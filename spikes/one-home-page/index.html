@@ -90,9 +90,9 @@ code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 .ibtn svg { width:13px; height:13px; }
 .avatar { position:relative; width:26px; height:26px; border-radius:50%; display:inline-grid; place-items:center; font-size:11px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#a58af7,#53c6f2); }
 .avatar.dot::after { content:""; position:absolute; top:-2px; right:-2px; width:9px; height:9px; border-radius:50%; background:var(--st-attention-tx); border:2px solid var(--bg); }
-.app.phone .hide-phone { display:none !important; }
+.app.narrow .hide-phone { display:none !important; }
 .page { padding:20px 24px 34px; max-width:1140px; margin:0 auto; }
-.app.phone .page { padding:14px 14px 26px; }
+.app.narrow .page { padding:14px 14px 26px; }
 
 /* ---- icons, buttons, tags ------------------------------------------- */
 svg.i { width:14px; height:14px; flex:none; }
@@ -156,8 +156,8 @@ svg.i { width:14px; height:14px; flex:none; }
 .welcome h3 { margin:0; font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
 .welcome .or { font-size:12px; color:var(--subtle); }
 .welcome .or a { color:var(--muted); font-weight:600; }
-.app.phone .connect.big { flex-direction:column; width:100%; }
-.app.phone .connect.big .btn { width:100%; }
+.app.narrow .connect.big { flex-direction:column; width:100%; }
+.app.narrow .connect.big .btn { width:100%; }
 
 /* section labels */
 .sect { display:flex; align-items:center; gap:10px; margin:22px 0 10px; }
@@ -170,7 +170,7 @@ svg.i { width:14px; height:14px; flex:none; }
 
 /* catalog (production example cards: poster + glass name footer) */
 .catalog { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
-.app.phone .catalog { grid-template-columns:repeat(2,1fr); gap:9px; }
+.app.narrow .catalog { grid-template-columns:repeat(2,1fr); gap:9px; }
 .ex { position:relative; height:118px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; }
 .ex .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.4); }
 .ex .foot { position:absolute; left:0; right:0; bottom:0; padding:7px 9px; background:rgba(12,12,20,.62); backdrop-filter:blur(10px);
@@ -232,15 +232,15 @@ svg.i { width:14px; height:14px; flex:none; }
 .fchip.shared.on { border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
 .fchip .n { color:var(--faint); font-weight:600; }
 .fchip.idea { border-style:dashed; }
-.app.phone .a-bar { flex-wrap:wrap; }
-.app.phone .a-bar .connect { order:-1; width:100%; justify-content:flex-end; }
+.app.narrow .a-bar { flex-wrap:wrap; }
+.app.narrow .a-bar .connect { order:-1; width:100%; justify-content:flex-end; }
 .pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; }
-.app.phone .pgrid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.app.narrow .pgrid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .pair { position:relative; display:grid; grid-template-rows:auto 1fr; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; cursor:pointer; min-width:0; transition:border-color .15s, box-shadow .15s; }
 .pair:hover { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.12); }
 .pair.is-here { border-color:var(--st-good-bd); }
 .pair .prev { height:112px; border-bottom:1px solid var(--bd-mut); }
-.app.phone .pair .prev { height:84px; }
+.app.narrow .pair .prev { height:84px; }
 .pair .body { padding:9px 11px 10px; display:grid; gap:4px; min-width:0; }
 .pair .r1, .pair .r2 { display:flex; align-items:center; gap:6px; min-width:0; }
 .pair .bname { font-weight:700; font-size:13px; color:var(--strong); }
@@ -249,12 +249,12 @@ svg.i { width:14px; height:14px; flex:none; }
 .pair .r1 .spring, .pair .r2 .spring { flex:1; }
 .pair .share { position:absolute; top:6px; left:6px; z-index:3; opacity:0; transition:opacity .15s; }
 .pair:hover .share { opacity:1; }
-.app.phone .pair .share { display:none; }
+.app.narrow .pair .share { display:none; }
 .pair.project .bname { font-weight:700; }
 .pair.project .quietline { font-size:11.5px; color:var(--subtle); }
 .pair.pattern .prev { height:72px; }
 .pgrid.patterns { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
-.app.phone .pgrid.patterns { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.app.narrow .pgrid.patterns { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .a-gap { height:16px; }
 
 /* =====================================================================
@@ -267,9 +267,9 @@ svg.i { width:14px; height:14px; flex:none; }
 .b-title svg.i { width:16px; height:16px; color:var(--subtle); }
 .b-title .shared-ic { color:var(--st-bound-tx); }
 .b-title { white-space:nowrap; }
-.app.phone .b-head { flex-wrap:wrap; }
-.app.phone .b-head > span[style] { display:none; }
-.app.phone .b-head .connect { width:100%; justify-content:flex-end; }
+.app.narrow .b-head { flex-wrap:wrap; }
+.app.narrow .b-head > span[style] { display:none; }
+.app.narrow .b-head .connect { width:100%; justify-content:flex-end; }
 .b-url { font:11px var(--mono); color:var(--faint); margin:0 0 14px; }
 .b-menu { position:absolute; left:0; top:calc(100% + 4px); z-index:30; width:250px; padding:6px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; gap:1px; max-height:340px; overflow:auto; }
 .b-menu button { appearance:none; font:inherit; cursor:pointer; display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; border:0; background:transparent; color:var(--tx); font-size:12.5px; text-align:left; }
@@ -279,7 +279,7 @@ svg.i { width:14px; height:14px; flex:none; }
 .b-menu hr { border:0; border-top:1px solid var(--bd-mut); margin:4px 2px; }
 .b-menu .shared-row { color:var(--st-bound-tx); }
 .list { border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:hidden; }
-.lrow { display:grid; grid-template-columns:78px minmax(0,1.15fr) minmax(0,1fr) 120px 128px 60px; align-items:center; gap:12px; padding:7px 12px; border-top:1px solid var(--bd-mut); cursor:pointer; min-height:44px; }
+.lrow { display:grid; grid-template-columns:78px minmax(0,1.15fr) minmax(0,1fr) 120px minmax(128px,auto) 60px; align-items:center; gap:12px; padding:7px 12px; border-top:1px solid var(--bd-mut); cursor:pointer; min-height:44px; }
 .lrow:first-child { border-top:0; }
 .lrow:hover { background:var(--raised); }
 .lrow .prev { height:28px; border-radius:4px; border:1px solid var(--bd-mut); }
@@ -287,7 +287,7 @@ svg.i { width:14px; height:14px; flex:none; }
 .lrow .who b { font-size:13px; color:var(--strong); font-weight:700; }
 .lrow .proj { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); min-width:0; }
 .lrow .proj .arrow { color:var(--faint); }
-.lrow .st { display:flex; justify-content:flex-start; }
+.lrow .st { display:flex; justify-content:flex-start; gap:5px; flex-wrap:wrap; }
 .lrow .go { justify-self:end; opacity:.0; transition:opacity .12s; }
 .lrow:hover .go { opacity:1; }
 .lrow.parent { background:color-mix(in srgb, var(--st-bound-bg) 35%, var(--panel)); }
@@ -295,12 +295,12 @@ svg.i { width:14px; height:14px; flex:none; }
 .lrow.child .who { padding-left:16px; position:relative; }
 .lrow.child .who::before { content:""; position:absolute; left:4px; top:-12px; bottom:50%; width:8px; border-left:1px solid var(--st-bound-bd); border-bottom:1px solid var(--st-bound-bd); border-bottom-left-radius:4px; }
 .lrow .meta { font-size:11.5px; color:var(--subtle); }
-.app.phone .lrow { grid-template-columns:56px minmax(0,1fr) auto; gap:9px; padding:7px 10px; }
-.app.phone .lrow .proj, .app.phone .lrow .grp, .app.phone .lrow .go { display:none; }
-.app.phone .lrow .who { flex-direction:column; align-items:flex-start; gap:1px; }
+.app.narrow .lrow { grid-template-columns:56px minmax(0,1fr) auto; gap:9px; padding:7px 10px; }
+.app.narrow .lrow .proj, .app.narrow .lrow .grp, .app.narrow .lrow .go { display:none; }
+.app.narrow .lrow .who { flex-direction:column; align-items:flex-start; gap:1px; }
 .lrow .who .sub2 { display:none; font-size:11.5px; color:var(--muted); }
-.app.phone .lrow .who .sub2 { display:block; }
-.app.phone .lrow.child .who { padding-left:12px; }
+.app.narrow .lrow .who .sub2 { display:block; }
+.app.narrow .lrow.child .who { padding-left:12px; }
 .b-patterns { display:flex; flex-wrap:wrap; gap:8px; }
 .pchip { display:inline-flex; align-items:center; gap:8px; padding:4px 10px 4px 4px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; font-size:12px; font-weight:600; color:var(--tx); }
 .pchip:hover { border-color:var(--bd-strong); }
@@ -310,9 +310,9 @@ svg.i { width:14px; height:14px; flex:none; }
    §4 C · Stage
    ===================================================================== */
 .c-stage { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(0,1fr); gap:12px; }
-.app.phone .c-stage { grid-template-columns:1fr; }
+.app.narrow .c-stage { grid-template-columns:1fr; }
 .c-hero { position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--st-good-bd); background:#07080a; height:290px; cursor:pointer; }
-.app.phone .c-hero { height:230px; }
+.app.narrow .c-hero { height:230px; }
 .c-hero .prev { position:absolute; inset:0; }
 .c-hero .ov { position:absolute; left:0; right:0; bottom:0; padding:40px 18px 16px; background:linear-gradient(transparent, rgba(7,8,10,.94) 55%); display:flex; align-items:flex-end; gap:12px; z-index:2; }
 .c-hero .ov .names { flex:1; min-width:0; display:grid; gap:3px; }
@@ -335,10 +335,10 @@ svg.i { width:14px; height:14px; flex:none; }
 .c-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
 .c-tab.shared { color:var(--st-bound-tx); }
 .c-tabs .connect { padding-bottom:6px; }
-.app.phone .c-tabs { flex-direction:column; align-items:stretch; gap:6px; }
-.app.phone .c-tabs .connect { order:-1; justify-content:flex-end; padding:0; }
+.app.narrow .c-tabs { flex-direction:column; align-items:stretch; gap:6px; }
+.app.narrow .c-tabs .connect { order:-1; justify-content:flex-end; padding:0; }
 .tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
-.app.phone .tiles { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.app.narrow .tiles { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .tile { position:relative; height:132px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; background:#07080a; min-width:0; }
 .tile:hover { border-color:var(--bd-strong); }
 .tile.is-here { border-color:var(--st-good-bd); }
@@ -374,89 +374,130 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .lg .what b { color:var(--strong); }
 .lg .src { display:block; font-size:11px; color:var(--subtle); margin-top:3px; }
 .lg .step { font:700 10px var(--mono); color:var(--faint); }
+
+/* =====================================================================
+   Round 2 (gate 2026-10-08): question sections, no control strip.
+   Yona kept A (cards) and B (list) behind one switch, cards by default,
+   remembered in this browser. One section per open question, options
+   lettered to match the chat (Q1-A, Q1-B…).
+   ===================================================================== */
+.qsec { margin-top:56px; }
+.qsec > h2 { display:flex; align-items:center; gap:10px; font-size:16px; letter-spacing:0; text-transform:none; color:var(--shell-tx); margin:0 0 6px; }
+.qn { font:800 12px var(--mono); color:#0b0c0e; background:var(--shell-tx); border-radius:5px; padding:3px 8px; }
+.qsec > p.ask { color:var(--shell-mut); font-size:13px; margin:0 0 16px; max-width:980px; }
+.qsec > p.ask b { color:var(--shell-tx); }
+.opts { display:grid; gap:18px; align-items:start; }
+.opts.c2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.opts.c3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.opt { border:1px solid var(--shell-bd); border-radius:12px; padding:14px; background:#0e0f12; display:grid; gap:10px; align-content:start; min-width:0; }
+.opt.leanopt { border-color:#365545; box-shadow:inset 0 0 0 1px #365545; }
+.ohead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.olabel { font:800 20px/1 var(--mono); color:var(--shell-tx); }
+.oname { font-size:14px; font-weight:700; color:var(--shell-tx); }
+.leanb { font-size:11px; font-weight:700; color:#7be0b2; border:1px solid #365545; border-radius:999px; padding:1px 9px; }
+.owhat { font-size:12.5px; color:var(--shell-mut); margin:0; }
+.ofa { font-size:12px; color:var(--shell-dim); margin:0; line-height:1.5; }
+.ofa b { color:var(--shell-mut); font-weight:600; }
+.crop { position:relative; overflow:hidden; border-radius:12px; }
+.crop.fade::after { content:""; position:absolute; left:0; right:0; bottom:0; height:70px; background:linear-gradient(transparent, #0e0f12); pointer-events:none; z-index:20; }
+.crop > .app { border-radius:12px; }
+.duo { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
+.duo.phoneduo { grid-template-columns:minmax(0,1fr) 392px; }
+.vlabel { font:700 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--shell-dim); margin:0 0 5px 2px; }
+.decided { border:1px dashed var(--shell-bd-strong); border-radius:8px; padding:12px 16px; margin-top:16px; font-size:12.5px; color:var(--shell-mut); max-width:980px; }
+.decided b { color:var(--shell-tx); }
+.decided ul { margin:6px 0 0; padding-left:18px; } .decided li { margin:3px 0; }
+.usinglean { font-size:12px; color:var(--shell-dim); margin:0 0 10px; }
+.usinglean b { color:var(--shell-mut); }
+.refrow { display:grid; grid-template-columns:repeat(3, 392px); gap:16px; justify-content:start; overflow-x:auto; }
+
+/* the cards/list switch (an app control, not a spike control) */
+.vswitch { display:inline-flex; border:1px solid var(--bd); border-radius:7px; overflow:hidden; flex:none; }
+.vswitch button { appearance:none; cursor:pointer; border:0; background:transparent; color:var(--subtle); width:30px; height:26px; display:grid; place-items:center; }
+.vswitch button + button { border-left:1px solid var(--bd); }
+.vswitch button:hover { color:var(--strong); }
+.vswitch button.on { background:var(--sel-bg); color:var(--strong); }
+.vswitch svg.i { width:14px; height:14px; }
+.tools { display:flex; align-items:center; gap:10px; flex:none; }
+.app.narrow .tools { width:100%; justify-content:space-between; }
+.app.narrow .a-bar .tools, .app.narrow .c-tabs .tools { order:-1; }
+
+/* a project on several boards, as one card */
+.pair.set { box-shadow:0 -4px 0 -2px #2c2c3b, 0 -8px 0 -5px #22222e; overflow:visible; }
+.pair.set .prev { border-radius:8px 8px 0 0; }
+.pair.set .boards { display:flex; align-items:center; gap:6px; min-width:0; font-size:11.5px; color:var(--muted); }
+.pgrid { align-items:start; }
+.pair .prev .pv { position:absolute; bottom:6px; right:6px; z-index:2; font:800 9px var(--mono); letter-spacing:.07em; color:var(--subtle); text-transform:uppercase; opacity:0; transition:opacity .15s; }
+.pair:hover .prev[data-hover] .pv { opacity:1; }
+.lrow .sync { margin-left:2px; }
 </style>
 </head>
 <body>
 
 <h1>One home page — boards and projects together</h1>
-<p class="hint"><b>Thesis:</b> lightplayer.app opens on your stuff. The landing hero, <code>/devices</code> and <code>/projects</code> become one page.
-<b>Order:</b> connected and running pairs, then recent pairs, then projects not on a board, then patterns, then the catalog, unchanged.
-<b>Filter:</b> All groups by default, one control to narrow it. Each item shows its group.
-<b>Connect:</b> three buttons, USB, Bluetooth and Network.
-<b>Design language:</b> the board is the unit, with its project as what's on it.
-The three concepts share every piece of data and differ in <b>structure</b>: cards, a list, or a stage.
-<b>Click any board or project</b> to see the URL it would open. Vision: <code>lp2025/2026-10-06-1530-boards-and-projects-model/vision.md</code>.</p>
-<p class="hint"><b>The step control</b> draws what each step of the work delivers.
-<b>Step 1</b> uses only what this browser knows: no cloud and no groups.
-<b>Step 2</b> adds boards in your account, their status without connecting, and groups.
-<b>Step 3</b> adds sharing: Sean's group, access requests, and Busy.</p>
+<p class="hint"><b>Round 2.</b> lightplayer.app opens on your stuff: boards that are on now, then recent boards, then other projects, your patterns and the catalog.
+Kept from round 1: <b>cards and a list behind one switch</b> (cards by default, remembered in this browser).
+Below the page, <b>one section per open question</b>. The options are lettered to match the questions in chat, so an answer can be "Q1 A, Q2 B…".
+The lean is outlined in green. Click any board or project to see the URL it would open.
+Vision: <code>lp2025/2026-10-06-1530-boards-and-projects-model/vision.md</code>.</p>
 
-<div class="controls" id="controls">
-  <div class="grp"><b>Who</b>
-    <button data-who="yona">Yona · many boards</button>
-    <button data-who="sean">Sean · one board</button>
-    <button data-who="signedout">Signed out</button>
-    <button data-who="new">Brand new</button>
+<!-- ================================================================== -->
+<section class="qsec" id="page">
+  <h2>The page so far</h2>
+  <p class="usinglean">Uses the lean for every question below: <b>Q1-A, Q2-B, Q3-B, Q4-A, Q5-B, Q6-A</b>. The card/list switch is next to the connect buttons.</p>
+  <div class="app" id="main"></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="qsec" id="q1">
+  <h2><span class="qn">Q1</span>The top of the page</h2>
+  <p class="ask">When a board is connected in this tab, does it get a big stage above everything, or is it just the first card?</p>
+  <div class="opts" id="q1o"></div>
+</section>
+
+<section class="qsec" id="q2">
+  <h2><span class="qn">Q2</span>A project on several boards</h2>
+  <p class="ask">Holiday Eaves is attached to Porch, Garage and Back fence. Does it show <b>once per board</b>, or <b>once as a project</b> with its boards inside?</p>
+  <div class="opts" id="q2o"></div>
+</section>
+
+<section class="qsec" id="q3">
+  <h2><span class="qn">Q3</span>The group filter</h2>
+  <p class="ask">With 12 groups. All groups is the default; one control narrows to a group or to Patterns. Which control?</p>
+  <div class="opts" id="q3o"></div>
+</section>
+
+<section class="qsec" id="q4">
+  <h2><span class="qn">Q4</span>The picture on a board that isn't connected here</h2>
+  <p class="ask">The page never connects to a board just to show it (a C6 has one network session), so only a board connected in this tab can play live. What do Porch (online), Back fence (offline) and Living room (busy) show?</p>
+  <div class="opts c3" id="q4o"></div>
+</section>
+
+<section class="qsec" id="q5">
+  <h2><span class="qn">Q5</span>Status words</h2>
+  <p class="ask">The same five boards in both word sets: connected here, online, offline, someone else connected, missing the last save.</p>
+  <div class="opts c2" id="q5o"></div>
+</section>
+
+<section class="qsec" id="q6">
+  <h2><span class="qn">Q6</span>The heading for projects with no board</h2>
+  <p class="ask">Replaces "Not on a board".</p>
+  <div class="opts c2" id="q6o"></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="qsec" id="ref">
+  <h2>For reference: other states (nothing to decide)</h2>
+  <p class="ask">At phone width: a brand-new visitor (the welcome), signed out with boards in this browser, and Sean with his one board.</p>
+  <div class="refrow" id="refo"></div>
+  <div class="decided"><b>Decided so far</b>
+    <ul>
+      <li><b>Round 1:</b> cards (A) and the list (B), behind one switch. Cards by default; the choice is remembered in this browser. The stage (C) came back as Q1.</li>
+      <li><b>Round 1:</b> "Not on a board" is out (Q6).</li>
+      <li><b>Spike format:</b> one section per question, lettered options matching chat, no control strip.</li>
+    </ul>
   </div>
-  <span class="sep"></span>
-  <div class="grp"><b>Step</b>
-    <button data-step="1">1 · this browser</button>
-    <button data-step="2">2 · account</button>
-    <button data-step="3">3 · sharing</button>
-  </div>
-  <span class="sep"></span>
-  <div class="grp"><b>Events</b>
-    <button data-ev="plug">Plug in a board</button>
-    <button data-ev="porch">Porch goes offline</button>
-    <button data-ev="request">Access request</button>
-    <button data-ev="many">Many groups</button>
-    <button data-ev="reset">Reset</button>
-  </div>
-  <span class="sep"></span>
-  <div class="grp"><b>Width</b>
-    <button data-w="desk">Desktop</button>
-    <button data-w="phone">Phone</button>
-  </div>
-</div>
-<p class="stepnote" id="stepnote"></p>
-
-<!-- ================================================================== -->
-<h2><span class="n">1</span>Today: the landing (reference)</h2>
-<p class="sub">Production as of <code>79668c96c</code>. A logo hero with "Edit the logo", the agent box with its filler line, four doors, then the catalog. Boards are on <b>Devices</b> and your projects on <b>Projects</b>, one click away each. Yona: "I don't actually use it for anything."</p>
-<div class="app" id="today"></div>
-
-<!-- ================================================================== -->
-<h2><span class="n">2</span>A · Pair cards — "the board is the card"</h2>
-<p class="sub">One grid sorted by importance, with no section headings until Patterns and Examples. Each card is a board: its LEDs on top, its name, then what it plays. A project with no board uses the same card with a poster and no board name. <b>Filter: a chip row.</b> <b>Connect: three small buttons on the right of that row.</b> <b>A project on three boards: three cards, each marked <span class="sync">⛓ 3</span>.</b></p>
-<div class="app" id="A"></div>
-<p class="cnotes"><b>For:</b> it's the most device-centric: you see your boards, and every card is the same shape and click. The live board's LEDs move, so "connected and running" is obvious without words. <b>Against:</b> the chip row runs out of room with many groups (try "Many groups"). An attached set repeats the project's name once per board. Projects and patterns blur together if both are cards.</p>
-
-<!-- ================================================================== -->
-<h2><span class="n">3</span>B · One list — "a pair is a line"</h2>
-<p class="sub">Dense rows: preview, board, what it plays, group, status, Open. <b>Filter: the page title is the filter</b> ("All groups ▾"), and picking a group puts you at that group's address (Q16). <b>A project on three boards: one project row with its boards under it.</b> Patterns are a strip of small chips, not rows.</p>
-<div class="app" id="B"></div>
-<p class="cnotes"><b>For:</b> it scales to many boards and groups, and status, group and age line up in columns you can scan. The title-as-filter costs no extra row, and its URL gives you a shareable group page. <b>Against:</b> it's the least visual. A home page for lights that reads like a file manager loses the "see it running" moment, and the previews are tiny.</p>
-
-<!-- ================================================================== -->
-<h2><span class="n">4</span>C · Stage — "your board is the hero"</h2>
-<p class="sub">The hero slot stays, but it shows <b>your connected board</b>, big and live, with one Open button. Other boards that are on now sit beside it. With nothing connected, and for a newcomer, the hero is the brand mark with the three connect buttons under it, so the page keeps its face. <b>Filter: tabs, like the top bar.</b> <b>A project on three boards: one stacked tile with a status pill for each board.</b></p>
-<div class="app" id="C"></div>
-<p class="cnotes"><b>For:</b> it's the strongest north-star answer. You open lightplayer.app and the first thing you see is your lights, playing, with one button to edit them. Tiles share the catalog's look, so the whole page reads as one gallery. <b>Against:</b> the hero only works when a board is connected in this tab. Boards that are online elsewhere can't play there, because the page never connects just to show status, so with no connected board the hero is static. Tabs overflow like chips.</p>
-
-<!-- ================================================================== -->
-<h2><span class="n">5</span>Shared pieces: status words</h2>
-<p class="sub">Words a pair can show <b>without connecting to the board</b> (T7: a C6 holds one network session, so the page never dials a board for its status). The step tag says when each becomes possible. Only a board connected <b>in this tab</b> plays live; every other preview is a still poster of its project.</p>
-<div class="legend" id="legend"></div>
-
-<div class="lean" id="lean">
-<b>My lean: C's stage on top of A's cards.</b>
-<ol>
-<li><b>The hero is C's:</b> your connected board, big and live, with Open. With no board connected, it's the brand mark with the three connect buttons, which is also the welcome state. That keeps the page's face, and Sean's first visit is one click from USB.</li>
-<li><b>Below it, A's grid in importance order</b>, but with C's stacked tile for an attached set. Three cards that all say "Holiday Eaves" read as a mistake; one stack with three status pills reads as one project on three boards.</li>
-<li><b>Filter: B's title-as-filter</b> ("All groups ▾" as a link to <code>/g/…</code>), not chips or tabs. It's the only one that survives "Many groups" and phone width, and it adds no row.</li>
-<li><b>Patterns: B's chip strip</b>, so patterns can't be mistaken for projects (D20).</li>
-</ol>
-</div>
+</section>
 
 <div class="toast" id="toast"></div>
 
@@ -483,6 +524,10 @@ const IC = {
   edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
 };
 const ic = (n, cls='i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${IC[n]}</svg>`;
+
+
+IC.grid = '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>';
+IC.list = '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>';
 
 /* =====================================================================
    Data
@@ -536,133 +581,124 @@ const DATASETS = {
   new: { signedIn:false, boards:[], loose:[], patterns:[] },
 };
 
+
+
 /* =====================================================================
-   State
+   Config: one rendered page instance = one cfg. Every option below is
+   the same page with one choice changed.
    ===================================================================== */
-const S0 = { who:'yona', step:3, filter:'all', phone:false, plug:null, net:false, porchOff:false, request:true, many:false, netOpen:null, bMenu:false };
-let S = { ...S0 };
+const LEAN = { hero:'none', sets:'stack', filter:'title', remote:'still', words:'B', label:'other' };
+const BASE = { who:'yona', step:3, view:'cards', ...LEAN, phone:false, many:false, top:true, request:true,
+  part:'page', catalog:'short', loose:true, patterns:true, only:null, fsel:'all', bMenu:false, remember:false, netOpen:false, plug:null, net:false };
+const INST = {};
+const VIEW_KEY = 'lp.home.view';
+function savedView(){ try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'cards'; } catch { return 'cards'; } }
+function saveView(v){ try { localStorage.setItem(VIEW_KEY, v); } catch {} }
 
 function linkWord(l){ return { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' }[l] || l; }
 
-/** The view: dataset × step × events → what the page knows. */
-function view(){
-  const ds = DATASETS[S.who];
+/** dataset × step × instance events → what the page knows */
+function view(c){
+  const ds = DATASETS[c.who];
   const signedIn = ds.signedIn;
-  const step = signedIn ? S.step : 1;
+  const step = signedIn ? c.step : 1;
   let boards = ds.boards.map(b => ({ ...b }));
-  if (S.porchOff) boards.forEach(b => { if (b.id==='porch') { b.state='offline'; b.seen='now'; b.ago=0.5; } });
   if (step < 3) boards = boards.filter(b => !b.shared);
   if (step < 2) {
     boards = boards.filter(b => b.met || b.state==='here');
-    boards.forEach(b => { if (b.state!=='here') { b.state='seen'; b.seen = b.seen==='now' ? 'just now' : (b.seen || '2 h'); } b.behind=false; });
+    boards.forEach(b => { if (b.state!=='here') { b.state='seen'; b.seen = b.seen || '2 h'; } b.behind=false; });
   }
-  if (S.net) boards.unshift({ id:'kitchen', name:'lp-7f3a.local', chip:'ESP32-C6', project:'kitchen', state:'here', link:'wifi', met:true, layout:'strip', ago:0, fresh:true });
-  if (S.plug) boards.unshift({ id:'newb', name: S.plug==='identifying' ? 'New board' : 'New board', chip: S.plug==='identifying' ? '' : 'ESP32-C6', project:null, state: S.plug==='identifying' ? 'working' : 'empty', link:S.plugLink||'usb', met:true, layout:'strip', ago:0, fresh:true });
-  boards.forEach(b => { b.group = b.project ? (PROJECTS[b.project].group) : null; if (step < 2) b.group = null; });
-  const groups = step >= 2 ? [...GROUPS.filter(g => step>=3 || !g.shared), ...(S.many ? MANY_GROUPS : [])] : [];
+  if (c.net) boards.unshift({ id:'kitchen', name:'lp-7f3a.local', chip:'ESP32-C6', project:'kitchen', state:'here', link:'wifi', met:true, layout:'strip', ago:0, fresh:true });
+  if (c.plug) boards.unshift({ id:'newb', name:'New board', chip:'ESP32-C6', project:null, state: c.plug, link:c.plugLink||'usb', met:true, layout:'strip', ago:0, fresh:true });
+  boards.forEach(b => { b.group = (b.project && step >= 2) ? PROJECTS[b.project].group : null; });
+  const allBoards = boards;
+  if (c.only) boards = c.only.map(id => boards.find(b=>b.id===id)).filter(Boolean);
+  const groups = step >= 2 ? [...GROUPS.filter(g => step>=3 || !g.shared), ...(c.many ? MANY_GROUPS : [])] : [];
   const usedGroups = groups.filter(g => boards.some(b=>b.group===g.id) || ds.loose.some(p=>PROJECTS[p].group===g.id) || g.many);
   const loose = ds.loose.map(id => ({ id, ...PROJECTS[id], group: step>=2 ? PROJECTS[id].group : null }));
   const patterns = ds.patterns.map(id => PATTERNS.find(p=>p.id===id));
-  const request = step >= 3 && S.request && S.who==='yona';
-  return { ds, signedIn, step, boards, groups: usedGroups, loose, patterns, request };
+  const request = step >= 3 && c.request && c.who==='yona';
+  return { ds, signedIn, step, boards, allBoards, groups: usedGroups, loose, patterns, request };
 }
-
-/* importance: here → online/busy → others newest first */
 function rank(b){ return ({ here:0, working:0, empty:0, online:1, busy:1 }[b.state] ?? 2); }
-function ordered(v){
-  const f = S.filter;
-  const inF = (g) => f==='all' || g===f;
-  const boards = v.boards.filter(b => inF(b.group) || (b.fresh && f==='all')).sort((a,b)=> rank(a)-rank(b) || a.ago-b.ago);
-  const loose = f==='patterns' ? [] : v.loose.filter(p => inF(p.group));
-  const showPatterns = f==='all' || f==='patterns';
-  const showCatalog = f==='all' || f==='patterns';
-  return { boards: f==='patterns' ? [] : boards, loose, patterns: showPatterns ? v.patterns : [], showCatalog, patternsOnly: f==='patterns' };
+function isHere(b){ return b.state==='here' || b.state==='working' || b.state==='empty'; }
+function filtered(v, c){
+  const f = c.fsel; const inF = g => f==='all' || g===f;
+  const boards = f==='patterns' ? [] : v.boards.filter(b => inF(b.group) || (b.fresh && f==='all'));
+  if (!c.only) boards.sort((a,b)=> rank(a)-rank(b) || a.ago-b.ago);
+  return { boards, loose: f==='patterns' ? [] : v.loose.filter(p => inF(p.group)), patterns: (f==='all'||f==='patterns') ? v.patterns : [],
+    showCatalog: f==='all' || f==='patterns', patternsOnly: f==='patterns' };
 }
 function groupOf(v, id){ return v.groups.find(g=>g.id===id) || GROUPS.find(g=>g.id===id); }
-function attachedCount(v, b){ return b.project ? v.boards.filter(x=>x.project===b.project).length : 0; }
-
-/* status words */
-function status(b){
-  switch(b.state){
-    case 'here':    return { cls:'here', short:`Live · ${linkWord(b.link)}`, words:`Here · ${linkWord(b.link)}` };
-    case 'online':  return { cls:'online', short:'Online', words:'Online' };
-    case 'busy':    return { cls:'busy', short:`Busy · ${b.by}`, words:`Busy · ${b.by} is on` };
-    case 'offline': return { cls:'offline', short:`Offline · ${b.seen}`, words:`Offline · ${b.seen}` };
-    case 'seen':    return { cls:'seen', short:`Seen ${b.seen} ago`, words:`Seen ${b.seen} ago` };
-    case 'working': return { cls:'working', short:'Identifying…', words:'Identifying…' };
-    case 'empty':   return { cls:'empty', short:'Empty', words:'Nothing on it' };
+function attachedCount(v, b){ return b.project ? v.allBoards.filter(x=>x.project===b.project).length : 0; }
+/** A lone board, or (sets:'stack') an attached set ranked by its best board. */
+function units(v, c, boards){
+  if (c.sets !== 'stack') return boards.map(b => ({ board:b, rank:rank(b) }));
+  const seen = new Set(); const out = [];
+  for (const b of boards){
+    if (b.project && attachedCount(v,b) > 1){
+      if (seen.has(b.project)) continue; seen.add(b.project);
+      out.push({ set:b.project, boards:boards.filter(x=>x.project===b.project), rank:rank(b) });
+    } else out.push({ board:b, rank:rank(b) });
   }
+  return out;
 }
-function chipSt(b){ const s=status(b); return `<span class="chipst s-${s.cls}"><span class="dot"></span>${s.words}</span>`; }
-function pillSt(b){ const s=status(b); return `<span class="pill ${s.cls}"><span class="dot"></span>${s.short}</span>`; }
+
+/* ---- status words (Q5) ---------------------------------------------- */
+const WORDS = {
+  A:{ here:b=>`Live · ${linkWord(b.link)}`, online:()=>'Online', offline:b=>`Offline · ${b.seen}`, busy:b=>`Busy · ${b.by}`, seen:b=>`Seen ${b.seen} ago`, behind:'Behind' },
+  B:{ here:b=>`Connected · ${linkWord(b.link)}`, online:()=>'Online', offline:b=>`Last seen ${b.seen} ago`, busy:b=>`In use · ${b.by}`, seen:b=>`Last seen ${b.seen} ago`, behind:'Out of date' },
+};
+function status(b, c){
+  const W = WORDS[c.words];
+  if (b.state==='working') return { cls:'working', words:'Identifying…' };
+  if (b.state==='empty') return { cls:'empty', words:'Nothing on it' };
+  return { cls:b.state, words:W[b.state](b) };
+}
+function chipSt(b, c){ const s=status(b,c); return `<span class="chipst s-${s.cls}"><span class="dot"></span>${s.words}</span>`; }
+function pillSt(b, c){ const s=status(b,c); return `<span class="pill ${s.cls}"><span class="dot"></span>${s.words}</span>`; }
+function behindChip(b, c){ return b.behind ? `<span class="chipst s-behind">${WORDS[c.words].behind}</span>` : ''; }
 function gtag(v, gid){
   const g = groupOf(v, gid); if (!g) return '';
   return g.shared ? `<span class="gtag shared">${ic('people')}${g.name}</span>` : `<span class="gtag">${g.name}</span>`;
 }
-function behindChip(b){ return b.behind ? `<span class="chipst s-behind">Behind</span>` : ''; }
+function setDots(boards, c){ return `<span class="dots">${boards.map(b=>`<span class="sdot ${b.behind?'behind':status(b,c).cls}" title="${b.name}: ${status(b,c).words}"></span>`).join('')}</span>`; }
 
-/* preview canvas markup: live only when connected HERE; others are stills */
-function prev(pat, layout, opts={}){
-  const live = !!opts.live, dim = opts.dim ? 1 : 0, off = opts.off ? 1 : 0;
-  return `<canvas data-pat="${pat}" data-layout="${layout}" data-live="${live?1:0}" data-dim="${dim}" data-off="${off}" data-seed="${opts.seed||1}"></canvas>`;
+/* ---- pictures (Q4) ---------------------------------------------------- */
+function canvas(pat, layout, o={}){
+  return `<canvas data-pat="${pat}" data-layout="${layout}" data-live="${o.live?1:0}" data-dim="${o.dim?1:0}" data-off="${o.off?1:0}" data-hover="${o.hover?1:0}" data-seed="${o.seed||1}"></canvas>`;
 }
-function boardPrev(b){
-  if (b.state==='working' || b.state==='empty') return prev('off', b.layout, { off:true });
+function boardPic(b, c){
+  if (b.state==='working' || b.state==='empty') return canvas('off', b.layout, { off:true });
   const p = PROJECTS[b.project];
-  return prev(p.pat, b.layout, { live: b.state==='here', dim: b.state==='offline' || b.state==='seen', seed: b.id.length });
+  if (isHere(b)) return canvas(p.pat, b.layout, { live:true, seed:b.id.length });
+  if (c.remote==='none') return canvas('off', b.layout, { off:true });
+  return canvas(p.pat, b.layout, { dim: b.state==='offline' || b.state==='seen', hover: c.remote==='hover', seed:b.id.length });
 }
-function poster(name, pat){
-  const h = [...name].reduce((a,c)=>a*31+c.charCodeAt(0)>>>0, 7);
+function prevAttrs(b, c){ return (!isHere(b) && c.remote==='hover') ? ' data-hover' : ''; }
+function poster(name){
+  const h = [...name].reduce((a,ch)=>a*31+ch.charCodeAt(0)>>>0, 7);
   const h1 = h%360, h2 = (h1+70+(h>>8)%90)%360;
   return `<div class="poster" style="background:linear-gradient(135deg,hsl(${h1} 45% 30%),hsl(${h2} 45% 26%))">${name[0].toUpperCase()}</div>`;
 }
 
-/** A stable fake base32 uid fragment for an id (spike only). */
-function fakeUid(id){ let h=2166136261; for (const c of id) h=Math.imul(h^c.charCodeAt(0),16777619)>>>0; const a='abcdefghijklmnopqrstuvwxyz234567'; let o=''; for (let i=0;i<5;i++){ o+=a[h&31]; h>>>=5; } return o; }
-
-/* click targets → toast */
-function urlFor(kind, id){
-  if (kind==='board'){
-    const b = view().boards.find(x=>x.id===id);
-    if (!b) return;
-    if (b.state==='busy') return toast(`<b>${b.by} is connected to ${b.name}.</b><span class="sub">A C6 takes one remote session at a time (T7). Try again when ${b.by} is done.</span>`);
-    if (b.state==='working') return toast(`Identifying the board…`);
-    if (b.state==='empty') return toast(`<b>Put a project on it</b><span class="sub">Copy a project (default) or attach to one. The setup flow stays minimal for now (D4).</span>`);
-    const p = PROJECTS[b.project];
-    const how = { here:`over ${linkWord(b.link)}, already connected`, online:'through the relay (step 2: the account knows it is online)',
-      offline:'with the board offline: it opens the project, and the board catches up next time it is online', seen: b.wifi ? 'over Wi‑Fi, at the address this browser last saw' : 'when you plug it in; this browser has only seen it over USB' }[b.state];
-    return toast(`Open <code>/p/${p.slug}-prj4q7c…?on=mac:${MAC[b.id]||'…'}</code><span class="sub">${how}</span>`);
-  }
-  if (kind==='project'){ const p = PROJECTS[id]; return toast(`Open <code>/p/${p.slug}-prj9m2d…</code><span class="sub">No board: it opens on a sim, and you can put it on a board from the editor.</span>`); }
-  if (kind==='pattern'){ const p = PATTERNS.find(x=>x.id===id); return toast(`Open <code>/p/${p.slug}-prj2x8a…</code><span class="sub">A pattern opens on its test rig. Use it in a project, or start one from it.</span>`); }
-  if (kind==='example'){ return toast(`Open example <b>${id}</b><span class="sub">The catalog works as it does today.</span>`); }
-  if (kind==='share'){ const b = view().boards.find(x=>x.id===id); return toast(`<b>Share ${b.name}</b><span class="sub">People by email (hypher@gmail.com), play or author · board page <code>/device/${b.name.toLowerCase().replace(/\W+/g,'-')}-dev${MAC[b.id].slice(0,6)}…</code> (step 3, Q5)</span>`); }
-  if (kind==='set'){ const p = PROJECTS[id]; return toast(`Open <code>/p/${p.slug}-prj4q7c…</code><span class="sub">The project. Save sends it to every attached board (D5). Pick a board on the tile to open it with that board.</span>`); }
+/* ---- the page's own pieces ------------------------------------------- */
+function topbar(v){
+  const right = v.signedIn ? `<span class="avatar ${v.request?'dot':''}">${v.ds.initial||'Y'}</span>` : `<span>Sign in</span>`;
+  return `<div class="topbar"><span class="logo">${ic('play')}<span>LightPlayer</span></span>
+    <span class="tright"><span class="hide-phone">Boards</span><span class="hide-phone">Docs</span><span class="kbd hide-phone">⌘K</span><span class="ibtn hide-phone">${ic('bot')}</span>${right}</span></div>`;
 }
-let toastT;
-function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4200); }
-
-/* =====================================================================
-   Shared page pieces
-   ===================================================================== */
-function topbar(v, today=false){
-  const right = v.signedIn
-    ? `<span class="avatar ${v.request?'dot':''}">${v.ds.initial||'Y'}</span>`
-    : `<span>Sign in</span>`;
-  return `<div class="topbar">
-    <span class="logo">${ic('play')}<span>LightPlayer</span></span>
-    ${today ? `<span class="navtab hide-phone">Devices</span><span class="navtab hide-phone">Projects</span>` : ''}
-    <span class="tright"><span class="hide-phone">Boards</span><span class="hide-phone">Docs</span><span class="kbd hide-phone">⌘K</span><span class="ibtn hide-phone">${ic('bot')}</span>${right}</span>
-  </div>`;
-}
-function connectButtons(cid, big=false){
+function connectButtons(c, big=false){
   const cls = big ? 'btn cta' : 'btn outline';
   return `<span class="connect ${big?'big':''}">
     <button class="${cls}" data-act="plug" data-link="usb">${ic('usb')}USB</button>
     <button class="${cls}" data-act="plug" data-link="ble">${ic('ble')}Bluetooth</button>
-    <button class="${cls}" data-act="netopen" data-cid="${cid}">${ic('net')}Network</button>
-    ${S.netOpen===cid ? `<div class="netpop"><label>Board address</label><div class="row2"><input value="lp-7f3a.local" spellcheck="false"><button class="btn sm" data-act="netgo">Connect</button></div></div>` : ''}
+    <button class="${cls}" data-act="netopen">${ic('net')}Network</button>
+    ${c.netOpen ? `<div class="netpop"><label>Board address</label><div class="row2"><input value="lp-7f3a.local" spellcheck="false"><button class="btn sm" data-act="netgo">Connect</button></div></div>` : ''}
   </span>`;
+}
+function vswitch(c){
+  return `<span class="vswitch"><button class="${c.view==='cards'?'on':''}" data-act="view" data-v="cards" title="Cards">${ic('grid')}</button><button class="${c.view==='list'?'on':''}" data-act="view" data-v="list" title="List">${ic('list')}</button></span>`;
 }
 function topLines(v){
   let h = '';
@@ -670,269 +706,291 @@ function topLines(v){
   if (v.request) h += `<div class="line request"><span class="face" style="background:linear-gradient(135deg,#ffab4a,#ff5d5d)">M</span><span class="grow"><b>Maya Lin</b> asks to play <b>Porch</b> <span class="note">“for the party Saturday”</span></span><button class="btn sm">Allow</button><button class="btn sm quiet">No</button></div>`;
   return h;
 }
-function welcome(cid){
-  return `<div class="welcome">
-    <h3>Connect a board</h3>
-    ${connectButtons(cid, true)}
-    <span class="or">No board? <a href="#" data-act="noop">Try an example ↓</a></span>
-  </div>`;
+function welcome(c){
+  return `<div class="welcome"><h3>Connect a board</h3>${connectButtons(c, true)}<span class="or">No board? <a href="#" data-act="noop">Try an example ↓</a></span></div>`;
 }
-function catalog(o){
-  if (!o.showCatalog) return '';
-  const cards = (names) => names.map(n => `<div class="ex" data-open="example" data-id="${n}">${poster(n)}<div class="foot">${n}</div></div>`).join('');
-  return (o.patternsOnly ? '' : `<div class="divider"><span></span><h4>Example projects</h4><span></span></div>
-    <p class="catlede">Finished pieces, wired for real hardware. Open one and make it yours.</p>
-    <div class="catalog">${cards(CATALOG_PROJECTS)}</div>`) +
+function catalog(c, f){
+  if (!c.catalog || !f.showCatalog) return '';
+  const n = c.catalog === 'short' ? 5 : 99;
+  const cards = names => names.slice(0,n).map(nm => `<div class="ex" data-open="example" data-id="${nm}">${poster(nm)}<div class="foot">${nm}</div></div>`).join('');
+  return (f.patternsOnly ? '' : `<div class="divider"><span></span><h4>Example projects</h4><span></span></div>
+    <p class="catlede">Finished pieces, wired for real hardware. Open one and make it yours.</p><div class="catalog">${cards(CATALOG_PROJECTS)}</div>`) +
     `<div class="divider"><span></span><h4>Example patterns</h4><span></span></div>
-    <p class="catlede">Single effects on a test rig. Each exports an effect you can import into your own project.</p>
-    <div class="catalog">${cards(CATALOG_PATTERNS)}</div>`;
+    <p class="catlede">Single effects on a test rig. Each exports an effect you can import into your own project.</p><div class="catalog">${cards(CATALOG_PATTERNS)}</div>`;
 }
 
-/* =====================================================================
-   §1 Today
-   ===================================================================== */
-function renderToday(){
-  const v = { signedIn:false, ds:{}, request:false };
-  document.getElementById('today').innerHTML = topbar(v, true) + `<div class="page today">
-    <div class="t-hero">
-      <div class="t-tri"></div>
-      <div class="t-word">LightPlayer</div>
-      <div class="t-slogan">Friendly shaders, everywhere</div>
-      <span class="t-pill">${ic('edit')}Edit the logo</span>
-      <div class="t-ask"><b>What do you want your lights to do?</b>
-        <div class="t-box">A strip of 250 LEDs on my XIAO that cycles a few calm patterns...</div>
-        <div class="t-slop">You'll connect an AI provider first — <mark>your words stay here.</mark></div></div>
-    </div>
-    <div class="t-col"><div class="divider"><span></span><h4>Get started</h4><span></span></div>
-    <div class="t-doors">
-      <div class="t-door"><span class="ic">${ic('usb')}</span><b>Connect a device</b><span>Plug a board in over USB and set it up.</span></div>
-      <div class="t-door"><span class="ic">${ic('sim')}</span><b>Try it here</b><span>Open an example and watch it run — no hardware needed.</span></div>
-      <div class="t-door"><span class="ic">${ic('info')}</span><b>Read the docs</b><span>Shaders, mapping, connecting devices.</span></div>
-      <div class="t-door"><span class="ic">${ic('chip')}</span><b>Supported boards</b><span>QuinLED, ESP32 DevKitC, XIAO, and more.</span></div>
-    </div>
-    <div class="divider"><span></span><h4>Projects</h4><span></span></div>
-    <div class="catalog">${CATALOG_PROJECTS.slice(0,4).map(n=>`<div class="ex">${poster(n)}<div class="foot">${n}</div></div>`).join('')}</div></div>
-  </div>`;
+/* ---- filter (Q3) -------------------------------------------------------- */
+function canFilter(v){ return v.groups.length > 0 || v.patterns.length > 0; }
+function count(v, gid){ return v.boards.filter(b=>b.group===gid).length + v.loose.filter(p=>p.group===gid).length; }
+function toolbar(v, c){
+  const tools = `<span class="tools">${vswitch(c)}${connectButtons(c)}</span>`;
+  if (c.filter==='chips'){
+    const chips = !canFilter(v) ? '' : [`<button class="fchip ${c.fsel==='all'?'on':''}" data-filter="all">All${v.groups.length?' groups':''}</button>`,
+      ...v.groups.map(g => `<button class="fchip ${g.shared?'shared':''} ${c.fsel===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name} <span class="n">${count(v,g.id)||''}</span></button>`),
+      `<button class="fchip idea ${c.fsel==='patterns'?'on':''}" data-filter="patterns">Patterns</button>`].join('');
+    return `<div class="a-bar"><div class="a-filter ${v.groups.length<6?'fits':''}">${chips}</div>${tools}</div>`;
+  }
+  if (c.filter==='tabs'){
+    const tabs = !canFilter(v) ? '' : [`<button class="c-tab ${c.fsel==='all'?'on':''}" data-filter="all">All</button>`,
+      ...v.groups.map(g=>`<button class="c-tab ${g.shared?'shared':''} ${c.fsel===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name}</button>`),
+      `<button class="c-tab ${c.fsel==='patterns'?'on':''}" data-filter="patterns">Patterns</button>`].join('');
+    return `<div class="c-tabs"><div class="tabs">${tabs}</div>${tools}</div>`;
+  }
+  // title: the page title is the filter, and a group is an address
+  const g = groupOf(v, c.fsel);
+  const label = c.fsel==='all' ? (v.groups.length ? 'All groups' : 'Your boards') : c.fsel==='patterns' ? 'Patterns' : g.name;
+  const sharedIc = g && g.shared ? `<span class="shared-ic">${ic('people')}</span>` : '';
+  const url = c.fsel==='all' ? 'lightplayer.app' : c.fsel==='patterns' ? 'lightplayer.app/patterns' : `lightplayer.app/g/${g.name.toLowerCase().replace(/\W+/g,'-').replace(/-+$/,'')}-grp${fakeUid(g.id)}…`;
+  const menu = c.bMenu ? `<div class="b-menu"><button class="${c.fsel==='all'?'on':''}" data-filter="all">All groups</button><hr>
+      ${v.groups.map(g=>`<button class="${g.shared?'shared-row':''} ${c.fsel===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name}<span class="n">${count(v,g.id)||''}</span></button>`).join('')}
+      <hr><button class="${c.fsel==='patterns'?'on':''}" data-filter="patterns">Patterns</button></div>` : '';
+  return `<div class="b-head"><button class="b-title" ${canFilter(v)?'data-act="bmenu"':''}>${sharedIc}${label}${canFilter(v)?ic('chev'):''}</button>${menu}
+    <span style="flex:1"></span>${tools}</div><p class="b-url">${url}</p>`;
 }
 
-/* =====================================================================
-   §2 A · Pair cards
-   ===================================================================== */
-function aCard(v, b){
+/* ---- cards (A) ------------------------------------------------------------ */
+function cardBoard(v, c, b){
   const p = b.project ? PROJECTS[b.project] : null;
-  const n = attachedCount(v, b);
-  const share = v.step>=3 && !b.shared && b.project && b.state!=='working' ? `<button class="btn sm share" data-act="share" data-id="${b.id}" title="Share">${ic('share')}</button>` : '';
-  return `<div class="pair ${b.state==='here'?'is-here':''}" data-open="board" data-id="${b.id}">
-    <div class="prev">${boardPrev(b)}${pillSt(b)}${share}</div>
+  const n = c.sets==='stack' ? 0 : attachedCount(v, b);
+  const share = v.step>=3 && !b.shared && b.project ? `<button class="btn sm share" data-act="share" data-id="${b.id}" title="Share">${ic('share')}</button>` : '';
+  return `<div class="pair ${isHere(b)?'is-here':''}" data-open="board" data-id="${b.id}">
+    <div class="prev"${prevAttrs(b,c)}>${boardPic(b,c)}${pillSt(b,c)}${share}<span class="pv">Preview</span></div>
     <div class="body">
       <div class="r1"><span class="bname ell">${b.name}</span><span class="spring"></span>${gtag(v,b.group)}</div>
-      <div class="r2"><span class="pname ell"><span class="arrow">▸</span>${p ? p.name : (b.state==='working'?'…':'Nothing on it')}</span>${n>1?`<span class="sync" title="Attached: ${n} boards play this project">${ic('link')}${n}</span>`:''}<span class="spring"></span>${behindChip(b)}</div>
+      <div class="r2"><span class="pname ell"><span class="arrow">▸</span>${p ? p.name : (b.state==='working'?'…':'Nothing on it')}</span>${n>1?`<span class="sync" title="Attached: ${n} boards play this project">${ic('link')}${n}</span>`:''}<span class="spring"></span>${behindChip(b,c)}</div>
     </div></div>`;
 }
-function aProject(v, p){
-  return `<div class="pair project" data-open="project" data-id="${p.id}">
-    <div class="prev">${poster(p.name)}</div>
+function cardSet(v, c, u){
+  const p = PROJECTS[u.set]; const here = u.boards.find(isHere);
+  const best = u.boards.slice().sort((a,b)=>rank(a)-rank(b))[0];
+  const on = u.boards.filter(b=>rank(b)<2).length;
+  return `<div class="pair set" data-open="set" data-id="${u.set}">
+    <div class="prev">${canvas(p.pat, best.layout, { live:!!here, seed:5 })}<span class="pill ${on?'online':'offline'}"><span class="dot"></span>${on} of ${u.boards.length} online</span></div>
+    <div class="body">
+      <div class="r1"><span class="sync">${ic('link')}${u.boards.length}</span><span class="bname ell">${p.name}</span><span class="spring"></span>${gtag(v,p.group)}</div>
+      <div class="r2 boards">${setDots(u.boards,c)}<span class="ell">${u.boards.map(b=>b.name+(b.behind?` <span style="color:var(--st-warning-tx)">(${WORDS[c.words].behind.toLowerCase()})</span>`:'')).join(' · ')}</span></div>
+    </div></div>`;
+}
+function cardProject(v, p){
+  return `<div class="pair project" data-open="project" data-id="${p.id}"><div class="prev">${poster(p.name)}</div>
     <div class="body"><div class="r1"><span class="bname ell">${p.name}</span><span class="spring"></span>${gtag(v,p.group)}</div>
-    <div class="r2"><span class="quietline">No board · edited ${p.edited}</span></div></div></div>`;
+    <div class="r2"><span class="quietline">Edited ${p.edited}</span></div></div></div>`;
 }
-function aPattern(p){
-  return `<div class="pair pattern project" data-open="pattern" data-id="${p.id}"><div class="prev">${prev(p.pat,'strip',{seed:3})}</div>
-    <div class="body"><div class="r1"><span class="bname ell">${p.name}</span></div></div></div>`;
-}
-function aFilter(v){
-  if (!v.groups.length && !v.patterns.length) return '<span style="flex:1"></span>';
-  const count = (gid) => v.boards.filter(b=>b.group===gid).length + v.loose.filter(p=>p.group===gid).length;
-  const chips = [`<button class="fchip ${S.filter==='all'?'on':''}" data-filter="all">All${v.groups.length?' groups':''}</button>`,
-    ...v.groups.map(g => `<button class="fchip ${g.shared?'shared':''} ${S.filter===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name} <span class="n">${count(g.id)||''}</span></button>`),
-    `<button class="fchip idea ${S.filter==='patterns'?'on':''}" data-filter="patterns">Patterns</button>`];
-  return `<div class="a-filter ${v.groups.length<6?'fits':''}">${chips.join('')}</div>`;
-}
-function renderA(){
-  const v = view(); const o = ordered(v);
-  const el = document.getElementById('A'); el.classList.toggle('phone', S.phone);
-  let body = topLines(v);
-  if (!v.boards.length && !v.loose.length && !v.patterns.length) {
-    body += welcome('A') + catalog(o);
-  } else {
-    body += `<div class="a-bar">${aFilter(v)}${connectButtons('A')}</div>`;
-    const cards = [...o.boards.map(b=>aCard(v,b)), ...o.loose.map(p=>aProject(v,p))];
-    if (cards.length) body += `<div class="pgrid">${cards.join('')}</div>`;
-    if (o.patterns.length) body += `<div class="sect"><h4>Your patterns</h4><span class="rule"></span></div><div class="pgrid patterns">${o.patterns.map(aPattern).join('')}</div>`;
-    body += catalog(o);
-  }
-  el.innerHTML = topbar(v) + `<div class="page">${body}</div>`;
-}
-
-/* =====================================================================
-   §3 B · One list
-   ===================================================================== */
-function bRow(v, b, extra=''){
+/* ---- list (B) --------------------------------------------------------------- */
+function rowBoard(v, c, b, child=false){
   const p = b.project ? PROJECTS[b.project] : null;
   const pname = p ? p.name : (b.state==='working'?'…':'Nothing on it');
-  return `<div class="lrow ${extra}" data-open="board" data-id="${b.id}">
-    <div class="prev">${boardPrev(b)}</div>
-    <div class="who"><b class="ell">${b.name}</b><span class="sub2 ell">${extra.includes('child')?'':'▸ '+pname}</span></div>
-    <div class="proj">${extra.includes('child')?'':`<span class="arrow">▸</span><span class="ell">${pname}</span>`}${behindChip(b)}</div>
-    <div class="grp">${extra.includes('child')?'':gtag(v,b.group)}</div>
-    <div class="st">${chipSt(b)}</div>
+  const n = c.sets==='stack' ? 0 : attachedCount(v, b);
+  const sync = n>1 ? `<span class="sync">${ic('link')}${n}</span>` : '';
+  return `<div class="lrow ${child?'child':''}" data-open="board" data-id="${b.id}">
+    <div class="prev"${prevAttrs(b,c)}>${boardPic(b,c)}</div>
+    <div class="who"><b class="ell">${b.name}</b><span class="sub2 ell">${child?'':'▸ '+pname}</span></div>
+    <div class="proj">${child?'':`<span class="arrow">▸</span><span class="ell">${pname}</span>${sync}`}</div>
+    <div class="grp">${child?'':gtag(v,b.group)}</div>
+    <div class="st">${chipSt(b,c)}${behindChip(b,c)}</div>
     <div class="go"><button class="btn sm">Open</button></div></div>`;
 }
-function bSetRows(v, pid, boards){
-  const p = PROJECTS[pid];
-  const head = `<div class="lrow parent" data-open="set" data-id="${pid}">
-    <div class="prev">${prev(p.pat,'roof',{seed:2})}</div>
-    <div class="who"><b class="ell">${p.name}</b><span class="sub2">${boards.length} boards, in sync</span></div>
-    <div class="proj"><span class="sync">${ic('link')}${boards.length} boards, in sync</span></div>
-    <div class="grp">${gtag(v,p.group)}</div><div class="st"></div><div class="go"><button class="btn sm">Open</button></div></div>`;
-  return head + boards.map(b => bRow(v, b, 'child')).join('');
+function rowSet(v, c, u){
+  const p = PROJECTS[u.set];
+  return `<div class="lrow parent" data-open="set" data-id="${u.set}">
+    <div class="prev">${canvas(p.pat,'roof',{seed:2, live:u.boards.some(isHere)})}</div>
+    <div class="who"><b class="ell">${p.name}</b><span class="sub2">${u.boards.length} boards, in sync</span></div>
+    <div class="proj"><span class="sync">${ic('link')}${u.boards.length} boards, in sync</span></div>
+    <div class="grp">${gtag(v,p.group)}</div><div class="st"></div><div class="go"><button class="btn sm">Open</button></div></div>` +
+    u.boards.map(b => rowBoard(v, c, b, true)).join('');
 }
-/** Units: a lone board, or an attached set (all its boards, ranked by its best board). */
-function bUnits(v, boards){
-  const seen = new Set(); const units = [];
-  for (const b of boards){
-    if (b.project && attachedCount(v,b) > 1){
-      if (seen.has(b.project)) continue; seen.add(b.project);
-      units.push({ set:b.project, boards:boards.filter(x=>x.project===b.project), rank:rank(b) });
-    } else units.push({ board:b, rank:rank(b) });
-  }
-  return units;
+function rowProject(v, p){
+  return `<div class="lrow" data-open="project" data-id="${p.id}"><div class="prev">${poster(p.name)}</div>
+    <div class="who"><b class="ell">${p.name}</b><span class="sub2">Edited ${p.edited}</span></div>
+    <div class="proj meta">Edited ${p.edited}</div><div class="grp">${gtag(v,p.group)}</div><div class="st"></div><div class="go"><button class="btn sm">Open</button></div></div>`;
 }
-function bListRows(v, units){
-  return units.map(u => u.set ? bSetRows(v, u.set, u.boards) : bRow(v, u.board)).join('');
+function block(v, c, us){
+  if (c.view==='list') return `<div class="list">${us.map(u => u.set ? rowSet(v,c,u) : rowBoard(v,c,u.board)).join('')}</div>`;
+  return `<div class="pgrid">${us.map(u => u.set ? cardSet(v,c,u) : cardBoard(v,c,u.board)).join('')}</div>`;
 }
-function bTitle(v){
-  const g = groupOf(v, S.filter);
-  const label = S.filter==='all' ? (v.groups.length ? 'All groups' : 'Your boards') : S.filter==='patterns' ? 'Patterns' : g.name;
-  const shared = g && g.shared ? `<span class="shared-ic">${ic('people')}</span>` : '';
-  const url = S.filter==='all' ? 'lightplayer.app' : S.filter==='patterns' ? 'lightplayer.app/patterns' : `lightplayer.app/g/${g.name.toLowerCase().replace(/\W+/g,'-')}-grp${fakeUid(g.id)}…`;
-  const canFilter = v.groups.length || v.patterns.length;
-  const count = (gid) => v.boards.filter(b=>b.group===gid).length + v.loose.filter(p=>p.group===gid).length;
-  const menu = S.bMenu ? `<div class="b-menu">
-      <button class="${S.filter==='all'?'on':''}" data-filter="all">All groups</button><hr>
-      ${v.groups.map(g=>`<button class="${g.shared?'shared-row':''} ${S.filter===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name}<span class="n">${count(g.id)||''}</span></button>`).join('')}
-      <hr><button class="${S.filter==='patterns'?'on':''}" data-filter="patterns">Patterns</button></div>` : '';
-  return `<div class="b-head">
-    <button class="b-title" ${canFilter?'data-act="bmenu"':''}>${shared}${label}${canFilter?ic('chev'):''}</button>${menu}
-    <span style="flex:1"></span>${connectButtons('B')}</div>
-    <p class="b-url">${url}</p>`;
+function looseBlock(v, c, ps){
+  return c.view==='list' ? `<div class="list">${ps.map(p=>rowProject(v,p)).join('')}</div>` : `<div class="pgrid">${ps.map(p=>cardProject(v,p)).join('')}</div>`;
 }
-function renderB(){
-  const v = view(); const o = ordered(v);
-  const el = document.getElementById('B'); el.classList.toggle('phone', S.phone);
-  let body = topLines(v);
-  if (!v.boards.length && !v.loose.length && !v.patterns.length) {
-    body += welcome('B') + catalog(o);
+const LABELS = { other:'Other projects', unattached:'Unattached projects' };
+function sect(t){ return `<div class="sect"><h4>${t}</h4><span class="rule"></span></div>`; }
+
+/* ---- stage (Q1-B) ----------------------------------------------------------- */
+function stage(v, c, b){
+  const p = b.project ? PROJECTS[b.project] : null;
+  const share = v.step>=3 && p ? `<button class="btn outline" data-act="share" data-id="${b.id}">${ic('share')}Share</button>` : '';
+  return `<div class="c-hero" data-open="board" data-id="${b.id}" style="margin-bottom:16px"><div class="prev">${boardPic(b,c)}</div>${pillSt(b,c)}
+    <div class="ov"><div class="names"><span class="bn ell">${b.name}</span><span class="pn"><span class="ell">▸ ${p?p.name:'Nothing on it'}</span>${gtag(v,b.group)}</span></div>
+    ${share}<button class="btn cta">Open</button></div></div>`;
+}
+
+/* ---- one page ------------------------------------------------------------------ */
+function page(c){
+  const v = view(c); const f = filtered(v, c);
+  if (c.fsel!=='all' && c.fsel!=='patterns' && !v.groups.some(g=>g.id===c.fsel)) c.fsel='all';
+  let body = '';
+  if (c.part==='boards') {
+    body = block(v, c, units(v, c, f.boards));
+  } else if (c.part==='loose') {
+    body = sect(LABELS[c.label]) + looseBlock(v, c, v.loose);
   } else {
-    body += bTitle(v);
-    const units = bUnits(v, o.boards);
-    const on = units.filter(u=>u.rank<2), rest = units.filter(u=>u.rank>=2);
-    if (on.length) body += `<div class="sect"><h4>On now</h4><span class="rule"></span></div><div class="list">${bListRows(v,on)}</div>`;
-    if (rest.length) body += `<div class="sect"><h4>Recent</h4><span class="rule"></span></div><div class="list">${bListRows(v,rest)}</div>`;
-    if (o.loose.length) body += `<div class="sect"><h4>Not on a board</h4><span class="rule"></span></div><div class="list">${o.loose.map(p=>`<div class="lrow" data-open="project" data-id="${p.id}">
-      <div class="prev">${poster(p.name)}</div><div class="who"><b class="ell">${p.name}</b><span class="sub2">edited ${p.edited}</span></div>
-      <div class="proj meta">edited ${p.edited}</div><div class="grp">${gtag(v,p.group)}</div><div class="st"></div><div class="go"><button class="btn sm">Open</button></div></div>`).join('')}</div>`;
-    if (o.patterns.length) body += `<div class="sect"><h4>Your patterns</h4><span class="rule"></span></div><div class="b-patterns">${o.patterns.map(p=>`<span class="pchip" data-open="pattern" data-id="${p.id}"><span class="prev">${prev(p.pat,'strip',{seed:4})}</span>${p.name}</span>`).join('')}</div>`;
-    body += catalog(o);
+    body = c.top ? topLines(v) : '';
+    if (!v.boards.length && !v.loose.length && !v.patterns.length) {
+      body += welcome(c) + catalog(c, f);
+    } else {
+      const lead = c.hero==='stage' ? f.boards.find(isHere) : null;
+      if (lead) body += stage(v, c, lead);
+      body += toolbar(v, c);
+      const us = units(v, c, f.boards.filter(b => b !== lead));
+      const on = us.filter(u=>u.rank<2), rest = us.filter(u=>u.rank>=2);
+      if (on.length) body += sect('On now') + block(v, c, on);
+      if (rest.length) body += sect('Recent') + block(v, c, rest);
+      if (c.loose && f.loose.length) body += sect(LABELS[c.label]) + looseBlock(v, c, f.loose);
+      if (c.patterns && f.patterns.length) body += sect('Your patterns') + `<div class="b-patterns">${f.patterns.map(p=>`<span class="pchip" data-open="pattern" data-id="${p.id}"><span class="prev">${canvas(p.pat,'strip',{seed:4})}</span>${p.name}</span>`).join('')}</div>`;
+      body += catalog(c, f);
+    }
   }
-  el.innerHTML = topbar(v) + `<div class="page">${body}</div>`;
+  return (c.top ? topbar(v) : '') + `<div class="page">${body}</div>`;
+}
+function render(id){
+  const c = INST[id]; const el = document.getElementById(id);
+  el.classList.toggle('phone', !!c.phone);
+  const room = (el.parentElement && el.parentElement.clientWidth) || 1200;
+  el.classList.toggle('narrow', !!c.phone || room < 760);
+  el.innerHTML = page(c);
+  requestAnimationFrame(mountCanvases);
+}
+function mount(id, over){ INST[id] = { ...BASE, ...over }; render(id); }
+/** an option panel: label, name, lean, what, for/against, then its render(s) */
+function option(q, letter, o){
+  const id = `${q}${letter}`;
+  const renders = (o.renders || [{}]).map((r, i) => {
+    const rid = `${id}-${i}`;
+    return `<div>${r.label?`<p class="vlabel">${r.label}</p>`:''}<div class="crop ${r.h?'fade':''}" style="${r.h?`max-height:${r.h}px`:''}"><div class="app" id="${rid}"></div></div></div>`;
+  });
+  const wrap = o.layout==='duo' ? `<div class="duo">${renders.join('')}</div>` : o.layout==='phoneduo' ? `<div class="duo phoneduo">${renders.join('')}</div>` : renders.join('');
+  return { html:`<div class="opt ${o.lean?'leanopt':''}"><div class="ohead"><span class="olabel">${q.toUpperCase()}-${letter}</span><span class="oname">${o.name}</span>${o.lean?'<span class="leanb">lean</span>':''}</div>
+      <p class="owhat">${o.what}</p><p class="ofa"><b>For:</b> ${o.pro}<br><b>Against:</b> ${o.con}</p>${wrap}</div>`,
+    mounts:(o.renders || [{}]).map((r,i) => [`${id}-${i}`, { ...o.cfg, ...(r.cfg||{}) }]) };
+}
+function question(q, opts){
+  const built = Object.entries(opts).map(([letter, o]) => option(q, letter, o));
+  document.getElementById(`${q}o`).innerHTML = built.map(b=>b.html).join('');
+  built.forEach(b => b.mounts.forEach(([id, cfg]) => mount(id, cfg)));
 }
 
 /* =====================================================================
-   §4 C · Stage
+   The questions
    ===================================================================== */
-/** C works in units too: a lone board, or an attached set shown once as a stack. */
-function isHereish(b){ return b.state==='here' || b.state==='working' || b.state==='empty'; }
-function cLayout(v, o){
-  const units = bUnits(v, o.boards);
-  const leadIdx = units.findIndex(u => u.board && isHereish(u.board));
-  const lead = leadIdx >= 0 ? units[leadIdx].board : null;
-  const rest = units.filter((_,i) => i !== leadIdx);
-  const side = rest.filter(u => u.rank < 2).slice(0, 3);
-  const grid = rest.filter(u => !side.includes(u));
-  return { lead, side, grid };
-}
-function cHero(v, o, L){
-  const sideHtml = L.side.length ? `<div class="c-side">${L.side.map(u=>cMini(v,u)).join('')}</div>` : '';
-  if (!L.lead) {
-    // no board connected in this tab: brand mark + connect buttons (this IS the welcome)
-    const brand = `<div class="c-welcome"><div class="t-tri"></div>${!v.boards.length && !v.loose.length ? '<h3 style="margin:0;font-size:20px;color:var(--strong)">Connect a board</h3>' : ''}${connectButtons('C', true)}
-      ${!v.boards.length ? '<span class="or" style="font-size:12px;color:var(--subtle)">No board? <a style="color:var(--muted);font-weight:600" href="#">Try an example ↓</a></span>' : ''}</div>`;
-    return sideHtml ? `<div class="c-stage"><div>${brand}</div>${sideHtml}</div>` : brand;
-  }
-  const lead = L.lead; const p = lead.project ? PROJECTS[lead.project] : null;
-  const share = v.step>=3 && p ? `<button class="btn outline" data-act="share" data-id="${lead.id}">${ic('share')}Share</button>` : '';
-  const heroEl = `<div class="c-hero" data-open="board" data-id="${lead.id}"><div class="prev">${boardPrev(lead)}</div>${pillSt(lead)}
-    <div class="ov"><div class="names"><span class="bn ell">${lead.name}</span><span class="pn"><span class="ell">▸ ${p?p.name:(lead.state==='working'?'Identifying…':'Nothing on it')}</span>${gtag(v,lead.group)}</span></div>
-    ${share}<button class="btn cta">${lead.state==='empty'?'Put a project on it':'Open'}</button></div></div>`;
-  return sideHtml ? `<div class="c-stage">${heroEl}${sideHtml}</div>` : heroEl;
-}
-function cMini(v, u){
-  if (u.set){
-    const p = PROJECTS[u.set]; const on = u.boards.filter(b=>rank(b)<2).length;
-    return `<div class="c-mini" data-open="set" data-id="${u.set}"><div class="prev">${prev(p.pat,'roof',{seed:2})}</div>
-      <div class="t"><b class="ell">${p.name}</b><span class="ell">${setDots(u.boards)} ${u.boards.length} boards · ${on} online</span><span>${u.boards.some(b=>b.behind)?'<span class="chipst s-behind">1 behind</span>':''}</span></div></div>`;
-  }
-  const b = u.board; const p = b.project ? PROJECTS[b.project] : null;
-  return `<div class="c-mini" data-open="board" data-id="${b.id}"><div class="prev">${boardPrev(b)}</div>
-    <div class="t"><b class="ell">${b.name}</b><span class="ell">▸ ${p?p.name:'…'}</span><span>${chipSt(b)}</span></div></div>`;
-}
-function setDots(boards){ return boards.map(b=>`<span class="sdot ${b.behind?'behind':status(b).cls}" title="${b.name}: ${status(b).words}${b.behind?', behind':''}"></span>`).join(''); }
-function cTile(v, b){
-  const p = b.project ? PROJECTS[b.project] : null; const s = status(b);
-  return `<div class="tile ${b.state==='here'?'is-here':''}" data-open="board" data-id="${b.id}"><div class="prev">${boardPrev(b)}</div>
-    <span class="gcorner">${gtag(v,b.group)}</span>
-    <div class="foot"><div class="l1"><span class="sdot ${s.cls}"></span><b class="ell">${b.name}</b></div>
-    <div class="l2"><span class="ell">▸ ${p?p.name:'Nothing on it'}</span><span style="flex:1"></span><span style="color:var(--subtle);flex:none">${b.state==='offline'||b.state==='seen'?b.seen:b.state==='busy'?'Busy':''}</span></div></div></div>`;
-}
-function cStack(v, pid, boards){
-  const p = PROJECTS[pid];
-  return `<div class="tile stack" data-open="set" data-id="${pid}"><div class="prev">${prev(p.pat,'roof',{seed:5})}</div>
-    <span class="gcorner">${gtag(v,p.group)}</span>
-    <div class="foot"><div class="l1"><span class="sync">${ic('link')}${boards.length}</span><b class="ell">${p.name}</b></div>
-    <div class="l2"><span class="dots">${setDots(boards)}</span><span class="ell">${boards.map(b=>b.name).join(' · ')}</span></div></div></div>`;
-}
-function cTabs(v){
-  const tabs = [`<button class="c-tab ${S.filter==='all'?'on':''}" data-filter="all">All</button>`,
-    ...v.groups.map(g=>`<button class="c-tab ${g.shared?'shared':''} ${S.filter===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name}</button>`),
-    `<button class="c-tab ${S.filter==='patterns'?'on':''}" data-filter="patterns">Patterns</button>`];
-  return `<div class="c-tabs"><div class="tabs">${(v.groups.length||v.patterns.length)?tabs.join(''):''}</div>${connectButtonsIfHero(v)}</div>`;
-}
-function connectButtonsIfHero(v){ return v.boards.some(b=>b.state==='here'||b.state==='working'||b.state==='empty') ? connectButtons('C') : ''; }
-function renderC(){
-  const v = view(); const o = ordered(v);
-  const el = document.getElementById('C'); el.classList.toggle('phone', S.phone);
-  let body = topLines(v);
-  const L = cLayout(v, o);
-  body += cHero(v, o, L);
-  if (v.boards.length || v.loose.length || v.patterns.length) {
-    body += cTabs(v);
-    const tiles = L.grid.map(u => u.set ? cStack(v, u.set, u.boards) : cTile(v, u.board));
-    o.loose.forEach(p => tiles.push(`<div class="tile" data-open="project" data-id="${p.id}"><div class="prev">${poster(p.name)}</div><span class="gcorner">${gtag(v,p.group)}</span>
-      <div class="foot"><div class="l1"><b class="ell">${p.name}</b></div><div class="l2"><span>No board · ${p.edited}</span></div></div></div>`));
-    if (tiles.length) body += `<div class="tiles">${tiles.join('')}</div>`;
-    if (o.patterns.length) body += `<div class="sect"><h4>Your patterns</h4><span class="rule"></span></div><div class="tiles">${o.patterns.map(p=>`<div class="tile" style="height:96px" data-open="pattern" data-id="${p.id}"><div class="prev">${prev(p.pat,'strip',{seed:6})}</div><div class="foot"><div class="l1"><b>${p.name}</b></div></div></div>`).join('')}</div>`;
-  }
-  body += catalog(o);
-  el.innerHTML = topbar(v) + `<div class="page">${body}</div>`;
+function buildQuestions(){
+  question('q1', {
+    A:{ name:'Just the first card', lean:true, what:'The connected board is the first card in On now, outlined green and playing live. Nothing above the filter.',
+      pro:'one layout whether or not a board is connected; the page starts with your stuff, not a banner.', con:'a single live board is a small thing to land on.',
+      cfg:{ hero:'none', catalog:false, loose:false, patterns:false }, renders:[{ h:600 }] },
+    B:{ name:'A stage', what:'The connected board gets a big live stage with Open (and Share), above the filter. No stage when nothing is connected here.',
+      pro:'the north star, literally: open lightplayer.app and your lights are the page.', con:'the page jumps between two layouts as boards come and go; the stage pushes everything else down.',
+      cfg:{ hero:'stage', catalog:false, loose:false, patterns:false }, renders:[{ h:600 }] },
+  });
+  question('q2', {
+    A:{ name:'Once per board', what:'Porch, Garage and Back fence are three entries, each saying Holiday Eaves with a ⛓ 3 mark.',
+      pro:'every entry is a board, always the same shape; device-centric.', con:'the project name repeats; Back fence lands in Recent, away from its siblings.',
+      cfg:{ sets:'perBoard', top:false, catalog:false, loose:false, patterns:false }, layout:'duo',
+      renders:[{ label:'Cards', h:620, cfg:{ view:'cards' } }, { label:'List', h:620, cfg:{ view:'list' } }] },
+    B:{ name:'Once as a project', lean:true, what:'One stacked card (a tree in the list) for Holiday Eaves, with a status dot per board. It ranks with its best board.',
+      pro:'reads as one project on three boards; behind boards show inside it.', con:'a board in a set is one level down; opening a specific board takes a second click.',
+      cfg:{ sets:'stack', top:false, catalog:false, loose:false, patterns:false }, layout:'duo',
+      renders:[{ label:'Cards', h:620, cfg:{ view:'cards' } }, { label:'List', h:620, cfg:{ view:'list' } }] },
+  });
+  const q3cfg = { many:true, catalog:false, loose:false, patterns:false, request:false };
+  question('q3', {
+    A:{ name:'Chips', what:'A row of group chips, All groups first, Patterns last.',
+      pro:'every group is one click, and you can see them all when there are few.', con:'twelve groups scroll off the side; on a phone it is a sideways scroller.',
+      cfg:{ ...q3cfg, filter:'chips' }, layout:'phoneduo', renders:[{ label:'Desktop', h:300 }, { label:'Phone', h:300, cfg:{ phone:true } }] },
+    B:{ name:'The title is the filter', lean:true, what:'The page title reads “All groups ▾”; picking a group changes the title and the address (/g/house-grp…), so a filtered page is a link you can share.',
+      pro:'costs no row; scales to any number of groups; same on a phone.', con:'groups are hidden behind one click.',
+      cfg:{ ...q3cfg, filter:'title', bMenu:true }, layout:'phoneduo', renders:[{ label:'Desktop, menu open', h:430 }, { label:'Phone', h:430, cfg:{ phone:true, bMenu:false } }] },
+    C:{ name:'Tabs', what:'Tabs like the top bar, with the spectrum underline.',
+      pro:'familiar, quiet.', con:'the same overflow as chips, and tabs suggest separate pages.',
+      cfg:{ ...q3cfg, filter:'tabs' }, layout:'phoneduo', renders:[{ label:'Desktop', h:300 }, { label:'Phone', h:300, cfg:{ phone:true } }] },
+  });
+  const q4cfg = { part:'boards', only:['desk','porch','fence','seanlr'], sets:'perBoard', view:'cards', top:false };
+  question('q4', {
+    A:{ name:'A still picture', lean:true, what:'The project’s picture, still; dimmed when the board is offline. Only Desk C6 moves.',
+      pro:'cheap and honest: moving means “here, live”.', con:'a still can look broken next to a moving one.', cfg:{ ...q4cfg, remote:'still' } },
+    B:{ name:'Still, plays on hover', what:'The same still, but hovering plays a preview of the project (like the catalog), marked “Preview”. Hover Porch.',
+      pro:'you can see what it plays without connecting.', con:'a preview can be mistaken for the board itself; costs a preview session per hover.', cfg:{ ...q4cfg, remote:'hover' } },
+    C:{ name:'Unlit LEDs', what:'The board’s LEDs drawn unlit. Status is words only.',
+      pro:'impossible to mistake for live.', con:'every remote board looks the same; you lose “which one is that”.', cfg:{ ...q4cfg, remote:'none' } },
+  });
+  const q5cfg = { part:'boards', only:['desk','porch','garage','fence','seanlr'], sets:'perBoard', top:false };
+  question('q5', {
+    A:{ name:'Short', what:'Live · USB · Online · Offline · 3 d · Busy · Sean · Behind',
+      pro:'fewest words.', con:'“Live” and “Online” are easy to confuse; “Behind” is history jargon.',
+      cfg:{ ...q5cfg, words:'A' }, renders:[{ label:'Cards', cfg:{ view:'cards' } }, { label:'List', cfg:{ view:'list' } }] },
+    B:{ name:'Plain', lean:true, what:'Connected · USB · Online · Last seen 3 d ago · In use · Sean · Out of date',
+      pro:'each says one thing; “Connected” is clearly “connected here”.', con:'longer.',
+      cfg:{ ...q5cfg, words:'B' }, renders:[{ label:'Cards', cfg:{ view:'cards' } }, { label:'List', cfg:{ view:'list' } }] },
+  });
+  const q6cfg = { part:'loose', top:false };
+  question('q6', {
+    A:{ name:'Other projects', lean:true, what:'Projects that aren’t on any board.',
+      pro:'short, no jargon; “other” is honest about it being the rest.', con:'says nothing about why they are separate.',
+      cfg:{ ...q6cfg, label:'other' }, renders:[{ label:'Cards', cfg:{ view:'cards' } }, { label:'List', cfg:{ view:'list' } }] },
+    B:{ name:'Unattached projects', what:'The same projects.',
+      pro:'precise.', con:'“attach” is the word for keeping boards in sync, so it can read as “not synced” rather than “no board”.',
+      cfg:{ ...q6cfg, label:'unattached' }, renders:[{ label:'Cards', cfg:{ view:'cards' } }, { label:'List', cfg:{ view:'list' } }] },
+  });
+  // reference states, phone width
+  document.getElementById('refo').innerHTML = ['new','signedout','sean'].map(w =>
+    `<div><p class="vlabel">${{new:'Brand new',signedout:'Signed out',sean:'Sean, one board'}[w]}</p><div class="crop fade" style="max-height:640px"><div class="app" id="ref-${w}"></div></div></div>`).join('');
+  ['new','signedout','sean'].forEach(w => mount(`ref-${w}`, { who:w, phone:true, catalog:'short' }));
 }
 
 /* =====================================================================
-   §5 Legend
+   Clicks: each rendered page is its own instance
    ===================================================================== */
-function renderLegend(){
-  const rows = [
-    [{state:'here',link:'usb'}, '<b>Connected in this tab</b>, playing live.', 'From the link itself.', '1'],
-    [{state:'seen',seen:'5 h'}, '<b>This browser has met it</b>, but nothing says it is online.', 'From this browser’s registry (per browser, step 1 only).', '1'],
-    [{state:'working'}, '<b>Just plugged in</b>: finding out what it is.', 'From the link.', '1'],
-    [{state:'empty'}, '<b>A board with nothing on it.</b> Click to put a project on it (copy, or attach).', 'From the link.', '1'],
-    [{state:'online'}, '<b>Online, not connected here.</b> One click opens it through the relay.', 'From relay presence. No connection is made.', '2'],
-    [{state:'offline',seen:'3 d'}, '<b>Not online.</b> Opening it opens the project; the board catches up later.', 'From the account’s last-seen time.', '2'],
-    [{state:'online',behind:true}, '<b>Attached, but missing the last save</b> (its project moved while it was away).', 'Project history’s Behind, from the version the board last reported (Q9).', '2'],
-    [{state:'busy',by:'Sean'}, '<b>Someone else holds its one remote session.</b> Says who (Q13).', 'From the relay: the route is taken.', '3'],
-  ];
-  document.getElementById('legend').innerHTML = rows.map(([b, what, src, step]) =>
-    `<div class="lg"><div class="w">${chipSt(b)}${b.behind?'<span class="chipst s-behind">Behind</span>':''}<span class="step">step ${step}</span></div><div class="what">${what}<span class="src">${src}</span></div></div>`).join('');
+function urlFor(c, kind, id){
+  if (kind==='board'){
+    const b = view(c).boards.find(x=>x.id===id); if (!b) return;
+    if (b.state==='busy') return toast(`<b>${b.by} is connected to ${b.name}.</b><span class="sub">A C6 takes one remote session at a time. Try again when ${b.by} is done.</span>`);
+    if (b.state==='working') return toast('Identifying the board…');
+    if (b.state==='empty') return toast(`<b>Put a project on it</b><span class="sub">Copy a project (default) or attach to one. The setup flow stays minimal for now.</span>`);
+    const p = PROJECTS[b.project];
+    const how = { here:`over ${linkWord(b.link)}, already connected`, online:'through the relay', offline:'with the board offline: it opens the project, and the board catches up when it is back',
+      seen: b.wifi ? 'over Wi‑Fi, at the address this browser last saw' : 'when you plug it in' }[b.state];
+    return toast(`Open <code>/p/${p.slug}-prj4q7c…?on=mac:${MAC[b.id]||'…'}</code><span class="sub">${how}</span>`);
+  }
+  if (kind==='project'){ const p = PROJECTS[id]; return toast(`Open <code>/p/${p.slug}-prj9m2d…</code><span class="sub">No board: it opens on a sim.</span>`); }
+  if (kind==='pattern'){ const p = PATTERNS.find(x=>x.id===id); return toast(`Open <code>/p/${p.slug}-prj2x8a…</code><span class="sub">A pattern opens on its test rig.</span>`); }
+  if (kind==='example') return toast(`Open example <b>${id}</b><span class="sub">The catalog works as it does today.</span>`);
+  if (kind==='set'){ const p = PROJECTS[id]; return toast(`Open <code>/p/${p.slug}-prj4q7c…</code><span class="sub">Save sends it to every attached board.</span>`); }
+  if (kind==='share'){ const b = view(c).boards.find(x=>x.id===id); return toast(`<b>Share ${b.name}</b><span class="sub">People by email, play or author · <code>/device/${b.name.toLowerCase().replace(/\W+/g,'-')}-dev${(MAC[b.id]||'').slice(0,6)}…</code></span>`); }
 }
+let toastT;
+function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4200); }
+function fakeUid(id){ let h=2166136261; for (const ch of id) h=Math.imul(h^ch.charCodeAt(0),16777619)>>>0; const a='abcdefghijklmnopqrstuvwxyz234567'; let o=''; for (let i=0;i<5;i++){ o+=a[h&31]; h>>>=5; } return o; }
+
+document.body.addEventListener('click', e => {
+  const app = e.target.closest('.app[id]'); if (!app) return;
+  const id = app.id, c = INST[id]; if (!c) return;
+  const act = e.target.closest('[data-act]');
+  if (act){
+    e.preventDefault(); e.stopPropagation();
+    const a = act.dataset.act;
+    if (a==='view'){ c.view = act.dataset.v; if (c.remember) saveView(c.view); return render(id); }
+    if (a==='plug'){ c.plug='working'; c.plugLink=act.dataset.link; c.netOpen=false; render(id); clearTimeout(c.t); c.t=setTimeout(()=>{ c.plug='empty'; render(id); }, 1600); return; }
+    if (a==='netopen'){ c.netOpen=!c.netOpen; return render(id); }
+    if (a==='netgo'){ c.net=true; c.netOpen=false; render(id); return toast('Connected to <code>lp-7f3a.local</code> over Wi‑Fi'); }
+    if (a==='bmenu'){ c.bMenu=!c.bMenu; return render(id); }
+    if (a==='share') return urlFor(c, 'share', act.dataset.id);
+    return;
+  }
+  if (e.target.closest('.netpop')) return;
+  const f = e.target.closest('[data-filter]');
+  if (f){ c.fsel=f.dataset.filter; c.bMenu=false; return render(id); }
+  const o = e.target.closest('[data-open]');
+  if (o) return urlFor(c, o.dataset.open, o.dataset.id);
+  if (c.netOpen || c.bMenu){ c.netOpen=false; c.bMenu=false; render(id); }
+});
 
 /* =====================================================================
    LED renderer: dots like the production lamp view. Live only for boards
@@ -969,7 +1027,8 @@ function mountCanvases(){
     const dpr = Math.min(2, window.devicePixelRatio||1); const r = c.getBoundingClientRect();
     c.width = Math.max(1, Math.round(r.width*dpr)); c.height = Math.max(1, Math.round(r.height*dpr));
     const entry = { c, ctx:c.getContext('2d'), pat:PAT[c.dataset.pat]||PAT.off, pts:layoutPts(c.dataset.layout, c.width, c.height, dpr),
-      live:c.dataset.live==='1', dim:c.dataset.dim==='1', off:c.dataset.off==='1', seed:+c.dataset.seed, dpr };
+      live:c.dataset.live==='1', dim:c.dataset.dim==='1', off:c.dataset.off==='1', seed:+c.dataset.seed, dpr,
+      hover:c.dataset.hover==='1', host:c.closest('.pair, .lrow') };
     draw(entry, 4 + entry.seed*1.7);
     return entry;
   });
@@ -987,89 +1046,20 @@ function draw(e, t){
   }
 }
 let last=0;
-function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of canvases) if (e.live) draw(e, t + e.seed); } requestAnimationFrame(loop); }
+function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of canvases){
+    const h = e.hover && e.host && e.host.matches(':hover');
+    if (e.live || h){ draw(e, t + e.seed); e.wasH = h; }
+    else if (e.wasH){ e.wasH = false; draw(e, 4 + e.seed*1.7); }
+  } } requestAnimationFrame(loop); }
 
-/* =====================================================================
-   Controls & wiring
-   ===================================================================== */
-function stepNote(){
-  const v = view();
-  const notes = {
-    1:'<b>Step 1, this browser only:</b> boards connected now, plus boards this browser has met (“Seen … ago”, no online status). No groups, so the filter is just Patterns. Garage and Back fence are missing because another browser set them up.',
-    2:'<b>Step 2, the account:</b> every board in your account, online or not, with status from relay presence and no connection made. Groups, an attached set (Holiday Eaves on three boards, one Behind).',
-    3:'<b>Step 3, sharing:</b> Sean’s boards in an automatic “Sean Connell” group, a waiting access request, Busy when Sean holds the Living room’s one session, and Share on your own boards.',
-  };
-  let n = notes[v.step];
-  if (!v.signedIn) n = '<b>Signed out:</b> step 1 only. Nothing can be in an account, so the page asks you to sign in (T8: Sean must sign in before he can share).' + (S.who==='new' ? ' <b>Brand new:</b> the welcome state.' : '');
-  document.getElementById('stepnote').innerHTML = n;
-}
-function syncControls(){
-  const ds = DATASETS[S.who];
-  document.querySelectorAll('[data-who]').forEach(b=>b.classList.toggle('active', b.dataset.who===S.who));
-  document.querySelectorAll('[data-step]').forEach(b=>{ b.classList.toggle('active', (ds.signedIn?S.step:1)===+b.dataset.step); b.disabled = !ds.signedIn; });
-  document.querySelector('[data-ev=porch]').classList.toggle('active', S.porchOff);
-  document.querySelector('[data-ev=request]').classList.toggle('active', S.request);
-  document.querySelector('[data-ev=many]').classList.toggle('active', S.many);
-  document.querySelector('[data-ev=plug]').classList.toggle('active', !!S.plug);
-  document.querySelector('[data-w=desk]').classList.toggle('active', !S.phone);
-  document.querySelector('[data-w=phone]').classList.toggle('active', S.phone);
-}
-function renderAll(){
-  const v = view();
-  if (S.filter!=='all' && S.filter!=='patterns' && !v.groups.some(g=>g.id===S.filter)) S.filter='all';
-  renderA(); renderB(); renderC(); syncControls(); stepNote();
-  requestAnimationFrame(mountCanvases);
-}
-function plug(link){
-  S.plug='identifying'; S.plugLink=link; S.netOpen=null; renderAll();
-  clearTimeout(plug.t); plug.t=setTimeout(()=>{ if (S.plug){ S.plug='empty'; renderAll(); } }, 1600);
-}
-document.getElementById('controls').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.who){ S = { ...S0, who:b.dataset.who, phone:S.phone, step:S.step, many:S.many }; }
-  if (b.dataset.step){ S.step=+b.dataset.step; }
-  if (b.dataset.w){ S.phone = b.dataset.w==='phone'; }
-  const ev = b.dataset.ev;
-  if (ev==='plug'){ if (S.plug) { S.plug=null; } else return plug('usb'); }
-  if (ev==='porch') S.porchOff=!S.porchOff;
-  if (ev==='request') S.request=!S.request;
-  if (ev==='many') S.many=!S.many;
-  if (ev==='reset'){ S = { ...S0, phone:S.phone }; }
-  renderAll();
-});
-document.body.addEventListener('click', e => {
-  if (e.target.closest('#controls')) return;
-  const act = e.target.closest('[data-act]');
-  if (act){
-    e.stopPropagation(); e.preventDefault();
-    const a = act.dataset.act;
-    if (a==='plug') return plug(act.dataset.link);
-    if (a==='netopen'){ S.netOpen = S.netOpen===act.dataset.cid ? null : act.dataset.cid; return renderAll(); }
-    if (a==='netgo'){ S.net=true; S.netOpen=null; renderAll(); return toast('Connected to <code>lp-7f3a.local</code> over Wi‑Fi<span class="sub">It joins the top of the page, live.</span>'); }
-    if (a==='bmenu'){ S.bMenu=!S.bMenu; return renderAll(); }
-    if (a==='share') return urlFor('share', act.dataset.id);
-    return;
-  }
-  if (e.target.closest('.netpop')) return;
-  const f = e.target.closest('[data-filter]');
-  if (f){ S.filter=f.dataset.filter; S.bMenu=false; return renderAll(); }
-  const o = e.target.closest('[data-open]');
-  if (o){ return urlFor(o.dataset.open, o.dataset.id); }
-  if (S.netOpen || S.bMenu){ S.netOpen=null; S.bMenu=false; renderAll(); }
-});
+
+
+/* boot */
 const qs = new URLSearchParams(location.search);
-if (qs.get('who')) S.who=qs.get('who');
-if (qs.get('step')) S.step=+qs.get('step');
-if (qs.get('phone')) S.phone=true;
-if (qs.get('many')) S.many=true;
-if (qs.get('filter')) S.filter=qs.get('filter');
-if (qs.get('bmenu')) S.bMenu=true;
-if (qs.get('net')) S.netOpen=qs.get('net');
-if (qs.get('plug')) S.plug=qs.get('plug');
-if (qs.get('porch')) S.porchOff=true;
-if (qs.get('request')==='0') S.request=false;
+mount('main', { remember:true, view: qs.get('view') || savedView(), catalog:'short' });
+buildQuestions();
 if (qs.get('shot')) { document.body.classList.add('shot'); document.getElementById(qs.get('shot')).classList.add('shot-keep'); }
-renderToday(); renderLegend(); renderAll(); requestAnimationFrame(loop);
+requestAnimationFrame(loop);
 window.addEventListener('resize', ()=>requestAnimationFrame(mountCanvases));
 </script>
 </body>
