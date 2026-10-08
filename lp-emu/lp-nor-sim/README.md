@@ -63,6 +63,6 @@ same calls, same bytes.
 
 Timing of any kind, read disturb, retention / bit rot, wear-out as it
 happens (erases are counted and never fail by themselves — only an
-installed `WearOut` makes one sector fail), multi-plane or suspend/resume, the cache and XIP
-mapping, and the SPI bus. A cut between two operations and a cut that tears
+installed `WearOut` makes one sector fail), multi-plane or
+suspend/resume, the cache and XIP mapping, and the SPI bus. A cut between two operations and a cut that tears
 one are the only failures.
