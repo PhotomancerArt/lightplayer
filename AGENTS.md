@@ -264,8 +264,11 @@ the app through the same view model and presses the same actions. See
   `lightplayer.app:80`; `LP_RELAY_HOST=<host>[:port]` at build time makes a
   desk image that dials another host and says so at boot — never a release
   build. Relay links are `LinkTrust::Relayed`: the board's "Anyone" setting
-  never applies to them. A fielded core's `RELAY_PROTO_VERSION` stays listed
-  in the hub while boards run it. See `docs/adr/2026-10-06-cloud-relay.md`.
+  never applies to them, and the anonymous key is refused there. Boards
+  take firmware updates through the relay (OTA M8 PR C), so **a fielded
+  core's `RELAY_PROTO_VERSION` is never refused**: the hub keeps every
+  version a fielded core speaks listed, and a new relay feature adds a
+  version beside the old one. See `docs/adr/2026-10-06-cloud-relay.md`.
 - **USB, the classic's UART and BLE are `lp-link` now, not `M!`.** The C6/S3
   silicon and their emulators, the classic ESP32's UART0 (DOM-Z-102 and its
   emulator, since wire proto 32), the C6's Bluetooth links (since wire proto
@@ -346,7 +349,9 @@ the app through the same view model and presses the same actions. See
   link feature is a SYN flag plus an extension an old end ignores; channel
   3's messages change only by adding (unknown types answered `N`/`U`).
   The JSON wire on channel 1 keeps the freedom above. See
-  `docs/adr/2026-10-06-ota-update-protocol.md`. Likewise the device
+  `docs/adr/2026-10-06-ota-update-protocol.md`. The relay's device leg is
+  in the same set once cores update through it (`lpc-relay`'s
+  `relay_frame_golden.rs`; see the relay bullet above). Likewise the device
   network file's **reader** (`NetworkFile::from_json`) ignores keys it does
   not know, so a rolled-back core still joins with a file a newer firmware
   grew (`docs/adr/2026-10-04-device-wifi-settings.md`, 2026-10-07 amendment).
@@ -901,7 +906,11 @@ mid-core and mid-engine, a renumbered board and a second client turned away
 busy — one step per invocation (`--lan --steps update`) to stay under ten
 minutes. The board's words there come from a console capture on its USB
 link, which counts as a host for the trial's confirmation (the LAN-only
-confirmation is `just test-emu-c6-ota-lan`'s). Every check
+confirmation is `just test-emu-c6-ota-lan`'s). `--relay` walks update, the
+relay dropping the board mid-core and a power cut mid-engine through a local
+lp-cloud-server standing in for lightplayer.app (the board's leg through the
+virtual LAN's uplink, Studio with `?relay=` and a made-up account): no number
+from it is the internet's. Every check
 waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
 It proves Studio's update host, routing and card against the real board
 session; it does **not** prove Chromium's serial backend across the
