@@ -37,6 +37,17 @@
 //!   [`SERVICE_TICK_CAP`] plus a pass on every JS activity (a message, the
 //!   link up or down), so the handshake does not wait for the model's open.
 //!
+//! - **Channel 3 rides the same link** (the over-the-air update, OTA M8):
+//!   [`send_update`] and [`take_updates`] are the Bluetooth port's, through
+//!   the same [`LinkPortService`], so nothing goes out on the update channel
+//!   until the board announced it on this connection (DS9). A board in
+//!   core-only says no hello; its unasked `M` is the announcement.
+//!
+//! - **The board's name, for when its address moves.** Once a hello says
+//!   the board's base MAC, a session dialled at an IP is told the board's
+//!   `lp-xxxx.local` socket ([`lan_name_fallback`]); the page tries it
+//!   beside the IP when the IP stops answering.
+//!
 //! **A socket close is the LAN's link reset.** Both ends lose the session
 //! together, and the page hears it as `wi-fi link lost: …`, which fails what
 //! is in flight and closes the model's link.
@@ -58,6 +69,7 @@ use crate::device_link::link_port_service::{LinkPortService, SecureLinkEvent};
 use crate::device_link::wire_reader::{WireRead, device_log_level, packed_replies_wanted};
 use crate::providers::network_link::{
     KeyRefusal, KeyWalk, KeyWalkStep, LinkKey, LinkKeys, board_from_relay_socket_url,
+    lan_name_fallback,
 };
 
 /// Reads a session keeps for a drainer that is not draining. Past this the
@@ -108,6 +120,9 @@ struct ServedSession {
     transmitted: bool,
     /// When a held-only walk was first seen with nothing left to present.
     exhausted_at: Option<Micros>,
+    /// The board's `.local` socket was handed to the page as the session's
+    /// fallback (`lan_name_fallback`).
+    fallback_said: bool,
 }
 
 impl ServedSession {
@@ -127,6 +142,7 @@ impl ServedSession {
             said_up: false,
             transmitted: false,
             exhausted_at: None,
+            fallback_said: false,
         }
     }
 
@@ -365,6 +381,41 @@ pub(crate) fn send_client_json(session: u32, json: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Queue one channel-3 (update) message on the session's link and send what
+/// the link has to send now (the Bluetooth port's twin). `Ok(false)`: the
+/// board has not announced the update channel on this connection, so
+/// nothing was queued (DS9; the link notes it). Errors like
+/// [`send_client_json`]'s.
+pub(crate) fn send_update(session: u32, message: &[u8]) -> Result<bool, String> {
+    if !matches!(service(session), Serviced::Up(_)) {
+        return Err("the wi-fi link is not connected".to_string());
+    }
+    let queued = SESSIONS
+        .with(|sessions| {
+            sessions
+                .borrow_mut()
+                .get_mut(&session)
+                .map(|served| served.service.send_update(message))
+        })
+        .unwrap_or_else(|| Err("the wi-fi link is not connected".to_string()))?;
+    service(session);
+    Ok(queued)
+}
+
+/// The board's channel-3 (update) messages since the last take, this
+/// connection's only (a new connection is a new link, and the old one's
+/// messages go with it). Drained by the model's link pump alone: a
+/// conversation borrowing the wire never sees them.
+pub(crate) fn take_updates(session: u32) -> Vec<Vec<u8>> {
+    SESSIONS.with(|sessions| {
+        sessions
+            .borrow_mut()
+            .get_mut(&session)
+            .map(|served| served.service.take_updates())
+            .unwrap_or_default()
+    })
+}
+
 /// Everything the session's link has read since the last drain, in order.
 /// Services the session first, so a drainer never waits a tick for frames
 /// already in the page.
@@ -411,7 +462,7 @@ fn service(session: u32) -> Serviced {
     let now = now_micros();
     let keys = link_keys();
     let tag = tap_tag(&taken.url);
-    let (frames, wake, running, gave_up, came_up) = SESSIONS.with(|sessions| {
+    let (frames, wake, running, gave_up, came_up, fallback) = SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
         let served = sessions
             .entry(session)
@@ -435,12 +486,22 @@ fn service(session: u32) -> Serviced {
         served.collect();
         let came_up = taken.connected && !served.said_up && served.service.is_up();
         served.said_up |= came_up;
+        // Once the board said its MAC, the page also knows its `.local`
+        // name, for when its address stops answering (a reset can move it).
+        let fallback = match (served.fallback_said, served.service.base_mac()) {
+            (false, Some(mac)) => {
+                served.fallback_said = true;
+                lan_name_fallback(&served.address, mac)
+            }
+            _ => None,
+        };
         (
             out,
             served.wake_in(now),
             Rc::clone(&served.running),
             gave_up,
             came_up,
+            fallback,
         )
     });
     // No borrow is held past here: the writes and the loop call back into
@@ -456,6 +517,9 @@ fn service(session: u32) -> Serviced {
     }
     if came_up {
         browser_websocket::mark_up(session);
+    }
+    if let Some(fallback) = fallback {
+        browser_websocket::set_fallback(session, &fallback);
     }
     wake_on_activity(session);
     if !taken.connected {

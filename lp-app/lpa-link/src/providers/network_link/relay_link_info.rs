@@ -11,8 +11,8 @@ use super::relay_endpoint::{board_from_relay_socket_url, relay_endpoint, relay_h
 
 /// The facts for the relay browser leg at `url`: the relay's host as its
 /// label (`lightplayer.app`) and the `relay:<board>` endpoint. `None` when
-/// `url` is not a relay browser leg. No USB facts and no update channel, as
-/// on the LAN.
+/// `url` is not a relay browser leg. No USB facts, and no update channel
+/// yet (the LAN has one; the relay's is a later step).
 pub fn relay_link_info(url: &str) -> Option<LinkInfo> {
     let board = board_from_relay_socket_url(url)?;
     Some(LinkInfo {

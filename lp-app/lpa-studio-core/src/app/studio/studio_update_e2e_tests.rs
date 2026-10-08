@@ -184,6 +184,89 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
     );
 }
 
+/// Over Wi‑Fi (OTA M8): the same update over the LAN link's update channel.
+/// Every one of the board's resets closes the socket; the page's session
+/// redials by itself, so the old link departs and a new one is attached,
+/// closed. The activity never knocks on the dropped link (that would race
+/// the page's own redial) but opens each new one; the card and the terminal
+/// say Wi‑Fi, and the terminal times each reconnect.
+#[test]
+fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
+    let mut board = Board::running_x();
+    board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+    board.reconnects_itself = true;
+    let mut bench = Bench::new(board, Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    let mut over_wifi = false;
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        over_wifi |= matches!(
+            bench.standing(device),
+            UpdateStanding::Updating {
+                link: UpdateLink::Wifi,
+                ..
+            }
+        );
+        if bench.outcome(device).is_some() {
+            break;
+        }
+    }
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(over_wifi, "the card said Wi‑Fi");
+    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over Wi\u{2011}Fi"));
+    assert!(bench.said_starting("board reset · reconnected in "));
+    assert!(
+        bench.board().opens_asked >= 3,
+        "each of the three reconnected links was opened by the model: {}",
+        bench.board().opens_asked
+    );
+    assert_eq!(
+        bench.board().opens_while_dropped,
+        0,
+        "no Open while the page's own redial was bringing the board back"
+    );
+}
+
+/// W6: a release from before updates over Wi‑Fi announces the update
+/// channel in its hello, but its LAN link ignores the channel. The update's
+/// first `Q` hears nothing; after five seconds the update ends in words,
+/// nothing on the board has changed, and the card offers nothing there that
+/// would only hang: it says the board updates over USB or Bluetooth until
+/// it has been updated once.
+#[test]
+fn over_wifi_a_board_that_never_answers_the_update_channel_is_named_and_offered_nothing() {
+    let mut board = Board::running_x();
+    board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+    board.reconnects_itself = true;
+    board.ignores_updates = true;
+    let mut bench = Bench::new(board, Some(y()));
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::NotOverWifi));
+    bench.assert_runs(&x());
+    assert!(bench.said("no answer on the update channel over Wi\u{2011}Fi"));
+    assert!(matches!(
+        bench.standing(device),
+        UpdateStanding::NotOverWifiYet { .. }
+    ));
+    let words = crate::update_words(&bench.standing(device)).expect("the card says why");
+    assert_eq!(
+        words.sentence,
+        "This board updates over USB or Bluetooth until it has been updated once."
+    );
+    for verb in ["update-firmware", "install-firmware"] {
+        let path = bench.controller.device_verb(device, verb);
+        bench.controller.not_offered(&path);
+    }
+}
+
 /// Update X → Y with an empty cache and no store: the backup is read back
 /// from the board, kept and pinned, and let go on Y.
 #[test]
@@ -277,6 +360,47 @@ fn an_engineless_board_is_restored_on_connect_from_the_cache_with_no_click_or_lo
     bench.assert_runs(&x());
     assert_eq!(bench.presses, 0, "no click");
     assert!(!bench.board().saw(b'L'), "no login");
+    assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
+}
+
+/// The same engine-less board on the LAN (OTA M8): core-only serves its
+/// Wi‑Fi link with no hello, so it is a pending link, and its engine is
+/// restored there from the cache with no click. The board's reset at the
+/// end is a socket close the page redials by itself: the pending link (and
+/// the restore's outcome with it) departs, and the board comes back as a
+/// card, running X — as over Bluetooth, the walk's own check.
+#[test]
+fn an_engineless_board_on_wifi_is_restored_on_connect_from_the_cache() {
+    let mut board = Board::engineless_x();
+    board.trust = LinkTrust::Untrusted;
+    board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+    board.reconnects_itself = true;
+    board.rig.reboot().expect("boots");
+    let mut bench = Bench::new(board, Some(y()));
+    bench.cache_engine(&x());
+    bench.grant();
+
+    bench.run_until("the pending card to say it is restoring", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .roster
+            .pending
+            .iter()
+            .any(|pending| pending.state_label.starts_with("Restoring firmware…"))
+    });
+    bench.run_until("the board to run X again, on a card", |bench| {
+        bench.board().rig.mode() == Some(SessionMode::EngineRunning)
+            && bench
+                .controller
+                .device_roster_view()
+                .roster
+                .devices
+                .iter()
+                .any(|card| card.state_label == "Ready")
+    });
+    bench.assert_runs(&x());
+    assert_eq!(bench.presses, 0, "no click");
     assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
 }
 
@@ -1090,6 +1214,13 @@ struct Board {
     dropped_at: Option<f64>,
     /// `LinkCommand::Open`s Studio sent.
     opens_asked: u32,
+    /// `LinkCommand::Open`s sent while a reset's drop was being played
+    /// (`dropped_at`): a knock on the dropped link, which a link that
+    /// reconnects by itself must never get.
+    opens_while_dropped: u32,
+    /// The board's LAN link ignores channel 3 (a release from before
+    /// updates over Wi‑Fi, W6): its hello still announces the channel.
+    ignores_updates: bool,
 }
 
 impl Board {
@@ -1117,6 +1248,8 @@ impl Board {
             reconnects_itself: false,
             dropped_at: None,
             opens_asked: 0,
+            opens_while_dropped: 0,
+            ignores_updates: false,
             announces: true,
         }
     }
@@ -1138,11 +1271,11 @@ impl Board {
     }
 
     fn info(&self) -> LinkInfo {
-        let bluetooth = self.endpoint.starts_with("ble:");
+        let network = self.endpoint.starts_with("ble:") || self.endpoint.starts_with("lan:");
         LinkInfo {
             label: "model board".to_string(),
             endpoint: EndpointKey(self.endpoint.clone()),
-            usb: (!bluetooth).then_some(UsbIds {
+            usb: (!network).then_some(UsbIds {
                 vendor: 0x303a,
                 product: 0x1001,
             }),
@@ -1288,6 +1421,9 @@ impl Board {
             return;
         };
         self.received.extend(bytes.first());
+        if self.ignores_updates {
+            return;
+        }
         let now = self.now_ms();
         let outs = self.rig.deliver(now, link, None, bytes);
         if self.rig.board.flash.is_frozen() {
@@ -1306,9 +1442,11 @@ impl Board {
             if self.resets_keep_port {
                 return self.session_reset();
             }
-            self.close(match self.reconnects_itself {
-                true => "bluetooth link lost: the board or the radio ended the connection",
-                false => "board reset",
+            let lan = self.endpoint.starts_with("lan:");
+            self.close(match (self.reconnects_itself, lan) {
+                (true, true) => "wi-fi link lost: the board closed the link (code 1006)",
+                (true, false) => "bluetooth link lost: the board or the radio ended the connection",
+                (false, _) => "board reset",
             });
             match self.rig.reboot() {
                 Ok(()) => {}
@@ -1378,6 +1516,9 @@ impl Link for RigLink {
         match command {
             LinkCommand::Open { .. } => {
                 board.opens_asked += 1;
+                if board.dropped_at.is_some() {
+                    board.opens_while_dropped += 1;
+                }
                 board.open();
             }
             LinkCommand::Close => board.close("closed"),

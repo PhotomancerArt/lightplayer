@@ -500,7 +500,7 @@ export async function releaseConsole(hold) {
 /// one verb the door answers itself, in its place in the reply order:
 /// `ok renumber lan=<name> board=<id> …`, or `err renumber: …` for a board
 /// on no served LAN.
-async function control(doorAddr, board, line) {
+export async function control(doorAddr, board, line) {
   const ws = new WebSocket(`ws://${doorAddr}/board/${board}/control`);
   const reply = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no reply to \`${line}\` on ${board}'s control channel`)), 30_000);

@@ -4914,7 +4914,13 @@ walk-drop-emu *args:
 # Chromium's USB stack (the desk check does that). Minutes per step; not CI.
 # `--steps install-older` (not a default step) walks "Other version…" over a
 # real lp-cloud-server's release index: two release images r1/r2, built here
-# when missing.
+# when missing. `--lan` (OTA M8) walks the update over Wi-Fi: each board on
+# the door's virtual LAN, Studio reaching it with `?lan=` through its port
+# forward — update, power cuts mid-core and mid-engine, an engine-less board
+# restored, a renumbered board, a second client turned away busy. One step
+# per invocation stays under ten minutes (`--lan --steps update`).
+# `WALK_RECORD=1` records the page's session (`?record=`) into
+# `records.jsonl` beside the report.
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
