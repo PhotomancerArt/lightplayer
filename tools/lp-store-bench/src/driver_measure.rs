@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::candidate_report::CandidateReport;
 use crate::oracle::run_step;
-use crate::{Candidate, CandidateConfig, Workload, WorkloadSpec};
+use crate::{Candidate, CandidateConfig, Step, Workload, WorkloadSpec};
 use lp_nor_sim::{FaultPlan, NorFlashSim};
 
 /// What one fault-free run of a workload cost.
@@ -45,14 +45,24 @@ pub struct MeasureResult {
 /// Format, mount once, run every step in that one mount, then measure a fresh
 /// mount of the result.
 pub fn measure(cand: &dyn Candidate, cfg: &CandidateConfig, wl: &Workload) -> MeasureResult {
+    measure_steps(cand, cfg, Some(wl.spec.clone()), wl.steps.iter().cloned())
+}
+
+/// [`measure`] over a stream of steps (the endurance run generates its tens
+/// of thousands of steps lazily).
+pub fn measure_steps(
+    cand: &dyn Candidate,
+    cfg: &CandidateConfig,
+    spec: Option<WorkloadSpec>,
+    steps: impl Iterator<Item = Step>,
+) -> MeasureResult {
     let mut r = MeasureResult {
         candidate: cand.name().into(),
         config: Some(cfg.clone()),
-        workload: Some(wl.spec.clone()),
-        steps: wl.steps.len(),
+        workload: spec,
         ..Default::default()
     };
-    match crate::catch_quiet(|| measure_inner(cand, cfg, wl, &mut r)) {
+    match crate::catch_quiet(|| measure_inner(cand, cfg, steps, &mut r)) {
         Ok(Ok(())) => r.ok = r.error.is_none(),
         Ok(Err(e)) => r.error = Some(e),
         Err(p) => r.error = Some(format!("panic: {p}")),
@@ -63,7 +73,7 @@ pub fn measure(cand: &dyn Candidate, cfg: &CandidateConfig, wl: &Workload) -> Me
 fn measure_inner(
     cand: &dyn Candidate,
     cfg: &CandidateConfig,
-    wl: &Workload,
+    steps: impl Iterator<Item = Step>,
     r: &mut MeasureResult,
 ) -> Result<(), String> {
     let mut flash = NorFlashSim::new(cfg.geometry());
@@ -76,7 +86,9 @@ fn measure_inner(
         .mount(flash, cfg)
         .map_err(|(e, _)| format!("mount: {e}"))?;
     let mut model = crate::oracle::Model::new();
-    for (i, step) in wl.steps.iter().enumerate() {
+    for (i, step) in steps.enumerate() {
+        let step = &step;
+        r.steps += 1;
         r.logical_bytes += step.logical_bytes();
         if let Err(e) = run_step(store.as_mut(), step) {
             r.error = Some(e.to_string());

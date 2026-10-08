@@ -24,6 +24,8 @@ pub struct SweepParams {
     pub steps: Option<Vec<usize>>,
     /// Full failure records written per (sweep, tear); the rest are counted.
     pub failure_log_cap: usize,
+    /// Stop between steps once this passes (the summary says `truncated`).
+    pub deadline: Option<std::time::Instant>,
 }
 
 impl Default for SweepParams {
@@ -34,6 +36,7 @@ impl Default for SweepParams {
             max_cuts_per_step: None,
             steps: None,
             failure_log_cap: 20,
+            deadline: None,
         }
     }
 }
@@ -55,6 +58,9 @@ pub struct SweepSummary {
     pub steps_skipped: Vec<String>,
     pub max_cuts_per_step: Option<u64>,
     pub error: Option<String>,
+    /// The deadline passed before every step was swept.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 /// A failed case, with what replays it (`lp-store-bench replay <file>`).
@@ -161,6 +167,13 @@ pub fn sweep_with(
         let summary = Mutex::new(blank(tear));
         let logged = Mutex::new(0usize);
         for &si in &steps {
+            if params
+                .deadline
+                .is_some_and(|d| std::time::Instant::now() >= d)
+            {
+                summary.lock().unwrap().truncated = true;
+                break;
+            }
             let Some(fx) = fixtures.get(si) else {
                 summary
                     .lock()

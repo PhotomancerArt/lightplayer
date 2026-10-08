@@ -16,6 +16,8 @@ use lp_store_bench::{CorpusSet, Reproducer, Scoreboard, WorkloadSpec, replay};
 const SPIKE_CORPUS: &str =
     "~/.photomancer/planning/lp2025/2026-10-07-1858-lpfs-fit-spike/measurements/corpus";
 
+const RESULTS_DIR: &str = "~/.photomancer/planning/lp2025/2026-10-07-2337-storage-testbed/results";
+
 #[derive(Parser)]
 #[command(about = "Race on-device store candidates through simulated power cuts")]
 struct Cli {
@@ -89,6 +91,30 @@ enum Cmd {
         /// Also binary-search the smallest partition (sectors) for each.
         #[arg(long)]
         min_sectors: bool,
+    },
+    /// The unattended overnight run (priority list until a deadline).
+    Overnight {
+        /// `HH:MM` local (tomorrow if already past) or `+<n>[smh]`.
+        #[arg(long, default_value = "09:00")]
+        until: String,
+        #[arg(long, default_value = "f1,f2,s1,t1")]
+        candidates: String,
+        #[arg(long, default_value = SPIKE_CORPUS)]
+        corpus: String,
+        #[arg(long, default_value = RESULTS_DIR)]
+        out: String,
+        #[arg(long, default_value_t = 8)]
+        threads: usize,
+        #[arg(long, default_value_t = 128)]
+        sectors: u32,
+        /// Shrink every unit (a smoke of the runner itself).
+        #[arg(long)]
+        quick: bool,
+    },
+    /// Render `<out>/report.md` and `<out>/summary.json` from the scoreboard.
+    Report {
+        #[arg(long, default_value = RESULTS_DIR)]
+        out: String,
     },
     /// Replay a failure record or reproducer (a JSON file, or `-` for stdin).
     Replay {
@@ -214,6 +240,63 @@ fn main() {
                         println!("    min sectors: {min:?}");
                     }
                 }
+            }
+        }
+        Cmd::Overnight {
+            until,
+            candidates,
+            corpus,
+            out,
+            threads,
+            sectors,
+            quick,
+        } => {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build_global()
+                .ok();
+            let out = expand(&out);
+            let sink =
+                Scoreboard::open(&out).unwrap_or_else(|e| die(&format!("{}: {e}", out.display())));
+            let deadline =
+                lp_store_bench::overnight::parse_deadline(&until).unwrap_or_else(|e| die(&e));
+            let cmd = |args: &[&str]| {
+                std::process::Command::new(args[0])
+                    .args(&args[1..])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_default()
+            };
+            sink.write(
+                "run_start",
+                &serde_json::json!({
+                    "commit": cmd(&["git", "rev-parse", "--short=10", "HEAD"]),
+                    "started": cmd(&["date", "+%Y-%m-%d %H:%M:%S %Z"]),
+                    "until": until, "candidates": candidates, "threads": threads,
+                    "sectors": sectors, "quick": quick, "pid": std::process::id(),
+                }),
+            );
+            let p = lp_store_bench::overnight::OvernightParams {
+                deadline,
+                candidates: candidates.split(',').map(String::from).collect(),
+                sectors,
+                quick,
+            };
+            let corpora = CorpusSet::new(Some(expand(&corpus)));
+            lp_store_bench::overnight::run_overnight(&p, &corpora, &sink);
+            match lp_store_bench::report::render_report(&out) {
+                Ok(_) => eprintln!("report: {}", out.join("report.md").display()),
+                Err(e) => die(&format!("report: {e}")),
+            }
+        }
+        Cmd::Report { out } => {
+            let out = expand(&out);
+            match lp_store_bench::report::render_report(&out) {
+                Ok(md) => {
+                    let head: String = md.lines().take(14).collect::<Vec<_>>().join("\n");
+                    println!("{head}\n…\nreport: {}", out.join("report.md").display());
+                }
+                Err(e) => die(&format!("report: {e}")),
             }
         }
         Cmd::Replay { file, corpus } => {
