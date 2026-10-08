@@ -48,6 +48,10 @@ lpc-access = { path = "../../lp-core/lpc-access", optional = true }
 # board's client state machine (Wi-Fi relay plan P6). no_std, sans-IO; its
 # HMAC is lpc-access's, already linked.
 lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
+# `radio_link::core_only_links` (feature `radio-link`): core-only's radio
+# and LAN links, driving the board's update session (`lpc-update`, no_std,
+# sans-IO). Already in every split image's core.
+lpc-update = { path = "../../lp-core/lpc-update", optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
 # Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
@@ -98,7 +102,7 @@ usb-link = ["dep:lp-link", "dep:critical-section"]
 # The radio links on lp-link (`radio_link`'s mux and port, plan
 # `ble-on-lp-link`): one `Link` per open connection, Datagram framing. The
 # C6's `ble` feature turns it on; the S3 and the classic have no radio link.
-radio-link = ["server", "dep:lp-link", "dep:lpc-access"]
+radio-link = ["server", "dep:lp-link", "dep:lpc-access", "dep:lpc-update"]
 # The classic's UART0 host link on lp-link (`uart_link`, `log_ring_logger`;
 # plan `classic-uart-on-lp-link`): the classic (v3) turns it on. The server
 # transport over it (`uart_link::uart_link_transport`) also needs `server`.
@@ -148,6 +152,9 @@ embassy-time = { version = "0.5.0", features = ["std", "generic-queue-8"] }
 # conversation against the real server's file handler, then the boot loader.
 # Host-only; no image links any of this.
 lpa-client = { path = "../../lp-app/lpa-client", default-features = false }
+# `radio_link::core_only_links`'s tests: a real board session on the
+# update crate's NOR model. Host-only.
+lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
 async-trait = "0.1"
 # Oracles for the `wifi` codecs (host tests only, never linked): a real
 # WebSocket client for `net::ws`, RustCrypto's SHA-1 for its accept hash, and

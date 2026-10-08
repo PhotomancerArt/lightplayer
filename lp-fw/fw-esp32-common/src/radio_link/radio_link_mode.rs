@@ -37,6 +37,23 @@ pub enum RadioLinkMode {
 /// in flight on Mac Chrome), so this is room, not a target.
 pub const UPDATE_RX_WINDOW: u8 = 32;
 
+/// The receive window a **LAN** link advertises in update mode (OTA Wi-Fi
+/// plan D7): 8 frames of 1 KiB in flight where serve mode keeps 2, so a
+/// slower Wi-Fi round trip still keeps up with the flash (~85 KB/s of
+/// compressed chunks). The slots cost ~8 KB, and the LAN endpoint's socket
+/// buffer grows to match, on core-only's free heap.
+///
+/// Measured on silicon (OTA Wi-Fi plan P6, 2026-10-07: FC6 fixture-c6 on
+/// the desk's test access point, lp-cli on a Mac on the same network,
+/// two runs each): the core and engine pieces together took **38.0 s at a
+/// window of 2, 34.0–35.5 s at 8, 33.6 s at 16**. 8 is the smallest window
+/// within ~10 % of the best. The flash, not the window, paces an update on
+/// a ~15 ms round trip; the window is room for a slower network. Core-only's
+/// heap free at a piece's commit, the inflate window held: 105,400 B (a
+/// window-16 core-only taking the core), 122,512 B (a window-8 trial core
+/// taking the engine).
+pub const LAN_UPDATE_RX_WINDOW: u8 = 8;
+
 impl RadioLinkMode {
     /// The mode as the port stores it (0 is "not decided").
     pub(crate) const fn code(self) -> u8 {

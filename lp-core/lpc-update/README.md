@@ -271,6 +271,7 @@ which is what lets a host send ahead.
 | core install | a trusted link (USB), or a held tier ≥ edit |
 | read-back `G` | a trusted link, or a held tier ≥ play |
 | resume / takeover | the rule of the transfer's kind |
+| `L` (core-side login) | any link that is not keyed: a keyed link's key is its login, so `L` on one gets the verdict any login the session will not take (no tier, no wait) |
 
 The **held tier** of an untrusted link is the highest of `OpenTo`'s tier,
 the tier its core-side login granted, and a keyed link's tier.
@@ -289,6 +290,24 @@ the file on an unconfirmed trial boot.** A file the core cannot read
 reads as `locked()`: heals still work, and core installs over radio wait
 until the board is back on a build that reads it. `AccessFacts::from_store`
 is that rule.
+
+### A secure link's key, in core-only (`src/board/core_key_lookup.rs`)
+
+A LAN link is a secure lp-link responder whose handshake asks for a key.
+With no server in core-only, the session answers it: the anonymous key
+(zero salt) with the zero PSK and no grant (`open` decides); a known salt
+with `lpc_access::key_candidates` over the store's secrets, best tier
+first; an unknown salt refused, uncharged; a wrong guess charged to the
+**login's own backoff** (one board, one backoff). The candidate that
+verifies brings the link up `LinkTrust::Keyed(tier)`
+(`key_authenticated`).
+
+### A trial that hears from no host (`src/board/trial_deadline.rs`)
+
+A trial core whose boot read a saved network, and on which no host link
+comes up for three minutes, resets itself (warm): the loader fails the
+trial and rolls back. The firmware drives `TrialDeadline`; the rule is
+the split-image ADR's §4 amendment of 2026-10-07.
 
 ### The core-side login (`src/board/core_login.rs`)
 
@@ -333,6 +352,9 @@ simulation use it; firmware never does.
 - `tests/board_access.rs`: QY2 both ways, the locked store, the login,
   ownership and takeover, the manifest's states, read-back, the running
   engine's hand-over.
+- `tests/board_keyed_link.rs`: core-only's key answer (known, unknown and
+  anonymous keys, the shared backoff), what a play or edit key may do, and
+  `L` refused on a keyed link.
 
 ## Validation
 

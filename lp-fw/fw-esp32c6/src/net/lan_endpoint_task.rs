@@ -35,6 +35,13 @@
 //! - A closed WebSocket, a TCP reset, a refused handshake that the peer
 //!   gives up on, or the mux's close request ends the link with a logged
 //!   reason; its session goes on the server's next tick.
+//! - **The boot's mode first.** A link's SYN carries its receive window,
+//!   which follows the mode (`RadioLinkPort::wait_for_mode`: a split image
+//!   decides it in `split_boot`), so nothing opens before it. In update
+//!   mode (core-only, taking an update) the link advertises the wider LAN
+//!   window and the socket's receive buffer is sized to hold it
+//!   ([`UPDATE_TCP_RX`]), or TCP's own window would be the limit again;
+//!   core-only reads the link itself (`CoreOnlyLinks`), with no mux.
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -53,7 +60,8 @@ use fw_esp32_common::net::try_zeroed_bytes;
 use fw_esp32_common::net::ws::{CloseCode, RX_OVERHEAD, WsConnection};
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{
-    NETWORK_LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, SharedPort, SlotEdge, now_us,
+    LAN_UPDATE_RX_WINDOW, NETWORK_LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkMode,
+    SharedPort, SlotEdge, now_us,
 };
 use lpc_shared::transport::{LinkId, LinkTrust};
 
@@ -67,6 +75,12 @@ pub const LINK_PORT: u16 = 80;
 /// (15,604 B), and this is held for the board's life.
 const TCP_RX: usize = 2 * 1024;
 const TCP_TX: usize = 2560;
+/// The receive buffer in update mode: the update window's frames
+/// ([`LAN_UPDATE_RX_WINDOW`] of `LAN_MAX_FRAME`, each with a client
+/// frame's WebSocket header and mask) and room for the host's ACKs beside
+/// them. Allocated once, in core-only only, where no engine shares the
+/// heap.
+const UPDATE_TCP_RX: usize = LAN_UPDATE_RX_WINDOW as usize * (LAN_MAX_FRAME + 8) + 512;
 /// A server frame's WebSocket header at the sizes a link sends (126..65535
 /// bytes: 4 B; shorter: 2 B).
 const WS_TX_HEADER: usize = 4;
@@ -126,9 +140,22 @@ pub async fn lan_link_task(
         }
     };
     let index = RADIO_LINK_SLOTS + lan;
+    let mode = port.wait_for_mode(index).await;
+    let mut update_rx: Option<&'static mut [u8]> = (mode == RadioLinkMode::Update)
+        .then(|| Box::leak(vec![0u8; UPDATE_TCP_RX].into_boxed_slice()));
+    if update_rx.is_some() {
+        log::info!(
+            "[lan] update mode: {LAN_UPDATE_RX_WINDOW} frames in flight, {UPDATE_TCP_RX} B socket \
+             buffer"
+        );
+    }
     loop {
         net_address::wait_up(&mut address).await;
-        let mut socket = TcpSocket::new(stack, &mut *buffers.tcp_rx, &mut *buffers.tcp_tx);
+        let rx: &mut [u8] = match update_rx.as_deref_mut() {
+            Some(rx) => rx,
+            None => &mut *buffers.tcp_rx,
+        };
+        let mut socket = TcpSocket::new(stack, rx, &mut *buffers.tcp_tx);
         socket.set_timeout(Some(IDLE_TIMEOUT));
         // One write is one whole WebSocket message (one lp-link frame): send
         // it now. With Nagle on, a short frame waited for the peer's delayed

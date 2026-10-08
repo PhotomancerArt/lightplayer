@@ -337,3 +337,34 @@ apply from now regardless.
 (milestone M2), plan `lp2025/2026-10-04-0005-ota-split-image-ships`
 (decisions D1–D21), spike `lp2025/2026-10-01-1854-ota-split-link-spike`,
 draft PR #903.
+
+## Amendment (2026-10-07): a trial core that hears from no host gives the board back
+
+§4 keeps a trial that started and never confirmed alive across every cold
+boot: nobody has connected to it yet. Over Wi-Fi that waits for ever on a
+house board out of Bluetooth range whose new core cannot reach its network.
+So (OTA Wi-Fi plan WD9; W4 answered yes, three minutes, DD67):
+
+- **A trial core whose boot read a saved network with Wi-Fi on**, and on
+  which no host link has come up on any transport for **three minutes of
+  its own uptime**, logs `[OTA] trial: no host in 3 min — giving the board
+  back to its last good core` and resets itself with a software reset.
+- That reset is **warm**, and a warm death after `started` fails a trial
+  (§4's table, `lp_bootctl::choose`): the loader rolls back to the proven
+  record. **No new mark, no record change, no loader change.**
+- The old core comes up engine-less (the update erased the engine header
+  before the core moved), says so on Wi-Fi, and any host holding its engine
+  heals it. The board refuses the failed build from then on
+  (`refusedBuild`).
+- It never applies to a boot with no network saved or Wi-Fi off (Bluetooth
+  or USB is how that board's owner reaches it), nor once a host link has
+  confirmed the trial.
+- **It is not a counted cold retry.** The cold rule is about a core that
+  dies while bringing its radios up; this one started and ran, and simply
+  heard nobody. An unattended update abandoned for three minutes rolls back
+  rather than waiting: the price of never needing a cable.
+
+The rule is `lpc_update::board::TrialDeadline` (`TRIAL_HOST_DEADLINE_MS`),
+host-tested there; the emulated proof is `lp-cli/tests/emu_ota_lan.rs`'s
+L8 (the host gone at the core's commit; the trial rolls back, refuses Y,
+and heals over the LAN).

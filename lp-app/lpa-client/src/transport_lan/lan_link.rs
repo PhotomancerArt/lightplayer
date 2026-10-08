@@ -31,6 +31,15 @@
 //!    session's grant — the hello the board writes at `Up` may not have it
 //!    yet (see the module docs of `lpa-client`'s `transport_lan`).
 //!
+//! [`LanLink::open_for_update`] is the way in for an over-the-air update,
+//! which runs across three resets and through core-only, where the board
+//! has no server and so no hello and no `LoginBegin`: there the secure
+//! session coming `Up` is the whole way in. It tries a held key first (the
+//! key an earlier session of the same update came up on, kept by the
+//! caller: a locked board's core-only answers it from its own store), then
+//! the anonymous key; a board that says hello (its engine runs) and grants
+//! less than edit to anyone takes the password path above.
+//!
 //! Sans-IO underneath: time is this link's own monotonic clock (µs since it
 //! connected), handed to the port on every call.
 
@@ -57,6 +66,11 @@ pub const LAN_SETUP_BUDGET: Duration = Duration::from_secs(10);
 
 /// The longest one [`LanLink::step`] waits for a frame during setup.
 const SETUP_STEP: Duration = Duration::from_millis(10);
+
+/// How long [`LanLink::open_for_update`] waits, once the session is up, for
+/// a hello: a running engine sends its hello on the server's next tick
+/// after `Up`; core-only never sends one.
+pub const UPDATE_HELLO_GRACE: Duration = Duration::from_secs(2);
 
 /// Request ids of the setup requests: far from any client's counter, below
 /// the ones the port itself uses (the pack opt-in, the log level).
@@ -90,12 +104,27 @@ pub struct LanSession {
     pub early: Vec<PortRead>,
 }
 
+/// An open link for an over-the-air update ([`LanLink::open_for_update`]):
+/// its secure session is up; the hello is there when the board's engine
+/// runs.
+pub struct LanUpdateSession {
+    pub link: LanLink,
+    /// The board's hello, when it has a server (its engine runs); `None`
+    /// from core-only.
+    pub hello: Option<ServerHello>,
+    /// Everything the session said before `open_for_update` returned, its
+    /// `Up` first.
+    pub early: Vec<PortRead>,
+}
+
 /// One secure lp-link over one WebSocket.
 pub struct LanLink {
     socket: LanSocket,
     port: WireLinkPort,
     started: Instant,
     target: LinkEndpoint,
+    /// The key the link's handshake runs on now (the last one tried).
+    key: (KeyId, Psk),
 }
 
 impl LanLink {
@@ -179,6 +208,68 @@ impl LanLink {
         }
     }
 
+    /// Connect to `target` for an over-the-air update (module docs): up on
+    /// a held key, else on the anonymous key; a running engine that grants
+    /// anyone less than edit, with a password given, goes the password way.
+    pub fn open_for_update(
+        target: &LinkEndpoint,
+        options: &LanOptions,
+    ) -> Result<LanUpdateSession, LanError> {
+        if !options.held_keys.is_empty() {
+            let attempt = retry_while_busy(|| {
+                let mut keys = options.held_keys.clone().into_iter();
+                let Some((key_id, psk)) = keys.next() else {
+                    return Err(LanError::Refused(RefusalReason::UnknownKey));
+                };
+                let mut link = Self::connect(target, key_id, psk, options.want_packed)?;
+                let early = link.come_up_to(UpTo::Session, &mut keys)?.1;
+                Ok((link, early))
+            });
+            match attempt {
+                Ok((mut link, mut early)) => {
+                    let hello = link.await_hello(&mut early)?;
+                    return Ok(LanUpdateSession { link, hello, early });
+                }
+                Err(LanError::Refused(RefusalReason::UnknownKey | RefusalReason::WrongKey)) => {}
+                Err(other) => return Err(other),
+            }
+        }
+        let (mut link, mut early) = retry_while_busy(|| {
+            let mut link = Self::connect(
+                target,
+                KeyId::ANONYMOUS,
+                Psk::ANONYMOUS,
+                options.want_packed,
+            )?;
+            let early = link.come_up_to(UpTo::Session, &mut std::iter::empty())?.1;
+            Ok((link, early))
+        })?;
+        let hello = link.await_hello(&mut early)?;
+        let wants_password = hello
+            .as_ref()
+            .is_some_and(|h| h.auth.granted != Some(Tier::Edit))
+            && options.password.is_some();
+        if wants_password {
+            link.close();
+            let session = Self::open(target, options)?;
+            return Ok(LanUpdateSession {
+                link: session.link,
+                hello: Some(session.hello),
+                early: session.early,
+            });
+        }
+        Ok(LanUpdateSession { link, hello, early })
+    }
+
+    /// The key the link's handshake came up on (or runs on now): what the
+    /// caller keeps to come back with after a reset
+    /// ([`LanOptions::held_keys`]). The anonymous key is never worth
+    /// keeping.
+    #[must_use]
+    pub fn key(&self) -> Option<(KeyId, Psk)> {
+        (self.key.0 != KeyId::ANONYMOUS).then(|| self.key.clone())
+    }
+
     /// Step 0: come up on one of the held keys. `None` when the board holds
     /// none of them.
     fn open_held(
@@ -231,7 +322,7 @@ impl LanLink {
             fresh_link_nonce(),
             want_packed,
             key_id,
-            psk,
+            psk.clone(),
             os_entropy,
         );
         Ok(Self {
@@ -239,6 +330,7 @@ impl LanLink {
             port,
             started: Instant::now(),
             target: target.clone(),
+            key: (key_id, psk),
         })
     }
 
@@ -306,6 +398,47 @@ impl LanLink {
         &mut self,
         more_keys: &mut dyn Iterator<Item = (KeyId, Psk)>,
     ) -> Result<(ServerHello, Vec<PortRead>), LanError> {
+        let (hello, early) = self.come_up_to(UpTo::Hello, more_keys)?;
+        match hello {
+            Some(hello) => Ok((hello, early)),
+            None => unreachable!("come_up_to(Hello) returns with a hello"),
+        }
+    }
+
+    /// Wait up to [`UPDATE_HELLO_GRACE`] for a hello on a session that is
+    /// up; everything read meanwhile goes to `early`. `None`: core-only.
+    fn await_hello(&mut self, early: &mut Vec<PortRead>) -> Result<Option<ServerHello>, LanError> {
+        let deadline = Instant::now() + UPDATE_HELLO_GRACE;
+        while Instant::now() < deadline {
+            self.step(SETUP_STEP)?;
+            while let Some(read) = self.port.poll_read() {
+                let hello = match &read {
+                    PortRead::Message(payload) => match &payload.message {
+                        Ok(message) => match &message.msg {
+                            ServerMsgBody::Hello(hello) => Some(hello.clone()),
+                            _ => None,
+                        },
+                        Err(_) => None,
+                    },
+                    _ => None,
+                };
+                early.push(read);
+                if hello.is_some() {
+                    return Ok(hello);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Step until the session is up (and, for [`UpTo::Hello`], its hello
+    /// has arrived); on a refusal of a wrong or unknown key, try the next of
+    /// `more_keys`.
+    fn come_up_to(
+        &mut self,
+        up_to: UpTo,
+        more_keys: &mut dyn Iterator<Item = (KeyId, Psk)>,
+    ) -> Result<(Option<ServerHello>, Vec<PortRead>), LanError> {
         let deadline = Instant::now() + LAN_SETUP_BUDGET;
         let mut early = Vec::new();
         while Instant::now() < deadline {
@@ -316,7 +449,10 @@ impl LanLink {
                         reason: reason @ (RefusalReason::WrongKey | RefusalReason::UnknownKey),
                         ..
                     } => match more_keys.next() {
-                        Some((key_id, psk)) => self.port.retry_with(key_id, psk),
+                        Some((key_id, psk)) => {
+                            self.key = (key_id, psk.clone());
+                            self.port.retry_with(key_id, psk);
+                        }
                         None => return Err(self.closing(LanError::Refused(reason))),
                     },
                     SecureEvent::Refused {
@@ -338,9 +474,13 @@ impl LanLink {
                 {
                     let hello = hello.clone();
                     early.push(read);
-                    return Ok((hello, early));
+                    return Ok((Some(hello), early));
                 }
+                let up = matches!(read, PortRead::Up { .. });
                 early.push(read);
+                if up && up_to == UpTo::Session {
+                    return Ok((None, early));
+                }
             }
         }
         Err(self.closing(LanError::NoHello {
@@ -404,6 +544,15 @@ impl LanLink {
         self.socket.shutdown();
         error
     }
+}
+
+/// How far [`LanLink::come_up_to`] waits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpTo {
+    /// The secure session is up.
+    Session,
+    /// The session is up and the board's hello arrived.
+    Hello,
 }
 
 /// A setup request's unexpected answer, in words.

@@ -24,19 +24,27 @@
 //! - [`parked_handshake`]: a newcomer's first frame while the network slot
 //!   is held, and the same-key takeover rule (feature `wifi`);
 //! - [`lan_link_config`]: one network link's lp-link configuration, the
-//!   `ws()` preset cut to the board (feature `wifi`);
+//!   `ws()` preset cut to the board, its receive window to the mode
+//!   (feature `wifi`);
+//! - [`network_key_answer`]: a key-lookup answer in a secure handshake's
+//!   words, for the mux and core-only alike (feature `wifi`);
 //! - [`link_mux_transport`]: USB plus the radio links as one server
 //!   transport: whole wire messages on each link's proto channel, the hello
 //!   per session, the login deadline, and channel 3 handed to the core with
 //!   the link's tier (feature `radio-link`);
 //! - [`radio_update_channel`]: what the mux hands the core's update hook
 //!   (feature `radio-link`);
+//! - [`core_only_links`]: core-only's radio and LAN links, the port's one
+//!   reader while no engine runs — a LAN link's key lookup answered by the
+//!   update session itself (feature `radio-link`);
 //! - [`frame_buf_holder`]: a transport letting go of the shared frame buffer
 //!   before someone else serializes into it.
 //!
 //! See `docs/adr/2026-09-24-ble-transport.md`, and for channel 3
 //! `docs/adr/2026-10-06-ota-update-protocol.md`.
 
+#[cfg(feature = "radio-link")]
+pub mod core_only_links;
 #[cfg(feature = "server")]
 pub mod frame_buf_holder;
 pub mod hci_connection_ledger;
@@ -44,6 +52,8 @@ pub mod hci_connection_ledger;
 pub mod lan_link_config;
 #[cfg(feature = "radio-link")]
 pub mod link_mux_transport;
+#[cfg(feature = "wifi")]
+pub mod network_key_answer;
 #[cfg(feature = "wifi")]
 pub mod parked_handshake;
 #[cfg(feature = "radio-link")]
@@ -57,6 +67,8 @@ pub mod radio_update_channel;
 #[cfg(feature = "radio-link")]
 pub mod slot_edge;
 
+#[cfg(feature = "radio-link")]
+pub use core_only_links::{CoreOnlyLinks, CoreOnlySession};
 #[cfg(feature = "server")]
 pub use frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "radio-link")]
@@ -68,7 +80,7 @@ pub use parked_handshake::{ChallengeVerdict, PARKED_FRAME_MAX, ParkRefused};
 #[cfg(feature = "radio-link")]
 pub use radio_link_config::{MtuTooSmall, radio_link_config, radio_max_payload};
 #[cfg(feature = "radio-link")]
-pub use radio_link_mode::{RadioLinkMode, UPDATE_RX_WINDOW};
+pub use radio_link_mode::{LAN_UPDATE_RX_WINDOW, RadioLinkMode, UPDATE_RX_WINDOW};
 #[cfg(feature = "radio-link")]
 pub use radio_link_port::{
     CloseReason, LINK_SLOTS, NETWORK_LINK_SLOTS, NotHeld, OpenRefused, PortLock, RADIO_LINK_SLOTS,

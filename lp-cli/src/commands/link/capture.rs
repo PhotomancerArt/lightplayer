@@ -24,6 +24,15 @@
 //! three times in an update and its USB port goes away each time, so with
 //! it a lost port is waited for and reopened rather than the end of the run.
 //!
+//! **Over the LAN** ([`super::lan_reopen`]) the same update runs on the
+//! board's Wi-Fi link (`ServeConfig::LAN`): the link opens for an update
+//! (`LanLink::open_for_update`: core-only has no hello), and after each reset
+//! it is dialled again on a bounded backoff, with the key the last session
+//! came up on (a locked board's core-only answers it), trying the board's
+//! `lp-xxxx.local` name when the address it was given stops answering. A
+//! board busy with another client says so once, in words, and the run
+//! stops; during an update's reconnects "busy" backs off like any refusal.
+//!
 //! `blepipe:<port>` hosts the link over Bluetooth instead, through a browser
 //! page that only moves frames ([`super::blepipe_capture`]). Everything above
 //! the link is [`CaptureSession`], shared by both.
@@ -32,12 +41,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use lpa_client::HostSpecifier;
-use lpa_client::transport_lan::{LanLink, LanOptions, LanSocket, LanTarget};
+use lpa_client::transport_lan::{LanError, LanLink, LanOptions, LanSocket, LanTarget};
+use lpa_update::ServeConfig;
 use lpc_wire::{PortRead, WireLinkPort};
 
 use super::args::CaptureArgs;
 use super::capture_session::CaptureSession;
 use super::lab_port::{LabPort, TermiosMode};
+use super::lan_reopen::{BUSY_WORDS, LanReopen};
 use crate::commands::emu::link_host::{describe_link_counters, fresh_nonce};
 use crate::commands::ota_host::OtaHost;
 
@@ -56,16 +67,34 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
             .with_context(|| format!("`{}`: expected blepipe:<port>", args.target))?;
         return super::blepipe_capture::capture_blepipe(args, port);
     }
-    let ota = OtaHost::from_args(&args.ota)?;
+    let lan = args.target.starts_with("lan:");
+    let ota = if lan {
+        OtaHost::from_args_over(&args.ota, ServeConfig::LAN)?
+    } else {
+        OtaHost::from_args(&args.ota)?
+    };
     let has_ota = ota.is_some();
     let mut session = CaptureSession::create(args, ota)?;
+    let mut reopen = if lan && has_ota {
+        Some(LanReopen::new(args)?)
+    } else {
+        None
+    };
     let Opened {
         pipe,
         mut link,
         clock,
         mut reads,
-    } = open(args)?;
+    } = match reopen.as_mut() {
+        Some(reopen) => open_lan_for_update(reopen)?,
+        None => open(args)?,
+    };
     let mut pipe = Some(pipe);
+    // The run's clock (the deadline, the update host's time) and the link's
+    // own (µs since it connected): one and the same until a LAN link is
+    // dialled again.
+    let run = clock;
+    let mut link_clock = clock;
     let deadline = Duration::from_secs(args.seconds);
     let mut buf = [0u8; 4096];
 
@@ -75,16 +104,31 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
         args.seconds,
         args.console.display()
     );
-    'run: while clock.elapsed() < deadline {
-        let now = clock.elapsed().as_micros() as u64;
-        // A board that resets drops its USB port: with an update running,
-        // wait for it to come back instead of ending the capture.
+    'run: while run.elapsed() < deadline {
+        let now = link_clock.elapsed().as_micros() as u64;
+        let now_ms = run.elapsed().as_millis() as u64;
+        // A board that resets drops its USB port (or its LAN link): with an
+        // update running, wait for it to come back instead of ending the
+        // capture.
         let Some(p) = pipe.as_mut() else {
+            if let Some(reopen) = reopen.as_mut() {
+                if let Some(opened) = reopen.try_again()? {
+                    let line = reopen.back_line(run);
+                    eprintln!("link capture: {line}");
+                    session.line(&format!("[link] {line}"))?;
+                    pipe = Some(CapturePipe::Lan(opened.socket));
+                    link = opened.link;
+                    link_clock = opened.clock;
+                    reads.extend(opened.early);
+                }
+                session.pump_ota_idle(now_ms)?;
+                continue;
+            }
             std::thread::sleep(Duration::from_millis(100));
             if let Ok(port) = LabPort::open(&args.target, TermiosMode::Raw) {
                 eprintln!(
                     "link capture: port back at {:.3} s",
-                    clock.elapsed().as_secs_f64()
+                    run.elapsed().as_secs_f64()
                 );
                 pipe = Some(CapturePipe::Port(port));
             }
@@ -95,9 +139,14 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
                 return Err(error).with_context(|| format!("reading {}", args.target));
             }
             eprintln!(
-                "link capture: port lost ({error}) at {:.3} s",
-                clock.elapsed().as_secs_f64()
+                "link capture: {} lost ({error}) at {:.3} s",
+                if lan { "LAN link" } else { "port" },
+                run.elapsed().as_secs_f64()
             );
+            if let Some(reopen) = reopen.as_mut() {
+                session.ota_down(now_ms);
+                reopen.lost();
+            }
             pipe = None;
             continue;
         }
@@ -113,18 +162,22 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
             }
         }
         if lost {
+            if let Some(reopen) = reopen.as_mut() {
+                session.ota_down(now_ms);
+                reopen.lost();
+            }
             pipe = None;
             continue;
         }
-        let now_ms = now / 1_000;
         reads.extend(std::iter::from_fn(|| link.poll_read()));
+        let mut session_ended = false;
         for read in reads.drain(..) {
             match &read {
                 PortRead::Up { generation } => {
                     session.ota_up(now_ms);
                     eprintln!(
                         "link capture: up (session {generation}) at {:.3} s, board nonce {}",
-                        clock.elapsed().as_secs_f64(),
+                        run.elapsed().as_secs_f64(),
                         link.link()
                             .peer_nonce()
                             .map_or_else(|| "unknown".into(), |n| format!("{n:#010x}"))
@@ -134,8 +187,19 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
                     session.ota_down(now_ms);
                     eprintln!(
                         "link capture: reset ({reason:?}) at {:.3} s",
-                        clock.elapsed().as_secs_f64()
+                        run.elapsed().as_secs_f64()
                     );
+                    // A LAN session that resets is a new link on the board
+                    // (it closes the old one): dial again.
+                    session_ended = reopen.is_some();
+                }
+                PortRead::Message(payload) => {
+                    if let Some(reopen) = reopen.as_mut()
+                        && let Ok(message) = &payload.message
+                        && let lpc_wire::server::ServerMsgBody::Hello(hello) = &message.msg
+                    {
+                        reopen.saw_hello(hello);
+                    }
                 }
                 _ => {}
             }
@@ -143,6 +207,13 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
             if session.matched() {
                 break 'run;
             }
+        }
+        if session_ended {
+            if let Some(reopen) = reopen.as_mut() {
+                reopen.lost();
+            }
+            pipe = None;
+            continue;
         }
         session.pump_ota(&mut link, now_ms)?;
         if session.matched() {
@@ -159,10 +230,25 @@ pub fn capture(args: &CaptureArgs) -> Result<()> {
         link.counters().datagrams_lost
     );
     session.finish(
-        clock.elapsed().as_secs_f64(),
+        run.elapsed().as_secs_f64(),
         &describe_link_counters(&link.counters()),
         &[lost],
     )
+}
+
+/// A `lan:` target opened for an update, through `reopen` (which keeps its
+/// key for the reconnects): a busy board is one sentence, and the end.
+fn open_lan_for_update(reopen: &mut LanReopen) -> Result<Opened> {
+    match reopen.open_first() {
+        Ok(opened) => Ok(Opened {
+            pipe: CapturePipe::Lan(opened.socket),
+            link: opened.link,
+            clock: opened.clock,
+            reads: opened.early,
+        }),
+        Err(LanError::Busy { .. }) => bail!("{BUSY_WORDS}"),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The target opened: its pipe, its link, the link's clock, and what it said

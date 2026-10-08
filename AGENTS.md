@@ -350,6 +350,12 @@ the app through the same view model and presses the same actions. See
   network file's **reader** (`NetworkFile::from_json`) ignores keys it does
   not know, so a rolled-back core still joins with a file a newer firmware
   grew (`docs/adr/2026-10-04-device-wifi-settings.md`, 2026-10-07 amendment).
+  Updates run on channel 3 over USB, Bluetooth and the LAN: a LAN link's
+  key decides who may flash, core-only answers that key itself (no server
+  runs there) and refuses `L` on it, and a trial core with a saved network
+  that hears from no host for three minutes gives the board back (the OTA
+  ADR's and the split-image ADR's amendments of 2026-10-07).
+  `just test-emu-c6-ota-lan` walks it with no cable.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 

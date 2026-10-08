@@ -4206,6 +4206,7 @@ dependencies = [
  "lpc-model",
  "lpc-relay",
  "lpc-shared",
+ "lpc-update",
  "lpc-wire",
  "lpfs",
  "ser-write-json",

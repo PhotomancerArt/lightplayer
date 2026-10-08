@@ -26,7 +26,9 @@ use lp_cli::commands::link::args::{CaptureArgs, RttArgs};
 use lp_cli::commands::upload::{UploadArgs, handle_upload};
 use lp_cli::commands::wifi::WifiCli;
 use lp_cli::commands::wifi::args::{HostArgs, WifiCommand};
-use lpa_client::transport_lan::{BoardPassword, LOCKED_WORDS, LanError, LanSocket, LanTarget};
+use lpa_client::transport_lan::{
+    BoardPassword, LOCKED_WORDS, LanError, LanLink, LanOptions, LanSocket, LanTarget,
+};
 use lpa_client::{HostSpecifier, LpClient};
 use lpc_access::{OpenTo, SecretEntry, SecretKind, Tier};
 use lpc_wire::lp_link::LinkConfig;
@@ -306,6 +308,66 @@ fn link_rtt_measures_a_lan_link_in_frames() {
     assert_eq!(report["request_rtt_ms"]["n"], 5);
     assert_eq!(report["request_rtt_frames"]["n"], 5, "{report}");
     assert_eq!(report["link_resets"], 0);
+    assert_no_early_requests(&harness);
+}
+
+/// An update's way in (OTA Wi-Fi plan WD7): on a locked board running its
+/// engine the password goes the usual way and the key it came up on is
+/// kept; the next link comes up on that held key with no password at all —
+/// how lp-cli reaches the board again after a reset, in core-only, where
+/// there is no `LoginBegin` to learn a password's key from.
+#[test]
+fn an_update_comes_back_on_the_key_it_came_up_on() {
+    let harness = start(locked(), None);
+    let endpoint = target(&harness).endpoint();
+    let first = LanLink::open_for_update(
+        &endpoint,
+        &LanOptions {
+            password: Some(BoardPassword::new(PASSWORD)),
+            want_packed: false,
+            held_keys: Vec::new(),
+        },
+    )
+    .expect("the password opens it");
+    let hello = first.hello.as_ref().expect("an engine says hello");
+    assert_eq!(hello.auth.granted, Some(Tier::Edit));
+    let key = first.link.key().expect("a password's key, worth keeping");
+    first.link.close();
+
+    let again = LanLink::open_for_update(
+        &endpoint,
+        &LanOptions {
+            password: None,
+            want_packed: false,
+            held_keys: vec![key],
+        },
+    )
+    .expect("the held key opens it");
+    assert!(
+        again
+            .early
+            .iter()
+            .any(|read| matches!(read, PortRead::Up { .. })),
+        "the session's Up is the first thing it says"
+    );
+    assert_eq!(
+        again.hello.expect("an engine").auth.granted,
+        Some(Tier::Edit)
+    );
+    assert!(again.link.key().is_some());
+    again.link.close();
+
+    // With nothing held and no password a locked board's engine still lets
+    // the anonymous session up (an engine heal needs nothing, Y8): the
+    // hello says it grants nothing.
+    let anyone = LanLink::open_for_update(&endpoint, &LanOptions::default())
+        .expect("an anonymous session comes up");
+    assert_eq!(anyone.hello.expect("an engine").auth.granted, None);
+    assert!(
+        anyone.link.key().is_none(),
+        "the anonymous key is never kept"
+    );
+    anyone.link.close();
     assert_no_early_requests(&harness);
 }
 

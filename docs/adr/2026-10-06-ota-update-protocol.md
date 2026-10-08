@@ -384,3 +384,65 @@ stage, to the reset that ended it), runs 1 and 2:
 Protocol v1, lp-link and every on-flash format are unchanged: no flag, no
 version, no new message. The core grew by 3,600 B (1,219,072 →
 1,222,672 B), and the split image's steady headroom is 300,714 B.
+
+## Amendment (2026-10-07, OTA Wi-Fi PR A — channel 3 over the LAN)
+
+Plan `lp2025/2026-10-06-2249-ota-wifi-updates` (PR A, P1–P6) carries
+channel 3 on a board's Wi-Fi link. Protocol v1, lp-link's frames and every
+on-flash format are unchanged; no `WIRE_PROTO_VERSION` bump.
+
+- **Who may flash over the LAN: the link's key.** A LAN link is a secure
+  lp-link responder, `LinkTrust::Keyed(tier)` with the tier of the key its
+  handshake verified, or `Untrusted` on the anonymous key (where `open`
+  decides, QY2 unchanged). §4's table holds as written: an edit key installs
+  a core, play queries and backs up, anyone heals the board's own engine
+  (Y8).
+- **Core-only answers a LAN link's key lookup itself**
+  (`lpc_update::board::BoardSession::key_lookup`, driven by
+  `fw-esp32-common`'s `radio_link::core_only_links`), with the engine's
+  rule, from the device store's secrets it already reads: the anonymous key
+  is answered with the zero PSK and grants nothing; a known salt with its
+  candidates, best tier first; an unknown salt is refused uncharged; a wrong
+  guess is charged to **the session's login backoff** — one board, one
+  backoff, whether the guess came as a key or as `L`.
+- **`L` is refused on a keyed link** with the verdict any login the session
+  will not take gets (no tier, no wait): its key is its login, as the
+  engine's server refuses a `LoginAnswer` there, so an HMAC answer can never
+  be relayed through a session a relay could sit in the middle of. No new
+  message, no new refusal.
+- **While the engine runs** the mux hands a LAN link's channel 3 to the
+  update hook with the tier its key granted on the server; a relayed link's
+  channel 3 is not served yet (updates through the relay are their own
+  change), and core-only turns a relayed link away.
+- **The LAN's update-mode window.** A LAN link opened in update mode
+  advertises a receive window of 8 frames (`LAN_UPDATE_RX_WINDOW`; serve
+  mode keeps 2) and the endpoint's socket receive buffer grows to hold it;
+  the LAN endpoint waits for the boot's mode before it opens a link, as the
+  BLE task does. `ServeConfig::LAN` is `ahead` 8.
+- **A host comes back on the key it came up on.** In core-only there is no
+  server, so no hello and no `LoginBegin` to learn a password's key from:
+  lp-cli keeps the key an engine session verified and dials the board again
+  with it after each reset (`LanLink::open_for_update`), at the address it
+  was given and then at the board's `lp-xxxx.local`.
+
+Measured on silicon (2026-10-07, FC6 fixture-c6 `A0:F2:62:87:B4:8C` on the
+desk's test access point, lp-cli on a Mac on the same network, image at
+`2c42254ac`), host wall time:
+
+| run | backup | core | engine | each reset, back on the LAN | total |
+|---|---:|---:|---:|---:|---:|
+| Wi-Fi, X → Y with a backup (2 runs) | 20.5 / 20.5 s | 14.1 / 15.5 s | 18.8 / 18.7 s | 2.4, 2.4, 0.4 s | **58.8 / 60.2 s** |
+| Wi-Fi, cached engine, window 8, `ahead` 8 (2 runs) | — | 15.6 / 15.5 s | 18.9 / 18.1 s | 2.4, 2.4, 0.4 s | **42.9 / 41.4 s** |
+| USB, X → Y with a backup (same desk) | 6.7 s | 11.2 s | 13.0 s | — | **31.0 s** |
+
+The window sweep (pieces together, `ahead` 4): 38.0 s at a window of 2,
+35.5 s at 8, 33.6 s at 16; at a window of 8, `ahead` 2 / 4 / 8 took 40.9 /
+35.5 / 34.0 s. On this network (~15 ms round trips) the flash paces an
+update and the window is room for a slower one. The backup is the Wi-Fi
+run's slow stage: the running engine's LAN link keeps its serve window of
+2, so the read-back moves ~90 KB/s against USB's ~270 KB/s. Two power cuts
+(`board power-cycle`, one in the core piece and one in the engine piece)
+resumed each piece where its record said and ended on the new build with
+nobody touching the board. Emulated, every scenario of the plan's P4 passes
+on `lp-emu:esp32c6:t1+net=lan` with no USB cable at all
+(`lp-cli/tests/emu_ota_lan.rs`, `just test-emu-c6-ota-lan`).

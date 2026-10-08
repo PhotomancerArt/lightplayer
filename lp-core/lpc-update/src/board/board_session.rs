@@ -94,6 +94,10 @@ pub struct BoardSession {
     pub(super) login: LoginState,
     /// The link that holds the device's one login challenge.
     pub(super) login_link: Option<LinkId>,
+    /// Secure links whose key lookup was answered: each candidate's tier
+    /// (`None`: the anonymous key), until the link comes up
+    /// ([`super::core_key_lookup`]).
+    pub(super) key_lookups: Vec<(LinkId, Vec<Option<Tier>>)>,
     pub(super) window: Option<UpdateWindow>,
     /// One sector of scratch, allocated once.
     pub(super) sector_buf: Vec<u8>,
@@ -132,6 +136,7 @@ impl BoardSession {
             transfer: None,
             login: LoginState::new(),
             login_link: None,
+            key_lookups: Vec::new(),
             window: None,
             sector_buf: vec![0u8; CHUNK as usize],
             outbox: Vec::new(),
@@ -199,6 +204,7 @@ impl BoardSession {
     /// tier is forgotten, and a transfer it owned may be taken over.
     pub fn link_down(&mut self, _now_ms: u64, link: LinkId) {
         self.links.retain(|l| l.id != link);
+        self.key_lookups.retain(|(l, _)| *l != link);
         if self.login_link == Some(link) {
             self.login_link = None;
             self.login.cancel();

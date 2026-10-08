@@ -139,6 +139,20 @@ impl CaptureSession {
         Ok(())
     }
 
+    /// Time passes with no link to the board (a LAN link being dialled
+    /// again after a reset): the update host's clock, and its lines.
+    pub fn pump_ota_idle(&mut self, now_ms: u64) -> Result<()> {
+        let Some(ota) = self.ota.as_mut() else {
+            return Ok(());
+        };
+        ota.tick(now_ms);
+        for line in ota.take_lines() {
+            eprintln!("link capture: {line}");
+            self.line(&line)?;
+        }
+        Ok(())
+    }
+
     /// Send the next `--request` if one is due.
     pub fn pump_requests(&mut self, link: &mut WireLinkPort) -> Result<()> {
         if let Some(message) = self.requests.due() {

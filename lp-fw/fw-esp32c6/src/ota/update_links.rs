@@ -1,6 +1,6 @@
 //! The host links the update session answers on: the USB link and, when the
-//! image has Bluetooth, each radio link — by the [`LinkId`] the session names
-//! it with.
+//! image has Bluetooth, each radio link (and with Wi-Fi the LAN link) — by
+//! the [`LinkId`] the session names it with.
 //!
 //! The session's link ids are the transport's: [`USB_LINK`] is the USB
 //! cable (`lpc_shared`'s `LinkId::PRIMARY`, 0), and a radio link is the id
@@ -74,9 +74,7 @@ impl UpdateLinks {
 
 /// A transport link as the session names it.
 #[cfg(feature = "ble")]
-pub fn session_link(link: lpc_shared::transport::LinkId) -> LinkId {
-    LinkId(link.raw())
-}
+pub use fw_esp32_common::radio_link::core_only_links::session_link;
 
 /// A session link as the transport names it.
 #[cfg(feature = "ble")]

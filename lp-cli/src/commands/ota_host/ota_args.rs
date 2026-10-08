@@ -27,8 +27,9 @@ pub struct OtaArgs {
     #[arg(long = "ota-cache", value_name = "DIR", requires = "ota_offer")]
     pub ota_cache: Option<PathBuf>,
 
-    /// Chunks kept in flight per request (send-ahead). Default 1 on USB,
-    /// serial and tcp; 4 on `blepipe:` (`ServeConfig::BLE`).
+    /// Chunks kept in flight per request (send-ahead). Default 4 on USB,
+    /// serial and tcp (`ServeConfig::USB`) and on `blepipe:`
+    /// (`ServeConfig::BLE`); 8 on `lan:` (`ServeConfig::LAN`).
     #[arg(long = "ota-ahead", requires = "ota_offer")]
     pub ota_ahead: Option<u8>,
 

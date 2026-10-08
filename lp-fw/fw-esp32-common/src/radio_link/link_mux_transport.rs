@@ -64,9 +64,10 @@
 //!    The mux holds no copy of that rule. A closed link is passed on so the
 //!    session forgets it, its queued messages dropped; a session `Reset`
 //!    drops the ended session's. With no hook (a monolithic image, DM25)
-//!    channel 3 is ignored. Only a Bluetooth link's channel 3 goes to the
-//!    hook: a LAN link's is ignored until updates over Wi-Fi are their own
-//!    change.
+//!    channel 3 is ignored. A Bluetooth link's channel 3 goes to the hook,
+//!    and a LAN link's, with the tier its key granted it on the server; a
+//!    relayed link's is ignored until updates through the relay are their
+//!    own change.
 //!
 //! **Network links** (feature `wifi`: the LAN's, and the cloud relay's
 //! routes) ride the same slots and the same rules, with five differences:
@@ -77,8 +78,8 @@
 //! link's tier at `Up`); a secure session that resets after coming up
 //! closes the link (a new session is a new server link, with a new grant, so
 //! the client reconnects); they are served from another thread, under the
-//! port's lock (see `radio_link_port`); their channel 3 is not served (rule
-//! 5); and the LAN and the relay share **one** network slot (Wi-Fi relay
+//! port's lock (see `radio_link_port`); a relayed link's channel 3 is not
+//! served yet (rule 5); and the LAN and the relay share **one** network slot (Wi-Fi relay
 //! plan D2). A newcomer that finds it held is a *challenge*
 //! ([`RadioLinkEvent::Challenged`]): it takes the slot only with a handshake
 //! that verifies under the holder's own key, looked up through the server
@@ -109,11 +110,13 @@ use lpc_wire::{LinkCounterTally, TransportError, WireServerMessage};
 
 use super::frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "wifi")]
+use super::network_key_answer::answer_key_lookup;
+#[cfg(feature = "wifi")]
 use super::parked_handshake::Msg1;
 use super::radio_link_config::SMALL_REPLY_BYTES;
-use super::radio_link_port::{
-    LINK_SLOTS, RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot,
-};
+#[cfg(feature = "wifi")]
+use super::radio_link_port::RADIO_LINK_SLOTS;
+use super::radio_link_port::{LINK_SLOTS, RadioLinkEvent, RadioLinkPort, RadioLinkSlot};
 use super::radio_update_channel::{RadioUpdate, RadioUpdateHook};
 use crate::link_upkeep::LinkUpkeep;
 use crate::serial::packed_link::PackedLink;
@@ -309,9 +312,16 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
         }
         let open = (!self.updates.is_empty()).then(open);
         while let Some((link, bytes)) = self.updates.pop_front() {
+            // The link as the server knows it on its slot: keyed on the
+            // LAN, untrusted on Bluetooth.
+            let wire = self
+                .radio
+                .iter()
+                .find(|l| l.id == link)
+                .map_or(RadioLinkPort::link(link), |l| l.wire);
             hook(RadioUpdate::Message {
                 link,
-                granted: granted(RadioLinkPort::link(link)),
+                granted: granted(wire),
                 open: open.unwrap_or(OpenTo::Nobody),
                 bytes: &bytes,
             });
@@ -617,12 +627,11 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                     LinkEvent::Message { channel, data }
                         if channel == CH_UPDATE
                             && self.update_hook.is_some()
-                            && radio.slot < RADIO_LINK_SLOTS =>
+                            && carries_updates(radio.wire) =>
                     {
                         // For the core, with the link's tier, from the
-                        // upkeep (rule 5). Bluetooth links only: a LAN
-                        // link's channel 3 is not served yet, and falls to
-                        // the arm below like any other channel.
+                        // upkeep (rule 5). A relayed link's falls to the
+                        // arm below like any other channel.
                         self.updates.push_back((radio.id, data));
                     }
                     LinkEvent::Message { channel, data } => {
@@ -902,25 +911,10 @@ fn take_secure_events(
     }
 }
 
-/// Hand the server's answer to a key lookup to the link: its candidate PSKs,
-/// or a refusal in the handshake's own words.
-#[cfg(feature = "wifi")]
-fn answer_lookup(
-    link: &mut lp_link::Link<lp_link::SelectiveRepeat>,
-    key_id: lp_link::secure_channel::KeyId,
-    answer: KeyAnswer,
-) {
-    use lp_link::secure_channel::{Psk, RefusalReason};
-    match answer {
-        KeyAnswer::Keys(psks) => {
-            let psks: Vec<Psk> = psks.into_iter().map(Psk::new).collect();
-            link.provide_keys(key_id, &psks);
-        }
-        KeyAnswer::Unknown => link.refuse(key_id, RefusalReason::UnknownKey, 0),
-        KeyAnswer::Backoff { retry_after_ms } => {
-            link.refuse(key_id, RefusalReason::Backoff, retry_after_ms);
-        }
-    }
+/// Whether a link's channel 3 goes to the update hook (rule 5): a
+/// Bluetooth link's and a LAN link's, never a relayed one's yet.
+fn carries_updates(wire: Link) -> bool {
+    wire.trust != lpc_shared::transport::LinkTrust::Relayed
 }
 
 /// The end of a tick's wait budget, for a tick starting now.
@@ -1023,7 +1017,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
             return;
         };
         let slot = self.port.slot(radio.slot);
-        slot.with_link(link, |l| answer_lookup(l, key_id, answer));
+        slot.with_link(link, |l| answer_key_lookup(l, key_id, answer));
         slot.ring();
     }
 
@@ -1763,6 +1757,56 @@ mod tests {
         mux.dispatch_updates(|_| None, || OpenTo::Nobody);
     }
 
+    /// Rule 5 on the LAN: a LAN link's channel-3 message goes to the hook
+    /// with the tier its key granted it on the server (asked with the link
+    /// as the server knows it: keyed), and a relayed link's is ignored.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn a_lan_links_channel_three_goes_to_the_update_hook_with_its_keys_grant() {
+        let _turn = frame_buf_turn();
+        let port = leak_port();
+        let mut mux =
+            LinkMuxTransport::new(Usb::default(), port, NeverDelay).with_update_hook(record_update);
+        take_updates();
+
+        let (lan, mut client) = open_network_session(port, &mut mux, LinkTrust::Keyed);
+        client.link.send(CH_UPDATE, b"Q\x01").unwrap();
+        client.pump(port.slot(RADIO_LINK_SLOTS));
+        assert!(block(mux.receive()).unwrap().is_none(), "not a request");
+        mux.dispatch_updates(
+            |l| (l.id == lan && l.trust == LinkTrust::Keyed).then_some(Tier::Edit),
+            || OpenTo::Nobody,
+        );
+        assert_eq!(
+            take_updates(),
+            vec![
+                Seen::Message(lan, Some(Tier::Edit), OpenTo::Nobody, b"Q\x01".to_vec()),
+                Seen::Pass,
+            ]
+        );
+        // The board's answer goes back on the LAN link.
+        assert_eq!(port.send_update(lan, b"M{}"), UpdateSend::Queued);
+        client.pump(port.slot(RADIO_LINK_SLOTS));
+        assert_eq!(client.next_update(), Some(b"M{}".to_vec()));
+        port.slot(RADIO_LINK_SLOTS).close_link(lan);
+        block(port.announce(RadioLinkEvent::Closed { link: lan }));
+        assert!(block(mux.receive()).unwrap().is_none());
+        mux.dispatch_updates(|_| None, || OpenTo::Nobody);
+        assert_eq!(take_updates(), vec![Seen::Closed(lan), Seen::Pass]);
+
+        let (relayed, mut client) = open_network_session(port, &mut mux, LinkTrust::Relayed);
+        client.link.send(CH_UPDATE, b"Q\x01").unwrap();
+        client.pump(port.slot(RADIO_LINK_SLOTS));
+        assert!(block(mux.receive()).unwrap().is_none());
+        mux.dispatch_updates(|_| Some(Tier::Edit), || OpenTo::Nobody);
+        assert_eq!(
+            take_updates(),
+            vec![Seen::Pass],
+            "a relayed link's is ignored"
+        );
+        let _ = relayed;
+    }
+
     /// The hook's answers on a radio link: a small one through the link's
     /// send ring, a 4 KiB read-back chunk as the external message out of the
     /// frame buffer, and another large one waits while any link reads it.
@@ -1860,6 +1904,126 @@ mod tests {
         block(port.announce(RadioLinkEvent::Opened { link, slot }));
         assert!(block(mux.receive()).unwrap().is_none());
         link
+    }
+
+    /// What the LAN endpoint (or the relay driver) does with a new
+    /// connection, then the secure handshake with an edit key the server
+    /// knows, then the hello: the link and its client.
+    #[cfg(feature = "wifi")]
+    fn open_network_session<D: DelayNs>(
+        port: &'static RadioLinkPort,
+        mux: &mut LinkMuxTransport<Usb, D>,
+        trust: LinkTrust,
+    ) -> (LinkId, SecureClient) {
+        use lp_link::secure_channel::{KeyId, Psk, SecureRole};
+        let index = RADIO_LINK_SLOTS;
+        let edge = if trust == LinkTrust::Relayed {
+            super::super::SlotEdge::Relay
+        } else {
+            super::super::SlotEdge::Local
+        };
+        let link = port.mint_link();
+        port.slot(index)
+            .open_network(link, 0x5eed, fill, trust, edge)
+            .unwrap();
+        block(port.announce(RadioLinkEvent::Opened { link, slot: index }));
+        assert!(block(mux.receive()).unwrap().is_none());
+        let psk = [0x42; 32];
+        let mut client = SecureClient {
+            link: lp_link::Link::new_secure(
+                LinkConfig::ws(),
+                0x0c11_e470,
+                SecureRole::Initiator {
+                    key_id: KeyId([2; 16]),
+                    psk: Psk::new(psk),
+                },
+                fill,
+            ),
+            events: VecDeque::new(),
+            now: 1_000_000_000_000,
+        };
+        client.pump(port.slot(index));
+        let events = mux.take_secure_events();
+        assert_eq!(
+            events,
+            vec![(link, SecureLinkEvent::KeyLookup { salt: [2; 16] })]
+        );
+        mux.answer_key_lookup(link, KeyAnswer::Keys(vec![psk]));
+        client.pump(port.slot(index));
+        assert!(block(mux.receive()).unwrap().is_none());
+        // The server takes the grant before the hello (its tick's order).
+        assert_eq!(
+            mux.take_secure_events(),
+            vec![(
+                link,
+                SecureLinkEvent::Authenticated {
+                    salt: [2; 16],
+                    candidate: 0
+                }
+            )]
+        );
+        assert_eq!(mux.take_opened_links(), vec![Link { id: link, trust }]);
+        block(mux.send(link, hello())).unwrap();
+        client.pump(port.slot(index));
+        assert!(client.next_on(CH_PROTO).is_some(), "the hello");
+        (link, client)
+    }
+
+    /// A host's secure end on a network link, at `ws()`.
+    #[cfg(feature = "wifi")]
+    struct SecureClient {
+        link: lp_link::Link<SelectiveRepeat>,
+        events: VecDeque<LinkEvent>,
+        now: Micros,
+    }
+
+    #[cfg(feature = "wifi")]
+    impl SecureClient {
+        fn pump(&mut self, slot: &RadioLinkSlot) {
+            let mut quiet = 0;
+            for _ in 0..4_000 {
+                self.now += 5_000;
+                let t = self.now;
+                let mut moved = false;
+                while let Some(frame) = slot.poll_frame(t, <[u8]>::to_vec) {
+                    self.link.on_datagram(t, &frame);
+                    moved = true;
+                }
+                while let Some(frame) = self.link.poll_transmit(t).map(<[u8]>::to_vec) {
+                    slot.on_datagram(t, &frame);
+                    moved = true;
+                }
+                while let Some(event) = self.link.recv() {
+                    self.events.push_back(event);
+                }
+                quiet = if moved { 0 } else { quiet + 1 };
+                if quiet >= 10 {
+                    break;
+                }
+            }
+        }
+
+        fn next_update(&mut self) -> Option<Vec<u8>> {
+            self.next_on(CH_UPDATE)
+        }
+
+        fn next_on(&mut self, wanted: u8) -> Option<Vec<u8>> {
+            while let Some(event) = self.events.pop_front() {
+                if let LinkEvent::Message { channel, data } = event
+                    && channel == wanted
+                {
+                    return Some(data);
+                }
+            }
+            None
+        }
+    }
+
+    #[cfg(feature = "wifi")]
+    fn fill(buf: &mut [u8]) {
+        for (i, b) in buf.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(13).wrapping_add(5);
+        }
     }
 
     /// [`open_link`], then bring the session up and deliver its hello.
