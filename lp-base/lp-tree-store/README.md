@@ -240,14 +240,14 @@ the ground truth); code from `size-probe/`.
 |---|---:|---:|
 | c40 pushed, `host_deflate` (push / save / panel) | 6,516 / 6,720 / 6,548 B | 7,092 / 7,296 / 7,124 B |
 | c40 pushed, `stored` (push / save / panel) | 8,076 / 8,472 / 8,108 B | 8,652 / 9,048 / 8,684 B |
-| full store, synthetic c40 then ~2,000 writes (3× the flash), deflated: at rest / max | 6,644 / 7,584 B | — |
-| full store, the same stored: at rest / max | 8,744 / 10,248 B | — |
+| full store, synthetic c40 then 2,174 writes (400 erases, ~3× the flash), deflated: held after a remount / max during the run | 6,644 / 7,572 B | — |
+| full store, the same stored (1,873 writes): held after a remount / max during the run | 8,744 / 10,212 B | — |
 
 (Index 185–202 records host-deflated, 315–348 stored; 138–139 files;
 sector table 1,536 B at 128, 2,112 B at 176.)
 
 Transient per call (counting allocator, synthetic c40, stored, 128
-sectors): `put` a 2.9 KB shader 3,838 B · `put` the panel 897 B · `append`
+sectors): `put` a 2.9 KB shader 3,854 B · `put` the panel 897 B · `append`
 4 KiB to an 18 KB file 2,240 B · `get` an 18 KB file 1,159 B beyond the
 returned buffer · `file_size` 0 B. A whole-project **push transaction**
 holds up to ~6.7 KB (24 B undo per path × 138 paths, plus a ≤ 2 KB delta).
@@ -267,7 +267,10 @@ indexes every record on flash before pruning to the ~200–380 live ones.
 pushes, 13 sectors better than 2048 for stored writes (device saves are
 stored), and half 2048's per-record buffers. Write amplification at 1024:
 0.36–0.50 host-deflated, 0.84–0.95 stored. Mount reads 100–280 KB (every
-byte in use).
+byte in use). Resident RAM moves the other way (c40 pushed, 128 sectors,
+stored / host_deflate): 10,236 / 7,764 B at 512, 8,076 / 6,516 B at 1024,
+6,720 / 5,964 B at 2048 — 512 doubles the index and goes over the budget
+stored; 2048 saves ~1.4 KB of index for 7–13 more sectors stored.
 
 ### Code (RV32, `size-probe`, opt-level z, LTO, stand-in hasher)
 
