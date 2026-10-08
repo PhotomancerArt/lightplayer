@@ -18,6 +18,10 @@
 //!   must not keep taking a core install over radio on the boot-time answer
 //!   until the next reboot, so the hook rebuilds its session's access facts
 //!   when this differs.
+//! - **A relayed link says so.** Through the cloud relay the device's
+//!   `open` never applies (the relay's second lock), so the message carries
+//!   whether its link is relayed and the session holds such a link to its
+//!   grant alone.
 //! - **Links come and go.** A closed radio link is passed on, so the session
 //!   forgets it (`BoardSession::link_down`).
 //!
@@ -38,11 +42,14 @@ use lpc_shared::transport::LinkId;
 pub enum RadioUpdate<'a> {
     /// One channel-3 message from `link`, the tier a login or a key
     /// granted that link on the engine's server (`None`: neither did), and
-    /// who the device is open to right now.
+    /// who the device is open to right now. `relayed`: the link came
+    /// through the cloud relay, where `open` never applies (the session
+    /// holds it to its grant alone).
     Message {
         link: LinkId,
         granted: Option<Tier>,
         open: OpenTo,
+        relayed: bool,
         bytes: &'a [u8],
     },
     /// `link` closed: forget it.

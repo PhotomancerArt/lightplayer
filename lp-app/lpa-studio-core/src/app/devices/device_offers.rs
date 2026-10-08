@@ -526,23 +526,21 @@ mod tests {
         );
     }
 
-    /// Over Wi‑Fi the update is not ready yet, which is not "need USB":
-    /// Bluetooth and USB both carry it. Erase keeps the USB reason; Reset is
-    /// a request there, enabled for the author tier.
+    /// The update's own reason wins on the USB Update verb when the link
+    /// has one; erase keeps the USB reason either way; Reset is a request
+    /// on a network link, enabled for the author tier.
     #[test]
-    fn over_wifi_the_update_says_it_is_not_ready_and_erase_still_needs_usb() {
+    fn the_updates_own_reason_wins_and_erase_still_needs_usb() {
+        let own = "the update's own reason";
         let mut view = ready();
         view.firmware_blocked = Some(lpa_devices::view::FIRMWARE_NEEDS_USB.to_string());
-        view.update_blocked = Some(lpa_devices::view::UPDATE_NOT_OVER_WIFI_YET.to_string());
+        view.update_blocked = Some(own.to_string());
         let offers = device_offers(&view, &facts(DeviceFace::Wire));
         let reason = |verb: &str| match find(&offers, verb).action.meta().enablement.clone() {
             crate::ActionEnablement::Disabled { reason } => reason,
             other => panic!("{verb}: {other:?}"),
         };
-        assert_eq!(
-            reason("update-firmware"),
-            lpa_devices::view::UPDATE_NOT_OVER_WIFI_YET
-        );
+        assert_eq!(reason("update-firmware"), own);
         assert_eq!(reason("erase"), lpa_devices::view::FIRMWARE_NEEDS_USB);
 
         let author = DeviceOfferFacts {

@@ -237,6 +237,52 @@ board (the LAN link serves channel 3, core-only answers its own key lookup).
   explained; the likeliest reading is a reset's socket that stays silent
   until the board answers again, and the activity's 1 s reopen knock).
 
+## Amendment (2026-10-08): through lightplayer.app's relay
+
+Plan `lp2025/2026-10-06-2249-ota-wifi-updates`, PR C (P9, P10), on the
+board half in `docs/adr/2026-10-06-ota-update-protocol.md`'s amendment of
+the same date. Studio's relay half stays behind `?relay=` (#1031's flag).
+
+- **A relayed link carries channel 3.** `relay_link_info` says
+  `carries_update_channel`, and the relay's session drains it through the
+  same `LinkPortService` as the LAN. With every link Studio reaches a board
+  by now carrying the channel, `UPDATE_NOT_OVER_WIFI_YET` is retired: a
+  board reached through the relay is offered the over-the-air update, never
+  the USB flash verb's "Firmware updates need USB", which stays the reason
+  for flash, factory reset and a board that can only be flashed.
+- **A fourth link, `UpdateLink::Relay`.** Said "Wi‑Fi" in the update's words
+  (the card's link line already says "via lightplayer.app"); served
+  `ServeConfig::RELAY` (4 ahead, the backup in 1 KiB pieces, as Bluetooth:
+  the board's relay leg takes 2 KiB at a time, and a whole 4 KiB read-back
+  chunk would hold the board's frame buffer for round trips). Not measured
+  through a real relay yet.
+- **A relayed session rides through a reboot.** The relay ends a board's
+  sessions when its leg drops (4410, redialled), and until the board is
+  back it answers "board offline" (4404), which otherwise ends a relay
+  session (#1031: each redial spends the page's tries at the relay). Each
+  update message sent through the relay holds its session for 2 min
+  (`RELAY_UPDATE_HOLD_MS`, longer than the activity's 90 s gap); while held,
+  4404 redials after 3 s and the relay's "slow down" (4420) after 30 s, the
+  time one try takes to come back. The activity waits for the relayed link
+  like a LAN or Bluetooth one (`reconnects_itself` for `relay:`).
+- **A board whose firmware predates updates through the relay** announces
+  channel 3 and then ignores it there: W6's 5 s silence ends the update
+  `NotOverWifi`, and through the relay the card says **"Update nearby
+  once"** — "This board updates via lightplayer.app after one update
+  nearby." — since its own Wi‑Fi may already do. `FIRST_RELAY_UPDATE_RELEASE`
+  is `None` until PR C is in a release.
+- **Measured.** Emulated (`lp-emu:esp32c6:t1+net=lan`, `just walk-ota-emu
+  --relay`: a local lp-cloud-server, the board's leg through the virtual
+  LAN's uplink, headless Chrome): X → Y with a backup, 3 resets (backup 21 s,
+  core 30 s, engine 26 s, wall); the relay dropping the board's leg mid-core
+  (one "board offline" ridden through, back in 4.0 s, the core resumed at
+  its record); a power cut mid-engine (resumed). Silicon through a **local**
+  relay (FC6 fixture-c6 on the desk's test access point, an lp-cloud-server
+  on the Mac, headless Chrome, no USB host): X → Y with a backup and a power
+  cut mid-core, 104.2 s from the press (backup 45 KB/s, core 60 KB/s,
+  engine 81 KB/s). No number here is the internet's; lightplayer.app's
+  relay is G2's (`docs/reports/2026-10-08-ota-relay-walk.md`).
+
 ## References
 
 - `docs/adr/2026-10-06-ota-update-protocol.md` (ADR 2: the protocol and

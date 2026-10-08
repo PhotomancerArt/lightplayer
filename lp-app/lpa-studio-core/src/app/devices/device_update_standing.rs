@@ -177,7 +177,11 @@ pub enum UpdateStanding {
     /// it announced the update channel, then said nothing on it when asked
     /// (the last update ended [`UpdateOutcomeFacts::NotOverWifi`]). It
     /// updates over USB or Bluetooth until it has been updated once.
-    NotOverWifiYet { board: UpdateVersion },
+    NotOverWifiYet {
+        board: UpdateVersion,
+        /// Wi‑Fi on its network, or through the relay.
+        link: UpdateLink,
+    },
 }
 
 impl UpdateStanding {
@@ -199,7 +203,7 @@ impl UpdateStanding {
             | Self::Newer { board, .. }
             | Self::PlayOnly { board, .. }
             | Self::NoWirelessBuild { board, .. }
-            | Self::NotOverWifiYet { board } => Some(board),
+            | Self::NotOverWifiYet { board, .. } => Some(board),
         }
     }
 
@@ -312,11 +316,14 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
 
     // Over Wi‑Fi, a board that announced the update channel and then said
     // nothing on it: nothing more is offered there that would only hang.
-    if inputs.link == UpdateLink::Wifi
+    if inputs.link.is_wifi()
         && inputs.view.last_update_outcome == Some(UpdateOutcomeFacts::NotOverWifi)
         && let Some(board) = board_version.clone()
     {
-        return UpdateStanding::NotOverWifiYet { board };
+        return UpdateStanding::NotOverWifiYet {
+            board,
+            link: inputs.link,
+        };
     }
 
     let (Some(decision), Some(board), Some(own), Some(board_view)) =

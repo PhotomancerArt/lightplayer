@@ -25,9 +25,10 @@
 //! secure responder whose key lookup the session answers itself, from the
 //! device store's secrets (the engine's rule, one backoff with `L`): its
 //! key decides its tier (`Keyed`), and it never logs in with `L`. A relayed
-//! link (a cloud relay route) is turned away, as updates through the relay
-//! are not served yet. The device's `open` setting counts as the access
-//! rule says (QY2). The links were opened in update mode
+//! link (a cloud relay route) is served the same way with the relay's
+//! second lock: the anonymous key is refused, and the key that verifies
+//! holds the link to its tier (`Relayed`) — the device's `open` never
+//! applies there. Elsewhere `open` counts as the access rule says (QY2). The links were opened in update mode
 //! (`RadioLinkMode::Update`, decided by `split_boot` before the radio side
 //! or the LAN endpoint may open any): they advertise the wide receive
 //! window, so a host can keep a window of chunks in flight. There is no

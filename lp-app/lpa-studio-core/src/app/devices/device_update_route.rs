@@ -20,7 +20,7 @@
 //! |---|---|---|---|
 //! | yes | yes | carries channel 3 | [`UpdateRoute::OverTheAir`] |
 //! | yes | no | USB | [`UpdateRoute::Flash`] (today's flash, Lasting) |
-//! | yes | no | Bluetooth or Wi‑Fi, carries channel 3 | [`UpdateRoute::NoWirelessBuild`]: no install offer, a plain line why |
+//! | yes | no | Bluetooth, Wi‑Fi or the relay, carries channel 3 | [`UpdateRoute::NoWirelessBuild`]: no install offer, a plain line why |
 //! | no, or the link carries no channel 3 | — | any | [`UpdateRoute::Flash`] |
 //!
 //! A restore or a finish needs none of this: it puts back the board's own
@@ -47,41 +47,59 @@ pub const FIRST_BLUETOOTH_UPDATE_RELEASE: Option<&str> = Some("2026.10.07-16");
 /// did before its release was named.
 pub const FIRST_WIFI_UPDATE_RELEASE: Option<&str> = None;
 
+/// The first release that serves the update channel through lightplayer.app's
+/// relay: none yet (OTA M8's relay half, PR C, is not in a release). While
+/// it is `None`, every choice older than the board's warns through the
+/// relay.
+pub const FIRST_RELAY_UPDATE_RELEASE: Option<&str> = None;
+
 /// The link an update would ride, as the card's words name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdateLink {
     Usb,
     Bluetooth,
-    /// The board's secure link on the LAN (`lan:`). A link through the
-    /// relay is Wi‑Fi too, but carries no update channel yet.
+    /// The board's secure link on the LAN (`lan:`).
     Wifi,
+    /// The board's secure link through lightplayer.app's relay (`relay:`):
+    /// Wi‑Fi in the card's words, but its own reach — a board whose
+    /// firmware predates updates through the relay is updated nearby once
+    /// (USB, Bluetooth or its own network).
+    Relay,
 }
 
 impl UpdateLink {
     /// The link a board reached at `endpoint` updates over: Bluetooth for
-    /// `ble:`, Wi‑Fi for `lan:` and `relay:`, USB for anything else (a
-    /// serial port, the emulator's door, a sim — or no link at all).
+    /// `ble:`, Wi‑Fi for `lan:`, the relay for `relay:`, USB for anything
+    /// else (a serial port, the emulator's door, a sim — or no link at all).
     pub fn of_endpoint(endpoint: Option<&EndpointKey>) -> Self {
         match endpoint {
             Some(endpoint) if endpoint.is_bluetooth() => Self::Bluetooth,
-            Some(endpoint) if endpoint.is_lan() || endpoint.is_relay() => Self::Wifi,
+            Some(endpoint) if endpoint.is_lan() => Self::Wifi,
+            Some(endpoint) if endpoint.is_relay() => Self::Relay,
             _ => Self::Usb,
         }
     }
 
-    /// The link's name in a sentence ("Updating over Bluetooth…").
+    /// The link's name in a sentence ("Updating over Bluetooth…"). The
+    /// relay is Wi‑Fi too; the card's link line already says "via
+    /// lightplayer.app".
     pub fn word(self) -> &'static str {
         match self {
             Self::Usb => "USB",
             Self::Bluetooth => "Bluetooth",
-            Self::Wifi => "Wi\u{2011}Fi",
+            Self::Wifi | Self::Relay => "Wi\u{2011}Fi",
         }
     }
 
     /// A link with no cable: what the user holds on it is a grant (a key's
     /// tier), not physical access.
     pub fn is_wireless(self) -> bool {
-        matches!(self, Self::Bluetooth | Self::Wifi)
+        matches!(self, Self::Bluetooth | Self::Wifi | Self::Relay)
+    }
+
+    /// A Wi‑Fi link, on the board's network or through the relay.
+    pub fn is_wifi(self) -> bool {
+        matches!(self, Self::Wifi | Self::Relay)
     }
 
     /// The user's tier an update decision reads over this link: the access
@@ -138,7 +156,7 @@ fn route_with(
 ) -> UpdateRoute {
     let link_allows = match link {
         UpdateLink::Usb => usb_over_the_air,
-        UpdateLink::Bluetooth | UpdateLink::Wifi => true,
+        UpdateLink::Bluetooth | UpdateLink::Wifi | UpdateLink::Relay => true,
     };
     if !(board_can && carries_update_channel && link_allows) {
         return UpdateRoute::Flash;
@@ -146,7 +164,9 @@ fn route_with(
     match (build_can, link) {
         (true, _) => UpdateRoute::OverTheAir,
         (false, UpdateLink::Usb) => UpdateRoute::Flash,
-        (false, UpdateLink::Bluetooth | UpdateLink::Wifi) => UpdateRoute::NoWirelessBuild,
+        (false, UpdateLink::Bluetooth | UpdateLink::Wifi | UpdateLink::Relay) => {
+            UpdateRoute::NoWirelessBuild
+        }
     }
 }
 
@@ -186,7 +206,7 @@ mod tests {
     /// says why.
     #[test]
     fn over_bluetooth_a_build_that_cannot_offers_no_install() {
-        for link in [UpdateLink::Bluetooth, UpdateLink::Wifi] {
+        for link in [UpdateLink::Bluetooth, UpdateLink::Wifi, UpdateLink::Relay] {
             assert_eq!(
                 update_route(true, false, link, true),
                 UpdateRoute::NoWirelessBuild
@@ -194,26 +214,30 @@ mod tests {
         }
     }
 
-    /// Over Wi‑Fi (OTA M8), a board and a build that can: over the air.
+    /// Over Wi‑Fi (OTA M8), on the board's network or through the relay, a
+    /// board and a build that can: over the air.
     #[test]
     fn over_wifi_a_board_and_a_build_that_can_go_over_the_air() {
-        assert_eq!(
-            update_route(true, true, UpdateLink::Wifi, true),
-            UpdateRoute::OverTheAir
-        );
+        for link in [UpdateLink::Wifi, UpdateLink::Relay] {
+            assert_eq!(
+                update_route(true, true, link, true),
+                UpdateRoute::OverTheAir
+            );
+        }
     }
 
-    /// Each endpoint names its update link; the relay is Wi‑Fi (its link
-    /// carries no update channel yet, which the route reads separately).
+    /// Each endpoint names its update link; the relay is its own, said
+    /// Wi‑Fi.
     #[test]
     fn each_endpoint_names_its_update_link() {
         let link = |key: &str| UpdateLink::of_endpoint(Some(&EndpointKey(key.to_string())));
         assert_eq!(link("ble:QkxFLWlk"), UpdateLink::Bluetooth);
         assert_eq!(link("lan:ws://192.168.1.40/link"), UpdateLink::Wifi);
-        assert_eq!(link("relay:a0f26287b48c"), UpdateLink::Wifi);
+        assert_eq!(link("relay:a0f26287b48c"), UpdateLink::Relay);
         assert_eq!(link("serial:/dev/cu.usbmodem1"), UpdateLink::Usb);
         assert_eq!(UpdateLink::of_endpoint(None), UpdateLink::Usb);
         assert!(UpdateLink::Wifi.is_wireless() && UpdateLink::Bluetooth.is_wireless());
+        assert!(UpdateLink::Relay.is_wireless() && UpdateLink::Relay.is_wifi());
         assert!(!UpdateLink::Usb.is_wireless());
     }
 
@@ -221,7 +245,12 @@ mod tests {
     /// whatever the build.
     #[test]
     fn a_link_without_the_update_channel_keeps_the_flash() {
-        for link in [UpdateLink::Usb, UpdateLink::Bluetooth, UpdateLink::Wifi] {
+        for link in [
+            UpdateLink::Usb,
+            UpdateLink::Bluetooth,
+            UpdateLink::Wifi,
+            UpdateLink::Relay,
+        ] {
             for build_can in [true, false] {
                 assert_eq!(
                     update_route(true, build_can, link, false),
@@ -235,7 +264,12 @@ mod tests {
     /// build.
     #[test]
     fn a_board_that_cannot_update_over_its_link_keeps_the_flash() {
-        for link in [UpdateLink::Usb, UpdateLink::Bluetooth, UpdateLink::Wifi] {
+        for link in [
+            UpdateLink::Usb,
+            UpdateLink::Bluetooth,
+            UpdateLink::Wifi,
+            UpdateLink::Relay,
+        ] {
             for build_can in [true, false] {
                 assert_eq!(
                     update_route(false, build_can, link, true),
@@ -262,7 +296,7 @@ mod tests {
     /// tier (a play-only user is not offered an update); a cable is trusted.
     #[test]
     fn a_wireless_link_reads_the_granted_tier_and_a_cable_does_not() {
-        for link in [UpdateLink::Bluetooth, UpdateLink::Wifi] {
+        for link in [UpdateLink::Bluetooth, UpdateLink::Wifi, UpdateLink::Relay] {
             assert_eq!(link.update_tier(Some(Tier::Play)), Some(Tier::Play));
             assert_eq!(link.update_tier(None), None);
         }
@@ -274,5 +308,6 @@ mod tests {
         assert_eq!(UpdateLink::Usb.word(), "USB");
         assert_eq!(UpdateLink::Bluetooth.word(), "Bluetooth");
         assert_eq!(UpdateLink::Wifi.word(), "Wi\u{2011}Fi");
+        assert_eq!(UpdateLink::Relay.word(), "Wi\u{2011}Fi");
     }
 }
