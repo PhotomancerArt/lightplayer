@@ -1,157 +1,257 @@
-//! `TreeStore`: the path API over the record log — format, mount, get, put,
-//! delete_prefix, list, commit.
+//! `TreeStore`: the path API over the record log.
 //!
-//! Writes are buffered in RAM (`WorkEntry::Staged`) and nothing touches flash
-//! until `commit`, which lays out every new record, marks, makes room (GC)
-//! or refuses with `NoSpace`, appends the records, and writes the root last.
+//! **Per-call commits.** Every `put`, `append`, `put_chunk_deflated`,
+//! `delete` and `delete_prefix` outside a transaction writes its records,
+//! path-copies its directories and writes a root before it returns.
+//!
+//! **Transactions.** Inside `begin` … `commit`, content records go to flash
+//! as they arrive (*pending*: reachable from the working tree, so GC keeps
+//! them), directory changes are held as a small delta in RAM (written as
+//! pending directories when it outgrows `txn_delta_max`), and only `commit`
+//! writes the root. A cut before that root leaves the pre-transaction state;
+//! `abort` drops the delta and puts the path table back.
+//!
+//! A per-call write is the same machinery as a one-call transaction.
 
-use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::blob_codec::{chunk_dict_ref, decode_chunk};
-use crate::dir_node::{DirEntry, EntryKind, decode_dir, encode_dir};
-use crate::file_tree::{FileEntry, WorkEntry, build_dirs, is_hot, tree_ram_bytes, valid_path};
 use crate::flash::Flash;
-use crate::gc_copy::collect_sector;
-use crate::gc_mark::{mark, recount_live_bytes};
-use crate::gc_victim::choose_victim;
-use crate::multi_node::MultiNode;
-use crate::node_layout::{LaidRecord, LayoutCtx, NodeTag, layout_node};
-use crate::object_id::ObjectId;
-use crate::record_header::encode_record;
+use crate::node_read::read_node_into;
+use crate::object_hasher::ObjectHasher;
+use crate::object_id::{IdTag, ObjectId, path_hash};
+use crate::path_table::{PathSlot, PathTable};
 use crate::record_kind::{ChunkCodec, RecordKind};
 use crate::record_log::RecordLog;
-use crate::record_plan::RecordPlan;
-use crate::record_scan::{scan_sector, tail_is_erased};
 use crate::root_record::RootRecord;
-use crate::root_select::select_root;
-use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader};
-use crate::sector_table::SectorUse;
-use crate::small_sort::sort_small_by;
-use crate::space_estimate::{fits_after_compaction, sectors_needed};
-use crate::store_config::{Codec, StoreConfig};
+use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN};
+use crate::store_config::StoreConfig;
 use crate::store_error::StoreError;
 use crate::store_stats::TreeStoreStats;
+use crate::tree_delta::{FileEntry, TreeDelta};
+use crate::txn_undo::TxnUndo;
 
-type Res<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
+pub(crate) type Res<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
 
-/// Deepest directory nesting mount will follow.
-const MAX_DIR_DEPTH: u32 = 64;
+/// Deepest path (components) the store accepts and mount follows.
+pub const MAX_DEPTH: usize = 32;
 
-/// The T1 store.
-pub struct TreeStore<F: Flash> {
-    log: RecordLog<F>,
-    cfg: StoreConfig,
-    root: Option<(ObjectId, RootRecord)>,
-    max_root_seq: u64,
-    working: BTreeMap<String, WorkEntry>,
-    dirty: bool,
-    dict_cache: Option<(ObjectId, Vec<u8>)>,
-    stats: TreeStoreStats,
+/// The committed root.
+#[derive(Clone, Debug)]
+pub(crate) struct Committed {
+    pub id: ObjectId,
+    pub root: RootRecord,
 }
 
-impl<F: Flash> TreeStore<F> {
-    /// Kill and erase every sector, then commit an empty tree. Works on any
-    /// flash content.
-    pub fn format(flash: &mut F, cfg: &StoreConfig) -> Res<(), F> {
+/// The tree as written so far (committed, plus a transaction's flushed
+/// directories).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WorkDirs {
+    pub cold: ObjectId,
+    pub hot: ObjectId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Txn {
+    None,
+    /// One call, committed (or rolled back) before it returns.
+    Implicit,
+    /// `begin` … `commit`/`abort`.
+    Explicit,
+}
+
+/// The tree store.
+pub struct TreeStore<F: Flash, H: ObjectHasher> {
+    pub(crate) log: RecordLog<F>,
+    pub(crate) hasher: H,
+    pub(crate) cfg: StoreConfig,
+    pub(crate) committed: Option<Committed>,
+    pub(crate) max_root_seq: u64,
+    pub(crate) work: WorkDirs,
+    pub(crate) delta: TreeDelta,
+    pub(crate) table: PathTable,
+    pub(crate) undo: TxnUndo,
+    pub(crate) txn: Txn,
+    pub(crate) stats: TreeStoreStats,
+}
+
+impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
+    /// Kill and erase every sector (retiring any that will not erase), then
+    /// commit an empty tree. Works on any flash content.
+    pub fn format(flash: &mut F, hasher: &mut H, cfg: &StoreConfig) -> Res<(), F> {
         check_config(flash.sector_count(), flash.sector_size(), cfg)?;
-        let mut store = TreeStore::<&mut F>::empty(RecordLog::new(flash), cfg.clone());
-        for s in 0..store.log.sector_count {
-            store.log.kill_and_erase(s)?;
+        let mut st = TreeStore::<&mut F, &mut H>::empty(flash, hasher, cfg.clone());
+        for s in 0..st.log.sector_count {
+            st.log.kill_and_erase(s)?;
         }
-        store.dirty = true;
-        store.commit()
+        let empty = st.write_dir_bytes(HeadKind::Cold, &[0, 0])?;
+        st.work = WorkDirs {
+            cold: empty,
+            hot: empty,
+        };
+        st.write_root()
     }
 
     /// Scan the flash and adopt the newest complete root (I1). Never panics
-    /// on any content; a flash with no complete root is an error.
-    pub fn mount(flash: F, cfg: StoreConfig) -> Result<Self, (StoreError<F::Error>, F)> {
+    /// on any content; a flash with no complete root is an error, which
+    /// hands the flash and the hasher back.
+    pub fn mount(
+        flash: F,
+        hasher: H,
+        cfg: StoreConfig,
+    ) -> Result<Self, (StoreError<F::Error>, F, H)> {
         if let Err(e) = check_config(flash.sector_count(), flash.sector_size(), &cfg) {
-            return Err((e, flash));
+            return Err((e, flash, hasher));
         }
-        let mut store = Self::empty(RecordLog::new(flash), cfg);
-        match store.load() {
-            Ok(()) => Ok(store),
-            Err(e) => Err((e, store.into_flash())),
+        let mut st = Self::empty(flash, hasher, cfg);
+        match st.load() {
+            Ok(()) => Ok(st),
+            Err(e) => Err((e, st.log.flash, st.hasher)),
         }
     }
 
-    /// The file at `path`: staged bytes if put since the last commit.
+    // ---- reads ------------------------------------------------------------
+
+    /// The file at `path` (read-your-writes inside a transaction).
     pub fn get(&mut self, path: &str) -> Res<Option<Vec<u8>>, F> {
-        let fe = match self.working.get(path) {
-            None => return Ok(None),
-            Some(WorkEntry::Staged(b)) => return Ok(Some(b.clone())),
-            Some(WorkEntry::Committed(fe)) => *fe,
+        let Some(fe) = self.lookup(path)? else {
+            return Ok(None);
         };
-        let bytes = self.read_node(fe.id)?;
-        if bytes.len() != fe.size as usize {
+        let mut out = Vec::with_capacity(fe.size as usize);
+        read_node_into(&mut self.log, fe.id, &mut out)?;
+        if out.len() != fe.size as usize {
             return Err(StoreError::Corrupt("file size"));
         }
-        Ok(Some(bytes))
+        Ok(Some(out))
     }
 
-    /// Stage `bytes` at `path` (RAM only until `commit`).
+    /// The file's size, from the path table (no flash read unless its hash
+    /// collided).
+    pub fn file_size(&mut self, path: &str) -> Res<Option<u32>, F> {
+        Ok(self.lookup(path)?.map(|fe| fe.size))
+    }
+
+    pub fn exists(&mut self, path: &str) -> Res<bool, F> {
+        Ok(self.lookup(path)?.is_some())
+    }
+
+    /// Every file path starting with `prefix` (a plain string prefix),
+    /// sorted. Walks the directories on flash.
+    pub fn list(&mut self, prefix: &str) -> Res<Vec<String>, F> {
+        self.list_files(prefix)
+    }
+
+    // ---- writes -----------------------------------------------------------
+
+    /// Write `bytes` at `path`, replacing any file there.
     pub fn put(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
-        if !valid_path(path) {
-            return Err(StoreError::InvalidPath);
-        }
-        if path.len() > usize::from(u16::MAX) || bytes.len() > u32::MAX as usize {
+        check_path(path)?;
+        if bytes.len() > u32::MAX as usize {
             return Err(StoreError::TooLarge);
         }
-        self.working
-            .insert(String::from(path), WorkEntry::Staged(bytes.to_vec()));
-        self.dirty = true;
-        let staged = self.staged_bytes();
-        self.note_buffer(staged);
-        Ok(())
+        self.op(|st| {
+            let existed = st.existing(path)?;
+            st.put_inner(path, existed, bytes)
+        })
     }
 
-    /// Remove every path starting with `prefix` (a plain string prefix).
+    /// Append `bytes` to the file at `path` (creating it): writes the new
+    /// chunk records and the file's new multi spine — not the file again.
+    pub fn append(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
+        check_path(path)?;
+        self.op(|st| st.append_inner(path, bytes))
+    }
+
+    /// Write one host-deflated chunk at `offset` of `path`: `0` replaces
+    /// the file with this chunk, the file's size appends it; anything else
+    /// is `BadOffset`. The chunk is inflated (into a buffer of
+    /// `logical_len` ≤ 4096 bytes) and hashed; if it does not inflate to
+    /// exactly `logical_len`, or its id is not `expected` (when given), it
+    /// is refused with `Corrupt` and nothing is written. The deflated bytes
+    /// are stored as they came (or, when they do not fit a record or do not
+    /// shrink, the logical bytes stored).
+    pub fn put_chunk_deflated(
+        &mut self,
+        path: &str,
+        offset: u32,
+        logical_len: u32,
+        expected: Option<ObjectId>,
+        deflated: &[u8],
+    ) -> Res<(), F> {
+        check_path(path)?;
+        self.op(|st| st.deflated_inner(path, offset, logical_len, expected, deflated))
+    }
+
+    /// Delete the file at `path`; `false` if there was none.
+    pub fn delete(&mut self, path: &str) -> Res<bool, F> {
+        check_path(path)?;
+        self.op(|st| {
+            let Some(fe) = st.existing(path)? else {
+                return Ok(false);
+            };
+            st.record_delete(path, fe);
+            Ok(true)
+        })
+    }
+
+    /// Remove every path starting with `prefix` (a plain string prefix). A
+    /// prefix `"<dir>/"` removes the directory as one change.
     pub fn delete_prefix(&mut self, prefix: &str) -> Res<(), F> {
-        let doomed = self.matching(prefix);
-        self.dirty |= !doomed.is_empty();
-        for p in doomed {
-            self.working.remove(&p);
+        self.op(|st| st.delete_prefix_inner(prefix))
+    }
+
+    /// Delete the file at `path` and the directory at `path`, as one
+    /// change (`LpFs::delete_dir`).
+    pub fn delete_file_and_tree(&mut self, path: &str) -> Res<(), F> {
+        check_path(path)?;
+        self.op(|st| {
+            if let Some(fe) = st.existing(path)? {
+                st.record_delete(path, fe);
+            }
+            let mut prefix = String::from(path);
+            prefix.push('/');
+            st.delete_prefix_inner(&prefix)
+        })
+    }
+
+    // ---- transactions -----------------------------------------------------
+
+    /// Start a transaction: until `commit`, nothing is committed.
+    pub fn begin(&mut self) -> Res<(), F> {
+        if self.txn != Txn::None {
+            return Err(StoreError::InTransaction);
         }
+        self.txn = Txn::Explicit;
         Ok(())
     }
 
-    /// Every file path starting with `prefix`, sorted.
-    pub fn list(&mut self, prefix: &str) -> Res<Vec<String>, F> {
-        Ok(self.matching(prefix))
-    }
-
-    /// Make everything since the last commit durable at once: new records,
-    /// changed directories, then a root with seq + 1. On `NoSpace` nothing of
-    /// the commit was written and the staged changes remain.
+    /// Commit the transaction: write its directories and one root. Outside a
+    /// transaction this does nothing (every call already committed). On
+    /// `NoSpace` the transaction stays open (abort it).
     pub fn commit(&mut self) -> Res<(), F> {
-        if !self.dirty {
+        if self.txn != Txn::Explicit {
             return Ok(());
         }
-        let working = core::mem::take(&mut self.working);
-        match self.commit_with(&working) {
-            Ok(committed) => {
-                self.working = committed;
-                self.dirty = false;
-                Ok(())
-            }
-            Err(e) => {
-                self.working = working;
-                Err(e)
-            }
-        }
-    }
-
-    /// Drop staged changes: back to the committed tree.
-    pub fn discard_uncommitted(&mut self) -> Res<(), F> {
-        let Some((_, root)) = self.root else {
-            return Err(StoreError::Corrupt("no root"));
-        };
-        self.working = self.load_tree(&root)?;
-        self.dirty = false;
+        self.commit_inner()?;
+        self.txn = Txn::None;
         Ok(())
     }
+
+    /// Drop the transaction: back to the committed tree. Its records on
+    /// flash are garbage.
+    pub fn abort(&mut self) -> Res<(), F> {
+        if self.txn == Txn::Explicit {
+            self.abort_inner();
+            self.txn = Txn::None;
+        }
+        Ok(())
+    }
+
+    pub fn in_transaction(&self) -> bool {
+        self.txn == Txn::Explicit
+    }
+
+    // ---- the rest ---------------------------------------------------------
 
     pub fn flash(&self) -> &F {
         &self.log.flash
@@ -167,11 +267,15 @@ impl<F: Flash> TreeStore<F> {
         self.log.into_flash()
     }
 
+    pub fn into_parts(self) -> (F, H) {
+        (self.log.flash, self.hasher)
+    }
+
     pub fn config(&self) -> &StoreConfig {
         &self.cfg
     }
 
-    /// Sectors free right now (no live record, not a head).
+    /// Sectors free right now (by the live upper bound).
     pub fn free_sectors(&self) -> u32 {
         self.log.free_count()
     }
@@ -180,524 +284,238 @@ impl<F: Flash> TreeStore<F> {
         let mut s = self.stats.clone();
         s.index_entries = self.log.index.len();
         s.index_ram_bytes = self.log.index.ram_bytes();
-        s.tree_ram_bytes = tree_ram_bytes(&self.working);
+        s.path_table_entries = self.table.len();
+        s.path_table_ram_bytes = self.table.ram_bytes();
         s.sector_table_ram_bytes = self.log.sectors.ram_bytes();
+        s.resident_ram_bytes = s.index_ram_bytes + s.path_table_ram_bytes + s.sector_table_ram_bytes;
+        s.transient_peak_bytes = s.transient_peak_bytes.max(self.log.largest_buffer);
         s.records_written = self.log.counters.records_written;
         s.record_bytes_written = self.log.counters.record_bytes_written;
         s.sectors_opened = self.log.counters.sectors_opened;
         s.erases = self.log.counters.erases;
+        s.verify_failures = self.log.counters.verify_failures;
+        s.retired_sectors = self.log.sectors.retired.len();
         s
     }
 
-    // ---- mount ------------------------------------------------------------
+    /// Forget the transient peak (a harness measuring one operation).
+    pub fn reset_transient_peak(&mut self) {
+        self.log.largest_buffer = 0;
+        self.stats.transient_peak_bytes = 0;
+    }
 
-    fn empty(log: RecordLog<F>, cfg: StoreConfig) -> Self {
+    // ---- internals --------------------------------------------------------
+
+    pub(crate) fn empty(flash: F, hasher: H, cfg: StoreConfig) -> Self {
         Self {
-            log,
+            log: RecordLog::new(flash),
+            hasher,
             cfg,
-            root: None,
+            committed: None,
             max_root_seq: 0,
-            working: BTreeMap::new(),
-            dirty: false,
-            dict_cache: None,
+            work: WorkDirs {
+                cold: ObjectId::NONE,
+                hot: ObjectId::NONE,
+            },
+            delta: TreeDelta::default(),
+            table: PathTable::default(),
+            undo: TxnUndo::default(),
+            txn: Txn::None,
             stats: TreeStoreStats::default(),
         }
     }
 
-    fn load(&mut self) -> Res<(), F> {
-        let n = self.log.sector_count;
-        let mut valid: Vec<(u32, u32, SectorHeader)> = Vec::new();
-        for s in 0..n {
-            let mut h = [0u8; SECTOR_HEADER_LEN as usize];
-            let addr = self.log.addr(s, 0);
-            self.log.read(addr, &mut h)?;
-            if let Some(hd) = SectorHeader::decode(&h) {
-                valid.push((hd.seq, s, hd));
-                self.log.sectors.erase_counts[s as usize] = hd.erase_count;
+    pub(crate) fn max_payload(&self) -> usize {
+        (self.cfg.record_max - crate::record_header::RECORD_HEADER_LEN) as usize
+    }
+
+    /// Run one call: inside an explicit transaction as is (a failed call
+    /// leaves the transaction as it was — calls change RAM state only after
+    /// their records are written); outside, as a one-call transaction.
+    pub(crate) fn op<T>(&mut self, f: impl FnOnce(&mut Self) -> Res<T, F>) -> Res<T, F> {
+        if self.txn == Txn::Explicit {
+            if self.delta.ram_bytes() >= self.cfg.txn_delta_max as usize {
+                self.flush()?;
             }
+            return f(self);
         }
-        sort_small_by(&mut valid, |a, b| (a.0, a.1) < (b.0, b.1));
-        let mut roots = Vec::new();
-        let mut closed = alloc::vec![false; n as usize];
-        for &(_, s, header) in &valid {
-            let scan = scan_sector(&mut self.log, s)?;
-            self.log.sectors.uses[s as usize] = SectorUse::Written {
-                header,
-                end: scan.end,
+        self.txn = Txn::Implicit;
+        let r = f(self).and_then(|v| self.commit_inner().map(|()| v));
+        if r.is_err() {
+            self.abort_inner();
+        }
+        self.txn = Txn::None;
+        r
+    }
+
+    /// Write the delta's directories, then a root if anything changed.
+    pub(crate) fn commit_inner(&mut self) -> Res<(), F> {
+        self.flush()?;
+        let unchanged = self.committed.as_ref().is_some_and(|c| {
+            c.root.cold_dir == self.work.cold
+                && c.root.hot_dir == self.work.hot
+                && c.root.retired == self.log.sectors.retired
+        });
+        if !unchanged {
+            self.write_root()?;
+        }
+        self.undo.clear();
+        Ok(())
+    }
+
+    pub(crate) fn abort_inner(&mut self) {
+        self.undo.restore(&mut self.table);
+        self.delta.clear();
+        if let Some(c) = &self.committed {
+            self.work = WorkDirs {
+                cold: c.root.cold_dir,
+                hot: c.root.hot_dir,
             };
-            closed[s as usize] = scan.closed;
-            // Ascending seq: a later sector's copy wins.
-            for (id, loc) in scan.records {
-                self.log.index.insert(id, loc);
-            }
-            roots.extend(scan.roots);
         }
-        self.max_root_seq = roots.iter().map(|r| r.0).max().unwrap_or(0);
-        self.log.next_sector_seq = valid.last().map_or(1, |v| v.0.saturating_add(1));
-        let Some(sel) = select_root(&mut self.log, roots)? else {
-            return Err(StoreError::Corrupt("no complete root"));
-        };
-        recount_live_bytes(&mut self.log, &sel.live);
-        self.note_buffer(sel.live.len() * core::mem::size_of::<ObjectId>());
-        self.working = self.load_tree(&sel.root)?;
-        self.root = Some((sel.id, sel.root));
-        for kind in HeadKind::ALL {
-            let cand = valid
-                .iter()
-                .rev()
-                .find(|v| v.2.kind == kind)
-                .map(|v| v.1)
-                .filter(|&s| !closed[s as usize]);
-            if let Some(s) = cand
-                && let SectorUse::Written { end, .. } = self.log.sectors.uses[s as usize]
-                && tail_is_erased(&mut self.log, s, end)?
-            {
-                self.log.heads[kind.index()] = Some(s);
-            }
-        }
-        self.stats.mount_bytes_read = self.log.counters.bytes_read;
-        Ok(())
     }
 
-    fn load_tree(&mut self, root: &RootRecord) -> Res<BTreeMap<String, WorkEntry>, F> {
-        let mut files = BTreeMap::new();
-        self.load_dir(root.cold_dir, String::new(), 0, &mut files)?;
-        let hot = self.read_node(root.hot_dir)?;
-        for e in decode_dir(&hot).ok_or(StoreError::Corrupt("hot dir"))? {
-            if e.kind != EntryKind::File || !valid_path(&e.name) {
-                return Err(StoreError::Corrupt("hot dir entry"));
-            }
-            let fe = FileEntry {
-                id: e.id,
-                size: e.size,
-            };
-            files.insert(e.name, WorkEntry::Committed(fe));
-        }
-        Ok(files)
-    }
-
-    fn load_dir(
-        &mut self,
-        id: ObjectId,
-        prefix: String,
-        depth: u32,
-        files: &mut BTreeMap<String, WorkEntry>,
-    ) -> Res<(), F> {
-        if depth > MAX_DIR_DEPTH {
-            return Err(StoreError::Corrupt("dir depth"));
-        }
-        let bytes = self.read_node(id)?;
-        for e in decode_dir(&bytes).ok_or(StoreError::Corrupt("dir"))? {
-            if e.name.is_empty() || e.name.contains('/') {
-                return Err(StoreError::Corrupt("dir entry name"));
-            }
-            let mut path = prefix.clone();
-            path.push('/');
-            path.push_str(&e.name);
-            match e.kind {
-                EntryKind::File => {
-                    let fe = FileEntry {
-                        id: e.id,
-                        size: e.size,
-                    };
-                    files.insert(path, WorkEntry::Committed(fe));
-                }
-                EntryKind::Dir => self.load_dir(e.id, path, depth + 1, files)?,
-            }
-        }
-        Ok(())
-    }
-
-    // ---- reading nodes ----------------------------------------------------
-
-    fn read_node(&mut self, id: ObjectId) -> Res<Vec<u8>, F> {
-        let (loc, payload) = self.log.read_payload(id)?;
-        let out = match loc.kind {
-            RecordKind::Blob => self.decode_blob(loc.codec, &payload)?,
-            RecordKind::Dir | RecordKind::Dict => payload,
-            RecordKind::Multi => {
-                let m = MultiNode::decode(&payload).ok_or(StoreError::Corrupt("multi"))?;
-                let mut out = Vec::with_capacity((m.total_len as usize).min(1 << 20));
-                self.read_multi(&m, &mut out)?;
-                if out.len() != m.total_len as usize {
-                    return Err(StoreError::Corrupt("multi length"));
-                }
-                out
-            }
-            RecordKind::Root => return Err(StoreError::Corrupt("root is not a node")),
-        };
-        self.note_buffer(out.len());
-        Ok(out)
-    }
-
-    fn read_multi(&mut self, m: &MultiNode, out: &mut Vec<u8>) -> Res<(), F> {
-        for &c in &m.children {
-            let (loc, payload) = self.log.read_payload(c)?;
-            match (m.level, loc.kind) {
-                (0, RecordKind::Blob) => {
-                    let b = self.decode_blob(loc.codec, &payload)?;
-                    out.extend_from_slice(&b);
-                }
-                (l, RecordKind::Multi) if l > 0 => {
-                    let cm = MultiNode::decode(&payload).ok_or(StoreError::Corrupt("multi"))?;
-                    if cm.level != l - 1 {
-                        return Err(StoreError::Corrupt("multi level"));
-                    }
-                    self.read_multi(&cm, out)?;
-                }
-                _ => return Err(StoreError::Corrupt("multi child")),
-            }
-        }
-        Ok(())
-    }
-
-    fn decode_blob(&mut self, codec: ChunkCodec, payload: &[u8]) -> Res<Vec<u8>, F> {
-        let dict_id = chunk_dict_ref(codec, payload);
-        if let Some(d) = dict_id {
-            self.load_dict(d)?;
-        }
-        let dict = dict_id.and_then(|_| self.dict_cache.as_ref().map(|c| c.1.as_slice()));
-        if let Some(d) = dict {
-            self.stats.largest_buffer = self.stats.largest_buffer.max(d.len() + 4096);
-        }
-        decode_chunk(codec, payload, dict).ok_or(StoreError::Corrupt("chunk does not decode"))
-    }
-
-    fn load_dict(&mut self, id: ObjectId) -> Res<(), F> {
-        if self.dict_cache.as_ref().is_some_and(|c| c.0 == id) {
-            return Ok(());
-        }
-        let bytes = self.read_node(id)?;
-        self.dict_cache = Some((id, bytes));
-        Ok(())
-    }
-
-    // ---- commit -----------------------------------------------------------
-
-    fn commit_with(
-        &mut self,
-        working: &BTreeMap<String, WorkEntry>,
-    ) -> Res<BTreeMap<String, WorkEntry>, F> {
-        let empty = RecordPlan::default();
-        let old_roots: Vec<ObjectId> = self.root.iter().map(|r| r.0).collect();
-        let old_live = mark(&mut self.log, &old_roots, &empty)?;
-        let mut plan = RecordPlan::default();
-        let (dict_id, dict_bytes) = self.choose_dict(working, &old_live, &mut plan)?;
-        let ctx = LayoutCtx {
-            record_max: self.cfg.record_max,
-            codec: self.cfg.codec,
-            dict: dict_bytes.as_deref().map(|b| (dict_id, b)),
-        };
-
-        // In `working`'s (sorted) order.
-        let mut files: Vec<(String, FileEntry)> = Vec::with_capacity(working.len());
-        for (path, e) in working {
-            let fe = match e {
-                WorkEntry::Committed(fe) => *fe,
-                WorkEntry::Staged(b) => {
-                    let head = if is_hot(path) {
-                        HeadKind::Hot
-                    } else {
-                        HeadKind::Cold
-                    };
-                    let id = self.plan_node(NodeTag::File, b, head, &ctx, &mut plan, &old_live)?;
-                    FileEntry {
-                        id,
-                        size: b.len() as u32,
-                    }
-                }
-            };
-            files.push((path.clone(), fe));
-        }
-
-        let mut hot_entries: Vec<DirEntry> = files
-            .iter()
-            .filter(|(p, _)| is_hot(p))
-            .map(|(p, fe)| DirEntry {
-                name: p.clone(),
-                kind: EntryKind::File,
-                size: fe.size,
-                id: fe.id,
-            })
-            .collect();
-        let hot_bytes = encode_dir(&mut hot_entries);
-        let hot_id = self.plan_node(
-            NodeTag::Dir,
-            &hot_bytes,
-            HeadKind::Hot,
-            &ctx,
-            &mut plan,
-            &old_live,
-        )?;
-        let cold: Vec<(&str, FileEntry)> = files
-            .iter()
-            .filter(|(p, _)| !is_hot(p))
-            .map(|(p, fe)| (&p[1..], *fe))
-            .collect();
-        let cold_id = build_dirs(&cold, &mut |mut entries| {
-            let bytes = encode_dir(&mut entries);
-            self.plan_node(
-                NodeTag::Dir,
-                &bytes,
-                HeadKind::Cold,
-                &ctx,
-                &mut plan,
-                &old_live,
-            )
-        })?;
-
-        // Inserts, not `collect`: a collected BTreeMap sorts, and that sort
-        // is kilobytes of RV32 code.
-        let mut committed: BTreeMap<String, WorkEntry> = BTreeMap::new();
-        for (p, fe) in files {
-            committed.insert(p, WorkEntry::Committed(fe));
-        }
-        if let Some((_, r)) = self.root
-            && r.cold_dir == cold_id
-            && r.hot_dir == hot_id
-            && r.dict == dict_id
-        {
-            return Ok(committed);
-        }
-
-        let seq = self.max_root_seq.saturating_add(1);
+    /// A root naming the working tree and the retired list, seq + 1.
+    pub(crate) fn write_root(&mut self) -> Res<(), F> {
         let root = RootRecord {
-            seq,
-            cold_dir: cold_id,
-            hot_dir: hot_id,
-            dict: dict_id,
-            next_key_id: 0,
+            seq: self.max_root_seq.wrapping_add(1),
+            cold_dir: self.work.cold,
+            hot_dir: self.work.hot,
+            retired: self.log.sectors.retired.clone(),
         };
         let payload = root.encode();
-        let root_id = RootRecord::id_of(&payload);
-        let root_rec = LaidRecord {
-            id: root_id,
-            kind: RecordKind::Root,
-            codec: ChunkCodec::Stored,
-            payload,
-        };
-        plan.push(root_rec, HeadKind::Hot);
-
-        let mut live = old_live;
-        live.extend(mark(&mut self.log, &[root_id], &plan)?);
-        recount_live_bytes(&mut self.log, &live);
-        self.note_buffer(plan.total_bytes() as usize);
-        self.note_buffer(live.len() * core::mem::size_of::<ObjectId>());
-
-        self.ensure_space(&plan, &live)?;
-        for p in &plan.records {
-            let raw = encode_record(p.rec.kind, p.rec.codec, p.rec.id, &p.rec.payload);
-            self.log
-                .append(p.head, &raw, p.rec.id, p.rec.kind, p.rec.codec)?;
-        }
-        self.root = Some((root_id, root));
-        self.max_root_seq = seq;
+        let id = ObjectId::of(&mut self.hasher, IdTag::Root, &[&payload]);
+        let len = crate::record_header::RECORD_HEADER_LEN + payload.len() as u32;
+        self.ensure_room(&[(HeadKind::Hot, len)])?;
+        self.log
+            .append(HeadKind::Hot, RecordKind::Root, ChunkCodec::Stored, id, &[&payload])?;
+        self.max_root_seq = root.seq;
+        self.committed = Some(Committed { id, root });
         self.stats.commits += 1;
-        Ok(committed)
+        Ok(())
     }
 
-    /// Lay a node out into the plan, skipping every record already present
-    /// with a complete closure (dedup by id, no byte compare). Returns its id.
-    fn plan_node(
-        &mut self,
-        tag: NodeTag,
-        bytes: &[u8],
-        head: HeadKind,
-        ctx: &LayoutCtx<'_>,
-        plan: &mut RecordPlan,
-        old_live: &BTreeSet<ObjectId>,
-    ) -> Res<ObjectId, F> {
-        let id = ObjectId::of(tag.id_tag(), bytes);
-        if self.is_known(id, plan, old_live)? {
-            self.stats.dedup_hits += 1;
-            return Ok(id);
-        }
-        let (_, recs) = layout_node(tag, bytes, ctx);
-        for r in recs {
-            if r.id != id && self.is_known(r.id, plan, old_live)? {
-                self.stats.dedup_hits += 1;
-                continue;
-            }
-            plan.push(r, head);
-        }
-        Ok(id)
-    }
-
-    /// Present with everything it names: planned, live under the current
-    /// root, or indexed with a complete closure (a garbage record whose
-    /// children were collected must be written again).
-    fn is_known(
-        &mut self,
-        id: ObjectId,
-        plan: &RecordPlan,
-        old_live: &BTreeSet<ObjectId>,
-    ) -> Res<bool, F> {
-        if plan.contains(id) || old_live.contains(&id) {
-            return Ok(true);
-        }
-        if !self.log.index.contains(id) {
-            return Ok(false);
-        }
-        match mark(&mut self.log, &[id], &RecordPlan::default()) {
-            Ok(_) => Ok(true),
-            Err(StoreError::Corrupt(_)) => Ok(false),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// The dictionary this commit codes against: a fresh one trained from
-    /// the commit's new content when it is a push (≥ `dict_train_min`), else
-    /// the root's.
-    fn choose_dict(
-        &mut self,
-        working: &BTreeMap<String, WorkEntry>,
-        old_live: &BTreeSet<ObjectId>,
-        plan: &mut RecordPlan,
-    ) -> Res<(ObjectId, Option<Vec<u8>>), F> {
-        if self.cfg.codec != Codec::DeflateDict {
-            return Ok((ObjectId::NONE, None));
-        }
-        if let Some(fresh) = self.train_dict(working, old_live, plan)? {
-            return Ok(fresh);
-        }
-        let current = self.root.map_or(ObjectId::NONE, |r| r.1.dict);
-        if current.is_none() || !cfg!(feature = "encode") {
-            return Ok((current, None));
-        }
-        self.load_dict(current)?;
-        Ok((current, self.dict_cache.as_ref().map(|c| c.1.clone())))
-    }
-
-    #[cfg(feature = "encode")]
-    fn train_dict(
-        &mut self,
-        working: &BTreeMap<String, WorkEntry>,
-        old_live: &BTreeSet<ObjectId>,
-        plan: &mut RecordPlan,
-    ) -> Res<Option<(ObjectId, Option<Vec<u8>>)>, F> {
-        use crate::object_id::IdTag;
-        let samples: Vec<&[u8]> = working
-            .iter()
-            .filter_map(|(p, e)| match e {
-                WorkEntry::Staged(b) if !is_hot(p) => Some(b.as_slice()),
-                _ => None,
-            })
-            .filter(|b| {
-                let id = ObjectId::of(IdTag::File, b);
-                !old_live.contains(&id) && !self.log.index.contains(id)
-            })
-            .collect();
-        let total: usize = samples.iter().map(|b| b.len()).sum();
-        if total < self.cfg.dict_train_min as usize {
+    /// The file at `path` by the path table (a collided row walks).
+    pub(crate) fn lookup(&mut self, path: &str) -> Res<Option<FileEntry>, F> {
+        if !valid_path(path) {
             return Ok(None);
         }
-        let dict = crate::store_dictionary::train_dictionary(&samples, self.cfg.dict_size as usize);
-        if dict.is_empty() {
-            return Ok(None);
+        let h = path_hash(&mut self.hasher, path);
+        match self.table.get(h) {
+            PathSlot::Absent => Ok(None),
+            PathSlot::File { id, size } => Ok(Some(FileEntry { id, size })),
+            PathSlot::Collided => self.walk_file(path),
         }
-        let stored = LayoutCtx {
-            record_max: self.cfg.record_max,
-            codec: Codec::Stored,
-            dict: None,
-        };
-        let id = self.plan_node(
-            NodeTag::Dict,
-            &dict,
-            HeadKind::Cold,
-            &stored,
-            plan,
-            old_live,
-        )?;
-        self.note_buffer(dict.len());
-        self.dict_cache = Some((id, dict.clone()));
-        Ok(Some((id, Some(dict))))
     }
 
-    #[cfg(not(feature = "encode"))]
-    fn train_dict(
-        &mut self,
-        _working: &BTreeMap<String, WorkEntry>,
-        _old_live: &BTreeSet<ObjectId>,
-        _plan: &mut RecordPlan,
-    ) -> Res<Option<(ObjectId, Option<Vec<u8>>)>, F> {
-        Ok(None)
-    }
-
-    /// Make the free sectors cover the plan plus the reserve, collecting
-    /// victims as needed; `NoSpace` when the conservative bound says the
-    /// commit cannot fit, before any record of it is written.
-    fn ensure_space(&mut self, plan: &RecordPlan, live: &BTreeSet<ObjectId>) -> Res<(), F> {
-        let cap = self.log.sector_capacity();
-        let lens: Vec<(HeadKind, u32)> = plan
-            .records
-            .iter()
-            .map(|r| (r.head, r.total_len()))
-            .collect();
-        let reserve = self.cfg.reserve;
-        let enough = |log: &RecordLog<F>| {
-            let remaining = [
-                log.head_remaining(HeadKind::Cold),
-                log.head_remaining(HeadKind::Hot),
-            ];
-            log.free_count() >= sectors_needed(remaining, lens.iter().copied(), cap) + reserve
-        };
-        if enough(&self.log) {
-            return Ok(());
-        }
-        let sizes: Vec<u32> = self
-            .log
-            .index
-            .iter()
-            .filter(|(id, _)| live.contains(id))
-            .map(|(_, loc)| loc.total_len())
-            .chain(lens.iter().map(|l| l.1))
-            .collect();
-        if !fits_after_compaction(sizes, cap, self.log.sector_count, reserve) {
-            return Err(StoreError::NoSpace);
-        }
-        for _ in 0..self.log.sector_count * 4 {
-            if self.log.free_count() == 0 {
-                break;
+    /// Whether the file at `path` exists, for a write: the table's row is
+    /// confirmed by a walk unless this transaction wrote the path itself, so
+    /// a row that belongs to another path (a hash collision) is found.
+    pub(crate) fn existing(&mut self, path: &str) -> Res<Option<FileEntry>, F> {
+        let h = path_hash(&mut self.hasher, path);
+        match self.table.get(h) {
+            PathSlot::Absent => Ok(None),
+            PathSlot::File { id, size } if matches!(self.delta.lookup(path), Some(Some(_))) => {
+                Ok(Some(FileEntry { id, size }))
             }
-            let Some(victim) = choose_victim(&self.log, self.cfg.gc_policy) else {
-                break;
-            };
-            let copied = collect_sector(&mut self.log, victim, live)?;
-            self.stats.gc_runs += 1;
-            self.stats.gc_copies += copied.records;
-            self.stats.gc_copy_bytes += copied.bytes;
-            if enough(&self.log) {
-                return Ok(());
+            _ => self.walk_file(path),
+        }
+    }
+
+    /// The path table and the delta after writing `fe` at `path`.
+    pub(crate) fn record_set(&mut self, path: &str, existed: Option<FileEntry>, fe: FileEntry) {
+        let h = path_hash(&mut self.hasher, path);
+        let prior = self.table.get(h);
+        self.undo.save(h, prior);
+        let slot = match prior {
+            PathSlot::Absent => PathSlot::File {
+                id: fe.id,
+                size: fe.size,
+            },
+            PathSlot::File { .. } if existed.is_some() => PathSlot::File {
+                id: fe.id,
+                size: fe.size,
+            },
+            _ => PathSlot::Collided,
+        };
+        self.table.set(h, slot);
+        self.delta.set(path, fe);
+        self.note_txn_ram();
+    }
+
+    /// The path table and the delta after deleting the (existing) file.
+    pub(crate) fn record_delete(&mut self, path: &str, _existed: FileEntry) {
+        let h = path_hash(&mut self.hasher, path);
+        let prior = self.table.get(h);
+        self.undo.save(h, prior);
+        if prior != PathSlot::Collided {
+            self.table.set(h, PathSlot::Absent);
+        }
+        self.delta.delete(path);
+        self.note_txn_ram();
+    }
+
+    pub(crate) fn note_txn_ram(&mut self) {
+        let n = self.delta.ram_bytes() + self.undo.ram_bytes();
+        self.log.note(n);
+    }
+
+    fn delete_prefix_inner(&mut self, prefix: &str) -> Res<(), F> {
+        let files = self.list_files(prefix)?;
+        self.log.note(
+            files.capacity() * core::mem::size_of::<String>()
+                + files.iter().map(|f| f.capacity()).sum::<usize>(),
+        );
+        let tree = prefix
+            .strip_suffix('/')
+            .filter(|d| valid_path(d) && !files.is_empty());
+        for p in &files {
+            let h = path_hash(&mut self.hasher, p);
+            let prior = self.table.get(h);
+            self.undo.save(h, prior);
+            if prior != PathSlot::Collided {
+                self.table.set(h, PathSlot::Absent);
+            }
+            if tree.is_none() {
+                self.delta.delete(p);
             }
         }
-        Err(StoreError::NoSpace)
+        if let Some(dir) = tree {
+            self.delta.delete_tree(dir);
+        }
+        self.note_txn_ram();
+        Ok(())
     }
+}
 
-    // ---- helpers ----------------------------------------------------------
+/// Absolute, no trailing `/`, no empty component, at most [`MAX_DEPTH`]
+/// components and `u16::MAX` bytes.
+pub fn valid_path(path: &str) -> bool {
+    path.len() > 1
+        && path.len() <= usize::from(u16::MAX)
+        && path.starts_with('/')
+        && !path.ends_with('/')
+        && !path[1..].split('/').any(str::is_empty)
+        && path.split('/').count() <= MAX_DEPTH + 1
+}
 
-    fn matching(&self, prefix: &str) -> Vec<String> {
-        self.working
-            .range::<str, _>((
-                core::ops::Bound::Included(prefix),
-                core::ops::Bound::Unbounded,
-            ))
-            .take_while(|(k, _)| k.starts_with(prefix))
-            .map(|(k, _)| k.clone())
-            .collect()
+/// The hot path: last two components are `.lp/panel.json`.
+pub fn is_hot(path: &str) -> bool {
+    path.ends_with("/.lp/panel.json")
+}
+
+pub(crate) fn head_for(path: &str) -> HeadKind {
+    if is_hot(path) {
+        HeadKind::Hot
+    } else {
+        HeadKind::Cold
     }
+}
 
-    fn staged_bytes(&self) -> usize {
-        self.working
-            .values()
-            .map(|e| match e {
-                WorkEntry::Staged(b) => b.len(),
-                WorkEntry::Committed(_) => 0,
-            })
-            .sum()
-    }
-
-    fn note_buffer(&mut self, n: usize) {
-        self.stats.largest_buffer = self.stats.largest_buffer.max(n);
+fn check_path<E>(path: &str) -> Result<(), StoreError<E>> {
+    if valid_path(path) {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidPath)
     }
 }
 
@@ -706,15 +524,10 @@ fn check_config<E>(
     sector_size: u32,
     cfg: &StoreConfig,
 ) -> Result<(), StoreError<E>> {
-    if cfg.json_tree {
-        return Err(StoreError::Unsupported(
-            "json_tree: JSON-tree mode is not implemented",
-        ));
-    }
     if !(512..=32768).contains(&sector_size) {
         return Err(StoreError::BadConfig("sector size must be 512..=32768"));
     }
-    if sector_count < 4 || sector_count > u32::from(u16::MAX) {
+    if !(4..=u32::from(u16::MAX)).contains(&sector_count) {
         return Err(StoreError::BadConfig("sector count must be 4..=65535"));
     }
     if cfg.record_max < 128 || cfg.record_max > sector_size - SECTOR_HEADER_LEN {

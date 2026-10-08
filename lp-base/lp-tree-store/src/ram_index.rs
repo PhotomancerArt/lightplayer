@@ -1,70 +1,159 @@
-//! The RAM index: id → where its one trusted copy lives. Rebuilt at mount by
-//! scanning; nothing on flash describes it.
+//! The RAM index: id → where its one trusted copy lives, as a sorted array
+//! of 12-byte entries (id u64, packed sector u16 | offset u16). Rebuilt at
+//! mount by scanning; nothing on flash describes it.
+//!
+//! What it holds (the dedup rule depends on it): after a mark, exactly the
+//! live records; between marks, those plus every record written since. No
+//! record it names is erased before the next mark prunes it, so every id it
+//! holds has a complete closure on flash.
 
-use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
 use core::mem::size_of;
 
+use crate::heap_sort::heap_sort_by;
 use crate::object_id::ObjectId;
-use crate::record_header::RECORD_HEADER_LEN;
-use crate::record_kind::{ChunkCodec, RecordKind};
+use crate::vec_growth::grow_for_one;
 
-/// Where a record is, and what it is.
+/// Where a record's header is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecordLoc {
-    pub sector: u16,
-    /// Offset of the record header within the sector.
-    pub offset: u16,
-    /// Payload length.
-    pub len: u16,
-    pub kind: RecordKind,
-    pub codec: ChunkCodec,
+    pub sector: u32,
+    pub offset: u32,
 }
 
 impl RecordLoc {
-    /// Header + payload.
-    pub fn total_len(&self) -> u32 {
-        RECORD_HEADER_LEN + u32::from(self.len)
+    fn pack(self) -> u32 {
+        self.sector << 16 | self.offset
+    }
+
+    fn unpack(v: u32) -> Self {
+        RecordLoc {
+            sector: v >> 16,
+            offset: v & 0xFFFF,
+        }
     }
 }
 
-/// id → location, one location per id (duplicates on flash are harmless:
-/// the index names the newest-sector copy found at mount, or the copy this
-/// session wrote last).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy)]
+#[repr(C, packed(4))]
+pub struct IndexEntry {
+    id: u64,
+    loc: u32,
+}
+
+/// Sorted by id; one entry per id.
+#[derive(Default)]
 pub struct RamIndex {
-    map: BTreeMap<ObjectId, RecordLoc>,
+    entries: Vec<IndexEntry>,
 }
 
 impl RamIndex {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Position of `id`, or where it would go.
+    pub fn find(&self, id: ObjectId) -> Result<usize, usize> {
+        let (mut lo, mut hi) = (0, self.entries.len());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let v = self.entries[mid].id;
+            if v == id.0 {
+                return Ok(mid);
+            }
+            if v < id.0 {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        Err(lo)
+    }
+
     pub fn get(&self, id: ObjectId) -> Option<RecordLoc> {
-        self.map.get(&id).copied()
+        self.find(id).ok().map(|i| self.loc_at(i))
     }
 
     pub fn contains(&self, id: ObjectId) -> bool {
-        self.map.contains_key(&id)
+        self.find(id).is_ok()
     }
 
+    pub fn id_at(&self, i: usize) -> ObjectId {
+        ObjectId(self.entries[i].id)
+    }
+
+    pub fn loc_at(&self, i: usize) -> RecordLoc {
+        RecordLoc::unpack(self.entries[i].loc)
+    }
+
+    /// Add or move.
     pub fn insert(&mut self, id: ObjectId, loc: RecordLoc) {
-        self.map.insert(id, loc);
+        let e = IndexEntry {
+            id: id.0,
+            loc: loc.pack(),
+        };
+        match self.find(id) {
+            Ok(i) => self.entries[i] = e,
+            Err(i) => {
+                grow_for_one(&mut self.entries);
+                self.entries.insert(i, e);
+            }
+        }
+    }
+
+    /// Keep the entries `keep(position)` says to.
+    pub fn retain_positions(&mut self, mut keep: impl FnMut(usize) -> bool) {
+        let mut i = 0;
+        self.entries.retain(|_| {
+            i += 1;
+            keep(i - 1)
+        });
     }
 
     /// Forget every record in `sector` (it is about to be erased).
     pub fn remove_sector(&mut self, sector: u32) {
-        self.map.retain(|_, loc| u32::from(loc.sector) != sector);
+        self.entries
+            .retain(|e| RecordLoc::unpack(e.loc).sector != sector);
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (ObjectId, RecordLoc)> + '_ {
-        self.map.iter().map(|(k, v)| (*k, *v))
+    /// Mount: add without keeping order; [`Self::sort_dedup`] after.
+    pub fn push_unsorted(&mut self, id: ObjectId, loc: RecordLoc) {
+        self.entries.push(IndexEntry {
+            id: id.0,
+            loc: loc.pack(),
+        });
     }
 
-    pub fn len(&self) -> usize {
-        self.map.len()
+    /// Mount: sort, and of several copies of one id keep the one in the
+    /// sector with the highest `newer(sector)` (the sector opened last).
+    pub fn sort_dedup(&mut self, newer: impl Fn(u32) -> u32) {
+        let rank = |e: &IndexEntry| (e.id, newer(RecordLoc::unpack(e.loc).sector));
+        heap_sort_by(&mut self.entries, |a, b| rank(a) < rank(b));
+        // Of each run of equal ids the last is the newest: keep it.
+        let n = self.entries.len();
+        let mut w = 0;
+        for r in 0..n {
+            if r + 1 < n && { self.entries[r + 1].id } == { self.entries[r].id } {
+                continue;
+            }
+            self.entries[w] = self.entries[r];
+            w += 1;
+        }
+        self.entries.truncate(w);
     }
 
-    /// The honest floor: entries × the entry's size (the B-tree's own node
-    /// overhead is not counted; a sorted array on device would be this).
+    /// Positions of the entries in `sector`.
+    pub fn positions_in(&self, sector: u32) -> impl Iterator<Item = usize> + '_ {
+        (0..self.entries.len()).filter(move |&i| self.loc_at(i).sector == sector)
+    }
+
+    pub fn shrink(&mut self) {
+        self.entries.shrink_to_fit();
+    }
+
+    /// What the allocator holds for it.
     pub fn ram_bytes(&self) -> usize {
-        self.map.len() * (size_of::<ObjectId>() + size_of::<RecordLoc>())
+        self.entries.capacity() * size_of::<IndexEntry>()
     }
 }
 
@@ -72,21 +161,31 @@ impl RamIndex {
 mod tests {
     use super::*;
 
+    fn loc(sector: u32, offset: u32) -> RecordLoc {
+        RecordLoc { sector, offset }
+    }
+
     #[test]
-    fn insert_remove_sector() {
+    fn insert_find_remove_and_dedup() {
+        assert_eq!(size_of::<IndexEntry>(), 12);
         let mut ix = RamIndex::default();
-        let loc = |sector| RecordLoc {
-            sector,
-            offset: 20,
-            len: 4,
-            kind: RecordKind::Blob,
-            codec: ChunkCodec::Stored,
-        };
-        ix.insert(ObjectId(1), loc(0));
-        ix.insert(ObjectId(2), loc(1));
+        ix.insert(ObjectId(5), loc(0, 20));
+        ix.insert(ObjectId(2), loc(1, 40));
+        ix.insert(ObjectId(9), loc(0, 60));
+        assert_eq!(ix.get(ObjectId(2)), Some(loc(1, 40)));
+        ix.insert(ObjectId(2), loc(3, 20));
+        assert_eq!(ix.get(ObjectId(2)), Some(loc(3, 20)));
         ix.remove_sector(0);
-        assert!(!ix.contains(ObjectId(1)));
-        assert_eq!(ix.get(ObjectId(2)), Some(loc(1)));
-        assert_eq!(ix.ram_bytes(), 16);
+        assert_eq!(ix.len(), 1);
+
+        let mut m = RamIndex::default();
+        m.push_unsorted(ObjectId(7), loc(4, 20));
+        m.push_unsorted(ObjectId(3), loc(2, 20));
+        m.push_unsorted(ObjectId(7), loc(1, 20));
+        // Sector 1 was opened after sector 4.
+        m.sort_dedup(|s| if s == 1 { 10 } else { s });
+        assert_eq!(m.len(), 2);
+        assert_eq!(m.get(ObjectId(7)), Some(loc(1, 20)));
+        assert_eq!(m.id_at(0), ObjectId(3));
     }
 }

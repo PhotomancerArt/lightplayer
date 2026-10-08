@@ -11,8 +11,8 @@ publish = false
 [dependencies]
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
-# T1: the prototype under test.
-lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim"] }
+# T1: the tree store under test (v1), with the host-side deflater.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim", "host-deflate"] }
 clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
 serde = { workspace = true, features = ["derive", "std"] }

@@ -1,11 +1,10 @@
-//! The record header and the record's on-flash bytes.
+//! The record header (FORMAT.md "Record").
 //!
 //! Layout (16 bytes, little-endian): kind u8 | codec u8 | payload length u16 |
 //! id u64 | CRC-32 over the first 12 header bytes and the payload. A header
 //! of all `0xFF` is the end of a sector's records; anything else that fails
 //! to parse or to check *closes* the sector (nothing after it is read).
 
-use alloc::vec::Vec;
 use lp_crc32::Crc32;
 
 use crate::object_id::ObjectId;
@@ -60,6 +59,11 @@ impl RecordHeader {
         })
     }
 
+    /// Header + payload bytes.
+    pub fn total_len(&self) -> u32 {
+        RECORD_HEADER_LEN + u32::from(self.len)
+    }
+
     /// Whether `payload` belongs to the header bytes `raw`.
     pub fn crc_ok(raw: &[u8; RECORD_HEADER_LEN as usize], payload: &[u8]) -> bool {
         let mut c = Crc32::new();
@@ -69,42 +73,42 @@ impl RecordHeader {
     }
 }
 
-/// A whole record's bytes. `payload` must be at most `u16::MAX` bytes (the
-/// callers keep it under `record_max`).
-pub fn encode_record(kind: RecordKind, codec: ChunkCodec, id: ObjectId, payload: &[u8]) -> Vec<u8> {
-    debug_assert!(payload.len() <= u16::MAX as usize);
-    let mut out = Vec::with_capacity(RECORD_HEADER_LEN as usize + payload.len());
-    out.push(kind.to_u8());
-    out.push(codec.to_u8());
-    out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
-    out.extend_from_slice(&id.0.to_le_bytes());
+/// The header bytes of a record whose payload is the concatenation of
+/// `parts` (at most `u16::MAX` bytes; callers keep it under `record_max`).
+pub fn encode_header(
+    kind: RecordKind,
+    codec: ChunkCodec,
+    id: ObjectId,
+    parts: &[&[u8]],
+) -> [u8; RECORD_HEADER_LEN as usize] {
+    let len: usize = parts.iter().map(|p| p.len()).sum();
+    debug_assert!(len <= u16::MAX as usize);
+    let mut h = [0u8; RECORD_HEADER_LEN as usize];
+    h[0] = kind.to_u8();
+    h[1] = codec.to_u8();
+    h[2..4].copy_from_slice(&(len as u16).to_le_bytes());
+    h[4..12].copy_from_slice(&id.0.to_le_bytes());
     let mut c = Crc32::new();
-    c.update(&out[..12]);
-    c.update(payload);
-    out.extend_from_slice(&c.finish().to_le_bytes());
-    out.extend_from_slice(payload);
-    out
+    c.update(&h[..12]);
+    for p in parts {
+        c.update(p);
+    }
+    h[12..16].copy_from_slice(&c.finish().to_le_bytes());
+    h
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn head(raw: &[u8]) -> [u8; 16] {
-        let mut h = [0u8; 16];
-        h.copy_from_slice(&raw[..16]);
-        h
-    }
-
     #[test]
     fn round_trip_and_crc() {
-        let raw = encode_record(
+        let h = encode_header(
             RecordKind::Blob,
             ChunkCodec::Deflate,
             ObjectId(42),
-            b"hello",
+            &[b"hel", b"lo"],
         );
-        let h = head(&raw);
         let HeaderRead::Record(r) = RecordHeader::parse(&h) else {
             panic!("not a record")
         };
@@ -112,9 +116,11 @@ mod tests {
             (r.kind, r.codec, r.len, r.id),
             (RecordKind::Blob, ChunkCodec::Deflate, 5, ObjectId(42))
         );
-        assert!(RecordHeader::crc_ok(&h, &raw[16..]));
+        assert!(RecordHeader::crc_ok(&h, b"hello"));
         assert!(!RecordHeader::crc_ok(&h, b"hellp"));
         assert_eq!(RecordHeader::parse(&[0xFF; 16]), HeaderRead::End);
         assert_eq!(RecordHeader::parse(&[0; 16]), HeaderRead::Bad);
+        let dir = encode_header(RecordKind::Dir, ChunkCodec::Deflate, ObjectId(1), &[]);
+        assert_eq!(RecordHeader::parse(&dir), HeaderRead::Bad, "only blobs code");
     }
 }

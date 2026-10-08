@@ -1,9 +1,9 @@
-//! Will a commit fit? Decided before anything of it is written.
+//! Will a write fit? Decided before anything of it is written.
 
 use alloc::vec::Vec;
 
+use crate::heap_sort::heap_sort_by;
 use crate::sector_header::HeadKind;
-use crate::small_sort::sort_small_by;
 
 /// New sectors the heads must open to append `records` in order — the exact
 /// rule `RecordLog::append` follows.
@@ -19,27 +19,27 @@ pub fn sectors_needed(
             opened += 1;
             *r = capacity;
         }
-        *r -= len;
+        *r = r.saturating_sub(len);
     }
     opened
 }
 
-/// The pre-write bound: could every live record plus the commit's new
-/// records, packed first-fit-decreasing into sectors, leave one sector for
-/// the other head and the reserve free? Optimistic about packing on purpose
-/// (GC copies in victim order, not size order): a commit this rejects cannot
-/// fit; one it accepts may still end in `NoSpace` after GC, with nothing of
-/// the commit written.
+/// The pre-write bound: could every live record plus the new ones, packed
+/// first-fit-decreasing into `usable` sectors, leave one sector for the
+/// other head and the reserve free? Optimistic about packing on purpose (GC
+/// copies in victim order, not size order): a write this rejects cannot
+/// fit; one it accepts may still end in `NoSpace` after GC, before any of
+/// its records.
 pub fn fits_after_compaction(
-    mut sizes: Vec<u32>,
+    mut sizes: Vec<u16>,
     capacity: u32,
-    sector_count: u32,
+    usable: u32,
     reserve: u32,
 ) -> bool {
-    sort_small_by(&mut sizes, |a, b| a < b);
-    let budget = sector_count.saturating_sub(reserve + 1) as usize;
+    heap_sort_by(&mut sizes, |a, b| a > b);
+    let budget = usable.saturating_sub(reserve + 1) as usize;
     let mut bins: Vec<u32> = Vec::new();
-    for len in sizes.into_iter().rev() {
+    for len in sizes.into_iter().map(u32::from) {
         match bins.iter_mut().find(|room| **room >= len) {
             Some(room) => *room -= len,
             None => {
