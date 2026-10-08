@@ -21,10 +21,10 @@ lp-crc32 = { path = "../lp-crc32" }
 lp-deflate = { path = "../lp-deflate" }
 sha2 = { workspace = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"], optional = true }
-lp-nor-sim = { path = "../lp-nor-sim", optional = true }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim", optional = true }
 
 [dev-dependencies]
-lp-nor-sim = { path = "../lp-nor-sim" }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 
 [lints]
 workspace = true

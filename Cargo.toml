@@ -11,7 +11,6 @@ members = [
     "lp-base/lp-deflate",
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
-    "lp-base/lp-nor-sim",
     "lp-base/lp-tree-store",
     # lp-app workspace members
     "lp-core/lpc-access",
@@ -102,6 +101,7 @@ members = [
     "lp-shader/lps-filetests",
     "lp-emu/lp-emu-core",
     "lp-emu/lp-emu-abi",
+    "lp-emu/lp-nor-sim",
     "lp-emu/lp-emu-jit",
     "lp-emu/lp-xt-jit",
     "lp-emu/lp-emu-validate",
@@ -153,7 +153,6 @@ default-members = [
     "lp-base/lp-deflate",
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
-    "lp-base/lp-nor-sim",
     "lp-base/lp-tree-store",
     # lp-app workspace members
     "lp-core/lpc-access",
@@ -220,6 +219,7 @@ default-members = [
     "lp-shader/lps-filetests",
     "lp-emu/lp-emu-core",
     "lp-emu/lp-emu-abi",
+    "lp-emu/lp-nor-sim",
     "lp-emu/lp-emu-jit",
     "lp-emu/lp-xt-jit",
     "lp-emu/lp-emu-validate",
