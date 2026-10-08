@@ -32,6 +32,13 @@
 //! names, since the server persists that only on a load that succeeded. A
 //! refused push used to leave the board dark over a folder it had refused.
 //!
+//! Two copies need room for two copies. When the board runs out of space
+//! writing the second one, the push removes the partial new slot and the old
+//! one and writes again into the old folder's own name: the old project is
+//! gone either way, and a power cut mid-way leaves `startup_project` naming a
+//! folder the next push replaces normally. A project that still does not fit
+//! alone ends in an error that says the old copy went.
+//!
 //! Step 3 is not optional. A serial wire drops bytes; a truncated write that
 //! loaded anyway would leave a board running something no library has, and
 //! the next sync verdict would be computed against a lie.
@@ -87,24 +94,7 @@ pub async fn push_project<Io: ClientIo>(
     };
 
     progress(format!("Sending the project to {storage_id}"), Some(20));
-    let landed = match client.replace_and_load_project(&storage_id, files).await {
-        Ok(_) => {
-            progress("Checking what the board received".to_string(), Some(85));
-            match client.hash_package(&storage_id).await {
-                Ok(outcome) if outcome.value == expected_hash => Ok(outcome.value),
-                // The bytes on the board are not the bytes in the library.
-                // Saying so beats a green card over a project nobody has.
-                Ok(outcome) => Err(ClientError::Protocol(format!(
-                    "the board ended up with different bytes than the library sent \
-                     (device {}, library {expected_hash}) — the project was not \
-                     fully written",
-                    outcome.value
-                ))),
-                Err(error) => Err(error),
-            }
-        }
-        Err(error) => Err(error),
-    };
+    let landed = write_and_verify(client, &storage_id, files, expected_hash, progress).await;
 
     match (landed, previous) {
         (Ok(hash), previous) => {
@@ -131,21 +121,120 @@ pub async fn push_project<Io: ClientIo>(
                 ),
             ))
         }
-        (Err(error), Some(old)) if old != storage_id => {
-            // The old dir was never touched: put it back on, then drop what
-            // the board refused. The error is the refusal, with what became
-            // of the board appended — the card must not guess.
+        (Err(error), Some(old)) if old != storage_id && is_no_space(&error) => {
+            // The board cannot hold two copies. Everything is already
+            // stopped (`replace_and_load_project` stops first), so the old
+            // copy can go: drop the partial new slot, then the old one, and
+            // write again into the OLD folder's own name. A power cut mid-way
+            // then leaves `startup_project` naming a folder the next push
+            // replaces normally — a retry into the other slot would orphan a
+            // partial folder for good.
             progress(
-                "The board refused it; restoring what it ran".to_string(),
-                Some(90),
+                format!("This board can't hold two copies — removing {old} to make room"),
+                Some(40),
             );
-            let restored = client
-                .project_load(&crate::project_deploy::project_load_path(&old))
-                .await;
-            let _ = client.delete_project_dir(&storage_id).await;
-            Err(with_restore_note(error, &old, restored.is_ok()))
+            let cleared = match client.delete_project_dir(&storage_id).await {
+                Ok(_) => client.delete_project_dir(&old).await.map(|_| ()),
+                Err(error) => Err(error),
+            };
+            if cleared.is_err() {
+                // The old folder is not provably gone: restore it as usual.
+                return Err(restore_previous(client, error, &old, &storage_id, progress).await);
+            }
+            progress(format!("Sending the project to {old}"), Some(50));
+            match write_and_verify(client, &old, files, expected_hash, progress).await {
+                Ok(hash) => {
+                    progress("Done".to_string(), Some(100));
+                    Ok(PushReport {
+                        storage_id: old,
+                        hash,
+                    })
+                }
+                Err(error) => {
+                    let _ = client.delete_project_dir(&old).await;
+                    Err(match is_no_space(&error) {
+                        true => ClientError::Server(format!(
+                            "this board can't hold two copies of the project, so the old copy \
+                             ({old}) was removed to make room — and the project still doesn't \
+                             fit on the board"
+                        )),
+                        false => with_note(
+                            error,
+                            &format!(
+                                "the previous project ({old}) was removed to make room, so \
+                                 the board is running nothing"
+                            ),
+                        ),
+                    })
+                }
+            }
+        }
+        (Err(error), Some(old)) if old != storage_id => {
+            Err(restore_previous(client, error, &old, &storage_id, progress).await)
         }
         (Err(error), _) => Err(error),
+    }
+}
+
+/// Write `files` into `storage_id`, load it, and check the board holds
+/// exactly the library's bytes.
+async fn write_and_verify<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    storage_id: &str,
+    files: &[(String, Vec<u8>)],
+    expected_hash: &str,
+    progress: PushProgress<'_>,
+) -> ClientResult<String> {
+    client.replace_and_load_project(storage_id, files).await?;
+    progress("Checking what the board received".to_string(), Some(85));
+    let outcome = client.hash_package(storage_id).await?;
+    match outcome.value == expected_hash {
+        true => Ok(outcome.value),
+        // The bytes on the board are not the bytes in the library.
+        // Saying so beats a green card over a project nobody has.
+        false => Err(ClientError::Protocol(format!(
+            "the board ended up with different bytes than the library sent \
+             (device {}, library {expected_hash}) — the project was not \
+             fully written",
+            outcome.value
+        ))),
+    }
+}
+
+/// The old dir was never touched: put it back on, then drop what the board
+/// refused. The error is the refusal, with what became of the board appended
+/// — the card must not guess.
+async fn restore_previous<Io: ClientIo>(
+    client: &mut LpClient<Io>,
+    error: ClientError,
+    old: &str,
+    storage_id: &str,
+    progress: PushProgress<'_>,
+) -> ClientError {
+    progress(
+        match is_no_space(&error) {
+            true => "The board is out of room for a second copy; restoring what it ran",
+            false => "The board refused it; restoring what it ran",
+        }
+        .to_string(),
+        Some(90),
+    );
+    let restored = client
+        .project_load(&crate::project_deploy::project_load_path(old))
+        .await;
+    let _ = client.delete_project_dir(storage_id).await;
+    with_restore_note(error, old, restored.is_ok())
+}
+
+/// Whether the board said its flash is full. Matched on the error text, the
+/// way [`LpClient::delete_project_dir`] matches a missing dir: fs errors
+/// cross the wire as display strings.
+fn is_no_space(error: &ClientError) -> bool {
+    match error {
+        ClientError::Server(message) | ClientError::Protocol(message) => {
+            message.contains("no space left on device")
+        }
+        _ => false,
     }
 }
 
