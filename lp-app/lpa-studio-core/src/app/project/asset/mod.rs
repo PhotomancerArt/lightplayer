@@ -19,7 +19,7 @@ pub mod ui_asset_content;
 pub mod ui_shader_error;
 
 pub use asset_content_fetch_op::AssetContentFetchOp;
-pub use asset_edit_op::{AssetEditOp, MAX_ASSET_BODY_BYTES};
+pub use asset_edit_op::{AssetEditOp, MAX_ASSET_BODY_BYTES, asset_body_too_large};
 pub use pending_asset_edit::PendingAssetEdit;
 pub use ui_asset_content::{UiAssetContent, UiAssetContentBody};
 pub use ui_shader_error::UiShaderError;
