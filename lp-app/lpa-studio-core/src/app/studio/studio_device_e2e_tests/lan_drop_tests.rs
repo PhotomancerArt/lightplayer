@@ -9,7 +9,7 @@
 use super::*;
 
 /// The board's link socket (a made-up address).
-const URL: &str = "ws://192.168.4.100/link";
+pub(super) const URL: &str = "ws://192.168.4.100/link";
 
 /// How `browser_websocket.js` reports a socket the board closed.
 const LOST: &str = "wi-fi link lost: the board closed the link (code 1001: rebooting)";
@@ -17,10 +17,10 @@ const LOST: &str = "wi-fi link lost: the board closed the link (code 1001: reboo
 /// A LAN board whose socket the test can drop. Its session stays present
 /// throughout, as the page's does when the redial is quick: the drop is
 /// only ever heard on the link itself.
-struct DroppableLanBoard {
-    device: FakeEsp32Device,
+pub(super) struct DroppableLanBoard {
+    pub(super) device: FakeEsp32Device,
     /// Set to drop the link that is open now.
-    lose: Rc<Cell<bool>>,
+    pub(super) lose: Rc<Cell<bool>>,
 }
 
 impl crate::LanLinkSource for DroppableLanBoard {

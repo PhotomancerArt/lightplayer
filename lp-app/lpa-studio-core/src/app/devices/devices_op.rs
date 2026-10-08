@@ -293,7 +293,8 @@ impl ControllerOp for DevicesOp {
             ),
             Action::ResetBoard { .. } => ActionMeta::new(
                 "Reset",
-                "Reboot the board (a hardware reset) and identify what starts up.",
+                "Restart the board and see what starts up: a hardware reset over a cable, \
+                 a restart request over Bluetooth or Wi‑Fi.",
                 ActionPriority::Secondary,
             ),
             // No confirmation: it takes nothing away. The worst case is a

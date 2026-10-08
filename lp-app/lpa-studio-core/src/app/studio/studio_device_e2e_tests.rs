@@ -176,6 +176,9 @@ pub(crate) mod agent_device_seat;
 mod ble_drop_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
+/// Reset on a board reached over Wi‑Fi: a restart request, and the card
+/// back on the redialled link with no click.
+mod lan_reset_tests;
 /// A board reached through lightplayer.app's relay (`relay:`, behind
 /// `?relay=1`): it identifies, refuses firmware, is never given keys, and
 /// comes back after its leg drops.
