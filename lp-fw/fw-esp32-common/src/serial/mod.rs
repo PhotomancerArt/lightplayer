@@ -17,6 +17,11 @@ pub mod server_msg;
 #[cfg(feature = "server")]
 pub mod server_payload;
 
+/// The largest block decoding a client request asks for, by its shape: what
+/// [`server_payload::request_refusal`] measures the heap against.
+#[cfg(feature = "server")]
+pub mod request_decode_block;
+
 /// One link's packed-reply state: the encoding, and the learned table that
 /// lives only while a host has the link packed.
 #[cfg(feature = "server")]
