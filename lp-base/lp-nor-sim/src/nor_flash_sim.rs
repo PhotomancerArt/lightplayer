@@ -25,6 +25,10 @@ pub struct NorFlashSim {
     read_budget: Option<u64>,
     reads_since_cycle: u64,
     panic_on_violation: bool,
+    /// Per sector: has any bit been cleared (or torn) since its last full erase?
+    nonblank: Vec<bool>,
+    nonblank_count: u32,
+    peak_nonblank: u32,
 }
 
 /// What `begin_op` decided about the operation about to run.
@@ -55,6 +59,9 @@ impl NorFlashSim {
             read_budget: None,
             reads_since_cycle: 0,
             panic_on_violation: cfg!(debug_assertions),
+            nonblank: vec![byte != 0xFF; geom.sector_count as usize],
+            nonblank_count: if byte != 0xFF { geom.sector_count } else { 0 },
+            peak_nonblank: if byte != 0xFF { geom.sector_count } else { 0 },
         }
     }
 
@@ -62,6 +69,9 @@ impl NorFlashSim {
     pub fn garbage(geom: NorGeometry, seed: u64) -> Self {
         let mut sim = Self::new(geom);
         let mut rng = SimRng::new(seed);
+        sim.nonblank.fill(true);
+        sim.nonblank_count = geom.sector_count;
+        sim.peak_nonblank = geom.sector_count;
         for s in &mut sim.sectors {
             let cells = Arc::make_mut(s);
             for b in cells.iter_mut() {
@@ -180,11 +190,28 @@ impl NorFlashSim {
             && self.sectors[sector as usize].iter().all(|&b| b == 0xFF)
     }
 
-    /// Sectors that are not blank: the "sectors in use" measure.
+    /// Sectors with any bit cleared (or torn) since their last full erase:
+    /// the flash's own "sectors in use" (a store that frees lazily, like
+    /// littlefs, keeps freed sectors here until it reuses them).
     pub fn sectors_in_use(&self) -> u32 {
-        (0..self.geom.sector_count)
-            .filter(|&s| !self.sector_is_blank(s))
-            .count() as u32
+        self.nonblank_count
+    }
+
+    /// The most sectors in use at once since the last [`Self::reset_peak`].
+    pub fn peak_sectors_in_use(&self) -> u32 {
+        self.peak_nonblank
+    }
+
+    pub fn reset_peak(&mut self) {
+        self.peak_nonblank = self.nonblank_count;
+    }
+
+    fn mark_nonblank(&mut self, sector: usize) {
+        if !self.nonblank[sector] {
+            self.nonblank[sector] = true;
+            self.nonblank_count += 1;
+            self.peak_nonblank = self.peak_nonblank.max(self.nonblank_count);
+        }
     }
 
     /// Program `data` at `addr` (clears bits: stored = stored & data). A
@@ -221,9 +248,16 @@ impl NorFlashSim {
                 let cells = Arc::make_mut(&mut self.sectors[sector as usize]);
                 cells.fill(0xFF);
                 self.damage[sector as usize] = NorSectorState::default();
+                if self.nonblank[sector as usize] {
+                    self.nonblank[sector as usize] = false;
+                    self.nonblank_count -= 1;
+                }
                 Ok(())
             }
             OpFate::Tear => {
+                if self.plan.tear != TearModel::Clean {
+                    self.mark_nonblank(sector as usize);
+                }
                 self.tear_erase(sector as usize);
                 Err(NorError::PowerLost)
             }
@@ -239,6 +273,9 @@ impl NorFlashSim {
             OpFate::Run => {
                 self.stats.program_bytes += data.len() as u64;
                 self.check_violations(sector, off, data);
+                if data.iter().any(|&d| d != 0xFF) {
+                    self.mark_nonblank(sector);
+                }
                 let cells = Arc::make_mut(&mut self.sectors[sector]);
                 for (i, &d) in data.iter().enumerate() {
                     cells[off + i] &= d;
@@ -252,6 +289,9 @@ impl NorFlashSim {
                 Ok(())
             }
             OpFate::Tear => {
+                if self.plan.tear != TearModel::Clean {
+                    self.mark_nonblank(sector);
+                }
                 self.tear_program(sector, off, data);
                 Err(NorError::PowerLost)
             }
@@ -635,6 +675,17 @@ mod tests {
         let mut f = small();
         assert_eq!(f.sectors_in_use(), 0);
         f.program(4096 * 2 + 5, &[0x00]).unwrap();
+        f.program(4096 * 3, &[0xFF]).unwrap();
         assert_eq!(f.sectors_in_use(), 1);
+        f.program(4096, &[0x00]).unwrap();
+        f.erase_sector(1).unwrap();
+        assert_eq!(f.sectors_in_use(), 1);
+        assert_eq!(f.peak_sectors_in_use(), 2);
+        f.reset_peak();
+        assert_eq!(f.peak_sectors_in_use(), 1);
+        assert_eq!(
+            f.sectors_in_use(),
+            (0..4).filter(|&s| !f.sector_is_blank(s)).count() as u32
+        );
     }
 }

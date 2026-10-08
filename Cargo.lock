@@ -6310,6 +6310,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-store-bench"
+version = "40.0.0"
+dependencies = [
+ "clap",
+ "lp-crc32",
+ "lp-nor-sim",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lp-ws281x"
 version = "0.1.0"
 
