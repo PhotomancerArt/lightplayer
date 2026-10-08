@@ -1799,7 +1799,11 @@ mod tests {
         client.pump(port.slot(RADIO_LINK_SLOTS));
         assert!(block(mux.receive()).unwrap().is_none());
         mux.dispatch_updates(|_| Some(Tier::Edit), || OpenTo::Nobody);
-        assert_eq!(take_updates(), vec![Seen::Pass], "a relayed link's is ignored");
+        assert_eq!(
+            take_updates(),
+            vec![Seen::Pass],
+            "a relayed link's is ignored"
+        );
         let _ = relayed;
     }
 
@@ -1958,10 +1962,7 @@ mod tests {
                 }
             )]
         );
-        assert_eq!(
-            mux.take_opened_links(),
-            vec![Link { id: link, trust }]
-        );
+        assert_eq!(mux.take_opened_links(), vec![Link { id: link, trust }]);
         block(mux.send(link, hello())).unwrap();
         client.pump(port.slot(index));
         assert!(client.next_on(CH_PROTO).is_some(), "the hello");

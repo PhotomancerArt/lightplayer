@@ -132,7 +132,10 @@ mod tests {
     fn update_mode_widens_the_receive_window_only() {
         let serve = lan_link_config_in(RadioLinkMode::Serve);
         let update = lan_link_config_in(RadioLinkMode::Update);
-        assert_eq!(std::format!("{serve:?}"), std::format!("{:?}", lan_link_config()));
+        assert_eq!(
+            std::format!("{serve:?}"),
+            std::format!("{:?}", lan_link_config())
+        );
         assert_eq!(serve.rx_window, LAN_WINDOW);
         assert_eq!(update.rx_window, LAN_UPDATE_RX_WINDOW);
         assert_eq!(update.validate(), Ok(()));

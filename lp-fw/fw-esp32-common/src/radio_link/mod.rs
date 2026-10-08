@@ -67,10 +67,10 @@ pub mod radio_update_channel;
 #[cfg(feature = "radio-link")]
 pub mod slot_edge;
 
-#[cfg(feature = "server")]
-pub use frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "radio-link")]
 pub use core_only_links::{CoreOnlyLinks, CoreOnlySession};
+#[cfg(feature = "server")]
+pub use frame_buf_holder::FrameBufHolder;
 #[cfg(feature = "radio-link")]
 pub use link_mux_transport::{
     LAN_WRITE_DEADLINE_MS, LOGIN_DEADLINE_MS, LinkMuxTransport, RADIO_WRITE_DEADLINE_MS, now_us,

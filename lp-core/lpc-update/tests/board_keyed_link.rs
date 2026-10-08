@@ -38,7 +38,10 @@ fn a_known_salt_is_answered_with_its_candidates_and_the_match_decides_the_tier()
         s.key_lookup(2, RADIO_2, &PLAY_SALT),
         CoreKeyAnswer::Keys(vec![link_psk(&play.k)])
     );
-    assert_eq!(s.key_authenticated(RADIO_2, 0), LinkTrust::Keyed(Tier::Play));
+    assert_eq!(
+        s.key_authenticated(RADIO_2, 0),
+        LinkTrust::Keyed(Tier::Play)
+    );
 
     // A candidate it never offered, or a link it never looked up, is no
     // grant.
@@ -141,7 +144,10 @@ fn a_play_key_queries_and_reads_back_and_an_edit_key_installs_a_core() {
     let g = read_back_request();
     let out = rig.deliver(2, RADIO, None, &g);
     assert!(
-        matches!(BoardMessage::decode(&out[0].bytes), Ok(BoardMessage::Data(_))),
+        matches!(
+            BoardMessage::decode(&out[0].bytes),
+            Ok(BoardMessage::Data(_))
+        ),
         "play reads back"
     );
 
@@ -149,10 +155,18 @@ fn a_play_key_queries_and_reads_back_and_an_edit_key_installs_a_core() {
     let mut rig = engineless_rig(access(OpenTo::Nobody), vec![x.clone(), y.clone()]);
     let up = keyed_up(&mut rig, RADIO, &PLAY_SALT);
     assert!(
-        matches!(BoardMessage::decode(&up[0].bytes), Ok(BoardMessage::Manifest(_))),
+        matches!(
+            BoardMessage::decode(&up[0].bytes),
+            Ok(BoardMessage::Manifest(_))
+        ),
         "M on up"
     );
-    let out = say(&mut rig, 3, RADIO, &HostMessage::Query { proto: 1 }.encode());
+    let out = say(
+        &mut rig,
+        3,
+        RADIO,
+        &HostMessage::Query { proto: 1 }.encode(),
+    );
     assert!(matches!(
         BoardMessage::decode(&out[0]),
         Ok(BoardMessage::Manifest(_))
@@ -165,7 +179,13 @@ fn a_play_key_queries_and_reads_back_and_an_edit_key_installs_a_core() {
     keyed_up(&mut rig, RADIO_2, &EDIT_SALT);
     let mut host = Host::new(y.clone());
     let mut now = 10;
-    exchange(&mut rig, &mut host, RADIO_2, offer_of(&y).encode(), &mut now);
+    exchange(
+        &mut rig,
+        &mut host,
+        RADIO_2,
+        offer_of(&y).encode(),
+        &mut now,
+    );
     assert!(host.refusals.is_empty(), "{:?}", host.refusals);
     assert!(rig.reset_pending, "the core committed");
 
@@ -259,11 +279,7 @@ fn session(rig: &mut BoardRig) -> &mut lpc_update::board::BoardSession {
 /// Look `salt` up on `link`, take its first candidate as the match (what
 /// the handshake would do), and bring the link up with the trust that
 /// gives; what the board said.
-fn keyed_up(
-    rig: &mut BoardRig,
-    link: LinkId,
-    salt: &[u8; 16],
-) -> Vec<lpc_update::board::Outgoing> {
+fn keyed_up(rig: &mut BoardRig, link: LinkId, salt: &[u8; 16]) -> Vec<lpc_update::board::Outgoing> {
     let s = session(rig);
     assert!(matches!(
         s.key_lookup(1, link, salt),

@@ -250,7 +250,10 @@ impl RadioLinkSlot {
     /// serve through the relay.
     #[cfg(feature = "wifi")]
     fn network_mode(&self, trust: LinkTrust) -> RadioLinkMode {
-        match (trust, RadioLinkMode::from_code(self.mode.load(Ordering::Acquire))) {
+        match (
+            trust,
+            RadioLinkMode::from_code(self.mode.load(Ordering::Acquire)),
+        ) {
             (LinkTrust::Keyed, Some(mode)) => mode,
             _ => RadioLinkMode::Serve,
         }

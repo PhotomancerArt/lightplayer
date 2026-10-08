@@ -30,9 +30,9 @@ use alloc::vec::Vec;
 
 use lp_link::{CH_UPDATE, LinkEvent};
 use lpc_shared::transport::LinkId as PortLinkId;
-use lpc_update::board::{LinkId, LinkTrust};
 #[cfg(feature = "wifi")]
 use lpc_update::board::CoreKeyAnswer;
+use lpc_update::board::{LinkId, LinkTrust};
 
 use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort};
 
@@ -217,7 +217,9 @@ fn answer_keys(
                 let answer = match session.key_lookup(session_link(id), &key_id.0) {
                     CoreKeyAnswer::Keys(psks) => KeyAnswer::Keys(psks),
                     CoreKeyAnswer::Unknown => {
-                        log::info!("[OTA] core-only: link {id} named a key this board does not hold");
+                        log::info!(
+                            "[OTA] core-only: link {id} named a key this board does not hold"
+                        );
                         KeyAnswer::Unknown
                     }
                     CoreKeyAnswer::Backoff { retry_after_ms } => {
@@ -376,13 +378,14 @@ mod tests {
         let mut right = board.connect(&key(Tier::Edit, EDIT_SALT));
         board.settle(&mut right);
         assert!(board.session.ups.is_empty());
-        let refused = core::iter::from_fn(|| right.link.poll_secure_event()).find_map(|e| match e {
-            SecureEvent::Refused {
-                reason,
-                retry_after_ms,
-            } => Some((reason, retry_after_ms)),
-            _ => None,
-        });
+        let refused =
+            core::iter::from_fn(|| right.link.poll_secure_event()).find_map(|e| match e {
+                SecureEvent::Refused {
+                    reason,
+                    retry_after_ms,
+                } => Some((reason, retry_after_ms)),
+                _ => None,
+            });
         let Some((RefusalReason::Backoff, wait)) = refused else {
             panic!("refused for backoff: {refused:?}");
         };
@@ -526,7 +529,10 @@ mod tests {
 
         fn disconnect(&mut self, client: &Client) {
             self.port.slot(RADIO_LINK_SLOTS).close_link(client.id);
-            block(self.port.announce(RadioLinkEvent::Closed { link: client.id }));
+            block(
+                self.port
+                    .announce(RadioLinkEvent::Closed { link: client.id }),
+            );
             self.links.pump(&mut self.session);
         }
 
