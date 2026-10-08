@@ -271,3 +271,16 @@ the rv32 or wasm32 graph.
 - Deduplicating HMAC-SHA256 between `lpc-access` and `secure_channel`.
 - A no-ARQ receiver drops what overflows its budget without a reset
   (`rx_no_room`), plain or secure; the first product no-ARQ link settles it.
+
+## Amendment (2026-10-08): M8's client key policy
+
+§8's M8 row is done (`2026-10-08-studio-network-links.md`, network transport
+PR C). Studio's `browser-websocket` provider runs the secure link to a
+board on the LAN (`lan:`) and through the relay (`relay:`). **On the LAN** a
+link presents the keys this browser holds, then keys typed for that board,
+then the anonymous key last; an anonymous link holds only what the board is
+open to, and the card says so ("Needs a device password"), so a locked board
+is never silently treated as unlocked. **Through the relay** a link presents
+held keys only (the account's, then the browser's): never the anonymous key,
+never a typed password. A walk that runs out is given up in words. There is
+no anonymous fallback over the relay.
