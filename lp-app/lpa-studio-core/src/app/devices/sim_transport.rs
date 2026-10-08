@@ -367,10 +367,15 @@ impl DeviceTransport for SimDeviceTransport {
                             .map_err(|error| error.to_string())?;
                     Ok(DeviceEffectFacts {
                         summary: match report.was_loaded {
-                            true => format!("removed {}", report.storage_id),
+                            true => format!(
+                                "removed {}{}",
+                                report.storage_id,
+                                report.boots_next_clause()
+                            ),
                             false => format!(
-                                "the sim reported nothing loaded; cleared {}",
-                                report.storage_id
+                                "the sim reported nothing loaded; cleared {}{}",
+                                report.storage_id,
+                                report.boots_next_clause()
                             ),
                         },
                         ..Default::default()
