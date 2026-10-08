@@ -22,6 +22,7 @@ pub mod session_output;
 pub mod transfer;
 pub mod transfer_owner;
 pub mod transfer_plan;
+pub mod trial_deadline;
 pub mod update_target;
 pub mod update_window;
 
@@ -30,4 +31,5 @@ pub use board_link::{LinkId, LinkTrust};
 pub use board_session::{BoardSession, TransferProgress};
 pub use core_key_lookup::CoreKeyAnswer;
 pub use session_output::{Effect, OWNER_QUIET_MS, Outgoing, SessionConfig};
+pub use trial_deadline::{TRIAL_HOST_DEADLINE_MS, TrialDeadline};
 pub use update_target::{BoardFacts, EngineStatus, FlashFault, SessionMode, UpdateTarget};

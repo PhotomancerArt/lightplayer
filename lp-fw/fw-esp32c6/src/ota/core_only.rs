@@ -38,12 +38,20 @@
 //! It sends no hello on any link: a host that only reads channel 1 still
 //! sees a board with no usable firmware and offers a USB update, which also
 //! fixes it.
+//!
+//! **A trial that hears from no host** (`lpc_update`'s `trial_deadline`): a
+//! trial core whose boot read a saved network with Wi-Fi on, and on which
+//! no host link comes up for three minutes, resets itself — a warm reset,
+//! which the loader reads as a failed trial and rolls back from. Without
+//! it, a house board whose new core cannot reach its network would wait for
+//! a cable.
 
 #[cfg(feature = "ble")]
 use fw_esp32_common::radio_link::CoreOnlyLinks;
 use fw_esp32_common::usb_link::UsbLinkShared;
 use lpc_update::board::{
     AccessFacts, EngineStatus, LinkTrust, OWNER_QUIET_MS, SessionConfig, SessionMode,
+    TRIAL_HOST_DEADLINE_MS, TrialDeadline,
 };
 use lpc_wire::lp_link::{CH_UPDATE, LinkEvent};
 
@@ -87,6 +95,8 @@ pub struct CoreOnly {
     pub entropy: fn(&mut [u8]),
     /// The update light, when the engine left a record this core can light.
     pub light: Option<StatusLight>,
+    /// The boot read a saved network with Wi-Fi on.
+    pub network_saved: bool,
 }
 
 /// The core-only loop. Never returns: every committed piece ends in a reset.
@@ -103,6 +113,7 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         usb_trust,
         entropy,
         mut light,
+        network_saved,
     } = ctx;
     let links = UpdateLinks {
         usb: usb_link,
@@ -156,6 +167,17 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
     #[cfg(feature = "ble")]
     let mut radio = CoreOnlyLinks::new(radio_port);
 
+    let mut deadline = TrialDeadline::new(
+        matches!(why, CoreOnlyReason::OnTrial),
+        network_saved,
+        embassy_time::Instant::now().as_millis(),
+    );
+    if deadline.armed() {
+        log::info!(
+            "[OTA] trial: a network is saved — a host has {} min to come up on a link",
+            TRIAL_HOST_DEADLINE_MS / 60_000
+        );
+    }
     let mut reset_at: Option<embassy_time::Instant> = None;
     loop {
         watchdog.feed(embassy_time::Instant::now().as_millis());
@@ -179,7 +201,10 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         for effect in edge.pump(&links) {
             touched = true;
             match effect {
-                EdgeEffect::ConfirmTrial => state.confirm(edge.target.flash()),
+                EdgeEffect::ConfirmTrial => {
+                    deadline.host_link_up();
+                    state.confirm(edge.target.flash());
+                }
                 EdgeEffect::Reset => {
                     // What the piece cost: the main stack's high-water mark
                     // (inflate's frames included, DM18) and the heap left
@@ -193,6 +218,15 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
                     reset_at = Some(embassy_time::Instant::now() + LOG_GRACE);
                 }
             }
+        }
+        if reset_at.is_none() && deadline.due(embassy_time::Instant::now().as_millis()) {
+            log::warn!(
+                "[OTA] trial: no host in {} min — giving the board back to its last good core",
+                TRIAL_HOST_DEADLINE_MS / 60_000
+            );
+            // A software reset: warm, so the loader fails the trial.
+            deadline.host_link_up();
+            reset_at = Some(embassy_time::Instant::now() + LOG_GRACE);
         }
         // The log lines above ride the link's best-effort log channel: give
         // them a moment to reach it, then the link task resets once the

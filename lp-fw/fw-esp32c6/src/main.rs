@@ -456,6 +456,10 @@ struct CoreBoot {
     boot_assessment: lp_recovery::BootAssessment,
     #[cfg(lp_split)]
     ota_state: ota::BootState,
+    /// The boot read a saved network with Wi-Fi on (`lp-net` joins one): a
+    /// trial core then waits only so long for a host (`ota::core_only`).
+    #[cfg(lp_split)]
+    network_saved: bool,
 }
 
 /// The core's half of the boot: the board, recovery and the watchdog, the
@@ -788,8 +792,14 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // Wi-Fi" holds from the first frame; the station never reads the file
     // itself (`net::station_probes`).
     #[cfg(lp_net)]
+    let network_file = lpa_server::network_store::read_network_file(base_fs.as_ref());
+    #[cfg(lp_net)]
+    let network_saved = network_file.wifi && !network_file.networks.is_empty();
+    #[cfg(not(lp_net))]
+    let network_saved = false;
+    #[cfg(lp_net)]
     {
-        let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
+        let file = network_file;
         net::station_probes::boot_settings(&file);
         // The relay's account entries, from the device store (Wi-Fi relay
         // plan P8); changes arrive through the server's `AccessChanged`.
@@ -834,6 +844,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         ))
     ))]
     let _ = net_radio;
+    #[cfg(not(lp_split))]
+    let _ = network_saved;
 
     CoreBoot {
         spawner,
@@ -861,6 +873,8 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         boot_assessment,
         #[cfg(lp_split)]
         ota_state,
+        #[cfg(lp_split)]
+        network_saved,
     }
 }
 
@@ -1519,6 +1533,7 @@ async fn split_boot(mut core: CoreBoot) {
                     usb_trust,
                     entropy: fill_random,
                     light,
+                    network_saved: core.network_saved,
                 })
                 .unwrap(),
             );
