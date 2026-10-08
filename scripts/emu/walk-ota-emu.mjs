@@ -753,7 +753,7 @@ async function main() {
   /// (`LP_CLOUD_FIRMWARE_UPSTREAM`, `LP_CLOUD_FIRMWARE_RELEASES_LIST`) on a
   /// `scripts/dev-port.sh` port. Studio is pointed at the server, so the
   /// index it reads is the route's own answer.
-  const startReleaseStore = async (releases) => {
+  const startReleaseStore = async (step, releases) => {
     const root = path.join(out, "release-upstream");
     const list = [];
     for (const [at, { dir, publishedAt, unlisted = false }] of releases.entries()) {
@@ -805,7 +805,9 @@ async function main() {
       server.listen(0, "127.0.0.1", () => resolve(server));
     });
     const upstreamOrigin = `http://127.0.0.1:${upstream.address().port}`;
-    const port = execFileSync("scripts/dev-port.sh", ["walk-ota-cloud"], { cwd: ROOT, encoding: "utf8" }).trim();
+    // One origin per step: each step serves its own list, and the browser
+    // keeps a list for a minute (max-age=60) across runs at one origin.
+    const port = execFileSync("scripts/dev-port.sh", [`walk-ota-cloud-${step}`], { cwd: ROOT, encoding: "utf8" }).trim();
     const origin = `http://127.0.0.1:${port}`;
     const log = path.join(out, "lp-cloud-server.log");
     const cloud = spawn(LP_CLOUD_SERVER, [], {
@@ -1107,7 +1109,7 @@ async function main() {
           if (TAB || BLE) throw new Error("install-older walks the door lane over ?emu= only");
           const r1 = JSON.parse(readFileSync(path.join(R1, "ota/ota-manifest.json"), "utf8"));
           const r2 = JSON.parse(readFileSync(path.join(R2, "ota/ota-manifest.json"), "utf8"));
-          const store = await startReleaseStore([
+          const store = await startReleaseStore(name, [
             { dir: R2, publishedAt: "2026-10-02T12:00:00Z" },
             { dir: R1, publishedAt: "2026-10-01T12:00:00Z" },
           ]);
@@ -1181,7 +1183,7 @@ async function main() {
           if (TAB || BLE) throw new Error("install-lookup walks the door lane over ?emu= only");
           const r1 = JSON.parse(readFileSync(path.join(R1, "ota/ota-manifest.json"), "utf8"));
           const r2 = JSON.parse(readFileSync(path.join(R2, "ota/ota-manifest.json"), "utf8"));
-          const store = await startReleaseStore([
+          const store = await startReleaseStore(name, [
             { dir: R2, publishedAt: "2026-10-02T12:00:00Z" },
             { dir: R1, publishedAt: "2026-10-01T12:00:00Z", unlisted: true },
           ]);
@@ -1242,7 +1244,7 @@ async function main() {
           const r1 = JSON.parse(readFileSync(path.join(R1, "ota/ota-manifest.json"), "utf8"));
           const r2 = JSON.parse(readFileSync(path.join(R2, "ota/ota-manifest.json"), "utf8"));
           // Only r2 in the store: r1 comes from its files alone.
-          const store = await startReleaseStore([{ dir: R2, publishedAt: "2026-10-02T12:00:00Z" }]);
+          const store = await startReleaseStore(name, [{ dir: R2, publishedAt: "2026-10-02T12:00:00Z" }]);
           try {
             await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
             await step(name, `on ${r2.version}: ${r1.version}'s ota files, picked with From a file…, are checked, listed and installed (armed)`, async () => {
