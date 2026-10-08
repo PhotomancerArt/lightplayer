@@ -28,7 +28,9 @@ use lpa_devices::{FirmwareAge, WireVersion};
 use lpa_update::HostBuildFacts;
 use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry};
 
-use super::device_update_route::{FIRST_BLUETOOTH_UPDATE_RELEASE, UpdateLink};
+use super::device_update_route::{
+    FIRST_BLUETOOTH_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE, UpdateLink,
+};
 use super::device_update_version::UpdateVersion;
 use super::store_lookups::StoreLookups;
 use super::update_build_facts::{StoreLatest, StoreReleases};
@@ -56,9 +58,11 @@ pub struct InstallChoice {
     /// The choice's wire protocol against this Studio's (`BoardOlder`: the
     /// choice speaks an older one); `None` when not known.
     pub wire: Option<WireVersion>,
-    /// Over Bluetooth, a version from before Bluetooth updates: after it,
-    /// the board needs a USB cable once to update again.
-    pub needs_usb_after: bool,
+    /// The wireless link this version can't be updated over again (it is
+    /// from before updates over that link): after it, the board needs
+    /// another way — a USB cable, or Bluetooth after Wi‑Fi — once. `None`
+    /// over USB, and for a version that keeps the link.
+    pub stranded_over: Option<UpdateLink>,
     /// When the release was published (RFC 3339), when the index says.
     pub published_at: Option<String>,
     /// Shown with nothing typed in the box.
@@ -192,7 +196,7 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
             let age = inputs.board.age_against(&f.version);
             let on_board = same_build(inputs.board, &f.version);
             InstallChoice {
-                needs_usb_after: needs_usb_after(inputs.link, &f.version, age),
+                stranded_over: stranded_over(inputs.link, &f.version, age),
                 refused: inputs.refused.is_some_and(|r| same_build(r, &f.version)),
                 wire: match f.own {
                     true => Some(WireVersion::Match),
@@ -272,22 +276,28 @@ fn same_build(a: &UpdateVersion, b: &UpdateVersion) -> bool {
         }
 }
 
-/// Over Bluetooth, whether `choice` predates Bluetooth updates
-/// ([`FIRST_BLUETOOTH_UPDATE_RELEASE`]); while no release is named, any
-/// choice older than the board's (`age` is the board against it).
-fn needs_usb_after(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> bool {
-    needs_usb_after_with(FIRST_BLUETOOTH_UPDATE_RELEASE, link, choice, age)
+/// Over a wireless link, `link` when `choice` predates updates over it
+/// ([`FIRST_BLUETOOTH_UPDATE_RELEASE`], [`FIRST_WIFI_UPDATE_RELEASE`]);
+/// while no release is named, any choice older than the board's (`age` is
+/// the board against it).
+fn stranded_over(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> Option<UpdateLink> {
+    let first = match link {
+        UpdateLink::Usb => return None,
+        UpdateLink::Bluetooth => FIRST_BLUETOOTH_UPDATE_RELEASE,
+        UpdateLink::Wifi => FIRST_WIFI_UPDATE_RELEASE,
+    };
+    needs_usb_after_with(first, link, choice, age).then_some(link)
 }
 
-/// [`needs_usb_after`] with the first release as a parameter, so both
-/// readings are tested.
+/// Whether [`stranded_over`] holds, with the first release as a parameter,
+/// so both readings are tested.
 fn needs_usb_after_with(
     first: Option<&str>,
     link: UpdateLink,
     choice: &UpdateVersion,
     age: FirmwareAge,
 ) -> bool {
-    if link != UpdateLink::Bluetooth {
+    if !link.is_wireless() {
         return false;
     }
     match first {
@@ -425,6 +435,23 @@ mod tests {
                 FirmwareAge::Newer
             ));
         }
+    }
+
+    /// Over Wi‑Fi no release is named yet: every choice older than the
+    /// board's warns, and a newer one does not.
+    #[test]
+    fn over_wifi_every_older_version_is_stranded_until_a_release_is_named() {
+        let any = UpdateVersion::new("2026.10.06-9");
+        assert_eq!(FIRST_WIFI_UPDATE_RELEASE, None);
+        assert_eq!(
+            stranded_over(UpdateLink::Wifi, &any, FirmwareAge::Newer),
+            Some(UpdateLink::Wifi)
+        );
+        assert_eq!(
+            stranded_over(UpdateLink::Wifi, &any, FirmwareAge::Older),
+            None
+        );
+        assert_eq!(stranded_over(UpdateLink::Usb, &any, FirmwareAge::Newer), None);
     }
 
     #[test]

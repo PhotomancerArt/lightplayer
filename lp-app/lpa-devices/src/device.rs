@@ -516,13 +516,14 @@ impl Device {
             return Vec::new();
         }
         let effect_id = self.mint_effect_id();
-        // A Bluetooth link reconnects by itself (the provider's own loop):
-        // between legs the activity only waits for it.
+        // A Bluetooth link and a LAN link reconnect by themselves (each
+        // provider's own loop): between legs the activity only waits for
+        // them, and opens the new link the loop attaches.
         let reconnects_itself = self
             .identity
             .endpoint
             .as_ref()
-            .is_some_and(|endpoint| endpoint.is_bluetooth());
+            .is_some_and(|endpoint| endpoint.is_bluetooth() || endpoint.is_lan());
         let mut reducer = UpdateActivity::new(self.id, intent.clone(), reconnects_itself);
         let commands = {
             let activity_ctx = ActivityCtx {

@@ -22,6 +22,7 @@
 //! | `ContinueUpdate` | — | `Finishing` (starts itself) |
 //! | `Busy` | — | `AnotherDevice` |
 //! | `NeedsUsb` | — | `NeedsUsbOnce` |
+//! | over Wi‑Fi, the last update heard nothing on the update channel | — | `NotOverWifiYet` |
 //! | `ReportCrashing` | — | `KeepsCrashing` |
 //! | `RefusedBuild` | — | `RolledBack` |
 //! | `BoardIsNewer` | — | `Newer` |
@@ -163,12 +164,20 @@ pub enum UpdateStanding {
         board: UpdateVersion,
         to: UpdateVersion,
     },
-    /// Over Bluetooth, the board could update, but this Studio's build
-    /// cannot be installed over the air (a single image, or a build with no
-    /// update files): nothing to install from here. Read by
+    /// Over Bluetooth or Wi‑Fi (`link`), the board could update, but this
+    /// Studio's build cannot be installed over the air (a single image, or a
+    /// build with no update files): nothing to install from here. Read by
     /// [`super::UpdateOfferFacts::read`] off the route, never by
     /// [`update_standing`].
-    NoWirelessBuild { board: UpdateVersion },
+    NoWirelessBuild {
+        board: UpdateVersion,
+        link: UpdateLink,
+    },
+    /// Over Wi‑Fi, the board's firmware is from before updates over Wi‑Fi:
+    /// it announced the update channel, then said nothing on it when asked
+    /// (the last update ended [`UpdateOutcomeFacts::NotOverWifi`]). It
+    /// updates over USB or Bluetooth until it has been updated once.
+    NotOverWifiYet { board: UpdateVersion },
 }
 
 impl UpdateStanding {
@@ -189,7 +198,8 @@ impl UpdateStanding {
             | Self::RolledBack { board, .. }
             | Self::Newer { board, .. }
             | Self::PlayOnly { board, .. }
-            | Self::NoWirelessBuild { board } => Some(board),
+            | Self::NoWirelessBuild { board, .. }
+            | Self::NotOverWifiYet { board } => Some(board),
         }
     }
 
@@ -298,6 +308,15 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
                 percent,
             },
         };
+    }
+
+    // Over Wi‑Fi, a board that announced the update channel and then said
+    // nothing on it: nothing more is offered there that would only hang.
+    if inputs.link == UpdateLink::Wifi
+        && inputs.view.last_update_outcome == Some(UpdateOutcomeFacts::NotOverWifi)
+        && let Some(board) = board_version.clone()
+    {
+        return UpdateStanding::NotOverWifiYet { board };
     }
 
     let (Some(decision), Some(board), Some(own), Some(board_view)) =

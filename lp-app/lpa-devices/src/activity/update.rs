@@ -137,7 +137,7 @@ enum UpdatePhase {
 pub struct UpdateActivity {
     device: DeviceId,
     intent: UpdateIntentFacts,
-    /// The link reconnects by itself (Bluetooth): the gap only waits, and
+    /// The link reconnects by itself (Bluetooth, the LAN): the gap only waits, and
     /// never sends an open that would fight the provider's own loop.
     reconnects_itself: bool,
     phase: UpdatePhase,
