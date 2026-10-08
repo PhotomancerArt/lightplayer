@@ -9,6 +9,9 @@
 //! (what `decide()` says and what is running), and the store's facts only
 //! widen what the card offers.
 //!
+//! - **A custom build picked from files** ("From a file…") is listed first,
+//!   marked as from a file; it stands in for a listed version of the same
+//!   name (the person picked those files on purpose).
 //! - **Only the board's target.** The index is per target and must name the
 //!   board's; this Studio's own build and `latest` are listed only when
 //!   built for it.
@@ -48,6 +51,8 @@ pub struct InstallChoice {
     pub refused: bool,
     /// This Studio's own build.
     pub own: bool,
+    /// The custom build picked from files ("From a file…").
+    pub from_file: bool,
     /// The choice's wire protocol against this Studio's (`BoardOlder`: the
     /// choice speaks an older one); `None` when not known.
     pub wire: Option<WireVersion>,
@@ -106,6 +111,8 @@ pub struct InstallChoiceInputs<'a> {
     pub store_releases: Option<&'a StoreReleases>,
     /// The releases looked up by exact version.
     pub store_lookups: Option<&'a StoreLookups>,
+    /// The custom build picked from files.
+    pub file_build: Option<&'a HostBuildFacts>,
     /// The link the install would ride.
     pub link: UpdateLink,
     /// This Studio's wire protocol version (`lpc_wire::WIRE_PROTO_VERSION`).
@@ -162,7 +169,21 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
             None => found.push(own),
         }
     }
-    found.sort_by(|a, b| order(&a.version, &b.version));
+    if let Some(file) = inputs
+        .file_build
+        .filter(|file| file.identity.target == inputs.target)
+    {
+        found.retain(|f| f.version.version != file.identity.version);
+        found.push(Found {
+            from_file: true,
+            ..Found::of_build(file, false)
+        });
+    }
+    found.sort_by(|a, b| {
+        b.from_file
+            .cmp(&a.from_file)
+            .then(order(&a.version, &b.version))
+    });
 
     found
         .into_iter()
@@ -179,9 +200,10 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
                         .wire_proto
                         .map(|proto| WireVersion::compare(proto, inputs.studio_wire_proto)),
                 },
-                recent: at < RECENT_CHOICES || f.own || on_board,
+                recent: at < RECENT_CHOICES || f.own || f.from_file || on_board,
                 on_board,
                 own: f.own,
+                from_file: f.from_file,
                 published_at: f.published_at,
                 version: f.version,
                 age,
@@ -194,6 +216,7 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
 struct Found {
     version: UpdateVersion,
     own: bool,
+    from_file: bool,
     wire_proto: Option<u32>,
     published_at: Option<String>,
 }
@@ -203,6 +226,7 @@ impl Found {
         Self {
             version: UpdateVersion::with_build_id(&entry.version, entry.build_id()),
             own: false,
+            from_file: false,
             wire_proto: Some(entry.wire_proto),
             published_at: entry.published_at.clone(),
         }
@@ -215,6 +239,7 @@ impl Found {
                 &build.identity.build_id,
             ),
             own,
+            from_file: false,
             wire_proto: Some(build.identity.wire_proto),
             published_at: None,
         }
@@ -454,6 +479,23 @@ mod tests {
     }
 
     #[test]
+    fn a_build_from_files_leads_and_stands_in_for_its_version() {
+        let releases = releases(&["2026.10.06-10", "2026.10.05-2"]);
+        let board = UpdateVersion::new("2026.10.03-1");
+        let file = crate::app::devices::device_update_fixtures::file_build("2026.10.06-10");
+        let mut picked = inputs(&board, None, Some(&releases));
+        picked.file_build = Some(&file);
+        let choices = install_choices(&picked);
+        assert_eq!(versions(&choices), ["2026.10.06-10", "2026.10.05-2"]);
+        assert!(choices[0].from_file && choices[0].recent);
+        assert!(!choices[1].from_file);
+        let mut other_target = file.clone();
+        other_target.identity.target = "esp32s3-8mb".into();
+        picked.file_build = Some(&other_target);
+        assert!(install_choices(&picked).iter().all(|c| !c.from_file));
+    }
+
+    #[test]
     fn the_refused_build_is_marked() {
         let releases = releases(&["2026.10.06-10", "2026.10.05-2"]);
         let board = UpdateVersion::new("2026.10.03-1");
@@ -478,6 +520,7 @@ mod tests {
             store_latest: None,
             store_releases: releases,
             store_lookups: None,
+            file_build: None,
             link: UpdateLink::Usb,
             studio_wire_proto: PROTO,
         }

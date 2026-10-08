@@ -6,6 +6,7 @@
 //! |---|---|---|---|
 //! | Update available | `update-firmware` | `Update` (another build: `Install Y`) | Routine |
 //! | Up to date, Update available, Newer, Rolled back, Keeps crashing | `install-firmware` | `Other version…` (a `find` box over a `version` choice; the press reads `Install`) | per choice: Routine only when known newer |
+//! | Wherever `Other version…` opens its list | `install-firmware-file` | `From a file…` (the web's file picker; the build joins the list) | needs a real click; the install arms |
 //! | Keeps crashing | `reinstall-firmware` | `Reinstall` | Routine |
 //! | A version Studio can't get | `install-firmware` | `Install Y` (one press with one version, else the same choice) | per choice, as above |
 //! | Backing up | `cancel` | the activity's own Cancel ([`super::device_offers`]) | Routine |
@@ -29,7 +30,11 @@
 //! and a whole version names one. A whole release version the list does not
 //! hold binds the press to "Look up <version>" ([`FirmwareLookupOp`]); once
 //! the store answers, the version is a choice like any other, and the same
-//! press installs it. It is offered when at least one choice can be picked,
+//! press installs it. **"From a file…"** (`install-firmware-file`, beside it
+//! wherever the list opens) picks a custom build's update files; once core
+//! has checked them ([`super::firmware_file_build`]) the build leads the
+//! list, and its install is always Lasting, with copy that says it is a
+//! custom build from files. It is offered when at least one choice can be picked,
 //! and always shows its list — never a blind one-press install. The chip
 //! reads "Other version…", its press "Install". Each choice binds at its
 //! own level: **Routine** only when it is known newer than the board's,
@@ -56,6 +61,7 @@ use super::device_update_route::{UpdateLink, UpdateRoute, update_route};
 use super::device_update_standing::{UpdateStanding, UpdateStandingInputs, update_standing};
 use super::device_update_version::UpdateVersion;
 use super::devices_op::DevicesOp;
+use super::firmware_file_build::FirmwareFileOp;
 use super::firmware_lookup_op::FirmwareLookupOp;
 use super::install_choice::{InstallChoice, InstallChoiceInputs, index_for, install_choices};
 use super::store_lookups::StoreLookup;
@@ -183,6 +189,7 @@ impl UpdateOfferFacts {
                     store_latest: inputs.store_latest,
                     store_releases: inputs.store_releases,
                     store_lookups: inputs.store_lookups,
+                    file_build: inputs.file_build,
                     link: inputs.link,
                     studio_wire_proto: lpc_wire::WIRE_PROTO_VERSION,
                 });
@@ -303,7 +310,17 @@ pub fn update_offers(
     };
     if let Some(offer) = install.and_then(|install| install.offer(at("install-firmware"), blocked))
     {
+        // Where the list opens, a custom build can be picked from files
+        // too (the web draws it in the list's panel).
+        let lists = !offer.params().is_empty();
         set.offers.push(offer);
+        if lists {
+            set.offers.push(UiOffer::new(
+                at("install-firmware-file"),
+                "upload",
+                gate(FirmwareFileOp::action_for(device), blocked),
+            ));
+        }
     }
     set
 }
@@ -503,6 +520,9 @@ fn choice_option(choice: &InstallChoice) -> OfferChoice {
     if choice.own {
         detail.push("this Studio's build".to_string());
     }
+    if choice.from_file {
+        detail.push("from your files".to_string());
+    }
     if let Some(date) = date_line(choice) {
         detail.push(date);
     }
@@ -568,7 +588,10 @@ fn warning(choice: &InstallChoice) -> Option<&'static str> {
 /// An install of `choice` on a board running `board`, at the choice's own
 /// level (see the module docs).
 fn bind_choice(device: DeviceId, board: &UpdateVersion, choice: &InstallChoice) -> UiAction {
-    let action = install_action(device, &choice.version.version, choice.is_older());
+    // A build from files has no order the host can trust: `decide()` may
+    // take it whichever way it compares.
+    let allow_downgrade = choice.is_older() || choice.from_file;
+    let action = install_action(device, &choice.version.version, allow_downgrade);
     match install_confirmation(board, choice) {
         Some(copy) => action.lasting(copy),
         None => action,
@@ -585,10 +608,19 @@ fn install_confirmation(
 ) -> Option<ActionConfirmation> {
     let version = choice.version.long();
     let older_wire = choice.speaks_older_wire();
-    if choice.is_known_newer() && !older_wire && !choice.needs_usb_after {
+    if choice.is_known_newer() && !older_wire && !choice.needs_usb_after && !choice.from_file {
         return None;
     }
-    let (title, mut message) = if choice.is_older() {
+    let (title, mut message) = if choice.from_file {
+        (
+            "Install a custom build?".to_string(),
+            format!(
+                "{version} is a custom build from files on this computer, not a release from the \
+                 store: Studio checked the files against their manifest, but not where they came \
+                 from, and it may not read the board's project."
+            ),
+        )
+    } else if choice.is_older() {
         (
             "Install an older version?".to_string(),
             format!(
@@ -1193,6 +1225,62 @@ mod tests {
         assert!(other.press(&args("2026.10.05-2")).is_err());
     }
 
+    /// "From a file…" sits beside the list, for the user's own click; the
+    /// build it reads leads the list, picked, and always arms with copy
+    /// that says it is a custom build — even one named like a newer release.
+    #[test]
+    fn a_build_from_files_leads_the_list_and_always_arms() {
+        let plain = fixture(UpdateFixtureRow::UpToDate);
+        let set = update_offers(&plain.view, &plain.offer_facts(), &prefix());
+        let file = set
+            .offers
+            .iter()
+            .find(|o| o.path.last() == Some("install-firmware-file"))
+            .expect("From a file… beside the list");
+        assert_eq!(file.label(), "From a file…");
+        assert!(file.action.meta().needs_user_activation, "the user's click");
+        assert!(
+            file.consequence().is_routine(),
+            "picking files changes nothing"
+        );
+
+        let picked = fixture(UpdateFixtureRow::UpToDate).with_file_build("9c1e4b7a2");
+        let other = install_of(&picked);
+        let (options, preselect) = choice_param(&other);
+        assert_eq!(options[0].value, "9c1e4b7a2");
+        assert_eq!(options[0].detail.as_deref(), Some("from your files"));
+        assert_eq!(preselect.as_deref(), Some("9c1e4b7a2"), "just picked");
+        let copy = lasting(&press(&other, "9c1e4b7a2"));
+        assert_eq!(copy.title, "Install a custom build?");
+        assert!(
+            copy.message
+                .starts_with("dev build 9c1e4b7 is a custom build from files on this computer"),
+            "{}",
+            copy.message
+        );
+        assert_eq!(
+            bound_intent(&other, &args("9c1e4b7a2")),
+            UpdateIntentFacts::Install {
+                version: "9c1e4b7a2".to_string(),
+                allow_downgrade: true
+            }
+        );
+
+        // Named like a newer release, and standing in for the store's: still
+        // a custom build.
+        let named = fixture(UpdateFixtureRow::UpToDate).with_file_build("2026.10.07-4");
+        let other = install_of(&named);
+        let (options, _) = choice_param(&other);
+        assert_eq!(
+            options.iter().filter(|o| o.value == "2026.10.07-4").count(),
+            1
+        );
+        assert_eq!(
+            lasting(&press(&other, "2026.10.07-4")).title,
+            "Install a custom build?"
+        );
+    }
+
     /// A release on a dev board (or a dev build on a released one) does not
     /// order: it arms, and is not a downgrade.
     #[test]
@@ -1251,7 +1339,8 @@ mod tests {
             (
                 vec![
                     ("reinstall-firmware".to_string(), false),
-                    ("install-firmware".to_string(), false)
+                    ("install-firmware".to_string(), false),
+                    ("install-firmware-file".to_string(), false)
                 ],
                 false,
                 false

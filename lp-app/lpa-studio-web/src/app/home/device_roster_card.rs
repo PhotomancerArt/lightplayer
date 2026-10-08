@@ -128,10 +128,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ActionEnablement, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
-    RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind, UiOffer, UiPackageCard,
-    UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind,
-    check_backup_file, device_firmware_line, device_identity_line, device_restore_from_file_action,
-    device_status_kind, escape_verb, firmware_face_preview_sentence, pending_firmware_line,
+    PickedFirmwareFile, RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind,
+    UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight,
+    UpdateRowKind, check_backup_file, device_firmware_line, device_identity_line,
+    device_restore_from_file_action, device_status_kind, escape_verb,
+    firmware_face_preview_sentence, firmware_file_action, pending_firmware_line,
     pending_identity_rows,
 };
 
@@ -838,6 +839,13 @@ pub(crate) fn DeviceRosterCard(
                                     OfferChoicePopover {
                                         offer: install,
                                         preview: install_picker_preview.clone(),
+                                        // "From a file…": a custom build's
+                                        // files, under the list.
+                                        footer: verb("install-firmware-file").map(|file| rsx! {
+                                            AgentMark { path: file.path.clone(),
+                                                FirmwareFileButton { device, offer: file, on_action }
+                                            }
+                                        }),
                                         on_action,
                                     }
                                 }
@@ -1222,6 +1230,10 @@ pub(crate) struct OfferPickerPreview {
 fn OfferChoicePopover(
     offer: UiOffer,
     #[props(default)] preview: Option<OfferPickerPreview>,
+    /// Drawn under the press: another way to the same verb (an install's
+    /// "From a file…").
+    #[props(default)]
+    footer: Option<Element>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let initial = preview.as_ref().map(|p| p.args.clone()).unwrap_or_default();
@@ -1255,7 +1267,12 @@ fn OfferChoicePopover(
                         p { class: "tw:m-0", "{copy.message}" }
                     }
                 }
-                div { class: "tw:flex tw:min-w-0 tw:justify-end",
+                div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-2",
+                    if let Some(footer) = footer {
+                        {footer}
+                    } else {
+                        span {}
+                    }
                     OfferPressButton {
                         offer,
                         args: current,
@@ -1268,6 +1285,67 @@ fn OfferChoicePopover(
         }
     }
 }
+
+/// "From a file…" (`install-firmware-file`): a quiet button in the offer's
+/// own words, paired with a hidden multi-file input — a file dialog cannot
+/// be a [`UiAction`], the same reasoning as [`RestoreFromFileButton`].
+/// Core's offer exists so the app agent can see this is possible
+/// (`needs_user_activation`); picking files reads their bytes and hands them
+/// to core ([`firmware_file_action`]), which checks them against their
+/// manifest and lists the build — or says why not.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FirmwareFileButton(
+    device: DeviceId,
+    offer: UiOffer,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let input_id = format!("firmware-file-{}", device.0);
+    let disabled = !offer.is_enabled();
+    rsx! {
+        button {
+            class: FIRMWARE_FILE_BUTTON_CLASS,
+            r#type: "button",
+            disabled,
+            title: "{offer.summary()}",
+            onclick: {
+                let input_id = input_id.clone();
+                move |_| open_restore_from_file_picker(&input_id)
+            },
+            "{offer.label()}"
+        }
+        input {
+            class: "tw:hidden",
+            id: "{input_id}",
+            r#type: "file",
+            multiple: true,
+            accept: ".json,.bin,.z",
+            onchange: move |event| {
+                let files = event.files();
+                spawn(async move {
+                    let mut picked = Vec::new();
+                    for file in files {
+                        let name = file.name();
+                        match file.read_bytes().await {
+                            Ok(bytes) => picked.push(PickedFirmwareFile { name, bytes: bytes.to_vec() }),
+                            Err(error) => {
+                                log::warn!("from a file: could not read {name}: {error}");
+                                say(&format!("{name} could not be read"));
+                                return;
+                            }
+                        }
+                    }
+                    if !picked.is_empty() {
+                        on_action.call(firmware_file_action(device, picked));
+                    }
+                });
+            },
+        }
+    }
+}
+
+/// "From a file…": a text button, quieter than the press beside it.
+const FIRMWARE_FILE_BUTTON_CLASS: &str = "tw:shrink-0 tw:whitespace-nowrap tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-0 tw:py-1.5 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60";
 
 /// What a Lasting pick changes, in core's words: wraps, never clips, at the
 /// panel's width.

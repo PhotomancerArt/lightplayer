@@ -570,6 +570,7 @@ mod tests {
                     on_board: false,
                     refused: false,
                     own: false,
+                    from_file: false,
                     wire: None,
                     needs_usb_after: false,
                     published_at: None,
@@ -591,6 +592,7 @@ mod tests {
             [
                 "reinstall-firmware",
                 "install-firmware",
+                "install-firmware-file",
                 "identify",
                 "reset-board",
                 "disconnect",

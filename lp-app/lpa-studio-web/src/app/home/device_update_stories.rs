@@ -159,7 +159,7 @@ fn device_card_update_play_only() -> Element {
 // --- "Other version…": the picker over the store's release index ----------
 
 #[story(
-    description = "Other version… open on an up-to-date board: a box to find or type a version above the store's newest five releases, newest first (version in mono, its publish time), the board's own drawn but not pickable (\"On this board now\"). The newest is picked, and its press reads Install: one click (Routine: newer than the board's)."
+    description = "Other version… open on an up-to-date board: a box to find or type a version above the store's newest five releases, newest first (version in mono, its publish time), the board's own drawn but not pickable (\"On this board now\"). The newest is picked, and its press reads Install: one click (Routine: newer than the board's). From a file… beside the press picks a custom build's files."
 )]
 fn device_card_update_other_version_picker() -> Element {
     update_picker(
@@ -223,6 +223,18 @@ fn device_card_update_other_version_picker_lookup_found() -> Element {
         UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb))
             .looked_up("2026.09.30-2", looked_up_release("2026.09.30-2")),
         OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.30-2"),
+        true,
+    )
+}
+
+#[story(
+    description = "After \"From a file…\": a custom build's update files picked from this computer (its ota-manifest.json, core.bin and engine.bin), checked by core against their manifest. The build leads the list, \"from your files\", picked; its install always arms, and the copy says it is a custom build that no store vouches for."
+)]
+fn device_card_update_other_version_picker_from_file() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb))
+            .with_file_build("9c1e4b7a2"),
+        OfferArgs::new(),
         true,
     )
 }

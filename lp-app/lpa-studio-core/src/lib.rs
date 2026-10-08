@@ -52,7 +52,7 @@ pub use app::devices::BrowserSerialTransport;
 pub use app::devices::BrowserSimLinkSource;
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
-    UpdateFixture, UpdateFixtureRow, looked_up_release,
+    UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
 };
 pub use app::devices::{
     AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource,
@@ -97,12 +97,13 @@ pub use app::devices::{
 };
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
-    FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareLookupOp, INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE,
-    INSTALL_PRESS_LABEL, INSTALL_VERSION_PARAM, InstallChoice, RECENT_CHOICES, StoreLatest,
-    StoreLookup, StoreLookups, StoreReleases, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate,
-    UiSessionUpdate, UpdateBuildFacts, UpdateLight, UpdateLink, UpdateOfferFacts, UpdateOffers,
-    UpdateProgress, UpdateRoute, UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding,
-    UpdateStandingInputs, UpdateVersion, UpdateVersionDisplay, update_offers, update_route,
+    FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
+    INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_PRESS_LABEL, INSTALL_VERSION_PARAM,
+    InstallChoice, PickedFirmwareFile, RECENT_CHOICES, StoreLatest, StoreLookup, StoreLookups,
+    StoreReleases, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate, UpdateBuildFacts,
+    UpdateLight, UpdateLink, UpdateOfferFacts, UpdateOffers, UpdateProgress, UpdateRoute,
+    UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs,
+    UpdateVersion, UpdateVersionDisplay, firmware_file_action, update_offers, update_route,
     update_session_words, update_standing, update_words, wants_auto_start,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};

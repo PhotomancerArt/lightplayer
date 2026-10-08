@@ -70,6 +70,9 @@ pub struct UpdateStandingInputs<'a> {
     /// The releases looked up by exact version, when any were. Like the
     /// index, read only by the card's version choices.
     pub store_lookups: Option<&'a StoreLookups>,
+    /// The custom build picked from files ("From a file…"), when one is.
+    /// Read only by the card's version choices.
+    pub file_build: Option<&'a HostBuildFacts>,
 }
 
 /// Where a board stands. See the module docs for which row is which.
@@ -633,6 +636,7 @@ pub(crate) mod tests {
             store_latest: None,
             store_releases: None,
             store_lookups: None,
+            file_build: None,
         }
     }
 

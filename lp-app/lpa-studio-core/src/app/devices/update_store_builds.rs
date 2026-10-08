@@ -167,6 +167,19 @@ pub(crate) async fn store_engine(
     }
 }
 
+/// A build from a manifest and its pieces, already checked against it (a
+/// build picked from files, [`super::firmware_file_build`]), or why it
+/// cannot be served.
+pub(crate) fn host_build_from_parts(
+    manifest: &OtaManifest,
+    core: Vec<u8>,
+    engine: Vec<u8>,
+    core_z: Option<EncodedPiece>,
+    engine_z: Option<EncodedPiece>,
+) -> Result<HostBuild, String> {
+    build_from_parts(manifest, core, engine, core_z, engine_z).map_err(|miss| miss.why)
+}
+
 /// A build from a manifest and its verified pieces, the `.z` streams kept
 /// only when they describe their pieces.
 fn build_from_parts(

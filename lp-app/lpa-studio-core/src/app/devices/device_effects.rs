@@ -370,6 +370,13 @@ impl DeviceEffects {
         self.update.want_store_lookup(target, version);
     }
 
+    /// Hold the custom build picked from files: an install of its version
+    /// serves it (until another is picked).
+    pub(crate) fn hold_file_build(&mut self, build: lpa_update::HostBuild) {
+        self.refresh_update_seams();
+        self.update.hold_file_build(build);
+    }
+
     /// Every look-up asked of the store, and where each stands.
     pub(crate) fn store_lookups(&self) -> super::StoreLookups {
         self.update.store_lookups()

@@ -67,6 +67,7 @@ pub struct UpdateBuildFacts {
     store_latest: Option<StoreLatest>,
     store_releases: Option<StoreReleases>,
     store_lookups: StoreLookups,
+    file_build: Option<HostBuildFacts>,
 }
 
 impl UpdateBuildFacts {
@@ -88,6 +89,16 @@ impl UpdateBuildFacts {
     /// The releases looked up by exact version, and where each stands.
     pub fn store_lookups(&self) -> &StoreLookups {
         &self.store_lookups
+    }
+
+    /// The custom build picked from files ("From a file…"), by its facts.
+    pub fn file_build(&self) -> Option<&HostBuildFacts> {
+        self.file_build.as_ref()
+    }
+
+    /// Install (or clear) the custom build picked from files.
+    pub fn set_file_build(&mut self, build: Option<HostBuildFacts>) {
+        self.file_build = build;
     }
 
     /// Install the look-ups as the update host holds them.

@@ -25,7 +25,10 @@ use lpa_devices::{
 };
 use lpa_update::{HostBuildFacts, HostIdentity, HostPieceFacts};
 use lpc_access::Tier;
-use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry, Requires, TargetName};
+use lpc_firmware_release::{
+    OtaManifest, PackageRef, PieceFile, ReleaseIndex, ReleaseIndexEntry, Requires, TargetName,
+    sha256_hex,
+};
 use lpc_update::{BoardManifest, BoardState, PieceKind, TransferView, sha256_to_hex};
 
 use super::device_identity::device_chip;
@@ -35,6 +38,7 @@ use super::device_update_standing::UpdateStandingInputs;
 use super::device_update_words::{
     UiDeviceUpdate, UiSessionUpdate, update_session_words, update_words,
 };
+use super::firmware_file_build::{PickedFirmwareFile, read_firmware_files};
 use super::store_lookups::{StoreLookup, StoreLookups};
 use super::update_build_facts::StoreReleases;
 
@@ -115,6 +119,8 @@ pub struct UpdateFixture {
     pub releases: Option<StoreReleases>,
     /// Releases looked up by exact version ([`Self::looked_up`]).
     pub lookups: StoreLookups,
+    /// A custom build picked from files ([`Self::with_file_build`]).
+    pub file: Option<HostBuildFacts>,
 }
 
 impl UpdateFixture {
@@ -188,7 +194,14 @@ impl UpdateFixture {
                 index: release_index(),
             }),
             lookups: StoreLookups::default(),
+            file: None,
         }
+    }
+
+    /// The same board, with the custom build `version` picked from files.
+    pub fn with_file_build(mut self, version: &str) -> Self {
+        self.file = Some(file_build(version));
+        self
     }
 
     /// The same board, after the box looked up `version` and the store
@@ -220,6 +233,7 @@ impl UpdateFixture {
             store_latest: None,
             store_releases: self.releases.as_ref(),
             store_lookups: Some(&self.lookups),
+            file_build: self.file.as_ref(),
         }
     }
 
@@ -504,6 +518,70 @@ pub fn looked_up_release(version: &str) -> StoreLookup {
         },
         published_at: None,
     })
+}
+
+/// `len` bytes of a piece, from `seed`: what a build picked from files
+/// carries in the stories and tests.
+pub fn piece_bytes(seed: u8, len: usize) -> Vec<u8> {
+    (0..len)
+        .map(|at| seed.wrapping_add((at % 251) as u8))
+        .collect()
+}
+
+/// The `ota-manifest.json` of a build at `version` with these pieces, as
+/// `lp-cli firmware package` writes it into a build's `ota/` folder (no
+/// encodings).
+pub fn ota_manifest_for(version: &str, core: &[u8], engine: &[u8]) -> OtaManifest {
+    let piece = |file: &str, bytes: &[u8]| PieceFile {
+        file: file.to_string(),
+        length: bytes.len() as u64,
+        sha256: sha256_hex(bytes),
+    };
+    let manifest = OtaManifest {
+        format: 1,
+        target: "esp32c6-4mb".to_string(),
+        chip: "esp32c6".to_string(),
+        version: version.to_string(),
+        commit: format!("{}{}", commit_for(version), "0".repeat(28)),
+        wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+        requires: Requires {
+            layout: 1,
+            loader: 1,
+        },
+        core: piece("core.bin", core),
+        engine: piece("engine.bin", engine),
+        encodings: Vec::new(),
+        package: PackageRef {
+            file: "package.json".to_string(),
+            length: 2,
+            sha256: sha256_hex(b"{}"),
+            image: piece("fw-esp32c6-merged.bin", b"image"),
+        },
+    };
+    manifest.validate().expect("a valid manifest");
+    manifest
+}
+
+/// A custom build `version` read from its files, as "From a file…" holds
+/// it.
+pub fn file_build(version: &str) -> HostBuildFacts {
+    let core = piece_bytes(0xC0, 4096 + 7);
+    let engine = piece_bytes(0xE0, 2 * 4096 + 9);
+    let manifest = ota_manifest_for(version, &core, &engine);
+    let files = [
+        ("ota-manifest.json", manifest.to_json_bytes()),
+        ("core.bin", core),
+        ("engine.bin", engine),
+    ]
+    .into_iter()
+    .map(|(name, bytes)| PickedFirmwareFile {
+        name: name.to_string(),
+        bytes,
+    })
+    .collect::<Vec<_>>();
+    read_firmware_files(&files, "esp32c6-4mb")
+        .expect("the sample files read")
+        .facts
 }
 
 /// A stable fake commit per version (a dev version is its own commit).

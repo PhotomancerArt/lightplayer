@@ -99,6 +99,7 @@ pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
 pub mod emu_transport;
+pub mod firmware_file_build;
 pub mod firmware_lookup_op;
 pub mod install_choice;
 pub mod lan_addresses;
@@ -236,6 +237,10 @@ pub use device_update_words::{
 pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
+};
+pub use firmware_file_build::{
+    FIRMWARE_FILE_MANIFEST, FirmwareFileBuild, FirmwareFileDataOp, FirmwareFileOp,
+    PickedFirmwareFile, firmware_file_action, read_firmware_files,
 };
 pub use firmware_lookup_op::FirmwareLookupOp;
 pub use install_choice::{

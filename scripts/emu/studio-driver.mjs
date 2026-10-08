@@ -342,6 +342,16 @@ export class StudioDriver {
     await this.cdp.send("Input.insertText", { text }, this.sessionId);
   }
 
+  /// Put `paths` (absolute, on this machine) into the file input `selector`
+  /// matches, as a person picking them in the file dialog would: CDP's
+  /// `DOM.setFileInputFiles`, which fires the input's change event.
+  async setFiles(selector, paths) {
+    const { root } = await this.cdp.send("DOM.getDocument", { depth: -1, pierce: true }, this.sessionId);
+    const { nodeId } = await this.cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector }, this.sessionId);
+    if (!nodeId) throw new Error(`no file input matches ${selector}`);
+    await this.cdp.send("DOM.setFileInputFiles", { nodeId, files: paths }, this.sessionId);
+  }
+
   /// Wait for the control, then click it. The wait is the page's, not ours.
   async clickWhenReady(text, options = {}) {
     await this.waitFor(

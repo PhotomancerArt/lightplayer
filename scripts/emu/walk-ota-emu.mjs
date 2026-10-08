@@ -44,6 +44,12 @@
 //                nothing in the list, so the press reads "Look up r1"; the
 //                store finds it by version, it joins the list, arms (older)
 //                and installs on the second click. `--steps install-lookup`
+//   install-file  "From a file…": only r2 in the store; r1's `ota/` folder
+//                (its manifest, core, engine and .z files) is put into the
+//                card's file input as the file dialog would hand it over;
+//                core checks it, r1 joins the list "from your files", arms
+//                with the custom-build copy, and installs — never asking the
+//                store for r1. `--steps install-file`
 //
 // Every assertion waits for the BOARD's words (its console, `[OTA]`,
 // `[LOADER]`, `[CORE]` lines) as well as the card's; a card line alone proves
@@ -112,13 +118,13 @@ const TAB = ARGS.includes("--tab");
 const BLE = ARGS.includes("--ble");
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
 const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : DOOR_STEPS);
 /// The steps that stand r1 and r2 behind a real lp-cloud-server.
-const RELEASE_STEPS = STEPS.includes("install-older") || STEPS.includes("install-lookup");
+const RELEASE_STEPS = ["install-older", "install-lookup", "install-file"].some((step) => STEPS.includes(step));
 /// The link the card must name.
 const LINK_WORD = BLE ? "Bluetooth" : "USB";
 if (TAB && BLE) {
@@ -1223,6 +1229,56 @@ async function main() {
                 summary: `${r1.version}, unlisted, looked up by version, armed, confirmed and installed (${toR1.order.map((e) => e.kind).join(" → ")}); the project ran throughout`,
                 shots: { press: lookupShot, found: foundShot, onR1: r1Shot },
                 found: found.replace(/\s+/g, " ").trim(),
+                toR1: { core: toR1.core, card: toR1.order, board: toR1.said },
+              };
+            });
+          } finally {
+            store.stop();
+          }
+          break;
+        }
+        case "install-file": {
+          if (TAB || BLE) throw new Error("install-file walks the door lane over ?emu= only");
+          const r1 = JSON.parse(readFileSync(path.join(R1, "ota/ota-manifest.json"), "utf8"));
+          const r2 = JSON.parse(readFileSync(path.join(R2, "ota/ota-manifest.json"), "utf8"));
+          // Only r2 in the store: r1 comes from its files alone.
+          const store = await startReleaseStore([{ dir: R2, publishedAt: "2026-10-02T12:00:00Z" }]);
+          try {
+            await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
+            await step(name, `on ${r2.version}: ${r1.version}'s ota files, picked with From a file…, are checked, listed and installed (armed)`, async () => {
+              await connect(board);
+              await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
+              const list = await openOtherVersion(r2.version);
+              if (list.includes(r1.version)) throw new Error(`${r1.version} is listed before its files were picked: ${list}`);
+              if (!list.includes("From a file…")) throw new Error(`the list's panel offers no From a file…: ${list}`);
+
+              // Pick r1's ota folder, as the file dialog would hand it over.
+              const ota = path.join(R1, "ota");
+              const picked = readdirSync(ota).map((file) => path.join(ota, file));
+              const from = boardWords(board).length;
+              await driver.setFiles('input[id^="firmware-file-"]', picked);
+              const found = await driver.waitFor(
+                `(() => { const t = ${PANEL}?.innerText ?? '';
+                          return t.includes(${JSON.stringify(r1.version)}) && t.includes('from your files') ? t : false; })()`,
+                { timeoutMs: STEP_MS, what: `${r1.version} from the files to join the list` },
+              );
+              if (!found.includes("Install a custom build?")) throw new Error(`the build from files does not say it is a custom build: ${found}`);
+              const foundShot = await shot("install-file-listed");
+              await driver.click("Install", { scope: PANEL, exact: true });
+              await driver.waitFor(
+                `(() => { const rest = ${PANEL}?.querySelector('.ux-armed .ux-armed-label-rest');
+                          return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`,
+                { timeoutMs: STEP_MS, what: `the press on ${r1.version} to arm` },
+              );
+              const armedShot = await shot("install-file-armed");
+              await driver.click("Confirm install", { scope: PANEL });
+              const toR1 = await awaitRelease(board, r1, from);
+              const r1Shot = await shot("install-file-on-r1");
+              const fetched = store.upstreamHits.filter((url) => url.includes(`v${r1.version}/`)).length;
+              if (fetched > 0) throw new Error(`the store was asked for ${r1.version}, which came from files`);
+              return {
+                summary: `${r1.version} from its ota files (${picked.length} picked), checked, armed, confirmed and installed (${toR1.order.map((e) => e.kind).join(" → ")}); the project ran throughout`,
+                shots: { listed: foundShot, armed: armedShot, onR1: r1Shot },
                 toR1: { core: toR1.core, card: toR1.order, board: toR1.said },
               };
             });

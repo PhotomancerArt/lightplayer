@@ -36,8 +36,10 @@
 //! running an Update (an activity that ends with no link attached raises no
 //! abandon).
 //!
-//! **Which build** (DS7): `Install { version }` takes this Studio's own build
-//! when it is that version, else the store's release of it; `Auto` and
+//! **Which build** (DS7): `Install { version }` takes the custom build
+//! picked from files when it is that version ("From a file…",
+//! [`super::firmware_file_build`]), else this Studio's own build when it is
+//! that version, else the store's release of it; `Auto` and
 //! `Reinstall` take this Studio's own build when it has one (the driver finds
 //! another build's engine itself, through the engine-source effects). With
 //! no build of its own, a restore needs none: the host finds the board's
@@ -208,6 +210,7 @@ impl UpdateHost {
                     releases: None,
                     releases_asked: None,
                     lookups: StoreLookups::default(),
+                    file_build: None,
                 })
             }),
         }
@@ -375,6 +378,13 @@ impl UpdateHost {
         HostState::want_store_lookup(&self.state, target, version);
     }
 
+    /// Hold the custom build picked from files ("From a file…"): from now
+    /// on an `Install` of its version serves it, ahead of this Studio's own
+    /// build and the store's.
+    pub(crate) fn hold_file_build(&self, build: HostBuild) {
+        self.state.borrow_mut().file_build = Some(build);
+    }
+
     /// Every look-up asked, and where each stands.
     pub(crate) fn store_lookups(&self) -> StoreLookups {
         self.state.borrow().lookups.clone()
@@ -464,6 +474,9 @@ struct HostState {
     releases: Option<StoreReleases>,
     releases_asked: Option<(String, u64)>,
     lookups: StoreLookups,
+    /// The custom build picked from files: an `Install` of its version
+    /// serves it.
+    file_build: Option<HostBuild>,
 }
 
 impl HostState {
@@ -710,6 +723,23 @@ impl HostState {
         };
         let generation = run.generation;
         let facts = run.facts.clone();
+        // A custom build picked from files serves an install of its version.
+        if let UpdateIntentFacts::Install { version, .. } = &run.intent
+            && let Some(file) = self
+                .file_build
+                .as_ref()
+                .filter(|file| file.identity.version == *version)
+        {
+            let loaded = Ok(file.clone());
+            (seams.spawn)(Box::pin(async move {
+                if let Some(cell) = me.upgrade() {
+                    cell.borrow_mut()
+                        .build_loaded(device, generation, loaded, false);
+                }
+            }));
+            run.phase = RunPhase::Preparing { source: None };
+            return;
+        }
         let wants_own = match &run.intent {
             UpdateIntentFacts::Install { version, .. } => own_facts
                 .as_ref()

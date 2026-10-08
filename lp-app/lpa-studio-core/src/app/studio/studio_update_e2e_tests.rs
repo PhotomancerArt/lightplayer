@@ -49,8 +49,8 @@ use crate::{
     ActionConsequence, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId,
     DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink,
     INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
-    MemoryOwnBuildSource, OfferArgs, OfferParamKind, StudioController, UiOffer, UpdateLink,
-    UpdateStanding,
+    MemoryOwnBuildSource, OfferArgs, OfferParamKind, PickedFirmwareFile, StudioController, UiOffer,
+    UpdateLink, UpdateStanding, firmware_file_action,
 };
 
 /// The model board's region (the sim's own size).
@@ -726,6 +726,99 @@ fn an_older_release_the_index_does_not_list_is_looked_up_then_installed() {
     assert!(
         refusal.to_string().contains("has no 2026.09.01-1"),
         "{refusal}"
+    );
+}
+
+/// "From a file…": the user picks a custom build's update files (W, in no
+/// store); core checks them, the build leads the version list, and its
+/// install arms (Lasting) and puts W on the board. Files for another target
+/// are refused in words, and nothing joins the list.
+#[test]
+fn a_custom_build_from_files_is_checked_listed_and_installed_armed() {
+    let mut bench = Bench::new(Board::with_catalog(vec![x(), w(), y()]), Some(y()));
+    let fetch = Rc::new(StoreFetch::default());
+    fetch.publish(&y(), &y().version);
+    fetch.publish_index(vec![index_entry(&y().version, Some(&y()), PROTO)]);
+    bench
+        .controller
+        .set_firmware_store(Rc::new(FirmwareStore::new(
+            STORE_ORIGIN,
+            Rc::clone(&fetch) as Rc<dyn FirmwareFetch>,
+        )));
+    let device = bench.connect_device();
+    bench.run_until("the store's index to reach the card", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_releases()
+            .is_some()
+            && matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let file_path = bench
+        .controller
+        .device_verb(device, "install-firmware-file");
+    let file = bench.controller.offered(&file_path);
+    assert!(
+        file.action.meta().needs_user_activation,
+        "the user's own click"
+    );
+
+    let ota_folder = |build: &ModelBuild, target: &str| -> Vec<PickedFirmwareFile> {
+        let mut manifest = ota_manifest(build);
+        manifest.target = target.to_string();
+        [
+            ("ota-manifest.json", manifest.to_json_bytes()),
+            ("core.bin", build.core.clone()),
+            ("engine.bin", build.engine.clone()),
+        ]
+        .into_iter()
+        .map(|(name, bytes)| PickedFirmwareFile {
+            name: name.to_string(),
+            bytes,
+        })
+        .collect()
+    };
+    // Another target's files: refused, said in words.
+    let refused = bench.controller.dispatch_press(firmware_file_action(
+        device,
+        ota_folder(&w(), "esp32s3-8mb"),
+    ));
+    let refusal = refused.expect_err("another target");
+    assert!(
+        refusal.to_string().contains("this board is esp32c6-4mb"),
+        "{refusal}"
+    );
+    assert!(bench.controller.update_build_facts().file_build().is_none());
+
+    // W's own folder: checked, and it leads the list, picked.
+    bench
+        .controller
+        .dispatch_press(firmware_file_action(
+            device,
+            ota_folder(&w(), "esp32c6-4mb"),
+        ))
+        .expect("W's files read");
+    let path = bench.controller.device_verb(device, "install-firmware");
+    let other = bench.controller.offered(&path);
+    assert_eq!(option_values(&other)[0], w().version);
+    let armed = other
+        .press(&OfferArgs::new().with(INSTALL_VERSION_PARAM, &w().version))
+        .expect("W installs");
+    let ActionConsequence::Lasting(copy) = &armed.meta().consequence else {
+        panic!("not Lasting: {:?}", armed.meta().consequence);
+    };
+    assert_eq!(copy.title, "Install a custom build?");
+    bench.press_lasting(
+        device,
+        "install-firmware",
+        OfferArgs::new().with(INSTALL_VERSION_PARAM, &w().version),
+    );
+    bench.run_until("the update to start", |bench| bench.updating(device));
+    bench.run_until("the board to run W", |bench| bench.idle_on(device, &w()));
+    bench.assert_runs(&w());
+    assert!(
+        !fetch.asked(&format!("/{}/ota-manifest.json", w().version)),
+        "W came from the files, never the store"
     );
 }
 
