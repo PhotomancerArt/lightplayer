@@ -554,7 +554,7 @@ function view(){
   if (step < 3) boards = boards.filter(b => !b.shared);
   if (step < 2) {
     boards = boards.filter(b => b.met || b.state==='here');
-    boards.forEach(b => { if (b.state!=='here') { b.state='seen'; } b.behind=false; });
+    boards.forEach(b => { if (b.state!=='here') { b.state='seen'; b.seen = b.seen==='now' ? 'just now' : (b.seen || '2 h'); } b.behind=false; });
   }
   if (S.net) boards.unshift({ id:'kitchen', name:'lp-7f3a.local', chip:'ESP32-C6', project:'kitchen', state:'here', link:'wifi', met:true, layout:'strip', ago:0, fresh:true });
   if (S.plug) boards.unshift({ id:'newb', name: S.plug==='identifying' ? 'New board' : 'New board', chip: S.plug==='identifying' ? '' : 'ESP32-C6', project:null, state: S.plug==='identifying' ? 'working' : 'empty', link:S.plugLink||'usb', met:true, layout:'strip', ago:0, fresh:true });
@@ -588,7 +588,7 @@ function status(b){
     case 'online':  return { cls:'online', short:'Online', words:'Online' };
     case 'busy':    return { cls:'busy', short:`Busy · ${b.by}`, words:`Busy · ${b.by} is on` };
     case 'offline': return { cls:'offline', short:`Offline · ${b.seen}`, words:`Offline · ${b.seen}` };
-    case 'seen':    return { cls:'seen', short:`Seen ${b.seen||'2 h'} ago`, words:`Seen ${b.seen||'2 h'} ago` };
+    case 'seen':    return { cls:'seen', short:`Seen ${b.seen} ago`, words:`Seen ${b.seen} ago` };
     case 'working': return { cls:'working', short:'Identifying…', words:'Identifying…' };
     case 'empty':   return { cls:'empty', short:'Empty', words:'Nothing on it' };
   }
