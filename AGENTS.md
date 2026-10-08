@@ -893,8 +893,15 @@ itself: X → Y with one press (backup, update, finish, project kept), the
 cable cut mid-core and mid-engine then finished with no click, an
 engine-less board restored on connect, the same with no copy anywhere ("which
 Studio can't get" → Install), and a pre-update board (no over-the-air offer,
-today's flash). `--tab` runs three of them against `?emu=tab`, and `--ble`
-(`just walk-ota-ble-emu`, above) four of them over `?ble=emu`. Every check
+today's flash). `--tab` runs three of them against `?emu=tab`, `--ble`
+(`just walk-ota-ble-emu`, above) four of them over `?ble=emu`, and `--lan`
+walks them over Wi‑Fi: each board on the door's virtual LAN, Studio with no
+`?emu=` at all (`?lan=` through the board's forward), plus a power cut
+mid-core and mid-engine, a renumbered board and a second client turned away
+busy — one step per invocation (`--lan --steps update`) to stay under ten
+minutes. The board's words there come from a console capture on its USB
+link, which counts as a host for the trial's confirmation (the LAN-only
+confirmation is `just test-emu-c6-ota-lan`'s). Every check
 waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
 It proves Studio's update host, routing and card against the real board
 session; it does **not** prove Chromium's serial backend across the
