@@ -37,6 +37,12 @@
 //!   [`SERVICE_TICK_CAP`] plus a pass on every JS activity (a message, the
 //!   link up or down), so the handshake does not wait for the model's open.
 //!
+//! - **Channel 3 rides the same link** (the over-the-air update, OTA M8):
+//!   [`send_update`] and [`take_updates`] are the Bluetooth port's, through
+//!   the same [`LinkPortService`], so nothing goes out on the update channel
+//!   until the board announced it on this connection (DS9). A board in
+//!   core-only says no hello; its unasked `M` is the announcement.
+//!
 //! **A socket close is the LAN's link reset.** Both ends lose the session
 //! together, and the page hears it as `wi-fi link lost: …`, which fails what
 //! is in flight and closes the model's link.
@@ -363,6 +369,41 @@ pub(crate) fn send_client_json(session: u32, json: &str) -> Result<(), String> {
         .unwrap_or_else(|| Err("the wi-fi link is not connected".to_string()))?;
     service(session);
     Ok(())
+}
+
+/// Queue one channel-3 (update) message on the session's link and send what
+/// the link has to send now (the Bluetooth port's twin). `Ok(false)`: the
+/// board has not announced the update channel on this connection, so
+/// nothing was queued (DS9; the link notes it). Errors like
+/// [`send_client_json`]'s.
+pub(crate) fn send_update(session: u32, message: &[u8]) -> Result<bool, String> {
+    if !matches!(service(session), Serviced::Up(_)) {
+        return Err("the wi-fi link is not connected".to_string());
+    }
+    let queued = SESSIONS
+        .with(|sessions| {
+            sessions
+                .borrow_mut()
+                .get_mut(&session)
+                .map(|served| served.service.send_update(message))
+        })
+        .unwrap_or_else(|| Err("the wi-fi link is not connected".to_string()))?;
+    service(session);
+    Ok(queued)
+}
+
+/// The board's channel-3 (update) messages since the last take, this
+/// connection's only (a new connection is a new link, and the old one's
+/// messages go with it). Drained by the model's link pump alone: a
+/// conversation borrowing the wire never sees them.
+pub(crate) fn take_updates(session: u32) -> Vec<Vec<u8>> {
+    SESSIONS.with(|sessions| {
+        sessions
+            .borrow_mut()
+            .get_mut(&session)
+            .map(|served| served.service.take_updates())
+            .unwrap_or_default()
+    })
 }
 
 /// Everything the session's link has read since the last drain, in order.

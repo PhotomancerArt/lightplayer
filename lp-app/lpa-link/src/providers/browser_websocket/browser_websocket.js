@@ -34,6 +34,15 @@
 //     2026-10-02 lesson, kept here so no browser can send a view's whole
 //     buffer).
 //
+// A BUSY BOARD IS NOT A CONNECTION. A C6 has one LAN slot; a second client
+// (Studio in another tab, lp-cli) gets its socket upgraded and then closed at
+// once with 1013, "try again later". That is said once, in words — `wi-fi
+// link lost: busy with another Wi‑Fi connection …` — and redialled on its
+// own slow schedule (2 s, 5 s, 15 s, then every 30 s), never the drop
+// loop's 250 ms. Until the board answers again, a redial that opens is not
+// announced as present (its link is serviced through `onActivity` all the
+// same), so a busy board does not flap in and out of Studio's roster.
+//
 // Presence is announced the way Web Serial's hotplug is — a `connect` /
 // `disconnect` edge with no payload — and Studio's device layer re-derives
 // from `presentSessions()`.
@@ -58,6 +67,17 @@ const MAX_BUFFERED_BYTES = 256 * 1024;
 /// session is wanted (a board on the LAN that reboots, or comes back to the
 /// network, is found again with no gesture).
 const RECONNECT_DELAYS_MS = [250, 1_000, 2_000, 4_000, 8_000, 15_000];
+/// The close code a board with its one LAN slot taken answers with (RFC
+/// 6455 "try again later").
+export const BUSY_CLOSE_CODE = 1013;
+/// How long a redial to a board that was busy must stay open, unanswered,
+/// before it is announced anyway (a busy board closes at once).
+const BUSY_SETTLE_MS = 1_000;
+/// A busy board's redials, in order; the last repeats.
+export const BUSY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000];
+/// What a busy board's drop says (after `wi-fi link lost: `). Ends with the
+/// close code, which Studio's connect words read.
+export const BUSY_WORDS = `busy with another Wi\u2011Fi connection (Studio in another tab, or lp-cli; code ${BUSY_CLOSE_CODE})`;
 /// `WebSocket.OPEN`, spelled out so a fake constructor need not carry it.
 const OPEN = 1;
 
@@ -130,6 +150,9 @@ class LanSession {
     this.lastDrop = null;
     // The link above the socket said it is up on this connection (`markUp`).
     this.up = false;
+    // Busy closes (1013) since the board last sent a frame: picks the busy
+    // redial delay, and keeps a redial that opens from being announced.
+    this.busyStrikes = 0;
   }
 
   describe() {
@@ -222,6 +245,7 @@ export async function disconnect(id) {
   cancelReconnect(session);
   session.generation += 1;
   session.connecting = null;
+  session.busyStrikes = 0;
   session.state = "closed";
   session.up = false;
   closeSocket(session);
@@ -452,11 +476,19 @@ function openSocket(session, generation) {
       session.state = "connected";
       session.up = false;
       session.attempt = 0;
-      const wasPresent = session.present;
-      session.present = true;
       session.activity();
-      if (!wasPresent) {
-        announce("connect");
+      // A board that turned the last connections away (busy) is present
+      // again once it answers (`onFrame`) — or, if nothing is servicing this
+      // session's link yet (it was turned away before Studio attached it),
+      // once the connection has stayed open for `BUSY_SETTLE_MS`.
+      if (session.busyStrikes === 0) {
+        becomePresent(session);
+      } else {
+        setTimeout(() => {
+          if (session.generation === generation && session.state === "connected") {
+            becomePresent(session);
+          }
+        }, BUSY_SETTLE_MS);
       }
       resolve();
     };
@@ -482,6 +514,10 @@ function openSocket(session, generation) {
         if (session.finalCodes.has(event?.code)) {
           session.wanted = false;
         }
+        if (event?.code === BUSY_CLOSE_CODE && session.wanted) {
+          handleBusy(session);
+          return;
+        }
         handleDrop(session, `the board closed the link (${closeWords(event)})`);
       }
     };
@@ -496,6 +532,11 @@ function onFrame(session, data) {
   }
   const frame = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer ?? data);
   session.received += 1;
+  // The board answered: it is not busy any more, and it is here.
+  session.busyStrikes = 0;
+  if (!session.present && session.state === "connected") {
+    becomePresent(session);
+  }
   if (session.bufferedBytes + frame.length > MAX_BUFFERED_BYTES) {
     if (!session.overflowNoted) {
       session.overflowNoted = true;
@@ -508,9 +549,39 @@ function onFrame(session, data) {
   session.activity();
 }
 
+/// Mark a session present, and say so if it was not.
+function becomePresent(session) {
+  const wasPresent = session.present;
+  session.present = true;
+  if (!wasPresent) {
+    announce("connect");
+  }
+}
+
+/// The board closed the connection with 1013: its one LAN slot is taken.
+/// The first strike is a drop, in words; later ones are quiet (nothing was
+/// announced for them). Either way the redial waits the busy schedule.
+function handleBusy(session) {
+  session.busyStrikes += 1;
+  const delay = BUSY_DELAYS_MS[Math.min(session.busyStrikes - 1, BUSY_DELAYS_MS.length - 1)];
+  if (session.busyStrikes === 1 || session.present) {
+    handleDrop(session, BUSY_WORDS, delay);
+    return;
+  }
+  session.lastDrop = BUSY_WORDS;
+  session.generation += 1;
+  session.connecting = null;
+  session.state = "lost";
+  session.up = false;
+  closeSocket(session);
+  session.clearFrames();
+  session.activity();
+  startReconnect(session, delay);
+}
+
 /// The link died underneath us: say so ONCE (the Rust side reads this exact
 /// phrase as a departure), stop being present, and reconnect if wanted.
-function handleDrop(session, why) {
+function handleDrop(session, why, reconnectDelayMs) {
   session.lastDrop = why;
   session.generation += 1;
   session.connecting = null;
@@ -525,7 +596,7 @@ function handleDrop(session, why) {
     announce("disconnect");
   }
   if (session.wanted) {
-    startReconnect(session, null);
+    startReconnect(session, reconnectDelayMs ?? null);
   }
 }
 
@@ -565,7 +636,8 @@ function schedule(session, delayMs) {
       if (!session.wanted || !sessions.has(session.id)) {
         return;
       }
-      const delay = RECONNECT_DELAYS_MS[Math.min(session.attempt, RECONNECT_DELAYS_MS.length - 1)];
+      const delays = session.busyStrikes > 0 ? BUSY_DELAYS_MS : RECONNECT_DELAYS_MS;
+      const delay = delays[Math.min(session.attempt, delays.length - 1)];
       schedule(session, delay);
     }
   }, delayMs);
