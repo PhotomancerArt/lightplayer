@@ -9,6 +9,8 @@ use alloc::vec::Vec;
 
 use lp_nor_sim::NorGeometry;
 
+extern crate std;
+
 use crate::StoreConfig;
 use crate::test_support::{Step, deflate, dial, noise, sweep, text};
 
@@ -36,6 +38,7 @@ fn per_call_workload() -> Vec<Step> {
 fn cut_sweep_per_call_commits() {
     for rm in [256, 1024] {
         let r = sweep(NorGeometry::c6(16), &cfg(rm), &per_call_workload(), 24);
+        std::println!("{}: {r:?}", line!());
         assert!(
             r.cuts > 100 && r.landed_old > 0 && r.landed_new > 0,
             "{rm}: {r:?}"
@@ -79,6 +82,7 @@ fn cut_sweep_transaction_of_ten_puts() {
         ..cfg(512)
     };
     let r = sweep(NorGeometry::c6(24), &c, &txn_workload(), 40);
+    std::println!("{}: {r:?}", line!());
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }
 
@@ -97,6 +101,7 @@ fn append_workload() -> Vec<Step> {
 #[test]
 fn cut_sweep_append_in_4k_chunks() {
     let r = sweep(NorGeometry::c6(32), &cfg(1024), &append_workload(), 12);
+    std::println!("{}: {r:?}", line!());
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }
 
@@ -116,6 +121,7 @@ fn deflated_workload() -> Vec<Step> {
 #[test]
 fn cut_sweep_deflated_push() {
     let r = sweep(NorGeometry::c6(16), &cfg(1024), &deflated_workload(), 48);
+    std::println!("{}: {r:?}", line!());
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }
 
@@ -145,6 +151,7 @@ fn gc_workload() -> Vec<Step> {
 fn cut_sweep_through_gc() {
     for rm in [256, 1024] {
         let r = sweep(NorGeometry::c6(10), &cfg(rm), &gc_workload(), 8);
+        std::println!("{}: {r:?}", line!());
         assert!(r.gc_runs > 0, "{rm}: no GC ran: {r:?}");
         assert!(r.landed_old > 0 && r.landed_new > 0, "{rm}: {r:?}");
     }

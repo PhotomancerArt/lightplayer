@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 
 use crate::dir_node::{DirEntry, EntryKind, encode_dir};
 use crate::flash::Flash;
+use crate::gc_mark::MarkRole;
 use crate::node_read::read_dir;
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::ObjectId;
@@ -21,14 +22,26 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// Write the delta's directories as pending records and adopt them as
     /// the working tree; the delta is empty after. On an error the delta and
     /// the working tree are as they were.
+    ///
+    /// Each directory makes room for exactly its own records before it is
+    /// written (`write_dir_bytes`), so GC may run between two directories:
+    /// the delta's file ids and every directory written so far are
+    /// *in flight* and marked live meanwhile.
     pub(crate) fn flush(&mut self) -> Res<(), F> {
         if self.delta.is_empty() {
             return Ok(());
         }
-        let need = self.flush_need();
-        self.ensure_room(&need)?;
         let changes = self.delta.take();
-        match self.rebuild_all(&changes) {
+        self.inflight = changes
+            .iter()
+            .filter_map(|c| match c.change {
+                Change::Set(fe) => Some((fe.id, MarkRole::Node)),
+                _ => None,
+            })
+            .collect();
+        let r = self.rebuild_all(&changes);
+        self.inflight = Vec::new();
+        match r {
             Ok(work) => {
                 self.work = work;
                 Ok(())
@@ -157,46 +170,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             .note(bytes.capacity() + entries.capacity() * core::mem::size_of::<DirEntry>());
         self.write_dir_bytes(HeadKind::Hot, &bytes)
     }
-
-    /// One record-sized directory per directory the delta touches (and
-    /// their ancestors), the hot directory, and the root.
-    fn flush_need(&self) -> Vec<(HeadKind, u32)> {
-        let rm = self.cfg.record_max;
-        let mut dirs = 1; // the root's cold directory
-        let mut prev: &str = "";
-        let mut hot = false;
-        for e in self.delta.entries() {
-            hot |= is_hot(&e.path) || e.change == Change::DeleteTree;
-            let parent = match e.change {
-                Change::DeleteTree => e.path.as_str(),
-                _ => &e.path[..e.path.rfind('/').unwrap_or(0)],
-            };
-            // Directories of `parent` not shared with the previous one.
-            let common = common_dirs(prev, parent);
-            dirs += parent.matches('/').count() - common;
-            prev = parent;
-        }
-        let mut need: Vec<(HeadKind, u32)> = (0..dirs).map(|_| (HeadKind::Cold, rm)).collect();
-        if hot {
-            need.push((HeadKind::Hot, rm));
-        }
-        need.push((HeadKind::Hot, self.root_len()));
-        need
-    }
 }
 
 fn remove(entries: &mut Vec<DirEntry>, name: &str, kind: EntryKind) {
     entries.retain(|e| !(e.kind == kind && e.name == name));
-}
-
-/// Directory components two `/a/b`-style paths share.
-fn common_dirs(a: &str, b: &str) -> usize {
-    let mut n = 0;
-    for (x, y) in a.split('/').skip(1).zip(b.split('/').skip(1)) {
-        if x != y {
-            break;
-        }
-        n += 1;
-    }
-    n
 }

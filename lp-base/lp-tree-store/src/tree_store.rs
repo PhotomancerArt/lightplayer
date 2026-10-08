@@ -75,6 +75,9 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     pub(crate) stats: TreeStoreStats,
     /// Index entries the last mark left (the growth bound's base).
     pub(crate) live_after_mark: usize,
+    /// Records a flush has written (or names) that nothing reachable names
+    /// yet: marked live while it runs.
+    pub(crate) inflight: Vec<(ObjectId, crate::gc_mark::MarkRole)>,
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
@@ -326,6 +329,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             txn: Txn::None,
             stats: TreeStoreStats::default(),
             live_after_mark: 0,
+            inflight: Vec::new(),
         }
     }
 

@@ -43,9 +43,23 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if !fits_after_compaction(sizes, self.log.sector_capacity(), usable, self.cfg.reserve) {
             return Err(StoreError::NoSpace);
         }
+        // Stop when collections stop freeing sectors (tail-only compaction
+        // of near-`record_max` records can churn without gaining any).
+        let mut best_free = self.log.free_count();
+        let mut stalls = 0;
         for _ in 0..self.log.sector_count * 4 {
-            if self.log.free_count() == 0 {
+            let free = self.log.free_count();
+            if free == 0 {
                 break;
+            }
+            if free > best_free {
+                best_free = free;
+                stalls = 0;
+            } else {
+                stalls += 1;
+                if stalls > self.cfg.reserve + 2 {
+                    break;
+                }
             }
             let Some(victim) = choose_victim(&self.log, self.cfg.gc_policy) else {
                 break;
@@ -80,6 +94,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         roots.push((self.work.cold, MarkRole::Dir));
         roots.push((self.work.hot, MarkRole::Dir));
         roots.extend(self.delta.set_ids().map(|id| (id, MarkRole::Node)));
+        roots.extend(self.inflight.iter().copied());
         let mut m = mark(&mut self.log, &roots, want_lens)?;
         self.stats.marks += 1;
         let lens = core::mem::take(&mut m.lens);

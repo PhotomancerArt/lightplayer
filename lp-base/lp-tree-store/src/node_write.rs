@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 use crate::blob_codec::{DEFLATE_PREFIX, MAX_LOGICAL_CHUNK};
 use crate::flash::Flash;
+use crate::gc_mark::MarkRole;
 use crate::multi_node::{encode_multi, multi_fanout};
 use crate::node_read::{Leaf, leaf_list, read_node_into};
 use crate::object_hasher::ObjectHasher;
@@ -138,16 +139,29 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     }
 
     /// A directory node from its bytes: one `Dir` record, or a flagged
-    /// multi over stored chunks.
+    /// multi over stored chunks. Makes room for exactly its records first
+    /// (GC may run: what the flush wrote so far is in flight), and is in
+    /// flight itself after.
     pub(crate) fn write_dir_bytes(&mut self, head: HeadKind, bytes: &[u8]) -> Res<ObjectId, F> {
-        if bytes.len() <= self.max_payload() {
+        let mut need = Vec::new();
+        let id = if bytes.len() <= self.max_payload() {
             let id = ObjectId::of(&mut self.hasher, IdTag::Dir, &[bytes]);
+            if !self.log.index.contains(id) {
+                need.push((head, HDR + bytes.len() as u32));
+                self.ensure_room(&need)?;
+            }
             self.write_if_new(head, RecordKind::Dir, ChunkCodec::Stored, id, &[bytes])?;
-            return Ok(id);
-        }
-        let mut leaves = Vec::new();
-        self.write_stored_chunks(head, bytes, &[], &mut leaves)?;
-        self.write_tree(head, &leaves, true)
+            id
+        } else {
+            let chunks = self.stored_chunk_need(head, bytes.len(), &mut need);
+            self.multi_need(head, chunks, true, &mut need);
+            self.ensure_room(&need)?;
+            let mut leaves = Vec::new();
+            self.write_stored_chunks(head, bytes, &[], &mut leaves)?;
+            self.write_tree(head, &leaves, true)?
+        };
+        self.inflight.push((id, MarkRole::Dir));
+        Ok(id)
     }
 
     /// Stored chunks of `a ++ b` (at most `record_max` each, so chunk
@@ -292,21 +306,14 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         }
     }
 
-    /// A per-call write also writes its directories and a root: one
-    /// record-sized directory per level of `path` (or the hot directory),
-    /// and the root. Directories bigger than one record are not foreseen; a
-    /// write that needs them can still end in `NoSpace`, before its root.
-    fn implicit_need(&self, path: &str, out: &mut Vec<(HeadKind, u32)>) {
+    /// A per-call write also writes its directories and a root. The root is
+    /// reserved here; each directory makes room for itself when it is
+    /// written (`write_dir_bytes`), so a write that fits its content but not
+    /// its directories ends in `NoSpace` after its content and before its
+    /// root (the committed state untouched either way).
+    fn implicit_need(&self, _path: &str, out: &mut Vec<(HeadKind, u32)>) {
         if self.txn != Txn::Implicit {
             return;
-        }
-        let rm = self.cfg.record_max;
-        if crate::tree_store::is_hot(path) {
-            out.push((HeadKind::Hot, rm));
-        } else {
-            for _ in 0..path.matches('/').count() {
-                out.push((HeadKind::Cold, rm));
-            }
         }
         out.push((HeadKind::Hot, self.root_len()));
     }
