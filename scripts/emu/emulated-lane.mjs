@@ -95,7 +95,15 @@ export async function startDoor({ root, id, boards, stateDir, consoleDir, logFil
   // file, and an appended log still holds the PREVIOUS run's address — which
   // reads as a door that is up and answers every fetch with a dead socket.
   const fd = openSync(logFile, "w");
-  const child = spawn(binary, args, { cwd: root, detached: true, stdio: ["ignore", fd, fd] });
+  // `LP_EMU_PARENT_PID`: the server outlives this script on purpose (detached,
+  // unref'd), but not a script that was KILLED — SIGKILL and a harness timeout
+  // run no exit handler. It watches this pid and exits once it is gone.
+  const child = spawn(binary, args, {
+    cwd: root,
+    detached: true,
+    stdio: ["ignore", fd, fd],
+    env: { ...process.env, LP_EMU_PARENT_PID: String(process.pid) },
+  });
   child.unref();
   const addr = await readListenAddress(logFile, child, id);
   return { addr, pid: child.pid, log: logFile, args, stateDir, consoleDir };
