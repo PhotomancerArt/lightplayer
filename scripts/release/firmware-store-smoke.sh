@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The firmware store's whole lookup, locally and hermetically: real staged
 # release assets → a static GitHub-shaped upstream → lp-cloud-server's
-# `/firmware/` route → curl. Plan D20: the pre-merge proof of the store; the
-# live proof is the merged release's (yona-ship).
+# `/firmware/` route and its release index → curl. Plan D20: the pre-merge
+# proof of the store; the live proof is the merged release's (yona-ship).
 #
 #   scripts/release/firmware-store-smoke.sh [<staging_dir>]
 #
@@ -18,8 +18,10 @@
 #
 # Lays the staging directory out as GitHub serves a release
 # (`download/v<version>/<asset>`, `latest/download/<asset>`) under a temp
-# root, serves it with python3's http.server, starts lp-cloud-server with
-# LP_CLOUD_FIRMWARE_UPSTREAM pointed at it (both on scripts/dev-port.sh
+# root, beside a GitHub-shaped REST releases list (`releases.json`: the one
+# release, every staged asset `uploaded`), serves it with python3's
+# http.server, starts lp-cloud-server with LP_CLOUD_FIRMWARE_UPSTREAM and
+# LP_CLOUD_FIRMWARE_RELEASES_LIST pointed at it (both on scripts/dev-port.sh
 # ports, never pinned), and asserts:
 #
 #   - the manifest by version: byte-equal, ACAO *, an ETag, immutable;
@@ -28,7 +30,10 @@
 #   - every file the manifest names: byte-equal, ETag = its sha256;
 #   - a second engine.bin: no upstream request;
 #   - a dev version and a reserved word: 404, no upstream request;
-#   - the build id (`<version>+<commit[..12]>`): the version's bytes.
+#   - the build id (`<version>+<commit[..12]>`): the version's bytes;
+#   - the release index `/api/v1/firmware/<target>/releases`: 200, format 1,
+#     the staged version and commit listed, ACAO *, max-age=60, an ETag;
+#   - `/firmware/<target>/releases` is not the index (no ACAO, no index body).
 #
 # Needs: python3, curl, node, cargo. Everything is torn down on exit.
 set -euo pipefail
@@ -75,6 +80,18 @@ for asset in "${staging}"/*; do
     cp "${asset}" "${served}/latest/download/"
 done
 
+# GitHub's REST releases list, as the release index reads it: one published
+# release, every staged asset uploaded.
+node -e '
+const [version, dir] = process.argv.slice(1);
+const assets = require("node:fs").readdirSync(dir).sort()
+    .map((name) => ({ name, state: "uploaded" }));
+process.stdout.write(JSON.stringify([{
+    tag_name: `v${version}`, draft: false, prerelease: false,
+    published_at: "2099-01-01T00:00:00Z", assets,
+}]));
+' "${version}" "${staging}" >"${served}/releases.json"
+
 upstream_port="$(scripts/dev-port.sh firmware-upstream)"
 server_port="$(scripts/dev-port.sh firmware-store-smoke)"
 upstream_log="${work}/upstream.log"
@@ -90,6 +107,7 @@ LP_CLOUD_STORE=mem \
 LP_CLOUD_BLOBS=fs \
 LP_CLOUD_DATA_DIR="${work}/cloud-data" \
 LP_CLOUD_FIRMWARE_UPSTREAM="http://127.0.0.1:${upstream_port}" \
+LP_CLOUD_FIRMWARE_RELEASES_LIST="http://127.0.0.1:${upstream_port}/releases.json" \
     cargo run -q -p lp-cloud-server >"${work}/server.log" 2>&1 &
 server_pid=$!
 
@@ -228,6 +246,36 @@ if [[ "${status}" == 200 ]] && cmp -s "${work}/body" "${staging}/${target}.ota-m
     ok "${path}: 200, the version's bytes"
 else
     bad "${path}: ${status}"
+fi
+
+# 8. The release index lists the staged release.
+path="/api/v1/firmware/${target}/releases"
+status="$(get "${path}")"
+if [[ "${status}" == 200 ]] && node -e '
+const [file, target, version, commit] = process.argv.slice(1);
+const index = JSON.parse(require("node:fs").readFileSync(file, "utf8"));
+const entry = index.releases.find((e) => e.version === version);
+process.exit(index.format === 1 && index.target === target && entry && entry.commit === commit ? 0 : 1);
+' "${work}/body" "${target}" "${version}" "${commit}"; then
+    ok "${path}: 200, format 1, lists ${version}"
+else
+    bad "${path}: ${status} $(head -c 300 "${work}/body")"
+fi
+expect "  ACAO: $(header access-control-allow-origin)" test "$(header access-control-allow-origin)" = "*"
+expect "  Cache-Control: $(header cache-control)" grep -qi '^cache-control:.*max-age=60' "${work}/headers"
+expect "  ETag: $(header etag) = its sha256" test "$(header etag)" = "\"$(sha_of "${work}/body")\""
+
+# 9. The index is only under /api/v1/: the old two-segment spelling is the
+#    page fallback's, not a firmware answer.
+path="/firmware/${target}/releases"
+status="$(get "${path}")"
+if [[ -z "$(header access-control-allow-origin)" ]] && ! node -e '
+const body = require("node:fs").readFileSync(process.argv[1], "utf8");
+try { process.exit(JSON.parse(body).format === 1 ? 0 : 1); } catch { process.exit(1); }
+' "${work}/body"; then
+    ok "${path}: ${status}, not the index"
+else
+    bad "${path}: ${status} answered like the index"
 fi
 
 echo "== firmware-store-smoke: ${passed} passed, ${failed} failed ($(upstream_requests) upstream requests)"

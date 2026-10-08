@@ -75,7 +75,7 @@ pub(crate) fn generate_builtin_completions(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, out)?;
+    crate::write_if_changed::write_if_changed(path, &out)?;
     Ok(())
 }
 

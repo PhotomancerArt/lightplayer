@@ -30,21 +30,62 @@ use lpc_update::{BoardManifest, BoardMessage, ChunkEncoding, PieceKind, Request,
 use crate::host_build::{HostBuild, HostPiece};
 use crate::host_refusal::HostRefusal;
 
-/// How far ahead to stream.
+/// The bytes a backup asks for per `G` over Bluetooth: its `D` (6 B of
+/// header plus these) is at most 1024 B, the C6's `SMALL_REPLY_BYTES`
+/// (`fw-esp32-common`'s `radio_link_config.rs`), so the board copies each
+/// answer into the radio link's own send ring. A whole 4 KiB chunk instead
+/// stays in the board's one shared frame buffer until the link has cut it
+/// into frames, and every reply on every link waits for that first — the
+/// heartbeat every 5 s, a USB host's answers. On a slow central the wait
+/// passed the board's 5 s deadline and it closed the link mid-backup
+/// (2026-10-07 desk run d2: `a reply still not out of the frame buffer
+/// after 4633 ms … closing`; the render loop stalled 2–3.5 s at every
+/// heartbeat before that).
+pub const BLE_READ_BACK_PIECE: u32 = 1016;
+
+/// How far ahead to stream, and how a backup reads back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ServeConfig {
-    /// Chunks in flight per request (1 = one per request).
+    /// Chunks in flight per request (1 = one per request). A backup keeps
+    /// the same bytes outstanding, in pieces of `read_back_piece`.
     pub ahead: u8,
+    /// Bytes per read-back `G` (at most one chunk).
+    pub read_back_piece: u32,
 }
 
 impl ServeConfig {
     /// USB: four in flight. On the bench C6 (2026-10-06) the next chunks
     /// then arrive while the board decodes and writes this one: a whole
     /// update 44.8 → 37.4 s against one per request, with the board erasing
-    /// blocks ahead. The backup pulls four ahead too (BLE already did).
-    pub const USB: Self = Self { ahead: 4 };
-    /// BLE: four in flight (the spike's S5c measurement).
-    pub const BLE: Self = Self { ahead: 4 };
+    /// blocks ahead. The backup pulls four chunks ahead too.
+    pub const USB: Self = Self {
+        ahead: 4,
+        read_back_piece: CHUNK,
+    };
+    /// BLE: four in flight (the spike's S5c measurement); the backup reads
+    /// back in [`BLE_READ_BACK_PIECE`]s, sixteen ahead (the same ~16 KiB).
+    pub const BLE: Self = Self {
+        ahead: 4,
+        read_back_piece: BLE_READ_BACK_PIECE,
+    };
+
+    /// `ahead` chunks (and a backup reading whole chunks).
+    #[must_use]
+    pub const fn ahead(ahead: u8) -> Self {
+        Self {
+            ahead,
+            read_back_piece: CHUNK,
+        }
+    }
+
+    /// How many read-back `G`s a backup keeps outstanding: `ahead` chunks'
+    /// worth of pieces.
+    #[must_use]
+    pub fn read_back_ahead(&self) -> u8 {
+        let piece = self.read_back_piece.clamp(1, CHUNK);
+        let pieces = (u32::from(self.ahead.max(1)) * CHUNK).div_ceil(piece);
+        u8::try_from(pieces).unwrap_or(u8::MAX)
+    }
 }
 
 /// What happened, for the caller.

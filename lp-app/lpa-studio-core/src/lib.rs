@@ -44,6 +44,8 @@ pub use app::devices::BrowserBleSource;
 pub use app::devices::BrowserEmuLinkSource;
 #[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
 pub use app::devices::BrowserLanSource;
+#[cfg(all(feature = "browser-websocket", target_arch = "wasm32"))]
+pub use app::devices::BrowserRelaySource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -100,6 +102,16 @@ pub use app::devices::{
     update_standing, update_words, wants_auto_start,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
+pub use app::devices::{
+    RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS, RelayConnectFailure,
+    RelayDeviceTransport, RelayLinkSource,
+};
+pub use app::devices::{
+    UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
+    WIFI_BUSY_WORDS, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET, WifiAddress, WifiAddressBook,
+    WifiAddressReach, WifiConnectFailure, WifiConnectOp, WifiConnectTarget, WifiConnects,
+    connect_wifi_offer,
+};
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
@@ -264,12 +276,12 @@ pub use core::{
 pub use lpa_devices::view::{
     ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, FIRMWARE_NEEDS_USB,
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
-    PendingLinkView, RosterView,
+    PendingLinkView, RosterView, UPDATE_NOT_OVER_WIFI_YET,
 };
 pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{
     Action as DeviceAction, ActivityKind as DeviceActivityKind, AppVersion as DeviceAppVersion,
-    DeviceId, DeviceStatus, EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
+    BoardKey, DeviceId, DeviceStatus, EndpointKey as DeviceEndpointKey, Event as DeviceEvent,
     FirmwareAge as DeviceFirmwareAge, FlashLayoutView as DeviceFlashLayoutView,
     FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,

@@ -162,16 +162,31 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
                 "Updating",
             )
         },
-        UpdateStanding::Finishing { to, percent, .. } => UiDeviceUpdate {
+        UpdateStanding::Finishing {
+            to,
+            percent,
+            resumed,
+            ..
+        } => UiDeviceUpdate {
             progress: progress(*percent, false),
             ..words(
                 Progress,
                 format!("Finishing the update…{}", pct(*percent)),
-                running_sentence(
-                    &format!("Finishing the update to {}…", to.short()),
-                    *percent,
-                    "It was interrupted; this Studio is completing it.",
-                ),
+                // "Interrupted" only when this Studio found the update
+                // half-way; the last phase of an update it ran is ordinary.
+                if *resumed {
+                    running_sentence(
+                        &format!("Finishing the update to {}…", to.short()),
+                        *percent,
+                        "It was interrupted; this Studio is completing it.",
+                    )
+                } else {
+                    running_sentence(
+                        "Installing the rest of the firmware…",
+                        *percent,
+                        "Keep the board powered.",
+                    )
+                },
                 yellow,
                 "Updating",
             )
@@ -517,20 +532,41 @@ mod tests {
     }
 
     #[test]
-    fn finishing() {
-        says(
+    fn finishing_an_update_this_studio_ran_is_not_called_interrupted() {
+        let words = says(
             &UpdateStanding::Finishing {
                 board: x(),
                 to: y(),
                 percent: Some(70),
                 running: true,
+                resumed: false,
             },
             "Finishing the update… 70%",
-            "Finishing the update to 2026.10.05-2… 70%. It was interrupted; this Studio is \
-             completing it.",
+            "Installing the rest of the firmware… 70%. Keep the board powered.",
             Some(UpdateLight::DarkYellow),
             "Updating",
         );
+        assert!(!words.sentence.contains("interrupted"));
+    }
+
+    #[test]
+    fn finishing_one_this_studio_found_half_way_says_so() {
+        for running in [true, false] {
+            says(
+                &UpdateStanding::Finishing {
+                    board: x(),
+                    to: y(),
+                    percent: Some(70),
+                    running,
+                    resumed: true,
+                },
+                "Finishing the update… 70%",
+                "Finishing the update to 2026.10.05-2… 70%. It was interrupted; this Studio is \
+                 completing it.",
+                Some(UpdateLight::DarkYellow),
+                "Updating",
+            );
+        }
     }
 
     #[test]

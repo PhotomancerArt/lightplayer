@@ -2689,7 +2689,7 @@ clippy-host:
     cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
     # fw-esp32-common's usb_link/uart_link modules are behind non-default
     # features (`clippy-host`'s `--workspace` only lints its defaults), the
-    # same gap `test-rust-core` closes above for the tests.
+    # same gap `test-rust-features` closes below for the tests.
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
@@ -2930,6 +2930,26 @@ _test-parallel: test-rust test-filetests test-emu-lab lpa-link-js-test
 
 test-rust-core:
     cargo test
+
+# The feature-variant test lines: crates whose tests (or part of them) sit
+# behind non-default features, so the workspace `cargo test` in
+# `test-rust-core` never compiles them. Each line resolves features over its
+# own package, which is exactly why they are slow: none of them shares the
+# workspace build's dependency artifacts, and together they cost 215-237 s on
+# a runner (lpc-wire ~60 s, lp-cli's desk-images ~45 s, fw-esp32-common up to
+# 66 s), measured on main run 37575019902 (2026-10-07).
+#
+# They used to be the tail of `test-rust-core`, on Validate (x64)'s critical
+# path. CI now runs them in the Lint (x64) job, which has the same `core`
+# gate, the same x64 runner and the same sccache setup, and finished ~15 min
+# before Validate did (see that job's step for the measured cost). Locally
+# `test-rust` (so `just test` and `just ci`) still runs both recipes, in this
+# order.
+#
+# lp-cli pulls in lpvm-cranelift, whose build script embeds the rv32 builtins
+# image: run `build-rv32-builtins` first (as `just test` and the CI step do),
+# or that crate compiles an empty embed.
+test-rust-features:
     # lp-json-pack's corpus tests need its host features (`required-features`),
     # which the plain workspace run never turns on. No dependencies: cheap.
     cargo test -p lp-json-pack --all-features
@@ -2965,14 +2985,14 @@ test-rust-core:
 
 # lp-link (the link-layer prototype, plan lp2025/2026-09-26-1720-reliable-device-link):
 # the delivery property at soak depth, 5,000 fault schedules per ARQ variant
-# (release, ~3 min). CI runs 500 per variant inside `test-rust-core`.
+# (release, ~3 min). CI runs 500 per variant inside `test-rust-features`.
 link-soak cases="5000":
     PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test delivery_properties
 
 # lp-link's decoder fuzzing at depth: arbitrary bytes, datagrams and crafted
 # frames against a live link, `cases` per framing (release, ~12 s at 20,000),
 # plain and secure (the secure cases add replays, forged SYNs and msg1 floods).
-# CI runs 256 per framing inside `test-rust-core`.
+# CI runs 256 per framing inside `test-rust-features`.
 link-fuzz cases="20000":
     PROPTEST_CASES={{cases}} cargo test -p lp-link --features sim,secure --release --test decoder_fuzz
 
@@ -3018,7 +3038,7 @@ link-lab-emu:
 # off upstream code), which is why this is `--manifest-path`, not `-p`. They
 # resolve their own dependencies, so this is a local check, not a CI job; the
 # hook's behaviour on the wire types is covered by `cargo test -p lpc-wire
-# --features ser-write-json`, which CI runs through `test-rust-core`.
+# --features ser-write-json`, which CI runs through `test-rust-features`.
 test-ser-write:
     CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write/Cargo.toml
     CARGO_TARGET_DIR="$PWD/target" cargo test --manifest-path third_party/ser-write-json/Cargo.toml
@@ -3119,7 +3139,7 @@ test-browser-shader-frontend:
     cargo test -p lpc-engine --features naga --lib -- shader_palette
 
 # Local parity: all host tests. CI composes the same pieces path-gated.
-test-rust: test-rust-core test-studio-host test-xt-host test-browser-shader-frontend
+test-rust: test-rust-core test-rust-features test-studio-host test-xt-host test-browser-shader-frontend
 
 # lp-gfx-wgpu is outside default-members (heavy wgpu dep tree) but its
 # CPU-side tests gate the canonical-GLSL → WGSL compile path; the
@@ -4209,6 +4229,13 @@ test-emu-jit-image slug="harness" grade="t2" window="20ms":
 test-emu-serve:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
+    # The Wi-Fi network seam's two LAN cells (plan lp2025/2026-10-05-1903-wifi-link-c6,
+    # P12/P13): one board reached over its port forward (hello, status, an
+    # upload), and two boards in lockstep finding each other. Dev profile:
+    # the emulator crates build at opt-level 3 there, and the Heap budget job
+    # that ran them in release hit its 30-minute budget.
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_link -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_lockstep -- --include-ignored --nocapture
 
 # The hardware walk, with the emulator where the board goes.
 #
@@ -4800,7 +4827,9 @@ walk-migration-emu *args:
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
 # → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
 # C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
-# Needs a Studio on this worktree's port, like walk-no-board. Not CI.
+# Needs a Studio on this worktree's port, like walk-no-board — or
+# `--serve-release` (after `just studio-web-story-build`), which serves the
+# release bundle itself. Not CI.
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
@@ -4811,8 +4840,28 @@ walk-ble-emu *args:
 # store — not access (the emulated link is trusted). Serves the RELEASE
 # bundle itself; needs `just studio-web-story-build`,
 # `just studio-firmware-package-esp32c6` and `cargo build -p lp-cli`. Not CI.
-walk-wifi-emu lane:
-    node scripts/emu/walk-wifi-emu.mjs {{ lane }}
+#
+# `lan` (Wi‑Fi plan P13, scripts/emu/walk-wifi-emu-lan.mjs) is the joined
+# walk: two emulated C6s on one virtual LAN, each joined over its USB door,
+# Studio reaching both over `?lan=` through their port forwards — upload and
+# edit, the LAN probe, a wrong password, a name not in range, the Radio
+# node's rule, a reset onto a new lease, `link rtt lan:` in frames (W1–W10).
+# Every step waits for the board's words (its console, its status answers),
+# never Studio's. Needs `just studio-firmware-package-served` (the merged
+# image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
+# prerequisites and starts nothing. Report:
+# docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
+# out W10's `link rtt`, which alone outlives a 10-minute command cap.
+#
+# `studio-lan` (network-transport plan P04,
+# scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
+# NO `?lan=` — remembered over USB, "Connect over Wi‑Fi" with no cable, a
+# board added by address, a second browser told the board is busy, a wrong
+# address said in words. Stand-in (DD193): the remembered lease is rewritten
+# to the board's loopback forward before it is dialled. Report:
+# docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
+walk-wifi-emu lane *args:
+    node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
 # The dropped-link walk: an emulated C6 over `?emu=` USB, the cable pulled
 # and re-seated under the editor and under Play — the page must stay put
@@ -4850,6 +4899,19 @@ walk-ota-emu *args: install-rv32-target
     just studio-firmware-package-esp32c6 split
     just studio-web-story-build
     node scripts/emu/walk-ota-emu.mjs {{ args }}
+
+# The over-the-air update walk over Bluetooth (OTA M7 P12): walk-ota-emu's
+# update, a drop mid-backup that the backup resumes from, a drop mid-core (out
+# of range, and Bluefy's phantom drop) finished with no click, and an
+# engine-less board restored on connect — with Studio
+# reaching the door's boards over `?ble=emu`, whose polyfill makes every
+# board reset a GATT drop. The card must say "Bluetooth" and Studio's
+# terminal must time every reconnect. Builds what walk-ota-emu builds. Proves
+# the transport, the card and the reconnects — not access (the emulated board
+# answers at the edit tier), and no number it prints is a Bluetooth number.
+# Not CI.
+walk-ota-ble-emu *args:
+    just walk-ota-emu --ble {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

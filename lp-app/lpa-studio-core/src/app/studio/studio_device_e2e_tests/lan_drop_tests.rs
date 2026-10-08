@@ -27,13 +27,11 @@ impl crate::LanLinkSource for DroppableLanBoard {
     fn present(&self) -> Vec<GrantedLink> {
         let info = lpa_link::providers::network_link::lan_link_info(URL);
         vec![GrantedLink {
-            link: Box::new(LossyLink {
-                inner: Box::new(fake_device_link(info.clone(), &self.device)),
-                lose: Rc::clone(&self.lose),
-                open: false,
-                lost: VecDeque::new(),
-                dead: false,
-            }),
+            link: Box::new(LossyLink::new(
+                Box::new(bench_link(info.clone(), &self.device)),
+                Rc::clone(&self.lose),
+                LOST,
+            )),
             info,
         }]
     }
@@ -53,16 +51,41 @@ impl crate::LanLinkSource for DroppableLanBoard {
             None => io,
         }))
     }
+
+    fn connect(&self, _url: &str) -> DeviceTransportFuture<Result<(), String>> {
+        Box::pin(core::future::ready(Ok(())))
+    }
 }
 
 /// The fake board's link, which drops the way `BrowserWebsocketLink` does:
-/// the loss as an error, then `Closed`, then nothing more.
-struct LossyLink {
+/// the loss as an error, then `Closed`, then nothing more. Shared with the
+/// relay's test (`relay_link_tests.rs`), whose drop has its own words.
+pub(super) struct LossyLink {
     inner: Box<dyn lpa_devices::link::Link>,
     lose: Rc<Cell<bool>>,
+    /// What the drop says (`wi-fi link lost: …`, `relay link lost: …`).
+    words: &'static str,
     open: bool,
     lost: VecDeque<lpa_devices::link::LinkEvent>,
     dead: bool,
+}
+
+impl LossyLink {
+    /// `inner`, dropped with `words` once `lose` is set while it is open.
+    pub(super) fn new(
+        inner: Box<dyn lpa_devices::link::Link>,
+        lose: Rc<Cell<bool>>,
+        words: &'static str,
+    ) -> Self {
+        Self {
+            inner,
+            lose,
+            words,
+            open: false,
+            lost: VecDeque::new(),
+            dead: false,
+        }
+    }
 }
 
 impl lpa_devices::link::Link for LossyLink {
@@ -81,9 +104,9 @@ impl lpa_devices::link::Link for LossyLink {
             self.open = false;
             self.dead = true;
             self.lost
-                .push_back(lpa_devices::link::LinkEvent::Error(LOST.to_string()));
+                .push_back(lpa_devices::link::LinkEvent::Error(self.words.to_string()));
             self.lost.push_back(lpa_devices::link::LinkEvent::Closed {
-                reason: LOST.to_string(),
+                reason: self.words.to_string(),
             });
         }
         if let Some(event) = self.lost.pop_front() {
@@ -156,7 +179,7 @@ fn a_lan_link_that_drops_and_redials_comes_back_ready() {
     assert_eq!(bench.view().devices.len(), 1, "one board, one card");
 }
 
-fn wait_for_ready(bench: &mut DeviceBench, tasks: &TaskPool, what: &str) {
+pub(super) fn wait_for_ready(bench: &mut DeviceBench, tasks: &TaskPool, what: &str) {
     bench.run_until(tasks, what, |bench| {
         bench
             .view()

@@ -290,7 +290,9 @@ the app through the same view model and presses the same actions. See
   saved network joins it by itself and serves the link at
   `ws://<board>/link` (port 80), answering `lp-xxxx.local` and DNS-SD
   `_lightplayer._tcp`. Hosts reach it as `lan:<ip>` or `lan:lp-xxxx.local`
-  (`lp-cli`, and Studio behind `?lan=`). The link is `LinkConfig::ws()` (one
+  (`lp-cli`, whose `lan list` browses `_lightplayer._tcp`; and Studio, with
+  no flag: a board it has met is offered "Connect over Wi‑Fi" at the address
+  it last gave, and the add slot takes an address). The link is `LinkConfig::ws()` (one
   frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
   access entries; the tier comes from the key, as on Bluetooth). Its replies
   are JSON, and the C6 has one LAN slot, so a second client is told to try
@@ -319,13 +321,21 @@ the app through the same view model and presses the same actions. See
   `docs/adr/2026-10-01-network-link-security.md`.
 - **The exception: lp-link itself and channel 3 (over-the-air updates)
   stay compatible once cores are fielded** (QY1, answered yes). A fielded
-  core can only be reached over them, so `plain_bytes_golden.rs` and
-  `update_channel_golden.rs` (both `lp-base/lp-link/tests/`) and
-  `lpc-update`'s `tests/v1_golden.hex` are **never-break** pins. A new
+  core can only be reached over them, so `plain_bytes_golden.rs`,
+  `update_channel_golden.rs` and `secure_ws_bytes_golden.rs` (all
+  `lp-base/lp-link/tests/`) and `lpc-update`'s `tests/v1_golden.hex` are
+  **never-break** pins. The third is the **Wi‑Fi link**: once a core that
+  updates over Wi‑Fi is fielded, a board in a house is reachable only over
+  `ws://<board>/link` (port 80, one binary message per frame, close 1013
+  when busy — `fw-esp32-common/tests/lan_endpoint_contract.rs` names each
+  fact) with `ws()` and the secure handshake's bytes. A new
   link feature is a SYN flag plus an extension an old end ignores; channel
   3's messages change only by adding (unknown types answered `N`/`U`).
   The JSON wire on channel 1 keeps the freedom above. See
-  `docs/adr/2026-10-06-ota-update-protocol.md`.
+  `docs/adr/2026-10-06-ota-update-protocol.md`. Likewise the device
+  network file's **reader** (`NetworkFile::from_json`) ignores keys it does
+  not know, so a rolled-back core still joins with a file a newer firmware
+  grew (`docs/adr/2026-10-04-device-wifi-settings.md`, 2026-10-07 amendment).
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -341,7 +351,10 @@ the app through the same view model and presses the same actions. See
   carries `<target>.ota-manifest.json` (`format: 1`,
   `schemas/ota-manifest.schema.json`, `lpc-firmware-release`) and the
   published `<target>.package.json`, and Studios in the field read them
-  through `lightplayer.app/firmware/<target>/<release>/<file>` for years.
+  through `lightplayer.app/firmware/<target>/<release>/<file>` for years —
+  and the release index `lightplayer.app/api/v1/firmware/<target>/releases`
+  (format 1, `schemas/firmware-release-index.schema.json`), which lists
+  them; a shape an old reader would misread goes to `/api/v2/…` beside it.
   Readers ignore unknown fields; an additive field stays format 1; anything
   an old reader would misread bumps `format`, written beside the old one.
   `package.json` is additive-only. Release assets are immutable. See
@@ -730,10 +743,15 @@ does not model. The full reasoning, in Yona's words, is
   reporting, Brave grant revocation, the real chooser) is the shim's residue
   (`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
   rule 3).
-- **Radio is the named exception: the emulator has no BLE air.** Since
-  Bluetooth went on by default, an emulated board with no device store
-  starts the BLE controller and advertises, but no central ever answers, so
-  nothing connects. A BLE claim comes from host tests (the access gate:
+- **Radio is the named exception, and it narrowed in 2026-10 to BLE and the
+  Wi-Fi PHY.** Wi-Fi above the frame device is now emulated for real (the
+  network seam, `net=lan`, on by default — "Emulated Wi-Fi", below, under
+  the C6 emulator): the IP stack, the link and the server all run; what the
+  emulator still cannot play is the radio itself (signal, airtime,
+  coexistence, the driver's own heap/timing) and BLE's air. Since Bluetooth
+  went on by default, an emulated board with no device store starts the BLE
+  controller and advertises, but no central ever answers, so nothing
+  connects. A BLE claim comes from host tests (the access gate:
   `lpa-server/tests/access_gate.rs`), `?ble=emu` for Studio's transport and
   UI (below), plus a desk walk. Since wire proto 37 the walk is Studio
   itself over Bluetooth, and `spikes/ble-lab`'s README is its runbook; that
@@ -803,8 +821,24 @@ back into one frame per notification on the way out, byte-identical to
 `lp_link::frame::wrap_stream` on a 200-vector check. It models the
 firmware's link rules as far as the page can see them: the link opens when
 the central subscribes, each link gets its own hello, an unauthenticated
-link is dropped after 10 s, and Bluefy's phantom drop, where the page hears
-a disconnect while the radio link stays up. **Trust caveat: it proves the
+link is dropped after 10 s, Bluefy's phantom drop, where the page hears
+a disconnect while the radio link stays up, and **a board reset as a GATT
+drop**: the emulated board's USB link survives a reset, so when the chip
+reboots under a live connection (its `reboots` count in the board registry
+moved, checked on the board's next SYN) the polyfill drops the connection
+and the page reconnects, as a real board's radio going down with its CPU
+makes it (counted as `resetDrops` in `stats()`; the board's byte channel
+stays open, since the rebooted board starts its own new session); a link
+restart with no reboot stays one connection. The
+Bluetooth link carries lp-link's update channel (OTA M7 P12), so the card
+updates over it: **`just walk-ota-ble-emu`** walks `walk-ota-emu`'s update,
+a drop mid-core (out of range, and the phantom drop) finished with no
+click, and an engine-less board restored on connect, all over `?ble=emu`,
+asserting the card says "Bluetooth" and Studio's terminal times every
+reconnect (`just walk-ble-emu --serve-release` runs the control walk with
+no dev server). Its reconnect times are the page's retry and the emulated
+board's boot, never a radio's, and its rates go through the board's USB
+link: **no number from either walk is a Bluetooth number.** **Trust caveat: it proves the
 transport, the UI and Play, not access.** The emulated board sees its
 trusted USB link, so every request is answered at the edit tier, and it
 never runs the C6's BLE controller or trouble-host (a chained ACL packet
@@ -839,7 +873,8 @@ itself: X → Y with one press (backup, update, finish, project kept), the
 cable cut mid-core and mid-engine then finished with no click, an
 engine-less board restored on connect, the same with no copy anywhere ("which
 Studio can't get" → Install), and a pre-update board (no over-the-air offer,
-today's flash). `--tab` runs three of them against `?emu=tab`. Every check
+today's flash). `--tab` runs three of them against `?emu=tab`, and `--ble`
+(`just walk-ota-ble-emu`, above) four of them over `?ble=emu`. Every check
 waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
 It proves Studio's update host, routing and card against the real board
 session; it does **not** prove Chromium's serial backend across the
@@ -856,9 +891,29 @@ than `https://lightplayer.app` (a local `just cloud-serve`, say); it accepts
 loopback and private-LAN origins only, so a crafted link cannot aim Studio at
 someone else's `latest`.
 
-**`?lan=<host>`** adds a Wi-Fi board to the Devices page by its LAN address
-(`lp-xxxx.local` or an IP), over the secure `ws()` link
-(`docs/adr/2026-10-07-c6-wifi-link.md`).
+**Wi‑Fi boards need no flag.** Studio installs its LAN link in every
+browser with a WebSocket: a board it has met over any link remembers its
+Wi‑Fi address in this browser (`lp.devices.wifi-addresses.v1`, never the
+registry), and its remembered tile offers "Connect over Wi‑Fi"
+(`devices/<board>/connect-wifi`); "Connect a board on Wi‑Fi" in the add slot
+takes an address (`devices/connect-wifi-address`). **`?lan=<host>`** stays as
+a dev shortcut that dials a board at page load by its LAN address
+(`lp-xxxx.local`, an IP, or an emulator's `127.0.0.1:<forward>`), over the
+secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
+
+**`?relay=1`** (until the network transport's walk on lightplayer.app; off
+by default) installs Studio's relay half: boards reached THROUGH
+lightplayer.app (`relay:<mac>`, the relay's browser leg
+`/relay/board/<mac>` on the page's own origin; `docs/adr/2026-10-06-cloud-relay.md`).
+Without it nothing of the relay exists in the page. A relay link presents
+held keys only — the account's, then the browser's; never the anonymous key
+or a typed password. `?relay=<mac>[,<mac>…]` also dials those boards at page
+load (a dev shortcut, like `?lan=`). Locally, serve the Studio bundle from a
+`lp-cloud-server` (`LP_CLOUD_STATIC_DIR`, dev login) so the relay is
+same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
+(`LP_CLOUD_SESSION` = the dev login's session); `Dioxus.toml` also forwards
+`/relay` (WebSocket upgrades included) to the `lp-cloud-server` on 2812 — but
+`lp-cli serve` binds 2812 for its own socket, so the two do not share a desk.
 
 Two more dev-only flags tune the device wire for a measurement (read once at
 page load by `lpa-studio-web/src/dev_url_flags.rs`; no UI, no persistence):
@@ -872,6 +927,18 @@ whose hello offers this build's pack format; what the board answered is one
 replies stay JSON — <why>`), and a packed link whose learned table lost step
 says so once (`wire: packed reply dropped …`, then `wire: back in step …`). See
 `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`.
+
+`?ble-writes=<with-response|without-response>[:N]` sets how every Bluetooth
+link the page makes writes its lp-link frames: data frames with or without
+response, at most `N` (1–32) in flight. The defaults
+(`lpa_link::providers::browser_ble_write_policy`) are `without-response:16`
+on a desktop browser (the OTA spike's S5c best on Mac Chrome) and
+`without-response:8` on iOS (Bluefy, unmeasured); SYN and ACK-only frames,
+and every frame while the link hears nothing, always go with response.
+`?ble-writes=with-response` is #880's every-frame-acknowledged behaviour, the
+fallback for a central that loses too much. Each link logs its policy and,
+during bulk traffic, a 15 s rate/resend/srtt line as `[ble <session>] …` on
+the page's console.
 
 An emulated board added on the **Devices page** asks the emulator for the
 LED performance seam (`led=fast`, softly: an image too old for it boots
@@ -1264,12 +1331,13 @@ asks**. The ROM hook table stays empty; seams are their own exception, with
 their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
 
 - **Two kinds.** A *capability* seam stands in for hardware the emulator
-  cannot model (none ships yet; Bluetooth and the network are next). A
-  *performance* seam skips work the emulator models faithfully but slowly,
-  and still bills its time: `led=fast` (the WS281x wait) keeps frames, fps
-  and heap identical. **Performance seams are on only for the emulated boards
-  a user adds on Studio's Devices page** — never `?emu=` (ws or tab), `emu
-  serve`'s defaults, the walks, CI or `lp-cli validate` (which refuses them).
+  cannot model: `net=lan` (the network seam, below) ships and is on by
+  default; Bluetooth is next. A *performance* seam skips work the emulator
+  models faithfully but slowly, and still bills its time: `led=fast` (the
+  WS281x wait) keeps frames, fps and heap identical. **Performance seams are
+  on only for the emulated boards a user adds on Studio's Devices page** —
+  never `?emu=` (ws or tab), `emu serve`'s defaults, the walks, CI or
+  `lp-cli validate` (which refuses them).
 - **Seam off is today's machine.** With nothing asked for, nothing scans,
   nothing is patched, and no figure moves.
 - **Flags.** `lp-cli emu run --seams <atoms>` (strict: a seam that cannot
@@ -1293,6 +1361,27 @@ The READMEs: `lp-base/lp-seam/README.md` (the ABI),
 `lp-emu/esp/lp-emu-esp32c6/README.md` ("Emulator seams"),
 `lp-fw/fw-esp32c6/README.md` (the table and its cost on silicon),
 `lp-emu/lp-emu-validate/README.md` ("Composite names").
+
+#### Emulated Wi-Fi
+
+Every emulated C6 run whose image carries the network seam engages it, soft
+and by default (no flag needed): the IP stack, lp-link, the secure LAN
+endpoint, mDNS and the server all run for real, against a virtual LAN instead
+of the radio (ADR `2026-10-05-emulator-seams.md` §11). `lp-cli emu run --lan
+<fixture.toml>` puts the board on a LAN with that fixture's access points and
+prints its forward, `forward lan:127.0.0.1:<port>`; `emu serve --lan
+<name>=<fixture>` plus a board's `lan=<name>` shares one LAN between several
+boards, and `GET /boards` lists each one's `lan`/`forward`/`address`. Reach a
+board through its forward like a desk port, `lp-cli … lan:127.0.0.1:<port>`,
+or open Studio at `?lan=ws://127.0.0.1:<port>/link` (several, comma-joined,
+for several boards). `just walk-wifi-emu lan` is the walk (two boards, one
+LAN, Studio headless over `?lan=`); `--pace realtime|max` (`pace=` per board)
+controls whether a board's guest clock is held to wall time, which the
+walk needed once real traffic crossed the LAN (an unset pace already holds a
+board to a connected host). **Trust caveat:** it proves everything above the
+frame device — the IP stack, the link, the server — never the radio: no
+signal, airtime, coexistence or driver heap/timing, and no real USB/serial
+stack or Chrome's Local Network prompt.
 
 #### The perf lab: the phone joins once, the director queues the presses
 
@@ -1464,7 +1553,9 @@ cargo test -p lpa-server --no-run
 
 CI (see `.github/workflows/pre-merge.yml`) is path-gated per job: one
 `detect-changes` job computes the gates, then `Lint (x64)` runs
-`just check-lint` in parallel with `Validate (x64)`, which runs
+`just check-lint` and then `just test-rust-features` (the feature-variant
+`cargo test -p … --features …` lines, kept off Validate's critical path) in
+parallel with `Validate (x64)`, which runs
 `just ci-prereqs`, the gated test recipes (`test-rust-core`, plus
 `test-studio-host` when studio paths changed, plus `test-filetests` when
 shader paths changed), then `schema-check` and the heap-budget ratchet —

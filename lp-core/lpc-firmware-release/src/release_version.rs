@@ -2,6 +2,7 @@
 
 use alloc::format;
 use alloc::string::{String, ToString};
+use core::cmp::Ordering;
 use core::fmt;
 
 use crate::lower_hex::{BUILD_ID_COMMIT_DIGITS, is_lower_hex};
@@ -13,7 +14,12 @@ use crate::lower_hex::{BUILD_ID_COMMIT_DIGITS, is_lower_hex};
 /// Four-digit year, two-digit month (01–12) and day (01–31), and `N ≥ 1`
 /// with no leading zero. Only a release version is ever in the store; a dev
 /// version (`abc1234`, `abc1234-dirty-101500PT`) never parses as one.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// **Ordered by number**, `(year, month, day, N)`, never by the string:
+/// `2026.10.06-10` is newer than `2026.10.06-9`. Equality is the string's,
+/// which agrees with the order because the grammar admits exactly one
+/// spelling of each version (fixed-width date, no leading zero in `N`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReleaseVersion(String);
 
 impl ReleaseVersion {
@@ -31,6 +37,30 @@ impl ReleaseVersion {
     pub fn tag(&self) -> String {
         format!("v{}", self.0)
     }
+
+    /// `(year, month, day, N)` as integers: what the order compares.
+    fn order_key(&self) -> (u32, u32, u32, u32) {
+        // The grammar guarantees every piece is ASCII digits that fit: a
+        // four-digit year, two-digit month and day, at most nine digits of N.
+        let (date, n) = self.0.split_once('-').unwrap_or((self.0.as_str(), ""));
+        let mut parts = date.split('.').map(digits_value);
+        let year = parts.next().unwrap_or(0);
+        let month = parts.next().unwrap_or(0);
+        let day = parts.next().unwrap_or(0);
+        (year, month, day, digits_value(n))
+    }
+}
+
+impl Ord for ReleaseVersion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.order_key().cmp(&other.order_key())
+    }
+}
+
+impl PartialOrd for ReleaseVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl fmt::Display for ReleaseVersion {
@@ -46,6 +76,9 @@ impl fmt::Display for ReleaseVersion {
 /// Nothing shorter or longer than 12 digits parses: a build id is a
 /// derivation (`version + "+" + commit[..12]`), not an abbreviation a
 /// client may choose.
+///
+/// Ordered by its version (numerically, see [`ReleaseVersion`]), then by the
+/// commit digits.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BuildId {
     version: ReleaseVersion,
@@ -112,6 +145,15 @@ fn two_digit(s: &str) -> u8 {
     (b[0] - b'0') * 10 + (b[1] - b'0')
 }
 
+/// The value of a run of ASCII digits no longer than the grammar allows
+/// (nine), so it always fits a `u32`.
+fn digits_value(s: &str) -> u32 {
+    s.bytes().fold(0u32, |acc, b| {
+        acc.saturating_mul(10)
+            .saturating_add(u32::from(b.wrapping_sub(b'0')))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +187,32 @@ mod tests {
         ] {
             assert!(ReleaseVersion::parse(s).is_none(), "{s:?}");
         }
+    }
+
+    #[test]
+    fn release_versions_order_by_number_not_by_string() {
+        let v = |s: &str| ReleaseVersion::parse(s).unwrap();
+        assert!(v("2026.10.06-10") > v("2026.10.06-9"));
+        assert!(v("2026.10.06-100") > v("2026.10.06-99"));
+        assert!(v("2026.10.06-999999999") > v("2026.10.06-99999999"));
+        // A later day, month or year is newer than any N before it.
+        assert!(v("2026.10.07-1") > v("2026.10.06-999"));
+        assert!(v("2026.11.01-1") > v("2026.10.31-50"));
+        assert!(v("2027.01.01-1") > v("2026.12.31-50"));
+        assert_eq!(v("2026.10.06-9").cmp(&v("2026.10.06-9")), Ordering::Equal);
+        let mut sorted = [v("2026.10.06-9"), v("2026.10.06-11"), v("2026.10.06-10")];
+        sorted.sort();
+        assert_eq!(
+            sorted.map(|v| v.to_string()),
+            ["2026.10.06-9", "2026.10.06-10", "2026.10.06-11"]
+        );
+    }
+
+    #[test]
+    fn build_ids_order_by_version_then_commit() {
+        let id = |s: &str| BuildId::parse(s).unwrap();
+        assert!(id("2026.10.06-10+000000000000") > id("2026.10.06-9+ffffffffffff"));
+        assert!(id("2026.10.06-9+bbbbbbbbbbbb") > id("2026.10.06-9+aaaaaaaaaaaa"));
     }
 
     #[test]

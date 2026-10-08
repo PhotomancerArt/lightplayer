@@ -57,7 +57,7 @@ fn sent(out: &[Vec<u8>]) -> Vec<(u8, PieceKind, u32)> {
 }
 
 /// One chunk per request (what `ServeConfig::USB` was before it streamed).
-const ONE_AHEAD: ServeConfig = ServeConfig { ahead: 1 };
+const ONE_AHEAD: ServeConfig = ServeConfig::ahead(1);
 const C: PieceKind = PieceKind::Core;
 const E: PieceKind = PieceKind::Engine;
 

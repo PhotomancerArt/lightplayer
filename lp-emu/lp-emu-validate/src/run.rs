@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use crate::config::ValidateConfig;
+use crate::config::{LabelPace, ValidateConfig};
 use crate::configuration::{Availability, Configuration, ConfigurationKind};
 use crate::driver::{LinkHost, RunRequest, default_out_dir, driver_for};
 use crate::grade::FieldClass;
@@ -73,6 +73,32 @@ pub fn list(cfg: &ValidateConfig, repo_root: &Path) -> Result<String> {
         let _ = writeln!(s, "  {:<30} {}", "", trust.join(" "));
     }
 
+    // The seam overlays a composite name (`lp-emu:esp32c6:t1+net=lan`) lays
+    // over its base: which classes each one regrades, and to what.
+    let _ = writeln!(s, "\nseam overlays (<configuration>+<seam>=<impl>)");
+    for overlay in &cfg.seams {
+        let kind = match overlay.kind {
+            crate::config::SeamKind::Performance => "performance",
+            crate::config::SeamKind::Capability => "capability",
+        };
+        let moved: Vec<String> = overlay
+            .trust
+            .entries()
+            .iter()
+            .map(|e| format!("{}={}", e.class.slug(), e.grade))
+            .collect();
+        let _ = writeln!(
+            s,
+            "  {:<30} {kind:<11} {}",
+            overlay.atom(),
+            if moved.is_empty() {
+                "every class at the base's grade".to_string()
+            } else {
+                moved.join(" ")
+            }
+        );
+    }
+
     let transcripts = committed_transcripts(repo_root)?;
     let _ = writeln!(s, "\ntranscripts ({TRANSCRIPTS_DIR})");
     if transcripts.is_empty() {
@@ -89,7 +115,7 @@ pub fn list(cfg: &ValidateConfig, repo_root: &Path) -> Result<String> {
                 let _ = writeln!(
                     s,
                     "  {:<28} {:<22} {:<6} {}",
-                    t.header.configuration,
+                    t.header.label(),
                     t.header.payload,
                     format!("{} ln", t.lines.len()),
                     rel
@@ -151,7 +177,13 @@ pub fn replay_against_configuration(
     options: ReplayOptions,
 ) -> Result<(ReplayReport, String)> {
     let l = Transcript::load(left)?;
-    let want = Configuration::parse(configuration)?;
+    // Matched on the LABEL, so `…:t1` finds the seam-free capture and
+    // `…:t1+net=lan` the one recorded with that seam engaged, never each
+    // other's. The name resolves through the table first, which refuses an
+    // unknown base or overlay by name and puts the atoms in label order.
+    let want = ValidateConfig::embedded()
+        .configuration(configuration)?
+        .label();
     let mut candidates = Vec::new();
     for path in committed_transcripts(repo_root)? {
         let Ok(t) = Transcript::load(&path) else {
@@ -159,7 +191,7 @@ pub fn replay_against_configuration(
         };
         if t.header.payload == l.header.payload
             && t.header.chip == l.header.chip
-            && t.header.configuration == want.name()
+            && t.header.label() == want
         {
             candidates.push(path);
         }
@@ -169,13 +201,13 @@ pub fn replay_against_configuration(
             "no committed transcript of payload `{}` on chip `{}` for configuration `{}`",
             l.header.payload,
             l.header.chip,
-            want.name()
+            want
         ),
         1 => replay_files(left, &candidates[0], options),
         n => bail!(
             "{n} committed transcripts match configuration `{}` for payload `{}`; \
              name one explicitly:\n  {}",
-            want.name(),
+            want,
             l.header.payload,
             candidates
                 .iter()
@@ -292,8 +324,10 @@ impl ImageOverrides {
 /// **Performance seams never make transcripts** (ADR
 /// docs/adr/2026-10-05-emulator-seams.md): a configuration composed with one
 /// is for reading and replay, never for `run` or `record`. A capability
-/// seam's composite is allowed (none exists yet).
-fn refuse_performance_seams(entry: &crate::config::ConfigurationEntry, verb: &str) -> Result<()> {
+/// seam's composite (`…+net=lan`) is allowed, on our own emulators only: a
+/// seam is something `lp-emu:*` answers, and a composite of silicon or
+/// esp-emu would run seam-free under a label that says otherwise.
+fn refuse_unrunnable_seams(entry: &crate::config::ConfigurationEntry, verb: &str) -> Result<()> {
     if let Some(seam) = entry.performance_seam() {
         bail!(
             "cannot {verb} on `{}`: `{}={}` is a performance seam, and performance seams never \
@@ -304,7 +338,41 @@ fn refuse_performance_seams(entry: &crate::config::ConfigurationEntry, verb: &st
             entry.name
         );
     }
+    if !entry.seams.is_empty() && entry.parsed()?.kind != ConfigurationKind::LpEmu {
+        bail!(
+            "cannot {verb} on `{}`: a seam is an exception our own emulator answers, and `{}` \
+             is not one of our emulators",
+            entry.label(),
+            entry.name
+        );
+    }
     Ok(())
+}
+
+/// **A paced run never makes a transcript.** `realtime` holds the board to
+/// wall time, so what it records depends on the host's clock, and a
+/// transcript must be a function of the image. `max` is what every
+/// `validate` run already is (its driver binds no LAN forward, so nothing
+/// ever paces it), and a transcript's header carries no pace, so it would
+/// file under a label it does not say: drop the `@pace=` instead.
+fn refuse_a_pace(entry: &crate::config::ConfigurationEntry, verb: &str) -> Result<()> {
+    match entry.pace {
+        None => Ok(()),
+        Some(LabelPace::Realtime) => bail!(
+            "cannot {verb} on `{}`: pace realtime holds the board to wall time, so what it \
+             records depends on the host's clock, and a transcript must be a function of the \
+             image — {verb} on `{}`",
+            entry.label(),
+            entry.seam_label()
+        ),
+        Some(LabelPace::Max) => bail!(
+            "cannot {verb} on `{}`: `validate` never paces a run (its driver binds no LAN \
+             forward), so every run is already `max`, and a transcript carries no pace — \
+             {verb} on `{}`",
+            entry.label(),
+            entry.seam_label()
+        ),
+    }
 }
 
 /// `validate run <set> --config <name>` — plan, then (unless dry) execute.
@@ -317,7 +385,8 @@ pub fn run_set(
     dry_run: bool,
 ) -> Result<String> {
     let entry = cfg.configuration(configuration)?;
-    refuse_performance_seams(&entry, "run")?;
+    refuse_unrunnable_seams(&entry, "run")?;
+    refuse_a_pace(&entry, "run")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -527,7 +596,8 @@ pub fn record_set(
         ..
     } = *provenance;
     let entry = cfg.configuration(configuration)?;
-    refuse_performance_seams(&entry, "record")?;
+    refuse_unrunnable_seams(&entry, "record")?;
+    refuse_a_pace(&entry, "record")?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -738,6 +808,11 @@ fn request(
         // not for `esp-emu:<version>`, whose detail is a version.
         chip: entry.chip.clone(),
         link_host: opts.link_host.cloned(),
+        seams: entry
+            .seams
+            .iter()
+            .map(|s| format!("{}={}", s.seam, s.implementation))
+            .collect(),
     }
 }
 
@@ -1022,6 +1097,125 @@ mod tests {
             err.contains("performance seams never make transcripts"),
             "{err}"
         );
+    }
+
+    /// A paced run never makes a transcript: `realtime` because what it
+    /// records depends on the host's clock, `max` because every validate run
+    /// already is one and a transcript carries no pace.
+    #[test]
+    fn a_paced_run_never_records_or_runs() {
+        let cfg = ValidateConfig::embedded();
+        let provenance = RecordProvenance {
+            date: "2026-10-06",
+            firmware_commit: "733d6886a",
+            firmware_dirty: None,
+            machine: None,
+        };
+        let record = |name: &str| {
+            format!(
+                "{:#}",
+                record_set(
+                    &cfg,
+                    "boot-idle",
+                    name,
+                    &RunOptions::default(),
+                    Path::new("/repo"),
+                    &provenance,
+                    true,
+                )
+                .unwrap_err()
+            )
+        };
+        let run = |name: &str| {
+            format!(
+                "{:#}",
+                run_set(
+                    &cfg,
+                    "boot-idle",
+                    name,
+                    &RunOptions::default(),
+                    Path::new("/repo"),
+                    true,
+                )
+                .unwrap_err()
+            )
+        };
+        let err = record("lp-emu:esp32c6:t1+net=lan@pace=realtime");
+        assert!(
+            err.contains("a transcript must be a function of the image"),
+            "{err}"
+        );
+        assert!(
+            err.contains("record on `lp-emu:esp32c6:t1+net=lan`"),
+            "{err}"
+        );
+        let err = run("lp-emu:esp32c6:t1+net=lan@pace=realtime");
+        assert!(err.contains("wall time"), "{err}");
+        for err in [
+            record("lp-emu:esp32c6:t1@pace=max"),
+            run("lp-emu:esp32c6:t1@pace=max"),
+        ] {
+            assert!(err.contains("never paces a run"), "{err}");
+            assert!(err.contains("on `lp-emu:esp32c6:t1`"), "{err}");
+        }
+    }
+
+    /// A capability seam records: the plan asks the machine for exactly the
+    /// configuration's seams (strictly, so an image without them fails
+    /// instead of recording seam-free under the composite's label), the
+    /// transcript files beside the seam-free one, and a plain name asks for
+    /// `none` so the machine's capability defaults never engage behind it.
+    #[test]
+    fn a_capability_seam_records_and_a_plain_name_asks_for_none() {
+        let cfg = ValidateConfig::embedded();
+        let provenance = RecordProvenance {
+            date: "2026-10-06",
+            firmware_commit: "d6cfaa2051ae",
+            firmware_dirty: None,
+            machine: None,
+        };
+        let record = |config: &str| {
+            record_set(
+                &cfg,
+                "boot-idle",
+                config,
+                &RunOptions::default(),
+                Path::new("/repo"),
+                &provenance,
+                true,
+            )
+        };
+        let net = record("lp-emu:esp32c6:t1+net=lan").unwrap();
+        assert!(net.contains("--seams net=lan"), "{net}");
+        assert!(
+            net.contains("boot-idle/lp-emu-esp32c6-t1+net=lan-2026-10-06-d6cfaa205.txt"),
+            "{net}"
+        );
+        let plain = record("lp-emu:esp32c6:t1").unwrap();
+        assert!(plain.contains("--seams none"), "{plain}");
+        assert!(
+            plain.contains("boot-idle/lp-emu-esp32c6-t1-2026-10-06-d6cfaa205.txt"),
+            "{plain}"
+        );
+
+        // A seam is our emulators' to answer: a composite of anything else is
+        // refused rather than run seam-free under its label.
+        let err = format!("{:#}", record("silicon:esp32c6+net=lan").unwrap_err());
+        assert!(err.contains("not one of our emulators"), "{err}");
+        // …and so is a chip whose machine answers none.
+        let err = format!(
+            "{:#}",
+            run_set(
+                &cfg,
+                "boot-idle",
+                "lp-emu:esp32v3:t1+net=lan",
+                &RunOptions::default(),
+                Path::new("/repo"),
+                true,
+            )
+            .unwrap_err()
+        );
+        assert!(err.contains("has no emulator seams"), "{err}");
     }
 
     #[test]

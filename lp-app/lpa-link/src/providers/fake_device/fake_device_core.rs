@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,37 @@ use crate::stream::ByteStreamError;
 /// How often the blank-flash boot ROM repeats its `invalid header` line.
 const BLANK_FLASH_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 
+/// The board's clock: microseconds on any monotonic origin.
+///
+/// Every timer the fake keeps — its boot delay, its heartbeat cadence, the
+/// ROM's repeat, its lp-link's — reads this, and so does the host end of a
+/// [`fake_device_link`](crate::device_link::fake::fake_device_link). By
+/// default it is the wall clock; a test that steps time itself hands the
+/// board its own ([`FakeEsp32Device::set_clock`]), so the board's timers and
+/// the host's agree with the test's and no test waits on real time for them.
+pub type FakeDeviceClock = Arc<dyn Fn() -> Micros + Send + Sync>;
+
+/// The wall clock, from when it was made.
+fn wall_clock() -> FakeDeviceClock {
+    let origin = Instant::now();
+    Arc::new(move || u64::try_from(origin.elapsed().as_micros()).unwrap_or(u64::MAX))
+}
+
+/// One board's clock, shared by its core and its links (outside the core's
+/// lock, so reading the time never takes the device).
+type SharedClock = Arc<RwLock<FakeDeviceClock>>;
+
+fn read_clock(clock: &SharedClock) -> Micros {
+    let clock = clock
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clock()
+}
+
+fn micros(duration: Duration) -> Micros {
+    u64::try_from(duration.as_micros()).unwrap_or(u64::MAX)
+}
+
 /// Cloneable handle to one scripted fake device.
 ///
 /// The device outlives individual byte streams (a reconnect opens a new
@@ -49,11 +80,14 @@ pub struct FakeEsp32Device {
     /// `device_link::fake::fake_host_port`). Beside the core, not in it: the
     /// port locks its link and then the device, never the other way round.
     host_port: Arc<Mutex<Option<WeakByteStreamPort<FakeDeviceByteStream>>>>,
+    /// The board's clock (the core holds the same one).
+    clock: SharedClock,
 }
 
 impl FakeEsp32Device {
     pub fn new(script: FakeDeviceScript) -> Self {
-        let phase = FakePhase::fresh(&script.boot);
+        let clock: SharedClock = Arc::new(RwLock::new(wall_clock()));
+        let phase = FakePhase::fresh(&script.boot, read_clock(&clock));
         let efuse_mac = match &script.boot {
             FakeBootState::LightPlayer(lp) => lp.base_mac.clone(),
             _ => None,
@@ -88,15 +122,82 @@ impl FakeEsp32Device {
                 packed_frames_emitted: 0,
                 session_hellos: 0,
                 unanswered: std::collections::BTreeSet::new(),
-                clock: Instant::now(),
+                clock: Arc::clone(&clock),
                 boots: 0,
                 link: None,
                 boot_hello: None,
                 outbox: VecDeque::new(),
                 cut_armed: false,
                 premature_sniffer: LinkSniffer::usb(),
+                at_server: std::collections::BTreeSet::new(),
+                server_said_hello: false,
+                server_gone: false,
             })),
             host_port: Arc::new(Mutex::new(None)),
+            clock,
+        }
+    }
+
+    /// Run the board on `clock` instead of the wall clock: its own timers
+    /// and the host end of every link attached to it
+    /// ([`fake_device_link`](crate::device_link::fake::fake_device_link))
+    /// read it from now on.
+    ///
+    /// The board's time carries on from where it is, at `clock`'s rate:
+    /// whatever origin `clock` has, nothing the board or a link already
+    /// timed sees time jump, in either direction.
+    pub fn set_clock(&self, clock: FakeDeviceClock) {
+        let mut current = self
+            .clock
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let offset = i128::from(current()) - i128::from(clock());
+        *current = Arc::new(move || {
+            u64::try_from((i128::from(clock()) + offset).max(0)).unwrap_or(u64::MAX)
+        });
+    }
+
+    /// Whether `other` is a handle on this same board.
+    pub fn is_same_board(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// The board's clock, now.
+    pub fn now_us(&self) -> Micros {
+        read_clock(&self.clock)
+    }
+
+    /// Wait (in real time, up to `limit`) until the board's server has
+    /// answered every request it was handed and, after a boot, said its
+    /// hello. `false` when `limit` ran out first.
+    ///
+    /// The server is a real `LpServer` on a real thread: it is the one part
+    /// of this board that cannot run on the board's clock. A test that
+    /// steps the clock itself ([`Self::set_clock`]) calls this between
+    /// steps, so the clock does not run on past an answer that is already
+    /// being computed — the board answers "at once" on its own clock, the
+    /// way the stepped test means it to, whatever the host machine's load.
+    ///
+    /// Answers the script swallows (`drop_responses`, `suppress_hello`)
+    /// count as answered: the server gave them. A board hung mid-frame, or
+    /// whose server is gone, has nothing left to wait for.
+    pub fn settle_server(&self, limit: Duration) -> bool {
+        let started = Instant::now();
+        loop {
+            {
+                let mut core = self.lock();
+                if !core.server_busy() {
+                    return true;
+                }
+                core.pump_server_frames();
+                if !core.server_busy() {
+                    return true;
+                }
+            }
+            if started.elapsed() >= limit {
+                return false;
+            }
+            std::thread::sleep(Duration::from_micros(50));
         }
     }
 
@@ -298,20 +399,18 @@ enum FakePhase {
     /// firmware): announcement-only output.
     Passive {
         announced: bool,
-        last_emit: Option<Instant>,
+        last_emit: Option<Micros>,
     },
     /// LightPlayer before `boot_delay` elapsed: silent, input discarded.
-    BootingLp { since: Instant },
+    BootingLp { since: Micros },
     /// LightPlayer serving: a real host `LpServer` on its own thread.
     RunningLp { runtime: HostRuntime },
 }
 
 impl FakePhase {
-    fn fresh(boot: &FakeBootState) -> Self {
+    fn fresh(boot: &FakeBootState, now: Micros) -> Self {
         match boot {
-            FakeBootState::LightPlayer(_) => Self::BootingLp {
-                since: Instant::now(),
-            },
+            FakeBootState::LightPlayer(_) => Self::BootingLp { since: now },
             _ => Self::Passive {
                 announced: false,
                 last_emit: None,
@@ -334,7 +433,7 @@ pub(crate) struct FakeDeviceCore {
     /// Device→host bytes not yet served to the reader.
     out: VecDeque<u8>,
     /// When `out` last became non-empty (read-latency reference point).
-    out_since: Option<Instant>,
+    out_since: Option<Micros>,
     /// Cumulative bytes served to readers (failure-knob offsets).
     served_bytes: usize,
     /// Protocol frames fully emitted (mid-frame-cut counting).
@@ -345,7 +444,7 @@ pub(crate) struct FakeDeviceCore {
     cut_armed: bool,
     /// When the last synthetic heartbeat was emitted (scripts with
     /// `heartbeat_interval`; the host server never heartbeats on its own).
-    last_heartbeat: Option<Instant>,
+    last_heartbeat: Option<Micros>,
     premature_input_bytes: usize,
     premature_input: Vec<u8>,
     /// Reads what the host writes while nothing is serving, for
@@ -384,8 +483,8 @@ pub(crate) struct FakeDeviceCore {
     packed_frames_emitted: usize,
     /// Session hellos sent, cumulative across boots.
     session_hellos: usize,
-    /// The device's clock for its link (any monotonic origin).
-    clock: Instant,
+    /// The device's clock (any monotonic origin): see [`FakeDeviceClock`].
+    clock: SharedClock,
     /// Boots so far: each boot's link gets its own nonce.
     boots: u32,
     /// This boot's link, once the LightPlayer server runs.
@@ -398,6 +497,14 @@ pub(crate) struct FakeDeviceCore {
     /// Correlation ids the server has been handed but whose answer has not
     /// yet reached the byte wire. Backs [`FakeEsp32Device::unanswered_requests`].
     unanswered: std::collections::BTreeSet<u64>,
+    /// Correlation ids the server has been handed and not yet answered —
+    /// whatever then becomes of the answer. Backs
+    /// [`FakeEsp32Device::settle_server`].
+    at_server: std::collections::BTreeSet<u64>,
+    /// This boot's server has sent its unsolicited hello (kept or not).
+    server_said_hello: bool,
+    /// This boot's server is gone: nothing more will come from it.
+    server_gone: bool,
 }
 
 impl FakeDeviceCore {
@@ -418,9 +525,21 @@ impl FakeDeviceCore {
         self.outbox.clear();
         self.premature_sniffer = LinkSniffer::usb();
         self.unanswered.clear();
+        self.at_server.clear();
+        self.server_said_hello = false;
+        self.server_gone = false;
         // Dropping a RunningLp phase drops the HostRuntime, which joins the
         // server thread (bounded).
-        self.phase = FakePhase::fresh(&self.script.boot);
+        self.phase = FakePhase::fresh(&self.script.boot, self.now());
+    }
+
+    /// Whether the server has work this board is still owed: a boot's hello,
+    /// or an answer to a request it was handed.
+    fn server_busy(&self) -> bool {
+        matches!(self.phase, FakePhase::RunningLp { .. })
+            && !self.stalled_by_cut
+            && !self.server_gone
+            && (!self.server_said_hello || !self.at_server.is_empty())
     }
 
     /// Drive the state machine and pump server frames into `out`.
@@ -435,12 +554,14 @@ impl FakeDeviceCore {
                     return;
                 };
                 let first = !*announced;
-                let due = last_emit.is_none_or(|at| at.elapsed() >= BLANK_FLASH_EMIT_INTERVAL);
+                let now = read_clock(&self.clock);
+                let due = last_emit
+                    .is_none_or(|at| now.saturating_sub(at) >= micros(BLANK_FLASH_EMIT_INTERVAL));
                 if !due {
                     return;
                 }
                 *announced = true;
-                *last_emit = Some(Instant::now());
+                *last_emit = Some(now);
                 let mut lines: Vec<String> = Vec::new();
                 if first {
                     lines.extend(self.script.rom_banner.iter().cloned());
@@ -479,7 +600,7 @@ impl FakeDeviceCore {
             }
             FakeBootState::LightPlayer(lp) => match &self.phase {
                 FakePhase::BootingLp { since } => {
-                    if since.elapsed() < lp.boot_delay {
+                    if read_clock(&self.clock).saturating_sub(*since) < micros(lp.boot_delay) {
                         return;
                     }
                     let lp = lp.clone();
@@ -658,9 +779,17 @@ impl FakeDeviceCore {
                 Some(Ok(frame)) => frame,
                 // Server side gone: nothing more will arrive; leave the
                 // wire quiet (a real dead firmware also just goes silent).
-                Some(Err(_)) => return,
+                Some(Err(_)) => {
+                    self.server_gone = true;
+                    return;
+                }
                 None => return,
             };
+            // The server has answered, whatever the wire then does with it.
+            self.at_server.remove(&frame.id);
+            if frame.id == 0 && is_hello(&frame) {
+                self.server_said_hello = true;
+            }
             // Scripted pre-hello firmware: swallow every hello at the wire
             // (unsolicited AND requested) while the rest of the protocol
             // keeps flowing.
@@ -818,7 +947,7 @@ impl FakeDeviceCore {
 
     /// Microseconds on the device's clock.
     fn now(&self) -> Micros {
-        u64::try_from(self.clock.elapsed().as_micros()).unwrap_or(u64::MAX)
+        read_clock(&self.clock)
     }
 
     /// Emit one synthetic unsolicited id-0 heartbeat when the script's
@@ -837,13 +966,14 @@ impl FakeDeviceCore {
         if self.stalled_by_cut {
             return;
         }
+        let now = self.now();
         let due = self
             .last_heartbeat
-            .is_none_or(|at| at.elapsed() >= interval);
+            .is_none_or(|at| now.saturating_sub(at) >= micros(interval));
         if !due {
             return;
         }
-        self.last_heartbeat = Some(Instant::now());
+        self.last_heartbeat = Some(now);
         let identity = self.heartbeat_identity();
         let frame = lpc_wire::WireServerMessage::new(
             0,
@@ -928,7 +1058,7 @@ impl FakeDeviceCore {
             return Ok(0);
         }
         if let Some(since) = self.out_since
-            && since.elapsed() < self.failure.read_latency
+            && self.now().saturating_sub(since) < micros(self.failure.read_latency)
         {
             return Ok(0);
         }
@@ -1048,6 +1178,7 @@ impl FakeDeviceCore {
         };
         if message.id != 0 {
             self.unanswered.insert(message.id);
+            self.at_server.insert(message.id);
         }
         let transport = runtime.client_transport();
         let sent = poll_once(async {
@@ -1055,7 +1186,8 @@ impl FakeDeviceCore {
             transport.send(message).await
         });
         match sent {
-            Some(Ok(())) => {}
+            // The board answers on its next tick, not a frame later.
+            Some(Ok(())) => runtime.wake_server(),
             Some(Err(error)) => eprintln!("[fake-device] server rejected frame: {error}"),
             None => eprintln!("[fake-device] server send did not complete"),
         }
@@ -1114,7 +1246,7 @@ impl FakeDeviceCore {
 
     fn push_bytes(&mut self, bytes: &[u8]) {
         if self.out.is_empty() && !bytes.is_empty() {
-            self.out_since = Some(Instant::now());
+            self.out_since = Some(self.now());
         }
         self.out.extend(bytes.iter().copied());
     }

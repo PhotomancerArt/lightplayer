@@ -83,6 +83,14 @@
 //! multi-board driver** for seams too. Each machine is named on the medium by
 //! its index (`<board>/<seam>`). A medium is additive: a pair with none runs
 //! exactly as before, and the air is untouched by one.
+//!
+//! The network seam's virtual LAN is one: build each machine with
+//! `Esp32C6Builder::lan(lan.clone(), ParticipantId(i))` on a
+//! `SharedLan` made with `LanDriver::Runner`, and pass
+//! `Box::new(lan.clone())` here. The runner then carries every frame and lands
+//! every join at its boundaries, so two boards on one LAN replay
+//! byte-identically (`tests/seam_net_lockstep.rs`). A self-driven LAN is its
+//! machines' to drive and ignores the runner's boundary.
 
 use lp_emu_core::sched::Cycles;
 use lp_emu_esp_common::air::{Air, ParticipantId, PerfectAir};

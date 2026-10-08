@@ -126,7 +126,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
+    ActionEnablement, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
     RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind, UiOffer, UiPackageCard,
     UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind,
@@ -193,7 +193,7 @@ pub(crate) fn DeviceRosterCard(
     /// at the app view; `None` for a board the link shows no row for.
     #[props(default)]
     wifi: Option<lpa_studio_core::UiDeviceWifi>,
-    /// The board is reached on the LAN (`?lan=`, Wi-Fi M6 P07): the info
+    /// The board is reached on the LAN (Wi-Fi M6 P07): the info
     /// line leads with "Wi-Fi · <address>". Functional, not designed (M8).
     /// `None` for every other link.
     #[props(default)]
@@ -269,6 +269,23 @@ pub(crate) fn DeviceRosterCard(
         update.params().is_empty()
             && (firmware_blocked || update.action.meta().enablement.is_enabled())
     });
+    // Factory reset over Bluetooth is refused with the firmware verbs'
+    // reason, said once: beside a Flash or an Update drawn refused, when
+    // one is. The over-the-air update is not refused there (OTA M7 P12), so
+    // a board that is up to date, or offered one, has no refused verb to
+    // say it, and the reason goes under Factory reset itself.
+    // Only when the Update says the same thing: over Wi‑Fi it says the
+    // update is not ready yet, and Factory reset still needs its own USB
+    // reason.
+    let firmware_reason_drawn = firmware_blocked
+        && (flash.is_some()
+            || update.as_ref().is_some_and(|update| {
+                matches!(
+                    update.action.meta().enablement,
+                    ActionEnablement::Disabled { ref reason }
+                        if Some(reason.as_str()) == card.firmware_blocked.as_deref()
+                )
+            }));
     // A Bluetooth link nothing has unlocked yet: the board answers only its
     // hello and the unlock, so what it runs is unknown to the card (its
     // "nothing loaded" is a refused read, not the board's word), and the
@@ -816,14 +833,15 @@ pub(crate) fn DeviceRosterCard(
                         // blank chip. It asks nothing, so it needs no picker.
                         // Not offered on a board that already IS blank
                         // (erasing a blank flash does nothing). Blocked, its
-                        // reason is the firmware verb's, said once beside it.
+                        // reason is the firmware verb's, said once: beside
+                        // that verb when it is drawn refused, else here.
                         if let Some(erase) = verb("erase") {
                             AgentMark { key: "{\"factory-reset\"}", path: erase.path.clone(),
                                 ActionButton {
                                     action: erase.action,
                                     running: false,
                                     variant: ActionButtonVariant::Quiet,
-                                    reason_said_elsewhere: firmware_blocked,
+                                    reason_said_elsewhere: firmware_reason_drawn,
                                     on_action,
                                 }
                             }
@@ -2494,9 +2512,9 @@ mod tests {
         let lan = lpa_studio_core::lan_link_for_endpoint("lan:ws://10.0.0.5/link");
         assert_eq!(
             info_line(lan.as_ref(), Some("Unlocked by Yona's MacBook"), "ready"),
-            "Wi-Fi · 10.0.0.5 · Unlocked by Yona's MacBook · ready"
+            "Wi\u{2011}Fi · 10.0.0.5 · Unlocked by Yona's MacBook · ready"
         );
-        assert_eq!(info_line(lan.as_ref(), None, ""), "Wi-Fi · 10.0.0.5");
+        assert_eq!(info_line(lan.as_ref(), None, ""), "Wi\u{2011}Fi · 10.0.0.5");
         assert_eq!(info_line(None, Some("Locked"), "ready"), "Locked · ready");
         assert_eq!(info_line(None, None, "ready"), "ready");
     }

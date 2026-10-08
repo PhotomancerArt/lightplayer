@@ -90,13 +90,19 @@ pub enum UpdateStanding {
         link: UpdateLink,
         percent: Option<u8>,
     },
-    /// An interrupted update to `to` is being completed (`running`), or is
-    /// waiting to be — it starts with no click.
+    /// The new firmware's last part is being installed (`running`), or an
+    /// interrupted update to `to` is waiting to be completed — it starts
+    /// with no click.
     Finishing {
         board: UpdateVersion,
         to: UpdateVersion,
         percent: Option<u8>,
         running: bool,
+        /// This Studio did not see the update start: it found the board
+        /// half-way and is completing it (the update's no-click `Auto`
+        /// intent, or a finish still waiting to start). `false` for the
+        /// ordinary last phase of an update this Studio started.
+        resumed: bool,
     },
     /// The board's own missing firmware is being put back (`running`), or
     /// is waiting to be — it starts with no click.
@@ -269,6 +275,8 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
                 to,
                 percent,
                 running: true,
+                // Only the no-click intent finishes what it did not start.
+                resumed: update.intent.is_auto(),
             },
             Some(UpdateStageFacts::Waiting) => UpdateStanding::AnotherDevice {
                 board,
@@ -317,6 +325,7 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
                 to: own,
                 percent: None,
                 running: false,
+                resumed: true,
             }
         }
         Decision::Heal { .. } => UpdateStanding::Restoring {
@@ -329,6 +338,7 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
             to: own,
             percent: transfer_percent(&board_view),
             running: false,
+            resumed: true,
         },
         Decision::Busy { done, total } => {
             let to = board_view
@@ -585,6 +595,53 @@ pub(crate) mod tests {
             assert!(is_row(&standing), "{stage:?} → {standing:?}");
             assert!(standing.is_progress());
             assert!(!wants_auto_start(&standing), "it already runs");
+        }
+    }
+
+    /// The last phase of an update this Studio started is not "resumed";
+    /// finishing what it found half-way (the no-click intent, or a finish
+    /// still waiting to start) is.
+    #[test]
+    fn finishing_is_resumed_only_when_this_studio_did_not_start_the_update() {
+        use lpa_devices::UpdateIntentFacts;
+        let y = studio_y();
+        let facts = facts_of(&board_x());
+        let finishing = |view: &DeviceView| {
+            let standing = update_standing(&inputs(view, Some(&facts), Some(&y)));
+            let UpdateStanding::Finishing {
+                resumed, running, ..
+            } = standing
+            else {
+                panic!("not finishing: {standing:?}");
+            };
+            (running, resumed)
+        };
+        // A press of Update: Install, and its engine phase is ordinary.
+        let pressed = updating_view(Some(UpdateStageFacts::Finishing), Some(70));
+        assert_eq!(finishing(&pressed), (true, false));
+        // Found half-way on connect: Auto, running.
+        let found = super::super::device_update_fixtures::with_update_intent(
+            ready_view(),
+            UpdateIntentFacts::Auto,
+            Some(UpdateStageFacts::Finishing),
+            Some(70),
+        );
+        assert_eq!(finishing(&found), (true, true));
+        // Found half-way, not started yet.
+        for manifest in [on_trial_of_y(), continuing()] {
+            let waiting = facts_of(&manifest);
+            let standing = update_standing(&inputs(&ready_view(), Some(&waiting), Some(&y)));
+            assert!(
+                matches!(
+                    standing,
+                    UpdateStanding::Finishing {
+                        running: false,
+                        resumed: true,
+                        ..
+                    }
+                ),
+                "{standing:?}"
+            );
         }
     }
 

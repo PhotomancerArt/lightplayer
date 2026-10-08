@@ -12,6 +12,10 @@
 //!   selector words.
 //! - [`OtaManifest::files`] / [`OtaManifest::verify`] — the file allowlist
 //!   and byte verification.
+//! - [`ReleaseIndex`] — the release index **format 1** (every release one
+//!   target can install, newest first), served at
+//!   [`release_index_path`] `/api/v1/firmware/<target>/releases`.
+//! - [`ReleaseVersion`] — ordered by number (`-10` is newer than `-9`).
 //!
 //! Names (N1, doors #1): a **target** is a line of builds (`esp32c6-4mb`,
 //! opaque), a **version** is `2026.10.05-3`, and a **build id** is
@@ -36,6 +40,9 @@ mod ota_encoding;
 mod ota_manifest;
 mod ota_manifest_error;
 mod release_asset_name;
+mod release_index;
+mod release_index_error;
+mod release_index_path;
 mod release_selector;
 mod release_version;
 mod target_name;
@@ -54,6 +61,11 @@ pub use ota_encoding::{ENCODING_DEFLATE_DICT_V1, EncodedPieceFile, Encoding1, En
 pub use ota_manifest::{OTA_MANIFEST_FORMAT, OtaManifest, PackageRef, PieceFile, Requires};
 pub use ota_manifest_error::OtaManifestError;
 pub use release_asset_name::{asset_name, split_asset_name};
+pub use release_index::{RELEASE_INDEX_FORMAT, ReleaseIndex, ReleaseIndexEntry};
+pub use release_index_error::ReleaseIndexError;
+pub use release_index_path::{
+    RELEASE_INDEX_PATH_PREFIX, RELEASE_INDEX_SEGMENT, parse_release_index_path, release_index_path,
+};
 pub use release_selector::{LATEST, ReleaseSelector};
 pub use release_version::{BuildId, ReleaseVersion, is_release_version};
 pub use target_name::{TARGET_NAME_MAX_LEN, TargetName, is_target_name};

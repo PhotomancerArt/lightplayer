@@ -16,18 +16,25 @@
 //! ```text
 //! fw_esp32_common::seam_table! {
 //!     version: env!("LP_APP_VERSION"),
+//!     pending: fw_esp32_common::seams::seam_wake::PENDING,
 //!     entries: [fw_esp32_common::seams::ws281x_wait_step::ENTRY],
 //! }
 //! ```
 //!
-//! The table names its own address (the emulator's live-table check) and no
-//! wake pending word: the firmware's wake handler ships with the first
-//! capability seam (Bluetooth), not before.
+//! The table names its own address (the emulator's live-table check) and the
+//! wake pending word's (`pending`, a static `AtomicU32` in RAM:
+//! [`crate::seams::seam_wake::PENDING`]). The wake's handler is the chip
+//! crate's, bound only when a capability seam that uses it is engaged; on
+//! silicon the word stays zero and the line is never enabled.
 
 /// Instantiate the chip's seam table. See [the module docs](self).
 #[macro_export]
 macro_rules! seam_table {
-    (version: $version:expr, entries: [$($entry:expr),* $(,)?] $(,)?) => {
+    (
+        version: $version:expr,
+        pending: $pending:path,
+        entries: [$($entry:expr),* $(,)?] $(,)?
+    ) => {
         /// The emulator seam descriptor table (`lp_seam::table`).
         #[used]
         #[unsafe(no_mangle)]
@@ -36,8 +43,7 @@ macro_rules! seam_table {
         > = $crate::seams::lp_seam::table::SeamTable::new(
             $version,
             $crate::seams::lp_seam::table::Addr::of(&LP_SEAM_TABLE),
-            // No wake handler ships yet (it lands with the Bluetooth seam).
-            $crate::seams::lp_seam::table::Addr::NONE,
+            $crate::seams::lp_seam::table::Addr::of(&$pending),
             [$($entry),*],
         );
     };

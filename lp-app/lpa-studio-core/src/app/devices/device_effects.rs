@@ -1375,6 +1375,9 @@ fn port_is_gone(message: &str) -> bool {
         // still attached and the card stayed "Attached — not listening"
         // (PR C's emulated walk, `lan_drop_tests`).
         || message.contains("wi-fi link lost")
+        // The same provider's relay session (the network transport's P05):
+        // the relay closed its leg, or no held key opened the board.
+        || message.contains("relay link lost")
 }
 
 /// Which platform chooser a grant request pops.

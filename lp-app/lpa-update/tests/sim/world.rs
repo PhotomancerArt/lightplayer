@@ -219,9 +219,16 @@ impl World {
                 self.rig.board.flash.cut_after(0);
             }
         } else {
-            // Nothing in flight and not done: an idle link, dropped.
-            self.out.stalls += 1;
-            self.drop_link();
+            // Nothing in flight and not done: a second passes for the
+            // driver (a wait for a running engine's login asks again on its
+            // tick); if it still has nothing to say, the idle link drops.
+            self.now += 1_000;
+            self.driver.tick(self.now);
+            self.pump();
+            if self.to_board.is_empty() {
+                self.out.stalls += 1;
+                self.drop_link();
+            }
         }
     }
 

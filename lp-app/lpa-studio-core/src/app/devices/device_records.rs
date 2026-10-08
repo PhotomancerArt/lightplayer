@@ -65,7 +65,11 @@ pub fn transport_label_for_endpoint(endpoint: &str) -> &'static str {
         LinkProviderKind::EmulatorTab
     } else if endpoint.starts_with(super::sim_record::BLE_ENDPOINT_PREFIX) {
         LinkProviderKind::BrowserBle
-    } else if endpoint.starts_with(lpa_link::providers::network_link::LAN_ENDPOINT_PREFIX) {
+    } else if endpoint.starts_with(lpa_link::providers::network_link::LAN_ENDPOINT_PREFIX)
+        || endpoint.starts_with(lpa_link::providers::network_link::RELAY_ENDPOINT_PREFIX)
+    {
+        // One provider, two endpoint kinds (the network transport's ND1):
+        // the registry column says "Wi-Fi" for both — no new stored value.
         LinkProviderKind::BrowserWebsocket
     } else {
         LinkProviderKind::BrowserSerialEsp32
@@ -300,6 +304,19 @@ mod tests {
             "lan:ws://10.0.0.5/link".to_string(),
         ));
         let row = registry_row_from_record(&over_lan).unwrap();
+        assert_eq!(row.transport, "Wi-Fi");
+        assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
+    }
+
+    /// A board reached through lightplayer.app's relay is the same Wi-Fi
+    /// provider's: the column says "Wi-Fi", no new stored value.
+    #[test]
+    fn a_relay_board_is_remembered_as_wifi() {
+        let mut over_relay = record();
+        over_relay.identity.endpoint = Some(lpa_devices::identity::EndpointKey(
+            "relay:a0f26287b48c".to_string(),
+        ));
+        let row = registry_row_from_record(&over_relay).unwrap();
         assert_eq!(row.transport, "Wi-Fi");
         assert!(!record_from_registry_row(&row, 1).last_over_bluetooth);
     }
