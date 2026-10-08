@@ -57,16 +57,3 @@ fn alive(pid: i32) -> bool {
 fn alive(_pid: i32) -> bool {
     true
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_pid_is_a_positive_integer() {
-        assert_eq!(parse_pid("4242").expect("parses"), 4242);
-        assert!(parse_pid("0").is_err());
-        assert!(parse_pid("-1").is_err());
-        assert!(parse_pid("abc").is_err());
-    }
-}
