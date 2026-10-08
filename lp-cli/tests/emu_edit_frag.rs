@@ -16,11 +16,27 @@
 //! link under test. After each edit the driver waits for the recompile and
 //! reads the board's runtime status (free bytes, largest block).
 //!
+//! A request the board's link drops is never answered: after
+//! [`REQUEST_NET`] the driver says `NO ANSWER`, opens a new link (as
+//! Studio's reconnect does) and goes on, loading the project again if the
+//! board came back without it. It asserts nothing past the deploy: it is
+//! the measurement, and its table is the report.
+//!
 //! Every wait is a wall-clock safety net, never a measurement; the heap
 //! figures are what transfer. Figures it prints are
 //! `lp-emu:esp32c6:t1` (USB) and `lp-emu:esp32c6:t1+net=lan` (LAN).
-//! `#[ignore]`d: it needs a built `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`, or
-//! `LP_CI_IMAGES`). `LP_EDIT_FRAG_EDITS` sets the edit count (default 24).
+//! `#[ignore]`d, not in CI: it needs a built `fw-esp32c6` ELF
+//! (`LP_EMU_BUILD_FW=1`, or `LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO=<elf>` — a
+//! `just fetch-ci-images` tree image), and the LAN run takes minutes.
+//!
+//! Knobs: `LP_EDIT_FRAG_EDITS` (edits, default 24); `LP_EDIT_FRAG_VIA=fs`
+//! (write the shader file instead: the same text as one JSON string);
+//! `LP_EDIT_FRAG_HOST_LINK=1` (LAN run: a USB host connected too — the
+//! configuration that refuses at edit 5 — and the board's decoded console);
+//! `LP_EDIT_FRAG_USB_JOINED=1` (USB run with Wi-Fi joined);
+//! `LP_EDIT_FRAG_STOP_ON_RESET=1`; `LP_EDIT_FRAG_NET_FLASH=<file>` (keep the
+//! flash that holds the network between runs); `LP_EDIT_FRAG_CONSOLE=<file>`
+//! (`emu run`'s output, and the board's console at `<file>.board`).
 
 use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
@@ -402,7 +418,8 @@ fn fs_write_len(path: &lpfs::LpPathBuf, bytes: &[u8]) -> usize {
         .unwrap_or(0)
 }
 
-/// What the gate says about a request of the reported size at these figures.
+/// What the gate said, before 2026-10-08, about a request of the reported
+/// size at these figures (3/4 of the message plus 1 KiB in one block).
 fn reported_request_passes(free: u64, largest: u64) -> bool {
     let block = (REPORTED_REQUEST_BYTES * 3 / 4 + 1024) as u64;
     let total = (REPORTED_REQUEST_BYTES + 16 * 1024) as u64;
@@ -411,7 +428,7 @@ fn reported_request_passes(free: u64, largest: u64) -> bool {
 
 fn report(label: &str, rows: &[Row]) {
     println!("\n{label}: playful-choker, Studio's ReplaceBody edits");
-    println!("edit  body B  request B  free B  largest B  7142-B gate  outcome");
+    println!("edit  body B  request B  free B  largest B  old rule, 7142 B  outcome");
     let mut first_refused = None;
     let mut first_gate = None;
     for row in rows {
@@ -430,7 +447,7 @@ fn report(label: &str, rows: &[Row]) {
             first_refused.get_or_insert(row.edit);
         }
         println!(
-            "{:>4}  {:>6}  {:>9}  {:>6}  {:>9}  {:>11}  {}",
+            "{:>4}  {:>6}  {:>9}  {:>6}  {:>9}  {:>16}  {}",
             row.edit,
             row.body_bytes,
             row.request_bytes,
