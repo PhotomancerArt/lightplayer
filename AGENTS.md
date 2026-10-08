@@ -356,12 +356,7 @@ the app through the same view model and presses the same actions. See
   network file's **reader** (`NetworkFile::from_json`) ignores keys it does
   not know, so a rolled-back core still joins with a file a newer firmware
   grew (`docs/adr/2026-10-04-device-wifi-settings.md`, 2026-10-07 amendment).
-  Updates run on channel 3 over USB, Bluetooth and the LAN: a LAN link's
-  key decides who may flash, core-only answers that key itself (no server
-  runs there) and refuses `L` on it, and a trial core with a saved network
-  that hears from no host for three minutes gives the board back (the OTA
-  ADR's and the split-image ADR's amendments of 2026-10-07).
-  `just test-emu-c6-ota-lan` walks it with no cable.
+  The rest of the update story is under "OTA updates" below.
 
 ## Persisted-format compatibility (the wire rule does NOT apply here)
 
@@ -406,6 +401,61 @@ the app through the same view model and presses the same actions. See
   "ready"; work happening in a session is invisible to the merge button.
   (docs/incidents/2026-08-08-uid-format-broke-prod-projects.md, cause 4.)
 
+## OTA updates
+
+A C6 updates itself over USB, Bluetooth, the LAN and the relay: Studio (or
+`lp-cli`) pushes the new build on lp-link channel 3, and the board survives
+a power cut at any point. The invariant (`plan.md` of
+`lp2025/2026-10-03-1330-ota-firmware-updates`): **after its one USB visit, no
+interruption leaves a board that only a cable can bring back.** The decisions
+are four ADRs, which cross-link each other:
+
+| Where | Read |
+|---|---|
+| The split image: loader, two boot records, core, engine, inside `factory` | `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md` (`lp-base/lp-bootctl`, `lp-fw/fw-esp32c6-loader`, `tools/lp-fw-split`) |
+| The protocol and the core that heals its engine | `docs/adr/2026-10-06-ota-update-protocol.md` (`lpc-update` is the codec and the board's session, `lpa-update` the host side shared by Studio and `lp-cli`, `lp-base/lp-deflate` the decoder) |
+| Releases, the store, the index, the lookup | `docs/adr/2026-10-06-firmware-distribution.md` (`lpc-firmware-release`, `lpa-firmware-store`) |
+| What Studio does with it, on every link | `docs/adr/2026-10-06-studio-updates-over-the-update-channel.md` |
+
+- **The core must hold everything an update needs without the engine**
+  (login, hashing, inflate, the update light, the radios, the relay), so core
+  growth is the flash cost that counts. Watch the distance to the core's next
+  32 KiB page, not only the headroom; the ledger and the growth table are in
+  `docs/adr/2026-07-28-esp32c6-flash-budget.md`.
+- **Updates follow whatever link reaches the board**, the relay included. Who
+  may flash is the link's tier (a key's, or "Anyone" on an open board, never
+  through the relay): if you can edit, you can flash. A missing engine is
+  healed by any host holding the hash-matching bytes, with no login.
+- **Rules found on silicon** (split-image ADR, section 7): no ROM SPI1 flash
+  access in the loader, nor in the core before `FlashStorage::new`; one
+  `FlashStorage`; the write fence (nothing written outside the region, inside
+  the running core, or before the fence knows both); an image ends on a
+  flash sector and the host flasher checks each write.
+- **Persisted formats are forever.** The boot records, the engine header and
+  digest slot, the loader's version word, the progress record, the
+  `ota-manifest.json` and the release index are versioned and bind from the
+  first release that carries them. The loader is never updated over the air.
+  The never-break pins are listed under "Wire/protocol compatibility".
+- **Before you touch a format or the protocol, run the power cuts.**
+  Emulated: `just test-emu-c6-ota` (the scenarios, with
+  `scripts/ota/emu-cut-sweep.sh` for a cut after every flash operation),
+  `just test-emu-c6-split-boot` (the boot bookkeeping),
+  `just test-emu-c6-ota-lan` (over the LAN, with no cable), and the walks:
+  `just walk-ota-emu` (`--tab`, `--ble`, `--lan`, `--relay`) and
+  `just walk-ota-ble-emu`. Silicon: `scripts/ota/hw-power-cut.py` cuts the
+  power of a board behind a switchable hub (lease it first, and cut through
+  `board power-cycle`, as the desk rules say); see `scripts/ota/README.md`.
+  `lp-cli emu run --ota-offer <dir> --ota-cut-after N` and
+  `lp-cli link capture <port> --ota-offer <dir>` are the hosts underneath, and
+  `lp-cli firmware install --release <version|previous|latest>` puts a
+  published release on a board.
+- **Local builds.** `just fw-esp32c6-split` builds the split image;
+  `just fw-esp32c6-size-check` gates the smallest steady-or-update headroom.
+  A plain single-image build is faster and has no over-the-air path;
+  `LP_FW_IMAGE=split just studio-dev` serves a Studio that can update boards.
+- **Walk records:** `docs/reports/2026-10-06-ota-iphone-walk.md`,
+  `2026-10-08-ota-wifi-house-walk.md`, `2026-10-08-ota-relay-walk.md`.
+
 ## Architecture Quick Reference
 
 ```
@@ -445,6 +495,7 @@ runtime.
 | `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO) | yes |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
+| `lp-nor-sim`     | The NOR flash power-cut model: a deterministic sans-IO model of the C6's SPI flash that loses power after any program or erase (torn programs, weak erases), shared by the store testbed and the emulator (`lp-emu/`, MIT) | yes |
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0, BLE and Wi-Fi links (board, host, Studio, tools; Wi-Fi is the C6's LAN WebSocket and the relay carrying the same link); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |

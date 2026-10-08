@@ -5,6 +5,8 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Related:** the OTA ADR set, closed out 2026-10-08: [2026-10-04-c6-split-link-firmware-loader-and-boot-records](2026-10-04-c6-split-link-firmware-loader-and-boot-records.md) (the split image), [2026-10-06-firmware-distribution](2026-10-06-firmware-distribution.md) (firmware distribution), [2026-10-06-studio-updates-over-the-update-channel](2026-10-06-studio-updates-over-the-update-channel.md) (Studio's updates). The C6's flash spend is in
+  [`2026-07-28-esp32c6-flash-budget.md`](2026-07-28-esp32c6-flash-budget.md)'s ledger.
 - **Plan:** `lp2025/2026-10-04-0757-ota-update-protocol` (Part A: the
   protocol and the host, PR #975/#984; Part B: the firmware, this ADR's PR)
 
@@ -488,7 +490,25 @@ are unchanged: no `WIRE_PROTO_VERSION` and no `RELAY_PROTO_VERSION` bump.
   fixture-c6 on the desk's test access point, an lp-cloud-server on the
   Mac, a desk image built with `LP_RELAY_HOST`): X → Y with a backup and a
   power cut mid-core, 104.2 s, the core resumed at its record. Silicon
-  through lightplayer.app's relay: G2, Yona's walk.
+  through lightplayer.app's relay: G2, Yona's walk, **passed 2026-10-08**
+  (below).
 
 The relay's own compatibility promise follows from this: see
 `docs/adr/2026-10-06-cloud-relay.md`'s amendment of the same date.
+
+**G2 (2026-10-08, Yona): passed.** loose-c6 updated to `2026.10.08-10`
+through lightplayer.app's relay and, unplugged mid-update, resumed without
+incident (`docs/reports/2026-10-08-ota-relay-walk.md`). An update follows
+whatever link reaches the board, the relay included.
+
+## Closeout (2026-10-08): what was walked
+
+Every link the protocol runs on has had a person at it: USB in a browser
+(release `v12 → v13`, 2026-10-06), Bluetooth on Yona's iPhone in Bluefy
+(2026-10-07, `docs/reports/2026-10-06-ota-iphone-walk.md`), Wi-Fi on the LAN
+at home with power cut at about 50 % of the backup, the core and the engine
+and a tab closed mid-update
+(`docs/reports/2026-10-08-ota-wifi-house-walk.md`), and the relay (above).
+Not walked by a person: the phone locked mid-update and the engine-less
+restore on Bluetooth (desk runs and the emulated walks cover them), and a
+lid closed or a second tab over Wi-Fi.

@@ -1,7 +1,41 @@
 # lp-bootctl
 
-The **boot-control sector**: a flash-persisted instruction to the firmware's
-next boot.
+Every on-flash format the boot path shares between its writers and readers.
+Two families, both `no_std`, IO-free and clock-free:
+
+- **the ESP32-C6 split image's formats**, below: the boot records, the
+  engine header, the engine digest slot, the loader's version word and the
+  layout inside `factory`;
+- **the boot-control sector**, after that: a flash-persisted instruction to
+  the firmware's next boot.
+
+## The split image's formats
+
+The C6's product image is a loader, two boot records, a core and an engine,
+all inside `factory` (layout 1, `SplitLayout`). The decisions are in
+[`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`](../../docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md);
+the formats **bind from the first release whose core can install an update**
+(they have since 2026-10-06) and are persisted: a change is an amendment or a
+new version, never a re-spelling.
+
+| Module | What it defines | Written by | Read by |
+|---|---|---|---|
+| `boot_record` | `BootRecord` + `BootMarks`: which core to boot, with the trial marks (attempted, started, confirmed) programmed in place | the packager (the first record); the update session; the core marks | the loader, the core |
+| `boot_choice`, `reset_kind` | `choose`: the newest valid record, or the one before when the newest is a trial that failed, by cold or warm reset | — | the loader, the core (the same table) |
+| `engine_header` | `EngineHeader` (`LPEH`): whether there is an engine the core may enter, its entry, length, build and commit mark | the packager; the update session | the core |
+| `engine_digest` | the SHA-256 of the engine, in the core's rodata (`LPED`) | the packager | the core, to accept that engine from anyone |
+| `loader_identity` | the loader's version word (`LPLV`) | the loader's build | the core, to know what its loader can do |
+| `split_layout` | where the loader, the progress record, the two record sectors, the core (low or high end) and the engine sit | — | all of them |
+
+The loader that reads them is
+[`lp-fw/fw-esp32c6-loader`](../../lp-fw/fw-esp32c6-loader/README.md); the
+host tool that builds the image is
+[`tools/lp-fw-split`](../../tools/lp-fw-split/README.md); the protocol that
+rewrites them is [`lpc-update`](../../lp-core/lpc-update/README.md).
+
+## The boot-control sector
+
+A flash-persisted instruction to the firmware's next boot.
 
 One 4 KB flash partition (`bootctl`, at `0xe000` on every supported board)
 holding a 16-byte record that the firmware reads *before* it auto-loads a
