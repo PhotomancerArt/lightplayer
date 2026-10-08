@@ -269,12 +269,14 @@ pub fn update_offers(
                 "download",
                 gate(action, blocked),
             ));
-            // Beside Update, the list must hold more than Update's version.
+            // Beside Update, the list must hold more than Update's version —
+            // or, with the store's list known, its box can look up any
+            // other release by version.
             let more = facts
                 .choices
                 .iter()
                 .any(|c| c.is_pickable() && c.version.version != to.version);
-            more.then(|| other_version(board))
+            (more || facts.listed).then(|| other_version(board))
         }
         UpdateStanding::UpToDate { version: board }
         | UpdateStanding::Newer { board, .. }

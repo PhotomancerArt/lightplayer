@@ -39,6 +39,11 @@
 //                built by the recipe (`build-image.sh` into images/r1,
 //                images/r2), and differ only in their version. Not in the
 //                default steps: `--steps install-older`
+//   install-lookup The same store with r1 left out of its releases list (its
+//                assets still served): r1 typed whole into the box finds
+//                nothing in the list, so the press reads "Look up r1"; the
+//                store finds it by version, it joins the list, arms (older)
+//                and installs on the second click. `--steps install-lookup`
 //
 // Every assertion waits for the BOARD's words (its console, `[OTA]`,
 // `[LOADER]`, `[CORE]` lines) as well as the card's; a card line alone proves
@@ -107,11 +112,13 @@ const TAB = ARGS.includes("--tab");
 const BLE = ARGS.includes("--ble");
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
 const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : DOOR_STEPS);
+/// The steps that stand r1 and r2 behind a real lp-cloud-server.
+const RELEASE_STEPS = STEPS.includes("install-older") || STEPS.includes("install-lookup");
 /// The link the card must name.
 const LINK_WORD = BLE ? "Bluetooth" : "USB";
 if (TAB && BLE) {
@@ -183,7 +190,7 @@ async function main() {
     ["the pre-update single image (lp-cli firmware package esp32c6-4mb --single-image --out …/mono/package)", path.join(MONO, "package/manifest.json")],
     ["Y, this Studio's split package (lp-cli firmware package esp32c6-4mb)", path.join(PACKAGES, "esp32c6-4mb/manifest.json")],
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
-    ...(STEPS.includes("install-older")
+    ...(RELEASE_STEPS
       ? [
           ["release r1 (scripts/ota/build-image.sh target/walk-ota-emu/images/r1 2026.10.01-1)", path.join(R1, "ota/ota-manifest.json")],
           ["release r2 (scripts/ota/build-image.sh target/walk-ota-emu/images/r2 2026.10.02-1)", path.join(R2, "ota/ota-manifest.json")],
@@ -230,7 +237,7 @@ async function main() {
   const xrChip = path.join(chips, "x-release.bin");
   if (xr && STEPS.includes("store-backup")) seedChip(path.join(XR, "merged.bin"), xrChip);
   const r2Chip = path.join(chips, "r2.bin");
-  if (STEPS.includes("install-older")) seedChip(path.join(R2, "merged.bin"), r2Chip);
+  if (RELEASE_STEPS) seedChip(path.join(R2, "merged.bin"), r2Chip);
   const lpEmu = git(["log", "-1", "--format=%h", "--", "lp-emu"]);
   const head = git(["rev-parse", "--short=12", "HEAD"]);
 
@@ -735,14 +742,15 @@ async function main() {
   /// them (`download/v<version>/<target>.<file>`, the newest under
   /// `latest/download/`), a GitHub-shaped REST releases list
   /// (`releases.json`: every asset its manifest names, `uploaded`), served
-  /// by a small static server, and a real lp-cloud-server in front of it
+  /// by a small static server (a release marked `unlisted` keeps its assets
+  /// but has no row), and a real lp-cloud-server in front of it
   /// (`LP_CLOUD_FIRMWARE_UPSTREAM`, `LP_CLOUD_FIRMWARE_RELEASES_LIST`) on a
   /// `scripts/dev-port.sh` port. Studio is pointed at the server, so the
   /// index it reads is the route's own answer.
   const startReleaseStore = async (releases) => {
     const root = path.join(out, "release-upstream");
     const list = [];
-    for (const [at, { dir, publishedAt }] of releases.entries()) {
+    for (const [at, { dir, publishedAt, unlisted = false }] of releases.entries()) {
       const manifest = JSON.parse(readFileSync(path.join(dir, "ota/ota-manifest.json"), "utf8"));
       const files = {
         "ota-manifest.json": path.join(dir, "ota/ota-manifest.json"),
@@ -764,7 +772,9 @@ async function main() {
           writeFileSync(path.join(home, `${manifest.target}.${file}`), readFileSync(from));
         }
       }
-      list.push({
+      // An unlisted release has its assets but no row in the list: older
+      // than the index's window, reachable only by its version.
+      if (!unlisted) list.push({
         tag_name: `v${manifest.version}`,
         draft: false,
         prerelease: false,
@@ -1154,6 +1164,66 @@ async function main() {
                 toR1: { core: toR1.core, card: toR1.order, board: toR1.said },
                 toR2: { core: toR2.core, card: toR2.order, board: toR2.said },
                 listsAsked: asked,
+              };
+            });
+          } finally {
+            store.stop();
+          }
+          break;
+        }
+        case "install-lookup": {
+          if (TAB || BLE) throw new Error("install-lookup walks the door lane over ?emu= only");
+          const r1 = JSON.parse(readFileSync(path.join(R1, "ota/ota-manifest.json"), "utf8"));
+          const r2 = JSON.parse(readFileSync(path.join(R2, "ota/ota-manifest.json"), "utf8"));
+          const store = await startReleaseStore([
+            { dir: R2, publishedAt: "2026-10-02T12:00:00Z" },
+            { dir: R1, publishedAt: "2026-10-01T12:00:00Z", unlisted: true },
+          ]);
+          try {
+            await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
+            await step(name, `on ${r2.version}: ${r1.version} is not in the store's list; typed in the box, it is looked up by version, then arms and installs`, async () => {
+              await connect(board);
+              await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
+
+              // The list holds the board's own and this Studio's build, not r1.
+              const list = await openOtherVersion(r2.version);
+              if (list.includes(r1.version)) throw new Error(`${r1.version} is listed, though the store's list leaves it out: ${list}`);
+
+              // r1, typed whole: nothing in the list matches, so the press looks it up.
+              const from = boardWords(board).length;
+              await driver.type("Type a version", r1.version, { scope: PANEL });
+              await driver.waitFor(
+                `[...(${PANEL}?.querySelectorAll('button') ?? [])].some((el) => !el.disabled && (el.textContent || '').includes(${JSON.stringify(`Look up ${r1.version}`)}))`,
+                { timeoutMs: STEP_MS, what: `the press to read Look up ${r1.version}` },
+              );
+              const lookupShot = await shot("install-lookup-press");
+              await driver.click(`Look up ${r1.version}`, { scope: PANEL });
+
+              // Found by the store's lookup: r1 joins the list, picked; older, so it arms.
+              const found = await driver.waitFor(
+                `(() => { const t = ${PANEL}?.innerText ?? ''; return t.includes('Install an older version?') ? t : false; })()`,
+                { timeoutMs: STEP_MS, what: `the store to find ${r1.version} and the press to install it` },
+              );
+              const foundShot = await shot("install-lookup-found");
+              // Found by the look-up, not the list: a looked-up release carries no
+              // publish time, so its line is the version's day alone (the list's
+              // would read "Oct 1, 12:00 UTC"). The upstream may not be asked at
+              // all: the browser keeps an immutable manifest it read before.
+              if (!found.includes(r1.version) || found.includes("12:00 UTC")) throw new Error(`${r1.version} is not the looked-up choice: ${found}`);
+              await driver.click("Install", { scope: PANEL, exact: true });
+              await driver.waitFor(
+                `(() => { const rest = ${PANEL}?.querySelector('.ux-armed .ux-armed-label-rest');
+                          return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`,
+                { timeoutMs: STEP_MS, what: `the press on ${r1.version} to arm` },
+              );
+              await driver.click("Confirm install", { scope: PANEL });
+              const toR1 = await awaitRelease(board, r1, from);
+              const r1Shot = await shot("install-lookup-on-r1");
+              return {
+                summary: `${r1.version}, unlisted, looked up by version, armed, confirmed and installed (${toR1.order.map((e) => e.kind).join(" → ")}); the project ran throughout`,
+                shots: { press: lookupShot, found: foundShot, onR1: r1Shot },
+                found: found.replace(/\s+/g, " ").trim(),
+                toR1: { core: toR1.core, card: toR1.order, board: toR1.said },
               };
             });
           } finally {

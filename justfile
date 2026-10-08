@@ -4898,9 +4898,10 @@ walk-ota-emu *args: install-rv32-target
     if [[ ! -f "${images}/mono/package/manifest.json" ]]; then
         ./target/debug/lp-cli firmware package esp32c6-4mb --single-image --out "${images}/mono/package"
     fi
-    # install-older's two releases (they differ only in their version), and
+    # install-older's (and install-lookup's) two releases (they differ only
+    # in their version), and
     # the real lp-cloud-server it stands them behind.
-    if [[ " {{ args }} " == *install-older* ]]; then
+    if [[ " {{ args }} " == *install-older* || " {{ args }} " == *install-lookup* ]]; then
         for release in r1:2026.10.01-1 r2:2026.10.02-1; do
             if [[ ! -f "${images}/${release%%:*}/ota/ota-manifest.json" ]]; then
                 scripts/ota/build-image.sh "${images}/${release%%:*}" "${release#*:}"
