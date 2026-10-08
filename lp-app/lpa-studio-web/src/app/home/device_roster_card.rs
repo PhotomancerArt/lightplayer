@@ -954,10 +954,11 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
-                    // The one device verb that never asks a question. It
-                    // pulses the chip's reset lines, which a Bluetooth link
-                    // does not have — so over one it is drawn disabled.
-                    // Core offers it busy or not (the escape from a stuck
+                    // The one device verb that never asks a question. Over
+                    // a cable it pulses the chip's reset lines; over
+                    // Bluetooth or Wi‑Fi it asks the board to restart
+                    // itself (core draws it disabled, saying why, below the
+                    // author tier). Core offers it busy or not (the escape from a stuck
                     // open); the card withdraws it while an activity runs
                     // (D9), as it does every verb that is not an escape.
                     if let Some(reset) = verb("reset-board").filter(|_| idle) {
@@ -1473,9 +1474,10 @@ pub(crate) fn PendingLinkCard(
                     // The silent-board recovery: a chip parked in ROM
                     // download-wait prints nothing, so identify can never
                     // settle — a hardware reset reboots it into honest boot
-                    // output (G1 2026-08-31, the erased C6). A Bluetooth
-                    // link has no reset lines, so there it is drawn
-                    // disabled with the reason, as on the settled card.
+                    // output (G1 2026-08-31, the erased C6). A network
+                    // link has no reset lines and the board has not
+                    // answered yet, so there core draws it disabled with
+                    // the reason.
                     if let Some(reset) = verb("reset-board") {
                         ActionButton {
                             key: "{\"reset-board\"}",
@@ -2333,8 +2335,8 @@ mod tests {
         }
     }
     use lpa_studio_core::UiStatusKind;
-    // Reset over Bluetooth is drawn disabled in every card state: core's
-    // `device_offers` and `pending_link_offers` tests own that now (the card
+    // When Reset is enabled or disabled over a network link is core's
+    // `device_offers` and `pending_link_offers` tests' to say (the card
     // draws the offer it is given).
 
     /// The fault line must wear the tone its own status chip wears, and it

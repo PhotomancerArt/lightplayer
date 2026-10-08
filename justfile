@@ -4888,6 +4888,13 @@ walk-ble-emu *args:
 # address said in words. Stand-in (DD193): the remembered lease is rewritten
 # to the board's loopback forward before it is dialled. Report:
 # docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
+#
+# `studio-lan-reset` (scripts/emu/walk-wifi-emu-studio-lan-reset.mjs): one
+# board on the same LAN, Studio with no flag connected to it by address, the
+# card's Reset pressed once — the board's console says it was asked to
+# restart, it rejoins, a new secure session opens from the page's own
+# redial, and the card is Ready again with no click. Same prerequisites as
+# `studio-lan`. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
