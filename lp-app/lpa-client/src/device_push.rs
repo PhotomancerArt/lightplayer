@@ -233,6 +233,10 @@ pub(crate) fn storage_id_of(path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    use lpc_wire::{WireServerMessage, WireServerMsgBody};
+
+    use crate::scripted_io::ScriptedIo;
+
     #[test]
     fn a_reported_path_names_the_storage_dir_a_push_replaces() {
         assert_eq!(storage_id_of("/projects/demo").as_deref(), Some("demo"));
@@ -253,5 +257,272 @@ mod tests {
         assert_eq!(other_slot("2026-08-30-porch"), "2026-08-30-porch-b");
         // A dir literally named "-b" has no base; it alternates with "-b-b".
         assert_eq!(other_slot("-b"), "-b-b");
+    }
+
+    /// (a) Room for two copies: the push is the two-slot push it always was —
+    /// new slot written and verified, then the old one removed.
+    #[tokio::test]
+    async fn a_push_with_room_writes_the_other_slot_then_removes_the_old_one() {
+        let io = ScriptedIo::new([
+            loaded(1, "demo"),
+            stopped(2),
+            deleted(3),
+            written(4, None),
+            written(5, None),
+            loaded_ok(6),
+            hashed(7, HASH),
+            deleted(8),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut noted: Vec<String> = Vec::new();
+        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
+
+        let report = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
+            .await
+            .expect("pushed");
+
+        assert_eq!(report.storage_id, "demo-b");
+        assert_eq!(
+            ops(&client.into_io().sent),
+            [
+                "list-loaded",
+                "stop",
+                "delete demo-b",
+                "write /projects/demo-b/project.json",
+                "write /projects/demo-b/main.glsl",
+                "load projects/demo-b",
+                "hash /projects/demo-b",
+                "delete demo",
+            ]
+        );
+        assert!(!noted.iter().any(|label| label.contains("two copies")));
+    }
+
+    /// (b) The board runs out of room for the second copy: the partial new
+    /// slot and the old one go, and the project is written again into the OLD
+    /// folder's own name — so a power cut mid-way leaves `startup_project`
+    /// naming a folder the next push replaces normally.
+    #[tokio::test]
+    async fn no_room_for_two_copies_replaces_the_old_slot_in_place() {
+        let io = ScriptedIo::new([
+            loaded(1, "demo"),
+            stopped(2),
+            deleted(3),
+            written(4, None),
+            written(5, Some(NO_SPACE)),
+            // The wipe: partial new slot, then the old one.
+            deleted(6),
+            deleted(7),
+            // The rewrite, into `demo`.
+            stopped(8),
+            deleted(9),
+            written(10, None),
+            written(11, None),
+            loaded_ok(12),
+            hashed(13, HASH),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut noted: Vec<String> = Vec::new();
+        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
+
+        let report = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
+            .await
+            .expect("pushed in place");
+
+        assert_eq!(report.storage_id, "demo", "the old folder's own name");
+        assert_eq!(report.hash, HASH);
+        assert_eq!(
+            ops(&client.into_io().sent),
+            [
+                "list-loaded",
+                "stop",
+                "delete demo-b",
+                "write /projects/demo-b/project.json",
+                "write /projects/demo-b/main.glsl",
+                "delete demo-b",
+                "delete demo",
+                "stop",
+                "delete demo",
+                "write /projects/demo/project.json",
+                "write /projects/demo/main.glsl",
+                "load projects/demo",
+                "hash /projects/demo",
+            ]
+        );
+        assert!(
+            noted
+                .iter()
+                .any(|label| label.contains("can't hold two copies") && label.contains("demo")),
+            "the card says why the old copy is going: {noted:?}"
+        );
+    }
+
+    /// (c) Too big even alone: the old copy is gone, and the error says so in
+    /// plain words instead of "the board refused it".
+    #[tokio::test]
+    async fn a_project_too_big_even_alone_says_the_old_copy_was_removed() {
+        let io = ScriptedIo::new([
+            loaded(1, "demo"),
+            stopped(2),
+            deleted(3),
+            written(4, Some(NO_SPACE)),
+            deleted(5),
+            deleted(6),
+            stopped(7),
+            deleted(8),
+            written(9, Some(NO_SPACE)),
+            // Best-effort cleanup of the partial rewrite.
+            deleted(10),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut noted: Vec<String> = Vec::new();
+        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
+
+        let error = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
+            .await
+            .expect_err("does not fit");
+
+        let message = error.to_string();
+        assert!(message.contains("demo"), "{message}");
+        assert!(message.contains("removed to make room"), "{message}");
+        assert!(message.contains("still doesn't fit"), "{message}");
+        assert!(!message.contains("refused"), "{message}");
+        assert!(
+            !noted.iter().any(|label| label.contains("restoring")),
+            "there is nothing to restore: {noted:?}"
+        );
+    }
+
+    /// (d) Any other failure keeps today's path: the old folder was never
+    /// touched, so it is loaded again and the refused slot dropped.
+    #[tokio::test]
+    async fn a_failure_that_is_not_about_space_restores_the_previous_project() {
+        let io = ScriptedIo::new([
+            loaded(1, "demo"),
+            stopped(2),
+            deleted(3),
+            written(4, Some("corrupt block")),
+            loaded_ok(5),
+            deleted(6),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut noted: Vec<String> = Vec::new();
+        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
+
+        let error = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
+            .await
+            .expect_err("refused");
+
+        assert!(
+            error
+                .to_string()
+                .contains("the board is running its previous project (demo) again"),
+            "{error}"
+        );
+        assert_eq!(
+            ops(&client.into_io().sent),
+            [
+                "list-loaded",
+                "stop",
+                "delete demo-b",
+                "write /projects/demo-b/project.json",
+                "load projects/demo",
+                "delete demo-b",
+            ]
+        );
+        assert!(noted.iter().any(|label| label.contains("refused it")));
+    }
+
+    const HASH: &str = "abc123";
+    const NO_SPACE: &str = "no space left on device";
+
+    fn files() -> Vec<(String, Vec<u8>)> {
+        vec![
+            ("project.json".to_string(), b"{}".to_vec()),
+            ("main.glsl".to_string(), b"void main() {}".to_vec()),
+        ]
+    }
+
+    fn loaded(id: u64, dir: &str) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        let project = lpc_wire::LoadedProject::new(
+            lpc_wire::WireProjectHandle(1),
+            format!("/projects/{dir}").as_path_buf(),
+        );
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ListLoadedProjects {
+                projects: vec![project],
+            },
+        )
+    }
+
+    fn stopped(id: u64) -> WireServerMessage {
+        WireServerMessage::new(id, WireServerMsgBody::StopAllProjects)
+    }
+
+    fn deleted(id: u64) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::DeleteDir {
+                path: "/projects/x".as_path_buf(),
+                error: None,
+            }),
+        )
+    }
+
+    fn written(id: u64, error: Option<&str>) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Write {
+                path: "/projects/x/f".as_path_buf(),
+                error: error.map(str::to_string),
+            }),
+        )
+    }
+
+    fn loaded_ok(id: u64) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::LoadProject {
+                handle: lpc_wire::WireProjectHandle(2),
+            },
+        )
+    }
+
+    fn hashed(id: u64, hash: &str) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::PackageHash {
+                prefix: "/projects/x".as_path_buf(),
+                hash: hash.to_string(),
+                error: None,
+            }),
+        )
+    }
+
+    /// What the conversation asked, one word-and-target per request.
+    fn ops(sent: &[lpc_wire::ClientMessage]) -> Vec<String> {
+        use lpc_wire::{ClientRequest, FsRequest};
+        sent.iter()
+            .map(|message| match &message.msg {
+                ClientRequest::ListLoadedProjects => "list-loaded".to_string(),
+                ClientRequest::StopAllProjects => "stop".to_string(),
+                ClientRequest::Filesystem(FsRequest::DeleteDir { path }) => {
+                    format!("delete {}", path.as_str().trim_start_matches("/projects/"))
+                }
+                ClientRequest::Filesystem(FsRequest::Write { path, .. }) => {
+                    format!("write {}", path.as_str())
+                }
+                ClientRequest::Filesystem(FsRequest::HashPackage { prefix }) => {
+                    format!("hash {}", prefix.as_str())
+                }
+                ClientRequest::LoadProject { path } => format!("load {path}"),
+                other => format!("{other:?}"),
+            })
+            .collect()
     }
 }
