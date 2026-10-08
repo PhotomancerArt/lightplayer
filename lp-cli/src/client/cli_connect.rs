@@ -107,9 +107,11 @@ pub async fn connect_relay(
 
 /// Connect `spec` and wait for readiness where the host is a device.
 ///
-/// Serial devices are reset on connect: readiness is granted only by the
-/// boot [`ServerHello`](lpc_wire::ServerHello), so the session watches a
-/// fresh boot rather than assuming whatever state the device was in.
+/// Serial devices are not reset on connect: the board owes a hello on every
+/// link-up, and readiness is that hello request (`lpa-link`'s
+/// `device_readiness`), so the session attaches to the running board as
+/// Studio does. A reset here cost the board an extra boot per command, and
+/// the one-boot `load_notice` with it.
 /// `on_event` observes the session feed (console lines, state transitions);
 /// pass [`DeviceEventSink::noop`]-like behavior by ignoring events.
 ///
@@ -157,11 +159,8 @@ pub async fn cli_connect_with_password(
         HostSpecifier::Serial { port, baud_rate } => {
             let config = detect_serial_port(port.as_deref(), baud_rate)
                 .context("Failed to detect serial port")?;
-            let provider = HostSerialEsp32Provider::with_options(HostSerialEsp32Options {
-                baud_rate: Some(config.baud_rate),
-                reset_after_open: true,
-                ..HostSerialEsp32Options::default()
-            });
+            let provider =
+                HostSerialEsp32Provider::with_options(serial_provider_options(config.baud_rate));
             let endpoint_id =
                 provider.create_endpoint_for_port(&config.port, label_for_port(&config.port));
             let connector = Rc::new(LinkConnector::HostSerialEsp32(provider));
@@ -200,6 +199,16 @@ pub async fn cli_connect_with_password(
     }
 }
 
+/// The serial provider options for a CLI connection: the board is attached
+/// to as it runs, never reset on open.
+fn serial_provider_options(baud_rate: u32) -> HostSerialEsp32Options {
+    HostSerialEsp32Options {
+        baud_rate: Some(baud_rate),
+        reset_after_open: false,
+        ..HostSerialEsp32Options::default()
+    }
+}
+
 /// Route a [`DeviceEvent`] feed to stderr: device console lines when
 /// `verbose`, link/log lines and state transitions always.
 pub fn stderr_device_events(verbose: bool) -> impl Fn(DeviceEvent) + 'static {
@@ -226,5 +235,20 @@ pub fn stderr_device_events(verbose: bool) -> impl Fn(DeviceEvent) + 'static {
                 eprintln!("[device] tx: {frame}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serial_connect_does_not_reset_the_board() {
+        let options = serial_provider_options(115_200);
+        assert!(
+            !options.reset_after_open,
+            "a DTR/RTS reset on connect costs the board an extra boot and clears its one-boot load_notice"
+        );
+        assert_eq!(options.baud_rate, Some(115_200));
     }
 }
