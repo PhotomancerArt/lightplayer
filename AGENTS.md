@@ -303,7 +303,8 @@ the app through the same view model and presses the same actions. See
   `_lightplayer._tcp`. Hosts reach it as `lan:<ip>` or `lan:lp-xxxx.local`
   (`lp-cli`, whose `lan list` browses `_lightplayer._tcp`; and Studio, with
   no flag: a board it has met is offered "Connect over Wi‑Fi" at the address
-  it last gave, and the add slot takes an address). The link is `LinkConfig::ws()` (one
+  it last gave, and the add slot takes an address; and, signed in, "Connect
+  through lightplayer.app" as `relay:<mac>`). The link is `LinkConfig::ws()` (one
   frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
   access entries; the tier comes from the key, as on Bluetooth). Its replies
   are JSON, and the C6 has one **network slot**, shared by the LAN and the
@@ -937,14 +938,23 @@ a dev shortcut that dials a board at page load by its LAN address
 (`lp-xxxx.local`, an IP, or an emulator's `127.0.0.1:<forward>`), over the
 secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
 
-**`?relay=1`** (until the network transport's walk on lightplayer.app; off
-by default) installs Studio's relay half: boards reached THROUGH
+**The relay is on for everyone, with no flag** (network transport PR C,
+`docs/adr/2026-10-08-studio-network-links.md`): Studio installs its relay
+half in every browser with a WebSocket — boards reached THROUGH
 lightplayer.app (`relay:<mac>`, the relay's browser leg
-`/relay/board/<mac>` on the page's own origin; `docs/adr/2026-10-06-cloud-relay.md`).
-Without it nothing of the relay exists in the page. A relay link presents
-held keys only — the account's, then the browser's; never the anonymous key
-or a typed password. `?relay=<mac>[,<mac>…]` also dials those boards at page
-load (a dev shortcut, like `?lan=`). Locally, serve the Studio bundle from a
+`/relay/board/<mac>` on the page's own origin;
+`docs/adr/2026-10-06-cloud-relay.md`). The only way in is one core offer: a
+remembered board (it said its MAC over any link), while someone is signed
+in, is offered "Connect through lightplayer.app"
+(`devices/<board>/connect-relay`); an offline board says "The board isn't
+online." on its tile. There is no "your boards" list, no `ListBoards` sweep
+and no automatic move onto the LAN yet (held for the domain-model and
+device-UX pass). A relay link presents held keys only — the account's, then
+the browser's; never the anonymous key or a typed password. **`?relay=<mac>[,<mac>…]`**
+stays as a dev shortcut that dials those boards at page load (like `?lan=`);
+there is no off switch (`?relay=0` is ignored with a note, `?relay=1` asks
+for nothing). `just walk-wifi-emu studio-relay` walks it on an emulated C6
+through a local `lp-cloud-server`. Locally, serve the Studio bundle from a
 `lp-cloud-server` (`LP_CLOUD_STATIC_DIR`, dev login) so the relay is
 same-origin, and put a host board on it with `lp-cli serve --relay <origin>`
 (`LP_CLOUD_SESSION` = the dev login's session); `Dioxus.toml` also forwards

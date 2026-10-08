@@ -69,7 +69,8 @@ pub struct CompositeDeviceTransport {
     /// WebSocket.
     lan: Option<Rc<dyn DeviceTransport>>,
     /// `None` where this page reaches no board through lightplayer.app's
-    /// relay: the same provider as the LAN, installed behind `?relay=1`.
+    /// relay: the same provider as the LAN, installed in every browser
+    /// with a WebSocket (no flag since the network transport's PR C).
     relay: Option<Rc<dyn DeviceTransport>>,
 }
 
@@ -110,7 +111,7 @@ impl CompositeDeviceTransport {
 
     /// Add the relay half (the network transport's P05: boards through
     /// lightplayer.app). Separate for the same reason: it depends on what
-    /// this page was asked to reach (`?relay=1`).
+    /// this page can reach (a browser with a WebSocket).
     pub fn with_relay(mut self, relay: Rc<dyn DeviceTransport>) -> Self {
         self.relay = Some(relay);
         self
@@ -648,7 +649,7 @@ mod tests {
         );
     }
 
-    /// Without `?relay=1` there is no relay half, and a `relay:` endpoint is
+    /// Without a relay half, a `relay:` endpoint is
     /// refused by name rather than routed to serial (a port named after a
     /// board id) or to the LAN.
     #[test]

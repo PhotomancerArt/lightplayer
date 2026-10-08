@@ -152,7 +152,8 @@ pub struct StudioController {
     /// a WebSocket (Wi-Fi M6 P07; no flag since M8).
     lan_transport: Option<Rc<crate::LanDeviceTransport>>,
     /// The transport that reaches boards through lightplayer.app's relay
-    /// (the network transport's P05): installed behind `?relay=1` only.
+    /// (the network transport's P05): installed in every browser with a
+    /// WebSocket since PR C.
     relay_transport: Option<Rc<crate::RelayDeviceTransport>>,
     /// Where each board Studio has met is on Wi‑Fi, by MAC: learned from
     /// its status on any link, kept in this browser by the web edge
