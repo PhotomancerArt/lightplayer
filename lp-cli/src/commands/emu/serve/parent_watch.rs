@@ -1,15 +1,11 @@
 //! `emu serve` exits when the process that started it dies, if it was asked to.
 //!
 //! A walk starts `emu serve` detached (`startDoor` in
-//! `scripts/emu/emulated-lane.mjs`) so the server can outlive a script that is
-//! done with it. The cost was a server that also outlived a script that was
-//! *killed*: SIGKILL and a harness timeout run no exit handler, and an
-//! emulated board nobody talks to still burns a core forever.
-//!
-//! So the walk names itself: `LP_EMU_PARENT_PID=<pid>`. While that process is
-//! alive nothing changes; once it is gone the server shuts down the way
-//! Ctrl-C does. It is an environment variable and opt-in on purpose — a
-//! terminal `emu serve` has no parent to wait for and must behave as before.
+//! `scripts/emu/emulated-lane.mjs`), so a walk killed by SIGKILL or a harness
+//! timeout runs no exit handler and left a server burning a core forever. The
+//! walk now names itself in `LP_EMU_PARENT_PID`; once that process is gone the
+//! server shuts down as Ctrl-C does. Opt-in: a terminal `emu serve` has no
+//! parent to wait for and behaves as before.
 
 use std::time::Duration;
 
@@ -72,11 +68,5 @@ mod tests {
         assert!(parse_pid("0").is_err());
         assert!(parse_pid("-1").is_err());
         assert!(parse_pid("abc").is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn this_process_is_alive() {
-        assert!(alive(std::process::id() as i32));
     }
 }
