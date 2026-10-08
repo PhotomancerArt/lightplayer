@@ -4919,6 +4919,10 @@ walk-drop-emu *args:
 # forward — update, power cuts mid-core and mid-engine, an engine-less board
 # restored, a renumbered board, a second client turned away busy. One step
 # per invocation stays under ten minutes (`--lan --steps update`).
+# `--relay` (OTA M8 PR C) walks it through a local lp-cloud-server standing in
+# for lightplayer.app's relay: the board's leg through the virtual LAN's
+# uplink, Studio with `?relay=` and a made-up account signed in — update, the
+# relay dropping the board mid-core, a power cut mid-engine.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
 # `records.jsonl` beside the report.
 walk-ota-emu *args: install-rv32-target
@@ -4941,6 +4945,10 @@ walk-ota-emu *args: install-rv32-target
                 scripts/ota/build-image.sh "${images}/${release%%:*}" "${release#*:}"
             fi
         done
+        cargo build -q -p lp-cloud-server
+    fi
+    # The relay lane's stand-in for lightplayer.app.
+    if [[ " {{ args }} " == *--relay* ]]; then
         cargo build -q -p lp-cloud-server
     fi
     # Y last: build-image.sh writes the parts directory the bundle copies.
