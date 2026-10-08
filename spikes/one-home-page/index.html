@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>One home page — boards and projects together</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* =====================================================================
+   Studio's palette, from lpa-studio-web/src/style.css :root (2026-10-08).
+   Spike shell is deliberately plain, matching the other spikes.
+   Design record for lp2025/2026-10-06-1530-boards-and-projects-model
+   (vision.md, D6–D21). Throwaway: production never imports spikes/.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --surface-muted:#0f0f15; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#09090e;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac; --faint:#6d6f7a;
+  --heading:#e9e9ef;
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --spectrum-cool:#5fe08b,#53c6f2,#a58af7;
+  --glow:rgba(140,170,255,.3);
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
+  --st-example-bg:rgba(168,163,196,.09); --st-example-bd:#565177; --st-example-tx:#a8a3c4;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:940px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:46px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:940px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px; margin-top:14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:80; background:rgba(11,12,14,.94); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls button:disabled { opacity:.4; cursor:not-allowed; }
+.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.stepnote { font-size:11.5px; color:var(--shell-dim); margin:8px 2px 0; max-width:1100px; min-height:17px; }
+.stepnote b { color:var(--shell-mut); }
+
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:26px; font-size:12.5px; color:var(--shell-mut); max-width:980px; }
+.lean b { color:#7be0b2; }
+.lean ol, .lean ul { margin:6px 0 0; padding-left:20px; } .lean li { margin:4px 0; }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:10px 2px 0; line-height:1.6; max-width:1100px; }
+.cnotes b { color:var(--shell-tx); font-weight:600; }
+
+/* =====================================================================
+   The app frame (Studio chrome, simplified)
+   ===================================================================== */
+.app { position:relative; background:var(--bg); color:var(--tx); border:1px solid var(--shell-bd); border-radius:12px;
+  overflow:hidden; font-size:13px; font-family:var(--font); margin:0 auto; }
+.app.phone { width:390px; }
+.topbar { display:flex; align-items:center; gap:22px; height:48px; padding:0 18px; border-bottom:1px solid var(--bd-mut); }
+.logo { display:inline-flex; align-items:center; gap:7px; font-weight:800; font-size:13px; letter-spacing:-.01em; }
+.logo svg { width:16px; height:16px; color:var(--strong); }
+.logo span { background:linear-gradient(90deg,#ff6b9a,#f5c84e 45%,#5fe08b); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.navtab { position:relative; font-size:12px; font-weight:600; color:var(--muted); padding:14px 0; }
+.navtab.on { color:var(--strong); }
+.navtab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
+.tright { margin-left:auto; display:flex; gap:12px; align-items:center; color:var(--subtle); font-size:12px; font-weight:600; }
+.kbd { border:1px solid var(--bd); border-radius:5px; padding:2px 6px; font:700 10px var(--mono); color:var(--muted); }
+.ibtn { width:26px; height:26px; border-radius:50%; border:1px solid var(--bd); display:inline-grid; place-items:center; color:var(--muted); }
+.ibtn svg { width:13px; height:13px; }
+.avatar { position:relative; width:26px; height:26px; border-radius:50%; display:inline-grid; place-items:center; font-size:11px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#a58af7,#53c6f2); }
+.avatar.dot::after { content:""; position:absolute; top:-2px; right:-2px; width:9px; height:9px; border-radius:50%; background:var(--st-attention-tx); border:2px solid var(--bg); }
+.app.phone .hide-phone { display:none !important; }
+.page { padding:20px 24px 34px; max-width:1140px; margin:0 auto; }
+.app.phone .page { padding:14px 14px 26px; }
+
+/* ---- icons, buttons, tags ------------------------------------------- */
+svg.i { width:14px; height:14px; flex:none; }
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:30px; padding:0 11px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx);
+  font-size:12px; font-weight:600; white-space:nowrap; text-decoration:none; }
+.btn:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btn.sm { height:26px; padding:0 9px; font-size:11.5px; }
+.btn.quiet { background:transparent; border-color:transparent; color:var(--muted); }
+.btn.quiet:hover { background:var(--raised); color:var(--strong); }
+.btn.outline { background:transparent; }
+.cta { position:relative; border-color:transparent; background:transparent; color:var(--strong); }
+.cta::before { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  opacity:.62; pointer-events:none; transition:opacity .3s; }
+.cta:hover::before { opacity:1; }
+.cta:hover { box-shadow:0 2px 24px var(--glow); }
+.connect { display:inline-flex; gap:6px; align-items:center; position:relative; }
+.connect .btn { height:28px; padding:0 10px; font-size:11.5px; }
+.connect.big .btn { height:44px; padding:0 18px; font-size:13.5px; gap:9px; border-radius:8px; }
+.connect.big svg.i { width:17px; height:17px; }
+.gtag { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; border:1px solid var(--bd-mut);
+  background:var(--surface); font-size:10.5px; font-weight:600; color:var(--subtle); white-space:nowrap; flex:none; max-width:140px; overflow:hidden; text-overflow:ellipsis; }
+.gtag svg.i { width:11px; height:11px; }
+.gtag.shared { color:var(--st-bound-tx); border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
+.chipst { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 7px; border-radius:999px; border:1px solid; font-size:10.5px; font-weight:700; white-space:nowrap; flex:none; }
+.chipst .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.s-here { background:var(--st-good-bg); border-color:var(--st-good-bd); color:var(--st-good-tx); }
+.s-here .dot { animation:blink 2s ease-in-out infinite; }
+.s-online { background:var(--st-live-bg); border-color:var(--st-live-bd); color:var(--st-live-tx); }
+.s-busy { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.s-offline, .s-seen, .s-empty { background:var(--st-neutral-bg); border-color:var(--st-neutral-bd); color:var(--subtle); }
+.s-working { background:var(--st-working-bg); border-color:var(--st-working-bd); color:var(--st-working-tx); }
+.s-behind { background:var(--st-warning-bg); border-color:var(--st-warning-bd); color:var(--st-warning-tx); }
+@keyframes blink { 50% { opacity:.35 } }
+.sync { display:inline-flex; align-items:center; gap:3px; font:700 10.5px var(--font); color:var(--st-bound-tx); flex:none; }
+.sync svg.i { width:11px; height:11px; }
+.ell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* the corner pill on a preview (production ux-play pill) */
+.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd);
+  border-radius:4px; background:color-mix(in srgb, var(--terminal) 80%, transparent); font:800 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; z-index:2; }
+.pill .dot { width:6px; height:6px; border-radius:50%; background:currentcolor; flex:none; }
+.pill.here { color:var(--st-good-tx); } .pill.here .dot { animation:blink 2s ease-in-out infinite; }
+.pill.online { color:var(--st-live-tx); } .pill.busy { color:var(--st-attention-tx); }
+.pill.offline, .pill.seen, .pill.empty { color:var(--subtle); } .pill.working { color:var(--st-working-tx); }
+
+/* shared slim lines at the top of the page */
+.line { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:8px; border:1px solid; font-size:12.5px; margin-bottom:12px; flex-wrap:wrap; }
+.line .grow { flex:1; min-width:120px; }
+.line.signin { border-color:var(--bd); background:var(--panel); color:var(--muted); }
+.line.request { border-color:var(--st-attention-bd); background:var(--st-attention-bg); color:var(--st-attention-tx); }
+.line.request b { color:var(--strong); font-weight:700; }
+.line.request .note { color:var(--muted); font-style:italic; }
+.face { width:22px; height:22px; border-radius:50%; display:inline-grid; place-items:center; font-size:10px; font-weight:800; color:#0d0d13; flex:none; }
+
+/* welcome (brand new) */
+.welcome { display:grid; justify-items:center; gap:16px; text-align:center; padding:46px 16px 40px; border:1px dashed var(--bd); border-radius:12px; }
+.welcome h3 { margin:0; font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
+.welcome .or { font-size:12px; color:var(--subtle); }
+.welcome .or a { color:var(--muted); font-weight:600; }
+.app.phone .connect.big { flex-direction:column; width:100%; }
+.app.phone .connect.big .btn { width:100%; }
+
+/* section labels */
+.sect { display:flex; align-items:center; gap:10px; margin:22px 0 10px; }
+.sect h4 { margin:0; font:800 11px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); white-space:nowrap; }
+.sect .rule { flex:1; height:1px; background:var(--bd-mut); }
+.sect .count { font:600 11px var(--font); color:var(--faint); }
+.divider { display:flex; align-items:center; gap:14px; margin:30px 0 14px; }
+.divider span { flex:1; height:1px; background:var(--bd-mut); }
+.divider h4 { margin:0; font:800 14px/1 var(--font); text-transform:uppercase; letter-spacing:.06em; color:var(--heading); }
+
+/* catalog (production example cards: poster + glass name footer) */
+.catalog { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
+.app.phone .catalog { grid-template-columns:repeat(2,1fr); gap:9px; }
+.ex { position:relative; height:118px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; }
+.ex .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.4); }
+.ex .foot { position:absolute; left:0; right:0; bottom:0; padding:7px 9px; background:rgba(12,12,20,.62); backdrop-filter:blur(10px);
+  font-size:12px; font-weight:700; color:var(--strong); border-top:1px solid rgba(255,255,255,.08); }
+.catlede { font-size:12px; color:var(--subtle); text-align:center; margin:-4px 0 12px; }
+
+/* previews */
+.prev { position:relative; background:#07080a; overflow:hidden; }
+.prev canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.prev .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.38); }
+
+/* toast + popover */
+.toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); opacity:0; z-index:200; pointer-events:none;
+  background:var(--raised-strong); border:1px solid var(--bd-strong); border-radius:10px; padding:9px 14px; box-shadow:0 18px 50px rgba(0,0,0,.6);
+  font-size:12.5px; color:var(--tx); transition:opacity .2s, transform .2s; max-width:min(720px, 92vw); }
+.toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast code { color:var(--st-live-tx); font-size:11.5px; }
+.toast .sub { display:block; color:var(--subtle); font-size:11.5px; margin-top:2px; }
+.netpop { position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:290px; display:grid; gap:8px; padding:12px;
+  border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); text-align:left; }
+.connect.big .netpop { right:auto; left:50%; transform:translateX(-50%); }
+.netpop label { font-size:11px; font-weight:700; color:var(--subtle); }
+.netpop .row2 { display:flex; gap:6px; }
+.netpop input { flex:1; min-width:0; height:30px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 9px; font:12px var(--mono); }
+
+/* =====================================================================
+   §1 Today (faithful, compact)
+   ===================================================================== */
+.today { max-height:720px; overflow:hidden; position:relative; }
+.today::after { content:""; position:absolute; left:0; right:0; bottom:0; height:120px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
+.t-hero { display:grid; justify-items:center; gap:14px; padding:26px 0 8px; text-align:center; }
+.t-tri { width:110px; height:120px; clip-path:polygon(12% 4%, 96% 50%, 12% 96%); border-radius:14px;
+  background:radial-gradient(circle at 35% 45%, #ff5fa8, #a24cff 55%, #4b6bff); filter:drop-shadow(0 0 30px rgba(170,90,255,.5)); }
+.t-word { font-size:30px; font-weight:800; letter-spacing:-.02em; background:linear-gradient(90deg,#ff6b9a,#c77dff 50%,#5fe08b); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.t-slogan { font-size:14px; font-weight:600; color:var(--strong); }
+.t-pill { display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:999px; border:1px solid var(--bd); background:var(--panel); font-size:12.5px; font-weight:700; color:var(--strong); }
+.t-ask { width:min(420px,100%); display:grid; gap:6px; margin-top:6px; }
+.t-ask b { font-size:15px; color:var(--strong); }
+.t-box { height:56px; border-radius:8px; border:1px solid var(--bd); background:var(--surface); text-align:left; padding:8px 10px; font-size:12px; color:var(--faint); }
+.t-slop { font-size:11px; color:var(--subtle); }
+.t-slop mark { background:rgba(255,93,93,.18); color:var(--st-error-tx); border-radius:3px; padding:0 3px; }
+.t-doors { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; width:min(760px,100%); margin:0 auto; }
+.t-door { display:grid; justify-items:center; gap:6px; padding:14px 10px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); text-align:center; }
+.t-door b { font-size:12.5px; color:var(--strong); } .t-door span { font-size:11px; color:var(--muted); line-height:1.35; }
+.t-door .ic { width:30px; height:30px; border-radius:6px; border:1px solid var(--bd); display:grid; place-items:center; color:var(--heading); background:var(--surface-muted); }
+.t-col { width:min(760px,100%); margin:0 auto; }
+
+/* =====================================================================
+   §2 A · Pair cards
+   ===================================================================== */
+.a-bar { display:flex; align-items:center; gap:12px; margin-bottom:14px; min-width:0; }
+.a-filter { display:flex; gap:6px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; mask:linear-gradient(90deg,#000 88%,transparent); -webkit-mask:linear-gradient(90deg,#000 88%,transparent); padding-right:30px; }
+.a-filter.fits { mask:none; -webkit-mask:none; }
+.fchip { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 11px; border-radius:999px;
+  border:1px solid var(--bd); background:transparent; color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap; flex:none; }
+.fchip:hover { border-color:var(--bd-strong); color:var(--strong); }
+.fchip.on { border-color:var(--sel-bd); background:var(--sel-bg); color:var(--strong); }
+.fchip.shared { color:var(--st-bound-tx); }
+.fchip.shared.on { border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
+.fchip .n { color:var(--faint); font-weight:600; }
+.fchip.idea { border-style:dashed; }
+.app.phone .a-bar { flex-wrap:wrap; }
+.app.phone .a-bar .connect { order:-1; width:100%; justify-content:flex-end; }
+.pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; }
+.app.phone .pgrid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.pair { position:relative; display:grid; grid-template-rows:auto 1fr; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; cursor:pointer; min-width:0; transition:border-color .15s, box-shadow .15s; }
+.pair:hover { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.12); }
+.pair.is-here { border-color:var(--st-good-bd); }
+.pair .prev { height:112px; border-bottom:1px solid var(--bd-mut); }
+.app.phone .pair .prev { height:84px; }
+.pair .body { padding:9px 11px 10px; display:grid; gap:4px; min-width:0; }
+.pair .r1, .pair .r2 { display:flex; align-items:center; gap:6px; min-width:0; }
+.pair .bname { font-weight:700; font-size:13px; color:var(--strong); }
+.pair .pname { font-size:12px; color:var(--muted); }
+.pair .pname .arrow { color:var(--faint); margin-right:3px; }
+.pair .r1 .spring, .pair .r2 .spring { flex:1; }
+.pair .share { position:absolute; top:6px; left:6px; z-index:3; opacity:0; transition:opacity .15s; }
+.pair:hover .share, .app.phone .pair .share { opacity:1; }
+.pair.project .bname { font-weight:700; }
+.pair.project .quietline { font-size:11.5px; color:var(--subtle); }
+.pair.pattern .prev { height:72px; }
+.pgrid.patterns { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+.app.phone .pgrid.patterns { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.a-gap { height:16px; }
+
+/* =====================================================================
+   §3 B · One list
+   ===================================================================== */
+.b-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; position:relative; }
+.b-title { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:8px; background:transparent; border:0; padding:4px 6px; margin-left:-6px; border-radius:8px;
+  font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
+.b-title:hover { background:var(--raised); }
+.b-title svg.i { width:16px; height:16px; color:var(--subtle); }
+.b-title .shared-ic { color:var(--st-bound-tx); }
+.b-url { font:11px var(--mono); color:var(--faint); margin:0 0 14px; }
+.b-menu { position:absolute; left:0; top:calc(100% + 4px); z-index:30; width:250px; padding:6px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; gap:1px; max-height:340px; overflow:auto; }
+.b-menu button { appearance:none; font:inherit; cursor:pointer; display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; border:0; background:transparent; color:var(--tx); font-size:12.5px; text-align:left; }
+.b-menu button:hover { background:var(--raised-strong); }
+.b-menu button.on { background:var(--sel-bg); }
+.b-menu button .n { margin-left:auto; color:var(--faint); font-size:11px; }
+.b-menu hr { border:0; border-top:1px solid var(--bd-mut); margin:4px 2px; }
+.b-menu .shared-row { color:var(--st-bound-tx); }
+.list { border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:hidden; }
+.lrow { display:grid; grid-template-columns:78px minmax(0,1.15fr) minmax(0,1fr) 120px 128px 60px; align-items:center; gap:12px; padding:7px 12px; border-top:1px solid var(--bd-mut); cursor:pointer; min-height:44px; }
+.lrow:first-child { border-top:0; }
+.lrow:hover { background:var(--raised); }
+.lrow .prev { height:28px; border-radius:4px; border:1px solid var(--bd-mut); }
+.lrow .who { display:flex; align-items:center; gap:7px; min-width:0; }
+.lrow .who b { font-size:13px; color:var(--strong); font-weight:700; }
+.lrow .proj { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); min-width:0; }
+.lrow .proj .arrow { color:var(--faint); }
+.lrow .st { display:flex; justify-content:flex-start; }
+.lrow .go { justify-self:end; opacity:.0; transition:opacity .12s; }
+.lrow:hover .go { opacity:1; }
+.lrow.parent { background:color-mix(in srgb, var(--st-bound-bg) 35%, var(--panel)); }
+.lrow.parent .who b { color:var(--strong); }
+.lrow.child .who { padding-left:16px; position:relative; }
+.lrow.child .who::before { content:""; position:absolute; left:4px; top:-12px; bottom:50%; width:8px; border-left:1px solid var(--st-bound-bd); border-bottom:1px solid var(--st-bound-bd); border-bottom-left-radius:4px; }
+.lrow .meta { font-size:11.5px; color:var(--subtle); }
+.app.phone .lrow { grid-template-columns:56px minmax(0,1fr) auto; gap:9px; padding:7px 10px; }
+.app.phone .lrow .proj, .app.phone .lrow .grp, .app.phone .lrow .go { display:none; }
+.app.phone .lrow .who { flex-direction:column; align-items:flex-start; gap:1px; }
+.lrow .who .sub2 { display:none; font-size:11.5px; color:var(--muted); }
+.app.phone .lrow .who .sub2 { display:block; }
+.app.phone .lrow.child .who { padding-left:12px; }
+.b-patterns { display:flex; flex-wrap:wrap; gap:8px; }
+.pchip { display:inline-flex; align-items:center; gap:8px; padding:4px 10px 4px 4px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; font-size:12px; font-weight:600; color:var(--tx); }
+.pchip:hover { border-color:var(--bd-strong); }
+.pchip .prev { width:44px; height:26px; border-radius:5px; }
+
+/* =====================================================================
+   §4 C · Stage
+   ===================================================================== */
+.c-stage { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(0,1fr); gap:12px; }
+.app.phone .c-stage { grid-template-columns:1fr; }
+.c-hero { position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--st-good-bd); background:#07080a; height:290px; cursor:pointer; }
+.app.phone .c-hero { height:230px; }
+.c-hero .prev { position:absolute; inset:0; }
+.c-hero .ov { position:absolute; left:0; right:0; bottom:0; padding:40px 18px 16px; background:linear-gradient(transparent, rgba(7,8,10,.94) 55%); display:flex; align-items:flex-end; gap:12px; z-index:2; }
+.c-hero .ov .names { flex:1; min-width:0; display:grid; gap:3px; }
+.c-hero .ov .bn { font-size:22px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
+.c-hero .ov .pn { font-size:13px; color:var(--muted); display:flex; gap:8px; align-items:center; min-width:0; }
+.c-hero .ov .btn { height:36px; padding:0 16px; font-size:13px; }
+.c-side { display:grid; gap:8px; align-content:start; }
+.c-mini { display:grid; grid-template-columns:96px minmax(0,1fr); gap:10px; align-items:center; padding:6px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; min-width:0; }
+.c-mini:hover { border-color:var(--bd-strong); }
+.c-mini .prev { height:54px; border-radius:5px; }
+.c-mini .t { display:grid; gap:2px; min-width:0; }
+.c-mini .t b { font-size:12.5px; color:var(--strong); }
+.c-mini .t span { font-size:11.5px; color:var(--muted); }
+.c-side .more { font-size:11.5px; color:var(--subtle); padding:2px 4px; }
+.c-tabs { display:flex; align-items:flex-end; gap:20px; border-bottom:1px solid var(--bd-mut); margin:22px 0 14px; min-width:0; }
+.c-tabs .tabs { display:flex; gap:18px; overflow-x:auto; scrollbar-width:none; flex:1; min-width:0; }
+.c-tab { appearance:none; font:inherit; cursor:pointer; background:transparent; border:0; position:relative; padding:8px 0 9px; font-size:12.5px; font-weight:600; color:var(--muted); white-space:nowrap; display:inline-flex; gap:5px; align-items:center; }
+.c-tab:hover { color:var(--strong); }
+.c-tab.on { color:var(--strong); }
+.c-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
+.c-tab.shared { color:var(--st-bound-tx); }
+.c-tabs .connect { padding-bottom:6px; }
+.app.phone .c-tabs { flex-direction:column; align-items:stretch; gap:6px; }
+.app.phone .c-tabs .connect { order:-1; justify-content:flex-end; padding:0; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
+.app.phone .tiles { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.tile { position:relative; height:132px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; background:#07080a; min-width:0; }
+.tile:hover { border-color:var(--bd-strong); }
+.tile.is-here { border-color:var(--st-good-bd); }
+.tile .prev { position:absolute; inset:0; }
+.tile .foot { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:6px 9px 7px; background:rgba(12,12,20,.66); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.08); display:grid; gap:1px; }
+.tile .foot .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
+.tile .foot .l1 b { font-size:12px; color:var(--strong); }
+.tile .foot .l2 { font-size:11px; color:var(--muted); display:flex; gap:6px; align-items:center; min-width:0; }
+.sdot { display:inline-block; vertical-align:middle; width:7px; height:7px; border-radius:50%; flex:none; }
+.sdot.here { background:var(--st-good-tx); box-shadow:0 0 8px var(--st-good-tx); animation:blink 2s ease-in-out infinite; }
+.sdot.online { background:var(--st-live-tx); }
+.sdot.busy { background:var(--st-attention-tx); }
+.sdot.offline, .sdot.seen, .sdot.empty { background:transparent; border:1.5px solid var(--faint); }
+.sdot.working { background:var(--st-working-tx); }
+.tile .gcorner { position:absolute; top:6px; left:6px; z-index:2; }
+.tile.stack { overflow:visible; box-shadow:0 -4px 0 -2px #2c2c3b, 0 -8px 0 -5px #22222e; }
+.tile.stack .prev { border-radius:8px 8px 0 0; overflow:hidden; }
+.tile.stack .foot { border-radius:0 0 8px 8px; }
+.dots { display:inline-flex; gap:3px; flex:none; }
+.sdot.behind { background:var(--st-warning-tx); }
+.c-welcome { display:grid; justify-items:center; gap:14px; text-align:center; padding:22px 0 10px; }
+.c-welcome .t-tri { width:96px; height:104px; }
+
+/* screenshot mode (?shot=<id>): one section alone, for gate crops */
+body.shot { padding:16px; }
+body.shot > *:not(.shot-keep):not(script) { display:none !important; }
+
+/* §5 legend */
+.legend { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
+.lg { display:grid; grid-template-columns:132px 1fr; gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--shell-bd); border-radius:8px; background:var(--bg); }
+.lg .w { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.lg .what { font-size:12px; color:var(--muted); }
+.lg .what b { color:var(--strong); }
+.lg .src { display:block; font-size:11px; color:var(--subtle); margin-top:3px; }
+.lg .step { font:700 10px var(--mono); color:var(--faint); }
+</style>
+</head>
+<body>
+
+<h1>One home page — boards and projects together</h1>
+<p class="hint"><b>Thesis:</b> lightplayer.app opens on your stuff. The landing hero, <code>/devices</code> and <code>/projects</code> become one page.
+<b>Order:</b> connected and running pairs, then recent pairs, then projects not on a board, then patterns, then the catalog, unchanged.
+<b>Filter:</b> All groups by default, one control to narrow it. Each item shows its group.
+<b>Connect:</b> three buttons, USB, Bluetooth and Network.
+<b>Design language:</b> the board is the unit, with its project as what's on it.
+The three concepts share every piece of data and differ in <b>structure</b>: cards, a list, or a stage.
+<b>Click any board or project</b> to see the URL it would open. Vision: <code>lp2025/2026-10-06-1530-boards-and-projects-model/vision.md</code>.</p>
+<p class="hint"><b>The step control</b> draws what each step of the work delivers.
+<b>Step 1</b> uses only what this browser knows: no cloud and no groups.
+<b>Step 2</b> adds boards in your account, their status without connecting, and groups.
+<b>Step 3</b> adds sharing: Sean's group, access requests, and Busy.</p>
+
+<div class="controls" id="controls">
+  <div class="grp"><b>Who</b>
+    <button data-who="yona">Yona · many boards</button>
+    <button data-who="sean">Sean · one board</button>
+    <button data-who="signedout">Signed out</button>
+    <button data-who="new">Brand new</button>
+  </div>
+  <span class="sep"></span>
+  <div class="grp"><b>Step</b>
+    <button data-step="1">1 · this browser</button>
+    <button data-step="2">2 · account</button>
+    <button data-step="3">3 · sharing</button>
+  </div>
+  <span class="sep"></span>
+  <div class="grp"><b>Events</b>
+    <button data-ev="plug">Plug in a board</button>
+    <button data-ev="porch">Porch goes offline</button>
+    <button data-ev="request">Access request</button>
+    <button data-ev="many">Many groups</button>
+    <button data-ev="reset">Reset</button>
+  </div>
+  <span class="sep"></span>
+  <div class="grp"><b>Width</b>
+    <button data-w="desk">Desktop</button>
+    <button data-w="phone">Phone</button>
+  </div>
+</div>
+<p class="stepnote" id="stepnote"></p>
+
+<!-- ================================================================== -->
+<h2><span class="n">1</span>Today: the landing (reference)</h2>
+<p class="sub">Production as of <code>79668c96c</code>. A logo hero with "Edit the logo", the agent box with its filler line, four doors, then the catalog. Boards are on <b>Devices</b> and your projects on <b>Projects</b>, one click away each. Yona: "I don't actually use it for anything."</p>
+<div class="app" id="today"></div>
+
+<!-- ================================================================== -->
+<h2><span class="n">2</span>A · Pair cards — "the board is the card"</h2>
+<p class="sub">One grid sorted by importance, with no section headings until Patterns and Examples. Each card is a board: its LEDs on top, its name, then what it plays. A project with no board uses the same card with a poster and no board name. <b>Filter: a chip row.</b> <b>Connect: three small buttons on the right of that row.</b> <b>A project on three boards: three cards, each marked <span class="sync">⛓ 3</span>.</b></p>
+<div class="app" id="A"></div>
+<p class="cnotes"><b>For:</b> it's the most device-centric: you see your boards, and every card is the same shape and click. The live board's LEDs move, so "connected and running" is obvious without words. <b>Against:</b> the chip row runs out of room with many groups (try "Many groups"). An attached set repeats the project's name once per board. Projects and patterns blur together if both are cards.</p>
+
+<!-- ================================================================== -->
+<h2><span class="n">3</span>B · One list — "a pair is a line"</h2>
+<p class="sub">Dense rows: preview, board, what it plays, group, status, Open. <b>Filter: the page title is the filter</b> ("All groups ▾"), and picking a group puts you at that group's address (Q16). <b>A project on three boards: one project row with its boards under it.</b> Patterns are a strip of small chips, not rows.</p>
+<div class="app" id="B"></div>
+<p class="cnotes"><b>For:</b> it scales to many boards and groups, and status, group and age line up in columns you can scan. The title-as-filter costs no extra row, and its URL gives you a shareable group page. <b>Against:</b> it's the least visual. A home page for lights that reads like a file manager loses the "see it running" moment, and the previews are tiny.</p>
+
+<!-- ================================================================== -->
+<h2><span class="n">4</span>C · Stage — "your board is the hero"</h2>
+<p class="sub">The hero slot stays, but it shows <b>your connected board</b>, big and live, with one Open button. Other boards that are on now sit beside it. With nothing connected, and for a newcomer, the hero is the brand mark with the three connect buttons under it, so the page keeps its face. <b>Filter: tabs, like the top bar.</b> <b>A project on three boards: one stacked tile with a status pill for each board.</b></p>
+<div class="app" id="C"></div>
+<p class="cnotes"><b>For:</b> it's the strongest north-star answer. You open lightplayer.app and the first thing you see is your lights, playing, with one button to edit them. Tiles share the catalog's look, so the whole page reads as one gallery. <b>Against:</b> the hero only works when a board is connected in this tab. Boards that are online elsewhere can't play there, because the page never connects just to show status, so with no connected board the hero is static. Tabs overflow like chips.</p>
+
+<!-- ================================================================== -->
+<h2><span class="n">5</span>Shared pieces: status words</h2>
+<p class="sub">Words a pair can show <b>without connecting to the board</b> (T7: a C6 holds one network session, so the page never dials a board for its status). The step tag says when each becomes possible. Only a board connected <b>in this tab</b> plays live; every other preview is a still poster of its project.</p>
+<div class="legend" id="legend"></div>
+
+<div class="lean" id="lean">
+<b>My lean: C's stage on top of A's cards.</b>
+<ol>
+<li><b>The hero is C's:</b> your connected board, big and live, with Open. With no board connected, it's the brand mark with the three connect buttons, which is also the welcome state. That keeps the page's face, and Sean's first visit is one click from USB.</li>
+<li><b>Below it, A's grid in importance order</b>, but with C's stacked tile for an attached set. Three cards that all say "Holiday Eaves" read as a mistake; one stack with three status pills reads as one project on three boards.</li>
+<li><b>Filter: B's title-as-filter</b> ("All groups ▾" as a link to <code>/g/…</code>), not chips or tabs. It's the only one that survives "Many groups" and phone width, and it adds no row.</li>
+<li><b>Patterns: B's chip strip</b>, so patterns can't be mistaken for projects (D20).</li>
+</ol>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   Icons (simple geometric paths)
+   ===================================================================== */
+const IC = {
+  usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="18.5" r="2.5"/><path d="M7 9v2.5l5 3"/><path d="M17 8v3.5l-5 3"/><rect x="5.6" y="7" width="2.8" height="2.4" rx=".4"/><circle cx="17" cy="7.5" r="1.3"/>',
+  ble:'<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  net:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor"/>',
+  people:'<circle cx="9" cy="8" r="3.3"/><path d="M2.8 20a6.2 6.2 0 0 1 12.4 0"/><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4"/><path d="M17.8 14.2a6.2 6.2 0 0 1 3.4 5.8"/>',
+  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  share:'<circle cx="18" cy="5.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4.1M8.2 13.2l7.6 4.1"/>',
+  chev:'<path d="m6 9 6 6 6-6"/>',
+  play:'<path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke="none"/>',
+  search:'<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  tag:'<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8" r="1.3"/>',
+  spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  bot:'<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="9.5" cy="13.5" r="1" fill="currentColor"/><circle cx="14.5" cy="13.5" r="1" fill="currentColor"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.8" r=".9" fill="currentColor"/>',
+  chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
+  sim:'<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/><path d="M10.5 8.5v4.5l4-2.25z" fill="currentColor"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+};
+const ic = (n, cls='i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${IC[n]}</svg>`;
+
+/* =====================================================================
+   Data
+   ===================================================================== */
+const PROJECTS = {
+  fyeah:    { name:'Fyeah Sign', pat:'rainbow', group:'studio', slug:'fyeah-sign', edited:'2 h' },
+  eaves:    { name:'Holiday Eaves', pat:'eaves', group:'house', slug:'holiday-eaves', edited:'1 d' },
+  choker:   { name:"Maya's choker", pat:'pulse', group:'gifts', slug:'mayas-choker', from:'PLAYFUL Choker', edited:'6 d' },
+  rocaille: { name:'Rocaille, truck cut', pat:'rocaille', group:'studio', slug:'rocaille-truck-cut', edited:'3 wk' },
+  aurora:   { name:'Aurora Drift', pat:'aurora', group:'sean', slug:'aurora-drift', owner:'Sean' },
+  spark:    { name:'Spark Rain', pat:'comet', group:'sean', slug:'spark-rain', owner:'Sean' },
+  seanaur:  { name:'Aurora Drift', pat:'aurora', group:null, slug:'aurora-drift', from:'Aurora', edited:'just now' },
+  sketch:   { name:'Untitled 4', pat:'wipe', group:'studio', slug:'untitled-4', edited:'yesterday', loose:true },
+  solstice: { name:'Radiance dome — winter solstice show, second act', pat:'aurora2', group:'studio', slug:'radiance-dome-winter-solstice', edited:'3 d', loose:true },
+  kitchen:  { name:'Slow Rainbow', pat:'rainbow2', group:'house', slug:'slow-rainbow', edited:'just now', from:'Slow Rainbow' },
+  gift2:    { name:'Mom’s porch candle', pat:'ember', group:'gifts', slug:'moms-porch-candle', edited:'2 wk', loose:true },
+};
+const PATTERNS = [
+  { id:'ember', name:'Ember Drift', pat:'ember', slug:'ember-drift' },
+  { id:'slowrb', name:'Slow Rainbow', pat:'rainbow2', slug:'slow-rainbow' },
+  { id:'sparks', name:'Spark Rain 2', pat:'comet', slug:'spark-rain-2' },
+];
+const CATALOG_PROJECTS = ['Fiber Headband','Fyeah Sign','Logo Sign','Peach (1D)','Peach (2D)','PLAYFUL Choker','Rocaille','Small Dome'];
+const CATALOG_PATTERNS = ['Aurora','Colour Wipe','Comet','Fire 2012','Fireflies','Heartbeat','Lava Lamp','Meteor'];
+const MAC = { desk:'a0f262b48c11', porch:'a0f262b48c3e', garage:'a0f262b490a2', fence:'a0f262b49144', choker:'10bda3b08e30', truck:'a0f262b4777f', seanlr:'54326f0c19e0', seantree:'54326f0c2a14', seanhouse:'54326f0c19e0', kitchen:'a0f262b4a7d1', newb:'a0f262b4c0de' };
+
+const GROUPS = [
+  { id:'house', name:'House' }, { id:'studio', name:'Studio' }, { id:'gifts', name:'Gifts' },
+  { id:'sean', name:'Sean Connell', shared:true },
+];
+const MANY_GROUPS = ['Burning Man 2026','Gallery install','Workshop','Domes','Clients — Larkspur','Sample rigs','Tests','Mom’s house'].map((n,i)=>({ id:'g'+i, name:n }));
+
+const DATASETS = {
+  yona: { signedIn:true, initial:'Y', boards:[
+    { id:'desk',   name:'Desk C6', chip:'ESP32-C6', project:'fyeah', state:'here', link:'usb', met:true, layout:'matrix', ago:0 },
+    { id:'porch',  name:'Porch', chip:'ESP32-C6', project:'eaves', state:'online', met:true, layout:'roof', ago:1, via:'relay' },
+    { id:'garage', name:'Garage', chip:'ESP32-C6', project:'eaves', state:'online', behind:true, layout:'strip', ago:2, via:'relay' },
+    { id:'fence',  name:'Back fence', chip:'ESP32-C6', project:'eaves', state:'offline', seen:'3 d', layout:'strip', ago:4320 },
+    { id:'choker', name:'PLAYFUL choker', chip:'XIAO C6', project:'choker', state:'offline', seen:'5 h', met:true, wifi:true, layout:'ring', ago:300 },
+    { id:'truck',  name:'Truck', chip:'ESP32-C6', project:'rocaille', state:'offline', seen:'2 wk', met:true, layout:'strip', ago:20160 },
+    { id:'seanlr', name:'Living room', chip:'ESP32-C6', project:'aurora', state:'busy', by:'Sean', shared:true, layout:'roof', ago:3, via:'relay' },
+    { id:'seantree', name:'Lemon tree', chip:'ESP32-C6', project:'spark', state:'offline', seen:'1 d', shared:true, layout:'dome', ago:1440 },
+  ], loose:['sketch','solstice','gift2'], patterns:['ember','slowrb','sparks'] },
+  sean: { signedIn:true, initial:'S', boards:[
+    { id:'seanhouse', name:'House', chip:'ESP32-C6', project:'seanaur', state:'here', link:'usb', met:true, layout:'roof', ago:0, owned:true },
+  ], loose:[], patterns:[] },
+  signedout: { signedIn:false, boards:[
+    { id:'desk',  name:'Desk C6', chip:'ESP32-C6', project:'fyeah', state:'here', link:'usb', met:true, layout:'matrix', ago:0 },
+    { id:'truck', name:'Truck', chip:'ESP32-C6', project:'rocaille', state:'offline', seen:'2 wk', met:true, layout:'strip', ago:20160 },
+  ], loose:['sketch'], patterns:['ember'] },
+  new: { signedIn:false, boards:[], loose:[], patterns:[] },
+};
+
+/* =====================================================================
+   State
+   ===================================================================== */
+const S0 = { who:'yona', step:3, filter:'all', phone:false, plug:null, net:false, porchOff:false, request:true, many:false, netOpen:null, bMenu:false };
+let S = { ...S0 };
+
+function linkWord(l){ return { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' }[l] || l; }
+
+/** The view: dataset × step × events → what the page knows. */
+function view(){
+  const ds = DATASETS[S.who];
+  const signedIn = ds.signedIn;
+  const step = signedIn ? S.step : 1;
+  let boards = ds.boards.map(b => ({ ...b }));
+  if (S.porchOff) boards.forEach(b => { if (b.id==='porch') { b.state='offline'; b.seen='now'; b.ago=0.5; } });
+  if (step < 3) boards = boards.filter(b => !b.shared);
+  if (step < 2) {
+    boards = boards.filter(b => b.met || b.state==='here');
+    boards.forEach(b => { if (b.state!=='here') { b.state='seen'; } b.behind=false; });
+  }
+  if (S.net) boards.unshift({ id:'kitchen', name:'lp-7f3a.local', chip:'ESP32-C6', project:'kitchen', state:'here', link:'wifi', met:true, layout:'strip', ago:0, fresh:true });
+  if (S.plug) boards.unshift({ id:'newb', name: S.plug==='identifying' ? 'New board' : 'New board', chip: S.plug==='identifying' ? '' : 'ESP32-C6', project:null, state: S.plug==='identifying' ? 'working' : 'empty', link:S.plugLink||'usb', met:true, layout:'strip', ago:0, fresh:true });
+  boards.forEach(b => { b.group = b.project ? (PROJECTS[b.project].group) : null; if (step < 2) b.group = null; });
+  const groups = step >= 2 ? [...GROUPS.filter(g => step>=3 || !g.shared), ...(S.many ? MANY_GROUPS : [])] : [];
+  const usedGroups = groups.filter(g => boards.some(b=>b.group===g.id) || ds.loose.some(p=>PROJECTS[p].group===g.id) || g.id.startsWith('g'));
+  const loose = ds.loose.map(id => ({ id, ...PROJECTS[id], group: step>=2 ? PROJECTS[id].group : null }));
+  const patterns = ds.patterns.map(id => PATTERNS.find(p=>p.id===id));
+  const request = step >= 3 && S.request && S.who==='yona';
+  return { ds, signedIn, step, boards, groups: usedGroups, loose, patterns, request };
+}
+
+/* importance: here → online/busy → others newest first */
+function rank(b){ return ({ here:0, working:0, empty:0, online:1, busy:1 }[b.state] ?? 2); }
+function ordered(v){
+  const f = S.filter;
+  const inF = (g) => f==='all' || g===f;
+  const boards = v.boards.filter(b => inF(b.group) || (b.fresh && f==='all')).sort((a,b)=> rank(a)-rank(b) || a.ago-b.ago);
+  const loose = f==='patterns' ? [] : v.loose.filter(p => inF(p.group));
+  const showPatterns = f==='all' || f==='patterns';
+  const showCatalog = f==='all' || f==='patterns';
+  return { boards: f==='patterns' ? [] : boards, loose, patterns: showPatterns ? v.patterns : [], showCatalog, patternsOnly: f==='patterns' };
+}
+function groupOf(v, id){ return v.groups.find(g=>g.id===id) || GROUPS.find(g=>g.id===id); }
+function attachedCount(v, b){ return b.project ? v.boards.filter(x=>x.project===b.project).length : 0; }
+
+/* status words */
+function status(b){
+  switch(b.state){
+    case 'here':    return { cls:'here', short:`Live · ${linkWord(b.link)}`, words:`Here · ${linkWord(b.link)}` };
+    case 'online':  return { cls:'online', short:'Online', words:'Online' };
+    case 'busy':    return { cls:'busy', short:`Busy · ${b.by}`, words:`Busy · ${b.by} is on` };
+    case 'offline': return { cls:'offline', short:`Offline · ${b.seen}`, words:`Offline · ${b.seen}` };
+    case 'seen':    return { cls:'seen', short:`Seen ${b.seen||'2 h'} ago`, words:`Seen ${b.seen||'2 h'} ago` };
+    case 'working': return { cls:'working', short:'Identifying…', words:'Identifying…' };
+    case 'empty':   return { cls:'empty', short:'Empty', words:'Nothing on it' };
+  }
+}
+function chipSt(b){ const s=status(b); return `<span class="chipst s-${s.cls}"><span class="dot"></span>${s.words}</span>`; }
+function pillSt(b){ const s=status(b); return `<span class="pill ${s.cls}"><span class="dot"></span>${s.short}</span>`; }
+function gtag(v, gid){
+  const g = groupOf(v, gid); if (!g) return '';
+  return g.shared ? `<span class="gtag shared">${ic('people')}${g.name}</span>` : `<span class="gtag">${g.name}</span>`;
+}
+function behindChip(b){ return b.behind ? `<span class="chipst s-behind">Behind</span>` : ''; }
+
+/* preview canvas markup: live only when connected HERE; others are stills */
+function prev(pat, layout, opts={}){
+  const live = !!opts.live, dim = opts.dim ? 1 : 0, off = opts.off ? 1 : 0;
+  return `<canvas data-pat="${pat}" data-layout="${layout}" data-live="${live?1:0}" data-dim="${dim}" data-off="${off}" data-seed="${opts.seed||1}"></canvas>`;
+}
+function boardPrev(b){
+  if (b.state==='working' || b.state==='empty') return prev('off', b.layout, { off:true });
+  const p = PROJECTS[b.project];
+  return prev(p.pat, b.layout, { live: b.state==='here', dim: b.state==='offline' || b.state==='seen', seed: b.id.length });
+}
+function poster(name, pat){
+  const h = [...name].reduce((a,c)=>a*31+c.charCodeAt(0)>>>0, 7);
+  const h1 = h%360, h2 = (h1+70+(h>>8)%90)%360;
+  return `<div class="poster" style="background:linear-gradient(135deg,hsl(${h1} 45% 30%),hsl(${h2} 45% 26%))">${name[0].toUpperCase()}</div>`;
+}
+
+/* click targets → toast */
+function urlFor(kind, id){
+  if (kind==='board'){
+    const b = view().boards.find(x=>x.id===id);
+    if (!b) return;
+    if (b.state==='busy') return toast(`<b>${b.by} is connected to ${b.name}.</b><span class="sub">A C6 takes one remote session at a time (T7). Try again when ${b.by} is done.</span>`);
+    if (b.state==='working') return toast(`Identifying the board…`);
+    if (b.state==='empty') return toast(`<b>Put a project on it</b><span class="sub">Copy a project (default) or attach to one. The setup flow stays minimal for now (D4).</span>`);
+    const p = PROJECTS[b.project];
+    const how = { here:`over ${linkWord(b.link)}, already connected`, online:'through the relay (step 2: the account knows it is online)',
+      offline:'with the board offline: it opens the project, and the board catches up next time it is online', seen: b.wifi ? 'over Wi‑Fi, at the address this browser last saw' : 'when you plug it in; this browser has only seen it over USB' }[b.state];
+    return toast(`Open <code>/p/${p.slug}-prj4q7c…?on=mac:${MAC[b.id]||'…'}</code><span class="sub">${how}</span>`);
+  }
+  if (kind==='project'){ const p = PROJECTS[id]; return toast(`Open <code>/p/${p.slug}-prj9m2d…</code><span class="sub">No board: it opens on a sim, and you can put it on a board from the editor.</span>`); }
+  if (kind==='pattern'){ const p = PATTERNS.find(x=>x.id===id); return toast(`Open <code>/p/${p.slug}-prj2x8a…</code><span class="sub">A pattern opens on its test rig. Use it in a project, or start one from it.</span>`); }
+  if (kind==='example'){ return toast(`Open example <b>${id}</b><span class="sub">The catalog works as it does today.</span>`); }
+  if (kind==='share'){ const b = view().boards.find(x=>x.id===id); return toast(`<b>Share ${b.name}</b><span class="sub">People by email (hypher@gmail.com), play or author · board page <code>/device/${b.name.toLowerCase().replace(/\W+/g,'-')}-dev${MAC[b.id].slice(0,6)}…</code> (step 3, Q5)</span>`); }
+  if (kind==='set'){ const p = PROJECTS[id]; return toast(`Open <code>/p/${p.slug}-prj4q7c…</code><span class="sub">The project. Save sends it to every attached board (D5). Pick a board on the tile to open it with that board.</span>`); }
+}
+let toastT;
+function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4200); }
+
+/* =====================================================================
+   Shared page pieces
+   ===================================================================== */
+function topbar(v, today=false){
+  const right = v.signedIn
+    ? `<span class="avatar ${v.request?'dot':''}">${v.ds.initial||'Y'}</span>`
+    : `<span>Sign in</span>`;
+  return `<div class="topbar">
+    <span class="logo">${ic('play')}<span>LightPlayer</span></span>
+    ${today ? `<span class="navtab hide-phone">Devices</span><span class="navtab hide-phone">Projects</span>` : ''}
+    <span class="tright"><span class="hide-phone">Boards</span><span class="hide-phone">Docs</span><span class="kbd hide-phone">⌘K</span><span class="ibtn hide-phone">${ic('bot')}</span>${right}</span>
+  </div>`;
+}
+function connectButtons(cid, big=false){
+  const cls = big ? 'btn cta' : 'btn outline';
+  return `<span class="connect ${big?'big':''}">
+    <button class="${cls}" data-act="plug" data-link="usb">${ic('usb')}USB</button>
+    <button class="${cls}" data-act="plug" data-link="ble">${ic('ble')}Bluetooth</button>
+    <button class="${cls}" data-act="netopen" data-cid="${cid}">${ic('net')}Network</button>
+    ${S.netOpen===cid ? `<div class="netpop"><label>Board address</label><div class="row2"><input value="lp-7f3a.local" spellcheck="false"><button class="btn sm" data-act="netgo">Connect</button></div></div>` : ''}
+  </span>`;
+}
+function topLines(v){
+  let h = '';
+  if (!v.signedIn && v.ds.boards.length) h += `<div class="line signin"><span class="grow">Sign in to keep your boards in your account.</span><button class="btn sm cta">Sign in</button></div>`;
+  if (v.request) h += `<div class="line request"><span class="face" style="background:linear-gradient(135deg,#ffab4a,#ff5d5d)">M</span><span class="grow"><b>Maya Lin</b> asks to play <b>Porch</b> <span class="note">“for the party Saturday”</span></span><button class="btn sm">Allow</button><button class="btn sm quiet">No</button></div>`;
+  return h;
+}
+function welcome(cid){
+  return `<div class="welcome">
+    <h3>Connect a board</h3>
+    ${connectButtons(cid, true)}
+    <span class="or">No board? <a href="#" data-act="noop">Try an example ↓</a></span>
+  </div>`;
+}
+function catalog(o){
+  if (!o.showCatalog) return '';
+  const cards = (names) => names.map(n => `<div class="ex" data-open="example" data-id="${n}">${poster(n)}<div class="foot">${n}</div></div>`).join('');
+  return (o.patternsOnly ? '' : `<div class="divider"><span></span><h4>Example projects</h4><span></span></div>
+    <p class="catlede">Finished pieces, wired for real hardware. Open one and make it yours.</p>
+    <div class="catalog">${cards(CATALOG_PROJECTS)}</div>`) +
+    `<div class="divider"><span></span><h4>Example patterns</h4><span></span></div>
+    <p class="catlede">Single effects on a test rig. Each exports an effect you can import into your own project.</p>
+    <div class="catalog">${cards(CATALOG_PATTERNS)}</div>`;
+}
+
+/* =====================================================================
+   §1 Today
+   ===================================================================== */
+function renderToday(){
+  const v = { signedIn:false, ds:{}, request:false };
+  document.getElementById('today').innerHTML = topbar(v, true) + `<div class="page today">
+    <div class="t-hero">
+      <div class="t-tri"></div>
+      <div class="t-word">LightPlayer</div>
+      <div class="t-slogan">Friendly shaders, everywhere</div>
+      <span class="t-pill">${ic('edit')}Edit the logo</span>
+      <div class="t-ask"><b>What do you want your lights to do?</b>
+        <div class="t-box">A strip of 250 LEDs on my XIAO that cycles a few calm patterns...</div>
+        <div class="t-slop">You'll connect an AI provider first — <mark>your words stay here.</mark></div></div>
+    </div>
+    <div class="t-col"><div class="divider"><span></span><h4>Get started</h4><span></span></div>
+    <div class="t-doors">
+      <div class="t-door"><span class="ic">${ic('usb')}</span><b>Connect a device</b><span>Plug a board in over USB and set it up.</span></div>
+      <div class="t-door"><span class="ic">${ic('sim')}</span><b>Try it here</b><span>Open an example and watch it run — no hardware needed.</span></div>
+      <div class="t-door"><span class="ic">${ic('info')}</span><b>Read the docs</b><span>Shaders, mapping, connecting devices.</span></div>
+      <div class="t-door"><span class="ic">${ic('chip')}</span><b>Supported boards</b><span>QuinLED, ESP32 DevKitC, XIAO, and more.</span></div>
+    </div>
+    <div class="divider"><span></span><h4>Projects</h4><span></span></div>
+    <div class="catalog">${CATALOG_PROJECTS.slice(0,4).map(n=>`<div class="ex">${poster(n)}<div class="foot">${n}</div></div>`).join('')}</div></div>
+  </div>`;
+}
+
+/* =====================================================================
+   §2 A · Pair cards
+   ===================================================================== */
+function aCard(v, b){
+  const p = b.project ? PROJECTS[b.project] : null;
+  const n = attachedCount(v, b);
+  const share = v.step>=3 && !b.shared && b.project && b.state!=='working' ? `<button class="btn sm share" data-act="share" data-id="${b.id}" title="Share">${ic('share')}</button>` : '';
+  return `<div class="pair ${b.state==='here'?'is-here':''}" data-open="board" data-id="${b.id}">
+    <div class="prev">${boardPrev(b)}${pillSt(b)}${share}</div>
+    <div class="body">
+      <div class="r1"><span class="bname ell">${b.name}</span><span class="spring"></span>${gtag(v,b.group)}</div>
+      <div class="r2"><span class="pname ell"><span class="arrow">▸</span>${p ? p.name : (b.state==='working'?'…':'Nothing on it')}</span>${n>1?`<span class="sync" title="Attached: ${n} boards play this project">${ic('link')}${n}</span>`:''}<span class="spring"></span>${behindChip(b)}</div>
+    </div></div>`;
+}
+function aProject(v, p){
+  return `<div class="pair project" data-open="project" data-id="${p.id}">
+    <div class="prev">${poster(p.name)}</div>
+    <div class="body"><div class="r1"><span class="bname ell">${p.name}</span><span class="spring"></span>${gtag(v,p.group)}</div>
+    <div class="r2"><span class="quietline">No board · edited ${p.edited}</span></div></div></div>`;
+}
+function aPattern(p){
+  return `<div class="pair pattern project" data-open="pattern" data-id="${p.id}"><div class="prev">${prev(p.pat,'strip',{seed:3})}</div>
+    <div class="body"><div class="r1"><span class="bname ell">${p.name}</span></div></div></div>`;
+}
+function aFilter(v){
+  if (!v.groups.length && !v.patterns.length) return '<span style="flex:1"></span>';
+  const count = (gid) => v.boards.filter(b=>b.group===gid).length + v.loose.filter(p=>p.group===gid).length;
+  const chips = [`<button class="fchip ${S.filter==='all'?'on':''}" data-filter="all">All${v.groups.length?' groups':''}</button>`,
+    ...v.groups.map(g => `<button class="fchip ${g.shared?'shared':''} ${S.filter===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name} <span class="n">${count(g.id)||''}</span></button>`),
+    `<button class="fchip idea ${S.filter==='patterns'?'on':''}" data-filter="patterns">Patterns</button>`];
+  return `<div class="a-filter ${v.groups.length<6?'fits':''}">${chips.join('')}</div>`;
+}
+function renderA(){
+  const v = view(); const o = ordered(v);
+  const el = document.getElementById('A'); el.classList.toggle('phone', S.phone);
+  let body = topLines(v);
+  if (!v.boards.length && !v.loose.length && !v.patterns.length) {
+    body += welcome('A') + catalog(o);
+  } else {
+    body += `<div class="a-bar">${aFilter(v)}${connectButtons('A')}</div>`;
+    const cards = [...o.boards.map(b=>aCard(v,b)), ...o.loose.map(p=>aProject(v,p))];
+    if (cards.length) body += `<div class="pgrid">${cards.join('')}</div>`;
+    if (o.patterns.length) body += `<div class="sect"><h4>Your patterns</h4><span class="rule"></span></div><div class="pgrid patterns">${o.patterns.map(aPattern).join('')}</div>`;
+    body += catalog(o);
+  }
+  el.innerHTML = topbar(v) + `<div class="page">${body}</div>`;
+}
+
+/* =====================================================================
+   §3 B · One list
+   ===================================================================== */
+function bRow(v, b, extra=''){
+  const p = b.project ? PROJECTS[b.project] : null;
+  const pname = p ? p.name : (b.state==='working'?'…':'Nothing on it');
+  return `<div class="lrow ${extra}" data-open="board" data-id="${b.id}">
+    <div class="prev">${boardPrev(b)}</div>
+    <div class="who"><b class="ell">${b.name}</b><span class="sub2 ell">${extra.includes('child')?'':'▸ '+pname}</span></div>
+    <div class="proj">${extra.includes('child')?'':`<span class="arrow">▸</span><span class="ell">${pname}</span>`}${behindChip(b)}</div>
+    <div class="grp">${extra.includes('child')?'':gtag(v,b.group)}</div>
+    <div class="st">${chipSt(b)}</div>
+    <div class="go"><button class="btn sm">Open</button></div></div>`;
+}
+function bSetRows(v, pid, boards){
+  const p = PROJECTS[pid];
+  const head = `<div class="lrow parent" data-open="set" data-id="${pid}">
+    <div class="prev">${prev(p.pat,'roof',{seed:2})}</div>
+    <div class="who"><b class="ell">${p.name}</b><span class="sub2">${boards.length} boards, in sync</span></div>
+    <div class="proj"><span class="sync">${ic('link')}${boards.length} boards, in sync</span></div>
+    <div class="grp">${gtag(v,p.group)}</div><div class="st"></div><div class="go"><button class="btn sm">Open</button></div></div>`;
+  return head + boards.map(b => bRow(v, b, 'child')).join('');
+}
+/** Units: a lone board, or an attached set (all its boards, ranked by its best board). */
+function bUnits(v, boards){
+  const seen = new Set(); const units = [];
+  for (const b of boards){
+    if (b.project && attachedCount(v,b) > 1){
+      if (seen.has(b.project)) continue; seen.add(b.project);
+      units.push({ set:b.project, boards:boards.filter(x=>x.project===b.project), rank:rank(b) });
+    } else units.push({ board:b, rank:rank(b) });
+  }
+  return units;
+}
+function bListRows(v, units){
+  return units.map(u => u.set ? bSetRows(v, u.set, u.boards) : bRow(v, u.board)).join('');
+}
+function bTitle(v){
+  const g = groupOf(v, S.filter);
+  const label = S.filter==='all' ? (v.groups.length ? 'All groups' : 'Your boards') : S.filter==='patterns' ? 'Patterns' : g.name;
+  const shared = g && g.shared ? `<span class="shared-ic">${ic('people')}</span>` : '';
+  const url = S.filter==='all' ? 'lightplayer.app' : S.filter==='patterns' ? 'lightplayer.app/patterns' : `lightplayer.app/g/${g.name.toLowerCase().replace(/\W+/g,'-')}-grp${(g.id+'k3v9q').slice(0,5)}…`;
+  const canFilter = v.groups.length || v.patterns.length;
+  const count = (gid) => v.boards.filter(b=>b.group===gid).length + v.loose.filter(p=>p.group===gid).length;
+  const menu = S.bMenu ? `<div class="b-menu">
+      <button class="${S.filter==='all'?'on':''}" data-filter="all">All groups</button><hr>
+      ${v.groups.map(g=>`<button class="${g.shared?'shared-row':''} ${S.filter===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name}<span class="n">${count(g.id)||''}</span></button>`).join('')}
+      <hr><button class="${S.filter==='patterns'?'on':''}" data-filter="patterns">Patterns</button></div>` : '';
+  return `<div class="b-head">
+    <button class="b-title" ${canFilter?'data-act="bmenu"':''}>${shared}${label}${canFilter?ic('chev'):''}</button>${menu}
+    <span style="flex:1"></span>${connectButtons('B')}</div>
+    <p class="b-url">${url}</p>`;
+}
+function renderB(){
+  const v = view(); const o = ordered(v);
+  const el = document.getElementById('B'); el.classList.toggle('phone', S.phone);
+  let body = topLines(v);
+  if (!v.boards.length && !v.loose.length && !v.patterns.length) {
+    body += welcome('B') + catalog(o);
+  } else {
+    body += bTitle(v);
+    const units = bUnits(v, o.boards);
+    const on = units.filter(u=>u.rank<2), rest = units.filter(u=>u.rank>=2);
+    if (on.length) body += `<div class="sect"><h4>On now</h4><span class="rule"></span></div><div class="list">${bListRows(v,on)}</div>`;
+    if (rest.length) body += `<div class="sect"><h4>Recent</h4><span class="rule"></span></div><div class="list">${bListRows(v,rest)}</div>`;
+    if (o.loose.length) body += `<div class="sect"><h4>Not on a board</h4><span class="rule"></span></div><div class="list">${o.loose.map(p=>`<div class="lrow" data-open="project" data-id="${p.id}">
+      <div class="prev">${poster(p.name)}</div><div class="who"><b class="ell">${p.name}</b><span class="sub2">edited ${p.edited}</span></div>
+      <div class="proj meta">edited ${p.edited}</div><div class="grp">${gtag(v,p.group)}</div><div class="st"></div><div class="go"><button class="btn sm">Open</button></div></div>`).join('')}</div>`;
+    if (o.patterns.length) body += `<div class="sect"><h4>Your patterns</h4><span class="rule"></span></div><div class="b-patterns">${o.patterns.map(p=>`<span class="pchip" data-open="pattern" data-id="${p.id}"><span class="prev">${prev(p.pat,'strip',{seed:4})}</span>${p.name}</span>`).join('')}</div>`;
+    body += catalog(o);
+  }
+  el.innerHTML = topbar(v) + `<div class="page">${body}</div>`;
+}
+
+/* =====================================================================
+   §4 C · Stage
+   ===================================================================== */
+/** C works in units too: a lone board, or an attached set shown once as a stack. */
+function isHereish(b){ return b.state==='here' || b.state==='working' || b.state==='empty'; }
+function cLayout(v, o){
+  const units = bUnits(v, o.boards);
+  const leadIdx = units.findIndex(u => u.board && isHereish(u.board));
+  const lead = leadIdx >= 0 ? units[leadIdx].board : null;
+  const rest = units.filter((_,i) => i !== leadIdx);
+  const side = rest.filter(u => u.rank < 2).slice(0, 3);
+  const grid = rest.filter(u => !side.includes(u));
+  return { lead, side, grid };
+}
+function cHero(v, o, L){
+  const sideHtml = L.side.length ? `<div class="c-side">${L.side.map(u=>cMini(v,u)).join('')}</div>` : '';
+  if (!L.lead) {
+    // no board connected in this tab: brand mark + connect buttons (this IS the welcome)
+    const brand = `<div class="c-welcome"><div class="t-tri"></div>${!v.boards.length && !v.loose.length ? '<h3 style="margin:0;font-size:20px;color:var(--strong)">Connect a board</h3>' : ''}${connectButtons('C', true)}
+      ${!v.boards.length ? '<span class="or" style="font-size:12px;color:var(--subtle)">No board? <a style="color:var(--muted);font-weight:600" href="#">Try an example ↓</a></span>' : ''}</div>`;
+    return sideHtml ? `<div class="c-stage"><div>${brand}</div>${sideHtml}</div>` : brand;
+  }
+  const lead = L.lead; const p = lead.project ? PROJECTS[lead.project] : null;
+  const share = v.step>=3 && p ? `<button class="btn outline" data-act="share" data-id="${lead.id}">${ic('share')}Share</button>` : '';
+  const heroEl = `<div class="c-hero" data-open="board" data-id="${lead.id}"><div class="prev">${boardPrev(lead)}</div>${pillSt(lead)}
+    <div class="ov"><div class="names"><span class="bn ell">${lead.name}</span><span class="pn"><span class="ell">▸ ${p?p.name:(lead.state==='working'?'Identifying…':'Nothing on it')}</span>${gtag(v,lead.group)}</span></div>
+    ${share}<button class="btn cta">${lead.state==='empty'?'Put a project on it':'Open'}</button></div></div>`;
+  return sideHtml ? `<div class="c-stage">${heroEl}${sideHtml}</div>` : heroEl;
+}
+function cMini(v, u){
+  if (u.set){
+    const p = PROJECTS[u.set]; const on = u.boards.filter(b=>rank(b)<2).length;
+    return `<div class="c-mini" data-open="set" data-id="${u.set}"><div class="prev">${prev(p.pat,'roof',{seed:2})}</div>
+      <div class="t"><b class="ell">${p.name}</b><span class="ell">${setDots(u.boards)} ${u.boards.length} boards · ${on} online</span><span>${u.boards.some(b=>b.behind)?'<span class="chipst s-behind">1 behind</span>':''}</span></div></div>`;
+  }
+  const b = u.board; const p = b.project ? PROJECTS[b.project] : null;
+  return `<div class="c-mini" data-open="board" data-id="${b.id}"><div class="prev">${boardPrev(b)}</div>
+    <div class="t"><b class="ell">${b.name}</b><span class="ell">▸ ${p?p.name:'…'}</span><span>${chipSt(b)}</span></div></div>`;
+}
+function setDots(boards){ return boards.map(b=>`<span class="sdot ${b.behind?'behind':status(b).cls}" title="${b.name}: ${status(b).words}${b.behind?', behind':''}"></span>`).join(''); }
+function cTile(v, b){
+  const p = b.project ? PROJECTS[b.project] : null; const s = status(b);
+  return `<div class="tile ${b.state==='here'?'is-here':''}" data-open="board" data-id="${b.id}"><div class="prev">${boardPrev(b)}</div>
+    <span class="gcorner">${gtag(v,b.group)}</span>
+    <div class="foot"><div class="l1"><span class="sdot ${s.cls}"></span><b class="ell">${b.name}</b></div>
+    <div class="l2"><span class="ell">▸ ${p?p.name:'Nothing on it'}</span><span style="flex:1"></span><span style="color:var(--subtle);flex:none">${b.state==='offline'||b.state==='seen'?b.seen:b.state==='busy'?'Busy':''}</span></div></div></div>`;
+}
+function cStack(v, pid, boards){
+  const p = PROJECTS[pid];
+  return `<div class="tile stack" data-open="set" data-id="${pid}"><div class="prev">${prev(p.pat,'roof',{seed:5})}</div>
+    <span class="gcorner">${gtag(v,p.group)}</span>
+    <div class="foot"><div class="l1"><span class="sync">${ic('link')}${boards.length}</span><b class="ell">${p.name}</b></div>
+    <div class="l2"><span class="dots">${setDots(boards)}</span><span class="ell">${boards.map(b=>b.name).join(' · ')}</span></div></div></div>`;
+}
+function cTabs(v){
+  const tabs = [`<button class="c-tab ${S.filter==='all'?'on':''}" data-filter="all">All</button>`,
+    ...v.groups.map(g=>`<button class="c-tab ${g.shared?'shared':''} ${S.filter===g.id?'on':''}" data-filter="${g.id}">${g.shared?ic('people'):''}${g.name}</button>`),
+    `<button class="c-tab ${S.filter==='patterns'?'on':''}" data-filter="patterns">Patterns</button>`];
+  return `<div class="c-tabs"><div class="tabs">${(v.groups.length||v.patterns.length)?tabs.join(''):''}</div>${connectButtonsIfHero(v)}</div>`;
+}
+function connectButtonsIfHero(v){ return v.boards.some(b=>b.state==='here'||b.state==='working'||b.state==='empty') ? connectButtons('C') : ''; }
+function renderC(){
+  const v = view(); const o = ordered(v);
+  const el = document.getElementById('C'); el.classList.toggle('phone', S.phone);
+  let body = topLines(v);
+  const L = cLayout(v, o);
+  body += cHero(v, o, L);
+  if (v.boards.length || v.loose.length || v.patterns.length) {
+    body += cTabs(v);
+    const tiles = L.grid.map(u => u.set ? cStack(v, u.set, u.boards) : cTile(v, u.board));
+    o.loose.forEach(p => tiles.push(`<div class="tile" data-open="project" data-id="${p.id}"><div class="prev">${poster(p.name)}</div><span class="gcorner">${gtag(v,p.group)}</span>
+      <div class="foot"><div class="l1"><b class="ell">${p.name}</b></div><div class="l2"><span>No board · ${p.edited}</span></div></div></div>`));
+    if (tiles.length) body += `<div class="tiles">${tiles.join('')}</div>`;
+    if (o.patterns.length) body += `<div class="sect"><h4>Your patterns</h4><span class="rule"></span></div><div class="tiles">${o.patterns.map(p=>`<div class="tile" style="height:96px" data-open="pattern" data-id="${p.id}"><div class="prev">${prev(p.pat,'strip',{seed:6})}</div><div class="foot"><div class="l1"><b>${p.name}</b></div></div></div>`).join('')}</div>`;
+  }
+  body += catalog(o);
+  el.innerHTML = topbar(v) + `<div class="page">${body}</div>`;
+}
+
+/* =====================================================================
+   §5 Legend
+   ===================================================================== */
+function renderLegend(){
+  const rows = [
+    [{state:'here',link:'usb'}, '<b>Connected in this tab</b>, playing live.', 'From the link itself.', '1'],
+    [{state:'seen',seen:'5 h'}, '<b>This browser has met it</b>, but nothing says it is online.', 'From this browser’s registry (per browser, step 1 only).', '1'],
+    [{state:'working'}, '<b>Just plugged in</b>: finding out what it is.', 'From the link.', '1'],
+    [{state:'empty'}, '<b>A board with nothing on it.</b> Click to put a project on it (copy, or attach).', 'From the link.', '1'],
+    [{state:'online'}, '<b>Online, not connected here.</b> One click opens it through the relay.', 'From relay presence. No connection is made.', '2'],
+    [{state:'offline',seen:'3 d'}, '<b>Not online.</b> Opening it opens the project; the board catches up later.', 'From the account’s last-seen time.', '2'],
+    [{state:'online',behind:true}, '<b>Attached, but missing the last save</b> (its project moved while it was away).', 'Project history’s Behind, from the version the board last reported (Q9).', '2'],
+    [{state:'busy',by:'Sean'}, '<b>Someone else holds its one remote session.</b> Says who (Q13).', 'From the relay: the route is taken.', '3'],
+  ];
+  document.getElementById('legend').innerHTML = rows.map(([b, what, src, step]) =>
+    `<div class="lg"><div class="w">${chipSt(b)}${b.behind?'<span class="chipst s-behind">Behind</span>':''}<span class="step">step ${step}</span></div><div class="what">${what}<span class="src">${src}</span></div></div>`).join('');
+}
+
+/* =====================================================================
+   LED renderer: dots like the production lamp view. Live only for boards
+   connected in this tab; everything else is a still frame (a poster).
+   ===================================================================== */
+function hsv(h,s,v){ const i=Math.floor(h*6), f=h*6-i, p=v*(1-s), q=v*(1-f*s), t=v*(1-(1-f)*s);
+  const [r,g,b]=[[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][((i%6)+6)%6]; return [r*255,g*255,b*255]; }
+const PAT = {
+  rainbow:(u,v,t)=>hsv((u*.9+v*.3+t*.12)%1,.85,1),
+  rainbow2:(u,v,t)=>hsv((u*.35+t*.04)%1,.7,.9),
+  eaves:(u,v,t)=>{ const k=Math.floor(u*36 - t*3); const tw=.6+.4*Math.sin(t*5+u*90); return (k%3===0)?[255*tw,40,30]:(k%3===1)?[40,210*tw,80]:[255*tw,190*tw,90]; },
+  aurora:(u,v,t)=>{ const a=.5+.5*Math.sin(u*5+t*.9), b=.5+.5*Math.sin(u*9-t*.6+v*3); return [80*b+40, 200*a+40, 150+90*b]; },
+  aurora2:(u,v,t)=>{ const a=.5+.5*Math.sin(u*4+t*.5+v*4); return hsv(.45+.25*a, .7, .5+.5*a); },
+  pulse:(u,v,t)=>{ const p=.5+.5*Math.sin(t*2.2 - u*6); return [255*p, 60*p+20, 200*p+30]; },
+  rocaille:(u,v,t)=>hsv(.03+.07*Math.sin(u*7+t*.7+v*5), .8, .55+.45*Math.sin(u*3-t*.9)),
+  comet:(u,v,t)=>{ const head=(t*.35)%1.3; const d=head-u; const k=d<0||d>.4?0:Math.pow(1-d/.4,3); return [140*k+10, 200*k+10, 255*k+20]; },
+  wipe:(u,v,t)=>{ const x=(t*.25)%2; return u < (x%1) ? (x<1?[255,120,60]:[60,140,255]) : (x<1?[60,140,255]:[255,120,60]); },
+  ember:(u,v,t)=>{ const f=.55+.45*Math.sin(t*7+u*23)*Math.sin(t*3.1+u*11); return [255*f, 110*f*f, 20*f]; },
+  off:()=>[0,0,0],
+};
+function layoutPts(kind, w, h, dpr=1){
+  const pts=[]; const pad=Math.min(w,h)*.12; const sp=11*dpr;
+  if (kind==='matrix'){ const cols=Math.max(8,Math.round(w/sp)), rows=Math.max(4,Math.round(h/sp));
+    for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) pts.push([pad+(w-2*pad)*x/(cols-1), pad+(h-2*pad)*y/(rows-1), x/(cols-1), y/(rows-1)]); }
+  else if (kind==='ring'){ const n=24, r=Math.min(w,h)*.36; for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; pts.push([w/2+r*Math.cos(a), h/2+r*Math.sin(a), i/n, .5]); } }
+  else if (kind==='roof'){ const n=Math.max(18,Math.round(w/(sp*.8))); for (let i=0;i<n;i++){ const u=i/(n-1); const y = h*.72 - (1-Math.abs(u-.5)*2)*h*.42; pts.push([pad+(w-2*pad)*u, y, u, .5]); } }
+  else if (kind==='dome'){ [[8,.15],[14,.28],[20,.41]].forEach(([n,rr],ri)=>{ for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; const R=Math.min(w,h)*rr*1.05; pts.push([w/2+R*Math.cos(a), h/2+R*Math.sin(a)*.8, i/n, ri/2]); } }); }
+  else { const n=Math.max(14,Math.round(w/(sp*.8))); for (let i=0;i<n;i++){ const u=i/(n-1); pts.push([pad+(w-2*pad)*u, h/2, u, .5]); } }
+  return pts;
+}
+let canvases = [];
+function mountCanvases(){
+  canvases = [...document.querySelectorAll('canvas[data-pat]')].map(c => {
+    const dpr = Math.min(2, window.devicePixelRatio||1); const r = c.getBoundingClientRect();
+    c.width = Math.max(1, Math.round(r.width*dpr)); c.height = Math.max(1, Math.round(r.height*dpr));
+    const entry = { c, ctx:c.getContext('2d'), pat:PAT[c.dataset.pat]||PAT.off, pts:layoutPts(c.dataset.layout, c.width, c.height, dpr),
+      live:c.dataset.live==='1', dim:c.dataset.dim==='1', off:c.dataset.off==='1', seed:+c.dataset.seed, dpr };
+    draw(entry, 4 + entry.seed*1.7);
+    return entry;
+  });
+}
+function draw(e, t){
+  const { ctx, c, pts } = e; ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#07080a'; ctx.fillRect(0,0,c.width,c.height);
+  const spacing = pts.length>1 ? Math.hypot(pts[1][0]-pts[0][0], pts[1][1]-pts[0][1]) : 10;
+  const R = Math.max(1.4*e.dpr, Math.min(spacing*.32, 4.2*e.dpr));
+  ctx.globalCompositeOperation='lighter';
+  for (const [x,y,u,v] of pts){
+    let [r,g,b] = e.off ? [18,18,24] : e.pat(u,v,t);
+    if (e.dim){ const m=(r+g+b)/3; r=(r*.5+m*.5)*.55; g=(g*.5+m*.5)*.55; b=(b*.5+m*.5)*.55; }
+    if (!e.off){ ctx.fillStyle=`rgba(${r|0},${g|0},${b|0},.16)`; ctx.beginPath(); ctx.arc(x,y,R*2.6,0,7); ctx.fill(); }
+    ctx.fillStyle=`rgb(${r|0},${g|0},${b|0})`; ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.fill();
+  }
+}
+let last=0;
+function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of canvases) if (e.live) draw(e, t + e.seed); } requestAnimationFrame(loop); }
+
+/* =====================================================================
+   Controls & wiring
+   ===================================================================== */
+function stepNote(){
+  const v = view();
+  const notes = {
+    1:'<b>Step 1, this browser only:</b> boards connected now, plus boards this browser has met (“Seen … ago”, no online status). No groups, so the filter is just Patterns. Garage and Back fence are missing because another browser set them up.',
+    2:'<b>Step 2, the account:</b> every board in your account, online or not, with status from relay presence and no connection made. Groups, an attached set (Holiday Eaves on three boards, one Behind).',
+    3:'<b>Step 3, sharing:</b> Sean’s boards in an automatic “Sean Connell” group, a waiting access request, Busy when Sean holds the Living room’s one session, and Share on your own boards.',
+  };
+  let n = notes[v.step];
+  if (!v.signedIn) n = '<b>Signed out:</b> step 1 only. Nothing can be in an account, so the page asks you to sign in (T8: Sean must sign in before he can share).' + (S.who==='new' ? ' <b>Brand new:</b> the welcome state.' : '');
+  document.getElementById('stepnote').innerHTML = n;
+}
+function syncControls(){
+  const ds = DATASETS[S.who];
+  document.querySelectorAll('[data-who]').forEach(b=>b.classList.toggle('active', b.dataset.who===S.who));
+  document.querySelectorAll('[data-step]').forEach(b=>{ b.classList.toggle('active', (ds.signedIn?S.step:1)===+b.dataset.step); b.disabled = !ds.signedIn; });
+  document.querySelector('[data-ev=porch]').classList.toggle('active', S.porchOff);
+  document.querySelector('[data-ev=request]').classList.toggle('active', S.request);
+  document.querySelector('[data-ev=many]').classList.toggle('active', S.many);
+  document.querySelector('[data-ev=plug]').classList.toggle('active', !!S.plug);
+  document.querySelector('[data-w=desk]').classList.toggle('active', !S.phone);
+  document.querySelector('[data-w=phone]').classList.toggle('active', S.phone);
+}
+function renderAll(){
+  const v = view();
+  if (S.filter!=='all' && S.filter!=='patterns' && !v.groups.some(g=>g.id===S.filter)) S.filter='all';
+  renderA(); renderB(); renderC(); syncControls(); stepNote();
+  requestAnimationFrame(mountCanvases);
+}
+function plug(link){
+  S.plug='identifying'; S.plugLink=link; S.netOpen=null; renderAll();
+  clearTimeout(plug.t); plug.t=setTimeout(()=>{ if (S.plug){ S.plug='empty'; renderAll(); } }, 1600);
+}
+document.getElementById('controls').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.who){ S = { ...S0, who:b.dataset.who, phone:S.phone, step:S.step, many:S.many }; }
+  if (b.dataset.step){ S.step=+b.dataset.step; }
+  if (b.dataset.w){ S.phone = b.dataset.w==='phone'; }
+  const ev = b.dataset.ev;
+  if (ev==='plug'){ if (S.plug) { S.plug=null; } else return plug('usb'); }
+  if (ev==='porch') S.porchOff=!S.porchOff;
+  if (ev==='request') S.request=!S.request;
+  if (ev==='many') S.many=!S.many;
+  if (ev==='reset'){ S = { ...S0, phone:S.phone }; }
+  renderAll();
+});
+document.body.addEventListener('click', e => {
+  if (e.target.closest('#controls')) return;
+  const act = e.target.closest('[data-act]');
+  if (act){
+    e.stopPropagation(); e.preventDefault();
+    const a = act.dataset.act;
+    if (a==='plug') return plug(act.dataset.link);
+    if (a==='netopen'){ S.netOpen = S.netOpen===act.dataset.cid ? null : act.dataset.cid; return renderAll(); }
+    if (a==='netgo'){ S.net=true; S.netOpen=null; renderAll(); return toast('Connected to <code>lp-7f3a.local</code> over Wi‑Fi<span class="sub">It joins the top of the page, live.</span>'); }
+    if (a==='bmenu'){ S.bMenu=!S.bMenu; return renderAll(); }
+    if (a==='share') return urlFor('share', act.dataset.id);
+    return;
+  }
+  if (e.target.closest('.netpop')) return;
+  const f = e.target.closest('[data-filter]');
+  if (f){ S.filter=f.dataset.filter; S.bMenu=false; return renderAll(); }
+  const o = e.target.closest('[data-open]');
+  if (o){ return urlFor(o.dataset.open, o.dataset.id); }
+  if (S.netOpen || S.bMenu){ S.netOpen=null; S.bMenu=false; renderAll(); }
+});
+const qs = new URLSearchParams(location.search);
+if (qs.get('who')) S.who=qs.get('who');
+if (qs.get('step')) S.step=+qs.get('step');
+if (qs.get('phone')) S.phone=true;
+if (qs.get('many')) S.many=true;
+if (qs.get('filter')) S.filter=qs.get('filter');
+if (qs.get('bmenu')) S.bMenu=true;
+if (qs.get('net')) S.netOpen=qs.get('net');
+if (qs.get('plug')) S.plug=qs.get('plug');
+if (qs.get('porch')) S.porchOff=true;
+if (qs.get('request')==='0') S.request=false;
+if (qs.get('shot')) { document.body.classList.add('shot'); document.getElementById(qs.get('shot')).classList.add('shot-keep'); }
+renderToday(); renderLegend(); renderAll(); requestAnimationFrame(loop);
+window.addEventListener('resize', ()=>requestAnimationFrame(mountCanvases));
+</script>
+</body>
+</html>
