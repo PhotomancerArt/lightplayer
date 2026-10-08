@@ -116,15 +116,14 @@ pub fn mark<F: Flash>(
         peak = peak.max(stack.capacity());
     }
     log.note(
-        m.bits.len() * 4 + peak * core::mem::size_of::<(ObjectId, MarkRole)>() + dir_bytes.capacity(),
+        m.bits.len() * 4
+            + peak * core::mem::size_of::<(ObjectId, MarkRole)>()
+            + dir_bytes.capacity(),
     );
     Ok(m)
 }
 
-fn push_entries<E>(
-    dir: &[u8],
-    stack: &mut Vec<(ObjectId, MarkRole)>,
-) -> Result<(), StoreError<E>> {
+fn push_entries<E>(dir: &[u8], stack: &mut Vec<(ObjectId, MarkRole)>) -> Result<(), StoreError<E>> {
     for e in decode_dir(dir).ok_or(StoreError::Corrupt("dir"))? {
         let role = match e.kind {
             EntryKind::File => MarkRole::Node,

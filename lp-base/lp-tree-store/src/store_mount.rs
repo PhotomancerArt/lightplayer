@@ -49,7 +49,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut index = core::mem::take(&mut self.log.index);
         index.sort_dedup(|s| seqs[s as usize]);
         self.log.index = index;
-        self.log.note(self.log.index.ram_bytes() + valid.capacity() * 12);
+        self.log
+            .note(self.log.index.ram_bytes() + valid.capacity() * 12);
         self.max_root_seq = roots.max_seq;
         self.log.next_sector_seq = valid.last().map_or(1, |v| v.0.wrapping_add(1));
 
@@ -69,6 +70,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         };
         self.stats.marks += 1;
         prune(&mut self.log, m);
+        self.live_after_mark = self.log.index.len();
         let (_, payload) = self.log.read_record(id)?;
         let root = RootRecord::decode(&payload).ok_or(StoreError::Corrupt("root"))?;
         self.log.sectors.retired = root.retired.clone();

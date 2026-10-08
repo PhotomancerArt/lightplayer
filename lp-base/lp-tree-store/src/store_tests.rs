@@ -37,7 +37,10 @@ fn round_trip_list_delete_and_remount() {
             .unwrap(),
         shader
     );
-    assert_eq!(st.file_size("/projects/a/modules/m/shader.glsl").unwrap(), Some(9000));
+    assert_eq!(
+        st.file_size("/projects/a/modules/m/shader.glsl").unwrap(),
+        Some(9000)
+    );
     assert_eq!(
         st.list("/projects/a/").unwrap(),
         vec![
@@ -122,7 +125,10 @@ fn torn_root_falls_back_and_torn_sector_is_closed() {
     for tear in [TearModel::BytePrefix, TearModel::RandomBits] {
         let mut st = mount(pre.clone(), &c);
         st.flash_mut().set_plan(FaultPlan::cut(n - 1, tear, 7));
-        assert!(matches!(st.put("/a.json", b"two"), Err(StoreError::Flash(_))));
+        assert!(matches!(
+            st.put("/a.json", b"two"),
+            Err(StoreError::Flash(_))
+        ));
         let mut f = st.into_flash();
         f.power_cycle(FaultPlan::none());
         let mut st = mount(f, &c);
@@ -177,9 +183,20 @@ fn no_space_before_writing_anything() {
     st.put("/small.json", b"keep me").unwrap();
     let programs = st.flash().stats().program_calls;
     let erases = st.flash().stats().erases_total();
-    assert_eq!(st.put("/huge.bin", &noise(9, 40_000)), Err(StoreError::NoSpace));
-    assert_eq!(st.flash().stats().program_calls, programs, "programmed before NoSpace");
-    assert_eq!(st.flash().stats().erases_total(), erases, "erased before NoSpace");
+    assert_eq!(
+        st.put("/huge.bin", &noise(9, 40_000)),
+        Err(StoreError::NoSpace)
+    );
+    assert_eq!(
+        st.flash().stats().program_calls,
+        programs,
+        "programmed before NoSpace"
+    );
+    assert_eq!(
+        st.flash().stats().erases_total(),
+        erases,
+        "erased before NoSpace"
+    );
     st.put("/small.json", b"still works").unwrap();
     let mut st = mount(st.into_flash(), &c);
     assert_eq!(st.get("/small.json").unwrap().unwrap(), b"still works");
@@ -239,7 +256,10 @@ fn verify_after_write_retires_a_worn_sector_and_the_retirement_survives_remount(
             failures = failures.max(st.stats().verify_failures);
             if st.stats().retired_sectors > 0 && round % 7 == 0 {
                 st = mount(st.into_flash(), &c);
-                assert!(st.log.sectors.is_retired(9), "{mode:?}: retirement lost on remount");
+                assert!(
+                    st.log.sectors.is_retired(9),
+                    "{mode:?}: retirement lost on remount"
+                );
             }
             assert_eq!(st.get("/churn.bin").unwrap().unwrap(), noise(round, 7000));
             assert_eq!(st.get("/keep.json").unwrap().unwrap(), text(round, 900));

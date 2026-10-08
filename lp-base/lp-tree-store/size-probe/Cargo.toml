@@ -13,6 +13,10 @@ publish = false
 
 [workspace]
 
+[features]
+# Link sha2 behind the hasher seam instead of the stand-in.
+soft-sha = ["lp-tree-store/soft-sha"]
+
 [dependencies]
 lp-tree-store = { path = "..", default-features = false }
 

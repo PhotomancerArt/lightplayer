@@ -29,7 +29,11 @@ fn a_transaction_commits_once_and_reads_its_own_writes() {
     }
     assert_eq!(st.get("/p/m3/shader.glsl").unwrap().unwrap(), text(3, 700));
     assert_eq!(st.list("/p/").unwrap().len(), 10);
-    assert_eq!(st.stats().commits, commits, "no root inside the transaction");
+    assert_eq!(
+        st.stats().commits,
+        commits,
+        "no root inside the transaction"
+    );
     // A remount now (as after a cut) sees none of it.
     let mut other = mount(st.flash().clone(), &c);
     assert!(other.list("/").unwrap().is_empty());
@@ -68,8 +72,11 @@ fn a_big_transaction_flushes_its_delta_and_stays_bounded() {
     let mut st = mount(formatted(NorGeometry::c6(64), &c), &c);
     st.begin().unwrap();
     for i in 0..120u64 {
-        st.put(&alloc::format!("/projects/a/modules/m{i:03}/node.json"), &text(i, 200))
-            .unwrap();
+        st.put(
+            &alloc::format!("/projects/a/modules/m{i:03}/node.json"),
+            &text(i, 200),
+        )
+        .unwrap();
         assert!(st.delta.ram_bytes() < 1024, "{}", st.delta.ram_bytes());
     }
     st.commit().unwrap();
@@ -77,7 +84,9 @@ fn a_big_transaction_flushes_its_delta_and_stays_bounded() {
     let all = st.list("/projects/a/").unwrap();
     assert_eq!(all.len(), 120);
     assert_eq!(
-        st.get("/projects/a/modules/m077/node.json").unwrap().unwrap(),
+        st.get("/projects/a/modules/m077/node.json")
+            .unwrap()
+            .unwrap(),
         text(77, 200)
     );
 }
@@ -91,7 +100,10 @@ fn appends_write_only_the_new_chunks_and_match_a_single_put() {
         let before = st.stats().record_bytes_written;
         st.append("/big.bin", piece).unwrap();
         let wrote = st.stats().record_bytes_written - before;
-        assert!(wrote < 4096 + 3 * 1024, "an append rewrote the file: {wrote}");
+        assert!(
+            wrote < 4096 + 3 * 1024,
+            "an append rewrote the file: {wrote}"
+        );
     }
     assert_eq!(st.get("/big.bin").unwrap().unwrap(), whole);
     // Fixed chunk offsets: the same bytes put at once are the same node.
@@ -196,6 +208,9 @@ fn colliding_path_hashes_fall_back_to_the_walk() {
         .iter()
         .map(|p| st.get(p).unwrap().unwrap())
         .collect();
-    assert_eq!(got, vec![b"one again".to_vec(), b"three".to_vec(), b"plain".to_vec()]);
+    assert_eq!(
+        got,
+        vec![b"one again".to_vec(), b"three".to_vec(), b"plain".to_vec()]
+    );
     assert_eq!(st.get("/b/zz2.json").unwrap(), None);
 }

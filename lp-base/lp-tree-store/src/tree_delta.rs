@@ -134,7 +134,11 @@ impl TreeDelta {
     /// What the allocator holds for it.
     pub fn ram_bytes(&self) -> usize {
         self.entries.capacity() * size_of::<DeltaEntry>()
-            + self.entries.iter().map(|e| e.path.capacity()).sum::<usize>()
+            + self
+                .entries
+                .iter()
+                .map(|e| e.path.capacity())
+                .sum::<usize>()
     }
 }
 

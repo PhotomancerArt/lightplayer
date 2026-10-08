@@ -73,6 +73,8 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     pub(crate) undo: TxnUndo,
     pub(crate) txn: Txn,
     pub(crate) stats: TreeStoreStats,
+    /// Index entries the last mark left (the growth bound's base).
+    pub(crate) live_after_mark: usize,
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
@@ -287,7 +289,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         s.path_table_entries = self.table.len();
         s.path_table_ram_bytes = self.table.ram_bytes();
         s.sector_table_ram_bytes = self.log.sectors.ram_bytes();
-        s.resident_ram_bytes = s.index_ram_bytes + s.path_table_ram_bytes + s.sector_table_ram_bytes;
+        s.resident_ram_bytes =
+            s.index_ram_bytes + s.path_table_ram_bytes + s.sector_table_ram_bytes;
         s.transient_peak_bytes = s.transient_peak_bytes.max(self.log.largest_buffer);
         s.records_written = self.log.counters.records_written;
         s.record_bytes_written = self.log.counters.record_bytes_written;
@@ -322,6 +325,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             undo: TxnUndo::default(),
             txn: Txn::None,
             stats: TreeStoreStats::default(),
+            live_after_mark: 0,
         }
     }
 
@@ -386,8 +390,13 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let id = ObjectId::of(&mut self.hasher, IdTag::Root, &[&payload]);
         let len = crate::record_header::RECORD_HEADER_LEN + payload.len() as u32;
         self.ensure_room(&[(HeadKind::Hot, len)])?;
-        self.log
-            .append(HeadKind::Hot, RecordKind::Root, ChunkCodec::Stored, id, &[&payload])?;
+        self.log.append(
+            HeadKind::Hot,
+            RecordKind::Root,
+            ChunkCodec::Stored,
+            id,
+            &[&payload],
+        )?;
         self.max_root_seq = root.seq;
         self.committed = Some(Committed { id, root });
         self.stats.commits += 1;

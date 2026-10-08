@@ -78,7 +78,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                             id: fe.id,
                         });
                     }
-                    Change::Delete if !is_hot(&e.path) => remove(&mut entries, rel, EntryKind::File),
+                    Change::Delete if !is_hot(&e.path) => {
+                        remove(&mut entries, rel, EntryKind::File)
+                    }
                     Change::DeleteTree => remove(&mut entries, rel, EntryKind::Dir),
                     _ => {}
                 }
@@ -119,7 +121,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             return Ok(None);
         }
         let bytes = encode_dir(&mut entries);
-        self.log.note(bytes.capacity() + entries.capacity() * core::mem::size_of::<DirEntry>());
+        self.log
+            .note(bytes.capacity() + entries.capacity() * core::mem::size_of::<DirEntry>());
         Ok(Some(self.write_dir_bytes(HeadKind::Cold, &bytes)?))
     }
 
@@ -150,7 +153,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             return Ok(self.work.hot);
         }
         let bytes = encode_dir(&mut entries);
-        self.log.note(bytes.capacity() + entries.capacity() * core::mem::size_of::<DirEntry>());
+        self.log
+            .note(bytes.capacity() + entries.capacity() * core::mem::size_of::<DirEntry>());
         self.write_dir_bytes(HeadKind::Hot, &bytes)
     }
 

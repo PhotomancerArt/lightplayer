@@ -43,7 +43,9 @@ mod tests {
         assert_eq!(v, [1, 1, 3, 4, 5]);
         let mut e: [u8; 0] = [];
         heap_sort_by(&mut e, |a, b| a < b);
-        let mut big: Vec<u32> = (0..1000u32).map(|i| i.wrapping_mul(2_654_435_761)).collect();
+        let mut big: Vec<u32> = (0..1000u32)
+            .map(|i| i.wrapping_mul(2_654_435_761))
+            .collect();
         heap_sort_by(&mut big, |a, b| a < b);
         assert!(big.windows(2).all(|w| w[0] <= w[1]));
     }

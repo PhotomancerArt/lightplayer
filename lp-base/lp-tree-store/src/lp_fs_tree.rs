@@ -118,7 +118,14 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
             st.put(&p, data).map_err(store_err)?;
             existed
         };
-        self.record(&p, if existed { FsEventKind::Modify } else { FsEventKind::Create });
+        self.record(
+            &p,
+            if existed {
+                FsEventKind::Modify
+            } else {
+                FsEventKind::Create
+            },
+        );
         Ok(())
     }
 
@@ -133,13 +140,25 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
             st.append(&p, data).map_err(store_err)?;
             existed
         };
-        self.record(&p, if existed { FsEventKind::Modify } else { FsEventKind::Create });
+        self.record(
+            &p,
+            if existed {
+                FsEventKind::Modify
+            } else {
+                FsEventKind::Create
+            },
+        );
         Ok(())
     }
 
     fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
         let p = norm(path)?;
-        let size = self.inner.borrow_mut().store.file_size(&p).map_err(store_err)?;
+        let size = self
+            .inner
+            .borrow_mut()
+            .store
+            .file_size(&p)
+            .map_err(store_err)?;
         size.map(u64::from).ok_or_else(|| not_found(&p))
     }
 
@@ -199,7 +218,12 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 "Path {p:?} is a directory, use delete_dir() instead"
             )));
         }
-        let gone = self.inner.borrow_mut().store.delete(&p).map_err(store_err)?;
+        let gone = self
+            .inner
+            .borrow_mut()
+            .store
+            .delete(&p)
+            .map_err(store_err)?;
         if !gone {
             return Err(not_found(&p));
         }

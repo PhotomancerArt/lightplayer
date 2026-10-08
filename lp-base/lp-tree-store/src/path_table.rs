@@ -32,7 +32,10 @@ struct PathRow {
 pub enum PathSlot {
     /// No live path has this hash.
     Absent,
-    File { id: ObjectId, size: u32 },
+    File {
+        id: ObjectId,
+        size: u32,
+    },
     /// Two or more live paths had this hash: walk.
     Collided,
 }

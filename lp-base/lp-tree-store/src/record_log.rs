@@ -128,10 +128,7 @@ impl<F: Flash> RecordLog<F> {
     /// chunk's logical length; the CRC was checked when it was scanned or
     /// written).
     pub fn read_payload_prefix(&mut self, loc: RecordLoc, buf: &mut [u8]) -> R<(), F> {
-        self.read(
-            self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN),
-            buf,
-        )
+        self.read(self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN), buf)
     }
 
     pub fn is_head(&self, sector: u32) -> bool {
@@ -192,7 +189,10 @@ impl<F: Flash> RecordLog<F> {
             self.sectors.end[s as usize] = (end + total) as u16;
             if self.verify(addr, &header, parts)? {
                 self.sectors.add_live(s, total);
-                let loc = RecordLoc { sector: s, offset: end };
+                let loc = RecordLoc {
+                    sector: s,
+                    offset: end,
+                };
                 self.index.insert(id, loc);
                 self.counters.records_written += 1;
                 self.counters.record_bytes_written += u64::from(total);

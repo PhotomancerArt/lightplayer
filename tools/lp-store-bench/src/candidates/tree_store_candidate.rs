@@ -10,9 +10,7 @@
 //! at offset 0 then the running size. `stored` writes every file stored.
 
 use lp_nor_sim::{NorError, NorFlashSim};
-use lp_tree_store::{
-    GcPolicy, SoftSha256, StoreConfig, TreeStore, host_deflate_chunks, is_hot,
-};
+use lp_tree_store::{GcPolicy, SoftSha256, StoreConfig, TreeStore, host_deflate_chunks, is_hot};
 
 use crate::{Candidate, CandidateConfig, CandidateReport, CandidateStore, StoreError};
 
@@ -206,7 +204,10 @@ mod tests {
         assert_eq!(codec, T1Codec::HostDeflate);
         assert_eq!(c.record_max, 512);
         assert!(tree_store_config(&CandidateConfig::new(32).with_dial("nope", "1")).is_err());
-        assert!(tree_store_config(&CandidateConfig::new(32).with_dial("codec", "deflate_dict")).is_err());
+        assert!(
+            tree_store_config(&CandidateConfig::new(32).with_dial("codec", "deflate_dict"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -229,7 +230,8 @@ mod tests {
                 &Scoreboard::memory(),
             );
             assert!(
-                out.iter().all(|s| s.cases > 0 && s.failures == 0 && s.non_atomic == 0),
+                out.iter()
+                    .all(|s| s.cases > 0 && s.failures == 0 && s.non_atomic == 0),
                 "{codec}: {out:?}"
             );
         }

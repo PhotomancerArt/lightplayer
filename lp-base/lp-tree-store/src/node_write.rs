@@ -48,7 +48,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let Some(fe) = existed else {
             return self.put_inner(path, None, bytes);
         };
-        let size = u32::try_from(fe.size as usize + bytes.len()).map_err(|_| StoreError::TooLarge)?;
+        let size =
+            u32::try_from(fe.size as usize + bytes.len()).map_err(|_| StoreError::TooLarge)?;
         let head = head_for(path);
         let mut leaves = leaf_list(&mut self.log, fe.id)?;
         let mut tail = Vec::new();
@@ -116,7 +117,13 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.ensure_room(&need)?;
         if keep_deflated {
             let len = (logical as u16).to_le_bytes();
-            self.write_if_new(head, RecordKind::Blob, ChunkCodec::Deflate, id, &[&len, deflated])?;
+            self.write_if_new(
+                head,
+                RecordKind::Blob,
+                ChunkCodec::Deflate,
+                id,
+                &[&len, deflated],
+            )?;
             leaves.push(Leaf {
                 id,
                 len: logical_len,
@@ -173,7 +180,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 break;
             }
         }
-        self.log.note(leaves.capacity() * core::mem::size_of::<Leaf>());
+        self.log
+            .note(leaves.capacity() * core::mem::size_of::<Leaf>());
         Ok(())
     }
 
@@ -242,7 +250,12 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     // ---- what a write will append (before it appends anything) ----------
 
     /// The stored chunks of `len` bytes; returns how many.
-    fn stored_chunk_need(&self, head: HeadKind, len: usize, out: &mut Vec<(HeadKind, u32)>) -> usize {
+    fn stored_chunk_need(
+        &self,
+        head: HeadKind,
+        len: usize,
+        out: &mut Vec<(HeadKind, u32)>,
+    ) -> usize {
         let mp = self.max_payload();
         let n = len.div_ceil(mp).max(1);
         for i in 0..n {

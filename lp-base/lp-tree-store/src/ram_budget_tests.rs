@@ -29,10 +29,16 @@ pub fn c40_like() -> Vec<(String, Vec<u8>)> {
         v.push((format!("{m}/shader.glsl"), text(100 + i, 2900)));
     }
     for i in 0..44u64 {
-        v.push((format!("/projects/a/nodes/n{i:02}.json"), text(200 + i, 450)));
+        v.push((
+            format!("/projects/a/nodes/n{i:02}.json"),
+            text(200 + i, 450),
+        ));
     }
     for i in 0..4u64 {
-        v.push((format!("/projects/a/maps/map{i}.json"), text(300 + i, 18_000)));
+        v.push((
+            format!("/projects/a/maps/map{i}.json"),
+            text(300 + i, 18_000),
+        ));
     }
     v.push((String::from("/projects/a/.lp/panel.json"), text(400, 450)));
     v
@@ -85,7 +91,10 @@ fn c40_resident_and_transient_are_inside_the_budget() {
     let piece = text(5, 4096);
     let mut worst = 0;
     let mut ops: Vec<(&str, usize)> = Vec::new();
-    let (_, p, _) = heap_use(|| st.put("/projects/a/modules/m07/shader.glsl", &shader).unwrap());
+    let (_, p, _) = heap_use(|| {
+        st.put("/projects/a/modules/m07/shader.glsl", &shader)
+            .unwrap()
+    });
     ops.push(("put shader", p));
     let (_, p, _) = heap_use(|| st.put("/projects/a/.lp/panel.json", &panel).unwrap());
     ops.push(("put panel", p));
@@ -101,4 +110,65 @@ fn c40_resident_and_transient_are_inside_the_budget() {
     }
     // D3: ≈ 5 KB per operation, the caller's buffer excluded.
     assert!(worst <= 5 * 1024, "{ops:?}");
+}
+
+/// A full store: c40 (stored, then host-deflated), then panel writes and
+/// saves until the 128 sectors have been written over about three times
+/// (old sectors reclaimed by erasing; with this workload every reclaimed
+/// sector is wholly garbage, so GC copies nothing). Resident must stay
+/// bounded (the index is pruned back by a mark when it outgrows the live
+/// set); mount's transient is reported — it indexes every record on flash
+/// before pruning, so it grows with the garbage, not the live data.
+#[test]
+fn a_full_store_keeps_resident_bounded_and_mount_reports_its_peak() {
+    for deflated in [false, true] {
+        let c = StoreConfig::default();
+        let mut st = mount(formatted(NorGeometry::c6(128), &c), &c);
+        st.begin().unwrap();
+        for (p, b) in &c40_like() {
+            if !deflated || crate::is_hot(p) {
+                st.put(p, b).unwrap();
+                continue;
+            }
+            let mut off = 0;
+            for ch in crate::host_deflate_chunks(&mut SoftSha256, b, c.record_max) {
+                st.put_chunk_deflated(p, off, ch.logical_len, Some(ch.id), &ch.deflated)
+                    .unwrap();
+                off += ch.logical_len;
+            }
+        }
+        st.commit().unwrap();
+        let at_rest = st.stats().resident_ram_bytes;
+        let mut max_resident = 0;
+        let mut max_peak = 0;
+        let mut round = 0u64;
+        while st.stats().erases < 400 {
+            st.put("/projects/a/.lp/panel.json", &text(round, 450))
+                .unwrap();
+            if round % 10 == 0 {
+                let p = format!("/projects/a/nodes/n{:02}.json", round % 44);
+                st.put(&p, &text(round, 450)).unwrap();
+            }
+            let s = st.stats();
+            max_resident = max_resident.max(s.resident_ram_bytes);
+            max_peak = max_peak.max(s.transient_peak_bytes);
+            round += 1;
+            assert!(round < 200_000, "{s:?}");
+        }
+        let flash = st.into_flash();
+        let in_use = flash.sectors_in_use();
+        let (st, mount_peak, held) =
+            heap_use(|| match TreeStore::mount(flash, SoftSha256, c.clone()) {
+                Ok(s) => s,
+                Err(_) => panic!("mount"),
+            });
+        std::println!(
+            "full c40/128 deflated={deflated}: resident after the push {at_rest} B, max \
+             {max_resident} B over {round} writes; largest buffer {max_peak} B; remount with \
+             {in_use} sectors in use: peak {mount_peak} B, held {held} B ({} index entries)",
+            st.stats().index_entries
+        );
+        // A regression ceiling, not the budget: the measured figure is reported.
+        assert!(max_resident <= 11 * 1024, "{max_resident}");
+    }
 }

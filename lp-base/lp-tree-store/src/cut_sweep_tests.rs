@@ -36,7 +36,10 @@ fn per_call_workload() -> Vec<Step> {
 fn cut_sweep_per_call_commits() {
     for rm in [256, 1024] {
         let r = sweep(NorGeometry::c6(16), &cfg(rm), &per_call_workload(), 24);
-        assert!(r.cuts > 100 && r.landed_old > 0 && r.landed_new > 0, "{rm}: {r:?}");
+        assert!(
+            r.cuts > 100 && r.landed_old > 0 && r.landed_new > 0,
+            "{rm}: {r:?}"
+        );
     }
 }
 
@@ -46,7 +49,10 @@ fn txn_workload() -> Vec<Step> {
         Box::new(|st| {
             st.begin()?;
             for i in 0..10u64 {
-                st.put(&alloc::format!("/projects/a/m{i}/shader.glsl"), &text(i, 600))?;
+                st.put(
+                    &alloc::format!("/projects/a/m{i}/shader.glsl"),
+                    &text(i, 600),
+                )?;
             }
             st.put("/projects/a/.lp/panel.json", &text(40, 100))?;
             st.commit()
@@ -56,7 +62,10 @@ fn txn_workload() -> Vec<Step> {
             st.begin()?;
             st.delete_prefix("/projects/a/")?;
             for i in 0..10u64 {
-                st.put(&alloc::format!("/projects/a/m{i}/shader.glsl"), &text(i + 100, 640))?;
+                st.put(
+                    &alloc::format!("/projects/a/m{i}/shader.glsl"),
+                    &text(i + 100, 640),
+                )?;
             }
             st.commit()
         }),

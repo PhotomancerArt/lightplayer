@@ -21,8 +21,14 @@ use crate::tree_store::{Res, TreeStore};
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// Make the free sectors cover `need` (records in append order) plus
-    /// the reserve.
+    /// the reserve. Also the index's bound: between marks it holds every
+    /// record written since, so once it has grown an eighth (+ 16) past the
+    /// live set of the last mark, mark now and prune it back.
     pub(crate) fn ensure_room(&mut self, need: &[(HeadKind, u32)]) -> Res<(), F> {
+        let live = self.live_after_mark;
+        if self.log.index.len() > live + live / 8 + 16 {
+            self.mark_and_prune(false)?;
+        }
         if self.enough(need) {
             return Ok(());
         }
@@ -78,6 +84,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.stats.marks += 1;
         let lens = core::mem::take(&mut m.lens);
         prune(&mut self.log, m);
+        self.live_after_mark = self.log.index.len();
         Ok(lens)
     }
 }

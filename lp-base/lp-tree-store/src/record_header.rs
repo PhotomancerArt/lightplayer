@@ -121,6 +121,10 @@ mod tests {
         assert_eq!(RecordHeader::parse(&[0xFF; 16]), HeaderRead::End);
         assert_eq!(RecordHeader::parse(&[0; 16]), HeaderRead::Bad);
         let dir = encode_header(RecordKind::Dir, ChunkCodec::Deflate, ObjectId(1), &[]);
-        assert_eq!(RecordHeader::parse(&dir), HeaderRead::Bad, "only blobs code");
+        assert_eq!(
+            RecordHeader::parse(&dir),
+            HeaderRead::Bad,
+            "only blobs code"
+        );
     }
 }

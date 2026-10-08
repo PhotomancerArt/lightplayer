@@ -34,7 +34,11 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut parts = path[1..].split('/').peekable();
         while let Some(name) = parts.next() {
             let last = parts.peek().is_none();
-            let want = if last { EntryKind::File } else { EntryKind::Dir };
+            let want = if last {
+                EntryKind::File
+            } else {
+                EntryKind::Dir
+            };
             let entries = read_dir(&mut self.log, dir)?;
             let Some(e) = entries
                 .into_iter()
@@ -90,7 +94,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             path.push_str(&e.name);
             match e.kind {
                 EntryKind::File if path.starts_with(prefix) => out.push(path.clone()),
-                EntryKind::Dir if depth < crate::tree_store::MAX_DEPTH && may_hold(path, prefix) => {
+                EntryKind::Dir
+                    if depth < crate::tree_store::MAX_DEPTH && may_hold(path, prefix) =>
+                {
                     self.list_cold(e.id, path, prefix, depth + 1, out)?;
                 }
                 _ => {}

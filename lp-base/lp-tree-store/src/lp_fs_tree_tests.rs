@@ -26,7 +26,11 @@ fn tree_fs() -> LpFsTree<NorFlashSim, SoftSha256> {
 }
 
 fn sorted(v: Result<Vec<LpPathBuf>, lpfs::FsError>) -> Vec<String> {
-    let mut v: Vec<String> = v.unwrap().iter().map(|p| String::from(p.as_str())).collect();
+    let mut v: Vec<String> = v
+        .unwrap()
+        .iter()
+        .map(|p| String::from(p.as_str()))
+        .collect();
     v.sort();
     v
 }
@@ -43,34 +47,67 @@ fn conformance_with_lp_fs_memory() {
     both(|fs| {
         let mut log = Vec::new();
         let p = |s: &str| String::from(s);
-        fs.write_file("/projects/a/project.json".as_path(), b"{}").unwrap();
-        fs.write_file("/projects/a/src/x.glsl".as_path(), b"x").unwrap();
-        fs.write_file("/projects/a/src/y.glsl".as_path(), b"yy").unwrap();
+        fs.write_file("/projects/a/project.json".as_path(), b"{}")
+            .unwrap();
+        fs.write_file("/projects/a/src/x.glsl".as_path(), b"x")
+            .unwrap();
+        fs.write_file("/projects/a/src/y.glsl".as_path(), b"yy")
+            .unwrap();
         fs.write_file("/top.json".as_path(), b"t").unwrap();
-        fs.append_file("/projects/a/src/y.glsl".as_path(), b"+").unwrap();
+        fs.append_file("/projects/a/src/y.glsl".as_path(), b"+")
+            .unwrap();
         fs.append_file("/new.log".as_path(), b"a").unwrap();
-        log.push(format!("{:?}", fs.read_file("/projects/a/src/y.glsl".as_path()).unwrap()));
-        log.push(format!("{:?}", fs.file_size("/projects/a/src/y.glsl".as_path()).unwrap()));
+        log.push(format!(
+            "{:?}",
+            fs.read_file("/projects/a/src/y.glsl".as_path()).unwrap()
+        ));
+        log.push(format!(
+            "{:?}",
+            fs.file_size("/projects/a/src/y.glsl".as_path()).unwrap()
+        ));
         log.push(format!("{:?}", fs.file_exists("/nope".as_path()).unwrap()));
         log.push(format!("{:?}", fs.is_dir("/projects".as_path()).unwrap()));
         log.push(format!("{:?}", fs.is_dir("/top.json".as_path()).unwrap()));
         log.push(format!("{:?}", fs.is_dir("/nope".as_path()).is_err()));
         log.push(format!("{:?}", fs.read_file("/nope".as_path()).is_err()));
         log.push(format!("{:?}", sorted(fs.list_dir("/".as_path(), false))));
-        log.push(format!("{:?}", sorted(fs.list_dir("/projects/a".as_path(), false))));
-        log.push(format!("{:?}", sorted(fs.list_dir("/projects/a/src".as_path(), true))));
-        log.push(format!("{:?}", fs.delete_file("/projects/a/src".as_path()).is_err()));
+        log.push(format!(
+            "{:?}",
+            sorted(fs.list_dir("/projects/a".as_path(), false))
+        ));
+        log.push(format!(
+            "{:?}",
+            sorted(fs.list_dir("/projects/a/src".as_path(), true))
+        ));
+        log.push(format!(
+            "{:?}",
+            fs.delete_file("/projects/a/src".as_path()).is_err()
+        ));
         log.push(format!("{:?}", fs.delete_file("/nope".as_path()).is_err()));
         fs.delete_file("/top.json".as_path()).unwrap();
         log.push(format!("{:?}", fs.delete_dir("/nope".as_path()).is_err()));
         log.push(format!("{:?}", fs.delete_dir("/".as_path()).is_err()));
         fs.delete_dir("/projects/a/src".as_path()).unwrap();
-        log.push(format!("{:?}", sorted(fs.list_dir("/projects/a".as_path(), true))));
+        log.push(format!(
+            "{:?}",
+            sorted(fs.list_dir("/projects/a".as_path(), true))
+        ));
         let view = fs.chroot("/projects/a".as_path()).unwrap();
-        view.borrow().write_file("/src/z.glsl".as_path(), b"z").unwrap();
-        log.push(format!("{:?}", fs.read_file("/projects/a/src/z.glsl".as_path()).unwrap()));
-        log.push(format!("{:?}", sorted(view.borrow().list_dir("/".as_path(), false))));
-        log.push(format!("{:?}", view.borrow().read_file("/project.json".as_path()).unwrap()));
+        view.borrow()
+            .write_file("/src/z.glsl".as_path(), b"z")
+            .unwrap();
+        log.push(format!(
+            "{:?}",
+            fs.read_file("/projects/a/src/z.glsl".as_path()).unwrap()
+        ));
+        log.push(format!(
+            "{:?}",
+            sorted(view.borrow().list_dir("/".as_path(), false))
+        ));
+        log.push(format!(
+            "{:?}",
+            view.borrow().read_file("/project.json".as_path()).unwrap()
+        ));
         let mut ev: Vec<String> = fs
             .get_changes_since(FsVersion::default())
             .iter()
@@ -101,7 +138,9 @@ fn a_batch_commits_together_and_aborts_cleanly() {
     let view = fs.chroot("/p".as_path()).unwrap();
     view.borrow().begin_batch().unwrap();
     view.borrow().delete_dir("/".as_path()).unwrap_err();
-    view.borrow().write_file("/new.json".as_path(), b"new").unwrap();
+    view.borrow()
+        .write_file("/new.json".as_path(), b"new")
+        .unwrap();
     assert_eq!(fs.read_file("/p/new.json".as_path()).unwrap(), b"new");
     view.borrow().abort_batch().unwrap();
     assert!(!fs.file_exists("/p/new.json".as_path()).unwrap());
@@ -109,7 +148,10 @@ fn a_batch_commits_together_and_aborts_cleanly() {
     fs.delete_dir("/p".as_path()).unwrap();
     fs.write_file("/p/new.json".as_path(), b"new").unwrap();
     fs.commit_batch().unwrap();
-    assert_eq!(sorted(fs.list_dir("/p".as_path(), false)), vec!["/p/new.json"]);
+    assert_eq!(
+        sorted(fs.list_dir("/p".as_path(), false)),
+        vec!["/p/new.json"]
+    );
     let events = fs.get_changes_since(FsVersion::default());
     assert!(events.iter().any(|e| e.kind == FsEventKind::Delete));
 }

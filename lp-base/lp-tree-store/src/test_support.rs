@@ -240,5 +240,9 @@ pub fn heap_use<T>(f: impl FnOnce() -> T) -> (T, usize, isize) {
     COUNTING.with(|c| c.set(true));
     let out = f();
     COUNTING.with(|c| c.set(false));
-    (out, PEAK.with(Cell::get).max(0) as usize, LIVE.with(Cell::get))
+    (
+        out,
+        PEAK.with(Cell::get).max(0) as usize,
+        LIVE.with(Cell::get),
+    )
 }

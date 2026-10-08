@@ -45,14 +45,17 @@ fn image() -> String {
     };
     st.put("/hardware.json", b"{\"board\": \"c6\"}").unwrap();
     st.begin().unwrap();
-    st.put("/projects/a/project.json", b"{\"name\": \"a\"}").unwrap();
+    st.put("/projects/a/project.json", b"{\"name\": \"a\"}")
+        .unwrap();
     let big: Vec<u8> = (0..1200u32).map(|i| (i * 7 % 251) as u8).collect();
     st.put("/projects/a/big.bin", &big).unwrap();
-    st.put("/projects/a/.lp/panel.json", b"{\"speed\": 1}").unwrap();
+    st.put("/projects/a/.lp/panel.json", b"{\"speed\": 1}")
+        .unwrap();
     st.put_chunk_deflated("/projects/a/s.glsl", 0, 672, None, &unhex(SHADER_DEFLATED))
         .unwrap();
     for i in 0..12 {
-        st.put(&format!("/projects/a/m/module-{i:02}.json"), b"{}").unwrap();
+        st.put(&format!("/projects/a/m/module-{i:02}.json"), b"{}")
+            .unwrap();
     }
     st.commit().unwrap();
     st.append("/projects/a/project.json", b"\n").unwrap();
@@ -63,7 +66,8 @@ fn image() -> String {
         Err(_) => panic!("remount"),
     };
     let flash = st.into_flash();
-    let mut out = format!("# lp-tree-store FORMAT_VERSION {FORMAT_VERSION}, 8 x 4096, record_max 256\n");
+    let mut out =
+        format!("# lp-tree-store FORMAT_VERSION {FORMAT_VERSION}, 8 x 4096, record_max 256\n");
     for s in 0..8u32 {
         let mut cells = vec![0u8; 4096];
         flash.peek(s * 4096, &mut cells);

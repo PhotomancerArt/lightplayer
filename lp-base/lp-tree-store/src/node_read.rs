@@ -26,7 +26,11 @@ pub struct Leaf {
 }
 
 /// Append node `id`'s logical bytes to `out`.
-pub fn read_node_into<F: Flash>(log: &mut RecordLog<F>, id: ObjectId, out: &mut Vec<u8>) -> R<(), F> {
+pub fn read_node_into<F: Flash>(
+    log: &mut RecordLog<F>,
+    id: ObjectId,
+    out: &mut Vec<u8>,
+) -> R<(), F> {
     let (h, payload) = log.read_record(id)?;
     match h.kind {
         RecordKind::Blob => decode_blob_into(h.codec, &payload, out)
