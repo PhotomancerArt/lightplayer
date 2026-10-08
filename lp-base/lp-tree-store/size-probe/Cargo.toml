@@ -1,0 +1,25 @@
+# The RV32 code-size probe for lp-tree-store: a no_std, no_main binary that
+# formats, mounts, puts, commits and gets on a RAM-backed flash, so the ELF
+# holds the device side of the store (decode only: no `encode` feature, so
+# writes are stored and reads link lp-deflate's inflate). Its own workspace,
+# excluded from the root one. Build:
+#   cargo build --release --target riscv32imac-unknown-none-elf
+[package]
+name = "lp-tree-store-size-probe"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[dependencies]
+lp-tree-store = { path = "..", default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+debug = false
+strip = false
