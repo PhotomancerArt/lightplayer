@@ -4,6 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::wear_out::{WearOut, WearState, on_erase, on_program};
 use crate::{FaultPlan, NorError, NorGeometry, NorSectorState, NorStats, SimRng, TearModel};
 
 /// A NOR part that can lose power after any operation.
@@ -29,6 +30,8 @@ pub struct NorFlashSim {
     nonblank: Vec<bool>,
     nonblank_count: u32,
     peak_nonblank: u32,
+    /// Injected wear-out (`wear_out.rs`); empty = nothing ever wears out.
+    wear: Vec<WearState>,
 }
 
 /// What `begin_op` decided about the operation about to run.
@@ -62,6 +65,7 @@ impl NorFlashSim {
             nonblank: vec![byte != 0xFF; geom.sector_count as usize],
             nonblank_count: if byte != 0xFF { geom.sector_count } else { 0 },
             peak_nonblank: if byte != 0xFF { geom.sector_count } else { 0 },
+            wear: Vec::new(),
         }
     }
 
@@ -133,6 +137,15 @@ impl NorFlashSim {
     /// Panic on a 0→1 program into a pristine sector (default: debug builds).
     pub fn set_panic_on_violation(&mut self, panic: bool) {
         self.panic_on_violation = panic;
+    }
+
+    /// Make a sector wear out (see `wear_out.rs`). Cuts and tears are
+    /// unaffected; several plans may be installed.
+    pub fn add_wear_out(&mut self, plan: WearOut) {
+        self.wear.push(WearState {
+            plan,
+            erases_seen: 0,
+        });
     }
 
     pub fn sector_damage(&self, sector: u32) -> &NorSectorState {
@@ -252,6 +265,10 @@ impl NorFlashSim {
                     self.nonblank[sector as usize] = false;
                     self.nonblank_count -= 1;
                 }
+                if !self.wear.is_empty() && on_erase(&mut self.wear, sector, cells) {
+                    self.damage[sector as usize].tainted = true;
+                    self.mark_nonblank(sector as usize);
+                }
                 Ok(())
             }
             OpFate::Tear => {
@@ -271,6 +288,13 @@ impl NorFlashSim {
         self.stats.program_pages += 1;
         match fate {
             OpFate::Run => {
+                let worn = (!self.wear.is_empty())
+                    .then(|| on_program(&self.wear, sector as u32, off, data))
+                    .flatten();
+                if worn.is_some() {
+                    self.damage[sector].tainted = true;
+                }
+                let data = worn.as_deref().unwrap_or(data);
                 self.stats.program_bytes += data.len() as u64;
                 self.check_violations(sector, off, data);
                 if data.iter().any(|&d| d != 0xFF) {
