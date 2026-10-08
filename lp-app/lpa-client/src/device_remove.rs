@@ -68,6 +68,26 @@ pub struct RemoveReport {
     /// Whether the board had actually reported running it. `false` means the
     /// fallback slot was cleared instead — honest, and worth saying.
     pub was_loaded: bool,
+    /// The project folder the board will start at its next power-up, now
+    /// that the removal is done — `None` when nothing is left to start (or
+    /// when the board could not be asked). Worked out by the firmware's own
+    /// boot rule (`boots_next`), so it can name a folder the removal never
+    /// touched: the other A/B push slot, or one the CLI uploaded.
+    pub boots_next: Option<String>,
+}
+
+impl RemoveReport {
+    /// The clause a removal's summary appends: empty when nothing is left
+    /// to start, else what will start at the next power-up. One wording for
+    /// every surface that reports a removal.
+    pub fn boots_next_clause(&self) -> String {
+        match &self.boots_next {
+            Some(next) => {
+                format!("; {next} is still on the board and will start when it's next powered on")
+            }
+            None => String::new(),
+        }
+    }
 }
 
 /// Take the loaded project off a device that is already listening.
@@ -123,12 +143,34 @@ pub async fn remove_project<Io: ClientIo>(
     progress(format!("Deleting {storage_id}"), Some(70));
     client.delete_project_dir(&storage_id).await?;
     forget_startup_project(client, &storage_id).await;
+    let boots_next = boots_next(client).await;
 
     progress("Done".to_string(), Some(100));
     Ok(RemoveReport {
         storage_id,
         was_loaded,
+        boots_next,
     })
+}
+
+/// The folder the board would start at its next power-up, by the firmware's
+/// own rule (`fw-esp32-common/src/boot.rs`, `auto_load_project`):
+/// `/lightplayer.json`'s `startup_project` when it names something on the
+/// board, else the first project folder under `/projects/` in path order
+/// (`ListAvailableProjects` lists the same `project.json` folders boot
+/// scans). Best-effort and words-only: a board that cannot be asked makes
+/// this `None`, never a failed removal.
+async fn boots_next<Io: ClientIo>(client: &mut LpClient<Io>) -> Option<String> {
+    if let Some(saved) = crate::device_push::saved_startup_project(client).await {
+        return Some(saved);
+    }
+    let available = client.project_list_available().await.ok()?.value;
+    let mut ids: Vec<String> = available
+        .iter()
+        .filter_map(|project| crate::device_push::storage_id_of(project.path.as_str()))
+        .collect();
+    ids.sort();
+    ids.into_iter().next()
 }
 
 /// Clear `/lightplayer.json`'s `startup_project` when it names the dir just
@@ -286,8 +328,100 @@ mod tests {
             .expect("removed");
 
         let sent = client.into_io().sent;
-        assert_eq!(sent.len(), 4, "read, but never written: {sent:?}");
-        assert_eq!(config_written(&sent), None);
+        assert_eq!(config_written(&sent), None, "read, but never written");
+    }
+
+    /// Two folders on the board (the A/B push pair, say), the loaded one
+    /// removed: the report names the one left, because that is what starts
+    /// at the next power-up — the lexical-first one when several remain,
+    /// whatever order the board lists them in.
+    #[tokio::test]
+    async fn a_removal_names_the_other_folder_that_boots_next() {
+        let io = ScriptedIo::new([
+            loaded_response(1, Some("/projects/studio")),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(3, None),
+            no_saved_startup_response(4),
+            no_saved_startup_response(5),
+            available_response(6, &["zook-b", "studio-b"]),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let report = remove_project(&mut client, "demo", &mut progress)
+            .await
+            .expect("removed");
+
+        assert_eq!(report.storage_id, "studio");
+        assert_eq!(report.boots_next.as_deref(), Some("studio-b"));
+        assert_eq!(
+            report.boots_next_clause(),
+            "; studio-b is still on the board and will start when it's next powered on"
+        );
+    }
+
+    /// One folder, removed: nothing is left to start, so nothing is said.
+    #[tokio::test]
+    async fn removing_the_only_folder_boots_nothing() {
+        let io = ScriptedIo::new([
+            loaded_response(1, Some("/projects/studio")),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(3, None),
+            no_saved_startup_response(4),
+            no_saved_startup_response(5),
+            available_response(6, &[]),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let report = remove_project(&mut client, "demo", &mut progress)
+            .await
+            .expect("removed");
+
+        assert_eq!(report.boots_next, None);
+        assert_eq!(report.boots_next_clause(), "");
+    }
+
+    /// The board's own rule: a saved `startup_project` that names a folder
+    /// still on the board wins over the lexical-first one.
+    #[tokio::test]
+    async fn a_saved_startup_project_beats_lexical_order_for_what_boots_next() {
+        let io = ScriptedIo::new([
+            loaded_response(1, Some("/projects/studio")),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(3, None),
+            saved_startup_config_response(4, "zook-b"),
+            saved_startup_config_response(5, "zook-b"),
+            projects_dir_listing_response(6, &["aaa", "zook-b"]),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let report = remove_project(&mut client, "demo", &mut progress)
+            .await
+            .expect("removed");
+
+        assert_eq!(report.boots_next.as_deref(), Some("zook-b"));
+    }
+
+    /// A board that cannot be asked what it would boot makes the fact
+    /// unknown — never a failed removal.
+    #[tokio::test]
+    async fn a_board_that_cannot_say_what_boots_next_still_removes() {
+        let io = ScriptedIo::new([
+            loaded_response(1, Some("/projects/studio")),
+            WireServerMessage::new(2, WireServerMsgBody::StopAllProjects),
+            delete_dir_response(3, None),
+        ]);
+        let mut client = LpClient::new(io);
+        let mut progress = |_label: String, _percent: Option<u8>| {};
+
+        let report = remove_project(&mut client, "demo", &mut progress)
+            .await
+            .expect("the removal stands");
+
+        assert_eq!(report.storage_id, "studio");
+        assert_eq!(report.boots_next, None);
     }
 
     /// A board still formatting its flash refuses the first asks and then
@@ -400,6 +534,19 @@ mod tests {
             }
             _ => None,
         })
+    }
+
+    /// The board's answer to `ListAvailableProjects`: the project folders
+    /// under `/projects`, in whatever order it lists them.
+    fn available_response(id: u64, dirs: &[&str]) -> WireServerMessage {
+        use lpc_model::AsLpPathBuf;
+        let projects = dirs
+            .iter()
+            .map(|dir| lpc_wire::AvailableProject {
+                path: format!("projects/{dir}").as_path_buf(),
+            })
+            .collect();
+        WireServerMessage::new(id, WireServerMsgBody::ListAvailableProjects { projects })
     }
 
     /// The `/projects` listing `saved_startup_project` checks the saved

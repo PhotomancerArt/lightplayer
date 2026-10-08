@@ -56,10 +56,11 @@
 //! never applied over an open editing session.
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{GitBranch, Link2, Pencil, Radio};
+use dioxus_icons::lucide::{GitBranch, Link2, Pencil, Radio, X};
 use lpa_studio_core::ActionPriority;
 use lpc_history::{ContentHash, ProjectHistory, SyncRelation};
 
+use super::visitor_banner_dismissal;
 use crate::core::solid_action_class;
 
 /// Which of the strip's two worlds the tracking copy is in.
@@ -136,6 +137,15 @@ pub enum VisitorBannerView {
 }
 
 /// The strip itself. Pure — the coordinator owns every consequence.
+///
+/// The two live variants (view-pristine, edit-link) are one compact line
+/// that measures its OWN width (a container query, so a 390 px story frame
+/// and a phone viewport read alike): under 480 px the project name
+/// truncates, the "updates arrive…" tail drops and Copy link is its icon.
+/// They carry a dismiss (X) that hides the strip on this device — view
+/// state, remembered per project in `localStorage`
+/// ([`visitor_banner_dismissal`]). The edited (warn) strip is never
+/// dismissible: it says the copy stopped tracking, which must stay seen.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn VisitorBanner(
@@ -144,22 +154,52 @@ pub fn VisitorBanner(
     #[props(default)] on_fork: Option<EventHandler<()>>,
     #[props(default)] on_discard: Option<EventHandler<()>>,
 ) -> Element {
-    match view {
-        VisitorBannerView::ViewPristine { name } => rsx! {
-            div { class: "{STRIP_BASE} {LIVE_TINT}", role: "status",
-                span { class: "tw:flex tw:flex-none tw:text-status-live-foreground",
-                    Radio { size: 14 }
-                }
-                span { class: STRIP_TEXT,
-                    "Viewing "
-                    strong { class: STRONG_TEXT, "{name}" }
-                    " — updates arrive as they happen."
-                }
-                span { class: ACTIONS,
-                    QuietButton { label: "Copy link", on_press: on_copy_link }
+    // Names dismissed this session; storage is the memory across loads. A
+    // throwing store still hides the strip for the session via this.
+    let mut dismissed_now = use_signal(Vec::<String>::new);
+    let live_line = |icon: Element, verb: &'static str, name: String, tail: &'static str| {
+        if dismissed_now.read().contains(&name) || visitor_banner_dismissal::is_dismissed(&name) {
+            return rsx! {};
+        }
+        let dismiss_name = name.clone();
+        rsx! {
+            div { class: "tw:@container tw:mb-3 tw:min-w-0",
+                div { class: "{LIVE_STRIP} {LIVE_TINT}", role: "status",
+                    span { class: "tw:flex tw:flex-none tw:text-status-live-foreground", {icon} }
+                    span { class: LIVE_TEXT,
+                        "{verb} "
+                        strong { class: STRONG_TEXT, "{name}" }
+                        span { class: "tw:hidden tw:@min-[480px]:inline", "{tail}" }
+                    }
+                    CompactButton {
+                        label: "Copy link",
+                        on_press: move |()| {
+                            if let Some(on_copy_link) = on_copy_link {
+                                on_copy_link.call(());
+                            }
+                        },
+                        Link2 { size: 14 }
+                        span { class: "tw:hidden tw:@min-[480px]:inline", "Copy link" }
+                    }
+                    CompactButton {
+                        label: "Dismiss",
+                        on_press: move |()| {
+                            visitor_banner_dismissal::remember_dismissed(&dismiss_name);
+                            dismissed_now.write().push(dismiss_name.clone());
+                        },
+                        X { size: 14 }
+                    }
                 }
             }
-        },
+        }
+    };
+    match view {
+        VisitorBannerView::ViewPristine { name } => live_line(
+            rsx! { Radio { size: 14 } },
+            "Viewing",
+            name,
+            " — updates arrive as they happen.",
+        ),
         VisitorBannerView::ViewEdited => rsx! {
             div { class: "{STRIP_BASE} {WARN_TINT}", role: "status",
                 span { class: "tw:flex tw:flex-none tw:text-status-warning-foreground",
@@ -176,21 +216,30 @@ pub fn VisitorBanner(
                 }
             }
         },
-        VisitorBannerView::EditLive { name } => rsx! {
-            div { class: "{STRIP_BASE} {LIVE_TINT}", role: "status",
-                span { class: "tw:flex tw:flex-none tw:text-status-live-foreground",
-                    Pencil { size: 14 }
-                }
-                span { class: STRIP_TEXT,
-                    "Editing "
-                    strong { class: STRONG_TEXT, "{name}" }
-                    " — saves go live for everyone."
-                }
-                span { class: ACTIONS,
-                    QuietButton { label: "Copy link", on_press: on_copy_link }
-                }
-            }
-        },
+        VisitorBannerView::EditLive { name } => live_line(
+            rsx! { Pencil { size: 14 } },
+            "Editing",
+            name,
+            " — saves go live for everyone.",
+        ),
+    }
+}
+
+/// A compact in-line strip button: a 28 px square-ish target, label shown
+/// only when the caller's children include it. `label` is the accessible
+/// name, so an icon-only press still reads.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn CompactButton(label: &'static str, on_press: EventHandler<()>, children: Element) -> Element {
+    rsx! {
+        button {
+            class: COMPACT_BUTTON,
+            r#type: "button",
+            title: "{label}",
+            aria_label: "{label}",
+            onclick: move |_| on_press.call(()),
+            {children}
+        }
     }
 }
 
@@ -239,6 +288,10 @@ fn ForkButton(label: &'static str, on_press: Option<EventHandler<()>>) -> Elemen
 /// Full-width, actions pushed to the end; wraps rather than clips on a
 /// narrow viewport.
 const STRIP_BASE: &str = "tw:mb-3 tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-3 tw:gap-y-2 tw:rounded-md tw:border tw:px-4 tw:py-2";
+/// One line, never wraps: the live variants stay a single compact row.
+const LIVE_STRIP: &str = "tw:flex tw:min-w-0 tw:flex-nowrap tw:items-center tw:gap-2 tw:rounded-md tw:border tw:py-1 tw:pl-3 tw:pr-1.5";
+const LIVE_TEXT: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:text-xs tw:text-muted-foreground";
+const COMPACT_BUTTON: &str = "tw:inline-flex tw:h-7 tw:min-w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:gap-1.5 tw:rounded-sm tw:border-0 tw:bg-transparent tw:px-1.5 tw:text-[11px] tw:font-semibold tw:text-muted-foreground tw:hover:text-strong-foreground ux-focus-ring";
 const LIVE_TINT: &str = "tw:border-status-live-border tw:bg-status-live-bg";
 const WARN_TINT: &str = "tw:border-status-warning-border tw:bg-status-warning-bg";
 const STRIP_TEXT: &str = "tw:min-w-0 tw:text-xs tw:leading-snug tw:text-muted-foreground";

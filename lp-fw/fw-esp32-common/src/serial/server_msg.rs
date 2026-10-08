@@ -1,35 +1,21 @@
-//! Wire-protocol server messages, serialized for an `M!` host link.
+//! The static frame buffer every board link serializes into, and the helpers
+//! that name a server message in a log line.
 //!
-//! Two shapes share this file's static frame buffer: the lp-link proto
-//! payload (bare JSON or `L`+packed, no line framing) that every board link
-//! sends — the C6/S3 USB link, the classic's UART link and the C6's radio
-//! links ([`super::server_payload`]) — and the `M!` framing here, which no
-//! board link in this crate uses since the classic (wire proto 32) and BLE
-//! (33) moved onto lp-link. (`fw-emu`, the one `M!` board link left, has its
-//! own.)
+//! Every board link — the C6/S3 USB link, the classic's UART link and the
+//! C6's radio links — sends a server message as an lp-link proto payload
+//! (bare JSON or `L`+packed, no line framing) written into this file's
+//! [`FRAME_BUF`] by [`super::server_payload`]. The `M!` line serializer that
+//! used to live here is gone: no board link in this crate has used it since
+//! the classic (wire proto 32) and BLE (33) moved onto lp-link. (`fw-emu`, the
+//! one `M!` board link left, has its own, in `fw-core`.)
 //!
-//! This is the chip-agnostic serialization half of every `M!` firmware's
-//! server write path: take a [`lpc_wire::WireServerMessage`] and produce one framed
-//! wire message in the static frame buffer — the JSON line `\nM!{json}\n`,
-//! or, on a link whose host opted in (the transport holds the choice and the
-//! link's learned table, [`super::packed_link`]), the learned packed frame
-//! `\n 0x00 'L' COBS(header + packed) 0x00` (`lpc_wire::packed_frame`,
-//! feature `json-pack`). It runs in
-//! **thread context** (the
-//! transport), never in the io task: serialization recursion plus a
-//! frame-budget buffer must not ride an interrupt executor's borrowed stack —
-//! that exact mistake corrupted the classic ESP32 on the bench (see
-//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`). The io
-//! loop that writes the produced bytes — connection monitoring, RX handling,
-//! the request/result channels — stays in the bin crate, because that is
-//! where the transport differs.
+//! Serialization runs in **thread context** (the transport), never in the io
+//! task: serialization recursion plus a frame-budget buffer must not ride an
+//! interrupt executor's borrowed stack — that exact mistake corrupted the
+//! classic ESP32 on the bench (see
+//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`).
 
 use alloc::{format, string::String};
-use embedded_hal_async::delay::DelayNs;
-use embedded_io_async::Write;
-use ser_write_json::SerWrite;
-
-use super::chunked_write::ChunkedWriter;
 
 /// The one serialized-frame buffer, in dedicated `.bss` — NOT the heap.
 ///
@@ -41,11 +27,10 @@ use super::chunked_write::ChunkedWriter;
 /// io-task-side design kept this buffer as task-future `.bss`; this static
 /// restores that memory shape while keeping serialization thread-side.
 ///
-/// Exclusivity is structural, not locked: the accountable write protocol has
-/// exactly one frame in flight (`SERVER_WRITE_REQUEST` is depth 1, and the
-/// transport awaits the io task's result before serializing again), so the
-/// single writer (`serialize_server_msg`, thread context) and single reader
-/// (the io task, via [`frame_bytes`]) never overlap.
+/// Exclusivity is structural, not locked: one frame is in flight at a time,
+/// so the single writer (the transport's `send`, thread context, through
+/// [`frame_buf_mut`]) and the reader (the link, via [`frame_bytes`]) never
+/// overlap.
 ///
 /// The lp-link transports (the USB link, `usb_link::usb_link_transport`, and
 /// the radio links behind the link mux, `radio_link::link_mux_transport`)
@@ -57,45 +42,10 @@ use super::chunked_write::ChunkedWriter;
 /// on its radio links), and the reads and the next write never overlap.
 static mut FRAME_BUF: [u8; SERVER_MSG_JSON_BUFFER_SIZE] = [0; SERVER_MSG_JSON_BUFFER_SIZE];
 
-/// A bounds-checked [`SerWrite`] sink over [`FRAME_BUF`].
-pub(crate) struct FrameBufWriter {
-    pub(crate) len: usize,
-}
-
-/// The only way [`FrameBufWriter`] can fail: out of buffer.
-#[derive(Debug)]
-pub(crate) struct FrameBufFull;
-
-impl core::fmt::Display for FrameBufFull {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("frame buffer full")
-    }
-}
-
-impl ser_write_json::SerWrite for FrameBufWriter {
-    type Error = FrameBufFull;
-
-    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
-        let end = self.len.checked_add(buf.len()).ok_or(FrameBufFull)?;
-        if end > SERVER_MSG_JSON_BUFFER_SIZE {
-            return Err(FrameBufFull);
-        }
-        // SAFETY: single writer by protocol (see FRAME_BUF); bounds checked
-        // above, raw copy to avoid an implicit reference to the static.
-        unsafe {
-            let dst = (core::ptr::addr_of_mut!(FRAME_BUF) as *mut u8).add(self.len);
-            core::ptr::copy_nonoverlapping(buf.as_ptr(), dst, buf.len());
-        }
-        self.len = end;
-        Ok(())
-    }
-}
-
-/// The serialized frame's bytes, for the io task's write.
+/// The serialized frame's bytes, for the link's read.
 ///
-/// SAFETY contract: call only between receiving a `(generation, len)` write
-/// request and posting its result — the window in which the protocol
-/// guarantees the buffer is the reader's (see [`FRAME_BUF`]).
+/// SAFETY contract: call only in the window in which the protocol guarantees
+/// the buffer is the reader's (see [`FRAME_BUF`]).
 pub fn frame_bytes(len: usize) -> &'static [u8] {
     let len = len.min(SERVER_MSG_JSON_BUFFER_SIZE);
     // SAFETY: exclusive by the accountable-write protocol; length clamped.
@@ -119,7 +69,8 @@ pub(crate) unsafe fn frame_buf_mut() -> &'static mut [u8] {
 }
 
 /// The serialized-frame budget: the shared `ProjectRead` frame budget plus
-/// room for the `\nM!` prefix and trailing `\n` (4 bytes, padded to 16).
+/// 16 bytes of slack (once the `\nM!` prefix and trailing `\n`; the size is
+/// kept so the buffer, and every image's `.bss`, does not move).
 ///
 /// The same buffer holds a packed frame unchanged: the engine's chunking
 /// budget is in JSON bytes, and a message's packed frame is never longer than
@@ -133,184 +84,8 @@ pub(crate) const SERVER_MSG_JSON_BUFFER_SIZE: usize =
 /// the server answers a host's opt-in with what this transport can do.
 pub const PACKED_ENCODING_SUPPORTED: bool = cfg!(feature = "json-pack");
 
-/// Serialize `msg` into the static frame buffer, returning the framed length
-/// for the write request: packed against `table` when the link has one
-/// ([`super::packed_link::PackedLink::table_for`]), JSON otherwise.
-///
-/// A packed frame is written with no measure pass (plan `lp-json-pack`,
-/// G-F2), and the table learns from it; the caller rolls that back if the
-/// write then fails. If it does not fit or cannot be packed, that one
-/// message goes out as JSON instead, measure pass included — never dropped —
-/// and the table is left as it was. Without the `json-pack` feature every
-/// message is JSON.
-pub fn serialize_server_msg(
-    msg: &lpc_wire::WireServerMessage,
-    table: Option<&mut dyn lp_json_pack::LearnStore>,
-) -> Result<usize, lpc_wire::TransportError> {
-    #[cfg(feature = "json-pack")]
-    if let Some(table) = table {
-        match serialize_server_msg_packed(msg, table) {
-            Ok(len) => return Ok(len),
-            Err(error) => note_packed_fallback(msg, error),
-        }
-    }
-    #[cfg(not(feature = "json-pack"))]
-    let _ = table;
-    serialize_server_msg_json(msg)
-}
-
-/// Write `msg` as one learned packed frame into [`FRAME_BUF`].
-#[cfg(feature = "json-pack")]
-fn serialize_server_msg_packed(
-    msg: &lpc_wire::WireServerMessage,
-    table: &mut dyn lp_json_pack::LearnStore,
-) -> Result<usize, lpc_wire::WireWriteError> {
-    // SAFETY: single writer by protocol (see FRAME_BUF): the transport
-    // serializes only between write requests, and the io task reads the
-    // buffer only inside one. The slice is dropped before this returns.
-    let buf = unsafe { frame_buf_mut() };
-    let len = lpc_wire::ser_learned_frame_to(buf, table, msg)?;
-    debug_assert!(
-        len <= lpc_wire::ser_write_json_len(msg) + 4,
-        "a packed frame outgrew its JSON line"
-    );
-    Ok(len)
-}
-
-/// A packed write failed: say so once per boot (then at debug, so a message
-/// class that never packs cannot flood the link), and let the caller send
-/// JSON.
-#[cfg(feature = "json-pack")]
-pub(crate) fn note_packed_fallback(
-    msg: &lpc_wire::WireServerMessage,
-    error: lpc_wire::WireWriteError,
-) {
-    use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
-    static WARNED: AtomicBool = AtomicBool::new(false);
-    if WARNED.swap(true, Relaxed) {
-        log::debug!(
-            "[io_task] server message id={} not packed ({error}); sending JSON",
-            msg.id
-        );
-    } else {
-        log::warn!(
-            "[io_task] server message id={} {} not packed ({error}); sending JSON \
-             (further fallbacks log at debug)",
-            msg.id,
-            server_message_detail(msg)
-        );
-    }
-}
-
-/// Serialize `msg` into the static frame buffer as one framed wire line
-/// (`\nM!{json}\n`), returning its length for the write request.
-///
-/// Thread-context by design (see the module docs): the caller is the
-/// transport's `send`, not the io task — serialization recursion must not
-/// ride an interrupt executor's borrowed stack, and the buffer must not ride
-/// the loaded-project heap (see [`FRAME_BUF`] for both lessons' receipts).
-/// The measure pass runs first so an oversized frame is refused with the
-/// budget numbers instead of a mid-write failure.
-fn serialize_server_msg_json(
-    msg: &lpc_wire::WireServerMessage,
-) -> Result<usize, lpc_wire::TransportError> {
-    const FRAMING_OVERHEAD: usize = 4; // "\nM!" + trailing "\n"
-    let json_len = lpc_wire::ser_write_json_len(msg);
-    let total = json_len + FRAMING_OVERHEAD;
-    if total > SERVER_MSG_JSON_BUFFER_SIZE {
-        let detail = server_message_detail(msg);
-        log::warn!(
-            "[io_task] server message id={} {} exceeded frame budget: {} B > {} (frame_budget={})",
-            msg.id,
-            detail,
-            total,
-            SERVER_MSG_JSON_BUFFER_SIZE,
-            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} exceeded frame budget ({total} B)",
-            msg.id, detail
-        )));
-    }
-    let mut writer = FrameBufWriter { len: 0 };
-    let mut write_all = || -> Result<(), FrameBufFull> {
-        writer.write(b"\nM!")?;
-        // Erased writer: shares one serializer instantiation per wire type
-        // with the measurement pass above.
-        lpc_wire::ser_write_json_to(&mut writer, msg).map_err(|_| FrameBufFull)?;
-        writer.write(b"\n")?;
-        Ok(())
-    };
-    if write_all().is_err() {
-        // Unreachable if the measure pass is honest; kept as a real error
-        // path rather than a panic because the wire must stay up.
-        let detail = server_message_detail(msg);
-        log::warn!(
-            "[io_task] server message id={} {} failed to serialize",
-            msg.id,
-            detail
-        );
-        return Err(lpc_wire::TransportError::Serialization(format!(
-            "server message id={} {} failed to serialize",
-            msg.id, detail
-        )));
-    }
-    debug_assert_eq!(writer.len, total, "measure and write passes disagree");
-    Ok(writer.len)
-}
-
-impl<W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'_, W, F, D> {
-    /// Write one framed server line (`\nM!{json}\n`) with the policy's retry
-    /// budget, resyncing the peer's line parser on failure.
-    ///
-    /// The frame's own leading `\n` doubles as the resync after an aborted
-    /// partial write, so a rewrite never splices onto a torn prefix. On final
-    /// failure one more bare `\n` goes out so the *next* frame starts clean.
-    /// Retry count is a policy (chip) fact — 0 on USB, where a failed write
-    /// means nobody is draining and rewriting would only stall the io loop.
-    pub async fn write_framed(&mut self, bytes: &[u8]) -> Result<(), lpc_wire::TransportError> {
-        let attempts = 1 + self.policy.server_msg_retries;
-        let mut last_failure = None;
-        for attempt in 1..=attempts {
-            if attempt > 1 {
-                // Brief backoff: if the first write died to a masked-interrupt
-                // window (a flash op) or a transient stall, give it a moment
-                // rather than immediately re-timing-out.
-                self.delay.delay_ms(10).await;
-            }
-            match self.try_write_all(bytes).await {
-                Ok(()) => {
-                    if attempt > 1 {
-                        log::info!(
-                            "[io_task] server frame written on attempt {attempt}/{attempts}"
-                        );
-                    }
-                    return Ok(());
-                }
-                Err(failure) => {
-                    log::warn!(
-                        "[io_task] server frame {} write {failure} (attempt {attempt}/{attempts})",
-                        self.policy.link_name
-                    );
-                    last_failure = Some(failure);
-                }
-            }
-        }
-        // Separate the torn frame from whatever comes next.
-        let _ = self.write_all(b"\n").await;
-        // The failure's chunk/elapsed detail is what distinguishes a wedged
-        // peripheral from a starved io task; keep it in the error so the
-        // transport's log (and any peer-visible error) carries it.
-        let failure = last_failure.expect("attempts >= 1");
-        Err(lpc_wire::TransportError::Other(format!(
-            "{} write {failure} ({attempts} attempts)",
-            self.policy.link_name
-        )))
-    }
-}
-
 /// One-line human description of a server message, for the buffer-overflow
-/// warnings above.
+/// and not-packed warnings in [`super::server_payload`].
 pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
     match &msg.msg {
         lpc_wire::server::ServerMsgBody::Hello(hello) => {
