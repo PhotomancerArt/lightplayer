@@ -11,6 +11,7 @@ members = [
     "lp-base/lp-deflate",
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
+    "lp-base/lp-nor-sim",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-relay",
@@ -150,6 +151,7 @@ default-members = [
     "lp-base/lp-deflate",
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
+    "lp-base/lp-nor-sim",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-relay",

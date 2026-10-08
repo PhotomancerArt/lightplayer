@@ -6206,6 +6206,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-nor-sim"
+version = "40.0.0"
+dependencies = [
+ "embedded-storage",
+]
+
+[[package]]
 name = "lp-perf"
 version = "40.0.0"
 dependencies = [
