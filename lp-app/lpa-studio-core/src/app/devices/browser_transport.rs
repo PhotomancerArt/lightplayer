@@ -185,13 +185,18 @@ impl DeviceTransport for BrowserSerialTransport {
                         .map_err(|error| error.to_string())?;
                     Ok(DeviceEffectFacts {
                         summary: match report.was_loaded {
-                            true => format!("removed {}", report.storage_id),
+                            true => format!(
+                                "removed {}{}",
+                                report.storage_id,
+                                report.boots_next_clause()
+                            ),
                             // Under-claim: the board had already stopped
                             // reporting it, so "removed" would be a claim
                             // about something we never saw.
                             false => format!(
-                                "the board reported nothing loaded; cleared {}",
-                                report.storage_id
+                                "the board reported nothing loaded; cleared {}{}",
+                                report.storage_id,
+                                report.boots_next_clause()
                             ),
                         },
                         ..Default::default()

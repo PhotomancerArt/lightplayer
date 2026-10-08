@@ -85,13 +85,18 @@ pub async fn run_wire_conversation(
                     .map_err(|error| error.to_string())?;
             Ok(DeviceEffectFacts {
                 summary: match removed.was_loaded {
-                    true => format!("removed {}", removed.storage_id),
+                    true => format!(
+                        "removed {}{}",
+                        removed.storage_id,
+                        removed.boots_next_clause()
+                    ),
                     // Under-claim: the board had already stopped reporting
                     // the project, so "removed" would be a claim about
                     // something never seen.
                     false => format!(
-                        "the board reported nothing loaded; cleared {}",
-                        removed.storage_id
+                        "the board reported nothing loaded; cleared {}{}",
+                        removed.storage_id,
+                        removed.boots_next_clause()
                     ),
                 },
                 ..Default::default()

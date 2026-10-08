@@ -42,6 +42,20 @@ pub(crate) fn visitor_banner_edit_live() -> Element {
     })
 }
 
+#[story(
+    label = "Visitor banner, phone width",
+    description = "The live strip in a 390 px frame whatever the viewport, with a long project name: one compact line, the name truncates with an ellipsis, the \"updates arrive\" tail drops, Copy link is its icon and the X dismisses the strip on this device (remembered per project in localStorage; view state, not an action). It was about a quarter of an iPhone screen and undismissable. Needs Yona's look before merge."
+)]
+pub(crate) fn visitor_banner_phone() -> Element {
+    rsx! {
+        div { class: "tw:w-[390px] tw:max-w-full",
+            {strip(VisitorBannerView::ViewPristine {
+                name: "radiance-dome-with-a-very-long-project-name".to_string(),
+            })}
+        }
+    }
+}
+
 /// Chrome-width mount: a bar-shaped row above, the strip below it, the way
 /// it ships (full-width under the chrome).
 fn strip(view: VisitorBannerView) -> Element {

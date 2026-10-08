@@ -129,7 +129,7 @@ impl RemoveProjectActivity {
     fn settled_summary(&self, summary: &str, ctx: &ActivityCtx<'_>) -> ActivityOutcome {
         match Self::reported_empty(ctx) {
             true => ActivityOutcome::Succeeded {
-                summary: format!("{summary} — the board has nothing loaded"),
+                summary: format!("{summary} — nothing is loaded right now"),
             },
             // Honest under-claim: the delete was verified over the wire and
             // the board simply has not reported since. Claiming the board is
@@ -437,7 +437,7 @@ mod tests {
                 ActivityStep::Done {
                     outcome: ActivityOutcome::Succeeded { ref summary },
                     ..
-                } if summary.contains("zook-dome") && summary.contains("nothing loaded")
+                } if summary.contains("zook-dome") && summary.contains("nothing is loaded right now")
             ),
             "{step:?}"
         );

@@ -1,10 +1,11 @@
 //! Wait, after a deploy is acked, for evidence the *newly deployed* project
 //! is actually running.
 //!
-//! `upload` resets the device on connect (`cli_connect`), so every session
-//! begins with a boot that auto-loads and compiles whatever the *previous*
-//! upload left on flash. The deploy's own reload then loads the *new*
-//! project — but if the CLI disconnects the instant `LoadProject` is acked,
+//! `upload` does not reset the device on connect (`cli_connect`), so the
+//! session attaches to a board that is already running — and, when it had
+//! just booted, may still be auto-loading and compiling whatever the
+//! *previous* upload left on flash. The deploy's own reload then loads the
+//! *new* project — but if the CLI disconnects the instant `LoadProject` is acked,
 //! nothing has observed that reload actually settle. The compile line an
 //! operator associates with an upload ends up describing the previous one.
 //! See `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`.

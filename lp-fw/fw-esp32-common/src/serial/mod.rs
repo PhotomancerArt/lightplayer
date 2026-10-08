@@ -8,8 +8,7 @@ pub mod in_endpoint;
 pub mod shared_serial;
 pub mod usb_connection;
 
-/// The static frame buffer every server write path shares (and the `M!`
-/// line serializer, which no board link in this crate uses any more).
+/// The static frame buffer every server write path shares.
 #[cfg(feature = "server")]
 pub mod server_msg;
 
