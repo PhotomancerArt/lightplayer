@@ -20,6 +20,16 @@ number — not an emulator or silicon measurement.
   blob, ping-pong slots, CRC + sequence — correct under every cut) and
   `mem-broken` (its twin, erase-then-rewrite in place — fails), plus the
   real candidates as they land.
+- **T1** (`candidates/tree_store_candidate.rs`): `lp-tree-store` v1. A
+  workload step is one store transaction (`begin` at its first write,
+  `commit` at its end), so T1 is scored step-atomic. Dials: `record_max`
+  (default 1024), `gc_policy` (`greedy` | `cost_benefit`), `reserve`,
+  `txn_delta_max`, and `codec` = `stored` (every file written stored) |
+  `host_deflate` (every file but the board's own `…/.lp/panel.json` arrives
+  as the wire carries it after M6: `host_deflate_chunks` → ≤ 4 KiB logical
+  chunks, `put_chunk_deflated` at offset 0 then the running size). The
+  prototype's `deflate`, `deflate_dict`, `dict_size` and `json_tree` dials
+  are gone with what they selected.
 - **Workloads** (`workload.rs`): steps of puts and prefix deletes, each
   ending in `commit`, built from corpora at runtime, deterministic by seed.
   `push` (board files, then the corpus into `/projects/a/`), `repush` (the
@@ -79,7 +89,7 @@ units and between the steps of a sweep), writing every result as it lands:
    which cannot hold c40) and switch c13↔c40reuse, every cut point, every
    tear model, 2 seeds; units interleave candidates;
 3. double cuts — the same workloads, the first 4 focus steps;
-4. the T1 dial sweep — `record_max` × `gc_policy` × `reserve` × codec/dict ×
+4. the T1 dial sweep — `record_max` × `gc_policy` × `reserve` × codec (`stored` | `host_deflate`) ×
    partition {96, 128, 176}: fault-free c40 measures plus a reduced cut
    sweep each;
 5. endurance — 30 simulated days (1 re-push, 10 saves, 1440 panel writes a
