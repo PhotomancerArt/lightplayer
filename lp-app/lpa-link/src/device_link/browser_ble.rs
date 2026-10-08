@@ -170,7 +170,8 @@ impl BleLinkInner {
             LinkCommand::Close => self.close_link("closed by request").await,
             LinkCommand::RunReset(kind) => {
                 self.push(LinkEvent::Error(
-                    "a Bluetooth link has no reset lines; reset needs USB".to_string(),
+                    "a Bluetooth link has no reset lines; the board restarts by request (Reset) instead"
+                        .to_string(),
                 ));
                 self.push(LinkEvent::ResetOutcome { kind, ok: false });
             }

@@ -13,6 +13,11 @@
   "OS-thread creation is not public" premise; see the note added there)
 - **Related:** `2026-09-27-lp-link-one-comms-layer`, `2026-07-06-sans-io-core`,
   `2026-07-28-esp32c6-flash-budget`
+- **Related (Wi-Fi control roadmap, `lp2025/2026-10-01-1832-wifi-control`):**
+  `2026-10-07-c6-wifi-link` (M6: the Wi-Fi link and its threads, which name
+  this ADR for the link threads), `2026-10-06-radio-frame-rate-budget`
+  (the frame-rate ceilings a radio has to stay under),
+  `2026-10-01-network-link-security` (the secure link M6 puts on the network)
 - **Supersedes:** None
 - **Superseded by:** None
 

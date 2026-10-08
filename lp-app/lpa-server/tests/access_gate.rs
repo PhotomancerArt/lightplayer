@@ -715,22 +715,19 @@ fn the_tier_a_radio_links_update_session_gets_is_the_grant_alone() {
     assert_eq!(rig.server.link_granted_tier(BLE_A), None);
 }
 
-/// Every link state channel 3 can arrive on — the USB cable and a
-/// Bluetooth link; the mux hands no keyed (LAN) or relayed link's channel 3
-/// to the update session — under both answers to QY2: `Q` is always
-/// answered, `G` needs play and another core needs edit — exactly the tier
-/// this server holds for the link, though the session was handed only the
-/// grant (it adds `open` from the same access file).
+/// Every link state channel 3 arrives on — the USB cable, a Bluetooth link,
+/// a keyed (LAN) link and a relayed one — under both answers to QY2: `Q` is
+/// always answered, `G` needs play and another core needs edit — exactly
+/// the tier this server holds for the link, though the session was handed
+/// only the grant (it adds `open` from the same access file, and never to a
+/// relayed link, as the server never does).
 #[test]
 fn a_radio_links_channel_three_answers_by_the_tier_the_server_holds() {
     for follows in [true, false] {
-        for state in LinkState::ALL
-            .into_iter()
-            .filter(|s| s.carries_channel_three())
-        {
+        for state in LinkState::ALL {
             let rig = Rig::for_state(state);
             let link = state.link();
-            let mut board = UpdateBoard::new(&rig, follows, state == LinkState::Trusted);
+            let mut board = UpdateBoard::new(&rig, follows, state.update_trust());
             let granted = rig.server.link_granted_tier(link);
             let held = rig.server.link_tier(link);
             let label = format!("{state:?}, QY2 {follows}");
@@ -779,7 +776,7 @@ fn an_open_at_author_board_takes_a_core_over_radio_only_as_qy2_says() {
         assert_eq!(rig.server.link_tier(BLE_A), Some(Tier::Edit));
         assert_eq!(rig.server.link_granted_tier(BLE_A), None);
 
-        let mut board = UpdateBoard::new(&rig, follows, false);
+        let mut board = UpdateBoard::new(&rig, follows, UpdateTrust::Untrusted);
         let install = board.offer_another_core(None);
         if follows {
             assert_eq!(install, Ok(()), "yes: open at Author is enough");
@@ -1137,18 +1134,17 @@ enum LinkState {
 }
 
 impl LinkState {
-    /// Whether the board serves this link's channel 3 (the update
-    /// protocol): the USB cable and a Bluetooth link do; a keyed LAN link
-    /// and a relayed link do not (`LinkMuxTransport`, rule 5).
-    fn carries_channel_three(self) -> bool {
-        matches!(
-            self,
-            LinkState::Trusted
-                | LinkState::UntrustedNone
-                | LinkState::UntrustedOpen
-                | LinkState::UntrustedPlay
-                | LinkState::UntrustedEdit
-        )
+    /// How the board's update session takes this link the first time it
+    /// hears it (`LinkMuxTransport`, rule 5): the cable trusted, a relayed
+    /// link relayed (`open` never applies), any other radio link untrusted.
+    fn update_trust(self) -> UpdateTrust {
+        match self {
+            LinkState::Trusted => UpdateTrust::Trusted,
+            LinkState::RelayedAnonymousOpen | LinkState::RelayedPlay | LinkState::RelayedEdit => {
+                UpdateTrust::Relayed(None)
+            }
+            _ => UpdateTrust::Untrusted,
+        }
     }
 
     const ALL: [LinkState; 12] = [
@@ -1439,8 +1435,8 @@ struct UpdateBoard {
 impl UpdateBoard {
     /// The session over `server`'s device store — its `secrets` and `open`,
     /// read as the core reads them at boot — with QY2 answered `follows`,
-    /// and one link up, trusted (USB) or not (a radio link).
-    fn new(server: &Rig, follows: bool, trusted: bool) -> Self {
+    /// and one link up, trusted as `trust`.
+    fn new(server: &Rig, follows: bool, trust: UpdateTrust) -> Self {
         let store = server
             .server
             .base_fs()
@@ -1457,11 +1453,6 @@ impl UpdateBoard {
             BoardRig::new(board, access, SessionConfig::default()).expect("the model boots");
         assert_eq!(rig.mode(), Some(SessionMode::EngineRunning));
         let link = UpdateLinkId(BLE_A.id.raw());
-        let trust = if trusted {
-            UpdateTrust::Trusted
-        } else {
-            UpdateTrust::Untrusted
-        };
         rig.link_up(0, link, trust);
         Self {
             rig,

@@ -36,6 +36,29 @@ Use one of:
 Treat ADRs as durable history. If a decision changes, create a new ADR that
 supersedes the old one instead of rewriting old context heavily.
 
+## Sets of ADRs that read together
+
+Each of these ADRs names the others in a `Related` line; this is the order
+to read them in.
+
+**Wi-Fi control** (roadmap `lp2025/2026-10-01-1832-wifi-control`, 2026-10):
+
+1. `2026-10-02-c6-link-io-thread` (M1, M2): the link runs on its own thread
+   and requests are answered before the render.
+2. `2026-10-02-c6-repartition-and-layout-migration` (M3): the 256 KB the app
+   gained for the radio, and the migration that carries every board's files.
+3. `2026-10-01-network-link-security` (M4): Noise NNpsk0 inside lp-link, the
+   key match as the login.
+4. `2026-10-04-device-wifi-settings` (M5): the write-only network file, set
+   over USB and Bluetooth.
+5. `2026-10-07-c6-wifi-link` (M6): the station, the LAN link and the Radio
+   node; with `2026-10-07-project-loads-are-tried-and-recovered` (a joined
+   board's heap) and `2026-10-05-emulator-seams` section 11 (the emulated
+   LAN).
+6. `2026-10-06-cloud-relay` (M7): boards reachable through lightplayer.app.
+7. `2026-10-06-radio-frame-rate-budget`: the ceilings every radio feature
+   stays under.
+
 ## Deferred Decisions
 
 Small deferrals live in the creating ADR's **Follow-ups** section; design-heavy

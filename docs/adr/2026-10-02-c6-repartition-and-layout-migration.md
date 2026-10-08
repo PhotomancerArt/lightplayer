@@ -6,6 +6,12 @@
 - **Supersedes:** None (spends the reserve `2026-07-28-esp32c6-flash-budget.md`
   Decision 4 held)
 - **Superseded by:** None
+- **Related (Wi-Fi control roadmap, `lp2025/2026-10-01-1832-wifi-control`, M3):**
+  `2026-10-07-c6-wifi-link` (what the app's extra 256 KB paid for),
+  `2026-10-04-device-wifi-settings` (the network file that lives in the
+  smaller `lpfs`), `2026-10-06-cloud-relay` (the relay client's flash spend
+  against the headroom this left), `2026-07-28-esp32c6-flash-budget` (the
+  reserve it spent)
 
 ## Context
 

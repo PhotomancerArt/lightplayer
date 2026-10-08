@@ -264,8 +264,11 @@ the app through the same view model and presses the same actions. See
   `lightplayer.app:80`; `LP_RELAY_HOST=<host>[:port]` at build time makes a
   desk image that dials another host and says so at boot — never a release
   build. Relay links are `LinkTrust::Relayed`: the board's "Anyone" setting
-  never applies to them. A fielded core's `RELAY_PROTO_VERSION` stays listed
-  in the hub while boards run it. See `docs/adr/2026-10-06-cloud-relay.md`.
+  never applies to them, and the anonymous key is refused there. Boards
+  take firmware updates through the relay (OTA M8 PR C), so **a fielded
+  core's `RELAY_PROTO_VERSION` is never refused**: the hub keeps every
+  version a fielded core speaks listed, and a new relay feature adds a
+  version beside the old one. See `docs/adr/2026-10-06-cloud-relay.md`.
 - **USB, the classic's UART and BLE are `lp-link` now, not `M!`.** The C6/S3
   silicon and their emulators, the classic ESP32's UART0 (DOM-Z-102 and its
   emulator, since wire proto 32), the C6's Bluetooth links (since wire proto
@@ -346,7 +349,9 @@ the app through the same view model and presses the same actions. See
   link feature is a SYN flag plus an extension an old end ignores; channel
   3's messages change only by adding (unknown types answered `N`/`U`).
   The JSON wire on channel 1 keeps the freedom above. See
-  `docs/adr/2026-10-06-ota-update-protocol.md`. Likewise the device
+  `docs/adr/2026-10-06-ota-update-protocol.md`. The relay's device leg is
+  in the same set once cores update through it (`lpc-relay`'s
+  `relay_frame_golden.rs`; see the relay bullet above). Likewise the device
   network file's **reader** (`NetworkFile::from_json`) ignores keys it does
   not know, so a rolled-back core still joins with a file a newer firmware
   grew (`docs/adr/2026-10-04-device-wifi-settings.md`, 2026-10-07 amendment).
@@ -439,7 +444,7 @@ runtime.
 | `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO) | yes |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0, BLE and Wi-Fi links (board, host, Studio, tools; Wi-Fi is the C6's LAN WebSocket and the relay carrying the same link); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
 | `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
@@ -893,8 +898,19 @@ itself: X → Y with one press (backup, update, finish, project kept), the
 cable cut mid-core and mid-engine then finished with no click, an
 engine-less board restored on connect, the same with no copy anywhere ("which
 Studio can't get" → Install), and a pre-update board (no over-the-air offer,
-today's flash). `--tab` runs three of them against `?emu=tab`, and `--ble`
-(`just walk-ota-ble-emu`, above) four of them over `?ble=emu`. Every check
+today's flash). `--tab` runs three of them against `?emu=tab`, `--ble`
+(`just walk-ota-ble-emu`, above) four of them over `?ble=emu`, and `--lan`
+walks them over Wi‑Fi: each board on the door's virtual LAN, Studio with no
+`?emu=` at all (`?lan=` through the board's forward), plus a power cut
+mid-core and mid-engine, a renumbered board and a second client turned away
+busy — one step per invocation (`--lan --steps update`) to stay under ten
+minutes. The board's words there come from a console capture on its USB
+link, which counts as a host for the trial's confirmation (the LAN-only
+confirmation is `just test-emu-c6-ota-lan`'s). `--relay` walks update, the
+relay dropping the board mid-core and a power cut mid-engine through a local
+lp-cloud-server standing in for lightplayer.app (the board's leg through the
+virtual LAN's uplink, Studio with `?relay=` and a made-up account): no number
+from it is the internet's. Every check
 waits for the board's own `[OTA]`/`[LOADER]` words as well as the card's.
 It proves Studio's update host, routing and card against the real board
 session; it does **not** prove Chromium's serial backend across the
@@ -1554,7 +1570,7 @@ believes.
 
 ## Radio frame-rate budget
 
-Any radio-side feature (Wi‑Fi now; relay, MQTT, time sync, and update
+Any radio-side feature (Wi‑Fi and the relay now; MQTT, time sync, and update
 checks later) has a frame-rate cost ceiling, not a target: ≤ 10 % fps cost
 (median) when joined but not connected to Studio, ≤ 50 % when connected and
 editing — see `docs/adr/2026-10-06-radio-frame-rate-budget.md` for the full

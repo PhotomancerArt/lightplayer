@@ -4888,6 +4888,13 @@ walk-ble-emu *args:
 # address said in words. Stand-in (DD193): the remembered lease is rewritten
 # to the board's loopback forward before it is dialled. Report:
 # docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
+#
+# `studio-lan-reset` (scripts/emu/walk-wifi-emu-studio-lan-reset.mjs): one
+# board on the same LAN, Studio with no flag connected to it by address, the
+# card's Reset pressed once — the board's console says it was asked to
+# restart, it rejoins, a new secure session opens from the page's own
+# redial, and the card is Ready again with no click. Same prerequisites as
+# `studio-lan`. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
@@ -4914,7 +4921,17 @@ walk-drop-emu *args:
 # Chromium's USB stack (the desk check does that). Minutes per step; not CI.
 # `--steps install-older` (not a default step) walks "Other version…" over a
 # real lp-cloud-server's release index: two release images r1/r2, built here
-# when missing.
+# when missing. `--lan` (OTA M8) walks the update over Wi-Fi: each board on
+# the door's virtual LAN, Studio reaching it with `?lan=` through its port
+# forward — update, power cuts mid-core and mid-engine, an engine-less board
+# restored, a renumbered board, a second client turned away busy. One step
+# per invocation stays under ten minutes (`--lan --steps update`).
+# `--relay` (OTA M8 PR C) walks it through a local lp-cloud-server standing in
+# for lightplayer.app's relay: the board's leg through the virtual LAN's
+# uplink, Studio with `?relay=` and a made-up account signed in — update, the
+# relay dropping the board mid-core, a power cut mid-engine.
+# `WALK_RECORD=1` records the page's session (`?record=`) into
+# `records.jsonl` beside the report.
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -4935,6 +4952,10 @@ walk-ota-emu *args: install-rv32-target
                 scripts/ota/build-image.sh "${images}/${release%%:*}" "${release#*:}"
             fi
         done
+        cargo build -q -p lp-cloud-server
+    fi
+    # The relay lane's stand-in for lightplayer.app.
+    if [[ " {{ args }} " == *--relay* ]]; then
         cargo build -q -p lp-cloud-server
     fi
     # Y last: build-image.sh writes the parts directory the bundle copies.

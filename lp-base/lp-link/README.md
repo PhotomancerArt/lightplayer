@@ -1,7 +1,7 @@
 # lp-link
 
 A small sans-IO link layer for LightPlayer's device transports: USB serial,
-BLE, the classic UART, and later UDP and WebSocket. It sits between a raw pipe
+BLE, the classic UART and Wi-Fi (WebSocket), and later UDP. It sits between a raw pipe
 and the wire messages, on **both** ends: the board, Studio (wasm), `lp-cli`,
 and the emulator tools run the same crate.
 
@@ -11,7 +11,11 @@ and the emulator tools run the same crate.
 > UART0** (the DOM-Z-102's CH340 link, its emulator, Studio's Web Serial and
 > `lp-cli`'s native serial behind a USB-UART bridge — wire proto 32) **and on
 > BLE** (the C6's radio links, `fw-esp32-common`'s `radio_link/`, and
-> Studio's Web Bluetooth provider — wire proto 37). It was built and measured
+> Studio's Web Bluetooth provider — wire proto 37), **and on Wi-Fi** (the C6's
+> LAN WebSocket at `ws://<board>/link`, the `ws()` preset with the secure
+> channel on, reached by `lp-cli`'s `lan:` and Studio's LAN link; and the
+> cloud relay, which carries the same `ws()` link unchanged, reached by
+> `lp-cli`'s `relay:` and Studio's relay link, which is behind `?relay=1` for now). It was built and measured
 > in the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven
 > on a C6 in the `test_comms_lab` firmware, cut over on USB in
 > `lp2025/2026-09-27-0215-lp-link-usb-cutover`, on the classic's UART in

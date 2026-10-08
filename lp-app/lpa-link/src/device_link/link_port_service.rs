@@ -40,13 +40,22 @@
 //! frame there and the link would stall; a message refused this way is a
 //! note, never a stalled link.
 //!
-//! A write that cannot be queued (the link's send budget is full, or the
-//! message is larger than a link message may be) is an error the sender sees,
-//! never a silent drop.
+//! **An update message waits for room** (OTA M8): channel-3 messages the
+//! link's send ring cannot take yet (`Full`: the update host keeps several
+//! 4 KiB chunks ahead, which can outrun a `send_budget` of 24 KiB) wait in an
+//! outbox, in order, and go into the link as acknowledgements free its ring
+//! — `lp-cli`'s own update host does the same (`capture_session.rs`). Before
+//! this, a burst past the ring was an error per message and the chunks were
+//! lost, which stalled a Wi‑Fi restore of raw chunks at 1 %. A session's
+//! outbox goes with the session.
+//!
+//! Any other write that cannot be queued (a request when the send budget is
+//! full, a message larger than a link message may be) is an error the sender
+//! sees, never a silent drop.
 
 use std::collections::VecDeque;
 
-use lpc_wire::lp_link::{LinkConfig, LinkState, Micros};
+use lpc_wire::lp_link::{LinkConfig, LinkState, Micros, SendError};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{ClientMessage, LinkCounters, ServerMsgBody, WireLinkPort};
 
@@ -93,6 +102,12 @@ pub struct LinkPortService {
     updates: VecDeque<Vec<u8>>,
     /// The board announced channel 3 this session (DS9).
     announced: bool,
+    /// Channel-3 messages queued for this session that the link's send ring
+    /// could not take yet, oldest first (see the module docs).
+    update_outbox: VecDeque<Vec<u8>>,
+    /// The board's base MAC, from the last hello that carried one (kept
+    /// across sessions: a board's MAC does not change).
+    base_mac: Option<String>,
     /// Whether the last look found the link stalled, so each edge is noted
     /// once.
     stalled: bool,
@@ -119,6 +134,8 @@ impl LinkPortService {
             notes: Vec::new(),
             updates: VecDeque::new(),
             announced: false,
+            update_outbox: VecDeque::new(),
+            base_mac: None,
             stalled: false,
         }
     }
@@ -147,6 +164,8 @@ impl LinkPortService {
             notes: Vec::new(),
             updates: VecDeque::new(),
             announced: false,
+            update_outbox: VecDeque::new(),
+            base_mac: None,
             stalled: false,
         }
     }
@@ -215,6 +234,7 @@ impl LinkPortService {
 
     /// Hand every frame the link has to send now to `write`, in order.
     pub fn transmit(&mut self, now: Micros, mut write: impl FnMut(&[u8])) {
+        self.flush_updates();
         while let Some(frame) = self.port.poll_transmit(now) {
             write(frame);
         }
@@ -232,6 +252,7 @@ impl LinkPortService {
         room: usize,
         mut write: impl FnMut(&[u8]),
     ) -> usize {
+        self.flush_updates();
         let mut written = 0;
         while written < room {
             let Some(frame) = self.port.poll_transmit(now) else {
@@ -263,16 +284,52 @@ impl LinkPortService {
     ///
     /// Before the board announced the channel this session (DS9, see the
     /// module docs) nothing is queued: the message is dropped with a note
-    /// and `Ok(false)` says so. `Ok(true)`: queued.
+    /// and `Ok(false)` says so. `Ok(true)`: queued — in the link, or in the
+    /// outbox behind what is already waiting there when the link's send
+    /// ring is full.
     pub fn send_update(&mut self, message: &[u8]) -> Result<bool, String> {
         if !self.announced {
             self.notes.push(UPDATE_NOT_ANNOUNCED_NOTE.to_string());
             return Ok(false);
         }
-        self.port
-            .send_update(message)
-            .map(|()| true)
-            .map_err(|error| format!("the link would not take the update message: {error:?}"))
+        if !self.update_outbox.is_empty() {
+            self.update_outbox.push_back(message.to_vec());
+            return Ok(true);
+        }
+        match self.port.send_update(message) {
+            Ok(()) => Ok(true),
+            Err(SendError::Full) => {
+                self.update_outbox.push_back(message.to_vec());
+                Ok(true)
+            }
+            Err(error) => Err(format!(
+                "the link would not take the update message: {error:?}"
+            )),
+        }
+    }
+
+    /// Channel-3 messages still waiting for room in the link's send ring.
+    pub fn updates_waiting(&self) -> usize {
+        self.update_outbox.len()
+    }
+
+    /// Move what waits in the outbox into the link, oldest first, while the
+    /// link's send ring takes it.
+    fn flush_updates(&mut self) {
+        while let Some(message) = self.update_outbox.front() {
+            match self.port.send_update(message) {
+                Ok(()) => {
+                    self.update_outbox.pop_front();
+                }
+                Err(SendError::Full) => break,
+                Err(error) => {
+                    self.update_outbox.pop_front();
+                    self.notes.push(format!(
+                        "link: an update message could not be sent ({error:?})"
+                    ));
+                }
+            }
+        }
     }
 
     /// The board's channel-3 messages since the last take, this session's
@@ -284,6 +341,11 @@ impl LinkPortService {
     /// Whether the board announced the update channel this session.
     pub fn update_channel_announced(&self) -> bool {
         self.announced
+    }
+
+    /// The board's base MAC, once a hello on this link said it.
+    pub fn base_mac(&self) -> Option<&str> {
+        self.base_mac.as_deref()
     }
 
     /// How long until the link next needs [`Self::transmit`] for a timer,
@@ -369,6 +431,9 @@ impl LinkPortService {
                                 && let ServerMsgBody::Hello(hello) = &message.msg
                             {
                                 self.announced |= hello.firmware.is_some();
+                                if let Some(mac) = &hello.hardware.base_mac {
+                                    self.base_mac = Some(mac.clone());
+                                }
                             }
                         }
                         _ => {}
@@ -388,6 +453,7 @@ impl LinkPortService {
     /// whether it announced it, belonged to the old one.
     fn forget_session(&mut self) {
         self.updates.clear();
+        self.update_outbox.clear();
         self.announced = false;
     }
 }
@@ -678,6 +744,36 @@ mod tests {
             "{updates:?}"
         );
         assert!(bench.host.take_reads().is_empty());
+    }
+
+    /// OTA M8: a burst of update messages larger than the link's send ring
+    /// (a host keeping eight raw 4 KiB chunks ahead against a 24 KiB ring)
+    /// is not refused: what the ring cannot take waits, and every message
+    /// reaches the board, in order, as the ring drains.
+    #[test]
+    fn a_burst_past_the_send_ring_waits_and_arrives_in_order() {
+        let mut bench = Bench::with_board(BoardDouble::split(0xB0A2_0001, true));
+        bench.run(40);
+        assert!(bench.host.update_channel_announced());
+        bench.host.take_updates();
+
+        let chunks: Vec<Vec<u8>> = (0..10u8)
+            .map(|n| {
+                let mut chunk = vec![n; 4_100];
+                chunk[0] = b'D';
+                chunk
+            })
+            .collect();
+        for chunk in &chunks {
+            assert_eq!(bench.host.send_update(chunk), Ok(true));
+        }
+        assert!(
+            bench.host.updates_waiting() > 0,
+            "ten 4 KiB messages do not all fit a 24 KiB ring"
+        );
+        bench.run(400);
+        assert_eq!(bench.host.updates_waiting(), 0);
+        assert_eq!(bench.board.updates, chunks, "every chunk, once, in order");
     }
 
     /// A core-only board says no hello: its own `M` on link-up is the

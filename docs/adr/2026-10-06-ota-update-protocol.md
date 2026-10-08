@@ -446,3 +446,49 @@ resumed each piece where its record said and ended on the new build with
 nobody touching the board. Emulated, every scenario of the plan's P4 passes
 on `lp-emu:esp32c6:t1+net=lan` with no USB cable at all
 (`lp-cli/tests/emu_ota_lan.rs`, `just test-emu-c6-ota-lan`).
+
+## Amendment (2026-10-08, OTA Wi-Fi PR C — channel 3 through the relay)
+
+Plan `lp2025/2026-10-06-2249-ota-wifi-updates` (PR C, P9–P10). The relay
+passes sealed lp-link frames and reads none of them, so channel 3 crosses
+it untouched; what changes is the board's access rule on a relayed link.
+Protocol v1, lp-link's frames, the relay's frames and every on-flash format
+are unchanged: no `WIRE_PROTO_VERSION` and no `RELAY_PROTO_VERSION` bump.
+
+- **A relayed link is `LinkTrust::Relayed(tier)`** in the update session
+  (`lpc_update::board`), the relay's second lock carried into §4: the
+  device's `open` **never** applies through the relay, so a relayed link
+  holds only its key's tier (or, while the engine runs, the server's grant
+  for it). An edit key installs a core, a play key queries and backs up,
+  anyone with a key heals the board's own engine (Y8); "Anyone" gives a
+  relayed link nothing, whatever the board is open to.
+- **Core-only serves a relayed link** as it serves a LAN link: it answers
+  the handshake's key lookup from the device store's secrets (one backoff
+  with `L`), and **refuses the anonymous key's lookup** through the relay
+  (`NetworkPath::Relay`), uncharged, like an unknown key. `L` is refused on
+  a relayed link as on a keyed one.
+- **While the engine runs** the mux hands a relayed link's channel 3 to the
+  update hook too, saying it is relayed (`RadioUpdate::Message { relayed }`),
+  so the session holds it to its grant alone.
+- **A relayed link keeps the serve window in update mode.** Its throughput
+  is bounded by the board's relay leg (2 KiB of TCP receive buffer, every
+  round trip across the internet), not by lp-link's window; widening the
+  leg's buffer in update mode is a measured change for later, not this one.
+- **The relay leg comes back after each reset from the core**, as Wi-Fi
+  relay PR B built it: a reset is a fresh boot, so the board dials as soon
+  as it has an address; a dropped leg (not a refusal) is redialled at once
+  (emulated: the leg back within the second the walk could see).
+- **Proof.** Host: `lpc-update`'s `board_keyed_link.rs` (the relay cases),
+  `fw-esp32-common`'s `core_only_links` (a real secure handshake through a
+  relayed slot: the key's tier, the anonymous key refused) and
+  `link_mux_transport`, and `lpa-server`'s `access_gate.rs` (channel 3 on
+  every link state, relayed included). Emulated: `just walk-ota-emu
+  --relay` (update, the relay dropping the board mid-core, a power cut
+  mid-engine). Silicon through a **local** relay (2026-10-08, FC6
+  fixture-c6 on the desk's test access point, an lp-cloud-server on the
+  Mac, a desk image built with `LP_RELAY_HOST`): X → Y with a backup and a
+  power cut mid-core, 104.2 s, the core resumed at its record. Silicon
+  through lightplayer.app's relay: G2, Yona's walk.
+
+The relay's own compatibility promise follows from this: see
+`docs/adr/2026-10-06-cloud-relay.md`'s amendment of the same date.
