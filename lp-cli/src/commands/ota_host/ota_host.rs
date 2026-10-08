@@ -54,18 +54,21 @@ pub struct OtaHost {
     lines: Vec<String>,
     stage: Option<Stage>,
     cut: bool,
+    /// The host's clock at its last input, for the stage lines.
+    now_ms: u64,
 }
 
 impl OtaHost {
     /// The host `args` describes, or `None` without `--ota-offer`, serving
-    /// one chunk per request unless `--ota-ahead` says otherwise (USB,
-    /// serial and tcp: [`ServeConfig::USB`]).
+    /// as [`ServeConfig::USB`] says (USB, serial and tcp) unless
+    /// `--ota-ahead` says otherwise.
     pub fn from_args(args: &OtaArgs) -> Result<Option<Self>> {
         Self::from_args_over(args, ServeConfig::USB)
     }
 
     /// [`Self::from_args`] on a link whose own serving default is `serve`
-    /// ([`ServeConfig::BLE`] on a Bluetooth pipe); `--ota-ahead` still wins.
+    /// ([`ServeConfig::BLE`] on a Bluetooth pipe, [`ServeConfig::LAN`] on a
+    /// `lan:` link); `--ota-ahead` still wins.
     pub fn from_args_over(args: &OtaArgs, serve: ServeConfig) -> Result<Option<Self>> {
         let Some(dir) = &args.ota_offer else {
             return Ok(None);
@@ -107,6 +110,7 @@ impl OtaHost {
             lines: Vec::new(),
             stage: None,
             cut: false,
+            now_ms: 0,
         };
         host.line(format!(
             "offering {} ({}): core {} B, engine {} B{}",
@@ -121,18 +125,21 @@ impl OtaHost {
 
     /// A link to the board came up.
     pub fn link_up(&mut self, now_ms: u64) {
+        self.now_ms = now_ms;
         self.driver.link_up(now_ms);
         self.pump();
     }
 
     /// The link went down, or the board reset.
     pub fn link_down(&mut self, now_ms: u64) {
+        self.now_ms = now_ms;
         self.driver.link_down(now_ms);
         self.pump();
     }
 
     /// One channel-3 message from the board.
     pub fn on_board(&mut self, now_ms: u64, bytes: &[u8]) {
+        self.now_ms = now_ms;
         match BoardMessage::decode(bytes) {
             Ok(BoardMessage::Manifest(json)) => {
                 if let Ok(m) = BoardManifest::from_json(json) {
@@ -151,6 +158,13 @@ impl OtaHost {
                 let encoded = r.encode();
                 self.refusals.push(encoded.get(1).copied().unwrap_or(0));
                 self.line(format!("board refused: {r:?}"));
+                if r == lpc_update::Refusal::Access {
+                    self.line(
+                        "an update needs edit access, and this link holds less (on Wi-Fi: the \
+                         board's password gives play access, or none was given)"
+                            .to_string(),
+                    );
+                }
             }
             Ok(BoardMessage::Request(_)) => self.requests += 1,
             _ => {}
@@ -166,6 +180,7 @@ impl OtaHost {
 
     /// Time passed (a login backoff may be over).
     pub fn tick(&mut self, now_ms: u64) {
+        self.now_ms = now_ms;
         self.driver.tick(now_ms);
         self.pump();
     }
@@ -252,14 +267,20 @@ impl OtaHost {
             DriverEffect::Progress { stage, done, total } => {
                 if self.stage != Some(stage) {
                     self.stage = Some(stage);
-                    self.line(format!("stage {stage:?} at {done}/{total} B"));
+                    self.line(format!(
+                        "stage {stage:?} at {done}/{total} B ({:.3} s)",
+                        self.now_ms as f64 / 1_000.0
+                    ));
                 }
             }
             DriverEffect::Decided(decision) => {
                 self.line(format!("decided: {}", describe(&decision)));
             }
             DriverEffect::Done(finish) => {
-                self.line(format!("done: {finish:?}"));
+                self.line(format!(
+                    "done: {finish:?} ({:.3} s)",
+                    self.now_ms as f64 / 1_000.0
+                ));
                 self.finish = Some(finish);
             }
         }
