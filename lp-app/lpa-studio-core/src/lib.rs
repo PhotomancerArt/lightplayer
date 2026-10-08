@@ -51,7 +51,9 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 #[cfg(any(test, feature = "story-fixtures"))]
-pub use app::devices::device_update_fixtures::{UpdateFixture, UpdateFixtureRow};
+pub use app::devices::device_update_fixtures::{
+    UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
+};
 pub use app::devices::{
     AUTOCONNECT_ENABLED_PARAM, BLE_ENDPOINT_PREFIX, Backing, BleDeviceTransport, BleLinkSource,
     BluetoothReach, BoardRef, BoardRefError, CompletedPush, CompositeDeviceTransport,
@@ -95,11 +97,14 @@ pub use app::devices::{
 };
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
-    INSTALL_VERSION_PARAM, StoreLatest, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate,
-    UpdateBuildFacts, UpdateLight, UpdateLink, UpdateOfferFacts, UpdateOffers, UpdateProgress,
-    UpdateRoute, UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs,
-    UpdateVersion, UpdateVersionDisplay, update_offers, update_route, update_session_words,
-    update_standing, update_words, wants_auto_start,
+    FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
+    INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_PRESS_LABEL, INSTALL_VERSION_PARAM,
+    InstallChoice, PickedFirmwareFile, RECENT_CHOICES, StoreLatest, StoreLookup, StoreLookups,
+    StoreReleases, USB_UPDATES_OVER_THE_AIR, UiDeviceUpdate, UiSessionUpdate, UpdateBuildFacts,
+    UpdateLight, UpdateLink, UpdateOfferFacts, UpdateOffers, UpdateProgress, UpdateRoute,
+    UpdateRowKind, UpdateRunTone, UpdateRunWord, UpdateStanding, UpdateStandingInputs,
+    UpdateVersion, UpdateVersionDisplay, firmware_file_action, update_offers, update_route,
+    update_session_words, update_standing, update_words, wants_auto_start,
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::devices::{
@@ -257,8 +262,9 @@ pub use app::studio::{
 pub use core::log::{DeviceEventKind, DeviceEventRecorder};
 pub use core::notice::UiNotices;
 pub use core::offer::{
-    OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferNearness, OfferParam, OfferParamKind,
-    OfferPath, OfferPathError, OfferPress, SECRET_MARKER, UiOffer, UiOfferFocus, UiOfferTree,
+    FILTER_FINDS_NOTHING, OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferNearness,
+    OfferParam, OfferParamKind, OfferPath, OfferPathError, OfferPress, SECRET_MARKER, UiOffer,
+    UiOfferFocus, UiOfferTree,
 };
 pub use core::view::activity_view::UiActivityStep;
 pub use core::view::activity_view::UiActivityStepState;

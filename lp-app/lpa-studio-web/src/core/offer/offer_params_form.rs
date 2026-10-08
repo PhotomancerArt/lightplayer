@@ -16,7 +16,9 @@
 //! and [`resolved_args`], so both readings agree on what is picked.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{OfferArgs, OfferChoice, OfferParam, OfferParamKind, UiAction, UiOffer};
+use lpa_studio_core::{
+    FILTER_FINDS_NOTHING, OfferArgs, OfferChoice, OfferParam, OfferParamKind, UiAction, UiOffer,
+};
 
 use crate::base::{OPTION_CARD_CHECK_CLASS, StudioIcon, StudioIconName};
 use crate::core::action::{ActionButton, ActionButtonVariant};
@@ -57,9 +59,19 @@ pub fn OfferParamsForm(
                                 .into_iter()
                                 .cloned()
                                 .collect();
+                            // A filter that finds nothing says so, in core's words.
+                            let finds_nothing = options.is_empty()
+                                && offer.filter_text(&param, &current).is_some();
                             rsx! {
                                 fieldset { key: "{name}", class: FIELDSET_CLASS,
                                     legend { class: LABEL_CLASS, "{param.label}" }
+                                    if let Some(note) = param.note.clone() {
+                                        p { class: NOTE_CLASS, "{note}" }
+                                    }
+                                    if finds_nothing {
+                                        p { class: NOTE_CLASS, "{FILTER_FINDS_NOTHING}" }
+                                    }
+                                    div { class: OPTIONS_CLASS,
                                     for option in options {
                                         {
                                             let selected = picked.as_deref() == Some(option.value.as_str());
@@ -74,6 +86,19 @@ pub fn OfferParamsForm(
                                                     title: option.disabled.clone().unwrap_or_default(),
                                                     aria_pressed: "{selected}",
                                                     onclick: move |_| args.write().insert(name.clone(), value.clone()),
+                                                    // A pick made before the list was drawn (a long
+                                                    // list, scrolled) starts in view.
+                                                    onmounted: move |event: MountedEvent| async move {
+                                                        if selected {
+                                                            // After the panel's entrance has placed it: it
+                                                            // mounts, then moves into the top layer, and a
+                                                            // scroll before that lands nowhere (measured: an
+                                                            // immediate or 0 ms scroll left the pick out of
+                                                            // view).
+                                                            gloo_timers::future::TimeoutFuture::new(150).await;
+                                                            let _ = event.data().scroll_to_with_options(PICK_IN_VIEW).await;
+                                                        }
+                                                    },
                                                     if selected {
                                                         span { class: OPTION_CARD_CHECK_CLASS, aria_hidden: "true",
                                                             StudioIcon { name: StudioIconName::StepComplete, size: 10 }
@@ -83,9 +108,13 @@ pub fn OfferParamsForm(
                                                     if let Some(detail) = option.disabled.clone().or(option.detail.clone()) {
                                                         span { class: OPTION_DETAIL_CLASS, "{detail}" }
                                                     }
+                                                    if let Some(warning) = option.warning.clone().filter(|_| option.disabled.is_none()) {
+                                                        span { class: OPTION_WARNING_CLASS, "{warning}" }
+                                                    }
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -219,58 +248,43 @@ pub fn OfferPressButton(
     }
 }
 
-/// What a press with `args` dispatches, or the offer's verb disabled with
-/// why it would be refused.
-pub(crate) fn pressed_or_refused(offer: &UiOffer, args: &OfferArgs) -> UiAction {
+/// What a press with `args` dispatches, or the press disabled with why it
+/// would be refused. The refused press wears what a press with the
+/// defaults reads (an install's "Install"), else the offer's own verb.
+pub fn pressed_or_refused(offer: &UiOffer, args: &OfferArgs) -> UiAction {
     match offer.press(&resolved_args(offer, args)) {
         Ok(action) => action,
-        Err(error) => offer.action.clone().disabled(error.to_string()),
+        Err(error) => offer
+            .press(&OfferArgs::new())
+            .unwrap_or_else(|_| offer.action.clone())
+            .disabled(error.to_string()),
     }
 }
 
-/// The options of choice `param` a renderer draws, given `args`: every
-/// option, except those offered only with a toggle that is off (the
-/// chip-narrowed board list hides the other boards until `all_boards`).
+/// The options of choice `param` a renderer draws, given `args`: core's
+/// reading ([`UiOffer::shown_options`]) — every option, except those
+/// offered only with a toggle that is off (the chip-narrowed board list
+/// hides the other boards until `all_boards`), and, while the choice's
+/// filter box holds text, only the options it finds.
 pub fn visible_options<'a>(
     offer: &UiOffer,
     param: &'a OfferParam,
     args: &OfferArgs,
 ) -> Vec<&'a OfferChoice> {
-    let OfferParamKind::Choice { options, .. } = &param.kind else {
-        return Vec::new();
-    };
-    options
-        .iter()
-        .filter(|option| match &option.only_with {
-            Some(toggle) => toggle_value(offer, args, toggle),
-            None => true,
-        })
-        .collect()
+    offer.shown_options(param, args)
 }
 
-/// `args` as a press should carry them: a picked option the renderer no
-/// longer draws (the list changed under it, or the toggle that widened it
-/// was turned off) is dropped, so the offer's own preselect stands in
-/// rather than a value that is gone — the stale-pick guard.
+/// `args` as a press should carry them: core's stale-pick guard
+/// ([`UiOffer::resolved_args`]) — a picked option the renderer no longer
+/// draws is dropped, so the offer's own default stands in rather than a
+/// value that is gone.
 pub fn resolved_args(offer: &UiOffer, args: &OfferArgs) -> OfferArgs {
-    let mut resolved = OfferArgs::new();
-    for (name, value) in args.iter() {
-        let stale = offer.params().iter().any(|param| {
-            param.name == name
-                && matches!(param.kind, OfferParamKind::Choice { .. })
-                && !visible_options(offer, param, args)
-                    .iter()
-                    .any(|option| option.value == value)
-        });
-        if !stale {
-            resolved.insert(name, value);
-        }
-    }
-    resolved
+    offer.resolved_args(args)
 }
 
 /// The option a choice reads as picked: the (still drawn) value in `args`,
-/// else the parameter's preselect.
+/// else the choice's default for them ([`UiOffer::choice_default`]: its
+/// preselect, or while its box holds text, the option that text names).
 pub(crate) fn picked_choice(
     offer: &UiOffer,
     param: &OfferParam,
@@ -279,25 +293,30 @@ pub(crate) fn picked_choice(
     resolved_args(offer, args)
         .choice(&param.name)
         .map(str::to_string)
-        .or_else(|| param.default_value())
+        .or_else(|| offer.choice_default(param, args))
 }
 
 /// A toggle's value: what `args` says, else its current state.
 pub(crate) fn toggle_value(offer: &UiOffer, args: &OfferArgs, name: &str) -> bool {
-    args.toggle(name).unwrap_or_else(|| {
-        offer
-            .params()
-            .iter()
-            .find(|param| param.name == name)
-            .and_then(|param| match param.kind {
-                OfferParamKind::Toggle { value } => Some(value),
-                _ => None,
-            })
-            .unwrap_or(false)
-    })
+    offer.toggle_value(args, name)
 }
 
-const FIELDSET_CLASS: &str = "tw:m-0 tw:grid tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] tw:gap-1.5 tw:border-0 tw:p-0";
+/// Scroll a pick into view only as far as needed, at once.
+const PICK_IN_VIEW: ScrollToOptions = ScrollToOptions {
+    behavior: ScrollBehavior::Instant,
+    vertical: ScrollLogicalPosition::Nearest,
+    horizontal: ScrollLogicalPosition::Nearest,
+};
+
+const FIELDSET_CLASS: &str = "tw:m-0 tw:grid tw:min-w-0 tw:border-0 tw:p-0";
+
+/// The options' grid: as many columns as fit, and a long list (a version
+/// list the box finds much of) scrolls inside about six rows, so the
+/// controls under it stay in view.
+const OPTIONS_CLASS: &str = "tw:grid tw:max-h-[18rem] tw:min-w-0 tw:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] tw:gap-1.5 tw:overflow-y-auto tw:overscroll-contain";
+
+/// A parameter's note: one quiet line under its label.
+const NOTE_CLASS: &str = "tw:m-0 tw:mb-1.5 tw:text-[10.5px] tw:text-dim-foreground";
 
 const LABEL_CLASS: &str =
     "tw:mb-1 tw:p-0 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground";
@@ -314,6 +333,10 @@ const TOGGLE_CLASS: &str =
 const OPTION_TITLE_CLASS: &str = "tw:min-w-0 tw:truncate tw:text-xs tw:font-semibold";
 
 const OPTION_DETAIL_CLASS: &str = "tw:min-w-0 tw:truncate tw:text-[10.5px] tw:text-dim-foreground";
+
+/// An option's caution, in the muted warning tone.
+const OPTION_WARNING_CLASS: &str =
+    "tw:min-w-0 tw:truncate tw:text-[10.5px] tw:text-status-warning-foreground";
 
 /// One option row, in the option-card grammar the device pickers use:
 /// selected wears the static ring, the selection wash and the check badge.

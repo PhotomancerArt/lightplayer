@@ -22,12 +22,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceCardFeedView, DeviceEscape, DeviceFace, DeviceId, DeviceLoadedProject, DeviceStatus,
-    DeviceView, FIRMWARE_NEEDS_USB, FeedLiveness, UiChromeSessionControl, UiChromeSessionStatus,
-    UiDeviceAccess, UiLensReconnecting, UiUnlockOffer, UpdateFixture, UpdateFixtureRow,
+    DeviceView, FIRMWARE_NEEDS_USB, FeedLiveness, INSTALL_FIND_PARAM, INSTALL_VERSION_PARAM,
+    OfferArgs, UiChromeSessionControl, UiChromeSessionStatus, UiDeviceAccess, UiLensReconnecting,
+    UiUnlockOffer, UpdateFixture, UpdateFixtureRow, looked_up_release,
 };
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::device_offer_story_fixtures::{StoryDeviceCard, session_device_tree};
+use crate::app::home::device_roster_card::OfferPickerPreview;
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
 use crate::app::layout::LinkReconnectingStrip;
 use crate::app::layout::session_control::SessionDevicePanel;
@@ -36,14 +38,14 @@ use crate::core::OffersProvider;
 // --- The device card, one row of the table each ---------------------------
 
 #[story(
-    description = "Up to date (information): the firmware line reads \"2026.10.05-2 · up to date\", the header's second row leads with the version and its commit dim, the chip stays Ready, and the only firmware verb is Factory reset."
+    description = "Up to date (information): the firmware line reads \"2026.10.05-2 · up to date\", the header's second row leads with the version and its commit dim, the chip stays Ready, and the firmware verbs are Other version… (the store's other releases) and Factory reset."
 )]
 fn device_card_update_up_to_date() -> Element {
     update_card(UpdateFixtureRow::UpToDate, Link::Usb)
 }
 
 #[story(
-    description = "Update available (information with an offer, not a needs-you): \"2026.10.03-1 → 2026.10.05-2 available\", one plain Update (Routine: one click, no arm), Factory reset at the end. The show keeps running."
+    description = "Update available (information with an offer, not a needs-you): \"2026.10.03-1 → 2026.10.05-2 available\", one plain Update (Routine: one click, no arm), the quiet Other version… beside it, Factory reset at the end. The show keeps running."
 )]
 fn device_card_update_available() -> Element {
     update_card(UpdateFixtureRow::Available, Link::Usb)
@@ -120,7 +122,7 @@ fn device_card_update_needs_usb_once_bluetooth() -> Element {
 }
 
 #[story(
-    description = "Keeps crashing (needs you, the show stopped): the line in the attention tone, the chip Needs firmware, the picture slot dark red with the whole sentence, and two repairs: Reinstall and Other version… (one press when this Studio can get one other version; a pick when it can get more). Factory reset is withdrawn: installing is the repair."
+    description = "Keeps crashing (needs you, the show stopped): the line in the attention tone, the chip Needs firmware, the picture slot dark red with the whole sentence, and two repairs: Reinstall and Other version… (the store's releases, the board's own drawn but not pickable). Factory reset is withdrawn: installing is the repair."
 )]
 fn device_card_update_keeps_crashing() -> Element {
     update_card(UpdateFixtureRow::KeepsCrashing, Link::Usb)
@@ -134,14 +136,14 @@ fn device_card_update_cant_get_version() -> Element {
 }
 
 #[story(
-    description = "Rolled back (information): \"Back on 2026.10.03-1 · the update didn't start\". Nothing is offered — the board refuses that build from now on — and the show runs on the old version."
+    description = "Rolled back (information): \"Back on 2026.10.03-1 · the update didn't start\". The board refuses that build from now on, so Update is not offered; Other version… is, with the refused build drawn but not pickable. The show runs on the old version."
 )]
 fn device_card_update_rolled_back() -> Element {
     update_card(UpdateFixtureRow::RolledBack, Link::Usb)
 }
 
 #[story(
-    description = "Newer than this Studio (information): \"2026.10.07-4 · newer than this Studio\"; its hover says to reload Studio to catch up. No downgrade is offered."
+    description = "Newer than this Studio (information): \"2026.10.07-4 · newer than this Studio\"; its hover says to reload Studio to catch up. Other version… is offered (an older one arms first)."
 )]
 fn device_card_update_newer() -> Element {
     update_card(UpdateFixtureRow::Newer, Link::Usb)
@@ -152,6 +154,100 @@ fn device_card_update_newer() -> Element {
 )]
 fn device_card_update_play_only() -> Element {
     update_card(UpdateFixtureRow::PlayOnly, Link::Bluetooth)
+}
+
+// --- "Other version…": the picker over the store's release index ----------
+
+#[story(
+    description = "Other version… open on an up-to-date board: a box to find or type a version above the store's newest five releases, newest first (version in mono, its publish time), the board's own drawn but not pickable (\"On this board now\"). The newest is picked, and its press reads Install: one click (Routine: newer than the board's). From a file… beside the press picks a custom build's files."
+)]
+fn device_card_update_other_version_picker() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
+        OfferArgs::new(),
+        false,
+    )
+}
+
+#[story(
+    description = "Typing in the box filters the whole list, not just the five: \"10.03\" finds the four releases of Oct 3, newest first, each with its older-language warning. Nothing is picked until one is clicked, so the press says to pick one."
+)]
+fn device_card_update_other_version_picker_filtered() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "10.03"),
+        false,
+    )
+}
+
+#[story(
+    description = "An older version typed whole and armed (Lasting): the box names 2026.10.05-1, the list shows it picked, and the panel says what changes in core's words — \"Install an older version?\" and that it may not read the board's project — above the armed \"Confirm install\"."
+)]
+fn device_card_update_other_version_picker_older_armed() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.10.05-1"),
+        true,
+    )
+}
+
+#[story(
+    description = "An older version that also speaks an older wire language, armed: the row's warning (\"older language than Studio\"), and both sentences in the copy — older version, and Studio can still update it but may not edit its project until you do."
+)]
+fn device_card_update_other_version_picker_wire_warning() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
+        OfferArgs::new()
+            .with(INSTALL_FIND_PARAM, "10.03")
+            .with(INSTALL_VERSION_PARAM, "2026.10.03-4"),
+        true,
+    )
+}
+
+#[story(
+    description = "A whole version older than the store's list holds: nothing in the list matches, so the press reads \"Look up 2026.09.30-2\" — one click (Routine) asks the store for that release by its version."
+)]
+fn device_card_update_other_version_picker_lookup() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.30-2"),
+        false,
+    )
+}
+
+#[story(
+    description = "The same version once the store has found it: it joins the list (picked, with its older-language warning, dated by its version — a lookup carries no publish time), and the press installs it — armed here, with both sentences, since it is older than the board's."
+)]
+fn device_card_update_other_version_picker_lookup_found() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb))
+            .looked_up("2026.09.30-2", looked_up_release("2026.09.30-2")),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.30-2"),
+        true,
+    )
+}
+
+#[story(
+    description = "After \"From a file…\": a custom build's update files picked from this computer (its ota-manifest.json, core.bin and engine.bin), checked by core against their manifest. The build leads the list, \"from your files\", picked; its install always arms, and the copy says it is a custom build that no store vouches for."
+)]
+fn device_card_update_other_version_picker_from_file() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb))
+            .with_file_build("9c1e4b7a2"),
+        OfferArgs::new(),
+        true,
+    )
+}
+
+#[story(
+    description = "Other version… with the store's list unreachable, on a board newer than this Studio: only this Studio's build to pick, one quiet line saying the full list isn't available right now, and the older-version copy above the press."
+)]
+fn device_card_update_other_version_picker_offline() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::Newer, porch_lights(Link::Usb)).offline(),
+        OfferArgs::new(),
+        false,
+    )
 }
 
 // --- The editor's device popover ------------------------------------------
@@ -218,6 +314,28 @@ enum Link {
 /// read by core from the fixture's facts.
 fn update_card(row: UpdateFixtureRow, link: Link) -> Element {
     let fixture = UpdateFixture::new(row, porch_lights(link));
+    fixture_card(fixture, row, link, None)
+}
+
+/// The sample board over USB with its install verb's list open, `args`
+/// picked, and armed when `armed`.
+fn update_picker(fixture: UpdateFixture, args: OfferArgs, armed: bool) -> Element {
+    let row = UpdateFixtureRow::UpToDate;
+    // Room under the card for the open list, so a capture holds all of it.
+    rsx! {
+        div { class: "tw:min-h-[1040px]",
+            {fixture_card(fixture, row, Link::Usb, Some(OfferPickerPreview { args, armed }))}
+        }
+    }
+}
+
+/// `fixture`'s card (`row` decides only the play row's access line).
+fn fixture_card(
+    fixture: UpdateFixture,
+    row: UpdateFixtureRow,
+    link: Link,
+    install_picker_preview: Option<OfferPickerPreview>,
+) -> Element {
     let update = fixture.words();
     let update_facts = fixture.offer_facts();
     // A USB board streams its picture to the card; over Bluetooth there is
@@ -246,6 +364,7 @@ fn update_card(row: UpdateFixtureRow, link: Link) -> Element {
                 access,
                 update,
                 update_facts,
+                install_picker_preview,
                 on_action: |_| {},
             }
         }

@@ -214,6 +214,9 @@ pub(crate) fn StoryDeviceCard(
     #[props(default)] access_panel_open: bool,
     #[props(default)] keys_open_preview: bool,
     #[props(default)] menu_initially_open: bool,
+    /// The install verb's version list, mounted open (and picked/armed).
+    #[props(default)]
+    install_picker_preview: Option<crate::app::home::device_roster_card::OfferPickerPreview>,
     /// The card's update words (core's, from the story's update fixture).
     #[props(default)]
     update: Option<lpa_studio_core::UiDeviceUpdate>,
@@ -249,6 +252,7 @@ pub(crate) fn StoryDeviceCard(
                 access_panel_open,
                 keys_open_preview,
                 menu_initially_open,
+                install_picker_preview,
                 on_action,
             }
         }

@@ -20,6 +20,18 @@ pub struct OfferParam {
     pub label: String,
     /// What kind of value it is, and what is allowed.
     pub kind: OfferParamKind,
+    /// One plain line about the whole parameter, when there is something
+    /// to say (a version list that is shorter than usual because the full
+    /// one cannot be read): renderers draw it under the control.
+    pub note: Option<String>,
+    /// For a choice: the text parameter whose text filters its options
+    /// (a version list with a box above it). While that text is not blank
+    /// only the options that [`OfferChoice::matches`] it are shown, and an
+    /// option offered [`OfferChoice::only_with`] that text parameter is
+    /// shown only then. Which options are shown is
+    /// [`crate::UiOffer::shown_options`], the one reading both the renderer
+    /// and a press use.
+    pub filter: Option<String>,
 }
 
 /// The kinds of value an offer can take.
@@ -64,14 +76,18 @@ pub struct OfferChoice {
     pub label: String,
     /// One more line about it, when there is one.
     pub detail: Option<String>,
+    /// A caution about picking it (a version in an older language than
+    /// this Studio), drawn in the warning tone under the detail.
+    pub warning: Option<String>,
     /// Why it cannot be picked right now, when it cannot. Drawn disabled
     /// with this reason, never hidden.
     pub disabled: Option<String>,
-    /// The toggle parameter that widens the choice to this option, when it
-    /// is one the list is narrowed away from by default: a board outside
-    /// the detected chip is offered only with `all_boards` on. A renderer
-    /// draws it only while that toggle is on, and a press that picks it
-    /// with the toggle off is refused ([`crate::UiOffer::press`]).
+    /// The parameter that widens the choice to this option, when it is one
+    /// the list is narrowed away from by default: a board outside the
+    /// detected chip is offered only with the toggle `all_boards` on, an
+    /// older version only while the choice's filter text
+    /// ([`OfferParam::filter`]) finds it. A renderer draws it only then, and
+    /// a press that picks it otherwise is refused ([`crate::UiOffer::press`]).
     pub only_with: Option<String>,
 }
 
@@ -86,6 +102,8 @@ impl OfferParam {
         Self {
             name: name.into(),
             label: label.into(),
+            note: None,
+            filter: None,
             kind: OfferParamKind::Choice { options, preselect },
         }
     }
@@ -100,6 +118,8 @@ impl OfferParam {
         Self {
             name: name.into(),
             label: label.into(),
+            note: None,
+            filter: None,
             kind: OfferParamKind::Text {
                 placeholder: placeholder.into(),
                 max_len: None,
@@ -114,8 +134,25 @@ impl OfferParam {
         Self {
             name: name.into(),
             label: label.into(),
+            note: None,
+            filter: None,
             kind: OfferParamKind::Toggle { value },
         }
+    }
+
+    /// With `note` drawn under the control.
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
+    /// A choice whose options the text parameter `text` filters (see
+    /// [`Self::filter`]). No effect on other kinds.
+    pub fn filtered_by(mut self, text: impl Into<String>) -> Self {
+        if matches!(self.kind, OfferParamKind::Choice { .. }) {
+            self.filter = Some(text.into());
+        }
+        self
     }
 
     /// Text the press may leave out. No effect on other kinds.
@@ -226,6 +263,7 @@ impl OfferChoice {
             value: value.into(),
             label: label.into(),
             detail: None,
+            warning: None,
             disabled: None,
             only_with: None,
         }
@@ -237,16 +275,46 @@ impl OfferChoice {
         self
     }
 
+    /// With a caution about picking it.
+    pub fn with_warning(mut self, warning: impl Into<String>) -> Self {
+        self.warning = Some(warning.into());
+        self
+    }
+
     /// Drawn but not pickable, for `reason`.
     pub fn disabled(mut self, reason: impl Into<String>) -> Self {
         self.disabled = Some(reason.into());
         self
     }
 
-    /// Offered only while the toggle parameter `toggle` is on.
-    pub fn only_with(mut self, toggle: impl Into<String>) -> Self {
-        self.only_with = Some(toggle.into());
+    /// Offered only while the parameter `param` widens the list: a toggle
+    /// that is on, or the choice's filter text while it holds text.
+    pub fn only_with(mut self, param: impl Into<String>) -> Self {
+        self.only_with = Some(param.into());
         self
+    }
+
+    /// Whether filter text `query` finds this option: it is in the value,
+    /// the label or the detail, ignoring case and the text's outer spaces.
+    /// Blank text finds every option.
+    pub fn matches(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return true;
+        }
+        [Some(&self.value), Some(&self.label), self.detail.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|text| text.to_lowercase().contains(&query))
+    }
+
+    /// Whether `query` names exactly this option (its value or its label,
+    /// ignoring case and outer spaces): what a press that only typed the
+    /// text picks.
+    pub fn is_named_by(&self, query: &str) -> bool {
+        let query = query.trim();
+        !query.is_empty()
+            && (self.value.eq_ignore_ascii_case(query) || self.label.eq_ignore_ascii_case(query))
     }
 }
 

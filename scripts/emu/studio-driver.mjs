@@ -321,6 +321,37 @@ export class StudioDriver {
     return clicked;
   }
 
+  /// Type `text` into the first visible text field under `scope` whose
+  /// placeholder contains `placeholder`, as keystrokes would: the field is
+  /// focused and cleared, then the text goes in through CDP's
+  /// `Input.insertText`, so the page sees real `input` events.
+  async type(placeholder, text, { scope = "document" } = {}) {
+    const found = await this.evaluate(`
+      (() => {
+        const wanted = ${JSON.stringify(placeholder.toLowerCase())};
+        const el = [...${scope}.querySelectorAll('input[type="text"], input:not([type])')]
+          .find((el) => (el.placeholder || '').toLowerCase().includes(wanted));
+        if (!el) return false;
+        el.scrollIntoView({ block: 'center' });
+        el.focus();
+        el.select();
+        return true;
+      })()
+    `);
+    if (!found) throw new Error(`no text field with a placeholder like ${JSON.stringify(placeholder)}`);
+    await this.cdp.send("Input.insertText", { text }, this.sessionId);
+  }
+
+  /// Put `paths` (absolute, on this machine) into the file input `selector`
+  /// matches, as a person picking them in the file dialog would: CDP's
+  /// `DOM.setFileInputFiles`, which fires the input's change event.
+  async setFiles(selector, paths) {
+    const { root } = await this.cdp.send("DOM.getDocument", { depth: -1, pierce: true }, this.sessionId);
+    const { nodeId } = await this.cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector }, this.sessionId);
+    if (!nodeId) throw new Error(`no file input matches ${selector}`);
+    await this.cdp.send("DOM.setFileInputFiles", { nodeId, files: paths }, this.sessionId);
+  }
+
   /// Wait for the control, then click it. The wait is the page's, not ours.
   async clickWhenReady(text, options = {}) {
     await this.waitFor(

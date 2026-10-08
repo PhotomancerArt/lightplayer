@@ -36,7 +36,8 @@ use lpa_update::decide::{SourceEffect, SourceResult};
 use lpa_update::{DriverConfig, DriverEffect, HostBuild, HostIdentity, UpdateDriver, UpdateIntent};
 use lpc_access::{OpenTo, SecretEntry, Tier};
 use lpc_firmware_release::{
-    OtaManifest, PackageRef, PieceFile, ReleaseSelector, Requires, TargetName, sha256_hex,
+    OtaManifest, PackageRef, PieceFile, ReleaseIndex, ReleaseIndexEntry, ReleaseSelector, Requires,
+    TargetName, sha256_hex,
 };
 use lpc_update::board::{AccessFacts, LinkId as RigLinkId, LinkTrust, SessionConfig, SessionMode};
 use lpc_update::code_table::CHUNK;
@@ -45,9 +46,11 @@ use lpc_update::{BoardMessage, PieceKind};
 
 use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
-    DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId, DeviceInput,
-    DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink, LensLineTap,
-    MemoryOwnBuildSource, OfferArgs, StudioController, UpdateLink, UpdateStanding,
+    ActionConsequence, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId,
+    DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink,
+    INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
+    MemoryOwnBuildSource, OfferArgs, OfferParamKind, PickedFirmwareFile, StudioController, UiOffer,
+    UpdateLink, UpdateStanding, firmware_file_action,
 };
 
 /// The model board's region (the sim's own size).
@@ -67,6 +70,19 @@ fn x() -> ModelBuild {
 fn y() -> ModelBuild {
     ModelBuild::synthetic("2026.10.06-1", 2, 6 * 4096 + 11, 9 * 4096 + 1000)
 }
+
+/// W: a release older than any the store's index lists.
+fn w() -> ModelBuild {
+    ModelBuild::synthetic("2026.10.04-1", 4, 5 * 4096 + 900, 8 * 4096 + 500)
+}
+
+/// Z: a release newer than this Studio's own, only in the store.
+fn z() -> ModelBuild {
+    ModelBuild::synthetic("2026.10.07-1", 3, 6 * 4096 + 500, 9 * 4096 + 300)
+}
+
+/// This Studio's wire protocol version.
+const PROTO: u32 = lpc_wire::WIRE_PROTO_VERSION;
 
 // ---------------------------------------------------------------------
 // The tests
@@ -500,6 +516,312 @@ fn install_y_on_an_e13_board_puts_y_on_it() {
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
 }
 
+/// "Other version…" over the store's release index: a newer release (Z)
+/// installs at one press; the update running, the verb is gone; then an
+/// older one (X), found by typing it in the box and in an older wire
+/// language, arms with both sentences, and the second click puts it on the
+/// board.
+#[test]
+fn other_version_installs_a_newer_release_at_one_press_and_an_older_one_armed() {
+    let mut bench = Bench::new(Board::with_catalog(vec![x(), y(), z()]), Some(y()));
+    let fetch = Rc::new(StoreFetch::default());
+    for build in [x(), y(), z()] {
+        fetch.publish(&build, &build.version);
+    }
+    // Z, ten releases between, Y, then X in the wire language before this
+    // Studio's: X is the fourteenth, behind the switch once it is not the
+    // board's.
+    let mut entries = vec![index_entry(&z().version, Some(&z()), PROTO)];
+    entries.extend((2..=11).rev().map(|n| {
+        let version = format!("2026.10.06-{n}");
+        index_entry(&version, None, PROTO)
+    }));
+    entries.push(index_entry(&y().version, Some(&y()), PROTO));
+    entries.push(index_entry(&x().version, Some(&x()), PROTO - 1));
+    fetch.publish_index(entries);
+    bench
+        .controller
+        .set_firmware_store(Rc::new(FirmwareStore::new(
+            STORE_ORIGIN,
+            Rc::clone(&fetch) as Rc<dyn FirmwareFetch>,
+        )));
+    let device = bench.connect_device();
+    bench.run_until("the store's index to reach the card", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_releases()
+            .is_some()
+            && matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let path = bench.controller.device_verb(device, "install-firmware");
+    let other = bench.controller.offered(&path);
+    assert_eq!(other.label(), "Other version…");
+    let values = option_values(&other);
+    assert_eq!(values.len(), 13);
+    assert_eq!(values[0], "2026.10.07-1");
+    assert_eq!(values[12], "2026.10.05-1", "the board's own, last");
+
+    // Z: newer, one press.
+    let z_args = OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.07-1");
+    bench.press(device, "install-firmware", z_args);
+    bench.run_until("the update to start", |bench| bench.updating(device));
+    bench.controller.not_offered(&path);
+    bench.run_until("the board to run Z", |bench| bench.idle_on(device, &z()));
+    bench.assert_runs(&z());
+
+    // X: older than the board's now, and no longer the board's own, so it
+    // is not among the newest five: the box finds it.
+    bench.run_until("the card to read Z as newer", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Newer { .. })
+    });
+    let other = bench.controller.offered(&path);
+    let x_args = OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.05-1");
+    assert!(
+        other.press(&x_args).is_err(),
+        "not shown until the box finds it"
+    );
+    let x_args = OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.10.05-1");
+    let armed = other.press(&x_args).expect("the box names it");
+    let ActionConsequence::Lasting(copy) = &armed.meta().consequence else {
+        panic!("not Lasting: {:?}", armed.meta().consequence);
+    };
+    assert_eq!(copy.title, "Install an older version?");
+    assert!(
+        copy.message
+            .contains("2026.10.05-1 is older than what this board runs")
+            && copy
+                .message
+                .contains("It also speaks an older language than this Studio"),
+        "{}",
+        copy.message
+    );
+    bench.press_lasting(device, "install-firmware", x_args);
+    bench.run_until("the update to start", |bench| bench.updating(device));
+    bench.run_until("the board to run X", |bench| bench.idle_on(device, &x()));
+    bench.assert_runs(&x());
+}
+
+/// With no release index (the store answers 404), "Other version…" lists
+/// this Studio's build and the store's latest, and says the full list is
+/// not available.
+#[test]
+fn with_no_index_other_version_lists_this_studios_build_and_the_stores_latest() {
+    let mut bench = Bench::new(Board::with_catalog(vec![x(), y(), z()]), Some(y()));
+    let fetch = Rc::new(StoreFetch::default());
+    fetch.publish(&z(), &z().version);
+    fetch.publish_latest(&z());
+    bench
+        .controller
+        .set_firmware_store(Rc::new(FirmwareStore::new(
+            STORE_ORIGIN,
+            Rc::clone(&fetch) as Rc<dyn FirmwareFetch>,
+        )));
+    let device = bench.connect_device();
+    bench.run_until("the store's latest to reach the card", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_latest()
+            .is_some()
+            && fetch.asked("/api/v1/firmware/esp32c6-4mb/releases")
+            && matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    assert!(
+        bench
+            .controller
+            .update_build_facts()
+            .store_releases()
+            .is_none()
+    );
+    let path = bench.controller.device_verb(device, "install-firmware");
+    let other = bench.controller.offered(&path);
+    assert_eq!(option_values(&other), ["2026.10.07-1", "2026.10.06-1"]);
+    assert_eq!(
+        other.params()[1].note.as_deref(),
+        Some(INSTALL_LIST_UNAVAILABLE)
+    );
+}
+
+/// A release older than the index lists (W): typing its whole version
+/// binds a look-up (Routine — the app agent may press it), the store finds
+/// it by version, and it joins the list; the same press then arms (it is
+/// older than the board's) and the second click puts it on the board.
+#[test]
+fn an_older_release_the_index_does_not_list_is_looked_up_then_installed() {
+    // The board runs the catalog's first build: X.
+    let mut bench = Bench::new(Board::with_catalog(vec![x(), w(), y(), z()]), Some(y()));
+    let fetch = Rc::new(StoreFetch::default());
+    for build in [w(), x(), y(), z()] {
+        fetch.publish(&build, &build.version);
+    }
+    fetch.publish_index(vec![
+        index_entry(&z().version, Some(&z()), PROTO),
+        index_entry(&y().version, Some(&y()), PROTO),
+    ]);
+    bench
+        .controller
+        .set_firmware_store(Rc::new(FirmwareStore::new(
+            STORE_ORIGIN,
+            Rc::clone(&fetch) as Rc<dyn FirmwareFetch>,
+        )));
+    let device = bench.connect_device();
+    bench.run_until("the store's index to reach the card", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_releases()
+            .is_some()
+            && matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let path = bench.controller.device_verb(device, "install-firmware");
+    let other = bench.controller.offered(&path);
+    assert!(!option_values(&other).contains(&w().version), "not listed");
+
+    let typed = OfferArgs::new().with(INSTALL_FIND_PARAM, &w().version);
+    let lookup = other.press(&typed).expect("a look-up");
+    assert!(lookup.meta().consequence.is_routine());
+    bench.press(device, "install-firmware", typed.clone());
+    bench.run_until("the store to find W", |bench| {
+        matches!(
+            bench
+                .controller
+                .update_build_facts()
+                .store_lookups()
+                .get("esp32c6-4mb", &w().version),
+            Some(crate::StoreLookup::Found(_))
+        )
+    });
+    assert!(option_values(&bench.controller.offered(&path)).contains(&w().version));
+    assert!(fetch.asked(&format!(
+        "/firmware/esp32c6-4mb/{}/ota-manifest.json",
+        w().version
+    )));
+
+    let other = bench.controller.offered(&path);
+    let armed = other.press(&typed).expect("now it installs");
+    let ActionConsequence::Lasting(copy) = &armed.meta().consequence else {
+        panic!("not Lasting: {:?}", armed.meta().consequence);
+    };
+    assert_eq!(copy.title, "Install an older version?");
+    bench.press_lasting(device, "install-firmware", typed);
+    bench.run_until("the update to start", |bench| bench.updating(device));
+    bench.run_until("the board to run W", |bench| bench.idle_on(device, &w()));
+    bench.assert_runs(&w());
+
+    // A whole version the store does not hold: looked up, then said so.
+    let other = bench.controller.offered(&path);
+    let nowhere = OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.01-1");
+    assert!(other.press(&nowhere).is_ok(), "a look-up first");
+    bench.press(device, "install-firmware", nowhere.clone());
+    bench.run_until("the store to answer", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_lookups()
+            .get("esp32c6-4mb", "2026.09.01-1")
+            == Some(&crate::StoreLookup::Missing)
+    });
+    let refusal = bench.controller.offered(&path).press(&nowhere).unwrap_err();
+    assert!(
+        refusal.to_string().contains("has no 2026.09.01-1"),
+        "{refusal}"
+    );
+}
+
+/// "From a file…": the user picks a custom build's update files (W, in no
+/// store); core checks them, the build leads the version list, and its
+/// install arms (Lasting) and puts W on the board. Files for another target
+/// are refused in words, and nothing joins the list.
+#[test]
+fn a_custom_build_from_files_is_checked_listed_and_installed_armed() {
+    let mut bench = Bench::new(Board::with_catalog(vec![x(), w(), y()]), Some(y()));
+    let fetch = Rc::new(StoreFetch::default());
+    fetch.publish(&y(), &y().version);
+    fetch.publish_index(vec![index_entry(&y().version, Some(&y()), PROTO)]);
+    bench
+        .controller
+        .set_firmware_store(Rc::new(FirmwareStore::new(
+            STORE_ORIGIN,
+            Rc::clone(&fetch) as Rc<dyn FirmwareFetch>,
+        )));
+    let device = bench.connect_device();
+    bench.run_until("the store's index to reach the card", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_releases()
+            .is_some()
+            && matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let file_path = bench
+        .controller
+        .device_verb(device, "install-firmware-file");
+    let file = bench.controller.offered(&file_path);
+    assert!(
+        file.action.meta().needs_user_activation,
+        "the user's own click"
+    );
+
+    let ota_folder = |build: &ModelBuild, target: &str| -> Vec<PickedFirmwareFile> {
+        let mut manifest = ota_manifest(build);
+        manifest.target = target.to_string();
+        [
+            ("ota-manifest.json", manifest.to_json_bytes()),
+            ("core.bin", build.core.clone()),
+            ("engine.bin", build.engine.clone()),
+        ]
+        .into_iter()
+        .map(|(name, bytes)| PickedFirmwareFile {
+            name: name.to_string(),
+            bytes,
+        })
+        .collect()
+    };
+    // Another target's files: refused, said in words.
+    let refused = bench.controller.dispatch_press(firmware_file_action(
+        device,
+        ota_folder(&w(), "esp32s3-8mb"),
+    ));
+    let refusal = refused.expect_err("another target");
+    assert!(
+        refusal.to_string().contains("this board is esp32c6-4mb"),
+        "{refusal}"
+    );
+    assert!(bench.controller.update_build_facts().file_build().is_none());
+
+    // W's own folder: checked, and it leads the list, picked.
+    bench
+        .controller
+        .dispatch_press(firmware_file_action(
+            device,
+            ota_folder(&w(), "esp32c6-4mb"),
+        ))
+        .expect("W's files read");
+    let path = bench.controller.device_verb(device, "install-firmware");
+    let other = bench.controller.offered(&path);
+    assert_eq!(option_values(&other)[0], w().version);
+    let armed = other
+        .press(&OfferArgs::new().with(INSTALL_VERSION_PARAM, &w().version))
+        .expect("W installs");
+    let ActionConsequence::Lasting(copy) = &armed.meta().consequence else {
+        panic!("not Lasting: {:?}", armed.meta().consequence);
+    };
+    assert_eq!(copy.title, "Install a custom build?");
+    bench.press_lasting(
+        device,
+        "install-firmware",
+        OfferArgs::new().with(INSTALL_VERSION_PARAM, &w().version),
+    );
+    bench.run_until("the update to start", |bench| bench.updating(device));
+    bench.run_until("the board to run W", |bench| bench.idle_on(device, &w()));
+    bench.assert_runs(&w());
+    assert!(
+        !fetch.asked(&format!("/{}/ota-manifest.json", w().version)),
+        "W came from the files, never the store"
+    );
+}
+
 /// Another device owns the board's transfer (Y's core, part-way): the card
 /// waits and Studio asks `Q` every 3 s; when that device's link drops,
 /// Studio takes over and finishes Y with no click.
@@ -800,7 +1122,12 @@ impl Board {
     }
 
     fn running_x() -> Self {
-        Self::new(FakeBoard::flashed_with(vec![x(), y()], 0, REGION))
+        Self::with_catalog(vec![x(), y()])
+    }
+
+    /// A board running `catalog[0]`, able to boot every build in `catalog`.
+    fn with_catalog(catalog: Vec<ModelBuild>) -> Self {
+        Self::new(FakeBoard::flashed_with(catalog, 0, REGION))
     }
 
     fn engineless_x() -> Self {
@@ -1190,6 +1517,17 @@ impl StoreFetch {
         );
     }
 
+    /// Publish the release index, `entries` put newest first.
+    fn publish_index(&self, entries: Vec<ReleaseIndexEntry>) {
+        let store = FirmwareStore::new(STORE_ORIGIN, NoFetch);
+        let target = TargetName::parse("esp32c6-4mb").expect("a target");
+        let index = ReleaseIndex::newest_first(&target, entries);
+        index.validate().expect("a valid index");
+        self.files
+            .borrow_mut()
+            .insert(store.releases_url(&target), index.to_json_bytes());
+    }
+
     fn asked(&self, tail: &str) -> bool {
         self.urls.borrow().iter().any(|url| url.ends_with(tail))
     }
@@ -1201,6 +1539,38 @@ impl FirmwareFetch for StoreFetch {
         let found = self.files.borrow().get(url).cloned();
         Box::pin(core::future::ready(Ok(found)))
     }
+}
+
+/// An index entry for `version` (of `build`, when it is a published one)
+/// speaking wire protocol `wire`.
+fn index_entry(version: &str, build: Option<&ModelBuild>, wire: u32) -> ReleaseIndexEntry {
+    let commit = match build {
+        Some(build) => ota_manifest(build).commit,
+        None => "736d72856d243fce519c9f461f369f59fcbf175a".to_string(),
+    };
+    ReleaseIndexEntry {
+        version: version.to_string(),
+        commit,
+        wire_proto: wire,
+        requires: Requires {
+            layout: 1,
+            loader: 1,
+        },
+        published_at: None,
+    }
+}
+
+/// The values of an offer's `version` choice, in order.
+fn option_values(offer: &UiOffer) -> Vec<String> {
+    let Some(OfferParamKind::Choice { options, .. }) = offer
+        .params()
+        .iter()
+        .find(|param| param.name == INSTALL_VERSION_PARAM)
+        .map(|param| &param.kind)
+    else {
+        panic!("no choice: {:?}", offer.params());
+    };
+    options.iter().map(|option| option.value.clone()).collect()
 }
 
 /// A fetch for URL-building only.
@@ -1513,6 +1883,36 @@ impl Bench {
             .press(path, args)
             .expect("a press never fails loudly");
         self.presses += 1;
+    }
+
+    /// The second click on a Lasting offer (after the arm).
+    fn press_lasting(&mut self, device: DeviceId, verb: &str, args: OfferArgs) {
+        let path = self.controller.device_verb(device, verb);
+        self.controller
+            .press_lasting(path, args)
+            .expect("a press never fails loudly");
+        self.presses += 1;
+    }
+
+    /// Whether an activity runs on `device`.
+    fn updating(&self, device: DeviceId) -> bool {
+        self.controller
+            .devices_for_test()
+            .roster()
+            .device(device)
+            .is_some_and(|d| d.activity.is_some())
+    }
+
+    /// Whether the board runs `build`'s engine and `device` has no
+    /// activity left.
+    fn idle_on(&self, device: DeviceId, build: &ModelBuild) -> bool {
+        let runs = {
+            let board = self.board();
+            board.rig.board.running_build().map(|b| b.version.clone())
+                == Some(build.version.clone())
+                && board.rig.mode() == Some(SessionMode::EngineRunning)
+        };
+        runs && !self.updating(device)
     }
 
     fn press_update(&mut self, device: DeviceId) {

@@ -633,10 +633,7 @@ mod tests {
     #[test]
     fn keeps_crashing() {
         says(
-            &UpdateStanding::KeepsCrashing {
-                board: y(),
-                choices: vec![y()],
-            },
+            &UpdateStanding::KeepsCrashing { board: y() },
             "2026.10.05-2 keeps crashing",
             "2026.10.05-2 keeps crashing on this board, so it stopped trying. Reinstall it, or \
              install another version.",
@@ -649,11 +646,7 @@ mod tests {
     fn a_version_studio_cant_get() {
         let v = UpdateVersion::new("2026.09.28-4");
         says(
-            &UpdateStanding::CantGetVersion {
-                board: v,
-                own: y(),
-                choices: vec![y()],
-            },
+            &UpdateStanding::CantGetVersion { board: v, own: y() },
             "Needs 2026.09.28-4, which Studio can't get",
             "This board needs 2026.09.28-4 to start, and this Studio can't get it. Connect to the \
              internet, or install 2026.10.05-2 instead.",
@@ -664,7 +657,6 @@ mod tests {
             &UpdateStanding::CantGetVersion {
                 board: UpdateVersion::new("5eb70a7c2"),
                 own: y(),
-                choices: vec![y()],
             },
             "Needs dev 5eb70a7, which Studio can't get",
             "This board needs dev build 5eb70a7 to start, and this Studio can't get it. Connect \
@@ -851,10 +843,7 @@ mod tests {
             "esp32c6 · 2026.10.03-1 → 2026.10.05-2 · 60:55:f9:0a:0b:0c"
         );
 
-        let crashing = session(&UpdateStanding::KeepsCrashing {
-            board: y(),
-            choices: vec![y()],
-        });
+        let crashing = session(&UpdateStanding::KeepsCrashing { board: y() });
         assert_eq!(
             crashing.run_word,
             Some(UpdateRunWord {

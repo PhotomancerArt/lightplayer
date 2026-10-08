@@ -1581,6 +1581,14 @@ impl StudioController {
         if latest.as_ref() != self.update_build_facts.store_latest() {
             self.update_build_facts_mut().set_store_latest(latest);
         }
+        let releases = host.store_releases();
+        if releases.as_ref() != self.update_build_facts.store_releases() {
+            self.update_build_facts_mut().set_store_releases(releases);
+        }
+        let lookups = host.store_lookups();
+        if lookups != *self.update_build_facts.store_lookups() {
+            self.update_build_facts_mut().set_store_lookups(lookups);
+        }
         // This Studio's own build may arrive after its source was installed
         // (the bundle's reads its manifests asynchronously).
         let own_now = host.own_facts();
@@ -1628,6 +1636,9 @@ impl StudioController {
                     false => crate::UpdateLink::Usb,
                 },
                 store_latest: store_latest.as_ref(),
+                store_releases: None,
+                store_lookups: None,
+                file_build: None,
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1665,6 +1676,7 @@ impl StudioController {
         self.devices.effects_mut().set_update_watches(watches);
         if let Some(target) = target {
             self.devices.effects_mut().want_store_latest(&target);
+            self.devices.effects_mut().want_store_releases(&target);
         }
         for device in starts {
             self.fold_device_input(crate::DeviceInput::Action(lpa_devices::Action::Update {
@@ -1686,8 +1698,9 @@ impl StudioController {
         self.devices.effects().firmware().store()
     }
 
-    /// This Studio's own build and the store's latest, by their facts —
-    /// what every card's update standing is read against.
+    /// This Studio's own build, the store's latest and its release index,
+    /// by their facts — what every card's update standing and version
+    /// choices are read against.
     pub fn update_build_facts(&self) -> &crate::UpdateBuildFacts {
         &self.update_build_facts
     }
@@ -1726,6 +1739,9 @@ impl StudioController {
             },
             link,
             store_latest: self.update_build_facts.store_latest(),
+            store_releases: self.update_build_facts.store_releases(),
+            store_lookups: Some(self.update_build_facts.store_lookups()),
+            file_build: self.update_build_facts.file_build(),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -4032,6 +4048,48 @@ impl StudioController {
                 )))),
                 Err(message) => Err(UiError::UnsupportedAction(message)),
             };
+        }
+        // "From a file…" is published so the agent can see it; pressing it
+        // for real opens the web's file picker, which dispatches the data op.
+        if node_id.as_str() == crate::FirmwareFileOp::NODE_ID {
+            let _op = action.into_op::<crate::FirmwareFileOp>()?;
+            return Err(UiError::UnsupportedAction(
+                "pick the build's files in the device card's Other version…".to_string(),
+            ));
+        }
+        if node_id.as_str() == crate::FirmwareFileDataOp::NODE_ID {
+            let op = action.into_op::<crate::FirmwareFileDataOp>()?;
+            let target = self
+                .devices
+                .roster()
+                .device(op.device)
+                .and_then(|device| device.evidence.update_facts())
+                .and_then(|facts| facts.target.clone());
+            let Some(target) = target else {
+                return Err(UiError::UnsupportedAction(
+                    "this board has not said what it was built for, so no build can be checked \
+                     against it"
+                        .to_string(),
+                ));
+            };
+            let read = crate::app::devices::read_firmware_files(&op.files, &target)
+                .map_err(UiError::UnsupportedAction)?;
+            let version = read.facts.identity.version.clone();
+            self.devices.effects_mut().hold_file_build(read.build);
+            self.update_build_facts_mut()
+                .set_file_build(Some(read.facts));
+            return Ok(UiNotices::new().with_notice(UiNotice::info(format!(
+                "{version} from your files is in Other version… — installing it takes two clicks."
+            ))));
+        }
+        if node_id.as_str() == crate::FirmwareLookupOp::NODE_ID {
+            let op = action.into_op::<crate::FirmwareLookupOp>()?;
+            self.devices
+                .effects_mut()
+                .want_store_lookup(&op.target, &op.version);
+            let lookups = self.devices.effects().store_lookups();
+            self.update_build_facts_mut().set_store_lookups(lookups);
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;

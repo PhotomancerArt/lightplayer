@@ -33,6 +33,10 @@ common case needs no network.
 `?firmware-store=` dev flag — and verifies everything it fetches through an
 injected `FirmwareFetch`: a manifest must validate and be the target and
 release asked for; a file must have the manifest's length and SHA-256.
+`releases(target)` reads the release index
+(`/api/v1/firmware/<target>/releases`, format 1): `Ok(None)` on a 404, and
+an index that does not validate, is another format or names another target
+is refused; unknown fields are ignored.
 
 `fetch_engine_from_store(store, target, build_id, expected_engine_sha256)`
 answers `Ok(None)` for a dev build **without fetching** (dev builds are never
