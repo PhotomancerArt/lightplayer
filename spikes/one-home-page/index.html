@@ -452,40 +452,41 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .topconn .btn svg.i { width:12px; height:12px; }
 .connpop { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:220px; display:grid; gap:6px; padding:8px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); }
 .connpop .btn { width:100%; justify-content:flex-start; }
+.sqrow { display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+.sq { appearance:none; font:inherit; cursor:pointer; position:relative; width:84px; height:72px; display:grid; place-items:center; align-content:center; gap:6px;
+  border:1px solid var(--bd); border-radius:8px; background:var(--panel); color:var(--tx); font-size:11.5px; font-weight:600; transition:border-color .15s, box-shadow .15s; }
+.sq svg.i { width:20px; height:20px; color:var(--heading); }
+.sq:hover, .sq.on { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.14); }
+.sq.on { border-color:var(--sel-bd); }
+.sqnet { display:grid; gap:6px; align-content:center; height:72px; min-width:240px; }
+.sqnet label { font-size:11px; font-weight:700; color:var(--subtle); }
+.sqnet .row2 { display:flex; gap:6px; }
+.sqnet input { flex:1; min-width:0; height:30px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 9px; font:12px var(--mono); }
+.sqhint { align-self:center; font-size:12px; color:var(--subtle); margin-left:6px; }
+.sqhint a { color:var(--muted); font-weight:600; }
+.app.narrow .sqhint { flex-basis:100%; margin:2px 0 0; }
 </style>
 </head>
 <body>
 
 <h1>One home page — boards and projects together</h1>
-<p class="hint"><b>Round 3.</b> lightplayer.app opens on your stuff. A board connected in this tab gets the stage; then online boards, offline boards, other projects, your patterns and the catalog.
-Settled so far: <b>cards and a list behind one switch</b> (cards by default, remembered in this browser), <b>Q1-B</b> the stage, <b>Q2-A</b> one card per board, <b>Q3-C</b> tabs, <b>Q4-A</b> a still picture, <b>Q6-A</b> “Other projects”.
-Below the page, one section per open question, lettered to match the chat. The lean is outlined in green. Click any board or project to see the URL it would open.
+<p class="hint"><b>Round 4: the layout has converged.</b> lightplayer.app opens on your stuff. A board connected in this tab gets the stage; then online boards, a place to connect a board, offline boards, other projects, your patterns and the catalog.
+Cards and a list behind one switch (cards by default, remembered in this browser); tabs to filter by group. Every decision is listed at the bottom.
+Next: the board card itself (what it says and how), as its own spike. Click any board or project to see the URL it would open.
 Vision: <code>lp2025/2026-10-06-1530-boards-and-projects-model/vision.md</code>.</p>
 
 <!-- ================================================================== -->
 <section class="qsec" id="page">
-  <h2>The page so far</h2>
-  <p class="usinglean">Uses the leans for the two open questions: <b>Q7-A, Q8-A</b>. The card/list switch sits at the right end of the tabs. The board card itself (what it says and how) is the next spike, so its words are placeholders.</p>
+  <h2>The page</h2>
+  <p class="usinglean">No open questions. The board card’s words are placeholders until the card spike.</p>
   <div class="app" id="main"></div>
 </section>
 
 <!-- ================================================================== -->
-<section class="qsec" id="q7">
-  <h2><span class="qn">Q7</span>Headings for the two board sections</h2>
-  <p class="ask">Replaces “On now” and “Recent”. The first section holds boards that are online (connected here, reachable through the account, or in use by someone else); the second holds the rest.</p>
-  <div class="opts c3" id="q7o"></div>
-</section>
-
-<section class="qsec" id="q8">
-  <h2><span class="qn">Q8</span>Where “Connect a board” lives</h2>
-  <p class="ask">USB, Bluetooth and Network get a place of their own, so they stop reading as filters. Each option shows the page when you have boards, and the same thing for a brand-new visitor.</p>
-  <div class="opts" id="q8o"></div>
-</section>
-
 <!-- ================================================================== -->
 <section class="qsec" id="ref">
   <h2>For reference: other states (nothing to decide)</h2>
-  <p class="ask">At phone width: signed out with boards in this browser, and Sean with his one board. (The brand-new welcome is part of Q8.)</p>
+  <p class="ask">At phone width: a brand-new visitor (the same Connect section, first), signed out with boards in this browser, and Sean with his one board.</p>
   <div class="refrow" id="refo"></div>
   <div class="decided"><b>Decided so far</b>
     <ul>
@@ -497,6 +498,8 @@ Vision: <code>lp2025/2026-10-06-1530-boards-and-projects-model/vision.md</code>.
       <li><b>Q5 → deferred:</b> status words belong to the card spike: what a card says, and in what order.</li>
       <li><b>Q6 → A:</b> “Other projects”.</li>
       <li><b>Round 2:</b> the connect buttons need their own place (Q8); “On now” reads like AI speak (Q7).</li>
+      <li><b>Q7 → A:</b> “Online boards” and “Offline boards”.</li>
+      <li><b>Q8 → B, adjusted:</b> “Connect a board” is a section of its own after Online boards, with three square buttons that take little width. A brand-new visitor gets the same section and buttons, first on the page, for continuity.</li>
     </ul>
   </div>
 </section>
@@ -590,7 +593,7 @@ const DATASETS = {
    Config: one rendered page instance = one cfg. Every option below is
    the same page with one choice changed.
    ===================================================================== */
-const LEAN = { hero:'stage', sets:'perBoard', filter:'tabs', remote:'still', words:'B', label:'other', heads:'A', connect:'card' };
+const LEAN = { hero:'stage', sets:'perBoard', filter:'tabs', remote:'still', words:'B', label:'other', heads:'A', connect:'section' };
 const BASE = { who:'yona', step:3, view:'cards', ...LEAN, phone:false, many:false, top:true, request:true,
   part:'page', catalog:'short', loose:true, patterns:true, only:null, fsel:'all', bMenu:false, remember:false, netOpen:false, plug:null, net:false };
 const INST = {};
@@ -725,7 +728,17 @@ function topLines(v){
   return h;
 }
 function welcome(c){
-  return `<div class="welcome"><h3>Connect a board</h3>${connectButtons(c, true)}<span class="or">No board? <a href="#" data-act="noop">Try an example ↓</a></span></div>`;
+  return connectSection(c, true);
+}
+/** Q8 (converged): “Connect a board” as its own section, three square buttons.
+ *  The same section, the same buttons, whether or not you have boards. */
+function connectSection(c, fresh=false){
+  const net = c.netOpen ? `<div class="sqnet"><label>Board address</label><div class="row2"><input value="lp-7f3a.local" spellcheck="false"><button class="btn sm" data-act="netgo">Connect</button></div></div>` : '';
+  const hint = fresh ? `<span class="sqhint">No board? <a href="#" data-act="noop">Try an example ↓</a></span>` : '';
+  return sect('Connect a board') + `<div class="sqrow">
+    <button class="sq" data-act="plug" data-link="usb">${ic('usb')}<span>USB</span></button>
+    <button class="sq" data-act="plug" data-link="ble">${ic('ble')}<span>Bluetooth</span></button>
+    <button class="sq ${c.netOpen?'on':''}" data-act="netopen">${ic('net')}<span>Network</span></button>${net}${hint}</div>`;
 }
 function catalog(c, f){
   if (!c.catalog || !f.showCatalog) return '';
@@ -865,6 +878,7 @@ function page(c){
       const H = HEADS[c.heads];
       const slot = c.connect==='card' && c.fsel==='all' ? connectSlot(c) : '';
       if (on.length || slot) body += sect(H[0]) + block(v, c, on, slot);
+      if (c.connect==='section' && c.fsel==='all') body += connectSection(c);
       if (rest.length) body += sect(H[1]) + block(v, c, rest);
       if (c.loose && f.loose.length) body += sect(LABELS[c.label]) + looseBlock(v, c, f.loose);
       if (c.patterns && f.patterns.length) body += sect('Your patterns') + `<div class="b-patterns">${f.patterns.map(p=>`<span class="pchip" data-open="pattern" data-id="${p.id}"><span class="prev">${canvas(p.pat,'strip',{seed:4})}</span>${p.name}</span>`).join('')}</div>`;
@@ -904,36 +918,11 @@ function question(q, opts){
    The questions
    ===================================================================== */
 function buildQuestions(){
-  const q7cfg = { hero:'none', top:false, view:'list', loose:false, patterns:false, catalog:false, request:false, connect:'none' };
-  question('q7', {
-    A:{ name:'Online / Offline boards', lean:true, what:'“Online boards”, then “Offline boards”.',
-      pro:'says exactly what the page knows (the relay sees it, or it doesn’t), and the two read as a pair.', con:'“offline” can sound like a fault for a board that’s simply unplugged in a drawer.',
-      cfg:{ ...q7cfg, heads:'A' } },
-    B:{ name:'Running / Recent boards', what:'“Running boards”, then “Recent boards”.',
-      pro:'“running” is what you care about.', con:'claims something the page can’t see: a board with no network may be running fine, and it would sit under “Recent”.',
-      cfg:{ ...q7cfg, heads:'B' } },
-    C:{ name:'Online / Offline devices', what:'“Online devices”, then “Offline devices”.',
-      pro:'covers a desktop server later, which isn’t a board.', con:'the rest of the page says “board” (“Connect a board”); one noun is better than two.',
-      cfg:{ ...q7cfg, heads:'C' } },
-  });
-  const q8with = { label:'You have boards (no board connected in this tab)', h:760, cfg:{ only:null, hero:'stage', request:false, loose:false, patterns:false, catalog:false } };
-  const q8new = { label:'Brand new (phone)', h:760, cfg:{ who:'new', phone:true, catalog:'short' } };
-  const noLead = ['porch','garage','seanlr','fence','choker','seantree','truck'];
-  question('q8', {
-    A:{ name:'A card at the end of Online boards', lean:true, what:'A dashed “Connect a board” card after the last online board (a row in the list), with the three buttons in it. For a newcomer it’s the same thing, big.',
-      pro:'the add button sits where the new board will appear, like the old Devices page; it’s never mistaken for a filter.', con:'with many online boards it’s further down the page.',
-      cfg:{ connect:'card' }, layout:'phoneduo', renders:[ { ...q8with, cfg:{ ...q8with.cfg, only:noLead } }, q8new ] },
-    B:{ name:'Its own strip', what:'A labelled “Connect a board” row above the tabs.',
-      pro:'always in the same place, at the top.', con:'a full row on every visit for something you do now and then.',
-      cfg:{ connect:'strip' }, layout:'phoneduo', renders:[ { ...q8with, cfg:{ ...q8with.cfg, only:noLead } }, q8new ] },
-    C:{ name:'A Connect button in the top bar', what:'“+ Connect” in the top bar opens the three choices. Open here.',
-      pro:'takes no room on the page, and it’s there on every page, the editor included.', con:'one more click, and the three ways are hidden until you open it.',
-      cfg:{ connect:'top', connOpen:true }, layout:'phoneduo', renders:[ { ...q8with, cfg:{ ...q8with.cfg, only:noLead } }, { ...q8new, cfg:{ ...q8new.cfg, connOpen:false } } ] },
-  });
-  // reference states, phone width
-  document.getElementById('refo').innerHTML = ['signedout','sean'].map(w =>
-    `<div><p class="vlabel">${{signedout:'Signed out',sean:'Sean, one board'}[w]}</p><div class="crop fade" style="max-height:760px"><div class="app" id="ref-${w}"></div></div></div>`).join('');
-  ['signedout','sean'].forEach(w => mount(`ref-${w}`, { who:w, phone:true, catalog:'short' }));
+  // no open questions in this round; reference states at phone width
+  const refs = { new:'Brand new', signedout:'Signed out', sean:'Sean, one board' };
+  document.getElementById('refo').innerHTML = Object.keys(refs).map(w =>
+    `<div><p class="vlabel">${refs[w]}</p><div class="crop fade" style="max-height:760px"><div class="app" id="ref-${w}"></div></div></div>`).join('');
+  Object.keys(refs).forEach(w => mount(`ref-${w}`, { who:w, phone:true, catalog:'short' }));
 }
 
 /* =====================================================================
