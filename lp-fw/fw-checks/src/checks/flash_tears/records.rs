@@ -117,7 +117,7 @@ impl fmt::Display for InFlightRecord {
             "{{\"kind\":\"ft-sector\",\"latest\":{},\"sector\":{},\"role\":\"in-flight\",\"wrote\":{},\"verdict\":\"{}\",\
              \"weak_bits\":{},\"weak_bytes\":{},\"old_zero_bits\":{},\"remaining_old_zeros\":{},\"weak_at_old_zeros\":{},\
              \"new_zero_bits\":{},\"landed_new_zeros\":{},\"weak_at_new_zeros\":{},\"ff_bytes\":{},\
-             \"leading_ff_bytes\":{},\"trailing_ff_bytes\":{},\"page_remaining\":{},\"page_landed\":{},\"page_weak\":{},\"program\":",
+             \"leading_ff_bytes\":{},\"trailing_ff_bytes\":{},\"zero_bytes\":{},\"leading_zero_bytes\":{},\"page_remaining\":{},\"page_landed\":{},\"page_weak\":{},\"program\":",
             self.latest,
             self.sector,
             self.latest,
@@ -133,6 +133,8 @@ impl fmt::Display for InFlightRecord {
             s.ff_bytes,
             s.leading_ff_bytes,
             s.trailing_ff_bytes,
+            s.zero_bytes,
+            s.leading_zero_bytes,
             Arr(&s.page_remaining),
             Arr(&s.page_landed),
             Arr(&s.page_weak),

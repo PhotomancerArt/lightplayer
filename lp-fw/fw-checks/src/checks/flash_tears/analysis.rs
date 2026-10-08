@@ -215,6 +215,14 @@ pub struct InFlight {
     pub leading_ff_bytes: u32,
     /// Bytes back from the end that read `0xFF` on every read.
     pub trailing_ff_bytes: u32,
+    /// Bytes that read `0x00` on every read.
+    pub zero_bytes: u32,
+    /// Bytes from offset 0 that read `0x00` on every read. Old and new are
+    /// complements, so `old & new` is `0x00`: a sector zeroed from the front
+    /// is either the part's own pre-program before an erase or a program
+    /// landing on cells the erase never cleared, and only where the zero run
+    /// stops (a 32-byte command boundary, or anywhere) tells the two apart.
+    pub leading_zero_bytes: u32,
     /// Per program page: old zeros remaining.
     pub page_remaining: [u16; PAGES_PER_SECTOR],
     /// Per program page: new zeros landed.
@@ -243,12 +251,15 @@ pub fn analyze_in_flight(and: &[u8], or: &[u8], old: &[u8], new: &[u8]) -> InFli
         ff_bytes: 0,
         leading_ff_bytes: 0,
         trailing_ff_bytes: 0,
+        zero_bytes: 0,
+        leading_zero_bytes: 0,
         page_remaining: [0; PAGES_PER_SECTOR],
         page_landed: [0; PAGES_PER_SECTOR],
         page_weak: [0; PAGES_PER_SECTOR],
         program: None,
     };
     let mut leading = true;
+    let mut leading_zero = true;
     for i in 0..SECTOR_SIZE {
         let weak = and[i] ^ or[i];
         // `or` is 0 only where every read was 0: a stable zero.
@@ -269,6 +280,13 @@ pub fn analyze_in_flight(and: &[u8], or: &[u8], old: &[u8], new: &[u8]) -> InFli
         f.page_remaining[page] += remaining as u16;
         f.page_landed[page] += landed as u16;
         f.page_weak[page] += weak.count_ones() as u16;
+        let zero = or[i] == 0x00;
+        f.zero_bytes += u32::from(zero);
+        if leading_zero && zero {
+            f.leading_zero_bytes += 1;
+        } else {
+            leading_zero = false;
+        }
         let ff = weak == 0 && and[i] == 0xFF;
         f.ff_bytes += u32::from(ff);
         if leading && ff {
@@ -418,6 +436,12 @@ mod tests {
         assert_eq!(f.leading_ff_bytes, 2048);
         assert_eq!(f.page_remaining[0], 0);
         assert!(f.page_remaining[15] > 0);
+        // Zeroed from the front: old zeros and new zeros at once.
+        let mut v = old;
+        v[..1000].fill(0x00);
+        let f = one_read(&v);
+        assert_eq!(f.verdict, Verdict::Mixed);
+        assert!(f.leading_zero_bytes >= 1000);
         // An old zero and a new zero at once is neither phase.
         let mut v = old;
         let i = (0..SECTOR_SIZE).find(|&i| new[i] != 0xFF).unwrap();
