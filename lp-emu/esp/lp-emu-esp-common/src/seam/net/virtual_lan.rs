@@ -339,6 +339,13 @@ impl VirtualLan {
         self.gateway.forward(host, mac, port)
     }
 
+    /// Carry `name` beyond the LAN to `to` on the host (a board dials it
+    /// on `port`): its uplink ([`super::LanUplink`]). Returns the address
+    /// the name resolves to on the LAN.
+    pub fn uplink(&mut self, name: &str, port: u16, to: SocketAddr) -> io::Result<Ipv4Addr> {
+        self.gateway.uplink(name, port, to)
+    }
+
     pub fn gateway(&self) -> &LanGateway {
         &self.gateway
     }

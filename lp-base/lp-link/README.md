@@ -27,9 +27,12 @@ and the emulator tools run the same crate.
 >
 > **The `secure` feature** (Noise NNpsk0 inside the SYN, then every frame
 > sealed; [Secure links](#secure-links)) is built and proven against `snow`,
-> the simulator, the fuzzer and a host end-to-end login test, and **off on
-> every product link** until the Wi-Fi milestones (M6's LAN WebSocket is the
-> first). Its decision is `docs/adr/2026-10-01-network-link-security.md`.
+> the simulator, the fuzzer and a host end-to-end login test, and **on for the
+> C6's network links** (M6's LAN WebSocket, and the cloud relay's routes, which
+> carry the same `ws()` link as one binary relay `Frame` per lp-link frame
+> through lightplayer.app, which reads none of them); off on every other
+> product link. Its decision is `docs/adr/2026-10-01-network-link-security.md`
+> and the relay's is `docs/adr/2026-10-06-cloud-relay.md`.
 
 ## Why it exists
 
@@ -77,6 +80,13 @@ wire's messages over channel 1 lives at each edge:
   transport and sharing its `FRAME_BUF` lease for any reply too big for the
   send ring). Behind `fw-esp32-common`'s `radio-link` feature, pulled in by
   `fw-esp32c6`'s `ble` feature (which also brings up the BT stack itself).
+- **Board, Wi-Fi (C6 only):** the same `radio_link/` port, whose **network
+  slot** (`NETWORK_LINK_SLOTS = 1`) holds one secure `ws()` link — a LAN
+  WebSocket from `fw-esp32c6/src/net/lan_endpoint_task.rs`, or a route on the
+  cloud relay's device leg from `net/relay/` (`relay_task.rs` on the chip, one
+  relay `Frame` per lp-link frame). Behind `fw-esp32-common`'s `wifi`
+  feature; a newcomer on the other path takes the slot only with the
+  holder's own key (`docs/adr/2026-10-06-cloud-relay.md`, "Device side").
 - **Native host:** `lpc_wire::WireLinkPort` — the one type every native
   reader drives (a real serial port, `serial:tcp`, `serial:ws`, the fake
   board double). `lpa-client`'s `transport_serial/link_pump.rs` and `lp-cli`'s
@@ -196,7 +206,11 @@ sequence space is future work if a measurement ever calls for it).
    use: one frame per WebSocket message, the `secure` channel on, and
    selective-repeat ARQ with a window of 2, acks every 2 frames and a 200 ms
    resend floor (TCP already delivers, and the hosts' `WireLinkPort` speaks
-   selective-repeat; `docs/adr/2026-10-07-c6-wifi-link.md`). A preset is what a **host** runs; a board takes its own cut of one
+   selective-repeat; `docs/adr/2026-10-07-c6-wifi-link.md`). **The cloud relay carries the same
+   link unchanged**: through lightplayer.app one lp-link frame is one binary
+   WebSocket message on the browser's leg and one relay `Frame` (a 3-byte route
+   header and the frame) on the board's, and no timeout was changed for the
+   longer round trip (`docs/adr/2026-10-06-cloud-relay.md`). A preset is what a **host** runs; a board takes its own cut of one
    (the C6's `UsbLinkShared::config`, the classic's
    `uart_board_link_config`), smaller buffers and a slower resend floor,
    because a host queues upload-sized requests through `send()` and a board

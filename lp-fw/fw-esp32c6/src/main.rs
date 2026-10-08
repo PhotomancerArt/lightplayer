@@ -791,18 +791,37 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     {
         let file = lpa_server::network_store::read_network_file(base_fs.as_ref());
         net::station_probes::boot_settings(&file);
+        // The relay's account entries, from the device store (Wi-Fi relay
+        // plan P8); changes arrive through the server's `AccessChanged`.
+        net::relay_probes::boot_access(&lpa_server::access_store::device_store_at_boot(
+            base_fs.as_ref(),
+            fs_boot_state,
+        ));
         log::info!(
-            "[wifi] {} network(s) saved, Wi-Fi {}",
+            "[wifi] {} network(s) saved, Wi-Fi {}, Cloud relay {}",
             file.networks.len(),
-            if file.wifi { "on" } else { "off" }
+            if file.wifi { "on" } else { "off" },
+            if file.cloud_relay { "on" } else { "off" }
         );
+        if net::relay_task::relay_host_overridden() {
+            esp_println::println!(
+                "[INIT] desk image: the relay is {}:{} (LP_RELAY_HOST), not lightplayer.app",
+                net::relay_task::RELAY_HOST,
+                net::relay_task::relay_port()
+            );
+        }
         if let Some((controller, station)) = net_radio {
-            let host = fw_esp32_common::net::mdns::mdns_host(net::net_thread::base_mac());
+            let mac = net::net_thread::base_mac();
+            let host = fw_esp32_common::net::mdns::mdns_host(mac);
             let seed = (u64::from(esp_hal::rng::Rng::new().random()) << 32)
                 | u64::from(esp_hal::rng::Rng::new().random());
             // A board that will join allocates its socket buffers now.
             let will_join = file.wifi && !file.networks.is_empty();
-            net::net_thread::start(controller, station, host, seed, lan_port, will_join);
+            let relay = net::relay_task::relay_config(
+                mac,
+                lpa_server::device_identity::read_device_name(base_fs.as_ref()),
+            );
+            net::net_thread::start(controller, station, host, seed, lan_port, will_join, relay);
         }
     }
     #[cfg(all(
@@ -980,6 +999,9 @@ fn lp_engine_entry(core: CoreBoot) {
         server.set_scan_probe(Some(net::station_probes::scan_probe));
         server.set_last_attempt_probe(Some(net::station_probes::last_attempt_probe));
         server.set_network_changed(Some(net::station_probes::network_changed));
+        // The relay's probe and its account entries' hook (Wi-Fi relay P8).
+        server.set_relay_probe(Some(net::relay_probes::relay_probe));
+        server.set_access_changed(Some(net::relay_probes::access_changed));
     }
     // With the link on its own thread, answer a tick's requests before its
     // render: the replies then go out while the frame renders (`io_thread`).

@@ -125,6 +125,10 @@ impl Registry {
                     "lan": b.lan.as_ref().map(|l| l.name.clone()),
                     "forward": b.lan.as_ref().map(|l| l.forward_spec()),
                     "address": b.lan.as_ref().and_then(|l| l.address()).map(|ip| ip.to_string()),
+                    // Its LAN's uplinks (`[[uplink]]` in the fixture):
+                    // `lightplayer.app:80 → 127.0.0.1:2812`, the hosts a board
+                    // there reaches by name. Empty on no served LAN.
+                    "uplinks": b.lan.as_ref().map_or_else(Vec::new, |l| l.uplinks()),
                 })
             })
             .collect();

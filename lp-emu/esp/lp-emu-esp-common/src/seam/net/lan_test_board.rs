@@ -24,15 +24,25 @@ use super::virtual_lan::{VirtualLan, net_pacer_config};
 
 pub const QUANTUM: Cycles = 16_000;
 
+/// The port the stand-in asks DNS questions from.
+const DNS_CLIENT_PORT: u16 = 5300;
+
 pub struct TestBoard {
     pub endpoint: SeamEndpoint,
     pub mac: [u8; 6],
     pub name: String,
     pub ip: Option<Ipv4Addr>,
+    /// The DNS server DHCP named, if it named one.
+    pub dns_server: Option<Ipv4Addr>,
     stack: LanStack,
     dhcp: SocketHandle,
     echo: SocketHandle,
     mdns: SocketHandle,
+    /// A UDP socket for DNS questions (`ask_dns`), and the replies heard.
+    dns: SocketHandle,
+    pub dns_replies: Vec<Vec<u8>>,
+    /// A TCP connection the board dialled out (`dial`).
+    client: Option<SocketHandle>,
 }
 
 impl TestBoard {
@@ -63,15 +73,76 @@ impl TestBoard {
         );
         mdns_socket.bind(MDNS_PORT).unwrap();
         let mdns = stack.sockets.add(mdns_socket);
+        let mut dns_socket = udp::Socket::new(
+            udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 4], vec![0; 2048]),
+            udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 4], vec![0; 2048]),
+        );
+        dns_socket.bind(DNS_CLIENT_PORT).unwrap();
+        let dns = stack.sockets.add(dns_socket);
         Self {
             endpoint: SeamEndpoint::new(id, 1, config),
             mac,
             name: name.to_string(),
             ip: None,
+            dns_server: None,
             stack,
             dhcp,
             echo,
             mdns,
+            dns,
+            dns_replies: Vec::new(),
+            client: None,
+        }
+    }
+
+    /// Ask the DNS server DHCP named for `name`'s A record.
+    pub fn ask_dns(&mut self, name: &str) {
+        let server = self.dns_server.expect("DHCP named a DNS server");
+        let query = lan_dns::encode_query(name, TYPE_A);
+        let to = IpEndpoint::new(IpAddress::Ipv4(server), 53);
+        self.stack
+            .sockets
+            .get_mut::<udp::Socket>(self.dns)
+            .send_slice(&query, to)
+            .unwrap();
+    }
+
+    /// Open a TCP connection to `ip:port` (through the default route when
+    /// it is off the /24).
+    pub fn dial(&mut self, ip: Ipv4Addr, port: u16) {
+        let mut socket = tcp::Socket::new(
+            tcp::SocketBuffer::new(vec![0; 4096]),
+            tcp::SocketBuffer::new(vec![0; 4096]),
+        );
+        socket
+            .connect(
+                self.stack.iface.context(),
+                (IpAddress::Ipv4(ip), port),
+                50_000,
+            )
+            .unwrap();
+        self.client = Some(self.stack.sockets.add(socket));
+    }
+
+    /// Send on the dialled connection what it will take now.
+    pub fn client_send(&mut self, bytes: &[u8]) -> usize {
+        let handle = self.client.expect("dialled");
+        let socket = self.stack.sockets.get_mut::<tcp::Socket>(handle);
+        if socket.can_send() {
+            socket.send_slice(bytes).unwrap_or(0)
+        } else {
+            0
+        }
+    }
+
+    /// What the dialled connection has received.
+    pub fn client_recv(&mut self) -> Vec<u8> {
+        let handle = self.client.expect("dialled");
+        let socket = self.stack.sockets.get_mut::<tcp::Socket>(handle);
+        let mut buf = [0u8; 4096];
+        match socket.recv_slice(&mut buf) {
+            Ok(n) => buf[..n].to_vec(),
+            Err(_) => Vec::new(),
         }
     }
 
@@ -104,7 +175,10 @@ impl TestBoard {
             .get_mut::<dhcpv4::Socket>(self.dhcp)
             .poll()
         {
-            Some(dhcpv4::Event::Configured(c)) => Some((c.address, c.router)),
+            Some(dhcpv4::Event::Configured(c)) => {
+                self.dns_server = c.dns_servers.first().copied();
+                Some((c.address, c.router))
+            }
             _ => None,
         };
         if let Some((address, router)) = configured {
@@ -142,6 +216,11 @@ impl TestBoard {
                 let to = IpEndpoint::new(IpAddress::Ipv4(MDNS_GROUP), MDNS_PORT);
                 socket.send_slice(&reply, to).unwrap();
             }
+        }
+
+        let socket = self.stack.sockets.get_mut::<udp::Socket>(self.dns);
+        while let Ok((n, _)) = socket.recv_slice(&mut buf) {
+            self.dns_replies.push(buf[..n].to_vec());
         }
 
         out.extend(self.stack.poll(now));

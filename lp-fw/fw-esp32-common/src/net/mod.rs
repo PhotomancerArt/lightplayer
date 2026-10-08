@@ -19,7 +19,9 @@ pub mod host_lan_harness;
 pub mod join_choice;
 pub mod mdns;
 pub mod net_frame_device;
+pub mod network_challenge;
 pub mod radio_rule;
+pub mod relay;
 pub mod scan_cache;
 // The network seam's adapters (`net=lan`): RISC-V only, like the seam calls
 // they make, and in host unit tests (where every call answers as silicon).
@@ -32,6 +34,7 @@ pub mod station_board;
 pub mod station_control;
 pub mod station_policy;
 pub mod station_settings;
+pub mod try_zeroed_bytes;
 pub mod ws;
 
 pub use join_choice::{JoinChoice, choose};
@@ -46,3 +49,4 @@ pub use station_board::StationBoard;
 pub use station_control::{ConnectOutcome, StationControl};
 pub use station_policy::{StationAction, StationEvent, StationPolicy};
 pub use station_settings::{SavedNetwork, StationSettings, secret_tag};
+pub use try_zeroed_bytes::try_zeroed_bytes;

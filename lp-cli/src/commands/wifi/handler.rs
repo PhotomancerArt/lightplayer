@@ -12,8 +12,8 @@ use lpa_client::{ClientError, HostSpecifier, LpClient};
 use lpc_access::NetworkFileError;
 use lpc_wire::WifiPassword;
 use lpc_wire::server::{
-    ConnectStep, LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo, StationFailure,
-    StationState,
+    ConnectStep, LastAttempt, NetworkScan, NetworkStatus, RelayRefusal, RelayState,
+    SavedNetworkInfo, StationFailure, StationState,
 };
 
 use lpa_client::transport_lan::LanError;
@@ -207,7 +207,7 @@ fn password_for(args: &AddArgs) -> Result<WifiPassword> {
 }
 
 /// The status in plain words: the switches, one line per saved network,
-/// the station.
+/// the station, the cloud relay.
 pub fn status_lines(status: &NetworkStatus) -> Vec<String> {
     let mut lines = vec![
         format!("wifi: {}", on_off(status.wifi)),
@@ -218,7 +218,37 @@ pub fn status_lines(status: &NetworkStatus) -> Vec<String> {
     }
     lines.extend(status.networks.iter().map(network_line));
     lines.push(format!("station: {}", station_words(&status.station)));
+    let joined = matches!(status.station, StationState::Connected { .. });
+    lines.push(format!("relay: {}", relay_words(status.relay, joined)));
     lines
+}
+
+/// The cloud relay's state in the words Studio's Wi-Fi popover uses
+/// (`lpa-studio-core`'s `wifi_words::relay`), lower-cased for a line. Not
+/// reaching lightplayer.app is "no internet" only once the station is
+/// `joined`; before that the board is waiting for its network.
+fn relay_words(relay: RelayState, joined: bool) -> &'static str {
+    match relay {
+        RelayState::Off => "off",
+        RelayState::NoAccount => {
+            "no account key — sign in to Studio and plug this board in once to use lightplayer.app"
+        }
+        RelayState::WaitingForInternet if joined => {
+            "connected, no internet — lightplayer.app didn't answer"
+        }
+        RelayState::WaitingForInternet => "waiting for a network",
+        RelayState::Connecting => "reaching lightplayer.app…",
+        RelayState::Connected => "connected to lightplayer.app",
+        RelayState::Refused {
+            reason: RelayRefusal::UnknownAccount,
+        } => "refused — plug this board into Studio once to refresh its account",
+        RelayState::Refused {
+            reason: RelayRefusal::UpdateFirmware,
+        } => "refused — update this board's firmware to use lightplayer.app",
+        RelayState::Refused {
+            reason: RelayRefusal::Busy,
+        } => "lightplayer.app is busy; the board tries again by itself",
+    }
 }
 
 /// A scan in plain words, one line per network heard.
@@ -333,6 +363,7 @@ mod tests {
                 },
             ],
             station: StationState::Unsupported,
+            relay: RelayState::Off,
         };
         assert_eq!(
             status_lines(&status),
@@ -342,8 +373,66 @@ mod tests {
                 "network: lp-walk-net (password set)",
                 "network: lp-back-office (open, hidden, wrong password)",
                 "station: this firmware can't connect to Wi-Fi yet",
+                "relay: off",
             ]
         );
+    }
+
+    #[test]
+    fn every_relay_state_reads_in_plain_words() {
+        let mut status = NetworkStatus {
+            wifi: true,
+            cloud_relay: true,
+            networks: Vec::new(),
+            station: StationState::NotConnected,
+            relay: RelayState::WaitingForInternet,
+        };
+        assert_eq!(
+            status_lines(&status).last().map(String::as_str),
+            Some("relay: waiting for a network"),
+            "not reaching lightplayer.app is no internet only once joined"
+        );
+        status.station = StationState::Connected {
+            ssid: String::from("lp-walk-net"),
+            ip: String::from("10.0.0.7"),
+            rssi: -48,
+            host: String::from("lp-8e30.local"),
+        };
+        let cases = [
+            (RelayState::Connecting, "relay: reaching lightplayer.app…"),
+            (RelayState::Connected, "relay: connected to lightplayer.app"),
+            (
+                RelayState::WaitingForInternet,
+                "relay: connected, no internet — lightplayer.app didn't answer",
+            ),
+            (
+                RelayState::NoAccount,
+                "relay: no account key — sign in to Studio and plug this board in once to use \
+                 lightplayer.app",
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::UnknownAccount,
+                },
+                "relay: refused — plug this board into Studio once to refresh its account",
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::UpdateFirmware,
+                },
+                "relay: refused — update this board's firmware to use lightplayer.app",
+            ),
+            (
+                RelayState::Refused {
+                    reason: RelayRefusal::Busy,
+                },
+                "relay: lightplayer.app is busy; the board tries again by itself",
+            ),
+        ];
+        for (relay, line) in cases {
+            status.relay = relay;
+            assert_eq!(status_lines(&status).last().map(String::as_str), Some(line));
+        }
     }
 
     #[test]
@@ -353,6 +442,7 @@ mod tests {
             cloud_relay: false,
             networks: Vec::new(),
             station: StationState::Off,
+            relay: RelayState::Off,
         };
         assert_eq!(
             status_lines(&status),
@@ -360,7 +450,8 @@ mod tests {
                 "wifi: off",
                 "cloud relay: off",
                 "networks: none saved",
-                "station: off"
+                "station: off",
+                "relay: off"
             ]
         );
         let cases = [

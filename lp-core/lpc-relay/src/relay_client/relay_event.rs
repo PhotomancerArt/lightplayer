@@ -33,8 +33,13 @@ pub enum RelayEvent<'a> {
     Heard,
     /// The board's link on `route` has a frame to send.
     RouteSend { route: u16, bytes: &'a [u8] },
-    /// The board closes `route` (its session ended).
-    RouteClose { route: u16 },
+    /// The board closes `route`, for `reason`: `Normal` when its session
+    /// ended, `Busy` when the board turned a newcomer away (the C6's one
+    /// network session is held).
+    RouteClose {
+        route: u16,
+        reason: crate::RouteCloseReason,
+    },
     /// Time passed; deadlines are checked against `now_ms`.
     Tick,
 }

@@ -1,5 +1,5 @@
 //! The seam between the network edges (the chip crate's BLE task, and with
-//! feature `wifi` its LAN endpoint) and the link mux
+//! feature `wifi` its LAN endpoint and the relay driver) and the link mux
 //! ([`super::LinkMuxTransport`]): one lp-link [`Link`] per open link, and
 //! the rules for sharing it.
 //!
@@ -7,33 +7,45 @@
 //! stack — see the seam rules in `Cargo.toml`), so the two halves meet here:
 //!
 //! - **Slots.** The first [`RADIO_LINK_SLOTS`] slots are Bluetooth's, the
-//!   next [`LAN_LINK_SLOTS`] the LAN's (feature `wifi`; plan
-//!   `lp2025/2026-10-05-1903-wifi-link-c6`: one LAN link, separate from
-//!   Bluetooth's two). A Bluetooth link is
-//!   [`LinkTrust::Untrusted`]; a LAN link is a secure lp-link responder,
-//!   [`LinkTrust::Keyed`] — its handshake's key decides its tier
-//!   ([`RadioLinkSlot::trust`]).
+//!   next [`NETWORK_LINK_SLOTS`] the network's (feature `wifi`): one secure
+//!   session the LAN endpoint and the cloud relay take turns at (Wi-Fi relay
+//!   plan D2). A Bluetooth link is [`LinkTrust::Untrusted`]; a network link
+//!   is a secure lp-link responder, [`LinkTrust::Keyed`] on the LAN and
+//!   [`LinkTrust::Relayed`] through the relay — its handshake's key decides
+//!   its tier. Each link records its trust and the edge serving it
+//!   ([`SlotEdge`]).
 //! - **Mode.** The boot decides once what its Bluetooth links are for
 //!   ([`RadioLinkPort::decide_mode`]: serving the wire, or taking an update
 //!   in core-only — [`super::radio_link_mode`]). No Bluetooth link opens
 //!   before that ([`OpenRefused::ModeUndecided`]); the BLE task waits for it
-//!   ([`RadioLinkPort::wait_for_mode`]). A LAN link has one configuration
-//!   whatever the mode.
+//!   ([`RadioLinkPort::wait_for_mode`]). A network link has one
+//!   configuration whatever the mode.
 //! - **Links.** The edge mints a [`LinkId`] per connection
 //!   ([`RadioLinkPort::mint_link`]: monotonic, never reused, never
 //!   [`LinkId::PRIMARY`]). Once it can deliver frames, it opens the
 //!   connection's lp-link session on its slot ([`RadioLinkPort::open`],
 //!   sized to the connection's ATT MTU and configured for the boot's mode;
-//!   [`RadioLinkSlot::open_lan`] for a LAN link) and announces it with
-//!   [`RadioLinkEvent::Opened`]; when the connection is gone it closes the
-//!   slot ([`RadioLinkSlot::close`], which frees the link) and announces
+//!   [`RadioLinkSlot::open_network`] for a network link) and announces it
+//!   with [`RadioLinkEvent::Opened`]; when the connection is gone it closes
+//!   the slot ([`RadioLinkSlot::close`], or [`RadioLinkSlot::close_link`] on
+//!   the network slot, which frees only its own link) and announces
 //!   [`RadioLinkEvent::Closed`].
+//! - **A busy network slot.** A connection that finds the network slot
+//!   held parks its first frame ([`RadioLinkSlot::park_challenge`]) and
+//!   announces [`RadioLinkEvent::Challenged`]; the mux takes the slot from
+//!   the holder only for a handshake that proves the holder's own key
+//!   ([`super::parked_handshake`]), and answers through
+//!   [`RadioLinkSlot::verdict`]. A granted newcomer opens with
+//!   [`RadioLinkSlot::take_over`].
 //! - **Frames.** One lp-link frame is one datagram (Datagram framing): one
-//!   ATT operation on Bluetooth, one binary WebSocket message on the LAN.
-//!   Each received frame goes to [`RadioLinkSlot::on_datagram`] whole, and
-//!   each frame [`RadioLinkSlot::poll_frame`] hands out is sent as one. The
-//!   edge runs the link's timers ([`RadioLinkSlot::poll_timeout`]) and wakes
-//!   on the mux's doorbell.
+//!   ATT operation on Bluetooth, one binary WebSocket message on the LAN,
+//!   one relay `Frame` on a route. Each received frame goes to
+//!   [`RadioLinkSlot::on_datagram`] whole, and each frame
+//!   [`RadioLinkSlot::poll_frame`] hands out is sent as one. The edge runs
+//!   the link's timers ([`RadioLinkSlot::poll_timeout`]) and wakes on the
+//!   mux's doorbell. On the network slot every one of these is asked by
+//!   link id (`*_for`), so an edge whose link was taken over never touches
+//!   its successor's.
 //! - **Messages.** The mux takes whole wire messages off the link and queues
 //!   replies onto it (`with_link`, crate-internal); core-only takes the
 //!   link's events itself ([`RadioLinkSlot::recv`]). Channel 3, the update
@@ -45,17 +57,18 @@
 //!   slot's link has one in flight ([`RadioLinkSlot::external_in_flight`]) no
 //!   one may serialize into that buffer; the edge signals when it stops
 //!   ([`RadioLinkSlot::released`]).
-//! - **Close.** The mux asks the edge to drop a link (the login deadline, a
-//!   reply the peer did not take in time, a secure session that reset) with
-//!   [`RadioLinkSlot::request_close`]; the edge disconnects and reports
-//!   [`RadioLinkEvent::Closed`] as for any other disconnect.
+//! - **Close.** The mux drops a link and asks its edge to disconnect (the
+//!   login deadline, a reply the peer did not take in time, a secure session
+//!   that reset, a takeover) with `revoke`, addressed to the edge that
+//!   served it; the edge disconnects and reports [`RadioLinkEvent::Closed`]
+//!   as for any other disconnect.
 //!
 //! **The lock, and the frame lease across threads.** Every borrow of a
 //! slot's link is taken inside one synchronous call and dropped before any
 //! `.await`. With Bluetooth alone everything runs on the one thread
 //! executor, so a plain [`RefCell`] is the whole lock ([`RadioLinkPort::leak`]).
-//! A LAN link is served from another thread (`lp-net` on the C6) while the
-//! mux runs on the main one, so a port with LAN slots is made with
+//! A network link is served from another thread (`lp-net` on the C6) while
+//! the mux runs on the main one, so a port with network slots is made with
 //! [`RadioLinkPort::leak_locked`] and every borrow — including the copy of
 //! a frame out of the shared frame buffer in [`RadioLinkSlot::poll_frame`],
 //! and every check and change of what the link has in flight — happens
@@ -82,8 +95,11 @@ use lp_link::{
 };
 use lpc_shared::transport::{Link, LinkId, LinkTrust};
 
+#[cfg(feature = "wifi")]
+use super::parked_handshake::{ChallengeVerdict, Msg1, ParkRefused, ParkedHandshake};
 use super::radio_link_config::{MtuTooSmall, SMALL_REPLY_BYTES, radio_link_config};
 use super::radio_link_mode::RadioLinkMode;
+use super::slot_edge::SlotEdge;
 use crate::update_send::UpdateSend;
 
 /// How many Bluetooth links can be open at once. The BLE task accepts at
@@ -92,32 +108,35 @@ use crate::update_send::UpdateSend;
 /// the connection-task pool all follow this one constant.
 pub const RADIO_LINK_SLOTS: usize = 2;
 
-/// How many LAN links can be open at once, separate from Bluetooth's. Zero
-/// without feature `wifi`.
+/// How many network links (the LAN's and the relay's, together) can be
+/// open at once, separate from Bluetooth's. Zero without feature `wifi`.
 ///
-/// One, not the plan's two (A2: Studio plus lp-cli). An open secure LAN
+/// One, not the plan's two (A2: Studio plus lp-cli). An open secure network
 /// link holds about 14 KB (its session and its connection), and on the
 /// emulated C6 two open while a project loads either refused the
 /// post-deploy read (free 47,692 B, largest block 14,724 B) or, at the
 /// first cut's window of 4, ran the shader compile out of memory and reset
 /// the board. One slot and its boot buffers left the same upload passing
 /// every time, with 67,216 B free and an 18,148 B block while the link
-/// stayed open (PR B's memory gate; `lp-emu:esp32c6:t1+net=lan`).
+/// stayed open (PR B's memory gate; `lp-emu:esp32c6:t1+net=lan`). The
+/// relay shares it (Wi-Fi relay plan D2): one network session, whichever
+/// path it came by.
 #[cfg(feature = "wifi")]
-pub const LAN_LINK_SLOTS: usize = 1;
-/// How many LAN links can be open at once. Zero without feature `wifi`.
+pub const NETWORK_LINK_SLOTS: usize = 1;
+/// How many network links can be open at once. Zero without feature `wifi`.
 #[cfg(not(feature = "wifi"))]
-pub const LAN_LINK_SLOTS: usize = 0;
+pub const NETWORK_LINK_SLOTS: usize = 0;
 
-/// Every slot: Bluetooth's first, then the LAN's.
-pub const LINK_SLOTS: usize = RADIO_LINK_SLOTS + LAN_LINK_SLOTS;
+/// Every slot: Bluetooth's first, then the network's.
+pub const LINK_SLOTS: usize = RADIO_LINK_SLOTS + NETWORK_LINK_SLOTS;
 
-/// Opened/closed notices. Two per slot outstanding is the worst case the
-/// edges can produce before the server loop drains them.
-const EVENT_DEPTH: usize = 2 * LINK_SLOTS + 2;
+/// Opened/closed/challenged notices. Two per slot outstanding is the worst
+/// case the edges can produce before the server loop drains them, and the
+/// network slot's challenger adds two more.
+const EVENT_DEPTH: usize = 2 * LINK_SLOTS + 4;
 
-/// The cross-thread lock a port with LAN slots takes around every borrow:
-/// it runs the closure with the other thread kept out.
+/// The cross-thread lock a port with network slots takes around every
+/// borrow: it runs the closure with the other thread kept out.
 pub type PortLock = fn(&mut dyn FnMut());
 
 /// A link's lifecycle, as its edge reports it.
@@ -128,11 +147,24 @@ pub enum RadioLinkEvent {
     Opened { link: LinkId, slot: usize },
     /// `link` is gone (disconnected, or closed at the mux's request).
     Closed { link: LinkId },
+    /// `link` found the network `slot` held and parked its first frame
+    /// there: the mux decides whether it takes the slot over
+    /// ([`RadioLinkSlot::verdict`]).
+    Challenged { link: LinkId, slot: usize },
 }
 
 /// Why the mux closed a link: a fixed phrase for the log line.
 pub type CloseReason = &'static str;
 
+/// The network slot is held (or reserved for a granted newcomer): the
+/// caller parks a challenge instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SlotHeld;
+
+/// The slot no longer holds the asking edge's link: it was closed by the
+/// mux, or taken over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotHeld;
 /// Why a slot did not open a link.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenRefused {
@@ -148,55 +180,77 @@ pub enum OpenRefused {
 struct SlotLink {
     id: LinkId,
     link: LpLink<SelectiveRepeat>,
+    /// What the server trusts this link as.
+    trust: LinkTrust,
+    /// Who serves it.
+    edge: SlotEdge,
+}
+
+/// Everything about a slot that the lock guards.
+struct SlotState {
+    /// Boxed: an idle slot costs a pointer, not a whole `Link` struct (the
+    /// port is on the heap of every radio image, connected or not).
+    link: Option<Box<SlotLink>>,
+    /// A newcomer's first frame while the network slot is held.
+    #[cfg(feature = "wifi")]
+    parked: ParkedHandshake,
 }
 
 /// One connection slot: its link, and the signals both halves wait on.
 pub struct RadioLinkSlot {
-    /// Boxed: an idle slot costs a pointer, not a whole `Link` struct (the
-    /// port is on the heap of every radio image, connected or not).
-    link: RefCell<Option<Box<SlotLink>>>,
-    /// What a link on this slot is trusted as.
+    state: RefCell<SlotState>,
+    /// What a link opened on this slot without a trust of its own is
+    /// trusted as (a Bluetooth link: untrusted; a LAN link: keyed).
     trust: LinkTrust,
-    /// Taken around every borrow of `link` (see the module docs).
+    /// Taken around every borrow of `state` (see the module docs).
     lock: Option<PortLock>,
-    /// Mux → edge: something was queued; transmit now rather than at the
-    /// link's next timer.
-    doorbell: Signal<CriticalSectionRawMutex, ()>,
+    /// Mux → edge, one per [`SlotEdge`]: something was queued; transmit now
+    /// rather than at the link's next timer.
+    doorbell: [Signal<CriticalSectionRawMutex, ()>; SlotEdge::COUNT],
     /// Edge → mux: this slot's link is no longer reading the frame buffer
     /// (possibly stale: the mux checks again).
     released: Signal<CriticalSectionRawMutex, ()>,
-    close_request: Signal<CriticalSectionRawMutex, CloseReason>,
+    /// Mux → edge, one per [`SlotEdge`]: drop your link.
+    close_request: [Signal<CriticalSectionRawMutex, CloseReason>; SlotEdge::COUNT],
+    /// Mux → the parked newcomer's edge: its verdict.
+    #[cfg(feature = "wifi")]
+    verdict: Signal<CriticalSectionRawMutex, ChallengeVerdict>,
 }
 
 impl RadioLinkSlot {
     const fn new(trust: LinkTrust, lock: Option<PortLock>) -> Self {
         Self {
-            link: RefCell::new(None),
+            state: RefCell::new(SlotState {
+                link: None,
+                #[cfg(feature = "wifi")]
+                parked: ParkedHandshake::new(),
+            }),
             trust,
             lock,
-            doorbell: Signal::new(),
+            doorbell: [const { Signal::new() }; SlotEdge::COUNT],
             released: Signal::new(),
-            close_request: Signal::new(),
+            close_request: [const { Signal::new() }; SlotEdge::COUNT],
+            #[cfg(feature = "wifi")]
+            verdict: Signal::new(),
         }
     }
 
-    /// What a link on this slot is trusted as: a Bluetooth link is
-    /// untrusted, a LAN link keyed (its secure handshake's key decides).
+    /// What a link on this slot is trusted as by default: a Bluetooth link
+    /// is untrusted, a network link keyed (a relayed one says so itself).
     pub fn trust(&self) -> LinkTrust {
         self.trust
     }
 
-    /// Run `f` on the slot's link cell, under the port's lock when it has
-    /// one.
-    fn guarded<R>(&self, f: impl FnOnce(&mut Option<Box<SlotLink>>) -> R) -> R {
+    /// Run `f` on the slot's state, under the port's lock when it has one.
+    fn guarded<R>(&self, f: impl FnOnce(&mut SlotState) -> R) -> R {
         match self.lock {
-            None => f(&mut self.link.borrow_mut()),
+            None => f(&mut self.state.borrow_mut()),
             Some(lock) => {
                 let mut f = Some(f);
                 let mut out = None;
                 lock(&mut || {
                     if let Some(f) = f.take() {
-                        out = Some(f(&mut self.link.borrow_mut()));
+                        out = Some(f(&mut self.state.borrow_mut()));
                     }
                 });
                 match out {
@@ -210,12 +264,16 @@ impl RadioLinkSlot {
     // ---- edge side ----
 
     /// Forget anything a previous link on this slot left behind. Call before
-    /// a new connection uses the slot.
+    /// a new connection uses the slot (a Bluetooth slot: one edge).
     pub fn reset(&self) {
-        self.guarded(|link| *link = None);
-        self.doorbell.reset();
-        self.close_request.reset();
+        self.guarded(|state| state.link = None);
+        self.reset_edge(SlotEdge::Local);
         self.released.signal(());
+    }
+
+    fn reset_edge(&self, edge: SlotEdge) {
+        self.doorbell[edge.index()].reset();
+        self.close_request[edge.index()].reset();
     }
 
     /// Start `id`'s lp-link session on this slot in `mode` (the port's
@@ -232,50 +290,171 @@ impl RadioLinkSlot {
         let fresh = Box::new(SlotLink {
             id,
             link: LpLink::new(cfg, nonce),
+            trust: self.trust,
+            edge: SlotEdge::Local,
         });
-        self.guarded(|link| *link = Some(fresh));
+        self.guarded(|state| state.link = Some(fresh));
         Ok(max_payload)
     }
 
-    /// Start `id`'s secure lp-link session on this LAN slot
-    /// ([`super::lan_link_config`]), the board as the Noise responder: no key
-    /// up front, a [`lp_link::secure_channel::SecureEvent::KeyLookup`] the
-    /// mux answers from the server's access store. `entropy` fills a buffer
-    /// with fresh random bytes (32 per handshake). Returns the link's frame
-    /// payload size.
+    /// Start `id`'s secure lp-link session on the network slot
+    /// ([`super::lan_link_config`]) for `edge`, trusted as `trust`
+    /// ([`LinkTrust::Keyed`] on the LAN, [`LinkTrust::Relayed`] through the
+    /// relay), the board as the Noise responder: no key up front, a
+    /// [`lp_link::secure_channel::SecureEvent::KeyLookup`] the mux answers
+    /// from the server's access store. `entropy` fills a buffer with fresh
+    /// random bytes (32 per handshake). Returns the link's frame payload
+    /// size, or [`SlotHeld`] when another link holds the slot (or a granted
+    /// newcomer has it reserved): park a challenge instead.
     #[cfg(feature = "wifi")]
-    pub fn open_lan(&self, id: LinkId, nonce: u32, entropy: fn(&mut [u8])) -> u16 {
-        let cfg = super::lan_link_config::lan_link_config();
-        let max_payload = cfg.max_payload;
-        let fresh = Box::new(SlotLink {
-            id,
-            link: LpLink::new_secure(
-                cfg,
-                nonce,
-                lp_link::secure_channel::SecureRole::Responder,
-                entropy,
-            ),
+    pub fn open_network(
+        &self,
+        id: LinkId,
+        nonce: u32,
+        entropy: fn(&mut [u8]),
+        trust: LinkTrust,
+        edge: SlotEdge,
+    ) -> Result<u16, SlotHeld> {
+        // Built before the lock: the session is ~12 KB of allocation, and
+        // nothing of it should happen with the other thread held out.
+        let fresh = network_link(id, nonce, entropy, trust, edge);
+        let max_payload = fresh.link.config().max_payload;
+        let opened = self.guarded(|state| {
+            if state.link.is_some() || state.parked.is_occupied() {
+                return Err(fresh);
+            }
+            state.link = Some(fresh);
+            Ok(())
         });
-        self.guarded(|link| *link = Some(fresh));
-        max_payload
+        match opened {
+            Ok(()) => {
+                self.reset_edge(edge);
+                Ok(max_payload)
+            }
+            Err(unused) => {
+                drop(unused);
+                Err(SlotHeld)
+            }
+        }
+    }
+
+    /// The network slot is held: park `id`'s first frame (`edge` serves it)
+    /// for the mux to judge, then announce [`RadioLinkEvent::Challenged`]
+    /// and wait for [`Self::verdict`].
+    #[cfg(feature = "wifi")]
+    pub fn park_challenge(
+        &self,
+        id: LinkId,
+        edge: SlotEdge,
+        first_frame: &[u8],
+    ) -> Result<(), ParkRefused> {
+        let parked = self.guarded(|state| state.parked.park(id, edge, first_frame));
+        if parked.is_ok() {
+            self.verdict.reset();
+        }
+        parked
+    }
+
+    /// The mux's verdict on the parked challenge. Only the parked
+    /// newcomer's edge waits on it.
+    #[cfg(feature = "wifi")]
+    pub async fn verdict(&self) -> ChallengeVerdict {
+        self.verdict.wait().await
+    }
+
+    /// The parked newcomer's edge gives up on `id` (it left, or waited too
+    /// long): the slot is no longer reserved for it. Announce
+    /// [`RadioLinkEvent::Closed`] for it after, so the mux forgets it too.
+    #[cfg(feature = "wifi")]
+    pub fn withdraw_challenge(&self, id: LinkId) {
+        self.guarded(|state| state.parked.clear(id));
+    }
+
+    /// Open the network slot for `id`, whose challenge the mux granted:
+    /// the same as [`Self::open_network`], then the parked first frame is
+    /// fed to the new session at `now`. [`SlotHeld`] if `id` was not
+    /// granted, or the old link has not gone.
+    #[cfg(feature = "wifi")]
+    pub fn take_over(
+        &self,
+        id: LinkId,
+        now: Micros,
+        nonce: u32,
+        entropy: fn(&mut [u8]),
+        trust: LinkTrust,
+    ) -> Result<u16, SlotHeld> {
+        let edge = self.guarded(|state| state.parked.granted_edge(id));
+        let Some(edge) = edge else {
+            return Err(SlotHeld);
+        };
+        let fresh = network_link(id, nonce, entropy, trust, edge);
+        let max_payload = fresh.link.config().max_payload;
+        let opened = self.guarded(|state| {
+            if state.link.is_some() {
+                return Err(fresh);
+            }
+            let Some((_, first)) = state.parked.take_granted(id) else {
+                return Err(fresh);
+            };
+            let mut fresh = fresh;
+            fresh.link.on_datagram(now, first);
+            state.link = Some(fresh);
+            Ok(())
+        });
+        match opened {
+            Ok(()) => {
+                self.reset_edge(edge);
+                Ok(max_payload)
+            }
+            Err(unused) => {
+                drop(unused);
+                Err(SlotHeld)
+            }
+        }
     }
 
     /// The connection is gone: free its link (its RAM goes back to the heap
-    /// now) and wake a mux waiting for the frame buffer.
+    /// now) and wake a mux waiting for the frame buffer. A Bluetooth slot's
+    /// edge (one connection per slot).
     pub fn close(&self) {
-        let gone = self.guarded(Option::take);
+        let gone = self.guarded(|state| state.link.take());
         drop(gone);
         self.released.signal(());
+    }
+
+    /// `id`'s connection is gone: free its link if the slot still holds it
+    /// (a link the mux revoked, or one taken over, is someone else's now);
+    /// whether it did.
+    pub fn close_link(&self, id: LinkId) -> bool {
+        let gone = self.guarded(|state| take_if(&mut state.link, id));
+        let freed = gone.is_some();
+        drop(gone);
+        self.released.signal(());
+        freed
     }
 
     /// One frame the peer sent: one whole lp-link frame. Ignored while the
     /// slot holds no link.
     pub fn on_datagram(&self, now: Micros, frame: &[u8]) {
-        self.guarded(|link| {
-            if let Some(slot) = link.as_mut() {
+        self.guarded(|state| {
+            if let Some(slot) = state.link.as_mut() {
                 slot.link.on_datagram(now, frame);
             }
         });
+    }
+
+    /// [`Self::on_datagram`] for `id`'s link only: [`NotHeld`] when the
+    /// slot no longer holds it.
+    pub fn on_datagram_for(&self, id: LinkId, now: Micros, frame: &[u8]) -> Result<(), NotHeld> {
+        self.guarded(|state| {
+            let slot = state
+                .link
+                .as_mut()
+                .filter(|slot| slot.id == id)
+                .ok_or(NotHeld)?;
+            slot.link.on_datagram(now, frame);
+            Ok(())
+        })
     }
 
     /// The next frame to send, handed to `take` (copy it out: the borrow —
@@ -283,15 +462,11 @@ impl RadioLinkSlot {
     /// nothing to send now. A long reply's fragments are read from the frame
     /// buffer here, under the lock.
     pub fn poll_frame<R>(&self, now: Micros, take: impl FnOnce(&[u8]) -> R) -> Option<R> {
-        let (taken, let_go) = self.guarded(|link| {
-            let Some(slot) = link.as_mut() else {
+        let (taken, let_go) = self.guarded(|state| {
+            let Some(slot) = state.link.as_mut() else {
                 return (None, false);
             };
-            let taken = slot
-                .link
-                .poll_transmit_with(now, &mut read_frame_buf)
-                .map(take);
-            (taken, !slot.link.external_in_flight())
+            poll_link(slot, now, take)
         });
         if let_go {
             self.released.signal(());
@@ -299,37 +474,87 @@ impl RadioLinkSlot {
         taken
     }
 
+    /// [`Self::poll_frame`] for `id`'s link only: [`NotHeld`] when the slot
+    /// no longer holds it.
+    pub fn poll_frame_for<R>(
+        &self,
+        id: LinkId,
+        now: Micros,
+        take: impl FnOnce(&[u8]) -> R,
+    ) -> Result<Option<R>, NotHeld> {
+        let polled = self.guarded(|state| {
+            let slot = state.link.as_mut().filter(|slot| slot.id == id)?;
+            Some(poll_link(slot, now, take))
+        });
+        let (taken, let_go) = polled.ok_or(NotHeld)?;
+        if let_go {
+            self.released.signal(());
+        }
+        Ok(taken)
+    }
+
     /// When the link next needs [`Self::poll_frame`] for a timer (retransmit,
     /// delayed ACK, keepalive, SYN), or `None` with no link.
     pub fn poll_timeout(&self) -> Option<Micros> {
-        self.guarded(|link| link.as_ref()?.link.poll_timeout())
+        self.guarded(|state| state.link.as_ref()?.link.poll_timeout())
+    }
+
+    /// [`Self::poll_timeout`] for `id`'s link only: `None` also when the
+    /// slot no longer holds it.
+    pub fn poll_timeout_for(&self, id: LinkId) -> Option<Micros> {
+        self.guarded(|state| {
+            state
+                .link
+                .as_ref()
+                .filter(|slot| slot.id == id)?
+                .link
+                .poll_timeout()
+        })
     }
 
     /// The heap the slot's link holds right now (`Link::ram_bytes`), or `None`
     /// with no link.
     pub fn ram_bytes(&self) -> Option<usize> {
-        self.guarded(|link| Some(link.as_ref()?.link.ram_bytes()))
+        self.guarded(|state| Some(state.link.as_ref()?.link.ram_bytes()))
     }
 
     /// The id of the link the slot holds, if any.
     pub fn link_id(&self) -> Option<LinkId> {
-        self.guarded(|link| Some(link.as_ref()?.id))
+        self.guarded(|state| Some(state.link.as_ref()?.id))
     }
 
     /// The slot's link's counters (a secure link's handshakes, refusals,
     /// seal failures and replays among them), or `None` with no link.
     pub fn counters(&self) -> Option<lp_link::LinkCounters> {
-        self.guarded(|link| Some(link.as_ref()?.link.counters().clone()))
+        self.guarded(|state| Some(state.link.as_ref()?.link.counters().clone()))
     }
 
-    /// Resolves when the mux queued something for this slot's link.
+    /// Resolves when the mux queued something for this slot's link (the
+    /// slot's own edge).
     pub async fn doorbell(&self) {
-        self.doorbell.wait().await;
+        self.doorbell_for(SlotEdge::Local).await;
     }
 
-    /// Resolves when the mux wants this slot's link dropped.
+    /// Resolves when the mux queued something for a link `edge` serves.
+    pub async fn doorbell_for(&self, edge: SlotEdge) {
+        self.doorbell[edge.index()].wait().await;
+    }
+
+    /// Resolves when the mux wants this slot's link dropped (the slot's own
+    /// edge).
     pub async fn close_requested(&self) -> CloseReason {
-        self.close_request.wait().await
+        self.close_requested_for(SlotEdge::Local).await
+    }
+
+    /// Resolves when the mux wants the link `edge` serves dropped.
+    pub async fn close_requested_for(&self, edge: SlotEdge) -> CloseReason {
+        self.close_request[edge.index()].wait().await
+    }
+
+    /// The mux's close request for `edge`, if one is waiting: why an edge
+    /// whose link is no longer held lost it.
+    pub fn try_close_request_for(&self, edge: SlotEdge) -> Option<CloseReason> {
+        self.close_request[edge.index()].try_take()
     }
 
     // ---- mux and core-only side ----
@@ -348,16 +573,31 @@ impl RadioLinkSlot {
         self.with_link(id, |link| link.generation())
     }
 
-    /// Ask the edge to drop this slot's link.
+    /// Ask the slot's own edge to drop its link (a slot the mux cannot use).
     pub fn request_close(&self, reason: CloseReason) {
-        self.close_request.signal(reason);
+        self.close_request[SlotEdge::Local.index()].signal(reason);
+    }
+
+    /// Drop `id`'s link from the slot now and ask the edge that served it to
+    /// disconnect: it stops reading the frame buffer and frees its RAM
+    /// before the edge has even noticed. A link the slot no longer holds
+    /// (already dropped) still has its edge asked, on the slot's own edge.
+    pub fn revoke(&self, id: LinkId, reason: CloseReason) {
+        let gone = self.guarded(|state| take_if(&mut state.link, id));
+        let edge = gone.as_ref().map_or(SlotEdge::Local, |slot| slot.edge);
+        drop(gone);
+        self.released.signal(());
+        self.close_request[edge.index()].signal(reason);
+        self.doorbell[edge.index()].signal(());
     }
 
     /// Whatever link this slot holds is still reading a reply out of the
     /// frame buffer: nothing may serialize into it yet.
     pub fn external_in_flight(&self) -> bool {
-        self.guarded(|link| {
-            link.as_ref()
+        self.guarded(|state| {
+            state
+                .link
+                .as_ref()
                 .is_some_and(|slot| slot.link.external_in_flight())
         })
     }
@@ -370,8 +610,8 @@ impl RadioLinkSlot {
         id: LinkId,
         f: impl FnOnce(&mut LpLink<SelectiveRepeat>) -> R,
     ) -> Option<R> {
-        self.guarded(|link| {
-            let slot = link.as_mut().filter(|slot| slot.id == id)?;
+        self.guarded(|state| {
+            let slot = state.link.as_mut().filter(|slot| slot.id == id)?;
             Some(f(&mut slot.link))
         })
     }
@@ -381,30 +621,55 @@ impl RadioLinkSlot {
         &self,
         f: impl FnOnce(LinkId, &mut LpLink<SelectiveRepeat>) -> R,
     ) -> Option<R> {
-        self.guarded(|link| {
-            let slot = link.as_mut()?;
+        self.guarded(|state| {
+            let slot = state.link.as_mut()?;
             Some(f(slot.id, &mut slot.link))
         })
+    }
+
+    /// The trust `id`'s link was opened with, while the slot holds it.
+    pub(crate) fn trust_of(&self, id: LinkId) -> Option<LinkTrust> {
+        self.guarded(|state| Some(state.link.as_ref().filter(|slot| slot.id == id)?.trust))
     }
 
     /// Drop `id`'s link from the slot now (the mux closed it): it stops
     /// reading the frame buffer and frees its RAM before the edge has even
     /// disconnected.
     pub(crate) fn drop_link(&self, id: LinkId) {
-        let gone = self.guarded(|link| {
-            if link.as_ref().is_some_and(|slot| slot.id == id) {
-                link.take()
-            } else {
-                None
-            }
-        });
+        let gone = self.guarded(|state| take_if(&mut state.link, id));
         drop(gone);
         self.released.signal(());
     }
 
-    /// Wake the edge to transmit what was just queued.
+    /// Wake the edge serving the slot's link to transmit what was just
+    /// queued.
     pub(crate) fn ring(&self) {
-        self.doorbell.signal(());
+        let edge = self.guarded(|state| state.link.as_ref().map_or(SlotEdge::Local, |s| s.edge));
+        self.doorbell[edge.index()].signal(());
+    }
+
+    /// `id`'s parked first frame, parsed, while the mux has not decided:
+    /// `Some(None)` when it is parked but is not a msg1.
+    #[cfg(feature = "wifi")]
+    pub(crate) fn parked_msg1(&self, id: LinkId) -> Option<Option<Msg1>> {
+        self.guarded(|state| state.parked.waiting_msg1(id))
+    }
+
+    /// Tell the parked newcomer `id` the slot is its (the holder is already
+    /// revoked).
+    #[cfg(feature = "wifi")]
+    pub(crate) fn grant_challenge(&self, id: LinkId) {
+        if self.guarded(|state| state.parked.grant(id)) {
+            self.verdict.signal(ChallengeVerdict::TakeOver);
+        }
+    }
+
+    /// Tell the parked newcomer `id` it is turned away.
+    #[cfg(feature = "wifi")]
+    pub fn refuse_challenge(&self, id: LinkId) {
+        if self.guarded(|state| state.parked.clear(id)) {
+            self.verdict.signal(ChallengeVerdict::Busy);
+        }
     }
 
     /// Resolves when the edge may have stopped reading the frame buffer
@@ -415,8 +680,63 @@ impl RadioLinkSlot {
 
     #[cfg(test)]
     pub(crate) fn take_close_request(&self) -> Option<CloseReason> {
-        self.close_request.try_take()
+        self.close_request[SlotEdge::Local.index()].try_take()
     }
+
+    #[cfg(test)]
+    pub(crate) fn take_close_request_for(&self, edge: SlotEdge) -> Option<CloseReason> {
+        self.close_request[edge.index()].try_take()
+    }
+
+    #[cfg(all(test, feature = "wifi"))]
+    pub(crate) fn try_verdict(&self) -> Option<ChallengeVerdict> {
+        self.verdict.try_take()
+    }
+}
+
+/// A network link for `edge`: secure, the board as the responder.
+#[cfg(feature = "wifi")]
+fn network_link(
+    id: LinkId,
+    nonce: u32,
+    entropy: fn(&mut [u8]),
+    trust: LinkTrust,
+    edge: SlotEdge,
+) -> Box<SlotLink> {
+    Box::new(SlotLink {
+        id,
+        link: LpLink::new_secure(
+            super::lan_link_config::lan_link_config(),
+            nonce,
+            lp_link::secure_channel::SecureRole::Responder,
+            entropy,
+        ),
+        trust,
+        edge,
+    })
+}
+
+/// Take the slot's link if it is `id`'s.
+fn take_if(link: &mut Option<Box<SlotLink>>, id: LinkId) -> Option<Box<SlotLink>> {
+    if link.as_ref().is_some_and(|slot| slot.id == id) {
+        link.take()
+    } else {
+        None
+    }
+}
+
+/// The next frame of `slot`'s link handed to `take`, and whether the link
+/// has let go of the frame buffer.
+fn poll_link<R>(
+    slot: &mut SlotLink,
+    now: Micros,
+    take: impl FnOnce(&[u8]) -> R,
+) -> (Option<R>, bool) {
+    let taken = slot
+        .link
+        .poll_transmit_with(now, &mut read_frame_buf)
+        .map(take);
+    (taken, !slot.link.external_in_flight())
 }
 
 /// Both halves' shared state. The firmware leaks one ([`RadioLinkPort::leak`],
@@ -424,7 +744,7 @@ impl RadioLinkSlot {
 /// thread).
 pub struct RadioLinkPort {
     radio: [RadioLinkSlot; RADIO_LINK_SLOTS],
-    lan: [RadioLinkSlot; LAN_LINK_SLOTS],
+    network: [RadioLinkSlot; NETWORK_LINK_SLOTS],
     events: Channel<CriticalSectionRawMutex, RadioLinkEvent, EVENT_DEPTH>,
     next_link: AtomicU32,
     /// The boot's [`RadioLinkMode`] as [`RadioLinkMode::code`] (0: not yet
@@ -444,7 +764,7 @@ impl RadioLinkPort {
     pub const fn new() -> Self {
         Self {
             radio: [const { RadioLinkSlot::new(LinkTrust::Untrusted, None) }; RADIO_LINK_SLOTS],
-            lan: [const { RadioLinkSlot::new(LinkTrust::Keyed, None) }; LAN_LINK_SLOTS],
+            network: [const { RadioLinkSlot::new(LinkTrust::Keyed, None) }; NETWORK_LINK_SLOTS],
             events: Channel::new(),
             // 0 is `LinkId::PRIMARY` (the USB cable).
             next_link: AtomicU32::new(1),
@@ -460,12 +780,12 @@ impl RadioLinkPort {
     }
 
     /// The firmware's one port when an edge runs on another thread (the
-    /// LAN endpoint on `lp-net`): every borrow is taken under `lock`. The
+    /// network edges on `lp-net`): every borrow is taken under `lock`. The
     /// second half is what crosses to the other thread.
     #[must_use]
     pub fn leak_locked(lock: PortLock) -> (&'static Self, SharedPort) {
         let mut port = Box::new(Self::new());
-        for slot in port.radio.iter_mut().chain(port.lan.iter_mut()) {
+        for slot in port.radio.iter_mut().chain(port.network.iter_mut()) {
             slot.lock = Some(lock);
         }
         let port: &'static Self = Box::leak(port);
@@ -478,12 +798,14 @@ impl RadioLinkPort {
     }
 
     /// The link as the server sees it on `slot`: untrusted on a Bluetooth
-    /// slot, keyed on a LAN slot.
+    /// slot; on the network slot keyed, or relayed when it came through the
+    /// relay.
     #[must_use]
     pub fn link_on(&self, slot: usize, id: LinkId) -> Link {
+        let slot = self.slot(slot);
         Link {
             id,
-            trust: self.slot(slot).trust,
+            trust: slot.trust_of(id).unwrap_or(slot.trust),
         }
     }
 
@@ -504,13 +826,13 @@ impl RadioLinkPort {
     pub fn slot(&self, index: usize) -> &RadioLinkSlot {
         match index.checked_sub(RADIO_LINK_SLOTS) {
             None => &self.radio[index],
-            Some(lan) => &self.lan[lan],
+            Some(network) => &self.network[network],
         }
     }
 
     /// Every slot, in index order.
     pub fn slots(&self) -> impl Iterator<Item = &RadioLinkSlot> {
-        self.radio.iter().chain(self.lan.iter())
+        self.radio.iter().chain(self.network.iter())
     }
 
     /// Decide what this boot's radio links are for. Once per boot, before
@@ -563,8 +885,8 @@ impl RadioLinkPort {
     /// nothing opens before it.
     ///
     /// # Panics
-    /// If `slot >= RADIO_LINK_SLOTS` (a LAN slot opens with
-    /// [`RadioLinkSlot::open_lan`]).
+    /// If `slot >= RADIO_LINK_SLOTS` (a network slot opens with
+    /// [`RadioLinkSlot::open_network`]).
     pub fn open(
         &self,
         slot: usize,
@@ -696,6 +1018,14 @@ pub struct SharedPort(&'static RadioLinkPort);
 // and the channel are critical-section types and the id counter is atomic.
 unsafe impl Send for SharedPort {}
 
+impl SharedPort {
+    /// The port itself, for an edge that keeps it (the relay driver).
+    #[must_use]
+    pub fn port(self) -> &'static RadioLinkPort {
+        self.0
+    }
+}
+
 impl core::ops::Deref for SharedPort {
     type Target = RadioLinkPort;
 
@@ -735,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn slots_are_bluetooth_then_lan_and_say_their_trust() {
+    fn slots_are_bluetooth_then_network_and_say_their_trust() {
         let port = RadioLinkPort::leak();
         for index in 0..RADIO_LINK_SLOTS {
             assert_eq!(port.slot(index).trust(), LinkTrust::Untrusted);
@@ -745,6 +1075,90 @@ mod tests {
         }
         let id = port.mint_link();
         assert_eq!(port.link_on(0, id).trust, LinkTrust::Untrusted);
+    }
+
+    /// The network slot: one link at a time, whichever edge; a relayed link
+    /// says so; an edge's id-checked calls fail once its link is revoked,
+    /// and the close request reaches the edge that served it, not the other.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn the_network_slot_holds_one_link_and_addresses_its_edge() {
+        let port = RadioLinkPort::leak();
+        let index = RADIO_LINK_SLOTS;
+        let slot = port.slot(index);
+        let relay = port.mint_link();
+        slot.open_network(relay, 1, fill, LinkTrust::Relayed, SlotEdge::Relay)
+            .expect("an empty slot opens");
+        assert_eq!(port.link_on(index, relay).trust, LinkTrust::Relayed);
+        let lan = port.mint_link();
+        assert_eq!(
+            slot.open_network(lan, 2, fill, LinkTrust::Keyed, SlotEdge::Local),
+            Err(SlotHeld)
+        );
+        assert_eq!(slot.poll_frame_for(lan, 0, |_| ()), Err(NotHeld));
+        assert!(slot.on_datagram_for(relay, 0, &[0; 8]).is_ok());
+
+        slot.revoke(relay, "taken over");
+        assert_eq!(slot.take_close_request_for(SlotEdge::Local), None);
+        assert_eq!(
+            slot.take_close_request_for(SlotEdge::Relay),
+            Some("taken over")
+        );
+        assert_eq!(slot.poll_frame_for(relay, 0, |_| ()), Err(NotHeld));
+        assert!(!slot.close_link(relay), "already gone");
+        slot.open_network(lan, 2, fill, LinkTrust::Keyed, SlotEdge::Local)
+            .expect("free again");
+        assert!(
+            !slot.close_link(relay),
+            "an old id never frees the new link"
+        );
+        assert_eq!(slot.link_id(), Some(lan));
+    }
+
+    /// A granted challenge reserves the slot for its newcomer, and its
+    /// parked frame is the new session's first.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn a_granted_challenger_and_only_it_opens_the_slot_with_its_parked_frame() {
+        let port = RadioLinkPort::leak();
+        let slot = port.slot(RADIO_LINK_SLOTS);
+        let holder = port.mint_link();
+        slot.open_network(holder, 1, fill, LinkTrust::Keyed, SlotEdge::Local)
+            .unwrap();
+        let newcomer = port.mint_link();
+        let syn = [0x5a; 84];
+        slot.park_challenge(newcomer, SlotEdge::Relay, &syn)
+            .unwrap();
+        assert!(
+            matches!(slot.parked_msg1(newcomer), Some(None)),
+            "not a msg1"
+        );
+        slot.revoke(holder, "taken over");
+        let stranger = port.mint_link();
+        assert_eq!(
+            slot.open_network(stranger, 3, fill, LinkTrust::Keyed, SlotEdge::Local),
+            Err(SlotHeld),
+            "a parked challenge reserves the slot"
+        );
+        assert_eq!(
+            slot.take_over(newcomer, 0, 4, fill, LinkTrust::Relayed),
+            Err(SlotHeld),
+            "not granted yet"
+        );
+        slot.grant_challenge(newcomer);
+        assert_eq!(slot.try_verdict(), Some(ChallengeVerdict::TakeOver));
+        slot.take_over(newcomer, 0, 4, fill, LinkTrust::Relayed)
+            .expect("granted");
+        assert_eq!(slot.link_id(), Some(newcomer));
+        assert_eq!(
+            slot.counters().unwrap().frames_rx,
+            0,
+            "a damaged SYN is no frame"
+        );
+        assert_eq!(
+            port.link_on(RADIO_LINK_SLOTS, newcomer).trust,
+            LinkTrust::Relayed
+        );
     }
 
     /// The cross-thread lease: one thread drops (revokes) and reopens the
@@ -778,5 +1192,10 @@ mod tests {
         // the RefCell); how many SYNs the edge caught in between is luck.
         let _frames = edge.join().expect("no borrow panicked on the edge thread");
         assert_eq!(OVERLAPS.load(Ordering::SeqCst), 0, "two borrows overlapped");
+    }
+
+    #[cfg(feature = "wifi")]
+    fn fill(buf: &mut [u8]) {
+        buf.fill(7);
     }
 }

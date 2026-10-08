@@ -188,9 +188,44 @@ fn patch_file(path: &std::path::Path, contents: &str) {
         .unwrap_or_else(|e| panic!("failed to backdate {}: {e}", path.display()));
 }
 
+/// The cloud relay's device-leg address (Wi-Fi relay plan RD14): the
+/// product image always dials `lightplayer.app:80`; a **desk** image built
+/// with `LP_RELAY_HOST=<host>[:port]` dials that instead (a local
+/// `lp-cloud-server`), and says so in its boot banner. A malformed value
+/// fails the build rather than ship an image that dials nowhere.
+fn emit_relay_host() {
+    println!("cargo:rerun-if-env-changed=LP_RELAY_HOST");
+    let given = std::env::var("LP_RELAY_HOST")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+    let (host, port, overridden) = match &given {
+        None => ("lightplayer.app".to_string(), 80u16, false),
+        Some(value) => {
+            let value = value.trim();
+            match value.rsplit_once(':') {
+                Some((host, port)) => {
+                    let port: u16 = port.parse().unwrap_or_else(|_| {
+                        panic!("LP_RELAY_HOST={value}: '{port}' is not a port")
+                    });
+                    (host.to_string(), port, true)
+                }
+                None => (value.to_string(), 80, true),
+            }
+        }
+    };
+    assert!(
+        !host.is_empty() && !host.contains('/'),
+        "LP_RELAY_HOST takes host[:port], not a URL"
+    );
+    println!("cargo:rustc-env=LP_RELAY_HOST_NAME={host}");
+    println!("cargo:rustc-env=LP_RELAY_HOST_PORT={port}");
+    println!("cargo:rustc-env=LP_RELAY_HOST_OVERRIDDEN={overridden}");
+}
+
 fn main() {
     emit_build_provenance();
     emit_partition_facts();
+    emit_relay_host();
 
     // Harness builds: any test_* feature selects a hardware harness entrypoint
     // instead of the app. Collapsed to one cfg so app-only code carries a

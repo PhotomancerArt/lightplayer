@@ -293,6 +293,54 @@ names as unverified. A difference on anything the seam *does* model (the
 frame device, the IP stack above it) is a fidelity defect, not a thing to
 work around.
 
+**Amendment (2026-10-07): the virtual LAN gets an uplink, for the cloud
+relay (PR #1019, Wi-Fi relay plan P9).** The paragraph above says the LAN has
+**no uplink**; that held until a board had somewhere to go. The C6's relay
+client dials `lightplayer.app` by name, so an emulated C6 needs the two
+things a home router gives it: an answer to the name, and a route to
+something that answers. Both are in `lp-emu-esp-common::seam::net` (MIT, no
+product crate; `just lint-emu-fence` green) and **neither is a seam**: no
+call was added to `lp-seam`, `SEAM_ABI_ID` did not move, and the firmware is
+the shipped image, unchanged. It is more of the medium under the same
+`net=lan` seam (§11's "below the IP stack"), so an emulated board's label is
+still `lp-emu:esp32c6:<grade>+net=lan`.
+
+- **A name, answered only for the names a run configures.** The gateway
+  answers DNS on UDP 53 (`lan_dns_server.rs`, written from RFC 1035): an `A`
+  question for a configured name gets one record, anything else gets
+  `NXDOMAIN`. DHCP hands the gateway out as the DNS server (option 6)
+  **only on a LAN that has an uplink**; a LAN with none offers exactly what
+  it did before, so no earlier run, transcript or figure moves.
+- **A way out, to one host address a run names** (`lan_uplink.rs`, the
+  mirror of the port forward). The gateway holds a second address beyond the
+  /24, `192.0.2.1` (TEST-NET-1, RFC 5737: nobody's real address), listens on
+  `<that address>:<port>` and, for each connection the board opens to it,
+  opens a host `TcpStream::connect` to the configured address and copies
+  bytes both ways. The pairing happens once the board's side is
+  *Established* (pairing at the half-open state shut the host's write side:
+  P9's one bug here), and the forward's moved-board care applies unchanged
+  (a connection whose board no longer holds the address it dialled from is
+  closed at once; one that stops answering is bounded by the forward's 60 s
+  of LAN time). The host side is wall-clock, like a forward's; the LAN side
+  stays in guest time.
+- **Where it is configured: a fixture table, not a flag.** An `[[uplink]]`
+  table (`name`, `to`, `port`, default 80) in the LAN fixture file that
+  `lp-cli emu run --lan` and `emu serve --lan NAME=FIXTURE` already read, so
+  one spelling serves both hosts and a fixture is a LAN's whole world: what
+  is in range and what is beyond the router. `GET /boards` lists each
+  board's uplinks.
+
+What it does **not** model, in addition to §11's list: NAT, a real resolver
+(a configured name gets one answer, everything else NXDOMAIN, no recursion), real internet
+latency or loss (the host side is loopback), and a TLS terminator in front
+of the service. The relay's device leg is plain HTTP, so none of those would
+change what the board's code does on the wire, but they are what the real
+path has and this one does not: **the desk sitting owns them**. The
+emulated cell proves the board registers, carries a session, is taken over
+and recovers; it is silent about the home router and the internet. A
+difference on anything the uplink *does* model (the name, the TCP path to
+the host) is a fidelity defect, as §11 says of the rest of the medium.
+
 ### 12. The pace axis (2026-10-06, Yona's decision)
 
 An idle emulated board's guest clock runs far ahead of a wall-clock peer's (a

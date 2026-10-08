@@ -140,7 +140,13 @@ pub async fn run_device_leg(
                     client.handle(now(), RelayEvent::RouteSend { route, bytes: &bytes }),
                 ),
                 Some(LegCommand::RouteClose { route }) => {
-                    pending.extend(client.handle(now(), RelayEvent::RouteClose { route }));
+                    pending.extend(client.handle(
+                        now(),
+                        RelayEvent::RouteClose {
+                            route,
+                            reason: lpc_relay::RouteCloseReason::Normal,
+                        },
+                    ));
                 }
                 None => {
                     if let Some(mut socket) = ws.take() {

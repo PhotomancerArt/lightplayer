@@ -1,9 +1,9 @@
 {
   "measured": {
-    "freeBytes": 198448,
-    "usedBytes": 103088,
+    "freeBytes": 195956,
+    "usedBytes": 105580,
     "totalBytes": 301536,
-    "largestFreeBlock": 119344,
+    "largestFreeBlock": 116840,
     "stackHighWater": 11972,
     "stackTop": 1082582544,
     "stackHighWaterBand": [

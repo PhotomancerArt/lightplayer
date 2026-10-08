@@ -256,8 +256,16 @@ the app through the same view model and presses the same actions. See
   inside a route is the ordinary secure lp-link, so the wire rule above
   still governs it. lp-cli reaches a board through the relay with
   `relay:<board-id>[@<origin>]` (session from `LP_CLOUD_SESSION`, env only)
-  and puts its host board there with `lp-cli serve --relay <origin>`. See
-  `docs/adr/2026-10-06-cloud-relay.md`.
+  and puts its host board there with `lp-cli serve --relay <origin>`. The C6
+  is a relay client **in the core** (`fw-esp32c6/src/net/relay_task.rs` on
+  `lp-net`, the loop in `fw-esp32-common/src/net/relay/`): it dials only when
+  joined, Cloud relay is on and it holds an account key, and
+  `NetworkStatus.relay` says how far it got. The product image always dials
+  `lightplayer.app:80`; `LP_RELAY_HOST=<host>[:port]` at build time makes a
+  desk image that dials another host and says so at boot — never a release
+  build. Relay links are `LinkTrust::Relayed`: the board's "Anyone" setting
+  never applies to them. A fielded core's `RELAY_PROTO_VERSION` stays listed
+  in the hub while boards run it. See `docs/adr/2026-10-06-cloud-relay.md`.
 - **USB, the classic's UART and BLE are `lp-link` now, not `M!`.** The C6/S3
   silicon and their emulators, the classic ESP32's UART0 (DOM-Z-102 and its
   emulator, since wire proto 32), the C6's Bluetooth links (since wire proto
@@ -295,9 +303,14 @@ the app through the same view model and presses the same actions. See
   it last gave, and the add slot takes an address). The link is `LinkConfig::ws()` (one
   frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
   access entries; the tier comes from the key, as on Bluetooth). Its replies
-  are JSON, and the C6 has one LAN slot, so a second client is told to try
-  again later. See `docs/adr/2026-10-07-c6-wifi-link.md`; the emulated LAN
-  (`net=lan`) is PR C's (`docs/adr/2026-10-05-emulator-seams.md`).
+  are JSON, and the C6 has one **network slot**, shared by the LAN and the
+  cloud relay, so a second client (by either path) is told to try again
+  later unless its handshake proves the holder's own key, which takes the
+  slot over. A joined board with Cloud relay on and an account key also dials
+  `lightplayer.app:80` by itself (below); it holds no relay memory while it
+  may not dial. See `docs/adr/2026-10-07-c6-wifi-link.md` and
+  `docs/adr/2026-10-06-cloud-relay.md` ("Device side"); the emulated LAN
+  (`net=lan`) is `docs/adr/2026-10-05-emulator-seams.md` §11.
 - **Project loads are tried, not gated.** There is no headroom gate before a
   `LoadProject`. A load is recorded in the RTC recovery region until its
   project has run 3 frames. A switch that resets the board boots the
@@ -313,8 +326,9 @@ the app through the same view model and presses the same actions. See
   (the scheduler's and esp-radio's, not the RMT refill's), so **keep those
   closures short** — no large copy under one. See
   `docs/adr/2026-10-02-c6-link-io-thread.md`.
-- **lp-link's `secure` feature is off on every product link.** Turning it on
-  for one (M6's LAN WebSocket is the first) is a wire change: bump
+- **lp-link's `secure` feature is off on every product link but the C6's
+  network ones** (the LAN WebSocket and the relay's routes, both secure).
+  Turning it on for another is a wire change: bump
   `WIRE_PROTO_VERSION` in the same change. A plain link's bytes are pinned by
   `lp-base/lp-link/tests/plain_bytes_golden.rs`; a mismatch there is a wire
   change too, never a golden to re-capture. See
@@ -419,7 +433,7 @@ runtime.
 | `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO) | yes |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
-| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link (`ws()` preset), the only secure product link | yes |
+| `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0 and BLE links (board, host, Studio, tools); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
 | `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
@@ -1382,6 +1396,25 @@ board to a connected host). **Trust caveat:** it proves everything above the
 frame device — the IP stack, the link, the server — never the radio: no
 signal, airtime, coexistence or driver heap/timing, and no real USB/serial
 stack or Chrome's Local Network prompt.
+
+**An uplink** puts a name and a way out on that LAN, so an emulated C6 reaches
+a service on the host exactly as a real one reaches `lightplayer.app`: an
+`[[uplink]]` table (`name`, `to`, `port`, default 80) in the LAN fixture
+(`emu run --lan` and `emu serve --lan` read the same file). The gateway
+answers DNS for the configured names only (NXDOMAIN for the rest), offers
+itself as DNS in DHCP only when the LAN has an uplink, and carries the board's
+TCP connection to `192.0.2.1:<port>` to the host address (ADR
+`2026-10-05-emulator-seams.md` §11's 2026-10-07 amendment). Firmware is
+unchanged and no seam was added. **`just walk-wifi-emu relay`** is its walk
+(lp-cli-driven, an in-process `lp-cloud-server`, waits on the board's own
+words; `lp-cli/tests/emu_relay_link.rs` is its CI cell in `test-emu-serve`):
+the board registers, `relay:<mac>@<origin>` edits it, a `lan:` client with the
+same key takes the slot, another is told busy, a restarted server gets the
+board back, Cloud relay off/on, a reset key is refused. Record:
+`docs/reports/2026-10-07-wifi-relay-emulator-walk.md`. **Trust caveat:** it
+proves the board's code and the relay's protocol, never NAT, a real resolver,
+the internet, or the 15 s reconnect (a desk-only measurement; the cell prints
+the time and does not assert it).
 
 #### The perf lab: the phone joins once, the director queues the presses
 

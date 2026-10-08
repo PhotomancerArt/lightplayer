@@ -18,8 +18,10 @@
 //!
 //! **Radio links.** Core-only is the radio port's one reader while it runs
 //! (no engine, no link mux): it takes the port's `Opened`/`Closed` notices
-//! and each open Bluetooth link's events itself; a LAN link (Wi-Fi) that
-//! opens is asked to close, as updates over the LAN are not served yet. Every radio link is untrusted; the
+//! and each open Bluetooth link's events itself; a network link (Wi-Fi: the
+//! LAN's, or a cloud relay route) that opens, or asks for the held network
+//! slot, is turned away, as updates over Wi-Fi are not served yet. Every
+//! radio link is untrusted; the
 //! session's own login (`L` over channel 3) is how one earns a tier, and
 //! the device's `open` setting counts as the access rule says (QY2). The
 //! links were opened in update mode (`RadioLinkMode::Update`, decided by
@@ -237,16 +239,24 @@ impl RadioLinks {
         while let Some(event) = self.port.try_event() {
             touched = true;
             match event {
-                // A LAN link (Wi-Fi) is not served here: updates over the
-                // LAN are their own change, and its secure handshake needs
-                // the server's keys, which core-only does not run.
+                // A network link (the LAN's, or a relay route) is not served
+                // here: updates over Wi-Fi are their own change, and its
+                // secure handshake needs the server's keys, which core-only
+                // does not run. `revoke` asks whichever edge serves it.
                 RadioLinkEvent::Opened { link, slot }
                     if slot >= fw_esp32_common::radio_link::RADIO_LINK_SLOTS =>
                 {
-                    log::info!("[OTA] core-only: LAN link {link} refused (slot {slot})");
+                    log::info!("[OTA] core-only: network link {link} refused (slot {slot})");
                     self.port
                         .slot(slot)
-                        .request_close("core-only serves Bluetooth links only");
+                        .revoke(link, "core-only serves Bluetooth links only");
+                }
+                // A newcomer for the network slot while another link holds
+                // it: turned away, like the holder.
+                RadioLinkEvent::Challenged { link, slot } => {
+                    log::info!("[OTA] core-only: network link {link} refused (slot {slot})");
+                    #[cfg(feature = "wifi")]
+                    self.port.slot(slot).refuse_challenge(link);
                 }
                 RadioLinkEvent::Opened { link, slot } => {
                     log::info!("[OTA] core-only: radio link {link} opened (slot {slot})");

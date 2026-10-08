@@ -13,8 +13,8 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::{Receiver, Watch};
 
 /// How many services wait on the address: the LAN slots' tasks, the
-/// refuser and mDNS.
-pub const WATCHERS: usize = fw_esp32_common::radio_link::LAN_LINK_SLOTS + 2;
+/// refuser, mDNS and the relay.
+pub const WATCHERS: usize = fw_esp32_common::radio_link::NETWORK_LINK_SLOTS + 3;
 
 /// The station's IPv4 address while it has one; `None` otherwise.
 static ADDRESS: Watch<CriticalSectionRawMutex, Option<[u8; 4]>, WATCHERS> = Watch::new_with(None);

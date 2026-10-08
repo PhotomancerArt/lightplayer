@@ -162,14 +162,10 @@ impl RelayClient {
                 }
             }
             RelayEvent::RouteSend { route, bytes } => self.route_send(route, bytes, &mut actions),
-            RelayEvent::RouteClose { route } => {
+            RelayEvent::RouteClose { route, reason } => {
                 if self.routes.close(route) && matches!(self.phase, Phase::Registered { .. }) {
                     actions.push(RelayAction::Send(
-                        RelayFrame::Close {
-                            route,
-                            reason: RouteCloseReason::Normal,
-                        }
-                        .encode(),
+                        RelayFrame::Close { route, reason }.encode(),
                     ));
                 }
             }
@@ -209,6 +205,14 @@ impl RelayClient {
     #[must_use]
     pub fn routes(&self) -> &RelayRoutes {
         &self.routes
+    }
+
+    /// Whether the board may dial now: joined, Cloud relay on, and holding
+    /// an account entry (RD8). While it is false the client never asks for
+    /// a socket, so an edge may give the device leg's buffers back.
+    #[must_use]
+    pub fn may_dial(&self) -> bool {
+        self.precondition().is_none()
     }
 
     /// The hub's verdict on each account of the last registration: bit `i`

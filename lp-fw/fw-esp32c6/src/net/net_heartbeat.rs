@@ -1,4 +1,4 @@
-//! The heartbeat's `[wifi]` line.
+//! The heartbeat's `[wifi]` and `[relay]` lines.
 
 use lpc_wire::StationState;
 
@@ -36,4 +36,12 @@ pub fn log_line() {
             state.ssid().unwrap_or("")
         ),
     }
+    let (relay, counters, routes) = super::relay_probes::RELAY_BOARD.heartbeat();
+    log::info!(
+        "[relay] state={relay} routes={routes} rx={} tx={} · takeovers {} busy {}",
+        counters.rx_bytes,
+        counters.tx_bytes,
+        counters.takeovers,
+        counters.busy
+    );
 }

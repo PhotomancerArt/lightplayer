@@ -1,9 +1,13 @@
-//! The WebSocket frame codec (RFC 6455, section 5), server side, sans-IO.
+//! The WebSocket frame codec (RFC 6455, section 5), both sides, sans-IO.
 //!
-//! [`FrameDecoder`] reads client frames out of a byte buffer and unmasks
-//! their payloads in place; [`server_header`] writes the unmasked headers
-//! the server sends. Only binary messages are data here: the link carries
-//! lp-link frames, never text.
+//! [`FrameDecoder`] reads frames out of a byte buffer: on the server
+//! ([`FrameDecoder::new`]) every frame must be masked and is unmasked in
+//! place; on the client ([`FrameDecoder::for_client`], the relay's device
+//! leg) every frame must be unmasked (5.1: a client closes on a masked
+//! server frame). [`server_header`] writes the unmasked headers a server
+//! sends, [`client_header`] the masked ones a client sends. Only binary
+//! messages are data here: the links carry lp-link and relay frames, never
+//! text.
 
 use core::ops::Range;
 
@@ -76,7 +80,7 @@ pub enum Decoded {
     Error(CloseCode),
 }
 
-/// Decodes client frames one at a time and tracks fragmentation: a
+/// Decodes the peer's frames one at a time and tracks fragmentation: a
 /// continuation needs an open message, a new binary frame needs none, and a
 /// message's fragments together stay within the cap.
 #[derive(Debug, Clone)]
@@ -85,15 +89,29 @@ pub struct FrameDecoder {
     /// Payload bytes of the open message's earlier fragments.
     message_len: usize,
     in_message: bool,
+    /// The peer is a client: its frames must be masked (a server's must
+    /// not be).
+    peer_masks: bool,
 }
 
 impl FrameDecoder {
-    /// A decoder refusing (1009) any data message over `max_message` bytes.
+    /// A server's decoder of client frames (every one masked), refusing
+    /// (1009) any data message over `max_message` bytes.
     pub const fn new(max_message: usize) -> Self {
         Self {
             max_message,
             message_len: 0,
             in_message: false,
+            peer_masks: true,
+        }
+    }
+
+    /// A client's decoder of server frames (none masked), with the same
+    /// cap.
+    pub const fn for_client(max_message: usize) -> Self {
+        Self {
+            peer_masks: false,
+            ..Self::new(max_message)
         }
     }
 
@@ -123,8 +141,8 @@ impl FrameDecoder {
             0xA => Opcode::Pong,
             _ => return Decoded::Error(CloseCode::PROTOCOL_ERROR),
         };
-        // Every client frame is masked (5.1).
-        if b1 & 0x80 == 0 {
+        // Every client frame is masked, and no server frame is (5.1).
+        if (b1 & 0x80 != 0) != self.peer_masks {
             return Decoded::Error(CloseCode::PROTOCOL_ERROR);
         }
         let len7 = b1 & 0x7f;
@@ -156,20 +174,26 @@ impl FrameDecoder {
         if !opcode.is_control() && len > (self.max_message - self.message_len) as u64 {
             return Decoded::Error(CloseCode::MESSAGE_TOO_BIG);
         }
-        let start = mask_at + 4;
+        let start = if self.peer_masks {
+            mask_at + 4
+        } else {
+            mask_at
+        };
         let end = start + len as usize;
         if buf.len() < end {
             return Decoded::Incomplete;
         }
 
-        let mask = [
-            buf[mask_at],
-            buf[mask_at + 1],
-            buf[mask_at + 2],
-            buf[mask_at + 3],
-        ];
-        for (i, b) in buf[start..end].iter_mut().enumerate() {
-            *b ^= mask[i & 3];
+        if self.peer_masks {
+            let mask = [
+                buf[mask_at],
+                buf[mask_at + 1],
+                buf[mask_at + 2],
+                buf[mask_at + 3],
+            ];
+            for (i, b) in buf[start..end].iter_mut().enumerate() {
+                *b ^= mask[i & 3];
+            }
         }
         if !opcode.is_control() {
             self.in_message = !fin;
@@ -225,6 +249,43 @@ pub fn server_header(opcode: Opcode, payload_len: usize) -> ServerHeader {
     ServerHeader { bytes, len }
 }
 
+/// An encoded client frame header: like the server's, with the mask bit set
+/// and the 4-byte masking key after the length.
+#[derive(Debug, Clone, Copy)]
+pub struct ClientHeader {
+    bytes: [u8; MAX_CLIENT_HEADER],
+    len: u8,
+}
+
+impl ClientHeader {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.len)]
+    }
+}
+
+/// The header of a single, final client frame carrying `payload_len`
+/// bytes masked with `mask` (5.3: a fresh, unpredictable key per frame).
+pub fn client_header(opcode: Opcode, payload_len: usize, mask: [u8; 4]) -> ClientHeader {
+    let server = server_header(opcode, payload_len);
+    let head = server.as_bytes();
+    let mut bytes = [0u8; MAX_CLIENT_HEADER];
+    bytes[..head.len()].copy_from_slice(head);
+    bytes[1] |= 0x80;
+    bytes[head.len()..head.len() + 4].copy_from_slice(&mask);
+    ClientHeader {
+        bytes,
+        len: (head.len() + 4) as u8,
+    }
+}
+
+/// Mask (or unmask: it is its own inverse) `payload` in place with `mask`,
+/// whose first byte applies at payload offset `offset`.
+pub fn apply_mask(payload: &mut [u8], mask: [u8; 4], offset: usize) {
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b ^= mask[(offset + i) & 3];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -234,6 +295,50 @@ mod tests {
     use super::*;
 
     const MASK: [u8; 4] = [0x37, 0xfa, 0x21, 0x3d];
+
+    #[test]
+    fn a_client_decodes_unmasked_server_frames_and_refuses_masked_ones() {
+        for len in [0usize, 1, 125, 126, 1000, 65535, 65536] {
+            let payload = pattern(len);
+            let mut buf = server_header(Opcode::Binary, len).as_bytes().to_vec();
+            buf.extend_from_slice(&payload);
+            let mut dec = FrameDecoder::for_client(100_000);
+            let Decoded::Frame(f) = dec.decode(&mut buf) else {
+                panic!("length {len}")
+            };
+            assert_eq!(f.frame_len, buf.len());
+            assert_eq!(&buf[f.payload], payload.as_slice(), "length {len}");
+        }
+        assert_eq!(
+            FrameDecoder::for_client(1000).decode(&mut client_frame(0x82, b"x")),
+            Decoded::Error(CloseCode::PROTOCOL_ERROR),
+            "a server never masks"
+        );
+    }
+
+    #[test]
+    fn client_headers_are_the_server_form_with_the_mask() {
+        let mask = [1, 2, 3, 4];
+        for len in [0usize, 125, 126, 65535, 65536] {
+            let client = client_header(Opcode::Binary, len, mask);
+            let server = server_header(Opcode::Binary, len);
+            let (c, s) = (client.as_bytes(), server.as_bytes());
+            assert_eq!(c.len(), s.len() + 4);
+            assert_eq!(c[0], s[0]);
+            assert_eq!(c[1], s[1] | 0x80);
+            assert_eq!(&c[2..s.len()], &s[2..]);
+            assert_eq!(&c[s.len()..], &mask);
+        }
+        let mut frame = client_header(Opcode::Binary, 300, MASK).as_bytes().to_vec();
+        let mut payload = pattern(300);
+        apply_mask(&mut payload[..7], MASK, 0);
+        apply_mask(&mut payload[7..], MASK, 7);
+        frame.extend_from_slice(&payload);
+        let Decoded::Frame(f) = FrameDecoder::new(1000).decode(&mut frame) else {
+            panic!("a server reads it")
+        };
+        assert_eq!(&frame[f.payload], pattern(300).as_slice());
+    }
 
     #[test]
     fn decodes_and_unmasks_each_length_form() {

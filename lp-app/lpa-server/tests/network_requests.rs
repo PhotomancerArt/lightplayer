@@ -30,8 +30,8 @@ use lpc_model::{AsLpPath, AsLpPathBuf, FsVersion};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::{Incoming, Link, LinkId, LinkTrust, ServerTransport};
 use lpc_wire::server::{
-    FsRequest, FsResponse, HeardNetwork, LastAttempt, NetworkScan, NetworkStatus, SavedNetworkInfo,
-    StationState,
+    FsRequest, FsResponse, HeardNetwork, LastAttempt, NetworkScan, NetworkStatus, RelayRefusal,
+    RelayState, SavedNetworkInfo, StationState,
 };
 use lpc_wire::{
     ClientMessage, ClientRequest, FsBootState, TransportError, WifiPassword, WireServerMessage,
@@ -61,6 +61,7 @@ fn a_fresh_board_has_no_network_and_says_it_cannot_connect() {
             cloud_relay: true,
             networks: Vec::new(),
             station: StationState::Unsupported,
+            relay: RelayState::Off,
         }
     );
     assert!(!rig.file_exists(), "a status is a read: it creates no file");
@@ -283,6 +284,25 @@ fn the_station_probe_is_reported_verbatim() {
     assert_eq!(rig.add(USB, SSID, PASSWORD).station, connected());
     rig.server.set_station_probe(None);
     assert_eq!(rig.status(USB).station, StationState::Unsupported);
+}
+
+/// The relay's state comes from its probe on every network answer (a read
+/// and a change alike); a board without one says `off`.
+#[test]
+fn the_relay_probe_is_reported_on_every_network_answer() {
+    fn refused() -> RelayState {
+        RelayState::Refused {
+            reason: RelayRefusal::UnknownAccount,
+        }
+    }
+    let mut rig = Rig::new();
+    assert_eq!(rig.status(USB).relay, RelayState::Off);
+    rig.server.set_relay_probe(Some(refused));
+    assert_eq!(rig.status(USB).relay, refused());
+    assert_eq!(rig.add(USB, SSID, PASSWORD).relay, refused());
+    assert_eq!(rig.forget(USB, SSID).relay, refused());
+    rig.server.set_relay_probe(None);
+    assert_eq!(rig.status(USB).relay, RelayState::Off);
 }
 
 /// The station's last attempt at each saved network comes from its probe,

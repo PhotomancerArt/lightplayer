@@ -26,10 +26,16 @@ pub mod harness_block_on;
 pub mod harness_counters;
 mod harness_edge;
 pub mod harness_entropy;
+mod harness_relay;
 mod harness_server;
 pub mod lan_harness;
 pub mod no_usb;
+#[cfg(test)]
+mod relay_slot_tests;
 pub mod std_tcp_byte_stream;
+#[cfg(test)]
+mod test_hub;
 
 pub use harness_counters::HarnessStats;
+pub use harness_relay::HarnessRelay;
 pub use lan_harness::{HarnessAccess, LanHarness, LanHarnessOptions};

@@ -13,7 +13,10 @@ pub mod net_heartbeat;
 pub mod net_thread;
 #[cfg(feature = "net_thread_stack_diag")]
 pub mod net_thread_stack_diag;
+pub mod relay_probes;
+pub mod relay_task;
 pub mod station_probes;
 pub mod station_task;
+pub mod tcp_byte_stream;
 
 pub use station_probes::uses_wifi;

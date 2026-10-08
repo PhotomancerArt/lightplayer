@@ -35,11 +35,13 @@ fn it_dials_only_when_joined_switched_on_and_holding_an_account() {
         assert!(actions.is_empty(), "{expected}: {actions:?}");
         assert_eq!(client.state(), expected);
         assert_eq!(client.next_wake(), None);
+        assert!(!client.may_dial(), "{expected}");
     }
 
     let mut client = client(1);
     client.handle(0, RelayEvent::Network { joined: true });
     client.handle(0, RelayEvent::CloudRelay(true));
+    assert!(!client.may_dial());
     let actions = client.handle(0, RelayEvent::Accounts(vec![account(1)]));
     assert_eq!(
         actions,
@@ -48,6 +50,7 @@ fn it_dials_only_when_joined_switched_on_and_holding_an_account() {
         }]
     );
     assert_eq!(client.state(), RelayState::Connecting);
+    assert!(client.may_dial());
 }
 
 #[test]
@@ -276,9 +279,14 @@ fn losing_wifi_closes_the_leg_and_its_routes_and_stops_dialling() {
 fn cloud_relay_off_mid_session_closes_and_never_dials() {
     let mut client = client(1);
     register(&mut client, 0);
+    assert!(client.may_dial());
     let actions = client.handle(20, RelayEvent::CloudRelay(false));
     assert_eq!(actions, [RelayAction::Close]);
     assert_eq!(client.state(), RelayState::Off);
+    assert!(
+        !client.may_dial(),
+        "off: the edge may give the buffers back"
+    );
     assert_eq!(client.next_wake(), None);
     for now in [100, 10_000, 1_000_000] {
         assert!(client.handle(now, RelayEvent::Tick).is_empty());
@@ -365,10 +373,31 @@ fn frames_pass_both_ways_byte_identical() {
     );
     client.handle(15, message(&RelayFrame::Open { route: 4 }));
     assert_eq!(
-        sent(&client.handle(16, RelayEvent::RouteClose { route: 4 })),
+        sent(&client.handle(
+            16,
+            RelayEvent::RouteClose {
+                route: 4,
+                reason: RouteCloseReason::Normal
+            }
+        )),
         RelayFrame::Close {
             route: 4,
             reason: RouteCloseReason::Normal
+        }
+    );
+    // A board that turns a newcomer away (its one session is held) says so.
+    client.handle(17, message(&RelayFrame::Open { route: 5 }));
+    assert_eq!(
+        sent(&client.handle(
+            18,
+            RelayEvent::RouteClose {
+                route: 5,
+                reason: RouteCloseReason::Busy
+            }
+        )),
+        RelayFrame::Close {
+            route: 5,
+            reason: RouteCloseReason::Busy
         }
     );
 }

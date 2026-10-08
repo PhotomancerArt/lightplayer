@@ -54,7 +54,9 @@ pub use relay_client::{
     RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent, RelayState,
 };
 pub use relay_close_code::RelayCloseCode;
-pub use relay_frame::{ROUTE_FRAME_OVERHEAD, RelayFrame, RelayFrameError, encode_route_frame};
+pub use relay_frame::{
+    ROUTE_FRAME_OVERHEAD, RelayFrame, RelayFrameError, encode_route_frame, route_frame_header,
+};
 pub use relay_hello::RelayHello;
 pub use relay_limits::{
     MAX_HELLO_ACCOUNTS, MAX_LABEL_BYTES, MAX_RELAY_FRAME, MAX_ROUTES_PER_BOARD, PING_INTERVAL_S,

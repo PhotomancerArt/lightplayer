@@ -163,6 +163,12 @@ impl UiDeviceWifi {
         self.status.as_ref().is_none_or(|status| status.cloud_relay)
     }
 
+    /// The line under the Cloud relay switch: whether the board reached
+    /// lightplayer.app, in the test's words (`wifi_words::relay`).
+    pub fn relay_line(&self) -> Option<(&'static str, WifiTone)> {
+        wifi_words::relay::line(self.status.as_ref()?)
+    }
+
     /// The Networks page's line under its header, when it has one — none
     /// while a test shows in its row (the row says it).
     pub fn networks_line(&self) -> Option<String> {
@@ -359,6 +365,7 @@ mod tests {
                 cloud_relay: true,
                 networks,
                 station,
+                relay: lpc_wire::RelayState::Off,
             }),
             ..UiDeviceWifi::new(DeviceId(1), true)
         }

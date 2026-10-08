@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 use fw_esp32_common::net::host_lan_harness::harness_entropy::harness_entropy;
 use fw_esp32_common::net::host_lan_harness::{HarnessAccess, LanHarness, LanHarnessOptions};
 use fw_esp32_common::net::ws::LINK_PATH;
-use fw_esp32_common::radio_link::LAN_LINK_SLOTS;
+use fw_esp32_common::radio_link::NETWORK_LINK_SLOTS;
 use fw_esp32_common::radio_link::lan_link_config::lan_link_config;
 use lp_link::secure_channel::{KeyId, Psk, SecureRole};
 use lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, LinkState, SelectiveRepeat};
@@ -196,7 +196,7 @@ fn a_text_message_is_refused() {
 fn a_busy_board_answers_close_1013() {
     let harness = start();
     // Every LAN slot taken (each upgraded connection holds one).
-    let _held: Vec<Socket> = (0..LAN_LINK_SLOTS).map(|_| connect(&harness)).collect();
+    let _held: Vec<Socket> = (0..NETWORK_LINK_SLOTS).map(|_| connect(&harness)).collect();
     // The extra one upgrades, then is told to try again later.
     let mut extra = connect(&harness);
     set_read_timeout(&mut extra, Duration::from_secs(5));
@@ -218,6 +218,7 @@ fn start() -> LanHarness {
     LanHarness::start(LanHarnessOptions {
         access: HarnessAccess::open(OpenTo::Edit),
         graphics: None,
+        relay: None,
     })
     .expect("the harness starts")
 }

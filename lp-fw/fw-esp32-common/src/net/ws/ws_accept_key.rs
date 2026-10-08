@@ -16,10 +16,19 @@ pub fn accept_key(sec_websocket_key: &str) -> [u8; 28] {
     hasher.update(sec_websocket_key.as_bytes());
     hasher.update(WS_GUID);
     let digest = hasher.finish();
-
     // 20 bytes = six whole 3-byte groups and a 2-byte tail with one `=`.
-    let mut out = [b'='; 28];
-    for (group, chars) in digest.chunks(3).zip(out.chunks_mut(4)) {
+    let mut out = [0u8; 28];
+    base64_encode(&digest, &mut out);
+    out
+}
+
+/// Standard base64 with padding (RFC 4648, section 4) of `input` into
+/// `out`, which must be exactly `4 * ceil(input.len() / 3)` bytes. The
+/// accept value (20 bytes → 28) and a client's key (16 → 24) are its uses.
+pub fn base64_encode(input: &[u8], out: &mut [u8]) {
+    debug_assert_eq!(out.len(), input.len().div_ceil(3) * 4);
+    out.fill(b'=');
+    for (group, chars) in input.chunks(3).zip(out.chunks_mut(4)) {
         let b = [
             group[0],
             *group.get(1).unwrap_or(&0),
@@ -31,7 +40,6 @@ pub fn accept_key(sec_websocket_key: &str) -> [u8; 28] {
             *c = BASE64[(n >> (18 - 6 * i) & 0x3f) as usize];
         }
     }
-    out
 }
 
 #[cfg(test)]
@@ -45,6 +53,13 @@ mod tests {
             &accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
             b"s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
         );
+    }
+
+    #[test]
+    fn a_sixteen_byte_key_is_24_chars_with_two_pads() {
+        let mut out = [0u8; 24];
+        base64_encode(b"the sample nonce", &mut out);
+        assert_eq!(&out, b"dGhlIHNhbXBsZSBub25jZQ==");
     }
 
     #[test]

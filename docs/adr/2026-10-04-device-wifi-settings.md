@@ -286,3 +286,47 @@ rollback target reads both, and no firmware rewrites the file on an
 unconfirmed trial boot (the access file's rule, `may_migrate_device_store`;
 today only a client's request writes the network file, and a core-only
 image serves no channel 1).
+
+## Amendment (2026-10-07): Cloud relay now dials, and the status says whether it got through
+
+**Decision.** The switch this ADR stored and never read now does something.
+On a C6 with `cloudRelay` on (the default), a joined board that holds at
+least one account key dials lightplayer.app by itself and stays connected;
+with it off, or with no account key, the board never dials and no packet
+leaves for the service. `NetworkStatus` gains one field, `relay`, and the
+status stays Author-only like the rest of it. The relay itself is
+`2026-10-06-cloud-relay.md` (its "Device side" is this change's board half);
+the wire moved to **proto 40** (`PACK_FORMAT_VERSION` unchanged).
+
+`relay` is a code, never words: `off`, `noAccount`, `waitingForInternet`,
+`connecting`, `connected` or `refused { reason }` with `reason` one of
+`unknownAccount`, `updateFirmware`, `busy`. A board with no relay client (the
+S3, the classic, `lp-cli serve` without `--relay`) says `off`. What each
+state means, and the words core gives it (`wifi_words::relay`, which
+`lp-cli wifi status` reads too, lower-cased):
+
+| State | Means | Studio's words |
+|---|---|---|
+| `off` | Cloud relay is off (or the board has no relay) | nothing |
+| `noAccount` | on, but the board holds no account key | "Sign in to Studio and plug this board in once to use lightplayer.app" |
+| `waitingForInternet` | joined, and lightplayer.app did not answer (the name did not resolve, or the connection failed); it tries again on its backoff | "Connected, no internet" (only while the station is joined; before that, no line) |
+| `connecting` | dialling or registering, or about to dial again | "Reaching lightplayer.app…" |
+| `connected` | registered: a browser signed in to one of the board's accounts can reach it | "Connected to lightplayer.app" |
+| `refused: unknownAccount` | the service no longer knows any key the board holds (the account's key was reset) | "Plug this board into Studio once to refresh its account" |
+| `refused: updateFirmware` | the board speaks a relay protocol the service no longer takes | "Update this board's firmware to use lightplayer.app" |
+| `refused: busy` | the service cannot take the board right now; it tries again by itself | nothing |
+
+The in-row test's last step, "Reaching lightplayer.app", is shown when Cloud
+relay is on and the board reports `connecting`, `connected` or
+`waitingForInternet` (it was hidden for every board until now). For
+`noAccount` and the two actionable refusals the step is skipped and a note
+under the row says what to do, and for `off` and `refused: busy` there is
+no step. The line under the Cloud relay switch is the same words. The Cloud
+relay toggle's help text and `lp-cli wifi set
+--cloud-relay on|off` are unchanged: the switch's name never said "dials", it
+said what it lets happen.
+
+**What does not change.** `network.json` stays `version: 1` and its bytes are
+untouched: `cloudRelay` is read, not changed. The set of requests, and each
+request's tier, are as above. A relay state is RAM only (never persisted),
+and the network file still reads back no password.

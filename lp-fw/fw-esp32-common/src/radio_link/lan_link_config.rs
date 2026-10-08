@@ -33,7 +33,7 @@
 //!   send.
 //!
 //! Secure is required: the slot opens it with `Link::new_secure` as the
-//! Noise responder (`RadioLinkSlot::open_lan`).
+//! Noise responder (`RadioLinkSlot::open_network`).
 
 use lp_link::LinkConfig;
 

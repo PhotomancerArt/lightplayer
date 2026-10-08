@@ -281,6 +281,16 @@ long-lived branch conflict on this file whenever main re-baselined too.
   carries CI's clean figures (103,024 / 198,512 / 119,400), transcribed
   from the first clean step, not a local bless.
 
+- 2026-10-07 — the cloud relay on the C6 (Wi-Fi relay PR B, #1019, P8): a
+  real move, not churn — the network slots' parked-handshake buffers and
+  per-edge signals, two more embassy-net socket slots and its DNS socket
+  took the C6's boot heap from 103,000 to 105,560 B used and its largest
+  block from 119,432 to 116,840 B (nothing saved, so no relay buffers);
+  the main stack's high water 11,940 → 12,200 B, measured on a local
+  bless before main's net-seam record landed. The merge of main took
+  main's record (the director owns the figures); CI's clean figures on
+  the merged tree replace it.
+
 - 2026-10-07 — **the dirty re-check again, and CI's own images are not the
   ratchet's image** (OTA M7 Bluetooth updates, PR #1005, run 37631551382,
   merge commit `f3035c68c858`). The heap job's clean first check
@@ -308,6 +318,22 @@ long-lived branch conflict on this file whenever main re-baselined too.
   above and now with a second reason: pin `APP_VERSION` for every build the
   figure checks use, so a build's stamp length stops being a figure.
   Applied on PR #1005 as `chore(figures): record CI's clean C6 heap figures for 4cad23fdb` (the json's `commit` field left at `e922ceca5`).
+
+- 2026-10-07 — **the cloud relay's final figures (PR #1019, head `a303512e4`):
+  a real move plus the dirty re-check, again.** The C6 record
+  (`scripts/heap-budget-record/chips/esp32c6.json`) was transcribed from CI's
+  clean first-step figures, 105,580 B used / 195,956 B free / 116,840 B
+  largest block, because the "Figure moves" re-check ran on its own dirtied
+  tree and could not pass (the 2026-10-06 and 2026-10-07 entries above, the
+  same mechanism a third time in a day). The S3 and the classic moved **16 B
+  of stack** (S3 `stack_total_bytes` 32,448 → 32,432; the classic's
+  `main_stack_bytes` and the boot lines 37,088 → 37,072, with the determinism
+  prefix counts), taken from CI's own patch with `just apply-ci-figures 1019`
+  with no local build. The C6 move is the relay's (network slots'
+  parked-handshake buffers and signals, two socket slots and the DNS socket,
+  +2,580 B used at boot, nothing saved); the 16 B stack moves have no
+  attributed cause. Workaround as before: the director takes CI's figures,
+  never a local bless.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each

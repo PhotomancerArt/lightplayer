@@ -44,6 +44,10 @@ embassy-net-driver = { version = "0.2.0", optional = true }
 # carries to the core's update hook (`radio_link::radio_update_channel`,
 # feature `radio-link`). Already in every server image (lpa-server).
 lpc-access = { path = "../../lp-core/lpc-access", optional = true }
+# `net::relay` (feature `wifi`): the cloud relay's device-leg protocol and the
+# board's client state machine (Wi-Fi relay plan P6). no_std, sans-IO; its
+# HMAC is lpc-access's, already linked.
+lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
 
 # Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
@@ -113,6 +117,7 @@ wifi = [
     "lp-link/secure",
     "dep:lpc-wire",
     "dep:lpc-access",
+    "dep:lpc-relay",
     "dep:embassy-net-driver",
     "dep:critical-section",
 ]

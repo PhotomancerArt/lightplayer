@@ -130,12 +130,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "lp-bootctl"
+version = "1.0.0"
+dependencies = [
+ "lp-crc32",
+]
+
+[[package]]
 name = "lp-collection"
 version = "1.0.0"
 dependencies = [
  "rustc-hash",
  "serde",
 ]
+
+[[package]]
+name = "lp-crc32"
+version = "40.0.0"
+
+[[package]]
+name = "lp-deflate"
+version = "40.0.0"
 
 [[package]]
 name = "lp-json-pack"
@@ -216,6 +231,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-update"
+version = "40.0.0"
+dependencies = [
+ "lp-bootctl",
+ "lp-crc32",
+ "lp-deflate",
+ "lpc-access",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "lpc-wire"
 version = "40.0.0"
 dependencies = [
@@ -225,6 +253,7 @@ dependencies = [
  "lp-link",
  "lpc-access",
  "lpc-model",
+ "lpc-update",
  "ryu-js",
  "ser-write-json",
  "serde",

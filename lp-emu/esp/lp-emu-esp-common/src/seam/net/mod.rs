@@ -27,6 +27,7 @@
 
 pub mod lan_dhcp_server;
 pub mod lan_dns;
+pub mod lan_dns_server;
 pub mod lan_frame;
 pub mod lan_gateway;
 pub mod lan_host_pace;
@@ -35,6 +36,7 @@ pub mod lan_port_forward;
 pub mod lan_probe;
 pub mod lan_stack;
 pub mod lan_station;
+pub mod lan_uplink;
 pub mod shared_lan;
 pub mod virtual_access_point;
 pub mod virtual_lan;
@@ -50,6 +52,7 @@ pub use lan_pace::{PACE_LABEL_MARKER, Pace};
 pub use lan_port_forward::{ForwardCounters, LanPortForward};
 pub use lan_probe::{LanProbe, ProbeConn, ProbeId};
 pub use lan_station::{LanStation, StationEvent};
+pub use lan_uplink::{LanUplink, UPLINK_IP};
 pub use shared_lan::{HOST_PACE_STEP_US, LanDriver, NET_SEAM, SharedLan, net_endpoint};
 pub use virtual_access_point::{JoinOutcome, ScanRecord, VirtualAccessPoint};
 pub use virtual_lan::{FrameRecord, LanConfig, LanCounters, LanPort, VirtualLan, net_pacer_config};

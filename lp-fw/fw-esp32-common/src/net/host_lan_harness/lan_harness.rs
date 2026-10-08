@@ -15,11 +15,14 @@ use std::time::Duration;
 
 use lpa_server::LpGraphics;
 use lpc_access::{DeviceAccessFile, OpenTo, SecretEntry};
+use lpc_relay::{RelayAccount, RelayEvent, RelayState};
 
 use super::harness_counters::{HarnessCounters, HarnessStats};
 use super::harness_edge::{refuse_connection, serve_connection};
+use super::harness_relay::{HarnessRelay, RelayShared, run_relay};
 use super::harness_server::{ServerSetup, run_server};
-use crate::radio_link::{LAN_LINK_SLOTS, SharedPort};
+use crate::net::relay::RelayCounters;
+use crate::radio_link::{NETWORK_LINK_SLOTS, SharedPort};
 
 /// Who may do what on the harness board: its device store
 /// (`/.lp/access.json`).
@@ -69,6 +72,10 @@ pub struct LanHarnessOptions {
     /// (`lp_gfx::NullGraphics`): enough for links, access and files; pass
     /// the real CPU backend to load a project.
     pub graphics: Option<Arc<dyn LpGraphics>>,
+    /// Put the board on a cloud relay too (its own driver and device leg,
+    /// sharing the network slot with the LAN endpoint), as a C6 with Cloud
+    /// relay on and its account entries (`access`'s `Account` secrets).
+    pub relay: Option<HarnessRelay>,
 }
 
 /// The LAN endpoint, the link mux and a real `lpa-server`, served from
@@ -82,6 +89,7 @@ pub struct LanHarness {
     addr: SocketAddr,
     stop: Arc<AtomicBool>,
     counters: Arc<HarnessCounters>,
+    relay: Arc<RelayShared>,
     threads: Vec<JoinHandle<()>>,
     _turn: MutexGuard<'static, ()>,
 }
@@ -98,6 +106,7 @@ impl LanHarness {
         let graphics = options
             .graphics
             .unwrap_or_else(|| Arc::new(lp_gfx::NullGraphics::new()));
+        let accounts = RelayAccount::from_entries(&options.access.secrets);
         let setup = ServerSetup {
             lock: port_lock,
             access_json: options.access.to_json(),
@@ -119,13 +128,41 @@ impl LanHarness {
                 .name(String::from("lan-harness-accept"))
                 .spawn(move || accept_loop(&listener, shared, &stop, &counters))?
         };
+        let relay_shared = Arc::new(RelayShared::default());
+        let mut threads = vec![accept, server];
+        if let Some(relay) = options.relay {
+            let stop = Arc::clone(&stop);
+            let relay_shared = Arc::clone(&relay_shared);
+            threads.push(
+                std::thread::Builder::new()
+                    .name(String::from("lan-harness-relay"))
+                    .spawn(move || {
+                        run_relay(relay, accounts, addr, shared, &relay_shared, &stop)
+                    })?,
+            );
+        }
         Ok(Self {
             addr,
             stop,
             counters,
-            threads: vec![accept, server],
+            relay: relay_shared,
+            threads,
             _turn: turn,
         })
+    }
+
+    /// The board's relay state and counters, as its driver last published
+    /// them (`off` before it ran, or without a relay).
+    #[must_use]
+    pub fn relay_status(&self) -> (RelayState, RelayCounters) {
+        self.relay.snapshot()
+    }
+
+    /// Tell the board's relay driver something, as the C6's relay task is
+    /// told by the station and the main thread (`CloudRelay(false)`, new
+    /// `Accounts`, the network lost…).
+    pub fn relay_input(&self, input: RelayEvent<'static>) {
+        self.relay.push_input(input);
     }
 
     /// Where the board listens.
@@ -173,8 +210,8 @@ fn accept_loop(
     stop: &Arc<AtomicBool>,
     counters: &Arc<HarnessCounters>,
 ) {
-    let busy: Arc<[AtomicBool; LAN_LINK_SLOTS]> =
-        Arc::new([const { AtomicBool::new(false) }; LAN_LINK_SLOTS]);
+    let busy: Arc<[AtomicBool; NETWORK_LINK_SLOTS]> =
+        Arc::new([const { AtomicBool::new(false) }; NETWORK_LINK_SLOTS]);
     let mut edges: Vec<JoinHandle<()>> = Vec::new();
     while !stop.load(Ordering::SeqCst) {
         let stream = match listener.accept() {
@@ -189,7 +226,7 @@ fn accept_loop(
             }
         };
         let _ = stream.set_nonblocking(false);
-        let free = (0..LAN_LINK_SLOTS).find(|&lan| {
+        let free = (0..NETWORK_LINK_SLOTS).find(|&lan| {
             busy[lan]
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                 .is_ok()
@@ -267,6 +304,7 @@ mod tests {
         let harness = LanHarness::start(LanHarnessOptions {
             access: HarnessAccess::open(OpenTo::Edit),
             graphics: None,
+            relay: None,
         })
         .expect("the harness starts");
         let url = alloc::format!("ws://{}/link", harness.addr());
@@ -289,7 +327,7 @@ mod tests {
         assert_eq!(hello.auth.granted, Some(Tier::Edit));
 
         // The rest of the slots, then one more.
-        let _rest: Vec<_> = (1..LAN_LINK_SLOTS).map(|_| connect(&url)).collect();
+        let _rest: Vec<_> = (1..NETWORK_LINK_SLOTS).map(|_| connect(&url)).collect();
         let mut extra = connect(&url);
         set_read_timeout(&mut extra, Duration::from_secs(5));
         let close = loop {
@@ -304,7 +342,7 @@ mod tests {
         assert_eq!(close, Some(1013), "try again later");
         let stats = harness.stats();
         assert_eq!(stats.refused, 1);
-        assert_eq!(stats.links_opened, LAN_LINK_SLOTS);
+        assert_eq!(stats.links_opened, NETWORK_LINK_SLOTS);
         assert_eq!(stats.early_requests, 0);
         harness.stop();
     }

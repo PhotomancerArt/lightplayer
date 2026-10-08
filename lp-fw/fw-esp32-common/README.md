@@ -62,3 +62,23 @@ cargo clippy -p fw-esp32-common --features server -- --no-deps -D warnings
 
 The crate is a workspace default-member, so `just check` covers it on the host
 toolchain; the firmware builds exercise it under `riscv32imac-unknown-none-elf`.
+
+## Network links (feature `wifi`): the LAN, the relay and the network slot
+
+`radio_link/` holds the one secure network session as a **network slot**
+(`NETWORK_LINK_SLOTS = 1`) shared by the C6's LAN endpoint and the cloud
+relay: each link records its trust (`Keyed` on the LAN, `Relayed` through the
+relay) and the edge serving it (`SlotEdge`). A newcomer that finds the slot
+held parks its first frame (`parked_handshake.rs`) and the mux either turns
+it away busy or, for a handshake that proves the holder's own key, lets it
+take the slot. `net/relay/` is the relay's board half, sans-IO: `RelayDriver`
+joins `lpc-relay`'s `RelayClient` to the slot, and `run_relay_leg` is the
+device leg's loop over a platform's sockets (`RelayLegIo`: DNS, TCP, clock,
+RNG), shared by `fw-esp32c6`'s relay task and the host harness
+(`net/host_lan_harness`, feature `host-lan-harness`, which runs the board's
+real port and server over std sockets; its relay tests are `relay_slot_tests`).
+`net/ws/` has both halves of the WebSocket (server for the LAN, client for the
+relay) over `ByteStream`, the seam a TLS wrapper would slot into. The relay
+leg allocates its buffers only while the board may dial (`try_zeroed_bytes`:
+no room is a failed dial, never a reset). Decisions:
+`docs/adr/2026-10-06-cloud-relay.md` ("Device side").

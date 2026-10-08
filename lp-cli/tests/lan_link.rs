@@ -179,7 +179,7 @@ fn a_link_past_the_boards_slots_is_told_to_try_again_later() {
     let harness = start(HarnessAccess::open(OpenTo::Edit), None);
     run(async {
         let mut open = Vec::new();
-        for n in 0..fw_esp32_common::radio_link::LAN_LINK_SLOTS {
+        for n in 0..fw_esp32_common::radio_link::NETWORK_LINK_SLOTS {
             open.push(
                 connect(&harness, None)
                     .await
@@ -328,7 +328,12 @@ fn locked() -> HarnessAccess {
 }
 
 fn start(access: HarnessAccess, graphics: Option<Arc<dyn lpa_server::LpGraphics>>) -> LanHarness {
-    LanHarness::start(LanHarnessOptions { access, graphics }).expect("the harness starts")
+    LanHarness::start(LanHarnessOptions {
+        access,
+        graphics,
+        relay: None,
+    })
+    .expect("the harness starts")
 }
 
 fn target(harness: &LanHarness) -> LanTarget {

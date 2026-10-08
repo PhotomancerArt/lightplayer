@@ -21,8 +21,6 @@
 //!   up well inside its login deadline and requests answer (numbers printed).
 
 use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -32,27 +30,17 @@ use lp_cli::server::create_server::create_server_on;
 use lp_cli::server::relay_host::relay_host_transport::NoLocalLinks;
 use lp_cli::server::relay_host::{host_board_id, start_relay_host};
 use lp_cli::server::run_server_loop_with;
-use lp_cloud_domain::MetaStore as _;
-use lp_cloud_server::app_state::AppState;
-use lp_cloud_server::config::ServerConfig;
-use lp_cloud_server::page::static_site::StaticSite;
-use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
-use lp_cloud_server::router::build_router;
-use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
 use lpa_client::LpClient;
 use lpa_client::transport_lan::{BoardPassword, LanError, os_entropy};
-use lpa_client::transport_relay::RelayTarget;
-use lpc_access::{DeviceAccessFile, OpenTo, SecretEntry, SecretKind, Tier};
-use lpc_cloud_api::{
-    AccountAccessInfo, Actor, BoardList, CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest,
-    CloudResponse,
-};
-use lpc_history::PrefixedUid;
+use lpc_access::{DeviceAccessFile, OpenTo, SecretEntry, Tier};
 use lpc_model::AsLpPath;
 use lpc_relay::RelayBoardId;
 use lpfs::{LpFs, LpFsMemory};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio::net::{TcpListener, TcpStream};
+
+#[path = "support/relay_cloud.rs"]
+mod relay_cloud;
+
+use relay_cloud::Cloud;
 
 const PASSWORD: &str = "camp fire";
 /// Cheap for a test; a person's password is written with far more.
@@ -294,275 +282,131 @@ fn a_session_through_a_slow_device_leg_stays_up() {
     });
 }
 
+/// The board's own relay driver (the C6's, on the host harness: its
+/// WebSocket client, driver, network slot and mux in front of a real
+/// lpa-server) against the real hub: it registers with its account key,
+/// the hub lists it with its LAN address, and an account session edits it.
+#[test]
+fn a_boards_own_relay_driver_registers_with_its_lan_address_and_carries_a_session() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
+    cloud.wait_for_boards(1);
+
+    let list = cloud.list_boards(&alice.session);
+    assert_eq!(list.boards.len(), 1);
+    assert_eq!(list.boards[0].id, board.to_string());
+    assert_eq!(
+        list.boards[0].lan.as_deref(),
+        Some(harness.addr().to_string().as_str()),
+        "the board's LAN address rides its hello"
+    );
+    run(async {
+        let connection = connect_relay(cloud.target(board), Some(alice.session.clone()), None)
+            .await
+            .expect("the account's key opens the board's relay session");
+        assert_eq!(connection.hello().unwrap().auth.granted, Some(Tier::Edit));
+        let mut client = LpClient::new(connection.client_io());
+        client
+            .network_status()
+            .await
+            .expect("an edit request through the board's own relay driver");
+        drop(client);
+        connection.close().await;
+    });
+    harness.stop();
+}
+
+/// D2 with the real hub and clients: Alice's relay session moves to the LAN
+/// when she opens it with the same key, and Bob, through the relay, is told
+/// busy while she holds it.
+#[test]
+fn the_same_key_moves_a_relay_session_to_the_lan_and_anyone_else_is_busy() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let bob = cloud.account("bob");
+    let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
+    cloud.wait_for_boards(1);
+    let alice_key = alice.entry();
+    run(async {
+        let relayed = connect_relay(cloud.target(board), Some(alice.session.clone()), None)
+            .await
+            .expect("Alice through the relay");
+        let lan_target =
+            lpa_client::transport_lan::LanTarget::new("127.0.0.1", harness.addr().port());
+        let (lan, hello) = lpa_client::transport_lan::connect_lan_transport(
+            lan_target.endpoint(),
+            lpa_client::transport_lan::LanOptions {
+                password: None,
+                want_packed: false,
+                held_keys: vec![(
+                    lpc_wire::lp_link::secure_channel::KeyId(alice_key.salt),
+                    lpc_wire::lp_link::secure_channel::Psk::new(lpc_access::link_psk(&alice_key.k)),
+                )],
+            },
+        )
+        .await
+        .expect("Alice on the LAN with the same key takes her session over");
+        assert_eq!(hello.auth.granted, Some(Tier::Edit));
+        let mut relay_client = LpClient::new(relayed.client_io());
+        assert!(
+            relay_client.network_status().await.is_err(),
+            "the relay session is gone once the LAN has it"
+        );
+        drop(relay_client);
+        relayed.close().await;
+
+        let refused =
+            match connect_relay(cloud.target(board), Some(bob.session.clone()), None).await {
+                Ok(_) => panic!("Bob got the board while Alice holds its one session"),
+                Err(error) => error,
+            };
+        assert!(
+            matches!(
+                refused.downcast_ref::<LanError>(),
+                Some(LanError::Busy { .. })
+            ),
+            "{refused}"
+        );
+        drop(lan);
+    });
+    assert_eq!(harness.stats().takeovers, 1);
+    harness.stop();
+}
+
 // ---- helpers ---------------------------------------------------------
 
-/// An lp-cloud-server on a loopback port, on its own runtime.
-struct Cloud {
-    runtime: Arc<tokio::runtime::Runtime>,
-    state: AppState,
-    port: u16,
-    serve: tokio::task::JoinHandle<()>,
-}
+/// The C6's board-side relay on the host harness: its network slot, mux
+/// and server, locked (no "Anyone"), holding `accounts`, on `cloud`'s relay.
+struct HarnessBoard;
 
-struct Account {
-    uid: PrefixedUid,
-    session: String,
-    access: AccountAccessInfo,
-}
-
-impl Account {
-    /// The entry Studio installs on a board for this account.
-    fn entry(&self) -> SecretEntry {
-        SecretEntry::from_password(
-            "test's account",
-            Tier::Edit,
-            &self.access.key_secret,
-            self.access.key_salt,
-            1,
-        )
-        .with_kind(SecretKind::Account)
+impl HarnessBoard {
+    fn start(
+        cloud: &Cloud,
+        accounts: Vec<SecretEntry>,
+    ) -> (
+        fw_esp32_common::net::host_lan_harness::LanHarness,
+        RelayBoardId,
+    ) {
+        use fw_esp32_common::net::host_lan_harness::{
+            HarnessAccess, HarnessRelay, LanHarness, LanHarnessOptions,
+        };
+        let mut mac = [0u8; 6];
+        os_entropy(&mut mac);
+        mac[0] = (mac[0] | 0x02) & 0xfe;
+        let harness = LanHarness::start(LanHarnessOptions {
+            access: HarnessAccess::locked(accounts),
+            graphics: None,
+            relay: Some(HarnessRelay {
+                host: "127.0.0.1".to_string(),
+                port: cloud.port,
+                board_mac: mac,
+                label: "harness board".to_string(),
+            }),
+        })
+        .expect("the harness starts");
+        (harness, RelayBoardId(mac))
     }
-}
-
-impl Cloud {
-    fn start(port: Option<u16>) -> Self {
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .unwrap(),
-        );
-        let state = fresh_state();
-        let (serve, port) = Self::serve(&runtime, state.clone(), port);
-        Self {
-            runtime,
-            state,
-            port,
-            serve,
-        }
-    }
-
-    fn serve(
-        runtime: &tokio::runtime::Runtime,
-        state: AppState,
-        port: Option<u16>,
-    ) -> (tokio::task::JoinHandle<()>, u16) {
-        let listener = runtime.block_on(async {
-            let address = format!("127.0.0.1:{}", port.unwrap_or(0));
-            let deadline = Instant::now() + Duration::from_secs(5);
-            loop {
-                match TcpListener::bind(&address).await {
-                    Ok(listener) => break listener,
-                    Err(error) if Instant::now() < deadline => {
-                        let _ = error;
-                        tokio::time::sleep(Duration::from_millis(50)).await;
-                    }
-                    Err(error) => panic!("could not bind {address}: {error}"),
-                }
-            }
-        });
-        let port = listener.local_addr().unwrap().port();
-        let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
-        let serve = runtime.spawn(async move {
-            let _ = axum::serve(listener, app).await;
-        });
-        (serve, port)
-    }
-
-    fn origin(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
-
-    fn target(&self, board: RelayBoardId) -> RelayTarget {
-        RelayTarget::new(board, self.origin())
-    }
-
-    /// A signed-in account with its account key minted, and a session.
-    fn account(&self, name: &str) -> Account {
-        let name = name.to_string();
-        let (uid, token, access) = self.runtime.block_on(self.state.with_service(move |core| {
-            let email = format!("{name}@example.com");
-            let user = core
-                .service
-                .upsert_user(&name, &email, &name, "google", None, None, None);
-            let token = core.service.open_session(user.uid, 3600.0, None);
-            let access = match core
-                .service
-                .handle(Actor::User(user.uid), CloudRequest::GetAccountAccess)
-                .unwrap()
-            {
-                CloudResponse::AccountAccessInfo(access) => access,
-                other => panic!("{other:?}"),
-            };
-            (user.uid, token, access)
-        }));
-        Account {
-            uid,
-            session: URL_SAFE_NO_PAD.encode(token),
-            access,
-        }
-    }
-
-    /// A guest session (no account key).
-    fn guest(&self) -> String {
-        let token = self.runtime.block_on(self.state.with_service(|core| {
-            let user = core.service.begin_guest_user();
-            core.service.open_session(user.uid, 3600.0, None)
-        }));
-        URL_SAFE_NO_PAD.encode(token)
-    }
-
-    /// A fresh session for an account already in the store.
-    fn session_for(&self, uid: PrefixedUid) -> String {
-        let token = self.runtime.block_on(
-            self.state
-                .with_service(move |core| core.service.open_session(uid, 3600.0, None)),
-        );
-        URL_SAFE_NO_PAD.encode(token)
-    }
-
-    fn wait_for_boards(&self, count: usize) {
-        let deadline = Instant::now() + Duration::from_secs(15);
-        while self.state.relay().board_count() < count {
-            assert!(
-                Instant::now() < deadline,
-                "{count} board(s) did not register; {} did",
-                self.state.relay().board_count()
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    fn list_boards(&self, session: &str) -> BoardList {
-        let url = format!("{}/api", self.origin());
-        let cookie = format!("lp_session={session}");
-        let reply: CloudReply = self.runtime.block_on(async move {
-            reqwest::Client::new()
-                .post(url)
-                .header("cookie", cookie)
-                .json(&CloudCall {
-                    version: CLOUD_API_VERSION,
-                    request: CloudRequest::ListBoards,
-                })
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap()
-        });
-        match reply.result.unwrap() {
-            CloudResponse::BoardList(list) => list,
-            other => panic!("{other:?}"),
-        }
-    }
-
-    /// A deploy: every leg told "going away", the process gone, a new one
-    /// on the same port with the same accounts (the store survives a
-    /// deploy; presence does not).
-    fn restart(&mut self) {
-        self.state.relay().going_away();
-        self.serve.abort();
-        let _ = self.runtime.block_on(&mut self.serve);
-        let old = self.state.clone();
-        let new = fresh_state();
-        let rows = self.runtime.block_on(old.with_service(|core| {
-            let store = core.service.store();
-            store
-                .users(100)
-                .into_iter()
-                .map(|user| {
-                    let access = store.account_access(user.uid);
-                    (user, access)
-                })
-                .collect::<Vec<_>>()
-        }));
-        self.runtime.block_on(new.with_service(move |core| {
-            for (user, access) in rows {
-                core.service.store_mut().put_user(user);
-                if let Some(access) = access {
-                    core.service.store_mut().put_account_access(access);
-                }
-            }
-        }));
-        let (serve, port) = Self::serve(&self.runtime, new.clone(), Some(self.port));
-        assert_eq!(port, self.port);
-        self.state = new;
-        self.serve = serve;
-    }
-
-    /// An origin whose traffic reaches this server `delay` late each way
-    /// (a loopback proxy): what a slow home uplink does to the device leg.
-    fn delayed_origin(&self, delay: Duration) -> String {
-        let target: SocketAddr = format!("127.0.0.1:{}", self.port).parse().unwrap();
-        let listener = self
-            .runtime
-            .block_on(TcpListener::bind("127.0.0.1:0"))
-            .unwrap();
-        let port = listener.local_addr().unwrap().port();
-        self.runtime.spawn(async move {
-            while let Ok((inbound, _)) = listener.accept().await {
-                tokio::spawn(async move {
-                    let Ok(outbound) = TcpStream::connect(target).await else {
-                        return;
-                    };
-                    let (in_read, in_write) = inbound.into_split();
-                    let (out_read, out_write) = outbound.into_split();
-                    tokio::spawn(delayed_copy(in_read, out_write, delay));
-                    tokio::spawn(delayed_copy(out_read, in_write, delay));
-                });
-            }
-        });
-        format!("http://127.0.0.1:{port}")
-    }
-}
-
-/// Copy `from` to `to`, each chunk arriving `delay` after it was read, in
-/// order.
-async fn delayed_copy(
-    mut from: tokio::net::tcp::OwnedReadHalf,
-    mut to: tokio::net::tcp::OwnedWriteHalf,
-    delay: Duration,
-) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(tokio::time::Instant, Vec<u8>)>();
-    let writer = tokio::spawn(async move {
-        while let Some((due, chunk)) = rx.recv().await {
-            tokio::time::sleep_until(due).await;
-            if to.write_all(&chunk).await.is_err() {
-                return;
-            }
-        }
-        let _ = to.shutdown().await;
-    });
-    let mut buffer = vec![0u8; 16 * 1024];
-    loop {
-        match from.read(&mut buffer).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let due = tokio::time::Instant::now() + delay;
-                if tx.send((due, buffer[..n].to_vec())).is_err() {
-                    break;
-                }
-            }
-        }
-    }
-    drop(tx);
-    let _ = writer.await;
-}
-
-fn fresh_state() -> AppState {
-    let config = ServerConfig::from_vars(|name| match name {
-        "LP_CLOUD_STORE" | "LP_CLOUD_BLOBS" => Some("mem".to_string()),
-        _ => None,
-    })
-    .expect("the test configuration parses");
-    AppState::new(
-        config,
-        AnyMetaStore::new(MemMetaStore::new()),
-        AnyBlobStore::new(MemBlobStore::new()),
-        StaticSite::open(None),
-    )
 }
 
 /// The board's own password, at edit (stretched, as a person's is).

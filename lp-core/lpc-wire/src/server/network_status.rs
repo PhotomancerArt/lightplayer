@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use lpc_access::NetworkFile;
 use serde::{Deserialize, Serialize};
 
+use crate::server::relay_state::RelayState;
 use crate::server::saved_network_info::SavedNetworkInfo;
 use crate::server::station_state::StationState;
 
@@ -25,18 +26,22 @@ pub struct NetworkStatus {
     pub networks: Vec<SavedNetworkInfo>,
     /// What the station is doing.
     pub station: StationState,
+    /// Whether the board reached lightplayer.app through the cloud relay
+    /// (`off` on a board with Cloud relay off, or with no relay).
+    pub relay: RelayState,
 }
 
 impl NetworkStatus {
-    /// The status of `file`, with the station reporting `station` and no
-    /// attempt recorded against any network.
+    /// The status of `file`, with the station reporting `station`, the
+    /// relay `relay`, and no attempt recorded against any network.
     #[must_use]
-    pub fn of(file: &NetworkFile, station: StationState) -> Self {
+    pub fn of(file: &NetworkFile, station: StationState, relay: RelayState) -> Self {
         Self {
             wifi: file.wifi,
             cloud_relay: file.cloud_relay,
             networks: file.networks.iter().map(SavedNetworkInfo::of).collect(),
             station,
+            relay,
         }
     }
 

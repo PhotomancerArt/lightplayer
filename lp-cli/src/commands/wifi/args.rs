@@ -100,7 +100,9 @@ pub struct SetArgs {
     #[arg(long, value_enum)]
     pub wifi: Option<OnOff>,
     /// Let lightplayer.app reach this board through the cloud relay (on by
-    /// default).
+    /// default). On, a joined board that holds an account key dials
+    /// lightplayer.app by itself and `wifi status` says how far it got; off,
+    /// it never dials.
     #[arg(long, value_enum)]
     pub cloud_relay: Option<OnOff>,
     /// Print the board's reply as JSON (it holds no password).

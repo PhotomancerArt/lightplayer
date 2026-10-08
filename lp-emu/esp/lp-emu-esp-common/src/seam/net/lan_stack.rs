@@ -64,6 +64,18 @@ impl LanStack {
         }
     }
 
+    /// Hold `ip`/`prefix` too, beside the addresses it has (the gateway's
+    /// uplink address). `Err` when the stack holds as many as it can.
+    pub fn add_address(&mut self, ip: Ipv4Addr, prefix: u8) -> Result<(), ()> {
+        let mut added = Err(());
+        self.iface.update_ip_addrs(|addrs| {
+            added = addrs
+                .push(IpCidr::Ipv4(Ipv4Cidr::new(ip, prefix)))
+                .map_err(|_| ());
+        });
+        added
+    }
+
     /// A frame the segment delivered.
     pub fn push_frame(&mut self, frame: Vec<u8>) {
         self.device.rx.push_back(frame);

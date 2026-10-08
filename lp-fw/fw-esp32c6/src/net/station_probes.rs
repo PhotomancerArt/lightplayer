@@ -24,14 +24,17 @@ pub fn uses_wifi() -> bool {
 
 /// The network file as `core_boot` read it, before the engine (and any
 /// Radio node) exists: "set to use Wi-Fi" is decided before a project
-/// opens its endpoints.
+/// opens its endpoints. The relay takes its Cloud relay switch from it too.
 pub fn boot_settings(file: &NetworkFile) {
     STATION_BOARD.settings_changed(file);
+    super::relay_probes::RELAY_BOARD.settings_changed(file);
 }
 
-/// The server's `NetworkChanged` hook: the file as it now stands.
+/// The server's `NetworkChanged` hook: the file as it now stands, for the
+/// station and the relay (the Cloud relay switch).
 pub fn network_changed(file: &NetworkFile) {
     STATION_BOARD.settings_changed(file);
+    super::relay_probes::RELAY_BOARD.settings_changed(file);
 }
 
 /// The server's `StationProbe`.
