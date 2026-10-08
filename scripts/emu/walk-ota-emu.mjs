@@ -156,7 +156,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
 import { boardRegistry, serveStudioBundle, startDoor, startRecordSink, stopDoor, walkPort } from "./emulated-lane.mjs";
-import { forwardHttp, forwardUpgrade, relayId, startRelayCloud } from "./walk-ota-relay.mjs";
+import { WALK_EMAIL, forwardHttp, forwardUpgrade, relayId, startRelayCloud } from "./walk-ota-relay.mjs";
 import {
   FIXTURE,
   LAN,
@@ -456,7 +456,7 @@ async function main() {
   if (RELAY_LANE) {
     console.log("  ⚠️  a local lp-cloud-server stands in for lightplayer.app: no internet, no fly proxy, no");
     console.log("     NAT, no real round trips; the board's leg crosses the emulated LAN's uplink.");
-    console.log(`  relay           ${cloud.origin} (device leg via 127.0.0.1:${cloud.devicePort}); account ${"walk-relay@example.com"}`);
+    console.log(`  relay           ${cloud.origin} (device leg via 127.0.0.1:${cloud.devicePort}); account ${WALK_EMAIL}`);
   }
   if (LAN_LANE) {
     console.log("  ⚠️  the emulated LAN proves the IP stack, the link and the board's rules — not the radio,");
