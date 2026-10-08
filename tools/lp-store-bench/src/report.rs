@@ -600,3 +600,29 @@ fn dial_table(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::overnight::{OvernightParams, run_overnight};
+    use crate::{CorpusSet, Scoreboard};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn renders_from_a_scoreboard() {
+        let dir = std::env::temp_dir().join(format!("lsb-report-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let sink = Scoreboard::open(&dir).unwrap();
+        let p = OvernightParams {
+            deadline: Instant::now() + Duration::from_millis(300),
+            candidates: vec!["mem".into()],
+            sectors: 16,
+            quick: true,
+        };
+        run_overnight(&p, &CorpusSet::new(None), &sink);
+        let md = render_report(&dir).unwrap();
+        assert!(md.contains("## Headline"));
+        assert!(dir.join("summary.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

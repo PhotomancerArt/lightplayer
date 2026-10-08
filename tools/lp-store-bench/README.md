@@ -60,6 +60,40 @@ cargo run --release -p lp-store-bench -- measure --candidates f1,f2,s1,t1 --work
 cargo run --release -p lp-store-bench -- replay failure.json      # one scoreboard line
 ```
 
+### Overnight
+
+```bash
+nohup nice -n 10 target/release/lp-store-bench overnight --until 09:00 --threads 8 \
+  --out <dir> --corpus <dir> > <dir>/overnight.log 2>&1 &
+target/release/lp-store-bench report --out <dir>      # re-render report.md at any time
+target/release/lp-store-bench overnight --quick --until +3m --candidates mem --out /tmp/x   # runner smoke
+```
+
+`overnight` works a priority list against its deadline (checked between
+units and between the steps of a sweep), writing every result as it lands:
+
+1. fault-free measures — every candidate × c13/c20/c40/c40reuse/c40-min-z ×
+   push/repush/save/panel (+ switch), with min-partition searches for push
+   and save;
+2. exhaustive single cuts — push/repush/save/panel on c40 (c20 for `f1`,
+   which cannot hold c40) and switch c13↔c40reuse, every cut point, every
+   tear model, 2 seeds; units interleave candidates;
+3. double cuts — the same workloads, the first 4 focus steps;
+4. the T1 dial sweep — `record_max` × `gc_policy` × `reserve` × codec/dict ×
+   partition {96, 128, 176}: fault-free c40 measures plus a reduced cut
+   sweep each;
+5. endurance — 30 simulated days (1 re-push, 10 saves, 1440 panel writes a
+   day);
+6. fill to full — c20 copies until `NoSpace` then saves; the largest
+   c40-style project (edited module copies) that pushes and takes 5 saves;
+7. random walks — 16 seeds × 300 steps per candidate.
+
+Then rounds repeat with new seeds (odd rounds: cut sweeps, double cuts and
+walks; even rounds: walks) until the deadline. The report's "What did not
+run" lists the units still queued at the end. `report` renders `report.md`
+(headline, cut totals with a replay command per failure, measures, fill, the
+T1 dial Pareto front) and `summary.json`.
+
 `--corpus` defaults to the spike's `measurements/corpus`; `--out` to
 `target/lp-store-bench/<cmd>`; `--threads` 8; `--sectors` 128.
 
