@@ -99,6 +99,7 @@ pub async fn run_wire_conversation(
                         removed.boots_next_clause()
                     ),
                 },
+                boots_next: removed.boots_next.clone(),
                 ..Default::default()
             })
         }

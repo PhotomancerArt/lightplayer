@@ -335,6 +335,7 @@ impl DeviceTransport for ScriptedTransport {
                     probed_mac: inspection.probed_mac.clone(),
                     chip_name: inspection.chip_name.clone(),
                     inspection: Some(inspection),
+                    boots_next: None,
                 })))
             }
             // A staged plan runs against the board's flash image, which then
@@ -372,6 +373,7 @@ impl DeviceTransport for ScriptedTransport {
                                 probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
                                 chip_name: Some("ESP32-C6 (fake)".to_string()),
                                 inspection: None,
+                                boots_next: None,
                             })
                         }
                         FlashPlan::FailMidWrite => {
@@ -382,6 +384,7 @@ impl DeviceTransport for ScriptedTransport {
                             probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
                             chip_name: Some("ESP32-C6 (fake)".to_string()),
                             inspection: None,
+                            boots_next: None,
                         }),
                         FlashPlan::Hang => {
                             core::future::pending::<()>().await;
@@ -440,6 +443,7 @@ impl DeviceTransport for ScriptedTransport {
                                         report.storage_id
                                     ),
                                 },
+                                boots_next: report.boots_next.clone(),
                                 ..Default::default()
                             })
                         }
@@ -6326,6 +6330,115 @@ fn removing_the_project_clears_the_board_and_leaves_the_library_alone() {
         bench.registry().len(),
         1,
         "the device row survives a removal"
+    );
+}
+
+/// The note a Remove leaves on the card, when it leaves another folder to
+/// start: the project line reads core's `project_note` while the board is idle
+/// and reports nothing loaded, and the very next thing that happens to the
+/// board (a push here) takes it away. A Remove that leaves nothing never
+/// shows one.
+#[test]
+fn a_removal_that_leaves_a_folder_says_what_starts_at_the_next_power_up() {
+    let device = empty_light_player("dev000000daqf6dvvr4");
+    let (mut bench, tasks) = identified(&device, "usb-remove-note-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    let note_of = |bench: &DeviceBench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&device_id)
+            .and_then(|layout| layout.project_note.clone())
+    };
+    let running = |bench: &DeviceBench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    };
+
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", running);
+
+    // Another project folder on the board, as the CLI's upload leaves one;
+    // `zz-other` sorts after any folder a push names, so it is what starts
+    // once the running one is gone.
+    let (_uid, other_files) = a_project_from_another_library(0x6e);
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    for (path, bytes) in other_files {
+        drive_real(client.fs_write(format!("/projects/zz-other/{path}").as_path(), bytes))
+            .expect("the other folder writes");
+    }
+    assert_eq!(note_of(&bench), None, "nothing has been removed yet");
+
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
+    bench.run_until(&tasks, "the removal to settle", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.loaded_project == lpa_devices::view::LoadedProject::Empty
+        })
+    });
+    let note = note_of(&bench).expect("the card carries the note");
+    assert_eq!(note.line, "zz-other starts at next power-up");
+    assert_eq!(
+        note.detail,
+        "zz-other is still on the board and will start when it's next powered on."
+    );
+
+    // Anything else that happens to the board takes the note away.
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running again", running);
+    assert_eq!(note_of(&bench), None, "a push cleared it");
+}
+
+/// The other side of the same: nothing left on the board, nothing to say.
+#[test]
+fn a_removal_that_leaves_nothing_shows_no_note() {
+    let device = empty_light_player("dev000000daqf6dvvr5");
+    let (mut bench, tasks) = identified(&device, "usb-remove-note-2");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the board to be running it", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
+    bench.run_until(&tasks, "the removal to settle", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.loaded_project == lpa_devices::view::LoadedProject::Empty
+        })
+    });
+    let layout = bench.controller.device_roster_view().layout;
+    assert!(
+        layout
+            .get(&device_id)
+            .is_none_or(|layout| layout.project_note.is_none()),
+        "{layout:?}"
     );
 }
 
