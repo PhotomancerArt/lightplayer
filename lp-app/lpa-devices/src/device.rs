@@ -54,6 +54,11 @@ use crate::wire::ClientFrame;
 const CLEAR_FAULTS_REQUEST_ID: u32 = 1;
 const CLEAR_FAULTS_REREAD_REQUEST_ID: u32 = 2;
 
+/// Correlation id for the restart request [`Action::ResetBoard`] sends over
+/// a network link. A constant for the same reason: nothing waits on its
+/// answer (see [`Device::resets_by_request`]).
+const REBOOT_REQUEST_ID: u32 = 3;
+
 /// One known device.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Device {
@@ -108,6 +113,18 @@ impl Device {
     /// twice.
     pub fn link(&self) -> Option<LinkId> {
         self.evidence.link()
+    }
+
+    /// Whether this board's Reset is a restart REQUEST it answers itself
+    /// (`ClientRequest::Reboot`) rather than a pulse on its link's reset
+    /// lines: true on a network link — Bluetooth, the LAN, the relay —
+    /// which has no DTR/RTS behind it. A USB or serial link, and a runtime
+    /// (a sim restarts its worker), keep the line reset.
+    pub fn resets_by_request(&self) -> bool {
+        self.identity
+            .endpoint
+            .as_ref()
+            .is_some_and(|endpoint| endpoint.is_network())
     }
 
     /// At most one activity per device (invariant I5).
@@ -649,16 +666,34 @@ impl Device {
                 self.spawn_erase(now, ctx)
             }
             Action::ResetBoard { .. } => {
-                // A hardware reset is a direct gesture, not an activity: one
-                // command, then identify reads whatever boots. Refused while
-                // an activity runs (I5 — a reset under a flash would wreck
-                // it) and without a link there is nothing to pulse.
+                // A reset is a direct gesture, not an activity: one command,
+                // then whatever boots is read. Refused while an activity
+                // runs (I5 — a reset under a flash would wreck it) and
+                // without a link there is nothing to pulse or ask.
                 if self.activity.is_some() {
                     return Vec::new();
                 }
                 let Some(link) = self.link() else {
                     return Vec::new();
                 };
+                if self.resets_by_request() {
+                    // No reset lines on this link: ask the board to restart
+                    // itself. It answers, THEN resets, which drops the link;
+                    // the transport's own reconnect brings it back and the
+                    // new link identifies like any other. So nothing here
+                    // waits for a boot: a board that does not honour the
+                    // request (below the edit tier, or an embedder with no
+                    // way to reset) answers an error, the card keeps what
+                    // it had, and no ladder is left waiting for a boot that
+                    // never comes.
+                    if !self.evidence.presence.is_open() {
+                        return Vec::new();
+                    }
+                    return vec![Command::Link {
+                        link,
+                        command: LinkCommand::SendFrame(ClientFrame::reboot(REBOOT_REQUEST_ID)),
+                    }];
+                }
                 let mut commands = vec![Command::Link {
                     link,
                     command: crate::link::LinkCommand::RunReset(crate::link::ResetKind::Normal),
