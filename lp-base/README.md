@@ -17,5 +17,4 @@ Inhabitants:
   region, recovery frame stack, blame ledger. See
   `docs/adr/2026-07-04-crash-recovery-model.md`.
 - `lp-crc32` — the one CRC-32 (IEEE) of the boot and update records, shared instead of copied.
-- `lp-nor-sim` — a deterministic NOR flash model that loses power after any program or erase (torn programs, weak erases), for the storage testbed.
 - `lp-seam` — the emulator seam ABI: declarations, identity, the firmware's descriptor table and the seam-function generators (MIT, no_std, no deps). See its README.

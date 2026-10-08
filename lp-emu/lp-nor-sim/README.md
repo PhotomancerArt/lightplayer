@@ -6,6 +6,10 @@ candidate store on, so its own correctness matters more than its speed.
 `no_std` + `alloc`, no dependencies beyond `embedded-storage`'s traits.
 Nothing here is linked into firmware.
 
+MIT, as a unit with the rest of `lp-emu/` (see `../LICENSE-MIT`): the host
+testbed and the emulated C6's flash share this one model, and nothing in this
+crate may depend on an AGPL workspace crate (`just lint-emu-fence`).
+
 ## What it models
 
 - **Geometry** (`NorGeometry`): sector count and size, program page size.
