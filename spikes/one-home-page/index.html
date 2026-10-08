@@ -248,7 +248,8 @@ svg.i { width:14px; height:14px; flex:none; }
 .pair .pname .arrow { color:var(--faint); margin-right:3px; }
 .pair .r1 .spring, .pair .r2 .spring { flex:1; }
 .pair .share { position:absolute; top:6px; left:6px; z-index:3; opacity:0; transition:opacity .15s; }
-.pair:hover .share, .app.phone .pair .share { opacity:1; }
+.pair:hover .share { opacity:1; }
+.app.phone .pair .share { display:none; }
 .pair.project .bname { font-weight:700; }
 .pair.project .quietline { font-size:11.5px; color:var(--subtle); }
 .pair.pattern .prev { height:72px; }
@@ -265,6 +266,10 @@ svg.i { width:14px; height:14px; flex:none; }
 .b-title:hover { background:var(--raised); }
 .b-title svg.i { width:16px; height:16px; color:var(--subtle); }
 .b-title .shared-ic { color:var(--st-bound-tx); }
+.b-title { white-space:nowrap; }
+.app.phone .b-head { flex-wrap:wrap; }
+.app.phone .b-head > span[style] { display:none; }
+.app.phone .b-head .connect { width:100%; justify-content:flex-end; }
 .b-url { font:11px var(--mono); color:var(--faint); margin:0 0 14px; }
 .b-menu { position:absolute; left:0; top:calc(100% + 4px); z-index:30; width:250px; padding:6px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; gap:1px; max-height:340px; overflow:auto; }
 .b-menu button { appearance:none; font:inherit; cursor:pointer; display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; border:0; background:transparent; color:var(--tx); font-size:12.5px; text-align:left; }
@@ -508,7 +513,7 @@ const GROUPS = [
   { id:'house', name:'House' }, { id:'studio', name:'Studio' }, { id:'gifts', name:'Gifts' },
   { id:'sean', name:'Sean Connell', shared:true },
 ];
-const MANY_GROUPS = ['Burning Man 2026','Gallery install','Workshop','Domes','Clients — Larkspur','Sample rigs','Tests','Mom’s house'].map((n,i)=>({ id:'g'+i, name:n }));
+const MANY_GROUPS = ['Burning Man 2026','Gallery install','Workshop','Domes','Clients — Larkspur','Sample rigs','Tests','Mom’s house'].map((n,i)=>({ id:'many'+i, name:n, many:true }));
 
 const DATASETS = {
   yona: { signedIn:true, initial:'Y', boards:[
@@ -555,7 +560,7 @@ function view(){
   if (S.plug) boards.unshift({ id:'newb', name: S.plug==='identifying' ? 'New board' : 'New board', chip: S.plug==='identifying' ? '' : 'ESP32-C6', project:null, state: S.plug==='identifying' ? 'working' : 'empty', link:S.plugLink||'usb', met:true, layout:'strip', ago:0, fresh:true });
   boards.forEach(b => { b.group = b.project ? (PROJECTS[b.project].group) : null; if (step < 2) b.group = null; });
   const groups = step >= 2 ? [...GROUPS.filter(g => step>=3 || !g.shared), ...(S.many ? MANY_GROUPS : [])] : [];
-  const usedGroups = groups.filter(g => boards.some(b=>b.group===g.id) || ds.loose.some(p=>PROJECTS[p].group===g.id) || g.id.startsWith('g'));
+  const usedGroups = groups.filter(g => boards.some(b=>b.group===g.id) || ds.loose.some(p=>PROJECTS[p].group===g.id) || g.many);
   const loose = ds.loose.map(id => ({ id, ...PROJECTS[id], group: step>=2 ? PROJECTS[id].group : null }));
   const patterns = ds.patterns.map(id => PATTERNS.find(p=>p.id===id));
   const request = step >= 3 && S.request && S.who==='yona';
@@ -611,6 +616,9 @@ function poster(name, pat){
   const h1 = h%360, h2 = (h1+70+(h>>8)%90)%360;
   return `<div class="poster" style="background:linear-gradient(135deg,hsl(${h1} 45% 30%),hsl(${h2} 45% 26%))">${name[0].toUpperCase()}</div>`;
 }
+
+/** A stable fake base32 uid fragment for an id (spike only). */
+function fakeUid(id){ let h=2166136261; for (const c of id) h=Math.imul(h^c.charCodeAt(0),16777619)>>>0; const a='abcdefghijklmnopqrstuvwxyz234567'; let o=''; for (let i=0;i<5;i++){ o+=a[h&31]; h>>>=5; } return o; }
 
 /* click targets → toast */
 function urlFor(kind, id){
@@ -796,7 +804,7 @@ function bTitle(v){
   const g = groupOf(v, S.filter);
   const label = S.filter==='all' ? (v.groups.length ? 'All groups' : 'Your boards') : S.filter==='patterns' ? 'Patterns' : g.name;
   const shared = g && g.shared ? `<span class="shared-ic">${ic('people')}</span>` : '';
-  const url = S.filter==='all' ? 'lightplayer.app' : S.filter==='patterns' ? 'lightplayer.app/patterns' : `lightplayer.app/g/${g.name.toLowerCase().replace(/\W+/g,'-')}-grp${(g.id+'k3v9q').slice(0,5)}…`;
+  const url = S.filter==='all' ? 'lightplayer.app' : S.filter==='patterns' ? 'lightplayer.app/patterns' : `lightplayer.app/g/${g.name.toLowerCase().replace(/\W+/g,'-')}-grp${fakeUid(g.id)}…`;
   const canFilter = v.groups.length || v.patterns.length;
   const count = (gid) => v.boards.filter(b=>b.group===gid).length + v.loose.filter(p=>p.group===gid).length;
   const menu = S.bMenu ? `<div class="b-menu">
