@@ -14,12 +14,14 @@
 //!   [`LinkTrust::Relayed`] through the relay — its handshake's key decides
 //!   its tier. Each link records its trust and the edge serving it
 //!   ([`SlotEdge`]).
-//! - **Mode.** The boot decides once what its Bluetooth links are for
+//! - **Mode.** The boot decides once what its links are for
 //!   ([`RadioLinkPort::decide_mode`]: serving the wire, or taking an update
 //!   in core-only — [`super::radio_link_mode`]). No Bluetooth link opens
 //!   before that ([`OpenRefused::ModeUndecided`]); the BLE task waits for it
-//!   ([`RadioLinkPort::wait_for_mode`]). A network link has one
-//!   configuration whatever the mode.
+//!   ([`RadioLinkPort::wait_for_mode`]), and so does the LAN endpoint. A LAN
+//!   link opened in update mode advertises the wider LAN window
+//!   ([`super::lan_link_config::lan_link_config_in`]); a relayed link keeps
+//!   the serve configuration whatever the mode.
 //! - **Links.** The edge mints a [`LinkId`] per connection
 //!   ([`RadioLinkPort::mint_link`]: monotonic, never reused, never
 //!   [`LinkId::PRIMARY`]). Once it can deliver frames, it opens the
@@ -51,7 +53,10 @@
 //!   link's events itself ([`RadioLinkSlot::recv`]). Channel 3, the update
 //!   protocol, is answered through [`RadioLinkPort::send_update`] by either
 //!   (the running engine's update hook, or core-only), on a Bluetooth link
-//!   only: a LAN link's channel 3 is not served. A long reply stays in the
+//!   or a LAN link (a relayed link's channel 3 is not served yet). Core-only
+//!   also answers a LAN link's key lookup itself
+//!   ([`RadioLinkSlot::poll_key_event`], [`RadioLinkSlot::answer_key`]),
+//!   since no server runs there. A long reply stays in the
 //!   shared static frame buffer (`serial::server_msg`) as an lp-link
 //!   *external* message and the link cuts its frames from there, so while a
 //!   slot's link has one in flight ([`RadioLinkSlot::external_in_flight`]) no
@@ -215,6 +220,10 @@ pub struct RadioLinkSlot {
     /// Mux → the parked newcomer's edge: its verdict.
     #[cfg(feature = "wifi")]
     verdict: Signal<CriticalSectionRawMutex, ChallengeVerdict>,
+    /// The boot's [`RadioLinkMode`] as [`RadioLinkMode::code`] (0: not yet
+    /// decided), copied here by [`RadioLinkPort::decide_mode`] so a network
+    /// link opened on this slot is configured for it.
+    mode: AtomicU8,
 }
 
 impl RadioLinkSlot {
@@ -232,6 +241,18 @@ impl RadioLinkSlot {
             close_request: [const { Signal::new() }; SlotEdge::COUNT],
             #[cfg(feature = "wifi")]
             verdict: Signal::new(),
+            mode: AtomicU8::new(0),
+        }
+    }
+
+    /// The mode a network link opened on this slot with `trust` is
+    /// configured for: the boot's on the LAN (serve until decided), always
+    /// serve through the relay.
+    #[cfg(feature = "wifi")]
+    fn network_mode(&self, trust: LinkTrust) -> RadioLinkMode {
+        match (trust, RadioLinkMode::from_code(self.mode.load(Ordering::Acquire))) {
+            (LinkTrust::Keyed, Some(mode)) => mode,
+            _ => RadioLinkMode::Serve,
         }
     }
 
@@ -298,7 +319,8 @@ impl RadioLinkSlot {
     }
 
     /// Start `id`'s secure lp-link session on the network slot
-    /// ([`super::lan_link_config`]) for `edge`, trusted as `trust`
+    /// ([`super::lan_link_config`], in the boot's mode on the LAN: see
+    /// [`RadioLinkPort::wait_for_mode`]) for `edge`, trusted as `trust`
     /// ([`LinkTrust::Keyed`] on the LAN, [`LinkTrust::Relayed`] through the
     /// relay), the board as the Noise responder: no key up front, a
     /// [`lp_link::secure_channel::SecureEvent::KeyLookup`] the mux answers
@@ -317,7 +339,7 @@ impl RadioLinkSlot {
     ) -> Result<u16, SlotHeld> {
         // Built before the lock: the session is ~12 KB of allocation, and
         // nothing of it should happen with the other thread held out.
-        let fresh = network_link(id, nonce, entropy, trust, edge);
+        let fresh = network_link(id, nonce, entropy, trust, edge, self.network_mode(trust));
         let max_payload = fresh.link.config().max_payload;
         let opened = self.guarded(|state| {
             if state.link.is_some() || state.parked.is_occupied() {
@@ -387,7 +409,7 @@ impl RadioLinkSlot {
         let Some(edge) = edge else {
             return Err(SlotHeld);
         };
-        let fresh = network_link(id, nonce, entropy, trust, edge);
+        let fresh = network_link(id, nonce, entropy, trust, edge, self.network_mode(trust));
         let max_payload = fresh.link.config().max_payload;
         let opened = self.guarded(|state| {
             if state.link.is_some() {
@@ -664,6 +686,36 @@ impl RadioLinkSlot {
         }
     }
 
+    /// Core-only: `id`'s next secure-handshake event — a key lookup to
+    /// answer ([`Self::answer_key`]) or a wrong key to charge — while the
+    /// slot holds it. The mux takes them itself while the engine runs.
+    #[cfg(feature = "wifi")]
+    pub fn poll_key_event(&self, id: LinkId) -> Option<lp_link::secure_channel::SecureEvent> {
+        self.with_link(id, LpLink::poll_secure_event).flatten()
+    }
+
+    /// Core-only: answer `id`'s key lookup for `key_id`, and wake its edge
+    /// to send what the handshake wrote.
+    #[cfg(feature = "wifi")]
+    pub fn answer_key(
+        &self,
+        id: LinkId,
+        key_id: lp_link::secure_channel::KeyId,
+        answer: lpc_shared::transport::KeyAnswer,
+    ) {
+        self.with_link(id, |l| {
+            super::network_key_answer::answer_key_lookup(l, key_id, answer);
+        });
+        self.ring();
+    }
+
+    /// The key `id`'s secure session authenticated, and which candidate
+    /// matched, once it is up.
+    #[cfg(feature = "wifi")]
+    pub fn session_auth(&self, id: LinkId) -> Option<lp_link::secure_channel::SessionAuth> {
+        self.with_link(id, |l| l.session_auth()).flatten()
+    }
+
     /// Tell the parked newcomer `id` it is turned away.
     #[cfg(feature = "wifi")]
     pub fn refuse_challenge(&self, id: LinkId) {
@@ -694,7 +746,8 @@ impl RadioLinkSlot {
     }
 }
 
-/// A network link for `edge`: secure, the board as the responder.
+/// A network link for `edge`, configured for `mode`: secure, the board as
+/// the responder.
 #[cfg(feature = "wifi")]
 fn network_link(
     id: LinkId,
@@ -702,11 +755,12 @@ fn network_link(
     entropy: fn(&mut [u8]),
     trust: LinkTrust,
     edge: SlotEdge,
+    mode: RadioLinkMode,
 ) -> Box<SlotLink> {
     Box::new(SlotLink {
         id,
         link: LpLink::new_secure(
-            super::lan_link_config::lan_link_config(),
+            super::lan_link_config::lan_link_config_in(mode),
             nonce,
             lp_link::secure_channel::SecureRole::Responder,
             entropy,
@@ -850,10 +904,12 @@ impl RadioLinkPort {
             log::error!("radio links: mode already decided — {mode:?} ignored");
             return;
         }
-        // The waiter is the slot's connection, on the doorbell it otherwise
-        // waits on for transmits (it holds no link yet, so nothing else
-        // rings it; a ring it later finds stale costs one quiet turn).
-        for slot in &self.radio {
+        // The waiter is the slot's edge (a Bluetooth connection, the LAN
+        // endpoint), on the doorbell it otherwise waits on for transmits (it
+        // holds no link yet, so nothing else rings it; a ring it later finds
+        // stale costs one quiet turn).
+        for slot in self.slots() {
+            slot.mode.store(mode.code(), Ordering::Release);
             slot.ring();
         }
     }
@@ -864,15 +920,16 @@ impl RadioLinkPort {
         RadioLinkMode::from_code(self.mode.load(Ordering::Acquire))
     }
 
-    /// Radio side: the boot's mode, once decided. Slot `slot`'s connection
-    /// waits here before it opens its link, so no link is ever configured
-    /// for a mode nobody chose (see [`super::radio_link_mode`]).
+    /// Edge side: the boot's mode, once decided. Slot `slot`'s edge (a
+    /// Bluetooth connection, or the LAN endpoint on a network slot) waits
+    /// here before it opens its link, so no link is ever configured for a
+    /// mode nobody chose (see [`super::radio_link_mode`]).
     pub async fn wait_for_mode(&self, slot: usize) -> RadioLinkMode {
         loop {
             if let Some(mode) = self.mode() {
                 return mode;
             }
-            self.radio[slot].doorbell().await;
+            self.slot(slot).doorbell().await;
         }
     }
 
@@ -928,8 +985,8 @@ impl RadioLinkPort {
     }
 
     /// Queue one channel-3 message (the over-the-air update protocol) on
-    /// Bluetooth link `link` and wake the BLE task (a LAN link's channel 3
-    /// is not served: `NoSession`): in the link's send ring when it is at
+    /// radio or LAN link `link` and wake the edge serving it: in the link's
+    /// send ring when it is at
     /// most [`SMALL_REPLY_BYTES`] (`R`, `N`, `M`, a login step), else — a
     /// read-back `D`, one 4 KiB chunk — as the link's external message out of
     /// the static frame buffer, when no radio link holds it. **The USB
@@ -940,7 +997,7 @@ impl RadioLinkPort {
     /// buffer: the server loop's (the mux, the engine's update hook) or
     /// core-only's, which has no transport.
     pub fn send_update(&self, link: LinkId, bytes: &[u8]) -> UpdateSend {
-        let Some(slot) = self.radio.iter().find(|s| s.generation(link).is_some()) else {
+        let Some(slot) = self.slots().find(|s| s.generation(link).is_some()) else {
             return UpdateSend::NoSession;
         };
         let ring = bytes.len() <= SMALL_REPLY_BYTES;
@@ -1113,6 +1170,68 @@ mod tests {
             "an old id never frees the new link"
         );
         assert_eq!(slot.link_id(), Some(lan));
+    }
+
+    /// A LAN link's SYN — its first frame — advertises the wider LAN window
+    /// in update mode (core-only) and the serve window otherwise; a relayed
+    /// link keeps the serve window in either mode, and so does a LAN link
+    /// opened before the mode is decided.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn a_lan_link_opened_in_update_mode_advertises_the_wide_window_in_its_syn() {
+        use super::super::radio_link_mode::LAN_UPDATE_RX_WINDOW;
+        let syn_window = |port: &'static RadioLinkPort, trust: LinkTrust, edge: SlotEdge| {
+            let slot = port.slot(RADIO_LINK_SLOTS);
+            let id = port.mint_link();
+            slot.open_network(id, 7, fill, trust, edge).unwrap();
+            let syn = slot
+                .poll_frame_for(id, 0, <[u8]>::to_vec)
+                .unwrap()
+                .expect("a SYN first");
+            slot.close_link(id);
+            let header = lp_link::frame::Header::parse(&syn).unwrap();
+            assert_eq!(header.kind, lp_link::frame::FrameKind::Syn);
+            let body = &syn[lp_link::frame::HEADER_LEN..syn.len() - 4];
+            lp_link::frame::SynBody::parse(body).unwrap().rx_window
+        };
+        let undecided = RadioLinkPort::leak();
+        assert_eq!(syn_window(undecided, LinkTrust::Keyed, SlotEdge::Local), 2);
+        for (mode, lan) in [
+            (RadioLinkMode::Update, LAN_UPDATE_RX_WINDOW),
+            (RadioLinkMode::Serve, 2),
+        ] {
+            let port = RadioLinkPort::leak();
+            port.decide_mode(mode);
+            assert_eq!(
+                syn_window(port, LinkTrust::Keyed, SlotEdge::Local),
+                lan,
+                "{mode:?}"
+            );
+            assert_eq!(
+                syn_window(port, LinkTrust::Relayed, SlotEdge::Relay),
+                2,
+                "{mode:?}"
+            );
+        }
+        assert_eq!(LAN_UPDATE_RX_WINDOW, 8);
+    }
+
+    /// The LAN endpoint waits for the boot's mode like a Bluetooth
+    /// connection, on its slot's doorbell.
+    #[cfg(feature = "wifi")]
+    #[test]
+    fn the_lan_endpoint_waits_for_the_mode() {
+        use core::future::Future as _;
+        let port = RadioLinkPort::leak();
+        let mut waiting = core::pin::pin!(port.wait_for_mode(RADIO_LINK_SLOTS));
+        let waker = core::task::Waker::noop();
+        let mut cx = core::task::Context::from_waker(waker);
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        port.decide_mode(RadioLinkMode::Update);
+        assert_eq!(
+            waiting.as_mut().poll(&mut cx),
+            core::task::Poll::Ready(RadioLinkMode::Update)
+        );
     }
 
     /// A granted challenge reserves the slot for its newcomer, and its

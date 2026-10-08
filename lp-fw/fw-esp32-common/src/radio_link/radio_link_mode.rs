@@ -37,6 +37,13 @@ pub enum RadioLinkMode {
 /// in flight on Mac Chrome), so this is room, not a target.
 pub const UPDATE_RX_WINDOW: u8 = 32;
 
+/// The receive window a **LAN** link advertises in update mode (OTA Wi-Fi
+/// plan D7): 8 frames of 1 KiB in flight where serve mode keeps 2, so a
+/// Wi-Fi round trip of ~30 ms still keeps up with the flash (~85 KB/s of
+/// compressed chunks). The slots cost ~8 KB, on core-only's free heap.
+/// The desk check (plan P6) measures 2, 8 and 16 and sets this from it.
+pub const LAN_UPDATE_RX_WINDOW: u8 = 8;
+
 impl RadioLinkMode {
     /// The mode as the port stores it (0 is "not decided").
     pub(crate) const fn code(self) -> u8 {

@@ -4,8 +4,9 @@
 //! does not fit, does not hash to its digest, or keeps crashing — and what a
 //! trial core does until it has proven itself. It keeps the board reachable
 //! and serves the over-the-air update protocol (`lpc-update`'s board
-//! session) on channel 3 of **every host link it has**: the USB link, and
-//! each Bluetooth radio link when the image has them:
+//! session) on channel 3 of **every host link it has**: the USB link, each
+//! Bluetooth radio link when the image has them, and the LAN link when it
+//! has Wi-Fi:
 //!
 //! - a host coming up — on any link — gets the board manifest (`M`)
 //!   unprompted, and a trial core confirms itself (the split image's rule:
@@ -16,27 +17,30 @@
 //!   link (the link that started it owns it while it is live);
 //! - an engine-less core accepts its own engine, by hash, from anyone (Y8).
 //!
-//! **Radio links.** Core-only is the radio port's one reader while it runs
-//! (no engine, no link mux): it takes the port's `Opened`/`Closed` notices
-//! and each open Bluetooth link's events itself; a network link (Wi-Fi: the
-//! LAN's, or a cloud relay route) that opens, or asks for the held network
-//! slot, is turned away, as updates over Wi-Fi are not served yet. Every
-//! radio link is untrusted; the
-//! session's own login (`L` over channel 3) is how one earns a tier, and
-//! the device's `open` setting counts as the access rule says (QY2). The
-//! links were opened in update mode (`RadioLinkMode::Update`, decided by
-//! `split_boot` before the radio side may open any): they advertise the
-//! wide receive window, so a host can keep a window of chunks in flight.
-//! There is no login deadline here — a radio link can only query, heal, or
-//! log in — so the BLE task's own subscribe deadline is the only one.
+//! **Radio and LAN links.** Core-only is the radio port's one reader while
+//! it runs (no engine, no link mux): `fw_esp32_common`'s
+//! [`CoreOnlyLinks`] takes the port's notices and each open link's events
+//! into the session. A Bluetooth link is untrusted, and the session's own
+//! login (`L` over channel 3) is how one earns a tier. A LAN link is a
+//! secure responder whose key lookup the session answers itself, from the
+//! device store's secrets (the engine's rule, one backoff with `L`): its
+//! key decides its tier (`Keyed`), and it never logs in with `L`. A relayed
+//! link (a cloud relay route) is turned away, as updates through the relay
+//! are not served yet. The device's `open` setting counts as the access
+//! rule says (QY2). The links were opened in update mode
+//! (`RadioLinkMode::Update`, decided by `split_boot` before the radio side
+//! or the LAN endpoint may open any): they advertise the wide receive
+//! window, so a host can keep a window of chunks in flight. There is no
+//! login deadline here — a link can only query, heal, or log in — so the
+//! BLE task's own subscribe deadline and the LAN endpoint's idle timeout
+//! are the only ones.
 //!
 //! It sends no hello on any link: a host that only reads channel 1 still
 //! sees a board with no usable firmware and offers a USB update, which also
 //! fixes it.
 
 #[cfg(feature = "ble")]
-use alloc::vec::Vec;
-
+use fw_esp32_common::radio_link::CoreOnlyLinks;
 use fw_esp32_common::usb_link::UsbLinkShared;
 use lpc_update::board::{
     AccessFacts, EngineStatus, LinkTrust, OWNER_QUIET_MS, SessionConfig, SessionMode,
@@ -150,7 +154,7 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         edge.link_up(USB_LINK, usb_trust);
     }
     #[cfg(feature = "ble")]
-    let mut radio = RadioLinks::new(radio_port);
+    let mut radio = CoreOnlyLinks::new(radio_port);
 
     let mut reset_at: Option<embassy_time::Instant> = None;
     loop {
@@ -208,84 +212,5 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
             }
         }
         embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
-    }
-}
-
-/// The radio links core-only serves: the ones the port announced open, and
-/// the slot each is on.
-#[cfg(feature = "ble")]
-struct RadioLinks {
-    port: &'static fw_esp32_common::radio_link::RadioLinkPort,
-    open: Vec<(lpc_shared::transport::LinkId, usize)>,
-}
-
-#[cfg(feature = "ble")]
-impl RadioLinks {
-    fn new(port: &'static fw_esp32_common::radio_link::RadioLinkPort) -> Self {
-        Self {
-            port,
-            open: Vec::new(),
-        }
-    }
-
-    /// Take the port's notices and every open link's events into the
-    /// session. Whether anything happened.
-    fn pump(&mut self, edge: &mut UpdateEdge) -> bool {
-        use fw_esp32_common::radio_link::RadioLinkEvent;
-
-        use super::update_links::session_link;
-
-        let mut touched = false;
-        while let Some(event) = self.port.try_event() {
-            touched = true;
-            match event {
-                // A network link (the LAN's, or a relay route) is not served
-                // here: updates over Wi-Fi are their own change, and its
-                // secure handshake needs the server's keys, which core-only
-                // does not run. `revoke` asks whichever edge serves it.
-                RadioLinkEvent::Opened { link, slot }
-                    if slot >= fw_esp32_common::radio_link::RADIO_LINK_SLOTS =>
-                {
-                    log::info!("[OTA] core-only: network link {link} refused (slot {slot})");
-                    self.port
-                        .slot(slot)
-                        .revoke(link, "core-only serves Bluetooth links only");
-                }
-                // A newcomer for the network slot while another link holds
-                // it: turned away, like the holder.
-                RadioLinkEvent::Challenged { link, slot } => {
-                    log::info!("[OTA] core-only: network link {link} refused (slot {slot})");
-                    #[cfg(feature = "wifi")]
-                    self.port.slot(slot).refuse_challenge(link);
-                }
-                RadioLinkEvent::Opened { link, slot } => {
-                    log::info!("[OTA] core-only: radio link {link} opened (slot {slot})");
-                    self.open.push((link, slot));
-                }
-                RadioLinkEvent::Closed { link } => {
-                    self.open.retain(|(l, _)| *l != link);
-                    edge.link_down(session_link(link));
-                    log::info!("[OTA] core-only: radio link {link} closed");
-                }
-            }
-        }
-        for &(link, slot) in &self.open {
-            let id = session_link(link);
-            while let Some(event) = self.port.slot(slot).recv(link) {
-                touched = true;
-                match event {
-                    // Every radio link is untrusted: the session's login
-                    // gives it a tier.
-                    LinkEvent::Up { .. } => edge.link_up(id, LinkTrust::Untrusted),
-                    LinkEvent::Reset { .. } => edge.link_down(id),
-                    LinkEvent::Message { channel, data } if channel == CH_UPDATE => {
-                        edge.on_message(id, &data);
-                    }
-                    // Channel 1 (the wire) has no server to answer it here.
-                    _ => {}
-                }
-            }
-        }
-        touched
     }
 }

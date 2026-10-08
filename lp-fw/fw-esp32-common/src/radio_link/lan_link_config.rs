@@ -34,10 +34,17 @@
 //!
 //! Secure is required: the slot opens it with `Link::new_secure` as the
 //! Noise responder (`RadioLinkSlot::open_network`).
+//!
+//! **In update mode** (core-only, taking an update over the LAN) the board
+//! advertises a wider receive window, [`LAN_UPDATE_RX_WINDOW`], in its SYN
+//! ([`lan_link_config_in`]): the host's `ws()` end adopts it, so more of an
+//! update's chunks are in flight per round trip. Nothing else changes, and
+//! serve mode is the cut above.
 
 use lp_link::LinkConfig;
 
 use super::radio_link_config::{RADIO_MAX_MESSAGE, SMALL_REPLY_BYTES};
+use super::radio_link_mode::{LAN_UPDATE_RX_WINDOW, RadioLinkMode};
 
 /// The board's frames in flight each way.
 const LAN_WINDOW: u8 = 2;
@@ -66,6 +73,17 @@ pub fn lan_link_config() -> LinkConfig {
     cfg
 }
 
+/// The board's configuration for one LAN link opened in `mode`: the serve
+/// cut ([`lan_link_config`]), with the receive window widened to
+/// [`LAN_UPDATE_RX_WINDOW`] in [`RadioLinkMode::Update`].
+pub fn lan_link_config_in(mode: RadioLinkMode) -> LinkConfig {
+    let mut cfg = lan_link_config();
+    if mode == RadioLinkMode::Update {
+        cfg.rx_window = LAN_UPDATE_RX_WINDOW;
+    }
+    cfg
+}
+
 /// The largest frame a LAN link sends or takes on the wire: its payload,
 /// the frame header and CRC, and the secure seal, with room to spare. The
 /// LAN endpoint sizes its WebSocket buffers from it.
@@ -91,8 +109,7 @@ mod tests {
 
     /// The update channel is reliable on the board's cut, as on the host's
     /// `ws()` (lp-link's `update_channel_golden.rs`): both ends agree on
-    /// the mask, and a Wi-Fi update (OTA M8) can ride channel 3. Nothing
-    /// serves channel 3 on a LAN link yet; the mux ignores it.
+    /// the mask, so a Wi-Fi update rides channel 3.
     #[test]
     fn the_update_channel_is_reliable_on_the_boards_cut() {
         let cfg = lan_link_config();
@@ -107,6 +124,30 @@ mod tests {
         let cfg = lan_link_config();
         assert!(cfg.ack_every <= cfg.rx_window, "{cfg:?}");
         assert!(cfg.min_rto >= 200_000, "{cfg:?}");
+    }
+
+    /// Update mode widens the receive window, and nothing else.
+    /// `--nocapture` prints what the wider window costs at most.
+    #[test]
+    fn update_mode_widens_the_receive_window_only() {
+        let serve = lan_link_config_in(RadioLinkMode::Serve);
+        let update = lan_link_config_in(RadioLinkMode::Update);
+        assert_eq!(std::format!("{serve:?}"), std::format!("{:?}", lan_link_config()));
+        assert_eq!(serve.rx_window, LAN_WINDOW);
+        assert_eq!(update.rx_window, LAN_UPDATE_RX_WINDOW);
+        assert_eq!(update.validate(), Ok(()));
+        assert!(update.ack_every <= update.rx_window);
+        let narrowed = LinkConfig {
+            rx_window: serve.rx_window,
+            ..update.clone()
+        };
+        assert_eq!(std::format!("{narrowed:?}"), std::format!("{serve:?}"));
+        let bound = |cfg: &LinkConfig| Link::<SelectiveRepeat>::ram_bound_secure(cfg);
+        std::println!(
+            "LAN link RAM bound: update {} B, serve {} B",
+            bound(&update),
+            bound(&serve)
+        );
     }
 
     #[test]

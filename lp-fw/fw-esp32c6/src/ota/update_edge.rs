@@ -265,3 +265,36 @@ impl UpdateEdge {
         }
     }
 }
+
+/// Core-only's radio and LAN links drive the session through the edge
+/// (`fw_esp32_common::radio_link::CoreOnlyLinks`): a LAN link's key lookup
+/// is answered by the session itself, on the session's clock.
+#[cfg(feature = "ble")]
+impl fw_esp32_common::radio_link::CoreOnlySession for UpdateEdge {
+    fn link_up(&mut self, link: LinkId, trust: LinkTrust) {
+        UpdateEdge::link_up(self, link, trust);
+    }
+
+    fn link_down(&mut self, link: LinkId) {
+        UpdateEdge::link_down(self, link);
+    }
+
+    fn on_message(&mut self, link: LinkId, bytes: &[u8]) {
+        UpdateEdge::on_message(self, link, bytes);
+    }
+
+    #[cfg(feature = "wifi")]
+    fn key_lookup(&mut self, link: LinkId, salt: &[u8; 16]) -> lpc_update::board::CoreKeyAnswer {
+        self.session.key_lookup(now_ms(), link, salt)
+    }
+
+    #[cfg(feature = "wifi")]
+    fn key_wrong(&mut self, link: LinkId) {
+        self.session.key_wrong(now_ms(), link);
+    }
+
+    #[cfg(feature = "wifi")]
+    fn key_authenticated(&mut self, link: LinkId, candidate: u8) -> LinkTrust {
+        self.session.key_authenticated(link, candidate)
+    }
+}
