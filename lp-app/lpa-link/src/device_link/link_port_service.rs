@@ -93,6 +93,9 @@ pub struct LinkPortService {
     updates: VecDeque<Vec<u8>>,
     /// The board announced channel 3 this session (DS9).
     announced: bool,
+    /// The board's base MAC, from the last hello that carried one (kept
+    /// across sessions: a board's MAC does not change).
+    base_mac: Option<String>,
     /// Whether the last look found the link stalled, so each edge is noted
     /// once.
     stalled: bool,
@@ -119,6 +122,7 @@ impl LinkPortService {
             notes: Vec::new(),
             updates: VecDeque::new(),
             announced: false,
+            base_mac: None,
             stalled: false,
         }
     }
@@ -147,6 +151,7 @@ impl LinkPortService {
             notes: Vec::new(),
             updates: VecDeque::new(),
             announced: false,
+            base_mac: None,
             stalled: false,
         }
     }
@@ -286,6 +291,11 @@ impl LinkPortService {
         self.announced
     }
 
+    /// The board's base MAC, once a hello on this link said it.
+    pub fn base_mac(&self) -> Option<&str> {
+        self.base_mac.as_deref()
+    }
+
     /// How long until the link next needs [`Self::transmit`] for a timer,
     /// at most `cap` (new bytes and new sends need one too, and the edge
     /// polls the page for bytes on the same tick).
@@ -369,6 +379,9 @@ impl LinkPortService {
                                 && let ServerMsgBody::Hello(hello) = &message.msg
                             {
                                 self.announced |= hello.firmware.is_some();
+                                if let Some(mac) = &hello.hardware.base_mac {
+                                    self.base_mac = Some(mac.clone());
+                                }
                             }
                         }
                         _ => {}

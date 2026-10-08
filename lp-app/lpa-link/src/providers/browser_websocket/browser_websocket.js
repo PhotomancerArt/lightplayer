@@ -43,6 +43,12 @@
 // announced as present (its link is serviced through `onActivity` all the
 // same), so a busy board does not flap in and out of Studio's roster.
 //
+// A BOARD WHOSE ADDRESS MOVED IS FOUND BY NAME. A session keeps its URL (its
+// identity), but once the Rust side knows the board's `.local` socket
+// (`setFallback`, from its hello's MAC) and the URL has not answered for
+// `FALLBACK_AFTER_MS`, every other redial goes to that name instead; the
+// socket that answers is the one redialled first from then on.
+//
 // Presence is announced the way Web Serial's hotplug is — a `connect` /
 // `disconnect` edge with no payload — and Studio's device layer re-derives
 // from `presentSessions()`.
@@ -67,6 +73,9 @@ const MAX_BUFFERED_BYTES = 256 * 1024;
 /// session is wanted (a board on the LAN that reboots, or comes back to the
 /// network, is found again with no gesture).
 const RECONNECT_DELAYS_MS = [250, 1_000, 2_000, 4_000, 8_000, 15_000];
+/// How long a dropped session's own address must go unanswered before its
+/// board's `.local` socket is tried beside it.
+export const FALLBACK_AFTER_MS = 10_000;
 /// The close code a board with its one LAN slot taken answers with (RFC
 /// 6455 "try again later").
 export const BUSY_CLOSE_CODE = 1013;
@@ -153,6 +162,11 @@ class LanSession {
     // Busy closes (1013) since the board last sent a frame: picks the busy
     // redial delay, and keeps a redial that opens from being announced.
     this.busyStrikes = 0;
+    // The board's `.local` socket (`setFallback`), the socket that answered
+    // last, and when the session lost its connection.
+    this.fallbackUrl = null;
+    this.dialUrl = url;
+    this.lostAt = null;
   }
 
   describe() {
@@ -378,6 +392,16 @@ export function markUp(id) {
   session.activity();
 }
 
+/// Where else this session's board answers: its `.local` socket, tried
+/// beside the session's URL once that has gone unanswered for
+/// `FALLBACK_AFTER_MS`.
+export function setFallback(id, url) {
+  const session = sessions.get(id);
+  if (session && url && url !== session.url) {
+    session.fallbackUrl = url;
+  }
+}
+
 /// End the session for good, saying why: the link above the socket has
 /// nothing left to try (a relay session out of keys). Heard as a drop —
 /// `<kind> link lost: <why>` — but never redialled, and no longer listed.
@@ -411,7 +435,7 @@ async function connectSession(session) {
   }
   session.state = "connecting";
   const generation = ++session.generation;
-  const attempt = openSocket(session, generation);
+  const attempt = openSocket(session, generation, dialTarget(session));
   session.connecting = attempt;
   try {
     await attempt;
@@ -422,7 +446,21 @@ async function connectSession(session) {
   }
 }
 
-function openSocket(session, generation) {
+/// The socket a connect dials: the one that answered last, and — once the
+/// session has been lost for `FALLBACK_AFTER_MS` with a fallback known —
+/// every other attempt the other of the session's URL and its fallback.
+function dialTarget(session) {
+  const last = session.dialUrl ?? session.url;
+  if (!session.fallbackUrl || session.lostAt === null) {
+    return last;
+  }
+  if (Date.now() - session.lostAt < FALLBACK_AFTER_MS || session.attempt % 2 === 0) {
+    return last;
+  }
+  return last === session.url ? session.fallbackUrl : session.url;
+}
+
+function openSocket(session, generation, target) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let socket;
@@ -448,7 +486,7 @@ function openSocket(session, generation) {
       CONNECT_TIMEOUT_MS,
     );
     try {
-      socket = new globalThis.WebSocket(session.url);
+      socket = new globalThis.WebSocket(target);
     } catch (error) {
       fail(`${session.kind} connect failed: ${messageOf(error)}`);
       return;
@@ -474,6 +512,11 @@ function openSocket(session, generation) {
       session.clearFrames();
       session.overflowNoted = false;
       session.state = "connected";
+      session.lostAt = null;
+      if (target !== session.dialUrl) {
+        console.info(`[lan] ${session.url}: the board answered at ${target}`);
+      }
+      session.dialUrl = target;
       session.up = false;
       session.attempt = 0;
       session.activity();
@@ -501,12 +544,12 @@ function openSocket(session, generation) {
     socket.onerror = () => {
       // A connect that fails fires error, then close; the close says why.
       if (!settled) {
-        fail(`${session.kind} connect to ${session.url} failed`);
+        fail(`${session.kind} connect to ${target} failed`);
       }
     };
     socket.onclose = (event) => {
       if (!settled) {
-        fail(`${session.kind} connect to ${session.url} was closed (${closeWords(event)})`);
+        fail(`${session.kind} connect to ${target} was closed (${closeWords(event)})`);
         return;
       }
       if (session.socket === socket && session.generation === generation) {
@@ -583,6 +626,9 @@ function handleBusy(session) {
 /// phrase as a departure), stop being present, and reconnect if wanted.
 function handleDrop(session, why, reconnectDelayMs) {
   session.lastDrop = why;
+  if (session.state === "connected") {
+    session.lostAt = Date.now();
+  }
   session.generation += 1;
   session.connecting = null;
   session.state = "lost";

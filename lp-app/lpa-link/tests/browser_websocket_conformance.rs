@@ -426,7 +426,18 @@ async fn a_busy_board_is_said_once_and_not_announced_until_it_answers() {
     let connects = edges.0.get();
 
     assert!(js_drop_socket(url, 1013, "try again later"));
-    let errors = wire.take_errors().expect("the session's errors");
+    let mut errors = Vec::new();
+    for _ in 0..200 {
+        errors.extend(wire.take_errors().expect("the session's errors"));
+        if !errors.is_empty() {
+            break;
+        }
+        tick(5).await;
+    }
+    for _ in 0..20 {
+        errors.extend(wire.take_errors().expect("the session's errors"));
+        tick(5).await;
+    }
     assert_eq!(errors.len(), 1, "{errors:?}");
     assert!(errors[0].starts_with("wi-fi link lost: busy with another Wi"), "{errors:?}");
     assert!(errors[0].contains("code 1013"), "{errors:?}");
@@ -445,10 +456,14 @@ async fn a_busy_board_is_said_once_and_not_announced_until_it_answers() {
         "a redial to a busy board is not a board"
     );
     assert!(js_drop_socket(url, 1013, "try again later"));
-    assert!(
-        wire.take_errors().expect("the session's errors").is_empty(),
-        "the second refusal is quiet"
-    );
+    for _ in 0..40 {
+        assert!(
+            wire.take_errors().expect("the session's errors").is_empty(),
+            "the second refusal is quiet"
+        );
+        tick(5).await;
+    }
+    assert!(!lan::present_sessions().iter().any(|present| present.url == url));
     assert_eq!(edges.0.get(), connects, "no connect edge while busy");
 
     // Free again: the next redial is answered, and the board is back.
