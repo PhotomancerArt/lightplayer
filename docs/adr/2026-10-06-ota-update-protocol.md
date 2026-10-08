@@ -484,7 +484,11 @@ are unchanged: no `WIRE_PROTO_VERSION` and no `RELAY_PROTO_VERSION` bump.
   `link_mux_transport`, and `lpa-server`'s `access_gate.rs` (channel 3 on
   every link state, relayed included). Emulated: `just walk-ota-emu
   --relay` (update, the relay dropping the board mid-core, a power cut
-  mid-engine). Silicon through the real relay: G2, Yona's walk.
+  mid-engine). Silicon through a **local** relay (2026-10-08, FC6
+  fixture-c6 on the desk's test access point, an lp-cloud-server on the
+  Mac, a desk image built with `LP_RELAY_HOST`): X → Y with a backup and a
+  power cut mid-core, 104.2 s, the core resumed at its record. Silicon
+  through lightplayer.app's relay: G2, Yona's walk.
 
 The relay's own compatibility promise follows from this: see
 `docs/adr/2026-10-06-cloud-relay.md`'s amendment of the same date.

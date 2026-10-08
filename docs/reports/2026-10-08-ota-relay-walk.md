@@ -133,6 +133,19 @@ the other device's tab loses it).
   (one "board offline" ridden through, back in 4.0 s, the core resumed at
   its record); a power cut mid-engine (resumed). Not the internet, not
   fly's proxy, not a NAT, not a radio.
+- **The agent's desk pre-walk, through a LOCAL relay** (2026-10-08; FC6
+  fixture-c6 `A0:F2:62:87:B4:8C` on the desk's test access point; an
+  lp-cloud-server on the Mac with a made-up dev account, the board's images
+  built to dial it, `LP_RELAY_HOST`; Studio's release bundle of this PR's
+  tree in headless Chrome on the Mac; no host on the board's USB during the
+  update): X → Y with a backup and the board's power cut at "Updating over
+  Wi‑Fi… 41%", **104.2 s** from the press to up to date (backup 41 s at
+  45 KB/s, core 24 s at 60 KB/s, engine 23 s at 81 KB/s; three resets and
+  the cut, each "reconnected"); the core resumed at its record. Silicon and
+  a real radio, but **not** lightplayer.app: no internet, no fly proxy, no
+  NAT. The real relay needs a real account's sign-in, which is yours. The
+  board was backed up first and restored exactly after (SHA-256
+  `77a0701d…79aa`). Records: `lp2025/2026-10-06-2249-ota-wifi-updates/data/desk/p10-*`.
 - **Host tests**: the anonymous key refused through the relay, a play key
   refused a core install even on a board open to anyone, an edit key's
   install taken (`lpc-update`, `fw-esp32-common`'s `core_only_links`,

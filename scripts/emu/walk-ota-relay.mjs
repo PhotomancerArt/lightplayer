@@ -29,8 +29,19 @@ export const WALK_EMAIL = "walk-relay@example.com";
 const CLOUD_API_VERSION = 5;
 
 /// Start the cloud for a Studio served at `studioOrigin`. `binary` is a
-/// built `lp-cloud-server`; its output goes to `log`.
-export async function startRelayCloud({ root, binary, studioOrigin, log, deadlineMs = 180_000 }) {
+/// built `lp-cloud-server`; its output goes to `log`. The device-leg forward
+/// listens on `deviceBind:devicePort` (loopback and any free port by
+/// default; a desk board on the LAN needs the Mac's address and the port its
+/// `LP_RELAY_HOST` image dials).
+export async function startRelayCloud({
+  root,
+  binary,
+  studioOrigin,
+  log,
+  deadlineMs = 180_000,
+  deviceBind = "127.0.0.1",
+  devicePort = 0,
+}) {
   const port = Number(execFileSync("scripts/dev-port.sh", ["walk-ota-relay-cloud"], { cwd: root, encoding: "utf8" }).trim());
   const origin = `http://127.0.0.1:${port}`;
   let text = "";
@@ -70,7 +81,7 @@ export async function startRelayCloud({ root, binary, studioOrigin, log, deadlin
     socket.pipe(upstream);
     upstream.pipe(socket);
   });
-  await new Promise((resolve) => forward.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => forward.listen(devicePort, deviceBind, resolve));
   const stop = () => {
     for (const pair of deviceLegs) {
       pair.socket.destroy();

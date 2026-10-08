@@ -271,13 +271,17 @@ the same date. Studio's relay half stays behind `?relay=` (#1031's flag).
   once"** — "This board updates via lightplayer.app after one update
   nearby." — since its own Wi‑Fi may already do. `FIRST_RELAY_UPDATE_RELEASE`
   is `None` until PR C is in a release.
-- **Measured, emulated only** (`lp-emu:esp32c6:t1+net=lan`, `just walk-ota-emu
+- **Measured.** Emulated (`lp-emu:esp32c6:t1+net=lan`, `just walk-ota-emu
   --relay`: a local lp-cloud-server, the board's leg through the virtual
   LAN's uplink, headless Chrome): X → Y with a backup, 3 resets (backup 21 s,
   core 30 s, engine 26 s, wall); the relay dropping the board's leg mid-core
   (one "board offline" ridden through, back in 4.0 s, the core resumed at
-  its record); a power cut mid-engine (resumed). No number here is the
-  internet's.
+  its record); a power cut mid-engine (resumed). Silicon through a **local**
+  relay (FC6 fixture-c6 on the desk's test access point, an lp-cloud-server
+  on the Mac, headless Chrome, no USB host): X → Y with a backup and a power
+  cut mid-core, 104.2 s from the press (backup 45 KB/s, core 60 KB/s,
+  engine 81 KB/s). No number here is the internet's; lightplayer.app's
+  relay is G2's (`docs/reports/2026-10-08-ota-relay-walk.md`).
 
 ## References
 
