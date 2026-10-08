@@ -124,12 +124,18 @@ const REQUEST_FREE_MARGIN_BYTES: usize = 16 * 1024;
 
 /// A request the heap cannot decode, refused before decoding: the error
 /// reply to send for it (a small JSON message, ready for the link's send
-/// ring) and the reason for the log. Decoding a request allocates the
-/// decoded blob in one block (base64 is 3/4 of its text), and that, not the
-/// reassembly, is where a 10 KB write reset the silicon C6 with three links
-/// open (PR B's desk walk: `alloc 10242 bytes failed`). The read gate's
-/// posture: refusal ("board memory busy"), never a reset. `None`: decode it
-/// (short, or the heap has room, or nothing probes the heap).
+/// ring) and the reason for the log. Decoding a request allocates its
+/// largest value in one block — a file write's blob (base64 is 3/4 of its
+/// text), a shader edit's byte array (one byte an element, grown by
+/// doubling) — and that, not the reassembly, is where a 10 KB write reset
+/// the silicon C6 with three links open (PR B's desk walk: `alloc 10242
+/// bytes failed`). The block is read off the request's shape
+/// ([`super::request_decode_block`]): measured as 3/4 of the whole message,
+/// Studio's shader edits were refused on a board that could decode them
+/// (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+/// The read gate's posture: refusal ("board memory busy"), never a reset.
+/// `None`: decode it (short, or the heap has room, or nothing probes the
+/// heap).
 pub fn request_refusal(data: &[u8]) -> Option<(alloc::vec::Vec<u8>, alloc::string::String)> {
     if data.len() < REQUEST_CHECKED_FROM_BYTES {
         return None;
@@ -145,7 +151,7 @@ fn refusal_given(
     if data.len() < REQUEST_CHECKED_FROM_BYTES {
         return None;
     }
-    let block = data.len() * 3 / 4 + 1024;
+    let block = super::request_decode_block::request_decode_block(data) + 1024;
     let total = data.len() + REQUEST_FREE_MARGIN_BYTES;
     if largest >= block && free >= total {
         return None;
@@ -211,6 +217,28 @@ mod request_gate_tests {
             "no probe: no gate"
         );
         assert_eq!(request_id(br#" { "id" : 7 , "msg":"#), Some(7));
+    }
+
+    /// Studio's shader edit of the 1,971 B choker shader, ~7.1 KB as a byte
+    /// array, at the figures the board refused it with on 2026-10-08
+    /// (largest block 5,216 B): it decodes into a 2,048 B block, so it is
+    /// taken; with no block that size it is still refused.
+    #[test]
+    fn a_shader_edit_is_measured_by_its_bytes_not_its_text() {
+        let body = alloc::vec![b'v'; 1_971];
+        let numbers: alloc::vec::Vec<alloc::string::String> =
+            body.iter().map(|b| alloc::format!("{b}")).collect();
+        let edit = alloc::format!(
+            r#"{{"id":31,"msg":{{"projectCommand":{{"handle":1,"command":{{"mutateOverlay":{{"request":{{"batch":{{"commands":[{{"id":7,"mutation":{{"set_artifact_body":{{"artifact":{{"path":"/shader.glsl"}},"edit":{{"replace_body":[{}]}}}}}}}}]}}}}}}}}}}}}}}"#,
+            numbers.join(",")
+        );
+        assert!(edit.len() > 7_000, "{}", edit.len());
+        assert!(
+            refusal_given(edit.as_bytes(), (41_724, 5_216)).is_none(),
+            "a 2 KB decode on a 5 KB block is taken"
+        );
+        let (_, reason) = refusal_given(edit.as_bytes(), (41_724, 2_500)).expect("refused");
+        assert!(reason.contains("a 3072 B block"), "{reason}");
     }
 }
 
