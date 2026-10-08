@@ -121,7 +121,38 @@ fn round_units<'a>(
     let cands = &p.candidates;
     let deadline = p.deadline;
     let seeds = vec![2 * round as u64 - 1, 2 * round as u64];
-    let max_cuts = if p.quick { Some(12) } else { None };
+    // Round 1 samples at most ROUND1_CUTS cut points a step so every
+    // priority gets a turn (one candidate's exhaustive sweep can take hours);
+    // round 2 and every odd round after it sweep every cut point.
+    let max_cuts = |cand: &str| {
+        if p.quick {
+            Some(12)
+        } else if round == 1 {
+            Some(if cand == "s1" {
+                ROUND1_CUTS_S1
+            } else {
+                ROUND1_CUTS
+            })
+        } else {
+            None
+        }
+    };
+    let steps_for = move |wl: &crate::Workload| {
+        if p.quick {
+            quick_steps(p, wl)
+        } else if round == 1 {
+            round1_steps(wl)
+        } else {
+            None
+        }
+    };
+    let sweeping = round <= 2 || round % 2 == 1;
+    // Uncapped rounds run the fastest candidates first.
+    let mut cands = cands.clone();
+    if round > 1 {
+        cands.sort_by_key(|c| speed_rank(c));
+    }
+    let cands = &cands;
     if round == 1 {
         // P1: fault-free measures.
         for c in cands {
@@ -133,13 +164,14 @@ fn round_units<'a>(
             ));
         }
     }
-    if round % 2 == 1 || round == 1 {
-        // P2: exhaustive single cuts; workloads interleaved across candidates.
+    if sweeping {
+        // P2: single cuts; workloads interleaved across candidates.
         for kind in WorkloadKind::ALL {
             for c in cands {
                 let spec = workload_for(kind, c, round as u64);
                 for tear in TearModel::ALL {
                     let (c, spec, seeds) = (c.clone(), spec.clone(), seeds.clone());
+                    let max_cuts = max_cuts(&c);
                     units.push((
                         2,
                         format!("sweep {c} {} {}", spec.label(), tear.name()),
@@ -152,7 +184,7 @@ fn round_units<'a>(
                                 tears: vec![tear],
                                 seeds,
                                 max_cuts_per_step: max_cuts,
-                                steps: quick_steps(p, &wl),
+                                steps: steps_for(&wl),
                                 deadline: Some(deadline),
                                 ..Default::default()
                             };
@@ -171,6 +203,7 @@ fn round_units<'a>(
                 let spec = workload_for(kind, c, round as u64);
                 for tear in TearModel::ALL {
                     let (c, spec, seeds) = (c.clone(), spec.clone(), seeds.clone());
+                    let max_cuts = max_cuts(&c);
                     units.push((
                         2,
                         format!("sweep {c}[{tight}] {} {}", spec.label(), tear.name()),
@@ -183,7 +216,7 @@ fn round_units<'a>(
                                 tears: vec![tear],
                                 seeds,
                                 max_cuts_per_step: max_cuts,
-                                steps: quick_steps(p, &wl),
+                                steps: steps_for(&wl),
                                 deadline: Some(deadline),
                                 ..Default::default()
                             };
@@ -193,6 +226,8 @@ fn round_units<'a>(
                 }
             }
         }
+    }
+    if round == 1 || (round > 2 && round % 2 == 1) {
         // P3: double cuts.
         for kind in WorkloadKind::ALL {
             for c in cands {
@@ -236,14 +271,14 @@ fn round_units<'a>(
                 Box::new(move || dial_sweep(p, corpora, sink)),
             ));
         }
-        // P5: endurance.
-        for c in cands {
-            let c = c.clone();
-            units.push((
-                5,
-                format!("endurance {c}"),
-                Box::new(move || {
-                    let Ok((cand, cfg)) = parse_candidate_spec(&c, p.sectors) else {
+        // P5: endurance, every candidate at once (one can take an hour).
+        let all = cands.clone();
+        units.push((
+            5,
+            format!("endurance {}", all.join(",")),
+            Box::new(move || {
+                all.par_iter().for_each(|c| {
+                    let Ok((cand, cfg)) = parse_candidate_spec(c, p.sectors) else {
                         return;
                     };
                     let Ok(corpus) = corpora.get(big_corpus(cand.name())) else {
@@ -264,17 +299,18 @@ fn round_units<'a>(
                         "endurance",
                         &serde_json::json!({"days": days, "corpus": corpus.name, "result": m}),
                     );
-                }),
-            ));
-        }
-        // P6: fill to full.
-        for c in cands {
-            let c = c.clone();
-            units.push((
-                6,
-                format!("fill {c}"),
-                Box::new(move || {
-                    let Ok((cand, cfg)) = parse_candidate_spec(&c, p.sectors) else {
+                    log(&format!("  endurance {c} done"));
+                });
+            }),
+        ));
+        // P6: fill to full, every candidate at once.
+        let all = cands.clone();
+        units.push((
+            6,
+            format!("fill {}", all.join(",")),
+            Box::new(move || {
+                all.par_iter().for_each(|c| {
+                    let Ok((cand, cfg)) = parse_candidate_spec(c, p.sectors) else {
                         return;
                     };
                     let (Ok(c20), Ok(c40)) = (corpora.get("c20"), corpora.get("c40")) else {
@@ -288,9 +324,10 @@ fn round_units<'a>(
                         "largest",
                         &largest_project(cand.as_ref(), &cfg, base, extra),
                     );
-                }),
-            ));
-        }
+                    log(&format!("  fill {c} done"));
+                });
+            }),
+        ));
     }
     // P7: random model-based sequences, every round.
     for c in cands {
@@ -320,6 +357,35 @@ fn round_units<'a>(
         ));
     }
     units
+}
+
+/// Cut points a step in round 1 (see `round_units`).
+pub const ROUND1_CUTS: u64 = 256;
+
+/// …and for S1, whose cut cases cost ~100× the others' (no key cache: every
+/// read scans the flash).
+pub const ROUND1_CUTS_S1: u64 = 48;
+
+/// Round 1's steps: the first five focus steps and the last (a long save or
+/// panel run repeats itself); later rounds sweep every step.
+fn round1_steps(wl: &crate::Workload) -> Option<Vec<usize>> {
+    let mut v: Vec<usize> = (wl.focus..wl.steps.len().min(wl.focus + 5)).collect();
+    let last = wl.steps.len() - 1;
+    if !v.contains(&last) {
+        v.push(last);
+    }
+    Some(v)
+}
+
+/// Sweep order for the uncapped rounds: cheapest cut case first.
+fn speed_rank(cand: &str) -> u32 {
+    match cand {
+        "t1" => 0,
+        "f2" => 1,
+        "f1" => 2,
+        "s1" => 9,
+        _ => 5,
+    }
 }
 
 /// A partition small enough that the save and panel workloads on c40 run

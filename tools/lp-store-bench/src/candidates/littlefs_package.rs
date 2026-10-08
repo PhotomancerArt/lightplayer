@@ -78,6 +78,8 @@ impl Candidate for LittlefsPackage {
             pending: BTreeMap::new(),
             swept_tmp: false,
             buffer_peak: Cell::new(0),
+            plain_deletes: Vec::new(),
+            plain_rewritten: std::collections::BTreeSet::new(),
         }))
     }
 }
@@ -104,6 +106,12 @@ struct PackageStore {
     pending: BTreeMap<String, SlotEdit>,
     swept_tmp: bool,
     buffer_peak: Cell<u64>,
+    /// Prefixes deleted this step over plain files: applied at `commit`, so a
+    /// delete-then-rewrite (a re-push's `.lp/panel.json`) never passes
+    /// through "missing". Until then such files read as gone unless put again.
+    plain_deletes: Vec<String>,
+    /// Plain files put this step (they survive this step's deletes).
+    plain_rewritten: std::collections::BTreeSet<String>,
 }
 
 /// `/projects/<slot>/<rel>` with `rel` outside `.lp/` → (slot, rel).
@@ -148,6 +156,15 @@ fn slot_reachable(slot: &str, prefix: &str) -> bool {
 }
 
 impl PackageStore {
+    /// A plain file this step deleted and has not put again.
+    fn plain_doomed(&self, path: &str) -> bool {
+        !self.plain_rewritten.contains(path)
+            && self
+                .plain_deletes
+                .iter()
+                .any(|d| path.starts_with(d.as_str()))
+    }
+
     fn pending_bytes(&self) -> u64 {
         self.pending
             .values()
@@ -425,6 +442,7 @@ impl CandidateStore for PackageStore {
         if is_reserved(path) {
             return Err(StoreError::Other(format!("{path} is a reserved name")));
         }
+        self.plain_rewritten.insert(path.into());
         if self.vol.exists(path)? {
             return self.vol.write_file(path, bytes);
         }
@@ -458,14 +476,15 @@ impl CandidateStore for PackageStore {
             }
             return self.read_member(slot, rel);
         }
-        if is_reserved(path) {
+        if is_reserved(path) || self.plain_doomed(path) {
             return Ok(None);
         }
         self.vol.read_file(path)
     }
 
     fn delete_prefix(&mut self, prefix: &str) -> Result<(), StoreError> {
-        self.vol.delete_prefix(prefix, &is_package_file)?;
+        self.plain_deletes.push(prefix.into());
+        self.plain_rewritten.retain(|p| !p.starts_with(prefix));
         for slot in self.slots()? {
             if !slot_reachable(&slot, prefix) {
                 continue;
@@ -496,7 +515,7 @@ impl CandidateStore for PackageStore {
             .vol
             .files_under(prefix)?
             .into_iter()
-            .filter(|p| !is_reserved(p))
+            .filter(|p| !is_reserved(p) && !self.plain_doomed(p))
             .collect();
         for slot in self.slots()? {
             if slot_reachable(&slot, prefix) {
@@ -523,6 +542,11 @@ impl CandidateStore for PackageStore {
                 self.pending = pending;
                 return Err(e);
             }
+        }
+        let rewritten = std::mem::take(&mut self.plain_rewritten);
+        for prefix in std::mem::take(&mut self.plain_deletes) {
+            self.vol
+                .delete_prefix(&prefix, &|p| is_package_file(p) || rewritten.contains(p))?;
         }
         Ok(())
     }
