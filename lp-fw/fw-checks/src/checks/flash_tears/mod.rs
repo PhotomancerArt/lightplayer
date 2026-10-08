@@ -63,15 +63,14 @@ pub const PAYLOAD: &str = "flash-tears";
 /// `done_marker` and the host registry carries it as `Sentinel::Ready`.
 pub const SCAN_DONE_MARKER: &str = "[flash-tears] === SCAN DONE ===";
 
-/// Printed every [`READY_PERIOD_MS`] until the host sends any byte.
+/// Printed once the host has sent a byte, before the header.
 ///
 /// After a power cut the board boots before the host has re-opened the port,
-/// and a USB-Serial-JTAG write nobody reads is dropped; so the scan waits for
-/// the host to say it is listening.
-pub const READY_LINE: &str = "[flash-tears] READY send any byte to start the scan";
-
-/// How often [`READY_LINE`] is repeated while nobody has answered.
-pub const READY_PERIOD_MS: u64 = 250;
+/// and on CX1 a boot that wrote before the host answered sent the host
+/// nothing at all (2026-10-08; `fw-esp32c6`'s harness says more). So a boot writes
+/// nothing until the host has sent a byte; the host sends one every few
+/// hundred milliseconds until the header arrives.
+pub const READY_LINE: &str = "[flash-tears] READY host answered, scanning";
 
 /// Bytes in one erase sector of the part.
 pub const SECTOR_SIZE: usize = 4096;

@@ -15,8 +15,9 @@ For the boot after the flash and then after each of `--cuts` power cuts:
    resolved by MAC through `board show`, never by a port-name pattern);
 2. open it the way `tty-capture.py` does — `os.open` and raw termios, HUPCL
    cleared, DTR/RTS untouched, so opening is not the reset dance;
-3. answer the payload's ready line with one byte (`g`) every 300 ms until the
-   header arrives, and read to the end of the first line holding `--until`;
+3. send one byte (`g`) every 300 ms until the header arrives — the payload
+   writes nothing until it has heard from the host — and read to the end of
+   the first line holding `--until`;
 4. close the port, wait a random `--min-ms..=--max-ms`, and cut the power with
    `board power-cycle <MAC> --as $BOARD_HOLDER` — never uhubctl.
 
@@ -44,7 +45,6 @@ import time
 import tty
 
 CX1_MAC = "14:C1:9F:E6:54:90"
-READY = b"[flash-tears] READY"
 HEADER = b"[fw-checks-header]"
 
 

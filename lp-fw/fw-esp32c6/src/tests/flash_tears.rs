@@ -16,9 +16,9 @@
 //! One boot:
 //!
 //! 1. find `lpfs` in the flashed partition table;
-//! 2. print the ready line every 250 ms until the host sends a byte — after a
-//!    power cut the board boots before the host has the port open again, and
-//!    a write nobody reads is dropped;
+//! 2. wait, writing nothing, until the host sends a byte — after a power cut
+//!    the board boots before the host has the port open again, and a write
+//!    nobody reads latches the link into dropping (see [`wait_for_host`]);
 //! 3. the header, then the scan's records (nothing is written before the
 //!    scan reads);
 //! 4. the repair and one timed work cycle, with their records;
@@ -39,7 +39,7 @@ use esp_storage::{FlashStorage, FlashStorageError};
 use fw_checks::FW_CHECK_JSON_PREFIX;
 use fw_checks::checks::flash_tears::layout::TearsLayout;
 use fw_checks::checks::flash_tears::runner::{self, BootFacts, ScanBuffers, TearsFlash};
-use fw_checks::checks::flash_tears::{PAGE_SIZE, READY_LINE, READY_PERIOD_MS, SCAN_DONE_MARKER};
+use fw_checks::checks::flash_tears::{PAGE_SIZE, READY_LINE, SCAN_DONE_MARKER};
 use fw_core::serial::SerialIo;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
@@ -47,6 +47,9 @@ use crate::flash_layout::FlashLayout;
 // Through the module rather than the re-export, as `cycle_probe` does: the
 // re-export is gated to a named list of harnesses.
 use crate::serial::usb_serial::Esp32UsbSerialIo;
+
+/// How often the boot looks for the host's byte.
+const POLL_MS: u64 = 5;
 
 pub async fn run_flash_tears(_: embassy_executor::Spawner) -> ! {
     let (sw_int, timg0, _rmt, usb_device, _gpio18, flash, _gpio4, _gpio20, _wifi, _rwdt) =
@@ -132,21 +135,26 @@ fn boot(
     Ok(next + 1)
 }
 
-/// Print the ready line until the host sends anything.
+/// Wait, silently, until the host sends anything; then say so.
+///
+/// Silently, and that is the fix for a desk finding (2026-10-08, CX1). When
+/// this loop printed a ready line every 250 ms, a boot after a real power
+/// cut sent the host **nothing** — not one byte in 15 s with the port open —
+/// while the host's bytes still arrived here (the journal showed the work
+/// loop resuming). The likely mechanism: the boot enumerates USB afresh, the
+/// first line fills the endpoint buffer before the host has the port open,
+/// times out, and latches `Esp32UsbSerialIo` into dropping. Whatever the
+/// mechanism, a boot that writes nothing until it has heard from the host
+/// was captured every time.
 async fn wait_for_host(serial: &Rc<RefCell<Esp32UsbSerialIo>>, out: &mut Out) {
     let mut byte = [0u8; 16];
-    loop {
-        let _ = write!(out, "{READY_LINE}\r\n");
-        let until = Instant::now() + Duration::from_millis(READY_PERIOD_MS);
-        while Instant::now() < until {
-            if serial.borrow_mut().read_available(&mut byte).unwrap_or(0) > 0 {
-                // Drain whatever else the host sent with it.
-                while serial.borrow_mut().read_available(&mut byte).unwrap_or(0) > 0 {}
-                return;
-            }
-            Timer::after(Duration::from_millis(5)).await;
-        }
+    while serial.borrow_mut().read_available(&mut byte).unwrap_or(0) == 0 {
+        Timer::after(Duration::from_millis(POLL_MS)).await;
     }
+    // Let the host's burst finish, and drop it.
+    Timer::after(Duration::from_millis(50)).await;
+    while serial.borrow_mut().read_available(&mut byte).unwrap_or(0) > 0 {}
+    let _ = write!(out, "{READY_LINE}\r\n");
 }
 
 /// The flash part's JEDEC id, by the SPI1 controller's own RDID command:

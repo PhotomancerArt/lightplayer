@@ -1648,15 +1648,17 @@ static FLASH_TEARS_FIELDS: &[FieldSpec] = &[
 ///   tenth). Where an emulated cut lands is a property of the machine's
 ///   slicing, not of a flash part, and nothing may read it as a tear shape.
 ///
-/// Each boot's ready line is answered by the `after` line that matches it (a
-/// match moves the search past itself).
+/// Each boot is answered by the `after` line that matches its bootloader's
+/// `Loaded app` (a match moves the search past itself): the payload writes
+/// nothing until the host has sent a byte, so there is no line of its own
+/// to wait on.
 pub const FLASH_TEARS_EMULATED_SCRIPT: &str = "\
-after \"[flash-tears] READY\" \"g\"
-after \"[flash-tears] READY\" \"g\"
-after \"[flash-tears] READY\" \"g\"
-after \"[flash-tears] READY\" \"g\"
-after \"[flash-tears] READY\" \"g\"
-after \"[flash-tears] READY\" \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
 450 power-cycle
 520 power-cycle
 700 power-cycle
@@ -3816,7 +3818,11 @@ mod tests {
         let plan = p.host_plan.expect("the emulated twin has a host");
         assert_eq!(plan.host, "attached");
         let cuts = plan.script.lines().filter(|l| l.ends_with("power-cycle")).count();
-        let answers = plan.script.lines().filter(|l| l.starts_with("after ")).count();
+        let answers = plan
+            .script
+            .lines()
+            .filter(|l| l.starts_with("after \"boot: Loaded app\""))
+            .count();
         assert_eq!(cuts, 5);
         assert_eq!(answers, cuts + 1, "one answer per boot: the first and one per cut");
         assert!(matches!(p.boot, BootPath::RomUp { .. }));
