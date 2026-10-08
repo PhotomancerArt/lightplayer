@@ -20,7 +20,8 @@
 //! as in `lpa-server`.
 //!
 //! **A keyed link never logs in here.** A secure link's key is its login
-//! (`LinkTrust::Keyed`, [`super::core_key_lookup`]); an `L` on one is
+//! (`LinkTrust::Keyed`, and `LinkTrust::Relayed` through the relay,
+//! [`super::core_key_lookup`]); an `L` on one is
 //! refused with the verdict any login it will not take gets (no tier, no
 //! wait), as the engine's server refuses a `LoginAnswer` on a keyed link —
 //! so an HMAC answer can never be relayed through a session a relay could
@@ -37,10 +38,9 @@ use super::board_session::BoardSession;
 
 impl BoardSession {
     pub(super) fn on_login(&mut self, now_ms: u64, link: LinkId, step: HostLoginStep) {
-        let keyed = self
-            .links
-            .iter()
-            .any(|l| l.id == link && matches!(l.trust, LinkTrust::Keyed(_)));
+        let keyed = self.links.iter().any(|l| {
+            l.id == link && matches!(l.trust, LinkTrust::Keyed(_) | LinkTrust::Relayed(_))
+        });
         let (tier, wait) = match step {
             _ if keyed => (None, 0),
             HostLoginStep::Begin => match self.begin_login(now_ms, link) {

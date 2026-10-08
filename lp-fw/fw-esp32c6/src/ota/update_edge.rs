@@ -139,18 +139,25 @@ impl UpdateEdge {
 
     /// One channel-3 message from a radio `link` while the engine runs, with
     /// the tier a login or key granted it on the engine's server (never one
-    /// the device's `open` setting alone gave: the session adds that itself).
+    /// the device's `open` setting alone gave: the session adds that itself,
+    /// except through the relay, where it never applies).
     #[cfg(feature = "ble")]
     pub fn on_message_with_tier(
         &mut self,
         link: LinkId,
+        relayed: bool,
         granted: Option<lpc_access::Tier>,
         bytes: &[u8],
     ) {
         let first = bytes.first().copied();
         let start = now_us();
+        let trust = if relayed {
+            LinkTrust::Relayed(None)
+        } else {
+            LinkTrust::Untrusted
+        };
         self.session
-            .on_message_with_tier(&mut self.target, now_ms(), link, granted, bytes);
+            .on_message_with_tier(&mut self.target, now_ms(), link, trust, granted, bytes);
         self.after_message(first, start, bytes);
     }
 
@@ -284,8 +291,13 @@ impl fw_esp32_common::radio_link::CoreOnlySession for UpdateEdge {
     }
 
     #[cfg(feature = "wifi")]
-    fn key_lookup(&mut self, link: LinkId, salt: &[u8; 16]) -> lpc_update::board::CoreKeyAnswer {
-        self.session.key_lookup(now_ms(), link, salt)
+    fn key_lookup(
+        &mut self,
+        link: LinkId,
+        path: lpc_update::board::NetworkPath,
+        salt: &[u8; 16],
+    ) -> lpc_update::board::CoreKeyAnswer {
+        self.session.key_lookup(now_ms(), link, path, salt)
     }
 
     #[cfg(feature = "wifi")]
@@ -294,7 +306,12 @@ impl fw_esp32_common::radio_link::CoreOnlySession for UpdateEdge {
     }
 
     #[cfg(feature = "wifi")]
-    fn key_authenticated(&mut self, link: LinkId, candidate: u8) -> LinkTrust {
-        self.session.key_authenticated(link, candidate)
+    fn key_authenticated(
+        &mut self,
+        link: LinkId,
+        path: lpc_update::board::NetworkPath,
+        candidate: u8,
+    ) -> LinkTrust {
+        self.session.key_authenticated(link, path, candidate)
     }
 }

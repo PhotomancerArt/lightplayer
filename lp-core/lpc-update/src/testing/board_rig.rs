@@ -106,7 +106,14 @@ impl BoardRig {
             return Vec::new();
         };
         if s.facts().mode == SessionMode::EngineRunning {
-            s.on_message_with_tier(&mut self.board, now_ms, link, tier, bytes);
+            s.on_message_with_tier(
+                &mut self.board,
+                now_ms,
+                link,
+                LinkTrust::Untrusted,
+                tier,
+                bytes,
+            );
         } else {
             s.on_message(&mut self.board, now_ms, link, bytes);
         }

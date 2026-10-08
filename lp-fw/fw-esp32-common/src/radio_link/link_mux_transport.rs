@@ -65,9 +65,9 @@
 //!    session forgets it, its queued messages dropped; a session `Reset`
 //!    drops the ended session's. With no hook (a monolithic image, DM25)
 //!    channel 3 is ignored. A Bluetooth link's channel 3 goes to the hook,
-//!    and a LAN link's, with the tier its key granted it on the server; a
-//!    relayed link's is ignored until updates through the relay are their
-//!    own change.
+//!    and a LAN link's and a relayed link's, with the tier its key granted
+//!    it on the server; a relayed link's says it is relayed, so the session
+//!    never adds `open` to it (the relay's second lock).
 //!
 //! **Network links** (feature `wifi`: the LAN's, and the cloud relay's
 //! routes) ride the same slots and the same rules, with five differences:
@@ -78,8 +78,8 @@
 //! link's tier at `Up`); a secure session that resets after coming up
 //! closes the link (a new session is a new server link, with a new grant, so
 //! the client reconnects); they are served from another thread, under the
-//! port's lock (see `radio_link_port`); a relayed link's channel 3 is not
-//! served yet (rule 5); and the LAN and the relay share **one** network slot (Wi-Fi relay
+//! port's lock (see `radio_link_port`); a relayed link's channel 3 is held
+//! to its grant (rule 5); and the LAN and the relay share **one** network slot (Wi-Fi relay
 //! plan D2). A newcomer that finds it held is a *challenge*
 //! ([`RadioLinkEvent::Challenged`]): it takes the slot only with a handshake
 //! that verifies under the holder's own key, looked up through the server
@@ -323,6 +323,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                 link,
                 granted: granted(wire),
                 open: open.unwrap_or(OpenTo::Nobody),
+                relayed: is_relayed(wire),
                 bytes: &bytes,
             });
         }
@@ -625,13 +626,10 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                         }
                     }
                     LinkEvent::Message { channel, data }
-                        if channel == CH_UPDATE
-                            && self.update_hook.is_some()
-                            && carries_updates(radio.wire) =>
+                        if channel == CH_UPDATE && self.update_hook.is_some() =>
                     {
                         // For the core, with the link's tier, from the
-                        // upkeep (rule 5). A relayed link's falls to the
-                        // arm below like any other channel.
+                        // upkeep (rule 5).
                         self.updates.push_back((radio.id, data));
                     }
                     LinkEvent::Message { channel, data } => {
@@ -911,10 +909,10 @@ fn take_secure_events(
     }
 }
 
-/// Whether a link's channel 3 goes to the update hook (rule 5): a
-/// Bluetooth link's and a LAN link's, never a relayed one's yet.
-fn carries_updates(wire: Link) -> bool {
-    wire.trust != lpc_shared::transport::LinkTrust::Relayed
+/// Whether a link came through the cloud relay (rule 5: its channel 3 is
+/// held to its grant, never the device's `open`).
+fn is_relayed(wire: Link) -> bool {
+    wire.trust == lpc_shared::transport::LinkTrust::Relayed
 }
 
 /// The end of a tick's wait budget, for a tick starting now.
@@ -1759,7 +1757,8 @@ mod tests {
 
     /// Rule 5 on the LAN: a LAN link's channel-3 message goes to the hook
     /// with the tier its key granted it on the server (asked with the link
-    /// as the server knows it: keyed), and a relayed link's is ignored.
+    /// as the server knows it: keyed), and a relayed link's too, said
+    /// relayed (asked as relayed).
     #[cfg(feature = "wifi")]
     #[test]
     fn a_lan_links_channel_three_goes_to_the_update_hook_with_its_keys_grant() {
@@ -1798,13 +1797,21 @@ mod tests {
         client.link.send(CH_UPDATE, b"Q\x01").unwrap();
         client.pump(port.slot(RADIO_LINK_SLOTS));
         assert!(block(mux.receive()).unwrap().is_none());
-        mux.dispatch_updates(|_| Some(Tier::Edit), || OpenTo::Nobody);
+        mux.dispatch_updates(
+            |l| (l.id == relayed && l.trust == LinkTrust::Relayed).then_some(Tier::Play),
+            || OpenTo::Edit,
+        );
         assert_eq!(
             take_updates(),
-            vec![Seen::Pass],
-            "a relayed link's is ignored"
+            vec![
+                Seen::Relayed(relayed, Some(Tier::Play), OpenTo::Edit, b"Q\x01".to_vec()),
+                Seen::Pass,
+            ],
+            "a relayed link's goes to the hook, said relayed"
         );
-        let _ = relayed;
+        assert_eq!(port.send_update(relayed, b"M{}"), UpdateSend::Queued);
+        client.pump(port.slot(RADIO_LINK_SLOTS));
+        assert_eq!(client.next_update(), Some(b"M{}".to_vec()));
     }
 
     /// The hook's answers on a radio link: a small one through the link's
@@ -1862,6 +1869,8 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     enum Seen {
         Message(LinkId, Option<Tier>, OpenTo, Vec<u8>),
+        /// A relayed link's message: the same, said relayed.
+        Relayed(LinkId, Option<Tier>, OpenTo, Vec<u8>),
         Closed(LinkId),
         Pass,
     }
@@ -1877,8 +1886,16 @@ mod tests {
                 link,
                 granted,
                 open,
+                relayed: false,
                 bytes,
             } => Seen::Message(link, granted, open, bytes.to_vec()),
+            RadioUpdate::Message {
+                link,
+                granted,
+                open,
+                relayed: true,
+                bytes,
+            } => Seen::Relayed(link, granted, open, bytes.to_vec()),
             RadioUpdate::Closed { link } => Seen::Closed(link),
             RadioUpdate::Pass => Seen::Pass,
         };
