@@ -1,6 +1,13 @@
 # Studio updates a board over Bluetooth: the iPhone/Bluefy walk (protocol)
 
-**Status: protocol, not yet walked.** The gate of
+**Status: walked and passed, 2026-10-07, by Yona.** On loose-c6, with the
+merged head of #1005: a full update over Bluetooth with its backup ended up
+to date ("it worked! quite impressive"). Not walked on the phone: locking it
+mid-update and the engine-less restore, which the desk runs (a cut mid-backup
+resumed; a power cut at 164 s) and the emulated walks cover. His notes on the
+copy (Finishing always said "It was interrupted"; a Wi-Fi link told him
+"Firmware updates need USB") were fixed before the merge. The text below is
+the protocol as written before the walk. The gate of
 `lp2025/2026-10-05-0820-ota-studio-ble-updates` (M7, PR-3, P13): a person,
 an iPhone running Bluefy, and a desk C6, with Studio served from the PR's
 branch. **2026-10-07: the director hosts the walk on `loose-c6`** (below);
