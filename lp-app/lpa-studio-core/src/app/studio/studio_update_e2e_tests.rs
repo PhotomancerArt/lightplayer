@@ -363,6 +363,47 @@ fn an_engineless_board_is_restored_on_connect_from_the_cache_with_no_click_or_lo
     assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
 }
 
+/// The same engine-less board on the LAN (OTA M8): core-only serves its
+/// Wi‑Fi link with no hello, so it is a pending link, and its engine is
+/// restored there from the cache with no click. The board's reset at the
+/// end is a socket close the page redials by itself: the pending link (and
+/// the restore's outcome with it) departs, and the board comes back as a
+/// card, running X — as over Bluetooth, the walk's own check.
+#[test]
+fn an_engineless_board_on_wifi_is_restored_on_connect_from_the_cache() {
+    let mut board = Board::engineless_x();
+    board.trust = LinkTrust::Untrusted;
+    board.endpoint = "lan:ws://192.168.1.40/link".to_string();
+    board.reconnects_itself = true;
+    board.rig.reboot().expect("boots");
+    let mut bench = Bench::new(board, Some(y()));
+    bench.cache_engine(&x());
+    bench.grant();
+
+    bench.run_until("the pending card to say it is restoring", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .roster
+            .pending
+            .iter()
+            .any(|pending| pending.state_label.starts_with("Restoring firmware…"))
+    });
+    bench.run_until("the board to run X again, on a card", |bench| {
+        bench.board().rig.mode() == Some(SessionMode::EngineRunning)
+            && bench
+                .controller
+                .device_roster_view()
+                .roster
+                .devices
+                .iter()
+                .any(|card| card.state_label == "Ready")
+    });
+    bench.assert_runs(&x());
+    assert_eq!(bench.presses, 0, "no click");
+    assert!(bench.said("board is missing its 2026.10.05-1 engine · restoring it"));
+}
+
 /// The same board with its engine nowhere (no cache, no store): E13's row,
 /// once — the no-click start does not fire again on the same link. A
 /// reconnect tries again (and misses again), and still no loop.
