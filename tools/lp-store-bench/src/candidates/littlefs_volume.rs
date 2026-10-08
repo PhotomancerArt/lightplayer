@@ -106,11 +106,19 @@ impl Storage for LfsNorStorage {
 /// An open littlefs file on the sim.
 pub type LfsFile<'a> = littlefs_rust::File<'a, LfsNorStorage>;
 
-/// The firmware's littlefs configuration for `sectors` blocks.
-pub fn lfs_config(sectors: u32) -> Config {
-    let mut c = Config::new(BLOCK_SIZE, sectors);
+/// The firmware's littlefs configuration for `cfg.sectors` blocks. The
+/// `block_cycles` dial sets littlefs's metadata-pair wear levelling (erases a
+/// pair takes before littlefs relocates it); unset is −1, off, which is
+/// `Config::new`'s default and what the firmware runs with today.
+pub fn lfs_config(cfg: &CandidateConfig) -> Config {
+    let mut c = Config::new(BLOCK_SIZE, cfg.sectors);
     c.cache_size = CACHE_SIZE;
     c.lookahead_size = LOOKAHEAD_SIZE;
+    c.block_cycles = cfg
+        .dial("block_cycles")
+        .and_then(|v| v.parse().ok())
+        .filter(|&v: &i32| v != 0)
+        .unwrap_or(-1);
     c
 }
 
@@ -139,7 +147,7 @@ impl LfsVolume {
     pub fn format(flash: &mut NorFlashSim, cfg: &CandidateConfig) -> Result<(), StoreError> {
         let shared = SharedFlash::new(flash.clone());
         let mut storage = LfsNorStorage(shared.clone());
-        let r = Filesystem::format(&mut storage, &lfs_config(cfg.sectors));
+        let r = Filesystem::format(&mut storage, &lfs_config(cfg));
         let e = r.err().map(|e| shared.store_error(e));
         drop(storage);
         *flash = SharedFlash::take(shared);
@@ -152,7 +160,7 @@ impl LfsVolume {
         cfg: &CandidateConfig,
     ) -> Result<Self, (StoreError, NorFlashSim)> {
         let shared = SharedFlash::new(flash);
-        match Filesystem::mount(LfsNorStorage(shared.clone()), lfs_config(cfg.sectors)) {
+        match Filesystem::mount(LfsNorStorage(shared.clone()), lfs_config(cfg)) {
             Ok(fs) => Ok(Self {
                 fs: Some(fs),
                 flash: shared,
@@ -408,5 +416,32 @@ mod tests {
             })
             .collect();
         assert!(!lost.is_empty(), "littlefs-rust no longer loses an entry");
+    }
+
+    /// A library defect, pinned (found by the 30-day endurance run,
+    /// 2026-10-08): littlefs-rust 0.1.0's `lfs_dir_commitcrc` never writes the
+    /// FCRC tag that upstream's (disk version 2.1) writes after every commit,
+    /// so a fetched metadata pair never proves its tail erased and every
+    /// commit compacts — one sector erase per file write instead of one per
+    /// block-full of commits. Upstream would erase ~20 times here. If this
+    /// starts failing, littlefs-rust was fixed: drop the pin and re-run the
+    /// endurance numbers.
+    #[test]
+    fn littlefs_compacts_on_every_commit() {
+        let cfg = CandidateConfig::new(128);
+        let mut f = NorFlashSim::new(cfg.geometry());
+        LfsVolume::format(&mut f, &cfg).unwrap();
+        let v = mount(f);
+        let panel = [b'p'; 350];
+        v.write_file("/projects/a/.lp/panel.json", &panel).unwrap();
+        let before = v.snapshot().stats().erases_total();
+        for _ in 0..200 {
+            v.write_file("/projects/a/.lp/panel.json", &panel).unwrap();
+        }
+        let erases = v.snapshot().stats().erases_total() - before;
+        assert!(
+            erases >= 190,
+            "littlefs-rust no longer compacts every commit ({erases} erases)"
+        );
     }
 }

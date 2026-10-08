@@ -6,6 +6,7 @@ use clap::{Args, Parser, Subcommand};
 use lp_nor_sim::TearModel;
 use lp_store_bench::candidates::parse_candidate_spec;
 use lp_store_bench::driver_double_cut::{DoubleCutParams, sweep_double_cut};
+use lp_store_bench::driver_endurance::{DayShape, endurance};
 use lp_store_bench::driver_exhaustive::{
     FailureRecord, SweepParams, SweepSummary, sweep_exhaustive,
 };
@@ -91,6 +92,25 @@ enum Cmd {
         /// Also binary-search the smallest partition (sectors) for each.
         #[arg(long)]
         min_sectors: bool,
+    },
+    /// Simulated days of use (fault-free): erase spread and write amp.
+    Endurance {
+        #[command(flatten)]
+        common: Common,
+        /// Corpus pushed as project `a` (F1 cannot hold c40 at 128 sectors).
+        #[arg(long, default_value = "c20")]
+        corpus_name: String,
+        #[arg(long, default_value_t = 30)]
+        days: u32,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Re-pushes a day (0 = pushed once, never again).
+        #[arg(long, default_value_t = 1)]
+        pushes: u32,
+        #[arg(long, default_value_t = 10)]
+        saves: u32,
+        #[arg(long, default_value_t = 1440)]
+        panel_writes: u32,
     },
     /// The unattended overnight run (priority list until a deadline).
     Overnight {
@@ -240,6 +260,46 @@ fn main() {
                         println!("    min sectors: {min:?}");
                     }
                 }
+            }
+        }
+        Cmd::Endurance {
+            common,
+            corpus_name,
+            days,
+            seed,
+            pushes,
+            saves,
+            panel_writes,
+        } => {
+            let shape = DayShape {
+                pushes,
+                saves,
+                panel_writes,
+            };
+            use rayon::prelude::*;
+            let ctx = Ctx::new(&common, "endurance");
+            let corpus = ctx.corpora.get(&corpus_name).unwrap_or_else(|e| die(&e));
+            let specs: Vec<&str> = common
+                .candidates
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let out: Vec<(String, MeasureResult)> = specs
+                .par_iter()
+                .map(|spec| {
+                    let (cand, cfg) =
+                        parse_candidate_spec(spec, common.sectors).unwrap_or_else(|e| die(&e));
+                    let m = endurance(cand.as_ref(), &cfg, &corpus, days, shape, seed);
+                    (spec.to_string(), m)
+                })
+                .collect();
+            for (spec, m) in out {
+                ctx.sink.write(
+                    "endurance",
+                    &serde_json::json!({"days": days, "corpus": corpus.name, "spec": spec, "result": m}),
+                );
+                println!("{spec}:");
+                print_measure(&m);
             }
         }
         Cmd::Overnight {
@@ -472,7 +532,7 @@ fn print_measure(m: &MeasureResult) {
         .map(|d| format!("@{d}"))
         .unwrap_or_default();
     println!(
-        "  measure {:<10} {:<28} {:<5} sectors end/peak {:>3}/{:>3} used {:>4} wa {:>5.2} mount {:>7} B/{:>5} reads ram {:>6} erases {}..{} {}",
+        "  measure {:<10} {:<28} {:<5} sectors end/peak {:>3}/{:>3} used {:>4} wa {:>5.2} mount {:>7} B/{:>5} reads ram {:>6} erases {}/{}/{} {}",
         format!("{}{dials}", m.candidate),
         w,
         if m.ok { "ok" } else { "FAIL" },
@@ -486,6 +546,7 @@ fn print_measure(m: &MeasureResult) {
         m.mount_read_calls,
         m.report.as_ref().map(|r| r.ram_bytes).unwrap_or(0),
         m.erases_min,
+        m.erases_median,
         m.erases_max,
         m.error
             .clone()
