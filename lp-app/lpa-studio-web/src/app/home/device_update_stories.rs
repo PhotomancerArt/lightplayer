@@ -316,8 +316,8 @@ fn device_curtain_update_updating() -> Element {
     description = "The same Reconnecting card while its board updates over Wi‑Fi: each reset closes the board's socket and the page redials it by itself, so the card's detail is the update's line, \"Updating over Wi‑Fi… 40%\"."
 )]
 fn device_curtain_update_updating_wifi() -> Element {
-    let fixture = UpdateFixture::new(UpdateFixtureRow::Updating, porch_lights(Link::Wifi))
-        .over_wifi();
+    let fixture =
+        UpdateFixture::new(UpdateFixtureRow::Updating, porch_lights(Link::Wifi)).over_wifi();
     let line = fixture.words().map(|words| words.line).unwrap_or_default();
     rsx! {
         section { class: "tw:grid tw:w-[760px] tw:gap-3 tw:p-4",

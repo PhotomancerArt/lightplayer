@@ -280,8 +280,7 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
         UpdateStanding::NotOverWifiYet { .. } => words(
             NeedsYou,
             "Update over USB or Bluetooth once".to_string(),
-            "This board updates over USB or Bluetooth until it has been updated once."
-                .to_string(),
+            "This board updates over USB or Bluetooth until it has been updated once.".to_string(),
             None,
             "Ready",
         ),

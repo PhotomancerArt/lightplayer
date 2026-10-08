@@ -1426,9 +1426,7 @@ impl HostState {
         let Some(link) = run.leg.as_ref().and_then(|leg| leg.handle.upgrade()) else {
             return;
         };
-        if bytes.first() == Some(&b'Q')
-            && !run.heard_this_leg
-            && run.asked_unanswered_at.is_none()
+        if bytes.first() == Some(&b'Q') && !run.heard_this_leg && run.asked_unanswered_at.is_none()
         {
             run.asked_unanswered_at = now;
         }

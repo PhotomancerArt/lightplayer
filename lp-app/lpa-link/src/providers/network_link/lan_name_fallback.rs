@@ -20,9 +20,7 @@ pub fn lan_name_fallback(url: &str, base_mac: &str) -> Option<String> {
         None => (rest, "/link"),
     };
     let (host, port) = match authority.rsplit_once(':') {
-        Some((host, port)) if port.bytes().all(|byte| byte.is_ascii_digit()) => {
-            (host, Some(port))
-        }
+        Some((host, port)) if port.bytes().all(|byte| byte.is_ascii_digit()) => (host, Some(port)),
         _ => (authority, None),
     };
     let octets: Vec<u8> = host

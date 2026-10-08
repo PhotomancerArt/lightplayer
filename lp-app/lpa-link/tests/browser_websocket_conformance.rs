@@ -51,8 +51,8 @@ use lpa_link::providers::browser_websocket::{
 };
 use lpa_link::providers::network_link::{KEY_ID_BYTES, LinkKey, LinkKeys, PSK_BYTES};
 use lpc_access::Tier;
-use lpc_wire::lp_link::secure_channel::{KeyId, Psk, RefusalReason, SecureEvent, SecureRole};
 use lpc_update::BoardManifest;
+use lpc_wire::lp_link::secure_channel::{KeyId, Psk, RefusalReason, SecureEvent, SecureRole};
 use lpc_wire::lp_link::{
     CH_PROTO, CH_UPDATE, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
 };
@@ -439,7 +439,10 @@ async fn a_busy_board_is_said_once_and_not_announced_until_it_answers() {
         tick(5).await;
     }
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(errors[0].starts_with("wi-fi link lost: busy with another Wi"), "{errors:?}");
+    assert!(
+        errors[0].starts_with("wi-fi link lost: busy with another Wi"),
+        "{errors:?}"
+    );
     assert!(errors[0].contains("code 1013"), "{errors:?}");
 
     // The redial opens, and is turned away again: nothing announced, nothing
@@ -452,7 +455,9 @@ async fn a_busy_board_is_said_once_and_not_announced_until_it_answers() {
     }
     assert_eq!(js_sockets_opened(url), 2, "the session redialled");
     assert!(
-        !lan::present_sessions().iter().any(|present| present.url == url),
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url),
         "a redial to a busy board is not a board"
     );
     assert!(js_drop_socket(url, 1013, "try again later"));
@@ -463,23 +468,36 @@ async fn a_busy_board_is_said_once_and_not_announced_until_it_answers() {
         );
         tick(5).await;
     }
-    assert!(!lan::present_sessions().iter().any(|present| present.url == url));
+    assert!(
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url)
+    );
     assert_eq!(edges.0.get(), connects, "no connect edge while busy");
 
     // Free again: the next redial is answered, and the board is back.
     let pump = bench.spawn_board_loop();
     for _ in 0..3_000 {
-        if lan::present_sessions().iter().any(|present| present.url == url) {
+        if lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url)
+        {
             break;
         }
         tick(10).await;
     }
     pump.set(false);
     assert!(
-        lan::present_sessions().iter().any(|present| present.url == url),
+        lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url),
         "the board answered, and is present"
     );
-    assert_eq!(edges.0.get(), connects + 1, "one connect edge when it answers");
+    assert_eq!(
+        edges.0.get(),
+        connects + 1,
+        "one connect edge when it answers"
+    );
     assert!(lan::forget(session.session).await);
 }
 
@@ -496,7 +514,10 @@ async fn the_update_channel_flows_both_ways_once_the_board_announces_it() {
     let mut link = open_link(&session).await;
     let pump = bench.spawn_board_loop();
 
-    let facts = wait_for(&mut link, |event| matches!(event, LinkEvent::UpdateFacts(_))).await;
+    let facts = wait_for(&mut link, |event| {
+        matches!(event, LinkEvent::UpdateFacts(_))
+    })
+    .await;
     assert!(
         matches!(&facts, Some(LinkEvent::UpdateFacts(f)) if f.version.as_deref() == Some("2026.10.06-1")),
         "the board's manifest, mirrored: {facts:?}"

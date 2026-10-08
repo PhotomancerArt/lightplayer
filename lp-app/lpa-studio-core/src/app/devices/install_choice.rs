@@ -451,7 +451,10 @@ mod tests {
             stranded_over(UpdateLink::Wifi, &any, FirmwareAge::Older),
             None
         );
-        assert_eq!(stranded_over(UpdateLink::Usb, &any, FirmwareAge::Newer), None);
+        assert_eq!(
+            stranded_over(UpdateLink::Usb, &any, FirmwareAge::Newer),
+            None
+        );
     }
 
     #[test]
