@@ -14,6 +14,11 @@ use super::journal::CopyScan;
 pub struct BootRecord<'a> {
     /// The chip's reset reason, as the firmware names it.
     pub reset: &'a str,
+    /// The chip's base MAC, from eFuse: which board this boot is.
+    pub mac: [u8; 6],
+    /// The flash part's JEDEC id (manufacturer, type, capacity), as the
+    /// part answers RDID: the tear behaviour belongs to this part.
+    pub flash_id: u32,
     /// The payload's first sector (the start of `lpfs`).
     pub base: u32,
     /// The in-flight cycle the journal names, or `None` on a fresh region.
@@ -24,8 +29,15 @@ impl fmt::Display for BootRecord<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{\"kind\":\"ft-boot\",\"reset\":\"{}\",\"base\":\"0x{:x}\",\"region_sectors\":{},\"latest\":{},\"state\":\"{}\"}}",
+            "{{\"kind\":\"ft-boot\",\"reset\":\"{}\",\"mac\":\"{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\",\"flash_id\":\"0x{:06x}\",\"base\":\"0x{:x}\",\"region_sectors\":{},\"latest\":{},\"state\":\"{}\"}}",
             self.reset,
+            self.mac[0],
+            self.mac[1],
+            self.mac[2],
+            self.mac[3],
+            self.mac[4],
+            self.mac[5],
+            self.flash_id,
             self.base,
             super::REGION_SECTORS,
             Opt(self.latest),
@@ -268,13 +280,15 @@ mod tests {
             "{}",
             BootRecord {
                 reset: "poweron",
+                mac: [0x14, 0xc1, 0x9f, 0xe6, 0x54, 0x90],
+                flash_id: 0x46_40_16,
                 base: 0x35_0000,
                 latest: None,
             }
         );
         assert_eq!(
             boot,
-            r#"{"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":null,"state":"fresh"}"#
+            r#"{"kind":"ft-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","region_sectors":16,"latest":null,"state":"fresh"}"#
         );
         let t = program_tear(&[0x00, 0xFF], &[0x00, 0x00]);
         assert_eq!(t.shape, TearShape::BytePrefix);

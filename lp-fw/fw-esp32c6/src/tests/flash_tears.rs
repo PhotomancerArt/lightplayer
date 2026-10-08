@@ -38,7 +38,7 @@ use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use esp_storage::{FlashStorage, FlashStorageError};
 use fw_checks::FW_CHECK_JSON_PREFIX;
 use fw_checks::checks::flash_tears::layout::TearsLayout;
-use fw_checks::checks::flash_tears::runner::{self, ScanBuffers, TearsFlash};
+use fw_checks::checks::flash_tears::runner::{self, BootFacts, ScanBuffers, TearsFlash};
 use fw_checks::checks::flash_tears::{PAGE_SIZE, READY_LINE, READY_PERIOD_MS, SCAN_DONE_MARKER};
 use fw_core::serial::SerialIo;
 
@@ -52,7 +52,14 @@ pub async fn run_flash_tears(_: embassy_executor::Spawner) -> ! {
     let (sw_int, timg0, _rmt, usb_device, _gpio18, flash, _gpio4, _gpio20, _wifi, _rwdt) =
         init_board();
     start_runtime(timg0, sw_int);
-    let reset = reset_name(esp_hal::system::reset_reason());
+    let facts = BootFacts {
+        reset: reset_name(esp_hal::system::reset_reason()),
+        mac: esp_hal::efuse::base_mac_address()
+            .as_bytes()
+            .try_into()
+            .unwrap_or([0; 6]),
+        flash_id: flash_jedec_id(),
+    };
 
     let serial = Rc::new(RefCell::new(Esp32UsbSerialIo::new(UsbSerialJtag::new(
         usb_device,
@@ -90,7 +97,7 @@ pub async fn run_flash_tears(_: embassy_executor::Spawner) -> ! {
     // SAFETY: `ScanBuffers` is five byte arrays; all zeroes is a valid value.
     let mut bufs: Box<ScanBuffers> = unsafe { Box::<ScanBuffers>::new_zeroed().assume_init() };
 
-    let next = match boot(&mut flash, &layout, &mut bufs, reset, &mut out) {
+    let next = match boot(&mut flash, &layout, &mut bufs, facts, &mut out) {
         Ok(next) => next,
         Err(e) => {
             let _ = write!(out, "[flash-tears] FLASH ERROR {e:?}\r\n");
@@ -111,13 +118,13 @@ fn boot(
     flash: &mut Flash,
     layout: &TearsLayout,
     bufs: &mut ScanBuffers,
-    reset: &str,
+    facts: BootFacts<'_>,
     out: &mut Out,
 ) -> Result<u32, FlashStorageError> {
     let mut emit = |r: &dyn fmt::Display| {
         let _ = write!(out, "{FW_CHECK_JSON_PREFIX}{r}\r\n");
     };
-    let found = runner::scan(flash, layout, bufs, reset, &mut emit)?;
+    let found = runner::scan(flash, layout, bufs, facts, &mut emit)?;
     let next = runner::prepare(flash, layout, &found, bufs, &mut emit)?;
     let mut now_us = || Instant::now().as_micros();
     let timing = runner::timed_cycle(flash, layout, next, &mut bufs.new, &mut now_us)?;
@@ -140,6 +147,22 @@ async fn wait_for_host(serial: &Rc<RefCell<Esp32UsbSerialIo>>, out: &mut Out) {
             Timer::after(Duration::from_millis(5)).await;
         }
     }
+}
+
+/// The flash part's JEDEC id, by the SPI1 controller's own RDID command:
+/// esp-storage's size probe (`hardware::get_flash_size`) reads it the same
+/// way, before any write.
+fn flash_jedec_id() -> u32 {
+    critical_section::with(|_| {
+        let spi1 = esp_hal::peripherals::SPI1::regs();
+        spi1.cmd().write(|w| w.flash_rdid().set_bit());
+        while spi1.cmd().read().flash_rdid().bit_is_set() {}
+        let id = spi1.w(0).read().buf().bits() & 0x00FF_FFFF;
+        // The part sends manufacturer, type, capacity; the word holds them
+        // first-byte-lowest. Print them in the order the part sent them.
+        let [m, t, c, _] = id.to_le_bytes();
+        u32::from_be_bytes([0, m, t, c])
+    })
 }
 
 async fn idle() -> ! {

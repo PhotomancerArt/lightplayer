@@ -72,13 +72,24 @@ pub struct BootScan {
     pub in_flight: Option<Verdict>,
 }
 
+/// Who is booting: the facts the firmware knows about the board and the part.
+#[derive(Clone, Copy, Debug)]
+pub struct BootFacts<'a> {
+    /// The reset reason, as the firmware names it (`poweron` after a cut).
+    pub reset: &'a str,
+    /// The chip's base MAC.
+    pub mac: [u8; 6],
+    /// The flash part's JEDEC id.
+    pub flash_id: u32,
+}
+
 /// Read the journal and every region sector, emit a record for each, and say
 /// what needs rewriting. Writes nothing.
 pub fn scan<F: TearsFlash>(
     flash: &mut F,
     layout: &TearsLayout,
     bufs: &mut ScanBuffers,
-    reset: &str,
+    facts: BootFacts<'_>,
     emit: Emit<'_>,
 ) -> Result<BootScan, F::Error> {
     let mut copies = [CopyScan::default(); JOURNAL_COPIES as usize];
@@ -88,7 +99,9 @@ pub fn scan<F: TearsFlash>(
     }
     let latest = journal::latest_of(&copies);
     emit(&BootRecord {
-        reset,
+        reset: facts.reset,
+        mac: facts.mac,
+        flash_id: facts.flash_id,
         base: layout.base,
         latest,
     });
@@ -461,7 +474,12 @@ mod tests {
         let mut bufs = Box::new(ScanBuffers::new());
         let mut out: Vec<String> = Vec::new();
         let mut emit = |r: &dyn fmt::Display| out.push(r.to_string());
-        let found = scan(nor, &layout, &mut bufs, "poweron", &mut emit).unwrap();
+        let facts = BootFacts {
+            reset: "poweron",
+            mac: [0; 6],
+            flash_id: 0,
+        };
+        let found = scan(nor, &layout, &mut bufs, facts, &mut emit).unwrap();
         let next = prepare(nor, &layout, &found, &mut bufs, &mut emit).unwrap();
         let mut clock = 0u64;
         let mut now = || {
