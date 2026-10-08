@@ -5,6 +5,8 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None (draft PR #903's design, which never merged)
 - **Superseded by:** None
+- **Related:** the OTA ADR set, closed out 2026-10-08: [2026-10-06-ota-update-protocol](2026-10-06-ota-update-protocol.md) (the update protocol), [2026-10-06-firmware-distribution](2026-10-06-firmware-distribution.md) (firmware distribution), [2026-10-06-studio-updates-over-the-update-channel](2026-10-06-studio-updates-over-the-update-channel.md) (Studio's updates). The C6's flash spend is in
+  [`2026-07-28-esp32c6-flash-budget.md`](2026-07-28-esp32c6-flash-budget.md)'s ledger.
 
 ## Context
 

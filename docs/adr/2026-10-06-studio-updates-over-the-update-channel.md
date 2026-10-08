@@ -5,6 +5,8 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Related:** the OTA ADR set, closed out 2026-10-08: [2026-10-04-c6-split-link-firmware-loader-and-boot-records](2026-10-04-c6-split-link-firmware-loader-and-boot-records.md) (the split image), [2026-10-06-ota-update-protocol](2026-10-06-ota-update-protocol.md) (the update protocol), [2026-10-06-firmware-distribution](2026-10-06-firmware-distribution.md) (firmware distribution). The C6's flash spend is in
+  [`2026-07-28-esp32c6-flash-budget.md`](2026-07-28-esp32c6-flash-budget.md)'s ledger.
 - **Plan:** `lp2025/2026-10-05-0820-ota-studio-ble-updates` (M7 of the OTA
   roadmap `lp2025/2026-10-03-1330-ota-firmware-updates`). PR-1 (P1–P6, the
   card, the model and the driver, dormant) and PR-2 (P7–P9, live over USB and
@@ -241,7 +243,7 @@ board (the LAN link serves channel 3, core-only answers its own key lookup).
 
 Plan `lp2025/2026-10-06-2249-ota-wifi-updates`, PR C (P9, P10), on the
 board half in `docs/adr/2026-10-06-ota-update-protocol.md`'s amendment of
-the same date. Studio's relay half stays behind `?relay=` (#1031's flag).
+the same date. Studio's relay half stays behind `?relay=` (#1031's flag) until the relay is on for everyone.
 
 - **A relayed link carries channel 3.** `relay_link_info` says
   `carries_update_channel`, and the relay's session drains it through the
@@ -283,12 +285,37 @@ the same date. Studio's relay half stays behind `?relay=` (#1031's flag).
   engine 81 KB/s). No number here is the internet's; lightplayer.app's
   relay is G2's (`docs/reports/2026-10-08-ota-relay-walk.md`).
 
+## Amendment (2026-10-08): installing another version, and the named first releases
+
+- **"Other version…"** (#1033, plan `lp2025/2026-10-06-2307-ota-install-another-version`)
+  is the offer `devices/<board>/install-firmware` in every idle over-the-air
+  row, over the release index (ADR 3's amendment). The newest five show,
+  a find box filters every choice Studio holds (core's `OfferParam::filter`),
+  an exact older version binds the press to "Look up <version>" (a store
+  manifest lookup), and `devices/<board>/install-firmware-file` ("From a
+  file…", needs the user's click) installs a build's update files after core
+  checks the manifest, target, lengths and SHA-256. Each choice binds at its
+  own level: **Routine** only when known newer, in this Studio's wire
+  language and keeping Bluetooth updates; anything else, and every file
+  install, is **Lasting**. N9 is unchanged. Nothing persisted, no wire or
+  firmware change. Yona passed the visual gate 2026-10-08 ("good enough").
+- **First releases are named** (#1050): `FIRST_BLUETOOTH_UPDATE_RELEASE`
+  `2026.10.07-16`, `FIRST_WIFI_UPDATE_RELEASE` `2026.10.08-2` and
+  `FIRST_RELAY_UPDATE_RELEASE` `2026.10.08-9`. A board on a known older
+  release is not offered Update on that link; it stands `NotOverWifiYet`
+  before any press ("Update nearby once" through the relay). This supersedes
+  the relay amendment's line that the relay constant is `None`.
+- **Updates follow whatever link reaches the board**, the relay included
+  (walked: G2 in ADR 2's amendment).
+
 ## References
 
 - `docs/adr/2026-10-06-ota-update-protocol.md` (ADR 2: the protocol and
   the firmware)
 - `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`
   (ADR 1: the split image)
+- `docs/adr/2026-10-06-firmware-distribution.md` (ADR 3: the release store,
+  the index and the lookup the picker reads)
 - `docs/adr/2026-10-01-offer-tree-and-consequence-levels.md` (levels)
 - `lp-app/lpa-update/README.md`, `lp-core/lpc-update/README.md`
 - `lp-fw/builds/README.md` (what the bundle carries; single vs split)
