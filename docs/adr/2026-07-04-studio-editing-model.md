@@ -394,7 +394,13 @@ Four deliberate points:
 - **Client-side size guard, no chunking.** `MAX_ASSET_BODY_BYTES` (10 KB)
   parks oversize applies as failed entries client-side; mutations stay
   single-frame under the 16 KB wire budget (`lpc-wire/src/budget.rs`).
-  Chunked mutations are recorded future work.
+  Chunked mutations are recorded future work. *Amended 2026-10-08 (wire
+  41): the body never went as base64 — it was serde's array of numbers,
+  ~3.5 characters a byte, so past ~4.7 KB of source an edit outgrew the
+  board's buffer. It now goes as its text (`lpc_model::body_bytes`), and
+  the limit is the body as encoded, 15,360 B
+  (`MAX_ASSET_BODY_ENCODED_BYTES`;
+  `docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).*
 - **Compile errors are presentation-parsed, not wire-structured.** The
   engine's `NodeRuntimeStatus::Error(String)` keeps carrying one rendered
   string; the client best-effort parses the rustc-style
