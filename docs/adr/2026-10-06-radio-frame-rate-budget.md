@@ -5,6 +5,10 @@
 - **Deciders:** Yona
 - **Supersedes:** None
 - **Superseded by:** None
+- **Related (Wi-Fi control roadmap):** `2026-10-07-c6-wifi-link` (the first
+  radio feature held to these ceilings), `2026-10-06-cloud-relay` (the second),
+  `2026-10-04-device-wifi-settings`, `2026-10-02-c6-link-io-thread` (the
+  link thread and messages-first), `2026-10-07-project-loads-are-tried-and-recovered`
 
 ## Context
 
