@@ -6322,6 +6322,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-tree-store"
+version = "40.0.0"
+dependencies = [
+ "flate2",
+ "lp-crc32",
+ "lp-deflate",
+ "lp-nor-sim",
+ "sha2",
+]
+
+[[package]]
 name = "lp-ws281x"
 version = "0.1.0"
 

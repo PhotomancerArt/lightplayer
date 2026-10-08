@@ -12,6 +12,7 @@ members = [
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
     "lp-base/lp-nor-sim",
+    "lp-base/lp-tree-store",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-relay",
@@ -153,6 +154,7 @@ default-members = [
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
     "lp-base/lp-nor-sim",
+    "lp-base/lp-tree-store",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-relay",
@@ -322,6 +324,14 @@ opt-level = 3
 # lp-link's simulator runs thousands of seeded fault schedules in the default
 # test run (overflow checks stay on): 27 s at opt-level 0, a few at 2.
 [profile.dev.package.lp-link]
+opt-level = 2
+# The storage testbed's cut sweeps (lp-tree-store's own, and the store bench's
+# over lp-nor-sim) run thousands of mount/judge cycles in the default test run.
+[profile.dev.package.lp-tree-store]
+opt-level = 2
+[profile.dev.package.lp-nor-sim]
+opt-level = 2
+[profile.dev.package.lp-store-bench]
 opt-level = 2
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
