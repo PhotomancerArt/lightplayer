@@ -53,6 +53,7 @@ mod air;
 mod board;
 mod door;
 mod lan_browse;
+mod parent_watch;
 mod served_lan;
 mod wire_tap;
 mod wire_tear;
@@ -180,6 +181,9 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         .build()
         .context("building the tokio runtime for the WebSocket door")?;
 
+    // Opt-in (`LP_EMU_PARENT_PID`): exit when the process that started us dies.
+    let parent = parent_watch::parent_pid_from_env()?;
+
     let door_registry = Arc::clone(&registry);
     let listen = args.listen.clone();
     runtime.block_on(async move {
@@ -196,6 +200,9 @@ pub fn serve(args: ServeArgs) -> Result<()> {
         let door = door::run(listener, door_registry);
         tokio::select! {
             () = door => {}
+            pid = parent_watch::gone(parent) => {
+                eprintln!("emu serve: parent {pid} gone — exiting");
+            }
             signal = tokio::signal::ctrl_c() => {
                 match signal {
                     Ok(()) => eprintln!("emu serve: interrupted; writing every board's flash back"),
