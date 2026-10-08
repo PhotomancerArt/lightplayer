@@ -20,6 +20,8 @@
 //! | `LP_CLOUD_GOOGLE_CLIENT_ID` / `_SECRET` | OAuth; both required for `GET /auth/google` | — |
 //! | `LP_CLOUD_GOOGLE_ENDPOINT_BASE` | Point the OAuth dance at a stub (tests) | Google |
 //! | `LP_CLOUD_FIRMWARE_UPSTREAM` | Releases base the `/firmware/` lookup proxies (an `http(s)` URL) | [`DEFAULT_FIRMWARE_UPSTREAM`] |
+//! | `LP_CLOUD_FIRMWARE_RELEASES_LIST` | The releases list `/api/v1/firmware/<target>/releases` is built from (an `http(s)` URL answering GitHub's REST releases JSON) | [`DEFAULT_FIRMWARE_RELEASES_LIST`] |
+//! | `LP_CLOUD_GITHUB_TOKEN` | Optional bearer token sent to the releases list URL **only** (raises GitHub's rate limit; no scopes needed for a public repo). Never logged | unset |
 
 use std::fmt;
 use std::net::IpAddr;
@@ -45,6 +47,14 @@ pub const GUEST_SESSION_TTL_SECONDS: f64 = 365.0 * 24.0 * 60.0 * 60.0;
 /// ([`crate::firmware::github_release_upstream`]).
 pub const DEFAULT_FIRMWARE_UPSTREAM: &str =
     "https://github.com/PhotomancerArt/lightplayer/releases";
+
+/// Where the release index's list of releases comes from: GitHub's REST
+/// releases list for the product repo, one page of the newest 100
+/// ([`crate::firmware::github_release_list_upstream`]). The download host
+/// has no list, so this is the one GitHub API call the firmware plane makes;
+/// `latest` still needs none.
+pub const DEFAULT_FIRMWARE_RELEASES_LIST: &str =
+    "https://api.github.com/repos/PhotomancerArt/lightplayer/releases?per_page=100";
 
 /// The whole of the process's configuration.
 #[derive(Debug, Clone)]
@@ -88,6 +98,34 @@ pub struct ServerConfig {
     /// slash (`LP_CLOUD_FIRMWARE_UPSTREAM`; tests and the local smoke point
     /// it at a stub).
     pub firmware_upstream: String,
+    /// The releases list the release index is built from
+    /// (`LP_CLOUD_FIRMWARE_RELEASES_LIST`; the smoke points it at a file).
+    pub firmware_releases_list: String,
+    /// The optional token for the releases list (`LP_CLOUD_GITHUB_TOKEN`).
+    pub github_token: Option<GithubToken>,
+}
+
+/// A GitHub token. Sent to the releases list URL only, and never printed:
+/// its `Debug` is redacted, and there is no `Display`.
+#[derive(Clone, PartialEq, Eq)]
+pub struct GithubToken(String);
+
+impl GithubToken {
+    /// A token (tests; the process reads `LP_CLOUD_GITHUB_TOKEN`).
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    /// The token, for the one header that carries it.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for GithubToken {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("GithubToken(<redacted>)")
+    }
 }
 
 impl ServerConfig {
@@ -119,6 +157,15 @@ impl ServerConfig {
             ),
             "LP_CLOUD_FIRMWARE_UPSTREAM",
         )?;
+        let firmware_releases_list = parse_http_url(
+            &value(
+                &get,
+                "LP_CLOUD_FIRMWARE_RELEASES_LIST",
+                DEFAULT_FIRMWARE_RELEASES_LIST,
+            ),
+            "LP_CLOUD_FIRMWARE_RELEASES_LIST",
+        )?;
+        let github_token = nonempty(get("LP_CLOUD_GITHUB_TOKEN")).map(GithubToken);
 
         if blobs == BlobBackend::S3 && get("LP_CLOUD_S3_BUCKET").is_none() {
             return Err(ConfigError::Missing("LP_CLOUD_S3_BUCKET"));
@@ -171,6 +218,8 @@ impl ServerConfig {
             session_ttl_seconds: SESSION_TTL_SECONDS,
             guest_session_ttl_seconds: GUEST_SESSION_TTL_SECONDS,
             firmware_upstream,
+            firmware_releases_list,
+            github_token,
         })
     }
 
@@ -489,6 +538,45 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_releases_list_defaults_to_the_github_api_and_can_be_pointed_at_a_file() {
+        let config = from(&[]);
+        assert_eq!(
+            config.firmware_releases_list,
+            DEFAULT_FIRMWARE_RELEASES_LIST
+        );
+        assert_eq!(config.github_token, None);
+        assert_eq!(
+            from(&[(
+                "LP_CLOUD_FIRMWARE_RELEASES_LIST",
+                "http://127.0.0.1:4000/releases.json"
+            )])
+            .firmware_releases_list,
+            "http://127.0.0.1:4000/releases.json"
+        );
+        assert_eq!(
+            ServerConfig::from_vars(|name| {
+                (name == "LP_CLOUD_FIRMWARE_RELEASES_LIST").then(|| "api.github.com".to_string())
+            })
+            .err(),
+            Some(ConfigError::Invalid {
+                name: "LP_CLOUD_FIRMWARE_RELEASES_LIST",
+                expected: "an http(s) URL",
+            })
+        );
+    }
+
+    #[test]
+    fn the_github_token_is_optional_and_never_printed() {
+        assert_eq!(from(&[("LP_CLOUD_GITHUB_TOKEN", "  ")]).github_token, None);
+        let config = from(&[("LP_CLOUD_GITHUB_TOKEN", "ghp_secret123")]);
+        assert_eq!(
+            config.github_token.as_ref().map(GithubToken::expose),
+            Some("ghp_secret123")
+        );
+        assert!(!format!("{config:?}").contains("ghp_secret123"));
     }
 
     #[test]

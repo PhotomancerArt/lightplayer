@@ -164,11 +164,27 @@ snapshot() {
         elif .conclusion == "CANCELLED" then "cancel"
         else "fail" end
       end;
+    def cname:
+      if .__typename == "StatusContext" then .context
+      else (.workflowName // "") + (if .workflowName then " / " else "" end) + .name end;
+    # A later run on the same head has a larger id (it sits in detailsUrl).
+    def runid: ((.detailsUrl // "") | [capture("/runs/(?<n>[0-9]+)")] | (.[0].n // "0") | tonumber);
+    # A re-run ("Re-run all/failed jobs") is a new attempt inside the SAME run
+    # id, so it ties on runid; its jobs have larger job ids (/job/<id>).
+    def jobid: ((.detailsUrl // "") | [capture("/job/(?<n>[0-9]+)")] | (.[0].n // "0") | tonumber);
+    def order: [runid, jobid];
+    # Latest run per check wins: a re-run, a reopen, or a close-and-reopen can
+    # still put several runs on one head, and the checks of the older runs
+    # stay in the rollup; a stale cancel must not count against a later
+    # green. StatusContexts have no run and pass through.
+    def latest:
+      [.[] | select(.__typename == "StatusContext")]
+      + ([.[] | select(.__typename != "StatusContext")] | group_by(cname) | map(max_by(order)));
     "head\t\(.headRefOid)",
     "mergeable\t\(.mergeable)",
     "merge_state\t\(.mergeStateStatus)",
-    ((.statusCheckRollup // [])[]
-      | "check\t\(bucket)\t\(if .__typename == "StatusContext" then .context else ((.workflowName // "") + (if .workflowName then " / " else "" end) + .name) end)\t\(.detailsUrl // .targetUrl // "")")'
+    ((.statusCheckRollup // []) | latest | .[]
+      | "check\t\(bucket)\t\(cname)\t\(.detailsUrl // .targetUrl // "")")'
 }
 
 # Stop the moment the PR's head is not the pinned sha. Nothing read in the
@@ -230,7 +246,9 @@ no_ci_diagnostic() {
   cat >&2 <<EOF
 no checks registered for $tag after ${REGISTER_TIMEOUT}s. Likely causes:
   - path-filtered CI: no workflow job matches this diff (.github/workflows)
-  - stacked PR: base '$base' — CI only runs against main; retarget the PR
+  - stacked PR: base '$base' — CI only runs against main; retarget the PR,
+    then push a commit or close and reopen it (retargeting alone starts no
+    CI): docs/debt/stacked-pr-retarget-gets-no-ci.md
   - the last push was made with GITHUB_TOKEN (e.g. story-baseline
     auto-commit), which never triggers workflows — push any commit to kick CI
 EOF

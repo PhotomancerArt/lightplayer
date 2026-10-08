@@ -9,7 +9,9 @@
 //!    raise is **consumed**;
 //! 2. ask the pacer (`lp_emu_esp_common::seam::WakePacer`, G0 rule (b)):
 //!    never two raises outstanding, a minimum spacing, and only when an
-//!    endpoint holds something;
+//!    endpoint has work: an inbound event, or on the network endpoint a
+//!    station event (a join's outcome, a scan's end) waiting for
+//!    `net_event_take`;
 //! 3. on a raise, OR every waiting endpoint's bit into the word — a
 //!    read-modify-write between two guest instructions, so atomic: the guest
 //!    is not running — then write `INTPRI.cpu_intr_from_cpu_3 = 1`, which is
@@ -41,15 +43,38 @@ impl Esp32C6Machine {
         self.seams.pending != 0 && !self.seams.endpoints.is_empty()
     }
 
-    /// When the run loop must next look at the wake: the pacer's earliest
-    /// raise while an endpoint holds something and no raise is waiting, so an
-    /// idle skip never sleeps past a raise the spacing allows. `None` on a
-    /// seam-off run.
+    /// When the run loop must next look at the seams: the pacer's earliest
+    /// raise while an endpoint has work and no raise is waiting, so an idle
+    /// skip never sleeps past a raise the spacing allows; and, on a LAN this
+    /// machine drives itself, the LAN's next due cycle, so a guest asleep in
+    /// `wfi` never sleeps through a join landing or a frame arriving
+    /// ([`super::net_seam`]). `None` on a seam-off run.
     pub(crate) fn seam_wake_deadline(&self) -> Option<Cycles> {
-        if !self.seam_wake_armed() || !self.seams.endpoints.iter().any(|e| e.has_inbound()) {
-            return None;
+        let wake = if self.seam_wake_armed() && self.seam_work_bits() != 0 {
+            self.seams.pacer.earliest_raise()
+        } else {
+            None
+        };
+        [wake, self.net_deadline()].into_iter().flatten().min()
+    }
+
+    /// The pending bits of every endpoint with work for the guest.
+    fn seam_work_bits(&self) -> u32 {
+        (0..self.seams.endpoints.len())
+            .map(|i| self.endpoint_work_bits(i))
+            .fold(0, |bits, b| bits | b)
+    }
+
+    /// Endpoint `i`'s pending bits: its own bit while it holds inbound
+    /// events, and on the network endpoint the station-event bit while an
+    /// event waits ([`super::net_seam::NET_EVENTS_BIT`]).
+    fn endpoint_work_bits(&self, i: usize) -> u32 {
+        let e = &self.seams.endpoints[i];
+        let mut bits = if e.has_inbound() { e.bit } else { 0 };
+        if self.net_has_event(i) {
+            bits |= super::net_seam::NET_EVENTS_BIT;
         }
-        self.seams.pacer.earliest_raise()
+        bits
     }
 
     /// One look at the wake, at the top of a slice. `true` when it raised the
@@ -63,18 +88,13 @@ impl Esp32C6Machine {
                 s.consume(now);
             }
         }
-        let waiting: u32 = self
-            .seams
-            .endpoints
-            .iter()
-            .filter(|e| e.has_inbound())
-            .fold(0, |bits, e| bits | e.bit);
+        let waiting = self.seam_work_bits();
         if self.seams.pacer.tick(now, word_is_zero, waiting != 0) != Tick::Raise {
             return false;
         }
-        for (e, s) in self.seams.endpoints.iter().zip(&mut self.seams.wake_stats) {
-            if waiting & e.bit != 0 {
-                s.raise(now);
+        for i in 0..self.seams.endpoints.len() {
+            if self.endpoint_work_bits(i) != 0 {
+                self.seams.wake_stats[i].raise(now);
             }
         }
         self.poke_word(addr, word | waiting);

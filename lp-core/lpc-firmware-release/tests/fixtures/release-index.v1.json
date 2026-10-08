@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "target": "esp32c6-4mb",
+  "releases": [
+    {
+      "version": "2026.10.06-19",
+      "commit": "736d72856d243fce519c9f461f369f59fcbf175a",
+      "wireProto": 39,
+      "requires": {
+        "layout": 1,
+        "loader": 1
+      },
+      "publishedAt": "2026-10-07T05:29:21Z"
+    },
+    {
+      "version": "2026.10.06-11",
+      "commit": "a976339dbbf348a673401bc94a5b728e03bbfc6c",
+      "wireProto": 38,
+      "requires": {
+        "layout": 1,
+        "loader": 1
+      }
+    }
+  ]
+}

@@ -26,7 +26,9 @@
 //!    (`reopen_rung`): reopen a closed serial port on its retry
 //!    cadence (a native-USB C6 re-enumerates on every software reset, as
 //!    after a flash), or leave a Bluetooth link to its provider's own
-//!    reconnect loop; ask an open, quiet one for a hello. The board is back
+//!    reconnect loop — and open the new link that loop attaches, which
+//!    arrives closed (opening a connected session is the model starting to
+//!    listen, not a connect); ask an open, quiet one for a hello. The board is back
 //!    when the link is open and the board has spoken since the leg ended —
 //!    a hello, or its manifest on channel 3 (a core-only board sends no
 //!    hello, only `M`). Then the next leg.
@@ -62,7 +64,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::event::{Action, ActivityMarker, Command, EffectRequest, Event, Input};
-use crate::evidence::Evidence;
+use crate::evidence::{Evidence, Presence};
 use crate::identity::DeviceId;
 use crate::time::Millis;
 
@@ -180,7 +182,7 @@ impl UpdateActivity {
             deadline: now.plus_ms(UPDATE_GAP_MS),
             next_poke_at: now.plus_ms(ctx.config.flash_reopen_retry_ms),
         };
-        let closed = self.closed_port();
+        let closed = self.closed_port(ctx.evidence);
         reopen_rung::knock(ctx, &mut self.next_request_id, closed)
     }
 
@@ -228,10 +230,29 @@ impl UpdateActivity {
         }
     }
 
-    fn closed_port(&self) -> ClosedPort {
-        match self.reconnects_itself {
-            true => ClosedPort::Wait,
-            false => ClosedPort::Reopen,
+    /// What the gap's knock does with a closed link.
+    ///
+    /// A serial port is reopened on the knock's cadence. A Bluetooth link
+    /// that dropped is left to the provider's own reconnect loop — an open
+    /// on it would be a connect fighting that loop. But the loop's success
+    /// is a NEW link (OTA M7 P12): the departure sweep detached the dropped
+    /// one, and the reconnect's sweep attached this one, closed, through the
+    /// roster's re-attach, which spawns an Identify to open it — a no-op on
+    /// a device this activity holds. So a closed link attached AFTER the gap
+    /// began is the provider's reconnect, its session already connected, and
+    /// opening it is the model starting to listen. (The dropped link's own
+    /// close is never after the gap began: the leg ends on it.)
+    fn closed_port(&self, evidence: &Evidence) -> ClosedPort {
+        if !self.reconnects_itself {
+            return ClosedPort::Reopen;
+        }
+        let gap_began = match self.phase {
+            UpdatePhase::BetweenLegs { since, .. } => since,
+            UpdatePhase::Starting { .. } | UpdatePhase::Leg { .. } => return ClosedPort::Wait,
+        };
+        match evidence.presence {
+            Presence::Present { since, .. } if since > gap_began => ClosedPort::Reopen,
+            _ => ClosedPort::Wait,
         }
     }
 
@@ -273,7 +294,7 @@ impl UpdateActivity {
         if self.board_is_back(ctx.evidence) {
             return ActivityStep::Continue(self.start_leg(now, ctx));
         }
-        let closed = self.closed_port();
+        let closed = self.closed_port(ctx.evidence);
         ActivityStep::Continue(reopen_rung::knock(ctx, &mut self.next_request_id, closed))
     }
 
@@ -351,7 +372,7 @@ impl UpdateActivity {
     }
 
     fn handle_timer(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
-        let closed = self.closed_port();
+        let closed = self.closed_port(ctx.evidence);
         match self.phase.clone() {
             UpdatePhase::Starting {
                 deadline,
@@ -565,6 +586,93 @@ mod tests {
         assert!(
             commands.is_empty(),
             "no open fights the provider: {commands:?}"
+        );
+    }
+
+    /// OTA M7 P12: the board's reset dropped its Bluetooth link mid-update;
+    /// the provider reconnected and the sweep attached a new, closed link.
+    /// The gap's next knock opens it (nothing else will while the activity
+    /// holds the device), and the next leg starts when the board speaks.
+    #[test]
+    fn a_bluetooth_link_attached_between_legs_is_opened() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = UpdateActivity::new(DeviceId(1), UpdateIntentFacts::Auto, true);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(10), ctx)
+        });
+        // The reset: the link vanishes under the leg.
+        let mut evidence = Evidence::default();
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(20),
+                &Input::Event(Event::LinkDetached { link: LinkId(1) }),
+                ctx,
+            )
+        });
+        let attached = Event::LinkAttached {
+            link: LinkId(2),
+            info: LinkInfo::default(),
+        };
+        evidence.fold(
+            Millis(900),
+            &attached,
+            &mut IdentityChain::default(),
+            &config,
+        );
+
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(2_000), &timer(), ctx)
+        });
+
+        assert!(
+            matches!(step, ActivityStep::Continue(ref commands)
+            if matches!(commands.as_slice(), [Command::Link {
+                command: LinkCommand::Open { .. },
+                ..
+            }])),
+            "the reconnected link is opened: {step:?}"
+        );
+    }
+
+    /// …but the link that DROPPED is left to the provider's loop: its close
+    /// is the gap's start, never after it, so the knock opens nothing.
+    #[test]
+    fn a_dropped_bluetooth_link_is_left_to_the_providers_loop() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = UpdateActivity::new(DeviceId(1), UpdateIntentFacts::Auto, true);
+        with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(10), ctx)
+        });
+        // The drop: the link closes, then the leg ends on it.
+        fold(
+            &mut evidence,
+            Millis(20),
+            LinkEvent::Closed {
+                reason: "bluetooth link lost: the board reset".to_string(),
+            },
+            &config,
+        );
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(20),
+                &ended(ActivityOutcome::Interrupted {
+                    reason: "the board's link closed".to_string(),
+                }),
+                ctx,
+            )
+        });
+
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(2_000), &timer(), ctx)
+        });
+
+        assert!(
+            matches!(step, ActivityStep::Continue(ref commands) if commands.is_empty()),
+            "no open fights the provider's reconnect: {step:?}"
         );
     }
 

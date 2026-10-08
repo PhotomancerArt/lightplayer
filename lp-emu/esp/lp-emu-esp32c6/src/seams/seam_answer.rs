@@ -8,7 +8,13 @@
 //!   until an interrupt it would wake for, exactly as after a `wfi`;
 //! - **value** (`test=echo`): read `a0..a2`, write the answer to `a0`;
 //! - **take** (`test=take`): copy what the endpoint holds into the buffer the
-//!   call handed over — the only guest memory a seam answer ever writes.
+//!   call handed over — the only guest memory a seam answer ever writes;
+//! - **net** (`net=lan`): one of the network seam's nine calls, by the site's
+//!   declaration ([`super::net_seam`]); it too writes only buffers the call
+//!   handed over.
+//!
+//! No answer charges a cycle (`lp_emu_esp_common::seam::seam_impl`, "What an
+//! answer costs").
 //!
 //! Not a hook-table entry and not counted in `hook_calls`: seams have their
 //! own table and their own counters.
@@ -39,9 +45,10 @@ impl Esp32C6Machine {
             return Served::No;
         };
         let imp = site.site.imp;
+        let decl = site.site.decl;
         self.seams.calls += 1;
         if self.bus.trace.is_enabled() {
-            let line = seam_announce::call_line(self.cycles(), pc, imp);
+            let line = seam_announce::call_line(self.cycles(), pc, imp, decl.id);
             self.bus.trace.note(&line);
         }
         let ra = self.harts[0].regs()[1] as u32;
@@ -58,6 +65,11 @@ impl Esp32C6Machine {
                 let r = self.harts[0].regs();
                 let (endpoint, buf, cap) = (r[10] as u32, r[11] as u32, r[12] as u32);
                 let n = self.seam_take(endpoint, buf, cap);
+                self.harts[0].regs_mut()[10] = n as i32;
+                Served::Yes
+            }
+            SeamAnswer::Net => {
+                let n = self.serve_net(decl.id);
                 self.harts[0].regs_mut()[10] = n as i32;
                 Served::Yes
             }

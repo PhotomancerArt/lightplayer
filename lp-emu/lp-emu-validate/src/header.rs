@@ -222,19 +222,46 @@ impl TranscriptHeader {
         Configuration::parse(&self.configuration)
     }
 
+    /// The run's configuration label, read off the structured fields: the
+    /// base `configuration` plus one `+<seam>=<impl>` per engaged seam,
+    /// sorted (the ADR's label rule). Exactly `configuration` for every
+    /// seam-free capture, which is every capture committed before seams.
+    pub fn label(&self) -> String {
+        let mut out = self.configuration.clone();
+        for atom in self.seam_atoms() {
+            out.push('+');
+            out.push_str(&atom);
+        }
+        out
+    }
+
+    /// `<seam>=<impl>` per engaged seam, sorted as the label sorts them.
+    fn seam_atoms(&self) -> Vec<String> {
+        let mut atoms: Vec<String> = self.seams.iter().map(|(s, i)| format!("{s}={i}")).collect();
+        atoms.sort();
+        atoms
+    }
+
     /// The committed filename stem:
-    /// `<configuration>-<date>-<short-commit>[-<machine>][-<baud>]`.
+    /// `<configuration>[+<seam>=<impl>…]-<date>-<short-commit>[-<machine>][-<baud>]`.
     ///
-    /// Both discriminators are optional and both are there for the same
-    /// reason: one payload, one configuration, one commit and one date can
-    /// produce more than one capture, and the filing scheme has to have room
-    /// for each. `machine` is two boards on one air; `baud` is one image read
-    /// at two line rates. A capture with neither files exactly where it
-    /// always did.
+    /// The discriminators are optional and all there for the same reason:
+    /// one payload, one configuration, one commit and one date can produce
+    /// more than one capture, and the filing scheme has to have room for
+    /// each. The seams are the run's label, so a capture with
+    /// `net=lan` engaged files beside the seam-free one instead of on top of
+    /// it as a misleading `-r2`; `machine` is two boards on one air; `baud`
+    /// is one image read at two line rates. A capture with none files exactly
+    /// where it always did.
     pub fn file_stem(&self) -> Result<String> {
         let config = self.configuration()?;
         let short = short_commit(&self.firmware_commit);
-        let mut stem = format!("{}-{}-{}", config.slug(), self.date, short);
+        let mut slug = config.slug();
+        for atom in self.seam_atoms() {
+            slug.push('+');
+            slug.push_str(&atom);
+        }
+        let mut stem = format!("{slug}-{}-{}", self.date, short);
         if let Some(machine) = &self.machine {
             stem.push('-');
             stem.push_str(machine);
@@ -731,5 +758,26 @@ mod tests {
         );
         let back: TranscriptHeader = serde_json::from_str(&json).unwrap();
         assert_eq!(back.seams.get("net").map(String::as_str), Some("lan"));
+    }
+
+    /// The label is the base plus the engaged atoms, sorted; a seam-free
+    /// header's label is exactly its configuration and files exactly where it
+    /// always did, and an engaged one files beside it rather than on top.
+    #[test]
+    fn the_label_and_the_stem_carry_the_engaged_seams() {
+        let plain = header();
+        assert_eq!(plain.label(), plain.configuration);
+        let plain_stem = plain.file_stem().unwrap();
+        assert!(!plain_stem.contains('+'), "{plain_stem}");
+
+        let mut net = header();
+        net.configuration = "lp-emu:esp32c6:t1".into();
+        net.seams.insert("net".into(), "lan".into());
+        net.seams.insert("aaa".into(), "x".into());
+        assert_eq!(net.label(), "lp-emu:esp32c6:t1+aaa=x+net=lan");
+        assert_eq!(
+            net.file_stem().unwrap(),
+            "lp-emu-esp32c6-t1+aaa=x+net=lan-2026-09-06-d6cfaa205"
+        );
     }
 }

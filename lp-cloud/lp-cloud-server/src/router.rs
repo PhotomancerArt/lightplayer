@@ -3,6 +3,7 @@
 //! | Route | Plane | Auth |
 //! |---|---|---|
 //! | `POST /api` | control | cookie → `Actor` (anonymous is a caller too) |
+//! | `GET\|HEAD\|OPTIONS /api/v1/firmware/{target}/releases` | firmware | none — the release index, format 1, any origin |
 //! | `GET /b/{hash}` | content | none — the hash is the capability |
 //! | `PUT /b/{hash}` | content | session required |
 //! | `GET /t/{hash}` | content | none |
@@ -30,7 +31,7 @@ use crate::api::api_route;
 use crate::app_state::AppState;
 use crate::auth::{dev_auth, google_auth, guest_auth};
 use crate::content::{blob_route, tree_route};
-use crate::firmware::firmware_route;
+use crate::firmware::{firmware_index_route, firmware_route};
 use crate::page::page_route;
 use crate::relay::{browser_leg, device_leg};
 
@@ -63,6 +64,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/auth/guest", post(guest_auth::post_guest_auth))
         .route("/auth/logout", post(google_auth::post_logout))
         .route("/auth/dev", get(dev_auth::get_dev_auth))
+        // The release index: an API answer, versioned in its path (a later
+        // incompatible shape is `/api/v2/…` beside it). `POST /api` above is
+        // a different, exact path; the two never overlap.
+        .route(
+            "/api/v1/firmware/{target}/releases",
+            get(firmware_index_route::get_release_index).options(firmware_route::options_firmware),
+        )
         // Three segments after `/firmware/`; the Studio bundle's own
         // `/firmware/<target>/manifest.json` has two and stays the fallback's.
         .route(

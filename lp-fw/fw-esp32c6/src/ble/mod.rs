@@ -7,8 +7,11 @@
 //! but no central ever connects to it. When on, each connection is one
 //! *untrusted* radio link into the
 //! link mux (`fw_esp32_common::radio_link`), which the server's access gate
-//! treats as it treats any untrusted link. BLE never exposes flashing: there
-//! is no such request on the wire.
+//! treats as it treats any untrusted link. On a split image a link's channel
+//! 3 carries the over-the-air update protocol to the core's update session
+//! (`crate::ota`), whose own access rule decides — with the tier the server
+//! granted the link while the engine runs, or the core's own login in
+//! core-only, where the links open in update mode (a wider receive window).
 //!
 //! - [`ble_task`]: bring-up, the host runner, advertising, connection tasks;
 //! - [`ble_connection`]: one connection's life as a link;

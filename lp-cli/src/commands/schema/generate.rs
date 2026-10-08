@@ -125,6 +125,13 @@ fn generate_outputs() -> Result<BTreeMap<String, String>> {
         render_schema(ota_manifest_schema()?, "ota-manifest.schema.json")?,
     );
     outputs.insert(
+        String::from("firmware-release-index.schema.json"),
+        render_schema(
+            firmware_release_index_schema()?,
+            "firmware-release-index.schema.json",
+        )?,
+    );
+    outputs.insert(
         String::from("status-light.schema.json"),
         render_schema(status_light_schema()?, "status-light.schema.json")?,
     );
@@ -350,6 +357,15 @@ fn device_network_schema() -> Result<Value> {
 fn ota_manifest_schema() -> Result<Value> {
     let schema = schemars::schema_for!(lpc_firmware_release::OtaManifest);
     serde_json::to_value(&schema).context("serializing ota manifest schema")
+}
+
+/// Schema for the firmware release index,
+/// `/api/v1/firmware/<target>/releases`. Plain serde; its own public format
+/// (`format: 1`), computed by lp-cloud-server and read by Studios in the
+/// field; unknown fields are allowed (`additionalProperties: true`).
+fn firmware_release_index_schema() -> Result<Value> {
+    let schema = schemars::schema_for!(lpc_firmware_release::ReleaseIndex);
+    serde_json::to_value(&schema).context("serializing firmware release index schema")
 }
 
 /// Schema for the update light's record, root `/.lp/status-light.json`.

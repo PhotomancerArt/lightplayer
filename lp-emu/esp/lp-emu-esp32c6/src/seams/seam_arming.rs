@@ -101,7 +101,7 @@ impl Esp32C6Machine {
             }
             SiteKind::Code => {
                 let head = flash.peek(paddr, HINT_SPAN)?;
-                if !holds_seam_hint(head, site.imp.decl().hint()) {
+                if !holds_seam_hint(head, site.decl.hint()) {
                     return None;
                 }
                 let first = u32::from_le_bytes(head[..4].try_into().ok()?);

@@ -4229,6 +4229,13 @@ test-emu-jit-image slug="harness" grade="t2" window="20ms":
 test-emu-serve:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_door -- --include-ignored --test-threads=1
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_serve_walk -- --include-ignored --test-threads=1
+    # The Wi-Fi network seam's two LAN cells (plan lp2025/2026-10-05-1903-wifi-link-c6,
+    # P12/P13): one board reached over its port forward (hello, status, an
+    # upload), and two boards in lockstep finding each other. Dev profile:
+    # the emulator crates build at opt-level 3 there, and the Heap budget job
+    # that ran them in release hit its 30-minute budget.
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_link -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --test emu_lan_lockstep -- --include-ignored --nocapture
 
 # The hardware walk, with the emulator where the board goes.
 #
@@ -4820,7 +4827,9 @@ walk-migration-emu *args:
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
 # → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
 # C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
-# Needs a Studio on this worktree's port, like walk-no-board. Not CI.
+# Needs a Studio on this worktree's port, like walk-no-board — or
+# `--serve-release` (after `just studio-web-story-build`), which serves the
+# release bundle itself. Not CI.
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
@@ -4831,8 +4840,28 @@ walk-ble-emu *args:
 # store — not access (the emulated link is trusted). Serves the RELEASE
 # bundle itself; needs `just studio-web-story-build`,
 # `just studio-firmware-package-esp32c6` and `cargo build -p lp-cli`. Not CI.
-walk-wifi-emu lane:
-    node scripts/emu/walk-wifi-emu.mjs {{ lane }}
+#
+# `lan` (Wi‑Fi plan P13, scripts/emu/walk-wifi-emu-lan.mjs) is the joined
+# walk: two emulated C6s on one virtual LAN, each joined over its USB door,
+# Studio reaching both over `?lan=` through their port forwards — upload and
+# edit, the LAN probe, a wrong password, a name not in range, the Radio
+# node's rule, a reset onto a new lease, `link rtt lan:` in frames (W1–W10).
+# Every step waits for the board's words (its console, its status answers),
+# never Studio's. Needs `just studio-firmware-package-served` (the merged
+# image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
+# prerequisites and starts nothing. Report:
+# docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
+# out W10's `link rtt`, which alone outlives a 10-minute command cap.
+#
+# `studio-lan` (network-transport plan P04,
+# scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
+# NO `?lan=` — remembered over USB, "Connect over Wi‑Fi" with no cable, a
+# board added by address, a second browser told the board is busy, a wrong
+# address said in words. Stand-in (DD193): the remembered lease is rewritten
+# to the board's loopback forward before it is dialled. Report:
+# docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
+walk-wifi-emu lane *args:
+    node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 
 # The dropped-link walk: an emulated C6 over `?emu=` USB, the cable pulled
 # and re-seated under the editor and under Play — the page must stay put
@@ -4870,6 +4899,19 @@ walk-ota-emu *args: install-rv32-target
     just studio-firmware-package-esp32c6 split
     just studio-web-story-build
     node scripts/emu/walk-ota-emu.mjs {{ args }}
+
+# The over-the-air update walk over Bluetooth (OTA M7 P12): walk-ota-emu's
+# update, a drop mid-backup that the backup resumes from, a drop mid-core (out
+# of range, and Bluefy's phantom drop) finished with no click, and an
+# engine-less board restored on connect — with Studio
+# reaching the door's boards over `?ble=emu`, whose polyfill makes every
+# board reset a GATT drop. The card must say "Bluetooth" and Studio's
+# terminal must time every reconnect. Builds what walk-ota-emu builds. Proves
+# the transport, the card and the reconnects — not access (the emulated board
+# answers at the edit tier), and no number it prints is a Bluetooth number.
+# Not CI.
+walk-ota-ble-emu *args:
+    just walk-ota-emu --ble {{ args }}
 
 # The hardware-validation system: payloads, configurations, transcripts,
 # replay. `just validate list` with no other args; `replay <transcript>

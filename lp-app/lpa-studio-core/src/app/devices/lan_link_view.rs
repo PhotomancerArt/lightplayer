@@ -1,19 +1,21 @@
 //! What a device card says about a board it reaches on the LAN: the
-//! transport ("Wi-Fi") and the address (Wi-Fi M6 P07).
+//! transport ("Wi‑Fi", the word every surface uses for the link,
+//! [`UiLinkKind::label`]) and the address (Wi-Fi M6 P07).
 //!
-//! Functional, not designed (the card's look for network boards is roadmap
-//! M8): one line the card draws beside its identity, so a Wi-Fi board is
-//! never mistaken for the USB one beside it, and the address says which
-//! socket Studio dialled.
+//! Functional, not designed (the card's look for network boards is the
+//! device-UX rework's): one line the card draws beside its identity, so a
+//! Wi‑Fi board is never mistaken for the USB one beside it, and the address
+//! says which socket Studio dialled.
 
 use lpa_devices::Device;
-use lpa_link::LinkProviderKind;
 use lpa_link::providers::network_link::{lan_host, url_from_lan_endpoint};
+
+use super::ui_link_kind::UiLinkKind;
 
 /// One Wi-Fi board's card line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiLanLink {
-    /// "Wi-Fi" — the provider kind's own transport label.
+    /// "Wi‑Fi" — the card's word for the link ([`UiLinkKind::label`]).
     pub transport: &'static str,
     /// The host (and port, when given) Studio dialled: `192.168.1.40`,
     /// `lp-b48c.local`.
@@ -23,7 +25,7 @@ pub struct UiLanLink {
 }
 
 impl UiLanLink {
-    /// The line as the card draws it: `Wi-Fi · 192.168.1.40`.
+    /// The line as the card draws it: `Wi‑Fi · 192.168.1.40`.
     pub fn line(&self) -> String {
         format!("{} · {}", self.transport, self.address)
     }
@@ -40,9 +42,7 @@ pub fn lan_link_view(device: &Device) -> Option<UiLanLink> {
 pub fn lan_link_for_endpoint(endpoint: &str) -> Option<UiLanLink> {
     let url = url_from_lan_endpoint(endpoint)?;
     Some(UiLanLink {
-        transport: LinkProviderKind::BrowserWebsocket
-            .transport_label()
-            .unwrap_or("Wi-Fi"),
+        transport: UiLinkKind::Wifi.label(),
         address: lan_host(url).to_string(),
         url: url.to_string(),
     })
@@ -55,10 +55,10 @@ mod tests {
     #[test]
     fn a_lan_board_says_wifi_and_its_address() {
         let line = lan_link_for_endpoint("lan:ws://192.168.1.40/link").expect("a lan endpoint");
-        assert_eq!(line.transport, "Wi-Fi");
+        assert_eq!(line.transport, "Wi\u{2011}Fi");
         assert_eq!(line.address, "192.168.1.40");
         assert_eq!(line.url, "ws://192.168.1.40/link");
-        assert_eq!(line.line(), "Wi-Fi · 192.168.1.40");
+        assert_eq!(line.line(), "Wi\u{2011}Fi · 192.168.1.40");
     }
 
     #[test]

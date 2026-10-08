@@ -5,9 +5,11 @@
 //! `browser_websocket` owns the sockets, the bounded connect and the
 //! reconnect loop; `BrowserWebsocketLink` turns a session into the model's
 //! link; `WsClientIo` is the borrowing conversation's io. What is left here
-//! is opening one session per `?lan=` address, handing the page's link keys
-//! to the provider, and keeping one wire handle per session for the link and
-//! a borrowing conversation to share.
+//! is opening one session per address Studio was asked to reach (the
+//! `?lan=` shortcut at page load; a card's "Connect over Wi‑Fi" or an
+//! address typed into the add slot later, through [`LanLinkSource::connect`]),
+//! handing the page's link keys to the provider, and keeping one wire handle
+//! per session for the link and a borrowing conversation to share.
 //!
 //! ⚠️ **wasm-only, so `just test` never sees it.** The transport it plugs
 //! into is host-covered through `lan_transport.rs`'s double; the provider
@@ -26,17 +28,26 @@ use lpa_link::providers::network_link::LinkKeys;
 use super::device_transport::{DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent};
 use super::lan_transport::LanLinkSource;
 
+/// How long a connect someone asked for waits for the board's first frame
+/// once its socket is up, before it calls the board reached anyway. The
+/// board answers the link's handshake in milliseconds; a board that turns
+/// the connection away (busy) closes it at once.
+const SETTLE_MS: u32 = 4_000;
+
 /// LAN boards, as this page holds them.
 pub struct BrowserLanSource {
     /// One wire per JS session, by the board's socket URL.
     wires: Rc<RefCell<BTreeMap<String, Rc<WsWire>>>>,
+    /// The page is served over https (Chrome's Local Network check).
+    secure_page: bool,
 }
 
 impl BrowserLanSource {
-    /// Reach the boards at `urls` (the `?lan=` flag's, normalised), each
-    /// link presenting `keys` (the access layer's). Every session connects
-    /// now and keeps reconnecting; each board is present once it answers.
-    pub fn new(urls: &[String], keys: Rc<dyn LinkKeys>) -> Self {
+    /// Reach the boards at `urls` (the `?lan=` shortcut's, normalised; often
+    /// none), each link presenting `keys` (the access layer's). Every
+    /// session connects now and keeps reconnecting; each board is present
+    /// once it answers. `secure_page`: this page is served over https.
+    pub fn new(urls: &[String], keys: Rc<dyn LinkKeys>, secure_page: bool) -> Self {
         lan::set_link_keys(keys);
         for url in urls {
             if let Err(error) = lan::open_session(url) {
@@ -45,6 +56,7 @@ impl BrowserLanSource {
         }
         Self {
             wires: Rc::default(),
+            secure_page,
         }
     }
 
@@ -72,8 +84,11 @@ impl BrowserLanSource {
 
 impl LanLinkSource for BrowserLanSource {
     fn present(&self) -> Vec<GrantedLink> {
+        // The provider holds relay sessions too (`browser_relay_source.rs`);
+        // those are the relay half's.
         lan::present_sessions()
             .iter()
+            .filter(|session| !session.is_relay())
             .map(|session| Self::granted(&self.wires, session))
             .collect()
     }
@@ -111,5 +126,24 @@ impl LanLinkSource for BrowserLanSource {
             }) as Rc<dyn Fn(WsTapLine)>
         });
         Ok(Box::new(WsClientIo::new(wire, tap)))
+    }
+
+    fn connect(&self, url: &str) -> DeviceTransportFuture<Result<(), String>> {
+        let url = url.to_string();
+        Box::pin(async move {
+            let session = lan::open_session(&url)?;
+            let reached = lan::connect_and_settle(session.session, SETTLE_MS).await;
+            if let Err(error) = &reached {
+                // Nothing keeps redialling an address that did not answer:
+                // the person who asked hears why, and asks again.
+                log::info!("wi-fi: {url}: {error}");
+                lan::forget(session.session).await;
+            }
+            reached
+        })
+    }
+
+    fn secure_page(&self) -> bool {
+        self.secure_page
     }
 }

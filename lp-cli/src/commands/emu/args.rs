@@ -66,6 +66,41 @@ pub enum Grade {
     T3,
 }
 
+/// A run's pace (`lp_emu_esp_common::seam::net::lan_pace`): whether the
+/// board's guest clock may run ahead of wall time. Unset (the flag left out)
+/// is realtime while a host is connected through a LAN forward, otherwise as
+/// fast as it goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum PaceArg {
+    /// 1×: the board never runs ahead of wall time, for the whole run, host
+    /// or no host — for watching a pattern, or any session with a person or a
+    /// wall-clock peer on the other end. Held at the board's LAN pump, so it
+    /// needs the network seam engaged (`net=lan`, a default): refused with
+    /// `--seams none`, and the run ends at a chip start whose image does not
+    /// engage it. Never for a transcript: it is wall-clock dependent.
+    Realtime,
+    /// As fast as possible: never paced, even with a host connected through
+    /// a forward.
+    Max,
+}
+
+impl PaceArg {
+    /// The machine's own name for this pace, shared by `run` and `serve`.
+    pub fn pace(self) -> lp_emu_esp_common::seam::net::Pace {
+        use lp_emu_esp_common::seam::net::Pace;
+        match self {
+            PaceArg::Realtime => Pace::Realtime,
+            PaceArg::Max => Pace::Max,
+        }
+    }
+
+    /// `realtime` / `max`, as `serve`'s `pace=` board option spells it.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        <Self as ValueEnum>::from_str(text, false)
+            .map_err(|_| format!("`{text}` is not a pace — realtime or max"))
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct RunArgs {
     #[arg(long, value_enum, default_value_t = EmuChip::Esp32C6)]
@@ -370,6 +405,36 @@ pub struct RunArgs {
     /// Print a flash image's (or a merged image's) seam tables and exit.
     #[arg(long = "seams-info", value_name = "IMAGE")]
     pub seams_info: Option<PathBuf>,
+
+    /// Put the board on a virtual LAN with this fixture's networks in range
+    /// (`[[access_point]]` tables: `name`, `password` (absent: open),
+    /// `signal_dbm`, `hidden`; test values only — the format of
+    /// `lp-emu/esp/lp-emu-esp-common/testdata/virtual_lan.toml`), answered
+    /// through the network seam (`net=lan`, a capability default). The run
+    /// prints the board's forward, `lan:127.0.0.1:<port>`, a loopback port
+    /// carried to the board's LAN endpoint (`:80`) once it has joined:
+    /// `lp-cli … lan:127.0.0.1:<port>` reaches it as a board on a desk's
+    /// network. The board joins whatever network its own saved settings
+    /// name (`lp-cli wifi add` over the USB link).
+    ///
+    /// Without it the seam still engages and the board's LAN is empty:
+    /// nothing in range, nothing forwarded. The C6 only.
+    #[arg(long, value_name = "FIXTURE")]
+    pub lan: Option<PathBuf>,
+
+    /// Write the seams' trace here: one `cyc=… SEAM <atom> <call> …` line
+    /// per seam call the guest makes (and the network seam's events), the
+    /// lines `lp-emu-esp32c6 --trace` writes, with none of the bus's. For
+    /// "did the board ever hand the LAN a frame?". The C6 only.
+    #[arg(long = "seam-trace", value_name = "FILE")]
+    pub seam_trace: Option<PathBuf>,
+
+    /// The run's pace: `realtime` (1×, never ahead of wall time) or `max` (as
+    /// fast as possible, never paced). Left out, the board runs at 1× only
+    /// while a host is connected through its `--lan` forward. A set pace is
+    /// in the run's label (`…+net=lan@pace=realtime`). The C6 only.
+    #[arg(long, value_enum)]
+    pub pace: Option<PaceArg>,
 }
 
 /// The USB host's state at power-on, for `run` and for every board `serve`
@@ -418,7 +483,7 @@ pub struct ServeArgs {
     pub chip: EmuChip,
 
     /// A board:
-    /// `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged|rom-up][,seams=<atoms|none>][,seams_prefer=<atoms>]`.
+    /// `<id>=<image>[,mac=<aa:bb:cc:dd:ee:ff>][,kind=elf|merged|rom-up][,seams=<atoms|none>][,seams_prefer=<atoms>][,lan=<name>][,pace=realtime|max]`.
     /// Repeatable, and the whole point — `s9-two-boards` is about two
     /// identities, so every board gets its own MAC (the desk board's with
     /// the last octet stepped, unless `mac=` says otherwise) and its own
@@ -443,13 +508,38 @@ pub struct ServeArgs {
     ///
     /// `seams=` (strict) and `seams_prefer=` (soft) engage emulator seams on
     /// that board, spelled as `run --seams` spells them (`seams=led=fast`).
-    /// **None by default**, beyond the capability seams (none exist yet):
-    /// `studio-dev-emu` and every walk serve seam-free boards, and a
-    /// performance seam is never for testing (ADR
-    /// docs/adr/2026-10-05-emulator-seams.md). `GET /boards` names each
+    /// By default a board asks for the **capability defaults** softly
+    /// (`net=lan`: engaged when the image carries the seam, one `SEAM none
+    /// engaged: …` line when it does not) and nothing else: a performance
+    /// seam is never for testing (ADR docs/adr/2026-10-05-emulator-seams.md),
+    /// and `seams=none` turns even the defaults off. `GET /boards` names each
     /// board's configuration label and its `SEAM` lines.
+    ///
+    /// `lan=<name>` puts the board on the LAN `--lan <name>=…` declared,
+    /// beside every other board naming it; without it an engaged board's LAN
+    /// is its own and empty. Boards on one LAN need distinct MACs (they get
+    /// them by default).
+    ///
+    /// `pace=realtime|max` sets this board's pace, over `--pace`.
     #[arg(long = "board", value_name = "ID=IMAGE[,OPTS]")]
     pub board: Vec<String>,
+
+    /// A virtual LAN: `<name>=<fixture.toml>`, the fixture in `emu run
+    /// --lan`'s format (the networks in range; test values only).
+    /// Repeatable. Every board whose spec says `lan=<name>` shares it, each
+    /// with its own lease and its own forward, a loopback port carried to the
+    /// board's LAN endpoint that `GET /boards` lists as `forward`
+    /// (`lan:127.0.0.1:<port>`). The forward is a door of its own, beside the
+    /// board's USB door: the USB door still admits one client.
+    ///
+    /// A served LAN runs on the host's clock (its boards each keep their own
+    /// guest clock): **not deterministic**, never what a test asserts on.
+    /// `GET /lans/<name>/browse?service=_lightplayer._tcp.local` asks the
+    /// LAN's probe for a DNS-SD service and answers with what the boards
+    /// said; `renumber` on a board's control channel gives its next DHCP
+    /// lease a different address.
+    #[arg(long = "lan", value_name = "NAME=FIXTURE")]
+    pub lan: Vec<String>,
 
     /// Where the door listens. `127.0.0.1:0` takes an ephemeral port and
     /// prints it, which is what a test and a second server want.
@@ -533,6 +623,13 @@ pub struct ServeArgs {
     /// channel does not clear it either: the value IS the power-on value.
     #[arg(long = "lpperi-clk-en", value_name = "HEX", value_parser = parse_hex_u32)]
     pub lpperi_clk_en: Option<u32>,
+
+    /// Every board's pace, unless its `--board` says `pace=`: `realtime` (1×,
+    /// never ahead of wall time) or `max` (as fast as possible, never paced).
+    /// Left out, a board runs at 1× only while a host is connected through
+    /// its LAN forward. A set pace is in the board's label (`GET /boards`).
+    #[arg(long, value_enum)]
+    pub pace: Option<PaceArg>,
 }
 
 /// `5f000000` or `0x5f000000` → a `u32`. Hex without a prefix, because that
@@ -545,6 +642,71 @@ fn parse_hex_u32(text: &str) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pace_is_spelled_the_way_the_label_spells_it() {
+        use lp_emu_esp_common::seam::net::Pace;
+        for pace in Pace::ALL {
+            let arg = PaceArg::parse(pace.as_str()).expect("the label's word");
+            assert_eq!(arg.pace(), pace);
+        }
+        assert!(PaceArg::parse("fast").is_err());
+        assert!(PaceArg::parse("").is_err());
+    }
+
+    /// The emulator writes a pace into a label and `validate` reads it back:
+    /// the two spellings, on either side of the `lp-emu/` fence, agree.
+    #[test]
+    fn the_emulators_pace_label_reads_back_through_validate() {
+        use lp_emu_esp_common::seam::net::{PACE_LABEL_MARKER, Pace};
+        use lp_emu_validate::config::{PACE_MARKER, ValidateConfig};
+        assert_eq!(PACE_LABEL_MARKER, PACE_MARKER);
+        let cfg = ValidateConfig::embedded();
+        for pace in Pace::ALL {
+            let label = format!(
+                "lp-emu:esp32c6:t1+net=lan{}",
+                Pace::label_suffix(Some(pace))
+            );
+            let entry = cfg.configuration(&label).expect("validate reads it");
+            assert_eq!(entry.label(), label);
+            assert_eq!(entry.pace.map(|p| p.as_str()), Some(pace.as_str()));
+        }
+    }
+
+    #[test]
+    fn both_hosts_take_a_pace_and_leave_it_unset_by_default() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Run {
+            #[command(flatten)]
+            run: RunArgs,
+        }
+        #[derive(Parser)]
+        struct Serve {
+            #[command(flatten)]
+            serve: ServeArgs,
+        }
+        let run = |extra: &[&str]| {
+            let mut argv = vec!["run", "--elf", "fw"];
+            argv.extend_from_slice(extra);
+            Run::try_parse_from(argv).map(|r| r.run.pace)
+        };
+        assert_eq!(run(&[]).unwrap(), None);
+        assert_eq!(
+            run(&["--pace", "realtime"]).unwrap(),
+            Some(PaceArg::Realtime)
+        );
+        assert_eq!(run(&["--pace", "max"]).unwrap(), Some(PaceArg::Max));
+        assert!(run(&["--pace", "fast"]).is_err());
+        let serve = |extra: &[&str]| {
+            let mut argv = vec!["serve", "--board", "c6-a=fw"];
+            argv.extend_from_slice(extra);
+            Serve::try_parse_from(argv).map(|s| s.serve.pace)
+        };
+        assert_eq!(serve(&[]).unwrap(), None);
+        assert_eq!(serve(&["--pace", "max"]).unwrap(), Some(PaceArg::Max));
+        assert!(serve(&["--pace", "1x"]).is_err());
+    }
 
     #[test]
     fn a_register_word_reads_with_or_without_the_prefix() {

@@ -1,0 +1,246 @@
+<!doctype html>
+<!--
+  The Bluetooth frame pipe: a page that holds a board's GATT connection and
+  moves lp-link frames between it and `lp-cli link capture blepipe:<port>`
+  over a WebSocket, one frame per message each way. It knows nothing about
+  lp-link, the login or the update: the terminal runs all three.
+
+    python3 -u spikes/ble-lab/server.py         # serves this page at /pipe
+    open http://localhost:<lab port>/pipe?ws=ws://127.0.0.1:<capture port>
+    Join (or: cdp-central.mjs join --id <device id>; the button is #btn-join)
+
+  To the terminal, as text: `up` once a connection is subscribed (the board
+  opens a new link session at the subscribe), `down` when it drops, and
+  `log <line>` for the page's own story. Binary messages are frames.
+
+  The rules it keeps (the same as Studio's `lpa-link` browser_ble.js):
+  - Every write is a COPY (`slice()`), never a view: Bluefy writes a view's
+    whole underlying buffer (docs/defects/2026-10-02-bluefy-writes-a-views-whole-buffer.md).
+  - One write at a time, in order: Web Bluetooth refuses a second GATT
+    operation while one is in flight, and the link's frames must arrive as
+    sent.
+  - Every `gatt.connect()` is bounded (12 s), then explicitly disconnected
+    and retried: Chrome on macOS has hung in it forever, neither resolving
+    nor rejecting (OTA spike S5, 2026-10-02).
+  - A drop is torn down (`gatt.disconnect()`) and reconnected to the same
+    device with no chooser, for as long as the page is open: an update
+    resets the board three times.
+
+  Unlike Studio, frames go as writes WITHOUT response by default (S5c: window
+  16, four chunks ahead, unpaced, was the best on Mac Chrome). `?ack_every=N`
+  sends every Nth as a write WITH response, which completes only once the
+  board has it — an experiment knob, off by default. `?prefix=` changes the
+  chooser's name filter (default `LP-`).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BLE pipe</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --muted: #666; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #ddd; --muted: #999; } }
+  body { font: 13px ui-monospace, monospace; margin: 16px; background: var(--bg); color: var(--fg); }
+  #state { color: var(--muted); margin-left: 8px; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<button id="btn-join">Join</button>
+<span id="state">idle</span>
+<pre id="log"></pre>
+<script>
+const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // central -> board (write)
+const TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // board -> central (notify)
+const params = new URLSearchParams(location.search);
+const WS_URL = params.get("ws") || "ws://127.0.0.1:5599";
+const ACK_EVERY = Math.max(0, Number(params.get("ack_every") || 0));
+const PREFIX = params.get("prefix") || "LP-";
+const CONNECT_TIMEOUT_MS = 12_000;
+/// Between reconnect attempts; the last one repeats for as long as the page
+/// is open.
+const RETRY_DELAYS_MS = [250, 1_000, 2_000, 4_000, 8_000];
+
+const S = {
+  connected: false, device: null, deviceId: null,
+  connects: 0, drops: 0, timeouts: 0,
+  toBoard: 0, toHost: 0, writeErrors: 0, acked: 0, notWritten: 0, notSent: 0,
+  events: [],
+};
+window.pipe = { S, ackEvery: ACK_EVERY, wsUrl: WS_URL };
+
+let device = null;
+let rx = null;
+let ws = null;
+/// Moves with every connect and drop: a write or a connect from an older
+/// connection is not this one's.
+let generation = 0;
+let writes = Promise.resolve();
+let sinceAck = 0;
+let retryTimer = null;
+
+function log(message) {
+  const line = `${(performance.now() / 1000).toFixed(3)} ${message}`;
+  S.events.push(line);
+  if (S.events.length > 500) S.events.shift();
+  // The terminal records the page's story beside the board's.
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(`log ${line}`);
+  document.getElementById("log").textContent = S.events.slice(-40).join("\n");
+  showState();
+}
+
+function showState() {
+  document.getElementById("state").textContent =
+    `${S.connected ? "up" : "down"} · ws ${ws && ws.readyState === WebSocket.OPEN ? "open" : "closed"} · ` +
+    `connects ${S.connects} drops ${S.drops} timeouts ${S.timeouts} · ` +
+    `→board ${S.toBoard} →host ${S.toHost} · write errors ${S.writeErrors}` +
+    (ACK_EVERY > 0 ? ` · acked ${S.acked} (every ${ACK_EVERY})` : "");
+}
+
+function openWs() {
+  ws = new WebSocket(WS_URL);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => {
+    log(`ws open (${WS_URL})`);
+    // A terminal that attaches to a connection already up starts its link
+    // on it; the board takes the new link's handshake as a restart.
+    if (S.connected) ws.send("up");
+  };
+  ws.onclose = () => {
+    log("ws closed; retrying");
+    setTimeout(openWs, 500);
+  };
+  ws.onmessage = (event) => {
+    if (typeof event.data === "string") return;
+    write(new Uint8Array(event.data).slice());
+  };
+}
+
+/// One frame from the terminal: one GATT write, chained after the last.
+function write(frame) {
+  const mine = generation;
+  writes = writes.then(async () => {
+    if (mine !== generation || !rx) {
+      S.notWritten++;
+      return;
+    }
+    try {
+      if (ACK_EVERY > 0 && ++sinceAck >= ACK_EVERY) {
+        sinceAck = 0;
+        await rx.writeValueWithResponse(frame);
+        S.acked++;
+      } else {
+        await rx.writeValueWithoutResponse(frame);
+      }
+      S.toBoard++;
+    } catch (error) {
+      if (mine !== generation) return;
+      S.writeErrors++;
+      log(`write failed: ${error.message}`);
+      // lp-link resends a lost frame; a write failing on a connection the
+      // page still calls up is a dead connection showing itself.
+      if (!device.gatt.connected) dropped("a write found the connection gone");
+    }
+  });
+}
+
+function onNotify(event) {
+  const view = event.target.value;
+  S.toHost++;
+  // Copied: the DataView's buffer is the browser's and may be reused.
+  const frame = new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(frame);
+  else S.notSent++;
+}
+
+async function openGatt(mine) {
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(NUS);
+  const rxChar = await service.getCharacteristic(RX);
+  const txChar = await service.getCharacteristic(TX);
+  if (mine !== generation) return;
+  txChar.addEventListener("characteristicvaluechanged", onNotify);
+  // Subscribe before anything else: the board opens its link at the
+  // subscribe and drops writes made earlier.
+  await txChar.startNotifications();
+  if (mine !== generation) return;
+  rx = rxChar;
+  writes = Promise.resolve();
+  sinceAck = 0;
+  S.connected = true;
+  S.connects++;
+  log(`ble up (${device.name}, id ${device.id})`);
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send("up");
+}
+
+/// One bounded attempt: a connect that has not finished in 12 s is
+/// abandoned with an explicit disconnect.
+async function boundedConnect() {
+  const mine = ++generation;
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`connect timed out after ${CONNECT_TIMEOUT_MS / 1000} s`)), CONNECT_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([openGatt(mine), timeout]);
+  } catch (error) {
+    if (mine === generation) {
+      if (/timed out/.test(error.message)) S.timeouts++;
+      generation++;
+      try { device.gatt.disconnect(); } catch { /* nothing to abandon */ }
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/// Attempt `attempt` (0 = at once, as a Join does; then the delays).
+function reconnect(attempt) {
+  clearTimeout(retryTimer);
+  const delay = attempt === 0 ? 0 : RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)];
+  retryTimer = setTimeout(async () => {
+    try {
+      await boundedConnect();
+    } catch (error) {
+      log(`connect failed (attempt ${attempt + 1}): ${error.message}`);
+      reconnect(attempt + 1);
+    }
+  }, delay);
+}
+
+/// The connection is gone: say so once, tear it down, reconnect.
+function dropped(why) {
+  if (!S.connected) return;
+  generation++;
+  S.connected = false;
+  S.drops++;
+  rx = null;
+  try { device.gatt.disconnect(); } catch { /* already gone */ }
+  log(`ble down (${why})`);
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send("down");
+  reconnect(1);
+}
+
+document.getElementById("btn-join").onclick = async () => {
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: PREFIX }, { services: [NUS] }],
+      optionalServices: [NUS],
+    });
+    S.device = device.name;
+    S.deviceId = device.id;
+    log(`picked ${device.name} (id ${device.id})`);
+    device.addEventListener("gattserverdisconnected", () => dropped("the board or the radio dropped it"));
+    reconnect(0);
+  } catch (error) {
+    log(`join failed: ${error.message}`);
+  }
+};
+
+openWs();
+log(`ready: ws ${WS_URL}, ack_every ${ACK_EVERY || "off"}, prefix ${PREFIX}`);
+</script>
+</body>
+</html>

@@ -51,6 +51,10 @@ lpc-update = { path = "../../lp-core/lpc-update" }
 # Which package files are access files (they never leave the library in an
 # export or a share envelope; a device push does carry them).
 lpc-access = { path = "../../lp-core/lpc-access" }
+# The cloud relay's close codes and their words (`lpc_relay::RelayCloseCode`),
+# shared with lp-cli: what a refused relay session says (network transport
+# P05). no_std + alloc, on lpc-access, which is already here.
+lpc-relay = { path = "../../lp-core/lpc-relay" }
 # The client-side display-layout fallback resolves map2d documents with the
 # same resolver the engine and the device run (see
 # `app/project/control_display_layout_fallback`).

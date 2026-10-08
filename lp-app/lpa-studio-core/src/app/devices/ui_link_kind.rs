@@ -1,5 +1,6 @@
 //! How a board is reached right now, in the words and glyph the card and
-//! the editor header use: USB, Bluetooth or Wi‑Fi.
+//! the editor header use: USB, Bluetooth, Wi‑Fi, or Wi‑Fi via
+//! lightplayer.app.
 //!
 //! One rule, read off the link's endpoint key, so the card's preview
 //! sentence, the header's glyph and the lens's refusals can never name
@@ -19,6 +20,9 @@ pub enum UiLinkKind {
     Bluetooth,
     /// A secure link over the LAN (`lan:`).
     Wifi,
+    /// The same secure link, carried by lightplayer.app's relay (`relay:`).
+    /// Drawn with the Wi‑Fi glyph: the board is on Wi‑Fi either way.
+    Relay,
 }
 
 impl UiLinkKind {
@@ -28,17 +32,26 @@ impl UiLinkKind {
         match endpoint {
             Some(endpoint) if endpoint.is_bluetooth() => Self::Bluetooth,
             Some(endpoint) if endpoint.is_lan() => Self::Wifi,
+            Some(endpoint) if endpoint.is_relay() => Self::Relay,
             _ => Self::Usb,
         }
     }
 
-    /// Its name in a sentence: "USB", "Bluetooth", "Wi‑Fi".
+    /// Its name in a sentence: "USB", "Bluetooth", "Wi‑Fi", "Wi‑Fi via
+    /// lightplayer.app".
     pub fn label(self) -> &'static str {
         match self {
             Self::Usb => "USB",
             Self::Bluetooth => "Bluetooth",
             Self::Wifi => "Wi\u{2011}Fi",
+            Self::Relay => "Wi\u{2011}Fi via lightplayer.app",
         }
+    }
+
+    /// Whether the board is on Wi‑Fi, reached on the LAN or through the
+    /// relay (the Wi‑Fi glyph).
+    pub fn is_wifi(self) -> bool {
+        matches!(self, Self::Wifi | Self::Relay)
     }
 }
 
@@ -54,5 +67,12 @@ mod tests {
         assert_eq!(kind("usb-1"), UiLinkKind::Usb);
         assert_eq!(UiLinkKind::of_endpoint(None), UiLinkKind::Usb);
         assert_eq!(UiLinkKind::Wifi.label(), "Wi\u{2011}Fi");
+        assert_eq!(kind("relay:a0f26287b48c"), UiLinkKind::Relay);
+        assert_eq!(
+            UiLinkKind::Relay.label(),
+            "Wi\u{2011}Fi via lightplayer.app"
+        );
+        assert!(UiLinkKind::Relay.is_wifi() && UiLinkKind::Wifi.is_wifi());
+        assert!(!UiLinkKind::Usb.is_wifi());
     }
 }

@@ -1,8 +1,12 @@
-//! The running engine's channel-3 hook (DM13, DM17): core code the engine's
-//! USB transport calls for every update-channel message, and once per pass
-//! over the link to flush (`fw_esp32_common::usb_link::set_update_hook`).
+//! The running engine's channel-3 hooks (DM13, DM17): core code the engine's
+//! transports call for every update-channel message — the USB transport
+//! (`fw_esp32_common::usb_link::set_update_hook`) and, when the image has
+//! Bluetooth, the link mux for each radio link's
+//! (`LinkMuxTransport::with_update_hook`, [`radio_update_hook`]) — and once
+//! per pass over the links to flush.
 //!
-//! It runs the board session in `EngineRunning` mode:
+//! It runs the board session in `EngineRunning` mode, one session for every
+//! link:
 //!
 //! - `Q` → `M` (state `running`);
 //! - `G` → a read-back of the engine, one 4 KiB sector per request, read
@@ -12,14 +16,21 @@
 //!   core-only — at once, since the engine's first sector is gone;
 //! - an unknown message → `N`/`U`.
 //!
+//! **Access.** USB is trusted (unless a test fixture says not). A radio link
+//! is untrusted, and its message arrives with the tier a login or key
+//! granted it on the engine's server — never one the device's `open`
+//! setting alone gave: the session adds `open` itself (from the access file
+//! read at boot), so its one rule — QY2's switch included — decides here as
+//! it does in core-only. Read-back needs play; another core needs edit.
+//!
 //! The session is built once at install, before the engine starts, for the
 //! hello's manifest (its facts carry the core's SHA-256, DM24, computed
-//! then), and dropped again; a host's first message builds it for good. It
-//! lives in a core static, touched only from the server loop's task.
+//! then), and dropped again; a host's first message, on any link, builds it
+//! for good. It lives in a core static, touched only from the server loop's
+//! task.
 
 use core::cell::RefCell;
 
-use fw_esp32_common::usb_link::UsbLinkShared;
 use lpc_update::board::{
     AccessFacts, EngineStatus, LinkTrust, OWNER_QUIET_MS, SessionConfig, SessionMode,
 };
@@ -27,11 +38,12 @@ use lpc_update::board::{
 use super::board_identity::{CoreIdentity, board_facts};
 use super::boot_state::BootState;
 use super::update_edge::{EdgeEffect, UpdateEdge};
+use super::update_links::{USB_LINK, UpdateLinks};
 use super::update_target_impl::SplitUpdateTarget;
 
 /// What the hook needs to build its session.
 struct Setup {
-    usb_link: &'static UsbLinkShared,
+    links: UpdateLinks,
     state: BootState,
     identity: CoreIdentity,
     engine_len: u32,
@@ -48,8 +60,9 @@ struct Running {
     at_install: lpc_update::BoardManifest,
 }
 
-/// The hook's state. One task only: the server loop's (the transport calls
-/// the hook from its own pump), so a `RefCell` is the whole lock.
+/// The hook's state. One task only: the server loop's (the transports call
+/// the hooks from their own pump and upkeep), so a `RefCell` is the whole
+/// lock.
 struct OneTask(RefCell<Option<Running>>);
 
 // SAFETY: touched only from the server loop's task (see above); the
@@ -58,9 +71,10 @@ unsafe impl Sync for OneTask {}
 
 static RUNNING: OneTask = OneTask(RefCell::new(None));
 
-/// Install the hook before entering the engine.
+/// Install the USB hook before entering the engine (the radio hook is the
+/// link mux's, [`radio_update_hook`]: the engine installs it with the mux).
 pub fn install(
-    usb_link: &'static UsbLinkShared,
+    links: UpdateLinks,
     state: BootState,
     identity: CoreIdentity,
     engine_len: u32,
@@ -69,7 +83,7 @@ pub fn install(
 ) {
     clear_stale_progress(&state);
     let setup = Setup {
-        usb_link,
+        links,
         state,
         identity,
         engine_len,
@@ -88,7 +102,7 @@ pub fn install(
         edge: None,
         at_install,
     });
-    fw_esp32_common::usb_link::set_update_hook(hook);
+    fw_esp32_common::usb_link::set_update_hook(usb_hook);
 }
 
 /// The board manifest the hello carries (`ServerHello::firmware`, wire
@@ -145,32 +159,91 @@ fn new_edge(s: &Setup) -> UpdateEdge {
     };
     let access = s.access.clone();
     let mut edge = UpdateEdge::new(SplitUpdateTarget::new(&s.state), facts, access, config);
-    edge.link_up(s.usb_trust);
+    edge.link_up(USB_LINK, s.usb_trust);
     edge
 }
 
-/// `Some(message)`: one channel-3 message; `None`: a pass, to flush.
-fn hook(message: Option<&[u8]>) {
+/// One call into the session, by whichever transport: `message` runs on the
+/// session, then everything queued is sent and its effects taken. `open`:
+/// who the device is open to now, as the engine's server holds it (a radio
+/// message carries it; USB, trusted, does not need it).
+fn with_session(
+    message: impl FnOnce(&mut UpdateEdge),
+    flush_only: bool,
+    open: Option<lpc_access::OpenTo>,
+) {
     let Ok(mut running) = RUNNING.0.try_borrow_mut() else {
         return;
     };
     let Some(running) = running.as_mut() else {
         return;
     };
-    let usb_link = running.setup.usb_link;
-    if message.is_none() && running.edge.is_none() {
+    let links = running.setup.links;
+    if flush_only && running.edge.is_none() {
         return; // nothing said yet, nothing to flush
     }
-    let edge = edge_of(running);
-    if let Some(bytes) = message {
-        edge.on_message(bytes);
+    // The access file was read at boot. A board locked (or opened) over a
+    // link since then: the session starts again on the new answer, rather
+    // than take a core install over radio on the old one until a reboot.
+    // Nothing long-lived is lost: while the engine runs a transfer is only
+    // ever pending (an accepted core offer resets at once), and a read-back
+    // is one sector per request, which the host asks for again.
+    if let Some(open) = open
+        && open != running.setup.access.open
+    {
+        log::info!(
+            "[OTA] the device is open to {open:?} now (was {:?}): the update session follows",
+            running.setup.access.open
+        );
+        running.setup.access.open = open;
+        running.edge = None;
     }
-    for effect in edge.pump(usb_link) {
+    let edge = edge_of(running);
+    message(edge);
+    for effect in edge.pump(&links) {
         if effect == EdgeEffect::Reset {
             // The engine's own header sector is erased: no engine code may
             // run from it again. Reset now; the host sees its link drop and
             // finds core-only waiting.
             super::reset_now();
         }
+    }
+}
+
+/// The USB transport's hook: `Some(message)`, one channel-3 message; `None`,
+/// a pass, to flush.
+fn usb_hook(message: Option<&[u8]>) {
+    match message {
+        Some(bytes) => with_session(|edge| edge.on_message(USB_LINK, bytes), false, None),
+        None => with_session(|_| {}, true, None),
+    }
+}
+
+/// The link mux's hook (`LinkMuxTransport::with_update_hook`): a radio
+/// link's channel-3 message with the tier its login or key granted, a link
+/// that closed, or a pass to flush.
+#[cfg(feature = "ble")]
+pub fn radio_update_hook(call: fw_esp32_common::radio_link::RadioUpdate<'_>) {
+    use fw_esp32_common::radio_link::RadioUpdate;
+
+    use super::update_links::session_link;
+
+    match call {
+        RadioUpdate::Message {
+            link,
+            granted,
+            open,
+            bytes,
+        } => with_session(
+            |edge| edge.on_message_with_tier(session_link(link), granted, bytes),
+            false,
+            Some(open),
+        ),
+        // A link the session never heard needs no goodbye; one it did is
+        // forgotten (and its queued answers dropped).
+        RadioUpdate::Closed { link } => {
+            with_session(|edge| edge.link_down(session_link(link)), true, None)
+        }
+        RadioUpdate::Pass => with_session(|_| {}, true, None),
     }
 }

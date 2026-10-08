@@ -9,10 +9,17 @@
 //! (`LinkKeys::refused_wrong`). A `Backoff` or `Busy` refusal is the board
 //! asking for time: the same key again, after it.
 //!
-//! The anonymous key is always last and always there. An open board grants
-//! it what it is open to; a locked one brings the link up holding nothing,
-//! which is how Studio learns the board's offers (`LoginBegin`) and asks for
-//! a password — whose keys then arrive as a new generation of the app's keys.
+//! On the LAN the anonymous key is always last and always there. An open
+//! board grants it what it is open to; a locked one brings the link up
+//! holding nothing, which is how Studio learns the board's offers
+//! (`LoginBegin`) and asks for a password — whose keys then arrive as a new
+//! generation of the app's keys.
+//!
+//! **Through the relay there is no anonymous key** ([`KeyWalk::held_only`]):
+//! a board's "Anyone" setting never applies over the internet, so Studio
+//! presents only the keys it holds, and a walk that runs out of them is
+//! [`KeyWalkStep::Exhausted`] — the board cannot be reached that way, and the
+//! person is told to sign in and plug it in once.
 
 use super::link_key::LinkKey;
 
@@ -42,16 +49,23 @@ pub enum KeyWalkStep {
     Present(LinkKey),
     /// Present this key once `after_ms` has passed.
     PresentAfter { key: LinkKey, after_ms: u32 },
+    /// A held-only walk refused its last key: nothing left to present.
+    Exhausted,
 }
 
 /// One link's walk through its keys. A new link (a new connection) starts a
 /// new walk; so does a new generation of the app's keys.
 #[derive(Clone, Debug)]
 pub struct KeyWalk {
-    /// The keys in the order presented, the anonymous key last.
+    /// The keys in the order presented, the anonymous key last (unless the
+    /// walk is held-only).
     keys: Vec<LinkKey>,
     at: usize,
     generation: u64,
+    /// Held-only: no anonymous key ends the walk.
+    held_only: bool,
+    /// Nothing left to present (a held-only walk only).
+    exhausted: bool,
 }
 
 impl KeyWalk {
@@ -59,24 +73,52 @@ impl KeyWalk {
     /// Repeated ids keep their first place, and any anonymous key among them
     /// moves to the end, where the walk always ends.
     pub fn new(keys: Vec<LinkKey>, generation: u64) -> Self {
-        let mut ordered: Vec<LinkKey> = Vec::with_capacity(keys.len() + 1);
-        for key in keys {
-            if key.is_anonymous() || ordered.iter().any(|seen| seen.key_id == key.key_id) {
-                continue;
-            }
-            ordered.push(key);
-        }
+        let mut ordered = held_in_order(keys);
         ordered.push(LinkKey::ANONYMOUS);
         Self {
             keys: ordered,
             at: 0,
             generation,
+            held_only: false,
+            exhausted: false,
         }
     }
 
-    /// The key to present now.
+    /// A walk over `keys` (best first) with NO anonymous key at the end: a
+    /// link through the relay. Repeated ids and any anonymous key among them
+    /// are dropped. With no keys at all the walk starts
+    /// [exhausted](Self::is_exhausted): there is nothing to present.
+    pub fn held_only(keys: Vec<LinkKey>, generation: u64) -> Self {
+        let ordered = held_in_order(keys);
+        let exhausted = ordered.is_empty();
+        Self {
+            // An exhausted walk still answers `current()`; nothing presents it.
+            keys: if exhausted {
+                vec![LinkKey::ANONYMOUS]
+            } else {
+                ordered
+            },
+            at: 0,
+            generation,
+            held_only: true,
+            exhausted,
+        }
+    }
+
+    /// The key to present now. Meaningless once the walk is
+    /// [exhausted](Self::is_exhausted): nothing may present it then.
     pub fn current(&self) -> &LinkKey {
         &self.keys[self.at]
+    }
+
+    /// Whether this walk ends without the anonymous key (a relay link).
+    pub fn is_held_only(&self) -> bool {
+        self.held_only
+    }
+
+    /// Whether a held-only walk has nothing left to present.
+    pub fn is_exhausted(&self) -> bool {
+        self.exhausted
     }
 
     /// The app's key generation this walk was built from.
@@ -99,9 +141,14 @@ impl KeyWalk {
     pub fn on_refused(&mut self, refusal: KeyRefusal) -> KeyWalkStep {
         match refusal {
             KeyRefusal::UnknownKey | KeyRefusal::WrongKey => {
-                if self.at + 1 < self.keys.len() {
+                if self.exhausted {
+                    KeyWalkStep::Exhausted
+                } else if self.at + 1 < self.keys.len() {
                     self.at += 1;
                     KeyWalkStep::Present(self.current().clone())
+                } else if self.held_only {
+                    self.exhausted = true;
+                    KeyWalkStep::Exhausted
                 } else {
                     // The anonymous key itself refused: a board that takes no
                     // anonymous session. Ask again, slowly, rather than spin.
@@ -121,6 +168,18 @@ impl KeyWalk {
             },
         }
     }
+}
+
+/// `keys` in order, without repeated ids or the anonymous key.
+fn held_in_order(keys: Vec<LinkKey>) -> Vec<LinkKey> {
+    let mut ordered: Vec<LinkKey> = Vec::with_capacity(keys.len() + 1);
+    for key in keys {
+        if key.is_anonymous() || ordered.iter().any(|seen| seen.key_id == key.key_id) {
+            continue;
+        }
+        ordered.push(key);
+    }
+    ordered
 }
 
 #[cfg(test)]
@@ -186,6 +245,42 @@ mod tests {
             walk.on_refused(KeyRefusal::UnknownKey),
             KeyWalkStep::PresentAfter { key, after_ms } if key.is_anonymous() && after_ms > 0
         ));
+    }
+
+    #[test]
+    fn a_held_only_walk_never_presents_the_anonymous_key() {
+        let mut walk = KeyWalk::held_only(vec![key(1), LinkKey::ANONYMOUS, key(2)], 3);
+        assert!(walk.is_held_only() && !walk.is_exhausted());
+        assert_eq!(walk.current(), &key(1));
+        assert_eq!(
+            walk.on_refused(KeyRefusal::UnknownKey),
+            KeyWalkStep::Present(key(2))
+        );
+        // A board that is busy gets the same key again, as on the LAN.
+        assert_eq!(
+            walk.on_refused(KeyRefusal::Busy),
+            KeyWalkStep::PresentAfter {
+                key: key(2),
+                after_ms: BUSY_RETRY_MS
+            }
+        );
+        assert_eq!(
+            walk.on_refused(KeyRefusal::WrongKey),
+            KeyWalkStep::Exhausted
+        );
+        assert!(walk.is_exhausted());
+        assert_eq!(
+            walk.on_refused(KeyRefusal::UnknownKey),
+            KeyWalkStep::Exhausted
+        );
+    }
+
+    #[test]
+    fn a_held_only_walk_with_no_keys_starts_exhausted() {
+        let walk = KeyWalk::held_only(vec![LinkKey::ANONYMOUS], 0);
+        assert!(walk.is_exhausted());
+        let lan = KeyWalk::new(Vec::new(), 0);
+        assert!(!lan.is_exhausted() && !lan.is_held_only());
     }
 
     fn key(id: u8) -> LinkKey {

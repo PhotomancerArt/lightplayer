@@ -26,7 +26,9 @@
 //
 // Like `walk-no-board`, it is not a CI job and must not become one, and it
 // needs a Studio already serving on this worktree's canonical port (it never
-// adopts a sibling's). Every wait is the page's or the polyfill's; the one
+// adopts a sibling's) — or `--serve-release`, which serves the release bundle
+// (`just studio-web-story-build`) and the packaged firmware itself on the
+// walk's own stable slot, so the walk runs as one foreground command. Every wait is the page's or the polyfill's; the one
 // deliberate duration is the idle window, and it is a counting window, not a
 // claim about how long anything took.
 //
@@ -53,7 +55,7 @@ import process from "node:process";
 import { execSync } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
-import { startDoor, stopDoor, studioUrlFor } from "./emulated-lane.mjs";
+import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const BOARD = process.env.WALK_BOARD ?? "c6-a";
@@ -100,11 +102,14 @@ async function main() {
   const shots = path.join(out, "shots");
   mkdirSync(shots, { recursive: true });
 
-  const port = studioPort();
-  if (!(await studioUp(port))) {
+  const bundle = process.argv.includes("--serve-release")
+    ? await serveStudioBundle({ root: ROOT, port: walkPort(ROOT, "walk-ble-emu") })
+    : null;
+  const port = bundle ? bundle.address().port : studioPort();
+  if (!bundle && !(await studioUp(port))) {
     console.error(
       `No Studio on this worktree's canonical port ${port}. Start one first ` +
-        "(`just studio-dev`) and re-run; this walk never adopts a sibling's listener.",
+        "(`just studio-dev`), or run with --serve-release; this walk never adopts a sibling's listener.",
     );
     process.exit(1);
   }
@@ -150,19 +155,27 @@ async function main() {
     driver.evaluate(`JSON.stringify(window.__lpEmuBluetooth?.stats(${JSON.stringify(BOARD)}) ?? null)`).then(JSON.parse);
   /// Count both directions for `windowMs`, with a census of what Studio
   /// wrote by request kind (the first chunk of each line carries
-  /// `"msg":{"<kind>"` or `"msg":"<kind>"`).
+  /// `"msg":{"<kind>"` or `"msg":"<kind>"`). Both write kinds are counted:
+  /// Studio's data frames go without response by default (the Bluetooth
+  /// write policy, `?ble-writes=`), its SYN and ACK-only frames with one.
   const measure = async (windowMs) => {
     await driver.evaluate(`(() => {
       const rx = window.__lpEmuBluetooth.devices.get(${JSON.stringify(BOARD)}).gatt.service.rx;
       if (!rx.__lpCensus) {
-        const write = rx.writeValueWithResponse.bind(rx);
         rx.__lpCensus = true;
-        rx.writeValueWithResponse = async (value) => {
+        const count = (value) => {
           const text = new TextDecoder().decode(value);
           const kind = text.match(/"msg":\\{?"([A-Za-z]+)"/)?.[1];
           if (kind) window.__lpBleCensus[kind] = (window.__lpBleCensus[kind] ?? 0) + 1;
-          return write(value);
         };
+        for (const name of ['writeValueWithResponse', 'writeValueWithoutResponse']) {
+          if (typeof rx[name] !== 'function') continue;
+          const write = rx[name].bind(rx);
+          rx[name] = async (value) => {
+            count(value);
+            return write(value);
+          };
+        }
       }
       window.__lpBleCensus = {};
     })()`);
@@ -219,7 +232,10 @@ async function main() {
       return `paired with ${picked}`;
     });
 
-    await step("identify", "the card comes up Ready, flashing drawn disabled with its reason", async () => {
+    // Over Bluetooth the over-the-air update is not refused (OTA M7 P12);
+    // the USB flash and Factory reset still are, and the reason is drawn
+    // beside whichever of them the card shows.
+    await step("identify", "the card comes up Ready, the USB-only firmware verbs drawn disabled with their reason", async () => {
       await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "Ready",
@@ -558,6 +574,7 @@ async function main() {
 
   await driver.close();
   await stopDoor(door);
+  bundle?.close();
 
   if (fatal) {
     console.error(`\nThe Bluetooth walk did not finish: ${fatal.message}`);

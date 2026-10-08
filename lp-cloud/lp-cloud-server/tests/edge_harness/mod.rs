@@ -21,6 +21,7 @@ use http_body_util::BodyExt as _;
 use lp_cloud_server::app_state::AppState;
 use lp_cloud_server::config::ServerConfig;
 use lp_cloud_server::firmware::firmware_upstream::FirmwareUpstream;
+use lp_cloud_server::firmware::release_list_upstream::ReleaseListUpstream;
 use lp_cloud_server::page::static_site::StaticSite;
 use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
 use lp_cloud_server::router::build_router;
@@ -71,16 +72,29 @@ impl TestServer {
     /// harness owns (`LP_CLOUD_STORE`/`LP_CLOUD_BLOBS` are always `mem`, and
     /// the base URL is a localhost one unless a test overrides it).
     pub fn with_vars(vars: &[(&str, &str)]) -> Self {
-        Self::build(vars, None)
+        Self::build(vars, None, None)
     }
 
     /// A service whose `/firmware/` lookup fetches through `upstream` (an
     /// in-process stub) instead of the network.
     pub fn with_firmware_upstream(upstream: Arc<dyn FirmwareUpstream>) -> Self {
-        Self::build(&[], Some(upstream))
+        Self::build(&[], Some(upstream), None)
     }
 
-    fn build(vars: &[(&str, &str)], upstream: Option<Arc<dyn FirmwareUpstream>>) -> Self {
+    /// A service whose `/firmware/` lookup and release index fetch through
+    /// in-process stubs: `upstream` for files, `list` for the releases list.
+    pub fn with_firmware_upstreams(
+        upstream: Arc<dyn FirmwareUpstream>,
+        list: Arc<dyn ReleaseListUpstream>,
+    ) -> Self {
+        Self::build(&[], Some(upstream), Some(list))
+    }
+
+    fn build(
+        vars: &[(&str, &str)],
+        upstream: Option<Arc<dyn FirmwareUpstream>>,
+        list: Option<Arc<dyn ReleaseListUpstream>>,
+    ) -> Self {
         let artifact = tempfile::tempdir().expect("a temp artifact directory");
         let bundle_manifest = artifact
             .path()
@@ -124,6 +138,9 @@ impl TestServer {
         );
         if let Some(upstream) = upstream {
             state = state.with_firmware_upstream(upstream);
+        }
+        if let Some(list) = list {
+            state = state.with_release_list_upstream(list);
         }
 
         Self {

@@ -47,6 +47,19 @@
 //! as Web Serial's are; the link's own notes (up, a stall, the opt-in's
 //! outcome) and a reset within a connection reach the journal as
 //! `LinkEvent::WireNote`s (the USB cut-over's D9).
+//!
+//! # Channel 3: the over-the-air update
+//!
+//! A Bluetooth link carries lp-link's update channel exactly as Web Serial's
+//! does (M7 P12): `LinkCommand::SendUpdate` is one channel-3 message out
+//! (`BleWire::send_update`), refused with a link note until the board
+//! announced the channel on this connection (DS9, in the shared
+//! `LinkPortService`); each message the board sends comes back as
+//! `LinkEvent::Update`, with `LinkEvent::UpdateFacts` first when it is a
+//! manifest (`update_facts_mirror::update_events`, the one decoder every
+//! channel-3 transport uses). A board's reset during an update is a GATT
+//! drop like any other: the session's reconnect loop brings the board back
+//! as a new link, and the Update activity waits for it between legs.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -57,6 +70,7 @@ use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::device_link::demux::demux_read;
+use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
 use crate::providers::browser_ble::{BleDevice, BleWire, is_link_lost};
 
@@ -69,7 +83,9 @@ pub fn ble_link_info(device: &BleDevice) -> LinkInfo {
         endpoint: EndpointKey(format!("{BLE_ENDPOINT_PREFIX}{}", device.device_id)),
         usb: None,
         serial_number: None,
-        carries_update_channel: false,
+        // Its lp-link carries the update channel (M7 P12); whether the board
+        // speaks it is the board's own announcement (DS9).
+        carries_update_channel: true,
     }
 }
 
@@ -177,10 +193,10 @@ impl BleLinkInner {
                     "not a request, and the link carries no raw text to the board: {line:?}"
                 ))),
             },
-            // Bluetooth runs lp-link now but opens no channel 3 yet (the
-            // update plan's M7 P12 adds it), and its `LinkInfo` says so: the
-            // model never asks. Dropped.
-            LinkCommand::SendUpdate(_) => {}
+            // One channel-3 message (M7 P12, Web Serial's twin); the link
+            // refuses it, with a note, until the board announced the channel
+            // on this connection (DS9).
+            LinkCommand::SendUpdate(bytes) => self.send_update(&bytes),
         }
     }
 
@@ -235,6 +251,21 @@ impl BleLinkInner {
         }
     }
 
+    /// Queue one update message on the session's link (written by its
+    /// loop).
+    fn send_update(&self, bytes: &[u8]) {
+        if !self.open.get() {
+            return self.push(LinkEvent::Error(
+                "update write on a link that is not open".to_string(),
+            ));
+        }
+        if let Err(error) = self.wire.send_update(bytes) {
+            self.push(LinkEvent::Error(format!(
+                "bluetooth update write failed: {error}"
+            )));
+        }
+    }
+
     /// Drain the session: errors first (in the order they happened), then
     /// what the link read, then the link's own notes.
     fn pump(&self) {
@@ -253,6 +284,13 @@ impl BleLinkInner {
         }
         for read in self.wire.take_reads() {
             self.push(demux_read(read));
+        }
+        // Channel 3, after the reads: a connection's update messages follow
+        // its link-up, and only this pump drains them (DS1).
+        for update in self.wire.take_updates() {
+            for event in update_events(update) {
+                self.push(event);
+            }
         }
         // After the reads: a note (the board's answer to the opt-in, say) is
         // made while reading, and belongs after what it was read beside.

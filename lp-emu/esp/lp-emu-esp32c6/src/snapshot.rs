@@ -27,6 +27,11 @@
 //! | `hook_calls`, `seam_calls`, `seam_arms`, `uart0`, `usb_sj` | observables a test compares |
 //! | `pins` | the pads' WS281x decoders and their frames — a decoder caught mid-bit is state, and the routing it decodes rides `scalars` with the rest of the bus |
 //!
+//! The network seam's **virtual LAN is not here either**, nor is a seam
+//! endpoint's queue: the LAN is a medium other boards and the host share
+//! (like the air), so restoring one board cannot rewind it. A restore keeps
+//! the board on its LAN as it is now.
+//!
 //! Watchpoints are **not** here: they live on the bus but they are derived
 //! from the hart's trigger CSRs, so [`crate::machine::Esp32C6Machine::restore`]
 //! re-arms them from the restored hart rather than carrying a second copy

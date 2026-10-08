@@ -750,6 +750,10 @@ async function runOne(spec, state, argPort, studioUrl) {
 ///
 /// `configuration` mirrors the transcript system's `lp-emu:<chip>:<grade>`
 /// naming (vision D18) — the same words the `.txt.meta.json` sidecars use.
+/// It is the BASE here: which seams each board engaged (a C6 engages its
+/// capability defaults, `net=lan`, once the firmware it runs carries them)
+/// is only known once the boards have booted, so the closing record below
+/// names each board's own label off the door's `/boards`.
 function provenanceRecord(spec, { doorAddr, boards, image, command }) {
   return JSON.stringify({
     t: Date.now() / 1000,
@@ -757,8 +761,22 @@ function provenanceRecord(spec, { doorAddr, boards, image, command }) {
     scope: "capture",
     entry:
       `emulator-captured trace (plan two M6). configuration=lp-emu:esp32c6:t1 ` +
+      `(base; each board's label, seams included, is the closing capture record) ` +
       `scenario=${spec.id} boards=${boards.join(" ")} image=${image} door=${doorAddr} ` +
       `command=${command}. NOT a silicon fixture: no board produced these bytes.`,
+  });
+}
+
+/// The closing provenance line: each board's configuration label as the
+/// door reported it at the end (`lp-emu:esp32c6:t1+net=lan`), the base plus
+/// the seams that board's last chip start engaged.
+function closingProvenanceRecord(registry) {
+  const labels = (registry ?? []).map((b) => `${b.id}=${b.configuration ?? "?"}`);
+  return JSON.stringify({
+    t: Date.now() / 1000,
+    kind: "journal",
+    scope: "capture",
+    entry: `configuration per board at the end: ${labels.join(" ") || "(the door did not answer)"}`,
   });
 }
 
@@ -833,6 +851,9 @@ async function runOneEmulated(spec, state, studio, sinkUrl, options) {
   await driver.close();
   state.active = null;
   await stopDoorSafely(door);
+  // After the sink is detached, so it is the file's last line and not one of
+  // the `records` the spec's `expect` list is judged against.
+  if (records.length) appendFileSync(partial, closingProvenanceRecord(registry) + "\n");
 
   console.log(`\nCaptured ${records.length} events.`);
   // The census matters more than it looks: an `expect` naming a kind that is
@@ -845,7 +866,7 @@ async function runOneEmulated(spec, state, studio, sinkUrl, options) {
   console.log("\nWhat the trace says happened:");
   console.log(summarize(records));
   if (registry) {
-    console.log(`\nDoor's live registry at the end: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);
+    console.log(`\nDoor's live registry at the end: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state} configuration=${b.configuration}`).join(" · ")}`);
   }
   if (consoleNoise.length) {
     console.log("\nPage console errors:");

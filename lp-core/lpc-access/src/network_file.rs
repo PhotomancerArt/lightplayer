@@ -36,6 +36,20 @@ use crate::wifi_network::WifiNetwork;
 /// file that fails to parse reads as no network too (the caller logs it)
 /// and is not rewritten until the next change.
 ///
+/// **The reader ignores keys it does not know** — at the top level and
+/// inside each network entry — and refuses any `version` but
+/// [`Self::VERSION`]. The core reads this file to join Wi-Fi, and a core
+/// rolled back (or held back by a failed update) must still join with what
+/// a newer firmware wrote: a board in a house is reachable only over
+/// Wi-Fi, so a file that grew a key must not strand it. A newer firmware
+/// may therefore add a key at version 1; an older reader drops it, and an
+/// older core that rewrites the file (only a client's request does) writes
+/// it back without the key. A change an older reader would *misread* is
+/// not an additive key: it needs a new `version`, written only by a
+/// firmware whose rollback target reads both, and never rewritten on an
+/// unconfirmed trial boot (the access file's rule). Writers are
+/// unchanged: they write the keys above and no others.
+///
 /// **Format bumps.** A serde change to this type or to [`WifiNetwork`] is a
 /// format change, even one that adds or removes no field: bump
 /// [`Self::VERSION`], keep a private reader for every older version that
@@ -46,7 +60,7 @@ use crate::wifi_network::WifiNetwork;
 /// the file is outside `PROJECT_FORMAT_VERSION`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct NetworkFile {
     /// Format version; always [`NetworkFile::VERSION`] when written.
     #[cfg_attr(feature = "schema-gen", schemars(range(min = 1, max = 1)))]
@@ -126,6 +140,9 @@ impl NetworkFile {
 
     /// Parse and validate the file's bytes. The version is checked first,
     /// so a newer file is refused by its number, not by a field it adds.
+    /// Unknown keys, at the top level and in each network entry, are
+    /// ignored (see the type's docs); the keys it knows are still checked
+    /// for their type.
     pub fn from_json(bytes: &[u8]) -> Result<Self, NetworkFileError> {
         use serde_json::Value;
         const BAD: NetworkFileError = NetworkFileError::Malformed { line: 0, column: 0 };
@@ -145,11 +162,6 @@ impl NetworkFile {
         let mut file = Self::none();
         file.wifi = flag("wifi")?;
         file.cloud_relay = flag("cloudRelay")?;
-        for key in top.keys() {
-            if !matches!(key.as_str(), "version" | "wifi" | "cloudRelay" | "networks") {
-                return Err(BAD);
-            }
-        }
         match top.get("networks") {
             None => {}
             Some(Value::Array(list)) => {
@@ -166,9 +178,6 @@ impl NetworkFile {
                         Some(Value::Bool(on)) => *on,
                         Some(_) => return Err(BAD),
                     };
-                    if entry.len() != 2 + usize::from(entry.contains_key("hidden")) {
-                        return Err(BAD);
-                    }
                     file.networks.push(WifiNetwork {
                         ssid: text("ssid")?,
                         password: text("password")?,
@@ -367,6 +376,11 @@ mod tests {
             NetworkFile::from_json(b"{\"version\":2,\"somethingNew\":1}"),
             Err(NetworkFileError::UnsupportedVersion(2))
         );
+        // Ignoring unknown keys does not ignore a newer version.
+        assert_eq!(
+            NetworkFile::from_json(b"{\"version\":1000,\"wifi\":true}"),
+            Err(NetworkFileError::UnsupportedVersion(1000))
+        );
         assert_eq!(
             NetworkFile::from_json(b"{\"version\":0}"),
             Err(NetworkFileError::UnsupportedVersion(0))
@@ -374,17 +388,60 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_field_is_refused() {
-        assert!(matches!(
-            NetworkFile::from_json(b"{\"version\":1,\"relay\":true}"),
-            Err(NetworkFileError::Malformed { .. })
-        ));
-        assert!(matches!(
-            NetworkFile::from_json(
-                b"{\"version\":1,\"networks\":[{\"ssid\":\"a\",\"password\":\"\",\"enabled\":true}]}"
-            ),
-            Err(NetworkFileError::Malformed { .. })
-        ));
+    fn an_unknown_top_level_key_is_ignored() {
+        // A rolled-back core reads what a newer firmware wrote.
+        let bytes = b"{\"version\":1,\"relay\":true,\"extra\":{\"a\":[1,2]},\"wifi\":false}";
+        let file = NetworkFile::from_json(bytes).unwrap();
+        assert!(!file.wifi, "the keys it knows still read");
+        assert!(file.cloud_relay);
+        assert!(file.networks.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_key_in_a_network_entry_is_ignored() {
+        let bytes = b"{\"version\":1,\"networks\":[\
+            {\"ssid\":\"lp-walk-net\",\"password\":\"correct-horse-42\",\"enabled\":true,\"priority\":{\"n\":3}},\
+            {\"ssid\":\"lp-back-office\",\"password\":\"staple-battery-7\",\"hidden\":true,\"band\":\"5g\"}]}";
+        assert_eq!(NetworkFile::from_json(bytes).unwrap(), saved());
+    }
+
+    #[test]
+    fn a_grown_file_reads_and_is_written_back_without_the_key() {
+        let grown = b"{\"version\":1,\"wifi\":true,\"cloudRelay\":true,\"future\":1,\"networks\":[\
+            {\"ssid\":\"lp-walk-net\",\"password\":\"correct-horse-42\",\"future\":1},\
+            {\"ssid\":\"lp-back-office\",\"password\":\"staple-battery-7\",\"hidden\":true}]}";
+        let read = NetworkFile::from_json(grown).unwrap();
+        // Writers are unchanged: they write v1 and no extra keys.
+        assert_eq!(read.to_json().unwrap(), V1_FILE);
+    }
+
+    #[test]
+    fn a_known_key_of_the_wrong_type_is_still_refused() {
+        for bytes in [
+            &b"{\"version\":1,\"wifi\":\"yes\",\"extra\":1}"[..],
+            b"{\"version\":1,\"networks\":{},\"extra\":1}",
+            b"{\"version\":1,\"networks\":[{\"ssid\":1,\"password\":\"\",\"extra\":1}]}",
+            b"{\"version\":1,\"networks\":[{\"ssid\":\"a\",\"extra\":1}]}",
+        ] {
+            assert!(
+                matches!(
+                    NetworkFile::from_json(bytes),
+                    Err(NetworkFileError::Malformed { .. })
+                ),
+                "{}",
+                core::str::from_utf8(bytes).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn a_rules_breaking_network_with_an_unknown_key_is_still_refused() {
+        let bytes =
+            b"{\"version\":1,\"networks\":[{\"ssid\":\"a\",\"password\":\"short\",\"extra\":1}]}";
+        assert_eq!(
+            NetworkFile::from_json(bytes),
+            Err(NetworkFileError::PasswordTooShort { len: 5 })
+        );
     }
 
     #[test]

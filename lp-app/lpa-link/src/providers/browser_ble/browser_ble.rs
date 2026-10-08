@@ -50,13 +50,19 @@ extern "C" {
     fn js_forget(id: u32) -> Promise;
 
     #[wasm_bindgen(js_name = write, catch)]
-    fn js_write(id: u32, frame: &[u8]) -> Result<bool, JsValue>;
+    fn js_write(id: u32, frame: &[u8], with_response: bool) -> Result<bool, JsValue>;
+
+    #[wasm_bindgen(js_name = browserKind)]
+    fn js_browser_kind() -> String;
 
     #[wasm_bindgen(js_name = takeFrames, catch)]
     fn js_take_frames(id: u32) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(js_name = onActivity, catch)]
     fn js_on_activity(id: u32, callback: &Closure<dyn FnMut()>) -> Result<Function, JsValue>;
+
+    #[wasm_bindgen(js_name = logLine)]
+    fn js_log_line(id: u32, text: &str);
 
     #[wasm_bindgen(js_name = takeErrors, catch)]
     fn js_take_errors(id: u32) -> Result<Array, JsValue>;
@@ -126,6 +132,13 @@ pub async fn availability() -> BleAvailability {
     }
 }
 
+/// The page's browser family as `browser_ble.js` names it (`"ios"`,
+/// `"brave"`, `"firefox"`, `"safari"`, `"other"`): what a link's default
+/// write policy is chosen by.
+pub(crate) fn browser_kind() -> String {
+    js_browser_kind()
+}
+
 /// Install the presence edges (see `browser_ble.js`): `on_connect` when a
 /// session becomes present, `on_disconnect` when one drops. Once per page;
 /// returns whether this call installed them.
@@ -187,10 +200,11 @@ pub(crate) async fn disconnect(session: u32) {
     let _ = JsFuture::from(js_disconnect(session)).await;
 }
 
-/// Queue one lp-link frame as one GATT write. `Ok(false)`: the link was not
-/// up, and the frame never left (the session's error says why).
-pub(crate) fn write_frame(session: u32, frame: &[u8]) -> Result<bool, String> {
-    let queued = js_write(session, frame).map_err(|error| error_message(&error))?;
+/// Queue one lp-link frame as one GATT write, with response or without
+/// (`ble_write_policy`). `Ok(false)`: the link was not up, and the frame
+/// never left (the session's error says why).
+pub(crate) fn write_frame(session: u32, frame: &[u8], with_response: bool) -> Result<bool, String> {
+    let queued = js_write(session, frame, with_response).map_err(|error| error_message(&error))?;
     // Only what the link took: a link that is down answers `false` and the
     // frame never left.
     if queued {
@@ -243,6 +257,11 @@ pub(crate) fn on_activity(
     callback: &Closure<dyn FnMut()>,
 ) -> Result<Function, String> {
     js_on_activity(session, callback).map_err(|error| error_message(&error))
+}
+
+/// Put one of the link's own lines on the page's console.
+pub(crate) fn log_line(session: u32, text: &str) {
+    js_log_line(session, text);
 }
 
 pub(crate) fn take_errors(session: u32) -> Result<Vec<String>, String> {

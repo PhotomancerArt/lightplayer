@@ -49,6 +49,10 @@ check dirty-unknown   3 "(b) DIRTY with mergeable UNKNOWN"
 check cla-only        2 "(c) MERGEABLE, only cla and a CLA run: not green"
 check green           0 "(d) cla + CI checks pass, CLA + CI runs completed"
 check ci-failed       1 "(e) a real CI failure"
+check superseded-green 0 "(f) two cancelled CI runs, then a green one, one head"
+check newest-failed   1 "(g) newest run's check failed, older run's passed"
+check cancelled-alone 1 "(h) a cancelled run with no replacement"
+check rerun-failed    1 "(i) one run id, two attempts: older passed, newer (larger job id) failed, listed first"
 
 if ((failures > 0)); then
   echo "$failures case(s) failed" >&2
