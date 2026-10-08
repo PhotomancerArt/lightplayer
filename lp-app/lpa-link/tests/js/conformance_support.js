@@ -752,6 +752,12 @@ export async function bleWholeBufferWrites(on) {
   (await bluetoothModule()).bluetooth().wholeBufferWrites = on;
 }
 
+/// Lose every n-th write without response (0: none), as the Mac's write
+/// queue does when it overflows.
+export async function bleDropUnackedEvery(n) {
+  (await bluetoothModule()).bluetooth().dropUnackedEvery = n;
+}
+
 /// The next GATT connect to this board never settles.
 export async function bleHangNextConnect(boardId) {
   (await bluetoothModule()).bluetooth().hangNextConnect(boardId);

@@ -788,13 +788,16 @@ fn save_receipt_line(next_version: Option<u64>) -> String {
 }
 
 /// The session's kind glyph: how the board the editor is a lens on is
-/// reached — USB, Bluetooth or Wi‑Fi (round-2 M5; core's
+/// reached — USB, Bluetooth or Wi‑Fi, on the LAN or through
+/// lightplayer.app (round-2 M5; core's
 /// [`UiLinkKind`](lpa_studio_core::UiLinkKind)).
 fn kind_icon(link: lpa_studio_core::UiLinkKind) -> StudioIconName {
     match link {
         lpa_studio_core::UiLinkKind::Usb => StudioIconName::Usb,
         lpa_studio_core::UiLinkKind::Bluetooth => StudioIconName::Bluetooth,
-        lpa_studio_core::UiLinkKind::Wifi => StudioIconName::Wifi,
+        lpa_studio_core::UiLinkKind::Wifi | lpa_studio_core::UiLinkKind::Relay => {
+            StudioIconName::Wifi
+        }
     }
 }
 

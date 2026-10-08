@@ -36,6 +36,9 @@ pub enum SiteKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArmSite {
     pub imp: &'static SeamImpl,
+    /// Which of the implementation's declarations this site is (a multi-call
+    /// seam has one code site per call).
+    pub decl: &'static lp_seam::SeamDecl,
     pub kind: SiteKind,
     pub vaddr: u32,
 }
@@ -60,9 +63,7 @@ impl Engaged {
 
     /// The arm sites of one engaged seam.
     pub fn sites_of<'a>(&'a self, imp: &'a SeamImpl) -> impl Iterator<Item = &'a ArmSite> + 'a {
-        self.sites
-            .iter()
-            .filter(move |s| s.imp.decl_id == imp.decl_id)
+        self.sites.iter().filter(move |s| s.imp.overlaps(imp))
     }
 }
 
@@ -91,10 +92,10 @@ pub fn resolve_static(request: &SeamRequest, scan: &ScanResult) -> Result<(), St
         if let Some(why) = scan.why_none() {
             return Err(strict_why(request, imp, &why));
         }
-        let carried = scan.candidates().any(|c| entry_for(c, imp).is_ok());
+        let carried = scan.candidates().any(|c| entries_for(c, imp).is_ok());
         if !carried {
             let first = scan.candidates().next().expect("why_none was None");
-            let why = entry_for(first, imp).unwrap_err();
+            let why = entries_for(first, imp).unwrap_err();
             return Err(strict_why(request, imp, &why));
         }
     }
@@ -155,20 +156,24 @@ pub fn resolve(
     let mut sites = Vec::new();
     let mut skipped = Vec::new();
     for (imp, strength) in wanted {
-        match entry_for(&table, imp) {
-            Ok(entry) => {
+        match entries_for(&table, imp) {
+            Ok(entries) => {
                 engaged.push(imp);
-                sites.push(ArmSite {
-                    imp,
-                    kind: SiteKind::Code,
-                    vaddr: entry.function,
-                });
-                if entry.engaged != 0 {
+                for (decl, entry) in entries {
                     sites.push(ArmSite {
                         imp,
-                        kind: SiteKind::EngagedByte,
-                        vaddr: entry.engaged,
+                        decl,
+                        kind: SiteKind::Code,
+                        vaddr: entry.function,
                     });
+                    if entry.engaged != 0 {
+                        sites.push(ArmSite {
+                            imp,
+                            decl,
+                            kind: SiteKind::EngagedByte,
+                            vaddr: entry.engaged,
+                        });
+                    }
                 }
             }
             Err(why) if strength == Strength::Strict => {
@@ -223,24 +228,32 @@ pub fn holds_seam_hint(bytes: &[u8], hint: i32) -> bool {
     false
 }
 
-/// The table entry that answers `imp`, or why it cannot.
-fn entry_for<'a>(table: &'a Candidate, imp: &SeamImpl) -> Result<&'a ScannedEntry, String> {
-    let entry = table.entry(imp.decl_id).ok_or_else(|| {
-        format!(
-            "the image's seam table (flash {:#x}, firmware {}) has no entry for {} ({:#06x})",
-            table.offset,
-            table.version,
-            imp.decl().symbol,
-            imp.decl_id
-        )
-    })?;
-    if imp.decl().shape == lp_seam::SeamShape::Switch && entry.engaged == 0 {
+/// The table entries that answer `imp`, one per declaration in its order, or
+/// why it cannot engage. Every declaration needs its entry (a seam is never
+/// half engaged); a switch-shape seam's **primary** entry must name the
+/// engaged byte, and the others may.
+fn entries_for<'a>(
+    table: &'a Candidate,
+    imp: &'static SeamImpl,
+) -> Result<Vec<(&'static lp_seam::SeamDecl, &'a ScannedEntry)>, String> {
+    let mut out = Vec::with_capacity(imp.decls.len());
+    for decl in imp.decls {
+        let entry = table.entry(decl.id).ok_or_else(|| {
+            format!(
+                "the image's seam table (flash {:#x}, firmware {}) has no entry for {} ({:#06x})",
+                table.offset, table.version, decl.symbol, decl.id
+            )
+        })?;
+        out.push((decl, entry));
+    }
+    let (primary, entry) = out[0];
+    if primary.shape == lp_seam::SeamShape::Switch && entry.engaged == 0 {
         return Err(format!(
             "the image's entry for {} names no engaged byte",
-            imp.decl().symbol
+            primary.symbol
         ));
     }
-    Ok(entry)
+    Ok(out)
 }
 
 fn strict_why(request: &SeamRequest, imp: &SeamImpl, why: &str) -> String {
@@ -372,6 +385,59 @@ mod tests {
     }
 
     #[test]
+    fn one_net_atom_arms_every_call_and_the_one_engaged_byte() {
+        let first = |v: u32| v.checked_sub(0x4200_0000).map(|o| 0x1_0000 + o);
+        let request = SeamRequest::default();
+        let Outcome::Engaged(e) = resolve(&request, &net_table(|_| {}), &first) else {
+            panic!("engages");
+        };
+        assert_eq!(e.label("lp-emu:esp32c6:t2"), "lp-emu:esp32c6:t2+net=lan");
+        let code: Vec<&str> = e
+            .sites
+            .iter()
+            .filter(|s| s.kind == SiteKind::Code)
+            .map(|s| s.decl.name)
+            .collect();
+        let declared: Vec<&str> = lp_seam::net::CALLS.iter().map(|d| d.name).collect();
+        assert_eq!(code, declared);
+        let bytes: Vec<&str> = e
+            .sites
+            .iter()
+            .filter(|s| s.kind == SiteKind::EngagedByte)
+            .map(|s| s.decl.name)
+            .collect();
+        assert_eq!(bytes, ["net_mac"]);
+        assert_eq!(e.sites_of(&crate::seam::seam_impl::NET_LAN).count(), 10);
+        let line = &crate::seam::seam_announce::engaged_lines(&e)[0];
+        assert!(
+            line.starts_with("SEAM net=lan engaged (capability, abi "),
+            "{line}"
+        );
+        assert!(
+            line.ends_with(", 9 sites, engaged-byte@0x42000400)"),
+            "{line}"
+        );
+
+        // One call missing: the seam does not engage at all, and says which.
+        let missing = net_table(|c| c.entries.retain(|x| x.id != lp_seam::net_event_take::ID));
+        match resolve(&request, &missing, &first) {
+            Outcome::SoftNone { why } => {
+                assert!(why.contains("no entry for lp_seam_net_event_take"), "{why}")
+            }
+            other => panic!("{other:?}"),
+        }
+        // The primary without its byte: not engaged either.
+        let byteless = net_table(|c| c.entries[0].engaged = 0);
+        match resolve(&request, &byteless, &first) {
+            Outcome::SoftNone { why } => assert!(why.contains("no engaged byte"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+        let strict = SeamRequest::strict("net=lan").unwrap();
+        assert!(resolve_static(&strict, &missing).is_err());
+        assert!(resolve_static(&strict, &net_table(|_| {})).is_ok());
+    }
+
+    #[test]
     fn the_hint_is_found_in_any_of_its_encodings() {
         // addi zero, zero, 1 ; ret
         let full = [0x13, 0x00, 0x10, 0x00, 0x82, 0x80];
@@ -415,6 +481,34 @@ mod tests {
         };
         ScanResult {
             hits: vec![table(0x1_0040), table(0x20_0040)],
+        }
+    }
+
+    /// One core whose table carries the nine network calls, the engaged byte
+    /// on `net_mac`'s entry alone (as the firmware lays it out), edited by
+    /// `edit`.
+    fn net_table(edit: impl FnOnce(&mut Candidate)) -> ScanResult {
+        let mut c = Candidate {
+            offset: 0x1_0040,
+            abi: lp_seam::SEAM_ABI_ID,
+            self_addr: 0x4200_0040,
+            version: "v".into(),
+            pending: 0x4081_0000,
+            entries: lp_seam::net::CALLS
+                .iter()
+                .enumerate()
+                .map(|(i, d)| ScannedEntry {
+                    id: d.id,
+                    kind: Some(d.kind),
+                    shape: Some(d.shape),
+                    function: 0x4200_1000 + 0x40 * i as u32,
+                    engaged: if i == 0 { 0x4200_0400 } else { 0 },
+                })
+                .collect(),
+        };
+        edit(&mut c);
+        ScanResult {
+            hits: vec![ScanHit::Candidate(c)],
         }
     }
 }

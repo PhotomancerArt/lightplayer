@@ -564,10 +564,31 @@ $dir/console.txt." >&2
     local high total
     high="$(echo "$stack" | awk '{print $4}')"
     total="$(echo "$stack" | awk '{print $7}')"
+    # The run's own configuration label: the base grade the machine printed
+    # (`emu: esp32c6 direct boot, grade lp-emu:esp32c6:t1, …`) plus every
+    # seam a chip start announced engaged (`SEAM net=lan engaged (…)`),
+    # sorted — the label rule of docs/adr/2026-10-05-emulator-seams.md §5.
+    # Built from the announcements because a split image's seams engage when
+    # the app first runs, after the boot line was printed. The C6 engages its
+    # capability defaults (`net=lan`) whenever the image carries them, so the
+    # label is read off the run rather than assumed. It is provenance, never
+    # a figure: a board that joins nothing allocates nothing for the link, so
+    # the seam moves no number this gate reads. The other chips' machines
+    # answer no seams, and print a grade rather than a label.
+    local label="$CHIP_CONFIG"
+    if [ "$CHIP_ID" = "esp32c6" ]; then
+        local base atom
+        base="$(grep -ao 'grade lp-emu:[^ ,+]*' "$dir/emu.err" | head -1 | cut -d' ' -f2 || true)"
+        label="${base:-$CHIP_CONFIG}"
+        for atom in $(grep -ao 'SEAM [a-z0-9_-]*=[a-z0-9_-]* engaged' "$dir/emu.err" \
+            | cut -d' ' -f2 | LC_ALL=C sort -u || true); do
+            label="${label}+${atom}"
+        done
+    fi
     echo "$memory" \
-        | jq --argjson h "$high" --argjson t "$total" \
+        | jq --argjson h "$high" --argjson t "$total" --arg c "$label" \
              '{freeBytes, usedBytes, totalBytes, largestFreeBlock,
-               stackHighWater: $h, stackTotal: $t}'
+               stackHighWater: $h, stackTotal: $t, configuration: $c}'
     rm -rf "$dir"
 }
 
@@ -631,6 +652,19 @@ that already have the Xtensa toolchain)."
     # `stackTop` rides with the measured figures so the one table below grades
     # it; it comes from the ELF, not the console.
     meas="$(jq -c --argjson l "$layout" '. + {stackTop: $l.stackTop}' <<<"$meas")"
+
+    # Which configuration the figures came from — the run's label, seams and
+    # all — beside the one the record was taken on. Reported, never gated:
+    # the label is not a figure, and a capability seam that answers nothing
+    # before a link comes up moves none of the numbers below.
+    local run_cfg rec_cfg
+    run_cfg="$(jq -r '.configuration' <<<"$meas")"
+    rec_cfg="$(jq -r '.configuration // empty' "$rec_file")"
+    echo "  configuration: ${run_cfg}"
+    if [ -n "$rec_cfg" ] && [ "$rec_cfg" != "$run_cfg" ]; then
+        echo "  note: the record was taken on ${rec_cfg}; this run is ${run_cfg}. The figures \
+compare regardless; the next re-baseline that moves a figure stamps the run's label."
+    fi
 
     # figure <TAB> recorded <TAB> measured <TAB> direction
     #   grow  — bigger is worse (usedBytes)
@@ -811,9 +845,14 @@ chip_baseline() {
         return 0
     fi
     local updated
+    # The configuration the new figures were measured on is the run's own
+    # label (`…+net=lan` once the image carries the network seam), stamped
+    # with them — never a figure, so it never decides whether to write.
     updated="$(jq -n --argjson e "$existing" --argjson m "$measured" \
-        --arg commit "$(stamp_commit)" --arg date "$(date +%F)" '
-        $e | .measured = $m | .recorded = $date | .commit = $commit')"
+        --arg commit "$(stamp_commit)" --arg date "$(date +%F)" \
+        --arg cfg "$(jq -r '.configuration' <<<"$meas")" '
+        $e | .measured = $m | .recorded = $date | .commit = $commit
+           | .configuration = $cfg')"
     # `-a`: the record is committed, and jq's default UTF-8 output would
     # rewrite every em dash in the prose the first time this ran on a host
     # whose jq differs — a diff that looks like the gate moved figures it

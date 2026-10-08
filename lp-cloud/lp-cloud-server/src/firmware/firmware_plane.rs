@@ -8,7 +8,9 @@
 //!
 //! The blob store (where checked files are kept by SHA-256) is reached by
 //! the route through [`AppState::with_service`](crate::AppState::with_service);
-//! this type holds the upstream and the in-memory manifest cache.
+//! this type holds the upstreams and the in-memory caches. The release index
+//! (`/api/v1/firmware/<target>/releases`) is built on the same plane, in
+//! [`release_index_plane`](super::release_index_plane).
 
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +20,8 @@ use lpc_firmware_release::{
 
 use super::firmware_manifest_cache::{CachedManifest, FirmwareManifestCache, MissKey};
 use super::firmware_upstream::{FirmwareUpstream, UpstreamAsset, UpstreamError};
+use super::release_index_cache::ReleaseIndexCache;
+use super::release_list_upstream::ReleaseListUpstream;
 
 /// Why a lookup has no bytes to answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,19 +35,43 @@ pub enum LookupFailure {
     BadUpstream(String),
 }
 
-/// The upstream and what the plane remembers.
+/// The upstreams and what the plane remembers.
 pub struct FirmwarePlane {
     upstream: Arc<dyn FirmwareUpstream>,
     cache: Mutex<FirmwareManifestCache>,
+    /// The releases list, for the release index
+    /// ([`release_index_plane`](super::release_index_plane)).
+    pub(super) list_upstream: Arc<dyn ReleaseListUpstream>,
+    pub(super) index_cache: Mutex<ReleaseIndexCache>,
+    /// Held while the list is fetched, so concurrent requests at expiry
+    /// share one upstream call.
+    pub(super) list_refresh: tokio::sync::Mutex<()>,
 }
 
 impl FirmwarePlane {
-    /// A plane fetching through `upstream`, with an empty cache.
-    pub fn new(upstream: Arc<dyn FirmwareUpstream>) -> Self {
+    /// A plane fetching files through `upstream` and the releases list
+    /// through `list_upstream`, with empty caches.
+    pub fn new(
+        upstream: Arc<dyn FirmwareUpstream>,
+        list_upstream: Arc<dyn ReleaseListUpstream>,
+    ) -> Self {
         Self {
             upstream,
             cache: Mutex::new(FirmwareManifestCache::new()),
+            list_upstream,
+            index_cache: Mutex::new(ReleaseIndexCache::new()),
+            list_refresh: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// The upstream files are fetched through.
+    pub fn upstream(&self) -> Arc<dyn FirmwareUpstream> {
+        Arc::clone(&self.upstream)
+    }
+
+    /// The upstream the releases list is fetched through.
+    pub fn list_upstream(&self) -> Arc<dyn ReleaseListUpstream> {
+        Arc::clone(&self.list_upstream)
     }
 
     /// The version `latest` is for `target` (GitHub's "Latest" release, which

@@ -155,6 +155,10 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std
 # `WireLinkPort::new_secure`) against the server behind a secure responder.
 # Tests only: no lpa-server build for a device turns the secure link on.
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, features = ["std", "secure-link"] }
+# `tests/access_gate.rs`: the tier this server grants a radio link, handed to
+# the board's update session (its model board, `test-support`) the way the
+# firmware's link mux hands it — the radio links' channel-3 access, end to end.
+lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
 
 [lints]
 workspace = true

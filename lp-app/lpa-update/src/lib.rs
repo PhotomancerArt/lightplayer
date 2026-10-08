@@ -59,4 +59,6 @@ pub use host_build_facts::{HostBuildFacts, HostPieceFacts};
 pub use host_refusal::HostRefusal;
 pub use identity::{IdentityMismatch, board_matches_release};
 pub use login::{Credential, LoginClient, LoginEvent};
-pub use serve::{ServeConfig, ServeCounters, ServeEvent, ServeOutput, ServeSession};
+pub use serve::{
+    BLE_READ_BACK_PIECE, ServeConfig, ServeCounters, ServeEvent, ServeOutput, ServeSession,
+};

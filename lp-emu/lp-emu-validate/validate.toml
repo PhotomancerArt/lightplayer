@@ -472,6 +472,42 @@ class = "timing"
 grade = "modeled"
 because = "the render thread's spin is parked until an interrupt; the RMT model bills the wire time. Frame timestamps drift about 0.13 us a frame against seam off, and the RMT refill-latency figure reads better than silicon: never quote it from this configuration"
 
+[[seam]]
+# The network capability seam (wifi-link-c6 PR C, P10-P12). A capability
+# default, engaged SOFTLY on every emulated C6 run whose image carries the
+# seam, so `lp-emu:esp32c6:<grade>+net=lan` is the label of nearly every
+# emulated C6 run from here on — and a capability seam may be recorded.
+#
+# What the seam cannot see is below the frame device: the radio. NONE of it is
+# a field class in this table, so none of it can be graded `absent` here
+# without inventing a class (deliberately not done in this change):
+#   - signal strength: a scan answer's RSSI is the LAN fixture's number;
+#   - airtime and throughput: a frame crosses the LAN at the seam's stated
+#     charge (zero, unmeasured — the seams roadmap D2), not at an air rate;
+#   - coexistence with BLE and ESP-NOW: there is no shared radio to arbitrate.
+# The Wi-Fi driver's own HEAP and TIMING live inside `memory` and `timing`,
+# which also carry the IP stack, the link and the server — the layers above the
+# frame device, which run as the shipped image runs them and stay at the base
+# grade. Marking either class absent would take those layers with it, so
+# `timing` is left as the base states it (an overlay entry would also drop
+# t3's documented band), and `memory` keeps the base's grade with the one
+# caveat it must carry (A7). When a payload first makes a radio claim, the
+# class it needs (a `radio` field class, graded `absent` on this overlay) is
+# that payload's change to make.
+name = "net"
+implementation = "lan"
+kind = "capability"
+description = "The network capability seam (net=lan): the shipped image's Wi-Fi frame device is answered by the emulator from the board's endpoint on a virtual LAN — frames in and out, link state, the station MAC (the board's own, from its eFuse model), scans, connect and disconnect, events — and each call is charged one stated constant (zero, unmeasured). ABOVE the frame device everything is the shipped image's own and stays at the base configuration's grade: the IP stack, the link, the server. BELOW it nothing runs — no Wi-Fi driver, no PHY, no air — so these are ABSENT and no figure from this configuration speaks for them: signal strength (a scan's RSSI is the fixture's), airtime and throughput (the LAN carries a frame at the seam's charge, not at an air rate), the Wi-Fi driver's own heap and timing (A7: the driver's join allocations never happen), and coexistence with BLE and ESP-NOW. This table has no field class for any of them (see the comment above the entry). A board that joins nothing calls the seam for nothing the heap ledger reads, so its figures are the seam-free run's."
+
+# `memory` keeps every lp-emu C6 grade's own `modeled`; only its reason moves,
+# because a heap figure off a joined board is the one number here that reads
+# as a silicon claim and is not one. `timing`, `pin`, `usb-serial-jtag`,
+# `boot-log` and `wire` are the base's, untouched.
+[[seam.trust]]
+class = "memory"
+grade = "modeled"
+because = "the base configuration's own memory grade and reason hold, unchanged, for everything up to the Wi-Fi link coming up — the image allocates nothing for the link before then, so a board that joins nothing reports the seam-free run's heap figures (read the evidence for them under the base name, `lp-emu:esp32c6:<grade>`). AFTER a join they do not transfer: with the seam answering, the Wi-Fi driver's own join allocations never happen (A7), so a heap figure taken with the link up reads better than silicon's by whatever the driver holds there. The IP stack's, the link's and the server's allocations are the shipped image's own and are counted; the driver's are absent. Never quote a post-join heap figure from this configuration as silicon's"
+
 [[configuration]]
 name = "lp-emu:esp32c6:t3"
 description = "The same machine at time grade 3: the class costs the cycle-probe kernels measured on silicon, plus what an access's address costs — the flash cache's 32-byte fills and the APB's wait states. The first grade in which two instructions with the same opcode cost different amounts. Memory is identical to t1 and t2 by construction; the interleaving is not."

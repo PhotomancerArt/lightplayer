@@ -46,7 +46,7 @@ impl crate::BleLinkSource for DroppableBleBoard {
         }
         let info = crate::ble_link_info(BLE_DEVICE_ID, "LP-b48c");
         vec![GrantedLink {
-            link: Box::new(fake_device_link(info.clone(), &self.device)),
+            link: Box::new(bench_link(info.clone(), &self.device)),
             info,
         }]
     }
@@ -381,11 +381,11 @@ fn sync_issue(view: &crate::UiStudioView) -> Option<String> {
 }
 
 /// A password the bench's locked board holds and Studio remembers.
-const BENCH_PASSWORD: &str = "bench-password-1";
+pub(super) const BENCH_PASSWORD: &str = "bench-password-1";
 
 /// A device store holding one edit password, [`BENCH_PASSWORD`], with
 /// nobody let in without it: a locked board.
-fn locked_store_file() -> (String, Vec<u8>) {
+pub(super) fn locked_store_file() -> (String, Vec<u8>) {
     let store = lpc_access::DeviceAccessFile {
         version: lpc_access::DeviceAccessFile::VERSION,
         secrets: vec![lpc_access::SecretEntry::from_password(
@@ -555,7 +555,6 @@ fn wait_for_the_resume(bench: &mut DeviceBench, tasks: &TaskPool) {
             bench.view().devices.first(),
             bench.controller.device_roster_view().access,
         );
-        std::thread::sleep(Duration::from_millis(1));
     }
     assert!(bench.controller.view().lens_reconnecting.is_none());
 }

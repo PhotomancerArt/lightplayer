@@ -320,6 +320,14 @@ pub fn App() -> Element {
             browser_json: crate::settings_io::load_local(crate::settings_io::ACCESS_BROWSER_KEY),
             account_json: crate::settings_io::load_local(crate::settings_io::ACCESS_ACCOUNT_KEY),
         });
+        // Where each board this browser has met is on Wi‑Fi: read before
+        // the actor spawns, written back whenever core says it changed. A
+        // convenience in this browser only — never the registry, never the
+        // account.
+        if let Some(json) = crate::wifi_addresses_io::load_wifi_addresses_json() {
+            controller.load_wifi_addresses(&json);
+        }
+        controller.set_on_wifi_addresses(crate::wifi_addresses_io::store_wifi_addresses_json);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);
@@ -459,17 +467,46 @@ pub fn App() -> Element {
             controller.set_ble_transport(Rc::new(lpa_studio_core::BleDeviceTransport::new(
                 Rc::new(lpa_studio_core::BrowserBleSource::new()),
             )));
-            // Boards on the LAN (`?lan=`, Wi-Fi M6 P07): only when the flag
-            // names one — there is no UI to add one yet (M8). Each link is a
-            // secure lp-link presenting this browser's access keys, the same
-            // the access controller unlocks a Bluetooth board with.
-            let lan = crate::dev_url_flags::lan_addresses();
-            if !lan.is_empty() {
+            // Boards on the LAN (Wi-Fi M6 P07; no flag since the network
+            // transport's P01): in every browser with a WebSocket. A board
+            // is reached at an address this browser remembered for it
+            // ("Connect over Wi‑Fi"), one typed into the add slot, or one
+            // the `?lan=` dev shortcut names, dialled at once. Each link is
+            // a secure lp-link presenting this browser's access keys, the
+            // same the access controller unlocks a Bluetooth board with.
+            if lpa_link::providers::browser_websocket::is_supported() {
+                let lan = crate::dev_url_flags::lan_addresses();
                 let keys = Rc::new(controller.network_link_keys())
                     as Rc<dyn lpa_link::providers::network_link::LinkKeys>;
+                let secure_page = web_sys::window()
+                    .and_then(|window| window.location().protocol().ok())
+                    .is_some_and(|protocol| protocol == "https:");
                 controller.set_lan_transport(Rc::new(lpa_studio_core::LanDeviceTransport::new(
-                    Rc::new(lpa_studio_core::BrowserLanSource::new(&lan, keys)),
+                    Rc::new(lpa_studio_core::BrowserLanSource::new(
+                        &lan,
+                        Rc::clone(&keys),
+                        secure_page,
+                    )),
                 )));
+                // Boards through lightplayer.app's relay (the network
+                // transport's P05), behind `?relay=1` until the walk on
+                // lightplayer.app: without the flag there is no relay half
+                // at all. The same provider and keys as the LAN; the relay
+                // is this page's own origin (in dev, `Dioxus.toml` forwards
+                // `/relay` to a local lp-cloud-server), so the signed-in
+                // session's cookie rides along.
+                if let Some(boards) = crate::dev_url_flags::relay_boards() {
+                    let origin = web_sys::window()
+                        .and_then(|window| window.location().origin().ok())
+                        .unwrap_or_default();
+                    controller.set_relay_transport(Rc::new(
+                        lpa_studio_core::RelayDeviceTransport::new(Rc::new(
+                            lpa_studio_core::BrowserRelaySource::new(&boards, &origin, keys),
+                        )),
+                    ));
+                }
+            } else {
+                log::info!("this browser has no WebSocket; Wi\u{2011}Fi boards are not reachable");
             }
         }
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
@@ -2381,7 +2418,7 @@ fn install_ble_hotplug(tx: &CommandSender) {
     }
 }
 
-/// The LAN presence edges (`?lan=`, Wi-Fi M6 P07): a board's socket opening
+/// The LAN presence edges (Wi-Fi M6 P07): a board's socket opening
 /// is a `connect`, one dropping a `disconnect` — the same two re-derivation
 /// triggers as Bluetooth's.
 #[cfg(target_arch = "wasm32")]

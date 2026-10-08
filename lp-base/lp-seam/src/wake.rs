@@ -32,9 +32,14 @@
 //!   endpoint and a cap on what one take returns. Never an unbounded
 //!   producer (the M0 spike's flood starved the render).
 //!
-//! **No firmware handler ships yet** (it lands with the Bluetooth seam), so
-//! every shipped table's `pending` is `0`. The emulator half is built and
-//! tested against a synthetic guest.
+//! **The firmware handler shipped with the network seam** (plan P10): the
+//! C6's table names its pending word (`fw-esp32-common`'s
+//! `seams::seam_wake::PENDING`, in RAM), and `fw-esp32c6`'s
+//! `seams::seam_wake_handler` binds the line, but only when the network
+//! seam is engaged, so silicon never enables it. Any set bit wakes both of
+//! the network's waiters (bit 0 frames, bit 1 station events, so a trace can
+//! tell them apart), and both run on the IO thread `lp-net`. The Bluetooth
+//! seam adds its consumers to the same handler.
 //!
 //! If a wake is ever lost or doubled in a way this protocol cannot explain,
 //! that is the roadmap's revisit trigger **R-WAKE**: stop and take it back to

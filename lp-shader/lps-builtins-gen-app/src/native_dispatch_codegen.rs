@@ -373,7 +373,8 @@ pub(super) fn dispatch_native_builtin(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create native_builtin_dispatch parent dir");
     }
-    fs::write(path, body).expect("write native_builtin_dispatch.rs");
+    crate::write_if_changed::write_if_changed(path, &body)
+        .expect("write native_builtin_dispatch.rs");
 }
 
 #[cfg(test)]

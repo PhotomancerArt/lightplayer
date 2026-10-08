@@ -29,7 +29,7 @@ pub mod fake_device_stream;
 pub mod fake_flash_layout;
 
 pub use failure_injection::FakeFailurePlan;
-pub use fake_device_core::FakeEsp32Device;
+pub use fake_device_core::{FakeDeviceClock, FakeEsp32Device};
 pub use fake_device_script::{
     C6_ROM_BANNER, CLASSIC_ESP32_ROM_BANNER, FAKE_DEVICE_PROJECT_DIR, FAKE_IMAGE_IDENTITY,
     FAKE_PROBED_MAC, FakeBootState, FakeDeviceIdentity, FakeDeviceScript, FakeFlashLayout,

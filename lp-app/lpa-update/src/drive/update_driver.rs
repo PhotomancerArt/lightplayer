@@ -31,9 +31,21 @@
 //! still crashing, the driver stops `ReportCrashing` (the crash is the
 //! build's, and a second write would only loop).
 //!
+//! **A running engine's `N`/`A` after a drop is a race, not a verdict.** Its
+//! channel 3 takes the tier its server's login (channel 1) granted the link,
+//! and a reconnected link has none until the caller's login there lands —
+//! while the driver's first `Q` → `M` → `G`s go at once. So on any link but
+//! the driver's first (or once the board has answered a read-back), an
+//! `N`/`A` from a running engine waits for that login: `Q` again every
+//! [`ENGINE_LOGIN_RETRY_MS`], the backup kept, for at most
+//! [`ENGINE_LOGIN_WAIT_MS`] before it stops `NeedsEngineLogin`. On the first
+//! link, before any answer, `N`/`A` stops at once, as before: whoever
+//! started the driver there held no login to wait for (lp-cli's U8).
+//!
 //! Inputs: link up/down, board messages (with the credentials the caller
 //! holds, passed each time: nothing here stores them), engine-source
-//! results, `go`, and `tick(now_ms)` for a login backoff. Outputs are
+//! results, `go`, and `tick(now_ms)` for a login backoff and the engine
+//! login's wait. Outputs are
 //! [`DriverEffect`]s: messages to send, engine-source effects, progress by
 //! stage, the decision, and the end. Stages, not copy (DM31).
 
@@ -52,6 +64,22 @@ use crate::host_build_facts::HostBuildFacts;
 use crate::host_refusal::HostRefusal;
 use crate::login::{Credential, LoginClient, LoginEvent};
 use crate::serve::{ServeConfig, ServeCounters, ServeEvent, ServeSession};
+
+/// How often a driver waiting out a running engine's `N`/`A` asks again
+/// (`Q`), for the caller's login on the new link to land first.
+pub const ENGINE_LOGIN_RETRY_MS: u64 = 1_000;
+
+/// How long a read-back piece may stay unanswered before the backup asks
+/// for it again ([`BackupSession::reask_stale`]). Pieces normally come back
+/// in well under a second; a slow Bluetooth central at 2 KiB/s drains a
+/// backup's ~16 KiB outstanding in ~8 s.
+pub const READ_BACK_STALE_MS: u64 = 20_000;
+
+/// How long a driver the board already answered waits for a running
+/// engine's login on a new link before it stops `NeedsEngineLogin`. Studio
+/// unlocks a reconnected Bluetooth link in well under a second with a
+/// remembered password (253–509 ms on the 2026-10-07 desk runs).
+pub const ENGINE_LOGIN_WAIT_MS: u64 = 30_000;
 
 /// What the driver is doing, in the roadmap's words (the caller words them).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,6 +206,11 @@ enum Phase {
     LoggingIn(Serving),
     /// Waiting for credentials (then the login).
     NeedsCredentials(Serving),
+    /// A running engine refused for want of its server's login on this
+    /// link: ask again (`Q`) at `next_ask_ms`.
+    AwaitingEngineLogin {
+        next_ask_ms: u64,
+    },
     Done,
 }
 
@@ -204,6 +237,18 @@ pub struct UpdateDriver {
     /// The board asked for engine chunks under `Reinstall`: the engine was
     /// erased and is being, or has been, written again.
     reinstalled: bool,
+    /// A running engine answered this driver's read-back: its server's
+    /// login held the tier once, so a later `N`/`A` waits for it again.
+    engine_answered: bool,
+    /// Links this driver has come up on: past the first, an `N`/`A` from a
+    /// running engine is the new link's login still on its way.
+    links_up: u32,
+    /// When a wait for the engine's login gives up (set at its first
+    /// `N`/`A`, cleared only by progress: a link that keeps dropping does
+    /// not keep the wait alive).
+    engine_login_deadline: Option<u64>,
+    /// The latest time an input carried.
+    now_ms: u64,
     effects: Vec<DriverEffect>,
 }
 
@@ -230,6 +275,10 @@ impl UpdateDriver {
             retries: 0,
             moved_core: false,
             reinstalled: false,
+            engine_answered: false,
+            links_up: 0,
+            engine_login_deadline: None,
+            now_ms: 0,
             effects: Vec::new(),
         }
     }
@@ -270,10 +319,12 @@ impl UpdateDriver {
     }
 
     /// A link to the board came up: ask who it is.
-    pub fn link_up(&mut self, _now_ms: u64) {
+    pub fn link_up(&mut self, now_ms: u64) {
         if self.phase == Phase::Done {
             return;
         }
+        self.now_ms = now_ms;
+        self.links_up = self.links_up.saturating_add(1);
         self.drop_serve();
         self.login = LoginClient::new();
         self.phase = Phase::Asked;
@@ -281,16 +332,34 @@ impl UpdateDriver {
     }
 
     /// The link went down (or the board reset).
-    pub fn link_down(&mut self, _now_ms: u64) {
+    pub fn link_down(&mut self, now_ms: u64) {
         if self.phase == Phase::Done {
             return;
         }
+        self.now_ms = now_ms;
         self.drop_serve();
         self.phase = Phase::Down;
     }
 
     /// Time passed: a login backoff may be over.
     pub fn tick(&mut self, now_ms: u64) {
+        self.now_ms = now_ms;
+        if let Phase::AwaitingEngineLogin { next_ask_ms } = self.phase
+            && now_ms >= next_ask_ms
+        {
+            // Ask who it is again: the manifest decides as on any new
+            // link, and a backup cut short resumes where it was.
+            self.phase = Phase::Asked;
+            self.send(encode_query(lpc_update::PROTO_V1));
+            return;
+        }
+        if self.phase == Phase::BackingUp
+            && let Some(backup) = &mut self.backup
+        {
+            backup.set_now(now_ms);
+            let again = backup.reask_stale(READ_BACK_STALE_MS);
+            self.send_all(again);
+        }
         if let (Some(at), Phase::LoggingIn(_)) = (self.login_retry_at, self.phase)
             && now_ms >= at
         {
@@ -327,6 +396,7 @@ impl UpdateDriver {
         if self.phase == Phase::Done {
             return;
         }
+        self.now_ms = now_ms;
         match BoardMessage::decode(bytes) {
             Ok(BoardMessage::Manifest(json)) => {
                 if let Ok(m) = BoardManifest::from_json(json) {
@@ -413,6 +483,7 @@ impl UpdateDriver {
                 } else if let Some(b) = &mut self.backup {
                     // A read-back cut short by a dropped link: ask again
                     // for what is missing.
+                    b.set_now(self.now_ms);
                     let gs = b.resume();
                     self.phase = Phase::BackingUp;
                     self.send_all(gs);
@@ -449,7 +520,14 @@ impl UpdateDriver {
         };
         match step {
             SourceStep::Ask(SourceEffect::ReadBack { sha, len }) => {
-                let mut backup = BackupSession::new(sha, len, self.config.serve.ahead);
+                let serve = self.config.serve;
+                let mut backup = BackupSession::with_piece(
+                    sha,
+                    len,
+                    serve.read_back_ahead(),
+                    serve.read_back_piece,
+                );
+                backup.set_now(self.now_ms);
                 let gs = backup.start();
                 self.backup = Some(backup);
                 self.phase = Phase::BackingUp;
@@ -502,10 +580,17 @@ impl UpdateDriver {
     }
 
     fn on_read_back(&mut self, bytes: &[u8]) {
+        let backing_up = self.phase == Phase::BackingUp;
         let Some(backup) = &mut self.backup else {
             return;
         };
+        self.engine_answered = true;
+        self.engine_login_deadline = None;
+        backup.set_now(self.now_ms);
         match backup.on_board(bytes) {
+            // A late `D` while waiting for the engine's login is kept; the
+            // wait's `Q` asks for the rest.
+            BackupStep::Send(_) if !backing_up => {}
             BackupStep::Send(gs) => {
                 if let Some(total) = self.board.engine_len() {
                     let done = backup.contiguous();
@@ -560,7 +645,8 @@ impl UpdateDriver {
             // A running engine's channel 3 takes no `L`: its server's own
             // login (channel 1) holds the link's tier.
             HostRefusal::NeedsLogin if self.board.state() == Some(BoardState::Running) => {
-                self.finish(Finish::Stopped(StopReason::NeedsEngineLogin));
+                self.drop_serve();
+                self.wait_for_engine_login();
             }
             HostRefusal::NeedsLogin => {
                 self.drop_serve();
@@ -589,14 +675,38 @@ impl UpdateDriver {
     }
 
     fn on_backup_refused(&mut self, r: HostRefusal) {
-        self.backup = None;
-        self.source = None;
         match r {
+            // The backup is kept: what is in stays in, and the wait's `Q`
+            // resumes it from the first missing chunk.
             HostRefusal::NeedsLogin if self.board.state() == Some(BoardState::Running) => {
-                self.finish(Finish::Stopped(StopReason::NeedsEngineLogin));
+                self.wait_for_engine_login();
             }
-            _ => self.finish(Finish::Stopped(StopReason::BackupFailed)),
+            _ => {
+                self.backup = None;
+                self.source = None;
+                self.finish(Finish::Stopped(StopReason::BackupFailed));
+            }
         }
+    }
+
+    /// A running engine refused for want of its server's login on this
+    /// link (see the module docs): wait for it on a link after the first
+    /// (or once the board answered) while the wait has time left; stop
+    /// otherwise.
+    fn wait_for_engine_login(&mut self) {
+        let now = self.now_ms;
+        let deadline = *self
+            .engine_login_deadline
+            .get_or_insert(now.saturating_add(ENGINE_LOGIN_WAIT_MS));
+        let had_a_login = self.engine_answered || self.links_up > 1;
+        if !had_a_login || now >= deadline {
+            self.backup = None;
+            self.source = None;
+            return self.finish(Finish::Stopped(StopReason::NeedsEngineLogin));
+        }
+        self.phase = Phase::AwaitingEngineLogin {
+            next_ask_ms: now.saturating_add(ENGINE_LOGIN_RETRY_MS),
+        };
     }
 
     fn on_login(&mut self, now_ms: u64, bytes: &[u8], credentials: &[Credential]) {

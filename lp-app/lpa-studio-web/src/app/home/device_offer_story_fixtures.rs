@@ -15,8 +15,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
     OfferPath, PendingLinkView, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
-    UiUnlockOffer, UpdateOfferFacts, add_device_offers, device_offers, new_sim_offer,
-    pending_link_offers,
+    UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_wifi_offer,
+    device_offers, new_sim_offer, pending_link_offers,
 };
 
 use crate::app::home::DevicesPage;
@@ -27,14 +27,18 @@ use crate::core::OffersProvider;
 /// The tree core would publish for `devices`: the add slot's transports at
 /// `bluetooth`, `devices/new-sim` where a runtime can start, and every
 /// pending link's and device's verbs — each device placed by its handle.
+/// `wifi_addresses`: the remembered boards this browser knows a Wi‑Fi
+/// address for (core's address book, as the story says it), each offered
+/// "Connect over Wi‑Fi".
 pub(crate) fn roster_tree(
     devices: &DeviceRosterView,
     projects: &[UiPackageCard],
     examples: &[UiExampleCard],
     bluetooth: BluetoothReach,
+    wifi_addresses: &[(lpa_studio_core::DeviceId, String)],
 ) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
-    for offer in add_device_offers(devices.usb_available, bluetooth) {
+    for offer in add_device_offers(devices.usb_available, bluetooth, wifi_reach(devices)) {
         tree.publish(offer);
     }
     if devices.transport_available {
@@ -51,8 +55,28 @@ pub(crate) fn roster_tree(
             false => DeviceFace::Wire,
         };
         tree.append(card_tree(card, face, locked, projects, examples));
+        if let Some((_, ip)) = wifi_addresses.iter().find(|(device, _)| *device == card.id) {
+            let connecting = devices
+                .wifi_connects
+                .get(&card.id)
+                .is_some_and(|connect| connect.connecting);
+            let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
+            tree.publish(connect_wifi_offer(&prefix, card.id, ip, connecting));
+        }
     }
     tree
+}
+
+/// The add slot's Wi‑Fi entry as core reads a Chromium page: reachable, and
+/// waiting while the roster says an address is being reached.
+fn wifi_reach(devices: &DeviceRosterView) -> WifiAddressReach {
+    WifiAddressReach {
+        available: true,
+        connecting: devices
+            .wifi_address_connect
+            .as_ref()
+            .is_some_and(|connect| connect.connecting),
+    }
 }
 
 /// One device card's verbs, as core publishes them for it.
@@ -156,11 +180,14 @@ pub(crate) fn RosterOffers(
     #[props(default)] projects: Vec<UiPackageCard>,
     #[props(default)] examples: Vec<UiExampleCard>,
     #[props(default)] ble_reach: Option<BluetoothReach>,
+    /// Remembered boards this browser knows a Wi‑Fi address for.
+    #[props(default)]
+    wifi_addresses: Vec<(lpa_studio_core::DeviceId, String)>,
     children: Element,
 ) -> Element {
     let asked = use_ble_reach();
     let reach = ble_reach.unwrap_or_else(|| asked());
-    let offers = roster_tree(&devices, &projects, &examples, reach);
+    let offers = roster_tree(&devices, &projects, &examples, reach, &wifi_addresses);
     rsx! {
         OffersProvider { offers, {children} }
     }
@@ -247,7 +274,11 @@ pub(crate) fn StoryPendingCard(
 /// draws one of its verbs) on its own.
 pub(crate) fn add_slot_tree(usb_available: bool, bluetooth: BluetoothReach) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
-    for offer in add_device_offers(usb_available, bluetooth) {
+    let wifi = WifiAddressReach {
+        available: true,
+        connecting: false,
+    };
+    for offer in add_device_offers(usb_available, bluetooth, wifi) {
         tree.publish(offer);
     }
     tree.publish(new_sim_offer());
@@ -261,6 +292,9 @@ pub(crate) fn StoryDevicesPage(
     home: lpa_studio_core::UiHomeView,
     #[props(default)] remembered_open: bool,
     #[props(default)] target_pick_open: bool,
+    /// Remembered boards this browser knows a Wi‑Fi address for.
+    #[props(default)]
+    wifi_addresses: Vec<(lpa_studio_core::DeviceId, String)>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
     rsx! {
@@ -268,6 +302,7 @@ pub(crate) fn StoryDevicesPage(
             devices: home.devices.clone(),
             projects: home.projects.clone(),
             examples: home.examples.clone(),
+            wifi_addresses,
             DevicesPage { home, remembered_open, target_pick_open, on_action }
         }
     }

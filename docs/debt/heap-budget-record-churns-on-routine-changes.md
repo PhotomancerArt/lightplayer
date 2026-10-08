@@ -190,6 +190,33 @@ long-lived branch conflict on this file whenever main re-baselined too.
   a first boot that hashes the engine and the core (~1.9 s emulated) reached
   its first heartbeat past it, which the gate reported as "no first
   heartbeat", not as a timing change (window now 8.5 s, with the reason).
+- 2026-10-06 — **a stacked PR takes its bases' moves as well as its own**
+  (Wi-Fi in the emulator, PR #993, stacked on #987 and #989): merging #989's
+  main merge (wire 39, #986's OTA) moved `hello.proto` 38 → 39 and the
+  S3/classic stack figures (−40 B / −48 B), and the C6 record moved by #989's
+  network stack (90,208 → 101,608 B used) — none of it #993's own. #993's
+  own move is the record's `configuration` (`lp-emu:esp32c6:t1+net=lan`: the
+  network seam engages on every emulated run); with nothing joined the seam
+  costs +32 B of heap, measured against `--seams none`. Taken from CI's patch
+  (`just apply-ci-figures 993`); #989 will take the same base moves again.
+- 2026-10-06 — **the C6 ratchet's first heartbeat moved 32 B between two
+  boots of one image** (PR #993 after merging main's #997/#1000/#1001 and
+  #989's latest, run 37514407160): the check measured 102,980 B used, CI's
+  bless re-ran it and measured 103,012, so the bless could not hold
+  ("not a figure move"); a desk run measured 102,988 twice. `net=lan`
+  engaged in every boot, so the spread is the host link's timing reaching the
+  first heartbeat (what the packed link has allocated by then), not the
+  seam. The record was set by hand to CI's worst-seen boot (103,012 used /
+  198,524 free / 119,360 largest), with the move's causes: +128 B of
+  server-boot from the bases (the engine records moved by the same 128) and
+  +32 B of the network seam's two boxes on a board that never joins. A gate at
+  0 % margin over a figure that varies with the host is this entry's shape
+  again; a band, as `stackHighWater` already has, is the paydown.
+- 2026-10-06 — the same, once more after #989's main merge (`ec48b7afc`):
+  #989's record (102,956 B used) is its own tree's, without the network
+  seam's two boxes (+32 B on a board that never joins); #993's merged tree
+  measured 102,980 then 103,012 on two CI boots (run 37530685444), so the
+  record again takes the worst boot (103,012 / 198,524 / 119,384).
 
 - 2026-10-06 — **a merge's "take theirs" dropped a branch's own figures**
   (Wi-Fi PR B, #989): merging main after #986, the C6 record conflicted and
@@ -243,6 +270,44 @@ long-lived branch conflict on this file whenever main re-baselined too.
   8 B. Workaround: record CI's (lower) figure, which passes on both. The
   ratchet's 0 % margin on a placement figure turns a host-side difference
   in the emulated run into a red check.
+
+- 2026-10-07 — **CI's dirty re-check fails again; the net seam moves the C6
+  record** (emulated Wi-Fi PR C, #993, run 37584523250). After the merge of
+  main took main's C6 record, PR C's net seam moved `usedBytes` +24 B and
+  `largestFreeBlock` -32 B (`freeBytes` -24 B) on the clean first step
+  (version `14b39e7`, `lp-emu:esp32c6:t1+net=lan`). CI's "Figure moves"
+  re-check ran on a dirty tree (`<sha>-dirty-…` version, +32 B) and failed
+  as "not a figure move" again. Workaround as on 2026-10-06: the record
+  carries CI's clean figures (103,024 / 198,512 / 119,400), transcribed
+  from the first clean step, not a local bless.
+
+- 2026-10-07 — **the dirty re-check again, and CI's own images are not the
+  ratchet's image** (OTA M7 Bluetooth updates, PR #1005, run 37631551382,
+  merge commit `f3035c68c858`). The heap job's clean first check
+  (`target/fw-split/shipped/p2.elf`, version `f3035c6`) read `usedBytes`
+  103,088 / `freeBytes` 198,448 / `largestFreeBlock` 119,344 against a record
+  of 103,096 / 198,440 / 119,360, and failed on `largestFreeBlock` alone
+  ("shrank"; the other two read "improved"). The `Figure moves` step then
+  re-baselined and re-checked on a tree its own write had dirtied: the log's
+  pass 1 reads `version f3035c6-dirty-071620PT` (against `f3035c6` for the
+  two clean builds), the re-check read 103,120 / 198,416 / 119,288, and the
+  step answered "not-a-figure-move" — the 2026-10-06 entry's mechanism,
+  confirmed in the log, the second time on this branch. Found on the way:
+  `just fetch-ci-images 1005 esp32c6` + `heap-budget-baseline-chips` /
+  `heap-budget-check-chips-c6` reads the record's own 103,096 / 198,440 /
+  119,360 and passes with no diff, because the `Emulator C6 (x64)` job's
+  image is stamped with a 9-character version (`f3035c68c`, `commit=f3035c68c858`
+  in its hello) while the heap job's build stamps 7 (`f3035c6`). 2 characters
+  x the stamp's copies is the 8 B the heap job reads lower, so the fetched
+  image reproduces the record, not the failing job. Two builds of one commit
+  inside one CI run therefore carry different C6 figures, and `docs/chip-figures.md`'s
+  "the heap ratchet's image is the same bytes the boot suite reads" does not
+  hold for the version string. Workaround as on 2026-10-06/07: the record
+  takes the heap job's clean first-step figures (103,088 / 198,448 / 119,344),
+  transcribed from the log, not a local or fetched-image bless. Paydown as
+  above and now with a second reason: pin `APP_VERSION` for every build the
+  figure checks use, so a build's stamp length stops being a figure.
+  Applied on PR #1005 as `chore(figures): record CI's clean C6 heap figures for 4cad23fdb` (the json's `commit` field left at `e922ceca5`).
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
