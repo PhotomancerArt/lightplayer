@@ -3512,6 +3512,22 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
     fi
     LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
 
+# Over-the-air updates over the EMULATED LAN (OTA Wi-Fi plan P4): the board on
+# a virtual LAN under `emu serve`, no USB cable, `lp-cli link capture lan:` as
+# the host. Not CI (DM26), like its USB sibling above. `images` reuses a
+# directory holding `x/` and `y/` (`scripts/ota/build-image.sh` outputs);
+# `filter` picks scenarios (`l1`, `l2`, …).
+test-emu-c6-ota-lan images="" filter="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out="{{ images }}"
+    if [[ -z "$out" ]]; then
+        out=target/ota-lan
+        scripts/ota/build-image.sh "$out/x" a0a0a0a0
+        scripts/ota/build-image.sh "$out/y" b1b1b1b1
+    fi
+    LP_OTA_LAN_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota_lan -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+
 # lp-cli's emulator-backed tests, whole: what a desk runs. They resolve the
 # ELF through `lp_emu_esp32c6::test_support` under `LP_EMU_BUILD_FW=1` — a
 # plain `cargo build`, not a reference image, so no espflash and no git

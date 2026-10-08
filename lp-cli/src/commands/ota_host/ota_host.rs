@@ -144,11 +144,14 @@ impl OtaHost {
             Ok(BoardMessage::Manifest(json)) => {
                 if let Ok(m) = BoardManifest::from_json(json) {
                     self.line(format!(
-                        "board: {} {:?}{}",
+                        "board: {} {:?}{}{}",
                         m.build_id,
                         m.state,
                         m.transfer
                             .map(|t| format!(" ({:?} {}/{} B)", t.kind, t.done, t.total))
+                            .unwrap_or_default(),
+                        m.refused_build
+                            .map(|hash| format!(" (refuses build {hash:#010x})"))
                             .unwrap_or_default()
                     ));
                     self.manifests.push(m);
