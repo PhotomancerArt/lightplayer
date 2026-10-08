@@ -29,6 +29,15 @@
 /// QY1: over a USB cable, a board that can update over the air does.
 pub const USB_UPDATES_OVER_THE_AIR: bool = true;
 
+/// The first release that serves the update channel over Bluetooth:
+/// `2026.10.07-16`, the release of #1005's merge (`c0adadae7`), published
+/// 2026-10-07T16:28:38Z. A release older than it, installed over Bluetooth,
+/// cannot be updated over Bluetooth again until it has been connected by
+/// USB once, so "Other version…" warns about it and arms. (`None` would
+/// mean "not in a release yet": every choice older than the board's would
+/// warn over Bluetooth.)
+pub const FIRST_BLUETOOTH_UPDATE_RELEASE: Option<&str> = Some("2026.10.07-16");
+
 /// The link an update would ride, as the card's words name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdateLink {

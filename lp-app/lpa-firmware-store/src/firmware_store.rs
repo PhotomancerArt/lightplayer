@@ -5,7 +5,8 @@ use std::fmt;
 
 use lpc_firmware_release::{
     FirmwareFileError, FirmwareLookupPath, OTA_MANIFEST_FILE, OtaManifest, OtaManifestError,
-    ReleaseSelector, ReleaseVersion, TargetName,
+    ReleaseIndex, ReleaseIndexError, ReleaseSelector, ReleaseVersion, TargetName,
+    release_index_path,
 };
 
 use crate::firmware_fetch::{FetchError, FirmwareFetch};
@@ -26,6 +27,11 @@ pub enum StoreError {
     BadManifest(OtaManifestError),
     /// The manifest describes something other than what was asked for.
     WrongManifest(String),
+    /// The release index did not parse or validate (another `format`
+    /// included: the reader then has no list).
+    BadIndex(ReleaseIndexError),
+    /// The release index is another target's.
+    WrongIndex(String),
     /// A manifest that is not a release's (a dev version) has no files in
     /// the store.
     NotARelease(String),
@@ -50,6 +56,8 @@ impl fmt::Display for StoreError {
             Self::BadTarget(t) => write!(f, "{t:?} is not a target name"),
             Self::BadManifest(e) => write!(f, "{e}"),
             Self::WrongManifest(why) => write!(f, "the store's manifest {why}"),
+            Self::BadIndex(e) => write!(f, "{e}"),
+            Self::WrongIndex(why) => write!(f, "the store's release index {why}"),
             Self::NotARelease(v) => write!(f, "{v} is not a release version"),
             Self::MissingFile(file) => write!(f, "the store has no {file}"),
             Self::BadFile(e) => write!(f, "{e}"),
@@ -134,6 +142,31 @@ impl<F: FirmwareFetch> FirmwareStore<F> {
             )));
         }
         Ok(Some(manifest))
+    }
+
+    /// The absolute URL of `target`'s release index
+    /// (`/api/v1/firmware/<target>/releases`).
+    pub fn releases_url(&self, target: &TargetName) -> String {
+        format!("{}{}", self.origin, release_index_path(target))
+    }
+
+    /// The validated release index of `target`, or `None` when the store
+    /// has none (404: no release carries the target, or the server predates
+    /// the route). Unknown fields are ignored; another `format` is refused
+    /// ([`StoreError::BadIndex`]), and so is another target's index.
+    pub async fn releases(&self, target: &TargetName) -> Result<Option<ReleaseIndex>, StoreError> {
+        let url = self.releases_url(target);
+        let Some(bytes) = self.fetch.get(&url).await? else {
+            return Ok(None);
+        };
+        let index = ReleaseIndex::parse_valid(&bytes).map_err(StoreError::BadIndex)?;
+        if index.target != target.as_str() {
+            return Err(StoreError::WrongIndex(format!(
+                "names target {}, not {target}",
+                index.target
+            )));
+        }
+        Ok(Some(index))
     }
 
     /// One file the manifest names, verified against it (length, SHA-256).
@@ -267,6 +300,95 @@ mod tests {
     }
 
     #[test]
+    fn the_release_index_is_read_and_verified() {
+        let fetch = FakeFetch::default();
+        let store = FirmwareStore::new("https://store.test/", fetch.clone());
+        let target = TargetName::parse("esp32c6-4mb").unwrap();
+        let url = "https://store.test/api/v1/firmware/esp32c6-4mb/releases";
+        assert_eq!(store.releases_url(&target), url);
+
+        // No index (404) is no list.
+        assert_eq!(block_on(store.releases(&target)), Ok(None));
+
+        fetch.put(
+            url,
+            index_json("esp32c6-4mb", &["2026.10.06-10", "2026.10.06-9"]),
+        );
+        let index = block_on(store.releases(&target)).unwrap().unwrap();
+        let versions: Vec<&str> = index.releases.iter().map(|e| e.version.as_str()).collect();
+        assert_eq!(versions, ["2026.10.06-10", "2026.10.06-9"]);
+        assert_eq!(fetch.calls().last().map(String::as_str), Some(url));
+    }
+
+    #[test]
+    fn the_release_index_ignores_unknown_fields() {
+        let fetch = FakeFetch::default();
+        let store = FirmwareStore::new("https://store.test", fetch.clone());
+        let target = TargetName::parse("esp32c6-4mb").unwrap();
+        let commit = "736d72856d243fce519c9f461f369f59fcbf175a";
+        let bytes = format!(
+            r#"{{"format":1,"target":"esp32c6-4mb","channel":"stable","releases":[
+              {{"version":"2026.10.06-19","commit":"{commit}","wireProto":39,
+                "requires":{{"layout":1,"loader":1,"radio":2}},
+                "publishedAt":"2026-10-07T05:41:12Z","capabilities":["ble-update"]}}]}}"#
+        );
+        fetch.put(&store.releases_url(&target), bytes.into_bytes());
+        let index = block_on(store.releases(&target)).unwrap().unwrap();
+        assert_eq!(index.releases.len(), 1);
+        assert_eq!(index.releases[0].wire_proto, 39);
+        assert_eq!(
+            index.releases[0].published_at.as_deref(),
+            Some("2026-10-07T05:41:12Z")
+        );
+    }
+
+    #[test]
+    fn the_release_index_refusals() {
+        let fetch = FakeFetch::default();
+        let store = FirmwareStore::new("https://store.test", fetch.clone());
+        let target = TargetName::parse("esp32c6-4mb").unwrap();
+        let url = store.releases_url(&target);
+
+        // Another format: refused, so the reader has no list.
+        fetch.put(
+            &url,
+            br#"{"format":2,"target":"esp32c6-4mb","entries":[]}"#.to_vec(),
+        );
+        assert_eq!(
+            block_on(store.releases(&target)),
+            Err(StoreError::BadIndex(ReleaseIndexError::UnsupportedFormat(
+                2
+            )))
+        );
+
+        // Not newest first: refused by validate.
+        fetch.put(
+            &url,
+            index_json("esp32c6-4mb", &["2026.10.06-9", "2026.10.06-10"]),
+        );
+        assert!(matches!(
+            block_on(store.releases(&target)),
+            Err(StoreError::BadIndex(
+                ReleaseIndexError::NotNewestFirst { .. }
+            ))
+        ));
+
+        // Another target's index.
+        fetch.put(&url, index_json("esp32s3-8mb", &["2026.10.06-9"]));
+        assert!(matches!(
+            block_on(store.releases(&target)),
+            Err(StoreError::WrongIndex(_))
+        ));
+
+        // Offline.
+        fetch.go_offline();
+        assert!(matches!(
+            block_on(store.releases(&target)),
+            Err(StoreError::Fetch(FetchError::Offline(_)))
+        ));
+    }
+
+    #[test]
     fn offline_is_a_fetch_error() {
         let fetch = FakeFetch::default();
         fetch.go_offline();
@@ -276,5 +398,21 @@ mod tests {
             block_on(store.manifest(&target, &ReleaseSelector::Latest)),
             Err(StoreError::Fetch(FetchError::Offline(_)))
         ));
+    }
+
+    fn index_json(target: &str, versions: &[&str]) -> Vec<u8> {
+        let releases: Vec<String> = versions
+            .iter()
+            .map(|v| {
+                format!(
+                    r#"{{"version":"{v}","commit":"736d72856d243fce519c9f461f369f59fcbf175a","wireProto":39,"requires":{{"layout":1,"loader":1}}}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"format":1,"target":"{target}","releases":[{}]}}"#,
+            releases.join(",")
+        )
+        .into_bytes()
     }
 }

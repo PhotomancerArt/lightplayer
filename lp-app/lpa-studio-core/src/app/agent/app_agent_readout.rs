@@ -260,11 +260,20 @@ fn param_text_with(param: &OfferParam, limit: Option<usize>) -> String {
                     .iter()
                     .filter(|option| option.only_with.as_deref() == Some(toggle))
                     .collect();
-                let _ = write!(
-                    text,
-                    "; with {toggle} on, also {}",
-                    choice_list(&widened, limit)
-                );
+                // A choice's own filter text widens it while it finds
+                // something (a version the box finds): say so, not "on".
+                let _ = match param.filter.as_deref() == Some(toggle) {
+                    true => write!(
+                        text,
+                        "; {toggle} text that finds them also offers {}",
+                        choice_list(&widened, limit)
+                    ),
+                    false => write!(
+                        text,
+                        "; with {toggle} on, also {}",
+                        choice_list(&widened, limit)
+                    ),
+                };
             }
             if let Some(preselect) = preselect {
                 let _ = write!(text, " [default {preselect}]");

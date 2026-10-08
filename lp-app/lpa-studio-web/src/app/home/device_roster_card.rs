@@ -128,10 +128,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     ActionEnablement, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
-    RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind, UiOffer, UiPackageCard,
-    UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight, UpdateRowKind,
-    check_backup_file, device_firmware_line, device_identity_line, device_restore_from_file_action,
-    device_status_kind, escape_verb, firmware_face_preview_sentence, pending_firmware_line,
+    PickedFirmwareFile, RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind,
+    UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight,
+    UpdateRowKind, check_backup_file, device_firmware_line, device_identity_line,
+    device_restore_from_file_action, device_status_kind, escape_verb,
+    firmware_face_preview_sentence, firmware_file_action, pending_firmware_line,
     pending_identity_rows,
 };
 
@@ -148,7 +149,7 @@ use crate::base::{
 };
 use crate::core::{
     ActionButton, ActionButtonVariant, OfferParamsForm, OfferPressButton, StatusChip,
-    quiet_action_class, use_device_verbs, verb_named,
+    pressed_or_refused, quiet_action_class, use_device_verbs, verb_named,
 };
 
 /// One device card.
@@ -224,6 +225,10 @@ pub(crate) fn DeviceRosterCard(
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
+    /// Stories only: mount the install verb's version list open, with
+    /// these values picked (and armed, when asked).
+    #[props(default)]
+    install_picker_preview: Option<OfferPickerPreview>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let device = card.id;
@@ -322,6 +327,9 @@ pub(crate) fn DeviceRosterCard(
     // AND beside the restore verbs of a board needing its files back — an
     // update never touches the board's files, so the files state never
     // withholds it (defect 2026-10-06).
+    // "Other version…" beside another firmware install verb: three chips.
+    let firmware_row_crowded = verb("install-firmware").is_some()
+        && (verb("update-firmware").is_some() || verb("reinstall-firmware").is_some());
     let update_verb = {
         let update = update.clone();
         let chip = chip.clone();
@@ -698,7 +706,11 @@ pub(crate) fn DeviceRosterCard(
                         other: firmware_bar.2,
                     }
                 }
-                div { class: if restore_face { restore_verb_row_class() } else { verb_row_class() },
+                // The restore face's verbs, and an install verb beside an
+                // update one ("Install dev …", "Other version…", Factory
+                // reset), do not fit one line of a narrow card: that row may
+                // wrap rather than paint its chips over each other.
+                div { class: if restore_face || firmware_row_crowded { restore_verb_row_class() } else { verb_row_class() },
                     if busy_zone == Some(ZoneKind::Firmware) {
                         if let Some(cancel) = cancel.clone() {
                             AgentMark { key: "{\"cancel-firmware\"}", path: cancel.path.clone(),
@@ -824,7 +836,18 @@ pub(crate) fn DeviceRosterCard(
                                         on_action,
                                     }
                                 } else {
-                                    OfferChoicePopover { offer: install, on_action }
+                                    OfferChoicePopover {
+                                        offer: install,
+                                        preview: install_picker_preview.clone(),
+                                        // "From a file…": a custom build's
+                                        // files, under the list.
+                                        footer: verb("install-firmware-file").map(|file| rsx! {
+                                            AgentMark { path: file.path.clone(),
+                                                FirmwareFileButton { device, offer: file, on_action }
+                                            }
+                                        }),
+                                        on_action,
+                                    }
                                 }
                             }
                         }
@@ -1184,17 +1207,44 @@ fn UpdateLine(update: UiDeviceUpdate) -> Element {
     }
 }
 
+/// Stories only: an offer popover mounted open, with values already
+/// picked, and its press armed when `armed`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct OfferPickerPreview {
+    pub args: OfferArgs,
+    pub armed: bool,
+}
+
 /// An offer with parameters drawn from a verb row (an install's `version`
 /// choice): the quiet chip, in the offer's own words, opens a panel that
 /// floats in the top layer — so asking cannot change the card's height —
 /// holding the offer's parameters ([`OfferParamsForm`]) and its press
 /// ([`OfferPressButton`], which arms a Lasting binding on itself). The
 /// board pick's grammar, with the generic form for the values.
+///
+/// When the picked value binds a Lasting action, its copy (core's title and
+/// sentence: what installing that version changes) is drawn above the
+/// press, so it is read before the two clicks rather than only on hover.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Element {
-    let args = use_signal(OfferArgs::new);
+fn OfferChoicePopover(
+    offer: UiOffer,
+    #[props(default)] preview: Option<OfferPickerPreview>,
+    /// Drawn under the press: another way to the same verb (an install's
+    /// "From a file…").
+    #[props(default)]
+    footer: Option<Element>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let initial = preview.as_ref().map(|p| p.args.clone()).unwrap_or_default();
+    let args = use_signal(move || initial);
     let current = args.read().clone();
+    let copy = pressed_or_refused(&offer, &current)
+        .meta()
+        .consequence
+        .copy()
+        .cloned();
+    let armed_preview = preview.as_ref().is_some_and(|p| p.armed);
     rsx! {
         PopoverButton {
             class: quiet_action_class().to_string(),
@@ -1208,13 +1258,26 @@ fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Elem
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomStart,
             layer_keeps_layout: true,
+            initially_open: preview.is_some(),
             div { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:p-2.5",
                 OfferParamsForm { offer: offer.clone(), args }
-                div { class: "tw:flex tw:min-w-0 tw:justify-end",
+                if let Some(copy) = copy {
+                    div { class: OFFER_CHOICE_COPY_CLASS,
+                        p { class: "tw:m-0 tw:font-semibold tw:text-strong-foreground", "{copy.title}" }
+                        p { class: "tw:m-0", "{copy.message}" }
+                    }
+                }
+                div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-2",
+                    if let Some(footer) = footer {
+                        {footer}
+                    } else {
+                        span {}
+                    }
                     OfferPressButton {
                         offer,
                         args: current,
                         variant: ActionButtonVariant::Outline,
+                        armed_preview,
                         on_action,
                     }
                 }
@@ -1223,8 +1286,72 @@ fn OfferChoicePopover(offer: UiOffer, on_action: EventHandler<UiAction>) -> Elem
     }
 }
 
-/// The parameter panel's box: narrow (a version list is short), in the
-/// popover's neutral chrome.
+/// "From a file…" (`install-firmware-file`): a quiet button in the offer's
+/// own words, paired with a hidden multi-file input — a file dialog cannot
+/// be a [`UiAction`], the same reasoning as [`RestoreFromFileButton`].
+/// Core's offer exists so the app agent can see this is possible
+/// (`needs_user_activation`); picking files reads their bytes and hands them
+/// to core ([`firmware_file_action`]), which checks them against their
+/// manifest and lists the build — or says why not.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn FirmwareFileButton(
+    device: DeviceId,
+    offer: UiOffer,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let input_id = format!("firmware-file-{}", device.0);
+    let disabled = !offer.is_enabled();
+    rsx! {
+        button {
+            class: FIRMWARE_FILE_BUTTON_CLASS,
+            r#type: "button",
+            disabled,
+            title: "{offer.summary()}",
+            onclick: {
+                let input_id = input_id.clone();
+                move |_| open_restore_from_file_picker(&input_id)
+            },
+            "{offer.label()}"
+        }
+        input {
+            class: "tw:hidden",
+            id: "{input_id}",
+            r#type: "file",
+            multiple: true,
+            accept: ".json,.bin,.z",
+            onchange: move |event| {
+                let files = event.files();
+                spawn(async move {
+                    let mut picked = Vec::new();
+                    for file in files {
+                        let name = file.name();
+                        match file.read_bytes().await {
+                            Ok(bytes) => picked.push(PickedFirmwareFile { name, bytes: bytes.to_vec() }),
+                            Err(error) => {
+                                log::warn!("from a file: could not read {name}: {error}");
+                                say(&format!("{name} could not be read"));
+                                return;
+                            }
+                        }
+                    }
+                    if !picked.is_empty() {
+                        on_action.call(firmware_file_action(device, picked));
+                    }
+                });
+            },
+        }
+    }
+}
+
+/// "From a file…": a text button, quieter than the press beside it.
+const FIRMWARE_FILE_BUTTON_CLASS: &str = "tw:shrink-0 tw:whitespace-nowrap tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-0 tw:py-1.5 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60";
+
+/// What a Lasting pick changes, in core's words: wraps, never clips, at the
+/// panel's width.
+const OFFER_CHOICE_COPY_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-1 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-2 tw:text-[11px] tw:leading-snug tw:text-muted-foreground tw:whitespace-normal tw:break-words";
+
+/// The parameter panel's box: narrow, in the popover's neutral chrome.
 const OFFER_CHOICE_POPUP_CLASS: &str = "tw:grid tw:w-[260px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
 /// The roster's "new device found, identifying…" entry.

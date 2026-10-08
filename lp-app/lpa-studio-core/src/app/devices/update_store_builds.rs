@@ -1,5 +1,6 @@
 //! What the firmware store gives an update: a released build's facts (the
-//! store's `latest`, for "Other version…", DS7), a whole released build to
+//! store's `latest`, for "Other version…", DS7), the release index (every
+//! version "Other version…" lists), a whole released build to
 //! install, and an engine for a heal or a backup — every file verified
 //! against its `ota-manifest.json` by `lpa-firmware-store` before it is
 //! used.
@@ -15,7 +16,8 @@ use lpa_firmware_store::{FetchError, StoreError, fetch_engine_from_store};
 use lpa_update::decide::StoreAnswer;
 use lpa_update::{EncodedPiece, HostBuild, HostBuildFacts, HostIdentity, HostPieceFacts};
 use lpc_firmware_release::{
-    EncodedPieceFile, OtaManifest, ReleaseSelector, ReleaseVersion, TargetName,
+    EncodedPieceFile, OtaManifest, ReleaseIndex, ReleaseIndexEntry, ReleaseSelector,
+    ReleaseVersion, TargetName,
 };
 
 use super::device_firmware_sources::StudioFirmwareStore;
@@ -58,6 +60,42 @@ pub(crate) async fn store_latest(
         .await
         .map_err(miss)?;
     Ok(manifest.as_ref().and_then(facts_from_ota_manifest))
+}
+
+/// The store's release index for `target` (verified by the store client);
+/// `None` when the store has none.
+pub(crate) async fn store_releases(
+    store: Rc<StudioFirmwareStore>,
+    target: String,
+) -> Result<Option<ReleaseIndex>, StoreMiss> {
+    let target = TargetName::parse(&target).ok_or_else(|| StoreMiss {
+        offline: false,
+        why: format!("{target} is not a target name"),
+    })?;
+    store.releases(&target).await.map_err(miss)
+}
+
+/// Release `version` of `target` by its exact version, as the index would
+/// list it: `None` when the store has no such release. Its manifest is
+/// verified by the store client (format, release version, target), and its
+/// target must be the one asked for.
+pub(crate) async fn store_release_entry(
+    store: Rc<StudioFirmwareStore>,
+    target: String,
+    version: String,
+) -> Result<Option<ReleaseIndexEntry>, StoreMiss> {
+    let (Some(target_name), Some(release)) =
+        (TargetName::parse(&target), ReleaseVersion::parse(&version))
+    else {
+        return Ok(None);
+    };
+    let manifest = store
+        .manifest(&target_name, &ReleaseSelector::Version(release))
+        .await
+        .map_err(miss)?;
+    Ok(manifest
+        .filter(|manifest| manifest.target == target && manifest.version == version)
+        .map(|manifest| ReleaseIndexEntry::from_manifest(&manifest, None)))
 }
 
 /// Release `version` for `target`, whole, from the store.
@@ -127,6 +165,19 @@ pub(crate) async fn store_engine(
             StoreAnswer::NotFound
         }
     }
+}
+
+/// A build from a manifest and its pieces, already checked against it (a
+/// build picked from files, [`super::firmware_file_build`]), or why it
+/// cannot be served.
+pub(crate) fn host_build_from_parts(
+    manifest: &OtaManifest,
+    core: Vec<u8>,
+    engine: Vec<u8>,
+    core_z: Option<EncodedPiece>,
+    engine_z: Option<EncodedPiece>,
+) -> Result<HostBuild, String> {
+    build_from_parts(manifest, core, engine, core_z, engine_z).map_err(|miss| miss.why)
 }
 
 /// A build from a manifest and its verified pieces, the `.z` streams kept

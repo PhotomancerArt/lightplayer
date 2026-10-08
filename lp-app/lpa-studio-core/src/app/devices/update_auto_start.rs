@@ -211,7 +211,6 @@ mod tests {
         let missed = UpdateStanding::CantGetVersion {
             board: v.clone(),
             own: v.clone(),
-            choices: vec![],
         };
         assert_eq!(auto_update_for_standing(&missed), AutoUpdate::Start);
         let other = UpdateStanding::AnotherDevice {

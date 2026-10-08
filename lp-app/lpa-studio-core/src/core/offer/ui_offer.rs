@@ -184,8 +184,11 @@ impl UiOffer {
                     param.check(value)?;
                     resolved.insert(param.name.clone(), value);
                 }
-                None => match param.default_value() {
+                None => match self.choice_or_default(param, args) {
                     Some(value) => resolved.insert(param.name.clone(), value),
+                    // A filtered choice whose text names no option: the
+                    // binder reads the text (`offer_shown_options`).
+                    None if self.filter_text(param, args).is_some() => {}
                     None if param.is_required() => {
                         return Err(OfferArgError::Missing {
                             name: param.name.clone(),
@@ -196,14 +199,23 @@ impl UiOffer {
                 },
             }
         }
-        self.check_widened_choices(&resolved)?;
+        self.check_shown_choices(&resolved)?;
         binder.bind(&resolved)
     }
 
-    /// Refuse a choice option that is offered only with a toggle on
-    /// ([`crate::OfferChoice::only_with`]) when the resolved press leaves
-    /// that toggle off.
-    fn check_widened_choices(&self, resolved: &OfferArgs) -> Result<(), OfferArgError> {
+    /// The default of a parameter a press left out: a choice's
+    /// ([`Self::choice_default`]), else the parameter's own.
+    fn choice_or_default(&self, param: &OfferParam, args: &OfferArgs) -> Option<String> {
+        match param.kind {
+            OfferParamKind::Choice { .. } => self.choice_default(param, args),
+            _ => param.default_value(),
+        }
+    }
+
+    /// Refuse a picked choice option the resolved press does not show
+    /// ([`Self::shown_options`]): one offered only with a toggle that is
+    /// off, or one the choice's filter text does not find.
+    fn check_shown_choices(&self, resolved: &OfferArgs) -> Result<(), OfferArgError> {
         for param in &self.params {
             let OfferParamKind::Choice { options, .. } = &param.kind else {
                 continue;
@@ -211,20 +223,29 @@ impl UiOffer {
             let Some(value) = resolved.choice(&param.name) else {
                 continue;
             };
-            let Some(toggle) = options
+            if self
+                .shown_options(param, resolved)
+                .iter()
+                .any(|option| option.value == value)
+            {
+                continue;
+            }
+            let widener = options
                 .iter()
                 .find(|option| option.value == value)
-                .and_then(|option| option.only_with.as_deref())
-            else {
-                continue;
+                .and_then(|option| option.only_with.as_deref());
+            let reason = match (widener, param.filter.as_deref()) {
+                (Some(toggle), filter) if filter != Some(toggle) => {
+                    format!("it is offered only with `{toggle}` on")
+                }
+                (_, Some(filter)) => format!("it is offered only while `{filter}` finds it"),
+                (_, None) => "it is not shown".to_string(),
             };
-            if resolved.toggle(toggle) != Some(true) {
-                return Err(OfferArgError::OptionDisabled {
-                    name: param.name.clone(),
-                    value: value.to_string(),
-                    reason: format!("it is offered only with `{toggle}` on"),
-                });
-            }
+            return Err(OfferArgError::OptionDisabled {
+                name: param.name.clone(),
+                value: value.to_string(),
+                reason,
+            });
         }
         Ok(())
     }

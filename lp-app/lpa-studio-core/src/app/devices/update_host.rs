@@ -36,8 +36,10 @@
 //! running an Update (an activity that ends with no link attached raises no
 //! abandon).
 //!
-//! **Which build** (DS7): `Install { version }` takes this Studio's own build
-//! when it is that version, else the store's release of it; `Auto` and
+//! **Which build** (DS7): `Install { version }` takes the custom build
+//! picked from files when it is that version ("From a file…",
+//! [`super::firmware_file_build`]), else this Studio's own build when it is
+//! that version, else the store's release of it; `Auto` and
 //! `Reinstall` take this Studio's own build when it has one (the driver finds
 //! another build's engine itself, through the engine-source effects). With
 //! no build of its own, a restore needs none: the host finds the board's
@@ -93,11 +95,14 @@ use super::device_firmware_sources::StudioFirmwareStore;
 use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
 use super::own_build_source::{OwnBuildSource, verified_own_build};
+use super::store_lookups::{StoreLookup, StoreLookups};
 use super::update_auto_start::{board_build_facts, board_engine_sha};
-use super::update_build_facts::StoreLatest;
+use super::update_build_facts::{StoreLatest, StoreReleases};
 use super::update_driver_mirror::{decision_facts, driver_intent, outcome_facts, stage_facts};
 use super::update_narration::{NarrationNames, UpdateNarration};
-use super::update_store_builds::{store_build, store_engine, store_latest};
+use super::update_store_builds::{
+    store_build, store_engine, store_latest, store_release_entry, store_releases,
+};
 
 /// How often a run's driver is ticked (a login backoff; the Waiting ask).
 const TICK_INTERVAL: Duration = Duration::from_millis(250);
@@ -202,6 +207,10 @@ impl UpdateHost {
                     pins: BTreeMap::new(),
                     latest: None,
                     latest_asked: None,
+                    releases: None,
+                    releases_asked: None,
+                    lookups: StoreLookups::default(),
+                    file_build: None,
                 })
             }),
         }
@@ -349,6 +358,37 @@ impl UpdateHost {
     pub(crate) fn store_latest(&self) -> Option<StoreLatest> {
         self.state.borrow().latest.clone()
     }
+
+    /// Ask the store for its release index of `target`, once per target
+    /// and store epoch (a miss, a 404 or a refused index is "no list" until
+    /// the epoch moves).
+    pub(crate) fn want_store_releases(&self, target: &str) {
+        HostState::want_store_releases(&self.state, target);
+    }
+
+    /// The store's release index, once it answered with one.
+    pub(crate) fn store_releases(&self) -> Option<StoreReleases> {
+        self.state.borrow().releases.clone()
+    }
+
+    /// Ask the store for release `version` of `target` by its exact
+    /// version ("Other version…"'s box), once — again only after an
+    /// offline answer.
+    pub(crate) fn want_store_lookup(&self, target: &str, version: &str) {
+        HostState::want_store_lookup(&self.state, target, version);
+    }
+
+    /// Hold the custom build picked from files ("From a file…"): from now
+    /// on an `Install` of its version serves it, ahead of this Studio's own
+    /// build and the store's.
+    pub(crate) fn hold_file_build(&self, build: HostBuild) {
+        self.state.borrow_mut().file_build = Some(build);
+    }
+
+    /// Every look-up asked, and where each stands.
+    pub(crate) fn store_lookups(&self) -> StoreLookups {
+        self.state.borrow().lookups.clone()
+    }
 }
 
 /// A run's remembered failure (see [`UpdateHost::auto_blocked`]).
@@ -431,6 +471,12 @@ struct HostState {
     pins: BTreeMap<DeviceId, String>,
     latest: Option<StoreLatest>,
     latest_asked: Option<(String, u64)>,
+    releases: Option<StoreReleases>,
+    releases_asked: Option<(String, u64)>,
+    lookups: StoreLookups,
+    /// The custom build picked from files: an `Install` of its version
+    /// serves it.
+    file_build: Option<HostBuild>,
 }
 
 impl HostState {
@@ -677,6 +723,23 @@ impl HostState {
         };
         let generation = run.generation;
         let facts = run.facts.clone();
+        // A custom build picked from files serves an install of its version.
+        if let UpdateIntentFacts::Install { version, .. } = &run.intent
+            && let Some(file) = self
+                .file_build
+                .as_ref()
+                .filter(|file| file.identity.version == *version)
+        {
+            let loaded = Ok(file.clone());
+            (seams.spawn)(Box::pin(async move {
+                if let Some(cell) = me.upgrade() {
+                    cell.borrow_mut()
+                        .build_loaded(device, generation, loaded, false);
+                }
+            }));
+            run.phase = RunPhase::Preparing { source: None };
+            return;
+        }
         let wants_own = match &run.intent {
             UpdateIntentFacts::Install { version, .. } => own_facts
                 .as_ref()
@@ -1494,6 +1557,79 @@ impl HostState {
                     }
                 }
             }
+        }));
+    }
+
+    fn want_store_releases(cell: &Rc<RefCell<Self>>, target: &str) {
+        let mut state = cell.borrow_mut();
+        let Some(seams) = state.seams.clone() else {
+            return;
+        };
+        let Some(store) = seams.store.clone() else {
+            return;
+        };
+        let asked = (target.to_string(), state.store_epoch);
+        if state.releases_asked.as_ref() == Some(&asked) {
+            return;
+        }
+        state.releases_asked = Some(asked);
+        let me = state.me.clone();
+        let target = target.to_string();
+        (seams.spawn)(Box::pin(async move {
+            let answer = store_releases(store, target).await;
+            let Some(cell) = me.upgrade() else {
+                return;
+            };
+            let mut state = cell.borrow_mut();
+            match answer {
+                Ok(index) => {
+                    state.note_store_answer(false);
+                    state.releases = index.map(|index| StoreReleases { index });
+                }
+                Err(miss) => {
+                    log::debug!("firmware store: no release index: {}", miss.why);
+                    if miss.offline {
+                        state.note_store_answer(true);
+                        // Asked again when the store is back.
+                        state.releases_asked = None;
+                    }
+                }
+            }
+        }));
+    }
+
+    fn want_store_lookup(cell: &Rc<RefCell<Self>>, target: &str, version: &str) {
+        let mut state = cell.borrow_mut();
+        if !state.lookups.wants(target, version) {
+            return;
+        }
+        let Some(seams) = state.seams.clone() else {
+            return;
+        };
+        let Some(store) = seams.store.clone() else {
+            state.lookups.set(target, version, StoreLookup::Offline);
+            return;
+        };
+        state.lookups.set(target, version, StoreLookup::Looking);
+        let me = state.me.clone();
+        let (target, version) = (target.to_string(), version.to_string());
+        (seams.spawn)(Box::pin(async move {
+            let answer = store_release_entry(store, target.clone(), version.clone()).await;
+            let Some(cell) = me.upgrade() else {
+                return;
+            };
+            let mut state = cell.borrow_mut();
+            let lookup = match answer {
+                Ok(Some(entry)) => StoreLookup::Found(entry),
+                Ok(None) => StoreLookup::Missing,
+                Err(miss) if miss.offline => StoreLookup::Offline,
+                Err(miss) => {
+                    log::debug!("firmware store: {version} refused: {}", miss.why);
+                    StoreLookup::Missing
+                }
+            };
+            state.note_store_answer(lookup == StoreLookup::Offline);
+            state.lookups.set(&target, &version, lookup);
         }));
     }
 }

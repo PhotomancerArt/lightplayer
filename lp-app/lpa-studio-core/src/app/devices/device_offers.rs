@@ -17,7 +17,8 @@
 //! | `flash` | the needs-firmware faces ([`flash_device_offer`]) |
 //! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting) |
 //! | `reinstall-firmware` | the board's firmware keeps crashing ([`update_offers`]) |
-//! | `install-firmware` | keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): one `version` choice ([`update_offers`]) |
+//! | `install-firmware` | an idle board that can update over the air — up to date, update available, newer, rolled back, keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): a `find` box over a `version` choice from the store's release index, or a look-up of a version the box names ([`update_offers`]) |
+//! | `install-firmware-file` | wherever `install-firmware` opens its list: "From a file…", a custom build's update files picked in the web's file dialog (needs the user's click; the build joins the list, and its install arms) ([`update_offers`]) |
 //! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
 //! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
 //! | `connect` | the port is there but closed |
@@ -533,6 +534,7 @@ mod tests {
                     to: y.clone(),
                 },
                 route: UpdateRoute::OverTheAir,
+                ..Default::default()
             },
             ..facts(DeviceFace::Wire)
         };
@@ -561,11 +563,22 @@ mod tests {
 
         let crashing = DeviceOfferFacts {
             update: UpdateOfferFacts {
-                standing: UpdateStanding::KeepsCrashing {
-                    board: y.clone(),
-                    choices: vec![y, UpdateVersion::new("2026.10.07-4")],
-                },
+                standing: UpdateStanding::KeepsCrashing { board: y },
                 route: UpdateRoute::OverTheAir,
+                choices: vec![crate::InstallChoice {
+                    version: UpdateVersion::new("2026.10.07-4"),
+                    age: lpa_devices::FirmwareAge::Older,
+                    on_board: false,
+                    refused: false,
+                    own: false,
+                    from_file: false,
+                    wire: None,
+                    needs_usb_after: false,
+                    published_at: None,
+                    recent: true,
+                }],
+                listed: true,
+                ..UpdateOfferFacts::default()
             },
             ..facts(DeviceFace::Wire)
         };
@@ -580,6 +593,7 @@ mod tests {
             [
                 "reinstall-firmware",
                 "install-firmware",
+                "install-firmware-file",
                 "identify",
                 "reset-board",
                 "disconnect",

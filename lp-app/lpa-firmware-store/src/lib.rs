@@ -9,7 +9,8 @@
 //!   and hosts without OPFS.
 //! - **The store client** ([`FirmwareStore`]): lookup URLs at an origin
 //!   ([`DEFAULT_FIRMWARE_STORE_ORIGIN`], or a dev flag's) and verification of
-//!   everything fetched, over an injected [`FirmwareFetch`].
+//!   everything fetched, over an injected [`FirmwareFetch`];
+//!   [`FirmwareStore::releases`] reads a target's release index.
 //! - [`fetch_engine_from_store`]: an engine for a board's target and build
 //!   id, checked against the hash the board reported.
 //! - [`keep_installed_engine`]: the engine a USB install just wrote, sliced

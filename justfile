@@ -4884,6 +4884,9 @@ walk-drop-emu *args:
 # Y's update files). Serves the bundle itself (no dev server). Proves the
 # transport, the card and the board's own words — not Bluetooth, and not
 # Chromium's USB stack (the desk check does that). Minutes per step; not CI.
+# `--steps install-older` (not a default step) walks "Other version…" over a
+# real lp-cloud-server's release index: two release images r1/r2, built here
+# when missing.
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -4894,6 +4897,17 @@ walk-ota-emu *args: install-rv32-target
     fi
     if [[ ! -f "${images}/mono/package/manifest.json" ]]; then
         ./target/debug/lp-cli firmware package esp32c6-4mb --single-image --out "${images}/mono/package"
+    fi
+    # install-older's (and install-lookup's) two releases (they differ only
+    # in their version), and
+    # the real lp-cloud-server it stands them behind.
+    if [[ " {{ args }} " == *install-older* || " {{ args }} " == *install-lookup* || " {{ args }} " == *install-file* ]]; then
+        for release in r1:2026.10.01-1 r2:2026.10.02-1; do
+            if [[ ! -f "${images}/${release%%:*}/ota/ota-manifest.json" ]]; then
+                scripts/ota/build-image.sh "${images}/${release%%:*}" "${release#*:}"
+            fi
+        done
+        cargo build -q -p lp-cloud-server
     fi
     # Y last: build-image.sh writes the parts directory the bundle copies.
     just studio-firmware-package-esp32c6 split

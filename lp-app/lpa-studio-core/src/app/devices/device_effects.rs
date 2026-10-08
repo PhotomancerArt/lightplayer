@@ -356,6 +356,32 @@ impl DeviceEffects {
         self.update.want_store_latest(target);
     }
 
+    /// Ask the store for its release index of `target` (once per target
+    /// and store epoch).
+    pub(crate) fn want_store_releases(&mut self, target: &str) {
+        self.refresh_update_seams();
+        self.update.want_store_releases(target);
+    }
+
+    /// Ask the store for release `version` of `target` by its exact
+    /// version (once; again after an offline answer).
+    pub(crate) fn want_store_lookup(&mut self, target: &str, version: &str) {
+        self.refresh_update_seams();
+        self.update.want_store_lookup(target, version);
+    }
+
+    /// Hold the custom build picked from files: an install of its version
+    /// serves it (until another is picked).
+    pub(crate) fn hold_file_build(&mut self, build: lpa_update::HostBuild) {
+        self.refresh_update_seams();
+        self.update.hold_file_build(build);
+    }
+
+    /// Every look-up asked of the store, and where each stands.
+    pub(crate) fn store_lookups(&self) -> super::StoreLookups {
+        self.update.store_lookups()
+    }
+
     /// The layout step's state (the C6 repartition): backup store, staged
     /// plans, the cached backup index.
     pub fn layout(&self) -> &super::device_layout_effect::LayoutEffects {

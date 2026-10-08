@@ -605,6 +605,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | unexplained-transient-stall | 2026-09-11 | [the-tab-walks-upload-step-flaked-once-in-three](2026-09-11-the-tab-walks-upload-step-flaked-once-in-three.md) | **open** (undiagnosed) | scripts/emu/walk-no-board.mjs — the tab-backed upload step |
 | bound-in-a-foreign-unit | 2026-09-13 | [the-dilation-window-drains-one-shift-at-a-time](2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md) | fixed | lpa-studio-web `public/lpa-link/emulator_worker.js` (the tab backing's pacing loop) |
 | lifecycle-ownership | 2026-09-13 | [a-stabilization-timer-outlived-the-popover](2026-09-13-a-stabilization-timer-outlived-the-popover.md) | fixed | lpa-studio-web `base/popover.rs`: a `forget()`-ed `setTimeout` (plus the fonts-ready future and an already-queued observer rAF) measured into signals the popover's scope had dropped — twelve panics under a green walk |
+| assumed-context | 2026-10-07 | [three-firmware-chips-painted-over-each-other-in-a-narrow-card](2026-10-07-three-firmware-chips-painted-over-each-other-in-a-narrow-card.md) | fixed (9b3cad436) | lpa-studio-web `device_roster_card.rs`: the firmware row was a fixed-height nowrap flex row sized for two chips; "Other version…" beside another install verb made three, painted over each other in a narrow card (found by `walk-ota-emu --steps install-older`). The row wraps when an install verb sits beside Update or Reinstall |
 
 ## Predecessor: `docs/bugs/`
 

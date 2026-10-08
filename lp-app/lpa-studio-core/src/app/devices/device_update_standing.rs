@@ -37,7 +37,8 @@ use lpc_update::BoardState;
 
 use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
-use super::update_build_facts::StoreLatest;
+use super::store_lookups::StoreLookups;
+use super::update_build_facts::{StoreLatest, StoreReleases};
 
 /// Everything a board's standing is read from. A struct so the card, the
 /// offers and the controller's no-click start all call the one function.
@@ -62,6 +63,16 @@ pub struct UpdateStandingInputs<'a> {
     pub link: UpdateLink,
     /// The firmware store's latest release, when known.
     pub store_latest: Option<&'a StoreLatest>,
+    /// The firmware store's release index, when known. The standing never
+    /// reads it; the card's version choices do
+    /// ([`super::UpdateOfferFacts::read`]).
+    pub store_releases: Option<&'a StoreReleases>,
+    /// The releases looked up by exact version, when any were. Like the
+    /// index, read only by the card's version choices.
+    pub store_lookups: Option<&'a StoreLookups>,
+    /// The custom build picked from files ("From a file…"), when one is.
+    /// Read only by the card's version choices.
+    pub file_build: Option<&'a HostBuildFacts>,
 }
 
 /// Where a board stands. See the module docs for which row is which.
@@ -125,21 +136,18 @@ pub enum UpdateStanding {
         link: UpdateLink,
     },
     /// The board's firmware (`board`) keeps crashing, so it stopped
-    /// trying. `choices`: the versions this Studio can install instead,
-    /// its own first.
-    KeepsCrashing {
-        board: UpdateVersion,
-        choices: Vec<UpdateVersion>,
-    },
+    /// trying. The versions it can take instead are the card's choices
+    /// ([`super::InstallChoice`]).
+    KeepsCrashing { board: UpdateVersion },
     /// The board needs `board` to start, and this Studio could not get it.
     /// `own`: this Studio's version, which it can install instead.
     CantGetVersion {
         board: UpdateVersion,
         own: UpdateVersion,
-        choices: Vec<UpdateVersion>,
     },
     /// An update to `refused` did not start, so the board went back to
-    /// `board` — and refuses that build from now on, so nothing is offered.
+    /// `board` — and refuses that build from now on (another version can
+    /// still be installed).
     RolledBack {
         board: UpdateVersion,
         refused: UpdateVersion,
@@ -297,7 +305,6 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
     else {
         return UpdateStanding::Nothing;
     };
-    let choices = install_choices(&own, inputs.store_latest, &board_view);
     match decision {
         Decision::Nothing => UpdateStanding::UpToDate { version: own },
         Decision::OfferUpdate { .. } => match board.age_against(&own) {
@@ -313,11 +320,7 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
                 Some(UpdateOutcomeFacts::MissingEngine { .. })
             ) =>
         {
-            UpdateStanding::CantGetVersion {
-                board,
-                own,
-                choices,
-            }
+            UpdateStanding::CantGetVersion { board, own }
         }
         Decision::Heal { .. } if finishing_own(Some(&board_view), inputs.own) => {
             UpdateStanding::Finishing {
@@ -356,7 +359,7 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
             to: own,
             link: inputs.link,
         },
-        Decision::ReportCrashing { .. } => UpdateStanding::KeepsCrashing { board, choices },
+        Decision::ReportCrashing { .. } => UpdateStanding::KeepsCrashing { board },
         Decision::RefusedBuild { .. } => UpdateStanding::RolledBack {
             board,
             refused: own,
@@ -394,24 +397,6 @@ fn version_named(
         .find(|build| build.identity.version == version)
         .map(own_version)
         .unwrap_or_else(|| UpdateVersion::new(version))
-}
-
-/// The versions "Other version…" offers (DS7): this Studio's own, then the
-/// store's latest when it is for the board's target and not the same.
-fn install_choices(
-    own: &UpdateVersion,
-    latest: Option<&StoreLatest>,
-    board: &BoardView,
-) -> Vec<UpdateVersion> {
-    let mut choices = vec![own.clone()];
-    let target = board.manifest.as_ref().map(|m| m.target.as_str());
-    if let Some(latest) = latest
-        && Some(latest.target()) == target
-        && latest.version() != own.version
-    {
-        choices.push(own_version(&latest.facts));
-    }
-    choices
 }
 
 /// Whether a heal is the tail of this Studio's own update: the board runs
@@ -528,42 +513,12 @@ pub(crate) mod tests {
         let y = studio_y();
         let facts = facts_of(&needs_engine());
         let standing = update_standing(&inputs(&view, Some(&facts), Some(&y)));
-        let UpdateStanding::CantGetVersion {
-            board,
-            own,
-            choices,
-        } = &standing
-        else {
+        let UpdateStanding::CantGetVersion { board, own } = &standing else {
             panic!("{standing:?}");
         };
         assert_eq!(board.version, "2026.10.03-1");
         assert_eq!(own.version, "2026.10.05-2");
-        assert_eq!(choices, &vec![own.clone()]);
         assert!(!wants_auto_start(&standing), "it would loop");
-    }
-
-    #[test]
-    fn other_version_offers_the_stores_latest_when_it_is_for_this_target_and_different() {
-        let view = ready_view();
-        let y = studio_y();
-        let facts = facts_of(&crashing());
-        let latest = StoreLatest {
-            facts: build("2026.10.07-4", [0xCC; 32], [0xCE; 32]),
-        };
-        let mut with_latest = inputs(&view, Some(&facts), Some(&y));
-        with_latest.store_latest = Some(&latest);
-        let UpdateStanding::KeepsCrashing { choices, .. } = update_standing(&with_latest) else {
-            panic!();
-        };
-        let versions: Vec<&str> = choices.iter().map(|c| c.version.as_str()).collect();
-        assert_eq!(versions, ["2026.10.05-2", "2026.10.07-4"]);
-
-        let same = StoreLatest { facts: studio_y() };
-        with_latest.store_latest = Some(&same);
-        let UpdateStanding::KeepsCrashing { choices, .. } = update_standing(&with_latest) else {
-            panic!();
-        };
-        assert_eq!(choices.len(), 1, "the same version is not offered twice");
     }
 
     #[test]
@@ -679,6 +634,9 @@ pub(crate) mod tests {
             tier: None,
             link: UpdateLink::Usb,
             store_latest: None,
+            store_releases: None,
+            store_lookups: None,
+            file_build: None,
         }
     }
 
