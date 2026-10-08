@@ -38,10 +38,15 @@ board that refuses (below the edit tier, or an embedder that cannot reset)
 leaves nothing waiting. In core the offer reads `ResetReach`, not
 `firmware_blocked`. `Lines` (USB, serial, a sim) keeps today's line reset.
 `Request { author }` is enabled for the author tier and disabled below it
-with "Reset needs an author password when the board isn't plugged in —
-unlock with one". A pending network link that has not answered says
-"Reset is ready once the board answers". `RESET_NEEDS_USB` is gone, and
+with "Unlock to reset". A pending network link that has not answered says
+"Reset waits for the board to answer". `RESET_NEEDS_USB` is gone, and
 `is_over_bluetooth`'s docs now say what it really reads.
+
+The card says Reset's reason on its own line UNDER the verb row, not
+under the button. The row is one `nowrap` line, so a reason in the
+button's column widens that column, and the first, longer wording pushed
+Disconnect and Forget past the card's edge (`ble-card-locked`, all three
+widths). "Reset needs USB" had fit only by being short.
 
 **Regression coverage** — `lpa-devices` `tests/scenarios.rs`:
 `reset_over_a_network_link_asks_the_board_to_restart_itself` (lan, ble,

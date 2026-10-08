@@ -46,15 +46,22 @@ pub(crate) fn roster_tree(
     }
     tree.append(pending_tree(&devices.roster.pending));
     for card in &devices.roster.devices {
-        let locked = devices
+        let unlock = devices
             .access
             .get(&card.id)
-            .is_some_and(|access| access.unlock == Some(UiUnlockOffer::Locked));
+            .and_then(|access| access.unlock);
         let face = match devices.runtime_bands.contains_key(&card.id) {
             true => DeviceFace::Sim,
             false => DeviceFace::Wire,
         };
-        tree.append(card_tree(card, face, locked, projects, examples));
+        tree.append(card_tree_unlocked(
+            card,
+            face,
+            unlock,
+            projects,
+            examples,
+            Default::default(),
+        ));
         if let Some((_, ip)) = wifi_addresses.iter().find(|(device, _)| *device == card.id) {
             let connecting = devices
                 .wifi_connects
@@ -101,16 +108,34 @@ pub(crate) fn card_tree_with_update(
     examples: &[UiExampleCard],
     update: UpdateOfferFacts,
 ) -> UiOfferTree {
+    let unlock = locked.then_some(UiUnlockOffer::Locked);
+    card_tree_unlocked(card, face, unlock, projects, examples, update)
+}
+
+/// [`card_tree_with_update`] read off the card's unlock state, as the
+/// controller reads it: `Locked` is offered no push, and anything short of
+/// the author tier (`Locked`, `PlayOnly`) is offered Reset disabled.
+fn card_tree_unlocked(
+    card: &DeviceView,
+    face: DeviceFace,
+    unlock: Option<UiUnlockOffer>,
+    projects: &[UiPackageCard],
+    examples: &[UiExampleCard],
+    update: UpdateOfferFacts,
+) -> UiOfferTree {
     let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
     let facts = DeviceOfferFacts {
         prefix: prefix.clone(),
         face,
         autoconnect: false,
-        locked,
+        locked: unlock == Some(UiUnlockOffer::Locked),
         // A story card on a network link (it carries the firmware reason)
-        // restarts by request, with the author tier unless it is locked.
+        // restarts by request, with the author tier when nothing asks it to
+        // unlock.
         reset: match card.firmware_blocked.is_some() {
-            true => ResetReach::Request { author: !locked },
+            true => ResetReach::Request {
+                author: unlock.is_none(),
+            },
             false => ResetReach::Lines,
         },
         banked: false,
@@ -151,6 +176,11 @@ pub(crate) fn CardOffers(
     card: DeviceView,
     #[props(default)] sim: bool,
     #[props(default)] locked: bool,
+    /// The card's unlock state, when its story tells one: what a play-only
+    /// link is offered differs from an unlocked one (Reset needs the author
+    /// tier). `locked` alone stands for `Locked`.
+    #[props(default)]
+    unlock: Option<UiUnlockOffer>,
     #[props(default)] projects: Vec<UiPackageCard>,
     #[props(default)] examples: Vec<UiExampleCard>,
     /// The board's update standing and route, when it tells an update
@@ -163,7 +193,8 @@ pub(crate) fn CardOffers(
         true => DeviceFace::Sim,
         false => DeviceFace::Wire,
     };
-    let offers = card_tree_with_update(&card, face, locked, &projects, &examples, update);
+    let unlock = unlock.or(locked.then_some(UiUnlockOffer::Locked));
+    let offers = card_tree_unlocked(&card, face, unlock, &projects, &examples, update);
     rsx! {
         OffersProvider { offers, {children} }
     }
@@ -235,14 +266,12 @@ pub(crate) fn StoryDeviceCard(
     update_facts: UpdateOfferFacts,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
-    let locked = access
-        .as_ref()
-        .is_some_and(|access| access.unlock == Some(UiUnlockOffer::Locked));
+    let unlock = access.as_ref().and_then(|access| access.unlock);
     rsx! {
         CardOffers {
             card: card.clone(),
             sim: runtime.is_some(),
-            locked,
+            unlock,
             projects: projects.clone(),
             examples: examples.clone(),
             update: update_facts,

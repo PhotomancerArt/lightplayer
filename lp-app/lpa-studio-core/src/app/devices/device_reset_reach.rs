@@ -21,9 +21,12 @@ pub enum ResetReach {
 /// Why Reset is disabled on a board reached over Bluetooth, Wi‑Fi or the
 /// relay whose link does not hold the author (edit) tier: the board would
 /// refuse the request.
-pub const RESET_NEEDS_AUTHOR: &str =
-    "Reset needs an author password when the board isn't plugged in — unlock with one";
+///
+/// Short on purpose: the card says it on one line under its verb row, just
+/// below the info line's "Unlock" (or the play-only strip's "Enter a
+/// password"), which is the way to it.
+pub const RESET_NEEDS_AUTHOR: &str = "Unlock to reset";
 
 /// Why a network link that has not answered yet offers no Reset: there is
 /// nobody to ask, and no password has been checked.
-pub const RESET_WAITS_FOR_ANSWER: &str = "Reset is ready once the board answers";
+pub const RESET_WAITS_FOR_ANSWER: &str = "Reset waits for the board to answer";

@@ -314,6 +314,7 @@ pub(crate) fn DeviceRosterCard(
     // port, which is the same condition the model's own spawns check.
     let linked = card.escapes.contains(&DeviceEscape::Disconnect);
     let idle = card.activity.is_none();
+    let reset_said = reset_reason(verb("reset-board").filter(|_| idle).as_ref());
     // The running face's push ("Replace…"), withdrawn while work runs (D9).
     let replace_push = push
         .clone()
@@ -926,8 +927,9 @@ pub(crate) fn DeviceRosterCard(
                 // The info line, with "Unlock" at its end when the device
                 // needs a password (it opens the sheet). On the LINE rather
                 // than in the verb row, because a Bluetooth card's row
-                // already holds Reset-with-its-reason, Disconnect and
-                // Forget; the line truncates its freshness first.
+                // already holds Reset, Disconnect and Forget (Reset's
+                // reason goes on its own line under the row); the line
+                // truncates its freshness first.
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
                     div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
                         p { class: info_line_class(), title: "{device_line}", "{device_line}" }
@@ -967,6 +969,7 @@ pub(crate) fn DeviceRosterCard(
                                 action: reset.action,
                                 running: false,
                                 variant: ActionButtonVariant::Quiet,
+                                reason_said_elsewhere: true,
                                 on_action,
                             }
                         }
@@ -995,6 +998,9 @@ pub(crate) fn DeviceRosterCard(
                             }
                         }
                     }
+                }
+                if let Some(reason) = reset_said {
+                    p { class: row_reason_class(), "{reason}" }
                 }
             }
             // The layout question (or refusal): a sheet over the page, so
@@ -1484,6 +1490,7 @@ pub(crate) fn PendingLinkCard(
                             action: reset.action,
                             running: false,
                             variant: ActionButtonVariant::Quiet,
+                            reason_said_elsewhere: true,
                             on_action,
                         }
                     }
@@ -1510,6 +1517,9 @@ pub(crate) fn PendingLinkCard(
                             on_action,
                         }
                     }
+                }
+                if let Some(reason) = reset_reason(verb("reset-board").as_ref()) {
+                    p { class: row_reason_class(), "{reason}" }
                 }
             }
         }
@@ -2126,6 +2136,23 @@ fn preview_slot_sentence(
 /// glow flat. The row's HEIGHT is what AC2 needs, and that is fixed here;
 /// the flexible spacer carries `min-w-0` so it collapses first when a
 /// narrow card runs out of room.
+/// Reset's disabled reason, when the card draws it disabled. Said on its own
+/// line UNDER the verb row, never under the button: the row is one
+/// `nowrap` line, so a reason in the button's column widened that column
+/// and pushed Disconnect and Forget past the card's edge (PR #1042's
+/// stories, `ble-card-locked`).
+fn reset_reason(reset: Option<&UiOffer>) -> Option<String> {
+    match &reset?.action.meta().enablement {
+        ActionEnablement::Enabled => None,
+        ActionEnablement::Disabled { reason } => Some(reason.clone()).filter(|r| !r.is_empty()),
+    }
+}
+
+/// The line a verb row's disabled reason is said on, below the row.
+fn row_reason_class() -> &'static str {
+    "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground"
+}
+
 fn verb_row_class() -> &'static str {
     "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:whitespace-nowrap"
 }
