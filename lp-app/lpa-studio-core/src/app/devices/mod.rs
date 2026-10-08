@@ -112,6 +112,8 @@ pub mod own_build_source;
 pub mod pending_link_offers;
 pub mod provisional_board_numbers;
 pub mod relay_connect_failure;
+pub mod relay_connect_offer;
+pub mod relay_connect_op;
 pub mod relay_transport;
 pub mod runtime_backing;
 pub mod runtime_band;
@@ -258,6 +260,8 @@ pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use relay_connect_failure::{
     RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS, RelayConnectFailure,
 };
+pub use relay_connect_offer::{RELAY_CONNECTING, connect_relay_offer};
+pub use relay_connect_op::RelayConnectOp;
 pub use relay_transport::{RelayDeviceTransport, RelayLinkSource};
 pub use runtime_backing::{Backing, EMULATED_TARGETS, backing_for, emu_offered_for};
 pub use runtime_band::{UiRuntimeBand, speed_word};
