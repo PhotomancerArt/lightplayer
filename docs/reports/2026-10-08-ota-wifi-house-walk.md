@@ -1,11 +1,33 @@
 # Studio updates a board over Wi‑Fi: the house walk, LAN half (protocol)
 
-**Status: protocol, not yet walked.** Gate G1 of
+**Status: walked and passed, 2026-10-08, by Yona** (see "The result"
+below; the steps for the lid-closed and second-tab cases were not walked).
+Gate G1 of
 `lp2025/2026-10-06-2249-ota-wifi-updates` (PR B, P8). Yona, at home, with a
 board on the house Wi‑Fi and **no USB cable**. The agent's pre-walk (below)
 ran the same flow on the desk, on the test access point, with Mac Chrome
 headless: it is evidence the flow works on a real radio, not the feel of it.
-The blank rows are filled in at and after the walk.
+The blank rows below were not filled in; the result is recorded in prose.
+
+## The result (2026-10-08, Yona)
+
+**Passed.** Board: loose-c6, on the house Wi‑Fi. Studio: this PR's, in a
+laptop browser. Power was cut at about 50 % during each of the three
+stages: **the backup, the core update and the engine update**. All three
+recovered with no lost progress. In Yona's words: "it worked perfectly. I
+killed power at 50% on each stage. backing up firmware. first stage update,
+and second stage update. it recovered all three times without even losing
+progress."
+
+| Step | Walked? |
+|---|---|
+| 1. Studio reaches the board over Wi‑Fi | yes |
+| 2. Update | yes |
+| 3. Update again, power off mid-update | yes (power cut at about 50 % in the backup, the core and the engine) |
+| 4. Close the laptop (or the tab) mid-update | **not walked** |
+| 5. A second Studio tab while an update runs | **not walked** |
+
+Per-step timings and card wording were not recorded.
 
 ## What you need
 
