@@ -42,16 +42,15 @@ pub const USB_UPDATES_OVER_THE_AIR: bool = true;
 pub const FIRST_BLUETOOTH_UPDATE_RELEASE: Option<&str> = Some("2026.10.07-16");
 
 /// The first release that serves the update channel over Wi‑Fi (the LAN):
-/// none yet — OTA M8's board half is not in a release. While it is `None`,
-/// every choice older than the board's warns over Wi‑Fi, as Bluetooth's
-/// did before its release was named.
-pub const FIRST_WIFI_UPDATE_RELEASE: Option<&str> = None;
+/// `2026.10.08-2`, the release of #1035's merge (`3c1524500`, the board
+/// taking updates over Wi‑Fi). A release older than it ignores the channel
+/// on its LAN link, so "Other version…" warns about it and arms.
+pub const FIRST_WIFI_UPDATE_RELEASE: Option<&str> = Some("2026.10.08-2");
 
 /// The first release that serves the update channel through lightplayer.app's
-/// relay: none yet (OTA M8's relay half, PR C, is not in a release). While
-/// it is `None`, every choice older than the board's warns through the
-/// relay.
-pub const FIRST_RELAY_UPDATE_RELEASE: Option<&str> = None;
+/// relay: `2026.10.08-9`, the release of #1044's merge (`9aff4f66f`). An
+/// older release is updated nearby once before the relay can update it.
+pub const FIRST_RELAY_UPDATE_RELEASE: Option<&str> = Some("2026.10.08-9");
 
 /// The link an update would ride, as the card's words name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +94,18 @@ impl UpdateLink {
     /// tier), not physical access.
     pub fn is_wireless(self) -> bool {
         matches!(self, Self::Bluetooth | Self::Wifi | Self::Relay)
+    }
+
+    /// The first release that serves the update channel over this link:
+    /// `None` for USB, which always does, and for a link whose release is
+    /// not named.
+    pub fn first_update_release(self) -> Option<&'static str> {
+        match self {
+            Self::Usb => None,
+            Self::Bluetooth => FIRST_BLUETOOTH_UPDATE_RELEASE,
+            Self::Wifi => FIRST_WIFI_UPDATE_RELEASE,
+            Self::Relay => FIRST_RELAY_UPDATE_RELEASE,
+        }
     }
 
     /// A Wi‑Fi link, on the board's network or through the relay.
