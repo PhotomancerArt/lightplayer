@@ -68,12 +68,26 @@ fn failed() -> Element {
     frame(OpeningState::Failed {
         message: "engine wasm fetch/compile failed: NetworkError when attempting to fetch resource"
             .to_string(),
-        retry: UiAction::from_op(
+        retry: Some(UiAction::from_op(
             ControllerId::new(HOME_NODE_ID),
             HomeOp::OpenExample {
                 id: "catalog/fyeah-sign".to_string(),
             },
-        ),
+        )),
+        device: None,
+        needs_unlock: false,
+    })
+}
+
+#[story(
+    description = "A REFUSED open — the pre-flight classified this project's format/content as one this build cannot open (too old to upgrade automatically, say) rather than a transient failure. Retrying would re-run the same classifier against the same bytes and refuse the same way, so there is no Retry button here — only the way back (Yona, 2026-10-03: no Retry on a format refusal)."
+)]
+fn failed_refused() -> Element {
+    frame(OpeningState::Failed {
+        message: "ancient: Format 3 — too old for this Studio. This project is too old to \
+                  upgrade automatically; open it with an older LightPlayer first."
+            .to_string(),
+        retry: None,
         device: None,
         needs_unlock: false,
     })
@@ -137,12 +151,12 @@ fn failed_on_board() -> Element {
                   (compiling its shaders): transport error: Transport error: device did not \
                   respond within 20.0s"
             .to_string(),
-        retry: UiAction::from_op(
+        retry: Some(UiAction::from_op(
             ControllerId::new(HOME_NODE_ID),
             HomeOp::OpenExample {
                 id: "catalog/fyeah-sign".to_string(),
             },
-        ),
+        )),
         device: Some(choker()),
         needs_unlock: false,
     })
@@ -155,12 +169,12 @@ fn failed_on_board_needs_unlock() -> Element {
     frame(OpeningState::Failed {
         message: lpa_studio_core::not_permitted_sentence(lpa_studio_core::AccessTier::Edit)
             .to_string(),
-        retry: UiAction::from_op(
+        retry: Some(UiAction::from_op(
             ControllerId::new(HOME_NODE_ID),
             HomeOp::OpenExample {
                 id: "catalog/fyeah-sign".to_string(),
             },
-        ),
+        )),
         device: Some(choker()),
         needs_unlock: true,
     })
