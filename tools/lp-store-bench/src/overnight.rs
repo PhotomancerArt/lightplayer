@@ -162,6 +162,37 @@ fn round_units<'a>(
                 }
             }
         }
+        // P2b: the same cuts at a tight partition, so they land in GC.
+        for kind in [WorkloadKind::Save, WorkloadKind::Panel] {
+            for c in cands {
+                let Some(tight) = tight_sectors(c) else {
+                    continue;
+                };
+                let spec = workload_for(kind, c, round as u64);
+                for tear in TearModel::ALL {
+                    let (c, spec, seeds) = (c.clone(), spec.clone(), seeds.clone());
+                    units.push((
+                        2,
+                        format!("sweep {c}[{tight}] {} {}", spec.label(), tear.name()),
+                        Box::new(move || {
+                            let Ok((cand, cfg)) = parse_candidate_spec(&c, tight) else {
+                                return;
+                            };
+                            let Ok(wl) = corpora.build(&spec) else { return };
+                            let params = SweepParams {
+                                tears: vec![tear],
+                                seeds,
+                                max_cuts_per_step: max_cuts,
+                                steps: quick_steps(p, &wl),
+                                deadline: Some(deadline),
+                                ..Default::default()
+                            };
+                            sweep_exhaustive(cand.as_ref(), &cfg, &wl, &params, sink);
+                        }),
+                    ));
+                }
+            }
+        }
         // P3: double cuts.
         for kind in WorkloadKind::ALL {
             for c in cands {
@@ -289,6 +320,19 @@ fn round_units<'a>(
         ));
     }
     units
+}
+
+/// A partition small enough that the save and panel workloads on c40 run
+/// the store's garbage collection (or compaction) under the cuts: a little
+/// above each candidate's measured editable minimum. `None` where the
+/// candidate has no headroom to tighten (F1 cannot hold c40 at all).
+pub fn tight_sectors(cand: &str) -> Option<u32> {
+    match cand {
+        "f2" => Some(48),
+        "s1" => Some(96),
+        "t1" => Some(28),
+        _ => None,
+    }
 }
 
 /// `kind` on the candidate's big corpus (switch: c13 ↔ c40reuse).

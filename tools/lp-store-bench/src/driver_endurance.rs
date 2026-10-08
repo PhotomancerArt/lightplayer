@@ -95,8 +95,9 @@ pub fn day_steps(
         } else if in_day < shape.pushes + shape.saves {
             let docs: Vec<String> = cur.keys().cloned().collect();
             let mut s = Step::new("day-save");
-            for _ in 0..1 + rng.below(3) {
-                let p = &docs[rng.below(docs.len() as u64) as usize];
+            let k = 1 + rng.below(3) as usize;
+            for i in crate::workload::pick_distinct(&mut rng, docs.len(), k) {
+                let p = &docs[i];
                 let b = Arc::new(edit_doc(p, &cur[p], &mut rng));
                 cur.insert(p.clone(), b.clone());
                 s.put(format!("/projects/a/{p}"), b);

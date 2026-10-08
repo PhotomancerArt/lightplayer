@@ -464,9 +464,16 @@ fn smoke(c: &Common) {
 
 fn print_measure(m: &MeasureResult) {
     let w = m.workload.as_ref().map(|w| w.label()).unwrap_or_default();
+    let dials = m
+        .config
+        .as_ref()
+        .map(|c| c.dials_label())
+        .filter(|d| !d.is_empty())
+        .map(|d| format!("@{d}"))
+        .unwrap_or_default();
     println!(
         "  measure {:<10} {:<28} {:<5} sectors end/peak {:>3}/{:>3} used {:>4} wa {:>5.2} mount {:>7} B/{:>5} reads ram {:>6} erases {}..{} {}",
-        m.candidate,
+        format!("{}{dials}", m.candidate),
         w,
         if m.ok { "ok" } else { "FAIL" },
         m.sectors_nonblank_end,

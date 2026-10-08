@@ -152,17 +152,23 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
             }
         }
     }
+    // Eligibility counts every default-dial run of a candidate, at any
+    // partition size (`t1`, `t1[32]`).
+    let same =
+        |lab: &str, c: &str| lab == c || lab.strip_prefix(c).is_some_and(|r| r.starts_with('['));
     let cut_totals = |l: &str| {
         let (mut cases, mut fails) = (0, 0);
         for ((_, lab, _, _), v) in &sweeps {
-            if lab == l {
+            if same(lab, l) {
                 cases += v[0];
                 fails += v[2];
             }
         }
-        if let Some(v) = random.get(l) {
-            cases += v[2];
-            fails += v[3];
+        for (lab, v) in &random {
+            if same(lab, l) {
+                cases += v[2];
+                fails += v[3];
+            }
         }
         (cases, fails)
     };

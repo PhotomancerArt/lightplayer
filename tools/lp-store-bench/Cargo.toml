@@ -11,10 +11,23 @@ publish = false
 [dependencies]
 lp-nor-sim = { path = "../../lp-base/lp-nor-sim" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
+# T1: the prototype under test.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim"] }
 clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
 serde = { workspace = true, features = ["derive", "std"] }
 serde_json = "1"
+# F1/F2: littlefs exactly as the firmware links it (BSD-3-Clause); the core
+# crate only for `size_of` of its structs in the RAM report.
+littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+littlefs-rust-core = { version = "0.1.0", default-features = false }
+# F2: members deflated on write (the host's job; MIT OR Zlib OR Apache-2.0)
+# and inflated with the device's own decoder.
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
+lp-deflate = { path = "../../lp-base/lp-deflate" }
+# S1: sequential-storage's map (MIT OR Apache-2.0) over its async NOR traits.
+sequential-storage = { version = "8.0.2", features = ["alloc"] }
+embedded-storage-async = "0.4"
 
 [lints]
 workspace = true

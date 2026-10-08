@@ -1,19 +1,35 @@
 //! The candidates, by name.
 
+#[cfg(test)]
+mod candidate_tests;
+mod littlefs_package;
+mod littlefs_today;
+mod littlefs_volume;
 mod mem_candidate;
+mod package_format;
+mod seq_storage_layer;
+mod tree_store_candidate;
 
+pub use littlefs_package::LittlefsPackage;
+pub use littlefs_today::LittlefsToday;
 pub use mem_candidate::{MemCandidate, MemLayout};
+pub use seq_storage_layer::SeqStorageLayer;
+pub use tree_store_candidate::{TreeStoreCandidate, tree_store_config};
 
 use crate::{Candidate, CandidateConfig};
 
 /// Every candidate name the CLI accepts.
-pub const CANDIDATE_NAMES: &[&str] = &["mem", "mem-broken"];
+pub const CANDIDATE_NAMES: &[&str] = &["mem", "mem-broken", "f1", "f2", "s1", "t1"];
 
 /// A candidate by its short name.
 pub fn candidate_by_name(name: &str) -> Option<Box<dyn Candidate>> {
     Some(match name {
         "mem" => Box::new(MemCandidate::new(MemLayout::PingPong)),
         "mem-broken" => Box::new(MemCandidate::new(MemLayout::InPlace)),
+        "f1" => Box::new(LittlefsToday),
+        "f2" => Box::new(LittlefsPackage),
+        "s1" => Box::new(SeqStorageLayer),
+        "t1" => Box::new(TreeStoreCandidate),
         _ => return None,
     })
 }

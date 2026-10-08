@@ -36,7 +36,11 @@ pub struct MeasureResult {
     pub mount_read_bytes: u64,
     pub mount_read_calls: u64,
     pub mount_ops: u64,
+    /// The fresh mount's self-report (RAM after a mount).
     pub report: Option<CandidateReport>,
+    /// The self-report at the end of the run, before unmounting (counters
+    /// such as GC copies cover the whole run).
+    pub run_report: Option<CandidateReport>,
     pub violations_0_to_1: u64,
     /// Logical bytes of the store's live content at the end.
     pub live_logical_bytes: u64,
@@ -100,7 +104,9 @@ fn measure_inner(
             r.used_sectors_max = Some(r.used_sectors_max.unwrap_or(0).max(u));
         }
     }
-    r.used_sectors_end = store.report().used_sectors;
+    let run_report = store.report();
+    r.used_sectors_end = run_report.used_sectors;
+    r.run_report = Some(run_report);
     let flash = store.into_flash();
     let st = flash.stats();
     r.program_bytes = st.program_bytes;

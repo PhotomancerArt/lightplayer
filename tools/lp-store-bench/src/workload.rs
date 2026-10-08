@@ -190,8 +190,9 @@ impl CorpusSet {
                         let docs: Vec<String> = cur.keys().cloned().collect();
                         for i in 0..20 {
                             let mut st = Step::new(format!("save-{i}"));
-                            for _ in 0..1 + rng.below(3) {
-                                let p = &docs[rng.below(docs.len() as u64) as usize];
+                            let k = 1 + rng.below(3) as usize;
+                            for i in pick_distinct(&mut rng, docs.len(), k) {
+                                let p = &docs[i];
                                 let b = Arc::new(edit_doc(p, &cur[p], &mut rng));
                                 cur.insert(p.clone(), b.clone());
                                 st.put(p.clone(), b);
@@ -247,6 +248,19 @@ pub fn push_step(
         s.put(format!("/projects/{slot}/{}", d.rel), bytes);
     }
     s
+}
+
+/// `k` distinct indices in `0..n` (fewer when `n < k`): a save writes each
+/// document once, so the oracle's "old or new" is the only right answer.
+pub fn pick_distinct(rng: &mut SimRng, n: usize, k: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    while out.len() < k.min(n) {
+        let i = rng.below(n as u64) as usize;
+        if !out.contains(&i) {
+            out.push(i);
+        }
+    }
+    out
 }
 
 /// A ~600 B pretty-printed panel document with seeded knob values.
@@ -360,6 +374,27 @@ mod tests {
         let json = b"{\n  \"a\": 12\n}\n".to_vec();
         let e = edit_doc("x.json", &json, &mut rng);
         assert_ne!(e, json);
+    }
+
+    #[test]
+    fn a_save_never_writes_a_document_twice() {
+        let set = CorpusSet::new(None);
+        let wl = set
+            .build(&WorkloadSpec::new(WorkloadKind::Save, "syn:2:200", 3))
+            .unwrap();
+        for step in &wl.steps[2..] {
+            let paths: Vec<&str> = step
+                .ops
+                .iter()
+                .filter_map(|op| match op {
+                    crate::Op::Put { path, .. } => Some(path.as_str()),
+                    crate::Op::DeletePrefix(_) => None,
+                })
+                .collect();
+            let distinct: std::collections::BTreeSet<&str> = paths.iter().copied().collect();
+            assert_eq!(distinct.len(), paths.len(), "{}", step.label);
+        }
+        assert_eq!(pick_distinct(&mut SimRng::new(1), 2, 3).len(), 2);
     }
 
     #[test]

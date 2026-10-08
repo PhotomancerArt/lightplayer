@@ -204,8 +204,9 @@ fn next_step(
     Ok(match roll {
         2..=5 => {
             let mut s = Step::new("save");
-            for _ in 0..1 + rng.below(3) {
-                let d = docs[rng.below(docs.len() as u64) as usize];
+            let k = 1 + rng.below(3) as usize;
+            for i in crate::workload::pick_distinct(rng, docs.len(), k) {
+                let d = docs[i];
                 s.put(d.clone(), Arc::new(edit_doc(d, &model[d], rng)));
             }
             s
