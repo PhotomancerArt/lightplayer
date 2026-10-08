@@ -715,7 +715,17 @@ async function main() {
        })()`,
       { timeoutMs: STEP_MS, what: "the card's over-the-air Update" },
     );
-    await driver.click(label, { scope: `document.querySelector('#main')`, exact: true });
+    // An install that is not known newer arms first (Lasting, since "Other
+    // version…"): two dev builds have no order, so "Install <Y>" on the
+    // E13 row arms, and its button carries the arm's "Confirm install".
+    const armed = label.endsWith("Confirm install");
+    const shown = armed ? label.slice(0, -"Confirm install".length).trim() : label;
+    await driver.click(shown, { scope: `document.querySelector('#main')`, exact: true });
+    if (armed) {
+      await driver.waitFor(`Boolean(document.querySelector('#main .ux-armed'))`, { timeoutMs: STEP_MS, what: "the install to arm" });
+      await driver.click("Confirm install", { scope: `document.querySelector('#main')` });
+      return `${shown} (armed, confirmed)`;
+    }
     return label;
   };
   const upToDate = `/(up to date|same as this Studio)/.test(${MAIN_TEXT})`;
@@ -1571,7 +1581,7 @@ async function main() {
   for (const s of report.steps) {
     console.log(`  ${s.skipped ? "–" : s.ok ? "✓" : "✗"} ${s.name.padEnd(22)} ${s.skipped ?? s.summary ?? s.error ?? ""}`);
   }
-  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
+  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : LAN_LANE ? "+net=lan: emulated times, not a radio's" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
 
   await driver.close();
   if (hold) await releaseConsole(hold);
