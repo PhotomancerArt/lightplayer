@@ -140,7 +140,7 @@ pub struct DeviceView {
     /// [`FIRMWARE_NEEDS_USB`]'s sentence unless the current link carries
     /// lp-link's update channel (USB, Bluetooth, the LAN and the relay all
     /// do). [`Self::firmware_blocked`] keeps its meaning
-    /// for the USB-only verbs (flash, factory reset, reset); this one is the
+    /// for the USB-only verbs (flash, factory reset); this one is the
     /// update's alone. Whether the board announced the channel is a
     /// separate fact ([`crate::Evidence::announced_update_channel`]).
     #[serde(default)]
@@ -239,11 +239,11 @@ pub struct PendingLinkView {
     /// the board is, and the pending card's identity row must not pass one
     /// off as the other.
     pub mac: Option<String>,
-    /// Why this link cannot carry firmware or a reset, when it cannot — the
-    /// same reason [`DeviceView::firmware_blocked`] carries, read here off
-    /// the LINK's own endpoint because a pending link has no bound identity
-    /// yet. A Bluetooth link that is still identifying has no reset lines
-    /// either, so its card must not offer an enabled Reset.
+    /// Why this link cannot carry firmware, when it cannot — the same
+    /// reason [`DeviceView::firmware_blocked`] carries, read here off the
+    /// LINK's own endpoint because a pending link has no bound identity yet.
+    /// (Its Reset is decided apart from this: a network link's Reset is a
+    /// restart request, which waits for the board to answer.)
     #[serde(default)]
     pub firmware_blocked: Option<String>,
     /// Dismiss, expressed as [`Escape::Forget`].
@@ -500,8 +500,12 @@ impl FirmwareFace {
 }
 
 impl DeviceView {
-    /// Whether this board is reached over Bluetooth right now — the one
-    /// link that cannot carry firmware, which is how the card knows.
+    /// Whether this board's link cannot carry firmware — read off
+    /// [`Self::firmware_blocked`], so, despite the name, true on EVERY
+    /// network link: Bluetooth, the LAN and the relay alike. A surface that
+    /// must name the link checks for the LAN first (the card does). It is
+    /// not the Reset rule either: Reset over a network link is a restart
+    /// request (`Device::resets_by_request`), which this link CAN carry.
     pub fn is_over_bluetooth(&self) -> bool {
         self.firmware_blocked.as_deref() == Some(FIRMWARE_NEEDS_USB)
     }
@@ -513,9 +517,8 @@ impl DeviceView {
 }
 
 impl PendingLinkView {
-    /// Whether this link is a Bluetooth one — no reset lines, no ROM
-    /// downloader — which is how the pending card knows to draw Reset
-    /// disabled.
+    /// Whether this link is a Bluetooth one — no ROM downloader behind it,
+    /// so the pending card's Flash is drawn disabled.
     pub fn is_over_bluetooth(&self) -> bool {
         self.firmware_blocked.as_deref() == Some(FIRMWARE_NEEDS_USB)
     }

@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `flash` | the link settled on a needs-firmware verdict ([`flash_pending_offer`]); pressing it adopts the link |
 //! | `adopt` | "Set up this device", where Flash is not already that gesture |
-//! | `reset-board` | always: the recovery for a chip parked silent in its ROM downloader; disabled over Bluetooth |
+//! | `reset-board` | always: the recovery for a chip parked silent in its ROM downloader; disabled on a network link (Bluetooth, Wi‑Fi, the relay), whose Reset is a request to a board that has not answered yet |
 //! | `dismiss` | the projection's escape (it says Forget; dismissing hands the grant back), Lasting through its meta |
 //!
 //! A pending link is not a device, so its adopt and dismiss address the
@@ -19,13 +19,18 @@ use lpa_devices::Action;
 use lpa_devices::view::PendingLinkView;
 
 use super::device_affordance::pending_escape_action;
-use super::device_flash::RESET_NEEDS_USB;
 use super::device_flash_offer::flash_pending_offer;
+use super::device_reset_reach::{RESET_WAITS_FOR_ANSWER, ResetReach};
 use super::devices_op::DevicesOp;
 use crate::{OfferPath, UiOffer};
 
 /// Every offer `pending`'s card makes, under `prefix` (`devices/<board>`).
-pub fn pending_link_offers(pending: &PendingLinkView, prefix: &OfferPath) -> Vec<UiOffer> {
+/// `reset`: how the link would restart the board ([`ResetReach`]).
+pub fn pending_link_offers(
+    pending: &PendingLinkView,
+    prefix: &OfferPath,
+    reset: ResetReach,
+) -> Vec<UiOffer> {
     let at = |verb: &str| prefix.clone().child(verb);
     let mut offers = Vec::new();
     if let Some(flash) = flash_pending_offer(pending, prefix.clone()) {
@@ -38,15 +43,19 @@ pub fn pending_link_offers(pending: &PendingLinkView, prefix: &OfferPath) -> Vec
             DevicesOp::action_for(Action::AdoptLink { link: pending.link }),
         ));
     }
-    let reset = DevicesOp::action_for(Action::ResetBoard {
+    // Over a cable, Reset pulses the reset lines — the way out of a chip
+    // that prints nothing. Over a network link it would be a restart
+    // request to a board that has not said hello yet (and whose password
+    // nobody has checked), so it waits for the answer.
+    let action = DevicesOp::action_for(Action::ResetBoard {
         device: pending.device,
     });
     offers.push(UiOffer::new(
         at("reset-board"),
         "reset",
-        match pending.is_over_bluetooth() {
-            true => reset.disabled(RESET_NEEDS_USB),
-            false => reset,
+        match reset {
+            ResetReach::Lines => action,
+            ResetReach::Request { .. } => action.disabled(RESET_WAITS_FOR_ANSWER),
         },
     ));
     // Every escape the projection grants a pending link dismisses it; one
@@ -70,7 +79,8 @@ mod tests {
 
     #[test]
     fn a_blank_chip_flashes_resets_and_dismisses_but_does_not_adopt_twice() {
-        let offers = pending_link_offers(&pending(FirmwareFace::Blank), &prefix());
+        let offers =
+            pending_link_offers(&pending(FirmwareFace::Blank), &prefix(), ResetReach::Lines);
         assert_eq!(
             paths(&offers),
             [
@@ -96,7 +106,11 @@ mod tests {
 
     #[test]
     fn an_identifying_link_can_be_kept_reset_or_dismissed() {
-        let offers = pending_link_offers(&pending(FirmwareFace::Unknown), &prefix());
+        let offers = pending_link_offers(
+            &pending(FirmwareFace::Unknown),
+            &prefix(),
+            ResetReach::Lines,
+        );
         assert_eq!(
             paths(&offers),
             [
@@ -112,16 +126,26 @@ mod tests {
         );
     }
 
+    /// A network link (Bluetooth, Wi‑Fi, the relay) still identifying has
+    /// no reset lines, and its Reset would ask a board that has not answered:
+    /// drawn disabled, saying it waits for the answer — never "needs USB".
     #[test]
-    fn over_bluetooth_reset_is_drawn_disabled() {
-        let mut link = pending(FirmwareFace::Unknown);
-        link.firmware_blocked = Some(lpa_devices::view::FIRMWARE_NEEDS_USB.to_string());
-        let offers = pending_link_offers(&link, &prefix());
+    fn over_a_network_link_reset_waits_for_the_board_to_answer() {
+        let offers = pending_link_offers(
+            &pending(FirmwareFace::Unknown),
+            &prefix(),
+            ResetReach::Request { author: false },
+        );
         let reset = offers
             .iter()
             .find(|offer| offer.path.last() == Some("reset-board"))
             .unwrap();
-        assert!(!reset.is_enabled());
+        assert_eq!(
+            reset.action.meta().enablement,
+            crate::ActionEnablement::Disabled {
+                reason: RESET_WAITS_FOR_ANSWER.to_string()
+            }
+        );
     }
 
     fn paths(offers: &[UiOffer]) -> Vec<String> {

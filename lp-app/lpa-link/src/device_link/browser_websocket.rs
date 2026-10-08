@@ -152,7 +152,7 @@ impl WsLinkInner {
             LinkCommand::Close => self.close_link("closed by request").await,
             LinkCommand::RunReset(kind) => {
                 self.push(LinkEvent::Error(format!(
-                    "a {} link has no reset lines; reset needs USB",
+                    "a {} link has no reset lines; the board restarts by request (Reset) instead",
                     if self.info.endpoint.is_relay() {
                         "relay"
                     } else {
