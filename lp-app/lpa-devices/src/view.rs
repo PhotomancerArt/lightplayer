@@ -137,8 +137,8 @@ pub struct DeviceView {
     #[serde(default)]
     pub firmware_blocked: Option<String>,
     /// Why an over-the-air update cannot run from here, when it cannot:
-    /// [`FIRMWARE_NEEDS_USB`]'s sentence (or, over the LAN,
-    /// [`UPDATE_NOT_OVER_WIFI_YET`]'s) unless the current link carries
+    /// [`FIRMWARE_NEEDS_USB`]'s sentence (or, through lightplayer.app's
+    /// relay, [`UPDATE_NOT_OVER_WIFI_YET`]'s) unless the current link carries
     /// lp-link's update channel. [`Self::firmware_blocked`] keeps its meaning
     /// for the USB-only verbs (flash, factory reset); this one is the
     /// update's alone. Whether the board announced the channel is a
@@ -154,9 +154,9 @@ pub struct DeviceView {
 /// flash, update and factory reset all need the cable.
 pub const FIRMWARE_NEEDS_USB: &str = "Firmware updates need USB";
 
-/// The sentence a card says when a board is reached over the LAN (Wi‑Fi):
-/// that link carries no update channel yet, but a Bluetooth or USB one
-/// does. [`DeviceView::update_blocked`]'s reason there, where
+/// The sentence a card says when a board is reached through lightplayer.app's
+/// relay: that link carries no update channel yet (the LAN's does), but a
+/// Bluetooth or USB one does. [`DeviceView::update_blocked`]'s reason there, where
 /// [`FIRMWARE_NEEDS_USB`] stays the reason for the USB-only verbs (flash,
 /// factory reset) and for a board whose firmware cannot update over the air.
 pub const UPDATE_NOT_OVER_WIFI_YET: &str =
@@ -404,19 +404,20 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
 }
 
 /// Why the over-the-air update cannot run on this link, or `None` when the
-/// link carries lp-link's update channel. A LAN link gets its own sentence:
-/// updates there are not built yet, but Bluetooth and USB both carry them,
-/// so "need USB" would send a person the wrong way.
+/// link carries lp-link's update channel (USB, Bluetooth, the LAN). A Wi‑Fi
+/// link through the relay gets its own sentence: updates there are not
+/// built yet, but Bluetooth and USB both carry them, so "need USB" would
+/// send a person the wrong way.
 fn update_blocked(device: &Device) -> Option<String> {
     if device.evidence.carries_update_channel() {
         return None;
     }
-    let over_lan = device
+    let over_wifi = device
         .identity
         .endpoint
         .as_ref()
-        .is_some_and(|endpoint| endpoint.is_lan());
-    Some(if over_lan {
+        .is_some_and(|endpoint| endpoint.is_lan() || endpoint.is_relay());
+    Some(if over_wifi {
         UPDATE_NOT_OVER_WIFI_YET.to_string()
     } else {
         FIRMWARE_NEEDS_USB.to_string()
@@ -1046,8 +1047,9 @@ mod tests {
         }
     }
 
-    /// Over the LAN the update says it is not ready yet (Bluetooth and USB
-    /// both carry it), while flash and factory reset still say USB; a
+    /// A LAN link carries the update channel (OTA M8): it blocks no update,
+    /// while flash and factory reset still say USB. Through the relay the
+    /// update says it is not ready yet (Bluetooth and USB both carry it); a
     /// Bluetooth link that carries channel 3 blocks no update.
     #[test]
     fn over_wifi_the_update_has_its_own_reason_and_the_usb_only_verbs_keep_theirs() {
@@ -1056,7 +1058,12 @@ mod tests {
 
         for (attach, update, firmware) in [
             (
-                Step::attach(1, "lan:ws://192.168.1.20/link"),
+                Step::attach_with_update_channel(1, "lan:ws://192.168.1.20/link"),
+                None,
+                Some(FIRMWARE_NEEDS_USB.to_string()),
+            ),
+            (
+                Step::attach(1, "relay:a0f26287b48c"),
                 Some(UPDATE_NOT_OVER_WIFI_YET.to_string()),
                 Some(FIRMWARE_NEEDS_USB.to_string()),
             ),

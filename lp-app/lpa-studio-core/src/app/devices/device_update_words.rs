@@ -277,9 +277,16 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
             None,
             "Ready",
         ),
-        UpdateStanding::NoWirelessBuild { .. } => words(
+        UpdateStanding::NotOverWifiYet { .. } => words(
+            NeedsYou,
+            "Update over USB or Bluetooth once".to_string(),
+            "This board updates over USB or Bluetooth until it has been updated once.".to_string(),
+            None,
+            "Ready",
+        ),
+        UpdateStanding::NoWirelessBuild { link, .. } => words(
             Information,
-            "Can't update over Bluetooth from this Studio".to_string(),
+            format!("Can't update over {} from this Studio", link.word()),
             "This Studio's build can't update the board wirelessly. Update it over USB, or \
              from a Studio that can."
                 .to_string(),

@@ -10,6 +10,11 @@
   tier), the director (WQ1, WQ5–WQ8, Q1–Q13)
 - **Refines:** `docs/adr/2026-09-23-ble-access-model.md` ("WiFi reuses the
   model"), `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`
+- **Related (Wi-Fi control roadmap, M5):** `2026-10-07-c6-wifi-link` (M6:
+  the station that joins what this file saves), `2026-10-06-cloud-relay`
+  (M7: what the Cloud relay switch dials), `2026-10-01-network-link-security`
+  (the keys the file's edit tier is checked against), `2026-10-02-c6-repartition-and-layout-migration`
+  (the `lpfs` this file lives in), `2026-10-06-radio-frame-rate-budget`
 - **Evidence:** planning dir `lp2025/2026-10-04-0808-wifi-settings/`
   (`plan.md`, `notes.md` WQ1–WQ8 and Q1–Q13, `p7-network-list-reshape.md`);
   the Wi‑Fi roadmap `lp2025/2026-10-01-1832-wifi-control` (M5; decisions

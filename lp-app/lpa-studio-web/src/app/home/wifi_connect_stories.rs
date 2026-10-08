@@ -51,6 +51,13 @@ fn wifi_remembered_board_unreachable() -> Element {
 }
 
 #[story(
+    description = "The same tile when the board turned the connection away: its one Wi‑Fi slot is taken — Studio in another tab updating it, or lp-cli — so it closed the socket with \"try again later\" (1013). The line says so (\"Busy with another connection — try again\"), and \"Connect over Wi‑Fi\" can be pressed again once the other connection lets go."
+)]
+fn wifi_remembered_board_busy() -> Element {
+    remembered_tile(Some(failed("192.168.1.40", WifiConnectFailure::Busy)))
+}
+
+#[story(
     description = "The add slot with its third way in (P02): under \"via USB\" and \"via Bluetooth\", one field for a board's address — an IP, or `lp-1a2b.local` where the browser resolves it — and Connect (`devices/connect-wifi-address`, one text parameter, normalised by core: a bare host, `ws://host`, `host:port`). No picker, no wizard. Connect waits for the field; nothing under it until something is typed."
 )]
 fn wifi_add_slot_address_field() -> Element {

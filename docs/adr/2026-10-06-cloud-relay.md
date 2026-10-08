@@ -6,6 +6,24 @@
 - **Supersedes:** None
 - **Superseded by:** None
 - **Plan:** lp2025/2026-10-06-0815-wifi-relay (Wi-Fi roadmap M7)
+- **Status note, 2026-10-08:** PR B (#1019) merged as `27b5b4b1f`, so the
+  device half is in the shipped core. Its desk sitting (plan P10) has run
+  since the "Device side" section below was written: on silicon (a C6, the
+  test access point, a LAN-local relay) all ten of its rows passed, and the
+  LAN round trip missed the M6 target and was reported. The internet path
+  from silicon (NAT, the real proxy, real DNS) is still unwalked; it is the
+  Wi-Fi roadmap's closeout walk. The decisions in this ADR are unchanged,
+  and the "no desk sitting has happened" line in "Device side" is the state
+  at the time it was written.
+- **Related (Wi-Fi control roadmap, M7):** `2026-10-01-network-link-security`
+  (the link every relayed session runs; the relay is untrusted),
+  `2026-10-07-c6-wifi-link` (the LAN link this shares the one network slot
+  with), `2026-10-04-device-wifi-settings` (the Cloud relay switch and the
+  relay states the board reports), `2026-10-05-emulator-seams` section 11
+  (the uplink that lets an emulated C6 dial a relay),
+  `2026-10-06-radio-frame-rate-budget`,
+  `2026-10-02-c6-repartition-and-layout-migration` (the flash the client's
+  +29,840 B is spent from)
 
 ## Context
 

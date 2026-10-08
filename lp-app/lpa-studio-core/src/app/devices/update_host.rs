@@ -56,6 +56,12 @@
 //! board whose evidence has no update facts, or a link that does not carry
 //! the channel, ends at once with `NeedsUsb`.
 //!
+//! **A board from before Wi‑Fi updates** (W6): over a Wi‑Fi link, a leg
+//! whose first `Q` hears nothing on channel 3 within
+//! [`WIFI_SILENT_ANSWER_MS`] is a release whose LAN link ignores the channel
+//! its hello announces. The run ends [`UpdateOutcomeFacts::NotOverWifi`],
+//! and the card offers nothing there that would only hang.
+//!
 //! **Another device's transfer** (DS8): a run that meets one waits (the
 //! card's `Waiting`), asking `Q` every 3 s, and starts over when the board
 //! is free; a board with no activity is watched the same way
@@ -109,6 +115,11 @@ const TICK_INTERVAL: Duration = Duration::from_millis(250);
 
 /// How often a board whose transfer another device owns is asked again (DS8).
 const BUSY_ASK_MS: u64 = 3_000;
+
+/// Over Wi‑Fi, how long a leg's first `Q` may go unanswered before the board
+/// is taken for one from before Wi‑Fi updates (W6). A board that serves the
+/// channel answers within a round trip; this is many.
+pub(crate) const WIFI_SILENT_ANSWER_MS: u64 = 5_000;
 
 /// A link handle, as the effects layer holds it.
 pub(crate) type LinkHandle = Weak<RefCell<Box<dyn Link>>>;
@@ -432,6 +443,11 @@ struct UpdateRun {
     /// The leg's lp-link session reset (the port stayed open); the driver
     /// is down until the board speaks on the new session.
     session_reset: bool,
+    /// When this leg first asked the board (`Q`) with nothing yet heard on
+    /// channel 3 in the leg: what the Wi‑Fi silence rule times (W6).
+    asked_unanswered_at: Option<u64>,
+    /// The board said something on channel 3 during this leg.
+    heard_this_leg: bool,
 }
 
 enum RunPhase {
@@ -508,20 +524,18 @@ impl HostState {
         if !self.runs.contains_key(&device) {
             self.next_generation += 1;
             let generation = self.next_generation;
-            let bluetooth = start.info.endpoint.is_bluetooth();
+            let link = UpdateLink::of_endpoint(Some(&start.info.endpoint));
             self.runs.insert(
                 device,
                 UpdateRun {
                     generation,
                     intent: start.intent.clone(),
-                    serve: match bluetooth {
-                        true => ServeConfig::BLE,
-                        false => ServeConfig::USB,
+                    serve: match link {
+                        UpdateLink::Usb => ServeConfig::USB,
+                        UpdateLink::Bluetooth => ServeConfig::BLE,
+                        UpdateLink::Wifi => ServeConfig::LAN,
                     },
-                    link_word: match bluetooth {
-                        true => UpdateLink::Bluetooth,
-                        false => UpdateLink::Usb,
-                    },
+                    link_word: link,
                     phase: RunPhase::New,
                     leg: None,
                     last_effect: start.effect_id,
@@ -532,6 +546,8 @@ impl HostState {
                     backup_sha: None,
                     read_back: false,
                     session_reset: false,
+                    asked_unanswered_at: None,
+                    heard_this_leg: false,
                 },
             );
             spawn_ticks(&seams, self.me.clone(), device, generation);
@@ -542,6 +558,8 @@ impl HostState {
         run.last_effect = start.effect_id;
         run.link = start.link;
         run.session_reset = false;
+        run.asked_unanswered_at = None;
+        run.heard_this_leg = false;
         run.facts = start.facts.facts.clone();
         let replaced = run.leg.replace(Leg {
             link: start.link,
@@ -1386,6 +1404,10 @@ impl HostState {
         if bytes.first() == Some(&b'M') {
             log::debug!("update: an M for {device:?}");
         }
+        if let Some(run) = self.runs.get_mut(&device) {
+            run.heard_this_leg = true;
+            run.asked_unanswered_at = None;
+        }
         match self.runs.get_mut(&device).map(|run| &mut run.phase) {
             Some(RunPhase::Driving(driver)) => {
                 driver.on_board(now, bytes, &self.credentials);
@@ -1396,16 +1418,30 @@ impl HostState {
         }
     }
 
-    fn send(&self, device: DeviceId, bytes: Vec<u8>) {
-        let Some(link) = self
-            .runs
-            .get(&device)
-            .and_then(|run| run.leg.as_ref())
-            .and_then(|leg| leg.handle.upgrade())
-        else {
+    fn send(&mut self, device: DeviceId, bytes: Vec<u8>) {
+        let now = self.seams.as_ref().map(UpdateSeams::now_ms);
+        let Some(run) = self.runs.get_mut(&device) else {
             return;
         };
+        let Some(link) = run.leg.as_ref().and_then(|leg| leg.handle.upgrade()) else {
+            return;
+        };
+        if bytes.first() == Some(&b'Q') && !run.heard_this_leg && run.asked_unanswered_at.is_none()
+        {
+            run.asked_unanswered_at = now;
+        }
         link.borrow_mut().submit(LinkCommand::SendUpdate(bytes));
+    }
+
+    /// Over Wi‑Fi, a leg whose first `Q` has gone unanswered for
+    /// [`WIFI_SILENT_ANSWER_MS`]: the board's LAN link ignores the update
+    /// channel (W6).
+    fn silent_over_wifi(run: &UpdateRun, now: u64) -> bool {
+        run.link_word == UpdateLink::Wifi
+            && !run.session_reset
+            && run
+                .asked_unanswered_at
+                .is_some_and(|at| now.saturating_sub(at) >= WIFI_SILENT_ANSWER_MS)
     }
 
     // ---- Time ------------------------------------------------------------------------
@@ -1422,6 +1458,15 @@ impl HostState {
         else {
             return false;
         };
+        if Self::silent_over_wifi(run, now) {
+            log::info!("update: {device:?} heard nothing on channel 3 over Wi-Fi");
+            self.finish(
+                device,
+                UpdateOutcomeFacts::NotOverWifi,
+                Some("no answer on the update channel over Wi\u{2011}Fi".to_string()),
+            );
+            return false;
+        }
         match &mut run.phase {
             RunPhase::Driving(driver) => {
                 driver.tick(now);

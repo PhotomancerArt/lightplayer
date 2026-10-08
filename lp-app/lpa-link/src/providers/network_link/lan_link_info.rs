@@ -11,14 +11,15 @@ use super::lan_endpoint::lan_endpoint;
 /// The facts for the board whose link socket is `url`: the host it is
 /// reached at as its label, and the `lan:<url>` endpoint. No USB ids and no
 /// serial number — identity comes from the hello's base MAC, like every
-/// other transport — and no update channel (a LAN link opens none yet).
+/// other transport. Its secure lp-link carries the update channel (OTA M8);
+/// whether the board speaks it is the board's own announcement (DS9).
 pub fn lan_link_info(url: &str) -> LinkInfo {
     LinkInfo {
         label: lan_host(url).to_string(),
         endpoint: EndpointKey(lan_endpoint(url)),
         usb: None,
         serial_number: None,
-        carries_update_channel: false,
+        carries_update_channel: true,
     }
 }
 
@@ -34,12 +35,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_lan_link_is_labelled_by_its_host_and_carries_no_usb_facts() {
+    fn a_lan_link_is_labelled_by_its_host_and_carries_the_update_channel() {
         let info = lan_link_info("ws://lp-b48c.local/link");
         assert_eq!(info.label, "lp-b48c.local");
         assert_eq!(info.endpoint.0, "lan:ws://lp-b48c.local/link");
         assert!(info.usb.is_none() && info.serial_number.is_none());
-        assert!(!info.carries_update_channel);
+        assert!(info.carries_update_channel);
     }
 
     #[test]

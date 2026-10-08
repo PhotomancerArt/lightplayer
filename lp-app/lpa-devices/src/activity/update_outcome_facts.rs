@@ -47,6 +47,11 @@ pub enum UpdateOutcomeFacts {
     Refused,
     /// The board's firmware is older than a message the update sent.
     BoardLacksMessage,
+    /// Over Wi‑Fi, the board said nothing on the update channel when asked
+    /// (a release from before updates over Wi‑Fi: its LAN link ignores the
+    /// channel its hello announces). It updates over USB or Bluetooth until
+    /// it has been updated once.
+    NotOverWifi,
     /// The model's own ending: the board reset (or its link dropped)
     /// between legs and did not come back within the gap's deadline. It
     /// keeps its place — reconnecting it finishes the update.
@@ -83,6 +88,7 @@ impl UpdateOutcomeFacts {
             Self::TooManyRetries => "the update failed its checks too many times",
             Self::Refused => "the board refused the update",
             Self::BoardLacksMessage => "the board's firmware is too old for this update",
+            Self::NotOverWifi => "this board doesn't update over Wi\u{2011}Fi yet",
             Self::BoardDidNotComeBack => {
                 "the board did not come back — it keeps its place; reconnect it to finish"
             }

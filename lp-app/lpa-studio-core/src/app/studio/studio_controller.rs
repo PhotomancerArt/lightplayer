@@ -1602,15 +1602,10 @@ impl StudioController {
         let mut actions = Vec::new();
         for device in self.devices.roster().devices() {
             let evidence = &device.evidence;
-            let bluetooth = device
-                .identity
-                .endpoint
-                .as_ref()
-                .is_some_and(lpa_devices::EndpointKey::is_bluetooth);
-            let tier = match bluetooth {
-                true => self.access.granted_tier(device.id),
-                false => None,
-            };
+            // Over a wireless link the user holds a grant (the key's tier on
+            // the LAN, the login's on Bluetooth); a cable is trusted.
+            let link = crate::UpdateLink::of_endpoint(device.identity.endpoint.as_ref());
+            let tier = link.update_tier(self.access.granted_tier(device.id));
             host.set_tier(device.id, tier);
             let Some(facts) = evidence.update_facts() else {
                 continue;
@@ -1631,10 +1626,7 @@ impl StudioController {
                 facts: Some(facts),
                 own: own.as_ref().or(derived.as_ref()),
                 tier,
-                link: match bluetooth {
-                    true => crate::UpdateLink::Bluetooth,
-                    false => crate::UpdateLink::Usb,
-                },
+                link,
                 store_latest: store_latest.as_ref(),
                 store_releases: None,
                 store_lookups: None,
@@ -1716,27 +1708,20 @@ impl StudioController {
     /// `view`'s update standing and which way its update goes
     /// (`device_update_standing`, `device_update_route`): the board's
     /// update facts this window, this Studio's build facts, the user's tier
-    /// over Bluetooth (a USB link is trusted), and whether the link carries
-    /// lp-link's update channel.
+    /// over Bluetooth or Wi‑Fi (a USB link is trusted), and whether the link
+    /// carries lp-link's update channel.
     pub fn device_update_facts(&self, view: &crate::DeviceView) -> crate::UpdateOfferFacts {
-        let evidence = self
-            .devices
-            .roster()
-            .device(view.id)
-            .map(|device| &device.evidence);
+        let device = self.devices.roster().device(view.id);
+        let evidence = device.map(|device| &device.evidence);
         let facts = evidence.and_then(lpa_devices::Evidence::update_facts);
-        let link = match view.is_over_bluetooth() {
-            true => crate::UpdateLink::Bluetooth,
-            false => crate::UpdateLink::Usb,
-        };
+        let link = crate::UpdateLink::of_endpoint(
+            device.and_then(|device| device.identity.endpoint.as_ref()),
+        );
         let inputs = crate::UpdateStandingInputs {
             view,
             facts,
             own: self.update_build_facts.own(),
-            tier: match link {
-                crate::UpdateLink::Bluetooth => self.access.granted_tier(view.id),
-                crate::UpdateLink::Usb => None,
-            },
+            tier: link.update_tier(self.access.granted_tier(view.id)),
             link,
             store_latest: self.update_build_facts.store_latest(),
             store_releases: self.update_build_facts.store_releases(),

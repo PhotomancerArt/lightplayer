@@ -29,6 +29,15 @@
 //!   every port's are; the link's own notes — a refused key among them — and
 //!   a reset within a connection (a rekey) reach the journal as
 //!   `LinkEvent::WireNote`s.
+//! - **Channel 3 on the LAN** (OTA M8): `LinkCommand::SendUpdate` is one
+//!   update message out (`WsWire::send_update`), refused with a link note
+//!   until the board announced the channel on this connection (DS9); what
+//!   the board sends comes back as `LinkEvent::Update`, with
+//!   `LinkEvent::UpdateFacts` first for a manifest (`update_events`, the one
+//!   decoder every channel-3 transport uses). A board's reset is a socket
+//!   close like any other: the session redials by itself, and the Update
+//!   activity waits for the new link between legs. Through the relay the
+//!   link carries no update channel yet.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -38,6 +47,7 @@ use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::device_link::demux::demux_read;
+use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
 use crate::providers::browser_websocket::{LanSession, WsWire, is_link_lost};
 
@@ -161,9 +171,11 @@ impl WsLinkInner {
                     "not a request, and the link carries no raw text to the board: {line:?}"
                 ))),
             },
-            // No update channel on a LAN link yet, and its `LinkInfo` says
-            // so: the model never asks. Dropped.
-            LinkCommand::SendUpdate(_) => {}
+            // One channel-3 message (the Bluetooth link's twin); the link
+            // refuses it, with a note, until the board announced the
+            // channel on this connection (DS9). Through the relay there is
+            // no update channel yet, and its `LinkInfo` says so.
+            LinkCommand::SendUpdate(bytes) => self.send_update(&bytes),
         }
     }
 
@@ -215,8 +227,29 @@ impl WsLinkInner {
         }
     }
 
-    /// Drain the session: errors first, then what the link read, then the
-    /// link's own notes.
+    /// Queue one update message on the session's link (sent by its loop).
+    fn send_update(&self, bytes: &[u8]) {
+        if !self.info.carries_update_channel {
+            return self.push(LinkEvent::Error(format!(
+                "a {} link carries no update channel",
+                self.kind()
+            )));
+        }
+        if !self.open.get() {
+            return self.push(LinkEvent::Error(
+                "update write on a link that is not open".to_string(),
+            ));
+        }
+        if let Err(error) = self.wire.send_update(bytes) {
+            self.push(LinkEvent::Error(format!(
+                "{} update write failed: {error}",
+                self.kind()
+            )));
+        }
+    }
+
+    /// Drain the session: errors first, then what the link read, then its
+    /// update messages, then the link's own notes.
     fn pump(&self) {
         if !self.open.get() {
             return;
@@ -233,6 +266,13 @@ impl WsLinkInner {
         }
         for read in self.wire.take_reads() {
             self.push(demux_read(read));
+        }
+        // Channel 3, after the reads: a connection's update messages follow
+        // its link-up, and only this pump drains them (DS1).
+        for update in self.wire.take_updates() {
+            for event in update_events(update) {
+                self.push(event);
+            }
         }
         for note in self.wire.take_notes() {
             self.push(LinkEvent::WireNote(note));

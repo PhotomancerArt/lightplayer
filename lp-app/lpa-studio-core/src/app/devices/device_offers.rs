@@ -608,7 +608,7 @@ mod tests {
                     own: false,
                     from_file: false,
                     wire: None,
-                    needs_usb_after: false,
+                    stranded_over: None,
                     published_at: None,
                     recent: true,
                 }],

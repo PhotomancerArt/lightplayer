@@ -6,6 +6,10 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Related (Wi-Fi control roadmap, M6 PR C):** `2026-10-07-c6-wifi-link`
+  (the LAN link section 11's `net=lan` runs against, below the frame device),
+  `2026-10-06-cloud-relay` (the uplink, section 11's 2026-10-07 amendment,
+  that lets an emulated C6 dial a relay), `2026-10-01-network-link-security`
 
 ## Context
 

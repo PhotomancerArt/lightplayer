@@ -43,6 +43,9 @@ extern "C" {
     #[wasm_bindgen(js_name = giveUp)]
     fn js_give_up(id: u32, why: &str);
 
+    #[wasm_bindgen(js_name = setFallback)]
+    fn js_set_fallback(id: u32, url: &str);
+
     #[wasm_bindgen(js_name = disconnect)]
     fn js_disconnect(id: u32) -> Promise;
 
@@ -190,6 +193,13 @@ pub(crate) fn mark_up(session: u32) {
 /// End the session for good with `why` (heard as `<kind> link lost: why`).
 pub(crate) fn give_up(session: u32, why: &str) {
     js_give_up(session, why);
+}
+
+/// Tell the page where else the session's board answers (its `.local`
+/// socket): tried beside the session's own URL once that has stopped
+/// answering for a while. The session keeps its URL (its identity).
+pub(crate) fn set_fallback(session: u32, url: &str) {
+    js_set_fallback(session, url);
 }
 
 pub(crate) async fn disconnect(session: u32) {
