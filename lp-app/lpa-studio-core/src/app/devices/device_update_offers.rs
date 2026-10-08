@@ -5,7 +5,7 @@
 //! | Row | Path verb | Button | Level |
 //! |---|---|---|---|
 //! | Update available | `update-firmware` | `Update` (another build: `Install Y`) | Routine |
-//! | Up to date, Update available, Newer, Rolled back, Keeps crashing | `install-firmware` | `Other version…` (a `version` choice; `all_versions` widens it) | per choice: Routine only when known newer |
+//! | Up to date, Update available, Newer, Rolled back, Keeps crashing | `install-firmware` | `Other version…` (a `find` box over a `version` choice; the press reads `Install`) | per choice: Routine only when known newer |
 //! | Keeps crashing | `reinstall-firmware` | `Reinstall` | Routine |
 //! | A version Studio can't get | `install-firmware` | `Install Y` (one press with one version, else the same choice) | per choice, as above |
 //! | Backing up | `cancel` | the activity's own Cancel ([`super::device_offers`]) | Routine |
@@ -21,16 +21,22 @@
 //! repair — and the rows where firmware is being written.
 //!
 //! **"Other version…"** lists the board's [`InstallChoice`]s (the store's
-//! release index for its target, this Studio's own build, and the store's
-//! `latest` when the index is missing): newest first, the board's own and a
-//! build it refused drawn disabled, the newest [`RECENT_CHOICES`] shown and
-//! the rest behind `all_versions`. It is offered when at least one choice
-//! can be picked, and always shows its list — never a blind one-press
-//! install. Each choice binds at its own level: **Routine** only when it is
-//! known newer than the board's, speaks no older wire language than this
-//! Studio and keeps Bluetooth updates; anything else is **Lasting**, with
-//! copy that says what changes. `allow_downgrade` is set exactly when the
-//! choice is older than the board's (what `decide()` needs).
+//! release index for its target, releases looked up by exact version, this
+//! Studio's own build, and the store's `latest` when the index is missing):
+//! newest first, the board's own and a build it refused drawn disabled, the
+//! newest [`RECENT_CHOICES`] shown. Above the list a box (`find`) filters
+//! it: typing searches every choice ([`crate::UiOffer::shown_options`]),
+//! and a whole version names one. A whole release version the list does not
+//! hold binds the press to "Look up <version>" ([`FirmwareLookupOp`]); once
+//! the store answers, the version is a choice like any other, and the same
+//! press installs it. It is offered when at least one choice can be picked,
+//! and always shows its list — never a blind one-press install. The chip
+//! reads "Other version…", its press "Install". Each choice binds at its
+//! own level: **Routine** only when it is known newer than the board's,
+//! speaks no older wire language than this Studio and keeps Bluetooth
+//! updates; anything else is **Lasting**, with copy that says what
+//! changes. `allow_downgrade` is set exactly when the choice is older than
+//! the board's (what `decide()` needs).
 //!
 //! Each verb binds `Action::Update { device, intent }`: `Update` and
 //! `Install Y` install Y; `Other version…` installs the chosen version;
@@ -50,7 +56,9 @@ use super::device_update_route::{UpdateLink, UpdateRoute, update_route};
 use super::device_update_standing::{UpdateStanding, UpdateStandingInputs, update_standing};
 use super::device_update_version::UpdateVersion;
 use super::devices_op::DevicesOp;
+use super::firmware_lookup_op::FirmwareLookupOp;
 use super::install_choice::{InstallChoice, InstallChoiceInputs, index_for, install_choices};
+use super::store_lookups::StoreLookup;
 use crate::{
     ActionConfirmation, OfferArgError, OfferArgs, OfferBinder, OfferChoice, OfferParam, OfferPath,
     UiAction, UiOffer,
@@ -59,8 +67,13 @@ use crate::{
 /// The install verb's version parameter.
 pub const INSTALL_VERSION_PARAM: &str = "version";
 
-/// The install verb's switch that widens its list to every version.
-pub const INSTALL_ALL_VERSIONS_PARAM: &str = "all_versions";
+/// The install verb's box: text that filters its version list, or names a
+/// version exactly.
+pub const INSTALL_FIND_PARAM: &str = "find";
+
+/// What the install verb's press reads inside its panel (the chip reads
+/// "Other version…").
+pub const INSTALL_PRESS_LABEL: &str = "Install";
 
 /// The line the version list carries when the store's full list could not
 /// be read (offline, or a server without the index).
@@ -91,6 +104,20 @@ pub struct UpdateOfferFacts {
     /// without it the choices are this Studio's build and the store's
     /// `latest`, and the list says so.
     pub listed: bool,
+    /// The board's target, when its manifest names one: what a look-up
+    /// asks the store for.
+    pub target: Option<String>,
+    /// The look-ups of versions for the board's target the store has not
+    /// found (yet), by version.
+    pub unfound: Vec<(String, LookupStand)>,
+}
+
+/// Where a look-up the store has not found stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LookupStand {
+    Looking,
+    Missing,
+    Offline,
 }
 
 impl UpdateOfferFacts {
@@ -127,6 +154,21 @@ impl UpdateOfferFacts {
             };
         }
         let target = inputs.facts.and_then(|facts| facts.target.as_deref());
+        let unfound = match (inputs.store_lookups, target) {
+            (Some(lookups), Some(target)) => lookups
+                .unfound(target)
+                .filter_map(|(version, lookup)| {
+                    let stand = match lookup {
+                        StoreLookup::Looking => LookupStand::Looking,
+                        StoreLookup::Missing => LookupStand::Missing,
+                        StoreLookup::Offline => LookupStand::Offline,
+                        StoreLookup::Found(_) => return None,
+                    };
+                    Some((version.to_string(), stand))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
         let (choices, listed) = match (standing.board(), target) {
             (Some(board), Some(target)) => {
                 let refused = match &standing {
@@ -140,6 +182,7 @@ impl UpdateOfferFacts {
                     own: inputs.own,
                     store_latest: inputs.store_latest,
                     store_releases: inputs.store_releases,
+                    store_lookups: inputs.store_lookups,
                     link: inputs.link,
                     studio_wire_proto: lpc_wire::WIRE_PROTO_VERSION,
                 });
@@ -152,6 +195,8 @@ impl UpdateOfferFacts {
             route,
             choices,
             listed,
+            target: target.map(str::to_string),
+            unfound,
         }
     }
 }
@@ -206,6 +251,8 @@ pub fn update_offers(
         board: board.clone(),
         choices: facts.choices.clone(),
         listed: facts.listed,
+        target: facts.target.clone(),
+        unfound: facts.unfound.clone(),
         label: "Other version…".to_string(),
         preselect: None,
         one_press: false,
@@ -275,6 +322,10 @@ struct InstallOffer {
     board: UpdateVersion,
     choices: Vec<InstallChoice>,
     listed: bool,
+    target: Option<String>,
+    unfound: Vec<(String, LookupStand)>,
+    /// What the chip reads; its press inside the panel reads
+    /// [`INSTALL_PRESS_LABEL`].
     label: String,
     /// The version picked for the user; else the newest one that can be
     /// picked.
@@ -285,10 +336,11 @@ struct InstallOffer {
 }
 
 impl InstallOffer {
-    /// The offer: one `version` choice — every choice, the board's own and
-    /// a refused build disabled — with `all_versions` when some are not
-    /// recent, bound to an install of the chosen one at its own level.
-    /// `None` when no version can be picked.
+    /// The offer: a `find` box over one `version` choice — every choice,
+    /// the board's own and a refused build disabled, the older ones shown
+    /// only while the box finds them — bound to an install of the chosen
+    /// one at its own level, or to a look-up of a version the box names
+    /// that the list does not hold. `None` when no version can be picked.
     fn offer(self, path: OfferPath, blocked: Option<&str>) -> Option<UiOffer> {
         let pickable = || self.choices.iter().filter(|c| c.is_pickable());
         let preselect = self
@@ -302,54 +354,142 @@ impl InstallOffer {
             })?;
         let single = pickable().count() == 1;
         let options: Vec<OfferChoice> = self.choices.iter().map(choice_option).collect();
-        let widened = self.choices.iter().any(|c| !c.recent);
         let Self {
             device,
             board,
             choices,
             listed,
-            label,
+            target,
+            unfound,
+            label: chip,
             one_press,
             ..
         } = self;
         let choices = Rc::new(choices);
-        let bind = move |version: &str| -> Option<UiAction> {
-            let choice = choices.iter().find(|c| c.version.version == version)?;
-            Some(bind_choice(device, &board, choice).with_label(label.clone()))
+        let pick = {
+            let choices = Rc::clone(&choices);
+            move |version: &str| -> Option<UiAction> {
+                let choice = choices.iter().find(|c| c.version.version == version)?;
+                Some(bind_choice(device, &board, choice))
+            }
         };
-        let template = bind(&preselect)?;
+        let template = pick(&preselect)?;
         if let Some(reason) = blocked {
-            return Some(UiOffer::new(path, "download", template.disabled(reason)));
+            return Some(UiOffer::new(
+                path,
+                "download",
+                template.with_label(chip).disabled(reason),
+            ));
         }
         if one_press && single {
-            return Some(UiOffer::new(path, "download", template));
+            return Some(UiOffer::new(path, "download", template.with_label(chip)));
         }
         let mut version =
-            OfferParam::choice(INSTALL_VERSION_PARAM, "version", options, Some(preselect));
+            OfferParam::choice(INSTALL_VERSION_PARAM, "version", options, Some(preselect))
+                .filtered_by(INSTALL_FIND_PARAM);
         if !listed {
             version = version.with_note(INSTALL_LIST_UNAVAILABLE);
         }
-        let mut params = vec![version];
-        if widened {
-            params.push(OfferParam::toggle(
-                INSTALL_ALL_VERSIONS_PARAM,
-                "All versions",
-                false,
-            ));
-        }
-        Some(UiOffer::with_params(
+        let find = OfferParam::text(INSTALL_FIND_PARAM, "find a version", "Type a version")
+            .optional()
+            .max_len(40);
+        let typed = TypedVersion {
+            choices,
+            target,
+            unfound,
+        };
+        let mut offer = UiOffer::with_params(
             path,
             "download",
-            params,
+            vec![find, version],
             OfferBinder::new(move |args: &OfferArgs| {
-                let version = args.choice(INSTALL_VERSION_PARAM).unwrap_or_default();
-                bind(version).ok_or_else(|| OfferArgError::Invalid {
-                    name: INSTALL_VERSION_PARAM.to_string(),
-                    reason: format!("{version} is not a version this Studio can get"),
-                })
+                match args.choice(INSTALL_VERSION_PARAM) {
+                    Some(version) => pick(version)
+                        .map(|install| install.with_label(INSTALL_PRESS_LABEL))
+                        .ok_or_else(|| OfferArgError::Invalid {
+                            name: INSTALL_VERSION_PARAM.to_string(),
+                            reason: format!("{version} is not a version this Studio can get"),
+                        }),
+                    // The box names no version the list can install: a
+                    // look-up, reading as one ("Look up 2026.09.30-2").
+                    None => typed.press(args.text(INSTALL_FIND_PARAM).unwrap_or_default()),
+                }
             }),
-            template,
-        ))
+            template.with_label(INSTALL_PRESS_LABEL),
+        );
+        // The chip names the verb; the press inside its panel installs.
+        offer.action = offer.action.with_label(chip);
+        Some(offer)
+    }
+}
+
+/// What the box's text binds when it names no choice that can be picked: a
+/// look-up of a whole release version the list does not hold, or why not.
+struct TypedVersion {
+    choices: Rc<Vec<InstallChoice>>,
+    target: Option<String>,
+    unfound: Vec<(String, LookupStand)>,
+}
+
+impl TypedVersion {
+    fn press(&self, typed: &str) -> Result<UiAction, OfferArgError> {
+        let invalid = |reason: String| OfferArgError::Invalid {
+            name: INSTALL_FIND_PARAM.to_string(),
+            reason,
+        };
+        if typed.is_empty() {
+            return Err(OfferArgError::Missing {
+                name: INSTALL_VERSION_PARAM.to_string(),
+                label: "version".to_string(),
+            });
+        }
+        if lpc_firmware_release::ReleaseVersion::parse(typed).is_none() {
+            let found = self
+                .choices
+                .iter()
+                .any(|c| c.is_pickable() && choice_option(c).matches(typed));
+            if found {
+                return Err(OfferArgError::Missing {
+                    name: INSTALL_VERSION_PARAM.to_string(),
+                    label: "version".to_string(),
+                });
+            }
+            return Err(invalid(format!(
+                "no version here matches “{typed}”; type a whole version (2026.10.03-1) to look \
+                 it up"
+            )));
+        }
+        if let Some(choice) = self.choices.iter().find(|c| c.version.version == typed) {
+            let reason = choice_option(choice)
+                .disabled
+                .unwrap_or_else(|| "it cannot be picked".to_string());
+            return Err(OfferArgError::OptionDisabled {
+                name: INSTALL_VERSION_PARAM.to_string(),
+                value: typed.to_string(),
+                reason,
+            });
+        }
+        let Some(target) = self.target.as_deref() else {
+            return Err(OfferArgError::Unavailable {
+                reason: "this board has not said what it was built for".to_string(),
+            });
+        };
+        let lookup = FirmwareLookupOp::action_for(target, typed);
+        match self
+            .unfound
+            .iter()
+            .find(|(version, _)| version == typed)
+            .map(|(_, stand)| *stand)
+        {
+            None => Ok(lookup),
+            Some(LookupStand::Looking) => Ok(lookup.disabled(format!("Looking up {typed}…"))),
+            Some(LookupStand::Offline) => Ok(lookup.with_summary(format!(
+                "Studio couldn't reach the firmware store to look up {typed}; try again."
+            ))),
+            Some(LookupStand::Missing) => Err(invalid(format!(
+                "the firmware store has no {typed} for this board"
+            ))),
+        }
     }
 }
 
@@ -376,7 +516,7 @@ fn choice_option(choice: &InstallChoice) -> OfferChoice {
         option = option.disabled("This board refused it after it failed to start");
     }
     if !choice.recent {
-        option = option.only_with(INSTALL_ALL_VERSIONS_PARAM);
+        option = option.only_with(INSTALL_FIND_PARAM);
     }
     option
 }
@@ -822,7 +962,7 @@ mod tests {
     }
 
     #[test]
-    fn the_list_is_newest_first_with_the_boards_own_disabled_and_the_rest_behind_a_switch() {
+    fn the_list_is_newest_first_with_the_boards_own_disabled_and_the_rest_behind_the_box() {
         let other = install_of(&fixture(UpdateFixtureRow::UpToDate));
         let (options, preselect) = choice_param(&other);
         let values: Vec<&str> = options.iter().map(|o| o.value.as_str()).collect();
@@ -849,15 +989,143 @@ mod tests {
         );
         assert_eq!(options[0].warning, None);
 
+        // The newest five and the board's own show; the box finds the rest.
         let widened: Vec<bool> = options.iter().map(|o| o.only_with.is_some()).collect();
-        assert_eq!(widened.iter().filter(|w| **w).count(), 4, "{widened:?}");
-        assert!(widened[10..].iter().all(|w| *w), "the oldest four");
+        assert_eq!(widened.iter().filter(|w| **w).count(), 9, "{widened:?}");
+        assert!(!widened[4], "the board's own, among the five");
+        assert!(widened[5..].iter().all(|w| *w), "the rest");
+        assert_eq!(options[5].only_with.as_deref(), Some(INSTALL_FIND_PARAM));
+        let names: Vec<&str> = other.params().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(
-            options[10].only_with.as_deref(),
-            Some(INSTALL_ALL_VERSIONS_PARAM)
+            names,
+            [INSTALL_FIND_PARAM, INSTALL_VERSION_PARAM],
+            "the box first"
         );
-        assert_eq!(other.params()[1].name, INSTALL_ALL_VERSIONS_PARAM);
-        assert!(other.params()[0].note.is_none(), "the full list is known");
+        let version = &other.params()[1];
+        assert_eq!(version.filter.as_deref(), Some(INSTALL_FIND_PARAM));
+        assert!(version.note.is_none(), "the full list is known");
+        let shown = |find: &str| -> Vec<String> {
+            other
+                .shown_options(version, &OfferArgs::new().with(INSTALL_FIND_PARAM, find))
+                .iter()
+                .map(|o| o.value.clone())
+                .collect()
+        };
+        assert_eq!(shown("").len(), 5, "the newest five");
+        assert_eq!(
+            shown("10.03"),
+            [
+                "2026.10.03-4",
+                "2026.10.03-3",
+                "2026.10.03-2",
+                "2026.10.03-1"
+            ],
+            "typing searches the whole list, newest first"
+        );
+        assert_eq!(
+            shown("10.05"),
+            ["2026.10.05-2", "2026.10.05-1"],
+            "the board's own too"
+        );
+        assert_eq!(other.label(), "Other version…", "the chip");
+        assert_eq!(other.action.meta().label, "Other version…");
+    }
+
+    /// The box: a whole version in the list picks it; one the list does not
+    /// hold binds a look-up, then where the look-up stands, then — found —
+    /// the version itself.
+    #[test]
+    fn a_typed_version_picks_from_the_list_or_is_looked_up() {
+        let other = install_of(&fixture(UpdateFixtureRow::UpToDate));
+        let typed = |find: &str| OfferArgs::new().with(INSTALL_FIND_PARAM, find);
+
+        // In the list, behind the box: picked, and it arms (older).
+        let action = other.press(&typed(" 2026.10.03-2 ")).expect("found");
+        assert_eq!(action.meta().label, INSTALL_PRESS_LABEL);
+        assert!(action.meta().consequence.arms());
+        assert_eq!(
+            bound_intent(&other, &typed("2026.10.03-2")),
+            UpdateIntentFacts::Install {
+                version: "2026.10.03-2".to_string(),
+                allow_downgrade: true
+            }
+        );
+        // The board's own: refused with its reason.
+        assert!(matches!(
+            other.press(&typed("2026.10.05-2")),
+            Err(OfferArgError::OptionDisabled { reason, .. }) if reason == "On this board now"
+        ));
+        // Part of a version: pick from what it finds; nothing: say so.
+        let refusal = other.press(&typed("10.03")).unwrap_err().to_string();
+        assert!(refusal.contains("choose a version"), "{refusal}");
+        let refusal = other.press(&typed("nope")).unwrap_err().to_string();
+        assert!(refusal.contains("no version here matches"), "{refusal}");
+
+        // Older than the list: a Routine look-up of it.
+        let lookup = other.press(&typed("2026.09.30-2")).expect("a look-up");
+        assert_eq!(lookup.meta().label, "Look up 2026.09.30-2");
+        assert!(
+            lookup.meta().consequence.is_routine(),
+            "the agent presses it"
+        );
+        assert_eq!(
+            lookup.op_as::<FirmwareLookupOp>(),
+            Some(&FirmwareLookupOp {
+                target: "esp32c6-4mb".to_string(),
+                version: "2026.09.30-2".to_string()
+            })
+        );
+
+        // Asked: the press waits; not there: says so; offline: ask again.
+        let looking =
+            fixture(UpdateFixtureRow::UpToDate).looked_up("2026.09.30-2", StoreLookup::Looking);
+        let refusal = install_of(&looking)
+            .press(&typed("2026.09.30-2"))
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("Looking up 2026.09.30-2"), "{refusal}");
+        let missing =
+            fixture(UpdateFixtureRow::UpToDate).looked_up("2026.09.30-2", StoreLookup::Missing);
+        let refusal = install_of(&missing)
+            .press(&typed("2026.09.30-2"))
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("has no 2026.09.30-2"), "{refusal}");
+        let offline =
+            fixture(UpdateFixtureRow::UpToDate).looked_up("2026.09.30-2", StoreLookup::Offline);
+        assert!(
+            install_of(&offline)
+                .press(&typed("2026.09.30-2"))
+                .unwrap()
+                .op_as::<FirmwareLookupOp>()
+                .is_some()
+        );
+
+        // Found: a choice the box finds, at its own level, with the copy.
+        let found = fixture(UpdateFixtureRow::UpToDate).looked_up(
+            "2026.09.30-2",
+            super::super::device_update_fixtures::looked_up_release("2026.09.30-2"),
+        );
+        let other = install_of(&found);
+        let version = &other.params()[1];
+        assert!(
+            other
+                .shown_options(version, &OfferArgs::new())
+                .iter()
+                .all(|o| o.value != "2026.09.30-2"),
+            "not among the recent"
+        );
+        let action = other.press(&typed("2026.09.30-2")).expect("installs");
+        let copy = lasting(&action);
+        assert_eq!(copy.title, "Install an older version?");
+        assert!(copy.message.contains("older language"), "{}", copy.message);
+        assert_eq!(
+            bound_intent(&other, &typed("2026.09.30-2")),
+            UpdateIntentFacts::Install {
+                version: "2026.09.30-2".to_string(),
+                allow_downgrade: true
+            }
+        );
     }
 
     /// Routine only when known newer; an older version arms with the copy
@@ -871,7 +1139,7 @@ mod tests {
             newer.meta().consequence.is_routine(),
             "the agent presses it"
         );
-        assert_eq!(newer.meta().label, "Other version…");
+        assert_eq!(newer.meta().label, INSTALL_PRESS_LABEL);
         assert_eq!(
             bound_intent(&other, &args("2026.10.07-4")),
             UpdateIntentFacts::Install {
@@ -913,10 +1181,11 @@ mod tests {
             copy.message
         );
 
-        // Behind the switch: refused with it off, taken with it on.
-        assert!(other.press(&args("2026.10.03-3")).is_err());
-        let wide = args("2026.10.03-3").with(INSTALL_ALL_VERSIONS_PARAM, "true");
-        assert!(other.press(&wide).unwrap().meta().consequence.arms());
+        // Behind the box: refused until the box finds it, taken then.
+        let picked = OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.03-3");
+        assert!(other.press(&picked).is_err());
+        let found = picked.with(INSTALL_FIND_PARAM, "10.03");
+        assert!(other.press(&found).unwrap().meta().consequence.arms());
 
         // The board's own is not a choice to press.
         assert!(other.press(&args("2026.10.05-2")).is_err());
@@ -1034,10 +1303,9 @@ mod tests {
         assert_eq!(values, ["2026.10.05-2"]);
         assert_eq!(preselect.as_deref(), Some("2026.10.05-2"));
         assert_eq!(
-            other.params()[0].note.as_deref(),
+            other.params()[1].note.as_deref(),
             Some(INSTALL_LIST_UNAVAILABLE)
         );
-        assert_eq!(other.params().len(), 1, "no switch: nothing is behind it");
         assert!(other.consequence().arms(), "Y is older than this board's");
 
         // Beside Update, a list of Update's version alone is not offered.
@@ -1117,14 +1385,23 @@ mod tests {
     }
 
     fn choice_param(offer: &UiOffer) -> (Vec<OfferChoice>, Option<String>) {
-        let crate::OfferParamKind::Choice { options, preselect } = &offer.params()[0].kind else {
+        let version = offer
+            .params()
+            .iter()
+            .find(|p| p.name == INSTALL_VERSION_PARAM)
+            .expect("a version choice");
+        let crate::OfferParamKind::Choice { options, preselect } = &version.kind else {
             panic!("{:?}", offer.params());
         };
         (options.clone(), preselect.clone())
     }
 
+    /// `version` picked, with the box finding it (as a person typing it
+    /// and clicking it would press).
     fn args(version: &str) -> OfferArgs {
-        OfferArgs::new().with(INSTALL_VERSION_PARAM, version)
+        OfferArgs::new()
+            .with(INSTALL_VERSION_PARAM, version)
+            .with(INSTALL_FIND_PARAM, version)
     }
 
     fn press(offer: &UiOffer, version: &str) -> UiAction {

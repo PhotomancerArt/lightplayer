@@ -35,6 +35,7 @@ use super::device_update_standing::UpdateStandingInputs;
 use super::device_update_words::{
     UiDeviceUpdate, UiSessionUpdate, update_session_words, update_words,
 };
+use super::store_lookups::{StoreLookup, StoreLookups};
 use super::update_build_facts::StoreReleases;
 
 /// One row of the update-states table, as a fixture builds it. The link a
@@ -112,6 +113,8 @@ pub struct UpdateFixture {
     /// The store's release index ([`release_index`]); `None` is a Studio
     /// that could not read it ([`Self::offline`]).
     pub releases: Option<StoreReleases>,
+    /// Releases looked up by exact version ([`Self::looked_up`]).
+    pub lookups: StoreLookups,
 }
 
 impl UpdateFixture {
@@ -184,7 +187,19 @@ impl UpdateFixture {
             releases: Some(StoreReleases {
                 index: release_index(),
             }),
+            lookups: StoreLookups::default(),
         }
+    }
+
+    /// The same board, after the box looked up `version` and the store
+    /// answered `lookup`.
+    pub fn looked_up(mut self, version: &str, lookup: StoreLookup) -> Self {
+        self.lookups.set(
+            &self.facts.target.clone().unwrap_or_default(),
+            version,
+            lookup,
+        );
+        self
     }
 
     /// The same board, with no release index: only this Studio's build to
@@ -204,6 +219,7 @@ impl UpdateFixture {
             link: self.link,
             store_latest: None,
             store_releases: self.releases.as_ref(),
+            store_lookups: Some(&self.lookups),
         }
     }
 
@@ -472,6 +488,22 @@ pub fn release_index() -> ReleaseIndex {
         })
         .collect();
     ReleaseIndex::newest_first(&target, entries)
+}
+
+/// Release `version` as the store answers a look-up of it: an older
+/// release the index no longer lists, in the wire language before this
+/// Studio's.
+pub fn looked_up_release(version: &str) -> StoreLookup {
+    StoreLookup::Found(ReleaseIndexEntry {
+        version: version.to_string(),
+        commit: format!("{}{}", commit_for(version), "0".repeat(28)),
+        wire_proto: lpc_wire::WIRE_PROTO_VERSION - 1,
+        requires: Requires {
+            layout: 1,
+            loader: 1,
+        },
+        published_at: None,
+    })
 }
 
 /// A stable fake commit per version (a dev version is its own commit).

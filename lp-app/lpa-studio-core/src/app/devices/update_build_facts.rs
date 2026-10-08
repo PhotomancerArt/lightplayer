@@ -10,8 +10,9 @@
 //! `ota-manifest.json` at start, [`UpdateBuildFacts::set_store_latest`]
 //! when the firmware store answers its `latest` lookup for a board's
 //! target, [`UpdateBuildFacts::set_store_releases`] when it answers the
-//! release index for that target — and from then on every card reads its
-//! standing and its version choices against them.
+//! release index for that target, [`UpdateBuildFacts::set_store_lookups`]
+//! as the releases looked up by exact version answer — and from then on
+//! every card reads its standing and its version choices against them.
 //!
 //! The store's answers are held for **one target at a time** (the first
 //! target the controller sees, as for `latest`): every board in the field
@@ -19,6 +20,8 @@
 
 use lpa_update::HostBuildFacts;
 use lpc_firmware_release::ReleaseIndex;
+
+use super::store_lookups::StoreLookups;
 
 /// The firmware store's latest release for a target, by its facts: the
 /// second version "Other version…" can offer (DS7), when it is not this
@@ -63,6 +66,7 @@ pub struct UpdateBuildFacts {
     own: Option<HostBuildFacts>,
     store_latest: Option<StoreLatest>,
     store_releases: Option<StoreReleases>,
+    store_lookups: StoreLookups,
 }
 
 impl UpdateBuildFacts {
@@ -79,6 +83,16 @@ impl UpdateBuildFacts {
     /// The store's release index, once the store has listed one.
     pub fn store_releases(&self) -> Option<&StoreReleases> {
         self.store_releases.as_ref()
+    }
+
+    /// The releases looked up by exact version, and where each stands.
+    pub fn store_lookups(&self) -> &StoreLookups {
+        &self.store_lookups
+    }
+
+    /// Install the look-ups as the update host holds them.
+    pub fn set_store_lookups(&mut self, lookups: StoreLookups) {
+        self.store_lookups = lookups;
     }
 
     /// Install (or clear) this Studio's own build facts.

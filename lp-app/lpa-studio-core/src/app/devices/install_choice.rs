@@ -1,6 +1,7 @@
 //! The versions "Other version…" can put on a board: the store's release
-//! index for the board's target, this Studio's own build, and — when the
-//! index is missing (offline, or a server that predates it) — the store's
+//! index for the board's target, the releases looked up by exact version
+//! ([`super::store_lookups`]), this Studio's own build, and — when the index
+//! is missing (offline, or a server that predates it) — the store's
 //! `latest`, each read against the board.
 //!
 //! The choices live in [`super::UpdateOfferFacts`], not in the board's
@@ -18,19 +19,19 @@
 //!   and the build the board refused after a failed start `refused`; the
 //!   offer draws both disabled.
 //! - **Recent:** the first [`RECENT_CHOICES`], plus this Studio's own and
-//!   the board's own; the rest sit behind the offer's "All versions"
-//!   switch.
+//!   the board's own; the rest are found by typing in the offer's box.
 
 use lpa_devices::{FirmwareAge, WireVersion};
 use lpa_update::HostBuildFacts;
-use lpc_firmware_release::ReleaseIndex;
+use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry};
 
 use super::device_update_route::{FIRST_BLUETOOTH_UPDATE_RELEASE, UpdateLink};
 use super::device_update_version::UpdateVersion;
+use super::store_lookups::StoreLookups;
 use super::update_build_facts::{StoreLatest, StoreReleases};
 
-/// How many choices the picker shows before "All versions".
-pub const RECENT_CHOICES: usize = 10;
+/// How many choices the picker shows before anything is typed in its box.
+pub const RECENT_CHOICES: usize = 5;
 
 /// One version "Other version…" can install, read against the board.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,7 +56,7 @@ pub struct InstallChoice {
     pub needs_usb_after: bool,
     /// When the release was published (RFC 3339), when the index says.
     pub published_at: Option<String>,
-    /// Shown without "All versions".
+    /// Shown with nothing typed in the box.
     pub recent: bool,
 }
 
@@ -103,6 +104,8 @@ pub struct InstallChoiceInputs<'a> {
     pub store_latest: Option<&'a StoreLatest>,
     /// The store's release index.
     pub store_releases: Option<&'a StoreReleases>,
+    /// The releases looked up by exact version.
+    pub store_lookups: Option<&'a StoreLookups>,
     /// The link the install would ride.
     pub link: UpdateLink,
     /// This Studio's wire protocol version (`lpc_wire::WIRE_PROTO_VERSION`).
@@ -125,16 +128,23 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
     let mut found: Vec<Found> = Vec::new();
     if let Some(index) = index {
         for entry in &index.releases {
-            found.push(Found {
-                version: UpdateVersion::with_build_id(&entry.version, entry.build_id()),
-                own: false,
-                wire_proto: Some(entry.wire_proto),
-                published_at: entry.published_at.clone(),
-            });
+            found.push(Found::of_entry(entry));
         }
-    } else if let Some(latest) = inputs
-        .store_latest
-        .filter(|latest| latest.target() == inputs.target)
+    }
+    for entry in inputs
+        .store_lookups
+        .into_iter()
+        .flat_map(|lookups| lookups.found(inputs.target))
+    {
+        if !found.iter().any(|f| f.version.version == entry.version) {
+            found.push(Found::of_entry(entry));
+        }
+    }
+    if index.is_none()
+        && let Some(latest) = inputs
+            .store_latest
+            .filter(|latest| latest.target() == inputs.target)
+        && !found.iter().any(|f| f.version.version == latest.version())
     {
         found.push(Found::of_build(&latest.facts, false));
     }
@@ -189,6 +199,15 @@ struct Found {
 }
 
 impl Found {
+    fn of_entry(entry: &ReleaseIndexEntry) -> Self {
+        Self {
+            version: UpdateVersion::with_build_id(&entry.version, entry.build_id()),
+            own: false,
+            wire_proto: Some(entry.wire_proto),
+            published_at: entry.published_at.clone(),
+        }
+    }
+
     fn of_build(build: &HostBuildFacts, own: bool) -> Self {
         Self {
             version: UpdateVersion::with_build_id(
@@ -258,6 +277,7 @@ mod tests {
 
     use super::*;
     use crate::app::devices::device_update_fixtures::{build, studio_y};
+    use crate::app::devices::store_lookups::StoreLookup;
 
     const PROTO: u32 = 40;
 
@@ -383,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_is_the_first_ten_plus_this_studios_and_the_boards_own() {
+    fn recent_is_the_first_five_plus_this_studios_and_the_boards_own() {
         let names: Vec<String> = (1..=14).rev().map(|n| format!("2026.10.06-{n}")).collect();
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let releases = releases(&names);
@@ -399,10 +419,38 @@ mod tests {
             .filter(|c| c.recent)
             .map(|c| c.version.version.as_str())
             .collect();
-        assert_eq!(recent.len(), 11, "{recent:?}");
+        assert_eq!(recent.len(), 6, "{recent:?}");
         assert_eq!(recent[0], "626a1b851");
-        assert_eq!(recent[9], "2026.10.06-6", "the first ten, own included");
-        assert_eq!(recent[10], "2026.10.06-1", "the board's own");
+        assert_eq!(recent[4], "2026.10.06-11", "the first five, own included");
+        assert_eq!(recent[5], "2026.10.06-1", "the board's own");
+    }
+
+    #[test]
+    fn a_release_looked_up_by_version_joins_the_list_in_its_place() {
+        let releases = releases(&["2026.10.06-10", "2026.10.05-2"]);
+        let board = UpdateVersion::new("2026.10.05-2");
+        let mut lookups = StoreLookups::default();
+        let older = releases.index.releases[0].clone();
+        let older = ReleaseIndexEntry {
+            version: "2026.09.30-2".to_string(),
+            ..older
+        };
+        lookups.set(
+            "esp32c6-4mb",
+            "2026.09.30-2",
+            StoreLookup::Found(older.clone()),
+        );
+        lookups.set("esp32s3-8mb", "2026.09.29-1", StoreLookup::Found(older));
+        lookups.set("esp32c6-4mb", "2026.09.28-1", StoreLookup::Missing);
+        let mut looked = inputs(&board, None, Some(&releases));
+        looked.store_lookups = Some(&lookups);
+        let choices = install_choices(&looked);
+        assert_eq!(
+            versions(&choices),
+            ["2026.10.06-10", "2026.10.05-2", "2026.09.30-2"],
+            "found for this target only, and in version order"
+        );
+        assert_eq!(choices[2].age, FirmwareAge::Newer, "older than the board's");
     }
 
     #[test]
@@ -429,6 +477,7 @@ mod tests {
             own: Some(&Y),
             store_latest: None,
             store_releases: releases,
+            store_lookups: None,
             link: UpdateLink::Usb,
             studio_wire_proto: PROTO,
         }

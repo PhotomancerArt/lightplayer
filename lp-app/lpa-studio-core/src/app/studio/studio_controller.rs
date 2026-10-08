@@ -1585,6 +1585,10 @@ impl StudioController {
         if releases.as_ref() != self.update_build_facts.store_releases() {
             self.update_build_facts_mut().set_store_releases(releases);
         }
+        let lookups = host.store_lookups();
+        if lookups != *self.update_build_facts.store_lookups() {
+            self.update_build_facts_mut().set_store_lookups(lookups);
+        }
         // This Studio's own build may arrive after its source was installed
         // (the bundle's reads its manifests asynchronously).
         let own_now = host.own_facts();
@@ -1633,6 +1637,7 @@ impl StudioController {
                 },
                 store_latest: store_latest.as_ref(),
                 store_releases: None,
+                store_lookups: None,
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1734,6 +1739,7 @@ impl StudioController {
             link,
             store_latest: self.update_build_facts.store_latest(),
             store_releases: self.update_build_facts.store_releases(),
+            store_lookups: Some(self.update_build_facts.store_lookups()),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -4040,6 +4046,15 @@ impl StudioController {
                 )))),
                 Err(message) => Err(UiError::UnsupportedAction(message)),
             };
+        }
+        if node_id.as_str() == crate::FirmwareLookupOp::NODE_ID {
+            let op = action.into_op::<crate::FirmwareLookupOp>()?;
+            self.devices
+                .effects_mut()
+                .want_store_lookup(&op.target, &op.version);
+            let lookups = self.devices.effects().store_lookups();
+            self.update_build_facts_mut().set_store_lookups(lookups);
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceFeedOp::NODE_ID {
             let op = action.into_op::<crate::DeviceFeedOp>()?;

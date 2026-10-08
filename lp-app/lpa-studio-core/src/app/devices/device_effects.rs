@@ -363,6 +363,18 @@ impl DeviceEffects {
         self.update.want_store_releases(target);
     }
 
+    /// Ask the store for release `version` of `target` by its exact
+    /// version (once; again after an offline answer).
+    pub(crate) fn want_store_lookup(&mut self, target: &str, version: &str) {
+        self.refresh_update_seams();
+        self.update.want_store_lookup(target, version);
+    }
+
+    /// Every look-up asked of the store, and where each stands.
+    pub(crate) fn store_lookups(&self) -> super::StoreLookups {
+        self.update.store_lookups()
+    }
+
     /// The layout step's state (the C6 repartition): backup store, staged
     /// plans, the cached backup index.
     pub fn layout(&self) -> &super::device_layout_effect::LayoutEffects {

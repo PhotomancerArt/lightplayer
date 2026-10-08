@@ -99,6 +99,7 @@ pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
 pub mod emu_transport;
+pub mod firmware_lookup_op;
 pub mod install_choice;
 pub mod lan_addresses;
 pub mod lan_link_view;
@@ -116,6 +117,7 @@ pub mod shared_link_client_io;
 pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
+pub mod store_lookups;
 pub mod target_offer;
 pub mod ui_link_kind;
 pub(crate) mod update_auto_start;
@@ -217,8 +219,8 @@ pub use device_transport::{
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
 };
 pub use device_update_offers::{
-    INSTALL_ALL_VERSIONS_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, UpdateOfferFacts,
-    UpdateOffers, update_offers,
+    INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_PRESS_LABEL, INSTALL_VERSION_PARAM,
+    LookupStand, UpdateOfferFacts, UpdateOffers, update_offers,
 };
 pub use device_update_route::{
     FIRST_BLUETOOTH_UPDATE_RELEASE, USB_UPDATES_OVER_THE_AIR, UpdateLink, UpdateRoute, update_route,
@@ -235,6 +237,7 @@ pub use devices_op::{DeviceFace, DevicesOp};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };
+pub use firmware_lookup_op::FirmwareLookupOp;
 pub use install_choice::{
     InstallChoice, InstallChoiceInputs, RECENT_CHOICES, index_for, install_choices,
 };
@@ -263,6 +266,7 @@ pub use sim_record::{
 pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
+pub use store_lookups::{StoreLookup, StoreLookups};
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
 pub use ui_link_kind::UiLinkKind;
 pub use update_build_facts::{StoreLatest, StoreReleases, UpdateBuildFacts};

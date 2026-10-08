@@ -22,9 +22,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceCardFeedView, DeviceEscape, DeviceFace, DeviceId, DeviceLoadedProject, DeviceStatus,
-    DeviceView, FIRMWARE_NEEDS_USB, FeedLiveness, INSTALL_ALL_VERSIONS_PARAM,
-    INSTALL_VERSION_PARAM, OfferArgs, UiChromeSessionControl, UiChromeSessionStatus,
-    UiDeviceAccess, UiLensReconnecting, UiUnlockOffer, UpdateFixture, UpdateFixtureRow,
+    DeviceView, FIRMWARE_NEEDS_USB, FeedLiveness, INSTALL_FIND_PARAM, INSTALL_VERSION_PARAM,
+    OfferArgs, UiChromeSessionControl, UiChromeSessionStatus, UiDeviceAccess, UiLensReconnecting,
+    UiUnlockOffer, UpdateFixture, UpdateFixtureRow, looked_up_release,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -159,7 +159,7 @@ fn device_card_update_play_only() -> Element {
 // --- "Other version…": the picker over the store's release index ----------
 
 #[story(
-    description = "Other version… open on an up-to-date board: the store's releases newest first (version in mono, its publish time), the board's own drawn but not pickable (\"On this board now\"), the newest ten shown and an All versions switch under them. The newest is picked, and it installs at one click (Routine: newer than the board's)."
+    description = "Other version… open on an up-to-date board: a box to find or type a version above the store's newest five releases, newest first (version in mono, its publish time), the board's own drawn but not pickable (\"On this board now\"). The newest is picked, and its press reads Install: one click (Routine: newer than the board's)."
 )]
 fn device_card_update_other_version_picker() -> Element {
     update_picker(
@@ -170,25 +170,23 @@ fn device_card_update_other_version_picker() -> Element {
 }
 
 #[story(
-    description = "Other version… with All versions on: the list widens to all fourteen releases and scrolls inside about five rows, here down to 2026.10.03-2 (one of the four only the switch shows), with its older-language warning and the copy above the press."
+    description = "Typing in the box filters the whole list, not just the five: \"10.03\" finds the four releases of Oct 3, newest first, each with its older-language warning. Nothing is picked until one is clicked, so the press says to pick one."
 )]
-fn device_card_update_other_version_picker_all_versions() -> Element {
+fn device_card_update_other_version_picker_filtered() -> Element {
     update_picker(
         UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
-        OfferArgs::new()
-            .with(INSTALL_ALL_VERSIONS_PARAM, "true")
-            .with(INSTALL_VERSION_PARAM, "2026.10.03-2"),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "10.03"),
         false,
     )
 }
 
 #[story(
-    description = "An older version picked and armed (Lasting): the panel says what changes in core's words — \"Install an older version?\" and that it may not read the board's project — above the armed press."
+    description = "An older version typed whole and armed (Lasting): the box names 2026.10.05-1, the list shows it picked, and the panel says what changes in core's words — \"Install an older version?\" and that it may not read the board's project — above the armed \"Confirm install\"."
 )]
 fn device_card_update_other_version_picker_older_armed() -> Element {
     update_picker(
         UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
-        OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.05-1"),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.10.05-1"),
         true,
     )
 }
@@ -199,7 +197,32 @@ fn device_card_update_other_version_picker_older_armed() -> Element {
 fn device_card_update_other_version_picker_wire_warning() -> Element {
     update_picker(
         UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
-        OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.03-4"),
+        OfferArgs::new()
+            .with(INSTALL_FIND_PARAM, "10.03")
+            .with(INSTALL_VERSION_PARAM, "2026.10.03-4"),
+        true,
+    )
+}
+
+#[story(
+    description = "A whole version older than the store's list holds: nothing in the list matches, so the press reads \"Look up 2026.09.30-2\" — one click (Routine) asks the store for that release by its version."
+)]
+fn device_card_update_other_version_picker_lookup() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb)),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.30-2"),
+        false,
+    )
+}
+
+#[story(
+    description = "The same version once the store has found it: it joins the list (picked, with its older-language warning, dated by its version — a lookup carries no publish time), and the press installs it — armed here, with both sentences, since it is older than the board's."
+)]
+fn device_card_update_other_version_picker_lookup_found() -> Element {
+    update_picker(
+        UpdateFixture::new(UpdateFixtureRow::UpToDate, porch_lights(Link::Usb))
+            .looked_up("2026.09.30-2", looked_up_release("2026.09.30-2")),
+        OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.30-2"),
         true,
     )
 }

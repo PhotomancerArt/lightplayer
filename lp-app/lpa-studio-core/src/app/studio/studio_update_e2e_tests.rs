@@ -48,7 +48,7 @@ use crate::app::studio::offer_press_test_api::OfferPressTestApi;
 use crate::{
     ActionConsequence, DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceId,
     DeviceInput, DeviceTaskFuture, DeviceTransport, DeviceTransportFuture, GrantedLink,
-    INSTALL_ALL_VERSIONS_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
+    INSTALL_FIND_PARAM, INSTALL_LIST_UNAVAILABLE, INSTALL_VERSION_PARAM, LensLineTap,
     MemoryOwnBuildSource, OfferArgs, OfferParamKind, StudioController, UiOffer, UpdateLink,
     UpdateStanding,
 };
@@ -69,6 +69,11 @@ fn x() -> ModelBuild {
 
 fn y() -> ModelBuild {
     ModelBuild::synthetic("2026.10.06-1", 2, 6 * 4096 + 11, 9 * 4096 + 1000)
+}
+
+/// W: a release older than any the store's index lists.
+fn w() -> ModelBuild {
+    ModelBuild::synthetic("2026.10.04-1", 4, 5 * 4096 + 900, 8 * 4096 + 500)
 }
 
 /// Z: a release newer than this Studio's own, only in the store.
@@ -513,8 +518,9 @@ fn install_y_on_an_e13_board_puts_y_on_it() {
 
 /// "Other version…" over the store's release index: a newer release (Z)
 /// installs at one press; the update running, the verb is gone; then an
-/// older one (X), behind "All versions" and in an older wire language,
-/// arms with both sentences, and the second click puts it on the board.
+/// older one (X), found by typing it in the box and in an older wire
+/// language, arms with both sentences, and the second click puts it on the
+/// board.
 #[test]
 fn other_version_installs_a_newer_release_at_one_press_and_an_older_one_armed() {
     let mut bench = Bench::new(Board::with_catalog(vec![x(), y(), z()]), Some(y()));
@@ -565,15 +571,18 @@ fn other_version_installs_a_newer_release_at_one_press_and_an_older_one_armed() 
     bench.assert_runs(&z());
 
     // X: older than the board's now, and no longer the board's own, so it
-    // sits behind "All versions".
+    // is not among the newest five: the box finds it.
     bench.run_until("the card to read Z as newer", |bench| {
         matches!(bench.standing(device), UpdateStanding::Newer { .. })
     });
     let other = bench.controller.offered(&path);
     let x_args = OfferArgs::new().with(INSTALL_VERSION_PARAM, "2026.10.05-1");
-    assert!(other.press(&x_args).is_err(), "behind the switch");
-    let x_args = x_args.with(INSTALL_ALL_VERSIONS_PARAM, "true");
-    let armed = other.press(&x_args).expect("pressable with the switch on");
+    assert!(
+        other.press(&x_args).is_err(),
+        "not shown until the box finds it"
+    );
+    let x_args = OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.10.05-1");
+    let armed = other.press(&x_args).expect("the box names it");
     let ActionConsequence::Lasting(copy) = &armed.meta().consequence else {
         panic!("not Lasting: {:?}", armed.meta().consequence);
     };
@@ -629,8 +638,94 @@ fn with_no_index_other_version_lists_this_studios_build_and_the_stores_latest() 
     let other = bench.controller.offered(&path);
     assert_eq!(option_values(&other), ["2026.10.07-1", "2026.10.06-1"]);
     assert_eq!(
-        other.params()[0].note.as_deref(),
+        other.params()[1].note.as_deref(),
         Some(INSTALL_LIST_UNAVAILABLE)
+    );
+}
+
+/// A release older than the index lists (W): typing its whole version
+/// binds a look-up (Routine — the app agent may press it), the store finds
+/// it by version, and it joins the list; the same press then arms (it is
+/// older than the board's) and the second click puts it on the board.
+#[test]
+fn an_older_release_the_index_does_not_list_is_looked_up_then_installed() {
+    // The board runs the catalog's first build: X.
+    let mut bench = Bench::new(Board::with_catalog(vec![x(), w(), y(), z()]), Some(y()));
+    let fetch = Rc::new(StoreFetch::default());
+    for build in [w(), x(), y(), z()] {
+        fetch.publish(&build, &build.version);
+    }
+    fetch.publish_index(vec![
+        index_entry(&z().version, Some(&z()), PROTO),
+        index_entry(&y().version, Some(&y()), PROTO),
+    ]);
+    bench
+        .controller
+        .set_firmware_store(Rc::new(FirmwareStore::new(
+            STORE_ORIGIN,
+            Rc::clone(&fetch) as Rc<dyn FirmwareFetch>,
+        )));
+    let device = bench.connect_device();
+    bench.run_until("the store's index to reach the card", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_releases()
+            .is_some()
+            && matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let path = bench.controller.device_verb(device, "install-firmware");
+    let other = bench.controller.offered(&path);
+    assert!(!option_values(&other).contains(&w().version), "not listed");
+
+    let typed = OfferArgs::new().with(INSTALL_FIND_PARAM, &w().version);
+    let lookup = other.press(&typed).expect("a look-up");
+    assert!(lookup.meta().consequence.is_routine());
+    bench.press(device, "install-firmware", typed.clone());
+    bench.run_until("the store to find W", |bench| {
+        matches!(
+            bench
+                .controller
+                .update_build_facts()
+                .store_lookups()
+                .get("esp32c6-4mb", &w().version),
+            Some(crate::StoreLookup::Found(_))
+        )
+    });
+    assert!(option_values(&bench.controller.offered(&path)).contains(&w().version));
+    assert!(fetch.asked(&format!(
+        "/firmware/esp32c6-4mb/{}/ota-manifest.json",
+        w().version
+    )));
+
+    let other = bench.controller.offered(&path);
+    let armed = other.press(&typed).expect("now it installs");
+    let ActionConsequence::Lasting(copy) = &armed.meta().consequence else {
+        panic!("not Lasting: {:?}", armed.meta().consequence);
+    };
+    assert_eq!(copy.title, "Install an older version?");
+    bench.press_lasting(device, "install-firmware", typed);
+    bench.run_until("the update to start", |bench| bench.updating(device));
+    bench.run_until("the board to run W", |bench| bench.idle_on(device, &w()));
+    bench.assert_runs(&w());
+
+    // A whole version the store does not hold: looked up, then said so.
+    let other = bench.controller.offered(&path);
+    let nowhere = OfferArgs::new().with(INSTALL_FIND_PARAM, "2026.09.01-1");
+    assert!(other.press(&nowhere).is_ok(), "a look-up first");
+    bench.press(device, "install-firmware", nowhere.clone());
+    bench.run_until("the store to answer", |bench| {
+        bench
+            .controller
+            .update_build_facts()
+            .store_lookups()
+            .get("esp32c6-4mb", "2026.09.01-1")
+            == Some(&crate::StoreLookup::Missing)
+    });
+    let refusal = bench.controller.offered(&path).press(&nowhere).unwrap_err();
+    assert!(
+        refusal.to_string().contains("has no 2026.09.01-1"),
+        "{refusal}"
     );
 }
 
@@ -1374,7 +1469,12 @@ fn index_entry(version: &str, build: Option<&ModelBuild>, wire: u32) -> ReleaseI
 
 /// The values of an offer's `version` choice, in order.
 fn option_values(offer: &UiOffer) -> Vec<String> {
-    let OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
+    let Some(OfferParamKind::Choice { options, .. }) = offer
+        .params()
+        .iter()
+        .find(|param| param.name == INSTALL_VERSION_PARAM)
+        .map(|param| &param.kind)
+    else {
         panic!("no choice: {:?}", offer.params());
     };
     options.iter().map(|option| option.value.clone()).collect()

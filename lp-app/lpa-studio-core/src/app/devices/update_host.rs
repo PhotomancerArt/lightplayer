@@ -93,11 +93,14 @@ use super::device_firmware_sources::StudioFirmwareStore;
 use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
 use super::own_build_source::{OwnBuildSource, verified_own_build};
+use super::store_lookups::{StoreLookup, StoreLookups};
 use super::update_auto_start::{board_build_facts, board_engine_sha};
 use super::update_build_facts::{StoreLatest, StoreReleases};
 use super::update_driver_mirror::{decision_facts, driver_intent, outcome_facts, stage_facts};
 use super::update_narration::{NarrationNames, UpdateNarration};
-use super::update_store_builds::{store_build, store_engine, store_latest, store_releases};
+use super::update_store_builds::{
+    store_build, store_engine, store_latest, store_release_entry, store_releases,
+};
 
 /// How often a run's driver is ticked (a login backoff; the Waiting ask).
 const TICK_INTERVAL: Duration = Duration::from_millis(250);
@@ -204,6 +207,7 @@ impl UpdateHost {
                     latest_asked: None,
                     releases: None,
                     releases_asked: None,
+                    lookups: StoreLookups::default(),
                 })
             }),
         }
@@ -363,6 +367,18 @@ impl UpdateHost {
     pub(crate) fn store_releases(&self) -> Option<StoreReleases> {
         self.state.borrow().releases.clone()
     }
+
+    /// Ask the store for release `version` of `target` by its exact
+    /// version ("Other version…"'s box), once — again only after an
+    /// offline answer.
+    pub(crate) fn want_store_lookup(&self, target: &str, version: &str) {
+        HostState::want_store_lookup(&self.state, target, version);
+    }
+
+    /// Every look-up asked, and where each stands.
+    pub(crate) fn store_lookups(&self) -> StoreLookups {
+        self.state.borrow().lookups.clone()
+    }
 }
 
 /// A run's remembered failure (see [`UpdateHost::auto_blocked`]).
@@ -447,6 +463,7 @@ struct HostState {
     latest_asked: Option<(String, u64)>,
     releases: Option<StoreReleases>,
     releases_asked: Option<(String, u64)>,
+    lookups: StoreLookups,
 }
 
 impl HostState {
@@ -1548,6 +1565,41 @@ impl HostState {
                     }
                 }
             }
+        }));
+    }
+
+    fn want_store_lookup(cell: &Rc<RefCell<Self>>, target: &str, version: &str) {
+        let mut state = cell.borrow_mut();
+        if !state.lookups.wants(target, version) {
+            return;
+        }
+        let Some(seams) = state.seams.clone() else {
+            return;
+        };
+        let Some(store) = seams.store.clone() else {
+            state.lookups.set(target, version, StoreLookup::Offline);
+            return;
+        };
+        state.lookups.set(target, version, StoreLookup::Looking);
+        let me = state.me.clone();
+        let (target, version) = (target.to_string(), version.to_string());
+        (seams.spawn)(Box::pin(async move {
+            let answer = store_release_entry(store, target.clone(), version.clone()).await;
+            let Some(cell) = me.upgrade() else {
+                return;
+            };
+            let mut state = cell.borrow_mut();
+            let lookup = match answer {
+                Ok(Some(entry)) => StoreLookup::Found(entry),
+                Ok(None) => StoreLookup::Missing,
+                Err(miss) if miss.offline => StoreLookup::Offline,
+                Err(miss) => {
+                    log::debug!("firmware store: {version} refused: {}", miss.why);
+                    StoreLookup::Missing
+                }
+            };
+            state.note_store_answer(lookup == StoreLookup::Offline);
+            state.lookups.set(&target, &version, lookup);
         }));
     }
 }

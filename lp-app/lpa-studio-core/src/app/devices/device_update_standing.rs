@@ -37,6 +37,7 @@ use lpc_update::BoardState;
 
 use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
+use super::store_lookups::StoreLookups;
 use super::update_build_facts::{StoreLatest, StoreReleases};
 
 /// Everything a board's standing is read from. A struct so the card, the
@@ -66,6 +67,9 @@ pub struct UpdateStandingInputs<'a> {
     /// reads it; the card's version choices do
     /// ([`super::UpdateOfferFacts::read`]).
     pub store_releases: Option<&'a StoreReleases>,
+    /// The releases looked up by exact version, when any were. Like the
+    /// index, read only by the card's version choices.
+    pub store_lookups: Option<&'a StoreLookups>,
 }
 
 /// Where a board stands. See the module docs for which row is which.
@@ -628,6 +632,7 @@ pub(crate) mod tests {
             link: UpdateLink::Usb,
             store_latest: None,
             store_releases: None,
+            store_lookups: None,
         }
     }
 
