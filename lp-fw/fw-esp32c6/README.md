@@ -117,6 +117,16 @@ core-only board has them too. The radio's C heap stays in `HEAP_RADIO`.
 ESP-NOW (the Radio node) is off while the board uses Wi-Fi. Decisions and
 measured costs: `docs/adr/2026-10-07-c6-wifi-link.md`.
 
+**Updates over Wi-Fi.** Core-only serves the over-the-air update protocol
+on the LAN link too (`fw-esp32-common`'s `radio_link::core_only_links`): it
+answers the link's key from the device store itself, so the key decides
+who may flash, and a LAN link opened in update mode advertises a window of
+8. A trial core with a saved network that hears from no host for three
+minutes gives the board back to its last good core (`src/ota/core_only.rs`).
+`lp-cli link capture lan:<board> --ota-offer <dir>` drives an update over
+it; `just test-emu-c6-ota-lan` walks it on the emulated LAN with no cable.
+See `docs/adr/2026-10-06-ota-update-protocol.md` (amendment of 2026-10-07).
+
 **The relay task** (`src/net/relay_task.rs`; the loop is
 `fw-esp32-common/src/net/relay/`) dials `lightplayer.app:80` when the station
 has an address, Cloud relay is on and the board holds an account key

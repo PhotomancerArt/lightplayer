@@ -68,14 +68,14 @@ impl ServeConfig {
         ahead: 4,
         read_back_piece: BLE_READ_BACK_PIECE,
     };
-    /// The LAN (a board's Wi-Fi link, `lan:`): four in flight to start, as
-    /// on USB and Bluetooth; the board advertises a wider receive window on
-    /// a LAN link in update mode, and the desk check (OTA Wi-Fi plan P6)
-    /// re-sets both from its measurement. A LAN host drains a whole 4 KiB
-    /// read-back chunk in a few round trips, so the backup reads whole
-    /// chunks.
+    /// The LAN (a board's Wi-Fi link, `lan:`): eight in flight. On the
+    /// desk (OTA Wi-Fi plan P6, 2026-10-07: FC6 fixture-c6, the test access
+    /// point, a Mac's lp-cli, the board's LAN window of 8, two runs each)
+    /// the core and engine pieces together took 40.9 s at `ahead` 2, 35.5 s
+    /// at 4 and 34.0 s at 8. A LAN host drains a whole 4 KiB read-back chunk
+    /// in a few round trips, so the backup reads whole chunks.
     pub const LAN: Self = Self {
-        ahead: 4,
+        ahead: 8,
         read_back_piece: CHUNK,
     };
 
