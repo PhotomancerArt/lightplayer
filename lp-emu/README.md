@@ -305,14 +305,32 @@ added a lowering per architecture plus a backend, and neither architecture's
 hard part — windowed registers here, the `fence.i` contract there — survives a
 register-machine IR without the same special casing.
 
-**What it emits today is nothing.** Every guest instruction escapes back to
-`XtHart::step_one`, which is the RV32 side's `Emit::NOTHING` build — slower
-than the interpreter, not a product path, and the one translation that cannot
-be wrong about an instruction. What it proves is the seam, and the proof is
-`v3-oracle.sh` with `--flags-a --jit --flags-b --interpreter`: the three
-pinned images at t1, both cores at `--core-quantum 256`, every column `same`.
-The guest semantics, the discovery sweep, the publish-by-store event, the wasm
-build and the S3 twin are the phases after it.
+**Since M7 P08 it runs in a browser engine, and that is where its number
+is.** `lp-emu-esp32v3` builds for `wasm32-wasip1` with
+`lp_emu_jit::host_browser` under it, the translated core is the **default**
+there (`machine::TRANSLATED_BY_DEFAULT`), and `--interpreter` is the free
+differential oracle every row's identity column is read against.
+`scripts/emu/build-xt-wasm.sh` (`just bench-emu-web --chip esp32v3`) builds
+and stages it; `scripts/emu/xt-bench-web/` is the rig, a **twin** of the C6's
+`scripts/emu/bench-web/` rather than an edit of it.
+
+**The classic's first browser rows** (`render-loop` t1, both cores at
+`--core-quantum 256`, 5,500 ms emulated, best of five in one interleaved
+invocation): **0.4466× real time in V8** at 64 blocks a function and
+**0.3765× in JSC** at 16, against a 1.5× floor — and **1.086× / 1.082×** its
+own interpreter, against the C6's 1.71× on `render-basic` in the same rig on
+the same day. Coverage is 78.50 % of retired instructions, the mean stay is
+47.8 instructions against a ≈155 runway, and 41.6 % of stays end on the
+256-cycle slice bound. One UART0 sha256 across all forty rows of both
+engines.
+
+Why it is short of the C6 is measured rather than guessed, and it is the
+entry protocol: XD8's exchange area carries the physical `AR[0..64]` file
+plus seven special registers across **every** entry and exit, which costs
+**153 ns an entry against the C6's 25 ns** and 8.61 % of a browser run at
+8.8 M entries. `docs/emulator-perf-ledger-classic.md` §4 is the whole
+table — the bucket profile, the boot cost of a 90 MB module in both engines,
+and the levers, priced.
 
 Two differences from the C6 are worth naming here because they are the
 architecture's and not choices:
@@ -326,6 +344,12 @@ architecture's and not choices:
   Xtensa instructions are two or three bytes at any alignment and all four
   `pc mod 4` residues are live in equal measure, which is the same answer the
   hart's own entry table reaches for the same reason.
+
+A third difference is the browser's and not the architecture's: **the
+whole-image module is emitted and compiled once per hart**, because the
+emitter bakes the exchange area's base in as a constant (DD117). In the
+browser that costs 676–799 ms of duplicate emit and 50–202 ms of duplicate
+compile per run — priced in the classic ledger's §5 menu, not yet spent.
 
 `lp-xt-jit/README.md` is that crate; `lp-emu-esp32v3/README.md`'s flag table
 is the switches.

@@ -78,25 +78,44 @@ blocks: core0 decodes=151613 hits=100926332 (99.85% of 101077945 entries) \
 **expected** reading on this chip rather than a warning: the firmware does not
 emit one after a publish, which is exactly why the contract is the store.
 
-### The translated core and `--jit` (M7 P04–P07)
+### The translated core and `--jit` (M7 P04–P08)
 
 A second, much younger fast path: `--jit` turns the guest's own program into
-WebAssembly and runs it under `wasmtime`. It needs a binary built
-`--features jit` — one without it says so and exits rather than accepting the
-flag and interpreting quietly, because a flag that is accepted and does
-nothing is how a measurement of the interpreter ends up labelled as the
-translator's.
+WebAssembly and runs it — natively under `wasmtime`, and **in a browser
+engine under that engine's own WebAssembly implementation**, which is where
+the product is and where the milestone's number is read.
 
-**Natively it is slower than the interpreter, and that is not a defect.**
-Cranelift needs about 150 seconds per core to compile the whole image, so the
-interpreter stays the native default and `--jit` is an **identity** door
-here, never a speed one. The speed reading is a browser engine's and belongs
-to P08. *Never quote a native `--jit` second as a speed number.*
+**Which host runs the module is chosen by target family and by nothing
+else** (`src/jit.rs`'s `HostCore` alias, the C6's line for line):
+`lp_emu_jit::host_wasmtime::WasmtimeCore` natively,
+`lp_emu_jit::host_browser::BrowserCore` on `wasm32-wasip1`. The two have the
+same surface, so everything below that `use` is one code path.
+
+**Natively the translated core is slower than the interpreter, and that is
+not a defect.** Cranelift needs about 150 seconds per core to compile the
+whole image, so the interpreter stays the native default and `--jit` is an
+**identity** door here, never a speed one. *Never quote a native `--jit`
+second as a speed number.*
+
+**In the `wasm32-wasip1` build the translated core is the DEFAULT**
+(`machine::TRANSLATED_BY_DEFAULT = cfg!(target_family = "wasm")`), because
+that build is the product build and its core is the translator. The two
+flags are therefore two positives rather than one `bool`: `--jit` only ever
+turns translation on and `--interpreter` only ever turns it off, and a run
+that names neither takes the build's own policy. Naming both is an error.
+`--interpreter` is the free differential oracle every browser row's identity
+column is read against, and it is an **argument**, never the absence of one.
+
+⚠️ **Direct load only.** Under `--boot-mode rom-up` no core is installed
+(XD10/XD4: the ROM puts the image in place with guest stores), and D4's
+cache-off watch puts a `MemoryCost` on the bus, so a ROM-up machine refuses
+every translated entry as impure even if one were installed. The rig's
+images are direct loads.
 
 | flag | what it does |
 |---|---|
-| `--jit` | install a translated core. Direct load only |
-| `--interpreter` | install none. The default natively, and the oracle's other leg |
+| `--jit` | install a translated core. Direct load only. The default in the `wasm32-wasip1` build |
+| `--interpreter` | install none. The default NATIVELY, and the oracle's other leg everywhere |
 | `--jit-seeds <file>` | **override** the sweep's seeds, one address per line (`0x`-prefixed or decimal; blank lines and `#` comments ignored). Rarely wanted: the sweep seeds itself from the image's symbols |
 | `--jit-blocks <n>` | the most blocks one translation event installs [200000] |
 | `--jit-fn-blocks <n>` | how many blocks one wasm function holds [64]. Lower it if a module is refused for body size |
@@ -110,6 +129,24 @@ entries for the engine check), and `LP_EMU_XT_BLOCKPROF=<path>` (the per-pc
 census and the coverage table). They are switches rather than flags because
 nobody runs one by accident and each perturbs the very thing the rest of the
 run reports.
+
+#### Running it in a browser engine (M7 P08)
+
+`scripts/emu/build-xt-wasm.sh` builds the `wasm32-wasip1` module, stages it
+beside the three pinned images, and prints the two commands that measure it:
+
+```bash
+just bench-emu-web --chip esp32v3          # build + stage
+scripts/emu/build-xt-wasm.sh --verify      # one row in each desk engine
+
+bun target/emu-xt-bench-web/xt-bench-cli.mjs --stage target/emu-xt-bench-web \
+  --rows render-loop:t1:jit:64,render-loop:t1:interp --best-of 5
+```
+
+The rows and what they read are
+[`docs/emulator-perf-ledger-classic.md`](../../../docs/emulator-perf-ledger-classic.md)
+§4. The rig is a twin of the C6's under `scripts/emu/xt-bench-web/`, never an
+edit of it.
 
 #### The two events (XD10)
 
