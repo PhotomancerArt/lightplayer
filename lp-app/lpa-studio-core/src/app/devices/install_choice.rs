@@ -29,7 +29,8 @@ use lpa_update::HostBuildFacts;
 use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry};
 
 use super::device_update_route::{
-    FIRST_BLUETOOTH_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE, UpdateLink,
+    FIRST_BLUETOOTH_UPDATE_RELEASE, FIRST_RELAY_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE,
+    UpdateLink,
 };
 use super::device_update_version::UpdateVersion;
 use super::store_lookups::StoreLookups;
@@ -277,7 +278,8 @@ fn same_build(a: &UpdateVersion, b: &UpdateVersion) -> bool {
 }
 
 /// Over a wireless link, `link` when `choice` predates updates over it
-/// ([`FIRST_BLUETOOTH_UPDATE_RELEASE`], [`FIRST_WIFI_UPDATE_RELEASE`]);
+/// ([`FIRST_BLUETOOTH_UPDATE_RELEASE`], [`FIRST_WIFI_UPDATE_RELEASE`],
+/// [`FIRST_RELAY_UPDATE_RELEASE`]);
 /// while no release is named, any choice older than the board's (`age` is
 /// the board against it).
 fn stranded_over(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> Option<UpdateLink> {
@@ -285,6 +287,7 @@ fn stranded_over(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> 
         UpdateLink::Usb => return None,
         UpdateLink::Bluetooth => FIRST_BLUETOOTH_UPDATE_RELEASE,
         UpdateLink::Wifi => FIRST_WIFI_UPDATE_RELEASE,
+        UpdateLink::Relay => FIRST_RELAY_UPDATE_RELEASE,
     };
     needs_usb_after_with(first, link, choice, age).then_some(link)
 }

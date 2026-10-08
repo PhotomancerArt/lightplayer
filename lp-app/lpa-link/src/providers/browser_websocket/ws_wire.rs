@@ -50,6 +50,12 @@ impl WsWire {
         ws_link_port::send_client_json(self.session, json)
     }
 
+    /// Hold the session for `ms`: it redials through the relay's "board
+    /// offline" meanwhile (`browser_websocket::hold`).
+    pub fn hold(&self, ms: u32) {
+        browser_websocket::hold(self.session, ms);
+    }
+
     /// Queue one channel-3 (update) message as one lp-link message.
     /// `Ok(false)`: the board has not announced the update channel on this
     /// connection, so nothing was queued (DS9). `Err` like

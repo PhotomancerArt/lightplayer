@@ -45,6 +45,18 @@ const FINAL_CODES: [RelayCloseCode; 4] = [
     RelayCloseCode::Busy,
 ];
 
+/// The refusals an update rides through, and how long it waits before each
+/// redial (`ws::hold`; the link holds its session for a while after every
+/// update message it sends). A board resets three times in an update, and
+/// until it is back the relay says it is offline — and each redial at a
+/// board that is not online spends one of this page's tries (20, one more
+/// every 30 s): so every 3 s while it is offline, and when the tries run
+/// out ("slow down") the 30 s one try takes to come back.
+const HOLD_CODES: [(RelayCloseCode, u32); 2] = [
+    (RelayCloseCode::BoardOffline, 3_000),
+    (RelayCloseCode::SlowDown, 30_000),
+];
+
 /// Relay boards, as this page holds them.
 pub struct BrowserRelaySource {
     /// The relay's origin: this page's own (`https://lightplayer.app`, or a
@@ -74,7 +86,11 @@ impl BrowserRelaySource {
 
     fn open(&self, board: &str) -> Result<LanSession, String> {
         let codes: Vec<u16> = FINAL_CODES.iter().map(|code| code.code()).collect();
-        ws::open_relay_session(&relay_socket_url(&self.origin, board), &codes)
+        let held: Vec<(u16, u32)> = HOLD_CODES
+            .iter()
+            .map(|(code, delay_ms)| (code.code(), *delay_ms))
+            .collect();
+        ws::open_relay_session(&relay_socket_url(&self.origin, board), &codes, &held)
     }
 
     fn granted(

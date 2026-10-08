@@ -79,6 +79,19 @@ impl ServeConfig {
         read_back_piece: CHUNK,
     };
 
+    /// Through lightplayer.app's relay (`relay:`): four in flight, and the
+    /// backup reads back in [`BLE_READ_BACK_PIECE`]s. Every window crosses
+    /// the internet twice and the board's relay leg takes 2 KiB at a time
+    /// (its TCP receive buffer), so more in flight only queues on the host;
+    /// a whole 4 KiB read-back chunk would hold the board's one shared
+    /// frame buffer for round trips while the engine renders, where a
+    /// small piece goes through the link's own send ring (Bluetooth's
+    /// reason). Not measured through a real relay yet.
+    pub const RELAY: Self = Self {
+        ahead: 4,
+        read_back_piece: BLE_READ_BACK_PIECE,
+    };
+
     /// `ahead` chunks (and a backup reading whole chunks).
     #[must_use]
     pub const fn ahead(ahead: u8) -> Self {

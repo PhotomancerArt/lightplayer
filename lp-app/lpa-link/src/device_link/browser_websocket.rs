@@ -36,8 +36,10 @@
 //!   `LinkEvent::UpdateFacts` first for a manifest (`update_events`, the one
 //!   decoder every channel-3 transport uses). A board's reset is a socket
 //!   close like any other: the session redials by itself, and the Update
-//!   activity waits for the new link between legs. Through the relay the
-//!   link carries no update channel yet.
+//!   activity waits for the new link between legs. Through the relay too:
+//!   each update message sent holds the session for
+//!   [`RELAY_UPDATE_HOLD_MS`], so it redials through the relay's "board
+//!   offline" while the board resets, instead of ending there.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -50,6 +52,12 @@ use crate::device_link::demux::demux_read;
 use crate::device_link::update_facts_mirror::update_events;
 use crate::device_link::wire::client_message;
 use crate::providers::browser_websocket::{LanSession, WsWire, is_link_lost};
+
+/// How long each update message sent through the relay holds its session
+/// (`WsWire::hold`): longer than the Update activity's wait between legs
+/// (`UPDATE_GAP_MS`, 90 s), so a board that resets mid-update is redialled
+/// until it is back or the update gives up.
+pub const RELAY_UPDATE_HOLD_MS: u32 = 120_000;
 
 /// The [`LinkInfo`] a LAN session's link wears (see
 /// [`network_link::lan_link_info`](crate::providers::network_link::lan_link_info)).
@@ -228,6 +236,7 @@ impl WsLinkInner {
     }
 
     /// Queue one update message on the session's link (sent by its loop).
+    /// Through the relay, it holds the session (see the module docs).
     fn send_update(&self, bytes: &[u8]) {
         if !self.info.carries_update_channel {
             return self.push(LinkEvent::Error(format!(
@@ -239,6 +248,9 @@ impl WsLinkInner {
             return self.push(LinkEvent::Error(
                 "update write on a link that is not open".to_string(),
             ));
+        }
+        if self.info.endpoint.is_relay() {
+            self.wire.hold(RELAY_UPDATE_HOLD_MS);
         }
         if let Err(error) = self.wire.send_update(bytes) {
             self.push(LinkEvent::Error(format!(

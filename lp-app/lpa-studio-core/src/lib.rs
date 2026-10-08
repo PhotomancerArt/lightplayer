@@ -282,7 +282,7 @@ pub use core::{
 pub use lpa_devices::view::{
     ActivityView as DeviceActivityView, DeviceView, Escape as DeviceEscape, FIRMWARE_NEEDS_USB,
     FirmwareFace as DeviceFirmwareFace, LoadedProject as DeviceLoadedProject, OutcomeView,
-    PendingLinkView, RosterView, UPDATE_NOT_OVER_WIFI_YET,
+    PendingLinkView, RosterView,
 };
 pub use lpa_devices::wire::BoardFs as DeviceBoardFs;
 pub use lpa_devices::{

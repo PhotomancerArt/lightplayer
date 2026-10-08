@@ -11,8 +11,8 @@ use super::relay_endpoint::{board_from_relay_socket_url, relay_endpoint, relay_h
 
 /// The facts for the relay browser leg at `url`: the relay's host as its
 /// label (`lightplayer.app`) and the `relay:<board>` endpoint. `None` when
-/// `url` is not a relay browser leg. No USB facts, and no update channel
-/// yet (the LAN has one; the relay's is a later step).
+/// `url` is not a relay browser leg. No USB facts; the update channel rides
+/// it as on the LAN (the relay passes sealed frames and never reads them).
 pub fn relay_link_info(url: &str) -> Option<LinkInfo> {
     let board = board_from_relay_socket_url(url)?;
     Some(LinkInfo {
@@ -20,7 +20,7 @@ pub fn relay_link_info(url: &str) -> Option<LinkInfo> {
         endpoint: EndpointKey(relay_endpoint(board)),
         usb: None,
         serial_number: None,
-        carries_update_channel: false,
+        carries_update_channel: true,
     })
 }
 
@@ -36,7 +36,7 @@ mod tests {
         assert_eq!(info.endpoint.0, "relay:a0f26287b48c");
         assert!(info.endpoint.is_relay() && info.endpoint.is_network());
         assert!(info.usb.is_none() && info.serial_number.is_none());
-        assert!(!info.carries_update_channel);
+        assert!(info.carries_update_channel);
         assert!(relay_link_info("ws://10.0.0.5/link").is_none());
     }
 }

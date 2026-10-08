@@ -534,6 +534,7 @@ impl HostState {
                         UpdateLink::Usb => ServeConfig::USB,
                         UpdateLink::Bluetooth => ServeConfig::BLE,
                         UpdateLink::Wifi => ServeConfig::LAN,
+                        UpdateLink::Relay => ServeConfig::RELAY,
                     },
                     link_word: link,
                     phase: RunPhase::New,
@@ -1437,7 +1438,7 @@ impl HostState {
     /// [`WIFI_SILENT_ANSWER_MS`]: the board's LAN link ignores the update
     /// channel (W6).
     fn silent_over_wifi(run: &UpdateRun, now: u64) -> bool {
-        run.link_word == UpdateLink::Wifi
+        run.link_word.is_wifi()
             && !run.session_reset
             && run
                 .asked_unanswered_at
