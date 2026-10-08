@@ -15,6 +15,7 @@ lp-emu/
   lp-emu-abi/                   host <-> guest protocol
   lp-emu-jit/                   RV32IMC -> WebAssembly translation (host)
   lp-emu-validate/              the hardware-validation system (host)
+  lp-nor-sim/                   SPI NOR flash power-cut model (host testbed + emulator)
   transcripts/                  committed, verbatim payload captures
   lp-riscv-emu/                 RV32IMAC+F executors
   lp-riscv-emu-guest/           rv32 guest-side runtime
@@ -41,6 +42,12 @@ directories are allowed to assume MMIO at all.
   `TrapCode`), logging levels, cycle-cost accounting (`CycleModel`/
   `InstClass`), serial plumbing, time control, and the host-side profiler
   (`profile/`, behind the `std` feature). `no_std` + alloc.
+
+- **`lp-nor-sim`** — a deterministic, sans-IO model of the C6's SPI NOR flash
+  that can lose power after any program or erase (torn programs, weak
+  erases). The storage testbed (`tools/lp-store-bench`, `lp-tree-store`'s
+  tests) and the emulated C6's flash share this one model, so a tear model
+  calibrated once holds in both. `no_std` + alloc. See its README.
 
 - **`lp-emu-validate`** — the hardware-validation system's host half:
   payloads, configurations, transcripts, masking, provenance grading and
