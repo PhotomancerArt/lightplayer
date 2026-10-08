@@ -242,13 +242,14 @@ impl fmt::Display for TearJson<'_> {
         let t = self.0;
         write!(
             f,
-            "{{\"shape\":\"{}\",\"intended_bits\":{},\"landed_bits\":{},\"stray_bits\":{},\"prefix_bytes\":{},\"partial_bytes\":{}}}",
+            "{{\"shape\":\"{}\",\"intended_bits\":{},\"landed_bits\":{},\"stray_bits\":{},\"prefix_bytes\":{},\"partial_bytes\":{},\"landed_extent\":{}}}",
             t.shape.name(),
             t.intended_bits,
             t.landed_bits,
             t.stray_bits,
             t.prefix_bytes,
             t.partial_bytes,
+            t.landed_extent,
         )
     }
 }

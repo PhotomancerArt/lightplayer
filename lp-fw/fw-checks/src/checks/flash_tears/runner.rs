@@ -567,14 +567,14 @@ mod tests {
     }
 
     #[test]
-    fn a_clean_cut_between_pages_is_a_page_boundary_and_one_in_the_journal_is_seen() {
+    fn a_clean_cut_between_pages_is_an_op_boundary_and_one_in_the_journal_is_seen() {
         let mut nor = FakeNor::new();
         let (_, next) = boot(&mut nor);
         nor.cut(CYCLE_OPS + 3 + 4, Tear::Clean);
         work_until_cut(&mut nor, next);
         let (records, _) = boot(&mut nor);
         let f = in_flight(&records);
-        assert!(f.contains(r#""shape":"page-boundary""#), "{f}");
+        assert!(f.contains(r#""shape":"op-boundary""#), "{f}");
 
         // A cut in the second journal copy's program, half the entry landed:
         // copy 0 names the new cycle, copy 1 shows the torn slot.

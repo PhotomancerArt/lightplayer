@@ -35,9 +35,10 @@ pub enum TearShape {
     Nothing,
     /// Every intended clear landed.
     Complete,
-    /// Whole pages landed, then nothing: a cut between two page programs,
-    /// not a tear.
-    PageBoundary,
+    /// Whole program commands landed, then nothing: a cut between two of
+    /// them, not a tear. A command is [`PROGRAM_CHUNK`] bytes on this stack
+    /// (the mask ROM's own chunking), not a 256-byte NOR page.
+    OpBoundary,
     /// A prefix of whole bytes, at most one partial byte, then nothing —
     /// `lp-nor-sim`'s `BytePrefix`.
     BytePrefix,
@@ -54,7 +55,7 @@ impl TearShape {
         match self {
             Self::Nothing => "nothing",
             Self::Complete => "complete",
-            Self::PageBoundary => "page-boundary",
+            Self::OpBoundary => "op-boundary",
             Self::BytePrefix => "byte-prefix",
             Self::Scattered => "scattered",
             Self::Stray => "stray",
@@ -76,9 +77,28 @@ pub struct ProgramTear {
     pub prefix_bytes: u32,
     /// Bytes neither as intended nor `0xFF`.
     pub partial_bytes: u32,
+    /// One past the last byte with a landed clear: how far the program got.
+    pub landed_extent: u32,
 }
 
+/// The bytes one page-program command carries on the C6's flash path.
+///
+/// esp-storage hands a 256-byte page to the mask ROM's
+/// `esp_rom_spiflash_write`, and the ROM issues it as eight 32-byte program
+/// commands: the emulator, which runs that ROM, counted 49,922 program
+/// commands for 391 four-kilobyte work cycles (128 a sector, 2026-10-08). So
+/// a cut *between* commands leaves a prefix that ends on a 32-byte boundary,
+/// and only a cut *inside* one can tear bits. Measured on the ROM, not on
+/// the part; the desk sitting is what says whether silicon agrees.
+pub const PROGRAM_CHUNK: usize = 32;
+
 /// Classify `actual` against `intended`, both read from erased cells.
+///
+/// The shapes, in order: a stray clear (neither model); everything landed;
+/// nothing landed; whole program commands and then nothing (a cut between
+/// two commands, [`TearShape::OpBoundary`]); whole bytes and at most one
+/// partial byte at the end ([`TearShape::BytePrefix`]); anything else
+/// ([`TearShape::Scattered`]).
 pub fn program_tear(actual: &[u8], intended: &[u8]) -> ProgramTear {
     debug_assert_eq!(actual.len(), intended.len());
     let mut t = ProgramTear {
@@ -88,12 +108,17 @@ pub fn program_tear(actual: &[u8], intended: &[u8]) -> ProgramTear {
         stray_bits: 0,
         prefix_bytes: 0,
         partial_bytes: 0,
+        landed_extent: 0,
     };
     let mut in_prefix = true;
-    for (&a, &w) in actual.iter().zip(intended) {
+    for (i, (&a, &w)) in actual.iter().zip(intended).enumerate() {
         t.intended_bits += (!w).count_ones();
-        t.landed_bits += (!a & !w).count_ones();
+        let landed = (!a & !w).count_ones();
+        t.landed_bits += landed;
         t.stray_bits += (!a & w).count_ones();
+        if landed > 0 {
+            t.landed_extent = i as u32 + 1;
+        }
         if in_prefix && a == w {
             t.prefix_bytes += 1;
         } else {
@@ -103,16 +128,19 @@ pub fn program_tear(actual: &[u8], intended: &[u8]) -> ProgramTear {
             t.partial_bytes += 1;
         }
     }
-    let p = t.prefix_bytes as usize;
+    let extent = t.landed_extent as usize;
+    // Every byte before the last one with a landed clear is exactly as
+    // intended (bytes after it hold no clears, and no strays by then).
+    let whole_before = |n: usize| actual[..n] == intended[..n];
     t.shape = if t.stray_bits > 0 {
         TearShape::Stray
     } else if t.landed_bits == t.intended_bits {
         TearShape::Complete
     } else if t.landed_bits == 0 {
         TearShape::Nothing
-    } else if whole_pages(actual, intended) {
-        TearShape::PageBoundary
-    } else if actual.get(p + 1..).is_none_or(|rest| rest.iter().all(|&b| b == 0xFF)) {
+    } else if whole_before(extent) && command_ends_clean(intended, extent) {
+        TearShape::OpBoundary
+    } else if whole_before(extent - 1) {
         TearShape::BytePrefix
     } else {
         TearShape::Scattered
@@ -120,14 +148,11 @@ pub fn program_tear(actual: &[u8], intended: &[u8]) -> ProgramTear {
     t
 }
 
-/// Is every page of `actual` either exactly `intended` or blank? Only a
-/// span of whole pages can be; a shorter one (a journal entry) never is.
-fn whole_pages(actual: &[u8], intended: &[u8]) -> bool {
-    actual.len() % PAGE_SIZE == 0
-        && actual
-            .chunks(PAGE_SIZE)
-            .zip(intended.chunks(PAGE_SIZE))
-            .all(|(a, w)| a == w || a.iter().all(|&b| b == 0xFF))
+/// Does the program command that `extent` falls in ask for nothing more
+/// after `extent`? Then a prefix ending at `extent` is that command whole.
+fn command_ends_clean(intended: &[u8], extent: usize) -> bool {
+    let end = extent.next_multiple_of(PROGRAM_CHUNK).min(intended.len());
+    intended[extent..end].iter().all(|&b| b == 0xFF)
 }
 
 /// What the in-flight sector looked like.
@@ -339,9 +364,19 @@ mod tests {
         v[..512].copy_from_slice(&new[..512]);
         let f = one_read(&v);
         assert_eq!(f.verdict, Verdict::TornProgram);
-        assert_eq!(f.program.unwrap().shape, TearShape::PageBoundary);
+        assert_eq!(f.program.unwrap().shape, TearShape::OpBoundary);
         assert!(f.program.unwrap().prefix_bytes >= 512);
         assert_eq!(f.page_landed[2], 0);
+        // Three whole 32-byte commands of page 5 are a boundary too; a
+        // prefix of 40 bytes is not.
+        let mut v = [0xFFu8; SECTOR_SIZE];
+        v[..5 * 256 + 96].copy_from_slice(&new[..5 * 256 + 96]);
+        assert_eq!(one_read(&v).program.unwrap().shape, TearShape::OpBoundary);
+        let mut v = [0xFFu8; SECTOR_SIZE];
+        v[..40].copy_from_slice(&new[..40]);
+        if new[40..64].iter().any(|&b| b != 0xFF) {
+            assert_eq!(one_read(&v).program.unwrap().shape, TearShape::BytePrefix);
+        }
     }
 
     #[test]

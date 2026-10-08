@@ -192,9 +192,14 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // reason `boot-idle-flash` does — the boot log comes out over the
             // product's own link, and nobody draining it is an empty file.
             "rom-up-boot",
+            // Tree-store M4's power cuts: a harness image whose scans go out
+            // over the USB-Serial-JTAG it prints on, and a host that answers
+            // each boot's ready line and cuts the power between them. Its
+            // emulated twin is the dry run: five power cycles, no tears.
+            "flash-tears",
         ],
         "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase, M5's oracle \
-         walk and M8's ROM-up boot drive the host; nothing else"
+         walk, M8's ROM-up boot and tree-store M4's power cuts drive the host; nothing else"
     );
 }
 
@@ -394,6 +399,11 @@ fn every_payloads_header_line_is_pinned() {
             "rmt-rx",
             "esp32c6,test_rmt_rx",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"rmt-rx\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_rmt_rx\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "flash-tears",
+            "esp32c6,test_flash_tears",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"flash-tears\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_flash_tears\",\"firmware_dirty\":false}\n",
         ),
         (
             "rmt-chase",

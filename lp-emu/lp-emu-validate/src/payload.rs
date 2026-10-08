@@ -162,6 +162,18 @@ pub enum Capture {
     /// time and can only remember. Everything the device says during the wait
     /// is lost on purpose — that is the measurement.
     FlashThenOpenAfter(u64),
+    /// Flash with no monitor, then hand the port to the power-cut driver
+    /// (`scripts/emu/flash-tears-cuts.py`, [`crate::driver::POWER_CUTS_SCRIPT`]).
+    /// It reads the boot after the flash, then `cuts` times: waits a random
+    /// `min_ms..=max_ms` after the payload's sentinel, cuts the board's power
+    /// with `board power-cycle`, and reads the next boot — every byte into
+    /// one capture.
+    ///
+    /// `flash-tears` (tree-store M4) is the case: its subject is what a NOR
+    /// part looks like after the supply goes in the middle of an operation,
+    /// and only a hand on the plug produces one. The driver refuses a board
+    /// that the desk registry does not tag `sacrificial`.
+    PowerCuts { cuts: u32, min_ms: u32, max_ms: u32 },
 }
 
 /// One field of one structured record, and what class of claim it makes.
@@ -1561,6 +1573,97 @@ static RMT_FRAME_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// The `flash-tears` records (tree-store M4). Every field is `Structural`
+/// except the timed cycle's microseconds: a verdict, a bit count and a shape
+/// are what the flash part did, not what a clock said. They are not expected
+/// to replay equal across two runs — a tear is the one thing in this tree
+/// that is random on purpose — so the fields are listed to say what each is,
+/// and `scripts/emu/flash-tears-analyze.py` is what reads them.
+static FLASH_TEARS_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "ft-boot",
+        field: "reset",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "ft-boot",
+        field: "latest",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "ft-sector",
+        field: "verdict",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "ft-sector",
+        field: "weak_bits",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "ft-summary",
+        field: "in_flight",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "ft-timing",
+        field: "erase_us",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "ft-timing",
+        field: "program_us",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "ft-timing",
+        field: "journal_us",
+        class: FieldClass::Timing,
+    },
+];
+
+/// The `flash-tears` emulated twin's host: open from power-on, a byte to
+/// each boot's ready line, and five power cycles.
+///
+/// The machine tears nothing — a power cycle lands between two flash
+/// commands — so this run's scans must report only whole, erased, old or
+/// `op-boundary` sectors and not one weak bit; that is the dry run (M4
+/// scope 3).
+///
+/// Three facts about the machine shape the numbers, all measured on this
+/// image (2026-10-08) rather than read off a document:
+///
+/// - **A command's time counts from the last power cycle, not from cycle
+///   zero of the run.** The machine's clock restarts with the chip, so each
+///   `power-cycle` below is that many emulated milliseconds after the
+///   previous one (the README's "absolute from cycle zero" holds for a run
+///   with no restart in it). The run's own `--timeout` is total.
+/// - **A boot reaches its scan-done line in about 210 ms (fresh) to 300 ms
+///   (resumed)**, so every gap is longer than that and no cut lands in a
+///   scan.
+/// - **A cut is applied at the next slice boundary**, which is always
+///   between two flash commands and in this image is most often the end of
+///   a sector erase (the first recording: four of five cuts left the sector
+///   erased, one left nine pages and three 32-byte program commands of the
+///   tenth). Where an emulated cut lands is a property of the machine's
+///   slicing, not of a flash part, and nothing may read it as a tear shape.
+///
+/// Each boot's ready line is answered by the `after` line that matches it (a
+/// match moves the search past itself).
+pub const FLASH_TEARS_EMULATED_SCRIPT: &str = "\
+after \"[flash-tears] READY\" \"g\"
+after \"[flash-tears] READY\" \"g\"
+after \"[flash-tears] READY\" \"g\"
+after \"[flash-tears] READY\" \"g\"
+after \"[flash-tears] READY\" \"g\"
+after \"[flash-tears] READY\" \"g\"
+450 power-cycle
+520 power-cycle
+700 power-cycle
+1000 power-cycle
+1500 power-cycle
+";
+
 pub static ALL_PAYLOADS: &[Payload] = &[
     Payload {
         name: "shader-compile-stress",
@@ -2868,6 +2971,58 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             strap: "app",
         },
     },
+    Payload {
+        name: "flash-tears",
+        chips: &[],
+        display_name: "Power cuts on a sacrificial board: what real NOR tears look like",
+        fw_check_slug: "flash-tears",
+        firmware_features: &["test_flash_tears"],
+        fw_checks_feature: Some("check-flash-tears"),
+        emits_header: true,
+        // A readiness line, not a done marker: after each boot's scan the
+        // payload goes back to its work loop for the host to cut again.
+        sentinel: Sentinel::Ready("[flash-tears] === SCAN DONE ==="),
+        host_script: None,
+        pin_script: None,
+        wire: &[],
+        record_kinds: &[
+            "ft-boot",
+            "ft-journal",
+            "ft-sector",
+            "ft-summary",
+            "ft-repair",
+            "ft-timing",
+        ],
+        mask_set: "flash-tears",
+        fields: FLASH_TEARS_FIELDS,
+        series: &[],
+        // Fifty cuts a recording: one foreground run of the desk sitting
+        // (M4 director note), so a sitting of 500 is ten recordings, each
+        // its own transcript, each committed before the next starts.
+        capture: Capture::PowerCuts {
+            cuts: 50,
+            min_ms: 50,
+            max_ms: 2000,
+        },
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: FLASH_TEARS_EMULATED_SCRIPT,
+        }),
+        probes: &[],
+        // Five gaps (4.17 s) and the last boot's scan, with room.
+        run_secs: Some(5),
+        fresh_chip: false,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        // ROM-up because the payload finds `lpfs` in the flashed partition
+        // table, which a direct load does not put in the chip.
+        boot: BootPath::RomUp {
+            reset_cause: "poweron",
+            strap: "app",
+        },
+    },
 ];
 
 pub fn find_payload(name: &str) -> Result<&'static Payload> {
@@ -3462,8 +3617,12 @@ mod tests {
         // The shipped image, flash-backed: the product's own link.
         assert_eq!(p.firmware_features, &["server", "radio"]);
 
-        // Every other payload is watched from its first byte.
-        for other in ALL_PAYLOADS.iter().filter(|o| o.name != p.name) {
+        // Every other payload is watched from its first byte, but the one
+        // whose subject is a power cut.
+        for other in ALL_PAYLOADS
+            .iter()
+            .filter(|o| o.name != p.name && o.name != "flash-tears")
+        {
             assert_eq!(other.capture, Capture::Monitor, "{}", other.name);
         }
     }
@@ -3637,5 +3796,29 @@ mod tests {
         assert!(find_payload("shader-compile-stress").is_ok());
         let err = find_payload("nope").unwrap_err().to_string();
         assert!(err.contains("shader-compile-stress"), "{err}");
+    }
+
+    /// `flash-tears` is cut, not watched: fifty power cycles a recording,
+    /// its scan-done line a readiness line, and an emulated twin that cuts
+    /// five times between flash operations.
+    #[test]
+    fn flash_tears_is_cut_by_a_hand_on_the_plug() {
+        let p = find_payload("flash-tears").unwrap();
+        assert_eq!(
+            p.capture,
+            Capture::PowerCuts {
+                cuts: 50,
+                min_ms: 50,
+                max_ms: 2000
+            }
+        );
+        assert_eq!(p.sentinel, Sentinel::Ready("[flash-tears] === SCAN DONE ==="));
+        let plan = p.host_plan.expect("the emulated twin has a host");
+        assert_eq!(plan.host, "attached");
+        let cuts = plan.script.lines().filter(|l| l.ends_with("power-cycle")).count();
+        let answers = plan.script.lines().filter(|l| l.starts_with("after ")).count();
+        assert_eq!(cuts, 5);
+        assert_eq!(answers, cuts + 1, "one answer per boot: the first and one per cut");
+        assert!(matches!(p.boot, BootPath::RomUp { .. }));
     }
 }
