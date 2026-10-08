@@ -14,7 +14,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
-    OfferPath, PendingLinkView, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
+    OfferPath, PendingLinkView, ResetReach, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
     UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_wifi_offer,
     device_offers, new_sim_offer, pending_link_offers,
 };
@@ -107,6 +107,12 @@ pub(crate) fn card_tree_with_update(
         face,
         autoconnect: false,
         locked,
+        // A story card on a network link (it carries the firmware reason)
+        // restarts by request, with the author tier unless it is locked.
+        reset: match card.firmware_blocked.is_some() {
+            true => ResetReach::Request { author: !locked },
+            false => ResetReach::Lines,
+        },
         banked: false,
         projects,
         examples,
@@ -125,7 +131,11 @@ pub(crate) fn pending_tree(pending: &[PendingLinkView]) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
     for link in pending {
         let prefix = OfferPath::board(&BoardRef::New(link.device.0 as u32));
-        for offer in pending_link_offers(link, &prefix) {
+        let reset = match link.firmware_blocked.is_some() {
+            true => ResetReach::Request { author: false },
+            false => ResetReach::Lines,
+        };
+        for offer in pending_link_offers(link, &prefix, reset) {
             tree.publish(offer);
         }
         tree.place_device(link.device, prefix);

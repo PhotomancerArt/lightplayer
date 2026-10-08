@@ -3213,7 +3213,18 @@ impl StudioController {
         let prefixes = self.device_offer_prefixes(&entries);
         for pending in &roster.roster.pending {
             let prefix = prefixes[&pending.device].clone();
-            for offer in crate::pending_link_offers(pending, &prefix) {
+            let over_network = self
+                .devices
+                .roster()
+                .pending()
+                .iter()
+                .find(|entry| entry.link == pending.link)
+                .is_some_and(|entry| entry.info.endpoint.is_network());
+            let reset = match over_network {
+                true => crate::ResetReach::Request { author: false },
+                false => crate::ResetReach::Lines,
+            };
+            for offer in crate::pending_link_offers(pending, &prefix, reset) {
                 offers.publish(offer);
             }
             offers.place_device(pending.device, prefix);
@@ -3233,6 +3244,7 @@ impl StudioController {
                     .access
                     .get(&view.id)
                     .is_some_and(|access| access.unlock == Some(crate::UiUnlockOffer::Locked)),
+                reset: self.device_reset_reach(device),
                 banked: self.runs_a_banked_project(view.id, &sources.projects),
                 projects: &sources.projects,
                 examples: &sources.examples,
@@ -3255,6 +3267,19 @@ impl StudioController {
         // The layout verbs (C6 repartition) under the same prefixes.
         self.devices
             .publish_layout_offers(self.device_now(), offers, &prefixes);
+    }
+
+    /// How `device`'s Reset reaches it ([`crate::ResetReach`]): the model's
+    /// own route (`Device::resets_by_request`), and over a network link
+    /// whether it holds the author tier the board's access gate asks of a
+    /// `Reboot`.
+    fn device_reset_reach(&self, device: Option<&lpa_devices::Device>) -> crate::ResetReach {
+        match device {
+            Some(device) if device.resets_by_request() => crate::ResetReach::Request {
+                author: self.access.granted_tier(device.id) == Some(lpc_access::Tier::Edit),
+            },
+            _ => crate::ResetReach::Lines,
+        }
     }
 
     /// `devices/<board>/connect-wifi`: "Connect over Wi‑Fi" on the card of a
