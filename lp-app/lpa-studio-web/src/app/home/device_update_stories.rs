@@ -24,7 +24,7 @@ use lpa_studio_core::{
     DeviceCardFeedView, DeviceEscape, DeviceFace, DeviceId, DeviceLoadedProject, DeviceStatus,
     DeviceView, FIRMWARE_NEEDS_USB, FeedLiveness, INSTALL_FIND_PARAM, INSTALL_VERSION_PARAM,
     OfferArgs, UiChromeSessionControl, UiChromeSessionStatus, UiDeviceAccess, UiLensReconnecting,
-    UiUnlockOffer, UpdateFixture, UpdateFixtureRow, looked_up_release,
+    UiUnlockOffer, UpdateFixture, UpdateFixtureRow, lan_link_for_endpoint, looked_up_release,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -80,6 +80,13 @@ fn device_card_update_updating_bluetooth() -> Element {
 }
 
 #[story(
+    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same row, its line and sentence naming the link (\"Updating over Wi‑Fi… 40%\"), the device line \"Wi‑Fi · 192.168.1.40\". The board resets three times on the way; each time the page redials it by itself and the card keeps this row."
+)]
+fn device_card_update_updating_wifi() -> Element {
+    update_card(UpdateFixtureRow::Updating, Link::Wifi)
+}
+
+#[story(
     description = "The last step of an update this Studio is running (progress): \"Finishing the update… 70%\", the dark-yellow slot saying \"Installing the rest of the firmware… 70%. Keep the board powered.\" Not called interrupted: nothing was."
 )]
 fn device_card_update_finishing() -> Element {
@@ -119,6 +126,13 @@ fn device_card_update_needs_usb_once_usb() -> Element {
 )]
 fn device_card_update_needs_usb_once_bluetooth() -> Element {
     update_card(UpdateFixtureRow::NeedsUsbOnce, Link::Bluetooth)
+}
+
+#[story(
+    description = "Over Wi‑Fi, a board on a release from before Wi‑Fi updates: its hello offered the update, but its Wi‑Fi link never answered it (5 s), so the card says what to do — \"Update over USB or Bluetooth once\", its hover \"This board updates over USB or Bluetooth until it has been updated once.\" — and offers nothing that would only hang."
+)]
+fn device_card_update_not_over_wifi_yet() -> Element {
+    update_card(UpdateFixtureRow::NotOverWifiYet, Link::Wifi)
 }
 
 #[story(
@@ -298,6 +312,20 @@ fn device_curtain_update_updating() -> Element {
     }
 }
 
+#[story(
+    description = "The same Reconnecting card while its board updates over Wi‑Fi: each reset closes the board's socket and the page redials it by itself, so the card's detail is the update's line, \"Updating over Wi‑Fi… 40%\"."
+)]
+fn device_curtain_update_updating_wifi() -> Element {
+    let fixture = UpdateFixture::new(UpdateFixtureRow::Updating, porch_lights(Link::Wifi))
+        .over_wifi();
+    let line = fixture.words().map(|words| words.line).unwrap_or_default();
+    rsx! {
+        section { class: "tw:grid tw:w-[760px] tw:gap-3 tw:p-4",
+            LinkReconnectingStrip { reconnecting: UiLensReconnecting::updating(&line) }
+        }
+    }
+}
+
 // --- Helpers --------------------------------------------------------------
 
 /// The frame the device-card stories use.
@@ -308,12 +336,21 @@ const CARD_FRAME: &str = "tw:grid tw:max-w-[420px] tw:p-3";
 enum Link {
     Usb,
     Bluetooth,
+    /// The board on the LAN (`lan:ws://192.168.1.40/link`).
+    Wifi,
 }
+
+/// The LAN board's endpoint.
+const WIFI_ENDPOINT: &str = "lan:ws://192.168.1.40/link";
 
 /// The sample board in `row`, over `link`: its words and its offers both
 /// read by core from the fixture's facts.
 fn update_card(row: UpdateFixtureRow, link: Link) -> Element {
     let fixture = UpdateFixture::new(row, porch_lights(link));
+    let fixture = match link {
+        Link::Wifi => fixture.over_wifi(),
+        Link::Usb | Link::Bluetooth => fixture,
+    };
     fixture_card(fixture, row, link, None)
 }
 
@@ -338,9 +375,9 @@ fn fixture_card(
 ) -> Element {
     let update = fixture.words();
     let update_facts = fixture.offer_facts();
-    // A USB board streams its picture to the card; over Bluetooth there is
-    // none (the slot says so).
-    let feed = (link == Link::Usb).then(|| DeviceCardFeedView {
+    // A USB or Wi‑Fi board streams its picture to the card; over Bluetooth
+    // there is none (the slot says so).
+    let feed = (link != Link::Bluetooth).then(|| DeviceCardFeedView {
         frame: Some(live_card_lamp_frame()),
         frame_age_secs: Some(0.2),
         engine_fps: Some(43),
@@ -365,6 +402,7 @@ fn fixture_card(
                 update,
                 update_facts,
                 install_picker_preview,
+                lan: (link == Link::Wifi).then(|| lan_link_for_endpoint(WIFI_ENDPOINT)).flatten(),
                 on_action: |_| {},
             }
         }
@@ -432,7 +470,7 @@ fn porch_lights(link: Link) -> DeviceView {
         last_outcome: None,
         terminal: Vec::new(),
         terminal_dropped: 0,
-        firmware_blocked: (link == Link::Bluetooth).then(|| FIRMWARE_NEEDS_USB.to_string()),
+        firmware_blocked: (link != Link::Usb).then(|| FIRMWARE_NEEDS_USB.to_string()),
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,
