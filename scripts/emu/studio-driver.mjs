@@ -321,6 +321,27 @@ export class StudioDriver {
     return clicked;
   }
 
+  /// Type `text` into the first visible text field under `scope` whose
+  /// placeholder contains `placeholder`, as keystrokes would: the field is
+  /// focused and cleared, then the text goes in through CDP's
+  /// `Input.insertText`, so the page sees real `input` events.
+  async type(placeholder, text, { scope = "document" } = {}) {
+    const found = await this.evaluate(`
+      (() => {
+        const wanted = ${JSON.stringify(placeholder.toLowerCase())};
+        const el = [...${scope}.querySelectorAll('input[type="text"], input:not([type])')]
+          .find((el) => (el.placeholder || '').toLowerCase().includes(wanted));
+        if (!el) return false;
+        el.scrollIntoView({ block: 'center' });
+        el.focus();
+        el.select();
+        return true;
+      })()
+    `);
+    if (!found) throw new Error(`no text field with a placeholder like ${JSON.stringify(placeholder)}`);
+    await this.cdp.send("Input.insertText", { text }, this.sessionId);
+  }
+
   /// Wait for the control, then click it. The wait is the page's, not ours.
   async clickWhenReady(text, options = {}) {
     await this.waitFor(

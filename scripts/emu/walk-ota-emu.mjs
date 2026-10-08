@@ -32,8 +32,9 @@
 //                on release r2 (`2026.10.02-1`) and a REAL lp-cloud-server in
 //                front of a GitHub-shaped upstream holding r1 and r2 (their
 //                assets, a REST releases list, `latest`). The list shows r2
-//                as the board's own, r1 and this Studio's build; r1 arms
-//                (older: Lasting) and installs on the second click; then r2
+//                as the board's own, r1 and this Studio's build; r1, typed
+//                whole into the list's box (which narrows the list to it),
+//                arms (older: Lasting) and installs on the second click; then r2
 //                installs at one click (newer: Routine). Both images are
 //                built by the recipe (`build-image.sh` into images/r1,
 //                images/r2), and differ only in their version. Not in the
@@ -1096,7 +1097,7 @@ async function main() {
           ]);
           try {
             await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
-            await step(name, `on ${r2.version}: Other version… lists the store's releases; ${r1.version} arms and installs, then ${r2.version} installs at one click`, async () => {
+            await step(name, `on ${r2.version}: Other version… lists the store's releases; ${r1.version}, typed in the box, arms and installs, then ${r2.version} installs at one click`, async () => {
               await connect(board);
               await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
 
@@ -1107,10 +1108,17 @@ async function main() {
               if (!list.includes("this Studio's build")) throw new Error(`the list does not offer this Studio's build: ${list}`);
               const listShot = await shot("install-older-list");
 
-              // r1: older than the board's, so the press arms (Lasting).
+              // r1, typed whole into the box: the list narrows to it, picked;
+              // older than the board's, so the press arms (Lasting).
               const from1 = boardWords(board).length;
-              await driver.click(r1.version, { scope: PANEL });
-              await driver.click("Other version…", { scope: PANEL });
+              await driver.type("Type a version", r1.version, { scope: PANEL });
+              const narrowed = await driver.waitFor(
+                `(() => { const t = ${PANEL}?.innerText ?? '';
+                          return t.includes(${JSON.stringify(r1.version)}) && !t.includes(${JSON.stringify(r2.version)}) ? t : false; })()`,
+                { timeoutMs: STEP_MS, what: `the box to narrow the list to ${r1.version}` },
+              );
+              const typedShot = await shot("install-older-typed");
+              await driver.click("Install", { scope: PANEL, exact: true });
               // Armed, and its label swap (a 0.16 s fade) done, so the shot
               // shows the armed reading alone.
               await driver.waitFor(
@@ -1131,7 +1139,7 @@ async function main() {
               if (!again.includes("On this board now")) throw new Error(`the list does not mark ${r1.version} as the board's own: ${again}`);
               if (!(await optionDisabled(r1.version))) throw new Error(`${r1.version} is pickable, though the board runs it`);
               await driver.click(r2.version, { scope: PANEL });
-              await driver.click("Other version…", { scope: PANEL });
+              await driver.click("Install", { scope: PANEL, exact: true });
               const armed = await driver.evaluate(`Boolean(${PANEL}?.querySelector('.ux-armed'))`);
               if (armed) throw new Error(`the press on ${r2.version} armed: a newer version is one click`);
               const toR2 = await awaitRelease(board, r2, from2);
@@ -1141,7 +1149,8 @@ async function main() {
               if (asked < 1) throw new Error("lp-cloud-server never read the releases list");
               return {
                 summary: `${toR1.id} armed, confirmed and installed (${toR1.order.map((e) => e.kind).join(" → ")}); ${toR2.id} at one click (${toR2.order.map((e) => e.kind).join(" → ")}); the project ran throughout`,
-                shots: { list: listShot, armed: armedShot, onR1: r1Shot, onR2: r2Shot },
+                shots: { list: listShot, typed: typedShot, armed: armedShot, onR1: r1Shot, onR2: r2Shot },
+                narrowed: narrowed.replace(/\s+/g, " ").trim(),
                 toR1: { core: toR1.core, card: toR1.order, board: toR1.said },
                 toR2: { core: toR2.core, card: toR2.order, board: toR2.said },
                 listsAsked: asked,
