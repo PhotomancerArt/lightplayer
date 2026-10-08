@@ -69,7 +69,7 @@ pub(crate) fn roster_tree(
             let connecting = devices
                 .wifi_connects
                 .get(&card.id)
-                .is_some_and(|connect| connect.connecting);
+                .is_some_and(|connect| !connect.through_relay && connect.connecting);
             let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
             tree.publish(connect_wifi_offer(&prefix, card.id, ip, connecting));
         }
