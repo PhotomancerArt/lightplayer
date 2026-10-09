@@ -9,7 +9,12 @@ use lpa_studio_core::{UiAction, UiHomeSection, UiHomeView};
 use super::boards_section::BoardsSection;
 use super::home_view_mode::HomeViewMode;
 
-/// The section's element id: the walks scope a board's card to it.
+/// The section's element id. `scripts/emu` addresses it by this string: the
+/// `studio-lan` and `studio-relay` walks wait for a board's "Connect over
+/// Wi‑Fi" / Reconnect verb inside it and assert it is gone once the board is
+/// back, `walk-ota-emu` waits for it when a cable-out moves a card here, and
+/// `walk-no-board` reports it. The section is not drawn when it is empty, so
+/// the id's absence is "no such section".
 pub(crate) const OFFLINE_BOARDS_ID: &str = "home-offline-boards";
 
 #[component]

@@ -173,7 +173,7 @@ async function main() {
       .then(() => true)
       .catch(() => false);
     if (back) return "came back on its own";
-    await driver.clickWhenReady(lane === "usb" ? "via USB" : "via Bluetooth", { timeoutMs: STEP_MS });
+    await driver.pressConnect(lane === "usb" ? "USB" : "Bluetooth", { timeoutMs: STEP_MS });
     await driver.pickBoard(BOARD, { timeoutMs: STEP_MS });
     await driver.waitFor(`${MAIN_TEXT}.includes('Ready') && Boolean(${WIFI_ROW})`, {
       timeoutMs: STEP_MS,

@@ -8,7 +8,10 @@ use lpa_studio_core::{UiAction, UiHomeSection, UiHomeView};
 use super::boards_section::BoardsSection;
 use super::home_view_mode::HomeViewMode;
 
-/// The section's element id: the walks scope a board's card to it.
+/// The section's element id. `scripts/emu` addresses it by this string:
+/// `walk-wifi-emu-lan`'s `cardOf` stops its climb here, and `walk-no-board`
+/// reports which section a board sits in by it. The section is not drawn
+/// when it is empty, so the id's absence is "no such section".
 pub(crate) const ONLINE_BOARDS_ID: &str = "home-online-boards";
 
 #[component]

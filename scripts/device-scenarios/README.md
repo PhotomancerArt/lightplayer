@@ -65,6 +65,7 @@ passive `hardware list`; it never opens or resets a port).
 ```bash
 just device-scenario run s1 --emu --shots /tmp/shots
 just device-scenario run --emu            # every scenario that has one
+just device-scenario run s1 --emu --serve-release   # no dev server: serve the release bundle itself
 just device-scenario check-guard          # the overwrite guard, proved by trying
 ```
 
@@ -79,8 +80,12 @@ scenario has two halves and each one changes:
 
 **One `emu serve` per scenario**, on an ephemeral port, so `blank` means blank.
 The **page** still comes from the worktree's own canonical `just studio-dev` —
-never a substitute server — and the two are joined by `?emu=<url>`, which
-composes with `?record=` because nothing reads anything else's flag.
+never a substitute server — or, with `--serve-release`, from the release bundle
+(`just studio-web-story-build`) the run serves itself on its own stable port: no
+prompt, no detached process, one foreground command. The two are joined by
+`?emu=<url>`, which composes with `?record=` because nothing reads anything
+else's flag. The steps' only page contact is the `connect` and `cancel-connect`
+steps, which press the home page's **USB** square (`pressConnect`).
 
 ## The `emulated` block
 

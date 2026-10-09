@@ -262,7 +262,7 @@ const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 const PAGE_TEXT = `(document.body?.innerText || '')`;
 
 async function connect(driver) {
-  await driver.clickWhenReady("via USB", { timeoutMs: STEP_MS });
+  await driver.pressConnect("USB", { timeoutMs: STEP_MS });
   await driver.pickBoard(BOARD, { timeoutMs: STEP_MS });
   await driver.waitFor(`${MAIN_TEXT}.includes('Update firmware') || ${MAIN_TEXT}.includes('Finish update') || ${MAIN_TEXT}.includes('Restore files')`, {
     timeoutMs: STEP_MS,

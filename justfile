@@ -4835,7 +4835,9 @@ fixture-fw variant port="":
 # TWO LANES since emulator plan two M6. `run <id> --emu` runs the same
 # scenario with NO BOARD, against an `lp-cli emu serve` the runner starts
 # itself, in headless Chrome; `check-guard` proves the emulated lane cannot
-# write a silicon fixture's name.
+# write a silicon fixture's name. `--emu --serve-release` serves the release
+# bundle itself (after `just studio-web-story-build`): no dev server, no
+# prompt, one foreground command.
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
@@ -4942,7 +4944,8 @@ walk-wifi-emu lane *args:
 # and re-seated under the editor and under Play — the page must stay put
 # behind "Reconnecting…" and resume the same session (defect
 # 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
-# this worktree's port; never a CI job.
+# this worktree's port, or `--serve-release` (after `just studio-web-story-build`),
+# which serves the release bundle itself; never a CI job.
 walk-drop-emu *args:
     node scripts/emu/walk-drop-emu.mjs {{ args }}
 

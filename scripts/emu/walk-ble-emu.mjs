@@ -227,7 +227,7 @@ async function main() {
     console.log(`  studio is up — page visibility: ${visibility}\n`);
 
     await step("add", "Connect a board via Bluetooth, and pick the board in the pairing chooser", async () => {
-      await driver.clickWhenReady("via Bluetooth", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("Bluetooth", { timeoutMs: STEP_DEADLINE_MS });
       const picked = await driver.pickBoard(BOARD, { timeoutMs: STEP_DEADLINE_MS });
       return `paired with ${picked}`;
     });

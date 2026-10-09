@@ -244,7 +244,7 @@ export function forwardOf(entry) {
 /// page touches a USB door or a control channel, so the walk's own tools
 /// can hold them (W9's `renumber`/`reset` need the control channel, and the
 /// shim holds every board's while its page is open).
-export function studioUrlForLan({ studioPort, forwards, sinkUrl, route = "/devices" }) {
+export function studioUrlForLan({ studioPort, forwards, sinkUrl, route = "/" }) {
   const query = new URLSearchParams();
   query.set("lan", forwards.map((forward) => `ws://${forward}/link`).join(","));
   query.set("record", sinkUrl);
@@ -263,7 +263,7 @@ export function studioUrlForLan({ studioPort, forwards, sinkUrl, route = "/devic
 /// attach / power), which would lock W9 out of `renumber` and `reset`; and
 /// the LAN page keeps its own view of c6-b, whose LAN link drops while the
 /// board tries the new networks.
-export function studioUrlForUsb({ studioPort, doorAddr, sinkUrl, route = "/devices" }) {
+export function studioUrlForUsb({ studioPort, doorAddr, sinkUrl, route = "/" }) {
   const query = new URLSearchParams();
   query.set("emu", `ws://${doorAddr}`);
   query.set("record", sinkUrl);
@@ -552,8 +552,11 @@ export function lpEmuCommit() {
 
 /// The card of the Wi‑Fi board Studio reached at `forward`: the element
 /// holding its "Wi-Fi · <address>" line, widened until it is one card among
-/// several (or the whole list, when it is the only one). Recomputed on every
-/// use: Dioxus may replace the nodes between two looks.
+/// several (or its boards section's whole grid, when it is the only one: the
+/// climb stops at `#home-online-boards` / `#home-offline-boards`, so a lone
+/// card is scoped to its section and not to a page that also holds Connect,
+/// the projects and the examples). Recomputed on every use: Dioxus may
+/// replace the nodes between two looks.
 export function cardOf(forward) {
   return `(() => {
     const re = new RegExp(${JSON.stringify(escapeRegExp(`${WORDS.wifiLine}${forward}`))} + '(?!\\\\d)');
@@ -562,8 +565,9 @@ export function cardOf(forward) {
     const hits = [...main.querySelectorAll('*')].filter((el) => re.test(el.textContent || ''));
     const leaf = hits.find((el) => ![...el.children].some((c) => re.test(c.textContent || '')));
     if (!leaf) return null;
+    const limit = leaf.closest('#home-online-boards, #home-offline-boards') ?? main;
     let el = leaf;
-    while (el.parentElement && el.parentElement !== main) {
+    while (el.parentElement && el.parentElement !== limit) {
       const cards = [...el.parentElement.children].filter((c) => (c.textContent || '').includes(${JSON.stringify(WORDS.wifiLine)}));
       if (cards.length > 1) return el;
       el = el.parentElement;
@@ -709,14 +713,15 @@ export class Page {
     return `${before} → ${await this.driver.evaluate(`${knob}.getAttribute('aria-valuenow')`)}`;
   }
 
-  /// Back to the Devices page without a reload (a reload would open new
-  /// LAN links and hide whether the old ones stayed up).
-  async toDevices(url) {
+  /// Back to the home page without a reload (a reload would open new LAN
+  /// links and hide whether the old ones stayed up): the top bar's logo, the
+  /// first link to `/` (`LogoLockup { href: "/" }` in `site_chrome.rs`).
+  async toHome(url) {
     const clicked = await this.driver.evaluate(`(() => {
-      const a = [...document.querySelectorAll('a[href]')].find((l) => new URL(l.href, location.href).pathname === '/devices');
+      const a = [...document.querySelectorAll('a[href]')].find((l) => new URL(l.href, location.href).pathname === '/');
       if (!a) return false; a.click(); return true; })()`);
     if (!clicked) await this.load(url);
-    await this.driver.waitFor(`location.pathname === '/devices'`, { timeoutMs: STEP_MS, what: "the Devices page" });
+    await this.driver.waitFor(`location.pathname === '/'`, { timeoutMs: STEP_MS, what: "the home page" });
     return clicked ? "in-app" : "reloaded";
   }
 }
@@ -1065,7 +1070,7 @@ async function main() {
     });
 
     await step("W4", `${B}'s card while ${A} stays connected: both links stay up`, async (marks, seen) => {
-      const how = await page.toDevices(url);
+      const how = await page.toHome(url);
       // Both cards Ready, each showing ITS board's MAC: the hello each link
       // carried (the page only says where to look; the MAC is the board's).
       for (const id of BOARDS) {
@@ -1099,7 +1104,7 @@ async function main() {
       if (stationOf(status).ip !== joined[B].ip) throw new Error(`${B} answered over its USB door as ${JSON.stringify(status.station)}`);
       noneClosed();
       await page.cardSays(fwd[B], "Ready");
-      return `back on Devices ${how}; both cards Ready with their own MACs; a second LAN dial to ${B} turned away (${turnedAway.replace(/^.*\] /, "")}); ${B} answered over USB at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
+      return `back on the home page ${how}; both cards Ready with their own MACs; a second LAN dial to ${B} turned away (${turnedAway.replace(/^.*\] /, "")}); ${B} answered over USB at ${joined[B].ip}; no LAN link closed${how === "in-app" ? "" : " (not checked: the page reloaded)"}`;
     });
 
     await step("W5", "the LAN probe asks for _lightplayer._tcp: both boards answer, each with its own name and MAC", async () => {
@@ -1138,7 +1143,7 @@ async function main() {
       await usbPage.load(usbUrl);
       // The shim's banner covers the cards' lower rows in a shot.
       await usbDriver.click("hide").catch(() => null);
-      await usbDriver.clickWhenReady("via USB", { timeoutMs: STEP_MS });
+      await usbDriver.pressConnect("USB", { timeoutMs: STEP_MS });
       await usbDriver.pickBoard(B, { timeoutMs: STEP_MS });
       // Studio's readiness may reset the board on open (the shim carries
       // DTR/RTS to the door); either way the board's answer over its
@@ -1394,8 +1399,8 @@ async function main() {
       // fault, relayed). A card that stays on neither after a relink is
       // Studio's finding 5 (PR B's), and does not hide the board's
       // evidence above: the step passes on the board's words and says so.
-      await page.toDevices(url);
-      const face = await page.cardSaysAny(fwd[A], ["Ready", "Degraded"]).catch(() => null);
+      await page.toHome(url);
+      const face =await page.cardSaysAny(fwd[A], ["Ready", "Degraded"]).catch(() => null);
       seen.cardFace = face;
       const card = face
         ? `card ${face}`

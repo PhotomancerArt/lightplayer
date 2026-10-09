@@ -155,7 +155,15 @@ import process from "node:process";
 import { execFileSync, spawn } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
-import { boardRegistry, serveStudioBundle, startDoor, startRecordSink, stopDoor, walkPort } from "./emulated-lane.mjs";
+import {
+  boardRegistry,
+  openNetworkRow,
+  serveStudioBundle,
+  startDoor,
+  startRecordSink,
+  stopDoor,
+  walkPort,
+} from "./emulated-lane.mjs";
 import { WALK_EMAIL, forwardHttp, forwardUpgrade, relayId, startRelayCloud } from "./walk-ota-relay.mjs";
 import {
   FIXTURE,
@@ -515,11 +523,11 @@ async function main() {
 
   const pageUrl = (doorAddr, firmwareStore = storeOrigin) =>
     (LAN_LANE
-      ? `http://localhost:${studioPort}/devices?lan=${encodeURIComponent(`ws://${door.forward}/link`)}` +
+      ? `http://localhost:${studioPort}/?lan=${encodeURIComponent(`ws://${door.forward}/link`)}` +
         `&firmware-store=${encodeURIComponent(firmwareStore)}`
       : RELAY_LANE
-      ? `http://localhost:${studioPort}/devices?relay=${door.relayId}&firmware-store=${encodeURIComponent(firmwareStore)}`
-      : `http://localhost:${studioPort}/devices?emu=${doorAddr ? encodeURIComponent(`ws://${doorAddr}`) : "tab"}` +
+      ? `http://localhost:${studioPort}/?relay=${door.relayId}&firmware-store=${encodeURIComponent(firmwareStore)}`
+      : `http://localhost:${studioPort}/?emu=${doorAddr ? encodeURIComponent(`ws://${doorAddr}`) : "tab"}` +
         `&firmware-store=${encodeURIComponent(firmwareStore)}` +
         (EMU_TTY ? `&emu-tty=${EMU_TTY}` : "") +
         (BLE ? "&ble=emu" : "")) + (recordUrl ? `&record=${encodeURIComponent(recordUrl)}` : "");
@@ -736,7 +744,7 @@ async function main() {
       await waitBoard(board, /\[wifi\] address \d+\.\d+\.\d+\.\d+/, "it joined the virtual LAN", JOIN_MS);
       return;
     }
-    await driver.clickWhenReady(BLE ? "via Bluetooth" : "via USB", { timeoutMs: STEP_MS });
+    await driver.pressConnect(BLE ? "Bluetooth" : "USB", { timeoutMs: STEP_MS });
     await driver.pickBoard(board, { timeoutMs: STEP_MS });
   };
   /// Over Wi‑Fi, every reset closes the board's socket and the page redials
@@ -951,9 +959,10 @@ async function main() {
         // The cable stays out until Studio has seen it go — its own terminal
         // line — then goes back in, as a person re-seating it would.
         // (The card keeps the update's line and offers "Reconnect…" while
-        // its link is gone; a core-only board's card may instead leave the
-        // roster for "remembered, not connected".)
-        await driver.waitFor(`/Reconnect…|remembered boards? not connected/.test(document.body.innerText)`, {
+        // its link is gone; a core-only board's card may instead leave
+        // Online boards for Offline boards, which is a section of its own
+        // on the home page.)
+        await driver.waitFor(`Boolean(document.querySelector('#home-offline-boards')) || /Reconnect…/.test(document.body.innerText)`, {
           timeoutMs: STEP_MS,
           what: "Studio to see the cable go",
         });
@@ -1636,8 +1645,9 @@ async function main() {
                   }
                   lpCliRefusal = refused.stderr.trim().split("\n").slice(-1)[0];
                   second = await StudioDriver.launch({ width: 1100, height: 900 });
-                  await second.navigate(`http://localhost:${studioPort}/devices`);
+                  await second.navigate(`http://localhost:${studioPort}/`);
                   await second.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: LOAD_MS, what: "the second Studio to load" });
+                  await openNetworkRow(second, { timeoutMs: STEP_MS });
                   const typed = await second.evaluate(typeAddress(door.forward));
                   if (typed !== "typed") throw new Error(`the second page's address field: ${typed}`);
                   await second.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the second page's Connect" });
@@ -1779,8 +1789,9 @@ function seedChip(image, chip, emulated = "60s", requests = []) {
   );
 }
 
-/// The add slot's address field and its Connect (the `studio-lan` walk's
-/// selectors), and what it says under them.
+/// The Network row's address field and its Connect (the `studio-lan` walk's
+/// selectors), and what it says under them. The row opens when the Network
+/// square is pressed (`openNetworkRow`).
 const ADDRESS_FIELD = `document.querySelector('#main input[placeholder^="192.168.1.40"]')`;
 const ADDRESS_ENTRY = `${ADDRESS_FIELD}?.closest('label')?.parentElement?.parentElement`;
 const ADDRESS_STATUS = `(${ADDRESS_ENTRY}?.querySelector('[role="status"]')?.innerText || '')`;
@@ -1794,7 +1805,7 @@ const PRESS_ADDRESS_CONNECT = `(() => {
 /// Studio's busy words (`lpa-studio-core`'s `WIFI_BUSY_WORDS`).
 const BUSY_WORDS = "Busy with another connection \u2014 try again";
 
-/// Type `text` into the add slot's address field, as a keyboard does for
+/// Type `text` into the Network row's address field, as a keyboard does for
 /// Dioxus (`input` events carry the value).
 function typeAddress(text) {
   return `(() => {

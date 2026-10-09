@@ -124,6 +124,29 @@ class Cdp {
   close() { this.socket.close(); }
 }
 
+/// Page-side expression for the controls under `scope` (an expression for
+/// the element to look under) that `click(text, ...)` may press: enabled,
+/// text containing `text` (case-insensitive), and, with `exact`, a leaf
+/// element whose whole text is `text`. `click` and the wait in
+/// `clickWhenReady` both read it, so the one is never satisfied by a control
+/// the other would not press. An absent `scope` element matches nothing.
+function matchingControls(text, { scope = "document", exact = false } = {}) {
+  return `((() => {
+    const wanted = ${JSON.stringify(text.toLowerCase())};
+    const norm = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+    const root = ${scope};
+    if (!root) return [];
+    return [...root.querySelectorAll('button, [role="button"], a')]
+      .filter((el) => !el.disabled)
+      .filter((el) => norm(el).includes(wanted))
+      .filter((el) => !${exact} || [el, ...el.querySelectorAll('*')]
+        .some((n) => n.childElementCount === 0 && norm(n) === wanted));
+  })())`;
+}
+
+/// The home page's Connect a board section: where the squares live.
+const CONNECT_SCOPE = "document.querySelector('#home-connect-board')";
+
 /// The page-side half of every wait: a promise that a MutationObserver
 /// settles. Injected once per document; see rule 2.
 const WAIT_HELPER = `
@@ -273,10 +296,12 @@ export class StudioDriver {
   // --- Studio's affordances, by their visible text -------------------------
 
   /// Every clickable control the page is showing, with its text — the probe
-  /// an agent runs when Studio's wording moves.
-  async controls() {
+  /// an agent runs when Studio's wording moves. `scope` is a page-side
+  /// expression for the element to look under (`document` by default); one
+  /// that evaluates to nothing lists no controls.
+  async controls({ scope = "document" } = {}) {
     return this.evaluate(`
-      [...document.querySelectorAll('button, [role="button"], a')]
+      [...(${scope} ?? document.createElement('div')).querySelectorAll('button, [role="button"], a')]
         .filter((el) => el.offsetParent !== null || el.closest('#lp-emu-picker'))
         .map((el) => ({
           tag: el.tagName.toLowerCase(),
@@ -297,14 +322,7 @@ export class StudioDriver {
   async click(text, { scope = "document", nth = 0, exact = false } = {}) {
     const clicked = await this.evaluate(`
       (() => {
-        const wanted = ${JSON.stringify(text.toLowerCase())};
-        const norm = (el) => (el.textContent || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-        const all = [...${scope}.querySelectorAll('button, [role="button"], a')]
-          .filter((el) => !el.disabled)
-          .filter((el) => norm(el).includes(wanted))
-          .filter((el) => !${exact} || [el, ...el.querySelectorAll('*')]
-            .some((n) => n.childElementCount === 0 && norm(n) === wanted));
-        const el = all[${nth}];
+        const el = ${matchingControls(text, { scope, exact })}[${nth}];
         if (!el) return null;
         el.scrollIntoView({ block: 'center' });
         el.click();
@@ -352,15 +370,38 @@ export class StudioDriver {
     await this.cdp.send("DOM.setFileInputFiles", { nodeId, files: paths }, this.sessionId);
   }
 
-  /// Wait for the control, then click it. The wait is the page's, not ours.
+  /// Wait for the control, then click it. The wait is the page's, not ours,
+  /// and it asks the question `click` will ask: the same `scope`, `exact` and
+  /// `nth`, so it cannot be satisfied by one control while the click finds
+  /// another (or none). Anything else in `options` (`timeoutMs`) is the wait's.
   async clickWhenReady(text, options = {}) {
+    const { scope = "document", nth = 0, exact = false, ...wait } = options;
     await this.waitFor(
-      `[...document.querySelectorAll('button, [role="button"], a')]
-         .some((el) => !el.disabled && (el.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase()
-           .includes(${JSON.stringify(text.toLowerCase())}))`,
-      { what: `the control ${JSON.stringify(text)}`, ...options },
+      `${matchingControls(text, { scope, exact })}.length > ${nth}`,
+      { what: `the control ${JSON.stringify(text)}${exact ? " (exact)" : ""}`, ...wait },
     );
-    return this.click(text, options);
+    return this.click(text, { scope, nth, exact });
+  }
+
+  /// Press one of the home page's Connect a board squares — `"USB"`,
+  /// `"Bluetooth"` or `"Network"` — by its whole word, inside
+  /// `#home-connect-board`. A bare substring would also match a board card's
+  /// "USB · live" Connection bar or its Bluetooth switch; this is the one
+  /// place a walk names a square. Waits for the square to be enabled.
+  async pressConnect(word, { timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    const scope = CONNECT_SCOPE;
+    try {
+      return await this.clickWhenReady(word, { scope, exact: true, timeoutMs });
+    } catch (error) {
+      const controls = await this.controls({ scope });
+      throw new Error(
+        `no enabled ${JSON.stringify(word)} square in #home-connect-board (${error.message.split("\n")[0]}). ` +
+          (controls.length === 0
+            ? "The section is not on the page, or holds no controls."
+            : "Controls in the section:\n" +
+              controls.map((control) => `  [${control.disabled ? "x" : " "}] ${control.text}`).join("\n")),
+      );
+    }
   }
 
   // --- the shim's own page contract ---------------------------------------
