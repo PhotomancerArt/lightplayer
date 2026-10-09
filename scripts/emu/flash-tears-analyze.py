@@ -30,8 +30,8 @@ Two things are reconstructed here rather than read:
   (or a short range of them, where the pattern has `0xFF` bytes).
 
 **Two payloads.** `flash-tears` programs each sector page by page;
-`flash-tears-unaligned` programs it as a 20-byte write and then 16-272-byte
-writes starting at `20 + k*16` (`program_plan.rs`, mirrored by `plan()`
+`flash-tears-unaligned` programs it as a 20-byte write and then 16-1040-byte
+writes starting at `20 + k*4`, never on a 32-byte boundary (`program_plan.rs`, mirrored by `plan()`
 here and checked against the `writes` its in-flight records list). Their
 transcripts sit in sibling directories and are reported apart: only the
 page-aligned silicon cuts give `--model-table` its numbers. For the
@@ -118,8 +118,10 @@ def zeros(b: int) -> int:
 
 # The unaligned program plan, as `program_plan.rs` writes it.
 UNALIGNED_FIRST = 20
-UNALIGNED_STEP = 16
-UNALIGNED_MAX_STEPS = 17
+UNALIGNED_STEP = 4
+UNALIGNED_MIN_WRITE = 16
+UNALIGNED_SHORT_MAX = 272
+UNALIGNED_MAX_WRITE = 1040
 
 
 def plan(sector: int, cycle: int) -> list[tuple[int, int]]:
@@ -129,7 +131,12 @@ def plan(sector: int, cycle: int) -> list[tuple[int, int]]:
     at = UNALIGNED_FIRST
     while at < SECTOR:
         state = splitmix(state)
-        n = min((1 + state % UNALIGNED_MAX_STEPS) * UNALIGNED_STEP, SECTOR - at)
+        cap = UNALIGNED_SHORT_MAX if state & 3 else UNALIGNED_MAX_WRITE
+        choices = (cap - UNALIGNED_MIN_WRITE) // UNALIGNED_STEP + 1
+        n = UNALIGNED_MIN_WRITE + ((state >> 2) % choices) * UNALIGNED_STEP
+        if (at + n) % COMMAND == 0:
+            n = n + UNALIGNED_STEP if n + UNALIGNED_STEP <= cap else n - UNALIGNED_STEP
+        n = min(n, SECTOR - at)
         out.append((at, n))
         at += n
     return out

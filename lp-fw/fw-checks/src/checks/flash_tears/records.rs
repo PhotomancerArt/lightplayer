@@ -224,7 +224,7 @@ pub struct TimingRecord {
     pub erase_us: u64,
     pub program_us: u64,
     /// The fastest and slowest single write of the program: a page under
-    /// the page plan, one 16–272-byte write under the unaligned one.
+    /// the page plan, one 16–1,040-byte write under the unaligned one.
     pub page_us_min: u64,
     pub page_us_max: u64,
 }

@@ -10,25 +10,28 @@
 //!   write the two are the same offsets.
 //! - **[`ProgramMode::Unaligned`]** (`flash-tears-unaligned`, tree-store M2
 //!   P10's question): one 20-byte write at offset 0, then writes of
-//!   16–272 bytes (a multiple of 16) back to back to the end of the sector,
-//!   so every write after the first starts at `20 + k·16` — 4 or 20 past a
-//!   32-byte boundary, never on one. The lengths are drawn from (sector,
-//!   cycle), so where a write starts inside its page moves from cycle to
-//!   cycle. A torn prefix then stops either `32·n` bytes after its write's
-//!   start (commands counted from the address), on an absolute 32-byte
-//!   boundary, or neither.
+//!   16–1,040 bytes (a multiple of 4) back to back to the end of the
+//!   sector, so every write after the first starts at `20 + k·4` and never
+//!   on a 32-byte boundary (a length that would put the next write on one
+//!   is moved by a word). That is the store's own case: its `Flash` goes
+//!   through esp-storage, which takes only 4-byte-aligned offsets and
+//!   lengths, so its programs reach the ROM word-aligned at any word inside
+//!   a page. The lengths are drawn from (sector, cycle), so where a write
+//!   starts inside its page moves from cycle to cycle. A torn prefix then
+//!   stops either `32·n` bytes after its write's start (commands counted
+//!   from the address), on an absolute 32-byte boundary, or neither.
 //!
-//! **Why writes this short.** The mask ROM splits a write at its page
-//! boundaries, and the emulator — which runs that ROM — shows it counting
-//! 32-byte commands from the write's address only up to the end of its
-//! first page; after that the commands are page-aligned, so absolute again
-//! (`scripts/emu/flash-tears-analyze.py --rom-split`). Only a write's
-//! first-page commands are unaligned, so the shorter the writes, the more
-//! of the program time a cut can land in is in them: about 67 % of the
-//! programmed bytes with writes of 16–272 bytes, against 27 % with the
-//! 16–1,040 the brief sketched (a 2,000-sector estimate of this plan). Long
-//! enough that about half the writes still cross a page, so the ROM's
-//! realignment after a page boundary is cut into as well.
+//! **Why three writes in four are short.** The mask ROM splits a write at
+//! its page boundaries, and the emulator — which runs that ROM — shows it
+//! counting 32-byte commands from the write's address only up to the end of
+//! its first page; after that the commands are page-aligned, so absolute
+//! again (`scripts/emu/flash-tears-analyze.py --rom-split`). Only a write's
+//! first-page commands are unaligned, so a cut tells the two hypotheses
+//! apart only there. Lengths uniform over 16–1,040 put about 27 % of the
+//! programmed bytes in unaligned commands; drawing three lengths in four
+//! from 16–272 and one from the whole 16–1,040 puts about 45 % there, keeps
+//! the full range, and about 60 % of the writes still cross a page (an
+//! estimate over 3,000 sector plans).
 //!
 //! The whole sector is still programmed, with the same pattern
 //! ([`super::pattern`]), so old and new stay complements and the scan's
@@ -42,11 +45,18 @@ use super::{PAGE_SIZE, PAGES_PER_SECTOR, SECTOR_SIZE};
 /// The first write of an unaligned plan: offset 0, this many bytes.
 pub const UNALIGNED_FIRST: usize = 20;
 
-/// Every unaligned write's length is a multiple of this.
-pub const UNALIGNED_STEP: usize = 16;
+/// Every unaligned write's length is a multiple of this: the flash
+/// driver's word.
+pub const UNALIGNED_STEP: usize = 4;
 
-/// The longest unaligned write: 17 steps.
-pub const UNALIGNED_MAX_WRITE: usize = 17 * UNALIGNED_STEP;
+/// The shortest unaligned write.
+pub const UNALIGNED_MIN_WRITE: usize = 16;
+
+/// The longest of the short writes, which three draws in four make.
+pub const UNALIGNED_SHORT_MAX: usize = 272;
+
+/// The longest unaligned write.
+pub const UNALIGNED_MAX_WRITE: usize = 1040;
 
 /// The longest write either plan makes: what a harness's bounce buffer holds.
 pub const MAX_WRITE: usize = if UNALIGNED_MAX_WRITE > PAGE_SIZE {
@@ -60,7 +70,8 @@ pub const MAX_WRITE: usize = if UNALIGNED_MAX_WRITE > PAGE_SIZE {
 pub enum ProgramMode {
     /// Sixteen page-aligned 256-byte writes.
     Pages,
-    /// A 20-byte write, then 16–272-byte writes starting at `20 + k·16`.
+    /// A 20-byte write, then 16–1,040-byte writes starting at `20 + k·4`,
+    /// never on a 32-byte boundary.
     Unaligned,
 }
 
@@ -117,8 +128,23 @@ impl Iterator for Writes {
             ProgramMode::Unaligned if self.index == 0 => UNALIGNED_FIRST,
             ProgramMode::Unaligned => {
                 self.state = splitmix(self.state);
-                let steps = 1 + (self.state % (UNALIGNED_MAX_WRITE / UNALIGNED_STEP) as u64);
-                (steps as usize * UNALIGNED_STEP).min(SECTOR_SIZE - self.at)
+                let cap = if self.state & 3 != 0 {
+                    UNALIGNED_SHORT_MAX
+                } else {
+                    UNALIGNED_MAX_WRITE
+                };
+                let choices = ((cap - UNALIGNED_MIN_WRITE) / UNALIGNED_STEP + 1) as u64;
+                let mut len =
+                    UNALIGNED_MIN_WRITE + ((self.state >> 2) % choices) as usize * UNALIGNED_STEP;
+                // Keep the next write off a 32-byte boundary.
+                if (self.at + len) % 32 == 0 {
+                    len = if len + UNALIGNED_STEP <= cap {
+                        len + UNALIGNED_STEP
+                    } else {
+                        len - UNALIGNED_STEP
+                    };
+                }
+                len.min(SECTOR_SIZE - self.at)
             }
         };
         let w = (self.at, len);
@@ -153,7 +179,7 @@ mod tests {
                     if i == 0 {
                         assert_eq!((at, len), (0, UNALIGNED_FIRST));
                     } else {
-                        assert_eq!((at - UNALIGNED_FIRST) % UNALIGNED_STEP, 0);
+                        assert_eq!(at % UNALIGNED_STEP, 0);
                         assert_ne!(at % 32, 0, "never on a command boundary");
                     }
                     if at / PAGE_SIZE != (at + len - 1) / PAGE_SIZE {
