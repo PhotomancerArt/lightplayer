@@ -341,6 +341,7 @@ impl DeviceTransport for ScriptedTransport {
                     probed_mac: inspection.probed_mac.clone(),
                     chip_name: inspection.chip_name.clone(),
                     inspection: Some(inspection),
+                    boots_next: None,
                 })))
             }
             // A staged plan runs against the board's flash image, which then
@@ -378,6 +379,7 @@ impl DeviceTransport for ScriptedTransport {
                                 probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
                                 chip_name: Some("ESP32-C6 (fake)".to_string()),
                                 inspection: None,
+                                boots_next: None,
                             })
                         }
                         FlashPlan::FailMidWrite => {
@@ -388,6 +390,7 @@ impl DeviceTransport for ScriptedTransport {
                             probed_mac: Some(SCRIPTED_PREFLIGHT_MAC.to_string()),
                             chip_name: Some("ESP32-C6 (fake)".to_string()),
                             inspection: None,
+                            boots_next: None,
                         }),
                         FlashPlan::Hang => {
                             core::future::pending::<()>().await;
@@ -446,6 +449,7 @@ impl DeviceTransport for ScriptedTransport {
                                         report.storage_id
                                     ),
                                 },
+                                boots_next: report.boots_next.clone(),
                                 ..Default::default()
                             })
                         }
@@ -6333,6 +6337,82 @@ fn removing_the_project_clears_the_board_and_leaves_the_library_alone() {
         1,
         "the device row survives a removal"
     );
+}
+
+/// A board running a pushed example, and what it takes to settle each step.
+fn running_example_board(uid: &str, endpoint: &str) -> (FakeEsp32Device, DeviceBench, TaskPool) {
+    let device = empty_light_player(uid);
+    let (mut bench, tasks) = identified(&device, endpoint);
+    settle_on(&mut bench, &tasks, true);
+    let device_id = bench.view().devices[0].id;
+    bench.push_gesture(device_id, bundled_example());
+    settle_on(&mut bench, &tasks, false);
+    (device, bench, tasks)
+}
+
+/// Run until the first card is idle and running (or, `emptied`, reports
+/// nothing loaded).
+fn settle_on(bench: &mut DeviceBench, tasks: &TaskPool, emptied: bool) {
+    bench.run_until(tasks, "the board to settle", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && match emptied {
+                    true => card.loaded_project == lpa_devices::view::LoadedProject::Empty,
+                    false => matches!(
+                        card.loaded_project,
+                        lpa_devices::view::LoadedProject::Running { .. }
+                    ),
+                }
+        })
+    });
+}
+
+/// The project line's note after a Remove: core's, on the card's layout.
+fn project_note(bench: &DeviceBench) -> Option<(String, String)> {
+    let layout = bench.controller.device_roster_view().layout;
+    let note = layout.values().next()?.project_note.clone()?;
+    Some((note.line, note.detail))
+}
+
+/// A Remove that leaves another folder says what starts at the next
+/// power-up, while the board is idle and reports nothing loaded; the next
+/// thing that happens to the board (a push) takes it away.
+#[test]
+fn a_removal_that_leaves_a_folder_says_what_starts_at_the_next_power_up() {
+    let (device, mut bench, tasks) = running_example_board("dev000000daqf6dvvr4", "usb-note-1");
+    let device_id = bench.view().devices[0].id;
+    // Another folder, as the CLI's upload leaves one; it sorts after any
+    // folder a push names, so it is what starts once the running one is gone.
+    let (_uid, other_files) = a_project_from_another_library(0x6e);
+    let mut client = lpa_client::LpClient::new(FakeDeviceIo::new(&device)).on_borrowed_wire();
+    for (path, bytes) in other_files {
+        drive_real(client.fs_write(format!("/projects/zz-other/{path}").as_path(), bytes))
+            .expect("the other folder writes");
+    }
+    assert_eq!(project_note(&bench), None, "nothing has been removed yet");
+
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
+    settle_on(&mut bench, &tasks, true);
+    let (line, detail) = project_note(&bench).expect("the card carries the note");
+    assert_eq!(line, "zz-other starts at next power-up");
+    assert_eq!(
+        detail,
+        "zz-other is still on the board and will start when it's next powered on."
+    );
+
+    bench.push_gesture(device_id, bundled_example());
+    settle_on(&mut bench, &tasks, false);
+    assert_eq!(project_note(&bench), None, "a push cleared it");
+}
+
+/// The other side of the same: nothing left on the board, nothing to say.
+#[test]
+fn a_removal_that_leaves_nothing_shows_no_note() {
+    let (_device, mut bench, tasks) = running_example_board("dev000000daqf6dvvr5", "usb-note-2");
+    let device_id = bench.view().devices[0].id;
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
+    settle_on(&mut bench, &tasks, true);
+    assert_eq!(project_note(&bench), None);
 }
 
 /// A removal the board refuses lands on the problem face with the reason,

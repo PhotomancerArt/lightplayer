@@ -956,6 +956,54 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
     }
 }
 
+/// A board that was just emptied by a Remove but has another folder on it,
+/// wearing core's `project_note` in place of "Nothing loaded".
+fn removed_board_note_cell() -> Element {
+    let card = DeviceView {
+        can_remove_project: false,
+        ..roster_fixture().roster.devices.remove(3)
+    };
+    let offers = crate::app::home::device_offer_story_fixtures::card_tree(
+        &card,
+        lpa_studio_core::DeviceFace::Wire,
+        false,
+        &[],
+        &[],
+    );
+    let prefix = offers
+        .device_prefix(card.id)
+        .cloned()
+        .expect("the card's verbs are placed");
+    let layout = Some(lpa_studio_core::UiDeviceLayout::note_only(
+        prefix, "studio-b",
+    ));
+    rsx! {
+        crate::core::OffersProvider { offers,
+            crate::app::home::device_roster_card::DeviceRosterCard {
+                card,
+                projects: packages(),
+                examples: examples(),
+                layout,
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "After a Remove that leaves another folder on the board: the project line, which would say \"Nothing loaded\", says what the board will start at its next power-up — \"studio-b starts at next power-up\" — in core's words, with the longer sentence (\"studio-b is still on the board and will start when it's next powered on.\") on hover. It is the same one-line, truncating info line, so the card is exactly as tall as the \"Nothing loaded\" card in `devices_card_states`. Shown at desktop card width (left) and phone card width (right). It goes away as soon as anything else happens to the board (a push, a project reported loaded). Needs Yona's look before merge."
+)]
+fn devices_card_removed_board_note() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: "tw:flex tw:flex-wrap tw:items-start tw:gap-4",
+                div { class: "tw:w-[400px] tw:max-w-full", {removed_board_note_cell()} }
+                div { class: "tw:w-[343px] tw:max-w-full", {removed_board_note_cell()} }
+            }
+        }
+    }
+}
+
 #[story(
     description = "The gap Decision 11 of the repartition ADR closes: a board needing its files back, with no pending backup in THIS browser — a different machine, cleared storage, or an interrupted migration whose only surviving copy is the file it offered as a download. \"Restore from a backup file…\" is the one restore verb (no Restore files, no Download backup: there is nothing stored here), and the board's Update stands beside it: an update never touches the board's files, so a files problem never hides it (defect 2026-10-06). Pressing it opens the OS file picker directly — a file dialog cannot be a `UiAction`, the same reasoning as the project library's own zip Import — so there is no sheet to capture here; the next two stories show the words it leads to."
 )]

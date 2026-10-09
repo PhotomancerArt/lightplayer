@@ -220,6 +220,11 @@ pub struct DeviceEffects {
     /// cannot hold `&mut self` across an await — the same reason
     /// [`Self::arrivals`] exists.
     completed_pushes: Rc<RefCell<Vec<CompletedPush>>>,
+    /// The folder a board will start at its next power-up, by device, set
+    /// when a RemoveProject succeeds and leaves one behind; dropped when
+    /// any effect starts for that device. Shared for the same reason as
+    /// [`Self::completed_pushes`].
+    removal_notes: Rc<RefCell<BTreeMap<DeviceId, String>>>,
     next_link: u64,
     /// The C6 repartition's layout step: the backup store, what each
     /// device's inspection staged, the store's index as last read, and
@@ -260,6 +265,7 @@ impl DeviceEffects {
             writes: PendingWrites::default(),
             staged_pushes: BTreeMap::new(),
             completed_pushes: Rc::new(RefCell::new(Vec::new())),
+            removal_notes: Rc::new(RefCell::new(BTreeMap::new())),
             next_link: 0,
             layout: super::device_layout_effect::LayoutEffects::default(),
             firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
@@ -671,6 +677,13 @@ impl DeviceEffects {
         ))
     }
 
+    /// The project folder `device` will start at its next power-up after a
+    /// Remove that left one behind — until the next effect on that device
+    /// starts. The card's project line reads it.
+    pub fn removal_boots_next(&self, device: DeviceId) -> Option<String> {
+        self.removal_notes.borrow().get(&device).cloned()
+    }
+
     /// Record writes to perform, taken by the roster sub-controller.
     pub fn take_writes(&mut self) -> PendingWrites {
         self.writes
@@ -724,6 +737,7 @@ impl DeviceEffects {
             Command::DeleteRecord(device) => {
                 // A forgotten device takes its unsent payload with it.
                 self.staged_pushes.remove(&device);
+                self.removal_notes.borrow_mut().remove(&device);
                 self.writes.delete.push(device);
             }
             Command::RevokeGrant(info) => self.revoke_grant(info),
@@ -782,6 +796,9 @@ impl DeviceEffects {
         effect: EffectRequest,
     ) {
         let kind = effect_kind(&effect);
+        // Whatever the last removal said about the next power-up is stale
+        // the moment anything else happens to the board.
+        self.removal_notes.borrow_mut().remove(&device);
         if let EffectRequest::Update { intent } = effect {
             self.run_update_leg(device, link, effect_id, intent);
             return;
@@ -897,6 +914,7 @@ impl DeviceEffects {
         // must not read that silence as the board going quiet.
         sink(Input::Event(Event::LinkBorrow { link, held: true }));
         let writes = Rc::clone(&self.completed_pushes);
+        let removal_notes = Rc::clone(&self.removal_notes);
         spawn(Box::pin(async move {
             let mut result = transport.run_effect(info, call, progress).await;
             if let (Some(restore), Ok(facts)) = (inspect_restore, &result) {
@@ -934,6 +952,13 @@ impl DeviceEffects {
                             version,
                         });
                         log::debug!("pushed {label} to device {device:?}");
+                    }
+                    // A removal that left a folder to start says so, before
+                    // the end marker folds so the card never lacks it.
+                    if kind == ActivityKind::RemoveProject
+                        && let Some(next) = facts.boots_next.clone()
+                    {
+                        removal_notes.borrow_mut().insert(device, next);
                     }
                     // Normalized HERE, not trusted from the tool: the JS
                     // side is untestable, and an unnormalized (or garbage)
