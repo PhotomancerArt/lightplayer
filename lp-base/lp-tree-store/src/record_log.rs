@@ -229,8 +229,17 @@ impl<F: Flash> RecordLog<F> {
             self.next_sector_seq = self.next_sector_seq.wrapping_add(1);
             let bytes = header.encode(self.sector_size);
             let addr = self.addr(pick, 0);
-            self.program(addr, &bytes)?;
-            if !self.verify(addr, &bytes, &[])? {
+            // The magic last, as its own program, and only once the rest
+            // reads back: a torn or worn header never shows the magic in
+            // front of a wrong version (FORMAT.md "Sector": a reader refuses
+            // the magic + a newer version).
+            self.program(addr + 4, &bytes[4..])?;
+            let mut ok = self.verify(addr + 4, &bytes[4..], &[])?;
+            if ok {
+                self.program(addr, &bytes[..4])?;
+                ok = self.verify(addr, &bytes, &[])?;
+            }
+            if !ok {
                 self.counters.verify_failures += 1;
                 self.retire(pick);
                 continue;

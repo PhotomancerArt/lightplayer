@@ -6,13 +6,13 @@
 use alloc::vec::Vec;
 
 use lp_crc32::crc32;
-use lp_nor_sim::{NorFlashSim, NorGeometry};
+use lp_nor_sim::{FaultPlan, NorFlashSim, NorGeometry, TearModel};
 
 use crate::object_id::{IdTag, ObjectId};
 use crate::record_header::{RECORD_HEADER_LEN, encode_header};
 use crate::record_kind::{ChunkCodec, RecordKind};
 use crate::root_record::{ROOT_FIXED_LEN, RootRecord};
-use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN};
+use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader, SectorRead};
 use crate::test_support::{Store, formatted, mount, snapshot, text};
 use crate::{SoftSha256, StoreConfig, StoreError, TreeStore};
 
@@ -70,6 +70,104 @@ fn another_sector_size_or_head_kind_refuses_the_mount() {
     let mut kind = f;
     reseal_header(&mut kind, victim, |h| h[6] = 2);
     refused(kind, &c, "unknown head kind");
+}
+
+/// A sector at a newer format version refuses the whole mount (a rolled-
+/// back core must never see a newer core's store as blank and format it),
+/// whether or not its CRC is where this version keeps it.
+#[test]
+fn a_sector_at_a_newer_version_refuses_the_mount() {
+    let (c, f, want) = small_store();
+    let victim = (0..SECTORS).find(|&s| !f.sector_is_blank(s)).unwrap();
+    let mut sealed = f.clone();
+    reseal_header(&mut sealed, victim, |h| h[4] = 4);
+    refused(sealed, &c, "newer format");
+    // A newer layout (here: everything after the version reshuffled).
+    let mut moved = f.clone();
+    rewrite_sector(&mut moved, victim, |h| {
+        h[4] = 9;
+        h[6..24].fill(0x5A);
+    });
+    refused(moved, &c, "newer format");
+    // A blank sector a newer core opened, the rest of the store untouched.
+    let blank = (0..SECTORS).find(|&s| f.sector_is_blank(s)).unwrap();
+    let mut extra = f;
+    let mut h = header_bytes(&extra, victim);
+    h[4] = 4;
+    extra.program(blank * 4096, &h).unwrap();
+    let before = image(&extra);
+    let back = refused(extra, &c, "newer format");
+    // Refusing wrote nothing; with the newer sector gone the store is whole.
+    assert_eq!(image(&back), before);
+    let mut back = back;
+    back.erase_sector(blank).unwrap();
+    let mut st = mount(back, &c);
+    assert_eq!(snapshot(&mut st), want);
+}
+
+/// A sector at an older (or never assigned lower) version is only
+/// untrusted: the rest of the store mounts and writing goes on.
+#[test]
+fn a_sector_at_an_older_version_is_untrusted_and_the_rest_mounts() {
+    let (c, mut f, want) = small_store();
+    let blank = (0..SECTORS).find(|&s| f.sector_is_blank(s)).unwrap();
+    let live = (0..SECTORS).find(|&s| !f.sector_is_blank(s)).unwrap();
+    let mut h = header_bytes(&f, live);
+    h[4] = 2;
+    let crc = crc32(&h[..20]);
+    h[20..24].copy_from_slice(&crc.to_le_bytes());
+    f.program(blank * 4096, &h).unwrap();
+    f.program(blank * 4096 + 24, b"records a version-2 writer left")
+        .unwrap();
+
+    let mut st = mount(f, &c);
+    assert_eq!(snapshot(&mut st), want);
+    for i in 0..40u64 {
+        st.put("/after.json", &text(i, 3000)).unwrap();
+    }
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(st.get("/after.json").unwrap().unwrap(), text(39, 3000));
+    assert_eq!(st.get("/a/one.json").unwrap().unwrap(), want["/a/one.json"]);
+}
+
+/// Power cut anywhere in a format over a live store — a torn kill of a good
+/// header, a torn erase of a killed one, a torn header program — under
+/// every tear model and many seeds: no sector ever reads as a newer format
+/// (on any of several reads, so weak bits get their chances), and the
+/// mount never refuses.
+#[test]
+fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
+    let (c, f, _) = small_store();
+    let mut probe = f.clone();
+    probe.set_plan(FaultPlan::none());
+    TreeStore::format(&mut probe, &mut SoftSha256, &c).unwrap();
+    let ops = probe.ops_since_plan();
+    let mut runs = 0u32;
+    for k in 0..ops {
+        for tear in TearModel::ALL {
+            for seed in 0..24u64 {
+                let mut g = f.clone();
+                g.set_plan(FaultPlan::cut(k, tear, seed << 8 | k));
+                assert!(TreeStore::format(&mut g, &mut SoftSha256, &c).is_err());
+                g.power_cycle(FaultPlan::none());
+                for s in 0..SECTORS {
+                    for _ in 0..4 {
+                        let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+                        g.read(s * 4096, &mut h).unwrap();
+                        assert!(
+                            !matches!(SectorHeader::decode(&h, 4096), SectorRead::Unsupported(_)),
+                            "cut {k} {tear:?} seed {seed}: sector {s} reads {h:02x?}"
+                        );
+                    }
+                }
+                if let Err((e, _, _)) = TreeStore::mount(g, SoftSha256, c.clone()) {
+                    assert!(!matches!(e, StoreError::Unsupported(_)), "cut {k}: {e:?}");
+                }
+                runs += 1;
+            }
+        }
+    }
+    assert!(runs > 1000, "{runs} runs");
 }
 
 /// A root whose tail carries a tag this version does not know is the
@@ -182,6 +280,31 @@ fn reseal_header(f: &mut NorFlashSim, s: u32, edit: impl FnOnce(&mut [u8])) {
     edit(h);
     let crc = crc32(&h[..20]);
     h[20..24].copy_from_slice(&crc.to_le_bytes());
+    f.erase_sector(s).unwrap();
+    let end = cells.iter().rposition(|&b| b != 0xFF).map_or(0, |p| p + 1);
+    f.program(s * size, &cells[..end]).unwrap();
+}
+
+/// Sector `s`'s 24 header bytes.
+fn header_bytes(f: &NorFlashSim, s: u32) -> [u8; SECTOR_HEADER_LEN as usize] {
+    let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+    f.peek(s * f.geometry().sector_size, &mut h);
+    h
+}
+
+/// Every cell of the flash.
+fn image(f: &NorFlashSim) -> Vec<u8> {
+    let mut v = alloc::vec![0u8; (SECTORS * f.geometry().sector_size) as usize];
+    f.peek(0, &mut v);
+    v
+}
+
+/// Rewrite sector `s`'s header with `edit` applied and nothing resealed.
+fn rewrite_sector(f: &mut NorFlashSim, s: u32, edit: impl FnOnce(&mut [u8])) {
+    let size = f.geometry().sector_size;
+    let mut cells = alloc::vec![0u8; size as usize];
+    f.peek(s * size, &mut cells);
+    edit(&mut cells[..SECTOR_HEADER_LEN as usize]);
     f.erase_sector(s).unwrap();
     let end = cells.iter().rposition(|&b| b != 0xFF).map_or(0, |p| p + 1);
     f.program(s * size, &cells[..end]).unwrap();

@@ -91,6 +91,11 @@ impl SectorHeader {
     pub fn decode(b: &[u8; SECTOR_HEADER_LEN as usize], sector_size: u32) -> SectorRead {
         let word = |i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let half = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
+        if word(0) == SECTOR_MAGIC && half(4) > FORMAT_VERSION {
+            // A newer writer's sector: refuse, never read it as blank (the
+            // CRC is not checked: a newer layout may have moved it).
+            return SectorRead::Unsupported("newer format");
+        }
         if word(0) != SECTOR_MAGIC || half(4) != FORMAT_VERSION || word(20) != crc32(&b[..20]) {
             return SectorRead::Untrusted;
         }
@@ -151,11 +156,13 @@ mod tests {
         for i in 0..24 {
             let mut t = b;
             t[i] ^= 0x10;
-            assert_eq!(
-                SectorHeader::decode(&t, S),
-                SectorRead::Untrusted,
-                "byte {i}"
-            );
+            // Raising the version is a newer format, CRC or not.
+            let want = if (4..6).contains(&i) {
+                SectorRead::Unsupported("newer format")
+            } else {
+                SectorRead::Untrusted
+            };
+            assert_eq!(SectorHeader::decode(&t, S), want, "byte {i}");
         }
     }
 
@@ -192,11 +199,40 @@ mod tests {
             SectorHeader::decode(&b, 8192),
             SectorRead::Unsupported(_)
         ));
-        let mut version = b;
-        version[4] = 4;
-        assert_eq!(
-            SectorHeader::decode(&resealed(version), S),
-            SectorRead::Untrusted
-        );
+    }
+
+    /// Magic + a newer version refuses, CRC or not; an older or never
+    /// assigned lower version is only untrusted.
+    #[test]
+    fn a_newer_version_refuses_and_an_older_one_is_untrusted() {
+        let b = SectorHeader {
+            seq: 1,
+            erase_count: 1,
+            kind: HeadKind::Cold,
+        }
+        .encode(S);
+        let newer = SectorRead::Unsupported("newer format");
+        for v in [4u16, 5, 0x0100, 0xFFFF] {
+            let mut t = b;
+            t[4..6].copy_from_slice(&v.to_le_bytes());
+            assert_eq!(SectorHeader::decode(&resealed(t), S), newer, "v{v}");
+            assert_eq!(SectorHeader::decode(&t, S), newer, "v{v}, stale CRC");
+            let mut odd = t;
+            odd[6..24].fill(0xA5);
+            assert_eq!(SectorHeader::decode(&odd, S), newer, "v{v}, other layout");
+        }
+        for v in [0u16, 1, 2] {
+            let mut t = b;
+            t[4..6].copy_from_slice(&v.to_le_bytes());
+            assert_eq!(
+                SectorHeader::decode(&resealed(t), S),
+                SectorRead::Untrusted,
+                "v{v}"
+            );
+        }
+        let mut no_magic = b;
+        no_magic[0] ^= 0x01;
+        no_magic[4] = 4;
+        assert_eq!(SectorHeader::decode(&no_magic, S), SectorRead::Untrusted);
     }
 }

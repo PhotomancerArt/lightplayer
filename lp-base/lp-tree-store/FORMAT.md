@@ -48,11 +48,24 @@ offset  size  field
 24      …     records, back to back, from offset 24
 ```
 
+The magic and the version are bytes 0..6 in **every** version, past and
+future; nothing else in the header is promised to stay where it is.
+
 A reader classifies a header in this order:
 
+0. The magic matches and the version is **greater** than the reader's: the
+   store is **unsupported** and the mount is refused (as in 2), without
+   checking the CRC — a newer layout may have moved it. A reader must
+   never treat a newer writer's sector as untrusted: if a newer core
+   rewrote every sector and the board rolled back to an older one, every
+   sector would be untrusted, the store would look blank, and formatting
+   it would erase the user's files. **A refused mount is never a reason to
+   format**: firmware must not format on `Unsupported`, only on a store
+   that is genuinely absent, and only when a person asks for it.
 1. Magic, version and CRC do not all match: the sector is **untrusted**.
    Nothing in it is read, whatever it holds. (An erased, killed or torn
-   header, or one of another format version: see "Versioning".)
+   header, or one of an older or never-assigned lower version — 1, 2, 0:
+   see "Versioning".)
 2. An incompat flag this reader does not know is set: the store is
    **unsupported** and the mount is refused — nothing past the headers is
    read, and no other sector is used to find a root. It is never treated as
@@ -93,6 +106,13 @@ Writing and killing:
 
 - A writer programs the header only after an erase it has read back as all
   `0xFF`, and reads the header back after programming it.
+- It programs the header in two operations, **the magic last**: bytes
+  4..24 first, read back; then, only if they read back as written, bytes
+  0..4; then the whole header is read back. So the magic is never on flash
+  in front of a version the writer did not write: a power cut or a worn
+  cell during the header can only leave a header without the magic, which
+  is untrusted (rule 1), never one that reads as a newer version (rule 0).
+  Every writer of every version keeps this order.
 - Before every erase, a writer programs the header to **24 zero bytes**
   ("kill"). A torn erase can then never leave an old valid header in front
   of weak bits.
@@ -330,12 +350,41 @@ There are two kinds of change, handled differently:
   closes a sector to appends, drops a tag, or refuses the store cleanly.
   Nothing is misread, and nothing needs re-packing.
 - **A layout change bumps the version**: what the rules above cannot
-  express (the header's own fields moving, a record header change, a CRC
-  change). An older reader sees every sector of the new version as
-  untrusted — "no store", never misread — so a version bump ships with a
-  migration that rewrites **every** sector before the new firmware writes
-  (a mix of old- and new-version sectors could leave an older reader a
-  stale but complete root), and a board must be re-packed to take it.
+  express (the header's own fields after byte 6 moving, a record header
+  change, a CRC change). An older reader refuses a store holding any
+  sector of the new version (rule 0: `Unsupported("newer format")`) — never
+  misread, and never "no store" — so a version bump ships with a migration
+  that rewrites **every** sector before the new firmware writes, and a
+  board must be re-packed to take it. A board rolled back to the older
+  core afterwards refuses its store rather than formatting over it.
+
+**Can anything but a newer writer show the magic and a greater version?**
+Rule 0 trusts 6 bytes with no CRC, so it matters what else could put them
+there:
+
+- *Erased* (`FF…`) and *killed* (`00…`) headers do not show the magic.
+- *A torn kill* over a good header only clears bits, so the version stays a
+  subset of 3's bits (0..3), never greater.
+- *A torn erase* starts from a killed header (the writer kills before every
+  erase) and moves bits towards 1. To read as the magic, exactly its 13
+  one-bits must have come up and its 19 zero-bits stayed down — one
+  particular 32-bit pattern, about 2⁻³² of torn erases, and a torn erase
+  needs a power cut inside the erase itself. (`lp-nor-sim`'s tear shapes
+  are stricter still: a byte-wise mix always sets bit 0, which `0x4C` lacks,
+  so only an erase edge at byte 0 with four random bytes can do it.)
+- *A torn or worn header program* cannot: the magic goes last, after the
+  rest reads back ("Writing and killing").
+- *Records* start at byte 24 and never cover bytes 0..6.
+- *Retention loss* can: a programmed bit that leaks back to 1 in the
+  version's 14 zero-bits raises it. On a v3 header that now refuses the
+  store where it once only untrusted the sector (whose records, perhaps a
+  root, were lost with it). The trade is deliberate: a refused store is
+  intact on flash and visible; a silently untrusted sector is data loss.
+
+`format_extension_tests.rs` cuts a format over a live store at every
+operation, under every tear model and many seeds, and checks that no
+header ever reads as a newer version; the power-cut sweeps would fail on
+one (they did, before the magic went last).
 
 **Why additive room (option B, G1, 2026-10-08).** The only executor that
 re-packs a filesystem is the layout migration

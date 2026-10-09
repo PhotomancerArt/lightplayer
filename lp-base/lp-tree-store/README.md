@@ -17,7 +17,12 @@ sector size in every sector header, a skippable TLV tail on the root, and
 record kinds this version does not know skipped as garbage. A good header
 with an unknown incompat flag, an unknown head kind or another sector size
 refuses the mount with `StoreError::Unsupported` (never a misread, and not
-"no store": do not format over it without asking). The reason: a board
+"no store": do not format over it without asking), and so does any sector
+whose magic is followed by a **newer format version** — so a core rolled
+back after a newer one rewrote the store refuses it instead of seeing a
+blank flash and formatting it. The writer programs a sector's magic last,
+after the rest of its header reads back, so a torn header never reads as
+newer. The reason: a board
 updated over Wi-Fi or Bluetooth cannot be re-packed, so a later core's
 change has to be readable, or cleanly refused, by the core before it.
 
