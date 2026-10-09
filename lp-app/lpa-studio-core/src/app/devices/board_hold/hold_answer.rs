@@ -99,7 +99,10 @@ mod tests {
             answer_plan(Some(&HoldLevel::Watching), false),
             AnswerPlan::Release
         );
-        assert_eq!(answer_plan(Some(&HoldLevel::Open), false), AnswerPlan::Release);
+        assert_eq!(
+            answer_plan(Some(&HoldLevel::Open), false),
+            AnswerPlan::Release
+        );
     }
 
     #[test]
@@ -130,7 +133,10 @@ mod tests {
             device: Some(DeviceId(3)),
             stage: ReleaseStage::WriteFrame,
         };
-        assert!(!release.ready_to_release(true, 0.0), "the frame comes first");
+        assert!(
+            !release.ready_to_release(true, 0.0),
+            "the frame comes first"
+        );
 
         release.stage = ReleaseStage::WaitClose { deadline: 10.0 };
         assert!(!release.ready_to_release(false, 9.0));

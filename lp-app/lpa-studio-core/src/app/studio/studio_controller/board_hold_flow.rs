@@ -159,8 +159,7 @@ impl StudioController {
 
         // This tab's own holds.
         let desired = self.desired_board_holds();
-        let answering: BTreeSet<HoldKey> =
-            self.board_hold_flow.releases.keys().copied().collect();
+        let answering: BTreeSet<HoldKey> = self.board_hold_flow.releases.keys().copied().collect();
         let plan = {
             let book = self.board_hold_book.as_ref().expect("checked above");
             let mine: BTreeMap<HoldKey, HoldLevel> = book
@@ -361,7 +360,10 @@ impl StudioController {
         let claim = edge.claim(&key);
         spawner(Box::pin(async move {
             let answer = claim.await;
-            tx.send(StudioCommand::HoldEdge(HoldEdgeEvent::Claimed { key, answer }));
+            tx.send(StudioCommand::HoldEdge(HoldEdgeEvent::Claimed {
+                key,
+                answer,
+            }));
         }));
     }
 
@@ -640,10 +642,8 @@ impl StudioController {
                 continue;
             };
             let evidence = pending.evidence();
-            let settled_failed = matches!(
-                evidence.last_outcome,
-                Some(ActivityOutcome::Failed { .. })
-            );
+            let settled_failed =
+                matches!(evidence.last_outcome, Some(ActivityOutcome::Failed { .. }));
             if pending.is_identifying()
                 || !settled_failed
                 || evidence.presence.is_open()

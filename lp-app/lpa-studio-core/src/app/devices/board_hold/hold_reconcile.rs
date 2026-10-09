@@ -59,7 +59,9 @@ pub fn hold_level(busy: Option<&str>, lens: bool) -> HoldLevel {
 
 /// The USB holds this tab should have: one per board whose USB port is open
 /// here and whose MAC is known, at its level.
-pub fn desired_holds(boards: impl IntoIterator<Item = HoldCandidate>) -> BTreeMap<HoldKey, HoldLevel> {
+pub fn desired_holds(
+    boards: impl IntoIterator<Item = HoldCandidate>,
+) -> BTreeMap<HoldKey, HoldLevel> {
     boards
         .into_iter()
         .filter(|board| board.open)

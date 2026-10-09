@@ -111,12 +111,16 @@ fn without_an_edge_a_note_changes_nothing() {
 fn t1_a_tab_that_loads_beside_a_holder_never_opens_the_held_port() {
     let desk = Desk::new(&[("dev000000holdt1aa", MAC_A)]);
     let mut a = desk.tab("A", &[0]);
-    run_until(&mut [&mut a], "A to hold the board", |tabs| tabs[0].holds(MAC_A));
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
 
     let mut b = desk.tab("B", &[0]);
     b.library_changed();
     run_until(&mut [&mut a, &mut b], "B to see the board held", |tabs| {
-        tabs[1].card(MAC_A).is_some_and(|card| card.held_elsewhere.is_some())
+        tabs[1]
+            .card(MAC_A)
+            .is_some_and(|card| card.held_elsewhere.is_some())
     });
     for _ in 0..40 {
         step(&mut [&mut a, &mut b]);
@@ -160,10 +164,16 @@ fn t2_a_refused_open_read_against_a_later_claim_is_the_other_tabs() {
         tabs[0].holds(MAC_A)
     });
     b.library_changed();
-    run_until(&mut [&mut a, &mut b], "B to read the refusal as held", |tabs| {
-        tabs[1].card(MAC_A).is_some_and(|card| card.held_elsewhere.is_some())
-            && tabs[1].bench.view().pending.is_empty()
-    });
+    run_until(
+        &mut [&mut a, &mut b],
+        "B to read the refusal as held",
+        |tabs| {
+            tabs[1]
+                .card(MAC_A)
+                .is_some_and(|card| card.held_elsewhere.is_some())
+                && tabs[1].bench.view().pending.is_empty()
+        },
+    );
 
     assert!(
         !desk.log_of(&["refused:B"]).is_empty(),
@@ -232,7 +242,9 @@ fn t3_two_boards_of_a_kind_both_held_are_both_gated() {
 fn t4_two_of_a_kind_one_held_opens_both_and_reads_the_refusal() {
     let desk = Desk::new(&[("dev000000holdt4aa", MAC_A), ("dev000000holdt4bb", MAC_B)]);
     let mut a = desk.tab("A", &[0]);
-    run_until(&mut [&mut a], "A to hold board A", |tabs| tabs[0].holds(MAC_A));
+    run_until(&mut [&mut a], "A to hold board A", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
 
     let mut b = desk.tab("B", &[0, 1]);
     b.library_changed();
@@ -285,7 +297,9 @@ fn t5_the_holders_level_follows_what_it_is_doing() {
     // Open: the editor on the board.
     a.run_a_project(MAC_A, &mut b);
     let uid = a.registry_uid(MAC_A);
-    a.bench.open_lens(&uid).expect("the editor opens on A's board");
+    a.bench
+        .open_lens(&uid)
+        .expect("the editor opens on A's board");
     run_until(&mut [&mut a, &mut b], "B to see A's editor open", |tabs| {
         tabs[1].fact(MAC_A).map(|fact| fact.level) == Some(HoldLevel::Open)
     });
@@ -354,7 +368,9 @@ fn t6_a_holder_that_dies_clears_the_fact_and_nothing_opens() {
 fn t7_a_busy_holder_refuses_and_nothing_closes() {
     let desk = Desk::new(&[("dev000000holdt7aa", MAC_A)]);
     let mut a = desk.tab("A", &[0]);
-    run_until(&mut [&mut a], "A to hold the board", |tabs| tabs[0].holds(MAC_A));
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
     let board = a.device_id(MAC_A);
     let asker = desk.bus.tab();
 
@@ -362,7 +378,9 @@ fn t7_a_busy_holder_refuses_and_nothing_closes() {
     a.wait_until_empty(MAC_A);
     a.bench.push_gesture(board, bundled_example());
     run_until(&mut [&mut a], "A to be busy", |tabs| {
-        tabs[0].card(MAC_A).is_some_and(|card| card.activity.is_some())
+        tabs[0]
+            .card(MAC_A)
+            .is_some_and(|card| card.activity.is_some())
     });
     let label = a
         .card(MAC_A)
@@ -410,7 +428,9 @@ fn t7_a_busy_holder_refuses_and_nothing_closes() {
 fn t7_an_idle_holder_lets_go_in_order() {
     let desk = Desk::new(&[("dev000000holdt7bb", MAC_A)]);
     let mut a = desk.tab("A", &[0]);
-    run_until(&mut [&mut a], "A to hold the board", |tabs| tabs[0].holds(MAC_A));
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
     let asker = desk.bus.tab();
 
     a.run_a_project_alone(MAC_A);
@@ -462,7 +482,11 @@ fn t7_an_idle_holder_lets_go_in_order() {
         "the holder's order"
     );
     let card = a.card(MAC_A).expect("A's card");
-    assert_eq!(card.status, DeviceStatus::Attached, "port closed, card kept");
+    assert_eq!(
+        card.status,
+        DeviceStatus::Attached,
+        "port closed, card kept"
+    );
     assert_eq!(
         card.held_elsewhere.map(|fact| fact.taken_from_here),
         Some(true),
@@ -524,7 +548,9 @@ fn z1_z5_take_over_by_path_and_take_it_back() {
         !b.bench.offered(path.clone()).consequence().is_routine(),
         "it closes A's editor: the tint says so"
     );
-    b.bench.press(path, OfferArgs::new()).expect("the press runs");
+    b.bench
+        .press(path, OfferArgs::new())
+        .expect("the press runs");
     assert_eq!(
         b.take_over_words(MAC_A).as_deref(),
         Some("Asking the other tab\u{2026}")
@@ -550,7 +576,10 @@ fn z1_z5_take_over_by_path_and_take_it_back() {
         if !desk.log_of(&["open:B"]).is_empty() && !order.contains(&"B's port opened") {
             order.push("B's port opened");
         }
-        assert!(std::time::Instant::now() < deadline, "no take-over: {order:?}");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no take-over: {order:?}"
+        );
     }
     assert_eq!(
         order,
@@ -564,9 +593,16 @@ fn z1_z5_take_over_by_path_and_take_it_back() {
     assert!(desk.log_of(&["refused:B"]).is_empty(), "B never fought A");
     let card = b.card(MAC_A).expect("B's card");
     assert_eq!(card.held_elsewhere, None);
-    run_until(&mut [&mut a, &mut b], "B to hold it and A to hear", |tabs| {
-        tabs[1].holds(MAC_A) && tabs[0].fact(MAC_A).is_some_and(|fact| fact.level == HoldLevel::Watching)
-    });
+    run_until(
+        &mut [&mut a, &mut b],
+        "B to hold it and A to hear",
+        |tabs| {
+            tabs[1].holds(MAC_A)
+                && tabs[0]
+                    .fact(MAC_A)
+                    .is_some_and(|fact| fact.level == HoldLevel::Watching)
+        },
+    );
     assert_eq!(b.take_over_words(MAC_A), None, "done: nothing to say");
     assert_eq!(a.fact(MAC_A), Some(held(HoldLevel::Watching, true)));
     a.bench.not_offered(a.verb(MAC_A, "connect"));
@@ -574,7 +610,9 @@ fn z1_z5_take_over_by_path_and_take_it_back() {
     // Z5: A takes it back, the same way.
     let path = a.verb(MAC_A, "take-over");
     assert!(a.bench.offered(path.clone()).consequence().is_routine());
-    a.bench.press(path, OfferArgs::new()).expect("the press runs");
+    a.bench
+        .press(path, OfferArgs::new())
+        .expect("the press runs");
     run_until(&mut [&mut a, &mut b], "A to have it back", |tabs| {
         tabs[0].holds(MAC_A)
             && tabs[0]
@@ -604,10 +642,14 @@ fn z2_a_busy_holder_refuses_and_the_offer_waits() {
     a.wait_until_empty(MAC_A);
     a.bench.push_gesture(board, bundled_example());
     run_until(&mut [&mut a], "A to be busy", |tabs| {
-        tabs[0].card(MAC_A).is_some_and(|card| card.activity.is_some())
+        tabs[0]
+            .card(MAC_A)
+            .is_some_and(|card| card.activity.is_some())
     });
     let path = b.verb(MAC_A, "take-over");
-    b.bench.press(path.clone(), OfferArgs::new()).expect("press");
+    b.bench
+        .press(path.clone(), OfferArgs::new())
+        .expect("press");
     run_until(&mut [&mut a, &mut b], "B to hear the refusal", |tabs| {
         tabs[1]
             .take_over_words(MAC_A)
@@ -641,7 +683,9 @@ fn z3_no_answer_fails_after_five_seconds_and_a_retry_works() {
     let desk = Desk::new(&[("dev000000holdz3aa", MAC_A)]);
     let (mut a, mut b) = holder_and_watcher(&desk);
     let path = b.verb(MAC_A, "take-over");
-    b.bench.press(path.clone(), OfferArgs::new()).expect("press");
+    b.bench
+        .press(path.clone(), OfferArgs::new())
+        .expect("press");
     assert_eq!(
         b.bench.offer_reason(path.clone()),
         "Asking the other tab\u{2026}"
@@ -680,7 +724,9 @@ fn z3_no_answer_fails_after_five_seconds_and_a_retry_works() {
 fn z4_the_take_over_costs_what_it_closes_over_there() {
     let desk = Desk::new(&[("dev000000holdz4aa", MAC_A)]);
     let mut a = desk.tab("A", &[0]);
-    run_until(&mut [&mut a], "A to hold the board", |tabs| tabs[0].holds(MAC_A));
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
     let mut b = desk.tab("B", &[0]);
     b.library_changed();
     // B alone: A has not answered B's `Who` yet.
@@ -775,9 +821,11 @@ fn z6_two_of_a_kind_asking_for_one_frees_only_that_one() {
             .card(MAC_A)
             .is_some_and(|card| card.status == DeviceStatus::Ready)
     });
-    run_until(&mut [&mut a, &mut b], "Y's port to be refused again", |_| {
-        desk.attempts(1, "B") >= 1
-    });
+    run_until(
+        &mut [&mut a, &mut b],
+        "Y's port to be refused again",
+        |_| desk.attempts(1, "B") >= 1,
+    );
     for _ in 0..40 {
         step(&mut [&mut a, &mut b]);
     }
@@ -801,9 +849,11 @@ fn z7_two_askers_one_wins_and_the_other_is_told_another_tab_has_it() {
     let (mut a, mut b) = holder_and_watcher(&desk);
     let mut c = desk.tab("C", &[0]);
     c.library_changed();
-    run_until(&mut [&mut a, &mut b, &mut c], "C to see the board held", |tabs| {
-        tabs[2].fact(MAC_A) == Some(held(HoldLevel::Watching, false))
-    });
+    run_until(
+        &mut [&mut a, &mut b, &mut c],
+        "C to see the board held",
+        |tabs| tabs[2].fact(MAC_A) == Some(held(HoldLevel::Watching, false)),
+    );
 
     b.bench
         .press(b.verb(MAC_A, "take-over"), OfferArgs::new())
@@ -811,12 +861,16 @@ fn z7_two_askers_one_wins_and_the_other_is_told_another_tab_has_it() {
     c.bench
         .press(c.verb(MAC_A, "take-over"), OfferArgs::new())
         .expect("C presses");
-    run_until(&mut [&mut a, &mut b, &mut c], "B to win and C to fail", |tabs| {
-        tabs[1]
-            .card(MAC_A)
-            .is_some_and(|card| card.status == DeviceStatus::Ready)
-            && tabs[2].take_over_failed(MAC_A) == Some(true)
-    });
+    run_until(
+        &mut [&mut a, &mut b, &mut c],
+        "B to win and C to fail",
+        |tabs| {
+            tabs[1]
+                .card(MAC_A)
+                .is_some_and(|card| card.status == DeviceStatus::Ready)
+                && tabs[2].take_over_failed(MAC_A) == Some(true)
+        },
+    );
 
     assert_eq!(
         c.take_over_words(MAC_A).as_deref(),
@@ -824,14 +878,18 @@ fn z7_two_askers_one_wins_and_the_other_is_told_another_tab_has_it() {
     );
     assert_eq!(desk.attempts(0, "B"), 1, "B opened once");
     assert_eq!(desk.attempts(0, "C"), 0, "C never opened it");
-    run_until(&mut [&mut a, &mut b, &mut c], "C to see B holding it", |tabs| {
-        tabs[2]
-            .bench
-            .controller
-            .board_hold_book()
-            .and_then(|book| book.held_elsewhere(&usb_key(MAC_A)).cloned())
-            .is_some_and(|hold| hold.tab == Some(tabs[1].tab_id()))
-    });
+    run_until(
+        &mut [&mut a, &mut b, &mut c],
+        "C to see B holding it",
+        |tabs| {
+            tabs[2]
+                .bench
+                .controller
+                .board_hold_book()
+                .and_then(|book| book.held_elsewhere(&usb_key(MAC_A)).cloned())
+                .is_some_and(|hold| hold.tab == Some(tabs[1].tab_id()))
+        },
+    );
 }
 
 /// Z8: the held card shows the holder's last picture, and a newer one
@@ -859,7 +917,11 @@ fn z8_a_held_card_follows_the_holders_picture() {
     let second = a.sidecar_captured_at(&uid).expect("written");
     assert!(second > first, "{second} vs {first}");
     b.library_changed();
-    assert_close(b.frame_captured_at(MAC_A), second, "a newer picture replaces it");
+    assert_close(
+        b.frame_captured_at(MAC_A),
+        second,
+        "a newer picture replaces it",
+    );
 
     // A pulls once more inside the window: not written. Letting the board
     // go writes it at once — newer than the last ten-second write — and
@@ -878,7 +940,11 @@ fn z8_a_held_card_follows_the_holders_picture() {
     });
     b.hear_notes();
     b.library_changed();
-    assert_close(b.frame_captured_at(MAC_A), last, "the holder's last picture");
+    assert_close(
+        b.frame_captured_at(MAC_A),
+        last,
+        "the holder's last picture",
+    );
 }
 
 /// Z10: the holder crashes. B's take-over goes and the plain Connect comes
@@ -1265,7 +1331,9 @@ impl Tab {
 /// fact on A's board.
 fn holder_and_watcher(desk: &Desk) -> (Tab, Tab) {
     let mut a = desk.tab("A", &[0]);
-    run_until(&mut [&mut a], "A to hold the board", |tabs| tabs[0].holds(MAC_A));
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
     let mut b = desk.tab("B", &[0]);
     b.library_changed();
     // Primed at no level (read as Open), then A's answer to B's `Who`.
@@ -1300,9 +1368,9 @@ impl Tab {
     /// Step this tab alone until its board reports nothing loaded.
     fn wait_until_empty(&mut self, mac: &str) {
         run_until(&mut [self], "the board to report nothing loaded", |tabs| {
-            tabs[0].card(mac).is_some_and(|card| {
-                card.loaded_project == lpa_devices::view::LoadedProject::Empty
-            })
+            tabs[0]
+                .card(mac)
+                .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
         });
     }
 
@@ -1508,4 +1576,3 @@ fn board() -> HoldKey {
         },
     )
 }
-

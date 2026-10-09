@@ -92,10 +92,6 @@ pub use app::devices::{
     HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
     OtherHold, PendingAsk, TabId, UsbPair,
 };
-/// Connect on a board another tab holds: the offer, its op and its words.
-pub use app::devices::{
-    TAKE_OVER_ASKING, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab, take_over_offer,
-};
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
     DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
@@ -123,6 +119,10 @@ pub use app::devices::{
     RELAY_CONNECTING, RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS,
     RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
     connect_relay_offer,
+};
+/// Connect on a board another tab holds: the offer, its op and its words.
+pub use app::devices::{
+    TAKE_OVER_ASKING, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab, take_over_offer,
 };
 pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,

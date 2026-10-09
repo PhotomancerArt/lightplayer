@@ -62,7 +62,8 @@ impl StudioController {
                 "this board has not said who it is yet".to_string(),
             ));
         };
-        let (Some(edge), Some(book)) = (self.board_hold_edge.clone(), self.board_hold_book.as_mut())
+        let (Some(edge), Some(book)) =
+            (self.board_hold_edge.clone(), self.board_hold_book.as_mut())
         else {
             return Err(UiError::UnsupportedAction(
                 "this browser cannot ask its other tabs".to_string(),
@@ -148,17 +149,23 @@ impl StudioController {
                 }
             }
         }
-        let ready: Vec<crate::DeviceId> = self
+        // Done: the board is ready here, or the roster no longer has it
+        // (forgotten) and there is no card to say anything on.
+        let done: Vec<crate::DeviceId> = self
             .take_overs
             .devices()
             .filter(|device| !self.take_overs.asking(*device))
-            .filter(|device| {
-                self.devices.roster().device(*device).is_some_and(|device| {
-                    matches!(device.status(), DeviceStatus::Ready | DeviceStatus::Degraded)
-                })
+            .filter(|device| match self.devices.roster().device(*device) {
+                Some(device) => {
+                    matches!(
+                        device.status(),
+                        DeviceStatus::Ready | DeviceStatus::Degraded
+                    )
+                }
+                None => true,
             })
             .collect();
-        for device in ready {
+        for device in done {
             self.take_overs.done(device);
         }
     }

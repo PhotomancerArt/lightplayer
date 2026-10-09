@@ -106,10 +106,12 @@ impl TakeOvers {
 
     /// The device whose ask is number `request`, while it waits.
     pub fn device_asking(&self, request: u64) -> Option<DeviceId> {
-        self.by_device.iter().find_map(|(device, stage)| match stage {
-            TakeOverStage::Asking { request: asked, .. } if *asked == request => Some(*device),
-            _ => None,
-        })
+        self.by_device
+            .iter()
+            .find_map(|(device, stage)| match stage {
+                TakeOverStage::Asking { request: asked, .. } if *asked == request => Some(*device),
+                _ => None,
+            })
     }
 
     /// The devices (and their ask numbers) asking about `key`.

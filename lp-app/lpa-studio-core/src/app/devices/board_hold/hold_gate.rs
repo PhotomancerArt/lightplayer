@@ -71,9 +71,7 @@ impl UsbHoldGate {
         }
         pairs
             .iter()
-            .map(|pair| {
-                pair.is_some_and(|pair| gate_group(groups[&pair], self.claims_for(pair)))
-            })
+            .map(|pair| pair.is_some_and(|pair| gate_group(groups[&pair], self.claims_for(pair))))
             .collect()
     }
 
@@ -270,19 +268,16 @@ mod tests {
             vendor: 0x303a,
             product: 0x1001,
         });
-        assert_eq!(usb_pair_of(&usb("browser-serial-esp32-port-1", c6)), Some(C6));
+        assert_eq!(
+            usb_pair_of(&usb("browser-serial-esp32-port-1", c6)),
+            Some(C6)
+        );
         assert_eq!(usb_pair_of(&usb("browser-serial-esp32-port-1", None)), None);
         assert_eq!(usb_pair_of(&usb("ble:QkxF", c6)), None);
         assert_eq!(usb_pair_of(&usb("lan:ws://192.168.1.4/link", c6)), None);
         assert_eq!(usb_pair_of(&usb("relay:a0f26287b48c", c6)), None);
-        assert_eq!(
-            usb_pair_of(&usb(&crate::sim_endpoint("dev1").0, c6)),
-            None
-        );
-        assert_eq!(
-            usb_pair_of(&usb(&crate::emu_endpoint("dev1").0, c6)),
-            None
-        );
+        assert_eq!(usb_pair_of(&usb(&crate::sim_endpoint("dev1").0, c6)), None);
+        assert_eq!(usb_pair_of(&usb(&crate::emu_endpoint("dev1").0, c6)), None);
     }
 
     const C6: UsbPair = UsbPair {
