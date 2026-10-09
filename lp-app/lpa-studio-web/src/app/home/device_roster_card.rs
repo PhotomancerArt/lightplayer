@@ -260,8 +260,9 @@ pub(crate) fn DeviceRosterCard(
     let firmware_blocked = card.firmware_blocked.is_some();
     // How the board is reached, for the words that depend on it: a board
     // on the LAN or through lightplayer.app is network-blocked for firmware
-    // like a Bluetooth one, but its feed runs, so it never wears Bluetooth's
-    // sentence (core's line says which network link it is).
+    // like a Bluetooth one, but only a Bluetooth board's picture comes at
+    // the gentler pace its pill names (core's line says which network link
+    // it is).
     let over = card_link_kind(lan.as_ref(), &card);
     // Update draws as one chip when it is one click, or when it is refused
     // for the link (Bluetooth: drawn disabled, reason under it). With
@@ -1743,8 +1744,9 @@ const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it runs.
 
 /// The preview slot's sentence while there is no feed (AC10): why there is
 /// no picture, in this state, in plain words — never a fake picture and
-/// never an empty box.
-fn preview_sentence(card: &DeviceView, over: UiLinkKind) -> String {
+/// never an empty box. The same on every link: the feed runs over USB,
+/// Wi‑Fi and Bluetooth alike.
+fn preview_sentence(card: &DeviceView) -> String {
     if card.activity.is_none()
         && let Some(sentence) = firmware_face_preview_sentence(&card.firmware_face)
     {
@@ -1756,13 +1758,6 @@ fn preview_sentence(card: &DeviceView, over: UiLinkKind) -> String {
     }
     if card.loaded_project == DeviceLoadedProject::Empty {
         return "Nothing loaded — no picture until something runs.".to_string();
-    }
-    // The card's live picture is not streamed over Bluetooth (M5: that air
-    // time is the board's ESP-NOW's too), so "coming" would be a promise.
-    // Over USB and Wi‑Fi the feed runs, and the picture is on its way.
-    if over == UiLinkKind::Bluetooth {
-        return "No live picture over Bluetooth — Open in editor to see and control it."
-            .to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }
@@ -2021,7 +2016,7 @@ fn preview_slot(
     // hello and the unlock), so it is read as having none.
     let feed = feed.filter(|_| !locked);
     let frame_class = feed_frame_class(card, feed);
-    let pill = feed_pill(card, feed);
+    let pill = feed_pill(card, feed, over);
     let picture = card
         .activity
         .is_none()
@@ -2030,7 +2025,7 @@ fn preview_slot(
     let sentence = if locked && card.activity.is_none() {
         Some(LOCKED_PREVIEW_SENTENCE.to_string())
     } else {
-        preview_slot_sentence(card, feed, over)
+        preview_slot_sentence(card, feed)
     };
     rsx! {
         div { class: "{frame_class}",
@@ -2104,9 +2099,15 @@ fn feed_frame_class(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Str
 /// The liveness pill: its tint family and its text, or none. Says where the
 /// picture came from and how old it is (the honest-preview ADR) — and
 /// nothing while an activity owns the slot or no frame exists.
+///
+/// Over Bluetooth a live pill also says how often the picture moves: the
+/// card pulls there at a gentler pace (`DEVICE_CARD_FEED_BLE_INTERVAL`, one
+/// to two pictures a second), so the board's "43 fps" beside a picture that
+/// steps once a second would read as a stall.
 fn feed_pill(
     card: &DeviceView,
     feed: Option<&DeviceCardFeedView>,
+    over: UiLinkKind,
 ) -> Option<(&'static str, String)> {
     if card.activity.is_some() {
         return None;
@@ -2121,9 +2122,11 @@ fn feed_pill(
         // inventing a number.
         FeedLiveness::Live => (
             "ux-play-pill-live",
-            match feed.engine_fps {
-                Some(fps) => format!("live · {fps} fps"),
-                None => "live".to_string(),
+            match (feed.engine_fps, over == UiLinkKind::Bluetooth) {
+                (Some(fps), false) => format!("live · {fps} fps"),
+                (None, false) => "live".to_string(),
+                (Some(fps), true) => format!("live · {fps} fps · {BLUETOOTH_PICTURE_PACE}"),
+                (None, true) => format!("live · {BLUETOOTH_PICTURE_PACE}"),
             },
         ),
         FeedLiveness::Stale => ("ux-play-pill-stale", format!("last frame · {}", age())),
@@ -2132,17 +2135,17 @@ fn feed_pill(
     })
 }
 
+/// How often a Bluetooth card's picture moves, in the live pill's words
+/// (see [`feed_pill`]).
+const BLUETOOTH_PICTURE_PACE: &str = "shown 1–2/s";
+
 /// The sentence in the slot, when the picture is not the whole story.
-fn preview_slot_sentence(
-    card: &DeviceView,
-    feed: Option<&DeviceCardFeedView>,
-    over: UiLinkKind,
-) -> Option<String> {
+fn preview_slot_sentence(card: &DeviceView, feed: Option<&DeviceCardFeedView>) -> Option<String> {
     if card.activity.is_some() {
-        return Some(preview_sentence(card, over));
+        return Some(preview_sentence(card));
     }
     let Some(feed) = feed else {
-        return Some(preview_sentence(card, over));
+        return Some(preview_sentence(card));
     };
     match &feed.frame {
         Some(frame) if frame.display_layout.is_some() => None,
@@ -2161,7 +2164,7 @@ fn preview_slot_sentence(
             // no last frame yet to dim, but "the live feed is coming" would
             // still be a promise the editor is actively blocking.
             FeedLiveness::Lens => "Picture paused while the editor is open.".to_string(),
-            _ => preview_sentence(card, over),
+            _ => preview_sentence(card),
         }),
     }
 }
@@ -2393,14 +2396,6 @@ fn confirm(_message: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// A test card's link: Bluetooth when the card says so, else USB.
-    fn card_link(card: &DeviceView) -> UiLinkKind {
-        if card.is_over_bluetooth() {
-            UiLinkKind::Bluetooth
-        } else {
-            UiLinkKind::Usb
-        }
-    }
     use lpa_studio_core::UiStatusKind;
     // When Reset is enabled or disabled over a network link is core's
     // `device_offers` and `pending_link_offers` tests' to say (the card
@@ -2779,7 +2774,8 @@ mod tests {
     #[test]
     fn the_pill_names_the_pictures_provenance_and_age() {
         let card = card_fixture();
-        let pill = |liveness| feed_pill(&card, Some(&feed_fixture(liveness, true)));
+        let pill =
+            |liveness| feed_pill(&card, Some(&feed_fixture(liveness, true)), UiLinkKind::Usb);
         assert_eq!(
             pill(FeedLiveness::Live),
             Some(("ux-play-pill-live", "live · 43 fps".to_string()))
@@ -2797,13 +2793,42 @@ mod tests {
             Some(("ux-play-pill-offline", "editor has the wire".to_string()))
         );
         assert_eq!(pill(FeedLiveness::Waiting), None);
-        assert_eq!(feed_pill(&card, None), None);
+        assert_eq!(feed_pill(&card, None, UiLinkKind::Usb), None);
 
         let mut no_fps = feed_fixture(FeedLiveness::Live, true);
         no_fps.engine_fps = None;
         assert_eq!(
-            feed_pill(&card, Some(&no_fps)),
+            feed_pill(&card, Some(&no_fps), UiLinkKind::Usb),
             Some(("ux-play-pill-live", "live".to_string()))
+        );
+
+        // Over Bluetooth the picture moves one to two times a second, and a
+        // live pill says so beside the board's own rate; the other looks
+        // are the same on every link.
+        let over_bluetooth =
+            |feed: &DeviceCardFeedView| feed_pill(&card, Some(feed), UiLinkKind::Bluetooth);
+        assert_eq!(
+            over_bluetooth(&feed_fixture(FeedLiveness::Live, true)),
+            Some((
+                "ux-play-pill-live",
+                "live · 43 fps · shown 1–2/s".to_string()
+            ))
+        );
+        assert_eq!(
+            over_bluetooth(&no_fps),
+            Some(("ux-play-pill-live", "live · shown 1–2/s".to_string()))
+        );
+        assert_eq!(
+            over_bluetooth(&feed_fixture(FeedLiveness::Stale, true)),
+            Some(("ux-play-pill-stale", "last frame · 12 s ago".to_string()))
+        );
+        assert_eq!(
+            feed_pill(
+                &card,
+                Some(&feed_fixture(FeedLiveness::Live, true)),
+                UiLinkKind::Wifi
+            ),
+            Some(("ux-play-pill-live", "live · 43 fps".to_string()))
         );
 
         let mut busy = card_fixture();
@@ -2817,7 +2842,11 @@ mod tests {
             update: None,
         });
         assert_eq!(
-            feed_pill(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
+            feed_pill(
+                &busy,
+                Some(&feed_fixture(FeedLiveness::Live, true)),
+                UiLinkKind::Bluetooth
+            ),
             None,
             "an activity owns the slot"
         );
@@ -2830,27 +2859,15 @@ mod tests {
     fn the_slot_sentence_yields_to_the_picture() {
         let card = card_fixture();
         assert_eq!(
-            preview_slot_sentence(
-                &card,
-                Some(&feed_fixture(FeedLiveness::Live, true)),
-                card_link(&card)
-            ),
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, true))),
             None
         );
         assert!(
-            preview_slot_sentence(
-                &card,
-                Some(&feed_fixture(FeedLiveness::Live, false)),
-                card_link(&card)
-            )
-            .is_some_and(|s| s.contains("too large to preview")),
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Live, false)))
+                .is_some_and(|s| s.contains("too large to preview")),
         );
         assert_eq!(
-            preview_slot_sentence(
-                &card,
-                Some(&feed_fixture(FeedLiveness::Waiting, true)),
-                card_link(&card)
-            ),
+            preview_slot_sentence(&card, Some(&feed_fixture(FeedLiveness::Waiting, true))),
             Some("Waiting for the first frame…".to_string())
         );
         // Editor lens, no frame pulled yet (the feed never pulls under the
@@ -2863,12 +2880,12 @@ mod tests {
             engine_fps: None,
         };
         assert_eq!(
-            preview_slot_sentence(&card, Some(&lens_no_frame), card_link(&card)),
+            preview_slot_sentence(&card, Some(&lens_no_frame)),
             Some("Picture paused while the editor is open.".to_string())
         );
         assert_eq!(
-            preview_slot_sentence(&card, None, card_link(&card)),
-            Some(preview_sentence(&card, card_link(&card)))
+            preview_slot_sentence(&card, None),
+            Some(preview_sentence(&card))
         );
 
         let mut busy = card_fixture();
@@ -2882,12 +2899,8 @@ mod tests {
             update: None,
         });
         assert_eq!(
-            preview_slot_sentence(
-                &busy,
-                Some(&feed_fixture(FeedLiveness::Live, true)),
-                card_link(&busy)
-            ),
-            Some(preview_sentence(&busy, card_link(&busy)))
+            preview_slot_sentence(&busy, Some(&feed_fixture(FeedLiveness::Live, true))),
+            Some(preview_sentence(&busy))
         );
         assert_eq!(
             feed_frame_class(&busy, Some(&feed_fixture(FeedLiveness::Offline, true))),
@@ -2914,13 +2927,13 @@ mod tests {
     fn every_state_has_an_honest_preview_sentence() {
         let mut card = card_fixture();
         assert_eq!(
-            preview_sentence(&card, card_link(&card)),
+            preview_sentence(&card),
             "No picture yet — the live feed is coming."
         );
 
         card.loaded_project = DeviceLoadedProject::Empty;
         assert_eq!(
-            preview_sentence(&card, card_link(&card)),
+            preview_sentence(&card),
             "Nothing loaded — no picture until something runs."
         );
 
@@ -2928,13 +2941,13 @@ mod tests {
             label: "porch-sign".to_string(),
         };
         assert_eq!(
-            preview_sentence(&card, card_link(&card)),
+            preview_sentence(&card),
             "No picture yet — the live feed is coming."
         );
 
         card.firmware_face = lpa_studio_core::DeviceFirmwareFace::Blank;
         assert_eq!(
-            preview_sentence(&card, card_link(&card)),
+            preview_sentence(&card),
             "Nothing running — a blank chip has no picture."
         );
 
@@ -2950,30 +2963,29 @@ mod tests {
             update: None,
         });
         assert_eq!(
-            preview_sentence(&card, card_link(&card)),
+            preview_sentence(&card),
             "Flashing firmware… the picture returns when the board does."
         );
     }
 
     /// A network board is blocked for firmware on Bluetooth and the LAN
-    /// alike, but only Bluetooth goes without a picture: over Wi‑Fi the
-    /// feed runs, and the sentence is a USB board's (PR C's walk found the
-    /// Bluetooth one on a Wi‑Fi card).
+    /// alike, and its picture is on its way on both: the feed runs over
+    /// every link (over Bluetooth since 2026-10-08, at a gentler pace), so
+    /// no card says it has no live picture.
     #[test]
-    fn a_wifi_card_waits_for_its_picture_and_never_names_bluetooth() {
+    fn a_network_card_waits_for_its_picture_like_a_usb_one() {
         let mut card = card_fixture();
         card.firmware_blocked = Some(lpa_studio_core::FIRMWARE_NEEDS_USB.to_string());
         assert_eq!(
-            preview_sentence(&card, UiLinkKind::Wifi),
+            preview_sentence(&card),
             "No picture yet — the live feed is coming."
         );
-        assert!(preview_sentence(&card, UiLinkKind::Bluetooth).contains("over Bluetooth"));
     }
 
     /// A board through lightplayer.app is refused firmware like a Bluetooth
-    /// one, but it is on Wi‑Fi: the card says "Wi‑Fi via lightplayer.app"
-    /// and never Bluetooth's sentence (PR C; behind `?relay=1` it said "No
-    /// live picture over Bluetooth").
+    /// one, but it is on Wi‑Fi: the card says "Wi‑Fi via lightplayer.app",
+    /// and its live pill is a USB board's, not Bluetooth's slower one (PR C;
+    /// behind `?relay=1` it once wore Bluetooth's words).
     #[test]
     fn a_relay_card_says_wifi_via_lightplayer_app_and_never_bluetooth() {
         let mut card = card_fixture();
@@ -2982,8 +2994,12 @@ mod tests {
         let over = card_link_kind(relay.as_ref(), &card);
         assert_eq!(over, UiLinkKind::Relay);
         assert_eq!(
-            preview_sentence(&card, over),
+            preview_sentence(&card),
             "No picture yet — the live feed is coming."
+        );
+        assert_eq!(
+            feed_pill(&card, Some(&feed_fixture(FeedLiveness::Live, true)), over),
+            Some(("ux-play-pill-live", "live · 43 fps".to_string()))
         );
         assert_eq!(
             info_line(relay.as_ref(), None, "ready"),

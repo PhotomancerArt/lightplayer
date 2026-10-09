@@ -4,7 +4,9 @@
 //! [`OutputFrameProbeRequest`]): while a card's ▶ Play tab is selected on a
 //! Ready device, the studio pulls the frame the board has ALREADY published
 //! at [`DEVICE_CARD_FEED_INTERVAL`](crate::DEVICE_CARD_FEED_INTERVAL)
-//! completion-gap and keeps the newest one here.
+//! completion-gap (over Bluetooth, the gentler
+//! [`DEVICE_CARD_FEED_BLE_INTERVAL`](crate::DEVICE_CARD_FEED_BLE_INTERVAL))
+//! and keeps the newest one here.
 //!
 //! # What this state exists to guarantee
 //!
