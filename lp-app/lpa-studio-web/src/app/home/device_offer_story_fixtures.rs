@@ -423,7 +423,12 @@ pub(crate) fn StoryBoardCard(
     /// offline.
     #[props(default)]
     relay: bool,
-    #[props(default = lpa_studio_core::BoardPlays::Unknown)] plays: lpa_studio_core::BoardPlays,
+    /// Which project it plays. Left `Unknown`, it is core's join over the
+    /// board's own report ([`lpa_studio_core::board_projects`] with no
+    /// registry and no lens): "Nothing on it yet" for an empty board, the
+    /// running label for a running one, as the controller would say.
+    #[props(default = lpa_studio_core::BoardPlays::Unknown)]
+    plays: lpa_studio_core::BoardPlays,
     #[props(default)] sharing: usize,
     #[props(default)] project: Option<UiPackageCard>,
     #[props(default)] shared_with: Vec<String>,
@@ -468,6 +473,14 @@ pub(crate) fn StoryBoardCard(
         tree.append(extra);
     }
     let verbs: Vec<lpa_studio_core::UiOffer> = tree.own_verbs_of(&prefix).cloned().collect();
+    let plays = match plays {
+        lpa_studio_core::BoardPlays::Unknown => {
+            own_report_plays(std::slice::from_ref(&card), &projects)
+                .plays(card.id)
+                .clone()
+        }
+        told => told,
+    };
     let built = lpa_studio_core::board_card(&lpa_studio_core::BoardCardInput {
         view: &card,
         board: &prefix,
@@ -490,20 +503,30 @@ pub(crate) fn StoryBoardCard(
         editor_holds_it,
         now,
     });
+    // A story that opens a part's details (or whose layout question raises
+    // them) keeps the room they float in, so a capture holds the whole
+    // details card and a grid of such cards never stacks one over the next.
+    let opens = details_open.is_some() || built.bars.iter().any(|bar| bar.details.raised);
     rsx! {
         OffersProvider { offers: tree,
-            BoardCard {
-                card: built,
-                projects,
-                examples,
-                details_open,
-                armed_preview,
-                previews,
-                on_action,
+            div { class: if opens { DETAILS_ROOM_CLASS } else { "tw:contents" },
+                BoardCard {
+                    card: built,
+                    projects,
+                    examples,
+                    details_open,
+                    armed_preview,
+                    previews,
+                    on_action,
+                }
             }
         }
     }
 }
+
+/// The room a story card's open details float in: the card, and the
+/// tallest details card below its lowest bar.
+const DETAILS_ROOM_CLASS: &str = "tw:grid tw:min-h-[900px] tw:content-start";
 
 /// [`BoardCard`] for a new board: core's [`pending_board_card`] over the
 /// verbs core publishes for the link (`link`: how it arrived).
@@ -521,7 +544,9 @@ pub(crate) fn StoryNewBoardCard(
     let built = lpa_studio_core::pending_board_card(&pending, &prefix, &verbs, link);
     rsx! {
         OffersProvider { offers: tree,
-            BoardCard { card: built, details_open, on_action }
+            div { class: if details_open.is_some() { DETAILS_ROOM_CLASS } else { "tw:contents" },
+                BoardCard { card: built, details_open, on_action }
+            }
         }
     }
 }
@@ -629,19 +654,44 @@ pub(crate) fn StoryHomePage(
 
 /// `home` with the sections core would build for its library and roster.
 ///
-/// `StudioController::home_view` writes each project's boards onto its card
-/// ([`stamp_on_boards`]) and fills [`UiHomeView::sections`] with
+/// `StudioController::home_view` joins boards to projects, writes each
+/// project's boards onto its card ([`stamp_on_boards`]) and fills
+/// [`UiHomeView::sections`] with
 /// [`build_home_sections`]; a story that left the sections at their default
 /// gets the same two calls, so a story never hand-builds which board or
 /// project sits in which section, or which boards a project says it is on,
 /// and cannot show a page core would not produce. A story that pins sections
 /// keeps its own (a test of the page's drawing, not of core's membership).
 pub(crate) fn with_core_sections(mut home: UiHomeView) -> UiHomeView {
+    // The join every section and card reads: core's, over the boards' own
+    // reports, unless the story pins its own.
+    if home.devices.board_projects == lpa_studio_core::BoardProjects::default() {
+        home.devices.board_projects =
+            own_report_plays(&home.devices.roster.devices, &home.projects);
+    }
     if home.sections == UiHomeSections::default() {
         stamp_on_boards(&mut home.projects, &home.devices);
         home.sections = build_home_sections(&home.projects, &home.devices);
     }
     home
+}
+
+/// Which project each board plays, by core's join over the boards' own
+/// reports alone ([`lpa_studio_core::board_projects`] with no registry
+/// rows and no lens) — what the controller answers before the library has
+/// a record of what it gave a board.
+fn own_report_plays(
+    boards: &[DeviceView],
+    projects: &[UiPackageCard],
+) -> lpa_studio_core::BoardProjects {
+    lpa_studio_core::board_projects(&lpa_studio_core::BoardProjectInputs {
+        boards,
+        registry_keys: &Default::default(),
+        registry: &[],
+        projects,
+        project_heads: &Default::default(),
+        lens: None,
+    })
 }
 
 /// `home` with the board cards core would build for its roster over
@@ -724,9 +774,19 @@ mod tests {
     fn a_story_that_leaves_the_sections_default_gets_the_ones_core_builds() {
         let home = story_home(UiHomeSections::default());
         let filled = with_core_sections(home.clone());
+        // The join is core's, over the boards' own reports.
+        assert_eq!(
+            filled.devices.board_projects,
+            own_report_plays(&home.devices.roster.devices, &home.projects)
+        );
+        assert_ne!(
+            filled.devices.board_projects,
+            BoardProjects::default(),
+            "the roster's boards say what they play"
+        );
         assert_eq!(
             filled.sections,
-            build_home_sections(&home.projects, &home.devices)
+            build_home_sections(&home.projects, &filled.devices)
         );
         // Not the default by accident: the roster is on the page.
         assert!(!filled.sections.online.is_empty());

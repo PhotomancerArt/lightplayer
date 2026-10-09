@@ -2588,7 +2588,7 @@ fn device_pick_popover_new_tab() -> Element {
 }
 
 #[story(
-    description = "The device card's header ⋯ menu, open: the project card's menu grammar on the device card, holding the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName and closes the menu; the name is Studio's (persisted to the registry) and is never written to the board. Every board verb keeps its zone; this is a menu, not a fourth verb row. The pending card carries no menu — a link that has not identified itself has no intent to write a name into, and names itself through the board pick's name field instead."
+    description = "Rename, on the board card: the hardware bar's details, open, hold the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName; the name is Studio's (persisted to the registry) and is never written to the board. Beside it are the board's model, chip and id, Reset, and Forget apart in the danger zone. A new board's card has no Rename — a link that has not identified itself has no entry to name, and names itself through the board pick's name field instead."
 )]
 fn devices_card_menu_open() -> Element {
     let card = roster_fixture().roster.devices.remove(0);
@@ -2609,7 +2609,7 @@ fn devices_card_menu_open() -> Element {
 }
 
 #[story(
-    description = "The device card's ⋯ menu with the board's LINK section (plan D13): under Rename, the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the bytes it sent and received, each in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 of its 40 sent frames (well over DD2's 5 % floor) and restarted once, so those two wear the warning tone — a restart is notable at any count, a resend only once it clears the floor. The panel floats, so the fixed-height card pays nothing for it; a link that reports no counters (Bluetooth, a sim) shows Rename alone."
+    description = "The board's LINK counters (plan D13), in the connection bar's details: the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the bytes it sent and received, each in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 of its 40 sent frames (well over DD2's 5 % floor) and restarted once, so those two wear the warning tone — a restart is notable at any count, a resend only once it clears the floor. The details float, so the fixed-height card pays nothing for them; a link that reports no counters (Bluetooth, a sim) shows none."
 )]
 fn devices_card_menu_link_counters() -> Element {
     let mut card = roster_fixture().roster.devices.remove(0);
@@ -2626,12 +2626,14 @@ fn devices_card_menu_link_counters() -> Element {
     rsx! {
         section { class: "tw:min-h-[640px] tw:p-4",
             div { class: "tw:w-[400px]",
-                StoryDeviceCard {
+                crate::app::home::device_offer_story_fixtures::StoryBoardCard {
                     card,
                     open_uid: Some("dev000000daqf6dvvqz".to_string()),
                     projects: packages(),
                     examples: examples(),
-                    menu_initially_open: true,
+                    details_open: Some(crate::app::board_card::CardPart::Bar(
+                        lpa_studio_core::BarLayer::Connection,
+                    )),
                     on_action: |_| {},
                 }
             }
