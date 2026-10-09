@@ -521,17 +521,34 @@ impl DeviceRoster {
                                 .unwrap_or(crate::BoardRef::New(1)),
                         )
                     });
-                super::device_layout_view::device_layout_view(
+                // After a Remove left a folder to start at the next
+                // power-up, the project line says so — only while the board
+                // is idle and still reports nothing loaded.
+                let folder = (view.activity.is_none()
+                    && view.loaded_project == lpa_devices::view::LoadedProject::Empty)
+                    .then(|| self.effects.removal_boots_next(device.id))
+                    .flatten();
+                let mut ui = super::device_layout_view::device_layout_view(
                     &view,
-                    offers_at,
+                    offers_at.clone(),
                     fs,
                     has_uid,
                     staged.as_ref(),
                     pending.as_ref(),
                     device.identity.mac.as_ref().map(|mac| mac.0.as_str()),
                     offers,
-                )
-                .map(|ui| (device.id, ui))
+                );
+                if let Some(folder) = folder {
+                    match ui.as_mut() {
+                        Some(ui) => {
+                            ui.project_note = Some(
+                                super::device_layout_view::UiProjectNote::starts_next(&folder),
+                            );
+                        }
+                        None => ui = Some(super::UiDeviceLayout::note_only(offers_at, &folder)),
+                    }
+                }
+                ui.map(|ui| (device.id, ui))
             })
             .collect()
     }

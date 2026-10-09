@@ -392,6 +392,22 @@ pub(crate) fn DeviceRosterCard(
     } else {
         project_line_text(&card, busy_zone)
     };
+    // After a Remove left a folder to start at the next power-up, core's
+    // note stands in for "Nothing loaded" (its sentence on hover); the
+    // line's height and truncation are unchanged.
+    let project_note = layout
+        .as_ref()
+        .and_then(|layout| layout.project_note.clone())
+        .filter(|_| {
+            !locked
+                && busy_zone.is_none()
+                && card.degraded.is_none()
+                && card.loaded_project == DeviceLoadedProject::Empty
+        });
+    let (project_line, project_line_title) = match project_note {
+        Some(note) => (note.line, note.detail),
+        None => (project_line.clone(), project_line),
+    };
     // A board whose files are waiting (held, or in a backup) says so in
     // the firmware line rather than in a new row: the card's height holds.
     let layout_line = layout
@@ -588,7 +604,7 @@ pub(crate) fn DeviceRosterCard(
                             div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
                                 p {
                                     class: if project_line_is_fault { fault_line_class() } else { info_line_class() },
-                                    title: "{project_line}",
+                                    title: "{project_line_title}",
                                     "{project_line}"
                                 }
                             }
