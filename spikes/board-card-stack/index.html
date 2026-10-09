@@ -751,7 +751,7 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
 <section class="qsec" id="q7"><h2><span class="qn">Q7</span>How does the name bar carry the primary action?</h2>
   <p class="ask">Watching is automatic where it can be; connecting a nearby board may need a tap (Bluetooth asks for one); opening starts a Studio session. The primary action is whatever gets you in next.</p><div class="opts" id="q7o"></div></section>
 <section class="qsec" id="q8"><h2><span class="qn">Q8</span>What does the firmware row say?</h2>
-  <p class="ask">When it’s fine. Notices (an update available, updating, no firmware) tint it either way.</p><div class="opts c3" id="q8o"></div></section>
+  <p class="ask">Porch is current; Fyeah Sign’s board is a release behind. Updating and “no firmware” tint the bar either way.</p><div class="opts c3" id="q8o"></div></section>
 <section class="qsec" id="q9"><h2><span class="qn">Q9</span>What does the hardware row say?</h2>
   <p class="ask">The real thing: grounding, not detail. The rest is in its popover.</p><div class="opts c3" id="q9o"></div></section>
 <section class="qsec" id="q3"><h2><span class="qn">Q3</span>How do the details open? <span style="font:500 12px var(--font);color:var(--shell-dim)">(carried from round 1)</span></h2>
@@ -812,26 +812,27 @@ IC.alert = '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5"/><circle cx="12
 IC.person = '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>';
 IC.tab = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5v4"/>';
 IC.history = '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>';
-IC.fw = '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 12h8M8 15h5"/>';
+IC.fw = '<rect x="4" y="3.5" width="5" height="7" rx="2.5"/><path d="M15 3.5h2v7M15 10.5h4"/><path d="M5 13.5h2v7M5 20.5h4"/><rect x="15" y="13.5" width="5" height="7" rx="2.5"/>';
+const STUDIO_FW = '2026.10.08-16';
 IC.check = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
 IC.xoct = '<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="m9 9 6 6M15 9l-6 6"/>';
 
 /* where: group or owner. link: how Studio reaches it now. conn: the connection state. */
 const BOARDS = [
-  { id:'desk',   title:'Fyeah Sign',    plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB',
-    fwNote:{ tone:'up', icon:'up', text:'0.43 available', act:'Update' } },
-  { id:'porch',  title:'Porch',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
-  { id:'garage', title:'Garage',        plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
+  { id:'desk',   title:'Fyeah Sign',    plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'2026.10.07-3', fwAge:'2 days', model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB',
+    fwOld:true },
+  { id:'porch',  title:'Porch',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
+  { id:'garage', title:'Garage',        plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
     projNote:{ tone:'att', icon:'history', text:'Out of date · v11', act:'Send latest' } },
-  { id:'kitchen', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
-    fwNote:{ tone:'up', icon:'up', text:'Updating to 0.43 · 42%', prog:42 } },
-  { id:'living', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'0.41', fwDate:'Sep 30', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
-  { id:'shelf',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', age:'just now', cloud:false, link:'wifi', conn:'othertab', group:'Studio', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
-  { id:'choker', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'0.40', fwDate:'Sep 21', model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
-  { id:'truck',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'0.38', fwDate:'Sep 2', model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
-  { id:'window', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
+  { id:'kitchen', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-9', fwAge:'today', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
+    fwNote:{ tone:'up', icon:'up', text:'Updating · 42%', prog:42 } },
+  { id:'living', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
+  { id:'shelf',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', age:'just now', cloud:false, link:'wifi', conn:'othertab', group:'Studio', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
+  { id:'choker', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'2026.09.21-1', fwAge:'2½ weeks', fwOld:true, model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
+  { id:'truck',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'2026.09.02-4', fwAge:'5 weeks', fwOld:true, model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
+  { id:'window', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
     projNote:{ tone:'err', icon:'alert', text:'Shader error', act:'Show' } },
-  { id:'lamp',   title:'Ember Drift',   plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:'0.42', fwDate:'Oct 7', model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
+  { id:'lamp',   title:'Ember Drift',   plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:'2026.10.08-16', fwAge:'today', model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
   { id:'newb',   title:'New board',     plays:null, blank:true, pat:'off', layout:'strip', cloud:false, link:'usb', conn:'connected', group:null, fw:null, model:'ESP32-C6', leds:null, mac:'c0de', free:'—', off:true,
     fwNote:{ tone:'att', icon:'fw', text:'No firmware' } },
 ];
@@ -930,9 +931,14 @@ function connRow(b, c){
 function fwRow(b, c){
   const n = b.fwNote;
   if (n) return `<div class="srow layer t-${n.tone}" data-detail="fw" data-id="${b.id}"><span class="nw">${ic(n.icon)}<span class="ell">${n.text}</span></span><span class="spring"></span>${n.act ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}${n.prog ? `<span class="prog" style="width:${n.prog}%"></span>` : ''}</div>`;
+  // older than Studio's: the bar offers the update (an offline board gets it when it's back)
+  if (b.fwOld && c.fw==='A'){
+    const act = b.conn==='offline' ? `<span class="nh" style="opacity:.8">when it’s back</span>` : `<button class="wo" data-act="Update">Update</button>`;
+    return `<div class="srow layer t-up" data-detail="fw" data-id="${b.id}">${ic('fw')}<span class="mono ell" style="color:inherit">LightPlayer ${b.fw}</span><span class="spring"></span>${act}</div>`;
+  }
   const body = c.fw==='B' ? `${ic('fw')}<span class="mono">${b.fw}</span><span style="color:var(--st-good-tx);display:inline-flex">${ic('check')}</span>`
-    : c.fw==='C' ? `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.fwDate}</span>`
-    : `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">up to date</span>`;
+    : c.fw==='C' ? `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.fwAge==='today' ? 'today' : b.fwAge+' old'}</span>`
+    : `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span>`;
   return `<div class="srow layer" data-detail="fw" data-id="${b.id}">${body}<span class="spring"></span><span class="chev">›</span></div>`;
 }
 function hwRow(b, c){
@@ -948,6 +954,7 @@ function popHtml(b, which){
     if (b.projNote) items.push(['Project', b.projNote.tone==='err' ? 'err' : 'warn', b.projNote.tone==='err' ? 'Shader error: sparkle.glsl, line 12 — “undeclared identifier hue”' : b.projNote.text]);
     if (b.conn==='held' || b.conn==='othertab') items.push(['Board', 'warn', b.conn==='held' ? 'Sean has it open (since 10:42)' : 'Open in your other tab (Chrome on Mac)']);
     if (b.fwNote) items.push(['Firmware', b.fwNote.tone==='att' ? 'warn' : 'info', b.fwNote.text]);
+    else if (b.fwOld) items.push(['Firmware', 'info', `LightPlayer ${b.fw} · ${STUDIO_FW} is newer`]);
     const li = items.length ? items.map(([ly, sev, t]) => `<li><span class="ly">${ly}</span><span style="color:${sev==='err'?'var(--st-error-tx)':sev==='warn'?'var(--st-attention-tx)':'var(--st-live-tx)'};display:inline-flex">${ic(sev==='info'?'up':sev==='err'?'xoct':'alert')}</span><span>${t}</span></li>`).join('') : `<li><span class="sicon ok"></span><span>Nothing needs you.</span></li>`;
     return `<div class="pop top"><h5>Status</h5><ul>${li}</ul><div class="kv">
       <span>Running</span><span>${watched(b) && b.fps ? b.fps+' fps · 17 ms a frame' : b.fps===0 ? 'stopped (0 fps)' : 'not watched · picture '+(b.age||'')}</span>
@@ -958,9 +965,9 @@ function popHtml(b, which){
       <span>In sync with</span><span>${b.synced ? 'Porch, Garage, Back fence' : 'only this board'}</span><span>Copied from</span><span>${b.id==='choker' ? 'PLAYFUL Choker (example)' : '—'}</span></div>
       <div class="acts"><button class="btn sm">Open</button><button class="btn sm outline">Share</button><button class="btn sm outline">Put another project on it</button></div></div>`;
   if (which==='fw') return `<div class="pop"><h5>Firmware</h5><div class="kv">
-      <span>Version</span><span class="m">${b.fw ? 'LightPlayer '+b.fw : 'none (blank flash)'}</span><span>Studio has</span><span class="m">0.43</span>
-      <span>Release</span><span>${b.fwDate || '—'} · split image</span><span>Last update</span><span>over the cloud, 2 days ago</span></div>
-      <div class="acts"><button class="btn sm">Update to 0.43</button><button class="btn sm outline">Reinstall</button><button class="btn sm outline lasting">Factory reset…</button></div></div>`;
+      <span>Version</span><span class="m">${b.fw ? 'LightPlayer '+b.fw : 'none (blank flash)'}</span><span>Newest</span><span class="m">${STUDIO_FW}</span>
+      <span>Image</span><span>split (loader, core, engine)</span><span>Last update</span><span>over the cloud, ${b.fwAge || '—'} ago</span></div>
+      <div class="acts">${b.fwOld ? `<button class="btn sm">Update to ${STUDIO_FW}</button>` : ''}<button class="btn sm outline">Reinstall</button><button class="btn sm outline">Other version…</button><button class="btn sm outline lasting">Factory reset…</button></div></div>`;
   return `<div class="pop"><h5>Hardware</h5><div class="kv">
       <span>Board</span><span>${b.model}</span><span>LEDs</span><span>${b.leds ? b.leds+' (WS2812, pin 10)' : '—'}</span>
       <span>Id</span><span class="m">a0:f2:62:b4:${b.mac.slice(0,2)}:${b.mac.slice(2)}</span><span>Memory</span><span>${b.free} free</span>
@@ -995,10 +1002,10 @@ function build(){
     C:{ name:'Open, with a link choice', what:'“Open ▾”, where ▾ picks the link (USB, Bluetooth, Wi‑Fi, cloud).', pro:'power users choose the link.', con:'a choice most people never need, on every card.', c:{ action:'split' } },
   });
   document.getElementById('q8o').innerHTML = Object.entries({
-    A:{ name:'Name, version, “up to date”', lean:true, what:'“LightPlayer 0.42 · up to date”.', pro:'says the version and that it’s fine.', con:'“up to date” on most cards.', c:{ fw:'A' } },
-    B:{ name:'Version and a tick', what:'“0.42 ✓”.', pro:'compact.', con:'a green tick reaches for the “good” family for something that’s merely normal.', c:{ fw:'B' } },
-    C:{ name:'Version and release date', what:'“LightPlayer 0.42 · Oct 7”.', pro:'says how old it is without judging it.', con:'you have to know what “current” is.', c:{ fw:'C' } },
-  }).map(([l,o]) => option('q8', l, o, `<div class="app">${grid(['porch','truck'], o.c)}</div>`)).join('');
+    A:{ name:'The version, and an update when it’s older', lean:true, what:'Your pick, revised from your comment: “LightPlayer 2026.10.08-16” and nothing else when it’s current (the version already carries its date). Older than the newest, the bar turns blue and offers Update; an offline board gets it when it’s back.', pro:'quiet when fine; the one useful action when not.', con:'a newcomer reads a date-like number with no “up to date” to confirm it’s fine (the status icon covers that).', c:{ fw:'A' } },
+    B:{ name:'Version and a tick', what:'“2026.10.08-16 ✓”.', pro:'compact.', con:'a green tick reaches for the “good” family for something that’s merely normal.', c:{ fw:'B' } },
+    C:{ name:'Version and its age', what:'“LightPlayer 2026.09.02-4 · 5 weeks old”.', pro:'staleness at a glance.', con:'the version already says its date; an age on every card is noise.', c:{ fw:'C' } },
+  }).map(([l,o]) => option('q8', l, o, `<div class="app">${grid(['porch','desk'], o.c)}</div>`)).join('');
   document.getElementById('q9o').innerHTML = Object.entries({
     A:{ name:'Board and LED count', lean:true, what:'“ESP32-C6 mini · 60 LEDs”.', pro:'what it is and how big it is, the two facts that ground it.', con:'the LED count comes from the project’s layout, not the chip.', c:{ hw:'A' } },
     B:{ name:'Chip and short id', what:'“ESP32-C6 · …8c3e”.', pro:'tells two identical boards apart.', con:'an id means nothing to a newcomer.', c:{ hw:'B' } },
@@ -1019,7 +1026,7 @@ function renderPage(){
 }
 let toastT;
 function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4000); }
-const ACT = { Open:'Opens the board in Studio: a session on the link it’s watched over.', Connect:'Connect over Bluetooth: the browser asks you to pick the board once; then it’s watched.', 'Take over':'Your other tab lets go; this tab opens it, and the other tab is told.', Watch:'Sean has it open; you keep watching (frames through the cloud).', Unlock:'Enter its password, once per browser.', Update:'Update the firmware to 0.43 (over the link it’s watched on).', Install:'Install LightPlayer over USB.', 'Send latest':'Send the project’s last save (v12) to this board.', Show:'Open the editor at the shader error.', links:'Open over: USB · Wi‑Fi · Cloud' };
+const ACT = { Open:'Opens the board in Studio: a session on the link it’s watched over.', Connect:'Connect over Bluetooth: the browser asks you to pick the board once; then it’s watched.', 'Take over':'Your other tab lets go; this tab opens it, and the other tab is told.', Watch:'Sean has it open; you keep watching (frames through the cloud).', Unlock:'Enter its password, once per browser.', Update:'Update the firmware to 2026.10.08-16 (over the link it’s watched on).', Install:'Install LightPlayer over USB.', 'Send latest':'Send the project’s last save (v12) to this board.', Show:'Open the editor at the shader error.', links:'Open over: USB · Wi‑Fi · Cloud' };
 document.body.addEventListener('click', e => {
   const act = e.target.closest('[data-act]');
   if (act){ e.stopPropagation(); toast(`<b>${act.dataset.act==='links'?'Open over…':act.dataset.act}</b><span class="sub">${ACT[act.dataset.act]||''}</span>`); return; }
