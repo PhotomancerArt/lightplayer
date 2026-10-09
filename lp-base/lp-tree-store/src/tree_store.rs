@@ -155,14 +155,16 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if bytes.len() > u32::MAX as usize {
             return Err(StoreError::TooLarge);
         }
-        self.op(|st| st.put_inner(path, bytes))
+        self.op(&mut |st| st.put_inner(path, bytes).map(|()| true))
+            .map(drop)
     }
 
     /// Append `bytes` to the file at `path` (creating it): writes the new
     /// chunk records and the file's new multi spine — not the file again.
     pub fn append(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
         check_path(path)?;
-        self.op(|st| st.append_inner(path, bytes))
+        self.op(&mut |st| st.append_inner(path, bytes).map(|()| true))
+            .map(drop)
     }
 
     /// Write one host-deflated chunk at `offset` of `path`: `0` replaces
@@ -182,13 +184,17 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         deflated: &[u8],
     ) -> Res<(), F> {
         check_path(path)?;
-        self.op(|st| st.deflated_inner(path, offset, logical_len, expected, deflated))
+        self.op(&mut |st| {
+            st.deflated_inner(path, offset, logical_len, expected, deflated)
+                .map(|()| true)
+        })
+        .map(drop)
     }
 
     /// Delete the file at `path`; `false` if there was none.
     pub fn delete(&mut self, path: &str) -> Res<bool, F> {
         check_path(path)?;
-        self.op(|st| {
+        self.op(&mut |st| {
             if st.walk_file(path)?.is_none() {
                 return Ok(false);
             }
@@ -203,22 +209,24 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub fn delete_prefix(&mut self, prefix: &str) -> Res<(), F> {
         let dir = prefix.strip_suffix('/').unwrap_or("");
         check_path(dir)?;
-        self.op(|st| {
+        self.op(&mut |st| {
             st.record_delete_tree(dir);
-            Ok(())
+            Ok(true)
         })
+        .map(drop)
     }
 
     /// Delete the file at `path` and the directory at `path`, as one
     /// change (`LpFs::delete_dir`).
     pub fn delete_file_and_tree(&mut self, path: &str) -> Res<(), F> {
         check_path(path)?;
-        self.op(|st| {
+        self.op(&mut |st| {
             // Deleting what is not there changes no directory.
             st.record_delete(path);
             st.record_delete_tree(path);
-            Ok(())
+            Ok(true)
         })
+        .map(drop)
     }
 
     // ---- transactions -----------------------------------------------------
@@ -343,7 +351,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// Run one call: inside an explicit transaction as is (a failed call
     /// leaves the transaction as it was — calls change RAM state only after
     /// their records are written); outside, as a one-call transaction.
-    pub(crate) fn op<T>(&mut self, f: impl FnOnce(&mut Self) -> Res<T, F>) -> Res<T, F> {
+    /// One body for every call (`dyn`, so not one copy per closure); the
+    /// call's own answer is the `bool` (`delete`'s), ignored by the rest.
+    #[inline(never)]
+    pub(crate) fn op(&mut self, f: &mut dyn FnMut(&mut Self) -> Res<bool, F>) -> Res<bool, F> {
         if self.txn == Txn::Explicit {
             if self.delta.ram_bytes() >= self.cfg.txn_delta_max as usize {
                 self.flush()?;
