@@ -115,7 +115,7 @@ pub struct SweepReport {
 /// `LP_TREE_STORE_SWEEP_TEARS` names others), fork the pre-step flash, cut at `k`, power-cycle, mount, and
 /// require the **whole state** to be the old or the new one; every third
 /// cut tears the recovery run too (a double cut); then re-run the step and
-/// require the new state, also after a remount.
+/// require the new state, also after a remount, with no sector retired.
 pub fn sweep(geom: NorGeometry, cfg: &StoreConfig, steps: &[Step], max_cuts: u64) -> SweepReport {
     let mut report = SweepReport::default();
     let mut flash = formatted(geom, cfg);
@@ -173,6 +173,14 @@ pub fn sweep(geom: NorGeometry, cfg: &StoreConfig, steps: &[Step], max_cuts: u64
                 assert!(snapshot(&mut st) == new, "{}: re-run state", ctx());
                 let mut st = mount(st.into_flash(), cfg);
                 assert!(snapshot(&mut st) == new, "{}: remount after re-run", ctx());
+                // No sweep wears a sector out: a cut, whatever it tore, must
+                // never cost one (a retirement is persisted for good).
+                assert_eq!(
+                    st.stats().retired_sectors,
+                    0,
+                    "{}: a cut retired a sector",
+                    ctx()
+                );
                 report.cuts += 1;
             }
         }
