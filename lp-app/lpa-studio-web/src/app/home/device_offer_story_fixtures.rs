@@ -409,7 +409,11 @@ pub(crate) fn StoryDevicesPage(
 /// `StudioShell`) has no such shadowing and may use this with
 /// [`OffersProvider`] directly.
 pub(crate) fn lens_card_offer_tree(card: &UiLensCard) -> UiOfferTree {
-    let UiLensCard::Device { card, runtime } = card;
+    let UiLensCard::Board {
+        view: card,
+        runtime,
+        ..
+    } = card;
     let face = match runtime.is_some() {
         true => DeviceFace::Sim,
         false => DeviceFace::Wire,

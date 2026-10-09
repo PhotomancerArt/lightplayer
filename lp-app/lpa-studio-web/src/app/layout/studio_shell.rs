@@ -262,10 +262,12 @@ fn play_mode_face(
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn LensCardPane(card: UiLensCard, on_action: EventHandler<UiAction>) -> Element {
-    let UiLensCard::Device { card, runtime } = card;
+    // Until the dock draws the board card (P08), it draws the roster's own
+    // projection the lens card still carries.
+    let UiLensCard::Board { view, runtime, .. } = card;
     rsx! {
         crate::app::home::device_roster_card::DeviceRosterCard {
-            card,
+            card: view,
             runtime,
             projects: Vec::new(),
             examples: Vec::new(),

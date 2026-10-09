@@ -745,6 +745,10 @@ mod tests {
             layout: Default::default(),
             backup_download: None,
             board_projects: Default::default(),
+            link_kinds: Default::default(),
+            last_seen: Default::default(),
+            ends: Default::default(),
+            cards: Vec::new(),
         }
     }
 

@@ -50,6 +50,13 @@ pub use app::devices::BrowserRelaySource;
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+pub use app::devices::board_card::{
+    BarLayer, BarWorkState, BoardCardInput, CornerMark, LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT,
+    PictureSource, UiActionDraw, UiBarDetails, UiBarWork, UiBoardCard, UiBoardPicture,
+    UiBoardPresence, UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary,
+    UiStackBar, UiStatusCorner, activity_bar, activity_words, board_card, link_icon,
+    pending_board_card,
+};
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
     UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
@@ -85,6 +92,10 @@ pub use app::devices::{
     sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
+};
+pub use app::devices::{
+    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
+    duration_words,
 };
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,

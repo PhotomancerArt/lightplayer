@@ -26,6 +26,10 @@ pub struct RichSection<A> {
     /// The section's health family. Only [`RichWeight::Actionable`]
     /// sections may color the object's rollup.
     pub tone: UiStatusKind,
+    /// A plain sentence above the lines: a notice's words, or a fact the
+    /// label→value rows cannot carry ("Anyone nearby can change this
+    /// board."). `None` for a section of facts alone.
+    pub sentence: Option<String>,
     /// Small label→value facts.
     pub lines: Vec<RichLine>,
     /// A standing advisory chip (e.g. "Firmware update available"): tones
@@ -56,6 +60,10 @@ pub enum RichWeight {
 pub struct RichLine {
     pub label: String,
     pub value: String,
+    /// How the value reads: [`UiStatusKind::Neutral`] for a plain fact, a
+    /// status family for one that says how something stands (a Wi‑Fi
+    /// row's "wrong password", in Warning).
+    pub tone: UiStatusKind,
 }
 
 impl RichLine {
@@ -63,7 +71,14 @@ impl RichLine {
         Self {
             label: label.into(),
             value: value.into(),
+            tone: UiStatusKind::Neutral,
         }
+    }
+
+    /// This line, its value read in `tone`.
+    pub fn toned(mut self, tone: UiStatusKind) -> Self {
+        self.tone = tone;
+        self
     }
 }
 

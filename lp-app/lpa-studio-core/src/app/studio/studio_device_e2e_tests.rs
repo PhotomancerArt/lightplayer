@@ -174,6 +174,9 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// The board card, built in core, on real boards: its primary pressed by
+/// path, and every action it draws an offer the tree publishes.
+mod board_card_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card

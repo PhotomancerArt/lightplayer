@@ -39,9 +39,40 @@ fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
 /// Every pane-layout story carries one — the shell renders no other
 /// runtime surface since the step-stack pane retired.
 pub(crate) fn simulator_lens_card() -> UiLensCard {
-    UiLensCard::Device {
-        card: sim_lens_device_view(),
-        runtime: Some(UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"))),
+    let view = sim_lens_device_view();
+    let runtime = UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"));
+    // The board card core builds for it, with the editor holding it. No
+    // verbs: nothing on screen draws this card until the dock does (P08).
+    let board = lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::Sim(
+        lpa_studio_core::BoardKey::parse("02:1a:2b:3c:4d:5e").expect("a MAC"),
+    ));
+    let card = lpa_studio_core::board_card(&lpa_studio_core::BoardCardInput {
+        view: &view,
+        board: &board,
+        offers: &[],
+        link: Some(lpa_studio_core::UiLinkKind::Usb),
+        feed: None,
+        runtime: Some(&runtime),
+        access: None,
+        wifi: None,
+        lan: None,
+        wifi_connect: None,
+        update: None,
+        layout: None,
+        plays: &lpa_studio_core::BoardPlays::Running {
+            label: "demo-project".to_string(),
+        },
+        sharing: 0,
+        project: None,
+        last_seen_at: None,
+        ended: None,
+        editor_holds_it: true,
+        now: 0.0,
+    });
+    UiLensCard::Board {
+        card: Box::new(card),
+        view,
+        runtime: Some(runtime),
     }
 }
 
