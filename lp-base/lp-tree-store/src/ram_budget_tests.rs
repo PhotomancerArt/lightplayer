@@ -75,14 +75,15 @@ fn c40_budget_on(sectors: u32) {
     let s = st.stats();
     std::println!(
         "c40/{sectors}: resident {} B (index {} × 12, paths {} × 20, sectors {}), mount peak {} B, \
-         held {} B, mount read {} B",
+         held {} B, mount read {} B in 1 + {} scans",
         s.resident_ram_bytes,
         s.index_entries,
         s.path_table_entries,
         s.sector_table_ram_bytes,
         mount_peak,
         held,
-        s.mount_bytes_read
+        s.mount_bytes_read,
+        s.mount_scans
     );
     // D3 says ≈ 8 KB; this is a regression ceiling, not the budget (the
     // measured figure is reported at G1).
@@ -187,9 +188,10 @@ fn a_full_store_keeps_resident_and_the_mount_peak_bounded() {
             "full c40/128 deflated={deflated}: resident after the push {at_rest} B, max \
              {max_resident} B over {round} writes; largest buffer {max_peak} B; remount with \
              {in_use} sectors in use: peak {mount_peak} B, held {held} B ({} index entries), \
-             mount read {} B",
+             mount read {} B in 1 + {} scans",
             st.stats().index_entries,
-            st.stats().mount_bytes_read
+            st.stats().mount_bytes_read,
+            st.stats().mount_scans
         );
         // A regression ceiling, not the budget: the measured figure is reported.
         assert!(max_resident <= 11 * 1024, "{max_resident}");

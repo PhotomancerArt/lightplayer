@@ -45,10 +45,14 @@ the RAM and code figures, and what changed from the prototype.
   is read back as all `0xFF`, then its sector header programmed and read
   back. A mismatch retires the sector (never opened, erased or collected
   again; persisted in the next root), and the record goes elsewhere.
-- **Mount** reads every trusted record whole (CRC over header and payload),
-  picks the newest root whose closure is complete (falling back one step),
-  marks from it, prunes the index to the live set, and hashes every path
-  into the path table.
+- **Mount** reads every trusted record whole (CRC over header and payload)
+  but indexes none of them: that pass finds where each sector's trusted
+  records end and keeps the newest two roots. Then it indexes only the
+  newest root's closure (falling back one step): level by level, one scan of
+  record headers over the trusted sectors, newest sector first, so the first
+  copy seen is the one FORMAT.md keeps; each record found is visited with
+  the mark's own step. Last, it hashes every path into the path table. Its
+  RAM is the live set's, whatever the garbage on flash.
 - **GC** runs only when free space is short, at the start of a write phase
   (when everything written is reachable from the committed root, the working
   tree, the delta and the in-flight directories of a flush): a full mark
@@ -92,8 +96,11 @@ excluded): a record's payload (≤ `record_max`), a directory's bytes and
 entries along the path, a file's leaf list (16 B per chunk), the mark's
 bitset and stack, a 4 KiB inflate buffer (`put_chunk_deflated`), and — for a
 transaction — its delta (≤ `txn_delta_max` + one call) and undo log (24 B
-per path touched). **Mount** indexes every record on flash before it prunes,
-so its peak grows with the garbage on flash, not with the live data.
+per path touched). **Mount** holds the live index as it builds it, the two
+widest adjacent tree levels (16 B per id), 12 B per sector of sorted
+headers, and a record's payload; nothing that grows with the garbage on
+flash. In exchange it scans record headers once per tree level (16 B per
+record on flash per level, stopping a level once every id is found).
 
 Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 
@@ -142,8 +149,11 @@ transactions (commit once, read your writes, abort, a bounded delta over
 120 files), appends (only new chunks written; same node as a single put),
 deflated chunks (verified, refused, stored coded, incompressible stored
 plain), forced path-hash collisions; RAM against the budget on a c40-shaped
-tree and on a full store, cross-checked with a counting allocator; the
-`LpFs` adapter against `LpFsMemory`; the format golden.
+tree and on a full store (mount's peak ≤ 16 KB at 128 sectors in both),
+cross-checked with a counting allocator; mount's index and live bytes equal
+to a full mark's after GC copies and a level-1 directory multi, and the
+newest of two copies indexed; the `LpFs` adapter against `LpFsMemory`; the
+format golden.
 
 **The cut sweeps** (`test_support::sweep`): for each step, every sampled
 cut point × every tear model (clean, byte-prefix, random-bits; torn erases
@@ -222,9 +232,12 @@ logical bytes, stored or deflated.)
    `record_max` per touched directory before a write refused commits a
    nearly full flash could take; each directory now makes room for exactly
    its records when it is written (in-flight records are marked live).
-5. **Mount's transient RAM grows with garbage.** Mount must index every
-   record on flash before it knows which are live; a 128-sector flash full
-   of panel-write garbage peaks at ~33 KB (see the G1 figures).
+5. **Mount's transient RAM grew with garbage** (fixed after G1, plan P8).
+   The first v1 mount indexed every record on flash before it knew which
+   were live, and a 128-sector flash full of panel-write garbage peaked at
+   ~33 KB. Mount now indexes only the chosen root's closure, found by
+   header scans (`mount_walk.rs`): ~14 KB, garbage or not, for ~30 % more
+   bytes read (see "Mount" under the G1 figures).
 
 ## G1 figures (2026-10-08)
 
@@ -251,9 +264,29 @@ sectors): `put` a 2.9 KB shader 3,854 B · `put` the panel 897 B · `append`
 4 KiB to an 18 KB file 2,240 B · `get` an 18 KB file 1,159 B beyond the
 returned buffer · `file_size` 0 B. A whole-project **push transaction**
 holds up to ~6.7 KB (24 B undo per path × 138 paths, plus a ≤ 2 KB delta).
-**Mount** peaks at 15.1 KB on a freshly pushed c40 and **33.7 KB** on a
-128-sector flash full of panel-write garbage (both codecs), because it
-indexes every record on flash before pruning to the ~200–380 live ones.
+
+### Mount (P8: bounded after G1)
+
+Peak heap during `TreeStore::mount` (counting allocator, `ram_budget_tests.rs`,
+synthetic c40, 128 sectors unless said) and flash bytes it read, before
+(`938df14aa`: index every record, then prune) and after (index the root's
+closure by header scans):
+
+| | peak before → after | bytes read before → after | header scans |
+|---|---:|---:|---:|
+| c40 freshly pushed, stored, 128 sectors | 15,134 → **14,187 B** | 279,526 → 324,996 | 7 |
+| c40 freshly pushed, stored, 176 sectors | 15,854 → **14,907 B** | 280,486 → 325,956 | 7 |
+| 128 sectors full of panel garbage, stored (379 live records) | 33,662 → **14,187 B** | 495,523 → 640,753 | 7 |
+| 128 sectors full of panel garbage, deflated (204 live records) | 33,734 → **12,992 B** | 525,278 → 719,564 | 6 |
+
+The test asserts ≤ 16 KB at 128 sectors in all four (≈ 30 B more per sector
+past 128). On the real c40 corpus (`lp-store-bench measure`, bytes / read
+calls): stored push / save / panel 219 / 276 / 263 KB in 1,531 / 1,971 /
+2,128 calls before, 257 / 334 / 328 KB in 3,903 / 5,595 / 6,211 calls after;
+host_deflate 103 / 152 / 146 KB → 127 / 195 / 200 KB (1,056–1,653 →
+2,582–5,038 calls). The extra bytes are 16-byte headers, one scan per tree
+level, plus the directories and multis the visit reads again; the extra
+calls are those header reads one by one.
 
 ### Space and the record size (smallest partition, `--min-sectors`)
 
@@ -266,8 +299,8 @@ indexes every record on flash before pruning to the ~200–380 live ones.
 `record_max` 1024 stays the default: within one sector of 2048 on deflated
 pushes, 13 sectors better than 2048 for stored writes (device saves are
 stored), and half 2048's per-record buffers. Write amplification at 1024:
-0.36–0.50 host-deflated, 0.84–0.95 stored. Mount reads 100–280 KB (every
-byte in use). Resident RAM moves the other way (c40 pushed, 128 sectors,
+0.36–0.50 host-deflated, 0.84–0.95 stored. Mount reads 127–335 KB (every
+byte in use once, plus the header scans; see "Mount"). Resident RAM moves the other way (c40 pushed, 128 sectors,
 stored / host_deflate): 10,236 / 7,764 B at 512, 8,076 / 6,516 B at 1024,
 6,720 / 5,964 B at 2048 — 512 doubles the index and goes over the budget
 stored; 2048 saves ~1.4 KB of index for 7–13 more sectors stored.
