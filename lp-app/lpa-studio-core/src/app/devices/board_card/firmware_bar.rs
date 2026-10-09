@@ -359,7 +359,11 @@ fn details(
 
     // 3. The panels.
     let mut panels = Vec::new();
-    if let Some(panel) = layout.and_then(|layout| layout.panel.clone()) {
+    let layout_panel = layout.and_then(|layout| layout.panel.clone());
+    // The layout question presses Download backup itself: the verbs below
+    // do not offer it a second time.
+    let panel_download = layout_panel.as_ref().map(|panel| panel.download.clone());
+    if let Some(panel) = layout_panel {
         panels.push(UiDetailPanel::Layout(panel));
     }
     if let Some(install) = input
@@ -417,6 +421,7 @@ fn details(
     .into_iter()
     .flatten()
     .filter(|action| Some(&action.offer) != drawn)
+    .filter(|action| Some(&action.offer) != panel_download.as_ref())
     .collect();
     sections.push(verbs(actions));
 

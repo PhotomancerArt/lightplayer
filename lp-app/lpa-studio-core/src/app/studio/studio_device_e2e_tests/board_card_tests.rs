@@ -489,6 +489,37 @@ fn the_layout_question_raises_the_firmware_details_and_continue_runs_by_path() {
     );
 }
 
+/// While the layout question is open, Download backup is the question's
+/// own button: the firmware details' verbs do not offer it a second time.
+#[test]
+fn the_layout_question_alone_offers_download_backup() {
+    let device = legacy_light_player(Vec::new());
+    let (mut bench, tasks) = identified(&device, "usb-card-layout-3");
+    let target = bench.view().devices[0].id;
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    let download = bench.device_verb(target, "download-backup");
+    assert_eq!(panel.download, download, "the question presses the verb");
+
+    let details_verbs = |bench: &DeviceBench| -> Vec<crate::OfferPath> {
+        card_of(bench, target)
+            .bar(crate::BarLayer::Firmware)
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .map(|action| action.offer.clone())
+            .collect()
+    };
+    assert!(
+        !details_verbs(&bench).contains(&download),
+        "one Download backup, the question's: {:?}",
+        details_verbs(&bench)
+    );
+    // The offer itself stands: the question's button presses it.
+    bench.offered(&download);
+}
+
 /// A board holding its files for a layout change: the firmware bar says so
 /// and its action is Finish update, at `…/finish-update`.
 #[test]
