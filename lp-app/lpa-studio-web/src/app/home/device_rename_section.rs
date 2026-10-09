@@ -9,7 +9,7 @@
 //!
 //! Drawn in the board card's hardware details (the Rename panel) and in the
 //! header session control's device panel, the other place the name is
-//! shown. Moved out of `device_roster_card.rs` unchanged.
+//! shown. Moved out of the retired device card unchanged.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{OfferArgs, RENAME_NAME_PARAM, UiAction, UiOffer};

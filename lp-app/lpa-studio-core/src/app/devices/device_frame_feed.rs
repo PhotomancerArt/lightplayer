@@ -318,7 +318,7 @@ impl DeviceFrameFeeds {
         self.page_visible
     }
 
-    /// The card's mount lease: `true` when a `DeviceRosterCard` for this
+    /// The card's mount lease: `true` when a board card for this
     /// device is on screen, `false` when it unmounts.
     pub fn set_wanted(&mut self, device: DeviceId, wanted: bool) {
         match self.by_device.get_mut(&device) {

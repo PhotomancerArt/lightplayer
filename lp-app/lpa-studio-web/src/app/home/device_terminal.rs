@@ -1,9 +1,12 @@
-//! The device card's terminal: what the board actually said, typed and
+//! The board's terminal: what the board actually said, typed and
 //! pinned. Renders straight off [`lpa_studio_core::DeviceTerminalLine`]
 //! (P1 of the device-card-v2 plan) — no view model in between.
 //!
-//! Three defects the old `TerminalPanel` (a flat `Vec<String>`, still in
-//! `device_roster_card.rs` until the swap) carried, fixed here:
+//! Drawn in the board card's status-corner details (the Terminal panel,
+//! `app/board_card/bar_detail_panel.rs`).
+//!
+//! Three defects the old `TerminalPanel` (a flat `Vec<String>`, on the
+//! retired device card until the swap) carried, fixed here:
 //!
 //! 1. **Reversed DOM order.** `TerminalPanel` was `flex-col-reverse` over
 //!    `.rev()`-iterated lines, so `Ctrl+F`, a screen reader, or a
@@ -50,8 +53,8 @@
 //! # One box, and flush inside it (D3; G1 2026-09-03)
 //!
 //! The terminal is content directly on the card's `bg-terminal` ground — no
-//! inner rounded/bordered sub-panel. The old `terminal_class()` in
-//! `device_roster_card.rs` drew its own box inside the zone's box; that is
+//! inner rounded/bordered sub-panel. The old `terminal_class()` on the
+//! retired device card drew its own box inside the zone's box; that is
 //! exactly the nesting the card's "one box" rule (AC1) forbids, so this
 //! component drops it.
 //!
@@ -111,9 +114,8 @@ const PIN_THRESHOLD_PX: f64 = 4.0;
 /// at mount is not enough.
 const PIN_RETRY_DELAYS_MS: [u32; 4] = [0, 50, 250, 1000];
 
-/// The card's terminal zone. `height_class` is the panel's fixed height —
-/// `tw:h-40` on a device card, the shorter `tw:h-24` on a pending link,
-/// which has far less to say (`device_roster_card.rs`).
+/// The board's terminal. `height_class` is the panel's fixed height (the
+/// status corner's details set it, `bar_detail_panel.rs`).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn DeviceTerminal(

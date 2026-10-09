@@ -9,8 +9,8 @@
 //! question a mismatched backup asks (a native `confirm`), and dispatches
 //! [`device_restore_from_file_action`]'s action directly.
 //!
-//! Behaviour unchanged from today's card (moved out of
-//! `device_roster_card.rs`); making it one button is future work.
+//! Behaviour unchanged from the retired device card it moved out of;
+//! making it one button is future work.
 //!
 //! [`UiDetailPanel::RestoreFromFile`]: lpa_studio_core::UiDetailPanel::RestoreFromFile
 

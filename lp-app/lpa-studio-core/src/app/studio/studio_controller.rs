@@ -3029,7 +3029,7 @@ impl StudioController {
     }
 
     /// The card's mount lease for its live frame feed: a mounted
-    /// `DeviceRosterCard` wants its device fed; an unmounted one does not.
+    /// board card wants its device fed; an unmounted one does not.
     pub fn set_device_feed_wanted(&mut self, device: crate::DeviceId, wanted: bool) {
         self.device_feeds.set_wanted(device, wanted);
         self.mark_dirty();

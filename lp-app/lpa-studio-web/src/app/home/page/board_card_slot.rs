@@ -108,6 +108,46 @@ mod tests {
         ));
     }
 
+    /// The remembered board keeps its NAME — the whole point of
+    /// remembering one (AC9: replugging brings the card back with its
+    /// name): a registry row Studio has not heard this session is an
+    /// offline card under its own title.
+    #[test]
+    fn a_cold_registry_row_keeps_its_name_on_its_offline_card() {
+        let mut model = lpa_studio_core::DeviceRoster::new(Default::default());
+        model.load_records(&[lpa_studio_core::app::places::RegisteredDevice {
+            uid: "dev0000000000000001".to_string(),
+            name: "Porch sign".to_string(),
+            ..Default::default()
+        }]);
+        let devices = roster(model.view(lpa_studio_core::DeviceMillis(0)).roster.devices);
+        let sections = build_home_sections(&[], &devices);
+        assert!(sections.online.is_empty(), "{sections:?}");
+        let card = slot_card(&sections.offline[0], &devices).expect("its card");
+        assert_eq!(card.presence, UiBoardPresence::Offline);
+        assert_eq!(card.name_bar.title, "Porch sign");
+    }
+
+    /// The home page reverses D7: an offline board is not folded away
+    /// under a line, it is a card under Offline boards — and that card
+    /// draws the board's last picture, dimmed, with its age in the corner.
+    #[test]
+    fn an_offline_board_is_a_card_with_its_last_picture_and_its_age() {
+        let mut devices = roster(vec![
+            device(1, DeviceStatus::Ready),
+            device(2, DeviceStatus::Offline),
+        ]);
+        devices.feeds.insert(DeviceId(2), remembered_feed());
+        devices.cards = cards(&devices);
+
+        let sections = build_home_sections(&[], &devices);
+        assert_eq!(sections.offline.len(), 1, "{sections:?}");
+        let card = slot_card(&sections.offline[0], &devices).expect("its card");
+        assert!(card.picture.frame.is_some(), "{:?}", card.picture);
+        assert!(card.picture.dim, "a last picture is dimmed");
+        assert_eq!(card.status.reading.as_deref(), Some("3 h ago"));
+    }
+
     fn entry(id: u64, kind: UiHomeBoardKind) -> UiHomeBoard {
         UiHomeBoard {
             id: DeviceId(id),
@@ -119,16 +159,8 @@ mod tests {
         }
     }
 
-    /// A roster of `devices`, with the cards core builds for them (each
-    /// placed at `devices/new-<id>`).
+    /// A roster of `devices`, with the cards core builds for them.
     fn roster(devices: Vec<DeviceView>) -> DeviceRosterView {
-        let mut tree = UiOfferTree::new();
-        for device in &devices {
-            tree.place_device(
-                device.id,
-                OfferPath::board(&BoardRef::New(device.id.0 as u32)),
-            );
-        }
         let mut roster = DeviceRosterView {
             roster: RosterView {
                 devices,
@@ -138,14 +170,54 @@ mod tests {
             usb_available: true,
             ..DeviceRosterView::default()
         };
-        roster.cards = roster_board_cards(&RosterCardsInput {
-            roster: &roster,
+        roster.cards = cards(&roster);
+        roster
+    }
+
+    /// The cards core builds for `roster`, each board placed at
+    /// `devices/new-<id>`.
+    fn cards(roster: &DeviceRosterView) -> Vec<UiBoardCard> {
+        let mut tree = UiOfferTree::new();
+        for device in &roster.roster.devices {
+            tree.place_device(
+                device.id,
+                OfferPath::board(&BoardRef::New(device.id.0 as u32)),
+            );
+        }
+        roster_board_cards(&RosterCardsInput {
+            roster,
             offers: &tree,
             projects: &[],
             lens: None,
             now: 0.0,
-        });
-        roster
+        })
+    }
+
+    /// A last picture with geometry, three hours old, from a board that is
+    /// gone.
+    fn remembered_feed() -> lpa_studio_core::DeviceCardFeedView {
+        use std::rc::Rc;
+        let layout = Rc::new(lpa_studio_core::ControlDisplayLayout::Layout2d(
+            lpa_studio_core::ControlLayout2d::new(
+                lpa_studio_core::Revision::new(7),
+                4,
+                1,
+                Vec::new(),
+            ),
+        ));
+        lpa_studio_core::DeviceCardFeedView {
+            frame: Some(lpa_studio_core::UiControlProductPreview {
+                revision: 3,
+                extent: lpa_studio_core::ControlExtent::new(1, 12),
+                sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                sample_layout: lpa_studio_core::ControlSampleLayout { spans: Vec::new() },
+                display_layout: Some(layout),
+                bytes: Rc::from(vec![0u8; 24]),
+            }),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: lpa_studio_core::FeedLiveness::Offline,
+        }
     }
 
     fn device(id: u64, status: DeviceStatus) -> DeviceView {
