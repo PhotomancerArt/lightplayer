@@ -17,7 +17,10 @@ flash-tears-analyze` (`scripts/emu/flash-tears-analyze.py`)
 > is "so far". Section 7 is generated: re-running `just flash-tears-analyze`
 > after each new batch rewrites it from every committed transcript, and the
 > prose around it says which of its numbers it leans on. The model
-> correction (scope item 5) has not started: it waits for M2 to merge.
+> correction (scope item 5, section 5) is in `lp-nor-sim` as
+> `TearModel::Calibrated`: **calibrated on these 200 cuts, to be re-checked
+> at 500** (`just flash-tears-analyze --check-model` says whether its numbers
+> still match every committed cut).
 
 ## 1. What was measured
 
@@ -117,8 +120,9 @@ right about the bits; the host is where they are named.
 - **A torn erase can leave a sector that reads `0x00`**: 36 of 200 cuts so
   far (18 %), from the front or throughout. A store whose format gives
   `0x00` a meaning — a zero length, a zero sequence number, a flag that is
-  "set" when cleared — reads a torn erase as data. `lp-nor-sim` never
-  makes this sector, so no store in the testbed has met it.
+  "set" when cleared — reads a torn erase as data. `lp-nor-sim`'s guessed
+  models never make this sector, so until the calibrated model (section 5)
+  no store in the testbed had met it.
 - **A torn erase usually reads perfectly erased** (101 of 166 erase cuts),
   with nothing a re-read could catch. `lp-nor-sim`'s README rule — trust only
   a sector you finished erasing *and then marked* — is the right rule, and
@@ -150,15 +154,104 @@ writing):
 | A started erase changes the sector | **held** — none left the old data whole |
 | A cut damages only the operation in flight | **held** — 0 settled sectors or journal slots damaged |
 
-## 5. What the correction will add (scope item 5 — not started)
+## 5. The correction: `TearModel::Calibrated` (scope item 5)
 
-Additive, beside today's models, once M2 has merged and the director says
-go: torn-erase shapes **zeroing** (a word-aligned `0x00` prefix, old after),
-**all-zero**, **erasing from zero** (every bit lifting at once, the residue
-spread over old and new positions alike, weak bits in proportion) and a
-**silent reads-erased** shape (all `0xFF`, no weak bits, but never marked);
-a torn program that stops on a **4-byte word** inside a **32-byte command**.
-The phase shares in section 7 are what a seeded mix would draw from.
+**Calibrated on 200 cuts; re-checked at 500.** Additive: `clean`,
+`byte_prefix` and `random_bits` are unchanged and stay the drivers' default
+list (`TearModel::ALL`); the new models run only when named. Code:
+`lp-emu/lp-nor-sim/src/calibrated_tear.rs`.
+
+**What it does.** Only the shape *inside* a torn operation is drawn; which
+operation is torn stays the workload's (the op counter).
+
+| torn op | shape | weight (= cuts seen) | what the model leaves |
+|---|---|---:|---|
+| erase | zeroing | 10 of 166 | `0x00` from offset 0 to a uniform 4-byte word boundary inside the sector, the old data after it, no weak bit |
+| erase | all zero | 26 | every bit 0, no weak bit |
+| erase | erasing | 28 | all `0xFF` except exactly *k* stable zeros and *w* weak bits at distinct uniform positions, (*k*, *w*) drawn from the 28 observed rows, linearly interpolated between neighbours |
+| erase | reads `0xFF`, weak | 1 | all `0xFF`, 2 weak bits (the one observed sector) |
+| erase | reads `0xFF` | 101 | all `0xFF`, no weak bit — the erase was cut, nothing shows it |
+| program | command boundary | 26 of 33 | a prefix of exactly what was asked, ending on a 32-byte command (offset 0, nothing landed, included) |
+| program | mid-command | 7 | a prefix ending on a 4-byte word inside a command |
+
+The command and word are counted from the start of the page operation:
+every silicon program was page-aligned, so absolute and relative alignment
+were never told apart. The weights live in `TearMix::CX1`
+(`NorFlashSim::set_tear_mix` replaces them); `--model-table` prints them
+from the transcripts. `calibrated_zeroing`, `calibrated_all_zero`,
+`calibrated_erasing`, `calibrated_reads_ff_weak` and `calibrated_reads_ff`
+force every torn erase into one state (programs keep the mix), because under
+the mix a `0x00` sector meets only about one erase cut in five.
+
+**Does it reproduce the part?** `just flash-tears-sim` runs the payload's
+own boot flow (`fw-checks/examples/flash_tears_on_nor_sim.rs`: the same
+scan, repair, timed cycle and work loop the firmware runs) on `lp-nor-sim`,
+cutting 10–97 cycles after the scan at an op weighted by CX1's median
+timings, and this report's own classifier sorts the result. Simulator
+numbers, 200 cuts a seed (`lp-nor-sim` at `8d9b99491`):
+
+| shape | CX1 | calibrated, seed 1 | seed 2 | byte_prefix / random_bits (seeds 1, 2) | clean (seeds 1, 2) |
+|---|---:|---:|---:|---|---|
+| erase: untouched | 0 | 0 | 0 | 0, 0 | 164, 169 |
+| erase: zeroing | 10 | 12 | 16 | 0, 0 | 0, 0 |
+| erase: all `0x00` | 26 | 24 | 24 | 0, 0 | 0, 0 |
+| erase: erasing | 28 | 33 | 32 | 94, 112 | 0, 0 |
+| erase: old data left | 0 | 0 | 0 | 37, 31 | 0, 0 |
+| erase: reads `0xFF`, weak | 1 | 2 | 3 | 33, 26 | 0, 0 |
+| erase: reads `0xFF` | 101 | 93 | 94 | 0, 0 | 4, 2 |
+| program: command boundary | 26 | 29 | 23 | 0, 0 | 31, 28 |
+| program: mid-command | 7 | 6 | 7 | 35, 30 (`byte_prefix`, partial bytes) | 0, 0 |
+| program: scattered | 0 | 0 | 0 | 30–35 (`random_bits`) | 0, 0 |
+| complete | 1 | 1 | 1 | 1, 1 | 1, 1 |
+
+Weak bits in erasing sectors: CX1 1 / 91 / 2,166 (min / median / max), the
+model 1 / 80 / 1,446 and 1 / 65 / 2,059. Erase-phase cuts with a stable `0`
+where the old data had a `1`: CX1 62 of 166, the model 67 of 164 and 69 of
+169. The guessed models never make a `0x00` sector and never a silent
+reads-erased one; the calibrated one lands in CX1's rows. With 200 cuts the
+sampling noise is a few cuts a row; the one row the model runs high on,
+reads-`0xFF`-with-weak-bits (5 of 333 against 1 of 166), rests on a single
+observation.
+
+**What the stores made of it** (`lp-store-bench sweep`, exhaustive single
+cut, 128 sectors, seeds 1 and 2, every cut point of each swept step;
+simulator numbers):
+
+| candidate | workload | cases | of them torn erases | failures under calibrated | under each forced erase shape | under the guessed three |
+|---|---|---:|---:|---:|---|---|
+| t1 | save:c40 | 852 | 26 | 0 | 0 | 0 |
+| t1 | panel:c40 | 1,074 | 14 | 0 | 0 | 0 |
+| t1 | push:c40 | 1,042 | 42 | 0 | 0 | 0 |
+| f2 | save:c40 | 14,360 | 960 | 0 | 0 | 0 |
+| f2 | panel:c40 | 800 | 200 | 0 | 0 | 0 |
+| f2 | push:c40 | 838 | 94 | 0 (80 non-atomic) | 0 (80) | 0 (80) |
+| f3 | save:c40 | 2,018 | 260 | 0 (591 non-atomic) | 0 (591) | 0 (591–592) |
+| f3 | panel:c40 | 826 | 204 | 0 | 0 | 0 |
+| f3 | push:c40 | 2,436 | 452 | 0 (2,374 non-atomic) | 0 (2,374) | 0 (2,374) |
+| f1 | push:c40 | 84 | 30 | 84 | 84 | 84 |
+| f1 | save:c40, panel:c40 | 0 | — | — (never reached: f1's c40 push is `NoSpace` fault-free at 128 sectors) | | |
+| f1 | push:c20 | 1,968 | 494 | 1,328 | 1,328 | 1,326 / 1,322 / 1,326 |
+| f1 | save:c20 | 822 | 134 | 0 (412 non-atomic) | 0 (412) | 0 (412–415) |
+| f1 | panel:c20 | 800 | 200 | 0 | 0 | 0 |
+
+Every f1 failure is one of two kinds, and neither is the tear model's: the
+same cases fail under `clean`. `doc_not_old_or_new` (`/hardware.json: 0 B,
+neither old nor new`) is f1's write path — littlefs as the firmware ships it
+creates a file before writing it, so a cut between leaves it empty (store;
+already in the testbed's 2026-10-07 overnight report, push and repush failing
+under every tear). `next_step_failed: NoSpace` is the harness asking f1 to run
+a step it cannot fit (harness: c40 does not fit f1 at 128 sectors; the c20
+rows are the meaningful ones). The two extra f1 push failures under
+`calibrated` (1,328 against `clean`'s 1,326) are the same kind, from
+calibrated program prefixes. Non-atomic counts are scored, not failures:
+littlefs's push and f3's save are not transactions.
+
+So far, then: **no store in the race reads a torn erase as data.** Each
+forced shape — a `0x00` run, a `0x00` sector, a residue with weak bits, a
+sector that reads erased — gives exactly the same outcome per candidate as
+the guessed models do, which says these stores never trust a sector whose
+erase they did not finish (the rule section 3 draws). t1 meets few erase
+cuts (14–42 cases a workload), f2 and f3 hundreds.
 
 ## 6. What this does not cover yet
 
@@ -182,9 +275,15 @@ The phase shares in section 7 are what a seeded mix would draw from.
   over 16 sectors — about 2,900 erases each, plus whatever came before the
   journal started counting. Tears on a worn part may differ (M7 wears one
   sector out).
-- **The silicon sidecars carry no board metadata** (`board`, `mac`): the
-  board is named only by the `ft-boot` records' MAC. The emulated sidecar
-  does carry it.
+- **The first four silicon sidecars carry no board metadata** (`board`,
+  `mac`): the board is named only by the `ft-boot` records' MAC. They stay
+  as they are (a transcript is never edited); from the next batch on the
+  soak driver states the board's mark, slug, MAC and the expected flash
+  JEDEC id (`lp-cli validate record --board/--mac/--note`) and checks the id
+  against every boot's own record (`scripts/emu/flash-tears-check-part.py`).
+- **The model's program unit is relative to the page op.** CX1's programs
+  were all page-aligned; whether an unaligned program's 32-byte commands
+  start at its address or at a 32-byte boundary is not measured.
 
 ## 7. Generated: every transcript, sorted
 
