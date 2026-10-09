@@ -82,6 +82,15 @@ pub enum StudioCommand {
     /// save, via the host's BroadcastChannel). Coalescable like
     /// `RefreshTick`: the actor schedules one gallery re-hydration.
     LibraryChanged,
+    /// A note another Studio tab of this browser said on the hold channel
+    /// (it holds a board, let one go, asks this tab to let go, answers, or
+    /// asks who holds what), heard by the hold edge
+    /// ([`BoardHoldEdge`](crate::BoardHoldEdge)). Applied in queue order and
+    /// never coalesced: a hold's notes in order are its story.
+    BoardHold {
+        from: crate::TabId,
+        note: crate::HoldNote,
+    },
     /// A timer-driven passive refresh tick. Coalescable and droppable: the actor
     /// keeps at most one pending tick and drops a tick that would run behind a
     /// pending action.

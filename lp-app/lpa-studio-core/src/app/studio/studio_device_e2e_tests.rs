@@ -174,6 +174,8 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// One tab holds a board: two tabs on one in-memory hold bus.
+mod board_hold_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card

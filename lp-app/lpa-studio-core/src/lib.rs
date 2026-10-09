@@ -86,6 +86,12 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
+/// One tab holds a board: the hold vocabulary and the edge the web installs.
+pub use app::devices::{
+    AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
+    HOLD_PROTO_VERSION, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus, OtherHold,
+    PendingAsk, TabId, UsbPair,
+};
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
     DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
@@ -125,6 +131,8 @@ pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;
+/// The device model's fact about a board another tab holds.
+pub use lpa_devices::{HeldElsewhere, HoldLevel, HoldVia};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{

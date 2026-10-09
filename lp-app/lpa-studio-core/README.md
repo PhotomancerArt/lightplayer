@@ -528,6 +528,23 @@ the home page's "Other projects" ask. Both read this join and never build
 their own. A project on an offline board counts as on a board; pending links
 are not in the join.
 
+### One tab holds a board
+
+A USB port opens in one tab only, and a board's network slot takes one
+client. So that another Studio tab of the same browser can say "Open in
+another tab" instead of "in use by another app", ask the holder to let go,
+and notice when it dies, a tab that holds a board takes a Web Lock named for
+it after the board's hello (`HoldKey`: `lp-board:usb:<vid>:<pid>:<mac>` or
+`lp-board:net:<mac>`) and says so on a channel (`HoldNote`, versioned and
+never persisted). `devices/board_hold/` holds the vocabulary: the book of
+who holds what (`BoardHoldBook`), the one door to the browser
+(`BoardHoldEdge`, installed by the web with `set_board_hold_edge`; notes
+arrive as `StudioCommand::BoardHold`), and its host double
+(`MemoryBoardHoldBus`, several tabs on one bus). The device model carries
+the fact on the board (`Event::BoardHeld`, `DeviceView.held_elsewhere`) and
+on a port it must not open (`Event::LinkHeld`). Taking a board over will be
+an offer at `devices/<board ref>/take-over`.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

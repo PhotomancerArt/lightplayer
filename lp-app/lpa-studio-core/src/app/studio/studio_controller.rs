@@ -168,6 +168,14 @@ pub struct StudioController {
     /// reports back (the actor's queue). `None` in a rig that wires neither.
     wifi_spawner: Option<Rc<dyn Fn(crate::DeviceTaskFuture)>>,
     wifi_tx: Option<crate::app::studio::studio_view_channel::CommandSender>,
+    /// The hold edge: the browser's Web Locks and hold channel
+    /// ([`Self::set_board_hold_edge`]). `None` where the browser has
+    /// neither, and in a rig that installs none: then this tab names no
+    /// holds and every device flow is as it was before holds existed.
+    board_hold_edge: Option<Rc<dyn crate::BoardHoldEdge>>,
+    /// What this tab and the other tabs of this browser hold, kept beside
+    /// the edge (there is a book exactly when there is an edge).
+    board_hold_book: Option<crate::BoardHoldBook>,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -478,6 +486,8 @@ impl StudioController {
             wifi_connects: crate::WifiConnects::default(),
             wifi_spawner: None,
             wifi_tx: None,
+            board_hold_edge: None,
+            board_hold_book: None,
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -1563,6 +1573,35 @@ impl StudioController {
     /// Without one, every migration asks for a download first.
     pub fn set_device_backup_store(&mut self, store: Rc<dyn crate::DeviceBackupStore>) {
         self.devices.effects_mut().set_backup_store(store);
+    }
+
+    /// Install the hold edge (Web Locks and the hold channel in the
+    /// browser; a [`crate::MemoryBoardHoldBus`] tab in tests), with an empty
+    /// book for the tab it names. Without one, this tab names no holds.
+    pub fn set_board_hold_edge(&mut self, edge: Rc<dyn crate::BoardHoldEdge>) {
+        self.board_hold_book = Some(crate::BoardHoldBook::new(edge.tab_id()));
+        self.board_hold_edge = Some(edge);
+    }
+
+    /// The hold book, when a hold edge is installed.
+    pub fn board_hold_book(&self) -> Option<&crate::BoardHoldBook> {
+        self.board_hold_book.as_ref()
+    }
+
+    /// A note another tab said on the hold channel
+    /// ([`StudioCommand::BoardHold`](crate::StudioCommand::BoardHold)):
+    /// folded into the book. Returns what it changed; reacting to it (the
+    /// fact on the board, the answer to an ask) is the hold flow's.
+    /// Without an edge there is no book, and a note changes nothing.
+    pub fn on_hold_note(
+        &mut self,
+        from: crate::TabId,
+        note: crate::HoldNote,
+    ) -> Vec<crate::BookChange> {
+        match self.board_hold_book.as_mut() {
+            Some(book) => book.apply(&from, &note),
+            None => Vec::new(),
+        }
     }
 
     /// Install the engine cache (OPFS `firmware-cache/` in the browser).

@@ -334,6 +334,11 @@ where
         for command in plan.network {
             self.controller.apply_network_command(command);
         }
+        // Before the device folds: what other tabs hold is what this
+        // batch's device inputs are read against.
+        for (from, note) in plan.board_hold {
+            self.controller.on_hold_note(from, note);
+        }
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
@@ -718,6 +723,8 @@ struct CommandPlan {
     settings: Vec<crate::SettingsCommand>,
     access: Vec<crate::app::access::AccessCommand>,
     network: Vec<crate::app::network::NetworkCommand>,
+    /// Hold-channel notes from other tabs, in queue order (never coalesced).
+    board_hold: Vec<(crate::TabId, crate::HoldNote)>,
     /// Agent run feedback, applied synchronously in queue order (event
     /// order is the transcript order; never coalesced).
     agent: Vec<crate::AgentFeedback>,
@@ -751,6 +758,7 @@ impl CommandPlan {
         let mut settings = Vec::new();
         let mut access = Vec::new();
         let mut network = Vec::new();
+        let mut board_hold = Vec::new();
         let mut agent = Vec::new();
         let mut actions = Vec::new();
         let mut tick = false;
@@ -766,6 +774,7 @@ impl CommandPlan {
                 StudioCommand::Device(input) => device.push(DeviceStep::Input(input)),
                 StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
+                StudioCommand::BoardHold { from, note } => board_hold.push((from, note)),
                 StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
                 StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
                 StudioCommand::Place(reported) => place = Some(reported),
@@ -802,6 +811,7 @@ impl CommandPlan {
             settings,
             access,
             network,
+            board_hold,
             agent,
             actions,
             tick,

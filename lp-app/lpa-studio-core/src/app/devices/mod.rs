@@ -41,6 +41,9 @@
 pub mod add_device_offers;
 pub mod ble_transport;
 pub mod bluetooth_reach;
+/// One tab holds a board: the hold vocabulary, the book, the edge trait and
+/// its in-memory double.
+pub mod board_hold;
 pub mod board_plays;
 pub mod board_projects;
 pub mod board_ref;
@@ -145,6 +148,11 @@ pub use add_device_offers::{
 };
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
+pub use board_hold::{
+    AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
+    HOLD_PROTO_VERSION, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus, OtherHold,
+    PendingAsk, TabId, UsbPair,
+};
 pub use board_plays::BoardPlays;
 pub use board_projects::{BoardProjectInputs, BoardProjects, board_projects};
 pub use board_ref::{BoardRef, BoardRefError};
