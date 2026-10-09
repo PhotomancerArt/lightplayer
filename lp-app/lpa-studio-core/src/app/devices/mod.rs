@@ -150,8 +150,8 @@ pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_hold::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
-    HOLD_PROTO_VERSION, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus, OtherHold,
-    PendingAsk, TabId, UsbPair,
+    HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
+    OtherHold, PendingAsk, TabId, UsbPair,
 };
 pub use board_plays::BoardPlays;
 pub use board_projects::{BoardProjectInputs, BoardProjects, board_projects};

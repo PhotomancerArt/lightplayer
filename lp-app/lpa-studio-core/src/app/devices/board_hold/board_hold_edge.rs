@@ -46,7 +46,10 @@ pub trait BoardHoldEdge {
     fn claim(&self, key: &HoldKey) -> DeviceTransportFuture<ClaimAnswer>;
 
     /// Let go of `key`'s lock. Idempotent: releasing a lock this tab does
-    /// not hold does nothing.
+    /// not hold does nothing. A release asked while a claim on `key` is
+    /// still in flight is sequenced behind it: the claim lets the lock go
+    /// the moment it lands (and answers [`ClaimAnswer::Taken`]), so a
+    /// release never leaves a lock held.
     fn release(&self, key: &HoldKey);
 
     /// Every board hold any tab of this browser has right now (this tab's

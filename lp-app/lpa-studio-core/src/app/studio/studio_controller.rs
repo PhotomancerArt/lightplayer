@@ -55,6 +55,10 @@ use crate::{
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
+/// One tab holds a board: the holder's flows (priming, claims, the gate's
+/// claims, the answer to an ask, the sentinels, the facts on the boards).
+mod board_hold_flow;
+
 /// Minimum gap between view publishes that carry *only* streamed log lines
 /// (session console tails, drained producer batches). Anything structural —
 /// a revision advance or a local mutation — publishes immediately and takes
@@ -176,6 +180,10 @@ pub struct StudioController {
     /// What this tab and the other tabs of this browser hold, kept beside
     /// the edge (there is a book exactly when there is an edge).
     board_hold_book: Option<crate::BoardHoldBook>,
+    /// What this tab is doing about the holds: claims in flight, sentinels,
+    /// the facts on its boards, boards being let go
+    /// (`studio_controller/board_hold_flow.rs`). Idle without an edge.
+    board_hold_flow: crate::app::devices::board_hold::BoardHoldFlow,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -488,6 +496,7 @@ impl StudioController {
             wifi_tx: None,
             board_hold_edge: None,
             board_hold_book: None,
+            board_hold_flow: Default::default(),
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -1598,10 +1607,14 @@ impl StudioController {
         from: crate::TabId,
         note: crate::HoldNote,
     ) -> Vec<crate::BookChange> {
-        match self.board_hold_book.as_mut() {
+        let changes = match self.board_hold_book.as_mut() {
             Some(book) => book.apply(&from, &note),
-            None => Vec::new(),
-        }
+            None => return Vec::new(),
+        };
+        self.react_to_hold_changes(&changes);
+        self.reconcile_board_holds();
+        self.mark_dirty();
+        changes
     }
 
     /// Install the engine cache (OPFS `firmware-cache/` in the browser).
@@ -1925,9 +1938,15 @@ impl StudioController {
     /// Run the granted-port sweep when one is due (boot, transport install,
     /// hotplug connect). Coalesced: a storm of connect events costs one sweep.
     fn run_due_device_sweep(&mut self) {
-        if !core::mem::take(&mut self.device_sweep_pending) {
+        if !self.device_sweep_pending {
             return;
         }
+        // With a hold edge, the first sweep waits for one look at what the
+        // other tabs hold, so it never opens a port they hold.
+        if !self.hold_priming_lets_sweep_run() {
+            return;
+        }
+        self.device_sweep_pending = false;
         self.devices.sweep_granted_ports();
     }
 
@@ -1946,6 +1965,11 @@ impl StudioController {
         for action in self.auto_name_actions() {
             self.fold_device_input(crate::DeviceInput::Action(action));
         }
+        // One tab holds a board: boards let go on request write their last
+        // picture and disconnect, then every hold is reconciled against
+        // what the folds left.
+        self.run_due_hold_releases().await;
+        self.reconcile_board_holds();
         let writes = self.devices.take_writes();
         if writes.is_empty() {
             return;
@@ -2201,6 +2225,9 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        // A port another tab's claims account for is that tab's board, not
+        // a new device found here.
+        self.hide_accounted_held_links(&mut view);
         view.board_projects = self.board_projects(&view);
         view
     }
@@ -2966,6 +2993,43 @@ impl StudioController {
             self.device_feeds
                 .mark_snapshot_written(device, captured_at, now);
         }
+    }
+
+    /// Write `device`'s newest frame to its sidecar NOW, past the ten-second
+    /// limit, stamped with the frame's own capture time: the holder's last
+    /// picture as it lets the board go to another tab, so that tab shows
+    /// the newest one. The same writer as [`Self::persist_due_device_frames`];
+    /// a failed write is a log line, like theirs.
+    async fn persist_device_frame_now(&mut self, device: crate::DeviceId) {
+        let now = (self.now_secs)();
+        let Some((frame, captured_at)) = self.device_feeds.get(device).and_then(|feed| {
+            let frame = feed.frame()?.clone();
+            let age = feed.frame_age_secs(now)?;
+            Some((frame, now - age))
+        }) else {
+            return;
+        };
+        let Ok(host) = self.library_host() else {
+            return;
+        };
+        let Some(uid) = self.device_registry_key(device).or_else(|| {
+            self.devices
+                .roster()
+                .device(device)
+                .and_then(|device| device.identity.uid.as_ref())
+                .map(|uid| uid.0.clone())
+        }) else {
+            return;
+        };
+        let bytes = crate::app::devices::device_frame_snapshot::encode(&frame, captured_at);
+        if let Err(error) = host
+            .catalog(CatalogOp::StoreDeviceFrame { uid, bytes })
+            .await
+        {
+            log::warn!("device last frame not persisted: {error}");
+        }
+        self.device_feeds
+            .mark_snapshot_written(device, captured_at, now);
     }
 
     /// Seed the feeds of remembered boards from their persisted last frames

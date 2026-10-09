@@ -69,6 +69,10 @@ struct Inner {
     channel: web_sys::BroadcastChannel,
     /// The board locks this tab holds, by key; dropping a guard releases.
     held: RefCell<BTreeMap<HoldKey, NamedLockGuard>>,
+    /// Claims still polling, by key: `true` once a release was asked for
+    /// while the claim was in flight. A release cannot drop a guard that
+    /// does not exist yet, so the claim drops it the moment it lands.
+    claiming: RefCell<BTreeMap<HoldKey, bool>>,
     /// One watch per key held elsewhere.
     watches: RefCell<BTreeMap<HoldKey, Rc<LockWatch>>>,
     /// The channel's `onmessage`, kept as long as the edge.
@@ -101,6 +105,7 @@ impl BrowserBoardHold {
                 tab,
                 channel,
                 held: RefCell::new(BTreeMap::new()),
+                claiming: RefCell::new(BTreeMap::new()),
                 watches: RefCell::new(BTreeMap::new()),
                 listener: RefCell::new(None),
             }),
@@ -148,9 +153,18 @@ impl BoardHoldEdge for BrowserBoardHold {
             if inner.held.borrow().contains_key(&key) {
                 return ClaimAnswer::Held;
             }
-            match try_acquire_named_lock_polling(&key.lock_name(), CLAIM_ATTEMPTS, CLAIM_DELAY_MS)
-                .await
-            {
+            inner.claiming.borrow_mut().insert(key, false);
+            let claimed =
+                try_acquire_named_lock_polling(&key.lock_name(), CLAIM_ATTEMPTS, CLAIM_DELAY_MS)
+                    .await;
+            let released_meanwhile = inner.claiming.borrow_mut().remove(&key).unwrap_or(false);
+            match claimed {
+                // Let go while it polled: the guard drops here, at once, so
+                // the lock is never left held behind a release.
+                Ok(Some(guard)) if released_meanwhile => {
+                    drop(guard);
+                    ClaimAnswer::Taken
+                }
                 Ok(Some(guard)) => {
                     inner.held.borrow_mut().insert(key, guard);
                     ClaimAnswer::Held
@@ -165,8 +179,12 @@ impl BoardHoldEdge for BrowserBoardHold {
     }
 
     fn release(&self, key: &HoldKey) {
-        // Dropping the guard lets the lock go; a key this tab does not hold
-        // is nothing to release.
+        // A claim still polling lets the lock go when it lands (see
+        // `claim`); a guard held now drops here. A key this tab neither
+        // holds nor claims is nothing to release.
+        if let Some(released) = self.inner.claiming.borrow_mut().get_mut(key) {
+            *released = true;
+        }
         drop(self.inner.held.borrow_mut().remove(key));
     }
 

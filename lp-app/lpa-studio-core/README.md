@@ -545,6 +545,21 @@ the fact on the board (`Event::BoardHeld`, `DeviceView.held_elsewhere`) and
 on a port it must not open (`Event::LinkHeld`). Taking a board over will be
 an offer at `devices/<board ref>/take-over`.
 
+The holder's side (`studio_controller/board_hold_flow.rs`, pure halves in
+`board_hold/`): a tab's first sweep waits for one look at the lock manager
+(`HoldPriming`), so it never opens a port another tab holds. Claim order is
+open, hello, then lock, then announce; release order is close the port,
+release the lock, then announce (`hold_reconcile`). The gate
+(`UsbHoldGate`, kept on the effects layer) attaches a sweep's new ports
+without opening them when the other tabs' claims for their vendor:product
+account for all of them, reads a refused open against the same claims, and
+names the board when exactly one claim and one port of the kind are in play.
+A holder announces `Watching`, `Open` (its editor is on the board) or
+`Busy(label)`; it refuses an ask while busy and otherwise closes the editor,
+writes the last picture, disconnects, waits for the close, releases, then
+says `Released` (`hold_answer`). A sentinel watch per hold elsewhere clears
+the fact when the holder dies, and never opens the port.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

@@ -339,6 +339,9 @@ where
         for (from, note) in plan.board_hold {
             self.controller.on_hold_note(from, note);
         }
+        for event in plan.hold_edge {
+            self.controller.on_hold_edge_event(event);
+        }
         for feedback in plan.agent {
             self.controller.apply_agent_feedback(feedback);
         }
@@ -725,6 +728,8 @@ struct CommandPlan {
     network: Vec<crate::app::network::NetworkCommand>,
     /// Hold-channel notes from other tabs, in queue order (never coalesced).
     board_hold: Vec<(crate::TabId, crate::HoldNote)>,
+    /// The hold edge's answers and hold deadlines, in queue order.
+    hold_edge: Vec<crate::HoldEdgeEvent>,
     /// Agent run feedback, applied synchronously in queue order (event
     /// order is the transcript order; never coalesced).
     agent: Vec<crate::AgentFeedback>,
@@ -759,6 +764,7 @@ impl CommandPlan {
         let mut access = Vec::new();
         let mut network = Vec::new();
         let mut board_hold = Vec::new();
+        let mut hold_edge = Vec::new();
         let mut agent = Vec::new();
         let mut actions = Vec::new();
         let mut tick = false;
@@ -775,6 +781,7 @@ impl CommandPlan {
                 StudioCommand::DeviceHotplug(edge) => device.push(DeviceStep::Hotplug(edge)),
                 StudioCommand::LibraryChanged => library_changed = true,
                 StudioCommand::BoardHold { from, note } => board_hold.push((from, note)),
+                StudioCommand::HoldEdge(event) => hold_edge.push(event),
                 StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
                 StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
                 StudioCommand::Place(reported) => place = Some(reported),
@@ -812,6 +819,7 @@ impl CommandPlan {
             access,
             network,
             board_hold,
+            hold_edge,
             agent,
             actions,
             tick,

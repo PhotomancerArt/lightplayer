@@ -91,6 +91,10 @@ pub enum StudioCommand {
         from: crate::TabId,
         note: crate::HoldNote,
     },
+    /// What this tab's hold edge answered (a claim, the first look at the
+    /// lock manager, a sentinel), or a hold deadline that may have passed.
+    /// Applied in queue order after the notes, never coalesced.
+    HoldEdge(crate::HoldEdgeEvent),
     /// A timer-driven passive refresh tick. Coalescable and droppable: the actor
     /// keeps at most one pending tick and drops a tick that would run behind a
     /// pending action.

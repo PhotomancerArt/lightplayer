@@ -89,8 +89,8 @@ pub use app::devices::{
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
 pub use app::devices::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
-    HOLD_PROTO_VERSION, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus, OtherHold,
-    PendingAsk, TabId, UsbPair,
+    HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
+    OtherHold, PendingAsk, TabId, UsbPair,
 };
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,

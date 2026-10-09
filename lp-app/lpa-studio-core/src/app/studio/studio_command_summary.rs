@@ -83,6 +83,10 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
             format!("BoardHold/{}", variant_of(&bounded_debug(note))),
             bounded_debug(format_args!("from {from}: {note:?}")),
         ),
+        StudioCommand::HoldEdge(event) => (
+            format!("HoldEdge/{}", variant_of(&bounded_debug(event))),
+            bounded_debug(event),
+        ),
         StudioCommand::Shutdown => ("Shutdown".to_string(), String::new()),
     };
     Some(summary)

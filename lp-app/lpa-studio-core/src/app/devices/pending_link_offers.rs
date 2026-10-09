@@ -9,7 +9,7 @@
 //! | `flash` | the link settled on a needs-firmware verdict ([`flash_pending_offer`]); pressing it adopts the link |
 //! | `adopt` | "Set up this device", where Flash is not already that gesture |
 //! | `reset-board` | always: the recovery for a chip parked silent in its ROM downloader; disabled on a network link (Bluetooth, Wi‑Fi, the relay), whose Reset is a request to a board that has not answered yet |
-//! | `dismiss` | the projection's escape (it says Forget; dismissing hands the grant back), Lasting through its meta |
+//! | `dismiss` | the projection's escape (it says Forget; dismissing hands the grant back), Lasting through its meta; not on a port another tab holds (handing the grant back can pull the port from that tab) |
 //!
 //! A pending link is not a device, so its adopt and dismiss address the
 //! LINK; its flash and reset address the provisional device the link was
@@ -59,8 +59,10 @@ pub fn pending_link_offers(
         },
     ));
     // Every escape the projection grants a pending link dismisses it; one
-    // verb, however many it names.
-    if let Some(escape) = pending.escapes.first() {
+    // verb, however many it names. Not a port another tab holds: dismissing
+    // hands the site's grant back (`port.forget()`), which can pull the
+    // port out from under the tab that holds it.
+    if let Some(escape) = pending.escapes.first().filter(|_| !pending.held_by_tab) {
         offers.push(UiOffer::new(
             at("dismiss"),
             "remove",
