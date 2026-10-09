@@ -56,6 +56,7 @@ number — not an emulator or silicon measurement.
 ```bash
 cargo run --release -p lp-store-bench -- smoke --candidates mem,mem-broken
 cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads 'push:c40;save:c13' --seeds 1,2
+cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads save:c40 --tears calibrated   # CX1's measured tears
 cargo run --release -p lp-store-bench -- double --candidates f2 --workloads save:c13
 cargo run --release -p lp-store-bench -- random --candidates s1 --seeds 8 --steps 300
 cargo run --release -p lp-store-bench -- measure --candidates f1,f2,s1,t1 --workloads 'push:c40;save:c40' --min-sectors
@@ -96,6 +97,13 @@ walks; even rounds: walks) until the deadline. The report's "What did not
 run" lists the units still queued at the end. `report` renders `report.md`
 (headline, cut totals with a replay command per failure, measures, fill, the
 T1 dial Pareto front) and `summary.json`.
+
+`sweep` and `double` take `--tears` (comma-separated tear model names;
+default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s `TearModel::ALL`).
+`calibrated` is the model measured on a real part (CX1, 200 cuts:
+`docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
+read `0x00` from the front or throughout, or silently read erased; it runs
+only when named, and a reproducer that names it replays under it.
 
 `--corpus` defaults to the spike's `measurements/corpus`; `--out` to
 `target/lp-store-bench/<cmd>`; `--threads` 8; `--sectors` 128.

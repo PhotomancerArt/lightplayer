@@ -292,4 +292,45 @@ mod tests {
         let replayed = crate::replay(&rec.reproducer, &set).unwrap();
         assert_eq!(replayed.as_ref().map(|f| &f.kind), Some(&rec.failure.kind));
     }
+
+    #[test]
+    fn the_calibrated_tear_model_sweeps_by_name_and_replays() {
+        let set = CorpusSet::new(None);
+        let wl = set
+            .build(&WorkloadSpec::new(WorkloadKind::Repush, "syn:3:300", 1))
+            .unwrap();
+        let cfg = CandidateConfig::new(16);
+        let params = SweepParams {
+            tears: vec![TearModel::from_name("calibrated").unwrap()],
+            ..SweepParams::default()
+        };
+        let sink = Scoreboard::memory();
+        let good = sweep_exhaustive(
+            &MemCandidate::new(MemLayout::PingPong),
+            &cfg,
+            &wl,
+            &params,
+            &sink,
+        );
+        assert_eq!(good.len(), 1);
+        assert_eq!(good[0].tear, "calibrated");
+        assert!(good[0].failures == 0 && good[0].cases > 0, "{good:?}");
+        let bad = sweep_exhaustive(
+            &MemCandidate::new(MemLayout::InPlace),
+            &cfg,
+            &wl,
+            &params,
+            &sink,
+        );
+        assert!(bad[0].failures > 0, "{bad:?}");
+        let rec: FailureRecord = sink
+            .records()
+            .into_iter()
+            .filter(|r| r["type"] == "failure")
+            .map(|r| serde_json::from_value(r).unwrap())
+            .next()
+            .unwrap();
+        let replayed = crate::replay(&rec.reproducer, &set).unwrap();
+        assert_eq!(replayed.as_ref().map(|f| &f.kind), Some(&rec.failure.kind));
+    }
 }
