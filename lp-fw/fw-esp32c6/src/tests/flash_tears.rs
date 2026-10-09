@@ -23,6 +23,14 @@
 //!    scan reads);
 //! 4. the repair and one timed work cycle, with their records;
 //! 5. the scan-done line, then the work loop, silently, until the power goes.
+//!
+//! Built with `test_flash_tears_unaligned` instead, the same harness is the
+//! `flash-tears-unaligned` payload: every work cycle programs its sector in
+//! 16–1,040-byte writes starting off every 32-byte boundary
+//! (`fw_checks::checks::flash_tears::program_plan`), each one esp-storage
+//! write and so one call into the mask ROM, to measure whether a torn
+//! prefix stops relative to the write's address or on absolute 32-byte
+//! boundaries. Only the plan and the payload name change.
 
 extern crate alloc;
 
@@ -38,6 +46,7 @@ use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use esp_storage::{FlashStorage, FlashStorageError};
 use fw_checks::FW_CHECK_JSON_PREFIX;
 use fw_checks::checks::flash_tears::layout::TearsLayout;
+use fw_checks::checks::flash_tears::program_plan::{MAX_WRITE, ProgramMode};
 use fw_checks::checks::flash_tears::runner::{self, BootFacts, ScanBuffers, TearsFlash};
 use fw_checks::checks::flash_tears::{PAGE_SIZE, READY_LINE, SCAN_DONE_MARKER};
 use fw_core::serial::SerialIo;
@@ -50,6 +59,16 @@ use crate::serial::usb_serial::Esp32UsbSerialIo;
 
 /// How often the boot looks for the host's byte.
 const POLL_MS: u64 = 5;
+
+#[cfg(all(feature = "test_flash_tears", feature = "test_flash_tears_unaligned"))]
+compile_error!("`test_flash_tears` and `test_flash_tears_unaligned` are two payloads; build one");
+
+/// How this image's work cycles program a sector: its build feature names it.
+const MODE: ProgramMode = if cfg!(feature = "test_flash_tears_unaligned") {
+    ProgramMode::Unaligned
+} else {
+    ProgramMode::Pages
+};
 
 pub async fn run_flash_tears(_: embassy_executor::Spawner) -> ! {
     let (sw_int, timg0, _rmt, usb_device, _gpio18, flash, _gpio4, _gpio20, _wifi, _rwdt) =
@@ -72,13 +91,14 @@ pub async fn run_flash_tears(_: embassy_executor::Spawner) -> ! {
     let mut storage = FlashStorage::new(flash);
     let layout = FlashLayout::locate(&mut storage)
         .lpfs
-        .and_then(|p| TearsLayout::new(p.offset, p.len));
+        .and_then(|p| TearsLayout::new(p.offset, p.len))
+        .map(|l| l.with_mode(MODE));
 
     wait_for_host(&serial, &mut out).await;
     let _ = fw_checks::write_header(
         &mut out,
         &fw_checks::PayloadHeader {
-            payload: fw_checks::checks::flash_tears::PAYLOAD,
+            payload: MODE.payload(),
             chip: "esp32c6",
             firmware_commit: env!("LP_BUILD_COMMIT"),
             firmware_features: env!("LP_BUILD_FEATURES"),
@@ -94,7 +114,10 @@ pub async fn run_flash_tears(_: embassy_executor::Spawner) -> ! {
         idle().await
     };
 
-    let mut flash = Flash(storage);
+    // SAFETY: `Bounce` is a byte array; all zeroes is a valid value.
+    let mut flash = Flash(storage, unsafe {
+        Box::<Bounce>::new_zeroed().assume_init()
+    });
     // 20 KiB, zeroed in place: a `Box::new` of the arrays would build them
     // on the main task's stack first.
     // SAFETY: `ScanBuffers` is five byte arrays; all zeroes is a valid value.
@@ -215,18 +238,24 @@ impl fmt::Write for Out {
 }
 
 /// esp-storage as the payload's flash. Built with `panic-unaligned-buffer`,
-/// so every transfer goes through a word-aligned bounce page: a journal
-/// entry is a 16-byte stack array with no alignment of its own.
-struct Flash(FlashStorage<'static>);
+/// so every transfer goes through a word-aligned bounce buffer: a journal
+/// entry is a 16-byte stack array with no alignment of its own. Programs go
+/// through the boxed one, which holds the longest write either plan makes
+/// (1,040 bytes under the unaligned plan) as ONE esp-storage write — one
+/// call into the ROM, which is what the unaligned payload measures.
+struct Flash(FlashStorage<'static>, Box<Bounce>);
 
 #[repr(C, align(4))]
-struct Bounce([u8; PAGE_SIZE]);
+struct Bounce([u8; MAX_WRITE]);
+
+#[repr(C, align(4))]
+struct ReadBounce([u8; PAGE_SIZE]);
 
 impl TearsFlash for Flash {
     type Error = FlashStorageError;
 
     fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), Self::Error> {
-        let mut bounce = Bounce([0; PAGE_SIZE]);
+        let mut bounce = ReadBounce([0; PAGE_SIZE]);
         let mut at = addr;
         for chunk in buf.chunks_mut(PAGE_SIZE) {
             let n = chunk.len().next_multiple_of(4);
@@ -242,9 +271,9 @@ impl TearsFlash for Flash {
     }
 
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), Self::Error> {
-        debug_assert!(data.len() <= PAGE_SIZE && data.len() % 4 == 0);
-        let mut bounce = Bounce([0xFF; PAGE_SIZE]);
-        bounce.0[..data.len()].copy_from_slice(data);
-        NorFlash::write(&mut self.0, addr, &bounce.0[..data.len()])
+        debug_assert!(data.len() <= MAX_WRITE && data.len() % 4 == 0);
+        let bounce = &mut self.1.0[..data.len()];
+        bounce.copy_from_slice(data);
+        NorFlash::write(&mut self.0, addr, bounce)
     }
 }

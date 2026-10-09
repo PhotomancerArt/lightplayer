@@ -6,7 +6,10 @@
 //!     --tear calibrated --cuts 200 --seed 1 --out target/flash-tears-sim/calibrated-1.txt
 //! scripts/emu/flash-tears-analyze.py target/flash-tears-sim/calibrated-1.txt
 //! ```
-//! (`just flash-tears-sim` does both, for every tear model.)
+//! (`just flash-tears-sim` does both, for every tear model.) With
+//! `--unaligned` it programs by the `flash-tears-unaligned` payload's plan
+//! instead of page by page (`program_plan.rs`): what each model predicts for
+//! where an unaligned torn prefix stops.
 //!
 //! It runs exactly the firmware's flow — `runner::scan`, `runner::prepare`,
 //! one `runner::timed_cycle`, `SCAN DONE`, then `runner::run_cycles` until
@@ -33,9 +36,10 @@ use std::path::PathBuf;
 use fw_checks::FW_CHECK_JSON_PREFIX;
 use fw_checks::checks::flash_tears::journal;
 use fw_checks::checks::flash_tears::layout::TearsLayout;
+use fw_checks::checks::flash_tears::program_plan::{ProgramMode, writes};
 use fw_checks::checks::flash_tears::runner::{self, BootFacts, ScanBuffers, TearsFlash};
 use fw_checks::checks::flash_tears::{
-    JOURNAL_COPIES, LAYOUT_SECTORS, PAGES_PER_SECTOR, SCAN_DONE_MARKER, SECTOR_SIZE,
+    JOURNAL_COPIES, LAYOUT_SECTORS, PAGE_SIZE, REGION_SECTORS, SCAN_DONE_MARKER, SECTOR_SIZE,
 };
 use lp_nor_sim::{FaultPlan, NorError, NorFlashSim, NorGeometry, SimRng, TearModel};
 
@@ -47,7 +51,9 @@ const JOURNAL_ENTRY_US: u64 = 47;
 fn main() {
     let args = Args::parse();
     let mut flash = Sim(NorFlashSim::new(NorGeometry::c6(LAYOUT_SECTORS)));
-    let layout = TearsLayout::new(0, LAYOUT_SECTORS * SECTOR_SIZE as u32).expect("layout");
+    let layout = TearsLayout::new(0, LAYOUT_SECTORS * SECTOR_SIZE as u32)
+        .expect("layout")
+        .with_mode(args.mode);
     let mut bufs = Box::new(ScanBuffers::new());
     let mut rng = SimRng::new(args.seed ^ 0xF1A5_7EA2_5111_0000);
     let mut out = String::new();
@@ -69,10 +75,11 @@ fn main() {
     }
     std::fs::write(&args.out, out).expect("write the transcript");
     let meta = format!(
-        "{{\"schema\":1,\"payload\":\"flash-tears\",\"chip\":\"esp32c6\",\
+        "{{\"schema\":1,\"payload\":\"{}\",\"chip\":\"esp32c6\",\
          \"configuration\":\"lp-nor-sim:{}\",\"date\":\"simulated\",\
          \"firmware_commit\":\"seed {}\",\"note\":\"lp-nor-sim, not a measurement: \
          fw-checks/examples/flash_tears_on_nor_sim.rs\"}}\n",
+        args.mode.payload(),
         args.tear.name(),
         args.seed
     );
@@ -137,7 +144,17 @@ fn pick_cut(
         weights.push(JOURNAL_ENTRY_US);
     }
     weights.push(ERASE_US);
-    weights.extend(std::iter::repeat_n(PAGE_US, PAGES_PER_SECTOR));
+    // One simulator op per page a write touches (`NorFlashSim::program`
+    // splits at pages), each weighted by its share of a page's time.
+    for (at, len) in writes(layout.mode, target % REGION_SECTORS, target) {
+        let mut a = at;
+        while a < at + len {
+            let end = (a / PAGE_SIZE + 1) * PAGE_SIZE;
+            let n = end.min(at + len) - a;
+            weights.push((PAGE_US * n as u64).div_ceil(PAGE_SIZE as u64));
+            a += n;
+        }
+    }
     let mut r = rng.below(weights.iter().sum());
     let mut op = 0;
     for (i, &w) in weights.iter().enumerate() {
@@ -167,6 +184,7 @@ impl TearsFlash for Sim {
 
 struct Args {
     tear: TearModel,
+    mode: ProgramMode,
     cuts: u32,
     seed: u64,
     out: PathBuf,
@@ -176,6 +194,7 @@ impl Args {
     fn parse() -> Self {
         let mut a = Args {
             tear: TearModel::Calibrated,
+            mode: ProgramMode::Pages,
             cuts: 200,
             seed: 1,
             out: PathBuf::from("target/flash-tears-sim/calibrated-1.txt"),
@@ -195,6 +214,7 @@ impl Args {
                 "--cuts" => a.cuts = value().parse().unwrap_or_else(|_| usage("--cuts N")),
                 "--seed" => a.seed = value().parse().unwrap_or_else(|_| usage("--seed N")),
                 "--out" => a.out = PathBuf::from(value()),
+                "--unaligned" => a.mode = ProgramMode::Unaligned,
                 _ => usage(&format!("unknown argument `{flag}`")),
             }
         }
@@ -206,7 +226,7 @@ fn usage(msg: &str) -> ! {
     eprintln!(
         "flash_tears_on_nor_sim: {msg}\n\
          usage: flash_tears_on_nor_sim [--tear clean|byte_prefix|random_bits|calibrated] \
-         [--cuts N] [--seed N] [--out PATH]"
+         [--cuts N] [--seed N] [--out PATH] [--unaligned]"
     );
     std::process::exit(2)
 }

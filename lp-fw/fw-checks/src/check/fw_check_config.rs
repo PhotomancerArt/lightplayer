@@ -157,6 +157,19 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::FlashTearsUnaligned,
+        display_name: "Power cuts on a sacrificial board, programs started off every 32-byte \
+                       boundary: where a torn unaligned program stops",
+        firmware_features: &["test_flash_tears_unaligned"],
+        // The same harness and scan as `flash-tears`, so the same readiness
+        // line and no done marker.
+        done_marker: None,
+        trace_slug: "flash-tears-unaligned",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
