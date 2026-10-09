@@ -12,6 +12,7 @@
 //! pill ("live · 43 fps", "last frame · 12 s ago"). Those words are the
 //! status corner's "Picture" line now, word for word ([`picture_line`]).
 
+use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{ActivityView, DeviceView, LoadedProject};
 
 use super::board_card_input::BoardCardInput;
@@ -147,14 +148,22 @@ fn preview_sentence(
         let label = activity.label.trim_end_matches(['…', '.', ' ']);
         return format!("{label}… the picture returns when the board does.");
     }
+    // A board Studio cannot reach has no feed coming: say when it was last
+    // heard (today's remembered tile's words), never "coming".
+    if view.status == DeviceStatus::Offline {
+        return match &view.freshness_label {
+            Some(heard) => format!("Not connected — {heard}."),
+            None => "Not connected — Studio has not heard this board.".to_string(),
+        };
+    }
     if view.loaded_project == LoadedProject::Empty {
-        return "Nothing loaded — no picture until something runs.".to_string();
+        return "Nothing on it yet — no picture until something runs.".to_string();
     }
     // The card's live picture is not streamed over Bluetooth (that air time
     // is the board's ESP-NOW's too), so "coming" would be a promise. Over
     // USB and Wi‑Fi the feed runs, and the picture is on its way.
     if over == UiLinkKind::Bluetooth {
-        return "No live picture over Bluetooth — Open in editor to see and control it."
+        return "No live picture over Bluetooth — open it in the editor to see and control it."
             .to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
@@ -312,7 +321,7 @@ mod tests {
         card.loaded_project = LoadedProject::Empty;
         assert_eq!(
             preview_sentence(&card, None, usb),
-            "Nothing loaded — no picture until something runs."
+            "Nothing on it yet — no picture until something runs."
         );
         card.firmware_face = FirmwareFace::Blank;
         assert_eq!(
@@ -325,6 +334,32 @@ mod tests {
         assert_eq!(
             preview_sentence(&card, Some(&flashing), usb),
             "Flashing firmware… the picture returns when the board does."
+        );
+    }
+
+    /// An offline board's picture line says it is not connected and when it
+    /// was last heard — never that a feed is coming (today's remembered
+    /// tile's words, ported from the page's offline tile).
+    #[test]
+    fn an_offline_boards_picture_line_says_when_it_was_heard() {
+        let mut offline = CardFixture::offline();
+        offline.view.freshness_label = Some("last heard 4 min ago".to_string());
+        assert_eq!(
+            picture_line(&offline.input()).as_deref(),
+            Some("Not connected — last heard 4 min ago.")
+        );
+        offline.view.freshness_label = None;
+        assert_eq!(
+            picture_line(&offline.input()).as_deref(),
+            Some("Not connected — Studio has not heard this board.")
+        );
+        // Over its last link too: an offline Bluetooth board promises no
+        // Bluetooth picture either.
+        let mut ble = CardFixture::offline().over(UiLinkKind::Bluetooth);
+        ble.view.freshness_label = None;
+        assert_eq!(
+            picture_line(&ble.input()).as_deref(),
+            Some("Not connected — Studio has not heard this board.")
         );
     }
 

@@ -160,7 +160,7 @@ fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<UiCardAction>
 }
 
 /// The board pick's chip filter for this board: the boot banner's chip,
-/// else the catalog family of the hello's board id (today's `joined_chip`).
+/// else the catalog family of the hello's board id (once the web's `joined_chip`).
 pub(crate) fn board_pick(input: &BoardCardInput<'_>) -> UiActionDraw {
     let from_banner = input.view.detected_chip.is_some();
     UiActionDraw::BoardPick {

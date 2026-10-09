@@ -366,7 +366,8 @@ fn details(
         .filter(|update| {
             story.is_none() && (update.light.is_some() || update.kind == UpdateRowKind::Information)
         })
-        .map(|update| update.sentence.clone());
+        .map(|update| update.sentence.clone())
+        .or_else(|| face_verdict(view, update, story.is_some()));
     sections.push(firmware);
 
     // 3. The panels.
@@ -451,6 +452,26 @@ fn details(
         panels,
         raised: layout.is_some_and(|layout| layout.panel.is_some()),
     }
+}
+
+/// How a running LightPlayer's firmware compares with this Studio's, in
+/// today's firmware line's words ("fw-esp32c6 abc1234 — older than Studio,
+/// update recommended", "… — newer than Studio"), when no update story says
+/// it: a board with no standing (another target, or no facts about this
+/// Studio's own build) would otherwise say it nowhere.
+fn face_verdict(
+    view: &lpa_devices::view::DeviceView,
+    update: Option<&crate::UiDeviceUpdate>,
+    noticed: bool,
+) -> Option<String> {
+    if update.is_some() || noticed {
+        return None;
+    }
+    let FirmwareFace::LightPlayer { .. } = view.firmware_face else {
+        return None;
+    };
+    let line = device_firmware_line(&view.firmware_face, None);
+    line.contains(" — ").then_some(line)
 }
 
 /// This Studio's own version, when the standing names it as the newest.
@@ -551,6 +572,45 @@ mod tests {
                 .unwrap()
                 .cancel
                 .is_none()
+        );
+    }
+
+    /// With no update story, how the board's firmware compares with this
+    /// Studio's is still said: the firmware details carry today's line —
+    /// older (the bar blue with Update), not this build, or newer.
+    #[test]
+    fn a_running_boards_verdict_is_said_without_an_update_story() {
+        for (age, says) in [
+            (FirmwareAge::Older, "older than Studio, update recommended"),
+            (
+                FirmwareAge::Different,
+                "not this Studio's build, update recommended",
+            ),
+            (FirmwareAge::Newer, "newer than Studio"),
+        ] {
+            let mut fixture = CardFixture::ready();
+            fixture.view.firmware_face = FirmwareFace::LightPlayer {
+                firmware: Some("fw-esp32c6 abc1234".to_string()),
+                wire: WireVersion::Match,
+                age,
+            };
+            let bar = firmware_bar(&fixture.input());
+            let sentence = bar
+                .details
+                .sections
+                .iter()
+                .find_map(|section| section.sentence.clone())
+                .unwrap_or_else(|| panic!("{age:?} is said"));
+            assert!(sentence.contains(says), "{age:?}: {sentence}");
+        }
+        // A current board says nothing more than its version.
+        let mut current = CardFixture::ready();
+        assert!(
+            firmware_bar(&current.input())
+                .details
+                .sections
+                .iter()
+                .all(|section| section.sentence.is_none())
         );
     }
 
