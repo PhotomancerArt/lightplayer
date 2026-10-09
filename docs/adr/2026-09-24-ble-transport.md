@@ -708,6 +708,12 @@ get the data rates down". Reversed for the card; Play keeps its minute.
   15-minute soak that followed (card on and off, 5-minute windows) had none.
   The 2026-09-24 Amendment's desk runs saw the same drop with nothing being
   read (2 in Run J, 0 in ~15 min over K+L), so one drop does not say whether
-  the card makes them likelier. Still owed: the same on a phone (Bluefy is a
-  different stack and MTU), a 512-lamp board, and ESP-NOW loss beside a
-  watched card (`desk_espnow_meter`).
+  the card makes them likelier.
+- **On a phone (2026-10-09).** Yona's iPhone in Bluefy, the same board running
+  the PLAYFUL Choker (lab rehearsal): the card drew the picture with the
+  Bluetooth pill, but only after a reboot. Before it, every read was refused
+  for memory: a connected central costs the C6 ~17.5 KB of heap, and the
+  choker was left under the 40 KiB read gate. Open defect,
+  `docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`.
+  Still owed: a 512-lamp board, and ESP-NOW loss beside a watched card
+  (`desk_espnow_meter`).
