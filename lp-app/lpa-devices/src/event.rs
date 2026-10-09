@@ -284,6 +284,34 @@ pub enum Event {
         link: LinkId,
         held: bool,
     },
+    /// Another tab of this browser holds the board with this MAC (`held:
+    /// Some`), or no longer does (`None`).
+    ///
+    /// A fact about the BOARD, addressed by MAC rather than by link: the
+    /// tab that hears it may have no link to the board at all (the OS
+    /// refuses a second `open()`), and may load the board's record only
+    /// after hearing it. The roster keeps the latest fact per MAC and puts
+    /// it on every device whose identity names that MAC, whichever arrives
+    /// first. Link attach, detach and loss never clear it; only this event
+    /// does.
+    BoardHeld {
+        mac: crate::identity::MacAddress,
+        held: Option<crate::held_elsewhere::HeldElsewhere>,
+    },
+    /// This link's port is held by another tab: do not open it.
+    ///
+    /// Settles the link's identify at once ("held by another tab", no retry,
+    /// no deadline wait); presence stays `Present`. When `mac` names the
+    /// board (the other tab's claims account for exactly this one link), the
+    /// MAC is learned on the link's identity exactly as a hello's would be,
+    /// so a pending link merges into the board's own card. That MAC is a
+    /// presumption until the board itself speaks: a hello that contradicts
+    /// it re-routes the link to whatever it really is.
+    LinkHeld {
+        link: LinkId,
+        #[serde(default)]
+        mac: Option<crate::identity::MacAddress>,
+    },
     TimerFired {
         timer: TimerId,
     },

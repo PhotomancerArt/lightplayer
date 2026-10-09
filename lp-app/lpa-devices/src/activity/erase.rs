@@ -243,6 +243,10 @@ impl ActivityReducer for EraseActivity {
                 },
                 Event::IdentityObserved { .. }
                 | Event::GrantAnswered { .. }
+                // Another tab's hold is the roster's and the fold's news, never this
+                // reducer's: a link this activity runs on was opened here.
+                | Event::BoardHeld { .. }
+                | Event::LinkHeld { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 // The wire borrow is the fold's business (it pauses

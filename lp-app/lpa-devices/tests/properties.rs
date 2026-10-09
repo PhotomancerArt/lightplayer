@@ -402,6 +402,25 @@ fn link_lifecycles() -> Vec<(&'static str, Vec<Step>)> {
         ("nothing at all", vec![]),
         ("attach only", vec![Step::attach(1, "usb-1")]),
         (
+            "port held by another tab",
+            vec![Step::attach(1, "usb-1"), Step::link_held(1, None)],
+        ),
+        (
+            "port held by another tab, board named",
+            vec![
+                Step::board_held(
+                    "a0:f2:62:87:b4:8c",
+                    Some(lpa_devices::HeldElsewhere {
+                        via: lpa_devices::HoldVia::Usb,
+                        level: lpa_devices::HoldLevel::Open,
+                        taken_from_here: false,
+                    }),
+                ),
+                Step::attach(1, "usb-1"),
+                Step::link_held(1, Some("a0:f2:62:87:b4:8c")),
+            ],
+        ),
+        (
             "attach + open, silent",
             vec![Step::attach(1, "usb-1"), Step::opened(1)],
         ),

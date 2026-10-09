@@ -572,6 +572,7 @@ fn ble_pending_card_over_bluetooth() -> Element {
         detected_chip: None,
         mac: None,
         firmware_blocked: None,
+        held_by_tab: false,
         escapes: vec![DeviceEscape::Forget],
     };
     let ble = PendingLinkView {
@@ -1001,6 +1002,7 @@ fn ble_card() -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: Some("Firmware updates need USB".to_string()),
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,

@@ -83,6 +83,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         ],
         update_blocked: None,
         last_update_outcome: None,
+        held_elsewhere: None,
     }
 }
 

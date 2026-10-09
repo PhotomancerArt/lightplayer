@@ -1335,6 +1335,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
                     firmware_blocked: None,
+                    held_by_tab: false,
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
@@ -1350,6 +1351,7 @@ fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
                     firmware_blocked: None,
+                    held_by_tab: false,
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],
@@ -1413,6 +1415,7 @@ fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1472,6 +1475,7 @@ fn roster_fixture() -> DeviceRosterView {
                     ],
                     update_blocked: None,
                     last_update_outcome: None,
+                    held_elsewhere: None,
                 },
                 DeviceView {
                     id: DeviceId(3),
@@ -1516,6 +1520,7 @@ fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1579,6 +1584,7 @@ fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1615,6 +1621,7 @@ fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     // The two verbs an absent board can honestly offer.
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1856,6 +1863,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )],
         terminal_dropped: 0,
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,
@@ -1970,6 +1978,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // so the projection offers Disconnect — which is also what keeps
         // the terminal and the verb rows drawn at their fixed heights.
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,

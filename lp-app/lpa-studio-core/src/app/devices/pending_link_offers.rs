@@ -168,6 +168,7 @@ mod tests {
             detected_chip: Some("esp32c6".to_string()),
             mac: None,
             firmware_blocked: None,
+            held_by_tab: false,
             escapes: vec![Escape::Forget],
         }
     }
