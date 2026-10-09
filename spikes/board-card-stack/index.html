@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Board card, round 5</title>
+<title>Board card, converged</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 /* =====================================================================
@@ -293,42 +293,19 @@ pre.shape { max-width:1000px; margin:10px 0 0; padding:12px 14px; border:1px sol
 </head>
 <body>
 
-<h1>The board card — round 5</h1>
-<p class="hint"><b>Round 4</b> (Yona): “we’re really close.” This round takes three things further: <b>the primary action’s look</b> (Q12), <b>how work in progress shows</b> (Q13), and <b>the panel</b>: connecting to a board turns its rows into its panel, and opening it in Studio becomes a separate Edit action (Q14–Q16).
-The card so far uses every lean; the questions are lettered to match the chat. Pick in the page, leave a note, or comment anywhere.</p>
-
-<div class="gatebar" id="gatebar"></div>
+<h1>The board card — converged</h1>
+<p class="hint"><b>Round 5</b> answered every open question (Q12-D, Q13-A, Q14-B, Q15-A, Q16-D), so this page is now the card as decided: the card itself, the components behind it, the assumptions it rests on, and every ruling with its round. Each round’s questions are in git (round 5 is commit 80947aa28). Comment anywhere if something here isn’t what you meant.</p>
 
 <section class="qsec" id="page">
   <h2 class="plainh">The card so far</h2>
-  <p class="usinglean">Every lean at once. <b>Connect</b> on any card: it connects (the connection bar says so for a moment), then <b>its rows become its panel</b>. Drag a control; a touched control turns gold and gets <b>↺</b> to let go. <b>Done</b> disconnects, and the rows come back. <b>Edit</b> is the project bar’s action. <b>Kitchen shelf</b> is updating its firmware, and its lights are the progress. <b>Maya’s choker</b> connects over Bluetooth, which takes a little longer. Click any bar for its details.</p>
+  <p class="usinglean"><b>Connect</b> (its icon says how: USB, the cloud, Wi‑Fi, Bluetooth) on any card: the connection bar says it’s connecting, then <b>its rows become its panel</b>, Studio’s own fader and knobs. Drag a control; a touched control turns gold and offers to let go. <b>Done</b> disconnects, and the rows come back. <b>Edit</b> is the project bar’s action. <b>Kitchen shelf</b> is updating its firmware: the progress is in its bar. <b>Maya’s choker</b> connects over Bluetooth, which takes a little longer. Click any bar for its details.</p>
   <div class="duo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
 </section>
 
-<section class="qsec" id="q12"><h2><span class="qn">Q12</span>What does the primary action look like?</h2>
-  <p class="ask">Q11 is settled: the primary action is a section of the name bar. Now its look. One rule from Studio’s style guide decides a lot here: <b>the spectrum is the pointer’s answer, not resting chrome</b> (“multi-color is a moment, not a wall”), and a static spectrum line under a word already means <b>“you are here”</b> on Studio’s tabs. Each option shows a board you can connect to, the same one hovered, a Bluetooth board, and one you can’t connect to right now (it’s updating). Hover them yourself, too.</p>
-  <div class="opts c2" id="q12o"></div></section>
-
-<section class="qsec" id="q13"><h2><span class="qn">Q13</span>How does work in progress show?</h2>
-  <p class="ask">A firmware update, start to finish, then a project being sent and a board connecting. In every option the bar doing the work goes neutral and says what’s happening with Studio’s spinner. Progress never sits on a status colour, by the style guide. Afterwards it’s green for a few seconds, or striped with <b>Retry</b>. The options differ in where the progress itself shows. From your note: <b>“probably replacing the lights.”</b></p>
-  <div class="opts c1" id="q13o"></div></section>
-
-<section class="qsec" id="q14"><h2><span class="qn">Q14</span>The rows become the panel. How does it look?</h2>
-  <p class="ask">From your notes: <b>“connecting opens the panel for controlling it, and loading it in Studio is a separate edit action”</b>, and <b>“when you connect a card, all the rows disappear and become the panel.”</b> The panel is the board’s own controls: brightness, speed, palette and whatever the project publishes, which is exactly what the play password gives. Each option shows Porch and Fyeah Sign connected (Porch’s brightness has been touched, so it’s gold) beside Garage, which is only watched, so you can compare heights. Drag any control.</p>
-  <div class="opts c1" id="q14o"></div></section>
-
-<section class="qsec" id="q15"><h2><span class="qn">Q15</span>Where does Edit live?</h2>
-  <p class="ask">With Connect as the way in, Edit opens the project in Studio’s editor with this board as its target. It shows only to people who can edit. Each option shows Porch watched and connected, Living room (Sean shared it to play) and Maya’s choker (anyone can play; editing needs its password).</p>
-  <div class="opts c1" id="q15o"></div></section>
-
-<section class="qsec" id="q16"><h2><span class="qn">Q16</span>What does the button say?</h2>
-  <p class="ask">The word on the primary action of a board you can reach. Unlock and Install stay as they are; a turned-over card says Done.</p>
-  <div class="opts c2" id="q16o"></div></section>
-
 <section class="qsec" id="assume">
-  <h2 class="plainh">Assumptions behind this round</h2>
+  <h2 class="plainh">Assumptions</h2>
   <div class="note"><ol>
-    <li><b>A1.</b> The panel on a card is the board’s own panel (vision: the board serves its panel), its first controls in the board’s order. The rest are behind <b>All controls</b>, which opens the board’s own page (today’s play mode, <code>/device/…/play</code>).</li>
+    <li><b>A1.</b> The panel on a card is the board’s own panel (vision: the board serves its panel), drawn with Studio’s existing panel widgets: as many of its controls as fit at the card’s height, in the board’s order. The rest are behind <b>All controls</b>, which opens the board’s own page (today’s play mode, <code>/device/…/play</code>).</li>
     <li><b>A2.</b> The play password (or a play share) is enough to connect and use the panel; Edit needs the edit password. That’s access as shipped.</li>
     <li><b>A3.</b> The card shows the board’s facts while it’s watched and its panel while it’s connected. <b>Done disconnects</b>: the board goes back to being watched, and its connection is free for someone else.</li>
     <li><b>A4.</b> You can connect while someone else is editing: the panel is built for several phones at once (panel.md P9). Today a C6 has one network slot, so a second client over Wi‑Fi or the cloud is a firmware question this needs answered.</li>
@@ -339,18 +316,18 @@ The card so far uses every lean; the questions are lettered to match the chat. P
 
 <section class="qsec" id="shape">
   <h2 class="plainh">The components, driven by data</h2>
-  <p class="usinglean">Three bar kinds now, all built in core as offers the agent can see and press: <b>the name bar</b> (one per card), <b>stack bars</b> (the board’s facts), and <b>control bars</b> (its panel). Watched, a card shows its facts; connected, its panel.</p>
+  <p class="usinglean">Two new components, both built in core as offers the agent can see and press: <b>the name bar</b> (one per card) and <b>stack bars</b> (the board’s facts). Watched, a card shows its facts; connected, it shows its panel with Studio’s existing panel widgets.</p>
   <pre class="shape">BoardCard {
   picture:  Picture { feed: Live | CloudFrames | Still { age } | Work(Progress) }   // Q13-B: the lights carry the progress
   status:   Status { worst: Fine | Working | Warning | Error, reading: Fps(58) | Age("5 h ago"), details }
   name_bar: NameBar { title, place, primary: Offer }     // devices/&lt;board&gt;/connect · unlock · install · done (disconnect)
   face:     Facts { bars: [StackBar] }                   // watched
-          | Panel { controls: [ControlBar], all: Offer } // connected (Q14 says how many, and how they look)
+          | Panel { controls: [PanelControl], all: Offer } // connected: Studio's existing panel widgets, as many as fit
 }
 StackBar   { layer: Project | Connection | Access | Firmware | Hardware, icon, summary, aside,
              tone: Option&lt;Tone&gt;, action: Option&lt;Offer&gt;, work: Option&lt;Work&gt;, details }
 Work       { words, progress: Percent(64) | Unknown, ends: Done(words) | Failed { words, retry: Offer } }
-ControlBar { channel, label, widget: Fader { v } | Step { options, i } | Momentary, engaged: bool, clear: Option&lt;Offer&gt; }</pre>
+PanelControl = the panel's own control model (panel.md: (scope, channel), Read → Latch → Clear), unchanged</pre>
 </section>
 
 <section class="qsec" id="ref">
@@ -367,6 +344,17 @@ ControlBar { channel, label, widget: Fader { v } | Step { options, i } | Momenta
       <li><b>Hardware</b> says the board model only; the LED count is the project’s (Q9).</li>
       <li><b>Access has its own bar</b> (Q10 → A, taken from the lean; it wasn’t answered, so say if not).</li>
       <li><b>No “open in another tab / take over” on the card</b>: Studio finds out when you connect, and offers to take over then.</li>
+      <li><b>The primary action’s look</b> (Q12 → D): a plain section with an icon leading the word: the link’s icon before Connect, a lock before Unlock, ✓ before Done. The spectrum ring lights it on hover.</li>
+      <li><b>Work in progress shows in its bar</b> (Q13 → A): the bar goes neutral with Studio’s spinner, the step and the percent, and the iridescent fill along its foot. When it’s done the bar is green for a few seconds; if it fails it’s striped with Retry. The picture and the corner don’t change.</li>
+      <li><b>Connecting turns the rows into the panel</b> (Yona: “when you connect a card, all the rows disappear and become the panel”; Q14 → B): Studio’s existing panel (its fader and knobs), as many controls as fit at the card’s height, then All controls. Scope kept small: no new control widgets.</li>
+      <li><b>Edit is the project bar’s action</b> (Q15 → A), for people who can edit, with a lock when it needs the edit password. A project notice (Send latest, Show) takes the slot, and Edit moves into the project’s details.</li>
+      <li><b>The button says Connect</b> (Q16 → D) on every board you can reach. Connected, the card shows its panel; <b>Done</b> disconnects.</li>
+    </ul></div>
+  <div class="note"><b>Later</b> (not now)
+    <ul>
+      <li>Some actions may grey out the lights, or use the picture’s space for something else (Yona, on Q13); a long update or an install is the obvious first case.</li>
+      <li>Panel controls drawn as bars (round 5’s Q14-A): “interesting, but keep scope small.”</li>
+      <li>Connecting while someone else edits needs more than one client per board; a C6 has one network slot today (A4).</li>
     </ul></div>
 </section>
 
@@ -442,7 +430,8 @@ const ACC = {
   locked: { you:'nothing yet', via:'—', short:'Locked', edit:false },
 };
 /* the leans */
-const LEAN = { cta:'key', prog:'lights', panel:'turn', look:'bars', edit:'proj', word:'Connect' };
+/* the card as decided (round 5 answers: Q12-D, Q13-A, Q14-B, Q15-A, Q16-D) */
+const LEAN = { cta:'glyph', prog:'bar', panel:'turn', look:'knobs', edit:'proj', word:'Connect' };
 
 /* the panel: the board's own controls, first four on the card */
 const F = (label, icon, v, fmt) => ({ k:'fader', label, icon, v, fmt });
@@ -682,63 +671,6 @@ function option(q, letter, o, body){
 function put(id, opts, body){ document.getElementById(`${id}o`).innerHTML = Object.entries(opts).map(([l,o]) => option(id, l, o, body(o.c, l))).join(''); }
 const cfg = o => ({ ...LEAN, panel:'none', ...o });
 
-function build(){
-  /* Q12 · the look of the section */
-  const q12boards = [ { ...byId('porch') }, { ...byId('porch'), seedAdd:3 }, { ...byId('choker') }, { ...byId('kitchen'), work:{ layer:'fw', words:'Updating', prog:42 } } ];
-  const q12caps = ['Ready', 'Ready · hovered', 'Bluetooth, not yet picked', 'Can’t connect now'];
-  put('q12', {
-    A:{ name:'A spectrum foot line', what:'Round 4: a slightly raised section with a thin, static spectrum line along its foot.', pro:'reads as special at a glance, on every card.', con:'a static spectrum line under a word is Studio’s “you are here” mark (the tabs). Eleven of them at rest is the wall the style guide rules out.', c:{ cta:'foot' } },
-    B:{ name:'A bright key; the spectrum answers the pointer', lean:true, what:'A raised neutral section, a step brighter than the bar, like a key. The spectrum ring lights its edges only on hover, then it flares on press.', pro:'Studio’s own rule for actions (bright neutral at rest, the spectrum is the pointer’s answer); still the brightest thing on the card; a full-height target.', con:'no colour at rest. It says “button” by brightness alone.', c:{ cta:'key' } },
-    C:{ name:'An outline', what:'No fill: a hairline box inside the section, which becomes the spectrum ring on hover.', pro:'closest to the old rounded button, so it reads as a button.', con:'a box inside a bar, the boxes-in-boxes you dislike; quieter than B.', c:{ cta:'outline' } },
-    D:{ name:'A glyph leads the word', what:'A plain section; an icon leads the word: the link’s icon before Connect, a lock before Unlock, ✓ before Done. Hover lights the ring.', pro:'says what will happen before you read it; no extra paint.', con:'one more icon on a card full of icons; at rest it looks like any other bar’s action.', c:{ cta:'glyph' } },
-    E:{ name:'The gradient fill', what:'Studio’s one loud style, the gradient Primary, as the section’s fill.', pro:'unmistakable.', con:'the style guide keeps it for the one Primary on a surface; a page of cards would be a wall of rainbow, and the warm end reads as a warning next to orange notices.', c:{ cta:'fill' } },
-  }, c => `<div class="app"><div class="page"><div class="strip">${q12boards.map((b, i) => `<div><p class="cap">${q12caps[i]}</p>${miniCard(b, cfg({ ...c, hovId: i===1 ? b.id : null }))}</div>`).join('')}</div></div></div>`);
-
-  /* Q13 · work in progress, in moments */
-  const desk = byId('desk'), garage = byId('garage'), choker = byId('choker');
-  const M = [
-    ['1 · Update offered', { ...desk }],
-    ['2 · Backing up the project', { ...desk, seedAdd:1, work:{ layer:'fw', words:'Backing up the project', prog:null } }],
-    ['3 · Updating', { ...desk, seedAdd:2, work:{ layer:'fw', words:'Updating', prog:64 } }],
-    ['4 · Restarting', { ...desk, seedAdd:3, work:{ layer:'fw', words:'Restarting', prog:null } }],
-    ['5 · Done, for a few seconds', { ...desk, seedAdd:4, fw:STUDIO_FW, fwOld:false, work:{ layer:'fw', state:'done', words:'Updated to '+STUDIO_FW } }],
-    ['Or: it didn’t finish', { ...desk, seedAdd:5, work:{ layer:'fw', state:'fail', words:'Update didn’t finish' } }],
-    ['Sending a project', { ...garage, projNote:null, work:{ layer:'proj', words:'Sending v12', prog:40 } }],
-    ['Connecting', { ...choker, work:{ layer:'conn', words:'Connecting', prog:null } }],
-  ];
-  put('q13', {
-    A:{ name:'In its bar', what:'The bar doing the work carries the progress: the iridescent fill grows along its foot (or sweeps, when there’s no percent). The picture and the corner don’t change.', pro:'the progress sits beside its words; nothing else moves.', con:'a 2 px line at the bottom of a 28 px bar is easy to miss; the picture keeps looking as if nothing is happening.', c:{ prog:'bar' } },
-    B:{ name:'The lights become the progress', lean:true, what:'The picture shows the work: the board’s own LEDs light up in order as it goes, in the iridescent fill’s colours (a comet sweeps when there’s no percent). The corner shows Studio’s spinner; the bar says the step and the percent.', pro:'impossible to miss; honest (the board isn’t playing its pattern while it updates); the progress is drawn in the board’s own shape. A board could later do the same on its real LEDs.', con:'the picture stops showing the pattern during a send, too, which is short.', c:{ prog:'lights' } },
-    C:{ name:'The corner', what:'The status corner becomes a progress ring and a percent; the picture holds its last frame, dimmed.', pro:'the status already lives there; the picture still shows what it played.', con:'small; the ring competes with the frame rate it replaces.', c:{ prog:'corner' } },
-  }, c => `<div class="app"><div class="page"><div class="strip wide">${M.map(([cap, b]) => `<div><p class="cap">${cap}</p>${card(b, cfg(c))}</div>`).join('')}</div></div></div>`);
-
-  /* Q14 · how the rows become the panel */
-  const q14b = [byId('porch'), byId('desk'), byId('garage')];
-  put('q14', {
-    A:{ name:'Control bars, same height', lean:true, what:'The five rows become four control bars and All controls. A control bar is a stack bar whose fill is its value: drag across it. A stepped control (Palette) shows its steps as blocks, with ‹ › at its end. Touched, the grip turns gold and ↺ lets go.', pro:'the card keeps its height; control bars are the same family as the stack bars (one grammar, data-driven); several boards can be connected side by side.', con:'four controls; a 28 px bar is a small target on a phone.', c:{ look:'bars' } },
-    B:{ name:'Studio’s knobs', what:'Brightness stays a full-width fader bar (it’s the master); the next three controls are Studio’s panel knobs (an arc, the value inside, the label under; a stepped control in blocks). Same height.', pro:'looks like the panel everywhere else in Studio; knobs read as “controls” instantly.', con:'three knobs on a card are small; a second widget family inside one card.', c:{ look:'knobs' } },
-    C:{ name:'The card grows to the whole panel', what:'Every control, as taller bars (34 px). The card grows while it’s connected and shrinks back on Done.', pro:'the whole panel without leaving the home page; touch-friendly.', con:'breaks the one-height rule (the grid jumps when you connect); a long panel makes a very tall card.', c:{ look:'grow' } },
-    D:{ name:'The project bar stays as its title', what:'The project bar stays on top (the panel is the project’s, and Edit stays in reach); the other four rows become three controls and All controls.', pro:'you always see what you’re controlling, and Edit is one click away while connected.', con:'one fewer control; not quite “all the rows become the panel”.', c:{ look:'proj' } },
-  }, c => `<div class="app"><div class="page"><div class="scards">${q14b.map(b => card(b, cfg({ ...c, panel:'turn', turned:['porch','desk'] }))).join('')}</div></div></div>`);
-
-  /* Q15 · where Edit lives */
-  const porchW = { ...byId('porch') }, porchC = { ...byId('porch'), seedAdd:2, id:'porch' };
-  put('q15', {
-    A:{ name:'The project bar’s action', lean:true, what:'Edit sits flush at the end of the project bar: you edit the project. A board shared to play has no Edit; one that needs the edit password shows a lock on it. A project notice (Send latest, Show) takes the slot, and Edit moves into the project’s details.', pro:'board → Connect, project → Edit: each verb on the thing it acts on; no new piece.', con:'while connected the project bar is gone, and Edit with it (unless Q14-D keeps it); Edit is below the name bar.', c:{ edit:'proj' } },
-    B:{ name:'A second section in the name bar', what:'Edit sits beside the primary action at the end of the name bar, plain, with the primary as the key. It’s there whether the card is watched or connected.', pro:'both ways in, side by side, in both faces of the card.', con:'two sections squeeze the name on narrow cards; Edit is about the project, not the board.', c:{ edit:'name' } },
-    C:{ name:'The panel’s last bar', what:'Connected, the last bar is Edit in Studio, in place of All controls. Watched, Edit is only in the project’s details.', pro:'connect first, edit from there; the facts side stays clean.', con:'two clicks to edit; All controls loses its place.', c:{ edit:'panel' } },
-  }, c => `<div class="app"><div class="page"><div class="scards">${[porchW, porchC, byId('living'), byId('choker')].map((b, i) => `<div><p class="cap">${['Watched','Connected','Shared to play','Edit needs a password'][i]}</p>${card(b, cfg({ ...c, panel:'turn', turned: i===1 ? ['porch'] : [] }))}</div>`).join('')}</div></div></div>`);
-
-  /* Q16 · the word */
-  const q16b = [byId('porch'), byId('living'), byId('desk')];
-  put('q16', {
-    A:{ name:'Play', what:'“Play”: the access tier is already called play (“You can play”), and so is the panel’s address (/play).', pro:'matches the play password and the access bar word for word.', con:'can read as “start it” on a board that’s already playing; a Bluetooth board still says Connect first.', c:{ word:'Play' } },
-    B:{ name:'Control', what:'“Control”: says what you’ll do.', pro:'no doubt about what it opens.', con:'a new word beside “You can play”; a little technical.', c:{ word:'Control' } },
-    C:{ name:'Panel', what:'“Panel”: names what opens, as the rest of Studio does.', pro:'one name for the thing everywhere.', con:'a noun on a button; less inviting.', c:{ word:'Panel' } },
-    D:{ name:'Connect, on every board', lean:true, what:'“Connect”, with the link’s icon: the same word whether the board is watched through the cloud, on USB, or waiting for its Bluetooth picker. Connected, the card shows its panel; Done disconnects.', pro:'your words (“when you connect a card”); one verb for the one way in, and it matches the card’s two states, watched and connected.', con:'says how, not what for: the panel is implied, not named.', c:{ word:'Connect' } },
-  }, c => `<div class="app"><div class="page"><div class="strip">${[...q16b, byId('choker')].map(b => miniCard(b, cfg(c))).join('')}</div></div></div>`);
-}
-
 /* =====================================================================
    The live page
    ===================================================================== */
@@ -912,7 +844,7 @@ function loop(ts){
    (Claude reads them), restored on load. Anywhere else: this browser,
    plus Copy answers. With `comments`: a Comment button per question.
    ===================================================================== */
-window.GATE = { round:'stack-card-r5', leans:{ q12:'B', q13:'B', q14:'A', q15:'A', q16:'D' } };
+window.GATE = { round:'stack-card-converged', leans:{} };
 const GATE = window.GATE;
 const gate = { picks:{}, notes:{}, mode:'local', doc:null, timer:null };
 const LS_KEY = 'lp-spike-gate:' + GATE.round;
@@ -983,7 +915,7 @@ async function gateStart(){
   gateDecorate(); document.querySelectorAll('textarea[data-note]').forEach(t => t.value = gate.notes[t.dataset.note] || ''); gateRenderBar();
 }
 
-build(); renderPage(); gateStart();
+renderPage(); gateStart();
 const qs = new URLSearchParams(location.search);
 if (qs.get('turn')) { qs.get('turn').split(',').forEach(id => TURNED.add(id)); renderPage(); }
 if (qs.get('open')) { OPEN = qs.get('open').split(':'); renderPage(); }
