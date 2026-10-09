@@ -164,7 +164,7 @@ fn device_card_update_newer() -> Element {
 }
 
 #[story(
-    description = "Play access only, over Bluetooth: the update is available and said so, but nothing is offered — installing needs the author password, and the device zone's \"Enter a password\" is the way to it."
+    description = "Play access only, over Bluetooth: the update is available and said so, but nothing is offered — installing needs the author password, and the device zone's \"Unlock to edit\" is the way to it."
 )]
 fn device_card_update_play_only() -> Element {
     update_card(UpdateFixtureRow::PlayOnly, Link::Bluetooth)

@@ -1736,6 +1736,7 @@ pub fn App() -> Element {
                     on_access: move |command| {
                         sheet_bridge.tx.send(StudioCommand::Access(command));
                     },
+                    on_action,
                 }
             }
         }

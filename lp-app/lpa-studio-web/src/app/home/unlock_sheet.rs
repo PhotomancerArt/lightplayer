@@ -15,19 +15,29 @@
 //! card.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{AccessCommand, UiLoginPrompt};
+use lpa_studio_core::{
+    AccessCommand, OfferArgs, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM, UiAction, UiLoginPrompt,
+};
 
 use super::access_fields::{HELP_CLASS, PasswordField};
 use crate::base::{StudioIcon, StudioIconName};
-use crate::core::{outline_action_class, quiet_action_class};
+use crate::core::{outline_action_class, quiet_action_class, use_device_verbs, verb_named};
 
+/// The sheet's submit presses the board's `unlock` offer
+/// (`devices/<board>/unlock`) with the two values it holds — the offer's
+/// `password` and `remember` params — and hands the bound action to
+/// `on_action`. With no such offer (core stopped offering it for this
+/// board: it is not linked, or not idle) the submit is disabled.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn UnlockSheet(
     prompt: UiLoginPrompt,
     /// "phone", "Mac" — the word after "this" (the page's platform).
     this_word: String,
+    /// Not now.
     on_access: EventHandler<AccessCommand>,
+    /// The unlock offer's press.
+    on_action: EventHandler<UiAction>,
     /// Stories: a capture pins the sheet in its box instead of the viewport.
     #[props(default)]
     inline: bool,
@@ -38,6 +48,9 @@ pub(crate) fn UnlockSheet(
     let device = prompt.device;
     let password = use_signal(|| typed.clone().unwrap_or_default());
     let mut remember = use_signal(|| true);
+    let verbs = use_device_verbs(Some(device))();
+    let unlock = verb_named(&verbs, "unlock");
+    let offered = unlock.is_some();
     let busy = prompt.busy;
     let submit_label = if busy { "Unlocking…" } else { "Unlock" };
     let frame_class = if inline {
@@ -55,14 +68,18 @@ pub(crate) fn UnlockSheet(
                 onsubmit: move |event| {
                     event.prevent_default();
                     let typed = password.read().clone();
+                    let Some(unlock) = unlock.as_ref() else {
+                        return;
+                    };
                     if typed.is_empty() {
                         return;
                     }
-                    on_access.call(AccessCommand::SubmitPassword {
-                        device,
-                        password: typed,
-                        remember: remember(),
-                    });
+                    let args = OfferArgs::new()
+                        .with(UNLOCK_PASSWORD_PARAM, typed)
+                        .with(UNLOCK_REMEMBER_PARAM, remember().to_string());
+                    if let Ok(action) = unlock.press(&args) {
+                        on_action.call(action);
+                    }
                 },
                 div { class: "tw:mx-auto tw:-mt-1 tw:h-1 tw:w-9 tw:rounded-full tw:bg-border-strong tw:sm:hidden" }
                 h2 { class: "tw:m-0 tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:text-base tw:font-bold tw:text-strong-foreground",
@@ -91,7 +108,8 @@ pub(crate) fn UnlockSheet(
                     button {
                         class: outline_action_class(false),
                         r#type: "submit",
-                        disabled: busy,
+                        disabled: busy || !offered,
+                        title: if offered { "" } else { "Studio can't unlock this board right now." },
                         "{submit_label}"
                     }
                 }

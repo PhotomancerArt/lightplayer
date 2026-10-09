@@ -24,7 +24,7 @@ use crate::app::home::ble_reach::BluetoothReach;
 use crate::app::home::browser_identity::BrowserPlatform;
 use crate::app::home::device_access_panel::DeviceAccessPanel;
 use crate::app::home::device_offer_story_fixtures::{
-    StoryDeviceCard, StoryPendingCard, add_slot_tree,
+    StoryDeviceCard, StoryPendingCard, add_slot_tree, unlock_sheet_tree,
 };
 use crate::app::home::devices_page::AddDeviceCard;
 use crate::app::home::unlock_link::UnlockLink;
@@ -299,27 +299,33 @@ fn ble_unlock_sheet() -> Element {
         retry_after_ms: retry,
         busy: false,
     };
+    // The sheet presses its board's `unlock` offer: the tree core would
+    // publish for a locked board.
     rsx! {
-        div { class: "tw:grid tw:gap-4 tw:p-3",
-            UnlockSheet {
-                prompt: prompt("This device needs a password to unlock it.", None),
-                this_word: "phone".to_string(),
-                on_access: |_| {},
-                inline: true,
-            }
-            UnlockSheet {
-                prompt: prompt("That device password didn't unlock PLAYFUL choker. It will listen again in 4 s.", Some(3_500)),
-                this_word: "phone".to_string(),
-                on_access: |_| {},
-                inline: true,
-                typed: Some("s'mores".to_string()),
+        OffersProvider { offers: unlock_sheet_tree(DeviceId(7), UiUnlockOffer::Locked),
+            div { class: "tw:grid tw:gap-4 tw:p-3",
+                UnlockSheet {
+                    prompt: prompt("This device needs a password to unlock it.", None),
+                    this_word: "phone".to_string(),
+                    on_access: |_| {},
+                    on_action: |_| {},
+                    inline: true,
+                }
+                UnlockSheet {
+                    prompt: prompt("That device password didn't unlock PLAYFUL choker. It will listen again in 4 s.", Some(3_500)),
+                    this_word: "phone".to_string(),
+                    on_access: |_| {},
+                    on_action: |_| {},
+                    inline: true,
+                    typed: Some("s'mores".to_string()),
+                }
             }
         }
     }
 }
 
 #[story(
-    description = "Unlocked for play only (a friend's shared password): the line says \"Unlocked with friends · play\", and where editing would be, one note says what it needs — \"Authoring needs an author password, or plug it in by USB.\" — with \"Enter a password\", which opens the Unlock sheet. A play link sees no \"Access\" row (the board lists only at author)."
+    description = "Unlocked for play only (a friend's shared password): the line says \"Unlocked with friends · play\", and where editing would be, one note says what it needs — \"Authoring needs an author password, or plug it in by USB.\" — with \"Unlock to edit\" (core's `unlock` offer), which opens the Unlock sheet. A play link sees no \"Access\" row (the board lists only at author)."
 )]
 fn ble_play_only_prompt() -> Element {
     let access = UiDeviceAccess {

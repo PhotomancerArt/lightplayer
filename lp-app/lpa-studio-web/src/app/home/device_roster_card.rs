@@ -487,6 +487,8 @@ pub(crate) fn DeviceRosterCard(
     let on_access = super::access_ui_context::access_handler();
     let on_network = super::access_ui_context::network_handler();
     let unlock = access.as_ref().and_then(|access| access.unlock);
+    // Core offers Unlock only while the board is linked and idle.
+    let unlock_verb = verb("unlock");
     let account_key_refused = access
         .as_ref()
         .and_then(|access| access.account_key_refused.clone());
@@ -912,17 +914,20 @@ pub(crate) fn DeviceRosterCard(
                     }
                 }
                 // Unlocked for play only: say what editing needs, and the
-                // way to it (the sheet), where the edit verbs are.
-                if idle && linked && unlock == Some(UiUnlockOffer::PlayOnly) {
+                // way to it (core's `unlock` offer, which raises the sheet),
+                // where the edit verbs are.
+                if let Some(unlock_verb) = unlock_verb.clone().filter(|_| unlock == Some(UiUnlockOffer::PlayOnly)) {
                     div { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-3 tw:gap-y-1.5 tw:rounded tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-2",
                         span { class: "tw:min-w-0 tw:flex-1 tw:text-xs tw:leading-snug tw:text-status-warning-foreground",
                             "{lpa_studio_core::PLAY_ONLY_SENTENCE}"
                         }
-                        button {
-                            class: quiet_action_class(),
-                            r#type: "button",
-                            onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
-                            "Enter a password"
+                        AgentMark { key: "{\"unlock\"}", path: unlock_verb.path.clone(),
+                            ActionButton {
+                                action: unlock_verb.action,
+                                running: false,
+                                variant: ActionButtonVariant::Quiet,
+                                on_action,
+                            }
                         }
                     }
                 }
@@ -943,12 +948,18 @@ pub(crate) fn DeviceRosterCard(
                     div { class: "ux-armed-dim tw:grid tw:min-w-0 tw:flex-1",
                         p { class: info_line_class(), title: "{device_line}", "{device_line}" }
                     }
-                    if idle && linked && unlock == Some(UiUnlockOffer::Locked) {
-                        button {
-                            class: LINE_VERB_CLASS,
-                            r#type: "button",
-                            onclick: move |_| on_access.call(lpa_studio_core::AccessCommand::LogIn { device }),
-                            "Unlock"
+                    if let Some(unlock_verb) = unlock_verb.clone().filter(|_| unlock == Some(UiUnlockOffer::Locked)) {
+                        AgentMark { key: "{\"unlock\"}", path: unlock_verb.path.clone(),
+                            button {
+                                class: LINE_VERB_CLASS,
+                                r#type: "button",
+                                title: "{unlock_verb.summary()}",
+                                onclick: {
+                                    let press = unlock_verb.action.clone();
+                                    move |_| on_action.call(press.clone())
+                                },
+                                "{unlock_verb.label()}"
+                            }
                         }
                     }
                 }

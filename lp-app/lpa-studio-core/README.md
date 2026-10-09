@@ -496,7 +496,12 @@ and `backing`. A level can depend on the board. Flashing a blank chip is
 Routine and flashing over firmware is Lasting. A push over a project the
 library has no copy of is Lasting, and Routine otherwise. Bluetooth reach
 is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
-is published disabled with its reason. See
+is published disabled with its reason. Unlock takes `password` (secret) and
+`remember`; pressed with no password it raises the sheet
+(`access/unlock_offer.rs`, `unlock_op.rs`: the op holds the password in an
+`UnlockPassword` whose `Debug` writes `<redacted>`, so the session recorder
+never carries it). It is published while a board's link holds nothing, or
+only play, and the board is linked and idle. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 ## Device Management UX

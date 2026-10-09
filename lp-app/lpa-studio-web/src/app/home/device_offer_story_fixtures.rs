@@ -16,7 +16,8 @@ use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
     OfferPath, PendingLinkView, ResetReach, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
     UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_relay_offer,
-    connect_wifi_offer, device_offers, new_sim_offer, pending_link_offers,
+    connect_wifi_offer, device_offers, device_unlock_offer, new_sim_offer, pending_link_offers,
+    unlock_offer,
 };
 
 use crate::app::home::DevicesPage;
@@ -158,7 +159,26 @@ fn card_tree_unlocked(
     for offer in device_offers(card, &facts) {
         tree.publish(offer);
     }
+    // `<board>/unlock`, offered the way the controller offers it: while the
+    // board is linked and idle.
+    if let Some(offer) = device_unlock_offer(&prefix, card, unlock) {
+        tree.publish(offer);
+    }
     tree.place_device(card.id, prefix);
+    tree
+}
+
+/// The tree core would publish for a board that needs unlocking, when a
+/// story has the Unlock sheet and no card (the sheet finds its board's
+/// `unlock` offer by the prompt's device).
+pub(crate) fn unlock_sheet_tree(
+    device: lpa_studio_core::DeviceId,
+    unlock: UiUnlockOffer,
+) -> UiOfferTree {
+    let prefix = OfferPath::board(&BoardRef::New(device.0 as u32));
+    let mut tree = UiOfferTree::new();
+    tree.publish(unlock_offer(&prefix, device, unlock));
+    tree.place_device(device, prefix);
     tree
 }
 
