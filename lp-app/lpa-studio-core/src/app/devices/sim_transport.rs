@@ -378,6 +378,7 @@ impl DeviceTransport for SimDeviceTransport {
                                 report.boots_next_clause()
                             ),
                         },
+                        boots_next: report.boots_next.clone(),
                         ..Default::default()
                     })
                 }

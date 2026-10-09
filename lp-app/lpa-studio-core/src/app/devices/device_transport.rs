@@ -110,6 +110,10 @@ pub struct DeviceEffectFacts {
     pub chip_name: Option<String>,
     /// What an [`DeviceEffectCall::InspectLayout`] read.
     pub inspection: Option<lpa_link::LinkLayoutInspection>,
+    /// What a [`DeviceEffectCall::RemoveProject`] left to start at the
+    /// board's next power-up — the project folder, by the firmware's own
+    /// boot rule. `None` when nothing is left (or the board could not say).
+    pub boots_next: Option<String>,
 }
 
 /// Progress callback for a running effect: label + optional percent. Called
