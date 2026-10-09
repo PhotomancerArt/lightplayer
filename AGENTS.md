@@ -251,8 +251,15 @@ the app through the same view model and presses the same actions. See
   `RELAY_PROTO_VERSION` and the hub accepts exactly the versions it lists
   (`SUPPORTED_RELAY_PROTO_VERSIONS`), refusing others by name — like
   `CLOUD_API_VERSION`. Any change to a relay frame's bytes, a reason code or
-  the proof bumps it; `lpc-relay/tests/relay_frame_golden.rs` holds the
-  bytes, and a golden is never edited to make a change pass. What rides
+  the proof bumps it. Two protocols are live: 1 (its bytes in
+  `lpc-relay/tests/relay_frame_golden.rs`, never edited at all) and 2
+  (pictures through the cloud, `relay_frame_golden_v2.rs`); a golden is
+  never edited to make a change pass. **The hub never sends a protocol 2
+  frame to a protocol 1 leg** (one send path, `to_board`, guards it): a
+  protocol 1 board drops its leg on a frame it does not know. A protocol 2
+  board sends its picture and its project's name in the clear (a decision,
+  not an oversight), never a project uid or a package hash, which travel
+  only as keyed tags. What rides
   inside a route is the ordinary secure lp-link, so the wire rule above
   still governs it. lp-cli reaches a board through the relay with
   `relay:<board-id>[@<origin>]` (session from `LP_CLOUD_SESSION`, env only)
@@ -492,7 +499,7 @@ runtime.
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
-| `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO) | yes |
+| `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO); relay protocol 2: the picture, the project report by keyed tags, the picture schedule | yes |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
 | `lp-nor-sim`     | The NOR flash power-cut model: a deterministic sans-IO model of the C6's SPI flash that loses power after any program or erase (torn programs, weak erases), shared by the store testbed and the emulator (`lp-emu/`, MIT) | yes |
