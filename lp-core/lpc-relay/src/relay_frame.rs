@@ -4,17 +4,27 @@
 //! fields, little-endian, nothing self-describing. The decoder checks every
 //! length, refuses trailing bytes, and never panics, whatever it is fed.
 //!
-//! | Tag | Frame | Direction | Fields after the tag |
-//! |---|---|---|---|
-//! | `0x01` | [`RelayFrame::Hello`] | board → hub | `relay_proto u16`, `mac [6]`, `wire_proto u32`, lan (`0` / `1 ip[4] port u16`), label (`len u8`, UTF-8), accounts (`n u8`, `n × salt[16]`) |
-//! | `0x02` | [`RelayFrame::Challenge`] | hub → board | `nonce [32]` |
-//! | `0x03` | [`RelayFrame::Proof`] | board → hub | `n u8`, `n × proof[32]` |
-//! | `0x04` | [`RelayFrame::Registered`] | hub → board | `accounts_ok u8` (bit i = account i), `ping_s u16` |
-//! | `0x05` | [`RelayFrame::Refused`] | hub → board | `reason u8`, `retry_after_s u16` |
-//! | `0x06` | [`RelayFrame::Open`] | hub → board | `route u16` |
-//! | `0x07` | [`RelayFrame::Frame`] | both | `route u16`, the lp-link frame (the rest) |
-//! | `0x08` | [`RelayFrame::Close`] | both | `route u16`, `reason u8` |
-//! | `0x09` | [`RelayFrame::LanChanged`] | board → hub | lan (`0` / `1 ip[4] port u16`) |
+//! | Tag | Frame | Protocol | Direction | Fields after the tag |
+//! |---|---|---|---|---|
+//! | `0x01` | [`RelayFrame::Hello`] | 1 | board → hub | `relay_proto u16`, `mac [6]`, `wire_proto u32`, lan (`0` / `1 ip[4] port u16`), label (`len u8`, UTF-8), accounts (`n u8`, `n × salt[16]`); **at `relay_proto` ≥ 2 only**, then firmware (`len u8` ≤ 40, ASCII) |
+//! | `0x02` | [`RelayFrame::Challenge`] | 1 | hub → board | `nonce [32]` |
+//! | `0x03` | [`RelayFrame::Proof`] | 1 | board → hub | `n u8`, `n × proof[32]` |
+//! | `0x04` | [`RelayFrame::Registered`] | 1 | hub → board | `accounts_ok u8` (bit i = account i), `ping_s u16` |
+//! | `0x05` | [`RelayFrame::Refused`] | 1 | hub → board | `reason u8`, `retry_after_s u16` |
+//! | `0x06` | [`RelayFrame::Open`] | 1 | hub → board | `route u16` |
+//! | `0x07` | [`RelayFrame::Frame`] | 1 | both | `route u16`, the lp-link frame (the rest) |
+//! | `0x08` | [`RelayFrame::Close`] | 1 | both | `route u16`, `reason u8` |
+//! | `0x09` | [`RelayFrame::LanChanged`] | 1 | board → hub | lan (`0` / `1 ip[4] port u16`) |
+//! | `0x0a` | [`RelayFrame::Project`] | 2 | board → hub | `0` (no project) / `1`, name (`len u8` ≤ 32, UTF-8), uid tag (`0` / `1 tag[16]`), content tag (`0` / `1 tag[16]`) |
+//! | `0x0b` | [`RelayFrame::Picture`] | 2 | board → hub | `n u8` (≤ 16), `n × lamps u32`, `count u16`, `count × [r g b]` |
+//! | `0x0c` | [`RelayFrame::PictureRate`] | 2 | hub → board | `idle_s u16`, `watched_ms u16`, `watched_for_s u16` |
+//!
+//! "Protocol" is the first relay protocol the frame kind exists in
+//! ([`RelayFrame::protocol`]). A hub never sends a board a frame whose
+//! protocol is above the board's: a protocol 1 board closes its leg on any
+//! frame it does not know. Protocol 1's bytes are pinned by
+//! `tests/relay_frame_golden.rs`, protocol 2's by
+//! `tests/relay_frame_golden_v2.rs`.
 //!
 //! Keepalive is the WebSocket's own ping and pong, not a frame.
 
@@ -23,11 +33,18 @@ use alloc::vec::Vec;
 use core::fmt;
 use lpc_access::SALT_BYTES;
 
+use crate::frame_reader::FrameReader;
 use crate::lan_address::LanAddress;
+use crate::picture_rate::PictureRate;
 use crate::refuse_reason::RefuseReason;
-use crate::relay_hello::{RelayHello, cut_label};
-use crate::relay_limits::{MAX_HELLO_ACCOUNTS, MAX_LABEL_BYTES, MAX_RELAY_FRAME};
+use crate::relay_hello::{RelayHello, cut_label, firmware_field};
+use crate::relay_limits::{
+    MAX_FIRMWARE_BYTES, MAX_HELLO_ACCOUNTS, MAX_LABEL_BYTES, MAX_RELAY_FRAME,
+};
+use crate::relay_picture::RelayPicture;
+use crate::relay_project::RelayProject;
 use crate::relay_proof::{RELAY_NONCE_BYTES, RELAY_PROOF_BYTES};
+use crate::relay_version::{RELAY_PROTO_1, RELAY_PROTO_2};
 use crate::route_close_reason::RouteCloseReason;
 
 const TAG_HELLO: u8 = 0x01;
@@ -39,6 +56,9 @@ const TAG_OPEN: u8 = 0x06;
 const TAG_FRAME: u8 = 0x07;
 const TAG_CLOSE: u8 = 0x08;
 const TAG_LAN_CHANGED: u8 = 0x09;
+const TAG_PROJECT: u8 = 0x0a;
+const TAG_PICTURE: u8 = 0x0b;
+const TAG_PICTURE_RATE: u8 = 0x0c;
 
 /// The bytes a [`RelayFrame::Frame`] adds to the lp-link frame it carries.
 pub const ROUTE_FRAME_OVERHEAD: usize = 3;
@@ -73,6 +93,13 @@ pub enum RelayFrame {
     },
     /// The board's LAN address changed.
     LanChanged { lan: Option<LanAddress> },
+    /// Protocol 2. The project the board plays (`None`: no project
+    /// loaded), after every `Registered` and on every change.
+    Project(Option<RelayProject>),
+    /// Protocol 2. What the board's lamps show, sampled.
+    Picture(RelayPicture),
+    /// Protocol 2. How often the hub wants pictures (hub → board).
+    PictureRate(PictureRate),
 }
 
 /// Why bytes are not a relay frame.
@@ -109,11 +136,12 @@ impl fmt::Display for RelayFrameError {
 impl RelayFrame {
     /// The frame's bytes.
     ///
-    /// Infallible: a hello's label and accounts, and a proof's list, are
-    /// cut to their limits as [`RelayHello::new`] cuts them. A
-    /// [`Self::Frame`] whose payload makes it longer than
+    /// Infallible: a hello's label, accounts and firmware, a proof's list,
+    /// and a project's name are cut to their limits as [`RelayHello::new`]
+    /// cuts them. A [`Self::Frame`] whose payload makes it longer than
     /// [`MAX_RELAY_FRAME`] encodes, and the far end refuses it; senders
-    /// check [`Self::fits`] first.
+    /// check [`Self::fits`] first. So does a [`Self::Picture`] that breaks
+    /// its rules; senders check [`RelayPicture::validate`].
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
@@ -131,6 +159,11 @@ impl RelayFrame {
                 out.push(accounts.len() as u8);
                 for salt in accounts {
                     out.extend_from_slice(salt);
+                }
+                if hello.relay_proto >= RELAY_PROTO_2 {
+                    let firmware = firmware_field(hello.firmware.as_deref().unwrap_or(""));
+                    out.push(firmware.len() as u8);
+                    out.extend_from_slice(firmware.as_bytes());
                 }
             }
             Self::Challenge { nonce } => {
@@ -175,6 +208,24 @@ impl RelayFrame {
                 out.push(TAG_LAN_CHANGED);
                 put_lan(&mut out, *lan);
             }
+            Self::Project(project) => {
+                out.push(TAG_PROJECT);
+                match project {
+                    None => out.push(0),
+                    Some(project) => {
+                        out.push(1);
+                        project.put(&mut out);
+                    }
+                }
+            }
+            Self::Picture(picture) => {
+                out.push(TAG_PICTURE);
+                picture.put(&mut out);
+            }
+            Self::PictureRate(rate) => {
+                out.push(TAG_PICTURE_RATE);
+                rate.put(&mut out);
+            }
         }
         out
     }
@@ -185,19 +236,14 @@ impl RelayFrame {
             return Err(RelayFrameError::TooLong);
         }
         let (&tag, body) = bytes.split_first().ok_or(RelayFrameError::Empty)?;
-        let mut r = Reader { rest: body };
+        let mut r = FrameReader::new(body);
         let frame = match tag {
             TAG_HELLO => {
                 let relay_proto = r.u16()?;
                 let board_mac = r.array::<6>()?;
                 let wire_proto = r.u32()?;
                 let lan = r.lan()?;
-                let label_len = usize::from(r.u8()?);
-                if label_len > MAX_LABEL_BYTES {
-                    return Err(RelayFrameError::BadField);
-                }
-                let label = core::str::from_utf8(r.take(label_len)?)
-                    .map_err(|_| RelayFrameError::BadField)?;
+                let label = String::from(r.short_str(MAX_LABEL_BYTES)?);
                 let count = usize::from(r.u8()?);
                 if count > MAX_HELLO_ACCOUNTS {
                     return Err(RelayFrameError::BadField);
@@ -206,13 +252,23 @@ impl RelayFrame {
                 for _ in 0..count {
                     accounts.push(r.array::<SALT_BYTES>()?);
                 }
+                let firmware = if relay_proto >= RELAY_PROTO_2 {
+                    let firmware = r.short_str(MAX_FIRMWARE_BYTES)?;
+                    if !firmware.is_ascii() {
+                        return Err(RelayFrameError::BadField);
+                    }
+                    Some(String::from(firmware))
+                } else {
+                    None
+                };
                 Self::Hello(RelayHello {
                     relay_proto,
                     board_mac,
-                    label: String::from(label),
+                    label,
                     wire_proto,
                     lan,
                     accounts,
+                    firmware,
                 })
             }
             TAG_CHALLENGE => Self::Challenge { nonce: r.array()? },
@@ -247,12 +303,43 @@ impl RelayFrame {
                 reason: RouteCloseReason::from_code(r.u8()?).ok_or(RelayFrameError::BadField)?,
             },
             TAG_LAN_CHANGED => Self::LanChanged { lan: r.lan()? },
+            TAG_PROJECT => {
+                if r.flag()? {
+                    Self::Project(Some(RelayProject::read(&mut r)?))
+                } else {
+                    Self::Project(None)
+                }
+            }
+            TAG_PICTURE => Self::Picture(RelayPicture::read(&mut r)?),
+            TAG_PICTURE_RATE => Self::PictureRate(PictureRate::read(&mut r)?),
             other => return Err(RelayFrameError::UnknownTag(other)),
         };
         if !r.rest.is_empty() {
             return Err(RelayFrameError::TrailingBytes);
         }
         Ok(frame)
+    }
+
+    /// The first relay protocol this frame kind exists in: 1 for tags
+    /// `0x01`–`0x09`, 2 for `0x0a`–`0x0c`. A hub sends a board only frames
+    /// whose protocol is at most the board's.
+    ///
+    /// A hello is protocol 1's frame kind at any `relay_proto`; its own
+    /// version is [`RelayHello::relay_proto`].
+    #[must_use]
+    pub const fn protocol(&self) -> u16 {
+        match self {
+            Self::Hello(_)
+            | Self::Challenge { .. }
+            | Self::Proof { .. }
+            | Self::Registered { .. }
+            | Self::Refused { .. }
+            | Self::Open { .. }
+            | Self::Frame { .. }
+            | Self::Close { .. }
+            | Self::LanChanged { .. } => RELAY_PROTO_1,
+            Self::Project(_) | Self::Picture(_) | Self::PictureRate(_) => RELAY_PROTO_2,
+        }
     }
 
     /// The relay version a hello's bytes declare, read before anything else
@@ -272,6 +359,17 @@ impl RelayFrame {
     #[must_use]
     pub const fn fits(payload_len: usize) -> bool {
         payload_len + ROUTE_FRAME_OVERHEAD <= MAX_RELAY_FRAME
+    }
+}
+
+/// [`RelayFrame::protocol`] from a frame's bytes (its tag), for a hub's
+/// outbox guard: `None` when the bytes are empty or the tag is no frame's.
+#[must_use]
+pub fn frame_protocol(bytes: &[u8]) -> Option<u16> {
+    match bytes.first()? {
+        TAG_HELLO..=TAG_LAN_CHANGED => Some(RELAY_PROTO_1),
+        TAG_PROJECT..=TAG_PICTURE_RATE => Some(RELAY_PROTO_2),
+        _ => None,
     }
 }
 
@@ -295,8 +393,8 @@ pub fn encode_route_frame(route: u16, payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// The frame's kind and its numbers, never its bytes: what a log line may
-/// print.
+/// The frame's kind and its numbers, never its bytes or its names: what a
+/// log line may print.
 impl fmt::Display for RelayFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -316,6 +414,19 @@ impl fmt::Display for RelayFrame {
             Self::Frame { route, bytes } => write!(f, "frame on route {route} ({} B)", bytes.len()),
             Self::Close { route, reason } => write!(f, "close route {route}: {reason}"),
             Self::LanChanged { .. } => f.write_str("lan changed"),
+            Self::Project(Some(_)) => f.write_str("project"),
+            Self::Project(None) => f.write_str("no project"),
+            Self::Picture(picture) => write!(
+                f,
+                "picture ({} lamps, {} samples)",
+                picture.lamps(),
+                picture.samples()
+            ),
+            Self::PictureRate(rate) => write!(
+                f,
+                "picture rate (idle {} s, watched {} ms for {} s)",
+                rate.idle_s, rate.watched_ms, rate.watched_for_s
+            ),
         }
     }
 }
@@ -331,54 +442,10 @@ fn put_lan(out: &mut Vec<u8>, lan: Option<LanAddress>) {
     }
 }
 
-/// A cursor over a frame's body; every read is length-checked.
-struct Reader<'a> {
-    rest: &'a [u8],
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, n: usize) -> Result<&'a [u8], RelayFrameError> {
-        if self.rest.len() < n {
-            return Err(RelayFrameError::Truncated);
-        }
-        let (head, tail) = self.rest.split_at(n);
-        self.rest = tail;
-        Ok(head)
-    }
-
-    fn array<const N: usize>(&mut self) -> Result<[u8; N], RelayFrameError> {
-        let mut out = [0u8; N];
-        out.copy_from_slice(self.take(N)?);
-        Ok(out)
-    }
-
-    fn u8(&mut self) -> Result<u8, RelayFrameError> {
-        Ok(self.take(1)?[0])
-    }
-
-    fn u16(&mut self) -> Result<u16, RelayFrameError> {
-        Ok(u16::from_le_bytes(self.array()?))
-    }
-
-    fn u32(&mut self) -> Result<u32, RelayFrameError> {
-        Ok(u32::from_le_bytes(self.array()?))
-    }
-
-    fn lan(&mut self) -> Result<Option<LanAddress>, RelayFrameError> {
-        match self.u8()? {
-            0 => Ok(None),
-            1 => Ok(Some(LanAddress {
-                ip: self.array()?,
-                port: self.u16()?,
-            })),
-            _ => Err(RelayFrameError::BadField),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relay_limits::{MAX_PICTURE_OUTPUTS, MAX_PROJECT_NAME_BYTES};
     use alloc::vec;
 
     #[test]
@@ -421,6 +488,10 @@ mod tests {
             "a hello cut short is still not decodable"
         );
         assert_eq!(RelayFrame::hello_version(&[TAG_OPEN, 1, 0]), None);
+        assert_eq!(
+            RelayFrame::hello_version(&sample_hello_v2().encode()),
+            Some(2)
+        );
     }
 
     #[test]
@@ -442,12 +513,81 @@ mod tests {
 
     #[test]
     fn trailing_bytes_are_refused() {
-        let mut bytes = RelayFrame::Open { route: 3 }.encode();
-        bytes.push(0);
+        for frame in sample_frames() {
+            if matches!(frame, RelayFrame::Frame { .. }) {
+                continue; // a route frame's payload is the rest
+            }
+            let mut bytes = frame.encode();
+            bytes.push(0);
+            assert_eq!(
+                RelayFrame::decode(&bytes),
+                Err(RelayFrameError::TrailingBytes),
+                "{frame}"
+            );
+        }
+    }
+
+    /// A protocol 1 hello has no tail: whatever follows its accounts is
+    /// trailing bytes, so a protocol 1 hub reads it exactly as before.
+    #[test]
+    fn a_protocol_1_hello_with_a_tail_is_trailing_bytes() {
+        let mut bytes = sample_hello().encode();
+        bytes.extend_from_slice(&[0x0c]);
+        bytes.extend_from_slice(b"2026.10.09-1");
         assert_eq!(
             RelayFrame::decode(&bytes),
             Err(RelayFrameError::TrailingBytes)
         );
+    }
+
+    #[test]
+    fn a_protocol_2_hello_without_its_tail_is_truncated() {
+        let mut bytes = sample_hello().encode();
+        bytes[1] = 2;
+        assert_eq!(RelayFrame::decode(&bytes), Err(RelayFrameError::Truncated));
+    }
+
+    #[test]
+    fn a_protocol_2_hello_without_firmware_encodes_an_empty_one() {
+        let mut hello = RelayHello::new([1; 6], "Lamp", 39, None, vec![]);
+        hello.relay_proto = RELAY_PROTO_2;
+        let decoded = RelayFrame::decode(&RelayFrame::Hello(hello).encode()).unwrap();
+        let RelayFrame::Hello(decoded) = decoded else {
+            panic!("{decoded}");
+        };
+        assert_eq!(decoded.firmware.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_protocol_1_hello_never_carries_its_firmware() {
+        let mut hello = RelayHello::new([1; 6], "Lamp", 39, None, vec![]);
+        hello.firmware = Some("ignored".into());
+        let bytes = RelayFrame::Hello(hello).encode();
+        assert_eq!(
+            bytes,
+            RelayFrame::Hello(RelayHello::new([1; 6], "Lamp", 39, None, vec![])).encode()
+        );
+    }
+
+    #[test]
+    fn a_long_or_non_ascii_firmware_is_refused() {
+        let mut bytes = sample_hello().encode();
+        bytes[1] = 2;
+        let mut long = bytes.clone();
+        long.push(41);
+        long.extend_from_slice(&[b'a'; 41]);
+        assert_eq!(RelayFrame::decode(&long), Err(RelayFrameError::BadField));
+        let mut accented = bytes.clone();
+        accented.push(2);
+        accented.extend_from_slice("é".as_bytes());
+        assert_eq!(
+            RelayFrame::decode(&accented),
+            Err(RelayFrameError::BadField)
+        );
+        let mut at_limit = bytes;
+        at_limit.push(40);
+        at_limit.extend_from_slice(&[b'a'; 40]);
+        assert!(RelayFrame::decode(&at_limit).is_ok());
     }
 
     #[test]
@@ -472,7 +612,134 @@ mod tests {
             RelayFrame::decode(&[0xee]),
             Err(RelayFrameError::UnknownTag(0xee))
         );
+        assert_eq!(
+            RelayFrame::decode(&[0x0d]),
+            Err(RelayFrameError::UnknownTag(0x0d))
+        );
         assert_eq!(RelayFrame::decode(&[]), Err(RelayFrameError::Empty));
+    }
+
+    #[test]
+    fn out_of_range_project_fields_are_refused() {
+        // The presence byte, then each tag's flag.
+        assert_eq!(
+            RelayFrame::decode(&[TAG_PROJECT, 2]),
+            Err(RelayFrameError::BadField)
+        );
+        assert_eq!(
+            RelayFrame::decode(&[TAG_PROJECT, 1, 0, 2, 0]),
+            Err(RelayFrameError::BadField)
+        );
+        assert_eq!(
+            RelayFrame::decode(&[TAG_PROJECT, 1, 0, 0, 7]),
+            Err(RelayFrameError::BadField)
+        );
+        // A name longer than 32 bytes, and one that is not UTF-8.
+        let mut long = vec![TAG_PROJECT, 1, (MAX_PROJECT_NAME_BYTES + 1) as u8];
+        long.extend_from_slice(&[b'a'; MAX_PROJECT_NAME_BYTES + 1]);
+        long.extend_from_slice(&[0, 0]);
+        assert_eq!(RelayFrame::decode(&long), Err(RelayFrameError::BadField));
+        assert_eq!(
+            RelayFrame::decode(&[TAG_PROJECT, 1, 2, 0xc3, 0x28, 0, 0]),
+            Err(RelayFrameError::BadField)
+        );
+        // At the limit is fine.
+        let mut at_limit = vec![TAG_PROJECT, 1, MAX_PROJECT_NAME_BYTES as u8];
+        at_limit.extend_from_slice(&[b'a'; MAX_PROJECT_NAME_BYTES]);
+        at_limit.extend_from_slice(&[0, 0]);
+        assert!(RelayFrame::decode(&at_limit).is_ok());
+    }
+
+    #[test]
+    fn a_projects_name_is_cut_on_a_character_boundary() {
+        // 31 ASCII bytes then a two-byte character straddling the limit.
+        let project = RelayProject {
+            name: "abcdefghijklmnopqrstuvwxyz01234é".into(),
+            uid_tag: None,
+            content_tag: None,
+        };
+        let decoded = RelayFrame::decode(&RelayFrame::Project(Some(project)).encode());
+        let Ok(RelayFrame::Project(Some(decoded))) = decoded else {
+            panic!("{decoded:?}");
+        };
+        assert_eq!(decoded.name, "abcdefghijklmnopqrstuvwxyz01234");
+    }
+
+    #[test]
+    fn out_of_range_picture_fields_are_refused() {
+        let picture = |outputs: &[u32], count: u16, colors: usize| {
+            let mut bytes = vec![TAG_PICTURE, outputs.len() as u8];
+            for lamps in outputs {
+                bytes.extend_from_slice(&lamps.to_le_bytes());
+            }
+            bytes.extend_from_slice(&count.to_le_bytes());
+            bytes.extend_from_slice(&vec![0x80; colors]);
+            RelayFrame::decode(&bytes)
+        };
+        // More than sixteen outputs.
+        assert_eq!(
+            picture(&[1; MAX_PICTURE_OUTPUTS + 1], 1, 3),
+            Err(RelayFrameError::BadField)
+        );
+        assert!(picture(&[1; MAX_PICTURE_OUTPUTS], 1, 3).is_ok());
+        // A lamp sum past u32.
+        assert_eq!(
+            picture(&[u32::MAX, 1], 1, 3),
+            Err(RelayFrameError::BadField)
+        );
+        assert!(picture(&[u32::MAX - 1, 1], 1, 3).is_ok());
+        // No samples for some lamps, samples for none.
+        assert_eq!(picture(&[3], 0, 0), Err(RelayFrameError::BadField));
+        assert_eq!(picture(&[], 1, 3), Err(RelayFrameError::BadField));
+        assert_eq!(picture(&[0, 0], 1, 3), Err(RelayFrameError::BadField));
+        assert!(picture(&[0, 0], 0, 0).is_ok());
+        // More samples than lamps.
+        assert_eq!(picture(&[2], 3, 9), Err(RelayFrameError::BadField));
+        // Byte counts that disagree with `count`.
+        assert_eq!(picture(&[3], 3, 8), Err(RelayFrameError::Truncated));
+        assert_eq!(picture(&[3], 3, 10), Err(RelayFrameError::TrailingBytes));
+    }
+
+    #[test]
+    fn the_frame_limit_bounds_a_pictures_samples() {
+        let picture = |count: usize| RelayPicture {
+            outputs: vec![1000; MAX_PICTURE_OUTPUTS],
+            colors: vec![0x40; 3 * count],
+        };
+        let at_limit = RelayFrame::Picture(picture(660)).encode();
+        assert_eq!(at_limit.len(), MAX_RELAY_FRAME);
+        assert!(RelayFrame::decode(&at_limit).is_ok());
+        assert_eq!(
+            RelayFrame::decode(&RelayFrame::Picture(picture(661)).encode()),
+            Err(RelayFrameError::TooLong)
+        );
+    }
+
+    #[test]
+    fn any_picture_rate_decodes() {
+        let rate = PictureRate {
+            idle_s: 0,
+            watched_ms: 0,
+            watched_for_s: u16::MAX,
+        };
+        assert_eq!(
+            RelayFrame::decode(&RelayFrame::PictureRate(rate).encode()),
+            Ok(RelayFrame::PictureRate(rate))
+        );
+    }
+
+    #[test]
+    fn each_frame_kind_knows_its_protocol() {
+        for frame in sample_frames() {
+            let bytes = frame.encode();
+            assert_eq!(frame_protocol(&bytes), Some(frame.protocol()), "{frame}");
+            let expected = if bytes[0] >= TAG_PROJECT { 2 } else { 1 };
+            assert_eq!(frame.protocol(), expected, "{frame}");
+        }
+        assert_eq!(frame_protocol(&[]), None);
+        assert_eq!(frame_protocol(&[0x00]), None);
+        assert_eq!(frame_protocol(&[0x0d]), None);
+        assert_eq!(frame_protocol(&[0xff]), None);
     }
 
     #[test]
@@ -496,6 +763,26 @@ mod tests {
         assert_eq!(text, "proof (1 account(s))");
     }
 
+    #[test]
+    fn display_never_prints_a_projects_name_or_a_pictures_colours() {
+        let texts: Vec<String> = sample_frames()
+            .iter()
+            .filter(|frame| frame.protocol() == RELAY_PROTO_2)
+            .map(|frame| alloc::format!("{frame}"))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "project",
+                "project",
+                "no project",
+                "picture (0 lamps, 0 samples)",
+                "picture (8 lamps, 4 samples)",
+                "picture rate (idle 60 s, watched 500 ms for 15 s)",
+            ]
+        );
+    }
+
     /// Seeded garbage, a few thousand buffers: the decoder answers every one.
     #[test]
     fn random_buffers_never_panic() {
@@ -513,7 +800,7 @@ mod tests {
                 *byte = state as u8;
             }
             if let Some(first) = buffer.first_mut() {
-                *first %= 11;
+                *first %= 14;
             }
             let _ = RelayFrame::decode(&buffer);
         }
@@ -532,10 +819,19 @@ mod tests {
         ))
     }
 
+    fn sample_hello_v2() -> RelayFrame {
+        let RelayFrame::Hello(hello) = sample_hello() else {
+            unreachable!()
+        };
+        RelayFrame::Hello(hello.with_firmware("2026.10.09-1"))
+    }
+
     fn sample_frames() -> Vec<RelayFrame> {
         vec![
             sample_hello(),
+            sample_hello_v2(),
             RelayFrame::Hello(RelayHello::new([1; 6], "", 1, None, vec![])),
+            RelayFrame::Hello(RelayHello::new([1; 6], "", 1, None, vec![]).with_firmware("")),
             RelayFrame::Challenge { nonce: [0x5a; 32] },
             RelayFrame::Proof {
                 proofs: vec![[1; 32], [2; 32]],
@@ -562,6 +858,30 @@ mod tests {
                 reason: RouteCloseReason::Busy,
             },
             RelayFrame::LanChanged { lan: None },
+            RelayFrame::Project(Some(RelayProject {
+                name: "Rocaille".into(),
+                uid_tag: Some([0xa1; 16]),
+                content_tag: Some([0xc2; 16]),
+            })),
+            RelayFrame::Project(Some(RelayProject {
+                name: String::new(),
+                uid_tag: None,
+                content_tag: None,
+            })),
+            RelayFrame::Project(None),
+            RelayFrame::Picture(RelayPicture {
+                outputs: vec![],
+                colors: vec![],
+            }),
+            RelayFrame::Picture(RelayPicture {
+                outputs: vec![5, 3],
+                colors: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            }),
+            RelayFrame::PictureRate(PictureRate {
+                idle_s: 60,
+                watched_ms: 500,
+                watched_for_s: 15,
+            }),
         ]
     }
 }

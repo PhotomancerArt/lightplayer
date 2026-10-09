@@ -311,7 +311,10 @@ impl RelayHub {
             | RelayFrame::Proof { .. }
             | RelayFrame::Registered { .. }
             | RelayFrame::Refused { .. }
-            | RelayFrame::Open { .. } => {
+            | RelayFrame::Open { .. }
+            | RelayFrame::Project(_)
+            | RelayFrame::Picture(_)
+            | RelayFrame::PictureRate(_) => {
                 let mut actions = vec![HubAction::Close {
                     leg,
                     code: RelayCloseCode::PolicyViolation,

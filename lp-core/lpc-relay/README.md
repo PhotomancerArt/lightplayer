@@ -24,11 +24,14 @@ route ids and frame lengths, never their contents.
 | Module | What |
 |---|---|
 | `relay_frame` | `RelayFrame` and its codec: one byte of tag, fixed little-endian fields, length-checked, ≤ `MAX_RELAY_FRAME` (2 KiB). The table of tags is the module doc. |
-| `relay_hello` | `RelayHello`: the board's MAC, name, wire version, LAN address and account salts. |
+| `relay_hello` | `RelayHello`: the board's MAC, name, wire version, LAN address and account salts. `RelayHello::new` is the protocol 1 hello; `.with_firmware(…)` makes it protocol 2, with the firmware version as its tail. |
+| `relay_project` | Protocol 2. `RelayProject` (the project's name, its uid tag, its content tag) and the tags: `project_tag_key(K) = HMAC(K, "lp-relay project/1")`, `project_uid_tag`, `project_content_tag`. A uid and a package hash are read capabilities and never cross the leg; only their tags do. |
+| `relay_picture` | Protocol 2. `RelayPicture`: lamps per output and point-sampled sRGB8 colours; its doc is the picture's meaning. |
+| `picture_rate` | Protocol 2. `PictureRate` (hub → board) and the board's clamp, `PictureRate::clamped`. |
 | `relay_proof` | `relay_auth_key(K) = HMAC(K, "lp-relay auth/1")`, `relay_proof(A, nonce, mac) = HMAC(A, nonce ‖ mac)`, and the hub's constant-time check. |
-| `relay_version` | `RELAY_PROTO_VERSION` and `check_relay_version`: version-and-refuse. |
+| `relay_version` | `RELAY_PROTO_1`, `RELAY_PROTO_2`, `RELAY_PROTO_VERSION`, `SUPPORTED_RELAY_PROTO_VERSIONS` and `check_relay_version`: version-and-refuse. |
 | `refuse_reason`, `route_close_reason` | The one-byte reason codes. |
-| `relay_limits` | Frame size, accounts per hello, routes per board, ping and silence intervals. |
+| `relay_limits` | Frame size, accounts per hello, routes per board, ping and silence intervals; protocol 2's firmware, name, tag and picture limits, and the board's clamps on a `PictureRate`. |
 | `relay_client` | `RelayClient`: the board's state machine — when to dial (`may_dial`: joined, Cloud relay on, an account entry; the C6's driver and relay task both ask it), backoff, the challenge, the route table, the status. |
 
 ## The registration
@@ -53,9 +56,22 @@ The device wire (`lpc-wire`) keeps no compatibility, because Studio, lp-cli
 and firmware ship together. The relay cannot: a lamp's firmware outlives
 many cloud deploys. So the device leg carries `RELAY_PROTO_VERSION`, the hub
 accepts exactly the versions in `SUPPORTED_RELAY_PROTO_VERSIONS`, and a
-board it refuses is told so by name. Bump the version on any change to a
-frame's bytes, a reason code or the proof; `tests/relay_frame_golden.rs`
-holds the bytes and must never be edited to make a change pass.
+board it refuses is told so by name.
+
+Two protocols exist, and the hub accepts both:
+
+| Protocol | Since | What it adds | Golden bytes |
+|---|---|---|---|
+| 1 | 2026-10-06, the first relay | tags `0x01`–`0x09` | `tests/relay_frame_golden.rs` |
+| 2 | 2026-10-08, pictures through the cloud | the hello's firmware tail; `Project` (`0x0a`), `Picture` (`0x0b`), `PictureRate` (`0x0c`); the project tags | `tests/relay_frame_golden_v2.rs` |
+
+Fielded cores speak protocol 1, so the hub accepts it forever and **never
+sends a protocol 1 board a frame protocol 1 does not have**
+(`RelayFrame::protocol`, `frame_protocol`): a protocol 1 board closes its
+leg on any frame it does not know. A change to a frame's bytes, a reason
+code or the proof is a new protocol, added beside the old ones; a golden
+file is never edited to make a change pass, and protocol 1's is never
+edited at all.
 
 ## Tests
 
