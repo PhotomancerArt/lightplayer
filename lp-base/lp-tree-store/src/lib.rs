@@ -22,6 +22,7 @@ mod heap_sort;
 mod host_deflate;
 #[cfg(feature = "lpfs")]
 mod lp_fs_tree;
+mod mount_walk;
 mod multi_node;
 mod node_read;
 mod node_write;

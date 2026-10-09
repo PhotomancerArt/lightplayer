@@ -1,6 +1,7 @@
 //! The RAM index: id → where its one trusted copy lives, as a sorted array
 //! of 12-byte entries (id u64, packed sector u16 | offset u16). Rebuilt at
-//! mount by scanning; nothing on flash describes it.
+//! mount from the chosen root's closure (`mount_walk.rs`); nothing on flash
+//! describes it.
 //!
 //! What it holds (the dedup rule depends on it): after a mark, exactly the
 //! live records; between marks, those plus every record written since. No
@@ -10,7 +11,6 @@
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::heap_sort::heap_sort_by;
 use crate::object_id::ObjectId;
 use crate::vec_growth::grow_for_one;
 
@@ -22,11 +22,11 @@ pub struct RecordLoc {
 }
 
 impl RecordLoc {
-    fn pack(self) -> u32 {
+    pub fn pack(self) -> u32 {
         self.sector << 16 | self.offset
     }
 
-    fn unpack(v: u32) -> Self {
+    pub fn unpack(v: u32) -> Self {
         RecordLoc {
             sector: v >> 16,
             offset: v & 0xFFFF,
@@ -116,32 +116,6 @@ impl RamIndex {
             .retain(|e| RecordLoc::unpack(e.loc).sector != sector);
     }
 
-    /// Mount: add without keeping order; [`Self::sort_dedup`] after.
-    pub fn push_unsorted(&mut self, id: ObjectId, loc: RecordLoc) {
-        self.entries.push(IndexEntry {
-            id: id.0,
-            loc: loc.pack(),
-        });
-    }
-
-    /// Mount: sort, and of several copies of one id keep the one in the
-    /// sector with the highest `newer(sector)` (the sector opened last).
-    pub fn sort_dedup(&mut self, newer: impl Fn(u32) -> u32) {
-        let rank = |e: &IndexEntry| (e.id, newer(RecordLoc::unpack(e.loc).sector));
-        heap_sort_by(&mut self.entries, |a, b| rank(a) < rank(b));
-        // Of each run of equal ids the last is the newest: keep it.
-        let n = self.entries.len();
-        let mut w = 0;
-        for r in 0..n {
-            if r + 1 < n && { self.entries[r + 1].id } == { self.entries[r].id } {
-                continue;
-            }
-            self.entries[w] = self.entries[r];
-            w += 1;
-        }
-        self.entries.truncate(w);
-    }
-
     /// Positions of the entries in `sector`.
     pub fn positions_in(&self, sector: u32) -> impl Iterator<Item = usize> + '_ {
         (0..self.entries.len()).filter(move |&i| self.loc_at(i).sector == sector)
@@ -166,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_find_remove_and_dedup() {
+    fn insert_find_and_remove() {
         assert_eq!(size_of::<IndexEntry>(), 12);
         let mut ix = RamIndex::default();
         ix.insert(ObjectId(5), loc(0, 20));
@@ -177,15 +151,5 @@ mod tests {
         assert_eq!(ix.get(ObjectId(2)), Some(loc(3, 20)));
         ix.remove_sector(0);
         assert_eq!(ix.len(), 1);
-
-        let mut m = RamIndex::default();
-        m.push_unsorted(ObjectId(7), loc(4, 20));
-        m.push_unsorted(ObjectId(3), loc(2, 20));
-        m.push_unsorted(ObjectId(7), loc(1, 20));
-        // Sector 1 was opened after sector 4.
-        m.sort_dedup(|s| if s == 1 { 10 } else { s });
-        assert_eq!(m.len(), 2);
-        assert_eq!(m.get(ObjectId(7)), Some(loc(1, 20)));
-        assert_eq!(m.id_at(0), ObjectId(3));
     }
 }

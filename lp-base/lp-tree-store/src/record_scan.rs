@@ -1,8 +1,10 @@
-//! Mount's scan of one sector: every record header and payload, CRC-checked
-//! (a torn program can leave a good header over a short payload — README
-//! defect 1), stopping at the end or at the first record that does not
-//! check. Records go straight into the index; roots are kept apart, two at
-//! most (I1 falls back one step and no further).
+//! Mount's first pass over one sector: every record header and payload,
+//! CRC-checked (a torn program can leave a good header over a short payload
+//! — README defect 1), stopping at the end or at the first record that does
+//! not check. Nothing is indexed here (that would cost RAM for every record
+//! on flash, garbage included): the pass finds where each sector's trusted
+//! records end and keeps the roots, two at most (I1 falls back one step and
+//! no further). `mount_walk.rs` then indexes only the chosen root's closure.
 
 use alloc::vec::Vec;
 
@@ -32,8 +34,14 @@ pub struct RootCandidates {
 }
 
 impl RootCandidates {
+    /// Offered in sector-sequence order: a second copy of a root (a GC
+    /// copy) moves it to the later sector, the copy FORMAT.md says to keep.
     fn offer(&mut self, c: RootCandidate) {
         self.max_seq = self.max_seq.max(c.seq);
+        if let Some(b) = self.best.iter_mut().flatten().find(|b| b.id == c.id) {
+            b.loc = c.loc;
+            return;
+        }
         match self.best {
             [Some(a), _] if c.seq <= a.seq => {
                 if self.best[1].is_none_or(|b| c.seq > b.seq) && c.id != a.id {
@@ -51,7 +59,8 @@ impl RootCandidates {
 /// How a sector ended.
 #[derive(Clone, Copy, Debug)]
 pub struct ScannedSector {
-    /// Offset just past the last good record (the sector size when closed).
+    /// Offset just past the last good record: the sector's trusted records
+    /// are `[SECTOR_HEADER_LEN, end)`, closed or not.
     pub end: u32,
     /// A record failed to check: nothing after it is trusted.
     pub closed: bool,
@@ -108,16 +117,11 @@ pub fn scan_sector<F: Flash>(
                     break;
                 }
             }
-        } else {
-            log.index.push_unsorted(r.id, loc);
         }
         off += r.total_len();
         out.end = off;
     }
     log.note(payload.capacity());
-    if out.closed {
-        out.end = size;
-    }
     Ok(out)
 }
 

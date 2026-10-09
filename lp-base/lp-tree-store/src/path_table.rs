@@ -116,6 +116,7 @@ impl PathTable {
     /// Mount: add a live file without keeping order; [`Self::finish_build`]
     /// after.
     pub fn push_unsorted(&mut self, hash: u64, id: ObjectId, size: u32) {
+        grow_for_one(&mut self.rows);
         self.rows.push(PathRow {
             hash,
             id: id.0,

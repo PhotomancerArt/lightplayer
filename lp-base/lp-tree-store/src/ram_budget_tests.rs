@@ -14,6 +14,9 @@ use lp_nor_sim::NorGeometry;
 use crate::test_support::{formatted, heap_use, mount, text};
 use crate::{SoftSha256, StoreConfig, TreeStore};
 
+/// G1's bound on mount's peak at 128 sectors, whatever the garbage (P8).
+const MOUNT_PEAK_AT_128: usize = 16 * 1024;
+
 /// c40's shape: 132 documents, ~216 KB, under one project, plus board
 /// files (sizes from the spike corpus: many small JSON nodes, ~40 shaders,
 /// a few big maps).
@@ -46,8 +49,14 @@ pub fn c40_like() -> Vec<(String, Vec<u8>)> {
 
 #[test]
 fn c40_resident_and_transient_are_inside_the_budget() {
+    for sectors in [128, 176] {
+        c40_budget_on(sectors);
+    }
+}
+
+fn c40_budget_on(sectors: u32) {
     let c = StoreConfig::default();
-    let mut st = mount(formatted(NorGeometry::c6(128), &c), &c);
+    let mut st = mount(formatted(NorGeometry::c6(sectors), &c), &c);
     let files = c40_like();
     let total: usize = files.iter().map(|f| f.1.len()).sum();
     assert!((200_000..240_000).contains(&total), "{total}");
@@ -65,22 +74,34 @@ fn c40_resident_and_transient_are_inside_the_budget() {
         });
     let s = st.stats();
     std::println!(
-        "c40/128: resident {} B (index {} × 12, paths {} × 20, sectors {}), mount peak {} B, held {} B",
+        "c40/{sectors}: resident {} B (index {} × 12, paths {} × 20, sectors {}), mount peak {} B, \
+         held {} B, mount read {} B",
         s.resident_ram_bytes,
         s.index_entries,
         s.path_table_entries,
         s.sector_table_ram_bytes,
         mount_peak,
-        held
+        held,
+        s.mount_bytes_read
     );
     // D3 says ≈ 8 KB; this is a regression ceiling, not the budget (the
     // measured figure is reported at G1).
-    assert!(s.resident_ram_bytes <= 9 * 1024, "{s:?}");
+    // (12 B per sector past 128.)
+    assert!(
+        s.resident_ram_bytes <= 9 * 1024 + (sectors as usize - 128) * 12,
+        "{s:?}"
+    );
     // What the allocator holds after mount is the resident structures.
     assert!(
         (held as usize) <= s.resident_ram_bytes + 512,
         "held {held} vs resident {}",
         s.resident_ram_bytes
+    );
+    // Mount's peak (G1, P8): ≤ 16 KB at 128 sectors; a sector costs mount
+    // ~30 B (the sector table, the sorted header list, the closed flags).
+    assert!(
+        mount_peak <= MOUNT_PEAK_AT_128 + (sectors as usize - 128) * 32,
+        "mount peak {mount_peak}"
     );
 
     // Per-operation transient, by the allocator (the caller's buffer — the
@@ -117,10 +138,10 @@ fn c40_resident_and_transient_are_inside_the_budget() {
 /// (old sectors reclaimed by erasing; with this workload every reclaimed
 /// sector is wholly garbage, so GC copies nothing). Resident must stay
 /// bounded (the index is pruned back by a mark when it outgrows the live
-/// set); mount's transient is reported — it indexes every record on flash
-/// before pruning, so it grows with the garbage, not the live data.
+/// set), and so must mount's peak: it indexes only the root's closure, so a
+/// flash full of garbage costs it no more than a freshly pushed one.
 #[test]
-fn a_full_store_keeps_resident_bounded_and_mount_reports_its_peak() {
+fn a_full_store_keeps_resident_and_the_mount_peak_bounded() {
     for deflated in [false, true] {
         let c = StoreConfig::default();
         let mut st = mount(formatted(NorGeometry::c6(128), &c), &c);
@@ -165,10 +186,14 @@ fn a_full_store_keeps_resident_bounded_and_mount_reports_its_peak() {
         std::println!(
             "full c40/128 deflated={deflated}: resident after the push {at_rest} B, max \
              {max_resident} B over {round} writes; largest buffer {max_peak} B; remount with \
-             {in_use} sectors in use: peak {mount_peak} B, held {held} B ({} index entries)",
-            st.stats().index_entries
+             {in_use} sectors in use: peak {mount_peak} B, held {held} B ({} index entries), \
+             mount read {} B",
+            st.stats().index_entries,
+            st.stats().mount_bytes_read
         );
         // A regression ceiling, not the budget: the measured figure is reported.
         assert!(max_resident <= 11 * 1024, "{max_resident}");
+        assert_eq!(in_use, 128, "the flash is not full of garbage");
+        assert!(mount_peak <= MOUNT_PEAK_AT_128, "mount peak {mount_peak}");
     }
 }

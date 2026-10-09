@@ -39,6 +39,9 @@ pub struct TreeStoreStats {
     pub record_bytes_written: u64,
     /// Flash bytes read by the last mount.
     pub mount_bytes_read: u64,
+    /// Header scans the last mount made after its first pass (one per level
+    /// of the tree it indexed).
+    pub mount_scans: u32,
     pub sectors_opened: u64,
     pub erases: u64,
     /// Read-backs that did not match what was written (record, erase or

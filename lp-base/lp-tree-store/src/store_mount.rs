@@ -1,17 +1,20 @@
-//! Mount: read every sector header; scan every valid sector's records in
-//! sector-sequence order into the index; pick the root by I1 (the newest
-//! CRC-good root whose closure is complete, else the one before it — no
-//! further, README defect 12); mark from it and prune the index to the live
-//! set; walk the tree to build the path table; resume each head only if
-//! its tail reads all `0xFF`.
+//! Mount: read every sector header; check every trusted sector's records in
+//! sector-sequence order (pass 1, `record_scan.rs`: where each sector's
+//! trusted records end, and the newest two roots — nothing indexed); pick
+//! the root by I1 (the newest CRC-good root whose closure is complete, else
+//! the one before it — no further, README defect 12) by indexing its
+//! closure (pass 2, `mount_walk.rs`: the index holds only live records, so
+//! mount's RAM does not grow with the garbage on flash); walk the tree to
+//! build the path table; resume each head only if its tail reads all
+//! `0xFF`.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::dir_node::EntryKind;
 use crate::flash::Flash;
-use crate::gc_mark::{MarkRole, mark, prune};
 use crate::heap_sort::heap_sort_by;
+use crate::mount_walk::index_closure;
 use crate::node_read::read_dir;
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::{ObjectId, path_hash};
@@ -35,6 +38,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             }
         }
         heap_sort_by(&mut valid, |a, b| (a.0, a.1) < (b.0, b.1));
+        // Pass 1: every trusted record, CRC-checked; roots kept apart.
         let mut roots = RootCandidates::default();
         let mut closed = alloc::vec![false; n as usize];
         for &(_, s, _) in &valid {
@@ -42,35 +46,36 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             self.log.sectors.end[s as usize] = scan.end as u16;
             closed[s as usize] = scan.closed;
         }
-        for c in roots.best.iter().flatten() {
-            self.log.index.push_unsorted(c.id, c.loc);
-        }
-        let seqs = &self.log.sectors.seq;
-        let mut index = core::mem::take(&mut self.log.index);
-        index.sort_dedup(|s| seqs[s as usize]);
-        self.log.index = index;
-        self.log
-            .note(self.log.index.ram_bytes() + valid.capacity() * 12);
         self.max_root_seq = roots.max_seq;
         self.log.next_sector_seq = valid.last().map_or(1, |v| v.0.wrapping_add(1));
 
+        // Pass 2: index the newest root's closure, else the one before it.
+        self.log.note(valid.capacity() * 12 + closed.capacity());
         let mut chosen = None;
         for c in roots.best.iter().flatten() {
-            match mark(&mut self.log, &[(c.id, MarkRole::Root)], false) {
-                Ok(m) => {
-                    chosen = Some((c.id, m));
+            match index_closure(&mut self.log, *c, &valid) {
+                Ok(w) => {
+                    chosen = Some((c.id, w));
                     break;
                 }
                 Err(StoreError::Corrupt(_)) => continue,
                 Err(e) => return Err(e),
             }
         }
-        let Some((id, m)) = chosen else {
+        let Some((id, walked)) = chosen else {
             return Err(StoreError::Corrupt("no complete root"));
         };
         self.stats.marks += 1;
-        prune(&mut self.log, m);
+        self.stats.mount_scans = walked.scans;
+        self.log.sectors.live = walked.live;
+        self.log.index.shrink();
         self.live_after_mark = self.log.index.len();
+        // A closed sector is never appended to: its end is the sector size.
+        for (s, &c) in closed.iter().enumerate() {
+            if c {
+                self.log.sectors.end[s] = self.log.sector_size as u16;
+            }
+        }
         let (_, payload) = self.log.read_record(id)?;
         let root = RootRecord::decode(&payload).ok_or(StoreError::Corrupt("root"))?;
         self.log.sectors.retired = root.retired.clone();
