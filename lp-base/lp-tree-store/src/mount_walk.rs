@@ -28,6 +28,7 @@ use alloc::vec::Vec;
 
 use crate::flash::Flash;
 use crate::gc_mark::{MarkRole, push_dir_node_entries, visit};
+use crate::heap_sort::heap_sort_by;
 use crate::multi_node::{multi_child, parse_multi};
 use crate::object_id::ObjectId;
 use crate::ram_index::{RamIndex, RecordLoc};
@@ -105,7 +106,7 @@ pub fn index_closure<F: Flash, K>(
         );
         // The next level: what was named and is not indexed yet, by id.
         next.retain(|&(id, _)| !log.index.contains(id));
-        next.sort_unstable_by_key(|e| e.0.0);
+        heap_sort_by(&mut next, |a, b| a.0.0 < b.0.0);
         next.dedup_by_key(|e| e.0.0);
         next.shrink_to_fit();
         if next.is_empty() {
