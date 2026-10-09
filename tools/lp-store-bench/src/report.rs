@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 /// the spike.
 pub fn code_size_note(cand: &str) -> &'static str {
     match cand {
-        "f1" | "f2" => "~25 KB (littlefs in the shipped image; spike)",
+        "f1" | "f2" | "f3" => "~25 KB (littlefs in the shipped image; spike)",
         "s1" => "8.9–11.7 KB (spike)",
         "t1" => "see lp-tree-store README (RV32 probe)",
         _ => "—",

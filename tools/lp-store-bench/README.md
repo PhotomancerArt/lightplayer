@@ -16,12 +16,15 @@ number — not an emulator or silicon measurement.
   over a list. Dials ride in `CandidateConfig.dials` as strings; on the
   command line a candidate is `name[@dial=v+dial=v]`, e.g.
   `t1@record_max=512+codec=stored` (`sectors=N` sets the partition). The
-  littlefs candidates (`f1`, `f2`) take `block_cycles=N` (littlefs's
-  metadata-pair wear levelling; unset is −1, off, as the firmware ships).
+  littlefs candidates (`f1`, `f2`, `f3`) take `block_cycles=N` (littlefs's
+  metadata-pair wear levelling; unset is −1, off, as the firmware ships —
+  except `f3`, whose unset is 100; `f3@block_cycles=-1` turns it off).
 - **Candidates** (`candidates/`): `mem` (the reference: whole store as one
   blob, ping-pong slots, CRC + sequence — correct under every cut) and
   `mem-broken` (its twin, erase-then-rewrite in place — fails), plus the
-  real candidates as they land.
+  real candidates as they land; `f3` (the control: littlefs, one deflated
+  package per pattern, `/projects/<slot>/modules/<p>.pkg`) is in
+  `littlefs_pattern_package.rs`.
 - **Workloads** (`workload.rs`): steps of puts and prefix deletes, each
   ending in `commit`, built from corpora at runtime, deterministic by seed.
   `push` (board files, then the corpus into `/projects/a/`), `repush` (the
