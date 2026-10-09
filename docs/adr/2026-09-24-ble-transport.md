@@ -276,6 +276,8 @@ S4. **Play over Bluetooth is lean when idle.** Play is the steady state (a
    (`BLE_PLAY_IDLE_REFRESH_INTERVAL`). The editor over Bluetooth is authoring
    and keeps the device cadence; the device card's live picture feed does not
    run over Bluetooth at all. Measured over `?ble=emu`: see Consequences.
+   *Amended 2026-10-08 (below): the card's picture runs over Bluetooth at a
+   gentle pace; Play keeps its minute.*
 
 S5. **`?ble=emu` is a polyfill, and it proves the transport — not access.**
    Beside `?emu=`, `navigator.bluetooth` becomes
@@ -622,3 +624,65 @@ the no-flashing rule all sit above or beside the framing.
   note.
 - Plan directory: `lp2025/2026-09-28-1445-ble-on-lp-link` (`plan.md`,
   `notes.md`, phase files `p1`–`p5`).
+
+## Amendment 2026-10-08: the card's picture runs over Bluetooth, gently (S4)
+
+S4 kept the device card's picture feed off Bluetooth entirely, so a board
+reached that way never showed a live picture and its card said "No live
+picture over Bluetooth — Open in editor to see and control it." Yona,
+2026-10-08: "its annoying and seems unnecessary after all the work we did to
+get the data rates down". Reversed for the card; Play keeps its minute.
+
+- **The rule.** The card feed runs over Bluetooth at its own completion gap,
+  `DEVICE_CARD_FEED_BLE_INTERVAL` = 500 ms, against
+  `DEVICE_CARD_FEED_INTERVAL` = 150 ms over USB, the LAN and the relay
+  (`card_feed_gap_policy`, `lpa-studio-core/src/app/studio/refresh_cadence.rs`).
+  The period is the gap plus the read's own time, so a card sees about one to
+  two pictures a second and a bigger frame self-throttles. The rest of the
+  feed's rule is unchanged: it pulls only while its card is mounted and the
+  page is visible, never under the editor's borrow, and parks after three
+  unanswered reads. The card waits for its first picture with the sentence
+  every link uses ("No picture yet — the live feed is coming."), and its live
+  pill names the pace: "live · 43 fps · shown 1–2/s".
+- **What a card read costs, measured.** Off the wire tap of
+  `just walk-ble-emu` (`LP_EMU_WIRE_TAP`, `just wire-tap-stat --ledger card`):
+  a steady reply is the frame's raw sRGB bytes plus about 87 B — 254 B for
+  Peach (1D)'s 56 lamps, 811 B for Logo Sign's 241 — so about 0.5 KB at 128
+  lamps and 1.6 KB at 512. The request is 187 B. The first read after a
+  connect also carries the geometry once (2,814 B for Logo Sign). These sizes
+  are the wire's and do not depend on the link; the walk's read rates do (its
+  "Bluetooth" is the emulated board's USB link), so none of its rates is a
+  Bluetooth number. For scale on that same emulated link: the card put
+  ~0.3 KB/s up and 0.4–1.2 KB/s down, the editor 1.7 KB/s up and 2.8 KB/s
+  down.
+- **Why M5's reasons no longer hold.**
+  - *Size.* M5 sized the card against `M!` JSON lines with base64 pixels.
+    Since D8 the link is lp-link and replies are packed: pixels travel raw.
+  - *ESP-NOW.* The concern still applies in kind: a card on screen is traffic
+    on the air the board shares with ESP-NOW, and a project with a Radio node
+    loses some packets while it is watched. But this ADR's 2026-09-24
+    Amendment ruled a connected central an operating state whose ESP-NOW loss
+    is measured and reported, not gated. Connected and idle already costs
+    ~8–9 % against ~0.5 %, and the editor over Bluetooth, which is allowed,
+    reads every 75 ms. The card adds well under what the editor does, only
+    while a person is looking at the Devices page, and never while the board
+    uses Wi‑Fi (ESP-NOW is off then: `fw-esp32-common/src/net/radio_rule.rs`).
+    Steady state (Bluetooth on, nothing connected) is untouched.
+  - *The board's loop.* A reply of at most `SMALL_REPLY_BYTES` (1 KiB, about
+    310 lamps) is copied into the link's send ring and holds nothing; a larger
+    one holds the frame buffer only until the link has cut it into frames.
+    The board-side ceiling is the radio frame-rate budget's connected row
+    (`2026-10-06-radio-frame-rate-budget.md`: ≤ 50 % fps, p99 ≤ 1 s).
+- **Play keeps its minute** (`BLE_PLAY_IDLE_REFRESH_INTERVAL`). It is not the
+  same case: Play is held for hours on a phone at the piece, its read is the
+  lens's whole read (a 407 B request; ~1.2 KB replies for Logo Sign in the
+  editor), and its
+  surface puts the controls first and the picture in a slim banner. The
+  2026-09-24 re-ruling weakens S4's "Play is the steady state", so it is worth
+  revisiting, but with the card's desk measurement in hand, not by analogy.
+- **Owed: a desk measurement on silicon.** Board fps with the card watched
+  against the same connection with the card off screen, link stability over
+  a few minutes, Mac Chrome as the central; optionally ESP-NOW loss with
+  `desk_espnow_meter`. The steps are in PR #1062. Until then the pace is a
+  judgement from the wire sizes and the earlier desk rates (Mac 5–12 KB/s of
+  notifications), not a measurement.

@@ -192,19 +192,21 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 /// Until 2026-10-08 a Bluetooth card had no picture at all (BLE M5: a
 /// picture every 150 ms is a stream, on air the board shares with
 /// ESP-NOW). What changed: the link is lp-link with packed replies, so one
-/// card read is the frame's raw sRGB bytes (3 B a lamp) plus a few dozen
-/// bytes — ~0.4 KB for 128 lamps, ~1.6 KB for 512 — and a connected central
-/// was re-ruled an operating state whose ESP-NOW cost is measured, not gated
-/// (`docs/adr/2026-09-24-ble-transport.md`, both 2026-09-24 and 2026-10-08
-/// amendments). The editor over Bluetooth already reads at the device
-/// cadence; a card at this gap moves a fraction of what the editor does.
+/// steady card reply is the frame's raw sRGB bytes (3 B a lamp) plus ~87 B
+/// — 254 B for Peach's 56 lamps and 811 B for Logo Sign's 241, measured off
+/// the wire tap; ~0.5 KB at 128 lamps, ~1.6 KB at 512 — beside a 187 B
+/// request; and a connected central was re-ruled an operating state whose
+/// ESP-NOW cost is measured, not gated (`docs/adr/2026-09-24-ble-transport.md`,
+/// its 2026-09-24 and 2026-10-08 amendments). The editor over Bluetooth
+/// already reads at the device cadence; a card at this gap moves a fraction
+/// of what the editor does.
 ///
 /// Under completion-based pacing the real period is this gap plus the
-/// read's own time on the air (a few connection events for a small frame,
-/// a few hundred milliseconds for a big one at the Mac's 5–12 KB/s), so a
-/// 128-lamp card lands near 1.5 pictures a second and a 512-lamp one near
-/// one. The feed still pulls only while its card is mounted and the page is
-/// visible.
+/// read's own time on the air, so a bigger frame self-throttles. At the
+/// Mac's measured 5–12 KB/s of notifications a 512-lamp reply is a few
+/// hundred milliseconds, which still lands near a picture a second; a small
+/// one near two. Not yet measured on silicon. The feed still pulls only
+/// while its card is mounted and the page is visible.
 pub const DEVICE_CARD_FEED_BLE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// The card feed's completion gap for a board, by the link it is reached
