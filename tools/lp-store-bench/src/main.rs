@@ -10,6 +10,7 @@ use lp_store_bench::driver_endurance::{DayShape, endurance};
 use lp_store_bench::driver_exhaustive::{
     FailureRecord, SweepParams, SweepSummary, sweep_exhaustive,
 };
+use lp_store_bench::driver_long::{LongParams, LongSummary, long_walk};
 use lp_store_bench::driver_measure::{MeasureResult, measure, min_sectors};
 use lp_store_bench::driver_random::{RandomParams, random_walk};
 use lp_store_bench::{CorpusSet, Reproducer, Scoreboard, WorkloadSpec, replay};
@@ -108,6 +109,34 @@ enum Cmd {
         /// `sweep --tears`); default the three guessed ones.
         #[arg(long, default_value = "")]
         tears: String,
+    },
+    /// Long walks on one mounted store: a cut every N steps, full-state
+    /// checks (and a remount) every M; GC runs per walk are reported.
+    Long {
+        #[command(flatten)]
+        common: Common,
+        /// Walks, seeds 1..=N (in parallel).
+        #[arg(long, default_value_t = 4)]
+        seeds: u64,
+        #[arg(long, default_value_t = 100_000)]
+        steps: u64,
+        #[arg(long, default_value_t = 10)]
+        cut_every: u64,
+        #[arg(long, default_value_t = 1000)]
+        check_every: u64,
+        #[arg(long, default_value = "c13,c20,c40reuse,c40")]
+        corpora: String,
+        /// Tear models a cut draws from (see `sweep --tears`); default the
+        /// three guessed ones.
+        #[arg(long, default_value = "")]
+        tears: String,
+        /// First seed (walks run seeds `first_seed..first_seed+seeds`).
+        #[arg(long, default_value_t = 1)]
+        first_seed: u64,
+        /// The edit mix: fill the three slots once, then saves, panel
+        /// writes and re-pushes (keeps the flash near full: GC copies).
+        #[arg(long)]
+        edit_mix: bool,
     },
     /// Fault-free measures (and the smallest partition each workload fits).
     Measure {
@@ -266,6 +295,43 @@ fn main() {
                         s.kinds,
                         s.error.unwrap_or_default()
                     );
+                }
+            }
+        }
+        Cmd::Long {
+            common,
+            seeds,
+            steps,
+            cut_every,
+            check_every,
+            corpora,
+            tears,
+            first_seed,
+            edit_mix,
+        } => {
+            let ctx = Ctx::new(&common, "long");
+            for (cand, cfg) in ctx.candidates() {
+                let runs: Vec<_> = (first_seed..first_seed + seeds)
+                    .map(|seed| LongParams {
+                        candidate: cand.name().into(),
+                        config: cfg.clone(),
+                        corpora: corpora.split(',').map(String::from).collect(),
+                        seed,
+                        steps,
+                        cut_every,
+                        check_every,
+                        tears: tear_names(&tears),
+                        wear: vec![],
+                        edit_mix,
+                    })
+                    .collect();
+                use rayon::prelude::*;
+                let out: Vec<_> = runs
+                    .par_iter()
+                    .map(|p| long_walk(cand.as_ref(), p, &ctx.corpora, &ctx.sink))
+                    .collect();
+                for s in out {
+                    print_long(&s);
                 }
             }
         }
@@ -589,6 +655,44 @@ fn print_measure(m: &MeasureResult) {
         m.error
             .clone()
             .map(|e| format!("({e} at step {:?})", m.failed_step))
+            .unwrap_or_default()
+    );
+}
+
+fn print_long(s: &LongSummary) {
+    let opt = |v: Option<u64>| v.map(|v| v.to_string()).unwrap_or("-".into());
+    println!(
+        "long {:<10} [{}] seed {:>3}: steps {:>6} no-space {:>5} cuts {:>5} landed {:>5} torn erases {:>4} checks {:>3} failures {} non-atomic {:>4} gc runs {:>6} gc copies {:>7} retired {} erases {:>7} (max/sector {}) {:?}{}",
+        format!(
+            "{}{}",
+            s.candidate,
+            s.config
+                .as_ref()
+                .map(|c| c.dials_label())
+                .filter(|d| !d.is_empty())
+                .map(|d| format!("@{d}"))
+                .unwrap_or_default()
+        ),
+        s.config.as_ref().map(|c| c.sectors).unwrap_or(0),
+        s.seed,
+        s.steps_run,
+        s.steps_no_space,
+        s.cuts,
+        s.landed,
+        s.torn_erases,
+        s.checks,
+        s.failures,
+        s.non_atomic,
+        opt(s.gc.gc_runs),
+        opt(s.gc.gc_copies),
+        opt(s.gc.retired_sectors),
+        s.gc.erases_total,
+        s.gc.erases_max,
+        s.kinds,
+        s.first_failure
+            .as_ref()
+            .map(|f| format!(" FIRST {}: {}", f.kind, f.detail))
+            .or(s.error.as_ref().map(|e| format!(" ERROR {e}")))
             .unwrap_or_default()
     );
 }

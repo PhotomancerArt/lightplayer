@@ -73,6 +73,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             self.stats.mount_scans = walked.scans;
         );
         self.log.sectors.live = walked.live;
+        #[cfg(feature = "mutants")]
+        if mutant!(DedupAgainstAllRecords) {
+            crate::mutants::index_every_record(&mut self.log, &valid)?;
+        }
         self.log.index.shrink();
         self.live_after_mark = self.log.index.len();
         // A closed sector is never appended to: its end is the sector size.
@@ -99,7 +103,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 .filter(|&s| !closed[s as usize] && !self.log.sectors.is_retired(s));
             if let Some(s) = cand {
                 let end = u32::from(self.log.sectors.end[s as usize]);
-                if self.log.reads_erased(s, end)? {
+                if mutant!(ResumeWithoutTailCheck) || self.log.reads_erased(s, end)? {
                     self.log.heads[kind.index()] = Some(s);
                 }
             }

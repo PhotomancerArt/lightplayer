@@ -102,7 +102,7 @@ pub fn scan_sector<F: Flash>(
         payload.clear();
         payload.resize(usize::from(len), 0);
         log.read(log.addr(s, off + RECORD_HEADER_LEN), &mut payload)?;
-        if !RecordHeader::crc_ok(&h, &payload) {
+        if !mutant!(TrustRecordHeaders) && !RecordHeader::crc_ok(&h, &payload) {
             out.closed = true;
             break;
         }

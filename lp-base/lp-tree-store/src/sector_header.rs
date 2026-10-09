@@ -91,7 +91,7 @@ impl SectorHeader {
     pub fn decode(b: &[u8; SECTOR_HEADER_LEN as usize], sector_size: u32) -> SectorRead {
         let word = |i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let half = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
-        if word(0) == SECTOR_MAGIC && half(4) > FORMAT_VERSION {
+        if !mutant!(NewerVersionUntrusted) && word(0) == SECTOR_MAGIC && half(4) > FORMAT_VERSION {
             // A newer writer's sector: refuse, never read it as blank (the
             // CRC is not checked: a newer layout may have moved it).
             return SectorRead::Unsupported("newer format");
