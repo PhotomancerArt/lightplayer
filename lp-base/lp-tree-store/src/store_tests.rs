@@ -1,154 +1,187 @@
-//! Behaviour tests of `TreeStore` on the NOR model, and the exhaustive cut
-//! sweeps (blob mode, every codec).
+//! Behaviour tests of `TreeStore` on the NOR model: round trips, dedup,
+//! multi-part nodes, big directories under GC, torn roots, untrusted
+//! sectors, garbage flash, `NoSpace`, GC, and verify-after-write retiring a
+//! worn sector.
 
-use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lp_nor_sim::{FaultPlan, NorFlashSim, NorGeometry, TearModel};
+use lp_nor_sim::{FaultPlan, NorFlashSim, NorGeometry, TearModel, WearMode, WearOut};
 
-use crate::record_header::encode_record;
+use crate::object_id::IdTag;
+use crate::record_header::encode_header;
 use crate::record_kind::{ChunkCodec, RecordKind};
 use crate::root_record::RootRecord;
-use crate::test_support::{Step, formatted, mount, noise, snapshot, sweep, text};
-use crate::{Codec, GcPolicy, ObjectId, StoreConfig, StoreError, TreeStore};
+use crate::test_support::{formatted, mount, noise, snapshot, text};
+use crate::{GcPolicy, ObjectId, SoftSha256, StoreConfig, StoreError, TreeStore};
 
-fn cfg(codec: Codec) -> StoreConfig {
-    StoreConfig {
-        codec,
-        dict_size: 1024,
-        dict_train_min: 2048,
-        ..StoreConfig::default()
-    }
+fn cfg() -> StoreConfig {
+    StoreConfig::default()
 }
-
-const CODECS: [Codec; 3] = [Codec::Stored, Codec::Deflate, Codec::DeflateDict];
 
 #[test]
 fn round_trip_list_delete_and_remount() {
-    for codec in CODECS {
-        let c = cfg(codec);
-        let mut st = mount(formatted(NorGeometry::c6(32), &c), &c);
-        let shader = text(1, 9000);
-        st.put("/projects/a/project.json", b"{\"name\": \"a\"}")
-            .unwrap();
-        st.put("/projects/a/modules/m/shader.glsl", &shader)
-            .unwrap();
-        st.put("/projects/a/.lp/panel.json", b"{}").unwrap();
-        st.put("/hardware.json", &text(2, 300)).unwrap();
-        // Read-your-writes before commit.
-        assert_eq!(
-            st.get("/projects/a/modules/m/shader.glsl")
-                .unwrap()
-                .unwrap(),
-            shader
-        );
-        st.commit().unwrap();
-        assert_eq!(
-            st.get("/projects/a/modules/m/shader.glsl")
-                .unwrap()
-                .unwrap(),
-            shader
-        );
-        assert_eq!(
-            st.list("/projects/a/").unwrap(),
-            vec![
-                String::from("/projects/a/.lp/panel.json"),
-                String::from("/projects/a/modules/m/shader.glsl"),
-                String::from("/projects/a/project.json"),
-            ]
-        );
-        st.delete_prefix("/projects/a/modules/").unwrap();
-        assert_eq!(st.get("/projects/a/modules/m/shader.glsl").unwrap(), None);
-        st.commit().unwrap();
-        let before = snapshot(&mut st);
-        let mut st = mount(st.into_flash(), &c);
-        assert_eq!(snapshot(&mut st), before, "{codec:?}");
-        assert_eq!(st.get("/nope").unwrap(), None);
-    }
+    let c = cfg();
+    let mut st = mount(formatted(NorGeometry::c6(32), &c), &c);
+    let shader = text(1, 9000);
+    st.put("/projects/a/project.json", b"{\"name\": \"a\"}")
+        .unwrap();
+    st.put("/projects/a/modules/m/shader.glsl", &shader)
+        .unwrap();
+    st.put("/projects/a/.lp/panel.json", b"{}").unwrap();
+    st.put("/hardware.json", &text(2, 300)).unwrap();
+    assert_eq!(
+        st.get("/projects/a/modules/m/shader.glsl")
+            .unwrap()
+            .unwrap(),
+        shader
+    );
+    assert_eq!(
+        st.file_size("/projects/a/modules/m/shader.glsl").unwrap(),
+        Some(9000)
+    );
+    assert_eq!(
+        st.list("/projects/a/").unwrap(),
+        vec![
+            String::from("/projects/a/.lp/panel.json"),
+            String::from("/projects/a/modules/m/shader.glsl"),
+            String::from("/projects/a/project.json"),
+        ]
+    );
+    st.delete_prefix("/projects/a/modules/").unwrap();
+    assert_eq!(st.get("/projects/a/modules/m/shader.glsl").unwrap(), None);
+    assert!(st.delete("/hardware.json").unwrap());
+    assert!(!st.delete("/hardware.json").unwrap());
+    let before = snapshot(&mut st);
+    assert_eq!(before.len(), 2);
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(snapshot(&mut st), before);
+    assert_eq!(st.get("/nope").unwrap(), None);
+    assert_eq!(st.get("/").unwrap(), None);
+    assert_eq!(st.put("/a/", b"x"), Err(StoreError::InvalidPath));
 }
 
 #[test]
-fn dedup_by_id_writes_once() {
-    let c = cfg(Codec::Deflate);
+fn valid_paths() {
+    use crate::{MAX_DEPTH, valid_path};
+    for ok in ["/a", "/a/b.json", "/.lp/panel.json", "/é/ü"] {
+        assert!(valid_path(ok), "{ok:?}");
+    }
+    for bad in ["", "/", "a", "a/b", "/a/", "//a", "/a//b", "/a/b/"] {
+        assert!(!valid_path(bad), "{bad:?}");
+    }
+    let deep = |n: usize| "/d".repeat(n);
+    assert!(valid_path(&deep(MAX_DEPTH)));
+    assert!(!valid_path(&deep(MAX_DEPTH + 1)));
+    assert!(!valid_path(&alloc::format!(
+        "/{}",
+        "x".repeat(usize::from(u16::MAX))
+    )));
+}
+
+/// `delete_prefix` takes a whole directory (`"<dir>/"`) and nothing else; a
+/// directory that is not there is a no-op that writes nothing.
+#[test]
+fn delete_prefix_takes_whole_directories_only() {
+    let c = cfg();
+    let mut st = mount(formatted(NorGeometry::c6(32), &c), &c);
+    st.put("/a/x.json", b"x").unwrap();
+    st.put("/ab.json", b"ab").unwrap();
+    st.put("/a/.lp/panel.json", b"{}").unwrap();
+    for bad in ["/a", "/", "", "a/", "/a//"] {
+        assert_eq!(
+            st.delete_prefix(bad),
+            Err(StoreError::InvalidPath),
+            "{bad:?}"
+        );
+    }
+    let written = st.stats().record_bytes_written;
+    st.delete_prefix("/nope/").unwrap();
+    st.delete_file_and_tree("/nope").unwrap();
+    assert_eq!(st.stats().record_bytes_written, written, "a no-op wrote");
+    st.delete_prefix("/a/").unwrap();
+    assert_eq!(st.list("/").unwrap(), vec![String::from("/ab.json")]);
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(st.list("/").unwrap(), vec![String::from("/ab.json")]);
+}
+
+#[test]
+fn dedup_by_id_writes_once_and_an_unchanged_write_writes_nothing() {
+    let c = cfg();
     let mut st = mount(formatted(NorGeometry::c6(32), &c), &c);
     let body = text(3, 5000);
     st.put("/a/x.json", &body).unwrap();
-    st.commit().unwrap();
     let written = st.stats().record_bytes_written;
     let hits = st.stats().dedup_hits;
     st.put("/b/x.json", &body).unwrap();
-    st.commit().unwrap();
     let s = st.stats();
     assert!(s.dedup_hits > hits);
     // Only the changed directories and a root: far less than the file.
     assert!(
-        s.record_bytes_written - written < 400,
+        s.record_bytes_written - written < 200,
         "{}",
         s.record_bytes_written - written
     );
-    // A commit that changes nothing writes nothing.
     st.put("/b/x.json", &body).unwrap();
-    st.commit().unwrap();
     assert_eq!(st.stats().record_bytes_written, s.record_bytes_written);
+    assert_eq!(st.stats().commits, s.commits, "no root for no change");
 }
 
 #[test]
-fn multi_part_nodes_over_record_max() {
-    for codec in CODECS {
-        let c = StoreConfig {
-            record_max: 256,
-            ..cfg(codec)
-        };
-        let mut st = mount(formatted(NorGeometry::c6(64), &c), &c);
-        let big = noise(4, 40_000);
-        let mut many_files = Vec::new();
-        for i in 0..40 {
-            many_files.push((
-                alloc::format!("/d/file-with-a-long-name-{i:03}.json"),
-                text(i, 50),
-            ));
-        }
-        st.put("/big.bin", &big).unwrap();
-        for (p, b) in &many_files {
-            st.put(p, b).unwrap();
-        }
-        st.commit().unwrap();
-        let mut st = mount(st.into_flash(), &c);
-        assert_eq!(st.get("/big.bin").unwrap().unwrap(), big, "{codec:?}");
-        for (p, b) in &many_files {
-            assert_eq!(&st.get(p).unwrap().unwrap(), b);
-        }
+fn multi_part_nodes_and_big_directories_survive_gc() {
+    let c = StoreConfig {
+        record_max: 256,
+        ..cfg()
+    };
+    let mut st = mount(formatted(NorGeometry::c6(24), &c), &c);
+    let big = noise(4, 40_000);
+    st.put("/big.bin", &big).unwrap();
+    let names: Vec<String> = (0..40)
+        .map(|i| alloc::format!("/d/file-with-a-long-name-{i:03}.json"))
+        .collect();
+    for (i, p) in names.iter().enumerate() {
+        st.put(p, &text(i as u64, 50)).unwrap();
+    }
+    // Churn until GC has collected every sector a few times over: the big
+    // directory's files must be marked live through its multi.
+    for round in 0..40u64 {
+        st.put("/churn.bin", &noise(round, 6000)).unwrap();
+    }
+    assert!(st.stats().gc_runs > 10, "{:?}", st.stats());
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(st.get("/big.bin").unwrap().unwrap(), big);
+    for (i, p) in names.iter().enumerate() {
+        assert_eq!(st.get(p).unwrap().unwrap(), text(i as u64, 50), "{p}");
     }
 }
 
 #[test]
 fn torn_root_falls_back_and_torn_sector_is_closed() {
-    let c = cfg(Codec::Stored);
+    let c = cfg();
     let mut st = mount(formatted(NorGeometry::c6(16), &c), &c);
     st.put("/a.json", b"one").unwrap();
-    st.commit().unwrap();
     let pre = st.into_flash();
-    // Count the commit's ops, then tear its last one (the root's page).
     let mut st = mount(pre.clone(), &c);
-    st.put("/a.json", b"two").unwrap();
     st.flash_mut().set_plan(FaultPlan::none());
-    st.commit().unwrap();
+    st.put("/a.json", b"two").unwrap();
     let n = st.flash().ops_since_plan();
-    for tear in [TearModel::BytePrefix, TearModel::RandomBits] {
+    for tear in [
+        TearModel::BytePrefix,
+        TearModel::RandomBits,
+        TearModel::Calibrated,
+    ] {
         let mut st = mount(pre.clone(), &c);
-        st.put("/a.json", b"two").unwrap();
         st.flash_mut().set_plan(FaultPlan::cut(n - 1, tear, 7));
-        assert!(matches!(st.commit(), Err(StoreError::Flash(_))));
+        assert!(matches!(
+            st.put("/a.json", b"two"),
+            Err(StoreError::Flash(_))
+        ));
         let mut f = st.into_flash();
         f.power_cycle(FaultPlan::none());
         let mut st = mount(f, &c);
         assert_eq!(st.get("/a.json").unwrap().unwrap(), b"one");
-        // Appending again must not land on the torn bytes: a fresh write
-        // and a remount read back exactly.
         st.put("/a.json", b"three").unwrap();
-        st.commit().unwrap();
         let mut st = mount(st.into_flash(), &c);
         assert_eq!(st.get("/a.json").unwrap().unwrap(), b"three");
     }
@@ -156,43 +189,36 @@ fn torn_root_falls_back_and_torn_sector_is_closed() {
 
 #[test]
 fn a_sector_without_a_header_is_never_trusted() {
-    let c = cfg(Codec::Stored);
+    let c = cfg();
     let mut st = mount(formatted(NorGeometry::c6(16), &c), &c);
     st.put("/a.json", b"one").unwrap();
-    st.commit().unwrap();
     let mut f = st.into_flash();
-    // A perfectly valid root record with a huge seq, in a sector whose
-    // header was never written (format left the rest erased, unheaded).
     let root = RootRecord {
         seq: 1_000_000,
         cold_dir: ObjectId(5),
         hot_dir: ObjectId(6),
-        dict: ObjectId::NONE,
-        next_key_id: 0,
+        retired: vec![],
     };
     let payload = root.encode();
-    let raw = encode_record(
-        RecordKind::Root,
-        ChunkCodec::Stored,
-        RootRecord::id_of(&payload),
-        &payload,
-    );
+    let id = ObjectId::of(&mut SoftSha256, IdTag::Root, &[&payload]);
+    let h = encode_header(RecordKind::Root, ChunkCodec::Stored, id, &[&payload]);
     let s = 15 * 4096;
-    f.program(s + 20, &raw).unwrap();
+    f.program(s + 20, &h).unwrap();
+    f.program(s + 36, &payload).unwrap();
     let mut st = mount(f, &c);
     assert_eq!(st.get("/a.json").unwrap().unwrap(), b"one");
 }
 
 #[test]
 fn garbage_flash_never_panics_and_formats() {
-    let c = cfg(Codec::Deflate);
+    let c = cfg();
     for seed in 0..8 {
         let f = NorFlashSim::garbage(NorGeometry::c6(16), seed);
-        let mut f = match TreeStore::mount(f, c.clone()) {
+        let mut f = match TreeStore::mount(f, SoftSha256, c.clone()) {
             Ok(_) => panic!("garbage mounted"),
-            Err((_, f)) => f,
+            Err((_, f, _)) => f,
         };
-        TreeStore::format(&mut f, &c).unwrap();
+        TreeStore::format(&mut f, &mut SoftSha256, &c).unwrap();
         let mut st = mount(f, &c);
         assert!(st.list("/").unwrap().is_empty());
     }
@@ -200,14 +226,15 @@ fn garbage_flash_never_panics_and_formats() {
 
 #[test]
 fn no_space_before_writing_anything() {
-    let c = cfg(Codec::Stored);
+    let c = cfg();
     let mut st = mount(formatted(NorGeometry::c6(8), &c), &c);
     st.put("/small.json", b"keep me").unwrap();
-    st.commit().unwrap();
     let programs = st.flash().stats().program_calls;
     let erases = st.flash().stats().erases_total();
-    st.put("/huge.bin", &noise(9, 40_000)).unwrap();
-    assert_eq!(st.commit(), Err(StoreError::NoSpace));
+    assert_eq!(
+        st.put("/huge.bin", &noise(9, 40_000)),
+        Err(StoreError::NoSpace)
+    );
     assert_eq!(
         st.flash().stats().program_calls,
         programs,
@@ -218,10 +245,7 @@ fn no_space_before_writing_anything() {
         erases,
         "erased before NoSpace"
     );
-    // The staged change is still there; drop it and keep going.
-    st.discard_uncommitted().unwrap();
     st.put("/small.json", b"still works").unwrap();
-    st.commit().unwrap();
     let mut st = mount(st.into_flash(), &c);
     assert_eq!(st.get("/small.json").unwrap().unwrap(), b"still works");
     assert_eq!(st.get("/huge.bin").unwrap(), None);
@@ -232,13 +256,12 @@ fn gc_keeps_live_and_reclaims_garbage() {
     for policy in [GcPolicy::Greedy, GcPolicy::CostBenefit] {
         let c = StoreConfig {
             gc_policy: policy,
-            ..cfg(Codec::Stored)
+            ..cfg()
         };
         let mut st = mount(formatted(NorGeometry::c6(16), &c), &c);
         st.put("/keep.bin", &noise(100, 6000)).unwrap();
-        st.commit().unwrap();
-        // Rewrite ~10× the flash: only GC makes that possible.
         for round in 0..60u64 {
+            st.begin().unwrap();
             st.put("/churn.bin", &noise(round, 9000)).unwrap();
             st.put("/projects/a/.lp/panel.json", &text(round, 200))
                 .unwrap();
@@ -249,103 +272,51 @@ fn gc_keeps_live_and_reclaims_garbage() {
             assert_eq!(st.get("/keep.bin").unwrap().unwrap(), noise(100, 6000));
             assert_eq!(st.get("/churn.bin").unwrap().unwrap(), noise(round, 9000));
         }
+        // Wholly-garbage sectors are freed by erasing alone; either way the
+        // flash was reused many times over.
         assert!(
             st.stats().gc_runs > 0 || st.stats().erases > 16,
-            "{policy:?}"
+            "{policy:?}: {:?}",
+            st.stats()
         );
         assert!(st.free_sectors() >= c.reserve);
     }
 }
 
 #[test]
-fn json_tree_is_refused() {
-    let c = StoreConfig {
-        json_tree: true,
-        ..StoreConfig::default()
-    };
-    let mut f = NorFlashSim::new(NorGeometry::c6(16));
-    assert!(matches!(
-        TreeStore::format(&mut f, &c),
-        Err(StoreError::Unsupported(_))
-    ));
-}
-
-// ---- the exhaustive cut sweeps -------------------------------------------
-
-fn basic_workload() -> Vec<Step> {
-    vec![
-        Box::new(|st| {
-            st.put("/hardware.json", &text(10, 220))?;
-            st.put("/projects/a/project.json", &text(11, 700))?;
-            st.put("/projects/a/modules/m/shader.glsl", &text(12, 3500))?;
-            st.put("/projects/a/.lp/panel.json", &text(13, 120))?;
-            st.commit()
-        }),
-        Box::new(|st| {
-            st.put("/projects/a/.lp/panel.json", &text(14, 130))?;
-            st.commit()
-        }),
-        Box::new(|st| {
-            st.put("/projects/a/modules/m/shader.glsl", &text(15, 3600))?;
-            st.put("/projects/a/modules/n/shader.glsl", &text(12, 3500))?;
-            st.commit()
-        }),
-        Box::new(|st| {
-            st.delete_prefix("/projects/a/modules/")?;
-            st.put("/projects/b/project.json", &text(16, 900))?;
-            st.put("/projects/b/.lp/panel.json", &text(17, 90))?;
-            st.commit()
-        }),
-    ]
-}
-
-#[test]
-fn cut_sweep_basic_every_codec() {
-    for codec in CODECS {
-        let c = cfg(codec);
-        let r = sweep(NorGeometry::c6(16), &c, &basic_workload(), 32);
-        assert!(
-            r.cuts > 100 && r.landed_old > 0 && r.landed_new > 0,
-            "{codec:?}: {r:?}"
-        );
-    }
-}
-
-fn gc_workload() -> Vec<Step> {
-    let mut steps: Vec<Step> = Vec::new();
-    steps.push(Box::new(|st| {
-        st.put("/keep.json", &text(20, 2500))?;
-        st.put("/projects/a/.lp/panel.json", &text(21, 100))?;
-        st.commit()
-    }));
-    for i in 0..crate::test_support::dial("LP_TREE_STORE_SWEEP_STEPS", 6) {
-        steps.push(Box::new(move |st| {
-            // A small file kept forever, written beside the churn, so cold
-            // sectors mix live and garbage and GC has to copy.
-            st.put(&alloc::format!("/log/{i}.json"), &text(60 + i, 300))?;
-            st.put("/churn-a.bin", &noise(30 + i, 3000))?;
-            st.put("/churn-b.json", &text(40 + i, 2600))?;
-            st.put("/projects/a/.lp/panel.json", &text(50 + i, 110))?;
-            st.commit()
-        }));
-    }
-    steps
-}
-
-#[test]
-fn cut_sweep_through_gc() {
-    for (codec, record_max) in [
-        (Codec::Stored, 1024),
-        (Codec::DeflateDict, 256),
-        (Codec::Deflate, 512),
-    ] {
-        let c = StoreConfig {
-            record_max,
-            ..cfg(codec)
-        };
-        // 10 sectors: the churn outgrows the flash within a few steps.
-        let r = sweep(NorGeometry::c6(10), &c, &gc_workload(), 8);
-        assert!(r.gc_runs > 0, "{codec:?}: no GC ran: {r:?}");
-        assert!(r.landed_old > 0 && r.landed_new > 0, "{codec:?}: {r:?}");
+fn verify_after_write_retires_a_worn_sector_and_the_retirement_survives_remount() {
+    for mode in [WearMode::EraseFails, WearMode::ProgramFails] {
+        let c = cfg();
+        let mut f = formatted(NorGeometry::c6(16), &c);
+        // Every sector was erased once by format; sector 9 fails from its
+        // next erase (or program) on.
+        f.add_wear_out(WearOut {
+            sector: 9,
+            after_erases: 0,
+            mode,
+            seed: 3,
+        });
+        let mut st = mount(f, &c);
+        let mut failures = 0;
+        for round in 0..80u64 {
+            st.put("/churn.bin", &noise(round, 7000)).unwrap();
+            st.put("/keep.json", &text(round, 900)).unwrap();
+            failures = failures.max(st.stats().verify_failures);
+            if st.stats().retired_sectors > 0 && round % 7 == 0 {
+                st = mount(st.into_flash(), &c);
+                assert!(
+                    st.log.sectors.is_retired(9),
+                    "{mode:?}: retirement lost on remount"
+                );
+            }
+            assert_eq!(st.get("/churn.bin").unwrap().unwrap(), noise(round, 7000));
+            assert_eq!(st.get("/keep.json").unwrap().unwrap(), text(round, 900));
+        }
+        let s = st.stats();
+        assert_eq!(s.retired_sectors, 1, "{mode:?}: {s:?}");
+        assert!(failures >= 1);
+        let st = mount(st.into_flash(), &c);
+        assert_eq!(st.log.sectors.retired, vec![9]);
+        assert!(st.log.heads.iter().all(|h| *h != Some(9)));
     }
 }

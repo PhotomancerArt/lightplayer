@@ -107,6 +107,10 @@ pub struct DeviceRosterView {
     /// The latest backup the user asked to download; the shell downloads
     /// when its `seq` advances.
     pub backup_download: Option<super::device_layout_effect::BackupDownload>,
+    /// Which project each board plays (`BoardProjects`): the board card's
+    /// project bar and the home page's "Other projects" both read it.
+    /// Joined by the controller, which holds the library and the lens.
+    pub board_projects: super::BoardProjects,
 }
 
 impl Default for DeviceRosterView {
@@ -129,6 +133,7 @@ impl Default for DeviceRosterView {
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
+            board_projects: super::BoardProjects::default(),
         }
     }
 }
@@ -457,6 +462,8 @@ impl DeviceRoster {
             // publishes them for real (`publish_layout_offers`).
             layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
             backup_download: self.effects.layout().download(),
+            // Joined by the controller, which holds the library and the lens.
+            board_projects: super::BoardProjects::default(),
         }
     }
 
@@ -514,17 +521,34 @@ impl DeviceRoster {
                                 .unwrap_or(crate::BoardRef::New(1)),
                         )
                     });
-                super::device_layout_view::device_layout_view(
+                // After a Remove left a folder to start at the next
+                // power-up, the project line says so — only while the board
+                // is idle and still reports nothing loaded.
+                let folder = (view.activity.is_none()
+                    && view.loaded_project == lpa_devices::view::LoadedProject::Empty)
+                    .then(|| self.effects.removal_boots_next(device.id))
+                    .flatten();
+                let mut ui = super::device_layout_view::device_layout_view(
                     &view,
-                    offers_at,
+                    offers_at.clone(),
                     fs,
                     has_uid,
                     staged.as_ref(),
                     pending.as_ref(),
                     device.identity.mac.as_ref().map(|mac| mac.0.as_str()),
                     offers,
-                )
-                .map(|ui| (device.id, ui))
+                );
+                if let Some(folder) = folder {
+                    match ui.as_mut() {
+                        Some(ui) => {
+                            ui.project_note = Some(
+                                super::device_layout_view::UiProjectNote::starts_next(&folder),
+                            );
+                        }
+                        None => ui = Some(super::UiDeviceLayout::note_only(offers_at, &folder)),
+                    }
+                }
+                ui.map(|ui| (device.id, ui))
             })
             .collect()
     }
@@ -913,6 +937,7 @@ mod tests {
             runtime_bands: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
+            board_projects: Default::default(),
         };
 
         let split = split_roster(&view);
@@ -963,6 +988,7 @@ mod tests {
             runtime_bands: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
+            board_projects: Default::default(),
         };
 
         let split = split_roster(&view);

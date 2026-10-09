@@ -248,6 +248,18 @@ impl LpFs for LpFsView {
         })))
     }
 
+    fn begin_batch(&self) -> Result<(), FsError> {
+        self.parent.borrow().begin_batch()
+    }
+
+    fn commit_batch(&self) -> Result<(), FsError> {
+        self.parent.borrow().commit_batch()
+    }
+
+    fn abort_batch(&self) -> Result<(), FsError> {
+        self.parent.borrow().abort_batch()
+    }
+
     fn current_version(&self) -> FsVersion {
         self.parent.borrow().current_version()
     }

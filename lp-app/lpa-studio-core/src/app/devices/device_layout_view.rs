@@ -64,6 +64,49 @@ pub struct UiDeviceLayout {
     /// This board's own base MAC, if known yet — so the one question a
     /// mismatched backup asks can name both boards.
     pub current_base_mac: Option<String>,
+    /// What the project line says in place of "Nothing loaded" after a
+    /// Remove left a folder on the board to start at its next power-up.
+    pub project_note: Option<UiProjectNote>,
+}
+
+/// The project line's words after a Remove that left a folder behind, built
+/// here so no surface composes the sentence.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiProjectNote {
+    /// The one-line copy: `studio-b starts at next power-up`.
+    pub line: String,
+    /// The full sentence, for the line's hover.
+    pub detail: String,
+}
+
+impl UiProjectNote {
+    /// The note for `folder`, the project folder the board starts next.
+    pub fn starts_next(folder: &str) -> Self {
+        Self {
+            line: format!("{folder} starts at next power-up"),
+            detail: format!(
+                "{folder} is still on the board and will start when it's next powered on."
+            ),
+        }
+    }
+}
+
+impl UiDeviceLayout {
+    /// A layout that carries only the project line's note — the case where
+    /// the board has nothing else to say about its files.
+    pub fn note_only(offers_at: OfferPath, folder: &str) -> Self {
+        Self {
+            offers_at,
+            panel: None,
+            line: None,
+            restore: None,
+            finish_update: None,
+            download: None,
+            restore_from_file: None,
+            current_base_mac: None,
+            project_note: Some(UiProjectNote::starts_next(folder)),
+        }
+    }
 }
 
 /// The question (or the refusal), as the card draws it.
@@ -116,6 +159,7 @@ pub fn device_layout_view(
         download: None,
         restore_from_file: None,
         current_base_mac: current_base_mac.map(str::to_string),
+        project_note: None,
     };
 
     // The question, while a Flash waits on it.

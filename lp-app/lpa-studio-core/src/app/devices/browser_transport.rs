@@ -129,6 +129,7 @@ impl DeviceTransport for BrowserSerialTransport {
                         probed_mac: inspection.probed_mac.clone(),
                         chip_name: inspection.chip_name.clone(),
                         inspection: Some(inspection),
+                        boots_next: None,
                     })
                 }
                 DeviceEffectCall::FlashFirmware { build_id, plan } => {
@@ -156,6 +157,7 @@ impl DeviceTransport for BrowserSerialTransport {
                         probed_mac: result.base_mac,
                         chip_name: result.chip_name,
                         inspection: None,
+                        boots_next: None,
                     })
                 }
                 DeviceEffectCall::EraseFlash => {
@@ -199,6 +201,7 @@ impl DeviceTransport for BrowserSerialTransport {
                                 report.boots_next_clause()
                             ),
                         },
+                        boots_next: report.boots_next.clone(),
                         ..Default::default()
                     })
                 }

@@ -25,6 +25,16 @@ number — not an emulator or silicon measurement.
   real candidates as they land; `f3` (the control: littlefs, one deflated
   package per pattern, `/projects/<slot>/modules/<p>.pkg`) is in
   `littlefs_pattern_package.rs`.
+- **T1** (`candidates/tree_store_candidate.rs`): `lp-tree-store` v1. A
+  workload step is one store transaction (`begin` at its first write,
+  `commit` at its end), so T1 is scored step-atomic. Dials: `record_max`
+  (default 1024), `gc_policy` (`greedy` | `cost_benefit`), `reserve`,
+  `txn_delta_max`, and `codec` = `stored` (every file written stored) |
+  `host_deflate` (every file but the board's own `…/.lp/panel.json` arrives
+  as the wire carries it after M6: `host_deflate_chunks` → ≤ 4 KiB logical
+  chunks, `put_chunk_deflated` at offset 0 then the running size). The
+  prototype's `deflate`, `deflate_dict`, `dict_size` and `json_tree` dials
+  are gone with what they selected.
 - **Workloads** (`workload.rs`): steps of puts and prefix deletes, each
   ending in `commit`, built from corpora at runtime, deterministic by seed.
   `push` (board files, then the corpus into `/projects/a/`), `repush` (the
@@ -60,6 +70,7 @@ number — not an emulator or silicon measurement.
 cargo run --release -p lp-store-bench -- smoke --candidates mem,mem-broken
 cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads 'push:c40;save:c13' --seeds 1,2
 cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads save:c40 --tears calibrated   # CX1's measured tears
+cargo run --release -p lp-store-bench -- smoke --candidates t1 --tears calibrated
 cargo run --release -p lp-store-bench -- double --candidates f2 --workloads save:c13
 cargo run --release -p lp-store-bench -- random --candidates s1 --seeds 8 --steps 300
 cargo run --release -p lp-store-bench -- measure --candidates f1,f2,s1,t1 --workloads 'push:c40;save:c40' --min-sectors
@@ -86,7 +97,7 @@ units and between the steps of a sweep), writing every result as it lands:
    which cannot hold c40) and switch c13↔c40reuse, every cut point, every
    tear model, 2 seeds; units interleave candidates;
 3. double cuts — the same workloads, the first 4 focus steps;
-4. the T1 dial sweep — `record_max` × `gc_policy` × `reserve` × codec/dict ×
+4. the T1 dial sweep — `record_max` × `gc_policy` × `reserve` × codec (`stored` | `host_deflate`) ×
    partition {96, 128, 176}: fault-free c40 measures plus a reduced cut
    sweep each;
 5. endurance — 30 simulated days (1 re-push, 10 saves, 1440 panel writes a
@@ -101,8 +112,12 @@ run" lists the units still queued at the end. `report` renders `report.md`
 (headline, cut totals with a replay command per failure, measures, fill, the
 T1 dial Pareto front) and `summary.json`.
 
-`sweep` and `double` take `--tears` (comma-separated tear model names;
-default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s `TearModel::ALL`).
+`sweep`, `double` and `random` take `--tears` (comma-separated tear model
+names; default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s
+`TearModel::ALL`; a walk draws each cut's model from the list). `smoke
+--tears <names>` runs every driver of the smoke under those models; without
+it the smoke is what it always was (the sweeps under the three guessed
+models, the double cut under `random_bits`).
 `calibrated` is the model measured on a real part (CX1, 200 cuts:
 `docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
 read `0x00` from the front or throughout, or silently read erased; it runs

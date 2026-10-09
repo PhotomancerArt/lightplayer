@@ -350,6 +350,7 @@ fn round_units<'a>(
                         steps: if p.quick { 30 } else { 300 },
                         cut_one_in: 3,
                         stop_at_cut: None,
+                        tears: vec![],
                     };
                     random_walk(cand.as_ref(), &rp, corpora, sink);
                 });
@@ -467,26 +468,18 @@ fn dial_sweep(p: &OvernightParams, corpora: &CorpusSet, sink: &Scoreboard) {
     };
     let gc: &[&str] = &["greedy", "cost_benefit"];
     let reserve: &[&str] = if p.quick { &["3"] } else { &["2", "3", "4"] };
-    let codecs: &[(&str, &str)] = &[
-        ("stored", ""),
-        ("deflate", ""),
-        ("deflate_dict", "4096"),
-        ("deflate_dict", "8192"),
-    ];
+    let codecs: &[&str] = &["stored", "host_deflate"];
     let parts: &[u32] = if p.quick { &[128] } else { &[96, 128, 176] };
     for rm in record_max {
         for g in gc {
             for r in reserve {
-                for (codec, dict) in codecs {
+                for codec in codecs {
                     for &sectors in parts {
-                        let mut c = CandidateConfig::new(sectors)
+                        let c = CandidateConfig::new(sectors)
                             .with_dial("record_max", rm)
                             .with_dial("gc_policy", g)
                             .with_dial("reserve", r)
                             .with_dial("codec", codec);
-                        if !dict.is_empty() {
-                            c = c.with_dial("dict_size", dict);
-                        }
                         settings.push(c);
                     }
                 }

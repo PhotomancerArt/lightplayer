@@ -118,6 +118,31 @@ pub trait LpFs {
         subdir: &LpPath,
     ) -> Result<alloc::rc::Rc<core::cell::RefCell<dyn LpFs>>, FsError>;
 
+    /// Start a batch: until [`Self::commit_batch`], the writes, appends and
+    /// deletes made through this filesystem (and its chroot views) commit
+    /// together or not at all — a power cut leaves every file as it was
+    /// before the batch. Reads see the batch's own writes.
+    ///
+    /// The default does nothing: a backend without transactions (littlefs,
+    /// the host filesystem, memory) commits each call by itself, as it
+    /// always has. A batch cannot nest.
+    fn begin_batch(&self) -> Result<(), FsError> {
+        Ok(())
+    }
+
+    /// Commit the batch begun by [`Self::begin_batch`] (nothing to do
+    /// outside one). On an error the batch stays open: abort it.
+    fn commit_batch(&self) -> Result<(), FsError> {
+        Ok(())
+    }
+
+    /// Drop the batch begun by [`Self::begin_batch`]: every file is as it
+    /// was before it (nothing to do outside one, or on a backend without
+    /// transactions).
+    fn abort_batch(&self) -> Result<(), FsError> {
+        Ok(())
+    }
+
     /// Get the current filesystem version
     ///
     /// Returns the version number that will be assigned to the next change.
