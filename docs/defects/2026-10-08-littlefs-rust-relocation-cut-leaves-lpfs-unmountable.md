@@ -43,6 +43,21 @@ parked as a patch in the testbed plan's `results/lpfs-block-cycles-100.patch`.
 `lp-store-bench sweep --candidates 'f1@block_cycles=1' --workloads save:c20 --seeds 1,2`;
 each failure line replays with `lp-store-bench replay`.
 
+**Seen again, 2026-10-08 (F3)** — the control candidate F3 (littlefs, one
+package per pattern, `block_cycles` 100 by default) reproduces the
+"document gone after the re-run" half on another layout. At
+`f3@block_cycles=1`, `save:c40` at 128 sectors loses 16–17 of 3,066 cut
+cases per tear model (`rerun_wrong_state`, all on step 19, cuts 29–37):
+the cut mount reads every file as old or new, then the re-run's first
+commit — whose littlefs calls all stay inside `/projects/a/modules/`
+(remove, create, write and same-directory rename of one `.pkg.tmp`) — takes
+the whole `/.lp` directory with it. Replays with
+`lp-store-bench replay` on
+`{"driver":"exhaustive","failure":{"detail":"/.lp/access.json: got None B, want Some(153) B","kind":"rerun_wrong_state"},"reproducer":{"case":{"candidate":"f3","config":{"dials":{"block_cycles":"1"},"sectors":128},"cut_after":33,"second":null,"seed":17901088477037630240,"step":19,"tear":"clean","workload":{"corpus":"c40","kind":"save","seed":1}}},"type":"failure"}`.
+At F3's own 100 and at −1, `save:c40`, `push:c40` and `panel:c40` had no
+failures (lp-nor-sim; PR #1060's report has the counts) — but 100 cuts few
+relocations, so that is not evidence the path is safe.
+
 **Lesson** — a littlefs setting that looks like pure policy, with no
 on-flash format change, still decides which library code runs. Turning one
 on is a code-path change, and it gets cut-swept like one.
