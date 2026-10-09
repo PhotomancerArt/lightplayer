@@ -10,6 +10,8 @@
   (`RuntimePayload` collapses to one arm, `Device`; pool capacity is one,
   kind-agnostically; the `#/sim/` follow-up is closed by the `?on=`
   grammar)
+  and [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) (the home page and an open lens
+  coexist: going home no longer detaches a lens the home page opened)
 
 ## Context
 
@@ -318,3 +320,13 @@ glyph + status + project chip, per the plan's Q6 fallback.
   the evidence source.
 - **N > 1 sims / radio-sim bus / networked connectors**: raise the
   capacity numbers; the pool shape is ready.
+
+**2026-10-08, the board card and one home page
+([2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md)):** a board's card on the home page opens the lens in
+place (Connect) and its panel shows on the card, so the lens and the home
+page coexist. The web's route→Home policy no longer dispatches
+`DetachLens` for a lens the home page opened. Done is what detaches it,
+and Edit moves to the editor on the same session with nothing rebuilt.
+Capacity stays one: Connect on a second board hands the one session over.
+A direction, built by the "connected" milestone of
+`lp2025/2026-10-06-1530-boards-and-projects-model`.
