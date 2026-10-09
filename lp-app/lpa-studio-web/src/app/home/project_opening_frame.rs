@@ -656,7 +656,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
             }
         }
         crate::route_recording::note_route_reason("open-cancelled");
-        crate::router::navigate_push(&StudioRoute::Devices);
+        crate::router::navigate_push(&StudioRoute::Home);
     };
     rsx! {
         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2.5 tw:pt-1",
@@ -679,7 +679,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
                     r#type: "button",
                     class: solid_action_class(ActionPriority::Secondary),
                     disabled: !reset.meta().enablement.is_enabled(),
-                    title: "{reset_title(&reset, \"Stop opening, reset the board's hardware, and go to Devices.\")}",
+                    title: "{reset_title(&reset, \"Stop opening, reset the board's hardware, and go home.\")}",
                     onclick: move |_| cancel_and(Some(reset.clone())),
                     "Reset the board"
                 }
@@ -687,7 +687,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
             button {
                 r#type: "button",
                 class: quiet_action_class(),
-                title: "Stop opening this project and go to Devices.",
+                title: "Stop opening this project and go home.",
                 onclick: move |_| cancel_and(None),
                 "Cancel"
             }
@@ -792,7 +792,7 @@ pub(crate) fn OpenFailureNotice(
     message: String,
     retry: UiAction,
     /// The board the open failed on: the notice then offers to reset it,
-    /// and the way back is Devices rather than Explore.
+    /// and the way back is Home rather than Explore.
     #[props(default)]
     device: Option<OpenDevice>,
     /// The board refused the link's tier (a Bluetooth link unlocked for
@@ -803,7 +803,7 @@ pub(crate) fn OpenFailureNotice(
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let (back_href, back_label) = match device {
-        Some(_) => (StudioRoute::Devices.path(), "Back to devices"),
+        Some(_) => (StudioRoute::Home.path(), "Back home"),
         None => (StudioRoute::Explore.path(), "Back to Explore"),
     };
     let board = device.as_ref().and_then(|device| device.id);

@@ -6,7 +6,8 @@
 //!   pressed, it comes back on a LAN link as the SAME device (merged by
 //!   MAC), presenting the keys typed for that board at another address;
 //!   Forget forgets the address with the board;
-//! - a board never seen is reached by an address typed into the add slot;
+//! - a board never seen is reached by an address typed into Connect a board's
+//!   Network row;
 //! - a connect that fails says why in plain words, where it was pressed.
 //!
 //! Every verb is pressed by its offer path, as the card and the app agent

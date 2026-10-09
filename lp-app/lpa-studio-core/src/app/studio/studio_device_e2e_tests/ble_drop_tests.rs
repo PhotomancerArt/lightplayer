@@ -124,7 +124,7 @@ impl lpa_client::ClientIo for AirIo {
 /// shape of finding 1: the editor is open on a board reached over
 /// Bluetooth, the board restarts and its radio link drops, and the board
 /// comes back on a new link. The editor holds, then resumes on the new link
-/// with the same session — never the Devices page.
+/// with the same session — never sent home.
 #[test]
 fn a_bluetooth_board_that_restarts_under_the_editor_resumes_it() {
     let (mut bench, tasks, device, present) = lens_over_bluetooth("dev000000bledrop01");

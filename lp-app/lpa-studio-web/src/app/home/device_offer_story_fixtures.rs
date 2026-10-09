@@ -1,7 +1,7 @@
 //! Story fixtures for the device surfaces' offer trees (M3).
 //!
-//! The device card, the pending card, the add slot and the stalled-open
-//! exits draw their verbs from the view's offer tree, which the shell
+//! The device card, the pending card, the Connect a board section and the
+//! stalled-open exits draw their verbs from the view's offer tree, which the shell
 //! provides. A story mounts a surface on its own, so it builds the tree the
 //! same way core publishes it — [`device_offers`], [`pending_link_offers`],
 //! [`add_device_offers`], [`new_sim_offer`] over the story's own fixtures —
@@ -14,20 +14,23 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
-    OfferPath, PendingLinkView, ResetReach, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
-    UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_relay_offer,
-    connect_wifi_offer, device_offers, device_unlock_offer, new_sim_offer, pending_link_offers,
-    unlock_offer,
+    OfferPath, PendingLinkView, ResetReach, UiDeviceSettingsView, UiExampleCard, UiHomeSections,
+    UiHomeView, UiLensCard, UiOfferTree, UiPackageCard, UiUnlockOffer, UpdateOfferFacts,
+    WifiAddressReach, add_device_offers, build_home_sections, connect_relay_offer,
+    connect_wifi_offer, device_offers, device_unlock_offer, home_offers, new_sim_offer,
+    pending_link_offers, stamp_on_boards, unlock_offer,
 };
 
 use crate::app::board_card::BoardCard;
-use crate::app::home::DevicesPage;
+use crate::app::home::HomePage;
 use crate::app::home::ble_reach::use_ble_reach;
+use crate::app::home::connect_board::connect_board_section::ConnectStoryPins;
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::app::home::page::home_view_mode::HomeViewMode;
 use crate::core::OffersProvider;
 
-/// The tree core would publish for `devices`: the add slot's transports at
-/// `bluetooth`, `devices/new-sim` where a runtime can start, and every
+/// The tree core would publish for `devices`: the Connect a board section's
+/// transports at `bluetooth`, `devices/new-sim` where a runtime can start, and every
 /// pending link's and device's verbs — each device placed by its handle.
 /// `wifi_addresses`: the remembered boards this browser knows a Wi‑Fi
 /// address for (core's address book, as the story says it), each offered
@@ -87,7 +90,7 @@ pub(crate) fn roster_tree(
     tree
 }
 
-/// The add slot's Wi‑Fi entry as core reads a Chromium page: reachable, and
+/// The Connect a board section's Network entry as core reads a Chromium page: reachable, and
 /// waiting while the roster says an address is being reached.
 fn wifi_reach(devices: &DeviceRosterView) -> WifiAddressReach {
     WifiAddressReach {
@@ -244,7 +247,7 @@ pub(crate) fn PendingOffers(pending: Vec<PendingLinkView>, children: Element) ->
 
 /// `children` under the tree core would publish for a whole roster. The
 /// Bluetooth half is `ble_reach` when a story pins it, else what this
-/// browser answers — the same answer the add slot's notes read, so the
+/// browser answers — the same answer the Connect a board section's notes read, so the
 /// button and the way forward under it never disagree.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -513,9 +516,9 @@ pub(crate) fn StoryPendingCard(
     }
 }
 
-/// The add slot's offers alone — `devices/connect-usb`, `connect-ble` and
-/// `devices/new-sim` — for a story that mounts the slot (or a page that
-/// draws one of its verbs) on its own.
+/// The Connect a board section's offers alone — `devices/connect-usb`,
+/// `connect-ble` and `devices/new-sim` — for a story that mounts the section
+/// (or a page that draws one of its verbs) on its own.
 pub(crate) fn add_slot_tree(usb_available: bool, bluetooth: BluetoothReach) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
     let wifi = WifiAddressReach {
@@ -529,13 +532,29 @@ pub(crate) fn add_slot_tree(usb_available: bool, bluetooth: BluetoothReach) -> U
     tree
 }
 
-/// [`DevicesPage`] under the tree core would publish for its roster.
+/// [`HomePage`] under the tree core would publish for its view: the
+/// roster's verbs and Home's own (`project/new`, `project/open`).
+///
+/// A story that leaves `home.sections` at its default gets the sections
+/// core would build from the story's own library and roster
+/// ([`build_home_sections`]), as `StudioController::home_view` does; a story
+/// that pins them keeps its own.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn StoryDevicesPage(
+pub(crate) fn StoryHomePage(
     home: lpa_studio_core::UiHomeView,
-    #[props(default)] remembered_open: bool,
-    #[props(default)] target_pick_open: bool,
+    /// A fixed clock ("edited 3 days ago" is read against it).
+    #[props(default)]
+    now_secs: Option<f64>,
+    /// The tab the page starts on.
+    #[props(default)]
+    initial_tab: Option<lpa_studio_core::UiHomeTab>,
+    /// Cards or rows (the page otherwise reads the browser's choice).
+    #[props(default)]
+    initial_mode: Option<HomeViewMode>,
+    /// The Connect a board section's pins.
+    #[props(default)]
+    connect_pins: ConnectStoryPins,
     /// Remembered boards this browser knows a Wi‑Fi address for.
     #[props(default)]
     wifi_addresses: Vec<(lpa_studio_core::DeviceId, String)>,
@@ -544,16 +563,60 @@ pub(crate) fn StoryDevicesPage(
     relay_boards: Vec<lpa_studio_core::DeviceId>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
+    let home = with_core_sections(home);
+    // The Bluetooth half is the pinned answer, else this browser's — the
+    // same answer the section's notes read, so the square and the way
+    // forward under it never disagree.
+    let asked = use_ble_reach();
+    let reach = connect_pins.ble_reach.unwrap_or_else(|| asked());
+    let mut offers = roster_tree(
+        &home.devices,
+        &home.projects,
+        &home.examples,
+        reach,
+        &wifi_addresses,
+        &relay_boards,
+    );
+    for offer in home_offers(&home) {
+        offers.publish(offer);
+    }
     rsx! {
-        RosterOffers {
-            devices: home.devices.clone(),
-            projects: home.projects.clone(),
-            examples: home.examples.clone(),
-            wifi_addresses,
-            relay_boards,
-            DevicesPage { home, remembered_open, target_pick_open, on_action }
+        OffersProvider { offers,
+            HomePage {
+                home: Some(home),
+                now_secs,
+                on_action: Some(on_action),
+                initial_tab,
+                // A capture never reads the story server's own storage:
+                // cards unless the story asks for rows.
+                initial_mode: Some(initial_mode.unwrap_or_default()),
+                connect_pins,
+                // The app reads these from its access context, which a story
+                // has none of: pin them so the closed fold is drawn.
+                keys_settings: Some(UiDeviceSettingsView {
+                    browser_name: Some("Luna's laptop".to_string()),
+                    remembered_passwords: 0,
+                }),
+            }
         }
     }
+}
+
+/// `home` with the sections core would build for its library and roster.
+///
+/// `StudioController::home_view` writes each project's boards onto its card
+/// ([`stamp_on_boards`]) and fills [`UiHomeView::sections`] with
+/// [`build_home_sections`]; a story that left the sections at their default
+/// gets the same two calls, so a story never hand-builds which board or
+/// project sits in which section, or which boards a project says it is on,
+/// and cannot show a page core would not produce. A story that pins sections
+/// keeps its own (a test of the page's drawing, not of core's membership).
+pub(crate) fn with_core_sections(mut home: UiHomeView) -> UiHomeView {
+    if home.sections == UiHomeSections::default() {
+        stamp_on_boards(&mut home.projects, &home.devices);
+        home.sections = build_home_sections(&home.projects, &home.devices);
+    }
+    home
 }
 
 /// The tree core would publish for a docked lens card (D43): the gallery's
@@ -628,5 +691,73 @@ fn ready_device(id: lpa_studio_core::DeviceId, title: &str) -> DeviceView {
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_studio_core::{BoardPlays, BoardProjects, DeviceId, UiHomeBoardKind};
+
+    use super::*;
+    use crate::app::home::home_gallery_stories::{examples, packages, roster_page_fixture};
+
+    #[test]
+    fn a_story_that_leaves_the_sections_default_gets_the_ones_core_builds() {
+        let home = story_home(UiHomeSections::default());
+        let filled = with_core_sections(home.clone());
+        assert_eq!(
+            filled.sections,
+            build_home_sections(&home.projects, &home.devices)
+        );
+        // Not the default by accident: the roster is on the page.
+        assert!(!filled.sections.online.is_empty());
+        assert!(
+            filled
+                .sections
+                .offline
+                .iter()
+                .all(|board| board.kind == UiHomeBoardKind::Remembered)
+        );
+    }
+
+    #[test]
+    fn a_projects_boards_are_the_ones_the_join_says_play_it() {
+        let mut home = story_home(UiHomeSections::default());
+        // The library fixture carries a hand-written "On Luna's porch sign"
+        // that no join backs; core would not say it.
+        assert_eq!(home.projects[0].on_boards, ["Luna's porch sign"]);
+        let porch = home.projects[0].uid.clone();
+        home.devices.board_projects = BoardProjects::from_answers([(
+            DeviceId(5),
+            BoardPlays::Given {
+                project_uid: porch,
+                at_head: true,
+            },
+        )]);
+        let shown = with_core_sections(home);
+        assert_eq!(shown.projects[0].on_boards, ["Garage strip"]);
+        assert!(shown.projects[1..].iter().all(|c| c.on_boards.is_empty()));
+    }
+
+    #[test]
+    fn a_story_that_pins_its_sections_keeps_them() {
+        let pinned = UiHomeSections {
+            newcomer: true,
+            ..UiHomeSections::default()
+        };
+        let kept = with_core_sections(story_home(pinned.clone()));
+        assert_eq!(kept.sections, pinned);
+    }
+
+    fn story_home(sections: UiHomeSections) -> UiHomeView {
+        UiHomeView {
+            projects: packages(),
+            examples: examples(),
+            devices: roster_page_fixture(),
+            sections,
+            library_available: true,
+            opening: None,
+            issue: None,
+        }
     }
 }

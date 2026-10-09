@@ -3,12 +3,12 @@ use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Binary, Bluetooth, Bot, Boxes, ChartLine, Check, ChevronDown,
     ChevronLeft, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, CircleDot, CircleMinus,
     CircleQuestionMark, Clock, Cloud, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag,
-    FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, Lightbulb, Link,
-    Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, LockOpen, Maximize2, Minimize2,
-    MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus, Power, Radio, RadioTower,
-    RefreshCw, RotateCcw, Route, Save, Settings, Smartphone, Sparkles, SquareArrowRight,
-    SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb, Users, Waypoints, Wifi, X,
-    Zap,
+    FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, LayoutGrid,
+    Lightbulb, Link, Link2, Link2Off, List, ListMusic, Locate, LocateFixed, Lock, LockOpen,
+    Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus, Power,
+    Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, Smartphone, Sparkles,
+    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb, Users,
+    Waypoints, Wifi, X, Zap,
 };
 
 #[component]
@@ -114,6 +114,8 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Connect => rsx! { Plug { size } },
         StudioIconName::Disconnect => rsx! { Unplug { size } },
         StudioIconName::Restart => rsx! { RotateCcw { size } },
+        StudioIconName::ViewCards => rsx! { LayoutGrid { size } },
+        StudioIconName::ViewList => rsx! { List { size } },
     }
 }
 
@@ -311,6 +313,10 @@ pub enum StudioIconName {
     Disconnect,
     /// A counter-clockwise turn: Reset, the board restarting.
     Restart,
+    /// A grid of tiles: the home page's cards view.
+    ViewCards,
+    /// Rows: the home page's list view.
+    ViewList,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

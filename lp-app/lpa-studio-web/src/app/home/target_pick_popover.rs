@@ -3,7 +3,7 @@
 //! Two surfaces open the same menu, so the menu is one component and the
 //! two decisions that differ are props:
 //!
-//! - **The Devices page's add slot** — the quiet second verb "start a board
+//! - **Connect a board's second verb** — the quiet second verb "start a board
 //!   here ▾". It draws the `devices/new-sim` offer: its rows are the
 //!   offer's `board` × `backing` pairs that bind, each tagged with what
 //!   picking it would start (`emu` / `sim`), and picking one presses the
@@ -22,7 +22,7 @@
 //! # Why a popover, again
 //!
 //! The same reason [`device_pick_popover`](super::device_pick_popover)
-//! gives: the add slot lives in the roster grid, and a list that grows with
+//! gives: Connect a board sits among the boards' sections, and a list that grows with
 //! the catalog would re-lay the whole grid out every time it opened.
 //! [`PopoverButton`] floats the panel in the browser's top layer, so the
 //! slot is the same height open or shut.
@@ -51,11 +51,11 @@ use crate::base::{
 };
 use crate::core::use_offer_at;
 
-/// The add slot's second verb, verbatim (spike 2a). Lowercase because it
+/// Connect a board's second verb, verbatim (spike 2a). Lowercase because it
 /// is a quiet aside beside the CTA, not a second button.
 pub(crate) const SLOT_VERB_LABEL: &str = "start a board here";
 
-/// The add slot's quiet second verb and its menu (spike 2a).
+/// Connect a board's quiet second verb and its menu (spike 2a).
 ///
 /// Deliberately quiet beside "via USB": the common case is a board
 /// on the desk, and this is the other way a card can appear.
@@ -68,7 +68,7 @@ pub(crate) fn TargetPickPopover(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // `devices/new-sim`: core publishes it wherever a runtime can be
-    // started (the add slot is drawn only there).
+    // started (Connect a board draws it only there).
     let Some(offer) = use_offer_at(OfferPath::devices().child("new-sim"))() else {
         return rsx! {};
     };
@@ -226,7 +226,7 @@ pub fn HardwarePickPopover(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn TargetPickMenu(
     offer: TargetOffer,
-    /// Tag each row with what this build would run it as (the add slot).
+    /// Tag each row with what this build would run it as (Connect a board).
     #[props(default = false)]
     show_tags: bool,
     /// Put the catalog id under the name (the Hardware row — `target` is a
@@ -355,7 +355,7 @@ fn focus_row(menu_id: &str, index: usize) {
     }
 }
 
-/// A per-mount id, so two menus on one page (the add slot and a settings
+/// A per-mount id, so two menus on one page (Connect a board and a settings
 /// row) cannot fight over the same row ids.
 fn next_menu_id() -> String {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -366,7 +366,7 @@ fn next_menu_id() -> String {
 /// The menu panel: narrow, because every row is one line of text.
 const TARGET_POPUP_CLASS: &str = "tw:grid tw:w-[300px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
-/// The add slot's second verb: a text affordance under the primary CTA, in
+/// Connect a board's second verb: a text affordance under the squares, in
 /// the remembered line's voice — the slot already has one button, and a
 /// second chip beside it would read as two equal offers.
 fn target_trigger_class() -> &'static str {
@@ -436,7 +436,7 @@ fn hint_class() -> &'static str {
 mod tests {
     use super::*;
 
-    /// The add slot's menu offers only what it can start, Desktop first —
+    /// Connect a board's menu offers only what it can start, Desktop first —
     /// the renderer's claim about the offer it draws.
     #[test]
     fn the_slots_menu_leads_with_desktop_and_offers_only_startable_rows() {
@@ -485,7 +485,7 @@ mod tests {
     }
 
     /// Two menus on one page get different row ids, so an arrow key in the
-    /// settings row cannot move focus inside the add slot's menu.
+    /// settings row cannot move focus inside Connect a board's menu.
     #[test]
     fn each_mounted_menu_gets_its_own_row_ids() {
         assert_ne!(next_menu_id(), next_menu_id());

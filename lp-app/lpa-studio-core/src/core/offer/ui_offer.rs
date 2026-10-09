@@ -92,7 +92,7 @@ impl UiOffer {
         offer.action = match offer.press_unchecked(&OfferArgs::new()) {
             Ok(bound) => bound,
             Err(OfferArgError::Missing { label, .. }) => {
-                offer.action.clone().disabled(format!("choose a {label}"))
+                offer.action.clone().disabled(waiting_reason(&label))
             }
             Err(error) => offer.action.clone().disabled(error.to_string()),
         };
@@ -103,6 +103,22 @@ impl UiOffer {
     /// draws them. Empty for an ordinary one-click verb.
     pub fn params(&self) -> &[OfferParam] {
         &self.params
+    }
+
+    /// Whether the offer is disabled only because a required value has not
+    /// been given yet: the "choose a …" state [`Self::with_params`] leaves
+    /// an unbound verb in. A renderer that draws the verb as the way to
+    /// its entry (a button that opens the field) treats that as pressable;
+    /// an offer disabled for its own sake (the page cannot reach the LAN,
+    /// an address is being reached) is not awaiting a value.
+    pub fn awaits_a_value(&self) -> bool {
+        let ActionEnablement::Disabled { reason } = &self.action.meta().enablement else {
+            return false;
+        };
+        match self.press_unchecked(&OfferArgs::new()) {
+            Err(OfferArgError::Missing { label, .. }) => *reason == waiting_reason(&label),
+            _ => false,
+        }
     }
 
     /// The action one press with `args` dispatches, or why the press is
@@ -276,6 +292,12 @@ impl UiOffer {
     }
 }
 
+/// Why an unbound verb reads disabled: it waits for a value the user has
+/// not given. [`UiOffer::awaits_a_value`] tests for exactly this.
+fn waiting_reason(label: &str) -> String {
+    format!("choose a {label}")
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -394,6 +416,30 @@ mod tests {
             })
         );
         assert!(offer.press(&OfferArgs::new().with("board", "xiao")).is_ok());
+    }
+
+    /// An offer waiting only for its value is told apart from one disabled
+    /// for its own sake, so a button that opens the entry can stay
+    /// pressable while the entry asks.
+    #[test]
+    fn an_offer_awaits_a_value_only_while_that_is_all_it_lacks() {
+        // Unbound and enabled once chosen: waiting for the value.
+        assert!(labelled_offer(None).awaits_a_value());
+        // Bound by a default: nothing is awaited.
+        assert!(!labelled_offer(Some("xiao")).awaits_a_value());
+        // A one-click verb awaits nothing, enabled or not.
+        assert!(!save_offer().awaits_a_value());
+        let blocked = UiOffer::new(
+            OfferPath::project().child("save"),
+            "save",
+            save_offer().action.disabled("nothing to save"),
+        );
+        assert!(!blocked.awaits_a_value());
+        // Disabled for its own sake after being given a value to wait for:
+        // the page, not the field, is what waits.
+        let mut page_waits = labelled_offer(None);
+        page_waits.action = page_waits.action.disabled("Connecting\u{2026}");
+        assert!(!page_waits.awaits_a_value());
     }
 
     #[test]

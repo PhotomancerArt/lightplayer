@@ -1,18 +1,25 @@
-//! The home gallery view model.
+//! The home page's view model.
 
 use crate::UiIssue;
 
 use super::ui_example_card::UiExampleCard;
+use super::ui_home_sections::UiHomeSections;
 use super::ui_package_card::UiPackageCard;
 
-/// Everything the home screen renders. Present on
+/// Everything the home page renders. Present on
 /// [`UiStudioView`](crate::UiStudioView) when the shell should show the
-/// gallery instead of the pane layout.
+/// page instead of the pane layout.
+///
+/// The page is [`Self::sections`]: which board or project sits in which
+/// section, in what order, and whether this is a first visit. The other
+/// fields are the things those sections point at (the library's cards, the
+/// roster's views, the catalog).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiHomeView {
-    /// *Your projects* section, name-sorted like the library lists them.
+    /// The library's projects, name-sorted like the library lists them.
+    /// The sections name them by uid; the web resolves a uid here.
     pub projects: Vec<UiPackageCard>,
-    /// *Examples* section (embedded packages until M6).
+    /// The examples (embedded packages until M6).
     pub examples: Vec<UiExampleCard>,
     /// The device roster: the `lpa-devices` projection, verbatim.
     ///
@@ -21,8 +28,14 @@ pub struct UiHomeView {
     /// label, freshness line and escape is a pure function of the fold — so
     /// there is nowhere for the page and the model to disagree.
     pub devices: crate::DeviceRosterView,
-    /// Whether the local library mounted; when `false` the projects section
-    /// explains instead of listing (the store banner carries the details).
+    /// What the page holds, in what order: Online and Offline boards,
+    /// Connect a board, Other projects, Projects, Your patterns, and
+    /// whether this is a newcomer. Filled by `StudioController::home_view`
+    /// once the roster is in.
+    pub sections: UiHomeSections,
+    /// Whether the local library mounted; when `false` the projects
+    /// sections explain instead of listing (the store banner carries the
+    /// details).
     pub library_available: bool,
     /// The card key (`prj…` uid or example id) whose open is in flight, so
     /// the renderer can show it busy.
@@ -44,6 +57,19 @@ impl UiHomeView {
                 "  devices: {} cards, {} identifying",
                 self.devices.roster.devices.len(),
                 self.devices.roster.pending.len()
+            ));
+        }
+        let sections = &self.sections;
+        if sections.newcomer {
+            lines.push("  sections: a first visit (no boards, no projects)".to_string());
+        } else {
+            lines.push(format!(
+                "  sections: {} online, {} offline, {} other projects, {} projects, {} patterns",
+                sections.online.len(),
+                sections.offline.len(),
+                sections.other_projects.len(),
+                sections.projects.len(),
+                sections.patterns.len(),
             ));
         }
         if let Some(opening) = &self.opening {

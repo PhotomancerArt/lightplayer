@@ -5,8 +5,8 @@
 // One emulated ESP32-C6, `c6-a`, running the packaged firmware ROM-up on the
 // `lan` lane's virtual LAN (`lan=home`). Real Studio, headless, on its
 // release bundle, with no `?emu=` and no `?lan=`: the board is reached the
-// way a person reaches it, by typing its address into "Connect a board on
-// Wi‑Fi".
+// way a person reaches it, by typing its address into the Network row of
+// Connect a board.
 //
 //   R1  the board joins the fixture's network over its USB door; the walk
 //       then holds that door as the board's console
@@ -45,6 +45,7 @@ import {
   RELEASE_BUNDLE,
   SERVED_FIRMWARE,
   boardRegistry,
+  openNetworkRow,
   serveStudioBundle,
   startDoor,
   startRecordSink,
@@ -72,8 +73,9 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 const A = "c6-a";
 
-/// The add slot's address field and its Connect (`wifi_address_entry.rs`),
-/// as the `studio-lan` lane finds them.
+/// The Network row's address field and its Connect (`wifi_address_entry.rs`),
+/// as the `studio-lan` lane finds them; the row opens when the Network square
+/// is pressed (`openNetworkRow`).
 const ADDRESS_FIELD = `document.querySelector('#main input[placeholder^="192.168.1.40"]')`;
 const ADDRESS_ENTRY = `${ADDRESS_FIELD}?.closest('label')?.parentElement?.parentElement`;
 const PRESS_ADDRESS_CONNECT = `(() => {
@@ -155,7 +157,7 @@ async function main() {
   if (options.dryRun) {
     const steps = [
       `R1 lp-cli wifi add <usb door> ${NET.ssid} → status connected; hold the USB door as the console`,
-      `R2 Studio, no flag: add slot <forward> → Connect → console: secure session opening → card Ready, Reset enabled`,
+      `R2 Studio, no flag: Network row <forward> → Connect → console: secure session opening → card Ready, Reset enabled`,
       `R3 press Reset once → console: "${BOARD.asked}", the ROM's reset banner, an address, a new secure session → card Ready again, no click`,
     ];
     writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify({ out, boards: boardsSpec, extraArgs, steps, prerequisites: needs, chrome }, null, 2));
@@ -197,7 +199,7 @@ async function main() {
   const mac = String(entry.mac).toLowerCase();
   let configuration = entry.configuration ?? "unknown";
   const query = new URLSearchParams({ record: sinkUrl });
-  const url = `http://localhost:${port}/devices?${query.toString()}`;
+  const url = `http://localhost:${port}/?${query.toString()}`;
 
   console.log("\nTHE EMULATED STUDIO-LAN RESET WALK");
   console.log(`  board    ${A} ${mac} → forward ${fwd}`);
@@ -260,9 +262,10 @@ async function main() {
       page = new Page(driver);
       await page.load(url);
       const from = hold.console.mark();
-      await driver.waitFor(`Boolean(${ADDRESS_FIELD})`, { timeoutMs: STEP_MS, what: "the add slot's address field" });
+      await openNetworkRow(driver, { timeoutMs: STEP_MS });
+      await driver.waitFor(`Boolean(${ADDRESS_FIELD})`, { timeoutMs: STEP_MS, what: "the Network row's address field" });
       await driver.type("192.168.1.40", fwd, { scope: "document.querySelector('#main')" });
-      await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the add slot's Connect" });
+      await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the Network row's Connect" });
       seen.opened = (await hold.console.waitFor(BOARD.session, { from, what: "a secure LAN session opening" })).trim();
       await page.cardSays(fwd, "Ready");
       const shown = await page.cardMac(fwd);

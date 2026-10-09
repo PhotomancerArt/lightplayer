@@ -330,7 +330,7 @@ pub(crate) fn library_project(uid: &str, slug: &str) -> UiPackageCard {
         slug: slug.to_string(),
         last_saved_at: Some(1_000_000.0 - 7_200.0),
         provenance: None,
-        on_device: None,
+        on_boards: Vec::new(),
         open_elsewhere: false,
         target: None,
         health: crate::app::library::PackageHealth::Ready,

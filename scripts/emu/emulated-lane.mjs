@@ -355,12 +355,12 @@ async function runStep(step, ctx) {
     case "connect": {
       // The one call `browser_esp32_device_controller.js` makes, answered by
       // the page's own chooser. Studio never learns anything is different.
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       const picked = await driver.pickBoard(step.board, { timeoutMs: STEP_DEADLINE_MS });
       return `picked ${picked} in the in-page chooser`;
     }
     case "cancel-connect": {
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`Boolean(document.querySelector('#lp-emu-picker'))`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the chooser",
@@ -444,6 +444,23 @@ async function runStep(step, ctx) {
   }
 }
 
+/// The wait for the Network row's address field, and the press that opens
+/// it (`openNetworkRow`): the field's placeholder starts with this.
+const ADDRESS_FIELD_SELECTOR = `#main input[placeholder^="192.168.1.40"]`;
+
+/// Open the home page's Network row — the address field and its Connect —
+/// and wait for the field. The Network square toggles the row, so a second
+/// press would close it: when the field is already on the page this presses
+/// nothing. Every walk that types an address calls this first.
+export async function openNetworkRow(driver, { timeoutMs = STEP_DEADLINE_MS } = {}) {
+  const open = () => driver.evaluate(`Boolean(document.querySelector(${JSON.stringify(ADDRESS_FIELD_SELECTOR)}))`);
+  if (!(await open())) await driver.pressConnect("Network", { timeoutMs });
+  await driver.waitFor(`Boolean(document.querySelector(${JSON.stringify(ADDRESS_FIELD_SELECTOR)}))`, {
+    timeoutMs,
+    what: "the Network row's address field",
+  });
+}
+
 /// Open Studio on the canonical dev server with BOTH flags. They compose:
 /// `index.html`'s reader and `device_events_io.rs`'s are two separate parsers
 /// over the same query string and neither reads the other's parameter.
@@ -451,7 +468,7 @@ async function runStep(step, ctx) {
 /// `doorAddr: null` is the TAB backing (`?emu=tab`): the emulator runs in a
 /// Worker in the page and there is no address to name. Everything else about
 /// the lane is unchanged, which is the point of the spelling.
-export function studioUrlFor({ studioPort, doorAddr = null, sinkUrl, route = "/devices" }) {
+export function studioUrlFor({ studioPort, doorAddr = null, sinkUrl, route = "/" }) {
   const query = new URLSearchParams();
   query.set("emu", doorAddr ? `ws://${doorAddr}` : "tab");
   query.set("record", sinkUrl);

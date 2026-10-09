@@ -1,4 +1,4 @@
-//! Stories for the Projects page's archive drawer.
+//! Stories for the home page's archive drawer.
 //!
 //! The live section reads the `CloudSession` and one `ListMyProjects`,
 //! which stories never provide — so these mount the pure list with

@@ -77,7 +77,7 @@ const STEP_DEADLINE_MS = 180_000;
 /// It is separate from `STEP_DEADLINE_MS` because conflating them makes a
 /// slow download look like a board that never answered: the first step's
 /// deadline was spent watching a progress bar, the screenshot said `Loading
-/// Studio…`, and the verdict said the card never offered `It's connected` (today's `via USB`)
+/// Studio…`, and the verdict said the card never offered `It's connected` (today's USB square)
 /// (measured 2026-09-10 on the tab lane, with the machine otherwise busy).
 /// Wait for the app to exist, then start timing the board.
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
@@ -169,6 +169,45 @@ function startSink() {
   return { server, records, raw, awaitRecord };
 }
 
+/// Which section of the home page holds the board right now, REPORTED and
+/// never asserted: whether a cable-out leaves a card under Online boards
+/// ("Reconnect…") or moves it to Offline boards depends on the board's state
+/// (`walk-ota-emu.mjs` says so where it waits for the same thing), so a claim
+/// here would be a claim about the roster's timing. Matches the board's MAC
+/// in `#home-offline-boards` / `#home-online-boards`; an offline card does not
+/// print the MAC, so with one board in the walk, the only section on the page
+/// is where it sits. Answers `offline`, `online`, `neither` (no section on the
+/// page) or `unmatched` (both are there and neither names the MAC).
+///
+/// Waits, bounded, for Offline boards to appear before it answers, so a card
+/// still on its way there is not reported as staying: a page-side wait that
+/// ends the moment the section exists, or at the deadline with whatever is
+/// there.
+async function sectionOf(driver, mac) {
+  await driver
+    .waitFor(`Boolean(document.querySelector('#home-offline-boards'))`, {
+      timeoutMs: 10_000,
+      what: "Offline boards to appear",
+    })
+    .catch(() => null);
+  return driver.evaluate(`(() => {
+    const mac = ${JSON.stringify((mac ?? "").toLowerCase())};
+    const found = { offline: document.querySelector('#home-offline-boards'),
+                    online: document.querySelector('#home-online-boards') };
+    const present = Object.keys(found).filter((name) => found[name]);
+    const named = present.find((name) => mac && found[name].innerText.toLowerCase().includes(mac));
+    if (named) return named;
+    if (present.length === 0) return 'neither';
+    return present.length === 1 ? present[0] : 'unmatched';
+  })()`);
+}
+
+async function reportSection(driver, mac, when) {
+  const section = await sectionOf(driver, mac);
+  console.log(`  the board's section ${when}: ${section}   (reported, not asserted)`);
+  return section;
+}
+
 /// The `loaded_projects` of the LAST heartbeat the board wrote to its own
 /// console. The door records that console whether or not anything is
 /// listening, which is what makes it the board's word rather than Studio's.
@@ -241,7 +280,16 @@ async function main() {
   const sink = startSink();
   await new Promise((resolve) => sink.server.listen(0, "127.0.0.1", resolve));
   const sinkUrl = `http://127.0.0.1:${sink.server.address().port}/ingest`;
-  const url = studioUrlFor({ studioPort: port, doorAddr: door?.addr ?? null, sinkUrl });
+  // The walk opens Studio at the LEGACY address on purpose: `/devices` is no
+  // page any more, it parses as Home and heals to `/` with the whole query
+  // kept (PAC2), and this is the one place that is proven live. `wire=packed`
+  // is the documented default spelled out, a no-op, and it is NOT one of the
+  // page-load flags (`record`, `emu`, `ble`), so a heal that filtered the
+  // query through `with_page_flags` would drop it and the check below would
+  // say so.
+  const url =
+    studioUrlFor({ studioPort: port, doorAddr: door?.addr ?? null, sinkUrl, route: "/devices" }) +
+    "&wire=packed";
 
   console.log("");
   console.log("THE WALK WITH NO BOARD");
@@ -287,6 +335,13 @@ async function main() {
   };
 
   let fatal = null;
+  /// The address the page healed to (the alias proof), and the MAC the
+  /// identify step read; the section reports below match on it.
+  let healed = null;
+  let boardMac = null;
+  /// Which section of the home page the board sat in after the cable came
+  /// out, and after it went back in: REPORTED, not asserted (see `sectionOf`).
+  const sections = {};
   try {
     await driver.navigate(url);
     const boards = await driver.awaitShim();
@@ -305,6 +360,23 @@ async function main() {
           `— the page is still on the shell loader, which is a bundle problem and not a board one`,
       );
     }
+    // THE ALIAS (PAC2): the legacy address must have healed to `/`, with the
+    // query it was opened with. A page-side wait, not a timer: the router
+    // rewrites the address once the app has mounted, which it has.
+    healed = await driver
+      .waitFor(
+        `(() => { const q = new URLSearchParams(location.search);
+                  return location.pathname === '/' && q.get('wire') === 'packed'
+                    && q.get('emu') !== null && q.get('record') !== null
+                    ? location.pathname + location.search : false; })()`,
+        { timeoutMs: 30_000, what: "the legacy address to heal to `/`" },
+      )
+      .catch(async () => {
+        const now = await driver.evaluate(`location.pathname + location.search`).catch(() => "(unreadable)");
+        throw new Error(`the legacy address did not heal to \`/\` with its flags: the page is at ${now}`);
+      });
+    console.log(`  the legacy address healed: /devices?… → ${healed.split("?")[0]} with wire=packed, emu and record kept`);
+
     // An instrument that lies about its own conditions is worse than none:
     // a hidden page throttles its timers and its Workers, so a walk run in
     // one measures the throttle. Say which it was, every time.
@@ -315,7 +387,7 @@ async function main() {
 
     // 1. FLASH — Studio's own esptool-js flow, into a chip with nothing on it.
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(options.board, { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(
         `(document.querySelector('#main')?.innerText || '').includes('needs firmware')`,
@@ -381,6 +453,7 @@ async function main() {
       console.log(`  identity: ${identity}   mac: ${mac}`);
       if (!identity) throw new Error("the card never showed a firmware identity");
       steps.identity = identity;
+      boardMac = mac;
     });
 
     // 4. UPLOAD — through Studio, as the criterion says, not the CLI.
@@ -441,6 +514,7 @@ async function main() {
                   return rows.some((r) => (r.innerText||'').includes('detached')); })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the banner to report the board detached" },
       );
+      sections.afterDetach = await reportSection(driver, boardMac, "after the cable came out");
     });
 
     // 6. RE-ATTACH — a replug is an enumeration, so the grant moves onto a
@@ -469,6 +543,7 @@ async function main() {
         .catch(() => "(never settled to a word this walk knows)");
       console.log(`  after the replug the card reads: ${JSON.stringify(settled)}`);
       steps.replugSettled = settled;
+      sections.afterReattach = await reportSection(driver, boardMac, "after the cable went back in");
     });
   } catch (error) {
     fatal = error;
@@ -496,8 +571,11 @@ async function main() {
         backing: door ? "door" : "tab",
         door: door?.addr ?? null,
         url,
+        aliasHealedTo: healed,
         project: WALK_PROJECT,
         model: BOARD_MODEL,
+        boardMac,
+        sections,
         registry,
         consoleErrors,
         steps: steps.map((s) => ({
@@ -519,6 +597,12 @@ async function main() {
   console.log("=== the walk, step by step");
   for (const s of steps) {
     console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${s.recordCount ?? s.records.length} record(s)   ${path.basename(s.shot)}`);
+  }
+  if (healed) console.log(`\n  the alias:   /devices → ${healed.split("?")[0]}, its query kept (wire, emu, record)`);
+  if (sections.afterDetach) {
+    console.log(
+      `  the section: after detach ${sections.afterDetach} · after re-attach ${sections.afterReattach ?? "(not reached)"}   (reported, not asserted)`,
+    );
   }
   if (registry) {
     console.log(`\n  the ${door ? "door" : "tab"}'s live registry: ${registry.map((b) => `${b.id} flash=${b.flash} boot=${b.boot} reboots=${b.reboots} state=${b.state}`).join(" · ")}`);

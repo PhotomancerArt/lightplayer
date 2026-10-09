@@ -16,6 +16,7 @@ use lpfs::LpFs;
 
 use super::embedded_example::embedded_examples;
 use super::ui_example_card::UiExampleCard;
+use super::ui_home_sections::UiHomeSections;
 use super::ui_home_view::UiHomeView;
 use super::ui_package_card::UiPackageCard;
 use crate::UiIssue;
@@ -68,7 +69,7 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
         Ok(summaries) => summaries
             .into_iter()
             .map(|summary| {
-                package_card(&store, &registered, summary.clone()).unwrap_or_else(|error| {
+                package_card(&store, summary.clone()).unwrap_or_else(|error| {
                     log::warn!("home: {} listed without its history: {error}", summary.slug);
                     (degraded_package_card(summary), None)
                 })
@@ -120,6 +121,7 @@ pub fn build_home_view(
             projects: Vec::new(),
             examples,
             devices: crate::DeviceRosterView::default(),
+            sections: UiHomeSections::default(),
             library_available: false,
             opening,
             issue,
@@ -132,6 +134,9 @@ pub fn build_home_view(
         // Filled by `StudioController::home_view` from the roster: the
         // builder reads the LIBRARY, and the device model is not in it.
         devices: crate::DeviceRosterView::default(),
+        // Filled there too, once the roster is in: the sections are the
+        // library joined to the boards.
+        sections: UiHomeSections::default(),
         library_available: true,
         opening,
         issue: issue.or_else(|| inputs.issue.clone()),
@@ -157,10 +162,6 @@ fn dedupe_by_key<T>(cards: Vec<T>, key: impl Fn(&T) -> String, what: &'static st
         .collect()
 }
 
-/// The display label a pattern project's kind reads as
-/// ([`crate::app::library::package_manifest::kind_label`]).
-const PATTERN_KIND_LABEL: &str = "Pattern";
-
 /// Every pattern export the library offers, for the add-node picker's
 /// import source (module authoring unit, P5).
 ///
@@ -173,7 +174,7 @@ pub fn importable_patterns(inputs: &HomeInputs) -> Vec<crate::UiImportablePatter
     inputs
         .projects
         .iter()
-        .filter(|card| card.project_kind == PATTERN_KIND_LABEL && card.health.is_openable())
+        .filter(|card| card.is_pattern() && card.health.is_openable())
         .flat_map(|card| {
             let family = card.exports.len() > 1;
             card.exports
@@ -221,15 +222,14 @@ pub fn builtin_importable_patterns() -> Vec<crate::UiImportablePattern> {
 /// to hold to be at head — [`HomeInputs::project_heads`]).
 fn package_card(
     store: &LibraryStore,
-    registered: &[RegisteredDevice],
     summary: crate::app::library::PackageSummary,
 ) -> Result<(UiPackageCard, Option<ContentHash>), crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
     // Advisory board target (vision D3) + authored project kind (module
     // authoring unit, P1): straight passthrough from the container
-    // manifest, same seam `provenance`/`on_device` use — no catalog lookup
-    // here, that's the web renderer's job.
+    // manifest, same seam `provenance` uses — no catalog lookup here,
+    // that's the web renderer's job.
     let manifest_fields =
         crate::app::library::package_manifest::read_manifest(&*handle.package_fs.borrow())?;
     let target = manifest_fields.target;
@@ -250,13 +250,6 @@ fn package_card(
 
     let uid = summary.uid.to_string();
     let head = handle.history.head();
-    let on_device = head.and_then(|head| {
-        registered.iter().find_map(|device| {
-            let association = device.association.as_ref()?;
-            (association.project.to_string() == uid && association.version == head)
-                .then(|| device.name.clone())
-        })
-    });
 
     let card = UiPackageCard {
         uid,
@@ -266,7 +259,9 @@ fn package_card(
         slug: summary.slug,
         last_saved_at,
         provenance: meta.and_then(|meta| provenance_line(store, &meta)),
-        on_device,
+        // The boards that play it come from the board↔project join, stamped
+        // by `StudioController::home_view` — a library read knows no boards.
+        on_boards: Vec::new(),
         open_elsewhere: false, // stamped by the hydration pass
         target,
         health: summary.health,
@@ -293,7 +288,7 @@ fn degraded_package_card(summary: crate::app::library::PackageSummary) -> UiPack
         slug: summary.slug,
         last_saved_at: None,
         provenance: None,
-        on_device: None,
+        on_boards: Vec::new(),
         open_elsewhere: false,
         // A degraded package's manifest may be unreadable; no target claim.
         target: None,
@@ -572,6 +567,8 @@ mod tests {
             view.render_text_lines(),
             vec![
                 format!("Home: 0 projects, {} examples", embedded_examples().len()),
+                "  sections: 0 online, 0 offline, 0 other projects, 0 projects, 0 patterns"
+                    .to_string(),
                 "  opening prjx".to_string(),
                 "  issue: boom".to_string(),
             ]

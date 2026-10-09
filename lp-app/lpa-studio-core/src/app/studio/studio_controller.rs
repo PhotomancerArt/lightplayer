@@ -32,7 +32,9 @@ use std::rc::Rc;
 use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::home::home_view_builder::HomeInputs;
-use crate::app::home::{HOME_NODE_ID, HomeOp, UiHomeView, home_view_builder};
+use crate::app::home::{
+    HOME_NODE_ID, HomeOp, UiHomeView, home_sections_builder, home_view_builder,
+};
 use crate::app::library::{CatalogOp, LibraryHost};
 use crate::app::project::device_bind::BindOutcome;
 use crate::app::studio::console_command::ConsoleCommand;
@@ -666,7 +668,7 @@ impl StudioController {
     /// beside the others: in every browser with a WebSocket. Its links
     /// present [`Self::network_link_keys`]. With it installed, a board this
     /// browser remembers an address for is offered "Connect over Wi‑Fi",
-    /// and the add slot takes an address.
+    /// and Connect a board's Network row takes an address.
     pub fn set_lan_transport(&mut self, transport: Rc<crate::LanDeviceTransport>) {
         self.lan_transport = Some(transport);
         self.install_device_transport();
@@ -2099,7 +2101,7 @@ impl StudioController {
 
     /// Whether this page can reach a board over USB. Web Serial (or the
     /// `?emu=` shim that polyfills it) is what built a serial transport;
-    /// without one the add slot keeps its USB verb out of the primary
+    /// without one Connect a board keeps its USB square out of the primary
     /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree's
     /// `devices/connect-usb` is disabled with the reason.
     fn usb_available(&self) -> bool {
@@ -3285,7 +3287,7 @@ impl StudioController {
                 let on_lens_card = lens.is_some()
                     && owner.as_ref().and_then(|owner| offers.device_at(owner)) == lens;
                 (!(place.page.is_editor() && on_lens_card))
-                    .then(|| "It is on the Devices page.".to_string())
+                    .then(|| "It is on the home page.".to_string())
             }
             _ => None,
         }
@@ -3845,6 +3847,11 @@ impl StudioController {
         // no `Ui*` mirror of it, so the page cannot drift from the fold.
         // The sim is in it, like every device (PD9).
         view.devices = self.device_roster_view();
+        // Which boards play each project is the board↔project join's
+        // answer (carried on the roster view); the library half could not
+        // know it. Then the page's sections, built from both halves.
+        home_sections_builder::stamp_on_boards(&mut view.projects, &view.devices);
+        view.sections = home_sections_builder::build_home_sections(&view.projects, &view.devices);
         Some(view)
     }
 
@@ -8552,8 +8559,8 @@ impl StudioController {
     /// are listed in full.
     fn app_agent_readout(&self) -> crate::app::agent::app_agent_readout::AppReadoutSnapshot {
         use crate::app::agent::app_agent_readout::{
-            AppReadoutSnapshot, device_lines, looking_at_lines, opening_line, page_line,
-            project_lines,
+            AppReadoutSnapshot, device_lines, home_lines, looking_at_lines, opening_line,
+            page_line, project_lines,
         };
         let home_view = self.home_view();
         let home = home_view.is_some();
@@ -8587,6 +8594,11 @@ impl StudioController {
         }
         let roster = self.device_roster_view();
         text.push_str(&device_lines(&roster));
+        // The home page the way a person sees it: which boards and
+        // projects sit in which section.
+        if let Some(home_view) = &home_view {
+            text.push_str(&home_lines(home_view));
+        }
         // A real board is one on the bus right now (not a remembered,
         // offline one) that wears no runtime band — a band marks a sim
         // (D38). `false` keeps the add-a-board offers listed in full on
@@ -10607,6 +10619,24 @@ mod tests {
         assert!(view.panes.is_empty(), "home replaces the pane layout");
         assert!(!home.library_available, "no store attached on host");
         assert!(!home.examples.is_empty(), "examples always show");
+    }
+
+    /// On the home page — the place the web reports for `/`, and for its
+    /// old addresses `/devices` and `/projects` — the boards' verbs and
+    /// Home's own project verbs (new, open) rank together, as they did on
+    /// the pages it replaced.
+    #[test]
+    fn the_home_page_ranks_the_boards_and_the_project_verbs_together() {
+        let mut studio = StudioController::new(|| 0.0);
+        studio.set_place(crate::UiPlace::new(crate::UiPage::Home));
+
+        let view = studio.view();
+
+        assert!(view.home.is_some(), "an idle studio shows home");
+        assert_eq!(
+            view.offers.focus().areas,
+            [crate::OfferPath::devices(), crate::OfferPath::project()]
+        );
     }
 
     /// The New menu's optional name: a typed name is what the library dates

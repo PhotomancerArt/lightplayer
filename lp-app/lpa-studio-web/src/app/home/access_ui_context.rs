@@ -1,7 +1,7 @@
 //! The Bluetooth access surfaces' wiring, as a context.
 //!
 //! The device card's Connections group and "Who has access", and the
-//! Devices page's access settings, sit several layers under the shell; the
+//! home page's "Unlocking your boards" fold, sit several layers under the shell; the
 //! web app provides their callback and the view slice they read here
 //! instead of threading them through every component between. Stories
 //! provide none, so those surfaces render inert (or are handed fixtures

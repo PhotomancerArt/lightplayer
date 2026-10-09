@@ -18,7 +18,7 @@
 //       (Studio's own sync, not a seeded chip): the board then answers
 //       `relay connected` (it registered with the relay by itself)
 //   T2  the cable is gone and nobody is signed in (no `?emu=`, no cookie):
-//       the board is a remembered tile, and its tile does NOT offer
+//       the board is a card under Offline boards, and it does NOT offer
 //       "Connect through lightplayer.app"
 //   T3  signed in again, still no cable: the tile offers "Connect through
 //       lightplayer.app"; pressed, the hub opens a member session to the
@@ -27,8 +27,8 @@
 //       lightplayer.app", Ready, with no "over Bluetooth" and no "USB
 //       connected" on it
 //   T4  the board cannot reach the relay (the walk drops its device leg and
-//       refuses new ones): the page's session ends, the card is a
-//       remembered tile again, and a press says "The board isn't online." on
+//       refuses new ones): the page's session ends, the card is
+//       a card under Offline boards again, and a press says "The board isn't online." on
 //       the tile (the hub's 4404); once the board is back on the relay (its
 //       own `[relay] leg open`), a press brings the card back Ready
 //
@@ -143,7 +143,7 @@ const RELAY_CARD = `(() => {
 })()`;
 const RELAY_CARD_TEXT = `(${RELAY_CARD}?.innerText || '')`;
 
-/// The remembered tile's status line (`devices_page.rs`, `role="status"`).
+/// The offline card's status line (`offline_board_tile.rs`, `role="status"`).
 const TILE_STATUS = `([...document.querySelectorAll('#main [role="status"]')].map((el) => el.innerText || '').join('\\n'))`;
 
 /// Press the tile's "Connect through lightplayer.app" once it is pressable.
@@ -178,8 +178,8 @@ async function main() {
 
   if (options.dryRun) {
     const steps = [
-      `T1 lp-cli wifi add <usb door> ${NET.ssid} → status connected, relay noAccount; Studio signed in, ?emu= → via USB → ${A} Ready → status relay connected`,
-      `T2 no cookie, no ?emu= → ${A}'s remembered tile, and no "${WORDS.connectRelay}"`,
+      `T1 lp-cli wifi add <usb door> ${NET.ssid} → status connected, relay noAccount; Studio signed in, ?emu= → the USB square → ${A} Ready → status relay connected`,
+      `T2 no cookie, no ?emu= → ${A}'s card under Offline boards, and no "${WORDS.connectRelay}"`,
       `T3 signed in, no ?emu= → tile → "${WORDS.connectRelay}" → hub: member session open; board: [relay] route … secure session opening → card "${WORDS.relayLine}" Ready, ${A}'s MAC, one device`,
       `T4 the device leg cut and refused → card offline → "${WORDS.connectRelay}" → tile "${WORDS.offline}"; leg allowed → board: [relay] leg open → press → Ready`,
     ];
@@ -239,8 +239,8 @@ async function main() {
   const mac = String(entry.mac).toLowerCase();
   const board = relayId(mac);
   let configuration = entry.configuration ?? "unknown";
-  const usbUrl = `${studioOrigin}/devices?emu=${encodeURIComponent(`ws://${door.addr}`)}`;
-  const plainUrl = `${studioOrigin}/devices`;
+  const usbUrl = `${studioOrigin}/?emu=${encodeURIComponent(`ws://${door.addr}`)}`;
+  const plainUrl = `${studioOrigin}/`;
 
   console.log("\nTHE EMULATED STUDIO-RELAY WALK (no ?relay=, no ?lan=)");
   console.log("  ⚠️  a local lp-cloud-server stands in for lightplayer.app: no internet, no fly proxy, no");
@@ -276,10 +276,13 @@ async function main() {
     await driver.navigate(url);
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: 420_000, what: "Studio to finish loading" });
   };
-  /// The remembered line, opened (its "show" toggle).
+  /// The board's card under Offline boards, which is always open: wait for it
+  /// (its Reconnect verb) THERE, not for text elsewhere on the page.
   const openRemembered = async () => {
-    await driver.clickWhenReady("show", { timeoutMs: STEP_MS, exact: true });
-    await driver.waitFor(`${MAIN_TEXT}.includes('Reconnect')`, { timeoutMs: STEP_MS, what: "the remembered tile" });
+    await driver.waitFor(`(document.querySelector('#home-offline-boards')?.innerText || '').includes('Reconnect')`, {
+      timeoutMs: STEP_MS,
+      what: "the card under Offline boards",
+    });
   };
 
   const step = async (id, describe, body, { fatal: stops = false } = {}) => {
@@ -332,7 +335,7 @@ async function main() {
       await driver.navigate(usbUrl);
       await driver.awaitShim();
       await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: 420_000, what: "Studio to finish loading" });
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_MS });
       await driver.pickBoard(A, { timeoutMs: STEP_MS });
       await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: `${A} Ready over USB` });
       // The toast Studio raises when its USB connect added keys on its own.
@@ -390,8 +393,10 @@ async function main() {
       for (const wrong of [WORDS.bluetooth, WORDS.usbConnected]) {
         if (card.includes(wrong)) throw new Error(`the relay card says ${JSON.stringify(wrong)}: ${card}`);
       }
-      const tiles = await driver.evaluate(`${MAIN_TEXT}.match(/remembered board/g)?.length ?? 0`);
-      if (tiles) throw new Error(`a remembered line is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
+      // The same device: no card left under Offline boards for it (it was the
+      // only remembered board, so the whole section is gone).
+      const offline = await driver.evaluate(`Boolean(document.querySelector('#home-offline-boards'))`);
+      if (offline) throw new Error(`Offline boards is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
       return { hub: seen.hub, board: seen.board, line: card.split("\n").find((l) => l.includes(WORDS.relayLine)) };
     }, { fatal: true });
 
@@ -399,8 +404,8 @@ async function main() {
       const from = hold.console.mark();
       cloud.refuseDeviceLeg(true);
       seen.cut = cloud.cutDeviceLeg();
-      // The card leaves the grid for the remembered line (drawn closed).
-      await driver.waitFor(`${MAIN_TEXT}.includes('remembered board')`, { timeoutMs: STEP_MS, what: "the card to go offline" });
+      // The card leaves Online boards for Offline boards.
+      await driver.waitFor(`Boolean(document.querySelector('#home-offline-boards'))`, { timeoutMs: STEP_MS, what: "the card to go offline" });
       seen.hubEnded = hubSince(0).split("\n").filter((line) => line.includes(board) && /ended|refused/.test(line)).slice(-2);
       await openRemembered();
       const hubFrom = cloud.log().length;
