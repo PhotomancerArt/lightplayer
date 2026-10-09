@@ -197,11 +197,15 @@ function cardSelector(path) {
 /// none, or several.
 const ONLY_CARD = `((() => { const all = document.querySelectorAll('[data-board-card]'); return all.length === 1 ? all[0] : null; })())`;
 
-/// The `AgentMark` around a verb's control: `data-offer-path` ends with
-/// `/<verb>`.
-function offerSelector(verb) {
-  return `[data-offer-path$="/${verb}"]`;
-}
+/// Page-side: the `AgentMark` around a verb's control on `card` —
+/// `data-offer-path` ends with `/<verb>` — on the card's face
+/// (`inDetails` false: the name bar's primary, a bar's action, a work's
+/// Cancel) or inside an open popover (`inDetails` true: a bar's or the
+/// corner's details, where the rest of a board's verbs live). A details
+/// card renders inside the card's DOM, so the two are told apart by the
+/// popover's layer.
+const FIND_MARK = `((card, verb, inDetails) => card ? [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')]
+  .find((mark) => Boolean(mark.closest('.ux-popover-layer')) === inDetails) || null : null)`;
 
 /// Page-side: the button that presses an `AgentMark`'s offer. The mark is
 /// `display: contents`; its control is the last button inside it (an
@@ -523,18 +527,19 @@ export class StudioDriver {
     const scope = await this.card({ board });
     await this.waitFor(
       `(() => { const card = ${scope}; if (!card) return false;
-                const button = ${PRESSABLE}(card.querySelector(${JSON.stringify(offerSelector(verb))}));
+                const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${Boolean(bar)}));
                 return Boolean(button) && (${!enabled} || !button.disabled); })()`,
-      { timeoutMs, what: `the offer \`${verb}\`${enabled ? " (enabled)" : ""} on ${board ?? "the card"}` },
+      { timeoutMs, what: `the offer \`${verb}\`${enabled ? " (enabled)" : ""} on ${board ?? "the card"}${bar ? `'s ${bar} details` : ""}` },
     );
   }
 
-  /// Whether `verb` is drawn on the card right now (no wait).
-  async offered(verb, { board = null, enabled = false } = {}) {
+  /// Whether `verb` is drawn on the card's face right now (no wait);
+  /// `inDetails` asks the open details instead.
+  async offered(verb, { board = null, enabled = false, inDetails = false } = {}) {
     const scope = await this.card({ board });
     return this.evaluate(
       `(() => { const card = ${scope}; if (!card) return false;
-                const button = ${PRESSABLE}(card.querySelector(${JSON.stringify(offerSelector(verb))}));
+                const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${inDetails}));
                 return Boolean(button) && (${!enabled} || !button.disabled); })()`,
     );
   }
@@ -593,7 +598,7 @@ export class StudioDriver {
     if (!bar) await this.closeDetails({ board });
     await this.waitOffer(verb, { board, bar, timeoutMs });
     const scope = await this.card({ board });
-    const press = `(() => { const button = ${PRESSABLE}(${scope}.querySelector(${JSON.stringify(offerSelector(verb))}));
+    const press = `(() => { const button = ${PRESSABLE}(${FIND_MARK}(${scope}, ${JSON.stringify(verb)}, ${Boolean(bar)}));
                             if (!button || button.disabled) return null;
                             button.scrollIntoView({ block: 'center' }); button.click();
                             return (button.textContent || '').replace(/\\s+/g, ' ').trim(); })()`;
@@ -732,8 +737,9 @@ export class StudioDriver {
     const scope = await this.card({ board });
     return this.waitFor(
       `(() => { const card = ${scope}; if (!card) return false;
-                if (${PRESSABLE}(card.querySelector('[data-bar="project"] [data-offer-path$="/push"]'))) return 'empty';
-                const edit = ${PRESSABLE}(card.querySelector('[data-offer-path$="/edit"]'));
+                const push = ${FIND_MARK}(card, 'push', false);
+                if (push?.closest('[data-bar="project"]') && ${PRESSABLE}(push)) return 'empty';
+                const edit = ${PRESSABLE}(${FIND_MARK}(card, 'edit', false));
                 return edit && !edit.disabled ? 'running' : false; })()`,
       { timeoutMs, what: `the board to say what it runs (\`push\` or \`edit\` offered)` },
     );
