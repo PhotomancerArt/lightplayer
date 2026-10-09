@@ -190,6 +190,8 @@ genuinely fits none of these, and define it here in one line.
   above it; nothing host-side can see it, only a device run of the exact
   construct. The fix is a shape the compiler handles and a device test
   that holds the shape.
+- **`unclassified`** — an open defect whose mechanism is not known yet;
+  reclassify it when the cause is found.
 - **`contract-gap`** — content is authored against a guarantee one tier
   enforces (a fuel meter, a bound, a trap) and a second implementation of
   the same interface never enforces it, so the same input is safe on one
@@ -390,6 +392,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| unclassified | 2026-10-09 | [the-editor-never-opens-on-an-emu-serve-usb-board](2026-10-09-the-editor-never-opens-on-an-emu-serve-usb-board.md) | **open** | project sync over an `lp-cli emu serve` USB board: `walk-drop-emu`'s editor step waits forever on "project sync failed: protocol error: expected project read frame seq 1, got 0", with today's card and with the board card alike; the tab backing and Bluetooth open the editor. Found by the board card's walk pass (P09) |
 | state-conflation | 2026-10-08 | [the-device-play-address-loses-play](2026-10-08-the-device-play-address-loses-play.md) | fixed (this change) | lpa-studio-web lens sync (`web_app.rs` × `router.rs`): "this `/device/` address must heal" also threw away its view, because the heal wrote the lens's own route, which always reads non-play. A `/device/<uid>/play` load landed on `/p/…?on=mac:…`, out of play. No walk ever loaded one. The heal keeps the device route's view now (`router::lens_sync_target`, a test per row) |
 | assumed-context | 2026-10-08 | [shader-edits-over-wi-fi-are-refused-board-memory-busy](2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md) | fixed (#1047 the gate, #1057 the wire; silicon re-check owed) | fw-esp32-common `request_refusal` × Studio's `ReplaceBody` edit: the request gate asked for a block of 3/4 of the message (the base64 rule), but a shader edit is a JSON byte array (~3.5 chars a byte) that decodes into a block of its byte count, so a Wi-Fi-fragmented C6 refused a 7 KB edit needing 2 KB (`largest block 5216 B … a 6380 B block`). The gate reads the block off the request's shape; wire 41 sends the body as text (choker edit 7,134 → 2,239 B) |
 | silent-drop | 2026-10-08 | [a-lan-request-past-8-kb-goes-unanswered-on-a-fragmented-heap](2026-10-08-a-lan-request-past-8-kb-goes-unanswered-on-a-fragmented-heap.md) | **open** | lp-link `Inbox::grow_partial` × the C6 LAN link: past 8 KB, reassembly's next growth needs the old buffer and a new one at once; on a fragmented heap the message is dropped as oversize and never answered, so the host waits out its deadline |

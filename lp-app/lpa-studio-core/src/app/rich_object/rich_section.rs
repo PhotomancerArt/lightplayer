@@ -6,10 +6,10 @@ use crate::UiStatusKind;
 /// label→value facts, an optional advisory chip, and the section's
 /// affordance identities.
 ///
-/// Generic over the consumer's affordance identity `A` (device sections
-/// carry `DeviceDetailAffordance`; other rich objects bring their own
-/// vocabulary) — the model stays renderer- and wiring-independent, exactly
-/// like [`RosterAffordance`](crate::app::roster::RosterAffordance).
+/// Generic over the consumer's affordance identity `A` (the board card's
+/// details carry [`UiCardAction`](crate::UiCardAction): an offer path, its
+/// word and how it is drawn; other rich objects bring their own vocabulary)
+/// — the model stays renderer- and wiring-independent.
 ///
 /// Affordance cardinality: an [`Advisory`](RichWeight::Advisory) or
 /// [`Actionable`](RichWeight::Actionable) section carries **at most one**

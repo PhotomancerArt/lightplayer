@@ -1,8 +1,8 @@
 //! The connection bar: how the board is reached, and how that is going.
 //!
 //! The link is the card's input, read off the roster `Device`'s endpoint
-//! (`UiLinkKind::of_endpoint`) — never `DeviceView::is_over_bluetooth` or
-//! `UiDeviceAccess::over_bluetooth`, which have both named a LAN or relay
+//! (`UiLinkKind::of_endpoint`) — never the `DeviceView`'s over-Bluetooth
+//! predicate or `UiDeviceAccess::over_bluetooth`, which have both named a LAN or relay
 //! board "Bluetooth" before (the 2026-10-08 defects). Its words are the
 //! link's own label ("USB", "Bluetooth", "Wi‑Fi", "Wi‑Fi via
 //! lightplayer.app"); its icon `usb`, `bluetooth`, `wifi`, or `cloud` for a

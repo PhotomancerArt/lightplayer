@@ -33,8 +33,9 @@ pub struct BoardCardInput<'a> {
     /// at these.
     pub offers: &'a [UiOffer],
     /// How the board is reached (the open link's kind, else the last one's),
-    /// from the roster `Device`'s endpoint — never derived from
-    /// `DeviceView::is_over_bluetooth`, which is true on every network link.
+    /// from the roster `Device`'s endpoint — never derived from the
+    /// `DeviceView`'s over-Bluetooth predicate, which is true on every
+    /// network link.
     pub link: Option<UiLinkKind>,
     /// The board's picture and its treatment.
     pub feed: Option<&'a DeviceCardFeedView>,

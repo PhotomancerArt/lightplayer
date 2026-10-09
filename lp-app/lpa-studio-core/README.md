@@ -501,7 +501,12 @@ is published disabled with its reason. Unlock takes `password` (secret) and
 (`access/unlock_offer.rs`, `unlock_op.rs`: the op holds the password in an
 `UnlockPassword` whose `Debug` writes `<redacted>`, so the session recorder
 never carries it). It is published while a board's link holds nothing, or
-only play, and the board is linked and idle. See
+only play, and the board is linked and idle. `edit` opens the board's
+project in the editor (`devices/edit_offer.rs`, `RuntimeOp::OpenDeviceLens`;
+the web's lens sync then writes `/device/<uid>`). It is published on a
+board that is Ready (or Degraded), running a project, linked, idle and
+registered, and it is the board card's primary there until the card's own
+Connect lands. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 ### Which board plays which project
@@ -532,6 +537,59 @@ the board card's project bar ("Holiday Eaves · 3 boards", "Out of date") and
 the home page's "Other projects" ask. Both read this join and never build
 their own. A project on an offline board counts as on a board; pending links
 are not in the join.
+
+### The board card is built in core
+
+Every board Studio shows — new, online or offline, on the home page, docked
+in the editor or on the mismatch page — is one card, built here as data
+(`devices/board_card/`) and only drawn by the web. `board_card(&BoardCardInput)`
+builds a roster board's card and `pending_board_card(..)` a new board's;
+`roster_board_cards(&RosterCardsInput)` builds every card on a roster, new
+boards first. `StudioController::view()` publishes them on
+`DeviceRosterView.cards` once the view's offers are published, and the
+editor's docked card is `UiLensCard::Board`, built with the editor holding
+the board (no primary until the card's Done lands). A builder reads only the
+board's own offers from the published tree, so a card can point at nothing
+core did not offer.
+
+A card (`UiBoardCard`) is:
+
+- the **picture** (`UiBoardPicture`): the board's lights, dimmed when they
+  are the last known ones, or the update's light while an update holds them;
+- the **status corner** (`UiStatusCorner`): a mark (a blue dot when all is
+  fine, the worst notice's icon otherwise, quiet for a board Studio is not
+  watching), a reading ("58 fps", "5 h ago"), and details holding the
+  notices, how the board is running, the picture's words and its terminal;
+- the **name bar** (`UiNameBar`): the board's name and its **one primary**
+  (`UiPrimary`): Install, Unlock, Connect, Power on or Edit, or a disabled
+  word saying why (`primary_action.rs` has the order);
+- **five bars** (`UiStackBar`), always project · connection · access ·
+  firmware · hardware, each one line: a summary, an aside, a tone (blue is
+  Update, orange is attention or someone else has it), at most one action,
+  and the bar's work while an activity runs in it. Each bar has its own file
+  (`project_bar.rs` …), whose doc is the table of what it says.
+
+A bar's **details** (`UiBarDetails`) are `RichSection<UiCardAction>`
+sections (a notice first, facts, verbs, a Danger section last) and today's
+surfaces as named panels (`UiDetailPanel`: the terminal, access, the
+Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other
+version, restore from file); `raised` asks the web to open them now (the
+layout question). Every action is a `UiCardAction`: the offer it presses,
+the card's word and icon for it, preset values, and how it is drawn
+(`UiActionDraw`: a press, the project pick, the board pick, the offer's own
+params, or the sheet core raises).
+
+A bar's **work** (`UiBarWork`) is the activity in the bar whose subject it
+changes (a push in project, an identify or a Wi‑Fi connect in connection, a
+flash or update in firmware): its words and percent, its Cancel, green for
+about three seconds once it is done, striped with Retry when it failed. Done
+and Failed come from `ActivityEnds` (`devices/activity_ends.rs`), read off
+the device journal in studio core. Which project a board plays is
+`BoardProjects` (above).
+
+The web draws a card with `lpa-studio-web`'s `app/board_card/` and decides
+only its look — never what a bar says, its tone, or which offer it carries.
+The walks read the card by the hooks that module documents.
 
 ## Device Management UX
 

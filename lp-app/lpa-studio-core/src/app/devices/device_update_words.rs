@@ -58,7 +58,8 @@ pub struct UiDeviceUpdate {
     pub sentence: String,
     /// The picture slot's light; `None` while the show runs.
     pub light: Option<UpdateLight>,
-    /// The header chip's word.
+    /// The short word for the update's state: the editor's session
+    /// popover reads it (`update_session_words`).
     pub chip: String,
     /// The version the header's second identity row names.
     pub version: UpdateVersionDisplay,

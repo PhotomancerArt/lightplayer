@@ -106,7 +106,8 @@ The board card's verbs:
   link's icon says how (USB, Bluetooth, Wi‑Fi, the cloud).
 - **Done** — close it; the card shows its facts again.
 - **Edit** — open the board's project in the editor. It's the project
-  bar's action, for people who can edit.
+  bar's action, for people who can edit. Until Connect lands, Edit is the
+  card's primary on a ready board that runs a project.
 - **Unlock** — enter a password for a locked board.
 - **Install** — put Lightplayer on a blank board.
 - **Update** — the firmware bar's action when a newer version exists
@@ -116,11 +117,18 @@ What each bar says:
 
 | Bar | Says | Examples |
 |---|---|---|
-| Project | what the board plays, and how many boards share it | `Holiday Eaves · 3 boards`, `Nothing loaded` |
-| Connection | the link and its state | `USB · live`, `Bluetooth · connected`, `also cloud`, `direct only`, `Offline · 2 weeks`, `Sean is editing` |
-| Access | what you can do, and with which key | `You can edit · your account key`, `You can play`, `Locked` |
-| Firmware | the version alone; its date is in it | `2026.10.08-9` |
-| Hardware | the board model | `XIAO ESP32-C6`, `Emulated C6 · in this tab` |
+| Project | what the board plays, and how many boards share it | `Holiday Eaves · 3 boards`, `Nothing on it yet`, `Out of date` |
+| Connection | the link and its state | `USB · live`, `Bluetooth · connected`, `Wi‑Fi via lightplayer.app · live`, `also cloud`, `direct only`, `Offline · 2 weeks`, `Sean is editing` |
+| Access | what you can do, and with which key | `You can edit · USB`, `You can edit · your account key`, `You can play`, `Locked` |
+| Firmware | the version alone, whatever it is | `2026.10.08-9`, `dev 5eb70a7` |
+| Hardware | the board model | `XIAO ESP32-C6`, `Emulated XIAO ESP32-C6` with `in this tab` beside it |
+
+A board reached through lightplayer.app names that link in full, **Wi‑Fi
+via lightplayer.app**, with the cloud icon. **also cloud** and **direct
+only** appear only once the board has said whether its Cloud relay is on;
+before that the connection bar says nothing about the cloud. Where Studio
+cannot know a fact yet (a locked board's project, an offline board's
+access), the bar says **Not known yet**.
 
 **Cloud connected** names a board that talks to lightplayer.app through
 the relay; it's a property of the board, not of the link in use. A board
