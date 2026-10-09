@@ -143,6 +143,9 @@ fn record(args: RecordArgs, config: &ValidateConfig, repo_root: &Path) -> Result
                 firmware_commit: &args.firmware_commit,
                 firmware_dirty: Some(args.firmware_dirty),
                 machine: args.machine.as_deref(),
+                board: args.board.as_deref(),
+                mac: args.mac.as_deref(),
+                note: args.note.as_deref(),
             },
             args.dry_run,
         )?

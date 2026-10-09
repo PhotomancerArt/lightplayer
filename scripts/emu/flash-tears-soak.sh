@@ -24,10 +24,21 @@
 # power-cycle`, and drops the lease when it is done unless --keep-lease.
 # It refuses a dirty tree under lp-fw/: the image's commit is the
 # transcript's, stated, and a dirty build would make that a lie.
+#
+# Every batch's sidecar names the board (`board`: its mark, slug and what it
+# is, from the desk registry; `mac`) and the flash part (`note`: the JEDEC id
+# CX1 reported on its first 204 boots). A silicon configuration cannot read
+# either, so the sitting states them; after each batch the transcript's own
+# `ft-boot` records are checked against the stated JEDEC id, and a part that
+# answers differently stops the sitting.
 set -euo pipefail
 
 SLUG="c6-expendable"
 MAC="14:C1:9F:E6:54:90"
+# What CX1's part answered RDID with on every boot of the first 200 cuts
+# (2026-10-08). Each boot's `ft-boot` record is the measurement; this is what
+# the sidecar says to expect, and it is checked after each batch.
+FLASH_JEDEC="0x464016"
 HOLDER="${BOARD_HOLDER:-direct: tree-store M4}"
 batches=1
 date="$(date +%F)"
@@ -58,10 +69,20 @@ if [[ -n "$(git status --porcelain -- lp-fw)" ]]; then
 fi
 commit="$(git rev-parse --short=12 HEAD)"
 
+# The board as the registry names it, for the sidecar.
+board_json="$(board show "$SLUG" --json)"
+board_field() {
+    python3 -c 'import json, sys; print(json.loads(sys.argv[2]).get(sys.argv[1]) or "")' "$1" "$board_json"
+}
+board_desc="$(board_field mark) $(board_field slug) ($(board_field board))"
+board_mac="$(board_field mac | tr 'A-F' 'a-f')"
+note="flash part JEDEC id ${FLASH_JEDEC} expected (what this board's part answered on its first 204 boots, 2026-10-08); every boot's ft-boot record carries the id it read"
+identity=(--board "$board_desc" --mac "$board_mac" --note "$note")
+
 if [[ -n "$dry_run" ]]; then
     BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- validate record flash-tears \
         --config silicon:esp32c6 --port "<resolved by MAC $MAC>" --date "$date" \
-        --commit "$commit" --dry-run
+        --commit "$commit" "${identity[@]}" --dry-run
     exit 0
 fi
 
@@ -77,7 +98,11 @@ for ((b = 1; b <= batches; b++)); do
     board renew "$SLUG" --as "$HOLDER" --minutes 60 >/dev/null
     echo "=== batch $b of $batches ==="
     BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- validate record flash-tears \
-        --config silicon:esp32c6 --port "$port" --date "$date" --commit "$commit"
+        --config silicon:esp32c6 --port "$port" --date "$date" --commit "$commit" \
+        "${identity[@]}"
+    # The newest transcript of this sitting: every boot read the stated part.
+    newest="$(ls -t lp-emu/transcripts/esp32c6/flash-tears/silicon-esp32c6-"$date"-*.txt | head -1)"
+    scripts/emu/flash-tears-check-part.py "$newest" "$FLASH_JEDEC"
     # The cut driver re-resolves the port after every cut; pick it up again
     # for the next flash.
     port="$(BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- fwcheck port --mac "$MAC" | tail -1)"
