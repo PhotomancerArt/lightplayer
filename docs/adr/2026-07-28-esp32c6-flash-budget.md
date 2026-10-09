@@ -213,6 +213,8 @@ Append; do not editorialize old entries.
 
 | Date | Spend | Bought | Clawback lever |
 |---|---|---|---|
+| 2026-10-08 | **−80 B code in the core, +386 B in the engine** — updates through the relay (plan `lp2025/2026-10-06-2249-ota-wifi-updates` PR C, #1044, `docs/adr/2026-10-06-ota-update-protocol.md` amendment of the same date): `LinkTrust::Relayed`, core-only serving a relayed link, the anonymous key refused there. Recorded on the PR, CI's builds: main `0cabfb52d` core 1,424,560 B, engine 1,841,556 B, **gated headroom 91,756 B**, 17,232 B to the next core page; the PR's `8b21192` core 1,424,480 B, engine 1,841,942 B, **gated headroom 91,370 B**, **17,312 B to the next core page** | A board updated from anywhere, through lightplayer.app, with the same rules as the LAN | **None, and nothing to claw back**: the cost is below the noise of a build. The core did not cross its page |
+| 2026-10-07 | **about +6,768 B code in the core** — Bluetooth updates (plan `lp2025/2026-10-05-0820-ota-studio-ble-updates` PR-3, #1005, `docs/adr/2026-10-06-ota-update-protocol.md` "Part C" amendment): core-only serves every Bluetooth link (receive window 32), the link mux passes a radio link's channel-3 messages to the core's session with the tier it was granted, core-only keeps the Wi-Fi controller. The figure is the one the relay row below recorded as arriving with #1005's merge; the PR itself recorded the gate: **158,448 B** at `4cad23fdb` (main merged), 4,848 B above the Wi-Fi ADR's then-floor of 153,600 B | A phone (Bluefy) that updates a board with no cable, and a core-only board that still answers on Bluetooth | **None short of the feature**: core-only must serve the radio links an update arrives on |
 | 2026-10-07 | **+8,448 B code in the core, −3,408 B in the engine** — updates over Wi-Fi (plan `lp2025/2026-10-06-2249-ota-wifi-updates` PR A, `docs/adr/2026-10-06-ota-update-protocol.md` amendment of the same date): core-only's own key answer for a LAN link (`lpc-update`'s `key_lookup`), core-only's radio and LAN links in `fw-esp32-common` (`core_only_links`, which replaced the chip crate's Bluetooth-only pump), the LAN's update-mode window and socket buffer, the keyed-`L` refusal, the trial core's three-minute deadline. Measured locally on #1019's head (`b44f7ab4a`) and on the branch: core 1,415,728 → 1,424,176 B, engine 1,844,166 → 1,840,758 B, `app.bin` 3,321,856 → 3,317,760 B; **gated headroom 89,146 → 92,554 B**, image headroom 86,016 → 90,112 B, update headroom 491,520 B both. The core stays in its 44th 32 KiB page (engine at `0x178000` both sides), **17,616 B short of the next one** (26,064 B before). The plan's estimate was +2.5–5.5 KB of core | A house board that takes its updates over Wi-Fi with no host on USB or Bluetooth, and a new core whose Wi-Fi fails gives the board back instead of waiting for a cable | **None short of the feature**: every piece is code core-only runs, and core-only must hold everything an update needs. The engine's −3,408 B was not attributed symbol by symbol (most likely shared code the core now reaches, which the split places in the core) |
 | 2026-10-07 | **+39,344 B code in the core, +4,340 B in the engine at P8** — the cloud relay's board side (plan `lp2025/2026-10-06-0815-wifi-relay` PR B, #1019, `docs/adr/2026-10-06-cloud-relay.md` "Device side"). By piece, in the core: the relay client **+29,840 B** (the task's future poll alone 10,434 B; `RelayClient::handle` 4,616 B), embassy-net's `dns` feature **+4,304 B**, the shared network slot, challenge, mux and the wire field **+5,200 B** (+4,484 B in the engine). At the PR's last firmware change the core sat **64 B under its 32 KiB page**; the merge of main's #1005 (core-only Bluetooth updates; +6,768 B arrived with it, including the core-only arms this branch needed to match) crossed it (DD209), so the page is main's growth, not this PR's. At `81816d2f4` the core is 6,704 B into its page, 58,832 B short of the next boundary. CI's build of `a303512e4` reads **88,308 B gated headroom** (main before the PR, `175bc506b`: 160,138 B; the plan's A3 asked 128 KB and a relay client ≤ 24 KB, both missed; Yona accepted it 2026-10-07 as "OK but tight"). Update headroom 622,592 → 557,056 B at P8 when the core first crossed a page. Heap, at boot with nothing saved, +2,580 B used (103,000 → 105,580 B) | A board on Wi-Fi that reaches lightplayer.app from anywhere by itself: registered by account key, no secret on the wire, one sealed session shared with the LAN | **None short of the feature.** The relay must live in the core (OTA M8's rule: a core-only board reaches the relay). DNS (+4,304 B) is embassy-net's resolver; a hand-written one for a single name was not tried or measured. A relay-state log line was written and taken out: +688 B of core crossed a page and cost 32 KiB of update headroom at once |
 | 2026-10-06 | **+2,112 B code in the core** (1,214,800 → 1,216,912 B; engine −234 B; steady headroom 301,006 → 301,240 B): the boot hashes on the SHA accelerator, with the core read through a scratch cache window (`docs/adr/2026-10-06-ota-update-protocol.md`, amendment of the same date) | The core's hash every boot 1,243 → 157 ms on silicon, and the engine guard 1,387 → 235 ms | Going back to `sha2` alone gets the bytes back and costs about a second on every boot. Not worth it |
@@ -247,6 +249,33 @@ Measured when it landed (same tree, `fw-esp32c6-size-check unsplit=1`):
 371,202 B**, steady (low and high) 371,202 B, update 1,015,808 B; legacy
 overlap 109,058 B before `0x310000`; code delta +8,478 B and image delta
 +59,790 B against the monolithic image of the same tree (2,976,880 B).
+
+## Amendment (2026-10-08): the core's growth through the OTA roadmap
+
+The OTA roadmap (`lp2025/2026-10-03-1330-ota-firmware-updates`) is closed.
+What it spent in the **core**, the part that must hold everything an update
+needs without the engine, is the ledger rows above, in order; this table
+collects the recorded figures so the next size question starts in one place.
+It does not re-measure anything, and the builds differ (the sum is a guide,
+not a build's delta).
+
+| What | Core code | Gated headroom after | Ledger row |
+|---|---:|---:|---|
+| The split image itself (loader, two records, page alignment) | +8,478 B code, +59,790 B image (against the monolithic image) | 371,202 B | the 2026-10-04 amendment above |
+| The update protocol: board session, login (HMAC against the stored keys, `lpc-access`), SHA-256, the deflate decoder (`lp-deflate`, ~3.1 KiB of it), the update light, the engine guard | +52,896 B | 300,544 B | 2026-10-06, Part B |
+| Boot hashes on the SHA accelerator | +2,112 B | 301,240 B | 2026-10-06 |
+| Bluetooth updates | about +6,768 B | 158,448 B | 2026-10-07, #1005 |
+| The relay's board side | +39,344 B | 88,308 B | 2026-10-07, #1019 |
+| Updates over Wi-Fi | +8,448 B | 92,554 B | 2026-10-07, PR A |
+| Updates through the relay | −80 B | 91,370 B | 2026-10-08, PR C |
+
+The OTA-attributed rows add up to about +109 KB of core. The drops in
+headroom between them include work that is not OTA's: the Wi-Fi link
+(`2026-10-07-c6-wifi-link.md`) and the relay, which the core carries because
+core-only must reach them. Where the core sits now: **17,312 B short of its
+next 32 KiB page** (PR C's CI build), which is the number to watch, because
+crossing a page costs a whole page of update headroom at once (the relay row's
+688-byte log line is the example). The 64 KB floor holds at 91,370 B.
 
 ## Alternatives Considered
 

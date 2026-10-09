@@ -40,10 +40,11 @@
 //! # The update channel (lp-link channel 3)
 //!
 //! Every lp-link transport Studio drives — Web Serial (a board, or the
-//! `?emu=` door), the tab-hosted board and the host byte stream (M7 P7), and
+//! `?emu=` door), the tab-hosted board and the host byte stream (M7 P7),
 //! Web Bluetooth (`browser_ble`, M7 P12, on the same `link_port_service`
-//! per connection) — carries the over-the-air update channel beside
-//! channel 1 (DS1):
+//! per connection) and a board's Wi‑Fi link (`browser_websocket`, OTA M8;
+//! not yet through the relay) — carries the over-the-air update channel
+//! beside channel 1 (DS1):
 //! `LinkCommand::SendUpdate` is one channel-3 message out, and each message
 //! the board sends comes back as `LinkEvent::Update` (with
 //! `LinkEvent::UpdateFacts` first when it is a manifest). Their

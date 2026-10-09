@@ -10,10 +10,14 @@
 //!
 //! - **the anonymous key** (zero salt) is answered with the zero PSK and
 //!   grants nothing: the link comes up [`LinkTrust::Untrusted`] and the
-//!   device's `open` decides, through the one access rule;
+//!   device's `open` decides, through the one access rule — **on the LAN
+//!   only**. Through the relay ([`NetworkPath::Relay`]) it is refused like
+//!   an unknown key (the relay's second lock): "Anyone" never applies there,
+//!   so a relayed link always holds a key;
 //! - **a known salt** is answered with `lpc_access::key_candidates` over the
 //!   store's secrets, best tier first; the candidate that verifies brings
-//!   the link up [`LinkTrust::Keyed`] at its tier ([`BoardSession::key_authenticated`]);
+//!   the link up [`LinkTrust::Keyed`] at its tier ([`BoardSession::key_authenticated`]),
+//!   or [`LinkTrust::Relayed`] through the relay;
 //! - **an unknown salt** tested no secret: refused, not charged;
 //! - **a wrong guess at a known salt** is charged to the session's login
 //!   backoff ([`BoardSession::key_wrong`]), and while it lasts every lookup
@@ -27,7 +31,7 @@ use alloc::vec::Vec;
 
 use lpc_access::{SALT_BYTES, Tier, key_candidates};
 
-use super::board_link::{LinkId, LinkTrust};
+use super::board_link::{LinkId, LinkTrust, NetworkPath};
 use super::board_session::BoardSession;
 
 /// What core-only tells a secure link's handshake.
@@ -53,12 +57,14 @@ impl core::fmt::Debug for CoreKeyAnswer {
 }
 
 impl BoardSession {
-    /// `link`'s handshake named the entry with `salt`: its candidate PSKs,
-    /// or why there are none (see the module docs).
+    /// `link`'s handshake, which reached the board by `path`, named the
+    /// entry with `salt`: its candidate PSKs, or why there are none (see the
+    /// module docs).
     pub fn key_lookup(
         &mut self,
         now_ms: u64,
         link: LinkId,
+        path: NetworkPath,
         salt: &[u8; SALT_BYTES],
     ) -> CoreKeyAnswer {
         let backoff = self.login.rate_limit().retry_after_ms(now_ms);
@@ -69,6 +75,9 @@ impl BoardSession {
         }
         self.key_lookups.retain(|(l, _)| *l != link);
         if *salt == [0; SALT_BYTES] {
+            if path == NetworkPath::Relay {
+                return CoreKeyAnswer::Unknown;
+            }
             self.key_lookups.push((link, alloc::vec![None]));
             return CoreKeyAnswer::Keys(alloc::vec![[0; 32]]);
         }
@@ -88,23 +97,31 @@ impl BoardSession {
         self.login.rate_limit_mut().record_failure(now_ms);
     }
 
-    /// `link` came up on `candidate` of its lookup: how the session trusts
-    /// it — keyed at that candidate's tier, or untrusted on the anonymous
-    /// key (and on a candidate it never offered). A real key clears the
-    /// backoff, as a login does.
-    pub fn key_authenticated(&mut self, link: LinkId, candidate: u8) -> LinkTrust {
+    /// `link` (which reached the board by `path`) came up on `candidate` of
+    /// its lookup: how the session trusts it — keyed at that candidate's
+    /// tier, or untrusted on the anonymous key (and on a candidate it never
+    /// offered); through the relay, relayed at that tier (no tier on a
+    /// candidate it never offered). A real key clears the backoff, as a
+    /// login does.
+    pub fn key_authenticated(
+        &mut self,
+        link: LinkId,
+        path: NetworkPath,
+        candidate: u8,
+    ) -> LinkTrust {
         let tier: Option<Tier> = self
             .key_lookups
             .iter()
             .position(|(l, _)| *l == link)
             .map(|at| self.key_lookups.swap_remove(at).1)
             .and_then(|tiers| tiers.get(usize::from(candidate)).copied().flatten());
-        match tier {
-            Some(tier) => {
-                self.login.rate_limit_mut().record_success();
-                LinkTrust::Keyed(tier)
-            }
-            None => LinkTrust::Untrusted,
+        if tier.is_some() {
+            self.login.rate_limit_mut().record_success();
+        }
+        match (path, tier) {
+            (NetworkPath::Relay, tier) => LinkTrust::Relayed(tier),
+            (NetworkPath::Lan, Some(tier)) => LinkTrust::Keyed(tier),
+            (NetworkPath::Lan, None) => LinkTrust::Untrusted,
         }
     }
 }

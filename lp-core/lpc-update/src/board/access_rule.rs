@@ -10,7 +10,8 @@
 //!
 //! The **held tier** of a link that is not `Trusted` is the highest of
 //! `OpenTo`'s tier, the tier its core-side login granted, and its
-//! `Keyed(tier)`.
+//! `Keyed(tier)`. A `Relayed` link (through the cloud relay) holds only its
+//! key's tier and its grant: `OpenTo` never applies over the relay.
 //!
 //! # QY2 — still open with Yona
 //!
@@ -109,9 +110,12 @@ pub fn may(op: Operation, trust: LinkTrust, granted: Option<Tier>, access: &Acce
     }
     let keyed = match trust {
         LinkTrust::Keyed(tier) => Some(tier),
+        LinkTrust::Relayed(tier) => tier,
         LinkTrust::Trusted | LinkTrust::Untrusted => None,
     };
-    let open = if op == Operation::CoreInstall && !access.core_install_follows_open_to {
+    let open = if matches!(trust, LinkTrust::Relayed(_))
+        || (op == Operation::CoreInstall && !access.core_install_follows_open_to)
+    {
         None
     } else {
         access.open.tier()
@@ -146,6 +150,9 @@ mod tests {
             LinkTrust::Untrusted,
             LinkTrust::Keyed(Tier::Play),
             LinkTrust::Keyed(Tier::Edit),
+            LinkTrust::Relayed(None),
+            LinkTrust::Relayed(Some(Tier::Play)),
+            LinkTrust::Relayed(Some(Tier::Edit)),
         ];
         let opens = [OpenTo::Nobody, OpenTo::Play, OpenTo::Edit];
         let logins = [None, Some(Tier::Play), Some(Tier::Edit)];
@@ -159,9 +166,11 @@ mod tests {
                             let got = may(op, trust, login, &access(open, follows));
                             let keyed = match trust {
                                 LinkTrust::Keyed(t) => Some(t),
+                                LinkTrust::Relayed(t) => t,
                                 _ => None,
                             };
-                            let open_counts = op != Operation::CoreInstall || follows;
+                            let relayed = matches!(trust, LinkTrust::Relayed(_));
+                            let open_counts = !relayed && (op != Operation::CoreInstall || follows);
                             let held = [open_counts.then(|| open.tier()).flatten(), login, keyed]
                                 .into_iter()
                                 .flatten()
@@ -181,7 +190,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(cases, 2 * 4 * 4 * 3 * 3);
+        assert_eq!(cases, 2 * 4 * 7 * 3 * 3);
     }
 
     #[test]
@@ -220,6 +229,50 @@ mod tests {
             CORE_INSTALL_FOLLOWS_OPEN_TO,
             "ships as yes until Yona answers QY2"
         );
+    }
+
+    /// The relay's second lock: a board open at edit gives a relayed link
+    /// nothing — a play key reads back and may not install a core, an edit
+    /// key may, and the board's own engine heals for anyone (Y8).
+    #[test]
+    fn over_the_relay_open_never_applies() {
+        let open = access(OpenTo::Edit, true);
+        assert!(!may(
+            Operation::ReadBack,
+            LinkTrust::Relayed(None),
+            None,
+            &open
+        ));
+        assert!(!may(
+            Operation::CoreInstall,
+            LinkTrust::Relayed(Some(Tier::Play)),
+            None,
+            &open
+        ));
+        assert!(may(
+            Operation::ReadBack,
+            LinkTrust::Relayed(Some(Tier::Play)),
+            None,
+            &open
+        ));
+        assert!(may(
+            Operation::CoreInstall,
+            LinkTrust::Relayed(Some(Tier::Edit)),
+            None,
+            &open
+        ));
+        assert!(may(
+            Operation::CoreInstall,
+            LinkTrust::Relayed(None),
+            Some(Tier::Edit),
+            &open
+        ));
+        assert!(may(
+            Operation::EngineInstall,
+            LinkTrust::Relayed(None),
+            None,
+            &open
+        ));
     }
 
     #[test]

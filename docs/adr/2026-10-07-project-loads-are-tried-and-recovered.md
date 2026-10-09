@@ -7,6 +7,10 @@
   (the `PROJECT_LOAD_MIN_HEADROOM_BYTES` gate added for
   `docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`)
 - Fixes: `docs/defects/2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.md`
+- Related (Wi-Fi control roadmap, M6): `2026-10-07-c6-wifi-link` (the joined
+  board whose heap made the old gate refuse every switch),
+  `2026-10-06-radio-frame-rate-budget`, `2026-10-06-cloud-relay` (its
+  "Device side" measures the relay's share of the same heap)
 
 ## Context
 

@@ -28,7 +28,7 @@ use lpa_devices::{FirmwareAge, WireVersion};
 use lpa_update::HostBuildFacts;
 use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry};
 
-use super::device_update_route::{FIRST_BLUETOOTH_UPDATE_RELEASE, UpdateLink};
+use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
 use super::store_lookups::StoreLookups;
 use super::update_build_facts::{StoreLatest, StoreReleases};
@@ -56,9 +56,11 @@ pub struct InstallChoice {
     /// The choice's wire protocol against this Studio's (`BoardOlder`: the
     /// choice speaks an older one); `None` when not known.
     pub wire: Option<WireVersion>,
-    /// Over Bluetooth, a version from before Bluetooth updates: after it,
-    /// the board needs a USB cable once to update again.
-    pub needs_usb_after: bool,
+    /// The wireless link this version can't be updated over again (it is
+    /// from before updates over that link): after it, the board needs
+    /// another way — a USB cable, or Bluetooth after Wi‑Fi — once. `None`
+    /// over USB, and for a version that keeps the link.
+    pub stranded_over: Option<UpdateLink>,
     /// When the release was published (RFC 3339), when the index says.
     pub published_at: Option<String>,
     /// Shown with nothing typed in the box.
@@ -192,7 +194,7 @@ pub fn install_choices(inputs: &InstallChoiceInputs<'_>) -> Vec<InstallChoice> {
             let age = inputs.board.age_against(&f.version);
             let on_board = same_build(inputs.board, &f.version);
             InstallChoice {
-                needs_usb_after: needs_usb_after(inputs.link, &f.version, age),
+                stranded_over: stranded_over(inputs.link, &f.version, age),
                 refused: inputs.refused.is_some_and(|r| same_build(r, &f.version)),
                 wire: match f.own {
                     true => Some(WireVersion::Match),
@@ -272,22 +274,23 @@ fn same_build(a: &UpdateVersion, b: &UpdateVersion) -> bool {
         }
 }
 
-/// Over Bluetooth, whether `choice` predates Bluetooth updates
-/// ([`FIRST_BLUETOOTH_UPDATE_RELEASE`]); while no release is named, any
-/// choice older than the board's (`age` is the board against it).
-fn needs_usb_after(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> bool {
-    needs_usb_after_with(FIRST_BLUETOOTH_UPDATE_RELEASE, link, choice, age)
+/// Over a wireless link, `link` when `choice` predates updates over it
+/// ([`UpdateLink::first_update_release`]);
+/// while no release is named, any choice older than the board's (`age` is
+/// the board against it).
+fn stranded_over(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> Option<UpdateLink> {
+    needs_usb_after_with(link.first_update_release(), link, choice, age).then_some(link)
 }
 
-/// [`needs_usb_after`] with the first release as a parameter, so both
-/// readings are tested.
+/// Whether [`stranded_over`] holds, with the first release as a parameter,
+/// so both readings are tested.
 fn needs_usb_after_with(
     first: Option<&str>,
     link: UpdateLink,
     choice: &UpdateVersion,
     age: FirmwareAge,
 ) -> bool {
-    if link != UpdateLink::Bluetooth {
+    if !link.is_wireless() {
         return false;
     }
     match first {
@@ -302,6 +305,9 @@ mod tests {
 
     use super::*;
     use crate::app::devices::device_update_fixtures::{build, studio_y};
+    use crate::app::devices::device_update_route::{
+        FIRST_RELAY_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE,
+    };
     use crate::app::devices::store_lookups::StoreLookup;
 
     const PROTO: u32 = 40;
@@ -425,6 +431,31 @@ mod tests {
                 FirmwareAge::Newer
             ));
         }
+    }
+
+    /// Over Wi‑Fi and the relay the first releases are named: a choice is
+    /// stranded exactly when it is older than that release, whatever the
+    /// board runs.
+    #[test]
+    fn over_wifi_and_the_relay_only_releases_before_theirs_are_stranded() {
+        assert_eq!(FIRST_WIFI_UPDATE_RELEASE, Some("2026.10.08-2"));
+        assert_eq!(FIRST_RELAY_UPDATE_RELEASE, Some("2026.10.08-9"));
+        let before_wifi = UpdateVersion::new("2026.10.08-1");
+        let wifi_only = UpdateVersion::new("2026.10.08-2");
+        let relay_first = UpdateVersion::new("2026.10.08-9");
+        let newer = UpdateVersion::new("2026.10.09-1");
+        let age = FirmwareAge::Newer;
+        let wifi = UpdateLink::Wifi;
+        let relay = UpdateLink::Relay;
+        assert_eq!(stranded_over(wifi, &before_wifi, age), Some(wifi));
+        assert_eq!(stranded_over(wifi, &wifi_only, age), None);
+        assert_eq!(stranded_over(wifi, &relay_first, age), None);
+        // Through the relay the Wi‑Fi-only release is still too old.
+        assert_eq!(stranded_over(relay, &before_wifi, age), Some(relay));
+        assert_eq!(stranded_over(relay, &wifi_only, age), Some(relay));
+        assert_eq!(stranded_over(relay, &relay_first, age), None);
+        assert_eq!(stranded_over(relay, &newer, age), None);
+        assert_eq!(stranded_over(UpdateLink::Usb, &before_wifi, age), None);
     }
 
     #[test]

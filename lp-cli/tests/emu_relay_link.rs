@@ -46,7 +46,7 @@ use lp_cli::client::cli_connect::{CliConnection, cli_connect_with_password, conn
 use lp_cli::commands::upload::{UploadArgs, handle_upload};
 use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
 use lpa_client::transport_lan::{LanError, LanOptions, LanTarget, connect_lan_transport};
-use lpa_client::{ClientEvent, HostSpecifier, LpClient};
+use lpa_client::{ClientEvent, HostSpecifier, LpClient, TokioClientIo, WIRE_ENCODING_ENV};
 use lpc_access::{Tier, link_psk};
 use lpc_relay::RelayBoardId;
 use lpc_wire::lp_link::secure_channel::{KeyId, Psk};
@@ -104,6 +104,7 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     );
     wait_listening(&usb_addr);
     let usb = format!("serial:tcp://{usb_addr}");
+    usb_replies_stay_json(true);
     run(async {
         let connection = connect(&usb).await;
         let mut client = LpClient::new(connection.client_io());
@@ -145,6 +146,7 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         }
         drop(client);
     });
+    usb_replies_stay_json(false);
     first.wait_exit(RELAY_NET);
     drop(first);
 
@@ -156,6 +158,7 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     let board = EmulatedBoard::start(&elf, &usb_addr, &fixture, &flash, None);
     wait_listening(&usb_addr);
     let usb = format!("serial:tcp://{usb_addr}");
+    usb_replies_stay_json(true);
     run(async {
         let connection = connect(&usb).await;
         let mut client = LpClient::new(connection.client_io());
@@ -175,6 +178,7 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
         drop(client);
         connection.close().await;
     });
+    usb_replies_stay_json(false);
     assert!(cloud.boards_within(1, Duration::from_secs(10)));
     eprintln!(
         "emu_relay_link: boot → registered in {:.1} s wall (lp-emu:esp32c6:t1+net=lan)",
@@ -224,21 +228,20 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     eprintln!("emu_relay_link: an upload over {relay_spec}");
 
     // The gate case (plan A3): projects/test/basic loaded, the relay
-    // registered and a session open through it.
+    // registered and a session open through it. The heap is read through
+    // that session, with no USB link open: a USB link that asked for packed
+    // replies costs the board a ~6.9 KB learned table and ~0.5 KB of session
+    // state a relay client never costs.
     run(async {
         let relayed = connect_relay(cloud.target(board_id), Some(alice.session.clone()), None)
             .await
             .expect("Alice through the relay");
-        let connection = connect(&usb).await;
-        let mut client = LpClient::new(connection.client_io());
+        let mut through = LpClient::new(relayed.client_io());
         heap(
-            &mut client,
-            "projects/test/basic loaded, relay registered, a relay session open",
+            &mut through,
+            "projects/test/basic loaded, relay registered, a relay session open (read through it)",
         )
         .await;
-        drop(client);
-        connection.close().await;
-        let mut through = LpClient::new(relayed.client_io());
         request_rtt(&mut through).await;
         drop(through);
         relayed.close().await;
@@ -282,16 +285,14 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
             ),
             "{refused}"
         );
-        let connection = connect(&usb).await;
-        let mut client = LpClient::new(connection.client_io());
+        // The heap is read over the LAN session itself (no USB link open).
+        let mut over_lan = LpClient::new(TokioClientIo::new(Box::new(local)));
         heap(
-            &mut client,
-            "projects/test/basic loaded, relay registered, a LAN session open",
+            &mut over_lan,
+            "projects/test/basic loaded, relay registered, a LAN session open (read through it)",
         )
         .await;
-        drop(client);
-        connection.close().await;
-        drop(local);
+        drop(over_lan);
     });
 
     // 5. A deploy: the board comes back by itself. The wall clock is only
@@ -366,8 +367,15 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     assert_eq!(cloud.board_count(), 0);
 }
 
-/// The board's own heap figures from its next heartbeat (over USB), printed
-/// with `what`: free bytes and the largest free block. Never a gate.
+/// The board's own heap figures from its next heartbeat, over whichever
+/// session `client` holds, printed with `what`: free bytes and the largest
+/// free block. Never a gate.
+///
+/// Read a figure through the session it describes. A USB link that asked for
+/// packed replies makes the board allocate a learned table (~6.9 KB) and
+/// ~0.5 KB of session state that a relay or LAN client does not cost; the
+/// rows with no network session to read through use a USB link that never
+/// asks (`usb_replies_stay_json`), which leaves only the ~0.5 KB.
 async fn heap(client: &mut LpClient<impl lpa_client::ClientIo>, what: &str) {
     let until = Instant::now() + Duration::from_secs(30);
     // A heartbeat after the state settled: skip what was queued before.
@@ -396,6 +404,20 @@ async fn heap(client: &mut LpClient<impl lpa_client::ClientIo>, what: &str) {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     eprintln!("emu_relay_link: heap — {what}: no heartbeat within 30 s");
+}
+
+/// Whether this test's USB connections ask the board for packed replies
+/// (`LP_WIRE_ENCODING`, read when a connection opens). `true` keeps them JSON.
+fn usb_replies_stay_json(json: bool) {
+    // SAFETY: this test binary's one firmware test; nothing else reads the
+    // environment while it runs, and no connection is opening here.
+    unsafe {
+        if json {
+            std::env::set_var(WIRE_ENCODING_ENV, "json");
+        } else {
+            std::env::remove_var(WIRE_ENCODING_ENV);
+        }
+    }
 }
 
 /// How promptly the board answers through the relay with a project

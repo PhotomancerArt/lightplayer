@@ -28,6 +28,8 @@
 //! | a plain-link board is named, never downgraded to | [`a_board_that_runs_a_plain_link_is_named`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
 //! | a connect someone asked for waits for the board's answer (a frame, a busy 1013, a socket that never opens) | [`a_connect_someone_asked_for_settles_on_the_boards_answer`] |
+//! | a busy board (1013) is said once, never announced again until it answers, and redialled slowly | [`a_busy_board_is_said_once_and_not_announced_until_it_answers`] |
+//! | the update channel flows both ways once a core-only board announces it with its `M` | [`the_update_channel_flows_both_ways_once_the_board_announces_it`] |
 //! | no reset over Wi-Fi | [`a_reset_over_wifi_fails_by_name`] |
 //!
 //! Each test uses its own URL: the provider's sessions are page-wide, one per
@@ -49,9 +51,10 @@ use lpa_link::providers::browser_websocket::{
 };
 use lpa_link::providers::network_link::{KEY_ID_BYTES, LinkKey, LinkKeys, PSK_BYTES};
 use lpc_access::Tier;
+use lpc_update::BoardManifest;
 use lpc_wire::lp_link::secure_channel::{KeyId, Psk, RefusalReason, SecureEvent, SecureRole};
 use lpc_wire::lp_link::{
-    CH_PROTO, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
+    CH_PROTO, CH_UPDATE, Link as BoardLink, LinkConfig, LinkEvent as BoardEvent, SelectiveRepeat,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -408,6 +411,139 @@ async fn a_connect_someone_asked_for_settles_on_the_boards_answer() {
     assert!(lan::forget(session.session).await);
 }
 
+/// A busy board (its one LAN slot taken: the upgrade, then close 1013) is
+/// said once, in words; the redial that follows is not announced as a
+/// board until the board answers, so a busy board does not flap in and out
+/// of Studio's roster, and a second refusal is quiet.
+#[wasm_bindgen_test]
+async fn a_busy_board_is_said_once_and_not_announced_until_it_answers() {
+    let url = "ws://10.0.0.11/link";
+    TestKeys::install(Vec::new());
+    let edges = edges();
+    let mut bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
+    let session = bench.connect().await;
+    let wire = WsWire::new(session.session);
+    let connects = edges.0.get();
+
+    assert!(js_drop_socket(url, 1013, "try again later"));
+    let mut errors = Vec::new();
+    for _ in 0..200 {
+        errors.extend(wire.take_errors().expect("the session's errors"));
+        if !errors.is_empty() {
+            break;
+        }
+        tick(5).await;
+    }
+    for _ in 0..20 {
+        errors.extend(wire.take_errors().expect("the session's errors"));
+        tick(5).await;
+    }
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].starts_with("wi-fi link lost: busy with another Wi"),
+        "{errors:?}"
+    );
+    assert!(errors[0].contains("code 1013"), "{errors:?}");
+
+    // The redial opens, and is turned away again: nothing announced, nothing
+    // said.
+    for _ in 0..1_000 {
+        if js_sockets_opened(url) >= 2 {
+            break;
+        }
+        tick(10).await;
+    }
+    assert_eq!(js_sockets_opened(url), 2, "the session redialled");
+    assert!(
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url),
+        "a redial to a busy board is not a board"
+    );
+    assert!(js_drop_socket(url, 1013, "try again later"));
+    for _ in 0..40 {
+        assert!(
+            wire.take_errors().expect("the session's errors").is_empty(),
+            "the second refusal is quiet"
+        );
+        tick(5).await;
+    }
+    assert!(
+        !lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url)
+    );
+    assert_eq!(edges.0.get(), connects, "no connect edge while busy");
+
+    // Free again: the next redial is answered, and the board is back.
+    let pump = bench.spawn_board_loop();
+    for _ in 0..3_000 {
+        if lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url)
+        {
+            break;
+        }
+        tick(10).await;
+    }
+    pump.set(false);
+    assert!(
+        lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url),
+        "the board answered, and is present"
+    );
+    assert_eq!(
+        edges.0.get(),
+        connects + 1,
+        "one connect edge when it answers"
+    );
+    assert!(lan::forget(session.session).await);
+}
+
+/// OTA M8: a core-only board (no server, so no hello) announces the update
+/// channel with its `M` on link-up. The LAN link hears it — the manifest as
+/// `UpdateFacts`, then the bytes as `Update` — and what Studio sends on
+/// channel 3 reaches the board's channel 3.
+#[wasm_bindgen_test]
+async fn the_update_channel_flows_both_ways_once_the_board_announces_it() {
+    let url = "ws://10.0.0.12/link";
+    TestKeys::install(Vec::new());
+    let mut bench = Bench::new(url, BoardDouble::core_only());
+    let session = bench.connect().await;
+    let mut link = open_link(&session).await;
+    let pump = bench.spawn_board_loop();
+
+    let facts = wait_for(&mut link, |event| {
+        matches!(event, LinkEvent::UpdateFacts(_))
+    })
+    .await;
+    assert!(
+        matches!(&facts, Some(LinkEvent::UpdateFacts(f)) if f.version.as_deref() == Some("2026.10.06-1")),
+        "the board's manifest, mirrored: {facts:?}"
+    );
+    let update = wait_for(&mut link, |event| matches!(event, LinkEvent::Update(_))).await;
+    assert!(
+        matches!(&update, Some(LinkEvent::Update(bytes)) if bytes.first() == Some(&b'M')),
+        "the manifest's bytes, for the update host: {update:?}"
+    );
+
+    link.submit(LinkCommand::SendUpdate(b"Q\x01".to_vec()));
+    for _ in 0..300 {
+        if !bench.board.borrow().updates.is_empty() {
+            break;
+        }
+        tick(10).await;
+    }
+    pump.set(false);
+    assert_eq!(
+        bench.board.borrow().updates,
+        vec![b"Q\x01".to_vec()],
+        "Studio's message reached the board's channel 3"
+    );
+    assert!(lan::forget(session.session).await);
+}
+
 /// Through the relay (its browser leg, `…/relay/board/<mac>`) the page
 /// presents the keys it holds and NEVER the anonymous key — even to a board
 /// open to anyone — and a connect someone asked for waits for the link to
@@ -420,7 +556,7 @@ async fn a_relay_session_presents_held_keys_only_and_settles_when_up() {
         url,
         BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Play)]),
     );
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     assert!(session.is_relay());
     // The model's link services the session from its first connection.
     let wire = WsWire::new(session.session);
@@ -458,7 +594,7 @@ async fn a_relay_session_no_held_key_opens_is_given_up_in_words() {
     let url = "ws://127.0.0.1:2812/relay/board/a0f26287b402";
     TestKeys::install(vec![key(0x51)]);
     let bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     let _wire = WsWire::new(session.session);
     let pump = bench.spawn_board_loop();
     let refused = settled(&spawn_until_up(session.session))
@@ -500,7 +636,7 @@ async fn a_relay_session_out_of_keys_comes_up_when_a_key_arrives() {
         url,
         BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Edit)]),
     );
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     let wire = WsWire::new(session.session);
     let pump = bench.spawn_board_loop();
     let up = spawn_until_up(session.session);
@@ -540,7 +676,7 @@ async fn a_relay_refusal_ends_the_session_and_another_drop_redials() {
         url,
         BoardDouble::secure(Opens::Nobody, vec![(key(0xED), Tier::Edit)]),
     );
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     for _ in 0..200 {
         if lan::present_sessions()
             .iter()
@@ -590,6 +726,69 @@ async fn a_relay_refusal_ends_the_session_and_another_drop_redials() {
             .iter()
             .any(|present| present.url == url)
     );
+    assert!(lan::forget(session.session).await);
+}
+
+/// OTA M8 through the relay: while an update holds the session (the board
+/// resets three times, and the relay says "board offline" until it is
+/// back), a 4404 is a drop redialled after its own delay, not the end; once
+/// the hold lapses, a 4404 ends the session again.
+#[wasm_bindgen_test]
+async fn a_held_relay_session_redials_through_board_offline() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b405";
+    TestKeys::install(vec![key(0xED)]);
+    let mut bench = Bench::new(
+        url,
+        BoardDouble::secure(Opens::Nobody, vec![(key(0xED), Tier::Edit)]),
+    );
+    let session = lan::open_relay_session(url, &[4404, 4429], &[(4404, 40)]).expect("a session");
+    for _ in 0..200 {
+        if lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url && present.connected)
+        {
+            break;
+        }
+        tick(10).await;
+    }
+    let wire = WsWire::new(session.session);
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+    js_accept_connects(url, true);
+
+    // Held: two "board offline" closes in a row, each redialled.
+    wire.hold(400);
+    for opened in [2, 3] {
+        for _ in 0..200 {
+            if js_drop_socket(url, 4404, "board-offline") {
+                break;
+            }
+            tick(10).await;
+        }
+        for _ in 0..200 {
+            if js_sockets_opened(url) >= opened {
+                break;
+            }
+            tick(10).await;
+        }
+        assert_eq!(js_sockets_opened(url), opened, "a held 4404 is redialled");
+    }
+
+    // The hold lapsed: the next 4404 ends the session.
+    for _ in 0..30 {
+        tick(20).await;
+    }
+    for _ in 0..200 {
+        if js_drop_socket(url, 4404, "board-offline") {
+            break;
+        }
+        tick(10).await;
+    }
+    for _ in 0..20 {
+        tick(20).await;
+    }
+    assert_eq!(js_sockets_opened(url), 3, "an unheld 4404 is not redialled");
     assert!(lan::forget(session.session).await);
 }
 
@@ -729,6 +928,11 @@ struct BoardDouble {
     requests: Vec<u64>,
     largest_frame: usize,
     nonce: u32,
+    /// A core-only board's manifest, sent as `M` on channel 3 on every `Up`
+    /// instead of a hello (it has no server).
+    manifest: Option<BoardManifest>,
+    /// Every channel-3 message read.
+    updates: Vec<Vec<u8>>,
 }
 
 impl BoardDouble {
@@ -738,6 +942,15 @@ impl BoardDouble {
 
     fn plain() -> Self {
         Self::build(false, Opens::Edit, Vec::new(), 0xB0A2_0001)
+    }
+
+    /// A split image waiting for its engine, open to edit: no hello, its
+    /// `M` instead.
+    fn core_only() -> Self {
+        Self {
+            manifest: Some(board_manifest()),
+            ..Self::secure(Opens::Edit, Vec::new())
+        }
     }
 
     fn build(secure: bool, open: Opens, entries: Vec<(LinkKey, Tier)>, nonce: u32) -> Self {
@@ -761,13 +974,17 @@ impl BoardDouble {
             requests: Vec::new(),
             largest_frame: 0,
             nonce,
+            manifest: None,
+            updates: Vec::new(),
         }
     }
 
     /// The board restarts: a new link, a new nonce, the same store.
     fn reboot(&mut self) {
         let entries = std::mem::take(&mut self.entries);
+        let manifest = self.manifest.take();
         *self = Self::build(self.secure, self.open, entries, self.nonce + 1);
+        self.manifest = manifest;
     }
 
     fn now() -> u64 {
@@ -799,11 +1016,22 @@ impl BoardDouble {
         }
         while let Some(event) = self.link.recv() {
             match event {
-                BoardEvent::Up { .. } => {
-                    let granted = self.granted();
-                    self.last_hello_granted = Some(granted);
-                    self.send(&hello(granted));
-                }
+                BoardEvent::Up { .. } => match &self.manifest {
+                    Some(manifest) => {
+                        let mut m = vec![b'M'];
+                        m.extend_from_slice(&manifest.to_json());
+                        self.link.send(CH_UPDATE, &m).expect("board send");
+                    }
+                    None => {
+                        let granted = self.granted();
+                        self.last_hello_granted = Some(granted);
+                        self.send(&hello(granted));
+                    }
+                },
+                BoardEvent::Message {
+                    channel: CH_UPDATE,
+                    data,
+                } => self.updates.push(data),
                 BoardEvent::Message {
                     channel: CH_PROTO,
                     data,
@@ -989,6 +1217,28 @@ async fn wait_for(
         tick(20).await;
     }
     None
+}
+
+/// A core-only board's manifest (what its `M` carries).
+fn board_manifest() -> BoardManifest {
+    BoardManifest {
+        proto: 1,
+        target: "esp32c6-4mb".to_string(),
+        chip: "esp32c6".to_string(),
+        version: "2026.10.06-1".to_string(),
+        build_id: "2026.10.06-1+abc123456789".to_string(),
+        wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+        core_sha256: "11".repeat(32),
+        core_len: 4096,
+        engine_sha256: "22".repeat(32),
+        engine_len: Some(8192),
+        layout: 1,
+        loader: 1,
+        region_len: 65_536,
+        state: lpc_update::BoardState::NeedsEngine,
+        refused_build: None,
+        transfer: None,
+    }
 }
 
 fn hello_count(reads: &[WireRead]) -> usize {

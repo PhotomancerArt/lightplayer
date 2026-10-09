@@ -11,8 +11,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceEscape, DeviceStatus, DeviceView, FIRMWARE_NEEDS_USB, UPDATE_NOT_OVER_WIFI_YET,
-    UiDeviceAccess, lan_link_for_endpoint,
+    DeviceEscape, DeviceStatus, DeviceView, FIRMWARE_NEEDS_USB, UiDeviceAccess,
+    lan_link_for_endpoint,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -71,11 +71,12 @@ const ENDPOINT: &str = "lan:ws://192.168.1.40/link";
 /// The catalog choker, running, reached on the LAN.
 fn wifi_card() -> DeviceView {
     DeviceView {
-        // As the model has it: firmware is blocked on every network link
-        // (no reset lines, no ROM downloader), Bluetooth and the LAN alike.
+        // As the model has it: the USB flash is blocked on every network
+        // link (no reset lines, no ROM downloader), Bluetooth and the LAN
+        // alike. The LAN carries the update channel (OTA M8), so the
+        // over-the-air update is not.
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
-        // The LAN carries no update channel yet; Bluetooth and USB do.
-        update_blocked: Some(UPDATE_NOT_OVER_WIFI_YET.to_string()),
+        update_blocked: None,
         ..usb_card()
     }
 }

@@ -78,11 +78,14 @@ pub enum UpdateFixtureRow {
     Newer,
     /// An update is available, but this link is unlocked for play only.
     PlayOnly,
+    /// Over Wi‑Fi, the board's release predates Wi‑Fi updates: the last
+    /// update heard nothing on the update channel. Always told over Wi‑Fi.
+    NotOverWifiYet,
 }
 
 impl UpdateFixtureRow {
     /// Every row, in the table's order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::UpToDate,
         Self::Available,
         Self::AvailableDevBoard,
@@ -98,6 +101,7 @@ impl UpdateFixtureRow {
         Self::RolledBack,
         Self::Newer,
         Self::PlayOnly,
+        Self::NotOverWifiYet,
     ];
 }
 
@@ -110,9 +114,10 @@ pub struct UpdateFixture {
     pub facts: UpdateFacts,
     /// This Studio's own build.
     pub own: HostBuildFacts,
-    /// The user's tier on the board over Bluetooth.
+    /// The user's tier on the board over Bluetooth or Wi‑Fi.
     pub tier: Option<Tier>,
-    /// The link the board is reached over (the view's).
+    /// The link the board is reached over (the view's; [`Self::over_wifi`]
+    /// for a board on the LAN).
     pub link: UpdateLink,
     /// The store's release index ([`release_index`]); `None` is a Studio
     /// that could not read it ([`Self::offline`]).
@@ -125,11 +130,14 @@ pub struct UpdateFixture {
 
 impl UpdateFixture {
     /// `view` (a ready LightPlayer, over USB or Bluetooth) in `row`.
+    /// [`UpdateFixtureRow::NotOverWifiYet`] is told over Wi‑Fi whatever the
+    /// view says.
     pub fn new(row: UpdateFixtureRow, view: DeviceView) -> Self {
         use UpdateFixtureRow as Row;
-        let link = match view.is_over_bluetooth() {
-            true => UpdateLink::Bluetooth,
-            false => UpdateLink::Usb,
+        let link = match (row, view.is_over_bluetooth()) {
+            (Row::NotOverWifiYet, _) => UpdateLink::Wifi,
+            (_, true) => UpdateLink::Bluetooth,
+            (_, false) => UpdateLink::Usb,
         };
         let (manifest, view, tier) = match row {
             Row::UpToDate => (board_y(), view, None),
@@ -183,6 +191,14 @@ impl UpdateFixture {
             Row::RolledBack => (refused(), view, None),
             Row::Newer => (newer(), view, None),
             Row::PlayOnly => (board_x(), view, Some(Tier::Play)),
+            Row::NotOverWifiYet => (
+                board_x(),
+                DeviceView {
+                    last_update_outcome: Some(UpdateOutcomeFacts::NotOverWifi),
+                    ..view
+                },
+                None,
+            ),
         };
         Self {
             view,
@@ -212,6 +228,21 @@ impl UpdateFixture {
             version,
             lookup,
         );
+        self
+    }
+
+    /// The same board, reached on the LAN (Wi‑Fi) instead.
+    pub fn over_wifi(mut self) -> Self {
+        self.link = UpdateLink::Wifi;
+        self
+    }
+
+    /// The same board and Studio a few days on, after every link's first
+    /// update release (`2026.10.08-9`): the board on `2026.10.09-1`, this
+    /// Studio's build `2026.10.09-2` (the same hashes).
+    pub fn on_recent_firmware(mut self) -> Self {
+        self.facts = facts_of(&manifest("2026.10.09-1", [0xAA; 32], [0xAE; 32]));
+        self.own = build("2026.10.09-2", [0xBB; 32], [0xBE; 32]);
         self
     }
 
@@ -641,6 +672,9 @@ mod tests {
                     Row::RolledBack => matches!(standing, UpdateStanding::RolledBack { .. }),
                     Row::Newer => matches!(standing, UpdateStanding::Newer { .. }),
                     Row::PlayOnly => matches!(standing, UpdateStanding::PlayOnly { .. }),
+                    Row::NotOverWifiYet => {
+                        matches!(standing, UpdateStanding::NotOverWifiYet { .. })
+                    }
                 };
                 assert!(
                     landed,

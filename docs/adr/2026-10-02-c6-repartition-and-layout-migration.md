@@ -6,6 +6,12 @@
 - **Supersedes:** None (spends the reserve `2026-07-28-esp32c6-flash-budget.md`
   Decision 4 held)
 - **Superseded by:** None
+- **Related (Wi-Fi control roadmap, `lp2025/2026-10-01-1832-wifi-control`, M3):**
+  `2026-10-07-c6-wifi-link` (what the app's extra 256 KB paid for),
+  `2026-10-04-device-wifi-settings` (the network file that lives in the
+  smaller `lpfs`), `2026-10-06-cloud-relay` (the relay client's flash spend
+  against the headroom this left), `2026-07-28-esp32c6-flash-budget` (the
+  reserve it spent)
 
 ## Context
 
@@ -143,6 +149,13 @@ already asked the question (landed in `828dcb97c`).
   the old `lpfs` head — see
   `2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`,
   Consequences.
+
+- 2026-10-08: over-the-air updates needed no second repartition. The split
+  image's whole layout (loader, progress record, boot records, two cores, the
+  engine) lives inside `factory`; `lpfs` and the table are untouched by an
+  update, and a board that already had this table needed only an ordinary
+  Studio "Update firmware" to take the split image. See the split-image ADR
+  and the flash budget's amendment.
 
 - Studio ZIP-file import of a device backup — before the image crosses
   `0x300000` (Decision 11).

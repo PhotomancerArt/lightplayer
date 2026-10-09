@@ -9,7 +9,7 @@ description = "Host testbed that races on-device store candidates through simula
 publish = false
 
 [dependencies]
-lp-nor-sim = { path = "../../lp-base/lp-nor-sim" }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
 # T1: the prototype under test.
 lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim"] }

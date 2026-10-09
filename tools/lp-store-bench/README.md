@@ -1,7 +1,7 @@
 # lp-store-bench
 
 The storage testbed: races on-device store candidates through simulated power
-cuts on [`lp-nor-sim`](../../lp-base/lp-nor-sim) and writes a JSONL
+cuts on [`lp-nor-sim`](../../lp-emu/lp-nor-sim) and writes a JSONL
 scoreboard. Host tooling for the spike
 `lp2025/2026-10-07-1858-lpfs-fit-spike` (M6 testbed + M7 race); **nothing
 here is linked into firmware**. Every number it prints is a *simulator*

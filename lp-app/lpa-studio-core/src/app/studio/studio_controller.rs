@@ -1602,15 +1602,10 @@ impl StudioController {
         let mut actions = Vec::new();
         for device in self.devices.roster().devices() {
             let evidence = &device.evidence;
-            let bluetooth = device
-                .identity
-                .endpoint
-                .as_ref()
-                .is_some_and(lpa_devices::EndpointKey::is_bluetooth);
-            let tier = match bluetooth {
-                true => self.access.granted_tier(device.id),
-                false => None,
-            };
+            // Over a wireless link the user holds a grant (the key's tier on
+            // the LAN, the login's on Bluetooth); a cable is trusted.
+            let link = crate::UpdateLink::of_endpoint(device.identity.endpoint.as_ref());
+            let tier = link.update_tier(self.access.granted_tier(device.id));
             host.set_tier(device.id, tier);
             let Some(facts) = evidence.update_facts() else {
                 continue;
@@ -1631,10 +1626,7 @@ impl StudioController {
                 facts: Some(facts),
                 own: own.as_ref().or(derived.as_ref()),
                 tier,
-                link: match bluetooth {
-                    true => crate::UpdateLink::Bluetooth,
-                    false => crate::UpdateLink::Usb,
-                },
+                link,
                 store_latest: store_latest.as_ref(),
                 store_releases: None,
                 store_lookups: None,
@@ -1716,27 +1708,20 @@ impl StudioController {
     /// `view`'s update standing and which way its update goes
     /// (`device_update_standing`, `device_update_route`): the board's
     /// update facts this window, this Studio's build facts, the user's tier
-    /// over Bluetooth (a USB link is trusted), and whether the link carries
-    /// lp-link's update channel.
+    /// over Bluetooth or Wi‑Fi (a USB link is trusted), and whether the link
+    /// carries lp-link's update channel.
     pub fn device_update_facts(&self, view: &crate::DeviceView) -> crate::UpdateOfferFacts {
-        let evidence = self
-            .devices
-            .roster()
-            .device(view.id)
-            .map(|device| &device.evidence);
+        let device = self.devices.roster().device(view.id);
+        let evidence = device.map(|device| &device.evidence);
         let facts = evidence.and_then(lpa_devices::Evidence::update_facts);
-        let link = match view.is_over_bluetooth() {
-            true => crate::UpdateLink::Bluetooth,
-            false => crate::UpdateLink::Usb,
-        };
+        let link = crate::UpdateLink::of_endpoint(
+            device.and_then(|device| device.identity.endpoint.as_ref()),
+        );
         let inputs = crate::UpdateStandingInputs {
             view,
             facts,
             own: self.update_build_facts.own(),
-            tier: match link {
-                crate::UpdateLink::Bluetooth => self.access.granted_tier(view.id),
-                crate::UpdateLink::Usb => None,
-            },
+            tier: link.update_tier(self.access.granted_tier(view.id)),
             link,
             store_latest: self.update_build_facts.store_latest(),
             store_releases: self.update_build_facts.store_releases(),
@@ -3213,7 +3198,18 @@ impl StudioController {
         let prefixes = self.device_offer_prefixes(&entries);
         for pending in &roster.roster.pending {
             let prefix = prefixes[&pending.device].clone();
-            for offer in crate::pending_link_offers(pending, &prefix) {
+            let over_network = self
+                .devices
+                .roster()
+                .pending()
+                .iter()
+                .find(|entry| entry.link == pending.link)
+                .is_some_and(|entry| entry.info.endpoint.is_network());
+            let reset = match over_network {
+                true => crate::ResetReach::Request { author: false },
+                false => crate::ResetReach::Lines,
+            };
+            for offer in crate::pending_link_offers(pending, &prefix, reset) {
                 offers.publish(offer);
             }
             offers.place_device(pending.device, prefix);
@@ -3233,6 +3229,7 @@ impl StudioController {
                     .access
                     .get(&view.id)
                     .is_some_and(|access| access.unlock == Some(crate::UiUnlockOffer::Locked)),
+                reset: self.device_reset_reach(device),
                 banked: self.runs_a_banked_project(view.id, &sources.projects),
                 projects: &sources.projects,
                 examples: &sources.examples,
@@ -3255,6 +3252,19 @@ impl StudioController {
         // The layout verbs (C6 repartition) under the same prefixes.
         self.devices
             .publish_layout_offers(self.device_now(), offers, &prefixes);
+    }
+
+    /// How `device`'s Reset reaches it ([`crate::ResetReach`]): the model's
+    /// own route (`Device::resets_by_request`), and over a network link
+    /// whether it holds the author tier the board's access gate asks of a
+    /// `Reboot`.
+    fn device_reset_reach(&self, device: Option<&lpa_devices::Device>) -> crate::ResetReach {
+        match device {
+            Some(device) if device.resets_by_request() => crate::ResetReach::Request {
+                author: self.access.granted_tier(device.id) == Some(lpc_access::Tier::Edit),
+            },
+            _ => crate::ResetReach::Lines,
+        }
     }
 
     /// `devices/<board>/connect-wifi`: "Connect over Wi‑Fi" on the card of a

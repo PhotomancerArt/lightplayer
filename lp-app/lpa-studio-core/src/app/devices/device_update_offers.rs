@@ -157,6 +157,7 @@ impl UpdateOfferFacts {
                     version,
                     build_id: inputs.facts.and_then(|facts| facts.build_id.clone()),
                 },
+                link: inputs.link,
             };
         }
         let target = inputs.facts.and_then(|facts| facts.target.as_deref());
@@ -231,7 +232,8 @@ pub fn update_offers(
         }
         // This Studio's build cannot go over the air, and over Bluetooth
         // there is no flash either: nothing to install, the line says why.
-        UpdateStanding::NoWirelessBuild { .. } => {
+        // Over Wi‑Fi, a board from before Wi‑Fi updates: the same.
+        UpdateStanding::NoWirelessBuild { .. } | UpdateStanding::NotOverWifiYet { .. } => {
             set.keep_flash = false;
             return set;
         }
@@ -574,8 +576,12 @@ fn month_day(date: &str) -> Option<String> {
 
 /// The one warning a choice's line carries, most lasting first.
 fn warning(choice: &InstallChoice) -> Option<&'static str> {
-    if choice.needs_usb_after {
-        Some("needs a USB cable after, over Bluetooth")
+    if let Some(link) = choice.stranded_over {
+        Some(match link {
+            UpdateLink::Wifi => "needs USB or Bluetooth after, over Wi\u{2011}Fi",
+            UpdateLink::Relay => "needs a nearby update after, via lightplayer.app",
+            _ => "needs a USB cable after, over Bluetooth",
+        })
     } else if choice.speaks_older_wire() {
         Some("older language than Studio")
     } else if choice.speaks_newer_wire() {
@@ -608,7 +614,8 @@ fn install_confirmation(
 ) -> Option<ActionConfirmation> {
     let version = choice.version.long();
     let older_wire = choice.speaks_older_wire();
-    if choice.is_known_newer() && !older_wire && !choice.needs_usb_after && !choice.from_file {
+    if choice.is_known_newer() && !older_wire && choice.stranded_over.is_none() && !choice.from_file
+    {
         return None;
     }
     let (title, mut message) = if choice.from_file {
@@ -650,14 +657,24 @@ fn install_confirmation(
              but may not edit its project until you do."
         ));
     }
-    if choice.needs_usb_after {
+    if let Some(link) = choice.stranded_over {
         if !message.is_empty() {
             message.push(' ');
         }
-        message.push_str(
-            "Over Bluetooth, this version can't be updated again until it has been connected \
-             by USB once.",
-        );
+        message.push_str(match link {
+            UpdateLink::Wifi => {
+                "Over Wi\u{2011}Fi, this version can't be updated again until it has been \
+                 updated over USB or Bluetooth once."
+            }
+            UpdateLink::Relay => {
+                "Via lightplayer.app, this version can't be updated again until it has been \
+                 updated nearby once."
+            }
+            _ => {
+                "Over Bluetooth, this version can't be updated again until it has been connected \
+                 by USB once."
+            }
+        });
     }
     Some(ActionConfirmation::new(title, message, "install"))
 }
@@ -769,7 +786,7 @@ mod tests {
         let read = UpdateOfferFacts::read(&ble, true);
         assert_eq!(read.route, UpdateRoute::NoWirelessBuild);
         assert!(
-            matches!(&read.standing, UpdateStanding::NoWirelessBuild { board } if board.version == "2026.10.03-1"),
+            matches!(&read.standing, UpdateStanding::NoWirelessBuild { board, .. } if board.version == "2026.10.03-1"),
             "{:?}",
             read.standing
         );
@@ -949,7 +966,7 @@ mod tests {
 
     /// "Other version…" is offered on every idle row a person could want
     /// another version from, and nowhere an update runs, a play-only user
-    /// looks, or the board needs USB first.
+    /// looks, or the board needs USB (or, over Wi‑Fi, Bluetooth) first.
     #[test]
     fn other_version_is_offered_in_exactly_the_idle_rows() {
         use crate::app::devices::device_update_fixtures::{UpdateFixture, UpdateFixtureRow as Row};
@@ -975,7 +992,8 @@ mod tests {
                 | Row::Restoring
                 | Row::AnotherDevice
                 | Row::NeedsUsbOnce
-                | Row::PlayOnly => None,
+                | Row::PlayOnly
+                | Row::NotOverWifiYet => None,
             };
             assert_eq!(install.map(UiOffer::label), expected, "{row:?}");
             if let Some(install) = install {
@@ -1439,6 +1457,25 @@ mod tests {
         let facts = fixture.offer_facts();
         assert!(!facts.choices.is_empty());
         assert_eq!(set_of(&fixture.view, &facts), (vec![], false, true));
+    }
+
+    /// Over Wi‑Fi (OTA M8) the same: a play-only user on the LAN is told the
+    /// update is there, and offered nothing the board would refuse.
+    #[test]
+    fn over_wifi_a_play_only_user_is_offered_no_update() {
+        let fixture = fixture(UpdateFixtureRow::PlayOnly)
+            .on_recent_firmware()
+            .over_wifi();
+        let facts = fixture.offer_facts();
+        assert!(matches!(facts.standing, UpdateStanding::PlayOnly { .. }));
+        assert_eq!(set_of(&fixture.view, &facts), (vec![], false, true));
+        // With edit, the same board over Wi‑Fi is offered its update.
+        let mut edit = fixture.clone();
+        edit.tier = Some(lpc_access::Tier::Edit);
+        assert!(matches!(
+            edit.offer_facts().standing,
+            UpdateStanding::Available { .. }
+        ));
     }
 
     /// The flash route (a link without the update channel): today's verbs,

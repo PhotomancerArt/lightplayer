@@ -51,7 +51,7 @@ mod ws_link_port;
 mod ws_wire;
 
 pub use browser_websocket::{
-    LanSession, connect_and_settle, connect_until_up, forget, install_websocket_events,
+    LanSession, connect_and_settle, connect_until_up, forget, hold, install_websocket_events,
     is_supported, open_relay_session, open_session, present_sessions,
 };
 pub use ws_client_io::{WsClientIo, WsTapLine};

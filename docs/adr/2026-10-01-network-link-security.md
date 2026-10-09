@@ -3,10 +3,20 @@
 - **Status:** Accepted (2026-10-01; G0 by Yona: "yes, that seems fine").
   Implemented as lp-link's `secure` feature (PR #894); **no product link
   turns it on yet** — the first is M6's LAN WebSocket.
+  *Status note, 2026-10-08:* two product links turn it on now, both on the
+  C6 — the LAN WebSocket (M6, PR #989) and the relay's routes (M7, PRs
+  #999 and #1019). Section 8 below records which link turned it on when.
+  The decisions in this ADR are unchanged.
 - **Date:** 2026-10-01
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Related (Wi-Fi control roadmap):** `2026-10-07-c6-wifi-link` (the first
+  product link to turn `secure` on: the LAN WebSocket), `2026-10-06-cloud-relay`
+  (the relay, untrusted, carries this link end to end),
+  `2026-10-04-device-wifi-settings` (the access entries that key it are the
+  same ones Bluetooth uses), `2026-10-02-c6-link-io-thread` (the thread that
+  serves it)
 - **Planning:** roadmap `lp2025/2026-10-01-1832-wifi-control` (M4), plan
   `lp2025/2026-10-01-1843-secure-link`; decisions D2–D6 and D9 and their
   measurements in `lp2025/2026-10-01-0300-wifi-control-experiments`
