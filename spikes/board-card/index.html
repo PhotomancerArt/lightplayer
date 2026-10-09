@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Boards — vocabulary and card</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* Palette and shared pieces copied from spikes/one-home-page (itself from
+   lpa-studio-web/src/style.css :root). Throwaway: production never imports
+   spikes/. Design record for lp2025/2026-10-06-1530-boards-and-projects-model. */
+
+/* =====================================================================
+   Studio's palette, from lpa-studio-web/src/style.css :root (2026-10-08).
+   Spike shell is deliberately plain, matching the other spikes.
+   Design record for lp2025/2026-10-06-1530-boards-and-projects-model
+   (vision.md, D6–D21). Throwaway: production never imports spikes/.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  --bg:#0d0d13; --surface:#14141c; --surface-muted:#0f0f15; --panel:#17171f; --raised:#1d1d28;
+  --raised-strong:#252532; --terminal:#09090e;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac; --faint:#6d6f7a;
+  --heading:#e9e9ef;
+  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --spectrum-cool:#5fe08b,#53c6f2,#a58af7;
+  --glow:rgba(140,170,255,.3);
+
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
+  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
+  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
+  --st-example-bg:rgba(168,163,196,.09); --st-example-bd:#565177; --st-example-tx:#a8a3c4;
+
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
+  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:940px; }
+p.hint b { color:var(--shell-mut); font-weight:600; }
+h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:46px 0 6px; }
+h2 .n { color:var(--shell-dim); margin-right:6px; }
+p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:940px; }
+p.sub b { color:var(--shell-mut); font-weight:600; }
+code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
+
+/* ---- exploration controls ------------------------------------------ */
+.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px; margin-top:14px;
+  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
+  position:sticky; top:8px; z-index:80; background:rgba(11,12,14,.94); backdrop-filter:blur(8px); }
+.controls b { color:var(--shell-tx); font-weight:600; }
+.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
+  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
+.controls button:hover { background:#1e2126; }
+.controls button.active { border-color:#7be0b2; color:#7be0b2; }
+.controls button:disabled { opacity:.4; cursor:not-allowed; }
+.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
+.stepnote { font-size:11.5px; color:var(--shell-dim); margin:8px 2px 0; max-width:1100px; min-height:17px; }
+.stepnote b { color:var(--shell-mut); }
+
+.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:26px; font-size:12.5px; color:var(--shell-mut); max-width:980px; }
+.lean b { color:#7be0b2; }
+.lean ol, .lean ul { margin:6px 0 0; padding-left:20px; } .lean li { margin:4px 0; }
+.cnotes { font-size:11.5px; color:var(--shell-mut); margin:10px 2px 0; line-height:1.6; max-width:1100px; }
+.cnotes b { color:var(--shell-tx); font-weight:600; }
+
+/* =====================================================================
+   The app frame (Studio chrome, simplified)
+   ===================================================================== */
+.app { position:relative; background:var(--bg); color:var(--tx); border:1px solid var(--shell-bd); border-radius:12px;
+  overflow:hidden; font-size:13px; font-family:var(--font); margin:0 auto; }
+.app.phone { width:390px; }
+.topbar { display:flex; align-items:center; gap:22px; height:48px; padding:0 18px; border-bottom:1px solid var(--bd-mut); }
+.logo { display:inline-flex; align-items:center; gap:7px; font-weight:800; font-size:13px; letter-spacing:-.01em; }
+.logo svg { width:16px; height:16px; color:var(--strong); }
+.logo span { background:linear-gradient(90deg,#ff6b9a,#f5c84e 45%,#5fe08b); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.navtab { position:relative; font-size:12px; font-weight:600; color:var(--muted); padding:14px 0; }
+.navtab.on { color:var(--strong); }
+.navtab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
+.tright { margin-left:auto; display:flex; gap:12px; align-items:center; color:var(--subtle); font-size:12px; font-weight:600; }
+.kbd { border:1px solid var(--bd); border-radius:5px; padding:2px 6px; font:700 10px var(--mono); color:var(--muted); }
+.ibtn { width:26px; height:26px; border-radius:50%; border:1px solid var(--bd); display:inline-grid; place-items:center; color:var(--muted); }
+.ibtn svg { width:13px; height:13px; }
+.avatar { position:relative; width:26px; height:26px; border-radius:50%; display:inline-grid; place-items:center; font-size:11px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#a58af7,#53c6f2); }
+.avatar.dot::after { content:""; position:absolute; top:-2px; right:-2px; width:9px; height:9px; border-radius:50%; background:var(--st-attention-tx); border:2px solid var(--bg); }
+.app.narrow .hide-phone { display:none !important; }
+.page { padding:20px 24px 34px; max-width:1140px; margin:0 auto; }
+.app.narrow .page { padding:14px 14px 26px; }
+
+/* ---- icons, buttons, tags ------------------------------------------- */
+svg.i { width:14px; height:14px; flex:none; }
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:30px; padding:0 11px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx);
+  font-size:12px; font-weight:600; white-space:nowrap; text-decoration:none; }
+.btn:hover { border-color:var(--bd-strong); color:var(--strong); }
+.btn.sm { height:26px; padding:0 9px; font-size:11.5px; }
+.btn.quiet { background:transparent; border-color:transparent; color:var(--muted); }
+.btn.quiet:hover { background:var(--raised); color:var(--strong); }
+.btn.outline { background:transparent; }
+.cta { position:relative; border-color:transparent; background:transparent; color:var(--strong); }
+.cta::before { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+  background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
+  opacity:.62; pointer-events:none; transition:opacity .3s; }
+.cta:hover::before { opacity:1; }
+.cta:hover { box-shadow:0 2px 24px var(--glow); }
+.connect { display:inline-flex; gap:6px; align-items:center; position:relative; }
+.connect .btn { height:28px; padding:0 10px; font-size:11.5px; }
+.connect.big .btn { height:44px; padding:0 18px; font-size:13.5px; gap:9px; border-radius:8px; }
+.connect.big svg.i { width:17px; height:17px; }
+.gtag { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; border:1px solid var(--bd-mut);
+  background:var(--surface); font-size:10.5px; font-weight:600; color:var(--subtle); white-space:nowrap; flex:none; max-width:140px; overflow:hidden; text-overflow:ellipsis; }
+.gtag svg.i { width:11px; height:11px; }
+.gtag.shared { color:var(--st-bound-tx); border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
+.chipst { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 7px; border-radius:999px; border:1px solid; font-size:10.5px; font-weight:700; white-space:nowrap; flex:none; }
+.chipst .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.s-here { background:var(--st-good-bg); border-color:var(--st-good-bd); color:var(--st-good-tx); }
+.s-here .dot { animation:blink 2s ease-in-out infinite; }
+.s-online { background:var(--st-live-bg); border-color:var(--st-live-bd); color:var(--st-live-tx); }
+.s-busy { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.s-offline, .s-seen, .s-empty { background:var(--st-neutral-bg); border-color:var(--st-neutral-bd); color:var(--subtle); }
+.s-working { background:var(--st-working-bg); border-color:var(--st-working-bd); color:var(--st-working-tx); }
+.s-behind { background:var(--st-warning-bg); border-color:var(--st-warning-bd); color:var(--st-warning-tx); }
+@keyframes blink { 50% { opacity:.35 } }
+.sync { display:inline-flex; align-items:center; gap:3px; font:700 10.5px var(--font); color:var(--st-bound-tx); flex:none; }
+.sync svg.i { width:11px; height:11px; }
+.ell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* the corner pill on a preview (production ux-play pill) */
+.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd);
+  border-radius:4px; background:color-mix(in srgb, var(--terminal) 80%, transparent); font:800 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; z-index:2; }
+.pill .dot { width:6px; height:6px; border-radius:50%; background:currentcolor; flex:none; }
+.pill.here { color:var(--st-good-tx); } .pill.here .dot { animation:blink 2s ease-in-out infinite; }
+.pill.online { color:var(--st-live-tx); } .pill.busy { color:var(--st-attention-tx); }
+.pill.offline, .pill.seen, .pill.empty { color:var(--subtle); } .pill.working { color:var(--st-working-tx); }
+
+/* shared slim lines at the top of the page */
+.line { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:8px; border:1px solid; font-size:12.5px; margin-bottom:12px; flex-wrap:wrap; }
+.line .grow { flex:1; min-width:120px; }
+.line.signin { border-color:var(--bd); background:var(--panel); color:var(--muted); }
+.line.request { border-color:var(--st-attention-bd); background:var(--st-attention-bg); color:var(--st-attention-tx); }
+.line.request b { color:var(--strong); font-weight:700; }
+.line.request .note { color:var(--muted); font-style:italic; }
+.face { width:22px; height:22px; border-radius:50%; display:inline-grid; place-items:center; font-size:10px; font-weight:800; color:#0d0d13; flex:none; }
+
+/* welcome (brand new) */
+.welcome { display:grid; justify-items:center; gap:16px; text-align:center; padding:46px 16px 40px; border:1px dashed var(--bd); border-radius:12px; }
+.welcome h3 { margin:0; font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
+.welcome .or { font-size:12px; color:var(--subtle); }
+.welcome .or a { color:var(--muted); font-weight:600; }
+.app.narrow .connect.big { flex-direction:column; width:100%; }
+.app.narrow .connect.big .btn { width:100%; }
+
+/* section labels */
+.sect { display:flex; align-items:center; gap:10px; margin:22px 0 10px; }
+.sect h4 { margin:0; font:800 11px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); white-space:nowrap; }
+.sect .rule { flex:1; height:1px; background:var(--bd-mut); }
+.sect .count { font:600 11px var(--font); color:var(--faint); }
+.divider { display:flex; align-items:center; gap:14px; margin:30px 0 14px; }
+.divider span { flex:1; height:1px; background:var(--bd-mut); }
+.divider h4 { margin:0; font:800 14px/1 var(--font); text-transform:uppercase; letter-spacing:.06em; color:var(--heading); }
+
+/* catalog (production example cards: poster + glass name footer) */
+.catalog { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
+.app.narrow .catalog { grid-template-columns:repeat(2,1fr); gap:9px; }
+.ex { position:relative; height:118px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; }
+.ex .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.4); }
+.ex .foot { position:absolute; left:0; right:0; bottom:0; padding:7px 9px; background:rgba(12,12,20,.62); backdrop-filter:blur(10px);
+  font-size:12px; font-weight:700; color:var(--strong); border-top:1px solid rgba(255,255,255,.08); }
+.catlede { font-size:12px; color:var(--subtle); text-align:center; margin:-4px 0 12px; }
+
+/* previews */
+.prev { position:relative; background:#07080a; overflow:hidden; }
+.prev canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.prev .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.38); }
+
+/* toast + popover */
+.toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); opacity:0; z-index:200; pointer-events:none;
+  background:var(--raised-strong); border:1px solid var(--bd-strong); border-radius:10px; padding:9px 14px; box-shadow:0 18px 50px rgba(0,0,0,.6);
+  font-size:12.5px; color:var(--tx); transition:opacity .2s, transform .2s; max-width:min(720px, 92vw); }
+.toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast code { color:var(--st-live-tx); font-size:11.5px; }
+.toast .sub { display:block; color:var(--subtle); font-size:11.5px; margin-top:2px; }
+.netpop { position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:290px; display:grid; gap:8px; padding:12px;
+  border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); text-align:left; }
+.connect.big .netpop { right:auto; left:50%; transform:translateX(-50%); }
+.netpop label { font-size:11px; font-weight:700; color:var(--subtle); }
+.netpop .row2 { display:flex; gap:6px; }
+.netpop input { flex:1; min-width:0; height:30px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 9px; font:12px var(--mono); }
+
+/* =====================================================================
+   §1 Today (faithful, compact)
+   ===================================================================== */
+.today { max-height:720px; overflow:hidden; position:relative; }
+.today::after { content:""; position:absolute; left:0; right:0; bottom:0; height:120px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
+.t-hero { display:grid; justify-items:center; gap:14px; padding:26px 0 8px; text-align:center; }
+.t-tri { width:110px; height:120px; clip-path:polygon(12% 4%, 96% 50%, 12% 96%); border-radius:14px;
+  background:radial-gradient(circle at 35% 45%, #ff5fa8, #a24cff 55%, #4b6bff); filter:drop-shadow(0 0 30px rgba(170,90,255,.5)); }
+.t-word { font-size:30px; font-weight:800; letter-spacing:-.02em; background:linear-gradient(90deg,#ff6b9a,#c77dff 50%,#5fe08b); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.t-slogan { font-size:14px; font-weight:600; color:var(--strong); }
+.t-pill { display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:999px; border:1px solid var(--bd); background:var(--panel); font-size:12.5px; font-weight:700; color:var(--strong); }
+.t-ask { width:min(420px,100%); display:grid; gap:6px; margin-top:6px; }
+.t-ask b { font-size:15px; color:var(--strong); }
+.t-box { height:56px; border-radius:8px; border:1px solid var(--bd); background:var(--surface); text-align:left; padding:8px 10px; font-size:12px; color:var(--faint); }
+.t-slop { font-size:11px; color:var(--subtle); }
+.t-slop mark { background:rgba(255,93,93,.18); color:var(--st-error-tx); border-radius:3px; padding:0 3px; }
+.t-doors { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; width:min(760px,100%); margin:0 auto; }
+.t-door { display:grid; justify-items:center; gap:6px; padding:14px 10px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); text-align:center; }
+.t-door b { font-size:12.5px; color:var(--strong); } .t-door span { font-size:11px; color:var(--muted); line-height:1.35; }
+.t-door .ic { width:30px; height:30px; border-radius:6px; border:1px solid var(--bd); display:grid; place-items:center; color:var(--heading); background:var(--surface-muted); }
+.t-col { width:min(760px,100%); margin:0 auto; }
+
+/* =====================================================================
+   §2 A · Pair cards
+   ===================================================================== */
+.a-bar { display:flex; align-items:center; gap:12px; margin-bottom:14px; min-width:0; }
+.a-filter { display:flex; gap:6px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; mask:linear-gradient(90deg,#000 88%,transparent); -webkit-mask:linear-gradient(90deg,#000 88%,transparent); padding-right:30px; }
+.a-filter.fits { mask:none; -webkit-mask:none; }
+.fchip { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 11px; border-radius:999px;
+  border:1px solid var(--bd); background:transparent; color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap; flex:none; }
+.fchip:hover { border-color:var(--bd-strong); color:var(--strong); }
+.fchip.on { border-color:var(--sel-bd); background:var(--sel-bg); color:var(--strong); }
+.fchip.shared { color:var(--st-bound-tx); }
+.fchip.shared.on { border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
+.fchip .n { color:var(--faint); font-weight:600; }
+.fchip.idea { border-style:dashed; }
+.app.narrow .a-bar { flex-wrap:wrap; }
+.app.narrow .a-bar .connect { order:-1; width:100%; justify-content:flex-end; }
+.pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; }
+.app.narrow .pgrid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.pair { position:relative; display:grid; grid-template-rows:auto 1fr; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; cursor:pointer; min-width:0; transition:border-color .15s, box-shadow .15s; }
+.pair:hover { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.12); }
+.pair.is-here { border-color:var(--st-good-bd); }
+.pair .prev { height:112px; border-bottom:1px solid var(--bd-mut); }
+.app.narrow .pair .prev { height:84px; }
+.pair .body { padding:9px 11px 10px; display:grid; gap:4px; min-width:0; }
+.pair .r1, .pair .r2 { display:flex; align-items:center; gap:6px; min-width:0; }
+.pair .bname { font-weight:700; font-size:13px; color:var(--strong); }
+.pair .pname { font-size:12px; color:var(--muted); }
+.pair .pname .arrow { color:var(--faint); margin-right:3px; }
+.pair .r1 .spring, .pair .r2 .spring { flex:1; }
+.pair .share { position:absolute; top:6px; left:6px; z-index:3; opacity:0; transition:opacity .15s; }
+.pair:hover .share { opacity:1; }
+.app.narrow .pair .share { display:none; }
+.pair.project .bname { font-weight:700; }
+.pair.project .quietline { font-size:11.5px; color:var(--subtle); }
+.pair.pattern .prev { height:72px; }
+.pgrid.patterns { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
+.app.narrow .pgrid.patterns { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.a-gap { height:16px; }
+
+/* =====================================================================
+   §3 B · One list
+   ===================================================================== */
+.b-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; position:relative; }
+.b-title { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:8px; background:transparent; border:0; padding:4px 6px; margin-left:-6px; border-radius:8px;
+  font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
+.b-title:hover { background:var(--raised); }
+.b-title svg.i { width:16px; height:16px; color:var(--subtle); }
+.b-title .shared-ic { color:var(--st-bound-tx); }
+.b-title { white-space:nowrap; }
+.app.narrow .b-head { flex-wrap:wrap; }
+.app.narrow .b-head > span[style] { display:none; }
+.app.narrow .b-head .connect { width:100%; justify-content:flex-end; }
+.b-url { font:11px var(--mono); color:var(--faint); margin:0 0 14px; }
+.b-menu { position:absolute; left:0; top:calc(100% + 4px); z-index:30; width:250px; padding:6px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; gap:1px; max-height:340px; overflow:auto; }
+.b-menu button { appearance:none; font:inherit; cursor:pointer; display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; border:0; background:transparent; color:var(--tx); font-size:12.5px; text-align:left; }
+.b-menu button:hover { background:var(--raised-strong); }
+.b-menu button.on { background:var(--sel-bg); }
+.b-menu button .n { margin-left:auto; color:var(--faint); font-size:11px; }
+.b-menu hr { border:0; border-top:1px solid var(--bd-mut); margin:4px 2px; }
+.b-menu .shared-row { color:var(--st-bound-tx); }
+.list { border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:hidden; }
+.lrow { display:grid; grid-template-columns:78px minmax(0,1.15fr) minmax(0,1fr) 120px minmax(128px,auto) 60px; align-items:center; gap:12px; padding:7px 12px; border-top:1px solid var(--bd-mut); cursor:pointer; min-height:44px; }
+.lrow:first-child { border-top:0; }
+.lrow:hover { background:var(--raised); }
+.lrow .prev { height:28px; border-radius:4px; border:1px solid var(--bd-mut); }
+.lrow .who { display:flex; align-items:center; gap:7px; min-width:0; }
+.lrow .who b { font-size:13px; color:var(--strong); font-weight:700; }
+.lrow .proj { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); min-width:0; }
+.lrow .proj .arrow { color:var(--faint); }
+.lrow .st { display:flex; justify-content:flex-start; gap:5px; flex-wrap:wrap; }
+.lrow .go { justify-self:end; opacity:.0; transition:opacity .12s; }
+.lrow:hover .go { opacity:1; }
+.lrow.parent { background:color-mix(in srgb, var(--st-bound-bg) 35%, var(--panel)); }
+.lrow.parent .who b { color:var(--strong); }
+.lrow.child .who { padding-left:16px; position:relative; }
+.lrow.child .who::before { content:""; position:absolute; left:4px; top:-12px; bottom:50%; width:8px; border-left:1px solid var(--st-bound-bd); border-bottom:1px solid var(--st-bound-bd); border-bottom-left-radius:4px; }
+.lrow .meta { font-size:11.5px; color:var(--subtle); }
+.app.narrow .lrow { grid-template-columns:56px minmax(0,1fr) auto; gap:9px; padding:7px 10px; }
+.app.narrow .lrow .proj, .app.narrow .lrow .grp, .app.narrow .lrow .go { display:none; }
+.app.narrow .lrow .who { flex-direction:column; align-items:flex-start; gap:1px; }
+.lrow .who .sub2 { display:none; font-size:11.5px; color:var(--muted); }
+.app.narrow .lrow .who .sub2 { display:block; }
+.app.narrow .lrow.child .who { padding-left:12px; }
+.b-patterns { display:flex; flex-wrap:wrap; gap:8px; }
+.pchip { display:inline-flex; align-items:center; gap:8px; padding:4px 10px 4px 4px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; font-size:12px; font-weight:600; color:var(--tx); }
+.pchip:hover { border-color:var(--bd-strong); }
+.pchip .prev { width:44px; height:26px; border-radius:5px; }
+
+/* =====================================================================
+   §4 C · Stage
+   ===================================================================== */
+.c-stage { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(0,1fr); gap:12px; }
+.app.narrow .c-stage { grid-template-columns:1fr; }
+.c-hero { position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--st-good-bd); background:#07080a; height:290px; cursor:pointer; }
+.app.narrow .c-hero { height:230px; }
+.c-hero .prev { position:absolute; inset:0; }
+.c-hero .ov { position:absolute; left:0; right:0; bottom:0; padding:40px 18px 16px; background:linear-gradient(transparent, rgba(7,8,10,.94) 55%); display:flex; align-items:flex-end; gap:12px; z-index:2; }
+.c-hero .ov .names { flex:1; min-width:0; display:grid; gap:3px; }
+.c-hero .ov .bn { font-size:22px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
+.c-hero .ov .pn { font-size:13px; color:var(--muted); display:flex; gap:8px; align-items:center; min-width:0; }
+.c-hero .ov .btn { height:36px; padding:0 16px; font-size:13px; }
+.c-side { display:grid; gap:8px; align-content:start; }
+.c-mini { display:grid; grid-template-columns:96px minmax(0,1fr); gap:10px; align-items:center; padding:6px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; min-width:0; }
+.c-mini:hover { border-color:var(--bd-strong); }
+.c-mini .prev { height:54px; border-radius:5px; }
+.c-mini .t { display:grid; gap:2px; min-width:0; }
+.c-mini .t b { font-size:12.5px; color:var(--strong); }
+.c-mini .t span { font-size:11.5px; color:var(--muted); }
+.c-side .more { font-size:11.5px; color:var(--subtle); padding:2px 4px; }
+.c-tabs { display:flex; align-items:flex-end; gap:20px; border-bottom:1px solid var(--bd-mut); margin:22px 0 14px; min-width:0; }
+.c-tabs .tabs { display:flex; gap:18px; overflow-x:auto; scrollbar-width:none; flex:1; min-width:0; }
+.c-tab { appearance:none; font:inherit; cursor:pointer; background:transparent; border:0; position:relative; padding:8px 0 9px; font-size:12.5px; font-weight:600; color:var(--muted); white-space:nowrap; display:inline-flex; gap:5px; align-items:center; }
+.c-tab:hover { color:var(--strong); }
+.c-tab.on { color:var(--strong); }
+.c-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
+.c-tab.shared { color:var(--st-bound-tx); }
+.c-tabs .connect { padding-bottom:6px; }
+.app.narrow .c-tabs { flex-direction:column; align-items:stretch; gap:6px; }
+.app.narrow .c-tabs .connect { order:-1; justify-content:flex-end; padding:0; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
+.app.narrow .tiles { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.tile { position:relative; height:132px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; background:#07080a; min-width:0; }
+.tile:hover { border-color:var(--bd-strong); }
+.tile.is-here { border-color:var(--st-good-bd); }
+.tile .prev { position:absolute; inset:0; }
+.tile .foot { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:6px 9px 7px; background:rgba(12,12,20,.66); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.08); display:grid; gap:1px; }
+.tile .foot .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
+.tile .foot .l1 b { font-size:12px; color:var(--strong); }
+.tile .foot .l2 { font-size:11px; color:var(--muted); display:flex; gap:6px; align-items:center; min-width:0; }
+.sdot { display:inline-block; vertical-align:middle; width:7px; height:7px; border-radius:50%; flex:none; }
+.sdot.here { background:var(--st-good-tx); box-shadow:0 0 8px var(--st-good-tx); animation:blink 2s ease-in-out infinite; }
+.sdot.online { background:var(--st-live-tx); }
+.sdot.busy { background:var(--st-attention-tx); }
+.sdot.offline, .sdot.seen, .sdot.empty { background:transparent; border:1.5px solid var(--faint); }
+.sdot.working { background:var(--st-working-tx); }
+.tile .gcorner { position:absolute; top:6px; left:6px; z-index:2; }
+.tile.stack { overflow:visible; box-shadow:0 -4px 0 -2px #2c2c3b, 0 -8px 0 -5px #22222e; }
+.tile.stack .prev { border-radius:8px 8px 0 0; overflow:hidden; }
+.tile.stack .foot { border-radius:0 0 8px 8px; }
+.dots { display:inline-flex; gap:3px; flex:none; }
+.sdot.behind { background:var(--st-warning-tx); }
+.c-welcome { display:grid; justify-items:center; gap:14px; text-align:center; padding:22px 0 10px; }
+.c-welcome .t-tri { width:96px; height:104px; }
+
+/* screenshot mode (?shot=<id>): one section alone, for gate crops */
+body.shot { padding:16px; }
+body.shot > *:not(.shot-keep):not(script) { display:none !important; }
+
+/* §5 legend */
+.legend { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
+.lg { display:grid; grid-template-columns:132px 1fr; gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--shell-bd); border-radius:8px; background:var(--bg); }
+.lg .w { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.lg .what { font-size:12px; color:var(--muted); }
+.lg .what b { color:var(--strong); }
+.lg .src { display:block; font-size:11px; color:var(--subtle); margin-top:3px; }
+.lg .step { font:700 10px var(--mono); color:var(--faint); }
+
+/* =====================================================================
+   Round 2 (gate 2026-10-08): question sections, no control strip.
+   Yona kept A (cards) and B (list) behind one switch, cards by default,
+   remembered in this browser. One section per open question, options
+   lettered to match the chat (Q1-A, Q1-B…).
+   ===================================================================== */
+.qsec { margin-top:56px; }
+.qsec > h2 { display:flex; align-items:center; gap:10px; font-size:16px; letter-spacing:0; text-transform:none; color:var(--shell-tx); margin:0 0 6px; }
+.qn { font:800 12px var(--mono); color:#0b0c0e; background:var(--shell-tx); border-radius:5px; padding:3px 8px; }
+.qsec > p.ask { color:var(--shell-mut); font-size:13px; margin:0 0 16px; max-width:980px; }
+.qsec > p.ask b { color:var(--shell-tx); }
+.opts { display:grid; gap:18px; align-items:start; }
+.opts.c2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.opts.c3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.opt { border:1px solid var(--shell-bd); border-radius:12px; padding:14px; background:#0e0f12; display:grid; gap:10px; align-content:start; min-width:0; }
+.opt.leanopt { border-color:#365545; box-shadow:inset 0 0 0 1px #365545; }
+.ohead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.olabel { font:800 20px/1 var(--mono); color:var(--shell-tx); }
+.oname { font-size:14px; font-weight:700; color:var(--shell-tx); }
+.leanb { font-size:11px; font-weight:700; color:#7be0b2; border:1px solid #365545; border-radius:999px; padding:1px 9px; }
+.owhat { font-size:12.5px; color:var(--shell-mut); margin:0; }
+.ofa { font-size:12px; color:var(--shell-dim); margin:0; line-height:1.5; }
+.ofa b { color:var(--shell-mut); font-weight:600; }
+.crop { position:relative; overflow:hidden; border-radius:12px; }
+.crop.fade::after { content:""; position:absolute; left:0; right:0; bottom:0; height:70px; background:linear-gradient(transparent, #0e0f12); pointer-events:none; z-index:20; }
+.crop > .app { border-radius:12px; }
+.duo { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
+.duo.phoneduo { grid-template-columns:minmax(0,1fr) 392px; }
+.vlabel { font:700 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--shell-dim); margin:0 0 5px 2px; }
+.decided { border:1px dashed var(--shell-bd-strong); border-radius:8px; padding:12px 16px; margin-top:16px; font-size:12.5px; color:var(--shell-mut); max-width:980px; }
+.decided b { color:var(--shell-tx); }
+.decided ul { margin:6px 0 0; padding-left:18px; } .decided li { margin:3px 0; }
+.usinglean { font-size:12px; color:var(--shell-dim); margin:0 0 10px; }
+.usinglean b { color:var(--shell-mut); }
+.refrow { display:grid; grid-template-columns:repeat(3, 392px); gap:16px; justify-content:start; overflow-x:auto; }
+
+/* the cards/list switch (an app control, not a spike control) */
+.vswitch { display:inline-flex; border:1px solid var(--bd); border-radius:7px; overflow:hidden; flex:none; }
+.vswitch button { appearance:none; cursor:pointer; border:0; background:transparent; color:var(--subtle); width:30px; height:26px; display:grid; place-items:center; }
+.vswitch button + button { border-left:1px solid var(--bd); }
+.vswitch button:hover { color:var(--strong); }
+.vswitch button.on { background:var(--sel-bg); color:var(--strong); }
+.vswitch svg.i { width:14px; height:14px; }
+.tools { display:flex; align-items:center; gap:10px; flex:none; }
+.app.narrow .tools { width:100%; justify-content:space-between; }
+.app.narrow .a-bar .tools, .app.narrow .c-tabs .tools { order:-1; }
+
+/* a project on several boards, as one card */
+.pair.set { box-shadow:0 -4px 0 -2px #2c2c3b, 0 -8px 0 -5px #22222e; overflow:visible; }
+.pair.set .prev { border-radius:8px 8px 0 0; }
+.pair.set .boards { display:flex; align-items:center; gap:6px; min-width:0; font-size:11.5px; color:var(--muted); }
+.pgrid { align-items:start; }
+.pair .prev .pv { position:absolute; bottom:6px; right:6px; z-index:2; font:800 9px var(--mono); letter-spacing:.07em; color:var(--subtle); text-transform:uppercase; opacity:0; transition:opacity .15s; }
+.pair:hover .prev[data-hover] .pv { opacity:1; }
+.lrow .sync { margin-left:2px; }
+.pair.addcard { align-self:stretch; border:1px dashed var(--bd-strong); background:transparent; cursor:default; display:grid; place-items:center; min-height:176px; }
+.pair.addcard:hover { box-shadow:none; }
+.addin { display:grid; gap:10px; justify-items:center; padding:14px; width:100%; }
+.addin b { font-size:13px; color:var(--strong); }
+.addbtns { display:grid; gap:6px; width:100%; max-width:180px; }
+.addbtns .btn { width:100%; justify-content:flex-start; }
+.addin .row2, .addrow .row2, .connpop .row2 { display:flex; gap:6px; width:100%; }
+.addin input, .addrow input, .connpop input { flex:1; min-width:0; height:28px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 8px; font:11.5px var(--mono); }
+.addrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 12px; border-top:1px dashed var(--bd-strong); }
+.addrow b { font-size:12.5px; color:var(--strong); }
+.addrow .spring, .cstrip .spring { flex:1; }
+.addrow .plus, .cstrip .plus { width:22px; height:22px; border-radius:6px; border:1px dashed var(--bd-strong); display:grid; place-items:center; color:var(--muted); }
+.addrow .plus svg.i, .cstrip .plus svg.i { width:12px; height:12px; }
+.addrow .connect .btn { height:26px; }
+.addrow .row2 { flex-basis:100%; max-width:320px; margin-left:auto; }
+.cstrip { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 12px; margin:0 0 6px; border:1px dashed var(--bd-strong); border-radius:8px; }
+.cstrip b { font-size:12.5px; color:var(--strong); }
+.app.narrow .cstrip .connect { width:100%; justify-content:flex-end; }
+.topconn { position:relative; }
+.topconn .btn svg.i { width:12px; height:12px; }
+.connpop { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:220px; display:grid; gap:6px; padding:8px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); }
+.connpop .btn { width:100%; justify-content:flex-start; }
+.sqrow { display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
+.sq { appearance:none; font:inherit; cursor:pointer; position:relative; width:84px; height:72px; display:grid; place-items:center; align-content:center; gap:6px;
+  border:1px solid var(--bd); border-radius:8px; background:var(--panel); color:var(--tx); font-size:11.5px; font-weight:600; transition:border-color .15s, box-shadow .15s; }
+.sq svg.i { width:20px; height:20px; color:var(--heading); }
+.sq:hover, .sq.on { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.14); }
+.sq.on { border-color:var(--sel-bd); }
+.sqnet { display:grid; gap:6px; align-content:center; height:72px; min-width:240px; }
+.sqnet label { font-size:11px; font-weight:700; color:var(--subtle); }
+.sqnet .row2 { display:flex; gap:6px; }
+.sqnet input { flex:1; min-width:0; height:30px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 9px; font:12px var(--mono); }
+.sqhint { align-self:center; font-size:12px; color:var(--subtle); margin-left:6px; }
+.sqhint a { color:var(--muted); font-weight:600; }
+.app.narrow .sqhint { flex-basis:100%; margin:2px 0 0; }
+
+/* =====================================================================
+   Board-card spike (round 1). The card on the home page, not the full
+   device card. Same eight boards in every option.
+   ===================================================================== */
+.cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; align-items:start; }
+.app.narrow .cards { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.k { display:inline-flex; align-items:center; gap:3px; color:var(--subtle); flex:none; }
+.k svg.i { width:13px; height:13px; }
+.k.cloud { color:var(--st-live-tx); }
+.k.dim { color:var(--faint); }
+.bc { position:relative; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; cursor:pointer; min-width:0; }
+.bc:hover { border-color:var(--bd-strong); }
+.bc.live { border-color:var(--st-good-bd); }
+.bc .pic { position:relative; background:#07080a; }
+.bc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.ell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mini-btn { appearance:none; font:inherit; cursor:pointer; height:24px; padding:0 9px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); color:var(--strong); font-size:11px; font-weight:700; white-space:nowrap; }
+.mini-btn:hover { border-color:var(--sel-bd); }
+
+/* A · picture first, words only when something needs you */
+.ca .pic { position:absolute; left:0; right:0; top:0; bottom:46px; }
+.ca .foot { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:7px 10px 8px; background:rgba(12,12,20,.7); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.07); display:grid; gap:1px; }
+.ca .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
+.ca .l1 b { font-size:12.5px; color:var(--strong); }
+.ca .l2 { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); min-width:0; }
+.ca .note { position:absolute; top:7px; left:7px; right:7px; z-index:2; display:flex; justify-content:flex-end; gap:6px; }
+.ca .note .pill { position:static; }
+.ca .note .mini-btn { height:20px; font-size:10px; padding:0 7px; }
+.ca { height:164px; }
+.app.narrow .ca { height:140px; }
+
+/* B · name first, a status line always */
+.cb { display:grid; }
+.cb .hd { display:flex; align-items:center; gap:7px; padding:9px 11px 0; min-width:0; }
+.cb .hd b { font-size:13px; color:var(--strong); }
+.cb .sub { padding:1px 11px 8px; font-size:11.5px; color:var(--muted); display:flex; gap:6px; align-items:center; min-width:0; }
+.cb .pic { height:84px; border-top:1px solid var(--bd-mut); border-bottom:1px solid var(--bd-mut); }
+.cb .st { display:flex; align-items:center; gap:4px 6px; flex-wrap:wrap; padding:7px 11px 8px; font-size:11.5px; color:var(--muted); min-height:36px; }
+.cb .st .dot { width:7px; height:7px; border-radius:50%; flex:none; }
+.cb .st .spring { flex:1; }
+
+/* C · one sentence */
+.cc .pic { height:96px; border-bottom:1px solid var(--bd-mut); }
+.cc .bd { padding:8px 11px 10px; display:grid; gap:3px; }
+.cc .hd { display:flex; align-items:center; gap:6px; min-width:0; }
+.cc .hd b { font-size:13px; color:var(--strong); }
+.cc .say { font-size:11.5px; line-height:1.4; color:var(--muted); min-height:32px; }
+.cc .say em { font-style:normal; color:var(--tx); font-weight:600; }
+.cc .say .warn { color:var(--st-warning-tx); }
+.cc .say .att { color:var(--st-attention-tx); }
+.cc .say a { color:var(--strong); font-weight:700; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+
+/* D · board above, project below */
+.cd .bz { padding:9px 11px 8px; display:grid; gap:6px; }
+.cd .hd { display:flex; align-items:center; gap:6px; min-width:0; }
+.cd .hd b { font-size:13px; color:var(--strong); }
+.cd .hd .spring { flex:1; }
+.cd .pic { height:86px; border-radius:6px; border:1px solid var(--bd-mut); overflow:hidden; }
+.cd .pz { border-top:1px solid var(--bd); padding:7px 11px 8px; display:flex; align-items:center; gap:7px; min-width:0; background:var(--surface); }
+.cd .pz .th { width:22px; height:16px; border-radius:3px; flex:none; }
+.cd .pz .nm { font-size:12px; color:var(--tx); font-weight:600; }
+.cd .pz .spring { flex:1; }
+.cd .pz .ok { font-size:10.5px; color:var(--subtle); flex:none; }
+.cd .pz .warn { font-size:10.5px; color:var(--st-warning-tx); font-weight:700; flex:none; }
+
+.stagecrop { max-height:560px; }
+.principle { font-size:12px; color:var(--shell-mut); margin:0; }
+.principle b { color:var(--shell-tx); }
+
+/* =====================================================================
+   Round 2: the vocabulary. The stack (project / firmware / board) is the
+   spine: every fact, notice and action belongs to one layer.
+   ===================================================================== */
+.vsec { margin-top:48px; }
+.vsec > h2 { display:flex; align-items:center; gap:10px; font-size:16px; letter-spacing:0; text-transform:none; color:var(--shell-tx); margin:0 0 6px; }
+.vsec > p.ask { color:var(--shell-mut); font-size:13px; margin:0 0 14px; max-width:1000px; }
+.vsec > p.ask b { color:var(--shell-tx); }
+.sn { font:800 12px var(--mono); color:var(--shell-tx); border:1px solid var(--shell-bd-strong); border-radius:5px; padding:2px 7px; }
+table.v { border-collapse:collapse; width:100%; max-width:1180px; font-size:12.5px; }
+table.v th { text-align:left; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--shell-dim); padding:6px 10px; border-bottom:1px solid var(--shell-bd-strong); }
+table.v td { padding:8px 10px; border-bottom:1px solid var(--shell-bd); vertical-align:top; color:var(--shell-mut); }
+table.v td b { color:var(--shell-tx); }
+table.v td.ex { background:var(--bg); }
+table.v td .no { color:#c98d8d; text-decoration:line-through; text-decoration-color:rgba(255,160,160,.5); }
+table.v code { font-size:11px; }
+
+/* the stack */
+.stack { display:grid; gap:0; max-width:1180px; border:1px solid var(--shell-bd); border-radius:12px; overflow:hidden; background:var(--bg); color:var(--tx); }
+.layer { display:grid; grid-template-columns:150px minmax(0,1.2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr); gap:0; border-top:1px solid var(--bd); }
+.layer:first-child { border-top:0; }
+.layer > div { padding:12px 14px; font-size:12px; color:var(--muted); line-height:1.5; border-left:1px solid var(--bd-mut); }
+.layer > div:first-child { border-left:0; }
+.layer .ln { font:800 11px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--heading); display:block; }
+.layer .ln small { display:block; font:500 11px var(--font); letter-spacing:0; text-transform:none; color:var(--subtle); margin-top:3px; }
+.layer.head > div { padding:8px 14px; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); font-weight:700; background:var(--surface); }
+.layer b { color:var(--tx); font-weight:600; }
+.tagline { font-size:11px; color:var(--subtle); }
+
+/* the vocabulary card (lean answers applied) */
+.vc { position:relative; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:visible; cursor:pointer; min-width:0; display:grid; grid-template-rows:auto 1fr; }
+.vc:hover { border-color:var(--bd-strong); }
+.vc .pic { position:relative; height:112px; background:#07080a; border-radius:8px 8px 0 0; overflow:hidden; border-bottom:1px solid var(--bd-mut); }
+.app.narrow .vc .pic { height:88px; }
+.vc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.vc .bd { padding:8px 11px 9px; display:grid; gap:2px; min-width:0; }
+.vc .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
+.vc .l1 b { font-size:13px; color:var(--strong); }
+.vc .l2, .vc .l3 { display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--muted); min-width:0; min-height:17px; }
+.vc .l3 { color:var(--subtle); font-size:11px; }
+.vc .l2 svg.i, .vc .l3 svg.i { width:12px; height:12px; flex:none; }
+.vc .spring { flex:1; }
+.reach { display:inline-flex; gap:4px; align-items:center; color:var(--subtle); flex:none; }
+.reach svg.i { width:13px; height:13px; }
+.reach .word { font-size:10.5px; font-weight:600; }
+.ldot { width:8px; height:8px; border-radius:50%; flex:none; }
+.ldot.run { background:var(--st-live-tx); box-shadow:0 0 6px rgba(156,200,238,.6); }
+.ldot.away { border:1.5px solid var(--faint); }
+.ldot.held { background:var(--st-attention-tx); }
+.ldot.none { background:var(--subtle); }
+.lword { font-size:10.5px; font-weight:700; color:var(--st-live-tx); flex:none; }
+.lword.away { color:var(--subtle); font-weight:600; }
+.avatar-s { width:15px; height:15px; border-radius:50%; display:inline-grid; place-items:center; font-size:8.5px; font-weight:800; color:#0d0d13; flex:none; background:linear-gradient(135deg,#ffab4a,#ff5d5d); }
+.notice { position:absolute; top:7px; left:7px; right:7px; z-index:3; display:flex; justify-content:flex-end; align-items:center; gap:6px; flex-wrap:wrap; }
+.npill { display:inline-flex; align-items:center; gap:5px; height:21px; padding:0 8px; border-radius:6px; border:1px solid; font-size:10.5px; font-weight:700; white-space:nowrap; backdrop-filter:blur(6px); }
+.npill svg.i { width:11px; height:11px; }
+.npill.att { background:color-mix(in srgb, var(--st-attention-bg) 88%, transparent); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
+.npill.amber { background:color-mix(in srgb, var(--st-warning-bg) 88%, transparent); border-color:var(--st-warning-bd); color:var(--st-warning-tx); }
+.npill.err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); border-color:var(--st-error-bd); color:var(--st-error-tx); }
+.npill.neu { background:color-mix(in srgb, var(--terminal) 82%, transparent); border-color:var(--bd); color:var(--muted); }
+.npill.blue { background:color-mix(in srgb, var(--st-live-bg) 88%, transparent); border-color:var(--st-live-bd); color:var(--st-live-tx); }
+.wayout { appearance:none; font:inherit; cursor:pointer; height:21px; padding:0 8px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); color:var(--strong); font-size:10.5px; font-weight:700; white-space:nowrap; }
+.wayout:hover { border-color:var(--sel-bd); }
+.kebab { position:absolute; right:6px; bottom:6px; z-index:4; width:24px; height:22px; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--subtle); display:grid; place-items:center; opacity:0; cursor:pointer; }
+.vc:hover .kebab, .vc.menuopen .kebab { opacity:1; border-color:var(--bd); background:var(--raised); }
+.vmenu { position:absolute; right:6px; top:calc(100% - 4px); z-index:20; width:210px; padding:6px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; gap:1px; }
+.vmenu .mh { font:800 9.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); padding:6px 8px 2px; }
+.vmenu button { appearance:none; font:inherit; cursor:pointer; display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; border:0; background:transparent; color:var(--tx); font-size:12px; text-align:left; }
+.vmenu button:hover { background:var(--raised-strong); }
+.vmenu button.lasting { color:var(--st-error-tx); }
+.vmenu button svg.i { width:13px; height:13px; color:var(--subtle); }
+.vmenu hr { border:0; border-top:1px solid var(--bd-mut); margin:3px 2px; }
+
+/* anatomy callouts */
+.anat { display:grid; grid-template-columns:300px minmax(0,1fr); gap:28px; align-items:start; max-width:1180px; }
+.anat .cardwrap { position:relative; }
+.co { position:absolute; width:20px; height:20px; border-radius:50%; background:var(--shell-tx); color:#0b0c0e; font:800 11px var(--mono); display:grid; place-items:center; z-index:30; box-shadow:0 0 0 3px #0b0c0e; }
+.anat ol { margin:0; padding-left:22px; font-size:12.5px; color:var(--shell-mut); line-height:1.55; }
+.anat ol li { margin:0 0 7px; }
+.anat ol b { color:var(--shell-tx); }
+
+/* the board page (the whole stack) */
+.bp { max-width:900px; }
+.bp .top { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:16px; padding:16px; }
+.bp .big { position:relative; height:190px; border-radius:10px; overflow:hidden; background:#07080a; border:1px solid var(--bd); }
+.bp .big canvas { position:absolute; inset:0; width:100%; height:100%; }
+.bp h3 { margin:0; font-size:22px; color:var(--strong); letter-spacing:-.01em; }
+.bp .meta { display:grid; gap:6px; align-content:start; font-size:12px; color:var(--muted); }
+.bp .meta .row { display:flex; align-items:center; gap:7px; }
+.bp .meta svg.i { width:13px; height:13px; color:var(--subtle); }
+.bp .lay { border-top:1px solid var(--bd); display:grid; grid-template-columns:120px minmax(0,1fr) auto; gap:14px; padding:12px 16px; align-items:start; }
+.bp .lay .lname { font:800 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--heading); padding-top:2px; }
+.bp .lay .facts { display:grid; gap:4px; font-size:12px; color:var(--muted); }
+.bp .lay .facts b { color:var(--strong); font-weight:600; }
+.bp .lay .facts .low { font:11px var(--mono); color:var(--subtle); }
+.bp .lay .acts { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+.bp .lay .acts .btn { height:28px; font-size:11.5px; }
+.bp .lay .acts .btn.lasting { color:var(--st-error-tx); }
+.bp .lay .note { margin-top:4px; }
+.more { font-size:11.5px; color:var(--subtle); text-decoration:underline dotted; cursor:pointer; }
+
+.prin { columns:2; column-gap:28px; max-width:1180px; font-size:12.5px; color:var(--shell-mut); padding-left:20px; margin:0; }
+.prin li { margin:0 0 7px; break-inside:avoid; }
+.prin b { color:var(--shell-tx); }
+.src { font-size:11px; color:var(--shell-dim); max-width:1180px; margin-top:10px; }
+.src a { color:var(--shell-mut); }
+</style>
+</head>
+<body>
+
+<h1>Boards — the vocabulary, and the card built from it</h1>
+<p class="hint"><b>Round 2.</b> Round 1 settled the direction of the card (picture first) and showed the real problem: a newcomer can’t tell what each word on it means. So this round defines the vocabulary first and builds the card from it.
+<b>The spine is the stack:</b> every board is <b>project</b> (what it plays), <b>firmware</b> (what it runs) and <b>board</b> (the hardware, where it is, and how we reach it). Every fact, notice and action belongs to one layer.
+<b>The order on a card</b> (Yona): what it plays / what it is → where it is and how we’re connected → notices, only when something’s wrong. Everything else is on the board’s page, or shown when it becomes relevant.
+The page so far uses the lean for every question below; the questions are lettered to match the chat. Click a card to see what Open does; hover for its ⋯ menu.</p>
+
+<!-- ================================================================== -->
+<section class="vsec" id="stack">
+  <h2><span class="sn">1</span>The stack: where every fact, notice and action lives</h2>
+  <p class="ask">The full device card already splits into these three zones. Making them the vocabulary’s layers means a fact always has a home, a notice always says which layer is unhappy, and an action always sits with the thing it changes.</p>
+  <div class="stack">
+    <div class="layer head"><div>Layer</div><div>Facts on the card</div><div>Facts on the board page</div><div>Notices it can raise</div><div>Actions it owns</div></div>
+    <div class="layer"><div class="ln">${PROJECT}<small>what it plays</small></div>
+      <div><b>The name</b> (one name; Q3) and <b>the picture</b>. “Playing X” only when the board has its own name. “3 boards” when it’s kept in sync.</div>
+      <div>Saved version, when saved, the other boards in its set, where it was copied from, panel values on this board.</div>
+      <div>Out of date (missing the last save) · shader error · fell back to the previous project.</div>
+      <div><b>Open</b> (the card itself) · Share · Set up (a new board).</div></div>
+    <div class="layer"><div class="ln">${FIRMWARE}<small>what it runs</small></div>
+      <div>Nothing, unless an update is available or it needs firmware.</div>
+      <div>Version, release, how it compares with Studio’s, the update history.</div>
+      <div>Update available · needs firmware · updating (with progress).</div>
+      <div>Update · Install · Reinstall · Factory reset <span class="tagline">(lasting)</span>.</div></div>
+    <div class="layer"><div class="ln">${BOARD}<small>the hardware, where it is, how we reach it</small></div>
+      <div><b>Where</b>: its group, or the person who shared it. <b>How</b>: cloud connected, and the link we’re using now. <b>Whether it’s running</b>: the status (its frame rate, or a notice).</div>
+      <div>Chip, board model, MAC, every link with its address and last seen, frame rate, memory, access (passwords), people.</div>
+      <div>Offline · last seen · someone else is using it · open in another tab · locked · not responding.</div>
+      <div>Take over · Unlock · Rename · Move to a group · Reset · Forget <span class="tagline">(lasting)</span>.</div></div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section class="vsec" id="anatomy">
+  <h2><span class="sn">2</span>The card, part by part</h2>
+  <p class="ask">The cold-read test: every element should say what it is without knowing the model. Each number is the sentence a newcomer should be able to say.</p>
+  <div class="anat"><div class="cardwrap" id="anatcard"></div>
+    <ol>
+      <li><b>The picture is the board’s lights.</b> Moving means you’re seeing it now. Still and dim means this is how it looked when it was last seen.</li>
+      <li><b>The status is always there.</b> When the board is fine, its frame rate (“60 fps”, blue for live). When something needs you, a notice takes its place, with the one action that fixes it. (Q4)</li>
+      <li><b>The name is what it is.</b> One name. A board you named (Porch) shows what it plays on the next line; a board you didn’t is just its project’s name. (Q3)</li>
+      <li><b>How we reach it.</b> A cloud: reachable from anywhere. A plug, Bluetooth or Wi‑Fi mark: connected that way, right now. (Q5)</li>
+      <li><b>What it plays, when that’s not its name,</b> and how many boards play it in sync. (Q6)</li>
+      <li><b>Where it is:</b> a folder for your groups, a face for someone else’s board.</li>
+      <li><b>Everything else</b> is one hover away (⋯), grouped by layer, or on the board’s page. The whole card opens the board in Studio.</li>
+    </ol></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="vsec" id="page">
+  <h2><span class="sn">3</span>The page so far: the same boards, built from the vocabulary</h2>
+  <p class="ask">Uses the leans: Q3-A, Q4-D, Q5-B, Q6-B, Q7-A, Q8-A. Ten boards cover every notice: connected here with an update available, cloud online, synced and out of date, someone else editing, open in your other tab, last seen nearby, offline, a shader error, locked, and new.</p>
+  <div class="duo phoneduo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="vsec" id="boardpage">
+  <h2><span class="sn">4</span>The whole stack: the board’s own page</h2>
+  <p class="ask">What “details when asked” looks like: the board’s page (<code>/device/porch-dev…</code>, vision Q5) shows every layer, with its facts, its notices and its actions. Low-level facts are one “more” away inside their layer. Garage, which is out of date, so the project layer carries the notice. (Q9 asks whether this is a page or the card growing in place.)</p>
+  <div class="app bp" id="bp"></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="vsec" id="glossary">
+  <h2><span class="sn">5</span>Glossary: one word per idea</h2>
+  <p class="ask">The words the card and the board page use, and the ones they stop using. “Today” lists what Studio says now (from the inventory of the code).</p>
+  <table class="v"><thead><tr><th>Say</th><th>It means</th><th>Stop saying (today)</th><th>Prior art</th></tr></thead><tbody id="gloss"></tbody></table>
+</section>
+
+<section class="vsec" id="grammar">
+  <h2><span class="sn">6</span>Visual grammar: one form per kind of fact</h2>
+  <p class="ask">Each kind of fact always takes the same form, so its form tells you what it is before you read it. Colours stay inside the frozen status families (<code>docs/style/ui.md</code>): blue is live, orange is a board needing attention, stripes are an error, and nothing on a card wears violet (bindings) or amber (unsaved edits).</p>
+  <table class="v"><thead><tr><th>Kind of fact</th><th>Form</th><th>Colour</th><th>Looks like</th></tr></thead><tbody id="gram"></tbody></table>
+</section>
+
+<section class="vsec" id="actions">
+  <h2><span class="sn">7</span>Actions: three tiers, three consequence levels</h2>
+  <p class="ask">Where an action appears depends on how often you need it; how it looks depends on what it costs (<code>ActionConsequence</code>: routine, undoable, lasting — the offer ADR). The ⋯ menu groups actions by layer, so the stack shows up even on a small card.</p>
+  <table class="v"><thead><tr><th>Tier</th><th>Where</th><th>Which actions</th></tr></thead><tbody>
+    <tr><td><b>The primary action</b></td><td>The whole card</td><td>Open (into Studio, over the best link). One per card, always the same.</td></tr>
+    <tr><td><b>The way out</b></td><td>Inside the notice, only while it’s showing</td><td>The one action that fixes it: Take over · Update · Unlock · Set up. Never more than one.</td></tr>
+    <tr><td><b>Everything else</b></td><td>The ⋯ menu (hover, or long-press on a phone), grouped by layer, and the board’s page</td><td>Project: Open, Share. Firmware: Update, Reinstall. Board: Rename, Move to a group, Reset, Forget (lasting: error tint, two clicks).</td></tr>
+  </tbody></table>
+  <div style="display:flex;gap:16px;margin-top:14px;align-items:flex-start;flex-wrap:wrap"><div style="width:260px;padding-bottom:230px" class="app"><div class="page" id="menudemo" style="padding:14px"></div></div>
+    <p class="ask" style="max-width:520px;margin:0">The menu, open on Porch. Headings are the layers. Forget is lasting, so it wears the error tint and asks twice; nothing in the menu is a browser <code>confirm()</code>.</p></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="qsec" id="q2">
+  <h2><span class="qn">Q2</span>Is the stage still wanted? <span style="font:500 12px var(--font);color:var(--shell-dim)">(carried from round 1)</span></h2>
+  <p class="ask">The board connected here is already live in its card. A: no stage (lean). B: keep the stage. Round 1 drew both; nothing changed since.</p>
+</section>
+
+<section class="qsec" id="q3">
+  <h2><span class="qn">Q3</span>How many names?</h2>
+  <p class="ask">Most boards play one project forever. Should such a board have one name?</p>
+  <div class="opts c2" id="q3o"></div>
+</section>
+<section class="qsec" id="q4">
+  <h2><span class="qn">Q4</span>How does a fine board say it’s fine?</h2>
+  <p class="ask">A dark effect looks like a dead board (prior art: WLED tints its cards, ESPHome prints ONLINE). Picture-first needs some sign of life that isn’t the picture. D is Yona’s idea from this round: status always visible, the frame rate when it’s fine.</p>
+  <div class="opts c2" id="q4o"></div>
+</section>
+<section class="qsec" id="q5">
+  <h2><span class="qn">Q5</span>How does a card say how we reach the board?</h2>
+  <p class="ask">You put “how we’re connected” in the second tier. Prior art mostly keeps transport icons off the tile (Apple says reach in words). Desk C6 is cloud connected and on USB right now.</p>
+  <div class="opts c3" id="q5o"></div>
+</section>
+<section class="qsec" id="q6">
+  <h2><span class="qn">Q6</span>How does a card say “in sync with other boards”?</h2>
+  <p class="ask">Porch, Garage and Back fence all play Holiday Eaves. Their pictures are identical, so the words have to carry it (Sonos: “Kitchen + 2”).</p>
+  <div class="opts c2" id="q6o"></div>
+</section>
+<section class="qsec" id="q7">
+  <h2><span class="qn">Q7</span>Which colour for “someone has it” and “out of date”?</h2>
+  <p class="ask">Inside the frozen families: orange is a board needing attention, amber is an unsaved edit.</p>
+  <div class="opts c2" id="q7o"></div>
+</section>
+<section class="qsec" id="q8">
+  <h2><span class="qn">Q8</span>Where do the other actions live?</h2>
+  <p class="ask">Open is the card; the way out sits in the notice. The rest?</p>
+  <div class="opts c2" id="q8o"></div>
+</section>
+<section class="qsec" id="q9">
+  <h2><span class="qn">Q9</span>Where does the whole stack live?</h2>
+  <p class="ask">Section 4 draws it as the board’s own page. The device card today grows in place instead.</p>
+  <div class="opts c2" id="q9o"></div>
+</section>
+
+<!-- ================================================================== -->
+<section class="vsec" id="prior">
+  <h2><span class="sn">8</span>Prior art (reference)</h2>
+  <p class="ask">From a survey of Sonos, Apple Home, Hue, WLED, Govee/Nanoleaf/Twinkly, Spotify Connect, take-over patterns (WordPress, Office, Meet, Teams, WhatsApp), Google Drive and Figma, and fleet tools (ESPHome, Home Assistant, balena, Particle). What recurs:</p>
+  <ol class="prin">
+    <li><b>Name things by place or purpose;</b> a default name is a placeholder (Sonos rooms; WLED shows the address until you name it; “(New Device)”).</li>
+    <li><b>When healthy, show the content, not a status word</b> (Sonos shows what’s playing; Apple “3 on”; WLED tints the card with the live colour).</li>
+    <li><b>But a picture alone can’t prove life:</b> an effect that’s dark looks dead. WLED changes the card when offline; ESPHome still prints ONLINE.</li>
+    <li><b>Offline is a time, not a yes/no:</b> “Offline, 5 minutes ago” (WLED), “Last seen” (Home Assistant).</li>
+    <li><b>Wait before saying offline</b> (WLED waits 60 s; Google Home’s brief false “offline” is a well-known annoyance).</li>
+    <li><b>Push unhealthy things down</b> (WLED’s “Offline Devices” section). Hiding them reads as “deleted” (Sonos).</li>
+    <li><b>Synced devices: one name plus a count</b> (Sonos “Kitchen + 2”), or a named group (Twinkly, Govee).</li>
+    <li><b>In use elsewhere: say who, then a plain verb</b> (“Take over” in WordPress, “Switch here” in Meet, “Use here” in WhatsApp), offer a gentler choice, and tell the person who lost it.</li>
+    <li><b>Shared things show a person</b> (Drive: owner and date; people search by owner).</li>
+    <li><b>Reach is said in words, not transport icons</b> (Apple: “Control Accessories Remotely”). No surveyed product puts USB/Bluetooth/cloud icons on the main tile.</li>
+    <li><b>Updates: a small badge on the tile, the action in settings, progress in words</b> (“Update Available”, “Installing (42%)”). Say “Updating” only for firmware.</li>
+    <li><b>A new device is its own state with an adopt verb</b> (ESPHome “DISCOVERED · Take Control”; Home Assistant “set it up”). <b>Status is never colour alone</b> (shapes in WLED, bar plus word in ESPHome).</li>
+  </ol>
+  <p class="src">Sources include support.sonos.com, support.apple.com (102056, 102386), the WLED-Native-Android strings and theme, github.com/esphome/dashboard, the Home Assistant frontend translations, docs.balena.io device statuses, docs.particle.io, WordPress <code>wp-admin/includes/post.php</code>, support.google.com/meet/answer/14762432, support.google.com/drive/answer/2375057. Govee, Nanoleaf and Hue publish little official wording; their cells were thin.</p>
+</section>
+
+<section class="vsec" id="fixes">
+  <h2><span class="sn">9</span>What this fixes in today’s Studio</h2>
+  <p class="ask">From the inventory of the code. These become the plan’s checklist when the vocabulary is ruled.</p>
+  <table class="v"><thead><tr><th>Today</th><th>Where</th><th>The vocabulary says</th></tr></thead><tbody id="fixlist"></tbody></table>
+</section>
+
+<section class="vsec" id="decided">
+  <div class="decided"><b>Decided so far</b>
+    <ul>
+      <li><b>Round 1, Q1 → A:</b> picture first (“I generally like Q1-A”), but the words must be legible to a newcomer — hence this round.</li>
+      <li><b>Information order</b> (Yona): what it plays / what it is → where it is and how we’re connected → notices when something’s wrong. Low-level detail when asked, or when relevant.</li>
+      <li><b>The stack</b> (project / firmware / board) is kept as the organising idea, even where the card shows only its top.</li>
+      <li><b>Durable home, once ruled:</b> the glossary in <code>docs/style/language.md</code>, the grammar in <code>docs/style/ui.md</code>, the idioms on the design-language story page, an ADR for the decisions, and the card as stories.</li>
+    </ul></div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   Icons (simple geometric paths)
+   ===================================================================== */
+const IC = {
+  usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="18.5" r="2.5"/><path d="M7 9v2.5l5 3"/><path d="M17 8v3.5l-5 3"/><rect x="5.6" y="7" width="2.8" height="2.4" rx=".4"/><circle cx="17" cy="7.5" r="1.3"/>',
+  ble:'<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  net:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor"/>',
+  people:'<circle cx="9" cy="8" r="3.3"/><path d="M2.8 20a6.2 6.2 0 0 1 12.4 0"/><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4"/><path d="M17.8 14.2a6.2 6.2 0 0 1 3.4 5.8"/>',
+  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  share:'<circle cx="18" cy="5.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4.1M8.2 13.2l7.6 4.1"/>',
+  chev:'<path d="m6 9 6 6 6-6"/>',
+  play:'<path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke="none"/>',
+  search:'<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  tag:'<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8" r="1.3"/>',
+  spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  bot:'<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="9.5" cy="13.5" r="1" fill="currentColor"/><circle cx="14.5" cy="13.5" r="1" fill="currentColor"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.8" r=".9" fill="currentColor"/>',
+  chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
+  sim:'<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/><path d="M10.5 8.5v4.5l4-2.25z" fill="currentColor"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+};
+const ic = (n, cls='i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${IC[n]}</svg>`;
+
+
+IC.grid = '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>';
+IC.plus = '<path d="M12 5v14M5 12h14"/>';
+IC.list = '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>';
+
+
+IC.cloud = '<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/>';
+IC.folder = '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>';
+IC.dots = '<circle cx="5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="19" cy="12" r="1.4" fill="currentColor"/>';
+IC.up = '<path d="M12 19V6M6 11l6-6 6 6"/>';
+IC.lock = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
+IC.alert = '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5"/><circle cx="12" cy="17" r=".9" fill="currentColor"/>';
+IC.person = '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>';
+IC.tab = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5v4"/>';
+IC.history = '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>';
+
+/* =====================================================================
+   The boards
+   ===================================================================== */
+const BOARDS = [
+  { id:'desk',   named:false, name:'Desk C6',     proj:'Fyeah Sign',     pat:'rainbow',  layout:'matrix', group:'Studio', cloud:true, link:'usb',  state:'here', update:true, fps:58 },
+  { id:'porch',  named:true,  name:'Porch',       proj:'Holiday Eaves',  pat:'eaves',    layout:'roof',   group:'House',  cloud:true, state:'online', synced:3, fps:60 },
+  { id:'garage', named:true,  name:'Garage',      proj:'Holiday Eaves',  pat:'eaves',    layout:'strip',  group:'House',  cloud:true, state:'online', synced:3, behind:true, fps:60 },
+  { id:'living', named:true,  name:'Living room', proj:'Aurora Drift',   pat:'aurora',   layout:'roof',   owner:'Sean Connell', cloud:true, state:'someone', who:'Sean' },
+  { id:'shelf',  named:false, name:'Shelf strip', proj:'Slow Rainbow',   pat:'rainbow2', layout:'strip',  group:'Studio', cloud:false, link:'wifi', state:'othertab' },
+  { id:'choker', named:false, name:'Choker',      proj:"Maya's choker",  pat:'pulse',    layout:'ring',   group:'Gifts',  cloud:false, link:'ble', state:'seen', age:'5 h' },
+  { id:'truck',  named:true,  name:'Truck',       proj:'Rocaille, truck cut', pat:'rocaille', layout:'strip', group:'Studio', cloud:true, state:'offline', age:'2 weeks' },
+  { id:'window', named:true,  name:'Window',      proj:'Sparkle Grid',   pat:'comet',    layout:'matrix', group:'House',  cloud:true, state:'online', fault:true },
+  { id:'gift',   named:false, name:'Lamp',        proj:'Ember Drift',    pat:'ember',    layout:'ring',   group:'Gifts',  cloud:false, link:'ble', state:'locked' },
+  { id:'newb',   named:false, name:'New board',   proj:null,             pat:'off',      layout:'strip',  group:null,     cloud:false, link:'usb', state:'new', chip:'ESP32-C6' },
+];
+const LINK_ICON = { usb:'usb', ble:'ble', wifi:'net' };
+const LINK_WORD = { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' };
+const LEAN = { names:'one', live:'fps', reach:'both', sync:'words', hold:'orange', menu:'kebab' };
+
+function picOf(b){
+  const rate = b.state==='here' ? 'live' : (b.cloud && (b.state==='online' || b.state==='someone')) ? 'slow' : 'still';
+  const dim = (b.state==='seen' || b.state==='offline') ? 1 : 0;
+  const off = (b.state==='new' || b.state==='locked') ? 1 : 0;
+  return `<canvas data-pat="${b.pat}" data-layout="${b.layout}" data-rate="${rate}" data-live="${rate==='live'?1:0}" data-dim="${dim}" data-off="${off}" data-seed="${b.id.length}"></canvas>`;
+}
+function title(b, o){ return o.names==='one' ? (b.named ? b.name : (b.proj || b.name)) : b.name; }
+function playsLine(b, o){
+  const showProj = o.names==='two' ? !!b.proj : (b.named && b.proj);
+  const sync = b.synced ? (o.sync==='words' ? `<span style="flex:none;white-space:nowrap">· ${b.synced} boards</span>` : `<span class="sync">${ic('link')}${b.synced}</span>`) : '';
+  if (!showProj) return b.synced ? `<span>${b.synced} boards in sync</span>` : '';
+  return `${ic('play')}<span class="ell">${b.proj}</span>${sync}`;
+}
+function whereLine(b){
+  if (b.owner) return `<span class="avatar-s">${b.owner[0]}</span><span class="ell">${b.owner}</span>`;
+  if (b.group) return `${ic('folder')}<span class="ell">${b.group}</span>`;
+  return b.chip ? `<span>${b.chip}</span>` : '';
+}
+function reach(b, o){
+  const cloud = b.cloud ? `<span title="Cloud connected: reachable from anywhere">${ic('cloud')}</span>` : '';
+  const here = (b.state==='here' || b.state==='new') && b.link ? `<span title="Connected by ${LINK_WORD[b.link]}">${ic(LINK_ICON[b.link])}</span>` : '';
+  if (o.reach==='cloud') return `<span class="reach">${cloud}</span>`;
+  if (o.reach==='words') return `<span class="reach"><span class="word">${b.cloud ? 'Anywhere' : 'Nearby'}</span></span>`;
+  return `<span class="reach">${here}${cloud}</span>`;
+}
+function liveness(b, o){
+  const running = ['here','online'].includes(b.state);
+  const held = ['someone','othertab'].includes(b.state);
+  if (o.live==='none' || o.live==='fps') return '';
+  if (o.live==='word') return running ? `<span class="lword">${b.state==='here'?'Live':'Online'}</span>` : '';
+  const cls = running ? 'run' : held ? 'held' : (b.state==='new' || b.state==='locked') ? 'none' : 'away';
+  return `<span class="ldot ${cls}"></span>`;
+}
+function notice(b, o){
+  const hold = o.hold==='orange' ? 'att' : 'amber';
+  if (b.state==='someone') return `<span class="npill att">${ic('person')}${b.who} is editing</span>`;
+  if (b.state==='othertab') return `<span class="npill att">${ic('tab')}Open in another tab</span><button class="wayout" data-act="take">Take over</button>`;
+  if (b.fault) return `<span class="npill err">${ic('alert')}Shader error</span>`;
+  if (b.behind) return `<span class="npill ${hold==='att'?'att':'amber'}">${ic('history')}Out of date</span><button class="wayout" data-act="send">Update</button>`;
+  if (b.state==='offline') return `<span class="npill neu">Offline · ${b.age}</span>`;
+  if (b.state==='seen') return `<span class="npill neu">Last seen ${b.age} ago</span>`;
+  if (b.state==='locked') return `<span class="npill neu">${ic('lock')}Locked</span><button class="wayout" data-act="unlock">Unlock</button>`;
+  if (b.state==='new') return `<button class="wayout" data-act="setup">Set up</button>`;
+  if (b.update) return (o.live==='fps' && b.fps ? `<span class="npill blue">${b.fps} fps</span>` : '') + `<span class="npill neu">${ic('up')}Update available</span>`;
+  if (o.live==='fps' && b.fps) return `<span class="npill blue" title="Running at ${b.fps} frames a second">${b.fps} fps</span>`;
+  return '';
+}
+function menuHtml(){
+  return `<div class="vmenu"><div class="mh">Project</div><button>${ic('play')}Open</button><button>${ic('share')}Share</button>
+    <hr><div class="mh">Firmware</div><button>${ic('up')}Update</button>
+    <hr><div class="mh">Board</div><button>${ic('edit')}Rename</button><button>${ic('folder')}Move to a group</button><button class="lasting">Forget…</button></div>`;
+}
+function card(b, o=LEAN, extra={}){
+  const l2 = playsLine(b, o), l3 = whereLine(b);
+  const name = b.state==='new' ? 'New board' : title(b, o);
+  const kebab = o.menu==='kebab' ? `<button class="kebab" data-act="menu" title="More">${ic('dots')}</button>` : '';
+  return `<div class="vc ${extra.menuopen?'menuopen':''}" data-open="${b.id}"><div class="pic">${picOf(b)}<div class="notice">${notice(b, o)}</div></div>
+    <div class="bd"><div class="l1">${liveness(b, o)}<b class="ell">${name}</b><span class="spring"></span>${reach(b, o)}</div>
+    ${l2 ? `<div class="l2">${l2}</div>` : ''}<div class="l3">${l3}</div></div>${kebab}${extra.menuopen ? menuHtml() : ''}</div>`;
+}
+function grid(boards, o=LEAN){ return `<div class="page"><div class="cards">${boards.map(b=>card(b,o)).join('')}</div></div>`; }
+
+/* =====================================================================
+   Sections
+   ===================================================================== */
+function anatomy(){
+  const b = BOARDS[1];
+  document.getElementById('anatcard').innerHTML = `<div class="app"><div class="page" style="padding:12px">${card({ ...b, behind:false }, LEAN)}</div></div>
+    <span class="co" style="left:-8px;top:60px">1</span><span class="co" style="right:70px;top:4px">2</span><span class="co" style="left:-8px;top:128px">3</span>
+    <span class="co" style="right:4px;top:136px">4</span><span class="co" style="left:200px;top:157px">5</span><span class="co" style="left:110px;top:177px">6</span>
+    <span class="co" style="right:-10px;top:180px">7</span>`;
+}
+function boardPage(){
+  const b = BOARDS[2];
+  document.getElementById('bp').innerHTML = `<div class="top"><div class="big">${picOf(b)}<div class="notice">${notice(b, LEAN)}</div></div>
+    <div class="meta"><h3>Garage</h3>
+      <div class="row">${ic('play')}Playing <b style="color:var(--tx)">Holiday Eaves</b> · 3 boards</div>
+      <div class="row">${ic('folder')}House · yours</div>
+      <div class="row"><span class="npill blue" style="height:19px">60 fps</span> ${ic('cloud')} cloud connected</div>
+      <div class="row" style="margin-top:6px;gap:6px"><button class="btn cta sm">Open</button><button class="btn sm outline">${ic('share')}Share</button></div></div></div>
+    <div class="lay"><div class="lname">Project</div><div class="facts"><div><b>Holiday Eaves</b>, kept in sync on Porch, Garage and Back fence</div>
+      <div class="note"><span class="npill att">${ic('history')}Out of date</span> <span style="font-size:11.5px">Garage has v11; the project is at v12 (saved 2 h ago).</span></div>
+      <div class="low">v12 · saved 2 h ago by you · panel values: this board’s own</div></div>
+      <div class="acts"><button class="btn sm">Update to v12</button><button class="btn sm outline">Open</button></div></div>
+    <div class="lay"><div class="lname">Firmware</div><div class="facts"><div><b>LightPlayer 0.42</b> · up to date</div><div class="low">release 2026-10-07 · split image · updated over the cloud</div></div>
+      <div class="acts"><button class="btn sm outline">Reinstall</button><button class="btn sm outline lasting">Factory reset…</button></div></div>
+    <div class="lay"><div class="lname">Board</div><div class="facts"><div><b>ESP32-C6</b> · in House · yours</div>
+      <div>${ic('cloud')} cloud connected · last heard just now · 58 fps</div>
+      <div class="low">a0:f2:62:b4:90:a2 · Wi‑Fi 192.168.1.41 · no USB · access: play anyone, edit with password</div><span class="more">more</span></div>
+      <div class="acts"><button class="btn sm outline">Rename</button><button class="btn sm outline">Move to a group</button><button class="btn sm outline lasting">Forget…</button></div></div>`;
+}
+const GLOSS = [
+  ['board', 'The LED controller you plug in. The page’s noun for the hardware.', 'device, piece, “New device”', 'Sonos speaker, Hue light'],
+  ['this device / this browser', 'Your phone or computer, never the LED board.', '“device” for the board', '—'],
+  ['project', 'What a board plays.', '“General” (a kind)', 'Sonos “now playing”'],
+  ['pattern · example', 'A reusable effect · a ready-made project from the catalog.', '“Real pieces”', '—'],
+  ['group', 'A folder of boards and projects (House, Studio).', 'rooms, tags', 'Hue rooms, Drive folders'],
+  ['cloud connected', 'Reachable from anywhere through lightplayer.app.', 'relay, “Wi‑Fi via lightplayer.app”, “Cloud relay”', 'Apple “control remotely”, Particle “connected to the cloud”'],
+  ['connected by USB / Bluetooth / Wi‑Fi', 'Studio has that link to it right now.', 'attached, listening, “Attached — not listening”', '—'],
+  ['online · offline · <i>time</i>', 'A cloud-connected board the cloud can see, or can’t, and since when.', '“Not responding” (as a resting state)', 'WLED “Offline, 5 minutes ago”'],
+  ['last seen <i>time</i> ago', 'A direct board Studio can’t see right now. No claim it’s off.', 'not nearby, not connected, not heard this session, last heard', 'Home Assistant “Last seen”'],
+  ['<i>Sean</i> is editing · open in another tab', 'Someone else (or you, elsewhere) has the board open.', 'busy, “in use by another app or another Studio tab”', 'WordPress “is currently editing”'],
+  ['take over', 'Move that session here; the other side is told who took it.', 'kick, reconnect', 'WordPress “Take over”, Meet “Switch here”'],
+  ['out of date', 'A synced board missing the project’s last save.', 'behind, diverged', '—'],
+  ['update available · updating', 'Firmware only. Progress in words and a percentage.', '“Update firmware” for a USB flash; “Updating” for anything else', 'WLED, Home Assistant'],
+  ['set up', 'Put a first project on a new board (copy or attach).', 'put a project on it, adopt', 'ESPHome “Take Control”, HA “set it up”'],
+  ['locked · unlock', 'It needs a password before you can play or edit it.', '“Needs a device password”', '—'],
+  ['open', 'The verb: open the board in Studio. Nothing else.', '“open” for access (→ Anyone) and networks (→ no password)', '—'],
+  ['live', 'The picture is moving, now. Nothing else.', '“live” for an unsaved session state', '—'],
+];
+const GRAM = [
+  ['Name', 'Bold text, one per card, never a chip', 'Strong neutral', '<b style="color:var(--strong)">Porch</b>'],
+  ['What it plays', 'Play glyph + text, only when the board has its own name', 'Muted', `<span style="display:inline-flex;gap:5px;align-items:center;color:var(--muted)">${'%PLAY%'}Holiday Eaves · 3 boards</span>`],
+  ['Where', 'Folder glyph + group; a face + name for someone else’s board', 'Subtle, no border', `<span style="display:inline-flex;gap:5px;align-items:center;color:var(--subtle)">%FOLDER%House</span> &nbsp; <span style="display:inline-flex;gap:5px;align-items:center;color:var(--subtle)"><span class="avatar-s">S</span>Sean Connell</span>`],
+  ['How we reach it', 'Icons only, at the end of the name line; the link in use first, the cloud last', 'Subtle neutral (not blue)', '<span class="reach">%USB%%CLOUD%</span>'],
+  ['The status', 'Always one pill on the picture’s top edge: the frame rate when fine, else the most important notice', 'Blue (live) when fine; see “A notice”', '<span class="npill blue">60 fps</span>'],
+  ['The picture', 'Moving when watched; dim and still, with an age, when not', '—', '—'],
+  ['A notice', 'Pill: glyph + words, on the picture’s top edge; one at a time, the most important', 'Orange (board needs you) · stripes (error) · neutral (time, updates)', '<span class="npill att">%PERSON%Sean is editing</span> <span class="npill err">%ALERT%Shader error</span> <span class="npill neu">Offline · 2 weeks</span>'],
+  ['The way out', 'A small button beside its notice', 'Neutral; lasting ones in error tint', '<button class="wayout">Take over</button>'],
+  ['Counts', 'Words', 'Muted', '3 boards'],
+  ['Ages', 'One format everywhere: 5 s · 3 min · 2 h · 3 days · 2 weeks', '—', 'Last seen 5 h ago'],
+];
+const FIXES = [
+  ['“device”, “board” and “piece” for the same thing', 'site_chrome.rs:228, home_landing.rs:133, devices_op.rs:150', 'board; “device” means your phone or computer'],
+  ['“Offline” vs “Not connected” for an absent board', 'view.rs:780, devices_page.rs:642', 'offline · time (cloud), last seen (direct)'],
+  ['Three age formats (“2 hr ago”, “2 h ago”, “5m ago”)', 'lpa-devices time.rs:74, play_feed_text.rs:9, core time_ago.rs:5', 'one helper, one format'],
+  ['“open” means a tier, a network, a verb and a port', 'ui_access_view.rs:156, wifi_words.rs:84', 'open is the verb only'],
+  ['“live” is green on the card and blue in the editor', 'device card pill, session_control.rs:962', 'live is blue (the frozen family)'],
+  ['Amber (unsaved) worn by Not responding, the play-only box, “open” access, counters', 'device_affordance.rs:32, card:915, connections_group.rs:261', 'orange for board attention; neutral otherwise'],
+  ['Violet (binding) worn by the link glyph, the runtime band, Copy link', 'session_control.rs:812, card:2218, access_controls.rs:87', 'neutral'],
+  ['The relay called “Wi‑Fi via lightplayer.app”, “Cloud relay”, plain “Wi‑Fi”', 'ui_link_kind.rs:42, wifi_panel.rs:541, device_update_route.rs:85', 'cloud connected'],
+  ['“Firmware updates need USB” though updates run over the air', 'lpa-devices view.rs:155', 'remove'],
+  ['Glyphs reused for different meanings (Eye, Sparkles, Lock, Users, Zap, Flask); “▶” and “✓” typed as text; ten files bypass StudioIcon', 'icon.rs:14-111, card:2211, package_card.rs:331', 'one glyph per meaning, all through StudioIcon'],
+];
+
+function option(q, letter, o, body){
+  return `<div class="opt ${o.lean?'leanopt':''}"><div class="ohead"><span class="olabel">${q.toUpperCase()}-${letter}</span><span class="oname">${o.name}</span>${o.lean?'<span class="leanb">lean</span>':''}</div>
+    <p class="owhat">${o.what}</p><p class="ofa"><b>For:</b> ${o.pro}<br><b>Against:</b> ${o.con}</p>${body}</div>`;
+}
+function qGrid(ids, o){ return `<div class="app">${grid(ids.map(id=>BOARDS.find(b=>b.id===id)), { ...LEAN, ...o })}</div>`; }
+function questions(){
+  const set = (q, opts, ids) => document.getElementById(`${q}o`).innerHTML = Object.entries(opts).map(([l,x]) => option(q, l, x, qGrid(x.ids || ids, x.o))).join('');
+  set('q3', {
+    A:{ name:'One name, unless you name the board', lean:true, what:'A board you never named is called by its project (“Fyeah Sign”). Name a board (Porch) and its project moves to the next line.', pro:'one name for the common case; places get names only where they matter (Sonos rooms).', con:'renaming a project renames the unnamed boards that play it, which may surprise.', o:{ names:'one' } },
+    B:{ name:'Always two', what:'Every board has its own name, with the project always underneath.', pro:'the board never changes name.', con:'two names on every card, the thing you said felt like too many.', o:{ names:'two' } },
+  }, ['desk','porch','shelf','choker']);
+  set('q4', {
+    A:{ name:'A dot', what:'Filled blue: running, and Studio can see it. Hollow: not seen now. Orange: someone else has it.', pro:'shape and colour, no words; works on a dark effect.', con:'a dot has to be learned once (a tooltip says it).', o:{ live:'dot' } },
+    B:{ name:'Nothing', what:'The picture alone; words only for exceptions.', pro:'cleanest.', con:'a dark effect looks dead.', o:{ live:'none' } },
+    C:{ name:'A word', what:'“Live” or “Online” on every fine card (ESPHome).', pro:'nothing to learn.', con:'a word on every card is the noise you asked to cut.', o:{ live:'word' } },
+    D:{ name:'Always a status: frame rate when fine', lean:true, what:'The status spot is never empty. A fine board shows its frame rate (“58 fps”, blue for live); anything else replaces it with a notice. Cloud boards report theirs with the heartbeat.', pro:'one place to look, always filled; a real number that proves it’s running, and one you care about.', con:'a number on every card; newcomers may not care what fps is (it still reads as “it’s running”).', o:{ live:'fps' } },
+  }, ['desk','porch','choker','truck']);
+  set('q5', {
+    A:{ name:'Cloud only', what:'A cloud for cloud-connected boards; the link in use lives on the board’s page.', pro:'closest to prior art; one icon.', con:'“how we’re connected” drops out of the card.', o:{ reach:'cloud' } },
+    B:{ name:'Link in use, then the cloud', lean:true, what:'The link Studio is using right now (USB, Bluetooth, Wi‑Fi), then a cloud when it’s cloud connected.', pro:'keeps your second tier: how we’re connected, at a glance.', con:'two icons on some cards.', o:{ reach:'both' } },
+    C:{ name:'Words', what:'“Anywhere” or “Nearby”.', pro:'says reach the way Apple does.', con:'words for a fact an icon carries.', o:{ reach:'words' } },
+  }, ['desk','porch','shelf','choker']);
+  set('q6', {
+    A:{ name:'Link glyph and a number', what:'⛓ 3 after the project.', pro:'compact.', con:'a newcomer can’t read it.', o:{ sync:'icon' } },
+    B:{ name:'Words', lean:true, what:'“Holiday Eaves · 3 boards”.', pro:'reads first time; Sonos “Kitchen + 2”.', con:'a few more characters.', o:{ sync:'words' } },
+  }, ['porch','garage','desk']);
+  set('q7', {
+    A:{ name:'Both orange', lean:true, what:'“Sean is editing” and “Out of date” are both the board needing attention.', pro:'amber stays “an unsaved edit” only.', con:'two different reasons share a colour (the glyph tells them apart).', o:{ hold:'orange' } },
+    B:{ name:'Out of date in amber', what:'Out of date takes amber, since it’s about a save.', pro:'ties it to saving.', con:'amber means an unsaved edit in the editor; a board missing a save isn’t one.', o:{ hold:'amber' } },
+  }, ['living','garage','shelf']);
+  document.getElementById('q8o').innerHTML = [
+    option('q8','A',{ name:'A ⋯ menu on the card', lean:true, what:'Hover (or long-press) shows ⋯; the menu groups actions by layer.', pro:'everything is one step away without leaving the page; the stack shows even here.', con:'one more thing on hover.' },
+      `<div class="app" style="padding-bottom:230px"><div class="page"><div class="cards" style="grid-template-columns:240px">${card(BOARDS[1], LEAN, { menuopen:true })}</div></div></div>`),
+    option('q8','B',{ name:'Only on the board’s page', what:'The card opens, and that’s all; everything else is on the board’s page.', pro:'the simplest card.', con:'Share or Rename takes a trip.' },
+      `<div class="app"><div class="page"><div class="cards" style="grid-template-columns:240px">${card(BOARDS[1], { ...LEAN, menu:'none' })}</div></div></div>`),
+  ].join('');
+  document.getElementById('q9o').innerHTML = [
+    option('q9','A',{ name:'Its own page', lean:true, what:'The board’s page at <code>/device/porch-dev…</code>, as in section 4.', pro:'an address you can share (vision R4); room for every layer.', con:'leaves the home page.' }, ''),
+    option('q9','B',{ name:'The card grows in place', what:'The card expands into the stack where it sits, like today’s device card.', pro:'no navigation.', con:'a big card pushes the page around (ui.md’s stable-layout rule), and there’s no address to share.' }, ''),
+  ].join('');
+}
+function tables(){
+  const sub = s => s.replace('%PLAY%', ic('play')).replace('%FOLDER%', ic('folder')).replace('%USB%', ic('usb')).replace('%CLOUD%', ic('cloud')).replace('%PERSON%', ic('person')).replace('%ALERT%', ic('alert'));
+  document.getElementById('gloss').innerHTML = GLOSS.map(([say, means, no, prior]) => `<tr><td><b>${say}</b></td><td>${means}</td><td><span class="no">${no}</span></td><td>${prior}</td></tr>`).join('');
+  document.getElementById('gram').innerHTML = GRAM.map(([k, f, c, ex]) => `<tr><td><b>${k}</b></td><td>${f}</td><td>${c}</td><td class="ex">${sub(ex)}</td></tr>`).join('');
+  document.getElementById('fixlist').innerHTML = FIXES.map(([t, w, v]) => `<tr><td>${t}</td><td><code>${w}</code></td><td><b>${v}</b></td></tr>`).join('');
+}
+
+/* clicks */
+let toastT;
+function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4200); }
+document.body.addEventListener('click', e => {
+  const act = e.target.closest('[data-act]');
+  if (act){ e.stopPropagation();
+    const w = { take:'Take over: your other tab lets go, and it opens here. The other tab is told who took it.', send:'Update: send the project’s last save (v12) to this board.', unlock:'Unlock: enter its password, once per browser.', setup:'Set up: copy a project onto it (default), or attach it to one.', menu:'The ⋯ menu: actions grouped by layer (see section 7).' }[act.dataset.act];
+    if (w) toast(w); return; }
+  const o = e.target.closest('[data-open]'); if (!o) return;
+  const b = BOARDS.find(x=>x.id===o.dataset.open);
+  toast(`<b>Open ${b.named ? b.name : (b.proj||b.name)}</b><span class="sub">${b.state==='someone' ? 'Sean has it open: you can watch, not edit.' : b.state==='offline'||b.state==='seen' ? 'Opens the project; the board catches up when it’s back.' : 'Opens it in Studio over the best link.'}</span>`);
+});
+
+/* =====================================================================
+   LED renderer: dots like the production lamp view. Live only for boards
+   connected in this tab; everything else is a still frame (a poster).
+   ===================================================================== */
+function hsv(h,s,v){ const i=Math.floor(h*6), f=h*6-i, p=v*(1-s), q=v*(1-f*s), t=v*(1-(1-f)*s);
+  const [r,g,b]=[[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][((i%6)+6)%6]; return [r*255,g*255,b*255]; }
+const PAT = {
+  rainbow:(u,v,t)=>hsv((u*.9+v*.3+t*.12)%1,.85,1),
+  rainbow2:(u,v,t)=>hsv((u*.35+t*.04)%1,.7,.9),
+  eaves:(u,v,t)=>{ const k=Math.floor(u*36 - t*3); const tw=.6+.4*Math.sin(t*5+u*90); return (k%3===0)?[255*tw,40,30]:(k%3===1)?[40,210*tw,80]:[255*tw,190*tw,90]; },
+  aurora:(u,v,t)=>{ const a=.5+.5*Math.sin(u*5+t*.9), b=.5+.5*Math.sin(u*9-t*.6+v*3); return [80*b+40, 200*a+40, 150+90*b]; },
+  aurora2:(u,v,t)=>{ const a=.5+.5*Math.sin(u*4+t*.5+v*4); return hsv(.45+.25*a, .7, .5+.5*a); },
+  pulse:(u,v,t)=>{ const p=.5+.5*Math.sin(t*2.2 - u*6); return [255*p, 60*p+20, 200*p+30]; },
+  rocaille:(u,v,t)=>hsv(.03+.07*Math.sin(u*7+t*.7+v*5), .8, .55+.45*Math.sin(u*3-t*.9)),
+  comet:(u,v,t)=>{ const head=(t*.35)%1.3; const d=head-u; const k=d<0||d>.4?0:Math.pow(1-d/.4,3); return [140*k+10, 200*k+10, 255*k+20]; },
+  wipe:(u,v,t)=>{ const x=(t*.25)%2; return u < (x%1) ? (x<1?[255,120,60]:[60,140,255]) : (x<1?[60,140,255]:[255,120,60]); },
+  ember:(u,v,t)=>{ const f=.55+.45*Math.sin(t*7+u*23)*Math.sin(t*3.1+u*11); return [255*f, 110*f*f, 20*f]; },
+  off:()=>[0,0,0],
+};
+function layoutPts(kind, w, h, dpr=1){
+  const pts=[]; const pad=Math.min(w,h)*.12; const sp=11*dpr;
+  if (kind==='matrix'){ const cols=Math.max(8,Math.round(w/sp)), rows=Math.max(4,Math.round(h/sp));
+    for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) pts.push([pad+(w-2*pad)*x/(cols-1), pad+(h-2*pad)*y/(rows-1), x/(cols-1), y/(rows-1)]); }
+  else if (kind==='ring'){ const n=24, r=Math.min(w,h)*.36; for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; pts.push([w/2+r*Math.cos(a), h/2+r*Math.sin(a), i/n, .5]); } }
+  else if (kind==='roof'){ const n=Math.max(18,Math.round(w/(sp*.8))); for (let i=0;i<n;i++){ const u=i/(n-1); const y = h*.72 - (1-Math.abs(u-.5)*2)*h*.42; pts.push([pad+(w-2*pad)*u, y, u, .5]); } }
+  else if (kind==='dome'){ [[8,.15],[14,.28],[20,.41]].forEach(([n,rr],ri)=>{ for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; const R=Math.min(w,h)*rr*1.05; pts.push([w/2+R*Math.cos(a), h/2+R*Math.sin(a)*.8, i/n, ri/2]); } }); }
+  else { const n=Math.max(14,Math.round(w/(sp*.8))); for (let i=0;i<n;i++){ const u=i/(n-1); pts.push([pad+(w-2*pad)*u, h/2, u, .5]); } }
+  return pts;
+}
+let canvases = [];
+function mountCanvases(){
+  canvases = [...document.querySelectorAll('canvas[data-pat]')].map(c => {
+    const dpr = Math.min(2, window.devicePixelRatio||1); const r = c.getBoundingClientRect();
+    c.width = Math.max(1, Math.round(r.width*dpr)); c.height = Math.max(1, Math.round(r.height*dpr));
+    const entry = { c, ctx:c.getContext('2d'), pat:PAT[c.dataset.pat]||PAT.off, pts:layoutPts(c.dataset.layout, c.width, c.height, dpr),
+      live:c.dataset.live==='1', dim:c.dataset.dim==='1', off:c.dataset.off==='1', seed:+c.dataset.seed, dpr,
+      hover:c.dataset.hover==='1', host:c.closest('.pair, .lrow') };
+    draw(entry, 4 + entry.seed*1.7);
+    return entry;
+  });
+}
+function draw(e, t){
+  const { ctx, c, pts } = e; ctx.globalCompositeOperation='source-over'; ctx.fillStyle='#07080a'; ctx.fillRect(0,0,c.width,c.height);
+  const spacing = pts.length>1 ? Math.hypot(pts[1][0]-pts[0][0], pts[1][1]-pts[0][1]) : 10;
+  const R = Math.max(1.4*e.dpr, Math.min(spacing*.32, 4.2*e.dpr));
+  ctx.globalCompositeOperation='lighter';
+  for (const [x,y,u,v] of pts){
+    let [r,g,b] = e.off ? [18,18,24] : e.pat(u,v,t);
+    if (e.dim){ const m=(r+g+b)/3; r=(r*.5+m*.5)*.55; g=(g*.5+m*.5)*.55; b=(b*.5+m*.5)*.55; }
+    if (!e.off){ ctx.fillStyle=`rgba(${r|0},${g|0},${b|0},.16)`; ctx.beginPath(); ctx.arc(x,y,R*2.6,0,7); ctx.fill(); }
+    ctx.fillStyle=`rgb(${r|0},${g|0},${b|0})`; ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.fill();
+  }
+}
+let last=0;
+function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of canvases){
+    const h = e.hover && e.host && e.host.matches(':hover');
+    if (e.live || h){ draw(e, t + e.seed); e.wasH = h; }
+    else if (e.wasH){ e.wasH = false; draw(e, 4 + e.seed*1.7); }
+  } } requestAnimationFrame(loop); }
+
+
+
+
+setInterval(() => { const t = performance.now()/1000; for (const e of canvases) if (e.c.dataset.rate==='slow') draw(e, t + e.seed); }, 700);
+
+document.querySelectorAll('.layer .ln').forEach(el => { el.innerHTML = el.innerHTML.replace('${PROJECT}','Project').replace('${FIRMWARE}','Firmware').replace('${BOARD}','Board'); });
+anatomy(); boardPage(); tables(); questions();
+document.getElementById('pg').innerHTML = grid(BOARDS);
+document.getElementById('pgp').innerHTML = grid(BOARDS);
+document.getElementById('menudemo').innerHTML = `<div class="cards" style="grid-template-columns:1fr">${card(BOARDS[1], LEAN, { menuopen:true })}</div>`;
+const qs = new URLSearchParams(location.search);
+if (qs.get('shot')) { document.body.classList.add('shot'); document.getElementById(qs.get('shot')).classList.add('shot-keep'); }
+requestAnimationFrame(() => { mountCanvases(); requestAnimationFrame(loop); });
+window.addEventListener('resize', ()=>requestAnimationFrame(mountCanvases));
+</script>
+</body>
+</html>
