@@ -5,7 +5,8 @@
 - **Deciders:** Photomancer
 - **Supersedes:** None (amends the zone/row ruling `device_roster_card.rs`'s
   own module doc has carried since P4, refined by P9 below)
-- **Superseded by:** None
+- **Superseded by:** section 2 and the zone table, by
+  [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) (section 1's rule and section 3 stand)
 
 ## Context
 
@@ -263,6 +264,18 @@ already running LightPlayer firmware when it first hello'd.
   preflight has probed a MAC. `PendingLinkView` carries that MAC (only the
   MAC — a port name is where the link is, not who the board is). Header
   stays 90px; `devices_card_pending` is the sheet.
+
+- **2026-10-08 — the board card replaces the zones; an offline board is a card again.**
+  [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) rebuilds the card in core as a name bar and a stack of
+  bars (project · connection · access · firmware · hardware). The zone
+  table above, and the measured heights in it, no longer describe the
+  card. Section 1's rule stands: no card changes height while it is on
+  screen. Section 2 is superseded: the home page shows a board Studio
+  remembers but cannot reach as a card under Offline boards, with its last
+  picture and that picture's age, not as a line under the grid. Section 3
+  (auto-name, never a MAC) stands. The terminal moves from the Firmware
+  zone into the status corner's details. A direction, built by the board
+  card milestone of `lp2025/2026-10-06-1530-boards-and-projects-model`.
 
 ## Spike and gate record
 
