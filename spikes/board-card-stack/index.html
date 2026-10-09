@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Stack card experiment</title>
+<title>Stack card, round 2</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 /* Palette and shared pieces copied from spikes/board-card (itself from
@@ -545,133 +545,178 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 
 
 /* =====================================================================
-   The stack card: the device card's three zones, shrunk. Picture + the
-   project row, then one row for firmware and one for hardware. A notice
-   is not a box on the picture: it tints the row of the layer it belongs
-   to, edge to edge, and its action sits at that row's end.
+   Round 2 of the stack card. Rows, top to bottom (Yona): project and
+   status · where and connection · firmware · hardware. Every card is the
+   same height in every state: rows never appear or disappear, a notice
+   only tints its row.
    ===================================================================== */
-.scards { display:grid; grid-template-columns:repeat(auto-fill,minmax(236px,1fr)); gap:14px; align-items:start; }
+.scards { display:grid; grid-template-columns:repeat(auto-fill,minmax(244px,1fr)); gap:14px; align-items:start; }
 .app.narrow .scards { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .opt .app:not(.phone) { margin:0; }
 .app.narrow .nh { display:none; }
 .sc { position:relative; border-radius:8px; border:1px solid var(--bd); background:var(--panel); min-width:0; }
-.sc.live { border-color:var(--st-live-bd); }
-.sc .pic { position:relative; height:104px; background:#07080a; border-radius:7px 7px 0 0; overflow:hidden; cursor:pointer; }
-.app.narrow .sc .pic { height:80px; }
+.sc .pic { position:relative; height:112px; background:#07080a; border-radius:7px 7px 0 0; overflow:hidden; cursor:pointer; }
+.sc.lab-glass .pic, .sc.lab-top .pic { height:138px; }
+.app.narrow .sc .pic { height:92px; }
+.app.narrow .sc.lab-glass .pic, .app.narrow .sc.lab-top .pic { height:112px; }
 .sc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
-.srow { display:flex; align-items:center; gap:6px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); }
+
+/* the label: name, then line 2 (what it plays, or a project notice). Two lines, always. */
+.lab { display:flex; align-items:center; gap:8px; padding:7px 8px 8px 10px; min-width:0; cursor:pointer; }
+.lab .txt { flex:1; min-width:0; display:grid; gap:1px; }
+.go { height:28px; padding:0 12px; border-radius:7px; font-size:12px; font-weight:800; flex:none; }
+.go[disabled] { opacity:.45; cursor:not-allowed; }
+.go.split-go { padding:0 0 0 12px; display:inline-flex; align-items:stretch; overflow:hidden; }
+.go.split-go span.car { display:inline-grid; place-items:center; width:24px; margin-left:10px; border-left:1px solid var(--bd-strong); }
+.lab .l1 { display:flex; align-items:center; gap:6px; min-width:0; height:18px; }
+.lab .l1 b { font-size:13px; color:var(--strong); }
+.lab .l2 { display:flex; align-items:center; gap:5px; min-width:0; height:18px; font-size:11.5px; color:var(--muted); }
+.lab .l2 svg.i { width:12px; height:12px; flex:none; }
+.lab.under { border-top:1px solid var(--bd-mut); }
+.lab.glass { position:absolute; left:0; right:0; bottom:0; z-index:2; background:rgba(12,12,20,.62); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.08); }
+.lab.top { position:absolute; left:0; right:0; top:0; z-index:2; background:linear-gradient(rgba(7,8,10,.86), rgba(7,8,10,.0)); padding-bottom:18px; }
+.lab.t-att { background:color-mix(in srgb, var(--st-attention-bg) 92%, transparent); }
+.lab.t-att .l2 { color:var(--st-attention-tx); font-weight:700; }
+.lab.t-err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); }
+.lab.t-err .l2 { color:var(--st-error-tx); font-weight:700; }
+.lab.top.t-att, .lab.top.t-err { background-image:none; }
+.lab .mini { appearance:none; font:inherit; cursor:pointer; height:18px; padding:0 7px; border-radius:5px; border:1px solid currentColor; background:transparent; color:inherit; font-size:10.5px; font-weight:800; flex:none; }
+
+/* the status: how fresh the picture is (frame rate when watched, an age when not) */
+.fps { font:700 10.5px var(--mono); color:var(--st-live-tx); flex:none; }
+.age { font:600 10.5px var(--font); color:var(--subtle); flex:none; }
+/* Q5-A: a cutout notched into the card's corner, in the card's own colour */
+.notch { position:absolute; top:0; right:0; z-index:4; height:22px; display:inline-flex; align-items:center; padding:0 9px 0 10px; background:var(--panel); border-bottom-left-radius:9px; }
+.notch::before, .notch::after { content:""; position:absolute; width:9px; height:9px; background:radial-gradient(circle at 0 100%, transparent 8.5px, var(--panel) 9px); }
+.notch::before { left:-9px; top:0; }
+.notch::after { right:0; bottom:-9px; }
+
+/* rows */
+.srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); }
 .srow svg.i { width:12px; height:12px; flex:none; color:var(--subtle); }
 .srow .spring { flex:1; }
 .srow .chev { color:var(--faint); font-size:12px; flex:none; }
-.srow.proj { display:grid; gap:1px; padding:7px 10px 8px; border-top:1px solid var(--bd-mut); cursor:pointer; }
-.srow.proj .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
-.srow.proj .l1 b { font-size:13px; color:var(--strong); }
-.srow.proj .l2 { display:flex; align-items:center; gap:5px; min-width:0; color:var(--muted); }
-.srow.layer { height:28px; cursor:pointer; }
+.srow.layer { cursor:pointer; }
 .srow.layer:hover { background:var(--raised); }
-.srow.layer:last-child, .srow.last { border-radius:0 0 7px 7px; }
-.fps { font:700 10.5px var(--mono); color:var(--st-live-tx); flex:none; }
+.srow:last-child { border-radius:0 0 7px 7px; }
 .mono { font:11px var(--mono); color:var(--muted); }
-.grp { display:inline-flex; align-items:center; gap:4px; color:var(--subtle); flex:none; }
-.reachi { display:inline-flex; gap:4px; align-items:center; flex:none; }
-.reachi svg.i { width:12px; height:12px; color:var(--subtle); }
+.grp { display:inline-flex; align-items:center; gap:4px; color:var(--subtle); min-width:0; }
 .av { width:14px; height:14px; border-radius:50%; display:inline-grid; place-items:center; font-size:8px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#ffab4a,#ff5d5d); flex:none; }
-
-/* a notice IS its row: tinted edge to edge, sharing the card's border */
-.srow.t-att  { background:var(--st-attention-bg); color:var(--st-attention-tx); border-top-color:var(--st-attention-bd); }
-.srow.t-err  { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-top-color:var(--st-error-bd); }
-.srow.t-neu  { background:var(--surface); color:var(--muted); }
-.srow.t-up   { background:var(--st-live-bg); color:var(--st-live-tx); border-top-color:var(--st-live-bd); }
+.lvl { display:inline-flex; align-items:center; gap:5px; flex:none; color:var(--muted); }
+.lvl b { color:var(--st-live-tx); font-weight:700; }
+.srow.t-att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-top-color:var(--st-attention-bd); }
+.srow.t-err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-top-color:var(--st-error-bd); }
+.srow.t-neu { background:var(--surface); color:var(--muted); }
+.srow.t-up  { background:var(--st-live-bg); color:var(--st-live-tx); border-top-color:var(--st-live-bd); }
 .srow.t-att svg.i, .srow.t-err svg.i, .srow.t-up svg.i { color:currentColor; }
-.srow[class*="t-"]:hover { filter:brightness(1.12); }
-.srow .nw { font-weight:700; }
-/* the way out: flush at the row's end, the row's own height */
-.wo { appearance:none; font:inherit; cursor:pointer; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid currentColor; background:rgba(255,255,255,.04); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; }
+.srow .nw { font-weight:700; display:inline-flex; align-items:center; gap:5px; min-width:0; }
+/* a row's action: flush at its end, the row's own height */
+.wo { appearance:none; font:inherit; cursor:pointer; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid var(--bd); background:rgba(255,255,255,.035); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; flex:none; }
+.srow[class*="t-"] .wo { border-left-color:currentColor; }
 .wo:hover { background:rgba(255,255,255,.1); }
-.srow.last .wo, .srow.layer:last-child .wo { border-bottom-right-radius:7px; }
-.srow.proj .wo { align-self:center; margin:0; height:24px; border:1px solid currentColor; border-radius:6px; }
-
-/* Q1-B: a corner tab flush in the picture's corner */
-.tab { position:absolute; top:0; right:0; z-index:3; display:inline-flex; align-items:stretch; height:22px; border-radius:0 7px 0 8px; border-left:1px solid; border-bottom:1px solid; font-size:10.5px; font-weight:700; overflow:hidden; }
-.tab > span { display:inline-flex; align-items:center; gap:5px; padding:0 8px; }
-.tab svg.i { width:11px; height:11px; }
-.tab .wo { margin:0; height:auto; align-self:stretch; }
-.tab.att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-color:var(--st-attention-bd); }
-.tab.err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-color:var(--st-error-bd); }
-.tab.neu { background:var(--surface); color:var(--muted); border-color:var(--bd); }
-.tab.up  { background:var(--st-live-bg); color:var(--st-live-tx); border-color:var(--st-live-bd); }
-/* Q1-C: a band across the bottom of the picture */
-.band { display:flex; align-items:stretch; height:26px; border-top:1px solid; font-size:11px; font-weight:700; }
-.band > span { display:inline-flex; align-items:center; gap:5px; padding:0 10px; flex:1; min-width:0; }
-.band svg.i { width:12px; height:12px; }
-.band .wo { margin:0; }
-.band.att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-color:var(--st-attention-bd); }
-.band.err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-color:var(--st-error-bd); }
-.band.neu { background:var(--surface); color:var(--muted); border-color:var(--bd); }
-.band.up  { background:var(--st-live-bg); color:var(--st-live-tx); border-color:var(--st-live-bd); }
-/* Q2-B: the way out as the card's last row, full width */
-.footwo { appearance:none; font:inherit; cursor:pointer; display:block; width:100%; height:30px; border:0; border-top:1px solid; border-radius:0 0 7px 7px; font-size:11.5px; font-weight:800; }
-.footwo.att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-color:var(--st-attention-bd); }
-.footwo.err { background-color:var(--st-error-bg); color:var(--st-error-tx); border-color:var(--st-error-bd); }
-.footwo.neu { background:var(--raised); color:var(--strong); border-color:var(--bd); }
-.footwo.up  { background:var(--st-live-bg); color:var(--st-live-tx); border-color:var(--st-live-bd); }
+.wo.primary { position:relative; }
+.wo.primary::after { content:""; position:absolute; left:8px; right:8px; bottom:4px; height:1.5px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum-cool)); opacity:.8; }
+.srow:last-child .wo { border-bottom-right-radius:7px; }
+.split { display:inline-flex; align-self:stretch; margin:0 -10px 0 4px; }
+.split .wo { margin:0; }
+.split .wo + .wo { padding:0 8px; }
+/* progress inside a row: the iridescent fill, never a flat bar */
+.prog { position:absolute; left:0; bottom:0; height:2px; background:linear-gradient(90deg,var(--spectrum)); border-radius:0 2px 2px 0; }
 
 /* details */
-.pop { position:absolute; left:-1px; right:-1px; z-index:40; padding:10px 12px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.65); display:grid; gap:8px; font-size:12px; color:var(--muted); min-width:280px; }
+.pop { position:absolute; left:-1px; right:-1px; top:calc(100% - 2px); z-index:40; padding:10px 12px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.65); display:grid; gap:8px; font-size:12px; color:var(--muted); min-width:280px; }
 .pop h5 { margin:0; font:800 10px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--heading); }
-.pop .kv { display:grid; grid-template-columns:88px minmax(0,1fr); gap:3px 10px; }
+.pop .kv { display:grid; grid-template-columns:92px minmax(0,1fr); gap:3px 10px; }
 .pop .kv span:nth-child(odd) { color:var(--subtle); }
 .pop .kv span:nth-child(even) { color:var(--tx); }
 .pop .kv .m { font:11px var(--mono); }
 .pop .acts { display:flex; gap:6px; flex-wrap:wrap; border-top:1px solid var(--bd-mut); padding-top:8px; }
 .pop .acts .btn { height:26px; font-size:11px; padding:0 9px; }
 .pop .acts .btn.lasting { color:var(--st-error-tx); }
-.panelwrap { display:grid; grid-template-columns:260px minmax(0,1fr); gap:0; border:1px solid var(--shell-bd); border-radius:12px; overflow:hidden; background:var(--bg); }
-.panelwrap .left { padding:14px; border-right:1px solid var(--bd); }
-.panelwrap .right { padding:14px 16px; display:grid; gap:12px; align-content:start; }
-.panelwrap .sect2 { border:1px solid var(--bd-mut); border-radius:8px; padding:10px 12px; display:grid; gap:6px; }
-.panelwrap .sect2.focus { border-color:var(--sel-bd); box-shadow:0 0 0 1px var(--sel-bd); }
-.panelwrap .sect2 h5 { margin:0; font:800 10px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--heading); }
-.panelwrap .kv { display:grid; grid-template-columns:96px minmax(0,1fr); gap:3px 10px; font-size:12px; }
-.panelwrap .kv span:nth-child(odd) { color:var(--subtle); }
-.panelwrap .kv span:nth-child(even) { color:var(--tx); }
+.anatomy2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; max-width:1180px; }
+.anatomy2 .ac { border:1px solid var(--shell-bd); border-radius:10px; padding:12px 14px; background:var(--bg); display:grid; gap:8px; }
+.anatomy2 .acn { font-size:13px; font-weight:700; color:var(--shell-tx); }
+.anatomy2 .acn small { font-weight:500; color:var(--shell-dim); margin-left:6px; }
+.anatomy2 p { margin:0; font-size:12px; color:var(--shell-mut); line-height:1.5; }
+.slotrow { display:flex; gap:6px; flex-wrap:wrap; }
+.slot { font:11px var(--mono); color:var(--muted); border:1px dashed var(--bd-strong); border-radius:5px; padding:3px 8px; }
+.slot.big { flex:1; }
+.slot.cta { border-style:solid; border-color:#5fe08b; color:var(--strong); }
+pre.shape { max-width:1180px; margin:12px 0 0; padding:12px 14px; border:1px solid var(--shell-bd); border-radius:10px; background:#08090b; color:var(--shell-mut); font:11.5px/1.55 var(--mono); overflow:auto; }
+.levels { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; max-width:1180px; }
+.levels .lv { border:1px solid var(--shell-bd); border-radius:10px; padding:12px 14px; background:var(--bg); font-size:12.5px; color:var(--shell-mut); }
+.levels .lv b { color:var(--shell-tx); display:block; margin-bottom:4px; font-size:13px; }
+.levels .lv code { font-size:11px; }
 </style>
 </head>
 <body>
 
-<h1>The stack card — firmware and hardware on every card</h1>
-<p class="hint"><b>A quick experiment.</b> The full device card’s three zones (project, firmware, device), shrunk onto the home card: the picture and the project row, then <b>one row for the firmware and one for the hardware</b>, each a one-line summary. <b>Click a row</b> for its details (a popover). The real data is one click away and grounds the card in what the board actually is.
-<b>No boxes in boxes:</b> a notice isn’t a pill on the picture any more. It tints the row of the layer it belongs to, edge to edge, sharing the card’s border, and its action sits flush at that row’s end. A fine board shows its frame rate.
-The page below uses the leans; the questions are lettered to match the chat. Click a picture or name to open; click a firmware or hardware row for details.</p>
+<h1>The stack card — round 2</h1>
+<p class="hint"><b>Round 1</b> settled the direction (“much better, I really like the overall idea”). <b>This round, one section per part of the card</b>, top to bottom in Yona’s order: <b>project and status · where and connection · firmware · hardware</b>.
+Two rules for every option: <b>a card never changes height</b> (rows never appear or disappear; a notice only tints its row), and <b>no boxes in boxes</b> (a notice is its row, edge to edge).
+The card is <b>two components</b>: one special <b>name bar</b> with the primary action, then a standard stack of <b>bars</b> that hold info and actions (below). The primary action connects to a board or opens it, across the three levels of connection.
+The page uses the leans; the questions are lettered to match the chat. Click a picture or name to open; click a firmware or hardware row for details.</p>
+
+<section class="qsec" id="levels">
+  <h2>The three levels of connection (vision D23–D26)</h2>
+  <div class="levels">
+    <div class="lv"><b>Watching</b>The picture and status, with no Studio session. Cloud-connected boards are watched through the cloud; a nearby board over its link (USB opens without asking; Bluetooth needs one tap to pick it; Wi‑Fi dials the address it last gave). Watching never blocks anyone.</div>
+    <div class="lv"><b>Connected</b>Studio holds a link it can open a session on. For a direct board, connecting is what starts watching it. The row says the link: “USB”, “Bluetooth”, “Wi‑Fi”, or the cloud.</div>
+    <div class="lv"><b>Open</b>The Studio session: the editor, with this board as the target. One per board; a watch steps aside for it, and someone else’s open shows as “Sean is editing” or “Open in another tab”.</div>
+  </div>
+</section>
+
+<section class="qsec" id="components">
+  <h2>Two components, driven by data (Yona: “one special bar that’s the main name / CTA, then a standardized stack of bars”)</h2>
+  <p class="ask" style="max-width:1100px">Like the node cards: the view model (in core, so every button is an offer the agent can see and press) says <b>what</b> is in each part; the components decide <b>how</b> it looks. The same two components can later carry project and pattern cards.</p>
+  <div class="anatomy2">
+    <div class="ac"><div class="acn">The name bar <small>one per card</small></div>
+      <div class="slotrow"><span class="slot big">title</span><span class="slot">status</span><span class="slot cta">primary action</span></div>
+      <div class="slotrow"><span class="slot">subtitle (what it plays) <i>or</i> the project’s notice + its fix</span></div>
+      <p>Two lines, always. The status (frame rate, or the picture’s age) is cut out of the corner (Q5). The primary action is one offer: Open, Connect, Take over, Unlock, Install (Q7).</p></div>
+    <div class="ac"><div class="acn">A stack bar <small>any number, one per layer</small></div>
+      <div class="slotrow"><span class="slot">icon</span><span class="slot big">summary</span><span class="slot">aside</span><span class="slot">action?</span><span class="slot">›</span></div>
+      <p>One line, 28 px, always. A <b>tone</b> (attention, error, neutral, live) tints the whole bar when it carries a notice; the summary becomes the notice’s words and the action its fix. <b>›</b> opens the bar’s details (Q3). Bars today: where &amp; connection · firmware · hardware.</p></div>
+  </div>
+  <pre class="shape">BoardCard {
+  picture:  Picture { feed: Live | CloudFrames | Still { age } }
+  status:   Status::Fps(58) | Status::Age("5 h ago")
+  name_bar: NameBar { title, subtitle: Plays { project, synced } | Notice { tone, words, fix: Offer } | Empty,
+                      primary: Offer }                 // devices/&lt;board ref&gt;/open · connect · take-over · unlock · install
+  bars:     [StackBar { layer: Where | Firmware | Hardware,
+                        icon, summary, aside, tone: Option&lt;Tone&gt;, action: Option&lt;Offer&gt;, details: Details }]
+}</pre>
+</section>
 
 <section class="qsec" id="page">
   <h2>The card so far</h2>
-  <p class="usinglean">Uses Q1-A, Q2-A, Q3-A. Ten boards: connected here with an update available, cloud online, out of date, Sean editing, open in your other tab, last seen, offline, a shader error, locked, and a blank board that needs firmware.</p>
+  <p class="usinglean">Uses the leans: Q4-B, Q5-A, Q6-A, Q7-A, Q8-A, Q9-A (and Q3-A, carried). Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
   <div class="duo phoneduo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
 </section>
 
-<section class="qsec" id="q1">
-  <h2><span class="qn">Q1</span>How does a notice share the card’s border?</h2>
-  <p class="ask">The same four boards in each: an update available (firmware), out of date (project), someone else has it (hardware), open in another tab (hardware).</p>
-  <div class="opts" id="q1o"></div>
-</section>
-<section class="qsec" id="q2">
-  <h2><span class="qn">Q2</span>Where does the way out live?</h2>
-  <p class="ask">The one action that fixes a notice: Take over, Update, Send latest, Unlock, Install.</p>
-  <div class="opts c2" id="q2o"></div>
-</section>
-<section class="qsec" id="q3">
-  <h2><span class="qn">Q3</span>How do the details open?</h2>
-  <p class="ask">An accordion pushes a grid of cards around, so it’s out. Shown open on Fyeah Sign’s firmware row.</p>
-  <div class="opts c2" id="q3o"></div>
-</section>
+<section class="qsec" id="q4"><h2><span class="qn">Q4</span>Where does the name go?</h2>
+  <p class="ask">The project row: the name, then one line for what it plays or what’s wrong with the project. Always two lines, so it never changes height.</p><div class="opts" id="q4o"></div></section>
+<section class="qsec" id="q5"><h2><span class="qn">Q5</span>Where does the status go?</h2>
+  <p class="ask">The status says how fresh the picture is: the frame rate while it’s watched, its age when it isn’t. Notices stay in their rows either way.</p><div class="opts" id="q5o"></div></section>
+<section class="qsec" id="q6"><h2><span class="qn">Q6</span>What does the where-and-connection row say?</h2>
+  <p class="ask">Where the board belongs, and how Studio reaches it right now. This row also carries connection notices: someone else has it, it’s offline, it’s locked.</p><div class="opts" id="q6o"></div></section>
+<section class="qsec" id="q7"><h2><span class="qn">Q7</span>How does the name bar carry the primary action?</h2>
+  <p class="ask">Watching is automatic where it can be; connecting a nearby board may need a tap (Bluetooth asks for one); opening starts a Studio session. The primary action is whatever gets you in next.</p><div class="opts" id="q7o"></div></section>
+<section class="qsec" id="q8"><h2><span class="qn">Q8</span>What does the firmware row say?</h2>
+  <p class="ask">When it’s fine. Notices (an update available, updating, no firmware) tint it either way.</p><div class="opts c3" id="q8o"></div></section>
+<section class="qsec" id="q9"><h2><span class="qn">Q9</span>What does the hardware row say?</h2>
+  <p class="ask">The real thing: grounding, not detail. The rest is in its popover.</p><div class="opts c3" id="q9o"></div></section>
+<section class="qsec" id="q3"><h2><span class="qn">Q3</span>How do the details open? <span style="font:500 12px var(--font);color:var(--shell-dim)">(carried from round 1)</span></h2>
+  <p class="ask">A: a popover from the row (lean, drawn open below). B: a side panel with the whole stack (round 1 drew it). An accordion would push the grid around.</p><div class="opts c2" id="q3o"></div></section>
 
 <section class="qsec" id="ref">
-  <div class="decided"><b>Context</b>
+  <div class="decided"><b>Decided so far</b>
     <ul>
-      <li>This builds on <code>spikes/board-card</code> round 2 (the vocabulary: the stack as the spine, one word per idea, the frozen status colours) and changes only the card’s structure. That spike’s questions are still open.</li>
-      <li>Rows follow the full device card’s grammar: full-bleed hairlines between zones, nothing framed inside a zone.</li>
-      <li>Colours stay in the frozen families: blue is live (frame rate, an update ready to take), orange is a board needing attention, stripes are an error, neutral is time.</li>
+      <li><b>Round 1:</b> the stack card, with firmware and hardware on every card (“much better”). Notices tint their layer’s row (Q1 → A); a status in the corner is fine too as long as it’s cut out of the card, not a pill (now Q5).</li>
+      <li><b>Round 1, Q2 → A</b> by the height rule: an action sits flush at the end of its row; a full-width last row would change the card’s height.</li>
+      <li><b>Order of rows</b> (Yona): project and status · where and connection · firmware · hardware.</li>
+      <li><b>Fixed height</b> (Yona): try hard never to change a card’s height.</li>
+      <li>The vocabulary (glossary, colours, actions by consequence) is <code>spikes/board-card</code> round 2; its open questions fold into this spike next round.</li>
     </ul></div>
 </section>
 
@@ -717,120 +762,182 @@ IC.person = '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>';
 IC.tab = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5v4"/>';
 IC.history = '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>';
 IC.fw = '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 12h8M8 15h5"/>';
-IC.clock = '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>';
+IC.check = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
 
+/* where: group or owner. link: how Studio reaches it now. conn: the connection state. */
 const BOARDS = [
-  { id:'desk',   title:'Fyeah Sign',     plays:null,             pat:'rainbow',  layout:'matrix', fps:58, cloud:true, link:'usb', chip:'ESP32-C6 DevKit', group:'Studio', fw:'0.42', live:true,
-    note:{ layer:'fw', tone:'up', icon:'up', text:'0.43 available', act:'Update' } },
-  { id:'porch',  title:'Porch',          plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, chip:'ESP32-C6', group:'House', fw:'0.42' },
-  { id:'garage', title:'Garage',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, chip:'ESP32-C6', group:'House', fw:'0.42',
-    note:{ layer:'proj', tone:'att', icon:'history', text:'Out of date · v11', act:'Send latest' } },
-  { id:'living', title:'Living room',    plays:'Aurora Drift',  pat:'aurora', layout:'roof', fps:57, cloud:true, chip:'ESP32-C6', owner:'Sean Connell', fw:'0.41',
-    note:{ layer:'hw', tone:'att', icon:'person', text:'Sean is editing' } },
-  { id:'shelf',  title:'Slow Rainbow',   plays:null, pat:'rainbow2', layout:'strip', cloud:false, link:'wifi', chip:'ESP32-C6', group:'Studio', fw:'0.42', still:true,
-    note:{ layer:'hw', tone:'att', icon:'tab', text:'Open in another tab', act:'Take over' } },
-  { id:'choker', title:'Maya’s choker',  plays:null, pat:'pulse', layout:'ring', cloud:false, link:'ble', chip:'XIAO ESP32-C6', group:'Gifts', fw:'0.40', dim:true,
-    note:{ layer:'hw', tone:'neu', icon:'clock', text:'Last seen 5 h ago' } },
-  { id:'truck',  title:'Truck',          plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', cloud:true, chip:'ESP32-C6', group:'Studio', fw:'0.38', dim:true,
-    note:{ layer:'hw', tone:'neu', icon:'cloud', text:'Offline · 2 weeks' } },
-  { id:'window', title:'Window',         plays:'Sparkle Grid', pat:'comet', layout:'matrix', cloud:true, chip:'ESP32-C6', group:'House', fw:'0.42',
-    note:{ layer:'proj', tone:'err', icon:'alert', text:'Shader error', act:'Show' } },
-  { id:'lamp',   title:'Ember Drift',    plays:null, pat:'off', layout:'ring', cloud:false, link:'ble', chip:'XIAO ESP32-C6', group:'Gifts', fw:'0.42', off:true,
-    note:{ layer:'hw', tone:'neu', icon:'lock', text:'Locked', act:'Unlock' } },
-  { id:'newb',   title:'New board',      plays:null, pat:'off', layout:'strip', cloud:false, link:'usb', chip:'ESP32-C6', group:null, fw:null, off:true, live:true,
-    note:{ layer:'fw', tone:'att', icon:'fw', text:'No firmware', act:'Install' } },
+  { id:'desk',   title:'Fyeah Sign',    plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB',
+    fwNote:{ tone:'up', icon:'up', text:'0.43 available', act:'Update' } },
+  { id:'porch',  title:'Porch',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
+  { id:'garage', title:'Garage',        plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
+    projNote:{ tone:'att', icon:'history', text:'Out of date · v11', act:'Send latest' } },
+  { id:'kitchen', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
+    fwNote:{ tone:'up', icon:'up', text:'Updating to 0.43 · 42%', prog:42 } },
+  { id:'living', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'0.41', fwDate:'Sep 30', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
+  { id:'shelf',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', age:'just now', cloud:false, link:'wifi', conn:'othertab', group:'Studio', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
+  { id:'choker', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'0.40', fwDate:'Sep 21', model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
+  { id:'truck',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'0.38', fwDate:'Sep 2', model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
+  { id:'window', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'0.42', fwDate:'Oct 7', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
+    projNote:{ tone:'err', icon:'alert', text:'Shader error', act:'Show' } },
+  { id:'lamp',   title:'Ember Drift',   plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:'0.42', fwDate:'Oct 7', model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
+  { id:'newb',   title:'New board',     plays:null, blank:true, pat:'off', layout:'strip', cloud:false, link:'usb', conn:'connected', group:null, fw:null, model:'ESP32-C6', leds:null, mac:'c0de', free:'—', off:true,
+    fwNote:{ tone:'att', icon:'fw', text:'No firmware' } },
 ];
 const LINK_ICON = { usb:'usb', ble:'ble', wifi:'net' };
 const LINK_WORD = { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' };
-const LEAN = { notice:'row', cta:'row', detail:'pop' };
+const LEAN = { label:'glass', status:'notch', conn:'words', action:'rowbtn', fw:'A', hw:'A', detail:'pop' };
 
+function watched(b){ return b.conn==='watch' || b.conn==='held' || (b.conn==='connected' && !b.off); }
 function canvasOf(b){
-  const rate = b.live && !b.off ? 'live' : (b.cloud && !b.dim && !b.off) ? 'slow' : 'still';
+  const rate = (b.conn==='watch' && b.link) ? 'live' : watched(b) ? 'slow' : 'still';
   return `<canvas data-pat="${b.pat}" data-layout="${b.layout}" data-rate="${rate}" data-live="${rate==='live'?1:0}" data-dim="${b.dim?1:0}" data-off="${b.off?1:0}" data-seed="${b.id.length}"></canvas>`;
 }
-function wo(n, c){ return n.act && c.cta==='row' ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''; }
-function noticeRow(n, c, layerCls){
-  return `<span class="nw" style="display:inline-flex;align-items:center;gap:5px;min-width:0">${ic(n.icon)}<span class="ell">${n.text}</span></span><span class="spring"></span>${wo(n, c)}`;
+function statusText(b){
+  if (b.blank) return '';
+  if (watched(b) && b.fps) return `<span class="fps" title="Running at ${b.fps} frames a second">${b.fps} fps</span>`;
+  if (watched(b) && b.fps===0) return `<span class="fps" style="color:var(--st-error-tx)">0 fps</span>`;
+  return b.age ? `<span class="age" title="How old this picture is">${b.age}</span>` : '';
 }
-function projRow(b, c){
-  const n = b.note && b.note.layer==='proj' && c.notice==='row' ? b.note : null;
-  const l2 = b.plays ? `${ic('play')}<span class="ell">${b.plays}</span>${b.synced ? `<span style="flex:none">· ${b.synced} boards</span>` : ''}` : '';
-  const right = n ? '' : (b.fps && !(b.note && b.note.layer==='hw' && b.note.tone==='neu') ? `<span class="fps" title="Running at ${b.fps} frames a second">${b.fps} fps</span>` : '');
-  const tint = n ? ` t-${n.tone}` : '';
-  return `<div class="srow proj${tint}" data-open="${b.id}"><div class="l1"><b class="ell">${b.title}</b><span class="spring"></span>${right}</div>
-    ${n ? `<div class="l2">${ic(n.icon)}<span class="nw ell">${n.text}</span><span class="spring"></span>${wo(n,c)}</div>` : (l2 ? `<div class="l2">${l2}</div>` : '')}</div>`;
+/* the label: name + line 2 (what it plays, or the project's notice) */
+function label(b, c){
+  const n = b.projNote;
+  const l2 = n ? `${ic(n.icon)}<span class="ell">${n.text}</span><span style="flex:1"></span>${n.act ? `<button class="mini" data-act="${n.act}">${n.act}</button>` : ''}`
+    : b.plays ? `${ic('play')}<span class="ell">${b.plays}</span>${b.synced ? `<span style="flex:none">· ${b.synced} boards</span>` : ''}`
+    : b.blank ? `<span style="color:var(--subtle)">Nothing on it yet</span>` : '';
+  const st = c.status==='label' ? statusText(b) : '';
+  return `<div class="lab ${c.label==='under'?'under':c.label} ${n ? 't-'+n.tone : ''}" data-open="${b.id}"><div class="txt"><div class="l1"><b class="ell">${b.title}</b><span style="flex:1"></span>${st}</div><div class="l2">${l2}</div></div>${mainAction(b, c)}</div>`;
 }
-function fwRow(b, c, last){
-  const n = b.note && b.note.layer==='fw' && c.notice==='row' ? b.note : null;
-  const body = n ? noticeRow(n, c) : `${ic('fw')}<span class="mono">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">up to date</span><span class="chev">›</span>`;
-  return `<div class="srow layer fw${n ? ' t-'+n.tone : ''}${last?' last':''}" data-detail="fw" data-id="${b.id}">${body}</div>`;
+/* the primary action: whatever gets you into the board, one button, always in the same place */
+function primaryOf(b){
+  switch (b.conn){
+    case 'idle': return { act:'Connect' };
+    case 'othertab': return { act:'Take over' };
+    case 'locked': return { act:'Unlock' };
+    case 'held': return { act:'Open', disabled:true, why:'Sean has it open' };
+    case 'connected': return b.blank ? { act:'Install' } : { act:'Open' };
+  }
+  if (b.fwNote && b.fwNote.prog) return { act:'Open', disabled:true, why:'Updating firmware' };
+  return { act:'Open' };
 }
-function hwRow(b, c, last){
-  const n = b.note && b.note.layer==='hw' && c.notice==='row' ? b.note : null;
-  const reach = `<span class="reachi">${b.live && b.link ? `<span title="Connected by ${LINK_WORD[b.link]}">${ic(LINK_ICON[b.link])}</span>` : ''}${b.cloud ? `<span title="Cloud connected">${ic('cloud')}</span>` : ''}${!b.live && !b.cloud && b.link ? `<span title="${LINK_WORD[b.link]}" style="opacity:.6">${ic(LINK_ICON[b.link])}</span>` : ''}</span>`;
-  const where = b.owner ? `<span class="grp nh"><span class="av">${b.owner[0]}</span>${b.owner.split(' ')[0]}</span>` : b.group ? `<span class="grp nh">${ic('folder')}${b.group}</span>` : '';
-  const body = n ? noticeRow(n, c) : `${ic('chip')}<span class="mono ell">${b.chip}</span>${reach}<span class="spring"></span>${where}<span class="chev">›</span>`;
-  return `<div class="srow layer hw${n ? ' t-'+n.tone : ''}${last?' last':''}" data-detail="hw" data-id="${b.id}">${body}</div>`;
+function mainAction(b, c){
+  if (c.action==='card') return '';
+  const p = primaryOf(b);
+  if (c.action==='split' && p.act==='Open' && !p.disabled) return `<button class="btn cta go split-go" data-act="Open">Open<span class="car" data-act="links">▾</span></button>`;
+  return `<button class="btn cta go" data-act="${p.act}" ${p.disabled ? `disabled title="${p.why}"` : ''}>${p.act}</button>`;
+}
+/* where + connection */
+function whereHtml(b){
+  if (b.owner) return `<span class="grp"><span class="av">${b.owner[0]}</span><span class="ell">${b.owner}</span></span>`;
+  if (b.group) return `<span class="grp">${ic('folder')}<span class="ell">${b.group}</span></span>`;
+  return `<span class="grp" style="color:var(--faint)">No group</span>`;
+}
+function connState(b){
+  // what the row says about the link, and the primary action that goes with it
+  switch (b.conn){
+    case 'watch':    return b.link ? { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · live` } : { icon:'cloud', words:'Cloud · live' };
+    case 'connected':return { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · connected` };
+    case 'idle':     return { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · not connected` };
+    case 'offline':  return { tone:'neu', icon:'cloud', words:`Offline · ${b.offlineFor}` };
+    case 'held':     return { tone:'att', icon:'person', words:b.who };
+    case 'othertab': return { tone:'att', icon:'tab', words:'Open in another tab' };
+    case 'locked':   return { tone:'neu', icon:'lock', words:'Locked' };
+  }
+}
+function connRow(b, c){
+  const s = connState(b);
+  const tone = s.tone ? ` t-${s.tone}` : '';
+  const btn = '';
+  const hint = c.action==='card' && b.conn==='idle' ? ' · tap to connect' : '';
+  if (s.tone) return `<div class="srow conn${tone}"><span class="nw">${ic(s.icon)}<span class="ell">${s.words}</span></span><span class="spring"></span>${btn}</div>`;
+  const live = s.words.includes('live');
+  const words = s.words.replace('live', '<b>live</b>');
+  if (c.conn==='icons') return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl" title="${s.words}">${ic(s.icon)}${b.cloud && b.link ? ic('cloud') : ''}${live ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--st-live-tx)"></span>' : ''}</span>${btn}</div>`;
+  if (c.conn==='wordsLeft') return `<div class="srow conn"><span class="lvl">${ic(s.icon)}<span>${words}${hint}</span></span><span class="spring"></span>${btn}</div>`;
+  return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl">${ic(s.icon)}<span class="nh">${words}${hint}</span>${b.cloud && b.link ? `<span title="Also cloud connected">${ic('cloud')}</span>` : ''}</span><span class="chev" style="visibility:hidden">›</span></div>`;
+}
+function fwRow(b, c){
+  const n = b.fwNote;
+  if (n) return `<div class="srow layer t-${n.tone}" data-detail="fw" data-id="${b.id}"><span class="nw">${ic(n.icon)}<span class="ell">${n.text}</span></span><span class="spring"></span>${n.act ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}${n.prog ? `<span class="prog" style="width:${n.prog}%"></span>` : ''}</div>`;
+  const body = c.fw==='B' ? `${ic('fw')}<span class="mono">${b.fw}</span><span style="color:var(--st-good-tx);display:inline-flex">${ic('check')}</span>`
+    : c.fw==='C' ? `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.fwDate}</span>`
+    : `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">up to date</span>`;
+  return `<div class="srow layer" data-detail="fw" data-id="${b.id}">${body}<span class="spring"></span><span class="chev">›</span></div>`;
+}
+function hwRow(b, c){
+  const body = c.hw==='B' ? `${ic('chip')}<span class="mono ell">ESP32-C6</span><span class="nh mono" style="color:var(--subtle)">· …${b.mac}</span>`
+    : c.hw==='C' ? `${ic('chip')}<span class="mono ell">${b.model}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.free==='—' ? '' : b.free+' free'}</span>`
+    : `${ic('chip')}<span class="mono ell">${b.model}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.leds ? b.leds+' LEDs' : 'no LEDs set'}</span>`;
+  const where = c.conn==='wordsLeft' ? `<span class="nh" style="margin-left:6px">${whereHtml(b)}</span>` : '';
+  return `<div class="srow layer" data-detail="hw" data-id="${b.id}">${body}${where}<span class="spring"></span><span class="chev">›</span></div>`;
 }
 function popHtml(b, which){
-  if (which==='fw') return `<div class="pop" style="top:calc(100% - 2px)"><h5>Firmware</h5><div class="kv">
-      <span>Version</span><span class="m">${b.fw ? 'LightPlayer '+b.fw : 'none (blank flash)'}</span>
-      <span>Studio has</span><span class="m">0.43</span>
-      <span>Release</span><span>2026-10-07 · split image</span>
-      <span>Last update</span><span>over the cloud, 2 days ago</span></div>
+  if (which==='fw') return `<div class="pop"><h5>Firmware</h5><div class="kv">
+      <span>Version</span><span class="m">${b.fw ? 'LightPlayer '+b.fw : 'none (blank flash)'}</span><span>Studio has</span><span class="m">0.43</span>
+      <span>Release</span><span>${b.fwDate || '—'} · split image</span><span>Last update</span><span>over the cloud, 2 days ago</span></div>
       <div class="acts"><button class="btn sm">Update to 0.43</button><button class="btn sm outline">Reinstall</button><button class="btn sm outline lasting">Factory reset…</button></div></div>`;
-  return `<div class="pop" style="top:calc(100% - 2px)"><h5>Hardware</h5><div class="kv">
-      <span>Board</span><span>${b.chip}</span>
-      <span>Id</span><span class="m">a0:f2:62:b4:8c:11</span>
-      <span>Reach</span><span>${b.live && b.link ? LINK_WORD[b.link]+' (this tab) · ' : ''}${b.cloud ? 'cloud, online' : 'direct only'}</span>
-      <span>Wi‑Fi</span><span class="m">192.168.1.40</span>
-      <span>Running</span><span>${b.fps ? b.fps+' fps · ' : ''}212 KB free</span>
-      <span>Access</span><span>play: anyone · edit: password</span>
-      <span>Group</span><span>${b.owner ? b.owner+'’s' : (b.group || '—')}</span></div>
+  return `<div class="pop"><h5>Hardware</h5><div class="kv">
+      <span>Board</span><span>${b.model}</span><span>LEDs</span><span>${b.leds ? b.leds+' (WS2812, pin 10)' : '—'}</span>
+      <span>Id</span><span class="m">a0:f2:62:b4:${b.mac.slice(0,2)}:${b.mac.slice(2)}</span><span>Memory</span><span>${b.free} free</span>
+      <span>Wi‑Fi</span><span class="m">192.168.1.40</span><span>Access</span><span>play: anyone · edit: password</span></div>
       <div class="acts"><button class="btn sm outline">Rename</button><button class="btn sm outline">Move to a group</button><button class="btn sm outline">Reset</button><button class="btn sm outline lasting">Forget…</button></div></div>`;
 }
 function card(b, c=LEAN, open=null){
-  const n = b.note;
-  const tab = n && c.notice==='tab' ? `<span class="tab ${n.tone}"><span>${ic(n.icon)}${n.text}</span>${n.act && c.cta==='row' ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}</span>` : '';
-  const band = n && c.notice==='band' ? `<div class="band ${n.tone}"><span>${ic(n.icon)}<span class="ell">${n.text}</span></span>${n.act && c.cta==='row' ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}</div>` : '';
-  const foot = n && n.act && c.cta==='foot' ? `<button class="footwo ${n.tone}" data-act="${n.act}">${n.act}</button>` : '';
-  return `<div class="sc ${b.live && !b.off ? 'live' : ''}"><div class="pic" data-open="${b.id}">${canvasOf(b)}${tab}</div>${band}
-    ${projRow(b, c)}${fwRow(b, c)}${hwRow(b, c, !foot)}${foot}${open && open[0]===b.id ? popHtml(b, open[1]) : ''}</div>`;
+  const lab = label(b, c);
+  const inPic = c.label!=='under';
+  const notch = c.status==='notch' && statusText(b) ? `<span class="notch">${statusText(b)}</span>` : '';
+  return `<div class="sc lab-${c.label}"><div class="pic" data-open="${b.id}">${canvasOf(b)}${inPic ? lab : ''}${notch}</div>${inPic ? '' : lab}
+    ${connRow(b, c)}${fwRow(b, c)}${hwRow(b, c)}${open && open[0]===b.id ? popHtml(b, open[1]) : ''}</div>`;
 }
 function grid(ids, c=LEAN, open=null){
   const bs = ids ? ids.map(id => BOARDS.find(b=>b.id===id)) : BOARDS;
-  return `<div class="page"><div class="scards">${bs.map(b => card(b, c, open)).join('')}</div></div>`;
+  return `<div class="page"><div class="scards">${bs.map(b => card(b, { ...LEAN, ...c }, open)).join('')}</div></div>`;
 }
-
-/* questions */
 function option(q, letter, o, body){
   return `<div class="opt ${o.lean?'leanopt':''}"><div class="ohead"><span class="olabel">${q.toUpperCase()}-${letter}</span><span class="oname">${o.name}</span>${o.lean?'<span class="leanb">lean</span>':''}</div>
     <p class="owhat">${o.what}</p><p class="ofa"><b>For:</b> ${o.pro}<br><b>Against:</b> ${o.con}</p>${body}</div>`;
 }
+function q(id, ids, opts){ document.getElementById(`${id}o`).innerHTML = Object.entries(opts).map(([l,o]) => option(id, l, o, `<div class="app">${grid(ids, o.c)}</div>`)).join(''); }
+
 function build(){
-  const q1ids = ['desk','garage','living','shelf'];
-  document.getElementById('q1o').innerHTML = [
-    option('q1','A',{ name:'The row is the notice', lean:true, what:'The layer’s own row tints edge to edge and says what’s wrong; its action is flush at the end.', pro:'no new shape at all; the notice says which layer is unhappy by where it is.', con:'a project notice replaces the “Playing …” line while it shows.' }, `<div class="app">${grid(q1ids, { ...LEAN, notice:'row' })}</div>`),
-    option('q1','B',{ name:'A corner tab', what:'A tab flush in the picture’s top corner, sharing the card’s top and right edges.', pro:'the most visible; the rows stay the same in every state.', con:'it sits on the picture, which is what you see first, for every kind of problem.' }, `<div class="app">${grid(q1ids, { ...LEAN, notice:'tab' })}</div>`),
-    option('q1','C',{ name:'A band under the picture', what:'A full-width band between the picture and the rows.', pro:'reads as one strip of status; the picture stays clean.', con:'the card grows a row when something’s wrong, so cards in a row stop lining up.' }, `<div class="app">${grid(q1ids, { ...LEAN, notice:'band' })}</div>`),
-  ].join('');
-  const q2ids = ['shelf','desk','garage','lamp'];
-  document.getElementById('q2o').innerHTML = [
-    option('q2','A',{ name:'At the end of its row', lean:true, what:'Flush at the right end of the row with the problem, the row’s own height.', pro:'the action sits with the thing it fixes; no extra row.', con:'a small target on a phone.' }, `<div class="app">${grid(q2ids, { ...LEAN, cta:'row' })}</div>`),
-    option('q2','B',{ name:'The card’s last row', what:'A full-width button along the card’s bottom edge.', pro:'big and obvious; one place for every action.', con:'cards with an action are taller than cards without; it’s further from the row it fixes.' }, `<div class="app">${grid(q2ids, { ...LEAN, cta:'foot' })}</div>`),
-  ].join('');
+  const four = ['porch','garage','choker','window'];
+  q('q4', four, {
+    A:{ name:'A row under the picture', what:'Name and line 2 in their own two-line row.', pro:'the picture is never covered.', con:'the tallest card; a fourth stripe of text.', c:{ label:'under' } },
+    B:{ name:'Glass over the bottom of the picture', lean:true, what:'Name and line 2 on a glass strip across the picture’s bottom, like the example cards.', pro:'the same look as the catalog, so the page reads as one gallery; shorter card.', con:'covers the bottom of the picture (LEDs are drawn above it).', c:{ label:'glass' } },
+    C:{ name:'On top of the picture', what:'Name and line 2 at the top, fading into the picture.', pro:'reads first, like a title.', con:'fights the status for the top edge; a project notice there looks like a banner.', c:{ label:'top' } },
+  });
+  q('q5', ['desk','porch','choker','truck'], {
+    A:{ name:'A cutout in the card’s corner', lean:true, what:'Notched out of the picture’s top-right corner in the card’s own colour, so it’s part of the card, not a pill on it.', pro:'what you said you’d be fine with; visible at a glance and never a box.', con:'one more element on the picture.', c:{ status:'notch' } },
+    B:{ name:'At the end of the name', what:'Right of the name, on the label.', pro:'nothing on the picture.', con:'the name line gets crowded on a phone.', c:{ status:'label' } },
+    C:{ name:'Nowhere', what:'No status; only the rows say anything.', pro:'quietest.', con:'nothing proves a dark effect is alive, and nothing says how old a still is.', c:{ status:'none' } },
+  });
+  const conn4 = ['desk','porch','choker','shelf','living','truck'];
+  q('q6', conn4, {
+    A:{ name:'Where on the left, link on the right', lean:true, what:'The group (or the owner’s face) on the left; the link in use and its level on the right (“USB · live”, “Cloud · live”, “Bluetooth · not connected”), then the action.', pro:'one row answers both “where is it” and “how do I reach it”, in your order.', con:'tight on a phone (the words hide there; the icon stays).', c:{ conn:'words' } },
+    B:{ name:'Link in words; where moves to the hardware row', what:'The whole row is the connection; the group sits at the end of the hardware row.', pro:'the most room for the connection words.', con:'“where” and “what it is” share a row, which mixes two kinds of fact.', c:{ conn:'wordsLeft' } },
+    C:{ name:'Icons only', what:'Where on the left, link icons and a live dot on the right.', pro:'the most compact.', con:'icons must be learned; the newcomer test fails for “not connected”.', c:{ conn:'icons' } },
+  });
+  q('q7', ['desk','choker','shelf','living'], {
+    A:{ name:'One button at the end of the name bar', lean:true, what:'Always there, always the way in: “Open” when it’s watched or offline, “Connect” when it needs a tap (Bluetooth), “Take over” when your other tab has it, “Unlock” when it’s locked, “Install” on a blank board. Greyed when it can’t be done (“Sean has it open”, updating).', pro:'one obvious next step in one place; the bar below it says why the word changed.', con:'the word changes, so you learn its place rather than its word.', c:{ action:'rowbtn' } },
+    B:{ name:'The whole card is the action', what:'No button: clicking the card connects if it must, then opens.', pro:'the cleanest card.', con:'nothing says a click will ask for Bluetooth, take over a tab, or that it can’t open now.', c:{ action:'card' } },
+    C:{ name:'Open, with a link choice', what:'“Open ▾”, where ▾ picks the link (USB, Bluetooth, Wi‑Fi, cloud).', pro:'power users choose the link.', con:'a choice most people never need, on every card.', c:{ action:'split' } },
+  });
+  document.getElementById('q8o').innerHTML = Object.entries({
+    A:{ name:'Name, version, “up to date”', lean:true, what:'“LightPlayer 0.42 · up to date”.', pro:'says the version and that it’s fine.', con:'“up to date” on most cards.', c:{ fw:'A' } },
+    B:{ name:'Version and a tick', what:'“0.42 ✓”.', pro:'compact.', con:'a green tick reaches for the “good” family for something that’s merely normal.', c:{ fw:'B' } },
+    C:{ name:'Version and release date', what:'“LightPlayer 0.42 · Oct 7”.', pro:'says how old it is without judging it.', con:'you have to know what “current” is.', c:{ fw:'C' } },
+  }).map(([l,o]) => option('q8', l, o, `<div class="app">${grid(['porch','truck'], o.c)}</div>`)).join('');
+  document.getElementById('q9o').innerHTML = Object.entries({
+    A:{ name:'Board and LED count', lean:true, what:'“ESP32-C6 mini · 60 LEDs”.', pro:'what it is and how big it is, the two facts that ground it.', con:'the LED count comes from the project’s layout, not the chip.', c:{ hw:'A' } },
+    B:{ name:'Chip and short id', what:'“ESP32-C6 · …8c3e”.', pro:'tells two identical boards apart.', con:'an id means nothing to a newcomer.', c:{ hw:'B' } },
+    C:{ name:'Board and memory', what:'“ESP32-C6 mini · 230 KB free”.', pro:'a live health number.', con:'memory worries nobody until it’s low (then it’s a notice).', c:{ hw:'C' } },
+  }).map(([l,o]) => option('q9', l, o, `<div class="app">${grid(['porch','truck'], o.c)}</div>`)).join('');
   document.getElementById('q3o').innerHTML = [
-    option('q3','A',{ name:'A popover from the row', lean:true, what:'The row opens a popover over its neighbours: the facts, then that layer’s actions.', pro:'nothing moves; quick in, quick out; works the same on every card.', con:'one layer at a time.' }, `<div class="app" style="padding-bottom:210px">${grid(['desk','porch'], LEAN, ['desk','fw'])}</div>`),
-    option('q3','B',{ name:'A side panel with the whole stack', what:'The row opens a panel beside the page with every layer, scrolled to the one you clicked.', pro:'all the real data at once; the board page in miniature.', con:'covers part of the page; heavier for a quick look.' },
-      `<div class="panelwrap"><div class="left"><div class="app" style="border:0">${grid(['desk'])}</div></div><div class="right">
-        <div class="sect2"><h5>Project</h5><div class="kv"><span>Playing</span><span>Fyeah Sign (v7, saved yesterday)</span><span>Running</span><span>58 fps</span></div></div>
-        <div class="sect2 focus"><h5>Firmware</h5><div class="kv"><span>Version</span><span>LightPlayer 0.42</span><span>Studio has</span><span>0.43</span><span>Release</span><span>2026-10-07 · split image</span></div><div style="display:flex;gap:6px"><button class="btn sm">Update to 0.43</button><button class="btn sm outline">Reinstall</button></div></div>
-        <div class="sect2"><h5>Hardware</h5><div class="kv"><span>Board</span><span>ESP32-C6 DevKit · a0:f2:62:b4:8c:11</span><span>Reach</span><span>USB (this tab) · cloud, online</span><span>Group</span><span>Studio</span></div></div>
-      </div></div>`),
+    option('q3','A',{ name:'A popover from the row', lean:true, what:'Facts, then that layer’s actions.', pro:'nothing moves.', con:'one layer at a time.' }, `<div class="app" style="padding-bottom:230px">${grid(['desk','porch'], LEAN, ['desk','hw'])}</div>`),
+    option('q3','B',{ name:'A side panel with the whole stack', what:'Every layer at once, scrolled to the one you clicked (drawn in round 1).', pro:'all the real data together.', con:'covers part of the page.' }, `<p class="ask" style="margin:0">See round 1 of this spike (git history), section Q3-B.</p>`),
   ].join('');
 }
 
-/* the live page: rows open popovers */
+/* the live page */
 let OPEN = null;
 function renderPage(){
   document.getElementById('pg').innerHTML = grid(null, LEAN, OPEN);
@@ -839,14 +946,15 @@ function renderPage(){
 }
 let toastT;
 function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4000); }
+const ACT = { Open:'Opens the board in Studio: a session on the link it’s watched over.', Connect:'Connect over Bluetooth: the browser asks you to pick the board once; then it’s watched.', 'Take over':'Your other tab lets go; this tab opens it, and the other tab is told.', Watch:'Sean has it open; you keep watching (frames through the cloud).', Unlock:'Enter its password, once per browser.', Update:'Update the firmware to 0.43 (over the link it’s watched on).', Install:'Install LightPlayer over USB.', 'Send latest':'Send the project’s last save (v12) to this board.', Show:'Open the editor at the shader error.', links:'Open over: USB · Wi‑Fi · Cloud' };
 document.body.addEventListener('click', e => {
   const act = e.target.closest('[data-act]');
-  if (act){ e.stopPropagation(); toast(`<b>${act.dataset.act}</b><span class="sub">the way out for this notice</span>`); return; }
+  if (act){ e.stopPropagation(); toast(`<b>${act.dataset.act==='links'?'Open over…':act.dataset.act}</b><span class="sub">${ACT[act.dataset.act]||''}</span>`); return; }
   if (e.target.closest('.pop')) return;
   const d = e.target.closest('[data-detail]');
   if (d && d.closest('#pg')){ const key = [d.dataset.id, d.dataset.detail]; OPEN = (OPEN && OPEN[0]===key[0] && OPEN[1]===key[1]) ? null : key; return renderPage(); }
   const o = e.target.closest('[data-open]');
-  if (o){ const b = BOARDS.find(x=>x.id===o.dataset.open); return toast(`<b>Open ${b.title}</b><span class="sub">into Studio, over the best link</span>`); }
+  if (o){ const b = BOARDS.find(x=>x.id===o.dataset.open); return toast(`<b>Open ${b.title}</b><span class="sub">${ACT.Open}</span>`); }
   if (OPEN){ OPEN=null; renderPage(); }
 });
 
