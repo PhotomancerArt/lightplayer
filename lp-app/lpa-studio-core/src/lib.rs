@@ -109,8 +109,9 @@ pub use app::devices::{
 };
 pub use app::devices::{LINK_COUNTERS_CAPTION, LinkTrouble, UiLinkCounterRow, link_counter_rows};
 pub use app::devices::{
-    RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS, RelayConnectFailure,
-    RelayDeviceTransport, RelayLinkSource,
+    RELAY_CONNECTING, RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS,
+    RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
+    connect_relay_offer,
 };
 pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
@@ -129,8 +130,8 @@ pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
     DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
     OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup,
-    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, dropped_sentence, not_permitted_sentence,
-    open_summary, tier_word,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, account_key_refused_sentence, dropped_sentence,
+    not_permitted_sentence, open_summary, tier_word,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

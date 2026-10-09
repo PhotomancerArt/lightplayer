@@ -243,7 +243,7 @@ board (the LAN link serves channel 3, core-only answers its own key lookup).
 
 Plan `lp2025/2026-10-06-2249-ota-wifi-updates`, PR C (P9, P10), on the
 board half in `docs/adr/2026-10-06-ota-update-protocol.md`'s amendment of
-the same date. Studio's relay half stays behind `?relay=` (#1031's flag) until the relay is on for everyone.
+the same date. Studio's relay half stayed behind `?relay=` (#1031's flag) until the relay was on for everyone; it is, with no flag, since the network transport's PR C (`2026-10-08-studio-network-links.md`), and the update path follows with no flag of its own.
 
 - **A relayed link carries channel 3.** `relay_link_info` says
   `carries_update_channel`, and the relay's session drains it through the

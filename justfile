@@ -4924,6 +4924,17 @@ walk-ble-emu *args:
 # restart, it rejoins, a new secure session opens from the page's own
 # redial, and the card is Ready again with no click. Same prerequisites as
 # `studio-lan`. Not CI.
+#
+# `studio-relay` (network-transport plan PR C,
+# scripts/emu/walk-wifi-emu-studio-relay.mjs): one board on the virtual LAN
+# whose uplink carries `lightplayer.app` to a local lp-cloud-server, Studio
+# with NO flag — signed in over USB its connect puts the account's key on
+# the board (`relay noAccount` → `connected`); signed out its remembered
+# tile offers no relay connect; signed in, "Connect through lightplayer.app"
+# brings the same board back as a "Wi‑Fi via lightplayer.app" card; off the
+# relay, the tile says "The board isn't online.". Needs `cargo build -p
+# lp-cli -p lp-cloud-server`, `just studio-web-story-build` and `just
+# studio-firmware-package-esp32c6`. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 

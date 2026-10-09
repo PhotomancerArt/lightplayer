@@ -389,6 +389,7 @@ fn fixture_card(
         line: Some("Unlocked with friends · play".to_string()),
         unlock: Some(UiUnlockOffer::PlayOnly),
         panel: None,
+        account_key_refused: None,
     });
     rsx! {
         div { class: CARD_FRAME,

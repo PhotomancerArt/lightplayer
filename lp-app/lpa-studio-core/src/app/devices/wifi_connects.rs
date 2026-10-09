@@ -1,24 +1,28 @@
-//! The connects over Wi‑Fi someone asked for, while they run and once they
-//! fail: what the card ("Connect over Wi‑Fi") and the add slot ("Connect a
-//! board on Wi‑Fi") say under their button.
+//! The connects to a Wi‑Fi board someone asked for, while they run and once
+//! they fail: what the card ("Connect over Wi‑Fi", "Connect through
+//! lightplayer.app") and the add slot ("Connect a board on Wi‑Fi") say under
+//! their button.
 //!
-//! One attempt per target: a known board (by MAC, so the answer finds its
-//! card even if the roster merged the entry meanwhile), or the add slot's
-//! one field. A new press replaces the target's attempt; a success clears
-//! it (the board's card takes over from there); a failure stays, in plain
-//! words, until the next press.
+//! One attempt per target: a known board on the LAN or through the relay
+//! (by MAC, so the answer finds its card even if the roster merged the entry
+//! meanwhile), or the add slot's one field. A new press replaces the
+//! target's attempt; a success clears it (the board's card takes over from
+//! there); a failure stays, in plain words, until the next press.
 
 use std::collections::BTreeMap;
 
 use lpa_devices::BoardKey;
 
+use super::relay_connect_failure::RelayConnectFailure;
 use super::wifi_connect_failure::WifiConnectFailure;
 
 /// Whose connect it is.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum WifiConnectTarget {
-    /// A known board's card, by its MAC.
+    /// A known board's card, on the LAN, by its MAC.
     Board(BoardKey),
+    /// A known board's card, through lightplayer.app's relay, by its MAC.
+    Relay(BoardKey),
     /// The add slot's address field.
     Address,
 }
@@ -28,21 +32,26 @@ pub enum WifiConnectTarget {
 struct WifiConnectAttempt {
     /// The host (and port) dialled, as the words name it.
     host: String,
-    failure: Option<WifiConnectFailure>,
+    /// Why it failed, in the card's words.
+    failure: Option<String>,
 }
 
 /// What a card or the add slot says about its connect.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiWifiConnect {
-    /// The address being reached: `192.168.1.40`, `lp-1a2b.local`.
+    /// The address being reached: `192.168.1.40`, `lp-1a2b.local`; through
+    /// the relay, `lightplayer.app`.
     pub host: String,
+    /// Reached through lightplayer.app's relay rather than on the LAN.
+    pub through_relay: bool,
     /// Under way: the button waits.
     pub connecting: bool,
     /// Why the last one failed, in plain words.
     pub error: Option<String>,
 }
 
-/// Every connect over Wi‑Fi this page asked for and has not seen succeed.
+/// Every connect to a Wi‑Fi board this page asked for and has not seen
+/// succeed.
 #[derive(Clone, Debug, Default)]
 pub struct WifiConnects {
     attempts: BTreeMap<WifiConnectTarget, WifiConnectAttempt>,
@@ -68,16 +77,35 @@ impl WifiConnects {
         host: &str,
         result: Result<(), WifiConnectFailure>,
     ) {
+        self.finish_with_words(target, host, result.map_err(|failure| failure.words()));
+    }
+
+    /// A connect through the relay ended: as [`Self::finish`].
+    pub fn finish_relay(
+        &mut self,
+        target: WifiConnectTarget,
+        host: &str,
+        result: Result<(), RelayConnectFailure>,
+    ) {
+        self.finish_with_words(target, host, result.map_err(|failure| failure.words()));
+    }
+
+    fn finish_with_words(
+        &mut self,
+        target: WifiConnectTarget,
+        host: &str,
+        result: Result<(), String>,
+    ) {
         match result {
             Ok(()) => {
                 self.attempts.remove(&target);
             }
-            Err(failure) => {
+            Err(words) => {
                 self.attempts.insert(
                     target,
                     WifiConnectAttempt {
                         host: host.to_string(),
-                        failure: Some(failure),
+                        failure: Some(words),
                     },
                 );
             }
@@ -91,9 +119,16 @@ impl WifiConnects {
             .is_some_and(|attempt| attempt.failure.is_none())
     }
 
-    /// Drop what a board's card said (Forget took the board).
+    /// Drop what a target said.
     pub fn forget(&mut self, target: WifiConnectTarget) {
         self.attempts.remove(&target);
+    }
+
+    /// Drop what either of `board`'s connects said (Forget took the board,
+    /// or a connect on the other road began).
+    pub fn forget_board(&mut self, board: BoardKey) {
+        self.forget(WifiConnectTarget::Board(board));
+        self.forget(WifiConnectTarget::Relay(board));
     }
 
     /// What `target`'s card or slot says.
@@ -101,9 +136,18 @@ impl WifiConnects {
         let attempt = self.attempts.get(&target)?;
         Some(UiWifiConnect {
             host: attempt.host.clone(),
+            through_relay: matches!(target, WifiConnectTarget::Relay(_)),
             connecting: attempt.failure.is_none(),
-            error: attempt.failure.as_ref().map(WifiConnectFailure::words),
+            error: attempt.failure.clone(),
         })
+    }
+
+    /// What `board`'s card says: its last connect, whichever road it took
+    /// (a press on one road drops what the other said, so there is at most
+    /// one).
+    pub fn view_board(&self, board: BoardKey) -> Option<UiWifiConnect> {
+        self.view(WifiConnectTarget::Board(board))
+            .or_else(|| self.view(WifiConnectTarget::Relay(board)))
     }
 }
 
@@ -121,6 +165,7 @@ mod tests {
             connects.view(board),
             Some(UiWifiConnect {
                 host: "10.0.0.5".to_string(),
+                through_relay: false,
                 connecting: true,
                 error: None
             })
@@ -142,5 +187,21 @@ mod tests {
         );
         assert!(!connects.connecting(WifiConnectTarget::Address));
         assert_eq!(connects.view(board), None, "one target's answer is its own");
+    }
+
+    #[test]
+    fn a_relay_connect_says_its_own_words_and_the_card_reads_either_road() {
+        let mut connects = WifiConnects::default();
+        let key = BoardKey::parse("a0f26287b48c").unwrap();
+        let relay = WifiConnectTarget::Relay(key);
+        connects.start(relay, "lightplayer.app");
+        assert!(connects.connecting(relay));
+        assert!(!connects.connecting(WifiConnectTarget::Board(key)));
+        connects.finish_relay(relay, "lightplayer.app", Err(RelayConnectFailure::Offline));
+        let said = connects.view_board(key).expect("the card says why");
+        assert!(said.through_relay && !said.connecting);
+        assert_eq!(said.error.as_deref(), Some("The board isn't online."));
+        connects.forget_board(key);
+        assert_eq!(connects.view_board(key), None);
     }
 }

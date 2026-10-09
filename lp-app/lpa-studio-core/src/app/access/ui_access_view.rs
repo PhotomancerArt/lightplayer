@@ -19,6 +19,21 @@ pub struct UiDeviceAccess {
     pub unlock: Option<UiUnlockOffer>,
     /// The device access panel, when this link may write the device store.
     pub panel: Option<UiAccessPanel>,
+    /// The last USB connect could not add the signed-in account's key, so
+    /// the board cannot be reached through lightplayer.app: the sentence
+    /// saying so, and why ([`account_key_refused_sentence`]). Shown on the
+    /// card, not only inside the Access panel.
+    pub account_key_refused: Option<String>,
+}
+
+/// What the card says when the account's key could not be added over USB,
+/// followed by the reason (`why`: the room rule's
+/// [`super::device_access_ops::FULL_SENTENCE`], or the board's own refusal).
+pub fn account_key_refused_sentence(why: &str) -> String {
+    format!(
+        "Your account's key couldn't be added, so this board can't be reached through \
+         lightplayer.app. {why}"
+    )
 }
 
 /// What a Bluetooth card offers when its unlock is not the whole story.
@@ -193,11 +208,14 @@ pub fn prompt_sentence(reason: &super::PromptReason, device_name: &str) -> Strin
 /// on the sheet it opens.
 pub const PLAY_ONLY_SENTENCE: &str = "Authoring needs an author password, or plug it in by USB.";
 
-/// The card's login line for a Bluetooth link.
-pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
+/// The card's login line for a link that must be unlocked — Bluetooth, the
+/// LAN, or lightplayer.app's relay (`link`, which the words name).
+pub fn access_line(phase: &super::AccessPhase, link: crate::UiLinkKind) -> Option<String> {
     use super::AccessPhase;
     Some(match phase {
-        AccessPhase::Unknown | AccessPhase::Checking => "Connecting over Bluetooth…".to_string(),
+        AccessPhase::Unknown | AccessPhase::Checking => {
+            format!("Connecting over {}…", link.label())
+        }
         AccessPhase::LoggingIn => "Unlocking…".to_string(),
         AccessPhase::Granted {
             tier: Tier::Edit,
@@ -219,9 +237,10 @@ pub fn access_line(phase: &super::AccessPhase) -> Option<String> {
             label: None,
         } => "Unlocked".to_string(),
         AccessPhase::Locked => "Needs a device password".to_string(),
-        AccessPhase::Unreachable => {
-            "Bluetooth has no device password here — connect by USB to set one".to_string()
-        }
+        AccessPhase::Unreachable => format!(
+            "{} has no device password here — connect by USB to set one",
+            link.label()
+        ),
     })
 }
 
@@ -233,38 +252,69 @@ mod tests {
     #[test]
     fn the_login_line_names_the_label_and_a_play_tier() {
         assert_eq!(
-            access_line(&AccessPhase::Granted {
-                tier: Tier::Play,
-                label: Some("friends".to_string())
-            })
+            access_line(
+                &AccessPhase::Granted {
+                    tier: Tier::Play,
+                    label: Some("friends".to_string())
+                },
+                crate::UiLinkKind::Bluetooth
+            )
             .as_deref(),
             Some("Unlocked with friends · play")
         );
         assert_eq!(
-            access_line(&AccessPhase::Granted {
-                tier: Tier::Edit,
-                label: Some("Yona's MacBook".to_string())
-            })
+            access_line(
+                &AccessPhase::Granted {
+                    tier: Tier::Edit,
+                    label: Some("Yona's MacBook".to_string())
+                },
+                crate::UiLinkKind::Bluetooth
+            )
             .as_deref(),
             Some("Unlocked by Yona's MacBook")
         );
         assert_eq!(
-            access_line(&AccessPhase::Granted {
-                tier: Tier::Play,
-                label: None
-            })
+            access_line(
+                &AccessPhase::Granted {
+                    tier: Tier::Play,
+                    label: None
+                },
+                crate::UiLinkKind::Bluetooth
+            )
             .as_deref(),
             Some("Open — play, no password")
         );
         assert_eq!(
-            access_line(&AccessPhase::Granted {
-                tier: Tier::Edit,
-                label: None
-            })
+            access_line(
+                &AccessPhase::Granted {
+                    tier: Tier::Edit,
+                    label: None
+                },
+                crate::UiLinkKind::Bluetooth
+            )
             .as_deref(),
             Some("Unlocked"),
             "one word for unlocked, with or without a name"
         );
+    }
+
+    /// The line names the link it is about: a board through lightplayer.app
+    /// never says "Connecting over Bluetooth…" (PR C).
+    #[test]
+    fn the_login_line_names_the_link() {
+        for (link, words) in [
+            (crate::UiLinkKind::Bluetooth, "Connecting over Bluetooth…"),
+            (crate::UiLinkKind::Wifi, "Connecting over Wi\u{2011}Fi…"),
+            (
+                crate::UiLinkKind::Relay,
+                "Connecting over Wi\u{2011}Fi via lightplayer.app…",
+            ),
+        ] {
+            assert_eq!(
+                access_line(&AccessPhase::Checking, link).as_deref(),
+                Some(words)
+            );
+        }
     }
 
     #[test]
