@@ -129,15 +129,25 @@ core at 581632; up to date; 4 reconnects timed`.
 
 **Heap**, from the board's heartbeat, on the relay walk's run
 (`lp-emu:esp32c6:t1+net=lan@d1efe5028`), beside the C6 read gate
-(40,960 B free / 8,192 B largest block):
+(40,960 B free / 8,192 B largest block), with `main`'s figures from CI's
+own run of the same cell (`main` `f5039fb93`, run 37905412888, job
+`Emulator C6 (x64)`) beside them. CI's run of this PR (`f83e61991`, run
+37926434285) read every row below to the byte, except the registered
+row's largest block (94,680 B on CI), which moves by a few dozen bytes from
+run to run.
 
-| State | Free | Largest block | Over the gate |
-|---|---:|---:|---|
-| joined, no account key (no relay buffers) | 181,160 B | 101,988 B | yes |
-| booted with network and key saved, relay registered, no session | 174,360 B | 94,736 B | yes |
-| `projects/test/basic` loaded, relay registered, a relay session open | 63,300 B | 17,636 B | yes |
-| **`projects/test/basic` loaded, relay registered, pictures watched, a relay session open** (P4) | **63,232 B** | **17,644 B** | yes |
-| `projects/test/basic` loaded, relay registered, a LAN session open | 63,236 B | 17,636 B | yes |
+| State | `main` (CI) | This branch: free | Largest block | Over the gate |
+|---|---|---:|---:|---|
+| joined, no account key (no relay buffers) | 181,344 / 102,172 B | 181,160 B | 101,988 B | yes |
+| booted with network and key saved, relay registered, no session | 175,444 / 95,588 B | 174,360 B | 94,736 B | yes |
+| `projects/test/basic` loaded, relay registered, a relay session open | 64,496 / 18,832 B | 63,300 B | 17,636 B | yes |
+| **`projects/test/basic` loaded, relay registered, pictures watched, a relay session open** (P4) | — (no such step) | **63,232 B** | **17,644 B** | yes |
+| `projects/test/basic` loaded, relay registered, a LAN session open | 64,432 / 18,824 B | 63,236 B | 17,636 B | yes |
+
+Relay protocol 2 costs a registered board **1,084–1,196 B of free heap and
+1,196 B of its largest block** against `main` (the picture buffer, 836 B,
+held while the leg is up, and the project's facts); with no account key it
+costs 184 B.
 
 Being watched costs 68 B of free heap (63,300 → 63,232 B, the same run's
 two relay-session rows) and nothing of the largest block. The unmodified
@@ -162,13 +172,18 @@ The engine still starts at `0x178000`: no page crossed. (`main` itself
 grew the core by 1,872 B between `078e77007` and `f5039fb93`, which is why
 the page distance before this PR is 15,424 B, not the plan's 17,296 B.)
 
-**The CI cell's wall time** (Q20; wall time on this host, M2 Max, other
-worktrees building — not a gate): the unmodified cell `finished in
-125.44s` (load average 7–15), and with the picture steps `finished in
-190.86s` (load 7–37), run back to back: **about +65 s**, within the
-minute Yona accepted. An earlier pair under heavier load read 157 s and
-282 s; under load the emulated board's clock runs well behind wall time
-(the 15 s lease and a heartbeat took 32.8–49.2 s wall to lapse).
+**The CI cell's wall time** (Q20; wall time, not a gate). **On CI**
+(job `Emulator C6 (x64)`, which runs it in `test-emu-serve`): `main`
+`f5039fb93` `finished in 112.01s` (run 37905412888), this PR `f83e61991`
+`finished in 220.24s` (run 37926434285): **+108 s**, under the plan's
+two-minute line but more than the "about a minute" Yona accepted. Most of it
+is the board's lease running out on its own clock (`idle again by itself
+49.9 s wall after the last watch` on CI). On this host (M2 Max, other
+worktrees building), back to back: the unmodified cell `finished in
+125.44s` (load average 7–15), the new one `finished in 190.86s` (load
+7–37), about +65 s; an earlier pair under heavier load read 157 s and
+282 s. Under load the emulated board's clock runs well behind wall time
+(the 15 s lease and a heartbeat took 32.8–49.9 s wall to lapse).
 
 ## 6. What this does not prove, and who does
 

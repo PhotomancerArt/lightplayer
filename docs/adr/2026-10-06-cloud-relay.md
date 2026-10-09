@@ -584,7 +584,10 @@ Heap, emulated (`lp-emu:esp32c6:t1+net=lan@d1efe5028`, the board's own
 heartbeat): with `projects/test/basic` loaded, the relay registered, the
 board **watched** and a relay session open, **63,232 B free, 17,644 B
 largest block**, over the C6 read gate (40 KiB / 8 KiB); being watched costs
-68 B of free heap and nothing of the largest block. A registered board
+68 B of free heap and nothing of the largest block. Against `main` (CI's
+runs of the same cell, `f5039fb93` and this PR), protocol 2 costs a
+registered board 1,084–1,196 B of free heap and 1,196 B of its largest
+block, and a board with no account key 184 B. A registered board
 keeps one 836 B picture buffer (`MAX_BOARD_PICTURE_FRAME`) while its leg is
 up, released when the leg ends, and none while it may not dial. The boot
 heap ratchet sits inside `main`'s own spread (CI: 105,716 B used on the
