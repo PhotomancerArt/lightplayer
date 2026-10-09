@@ -500,6 +500,35 @@ is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
 is published disabled with its reason. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
+### Which board plays which project
+
+A board's heartbeat says that something runs, never which library project it
+is (the wire carries a storage label, not a `prj…` uid), so Studio joins
+three kinds of evidence, in one place: `devices/board_projects.rs`
+(`BoardProjects`, built by `board_projects`), with the per-board answer
+`BoardPlays` in `devices/board_plays.rs`. It is published as
+`DeviceRosterView.board_projects`, filled by
+`StudioController::device_roster_view()`. First match wins:
+
+1. The editor's lens is open on the board with a library project bound:
+   `Open`.
+2. The board says it runs nothing: `Nothing`. A live "nothing" beats a stale
+   association (a Remove, an erase, another browser's push).
+3. The registry row's association names a project in this library: `Given`,
+   with `at_head` saying whether the version given is the project's newest
+   (`HomeInputs.project_heads`). This holds whether the board says it runs
+   something or has said nothing at all, so an offline board keeps playing
+   what it was given.
+4. The board says it runs something: `Running { label }`, a project this
+   library cannot name.
+5. Otherwise `Unknown`.
+
+`plays`, `boards_playing`, `sharing` and `on_no_board` answer the questions
+the board card's project bar ("Holiday Eaves · 3 boards", "Out of date") and
+the home page's "Other projects" ask. Both read this join and never build
+their own. A project on an offline board counts as on a board; pending links
+are not in the join.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

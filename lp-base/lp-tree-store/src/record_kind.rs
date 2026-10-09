@@ -1,19 +1,16 @@
-//! Record types and chunk codecs, as their on-flash bytes.
+//! Record types and chunk codecs, as their on-flash bytes (FORMAT.md).
 
 /// What a record holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RecordKind {
-    /// A leaf chunk (a whole small file, or one chunk of a bigger node).
+    /// A leaf: a whole small file, or one chunk of a bigger node.
     Blob,
     /// A multi-part node: ordered child ids (chunks, or lower Multi levels).
     Multi,
-    /// A directory: sorted entries name → (kind, size, id).
+    /// A directory that fits one record: sorted entries.
     Dir,
-    /// The commit anchor: seq, cold dir, hot dir, dictionary.
+    /// The commit anchor.
     Root,
-    /// The store-local deflate dictionary, when it fits one record (else the
-    /// dictionary node is a `Multi` of stored chunks).
-    Dict,
 }
 
 impl RecordKind {
@@ -23,17 +20,16 @@ impl RecordKind {
             RecordKind::Multi => 2,
             RecordKind::Dir => 3,
             RecordKind::Root => 4,
-            RecordKind::Dict => 5,
         }
     }
 
+    /// `5` was the prototype's dictionary and is never written again.
     pub fn from_u8(b: u8) -> Option<Self> {
         Some(match b {
             1 => RecordKind::Blob,
             2 => RecordKind::Multi,
             3 => RecordKind::Dir,
             4 => RecordKind::Root,
-            5 => RecordKind::Dict,
             _ => return None,
         })
     }
@@ -44,11 +40,9 @@ impl RecordKind {
 pub enum ChunkCodec {
     /// Payload = the bytes.
     Stored,
-    /// Payload = logical length (u16 LE) ++ raw deflate.
+    /// Payload = logical length (u16 LE) ++ raw deflate (RFC 1951), as the
+    /// host sent it.
     Deflate,
-    /// Payload = logical length (u16 LE) ++ dictionary id (u64 LE) ++ raw
-    /// deflate against that dictionary.
-    DeflateDict,
 }
 
 impl ChunkCodec {
@@ -56,15 +50,14 @@ impl ChunkCodec {
         match self {
             ChunkCodec::Stored => 0,
             ChunkCodec::Deflate => 1,
-            ChunkCodec::DeflateDict => 2,
         }
     }
 
+    /// `2` was the prototype's deflate-with-dictionary and is never written.
     pub fn from_u8(b: u8) -> Option<Self> {
         Some(match b {
             0 => ChunkCodec::Stored,
             1 => ChunkCodec::Deflate,
-            2 => ChunkCodec::DeflateDict,
             _ => return None,
         })
     }
@@ -81,17 +74,14 @@ mod tests {
             RecordKind::Multi,
             RecordKind::Dir,
             RecordKind::Root,
-            RecordKind::Dict,
         ] {
             assert_eq!(RecordKind::from_u8(k.to_u8()), Some(k));
         }
+        assert_eq!(RecordKind::from_u8(5), None);
         assert_eq!(RecordKind::from_u8(0xFF), None);
-        for c in [
-            ChunkCodec::Stored,
-            ChunkCodec::Deflate,
-            ChunkCodec::DeflateDict,
-        ] {
+        for c in [ChunkCodec::Stored, ChunkCodec::Deflate] {
             assert_eq!(ChunkCodec::from_u8(c.to_u8()), Some(c));
         }
+        assert_eq!(ChunkCodec::from_u8(2), None);
     }
 }

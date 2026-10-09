@@ -92,6 +92,7 @@ pub use app::devices::{
     MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
     device_layout_view, device_restore_from_file_action,
 };
+pub use app::devices::{BoardPlays, BoardProjectInputs, BoardProjects, board_projects};
 pub use app::devices::{
     BundledOwnBuild, BundledOwnBuildSource, MemoryOwnBuildSource, OWN_BUILD_MISMATCH,
     OwnBuildSource, UpdateHost,
