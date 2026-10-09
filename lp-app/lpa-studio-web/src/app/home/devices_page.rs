@@ -2,8 +2,9 @@
 //!
 //! One section, one source: the `lpa-devices` roster's projection — one
 //! card per known device (real, emu, or sim; a sim is a device, same as
-//! any board), one entry per link still being identified, and one button
-//! to ask the browser for another port.
+//! any board), one entry per link still being identified, and below them
+//! the Connect a board section ([`ConnectBoardSection`]) to bring another
+//! in.
 //!
 //! The device half renders `RosterView` DIRECTLY. There is no `Ui*` mirror of
 //! it, on purpose: the projection is already a pure function of the fold, so
@@ -32,21 +33,20 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceEscape, DeviceRosterView, OfferPath, RememberedView, UiAction, UiHomeView, UiOffer,
-    UiWifiConnect, escape_verb, split_roster,
+    DeviceEscape, DeviceRosterView, RememberedView, UiAction, UiHomeView, UiOffer, escape_verb,
+    split_roster,
 };
 
-use crate::app::home::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
+use crate::app::home::connect_board::ConnectBoardSection;
+use crate::app::home::connect_board::connect_board_section::NO_TRANSPORT_HEADLINE;
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::play_feed_text::frame_age_label;
-use crate::app::home::reach_note::{ReachCopy, ReachNote, USB_UNAVAILABLE, this_page_url};
-use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::wifi_address_entry::{
-    CONNECTING_LINE_CLASS, FAILED_LINE_CLASS, WifiAddressEntry, connect_line,
+    CONNECTING_LINE_CLASS, FAILED_LINE_CLASS, connect_line,
 };
 use crate::app::home::{device_grid_class, section_title_class};
 use crate::app::node::lamp_view::LampView;
-use crate::core::{ActionButton, ActionButtonVariant, use_device_verbs, use_offer_at, verb_named};
+use crate::core::{ActionButton, ActionButtonVariant, use_device_verbs, verb_named};
 
 /// The runtime roster page (roadmap M4's gallery top, re-homed).
 #[component]
@@ -59,9 +59,9 @@ pub fn DevicesPage(
     /// closed and stays where the user leaves it.
     #[props(default)]
     remembered_open: bool,
-    /// Story-only: mount the add slot's target menu open, for the same
-    /// reason — a capture cannot click a trigger, and the dropdown is the
-    /// half of D44 worth reviewing.
+    /// Story-only: mount the Connect a board section's target menu open,
+    /// for the same reason — a capture cannot click a trigger, and the
+    /// dropdown is the half of D44 worth reviewing.
     #[props(default)]
     target_pick_open: bool,
     /// Stories only: the access settings section's view (the app reads it
@@ -100,11 +100,7 @@ pub fn DevicesPage(
                     h2 { class: section_title_class(), "Devices" }
                 }
 
-                if !devices.transport_available {
-                    UnavailableNote {}
-                }
-
-                if devices.transport_available {
+                if devices.transport_available && (!devices.roster.pending.is_empty() || !connected.is_empty()) {
                     div { class: device_grid_class(),
                         // Pending links come first: a board just plugged in is
                         // what the user is looking at.
@@ -153,16 +149,19 @@ pub fn DevicesPage(
                                 on_action,
                             }
                         }
-                        // Adding lives IN the roster, at the insertion point
-                        // (the house rule: add buttons sit where the new
-                        // entry will appear, never in headers).
-                        AddDeviceCard {
-                            pick_open: target_pick_open,
-                            usb_available: devices.usb_available,
-                            wifi_connect: devices.wifi_address_connect.clone(),
-                            on_action,
-                        }
                     }
+                }
+
+                // Adding a board: the Connect a board section, below the
+                // roster (the home page's own section, drawn here until
+                // the page replaces this one).
+                ConnectBoardSection {
+                    usb_available: devices.usb_available,
+                    transport_available: devices.transport_available,
+                    wifi_connect: devices.wifi_address_connect.clone(),
+                    welcome: false,
+                    pick_open: target_pick_open,
+                    on_action,
                 }
 
                 // The boards Studio knows and cannot see. One line, always
@@ -202,212 +201,6 @@ pub fn DevicesPage(
                         }
                     },
                 }
-            }
-        }
-    }
-}
-
-/// The roster's add slot: a card in the grid where the next device's card
-/// will appear. Its three verbs are offers (M3): `devices/connect-usb`,
-/// `devices/connect-ble` and `devices/new-sim`. It doubles as the empty state — same slot, same copy, same
-/// layout whether it is the first board or the fifth (clear minimalism,
-/// G1 ruling) — so there is no separate empty-state block to jump around.
-///
-/// # "Connect a board", two transports, one detour (D44, M5, G3)
-///
-/// The heading says the goal; the two buttons say only the path —
-/// **via USB** (the spectrum Primary: a board on the desk is the common
-/// case) and **via Bluetooth**. Both are ALWAYS drawn (G3, 2026-09-24): a
-/// transport this browser cannot drive is DISABLED with core's reason under
-/// it and a way to continue — the Bluefy link, the Brave flag, this page's
-/// address to open where it works — rather than hidden, so a phone visitor
-/// learns USB exists and where it works. Below them, **start a board here
-/// ▾** is the quiet detour that opens the target menu; its panel floats in
-/// the top layer, so the slot is the same height open or shut.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn AddDeviceCard(
-    /// Stories only: mount the target menu open (a capture cannot click).
-    #[props(default = false)]
-    pick_open: bool,
-    /// Stories only: pin what the Bluetooth half says. Real surfaces ask the
-    /// browser (`use_ble_reach`).
-    #[props(default = None)]
-    ble_reach: Option<BluetoothReach>,
-    /// Whether this browser can reach a USB port (Web Serial, or the
-    /// `?emu=` shim that polyfills it). Where it cannot — iPhone, Bluefy,
-    /// Firefox, Safari — the USB button is drawn disabled with its reason.
-    #[props(default = true)]
-    usb_available: bool,
-    /// Stories only: the address the copy lines show, pinned so a capture
-    /// does not print the story server's own URL. Real surfaces read the
-    /// page's.
-    #[props(default = None)]
-    page_url: Option<String>,
-    /// The Wi‑Fi entry's connect under way, or why it failed (core's).
-    #[props(default)]
-    wifi_connect: Option<UiWifiConnect>,
-    /// Stories only: the Wi‑Fi field as typed.
-    #[props(default)]
-    wifi_typed: Option<String>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let asked = use_ble_reach();
-    let ble = ble_reach.unwrap_or_else(|| asked());
-    let notes = add_slot_notes(usb_available, ble);
-    let page_url = page_url.unwrap_or_else(this_page_url);
-    let usb = use_offer_at(OfferPath::devices().child("connect-usb"))();
-    let ble_offer = use_offer_at(OfferPath::devices().child("connect-ble"))();
-    let wifi_offer = use_offer_at(OfferPath::devices().child("connect-wifi-address"))();
-    rsx! {
-        div { class: "tw:flex tw:min-h-40 tw:flex-col tw:items-center tw:justify-center tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border-strong tw:bg-transparent tw:px-5 tw:py-6",
-            // The invitation is transport-OPEN: connecting is the goal, and
-            // each button names only its path.
-            p { class: "tw:m-0 tw:text-center tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                "Connect a board"
-            }
-            // One column, both buttons the full width of it, so the two
-            // paths read as a pair whatever each says under it. USB wears
-            // the Primary spectrum ring, Bluetooth the Secondary tier.
-            div { class: "tw:grid tw:w-full tw:max-w-64 tw:gap-3 tw:text-center",
-                if let Some(usb) = usb {
-                    TransportOffer {
-                        offer: usb,
-                        path_word: "via USB",
-                        note: notes.usb,
-                        page_url: page_url.clone(),
-                        on_action,
-                    }
-                }
-                if let Some(ble) = ble_offer {
-                    TransportOffer {
-                        offer: ble,
-                        path_word: "via Bluetooth",
-                        note: notes.ble,
-                        page_url,
-                        on_action,
-                    }
-                }
-                // A board on your network: no chooser, so its address.
-                if let Some(wifi) = wifi_offer {
-                    WifiAddressEntry {
-                        offer: wifi,
-                        connect: wifi_connect,
-                        typed: wifi_typed,
-                        on_action,
-                    }
-                }
-            }
-            span { class: add_slot_or_class(), "or" }
-            TargetPickPopover { initially_open: pick_open, on_action }
-        }
-    }
-}
-
-/// One transport's offer as its button and, when it is disabled, the way
-/// forward under it: the reason (the offer's own, core's sentence), an
-/// optional link out, and the text to select and copy — shown in full,
-/// never folded. The way forward is the web's: it is about this browser.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn TransportOffer(
-    offer: UiOffer,
-    /// What the button reads in the slot: only the path ("via USB"),
-    /// because the slot's heading already says the goal. The offer's own
-    /// label says both, for a reader with no heading (the app agent, ⌘K).
-    path_word: &'static str,
-    note: Option<ReachNote>,
-    page_url: String,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let copy = note.and_then(|note| note.copy).map(|copy| match copy {
-        ReachCopy::Text(text) => text.to_string(),
-        ReachCopy::ThisPage => page_url.clone(),
-    });
-    // The way forward belongs under a button that cannot be pressed.
-    let note = note.filter(|_| !offer.is_enabled());
-    let action = offer.action.with_label(path_word);
-    rsx! {
-        div { class: "tw:grid tw:w-full tw:gap-1",
-            ActionButton { action, running: false, on_action }
-            if let Some(note) = note {
-                if let Some(link) = note.link {
-                    a {
-                        class: "tw:justify-self-center tw:text-xs tw:font-semibold tw:text-strong-foreground tw:underline tw:underline-offset-2",
-                        href: link.href,
-                        target: "_blank",
-                        rel: "noopener",
-                        "{link.label}"
-                    }
-                }
-                if let Some(lead) = note.copy_lead.filter(|_| copy.is_some()) {
-                    p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground",
-                        "{lead}"
-                    }
-                }
-                if let Some(copy) = copy {
-                    code { class: "tw:justify-self-center tw:select-all tw:[overflow-wrap:anywhere] tw:rounded-sm tw:bg-card-muted tw:px-1.5 tw:py-0.5 tw:font-mono tw:text-[11px] tw:text-strong-foreground",
-                        "{copy}"
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// What the add slot says under each transport where this browser cannot
-/// drive it: the way forward (a link out, an address to copy), beside the
-/// reason core gives the disabled offer. Decided apart from the component
-/// so it is testable.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct AddSlotNotes {
-    /// Under "via USB".
-    pub usb: Option<ReachNote>,
-    /// Under "via Bluetooth".
-    pub ble: Option<ReachNote>,
-}
-
-pub(crate) fn add_slot_notes(usb_available: bool, ble: BluetoothReach) -> AddSlotNotes {
-    let ble_note = ble_reach_note(ble);
-    let mut usb_note = (!usb_available).then_some(USB_UNAVAILABLE);
-    // Firefox, desktop Safari: BOTH paths send you to Chrome or Edge, with
-    // the same "open this page there" — say the address once, under the
-    // lower button, rather than twice in a row.
-    if let (Some(usb), Some(ble)) = (usb_note.as_mut(), ble_note)
-        && usb.copy == ble.copy
-        && usb.copy_lead == ble.copy_lead
-    {
-        usb.copy_lead = None;
-        usb.copy = None;
-    }
-    AddSlotNotes {
-        usb: usb_note,
-        ble: ble_note,
-    }
-}
-
-/// The "or" before the slot's detour: the quietest possible separator,
-/// because the offers are not equal — connecting a board is the common
-/// case and starting one here is the deliberate detour.
-fn add_slot_or_class() -> &'static str {
-    "tw:text-[10px] tw:tracking-wide tw:text-dim-foreground tw:uppercase"
-}
-
-/// No transport: this build (or this browser) cannot reach a USB port at all.
-///
-/// Said out loud, because an empty roster with no explanation reads as "you
-/// have no devices" — a different and wrong claim.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UnavailableNote() -> Element {
-    rsx! {
-        div { class: note_class(),
-            p { class: "tw:m-0 tw:text-sm tw:font-semibold tw:text-strong-foreground",
-                "This browser can't talk to USB devices"
-            }
-            p { class: "tw:m-0 tw:max-w-prose tw:text-xs tw:leading-relaxed tw:text-subtle-foreground",
-                "Studio reaches boards over Web Serial, which Chrome, Edge and \
-                 other Chromium browsers support. A sim runs anywhere."
             }
         }
     }
@@ -678,10 +471,6 @@ fn remembered_tile_class() -> &'static str {
     "tw:flex tw:flex-col tw:gap-3 tw:rounded-md tw:border tw:border-dashed tw:border-border tw:bg-card tw:p-4 tw:opacity-75"
 }
 
-fn note_class() -> &'static str {
-    "tw:grid tw:gap-2 tw:rounded-md tw:border tw:border-dashed tw:border-border tw:px-4 tw:py-5"
-}
-
 /// A page-shaped summary of what the roster is showing, for tests and
 /// fallback renderers.
 ///
@@ -698,7 +487,7 @@ fn note_class() -> &'static str {
 )]
 pub(crate) fn devices_page_lines(devices: &DeviceRosterView) -> Vec<String> {
     if !devices.transport_available {
-        return vec!["This browser can't talk to USB devices".to_string()];
+        return vec![NO_TRANSPORT_HEADLINE.to_string()];
     }
     let split = split_roster(devices);
     if split.connected.is_empty() && devices.roster.pending.is_empty() {
@@ -748,116 +537,6 @@ mod tests {
         }
     }
 
-    /// D44 + G3: the slot offers BOTH ways a card can appear, and each
-    /// verb's words come from the place that owns them — core's offers for
-    /// the two transports under "Connect a board" (the button reads only
-    /// the path), the target menu for the board Studio is about to start.
-    #[test]
-    fn the_add_slot_offers_both_ways_a_card_can_appear() {
-        let [usb, ble, wifi] =
-            lpa_studio_core::add_device_offers(true, BluetoothReach::Ready, wifi_reach())
-                .try_into()
-                .expect("three transports");
-        assert_eq!(usb.path.to_string(), "devices/connect-usb");
-        assert_eq!(usb.action.meta().icon.as_deref(), Some("usb"));
-        assert_eq!(ble.path.to_string(), "devices/connect-ble");
-        assert_eq!(ble.action.meta().icon.as_deref(), Some("bluetooth"));
-        assert_eq!(wifi.path.to_string(), "devices/connect-wifi-address");
-        assert_eq!(wifi.action.meta().icon.as_deref(), Some("wifi"));
-        assert_eq!(
-            crate::app::home::target_pick_popover::SLOT_VERB_LABEL,
-            "start a board here"
-        );
-    }
-
-    /// G3: both buttons are ALWAYS drawn. Where this browser cannot drive a
-    /// transport, core disables its offer with the reason, and the slot
-    /// adds a way to go on under it — never hidden, never a verb that can
-    /// only fail.
-    #[test]
-    fn a_transport_this_browser_cannot_drive_is_disabled_with_a_way_forward() {
-        let reasons = |usb: bool, reach: BluetoothReach| {
-            lpa_studio_core::add_device_offers(usb, reach, wifi_reach())
-                .into_iter()
-                // The two choosers; the Wi‑Fi address entry has its own
-                // test in core (it waits for its field, not a browser).
-                .take(2)
-                .map(|offer| match &offer.action.meta().enablement {
-                    lpa_studio_core::ActionEnablement::Enabled => None,
-                    lpa_studio_core::ActionEnablement::Disabled { reason } => Some(reason.clone()),
-                })
-                .collect::<Vec<_>>()
-        };
-
-        // Chrome/Edge on a computer: both live, nothing to explain.
-        assert_eq!(reasons(true, BluetoothReach::Ready), [None, None]);
-        assert_eq!(
-            add_slot_notes(true, BluetoothReach::Ready),
-            AddSlotNotes {
-                usb: None,
-                ble: None
-            }
-        );
-
-        // Bluefy: no Web Serial. USB disabled with core's reason, and the
-        // slot gives this page's address to open where it works; Bluetooth
-        // live.
-        assert_eq!(
-            reasons(false, BluetoothReach::Ready),
-            [
-                Some(lpa_studio_core::USB_NEEDS_WEB_SERIAL.to_string()),
-                None
-            ]
-        );
-        let bluefy = add_slot_notes(false, BluetoothReach::Ready);
-        assert_eq!(bluefy.usb, Some(USB_UNAVAILABLE));
-        assert_eq!(
-            USB_UNAVAILABLE.reason,
-            lpa_studio_core::USB_NEEDS_WEB_SERIAL
-        );
-        assert_eq!(USB_UNAVAILABLE.copy, Some(ReachCopy::ThisPage));
-        assert_eq!(bluefy.ble, None);
-
-        // iPhone Safari / Chrome on iOS: both disabled; Bluetooth points to
-        // Bluefy on the App Store and then this page, USB keeps its own.
-        assert!(
-            reasons(false, BluetoothReach::Ios)
-                .iter()
-                .all(Option::is_some)
-        );
-        let ios = add_slot_notes(false, BluetoothReach::Ios);
-        let ble_note = ios.ble.expect("the Bluefy path");
-        assert_eq!(
-            ble_note.link.map(|link| link.href),
-            Some(crate::app::home::reach_note::BLUEFY_APP_STORE_URL)
-        );
-        assert_eq!(ios.usb, Some(USB_UNAVAILABLE));
-
-        // Brave on a computer: USB live, Bluetooth disabled with the flag.
-        let brave = add_slot_notes(true, BluetoothReach::Brave);
-        assert_eq!(brave.usb, None);
-        assert_eq!(
-            brave.ble.and_then(|note| note.copy),
-            Some(ReachCopy::Text(
-                crate::app::home::ble_reach::BRAVE_BLUETOOTH_FLAG
-            ))
-        );
-
-        // Firefox / desktop Safari: both go to Chrome or Edge — the page's
-        // address is said ONCE (under Bluetooth), not twice in a row.
-        let firefox = add_slot_notes(false, BluetoothReach::Firefox);
-        let usb_note = firefox.usb.expect("USB still says why");
-        assert_eq!(usb_note.copy, None, "the address is not repeated");
-        assert_eq!(
-            firefox.ble.and_then(|note| note.copy),
-            Some(ReachCopy::ThisPage)
-        );
-
-        // The answer still on its way: disabled, nothing to add under it.
-        assert!(reasons(true, BluetoothReach::Checking)[1].is_some());
-        assert_eq!(add_slot_notes(true, BluetoothReach::Checking).ble, None);
-    }
-
     /// A host build (or a Firefox) has no transport, and the page says that
     /// rather than showing an empty roster that reads as "you have none".
     #[test]
@@ -870,7 +549,7 @@ mod tests {
             false,
         ));
 
-        assert_eq!(lines, vec!["This browser can't talk to USB devices"]);
+        assert_eq!(lines, vec![NO_TRANSPORT_HEADLINE]);
     }
 
     #[test]
@@ -1083,14 +762,6 @@ mod tests {
             remembered_escape_variant(DeviceEscape::Forget),
             ActionButtonVariant::Quiet,
         );
-    }
-
-    /// A page that reaches the LAN, reaching nothing yet.
-    fn wifi_reach() -> lpa_studio_core::WifiAddressReach {
-        lpa_studio_core::WifiAddressReach {
-            available: true,
-            connecting: false,
-        }
     }
 
     fn remembered_fixture() -> RememberedView {

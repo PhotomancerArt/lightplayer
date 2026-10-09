@@ -2,8 +2,8 @@
 //! spike `access-panel-tidy` concept 4B): the card's Connections group, the
 //! access panel in its four states and its key list, the Unlock sheet, the
 //! play-only prompt, the "can now unlock" toast, the friend's page, and
-//! Settings — plus the add slot per browser and a Bluetooth link still
-//! identifying.
+//! Settings — plus the Connect a board section per browser and a Bluetooth
+//! link still identifying.
 //!
 //! Every one of these is also captured at the phone width (the story
 //! harness's `sm` viewport), which is where G1 reviews them.
@@ -22,11 +22,11 @@ use crate::app::home::access_added_toast::AccessAddedToast;
 use crate::app::home::access_settings_section::AccessSettingsSection;
 use crate::app::home::ble_reach::BluetoothReach;
 use crate::app::home::browser_identity::BrowserPlatform;
+use crate::app::home::connect_board::ConnectBoardSection;
 use crate::app::home::device_access_panel::DeviceAccessPanel;
 use crate::app::home::device_offer_story_fixtures::{
     StoryDeviceCard, StoryPendingCard, add_slot_tree,
 };
-use crate::app::home::devices_page::AddDeviceCard;
 use crate::app::home::unlock_link::UnlockLink;
 use crate::app::home::unlock_page::UnlockPage;
 use crate::app::home::unlock_sheet::UnlockSheet;
@@ -426,7 +426,7 @@ fn ble_access_added_toast() -> Element {
 // --- 5 · A shared link ---------------------------------------------------
 
 #[story(
-    description = "The friend's phone after scanning the QR (lightplayer.app/unlock): no account needed — \"Saved on this phone. Connect to PLAYFUL choker to use it.\" and Connect via Bluetooth (the browser's chooser needs a tap). Right: the same page in iPhone Safari, which has no Web Bluetooth — the add slot's own way forward (Bluefy)."
+    description = "The friend's phone after scanning the QR (lightplayer.app/unlock): no account needed — \"Saved on this phone. Connect to PLAYFUL choker to use it.\" and Connect via Bluetooth (the browser's chooser needs a tap). Right: the same page in iPhone Safari, which has no Web Bluetooth — the way forward the Connect a board section gives (Bluefy)."
 )]
 fn ble_friend_page() -> Element {
     let link = UnlockLink {
@@ -505,7 +505,7 @@ fn ble_settings_signed_out() -> Element {
 // --- unchanged surfaces -----------------------------------------------------
 
 #[story(
-    description = "The add slot, per browser (BLE M5 copy, G3 rework). \"Connect a board\", then \"via USB\" and \"via Bluetooth\" — BOTH always drawn; one this browser cannot drive is DISABLED with its reason under it and a way to continue. Chrome/Edge: both live. Brave: Bluetooth disabled, the flag's address as select-and-copy text (a page cannot open brave://). Firefox and desktop Safari: both disabled, both need Chrome or Edge, and this page's address is given ONCE to open there. iPhone Safari (and Chrome on iOS): USB needs a computer; Bluetooth needs Bluefy — a link to it on the App Store, then this page's address to open in it. Bluefy: USB disabled with the address to open on a computer, Bluetooth live. Bluetooth off: turn it on and reload. Never a generic \"connect failed\"."
+    description = "The Connect a board section, per browser (BLE M5 copy, G3 rework). Three squares — USB, Bluetooth, Network — ALWAYS drawn; one this browser cannot drive is DISABLED with its reason (the square's tooltip, and as a line under the row) and a way to continue. Chrome/Edge: both live. Brave: Bluetooth disabled, the flag's address as select-and-copy text (a page cannot open brave://). Firefox and desktop Safari: both disabled, both need Chrome or Edge, and this page's address is given ONCE to open there. iPhone Safari (and Chrome on iOS): USB needs a computer; Bluetooth needs Bluefy — a link to it on the App Store, then this page's address to open in it. Bluefy: USB disabled with the address to open on a computer, Bluetooth live. Bluetooth off: turn it on and reload. Never a generic \"connect failed\"."
 )]
 fn ble_add_slot_by_browser() -> Element {
     rsx! {
@@ -523,35 +523,35 @@ fn ble_add_slot_by_browser() -> Element {
 }
 
 #[story(
-    description = "The add slot in Chrome or Edge on a computer (G3): \"Connect a board\", both buttons live, one full-width column — via USB the spectrum Primary, via Bluetooth the Secondary under it — and \"start a board here\" below."
+    description = "The Connect a board section in Chrome or Edge on a computer (G3): USB, Bluetooth and Network squares, all live, and \"start a board here\" below."
 )]
 fn ble_add_slot_chrome() -> Element {
     rsx! { AddSlotAs { reach: BluetoothReach::Ready, usb: true } }
 }
 
 #[story(
-    description = "The add slot in Brave (G3): via USB live; via Bluetooth DISABLED — \"Brave keeps Bluetooth behind a flag.\" — with the flag's address as select-and-copy text, because a page cannot open a brave:// link."
+    description = "The Connect a board section in Brave (G3): USB live; Bluetooth DISABLED — \"Brave keeps Bluetooth behind a flag.\" — with the flag's address as select-and-copy text, because a page cannot open a brave:// link."
 )]
 fn ble_add_slot_brave() -> Element {
     rsx! { AddSlotAs { reach: BluetoothReach::Brave, usb: true } }
 }
 
 #[story(
-    description = "The add slot in Firefox (G3): both buttons DISABLED — USB needs Chrome or Edge on a computer, Bluetooth needs Chrome or Edge — and this page's address, once, as select-and-copy text to open there."
+    description = "The Connect a board section in Firefox (G3): USB and Bluetooth DISABLED — USB needs Chrome or Edge on a computer, Bluetooth needs Chrome or Edge — and this page's address, once, as select-and-copy text to open there."
 )]
 fn ble_add_slot_firefox() -> Element {
     rsx! { AddSlotAs { reach: BluetoothReach::Firefox, usb: false } }
 }
 
 #[story(
-    description = "The add slot in Safari on iPhone — and Chrome on iPhone, which is the same WebKit (G3): via USB DISABLED (it needs a computer, with this page's address to open there); via Bluetooth DISABLED with the way through: \"Get Bluefy on the App Store\", then this page's address to open in Bluefy."
+    description = "The Connect a board section in Safari on iPhone — and Chrome on iPhone, which is the same WebKit (G3): USB DISABLED (it needs a computer, with this page's address to open there); Bluetooth DISABLED with the way through: \"Get Bluefy on the App Store\", then this page's address to open in Bluefy."
 )]
 fn ble_add_slot_iphone_safari() -> Element {
     rsx! { AddSlotAs { reach: BluetoothReach::Ios, usb: false } }
 }
 
 #[story(
-    description = "The add slot in Bluefy on iPhone (G3): Web Bluetooth but no Web Serial. via USB DISABLED with its reason and this page's address to open on a computer; via Bluetooth live."
+    description = "The Connect a board section in Bluefy on iPhone (G3): Web Bluetooth but no Web Serial. USB DISABLED with its reason and this page's address to open on a computer; Bluetooth live."
 )]
 fn ble_add_slot_bluefy() -> Element {
     rsx! { AddSlotAs { reach: BluetoothReach::Ready, usb: false } }
@@ -614,15 +614,15 @@ const ADD_SLOT_BROWSERS: [(&str, BluetoothReach, bool); 7] = [
     ("Chrome, Bluetooth off", BluetoothReach::Off, true),
 ];
 
-/// The add slot pinned to one browser's answers, with the product's own
-/// address in its copy lines (never the story server's).
+/// The Connect a board section pinned to one browser's answers, with the
+/// product's own address in its copy lines (never the story server's).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn AddSlotAs(reach: BluetoothReach, usb: bool) -> Element {
     rsx! {
         div { class: "tw:p-3",
             OffersProvider { offers: add_slot_tree(usb, reach),
-                AddDeviceCard {
+                ConnectBoardSection {
                     ble_reach: Some(reach),
                     usb_available: usb,
                     page_url: Some("https://lightplayer.app/devices".to_string()),

@@ -30,6 +30,7 @@ use lpa_studio_core::{
 
 use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
+use crate::app::home::connect_board::ConnectBoardSection;
 use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
 use crate::app::home::device_offer_story_fixtures::{
     StoryDeviceCard, StoryPendingCard, add_slot_tree,
@@ -40,7 +41,6 @@ use crate::app::home::device_pick_popover::{
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
 use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
-use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::core::OffersProvider;
 use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
@@ -496,16 +496,21 @@ fn devices_page_story(remembered_open: bool) -> Element {
 }
 
 #[story(
-    description = "The add slot's target menu, open (D44, PD16, D1, spike 2 + 2b). The slot keeps \"via USB\" (under \"Connect a board\") as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
+    description = "The Connect a board section's target menu, open (D44, PD16, D1, spike 2 + 2b). The section keeps its three squares — USB, Bluetooth, Network — and grows a quiet second verb under them, \"start a board here ▾\", because the place where the next board comes from should offer BOTH ways a board can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands under Online boards. The panel floats in the top layer, so the section is exactly as tall open as shut and the page never reflows."
 )]
 fn devices_target_pick_open() -> Element {
     rsx! {
         // Tall enough for the WHOLE panel — every row plus the hint line
         // under them. The panel floats in the top layer, so a section that
         // merely fits the trigger clips exactly the half this story is for.
-        section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:place-items-center tw:p-4",
+        section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:content-start tw:p-4",
             OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
-                TargetPickPopover { initially_open: true, on_action: |_| {} }
+                ConnectBoardSection {
+                    ble_reach: Some(BluetoothReach::Ready),
+                    page_url: Some("https://lightplayer.app/devices".to_string()),
+                    pick_open: true,
+                    on_action: |_| {},
+                }
             }
         }
     }

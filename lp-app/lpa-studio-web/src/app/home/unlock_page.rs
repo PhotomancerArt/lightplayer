@@ -20,7 +20,7 @@ use lpa_studio_core::{AccessCommand, OfferPath, UiAction};
 
 use super::access_fields::HELP_CLASS;
 use super::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
-use super::devices_page::TransportOffer;
+use super::connect_board::TransportOffer;
 use super::reach_note::this_page_url;
 use super::unlock_link::{UNLOCK_PATH, UnlockLink};
 use crate::base::{StudioIcon, StudioIconName};

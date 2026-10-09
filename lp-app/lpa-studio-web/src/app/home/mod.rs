@@ -16,6 +16,7 @@ pub(crate) mod brand_hero;
 pub(crate) mod browser_identity;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
+pub(crate) mod connect_board;
 pub(crate) mod connections_group;
 pub(crate) mod device_access_panel;
 pub(crate) mod device_layout_sheet;
