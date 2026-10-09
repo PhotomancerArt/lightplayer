@@ -516,7 +516,18 @@ pub fn App() -> Element {
                 log::info!("this browser has no WebSocket; Wi\u{2011}Fi boards are not reachable");
             }
         }
+        // One tab holds a board: Web Locks and the hold channel, in a
+        // browser that has both (nothing is installed otherwise, and every
+        // device flow is as before). Not the docs page's actor: it has no
+        // boards to hold.
+        #[cfg(target_arch = "wasm32")]
+        let board_hold = crate::browser_board_hold::install_board_hold(&mut controller);
         let (actor, handle) = StudioActor::new(controller, make_pull_timer);
+        // The notes other tabs say reach this tab's queue from here on.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(board_hold) = &board_hold {
+            board_hold.listen(&handle.tx);
+        }
         let mut view_rx = handle.view;
         let loop_tx = handle.tx.clone();
         spawn(async move {
