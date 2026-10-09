@@ -350,15 +350,21 @@ division for the cost-benefit score (0.95 KB), `rebuild_dir` (0.9 KB),
 +26 B in `RootRecord::decode` (the tail), the rest outlining noise. RAM does
 not move: resident, transient and mount peaks are byte-identical in
 `ram_budget_tests.rs`; mount reads 4 B more per sector header (+504 B at
-128 sectors).
+128 sectors). Refusing a newer version and programming the magic last
+(P9b) add **+52 B of `.text`** (50,740 → 50,792 B, same flags, `.rodata`
+unchanged) and one program and one 20-byte read per sector opened.
 
 ### Power cuts
 
 - In-crate sweeps at every cut point (`LP_TREE_STORE_SWEEP_CUTS=1000000
-  LP_TREE_STORE_SWEEP_STEPS=12`, release), format version 3: **9,759 cuts,
-  0 failures** (per-call 387 + 303, transaction 825, append 1,176, deflated
-  push 75, GC churn 4,464 + 2,529; version 2 was 9,819 — the 4-byte-longer
-  header moves when GC runs). The default run samples them in < 20 s.
+  LP_TREE_STORE_SWEEP_STEPS=12`, release), format version 3 with the
+  magic programmed last (P9b): **9,963 cuts, 0 failures** (per-call 390 +
+  306, transaction 837, append 1,215, deflated push 75, GC churn 4,536 +
+  2,604; the extra program per sector opened adds cut points). P9's
+  single-program header was 9,759 cuts, 0 failures; with the newer-version
+  refusal and that header the append and GC sweeps fail (a torn header
+  left the magic in front of a half-programmed version). Version 2 was
+  9,819. The default run samples them in < 20 s.
 - `lp-store-bench smoke`, format version 3: T1 stored 862 cases + 25
   random-walk cuts, T1 host_deflate 859 + 25, **0 failures, 0 non-atomic**
   (version 2: 853 + 25 and 856 + 25; F2, which this format does not touch,
