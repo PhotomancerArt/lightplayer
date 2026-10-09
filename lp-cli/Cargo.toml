@@ -40,6 +40,9 @@ lpa-upgrade = { path = "../lp-app/lpa-upgrade" }
 lpc-mapping = { path = "../lp-core/lpc-mapping" }
 lp-gfx-lpvm = { path = "../lp-gfx/lp-gfx-lpvm" }
 lpa-link = { path = "../lp-app/lpa-link", features = ["host-process", "host-serial-esp32"] }
+# `hardware tree inspect|check|extract`: the tree store's own read-only
+# inspector (feature `inspect`), so the format is never reimplemented here.
+lp-tree-store = { path = "../lp-base/lp-tree-store", features = ["inspect"] }
 lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
 lpa-boards = { path = "../lp-app/lpa-boards", features = ["schema-gen"] }
 # The two persisted access files (project sidecar, device store).
@@ -171,6 +174,11 @@ dioxus-ssr = { version = "0.7", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# `hardware tree` tests build real store images on the NOR model, and forge
+# the few the writer never makes (a bad directory name) record by record.
+lp-tree-store = { path = "../lp-base/lp-tree-store", features = ["inspect", "nor-sim", "stats"] }
+lp-nor-sim = { path = "../lp-emu/lp-nor-sim" }
+lp-crc32 = { path = "../lp-base/lp-crc32" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
