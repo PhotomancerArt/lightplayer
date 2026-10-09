@@ -253,10 +253,12 @@ impl AgentHost for AgentHostBridge {
                 .ok_or_else(|| HostError::new("no shader source artifact resolved"))?;
             // The tool layer pre-checks its own mirror of this cap; this
             // guard keeps the bridge honest if the two ever drift.
-            if source.len() > MAX_ASSET_BODY_BYTES {
+            if crate::asset_body_too_large(source.as_bytes()) {
                 return Err(HostError::new(format!(
-                    "source is {} bytes; the asset limit is {MAX_ASSET_BODY_BYTES}",
-                    source.len()
+                    "source is {} bytes ({} on the wire); the asset limit is \
+                     {MAX_ASSET_BODY_BYTES} on the wire",
+                    source.len(),
+                    lpc_model::body_bytes::encoded_len(source.as_bytes())
                 )));
             }
             // Fence the verdict BEFORE enqueuing the apply, so the wait

@@ -152,6 +152,7 @@ pub use product::{
     ControlProduct, ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind,
     ProductRef, TimeProduct, VisualProduct,
 };
+pub use project::body_bytes;
 pub use project::overlay::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
