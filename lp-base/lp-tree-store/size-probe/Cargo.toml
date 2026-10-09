@@ -16,9 +16,12 @@ publish = false
 [features]
 # Link sha2 behind the hasher seam instead of the stand-in.
 soft-sha = ["lp-tree-store/soft-sha"]
+# The calls through `LpFsTree` (`dyn lpfs::LpFs`): the store plus its adapter.
+lpfs = ["lp-tree-store/lpfs", "dep:lpfs"]
 
 [dependencies]
 lp-tree-store = { path = "..", default-features = false }
+lpfs = { path = "../../lpfs", optional = true }
 
 [profile.release]
 opt-level = "z"

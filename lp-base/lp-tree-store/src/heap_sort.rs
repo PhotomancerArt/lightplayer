@@ -19,6 +19,12 @@ pub fn heap_sort_by<T>(v: &mut [T], mut less: impl FnMut(&T, &T) -> bool) {
     });
 }
 
+/// Strings by their bytes (the store's listings and the `LpFs` adapter's:
+/// one copy for both).
+pub fn sort_strings(v: &mut [alloc::string::String]) {
+    heap_sort_by(v, |a, b| a.as_bytes() < b.as_bytes());
+}
+
 /// The sort over positions: `op(i, j, false)` = is `i` less than `j`;
 /// `op(i, j, true)` swaps them.
 #[inline(never)]

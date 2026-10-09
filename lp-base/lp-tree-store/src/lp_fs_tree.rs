@@ -16,6 +16,7 @@ use core::fmt::Debug;
 use lpfs::{FsError, FsEvent, FsEventKind, FsVersion, LpFs, LpFsView, LpPath, LpPathBuf};
 
 use crate::flash::Flash;
+use crate::heap_sort::sort_strings;
 use crate::object_hasher::ObjectHasher;
 use crate::store_error::StoreError;
 use crate::tree_store::TreeStore;
@@ -201,7 +202,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 out.push(f.clone());
             }
         }
-        out.sort_unstable();
+        sort_strings(&mut out);
         out.dedup();
         Ok(out.into_iter().map(LpPathBuf::from).collect())
     }

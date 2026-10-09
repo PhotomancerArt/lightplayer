@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use crate::dir_node::{DirEntry, EntryKind};
 use crate::flash::Flash;
-use crate::heap_sort::heap_sort_by;
+use crate::heap_sort::sort_strings;
 use crate::node_read::read_dir;
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::ObjectId;
@@ -77,7 +77,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 names.push(e.path.clone());
             }
         }
-        heap_sort_by(&mut names, |a, b| a.as_bytes() < b.as_bytes());
+        sort_strings(&mut names);
         names.dedup();
         Ok(names)
     }
