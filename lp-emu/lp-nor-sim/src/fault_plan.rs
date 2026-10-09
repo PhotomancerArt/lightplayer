@@ -19,10 +19,20 @@ pub enum TearModel {
     /// or a sector reading `0xFF` (see [`crate::calibrated_tear`]). Not in
     /// [`TearModel::ALL`]: name it to run it.
     Calibrated,
-    /// [`TearModel::Calibrated`] with every torn erase forced to one shape
-    /// (programs keep the calibrated mix): a sweep in which every erase cut
-    /// meets that state, rather than about one in five.
-    CalibratedErase(EraseShape),
+    // [`TearModel::Calibrated`] with every torn erase forced to one shape
+    // (programs keep the calibrated mix): a sweep in which every erase cut
+    // meets that state, rather than about one in five. Unit variants, so a
+    // `TearModel` still casts to an integer (seeds mix it in).
+    /// Calibrated, every torn erase [`EraseShape::Zeroing`].
+    CalibratedZeroing,
+    /// Calibrated, every torn erase [`EraseShape::AllZero`].
+    CalibratedAllZero,
+    /// Calibrated, every torn erase [`EraseShape::Erasing`].
+    CalibratedErasing,
+    /// Calibrated, every torn erase [`EraseShape::ReadsFfWeak`].
+    CalibratedReadsFfWeak,
+    /// Calibrated, every torn erase [`EraseShape::ReadsFf`].
+    CalibratedReadsFf,
 }
 
 impl TearModel {
@@ -40,11 +50,11 @@ impl TearModel {
         TearModel::BytePrefix,
         TearModel::RandomBits,
         TearModel::Calibrated,
-        TearModel::CalibratedErase(EraseShape::Zeroing),
-        TearModel::CalibratedErase(EraseShape::AllZero),
-        TearModel::CalibratedErase(EraseShape::Erasing),
-        TearModel::CalibratedErase(EraseShape::ReadsFfWeak),
-        TearModel::CalibratedErase(EraseShape::ReadsFf),
+        TearModel::CalibratedZeroing,
+        TearModel::CalibratedAllZero,
+        TearModel::CalibratedErasing,
+        TearModel::CalibratedReadsFfWeak,
+        TearModel::CalibratedReadsFf,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -53,12 +63,29 @@ impl TearModel {
             TearModel::BytePrefix => "byte_prefix",
             TearModel::RandomBits => "random_bits",
             TearModel::Calibrated => "calibrated",
-            TearModel::CalibratedErase(EraseShape::Zeroing) => "calibrated_zeroing",
-            TearModel::CalibratedErase(EraseShape::AllZero) => "calibrated_all_zero",
-            TearModel::CalibratedErase(EraseShape::Erasing) => "calibrated_erasing",
-            TearModel::CalibratedErase(EraseShape::ReadsFfWeak) => "calibrated_reads_ff_weak",
-            TearModel::CalibratedErase(EraseShape::ReadsFf) => "calibrated_reads_ff",
+            TearModel::CalibratedZeroing => "calibrated_zeroing",
+            TearModel::CalibratedAllZero => "calibrated_all_zero",
+            TearModel::CalibratedErasing => "calibrated_erasing",
+            TearModel::CalibratedReadsFfWeak => "calibrated_reads_ff_weak",
+            TearModel::CalibratedReadsFf => "calibrated_reads_ff",
         }
+    }
+
+    /// The erase shape a forced calibrated model always tears into.
+    pub fn forced_erase_shape(&self) -> Option<EraseShape> {
+        match self {
+            TearModel::CalibratedZeroing => Some(EraseShape::Zeroing),
+            TearModel::CalibratedAllZero => Some(EraseShape::AllZero),
+            TearModel::CalibratedErasing => Some(EraseShape::Erasing),
+            TearModel::CalibratedReadsFfWeak => Some(EraseShape::ReadsFfWeak),
+            TearModel::CalibratedReadsFf => Some(EraseShape::ReadsFf),
+            _ => None,
+        }
+    }
+
+    /// Does this model tear the calibrated way (the mix, or a forced shape)?
+    pub fn is_calibrated(&self) -> bool {
+        *self == TearModel::Calibrated || self.forced_erase_shape().is_some()
     }
 
     pub fn from_name(name: &str) -> Option<Self> {

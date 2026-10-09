@@ -360,7 +360,12 @@ impl NorFlashSim {
         let cells = Arc::make_mut(&mut self.sectors[sector]);
         match tear {
             TearModel::Clean => {}
-            TearModel::Calibrated | TearModel::CalibratedErase(_) => {
+            TearModel::Calibrated
+            | TearModel::CalibratedZeroing
+            | TearModel::CalibratedAllZero
+            | TearModel::CalibratedErasing
+            | TearModel::CalibratedReadsFfWeak
+            | TearModel::CalibratedReadsFf => {
                 calibrated_tear::tear_program(&self.tear_mix, rng, cells, off, data)
             }
             TearModel::BytePrefix => {
@@ -402,10 +407,11 @@ impl NorFlashSim {
         let state = &mut self.damage[sector];
         state.tainted = true;
         let weak = state.weak_mask(ss);
-        let mix = match self.plan.tear {
-            TearModel::Calibrated => Some(self.tear_mix),
-            TearModel::CalibratedErase(shape) => Some(self.tear_mix.erase_only(shape)),
-            _ => None,
+        let tear = self.plan.tear;
+        let mix = match tear.forced_erase_shape() {
+            Some(shape) => Some(self.tear_mix.erase_only(shape)),
+            None if tear.is_calibrated() => Some(self.tear_mix),
+            None => None,
         };
         let shape = match mix {
             Some(_) => None,

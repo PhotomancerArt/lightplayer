@@ -53,7 +53,7 @@ crate may depend on an AGPL workspace crate (`just lint-emu-fence`).
   bits (1), and reads `0xFF` with **no** weak bit (101). The weights are
   `TearMix::CX1`; `NorFlashSim::set_tear_mix` replaces them (e.g.
   `TearMix::CX1.erase_only(EraseShape::AllZero)` makes every torn erase read
-  `0x00`). `CalibratedErase(shape)` — named `calibrated_zeroing`,
+  `0x00`). `CalibratedZeroing` … `CalibratedReadsFf` — named `calibrated_zeroing`,
   `calibrated_all_zero`, `calibrated_erasing`, `calibrated_reads_ff_weak`,
   `calibrated_reads_ff` — forces every torn erase to one shape, so a sweep
   meets that state at every erase cut instead of at about one in five. None
