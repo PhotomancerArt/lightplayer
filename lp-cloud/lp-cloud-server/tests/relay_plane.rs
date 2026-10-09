@@ -840,7 +840,7 @@ async fn drive_board(
             label: "Lamp".into(),
             wire_proto: 39,
             max_routes: 1,
-            firmware: "fake-board-1".into(),
+            firmware: "fake-board-1",
         },
         |bytes| bytes.fill(7),
     );

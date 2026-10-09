@@ -880,7 +880,7 @@ fn config(max_routes: usize) -> RelayClientConfig {
         label: "Lamp".into(),
         wire_proto: 39,
         max_routes,
-        firmware: "test-1".into(),
+        firmware: "test-1",
     }
 }
 
