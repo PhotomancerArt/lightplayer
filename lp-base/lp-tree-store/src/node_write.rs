@@ -23,20 +23,16 @@ use crate::tree_store::{Res, TreeStore, Txn, head_for};
 
 const HDR: u32 = RECORD_HEADER_LEN;
 
+/// A host-deflated chunk a write keeps as it came.
+pub(crate) struct Coded<'a> {
+    pub id: ObjectId,
+    pub logical_len: u32,
+    pub deflated: &'a [u8],
+}
+
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub(crate) fn put_inner(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
-        let head = head_for(path);
-        let mut need = Vec::new();
-        let chunks = self.stored_chunk_need(head, bytes.len(), &mut need);
-        self.multi_need(head, chunks, false, &mut need);
-        self.implicit_need(path, &mut need);
-        self.ensure_room(&need)?;
-        let mut leaves = Vec::new();
-        self.write_stored_chunks(head, bytes, &[], &mut leaves)?;
-        let id = self.write_tree(head, &leaves, false)?;
-        let size = bytes.len() as u32;
-        self.record_set(path, FileEntry { id, size });
-        Ok(())
+        self.write_file(path, Vec::new(), bytes, &[], None, bytes.len() as u32)
     }
 
     pub(crate) fn append_inner(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
@@ -45,7 +41,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         };
         let size =
             u32::try_from(fe.size as usize + bytes.len()).map_err(|_| StoreError::TooLarge)?;
-        let head = head_for(path);
         let mut leaves = leaf_list(&mut self.log, fe.id)?;
         let mut tail = Vec::new();
         if let Some(last) = leaves.last().copied()
@@ -55,15 +50,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             read_node_into(&mut self.log, last.id, &mut tail)?;
             leaves.pop();
         }
-        let mut need = Vec::new();
-        let chunks = self.stored_chunk_need(head, tail.len() + bytes.len(), &mut need);
-        self.multi_need(head, leaves.len() + chunks, false, &mut need);
-        self.implicit_need(path, &mut need);
-        self.ensure_room(&need)?;
-        self.write_stored_chunks(head, &tail, bytes, &mut leaves)?;
-        let id = self.write_tree(head, &leaves, false)?;
-        self.record_set(path, FileEntry { id, size });
-        Ok(())
+        self.write_file(path, leaves, &tail, bytes, None, size)
     }
 
     pub(crate) fn deflated_inner(
@@ -79,7 +66,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             return Err(StoreError::TooLarge);
         }
         let existed = self.walk_file(path)?;
-        let mut leaves = match (offset, existed) {
+        let leaves = match (offset, existed) {
             (0, _) => Vec::new(),
             (o, Some(fe)) if fe.size == o => leaf_list(&mut self.log, fe.id)?,
             _ => return Err(StoreError::BadOffset),
@@ -97,38 +84,65 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if expected.is_some_and(|e| e != id) {
             return Err(StoreError::Corrupt("chunk id"));
         }
-        let head = head_for(path);
         let coded = DEFLATE_PREFIX + deflated.len();
-        let keep_deflated = coded <= self.max_payload() && coded < logical;
-        let mut need = Vec::new();
-        let chunks = if keep_deflated {
-            need.push((head, HDR + coded as u32));
-            1
+        if coded <= self.max_payload() && coded < logical {
+            let keep = Coded {
+                id,
+                logical_len,
+                deflated,
+            };
+            self.write_file(path, leaves, &[], &[], Some(keep), size)
         } else {
-            self.stored_chunk_need(head, logical, &mut need)
+            self.write_file(path, leaves, &buf, &[], None, size)
+        }
+    }
+
+    /// Every file write's end: after the file's kept chunks `leaves`,
+    /// either the one deflated chunk `coded` or stored chunks of `a ++ b`;
+    /// the multi tree over them all; the path's new entry of `size` bytes.
+    /// Room for every record (and a per-call write's root) is made first,
+    /// so `NoSpace` comes before any of them.
+    fn write_file(
+        &mut self,
+        path: &str,
+        mut leaves: Vec<Leaf>,
+        a: &[u8],
+        b: &[u8],
+        coded: Option<Coded<'_>>,
+        size: u32,
+    ) -> Res<(), F> {
+        let head = head_for(path);
+        let mut need = Vec::new();
+        let chunks = match &coded {
+            Some(c) => {
+                need.push((head, HDR + (DEFLATE_PREFIX + c.deflated.len()) as u32));
+                1
+            }
+            None => self.stored_chunk_need(head, a.len() + b.len(), &mut need),
         };
         self.multi_need(head, leaves.len() + chunks, false, &mut need);
-        self.implicit_need(path, &mut need);
+        self.implicit_need(&mut need);
         self.ensure_room(&need)?;
-        if keep_deflated {
-            let len = (logical as u16).to_le_bytes();
-            self.write_if_new(
-                head,
-                RecordKind::Blob,
-                ChunkCodec::Deflate,
-                id,
-                &[&len, deflated],
-            )?;
-            leaves.push(Leaf {
-                id,
-                len: logical_len,
-                stored: false,
-            });
-        } else {
-            self.write_stored_chunks(head, &buf, &[], &mut leaves)?;
+        match coded {
+            Some(c) => {
+                let len = (c.logical_len as u16).to_le_bytes();
+                self.write_if_new(
+                    head,
+                    RecordKind::Blob,
+                    ChunkCodec::Deflate,
+                    c.id,
+                    &[&len, c.deflated],
+                )?;
+                leaves.push(Leaf {
+                    id: c.id,
+                    len: c.logical_len,
+                    stored: false,
+                });
+            }
+            None => self.write_stored_chunks(head, a, b, &mut leaves)?,
         }
-        let node = self.write_tree(head, &leaves, false)?;
-        self.record_set(path, FileEntry { id: node, size });
+        let id = self.write_tree(head, &leaves, false)?;
+        self.record_set(path, FileEntry { id, size });
         Ok(())
     }
 
@@ -305,7 +319,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// written (`write_dir_bytes`), so a write that fits its content but not
     /// its directories ends in `NoSpace` after its content and before its
     /// root (the committed state untouched either way).
-    fn implicit_need(&self, _path: &str, out: &mut Vec<(HeadKind, u32)>) {
+    fn implicit_need(&self, out: &mut Vec<(HeadKind, u32)>) {
         if self.txn != Txn::Implicit {
             return;
         }
