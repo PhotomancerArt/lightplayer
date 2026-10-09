@@ -34,8 +34,8 @@ backend = "http://localhost:2812/b"
 [[web.proxy]]
 backend = "http://localhost:2812/t"
 
-# The cloud relay's browser leg (`/relay/board/<mac>`, Studio behind
-# `?relay=1`): a WebSocket. dx's proxy forwards the upgrade (dioxus-cli 0.7's
+# The cloud relay's browser leg (`/relay/board/<mac>`, on in Studio with
+# no flag): a WebSocket. dx's proxy forwards the upgrade (dioxus-cli 0.7's
 # `serve/proxy_ws.rs`), headers — the session cookie — and close codes
 # included, so dev reaches a local lp-cloud-server's relay same-origin, as
 # production does.

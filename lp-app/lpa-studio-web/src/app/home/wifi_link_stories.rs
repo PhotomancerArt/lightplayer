@@ -88,5 +88,6 @@ fn unlocked() -> UiDeviceAccess {
         line: Some("Unlocked by Yona's MacBook".to_string()),
         unlock: None,
         panel: None,
+        account_key_refused: None,
     }
 }
