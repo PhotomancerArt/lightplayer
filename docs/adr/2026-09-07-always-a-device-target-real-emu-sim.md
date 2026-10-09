@@ -23,6 +23,8 @@
   `2026-09-03-device-card-fixed-height-and-disconnect-disappears.md` (the
   height table gains a sim-only row) — the reciprocal notes land in P6
 - **Superseded by:** None
+- **Amended by:** [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) (a stand-in is a board card on
+  the home page; the runtime band's words move to the hardware bar)
 
 ## Context
 
@@ -282,6 +284,17 @@ Two verbs still fork **wording only** between an emu and a serial device at
 one surface (`session_control`'s `DeviceFace` selection), which this
 amendment does not settle — carried as an open question in the new ADR's
 Follow-ups.
+
+## Amendment 2026-10-08 — stand-ins on the one home page
+
+[2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) replaces the Devices page with one home page and rebuilds
+the card as a name bar and bars. A simulated or emulated board stays an
+ordinary board, and its card is a board card like any other. The runtime
+band's words ("Sim · <target> · in this tab") move to the hardware bar.
+"Start a board here" (`devices/new-sim`) stays in Connect a board. How a
+project, or an offline board's project, starts on a stand-in from the home
+page is open: the roadmap's "Editing without the board" milestone
+(`lp2025/2026-10-06-1530-boards-and-projects-model`).
 
 ## Follow-ups
 

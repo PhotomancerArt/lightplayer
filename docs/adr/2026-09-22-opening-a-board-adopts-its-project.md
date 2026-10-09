@@ -8,6 +8,8 @@
   promise that `/device/<uid>` is a resolver — this is the piece of the
   resolution that was missing)
 - **Superseded by:** None
+- **Amended by:** [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) (Connect on a card binds or
+  adopts the same way; the address stays the home page until Edit)
 - **Amended:** 2026-09-22, after shipping — identity-free boards are
   stamped, not refused (see *Amendment* below)
 
@@ -162,6 +164,15 @@ stamping one — on the board, where the project actually lives — is
 exactly what entering a library does to any other project. The rejected
 alternative below (minting only in the library) stays rejected for the
 reason it always was: the copy would never hash-match the board.
+
+## Amendment (2026-10-08, the board card and one home page)
+
+[2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md): Connect on a board's card opens the board in place on the
+home page, and binds or adopts its project exactly as above. The address
+heals when you press Edit, which goes to the editor on the open session at
+`/p/<slug>-prj…?on=mac:…`. While the board is connected on the home page
+the address stays `/`. A direction, built by the "connected" milestone of
+`lp2025/2026-10-06-1530-boards-and-projects-model`.
 
 ## Alternatives considered
 
