@@ -11,7 +11,10 @@
 //! | `Answer { request, asker, outcome }` | the asked tab | `Released`, or refused and why |
 //! | `Who` | a new tab | everyone, say what you hold |
 //!
-//! Every note rides in a JSON envelope `{"v":1,"tab":"<id>","note":…}`.
+//! Every note rides in a JSON envelope `{"v":1,"tab":"<id>","note":…}`,
+//! the note externally tagged (`{"holds":{"key":…,"level":…}}`, `"who"`):
+//! no internally tagged or flattened serde, which the repo's
+//! `lint-serde-content` keeps out (`docs/adr/2026-07-04-json-only-artifacts.md`).
 //! [`HoldNote::decode`] ignores a note of another version, malformed text,
 //! and a note this tab sent itself. The version is not a compatibility
 //! promise: tabs of different builds share one browser (lightplayer.app
@@ -30,7 +33,7 @@ pub const HOLD_PROTO_VERSION: u32 = 1;
 
 /// One note on the hold channel.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(tag = "note", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum HoldNote {
     /// I hold this board, at this level. Said after the claim, again on a
     /// level change, and in answer to [`Self::Who`].
@@ -107,13 +110,11 @@ impl HoldNote {
     }
 }
 
-/// The note's wire form: the version, the sender, and the note's own fields
-/// beside its `note` tag.
+/// The note's text form: the version, the sender, and the note.
 #[derive(Deserialize, Serialize)]
 struct Envelope {
     v: u32,
     tab: TabId,
-    #[serde(flatten)]
     note: HoldNote,
 }
 
@@ -150,11 +151,10 @@ mod tests {
             level: HoldLevel::Watching,
         }
         .encode(&tab("a"));
-        let value: serde_json::Value = serde_json::from_str(&text).expect("json");
-        assert_eq!(value["v"], 1);
-        assert_eq!(value["tab"], "a");
-        assert_eq!(value["note"], "holds");
-        assert_eq!(value["key"], "lp-board:usb:303a:1001:a0f26287b48c");
+        assert_eq!(
+            text,
+            r#"{"v":1,"tab":"a","note":{"holds":{"key":"lp-board:usb:303a:1001:a0f26287b48c","level":"Watching"}}}"#
+        );
         assert_eq!(
             HoldNote::Who.encode(&tab("a")),
             r#"{"v":1,"tab":"a","note":"who"}"#
@@ -187,8 +187,9 @@ mod tests {
             r#"{"v":1}"#,
             r#"{"v":1,"tab":"a"}"#,
             r#"{"v":1,"tab":"a","note":"shout"}"#,
-            r#"{"v":1,"tab":"a","note":"holds","key":"lp-catalog","level":"Watching"}"#,
-            r#"{"v":1,"tab":"a","note":"gone"}"#,
+            r#"{"v":1,"tab":"a","note":{"holds":{"key":"lp-catalog","level":"Watching"}}}"#,
+            r#"{"v":1,"tab":"a","note":{"gone":{}}}"#,
+            r#"{"v":"1","tab":"a","note":"who"}"#,
         ] {
             assert_eq!(HoldNote::decode(text, &tab("b")), None, "{text}");
         }
@@ -197,7 +198,7 @@ mod tests {
     #[test]
     fn an_ask_with_no_holder_named_reads_as_asking_whoever_holds_it() {
         let text =
-            r#"{"v":1,"tab":"a","note":"ask","request":7,"key":"lp-board:net:a0f26287b48c"}"#;
+            r#"{"v":1,"tab":"a","note":{"ask":{"request":7,"key":"lp-board:net:a0f26287b48c"}}}"#;
         assert_eq!(
             HoldNote::decode(text, &tab("b")),
             Some((

@@ -14,7 +14,7 @@
 //!   re-routes the link instead of wedging the card.
 
 use lpa_devices::activity::identify::HELD_BY_ANOTHER_TAB;
-use lpa_devices::replay::{Replay, Step};
+use lpa_devices::replay::{Fixture, Replay, Step};
 use lpa_devices::{
     Command, DeviceId, DeviceRecord, DeviceStatus, DeviceUid, Escape, Event, HeldElsewhere,
     HoldLevel, HoldVia, IdentityChain, Input, LinkCommand, LinkId, MacAddress, Millis, Roster,
@@ -412,6 +412,18 @@ fn the_hold_events_round_trip_through_json() {
     let json = serde_json::to_string(&step).expect("step serializes");
     let back: Step = serde_json::from_str(&json).expect("step parses");
     assert_eq!(serde_json::to_string(&back).expect("re-serializes"), json);
+}
+
+/// The same story as JSON, the shape a triaged bug's fixture takes: the
+/// hold steps have a written form, and it plays.
+#[test]
+fn the_held_by_another_tab_fixture_plays() {
+    let fixture = Fixture::from_json(include_str!("../fixtures/held-by-another-tab.json"))
+        .expect("fixture parses");
+    let mut replay = Replay::new(RosterConfig::default());
+    if let Err(failure) = replay.run(&fixture) {
+        panic!("{failure}\nview: {:#?}", replay.view());
+    }
 }
 
 fn held(level: HoldLevel) -> HeldElsewhere {
