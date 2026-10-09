@@ -34,6 +34,7 @@ extern crate alloc;
 
 pub mod board;
 pub mod board_manifest;
+pub mod board_manifest_view;
 pub mod build_id;
 pub mod chunk;
 pub mod code_table;
@@ -57,6 +58,7 @@ mod wire_reader;
 pub mod testing;
 
 pub use board_manifest::{BoardManifest, BoardState, TransferView};
+pub use board_manifest_view::BoardManifestView;
 pub use build_id::{BUILD_ID_LEN, build_hash, build_hash_of_field, build_id_field, build_id_text};
 pub use chunk::{ChunkEncoding, ChunkRef, encode_chunk};
 pub use code_table::{CHUNK, ENCODING_1, PROTO_V1};
