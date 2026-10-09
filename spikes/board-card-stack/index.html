@@ -559,7 +559,7 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .sc.lab-glass .pic, .sc.lab-top .pic { height:138px; }
 .app.narrow .sc .pic { height:112px; }
 .app.narrow .sc.lab-glass .pic, .app.narrow .sc.lab-top .pic { height:112px; }
-.sc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+.sc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; border-radius:7px 7px 0 0; }
 
 /* the label: name, then line 2 (what it plays, or a project notice). Two lines, always. */
 .lab { display:flex; align-items:center; gap:8px; padding:7px 8px 8px 10px; min-width:0; cursor:pointer; }
@@ -608,6 +608,29 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .notch::before, .notch::after { content:""; position:absolute; width:9px; height:9px; background:radial-gradient(circle at 0 100%, transparent 8.5px, var(--panel) 9px); }
 .notch::before { left:-9px; top:0; }
 .notch::after { right:0; bottom:-9px; }
+
+/* details: Studio's detail card (base/detail_popover.rs), its outline merged with the bar
+   that opened it (docs/adr/2026-07-15-popover-svg-merged-outline.md; production draws the
+   union as one SVG path, this spike approximates it with borders) */
+.srow.open { z-index:41; background:var(--raised); box-shadow:inset 1px 0 0 var(--bd-strong), inset -1px 0 0 var(--bd-strong), inset 0 1px 0 var(--bd-strong); }
+.dpop { position:absolute; left:0; right:0; top:100%; z-index:40; max-width:320px; min-width:100%; background:var(--raised); border:1px solid var(--bd-strong); border-top:0;
+  border-radius:0 0 10px 10px; box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; color:var(--muted); font-size:12px; cursor:default; }
+.dpop::before { content:""; position:absolute; left:10px; right:10px; top:0; height:1px; background:var(--bd-mut); }
+.dpop.top { left:auto; right:-1px; top:24px; width:300px; border-top:1px solid var(--bd-strong); border-radius:10px 0 10px 10px; }
+.dpop.top::before { display:none; }
+.dsec { display:grid; gap:2px; padding:6px 12px; border-top:1px solid var(--bd-mut); }
+.dsec:first-child { border-top:0; }
+.dsec h6 { margin:0; font:700 11px var(--font); letter-spacing:.04em; text-transform:uppercase; color:var(--heading); }
+.dsec .kvl { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.dsec .kvl span:first-child { color:var(--subtle); }
+.dsec .kvl span:last-child { font:11.5px var(--mono); color:var(--tx); text-align:right; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dsec p { margin:0; color:var(--tx); line-height:1.4; }
+.dsec.tw-live { background:linear-gradient(90deg,var(--st-live-bg) 0%,transparent 72%); } .dsec.tw-live h6 { color:var(--st-live-tx); }
+.dsec.tw-att  { background:linear-gradient(90deg,var(--st-attention-bg) 0%,transparent 72%); } .dsec.tw-att h6 { color:var(--st-attention-tx); }
+.dsec.tw-err  { background:linear-gradient(90deg,var(--st-error-bg) 0%,transparent 72%); } .dsec.tw-err h6 { color:var(--st-error-tx); }
+.dsec .acts { display:flex; gap:6px; flex-wrap:wrap; padding-top:3px; }
+.dsec .acts .btn { height:26px; font-size:11px; padding:0 9px; }
+.dsec .acts .btn.lasting { color:var(--st-error-tx); }
 
 /* rows */
 .srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); }
@@ -742,7 +765,7 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
 
 <section class="qsec" id="page">
   <h2>The card so far</h2>
-  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Uses the leans: Q6-D (the group under the name, from your comment), Q7-A, Q8-A, Q9-A (and Q3-A). Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
+  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Uses the leans: Q6-D (the group under the name), Q7-A, Q8-A (version only, Update when older), Q9-A, Q10-A (an access bar), and Q3-A (Studio’s detail card, merged with its bar). Click any bar. Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
   <div class="duo phoneduo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
 </section>
 
@@ -754,6 +777,8 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
   <p class="ask">Porch is current; Fyeah Sign’s board is a release behind. Updating and “no firmware” tint the bar either way.</p><div class="opts c3" id="q8o"></div></section>
 <section class="qsec" id="q9"><h2><span class="qn">Q9</span>What does the hardware row say?</h2>
   <p class="ask">The real thing: grounding, not detail. The rest is in its popover.</p><div class="opts c3" id="q9o"></div></section>
+<section class="qsec" id="q10"><h2><span class="qn">Q10</span>Where does access live?</h2>
+  <p class="ask">From your note: “the access control needs a bar too, probably, or it lives in the connection spot.” Access is what you can do with this board (play, edit, nothing yet) and the key that lets you.</p><div class="opts c2" id="q10o"></div></section>
 <section class="qsec" id="q3"><h2><span class="qn">Q3</span>How do the details open? <span style="font:500 12px var(--font);color:var(--shell-dim)">(carried from round 1)</span></h2>
   <p class="ask">A: a popover from the row (lean, drawn open below). B: a side panel with the whole stack (round 1 drew it). An accordion would push the grid around.</p><div class="opts c2" id="q3o"></div></section>
 
@@ -815,30 +840,42 @@ IC.history = '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M1
 IC.fw = '<rect x="4" y="3.5" width="5" height="7" rx="2.5"/><path d="M15 3.5h2v7M15 10.5h4"/><path d="M5 13.5h2v7M5 20.5h4"/><rect x="15" y="13.5" width="5" height="7" rx="2.5"/>';
 const STUDIO_FW = '2026.10.08-16';
 IC.check = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
+IC.unlock = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.9"/>';
+IC.unlockplay = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.9"/><path d="m11 13.5 3 2-3 2z" fill="currentColor" stroke="none"/>';
 IC.xoct = '<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="m9 9 6 6M15 9l-6 6"/>';
 
 /* where: group or owner. link: how Studio reaches it now. conn: the connection state. */
 const BOARDS = [
-  { id:'desk',   title:'Fyeah Sign',    plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'2026.10.07-3', fwAge:'2 days', model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB',
+  { id:'desk', acc:'usb',   title:'Fyeah Sign',    plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'2026.10.07-3', fwAge:'2 days', model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB',
     fwOld:true },
-  { id:'porch',  title:'Porch',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
-  { id:'garage', title:'Garage',        plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
+  { id:'porch', acc:'edit',  title:'Porch',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
+  { id:'garage', acc:'edit', title:'Garage',        plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
     projNote:{ tone:'att', icon:'history', text:'Out of date · v11', act:'Send latest' } },
-  { id:'kitchen', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-9', fwAge:'today', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
+  { id:'kitchen', acc:'edit', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-9', fwAge:'today', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
     fwNote:{ tone:'up', icon:'up', text:'Updating · 42%', prog:42 } },
-  { id:'living', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
-  { id:'shelf',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', age:'just now', cloud:false, link:'wifi', conn:'othertab', group:'Studio', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
-  { id:'choker', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'2026.09.21-1', fwAge:'2½ weeks', fwOld:true, model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
-  { id:'truck',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'2026.09.02-4', fwAge:'5 weeks', fwOld:true, model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
-  { id:'window', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
+  { id:'living', acc:'play', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
+  { id:'shelf', acc:'browser',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', age:'just now', cloud:false, link:'wifi', conn:'othertab', group:'Studio', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
+  { id:'choker', acc:'anyone', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'2026.09.21-1', fwAge:'2½ weeks', fwOld:true, model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
+  { id:'truck', acc:'edit',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'2026.09.02-4', fwAge:'5 weeks', fwOld:true, model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
+  { id:'window', acc:'edit', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
     projNote:{ tone:'err', icon:'alert', text:'Shader error', act:'Show' } },
-  { id:'lamp',   title:'Ember Drift',   plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:'2026.10.08-16', fwAge:'today', model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
-  { id:'newb',   title:'New board',     plays:null, blank:true, pat:'off', layout:'strip', cloud:false, link:'usb', conn:'connected', group:null, fw:null, model:'ESP32-C6', leds:null, mac:'c0de', free:'—', off:true,
+  { id:'lamp', acc:'locked',   title:'Ember Drift',   plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:'2026.10.08-16', fwAge:'today', model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
+  { id:'newb', acc:'usb',   title:'New board',     plays:null, blank:true, pat:'off', layout:'strip', cloud:false, link:'usb', conn:'connected', group:null, fw:null, model:'ESP32-C6', leds:null, mac:'c0de', free:'—', off:true,
     fwNote:{ tone:'att', icon:'fw', text:'No firmware' } },
 ];
 const LINK_ICON = { usb:'usb', ble:'ble', wifi:'net' };
 const LINK_WORD = { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' };
-const LEAN = { label:'glass', status:'notch', conn:'own', action:'rowbtn', fw:'A', hw:'A', detail:'pop' };
+const LEAN = { label:'glass', status:'notch', conn:'own', action:'rowbtn', fw:'A', hw:'A', detail:'pop', access:'bar' };
+/* access: what YOU can do with this board, and with which key */
+const ACC = {
+  edit:   { you:'play and edit', via:'your account key', short:'You can edit' },
+  usb:    { you:'play and edit', via:'USB (always)', short:'You can edit' },
+  browser:{ you:'play and edit', via:'this browser’s key', short:'You can edit' },
+  play:   { you:'play', via:'shared by Sean', short:'You can play' },
+  anyone: { you:'play (edit needs a password)', via:'anyone can play', short:'You can play' },
+  locked: { you:'nothing yet', via:'—', short:'Locked' },
+  none:   { you:'play and edit', via:'USB (always)', short:'You can edit' },
+};
 
 function watched(b){ return b.conn==='watch' || b.conn==='held' || (b.conn==='connected' && !b.off); }
 function canvasOf(b){
@@ -912,7 +949,7 @@ function connState(b){
     case 'offline':  return { tone:'neu', icon:'cloud', words:`Offline · ${b.offlineFor}` };
     case 'held':     return { tone:'att', icon:'person', words:b.who };
     case 'othertab': return { tone:'att', icon:'tab', words:'Open in another tab' };
-    case 'locked':   return { tone:'neu', icon:'lock', words:'Locked' };
+    case 'locked':   return { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · connected` };
   }
 }
 function connRow(b, c){
@@ -920,13 +957,20 @@ function connRow(b, c){
   const tone = s.tone ? ` t-${s.tone}` : '';
   const btn = '';
   const hint = c.action==='card' && b.conn==='idle' ? ' · tap to connect' : '';
-  if (s.tone) return `<div class="srow conn${tone}"><span class="nw">${ic(s.icon)}<span class="ell">${s.words}</span></span><span class="spring"></span>${btn}</div>`;
+  if (s.tone) return `<div class="srow layer conn${tone}" data-detail="conn" data-id="${b.id}"><span class="nw">${ic(s.icon)}<span class="ell">${s.words}</span></span><span class="spring"></span>${btn}</div>`;
   const live = s.words.includes('live');
   const words = s.words.replace('live', '<b>live</b>');
   if (c.conn==='icons') return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl" title="${s.words}">${ic(s.icon)}${b.cloud && b.link ? ic('cloud') : ''}${live ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--st-live-tx)"></span>' : ''}</span>${btn}</div>`;
-  if (c.conn==='own') return `<div class="srow conn"><span class="lvl">${ic(s.icon)}<span class="ell">${words}${hint}</span></span><span class="spring"></span>${b.cloud && b.link ? `<span class="lvl" title="Also reachable from anywhere">${ic('cloud')}<span class="nh">also cloud</span></span>` : (!b.cloud ? '<span class="nh" style="color:var(--faint)">direct only</span>' : '')}</div>`;
+  const tier = c.access==='conn' ? (b.acc==='locked' ? `<span class="lvl" style="color:var(--st-attention-tx)">${ic('lock')}<span class="nh">locked</span></span>` : `<span class="lvl" title="${ACC[b.acc].you}">${ic('unlock')}<span class="nh">${b.acc==='play'||b.acc==='anyone' ? 'play' : 'edit'}</span></span>`) : '';
+  if (c.conn==='own' && c.access==='conn') return `<div class="srow layer conn" data-detail="conn" data-id="${b.id}"><span class="lvl">${ic(s.icon)}<span class="ell">${words}</span></span><span class="spring"></span>${tier}<span class="chev">›</span></div>`;
+  if (c.conn==='own') return `<div class="srow layer conn" data-detail="conn" data-id="${b.id}"><span class="lvl">${ic(s.icon)}<span class="ell">${words}${hint}</span></span><span class="spring"></span>${b.cloud && b.link ? `<span class="lvl" title="Also reachable from anywhere">${ic('cloud')}<span class="nh">also cloud</span></span>` : (!b.cloud ? '<span class="nh" style="color:var(--faint)">direct only</span>' : '')}</div>`;
   if (c.conn==='wordsLeft') return `<div class="srow conn"><span class="lvl">${ic(s.icon)}<span>${words}${hint}</span></span><span class="spring"></span>${btn}</div>`;
   return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl">${ic(s.icon)}<span class="nh">${words}${hint}</span>${b.cloud && b.link ? `<span title="Also cloud connected">${ic('cloud')}</span>` : ''}</span><span class="chev" style="visibility:hidden">›</span></div>`;
+}
+function accessRow(b, c){
+  const a = ACC[b.acc];
+  if (b.acc==='locked') return `<div class="srow layer t-neu" data-detail="acc" data-id="${b.id}"><span class="nw">${ic('lock')}<span>Locked</span></span><span class="spring"></span><span class="nh" style="color:var(--subtle)">needs a password</span><span class="chev">›</span></div>`;
+  return `<div class="srow layer" data-detail="acc" data-id="${b.id}">${ic(b.acc==='play'||b.acc==='anyone' ? 'unlockplay' : 'unlock')}<span class="ell" style="color:var(--tx)">${a.short}</span><span class="spring"></span><span class="nh ell" style="color:var(--subtle)">${a.via}</span><span class="chev">›</span></div>`;
 }
 function fwRow(b, c){
   const n = b.fwNote;
@@ -948,35 +992,52 @@ function hwRow(b, c){
   const where = c.conn==='wordsLeft' ? `<span class="nh" style="margin-left:6px">${whereHtml(b)}</span>` : '';
   return `<div class="srow layer" data-detail="hw" data-id="${b.id}">${body}${where}<span class="spring"></span><span class="chev">›</span></div>`;
 }
+function kvl(k, v){ return `<div class="kvl"><span>${k}</span><span>${v}</span></div>`; }
+function sec(title, body, tint=''){ return `<div class="dsec ${tint ? 'tw-'+tint : ''}"><h6>${title}</h6>${body}</div>`; }
+function acts(list){ return `<div class="acts">${list.join('')}</div>`; }
 function popHtml(b, which){
   if (which==='status'){
-    const items = [];
-    if (b.projNote) items.push(['Project', b.projNote.tone==='err' ? 'err' : 'warn', b.projNote.tone==='err' ? 'Shader error: sparkle.glsl, line 12 — “undeclared identifier hue”' : b.projNote.text]);
-    if (b.conn==='held' || b.conn==='othertab') items.push(['Board', 'warn', b.conn==='held' ? 'Sean has it open (since 10:42)' : 'Open in your other tab (Chrome on Mac)']);
-    if (b.fwNote) items.push(['Firmware', b.fwNote.tone==='att' ? 'warn' : 'info', b.fwNote.text]);
-    else if (b.fwOld) items.push(['Firmware', 'info', `LightPlayer ${b.fw} · ${STUDIO_FW} is newer`]);
-    const li = items.length ? items.map(([ly, sev, t]) => `<li><span class="ly">${ly}</span><span style="color:${sev==='err'?'var(--st-error-tx)':sev==='warn'?'var(--st-attention-tx)':'var(--st-live-tx)'};display:inline-flex">${ic(sev==='info'?'up':sev==='err'?'xoct':'alert')}</span><span>${t}</span></li>`).join('') : `<li><span class="sicon ok"></span><span>Nothing needs you.</span></li>`;
-    return `<div class="pop top"><h5>Status</h5><ul>${li}</ul><div class="kv">
-      <span>Running</span><span>${watched(b) && b.fps ? b.fps+' fps · 17 ms a frame' : b.fps===0 ? 'stopped (0 fps)' : 'not watched · picture '+(b.age||'')}</span>
-      <span>Memory</span><span>${b.free} free</span><span>Up</span><span>3 days</span></div></div>`;
+    const parts = [];
+    if (b.projNote) parts.push(sec(b.projNote.tone==='err' ? 'Project · error' : 'Project', `<p>${b.projNote.tone==='err' ? 'Shader error in sparkle.glsl, line 12: undeclared identifier “hue”.' : 'Out of date: the board has v11; the project is at v12.'}</p>`, b.projNote.tone==='err' ? 'err' : 'att'));
+    if (b.conn==='held' || b.conn==='othertab') parts.push(sec('Connection', `<p>${b.conn==='held' ? 'Sean has it open, since 10:42.' : 'Open in your other tab (Chrome on Mac).'}</p>`, 'att'));
+    if (b.fwNote && b.fwNote.prog) parts.push(sec('Firmware', `<p>Updating to ${STUDIO_FW} · 42%.</p>`, 'live'));
+    else if (b.fwOld) parts.push(sec('Firmware', `<p>${STUDIO_FW} is newer than its ${b.fw}.</p>`, 'live'));
+    if (!parts.length) parts.push(sec('Status', `<p>Nothing needs you.</p>`));
+    parts.push(sec('Running', kvl('Frame rate', watched(b) && b.fps ? b.fps+' fps · 17 ms' : b.fps===0 ? 'stopped' : 'not watched') + kvl('Picture', watched(b) ? 'live' : (b.age||'—')) + kvl('Memory', b.free+' free') + kvl('Up', '3 days')));
+    return `<div class="dpop top">${parts.join('')}</div>`;
   }
-  if (which==='proj') return `<div class="pop"><h5>Project</h5><div class="kv">
-      <span>Playing</span><span>${b.plays || b.title}</span><span>Version</span><span>${b.projNote && b.projNote.icon==='history' ? 'v11 (the project is at v12)' : 'v12, saved 2 h ago'}</span>
-      <span>In sync with</span><span>${b.synced ? 'Porch, Garage, Back fence' : 'only this board'}</span><span>Copied from</span><span>${b.id==='choker' ? 'PLAYFUL Choker (example)' : '—'}</span></div>
-      <div class="acts"><button class="btn sm">Open</button><button class="btn sm outline">Share</button><button class="btn sm outline">Put another project on it</button></div></div>`;
-  if (which==='fw') return `<div class="pop"><h5>Firmware</h5><div class="kv">
-      <span>Version</span><span class="m">${b.fw ? 'LightPlayer '+b.fw : 'none (blank flash)'}</span><span>Newest</span><span class="m">${STUDIO_FW}</span>
-      <span>Image</span><span>split (loader, core, engine)</span><span>Last update</span><span>over the cloud, ${b.fwAge || '—'} ago</span></div>
-      <div class="acts">${b.fwOld ? `<button class="btn sm">Update to ${STUDIO_FW}</button>` : ''}<button class="btn sm outline">Reinstall</button><button class="btn sm outline">Other version…</button><button class="btn sm outline lasting">Factory reset…</button></div></div>`;
-  return `<div class="pop"><h5>Hardware</h5><div class="kv">
-      <span>Board</span><span>${b.model}</span><span>LEDs</span><span>${b.leds ? b.leds+' (WS2812, pin 10)' : '—'}</span>
-      <span>Id</span><span class="m">a0:f2:62:b4:${b.mac.slice(0,2)}:${b.mac.slice(2)}</span><span>Memory</span><span>${b.free} free</span>
-      <span>Wi‑Fi</span><span class="m">192.168.1.40</span><span>Access</span><span>play: anyone · edit: password</span></div>
-      <div class="acts"><button class="btn sm outline">Rename</button><button class="btn sm outline">Move to a group</button><button class="btn sm outline">Reset</button><button class="btn sm outline lasting">Forget…</button></div></div>`;
+  if (which==='proj') return `<div class="dpop">${
+    (b.projNote ? sec(b.projNote.tone==='err' ? 'Error' : 'Out of date', `<p>${b.projNote.tone==='err' ? 'Shader error in sparkle.glsl, line 12.' : 'This board has v11; the project is at v12, saved 2 h ago.'}</p>`, b.projNote.tone==='err' ? 'err' : 'att') : '')
+    + sec('Project', kvl('Playing', b.plays || b.title) + kvl('Version', b.projNote && b.projNote.icon==='history' ? 'v11' : 'v12') + kvl('Saved', '2 h ago'))
+    + sec('In sync', kvl('With', b.synced ? 'Porch · Garage · Back fence' : 'only this board') + kvl('Copied from', b.id==='choker' ? 'PLAYFUL Choker' : '—'))
+    + sec('Actions', acts([`<button class="btn sm">Open</button>`, `<button class="btn sm outline">Share</button>`, `<button class="btn sm outline">Put another project on it</button>`]))}</div>`;
+  if (which==='fw') return `<div class="dpop">${
+    (b.fwOld ? sec('Update', `<p>${STUDIO_FW} is newer.</p>` + acts([`<button class="btn sm">Update to ${STUDIO_FW}</button>`]), 'live') : '')
+    + sec('Firmware', kvl('Version', b.fw ? 'LightPlayer '+b.fw : 'none') + kvl('Newest', STUDIO_FW) + kvl('Image', 'split') + kvl('Last update', b.fwAge ? 'over the cloud, '+b.fwAge+(b.fwAge==='today'?'':' ago') : '—'))
+    + sec('Actions', acts([`<button class="btn sm outline">Reinstall</button>`, `<button class="btn sm outline">Other version…</button>`, `<button class="btn sm outline lasting">Factory reset…</button>`]))}</div>`;
+  if (which==='acc') return `<div class="dpop">${
+    (b.acc==='locked' ? sec('Locked', `<p>It needs a password before you can play it or edit it.</p>` + acts([`<button class="btn sm">Unlock…</button>`]), 'att') : '')
+    + sec('Your access', kvl('You can', ACC[b.acc].you) + kvl('With', ACC[b.acc].via))
+    + sec('This board', kvl('Play', b.accPlay || 'anyone') + kvl('Edit', 'password'))
+    + sec('Actions', acts([`<button class="btn sm outline">Change passwords…</button>`, `<button class="btn sm outline">Forget this browser’s key</button>`]))}</div>`;
+  if (which==='conn') return `<div class="dpop">${
+    sec('Reach', kvl('Now', connState(b).words) + kvl('Cloud', b.cloud ? 'connected · online' : 'off') + kvl('Wi‑Fi', b.link==='ble' ? '—' : '192.168.1.40') + kvl('Last seen', b.age || 'now'))
+    + sec('Actions', acts([`<button class="btn sm outline">Connect another way…</button>`, `<button class="btn sm outline">Disconnect</button>`]))}</div>`;
+  return `<div class="dpop">${
+    sec('Board', kvl('Model', b.model) + kvl('LEDs', b.leds ? b.leds+' · WS2812 · pin 10' : '—') + kvl('Id', 'a0:f2:62:b4:'+b.mac.slice(0,2)+':'+b.mac.slice(2)))
+    + sec('Running', kvl('Memory', b.free+' free') + kvl('Up', '3 days'))
+    + sec('Actions', acts([`<button class="btn sm outline">Rename</button>`, `<button class="btn sm outline">Move to a group</button>`, `<button class="btn sm outline">Reset</button>`, `<button class="btn sm outline lasting">Forget…</button>`]))}</div>`;
+}
+/* put a bar's details inside the bar, so its outline merges with the bar's */
+function withPop(html, b, which, open){
+  if (!(open && open[0]===b.id && open[1]===which)) return html;
+  const k = html.lastIndexOf('</div>');
+  return html.replace('class="srow', 'class="srow open').slice(0, k + ' open'.length) + popHtml(b, which) + '</div>';
 }
 function card(b, c=LEAN, open=null){
-  return `<div class="sc" data-comment-target><div class="pic" data-open="${b.id}">${canvasOf(b)}${statusNotch(b)}</div>${nameBar(b, c)}
-    ${projRow(b, c)}${connRow(b, c)}${fwRow(b, c)}${hwRow(b, c)}${open && open[0]===b.id ? popHtml(b, open[1]) : ''}</div>`;
+  const statusPop = open && open[0]===b.id && open[1]==='status' ? popHtml(b, 'status') : '';
+  return `<div class="sc" data-comment-target><div class="pic" data-open="${b.id}" style="overflow:visible">${canvasOf(b)}${statusNotch(b)}</div>${statusPop}${nameBar(b, c)}
+    ${withPop(projRow(b, c), b, 'proj', open)}${withPop(connRow(b, c), b, 'conn', open)}${c.access==='bar' ? withPop(accessRow(b, c), b, 'acc', open) : ''}${withPop(fwRow(b, c), b, 'fw', open)}${withPop(hwRow(b, c), b, 'hw', open)}</div>`;
 }
 function grid(ids, c=LEAN, open=null){
   const bs = ids ? ids.map(id => BOARDS.find(b=>b.id===id)) : BOARDS;
@@ -996,6 +1057,10 @@ function build(){
     B:{ name:'Link in words; where moves to the hardware row', what:'The whole row is the connection; the group sits at the end of the hardware row.', pro:'the most room for the connection words.', con:'“where” and “what it is” share a row, which mixes two kinds of fact.', c:{ conn:'wordsLeft' } },
     C:{ name:'Icons only', what:'Where on the left, link icons and a live dot on the right.', pro:'the most compact.', con:'icons must be learned; the newcomer test fails for “not connected”.', c:{ conn:'icons' } },
   });
+  q('q10', ['desk','choker','living','lamp'], {
+    A:{ name:'Its own bar', lean:true, what:'An access bar: what you can do (“You can edit”, “You can play”, “Locked”) and with which key (your account key, this browser, USB, shared by Sean). Its details hold the board’s play and edit settings.', pro:'access gets a home for its notice (Locked) and its settings; it reads per person, which shared boards need.', con:'a fifth bar on every card.', c:{ access:'bar' } },
+    B:{ name:'At the end of the connection bar', what:'The connection bar ends with a lock and your tier (“edit”, “play”, “locked”); its details include access.', pro:'one bar shorter; the tier comes from the key you connected with, so they belong together.', con:'two facts share a bar, and “Locked” gets no room for words on a phone.', c:{ access:'conn' } },
+  });
   q('q7', ['desk','choker','shelf','living'], {
     A:{ name:'One button at the end of the name bar', lean:true, what:'Always there, always the way in: “Open” when it’s watched or offline, “Connect” when it needs a tap (Bluetooth), “Take over” when your other tab has it, “Unlock” when it’s locked, “Install” on a blank board. Greyed when it can’t be done (“Sean has it open”, updating).', pro:'one obvious next step in one place; the bar below it says why the word changed.', con:'the word changes, so you learn its place rather than its word.', c:{ action:'rowbtn' } },
     B:{ name:'The whole card is the action', what:'No button: clicking the card connects if it must, then opens.', pro:'the cleanest card.', con:'nothing says a click will ask for Bluetooth, take over a tab, or that it can’t open now.', c:{ action:'card' } },
@@ -1012,7 +1077,7 @@ function build(){
     C:{ name:'Board and memory', what:'“ESP32-C6 mini · 230 KB free”.', pro:'a live health number.', con:'memory worries nobody until it’s low (then it’s a notice).', c:{ hw:'C' } },
   }).map(([l,o]) => option('q9', l, o, `<div class="app">${grid(['porch','truck'], o.c)}</div>`)).join('');
   document.getElementById('q3o').innerHTML = [
-    option('q3','A',{ name:'A popover from the row', lean:true, what:'Facts, then that layer’s actions.', pro:'nothing moves.', con:'one layer at a time.' }, `<div class="app" style="padding-bottom:230px">${grid(['desk','porch'], LEAN, ['desk','hw'])}</div>`),
+    option('q3','A',{ name:'A popover from the row', lean:true, what:'Studio’s own detail card, its outline merged with the bar that opened it (from your comment): titled sections, a tinted section for what needs you, then that layer’s actions.', pro:'nothing moves, and it’s the popover the rest of Studio already uses.', con:'one layer at a time.' }, `<div class="app" style="padding-bottom:250px">${grid(['desk','porch'], LEAN, ['desk','fw'])}</div>`),
     option('q3','B',{ name:'A side panel with the whole stack', what:'Every layer at once, scrolled to the one you clicked (drawn in round 1).', pro:'all the real data together.', con:'covers part of the page.' }, `<p class="ask" style="margin:0">See round 1 of this spike (git history), section Q3-B.</p>`),
   ].join('');
 }
@@ -1104,7 +1169,7 @@ function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of 
 
 setInterval(() => { const t = performance.now()/1000; for (const e of canvases) if (e.c.dataset.rate==='slow') draw(e, t + e.seed); }, 700);
 
-window.GATE = { round:'stack-card-r3', leans:{ q3:'A', q6:'D', q7:'A', q8:'A', q9:'A' } };
+window.GATE = { round:'stack-card-r3', leans:{ q3:'A', q6:'D', q7:'A', q8:'A', q9:'A', q10:'A' } };
 /* =====================================================================
    The gate kit (see the CSS above). Works in three places:
    - on claude.ai with `db`: answers saved to the store (Claude reads
