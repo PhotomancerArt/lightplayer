@@ -147,11 +147,7 @@ pub fn scan<F: TearsFlash>(
                 out.needs_rewrite |= 1 << sector;
             }
             out.in_flight = Some(f.verdict);
-            emit(&InFlightRecord {
-                latest,
-                sector,
-                f,
-            });
+            emit(&InFlightRecord { latest, sector, f });
         } else {
             fill_pattern(sector, wrote, &mut bufs.new);
             let s = analyze_settled(&bufs.and, &bufs.or, &bufs.new);
@@ -463,7 +459,11 @@ mod tests {
             for i in 0..n {
                 self.cells[a + i] &= data[i];
             }
-            if n < data.len() { Err(PowerLost) } else { Ok(()) }
+            if n < data.len() {
+                Err(PowerLost)
+            } else {
+                Ok(())
+            }
         }
     }
 

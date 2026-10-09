@@ -3814,17 +3814,28 @@ mod tests {
                 max_ms: 2000
             }
         );
-        assert_eq!(p.sentinel, Sentinel::Ready("[flash-tears] === SCAN DONE ==="));
+        assert_eq!(
+            p.sentinel,
+            Sentinel::Ready("[flash-tears] === SCAN DONE ===")
+        );
         let plan = p.host_plan.expect("the emulated twin has a host");
         assert_eq!(plan.host, "attached");
-        let cuts = plan.script.lines().filter(|l| l.ends_with("power-cycle")).count();
+        let cuts = plan
+            .script
+            .lines()
+            .filter(|l| l.ends_with("power-cycle"))
+            .count();
         let answers = plan
             .script
             .lines()
             .filter(|l| l.starts_with("after \"boot: Loaded app\""))
             .count();
         assert_eq!(cuts, 5);
-        assert_eq!(answers, cuts + 1, "one answer per boot: the first and one per cut");
+        assert_eq!(
+            answers,
+            cuts + 1,
+            "one answer per boot: the first and one per cut"
+        );
         assert!(matches!(p.boot, BootPath::RomUp { .. }));
     }
 }

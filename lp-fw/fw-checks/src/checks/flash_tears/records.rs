@@ -306,7 +306,10 @@ mod tests {
                 },
             }
         );
-        assert!(j.starts_with(r#"{"kind":"ft-journal","copy":1,"valid":3"#), "{j}");
+        assert!(
+            j.starts_with(r#"{"kind":"ft-journal","copy":1,"valid":3"#),
+            "{j}"
+        );
         assert!(j.contains(r#""torn_next":{"shape":"byte-prefix""#), "{j}");
         assert!(j.ends_with("}}"), "{j}");
         assert!(!j.contains('\n'));

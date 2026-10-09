@@ -56,7 +56,10 @@ mod tests {
         let a = pat(0, 0);
         let zeros: u32 = a.iter().map(|b| b.count_zeros()).sum();
         let bits = (SECTOR_SIZE * 8) as u32;
-        assert!(zeros > bits * 45 / 100 && zeros < bits * 55 / 100, "{zeros}");
+        assert!(
+            zeros > bits * 45 / 100 && zeros < bits * 55 / 100,
+            "{zeros}"
+        );
         assert_ne!(pat(0, 0), pat(1, 1));
         // The pattern is a function of the sector and the generation only.
         assert_eq!(pat(5, 5), pat(5, 5));
