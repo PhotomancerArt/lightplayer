@@ -2162,7 +2162,47 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        view.board_projects = self.board_projects(&view);
         view
+    }
+
+    /// Which board plays which project: the roster joined to the library
+    /// (`crate::board_projects` holds the rule).
+    ///
+    /// The lens counts only when a project is loaded in the editor AND a
+    /// library package backs it — a transient session binds no library
+    /// project, so it names none. Without a hydrated library the join still
+    /// answers from the boards' own reports.
+    fn board_projects(&self, view: &crate::DeviceRosterView) -> crate::BoardProjects {
+        let no_inputs = HomeInputs::default();
+        let inputs = self.home_inputs.as_ref().unwrap_or(&no_inputs);
+        let registry_keys = view
+            .roster
+            .devices
+            .iter()
+            .filter_map(|board| {
+                let key = self.devices.roster().device(board.id).and_then(|device| {
+                    crate::app::devices::device_records::registry_key(&device.identity)
+                })?;
+                Some((board.id, key))
+            })
+            .collect();
+        let lens = self
+            .pool
+            .attached_session()
+            .filter(|_| self.project_is_loaded())
+            .and_then(|session| {
+                let project_uid = self.project.active_library_uid()?;
+                Some((session.attachment().device, project_uid))
+            });
+        crate::board_projects(&crate::BoardProjectInputs {
+            boards: &view.roster.devices,
+            registry_keys: &registry_keys,
+            registry: &inputs.registered,
+            projects: &inputs.projects,
+            project_heads: &inputs.project_heads,
+            lens,
+        })
     }
 
     /// The runtime band for every RUNTIME in the roster (PD11, D25), joined

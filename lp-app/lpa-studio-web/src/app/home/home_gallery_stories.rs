@@ -546,6 +546,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         usb_available: true,
         layout: Default::default(),
         backup_download: None,
+        board_projects: Default::default(),
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -1312,6 +1313,7 @@ fn roster_fixture() -> DeviceRosterView {
         usb_available: true,
         layout: Default::default(),
         backup_download: None,
+        board_projects: Default::default(),
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -1666,6 +1668,7 @@ fn roster_page_fixture() -> DeviceRosterView {
         usb_available: true,
         layout: Default::default(),
         backup_download: None,
+        board_projects: Default::default(),
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,

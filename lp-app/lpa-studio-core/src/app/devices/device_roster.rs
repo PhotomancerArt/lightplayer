@@ -107,6 +107,10 @@ pub struct DeviceRosterView {
     /// The latest backup the user asked to download; the shell downloads
     /// when its `seq` advances.
     pub backup_download: Option<super::device_layout_effect::BackupDownload>,
+    /// Which project each board plays (`BoardProjects`): the board card's
+    /// project bar and the home page's "Other projects" both read it.
+    /// Joined by the controller, which holds the library and the lens.
+    pub board_projects: super::BoardProjects,
 }
 
 impl Default for DeviceRosterView {
@@ -129,6 +133,7 @@ impl Default for DeviceRosterView {
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
+            board_projects: super::BoardProjects::default(),
         }
     }
 }
@@ -457,6 +462,8 @@ impl DeviceRoster {
             // publishes them for real (`publish_layout_offers`).
             layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
             backup_download: self.effects.layout().download(),
+            // Joined by the controller, which holds the library and the lens.
+            board_projects: super::BoardProjects::default(),
         }
     }
 
@@ -930,6 +937,7 @@ mod tests {
             runtime_bands: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
+            board_projects: Default::default(),
         };
 
         let split = split_roster(&view);
@@ -980,6 +988,7 @@ mod tests {
             runtime_bands: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
+            board_projects: Default::default(),
         };
 
         let split = split_roster(&view);
