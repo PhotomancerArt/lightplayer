@@ -14,6 +14,8 @@
   (the lens borrows a sim's wire the same way it borrows silicon's — it
   is always a device lens; the `/device/<uid>` address rule is superseded
   by the `?on=` hint)
+  and [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md) (a board card opens the lens in place
+  on the home page)
 
 ## Context
 
@@ -170,3 +172,13 @@ Serial port (a CH340 bridge, `LinkConfig::uart()`) is one more
 `LinkPortService`-backed port, so everything above applies to it
 unchanged, on the same terms: read "USB" here as "every `lp-link` port".
 Pause-the-pump stays until M2b for it too.
+
+## Amended 2026-10-08 — a card opens the lens in place
+
+[2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md): Connect on a board's card on the home page takes this
+same exclusive borrow, and the card shows the board's panel while it is
+held. The page stays the home page. Decision 3 stands: a card verb that
+needs the wire while the lens holds it closes the lens first. The card's
+picture keeps moving from the lens's session while the borrow is held. A
+direction, built by the "connected" milestone of
+`lp2025/2026-10-06-1530-boards-and-projects-model`.
