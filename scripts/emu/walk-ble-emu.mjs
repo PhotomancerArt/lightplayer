@@ -54,7 +54,7 @@ import path from "node:path";
 import process from "node:process";
 import { execSync } from "node:child_process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { PANEL, StudioDriver } from "./studio-driver.mjs";
 import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -235,19 +235,27 @@ async function main() {
     // Over Bluetooth the over-the-air update is not refused (OTA M7 P12);
     // the USB flash and Factory reset still are, and the reason is drawn
     // beside whichever of them the card shows.
-    await step("identify", "the card comes up Ready, the USB-only firmware verbs drawn disabled with their reason", async () => {
-      await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "Ready",
-      });
-      const reason = await driver.evaluate(`${MAIN_TEXT}.includes('Firmware updates need USB')`);
-      if (!reason) throw new Error("the card does not say `Firmware updates need USB`");
-      // The Connections group: over the link it is on, Bluetooth is locked
-      // on and the row says how to turn it off instead.
+    await step("identify", "the card comes up ready, the firmware details saying the USB-only verbs need USB", async () => {
+      // Ready, as core reads it: the card offers the board a project, or the
+      // editor on the one it runs.
+      await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS });
+      // The firmware details say why the USB-only verbs are refused over
+      // this link.
+      const reason = await driver.detailsFact("firmware", "Over this link", { timeoutMs: STEP_DEADLINE_MS });
+      if (reason !== "Firmware updates need USB") {
+        throw new Error(`the firmware details do not say \`Firmware updates need USB\` (they say ${JSON.stringify(reason)})`);
+      }
+      // The connection details: over the link it is on, Bluetooth is locked
+      // on and the switch's line says how to turn it off instead.
+      await driver.openBar("connection", { timeoutMs: STEP_DEADLINE_MS });
       const locked = await driver.waitFor(
-        `${MAIN_TEXT}.includes('turn off by USB') && Boolean(document.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled'))`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the Connections group's locked Bluetooth switch" },
+        `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
+                  const panel = card.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]');
+                  return Boolean(panel) && (panel.innerText || '').includes('turn off by USB')
+                    && Boolean(panel.querySelector('button[role="switch"][aria-label="Bluetooth"][aria-checked="true"]:disabled')); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the connection details' locked Bluetooth switch" },
       );
+      await driver.closeDetails();
       if (!locked) throw new Error("the card has no locked Bluetooth switch");
       const endpoint = await driver.evaluate(
         `JSON.stringify(window.__lpEmuBluetooth.describe(${JSON.stringify(BOARD)}))`,
@@ -259,42 +267,38 @@ async function main() {
       // The packaged image boots with a project on it; clearing it is the
       // other conversation effect (ask → stop → delete), over the link.
       // Ready comes first; what it is running arrives on its heartbeat.
-      const face = await driver.waitFor(
-        `(() => { const t = ${MAIN_TEXT};
-                  return t.includes('Remove project') ? 'running' : t.includes('Nothing loaded') ? 'empty' : false; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board to say what it runs" },
-      );
+      const face = await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS });
       if (face === "empty") return "nothing was loaded";
-      // An inline two-click confirmation: the first click arms the button,
-      // the second dispatches (both labels live in the one button).
-      await driver.clickWhenReady("Remove project", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.click("Remove project");
-      await driver.waitFor(`${MAIN_TEXT}.includes('to choose from')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the empty face",
-      });
+      // Remove project, in the project details' danger zone: an inline
+      // two-click confirmation — the first click arms the button, the second
+      // dispatches (both labels live in the one button).
+      await driver.pressOffer("remove-project", { bar: "project", confirm: true, timeoutMs: STEP_DEADLINE_MS });
+      await driver.closeDetails();
+      await driver.waitFor(
+        `(() => { const card = document.querySelector('[data-board-card]');
+                  return Boolean(card?.querySelector('[data-bar="project"] > [data-offer-path$="/push"]')); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the empty board (`push` on the project bar)" },
+      );
       return "the board reported nothing loaded";
     });
 
     await step("push", `push ${PROJECT} over Bluetooth`, async () => {
       const before = await stats();
-      await driver.clickWhenReady("to choose from", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
-        what: "the project popover",
-      });
-      await driver.click(PROJECT, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-      await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_DEADLINE_MS });
-      // The board's own words, streamed off the Bluetooth link.
-      await driver.waitFor(`${MAIN_TEXT}.includes('Project loaded')`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the board to say `Project loaded`",
-      });
+      // `push`: the empty board's "Add a project", drawn as the project pick.
+      await driver.pressOffer("push", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(`Boolean(${PANEL})`, { what: "the project popover" });
+      await driver.click(PROJECT, { scope: PANEL });
+      await driver.clickWhenReady("Put it on the board", { scope: PANEL, timeoutMs: STEP_DEADLINE_MS });
+      // The board's own words, streamed off the Bluetooth link, in its
+      // terminal.
+      await driver.boardSaid("Project loaded", { timeoutMs: STEP_DEADLINE_MS });
       const after = await stats();
       return `the board said Project loaded; the push wrote ${after.written - before.written} B in ${after.writes - before.writes} writes`;
     });
 
     await step("editor", `open the board in the editor, then ${EDITOR_WINDOW_MS / 1000} s untouched (authoring, for comparison)`, async () => {
-      await driver.clickWhenReady("Open in editor", { timeoutMs: STEP_DEADLINE_MS });
+      // Edit, the card's primary on a ready, running board (`edit`).
+      await driver.pressOffer("edit", { timeoutMs: STEP_DEADLINE_MS });
       // The project has to arrive before Play can be asked for: Play is a
       // view of the lens's project, and the toggle is inert until it is.
       await driver.waitFor(
