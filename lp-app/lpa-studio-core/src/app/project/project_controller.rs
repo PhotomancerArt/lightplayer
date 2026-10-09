@@ -9064,7 +9064,7 @@ impl ProjectController {
         bytes: Vec<u8>,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
-        if bytes.len() > MAX_ASSET_BODY_BYTES {
+        if crate::asset_body_too_large(&bytes) {
             // Client-side size guard: mutations are single-frame on the wire
             // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
             // with its bytes preserved and nothing is sent.
@@ -18904,7 +18904,7 @@ mod tests {
             .expect("oversize entry parked as failed");
         assert_eq!(
             edit.failure_reason(),
-            Some("asset too large to send (limit 10 KB)")
+            Some("asset too large to send (limit 15 KB)")
         );
         assert_eq!(edit.bytes, oversize, "the user's text is not lost");
         assert_eq!(
@@ -18914,6 +18914,32 @@ mod tests {
                 failed: 1,
             }
         );
+    }
+
+    /// The limit is the body as the edit carries it, escapes included
+    /// (wire 41): a 12 KB shader the old 10 KB raw limit refused is sent,
+    /// and a body under the limit in bytes but over it once its quotes are
+    /// escaped is not.
+    #[test]
+    fn the_asset_body_limit_is_measured_as_the_wire_carries_it() {
+        let shader = "vec3 c = vec3(0.5);\n".repeat(12 * 1024 / 20);
+        assert!(shader.len() > 10 * 1024);
+        assert!(!crate::asset_body_too_large(shader.as_bytes()));
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 4)]);
+        block_on_ready(project.apply_asset_body(
+            &mut client,
+            glsl_artifact(),
+            shader.clone().into_bytes(),
+        ))
+        .unwrap();
+        assert_eq!(sent.borrow().len(), 1, "the 12 KB shader is sent");
+
+        let quotes = vec![b'"'; crate::MAX_ASSET_BODY_BYTES / 2 + 1];
+        assert!(quotes.len() < crate::MAX_ASSET_BODY_BYTES);
+        assert!(crate::asset_body_too_large(&quotes));
+        block_on_ready(project.apply_asset_body(&mut client, glsl_artifact(), quotes)).unwrap();
+        assert_eq!(sent.borrow().len(), 1, "the escaped body is not sent");
     }
 
     #[test]

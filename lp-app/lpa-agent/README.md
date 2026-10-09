@@ -132,7 +132,7 @@ serialization; `cache_control` never lands on thinking-family blocks).
   reserved for host failures). A per-session cache of the last compiled
   shader powers `diff: { "vs": "previous" }`; `capture` is reserved until
   the M6 preview snapshot seam lands. Staged source is pre-checked
-  against the 10 KB asset cap (`MAX_SOURCE_BYTES`).
+  against the 15 KB asset cap (`MAX_SOURCE_BYTES`).
 - **`upsert_param`** — narrow f32 param record upsert (name, label,
   default, min/max, unit, panel), dispatched through the host to the same
   Save-gated overlay path. The name must be a declared uniform or an

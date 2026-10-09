@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-08      # how: report (Yona, a real C6 edited from Studio over Wi-Fi), reproduced e2e on the emulated C6
-fixed: this change
+fixed: 2026-10-08, #1047 (the gate) and #1057 (the wire half, wire 41)
 area: fw-esp32-common `server_payload::request_refusal` × lpc-model `AssetBodyOverlay::ReplaceBody` (Studio's shader edit) × the C6 heap over Wi-Fi
 class: assumed-context
 related:
@@ -84,6 +84,39 @@ headroom gate 92,554 → 91,622 B).
   It would also lift a latent limit: Studio allows a 10 KB body
   (`MAX_ASSET_BODY_BYTES`, sized for base64), but past ~4.7 KB a byte
   array outgrows the board's 16.6 KB message cap (computed, not walked).
+  **Fixed by wire 41 — see "The wire half" below.**
+
+**The wire half (wire 41, fixed 2026-10-08)** — the request is now about
+the shader's own size. `AssetBodyOverlay::ReplaceBody` and
+`WireCreateNodeRequest`'s `body` and `assets` go as the body's text when it
+is UTF-8, else as `{"base64":"…"}` (`lpc_model::body_bytes`; one encoding
+per body, so a string is always the text itself). `WIRE_PROTO_VERSION`
+40 → 41. Pinned in `lpc-wire`'s
+`a_shader_edit_request_is_about_the_size_of_its_source`:
+
+| Shader | Source | Request before | Request after |
+|---|---:|---:|---:|
+| PLAYFUL choker | 1,971 B | 7,134 B | 2,239 B |
+| `projects/test/basic` | 4,365 B | 15,183 B | 4,709 B |
+
+Studio's limit is now the body **as the wire carries it**
+(`MAX_ASSET_BODY_BYTES` = `lpc_wire::budget::MAX_ASSET_BODY_ENCODED_BYTES`
+= 16,384 B frame budget − 1,024 B envelope = 15,360 B; a shader is its own
+size plus a byte a line), under the board's 16,656 B request buffer and
+inside one overlay-read reply. The request gate's string rule follows how
+`serde_json` decodes a string: escaped text needs under twice its length
+(its scratch unescape), base64 3/4, plain text its length; the byte-array
+rule left with the byte arrays.
+
+Emulated, `lp-cli/tests/emu_edit_frag.rs` on an image built from that
+change (`lp-emu:esp32c6:t1+net=lan`, 24 growing edits of the choker,
+requests 2,292 → 3,412 B): **no refusal and no unanswered request** in
+either configuration. With a LAN client alone, edits 1–14 compiled, and
+edit 15 reset the board in the compile (`requested=7132 … largest_free=7120
+… context=shader node: compile`), as did 19 and 21. With a LAN client and a
+USB host (the configuration that refused at edit 5), edits 1–12 compiled,
+and 13 and 15 reset it the same way (`requested=6580 … largest_free=5344`).
+Those resets are the compile entry above, still open.
 
 **Regression coverage** — `request_decode_block::tests` (a byte-array edit
 needs its count rounded up; a file write the old rule; other arrays their

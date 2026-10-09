@@ -4,8 +4,11 @@
 //! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
 //!
 //! Studio applies an edited shader as one `SetArtifactBody`/`ReplaceBody`
-//! overlay mutation (`ProjectController::apply_asset_body`), the bytes a
-//! JSON array of numbers. Each edit here adds a line of work, so every
+//! overlay mutation (`ProjectController::apply_asset_body`): since wire 41
+//! the body is the shader's text as one JSON string (`lpc_model::body_bytes`;
+//! before, a JSON array of numbers, ~3.5 characters a byte). The "old rule"
+//! column is the pre-#1047 gate on the 7,142 B byte-array request the board
+//! refused, kept for comparison. Each edit here adds a line of work, so every
 //! recompile's code is a little bigger than the last (a comment-only edit
 //! compiles to the same code and does not fragment).
 //!

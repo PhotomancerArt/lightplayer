@@ -36,8 +36,10 @@ pub const ENGINE_VERDICT_BUDGET_MS: u32 = 1500;
 
 /// Client-side cap on staged source size. Mirrors
 /// `lpa_studio_core::MAX_ASSET_BODY_BYTES` (this crate must not depend on
-/// lpa-studio-core; the values must stay in sync).
-pub const MAX_SOURCE_BYTES: usize = 10 * 1024;
+/// lpa-studio-core; the values must stay in sync). That limit is the body
+/// as the wire carries it (its escapes count, a byte a line for a shader),
+/// so this raw check is the quick one and Studio's bridge has the last word.
+pub const MAX_SOURCE_BYTES: usize = 15 * 1024;
 
 /// Result of one `iterate` call — the shader tools' name for the
 /// session-wide [`ToolOutcome`].
@@ -92,7 +94,7 @@ pub async fn run_iterate(
     };
     let note = input.note.clone();
 
-    // 10 KB pre-check: actionable in-band message instead of a failed
+    // 15 KB pre-check: actionable in-band message instead of a failed
     // overlay write.
     if let Some(source) = &input.source
         && source.len() > MAX_SOURCE_BYTES
@@ -376,7 +378,7 @@ fn input_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "source": { "type": "string",
-                "description": "New full GLSL source. When present it is staged as an unsaved edit AND compiled for this experiment. Must define `vec4 render_2d(vec2 pos)`. Max 10240 bytes." },
+                "description": "New full GLSL source. When present it is staged as an unsaved edit AND compiled for this experiment. Must define `vec4 render_2d(vec2 pos)`. Max 15360 bytes." },
             "note": { "type": "string",
                 "description": "One-line intent, shown in the UI next to this call." },
             "size": { "type": "array", "items": { "type": "integer", "minimum": 1 },
@@ -516,7 +518,7 @@ mod tests {
         let outcome = run(&json!({ "source": big }), &mut host, &mut cache);
         assert!(!outcome.is_error);
         assert!(
-            outcome.content.contains("the asset limit is 10240"),
+            outcome.content.contains("the asset limit is 15360"),
             "{}",
             outcome.content
         );
