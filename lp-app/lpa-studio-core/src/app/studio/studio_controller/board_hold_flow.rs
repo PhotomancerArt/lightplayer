@@ -107,8 +107,11 @@ impl StudioController {
                     key,
                     level,
                 } => self.answer_hold_ask(from.clone(), *request, *key, level.clone()),
-                // The asker's side reads answers (the take-over, P4).
-                BookChange::AnswerReceived { .. } => {}
+                BookChange::AnswerReceived {
+                    request,
+                    key,
+                    outcome,
+                } => self.take_over_answered(*request, *key, outcome.clone()),
                 BookChange::WhoAsked { .. } => {
                     let (Some(edge), Some(book)) =
                         (self.board_hold_edge.as_ref(), self.board_hold_book.as_ref())
@@ -204,6 +207,7 @@ impl StudioController {
         self.read_refused_ports();
         self.name_held_ports();
         self.put_hold_facts_on_boards();
+        self.reconcile_take_overs(now);
     }
 
     /// The boards being let go on request whose picture is next: write it,
@@ -558,6 +562,7 @@ impl StudioController {
             self.board_hold_flow.taken_from_here.remove(&key.mac());
         }
         self.journal_hold(format!("hold: {key} is free"));
+        self.take_over_freed(key);
     }
 
     /// One sentinel per hold elsewhere; none for a hold that went.

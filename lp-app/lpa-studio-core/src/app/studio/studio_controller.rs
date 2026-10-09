@@ -58,6 +58,9 @@ use crate::{
 /// One tab holds a board: the holder's flows (priming, claims, the gate's
 /// claims, the answer to an ask, the sentinels, the facts on the boards).
 mod board_hold_flow;
+/// One tab holds a board: Connect on a board another tab holds
+/// (`devices/<board>/take-over`), the asker's side.
+mod take_over_flow;
 
 /// Minimum gap between view publishes that carry *only* streamed log lines
 /// (session console tails, drained producer batches). Anything structural —
@@ -184,6 +187,10 @@ pub struct StudioController {
     /// the facts on its boards, boards being let go
     /// (`studio_controller/board_hold_flow.rs`). Idle without an edge.
     board_hold_flow: crate::app::devices::board_hold::BoardHoldFlow,
+    /// Every Connect on a board another tab holds under way here, and how
+    /// each ended (`devices/<board>/take-over`;
+    /// `studio_controller/take_over_flow.rs`).
+    take_overs: crate::TakeOvers,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -497,6 +504,7 @@ impl StudioController {
             board_hold_edge: None,
             board_hold_book: None,
             board_hold_flow: Default::default(),
+            take_overs: crate::TakeOvers::default(),
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -2225,6 +2233,11 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        view.take_overs = self
+            .take_overs
+            .devices()
+            .filter_map(|device| Some((device, self.take_overs.view(device)?)))
+            .collect();
         // A port another tab's claims account for is that tab's board, not
         // a new device found here.
         self.hide_accounted_held_links(&mut view);
@@ -3034,9 +3047,10 @@ impl StudioController {
 
     /// Seed the feeds of remembered boards from their persisted last frames
     /// (`device_frame_snapshot`), read off the library snapshot `fs` at
-    /// settle. Only a board whose feed has NO picture reads its sidecar, so
-    /// after the first settle nothing is read again, and a frame this
-    /// session pulled is never displaced by an older one on disk.
+    /// settle. A board whose link is open here keeps its own picture once
+    /// it has one; any other reads its sidecar and takes it when it is
+    /// newer, so a board another tab holds follows that tab's picture, and
+    /// a frame is never displaced by an older one on disk.
     fn seed_device_frame_snapshots(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
         let Some(inputs) = self.home_inputs.as_ref() else {
             return;
@@ -3065,7 +3079,16 @@ impl StudioController {
             let Some(device) = device else {
                 continue;
             };
-            if self.device_feeds.has_frame(device) {
+            // A picture pulled over a link open here is the newest there
+            // is; any other (a seed, the last pull on a closed link) gives
+            // way to a newer sidecar — another tab holding the board writes
+            // one every ten seconds, and every write re-settles this tab.
+            let live = self
+                .devices
+                .roster()
+                .device(device)
+                .is_some_and(|device| device.evidence.presence.is_open());
+            if !self.device_feeds.wants_snapshot(device, live) {
                 continue;
             }
             let snapshot = {
@@ -3073,7 +3096,9 @@ impl StudioController {
                 crate::app::devices::device_frame_snapshot::read_snapshot(&*fs, &uid)
             };
             if let Some((frame, captured_at)) = snapshot {
-                seeded |= self.device_feeds.seed_snapshot(device, frame, captured_at);
+                seeded |= self
+                    .device_feeds
+                    .seed_snapshot(device, frame, captured_at, live);
             }
         }
         if seeded {
@@ -3456,6 +3481,9 @@ impl StudioController {
                 offers.publish(offer);
             }
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
+                offers.publish(offer);
+            }
+            if let Some(offer) = self.take_over_offer_for(view, &facts) {
                 offers.publish(offer);
             }
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
@@ -4254,6 +4282,10 @@ impl StudioController {
         if node_id.as_str() == crate::RelayConnectOp::NODE_ID {
             let op = action.into_op::<crate::RelayConnectOp>()?;
             return self.start_relay_connect(op);
+        }
+        if node_id.as_str() == crate::TakeOverOp::NODE_ID {
+            let op = action.into_op::<crate::TakeOverOp>()?;
+            return self.begin_take_over(op);
         }
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;

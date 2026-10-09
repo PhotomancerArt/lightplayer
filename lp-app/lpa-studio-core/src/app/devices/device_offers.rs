@@ -10,7 +10,7 @@
 //!
 //! | path verb | offered when |
 //! |---|---|
-//! | `cancel`, `retry`, `reconnect`, `disconnect`, `forget` | the model projects that escape |
+//! | `cancel`, `retry`, `reconnect`, `disconnect`, `forget` | the model projects that escape (`retry` not on a board another tab holds) |
 //! | `push` | a LightPlayer on an open port, idle, that has said what it runs ([`push_device_offer`]) and is not locked |
 //! | `clear-faults` | the board reported it is degraded, linked, idle |
 //! | `remove-project` | the board reported something running, port open, idle |
@@ -20,8 +20,8 @@
 //! | `install-firmware` | an idle board that can update over the air — up to date, update available, newer, rolled back, keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): a `find` box over a `version` choice from the store's release index, or a look-up of a version the box names ([`update_offers`]) |
 //! | `install-firmware-file` | wherever `install-firmware` opens its list: "From a file…", a custom build's update files picked in the web's file dialog (needs the user's click; the build joins the list, and its install arms) ([`update_offers`]) |
 //! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
-//! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
-//! | `connect` | the port is there but closed |
+//! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered; not on a board another tab holds |
+//! | `connect` | the port is there but closed, and no other tab holds the board (then the controller offers `take-over` instead) |
 //! | `reset-board` | linked: a USB link's reset lines, a network link's restart request ([`ResetReach`]); disabled over a network link without the author tier (the board would refuse) and while an activity runs (the model refuses a reset under one; Cancel is the escape) |
 //! | `rename` | always: one Text param, `name` |
 //! | `autoconnect` | a board at the end of a wire: one Toggle param, `enabled` |
@@ -154,16 +154,22 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
     }
 
     // DEVICE
-    if view.escapes.contains(&Escape::Retry) {
-        offers.push(escape(Escape::Retry));
-    } else if idle && linked {
-        offers.push(UiOffer::new(
-            at("identify"),
-            "info",
-            DevicesOp::action_for(Action::Identify { device }),
-        ));
+    // A board another tab holds is opened by its `take-over` (the
+    // controller's): Retry, Identify and Connect would each open a port
+    // that tab holds, fighting it for the board.
+    let held_elsewhere = view.held_elsewhere.is_some();
+    if !held_elsewhere {
+        if view.escapes.contains(&Escape::Retry) {
+            offers.push(escape(Escape::Retry));
+        } else if idle && linked {
+            offers.push(UiOffer::new(
+                at("identify"),
+                "info",
+                DevicesOp::action_for(Action::Identify { device }),
+            ));
+        }
     }
-    if view.status == DeviceStatus::Attached {
+    if view.status == DeviceStatus::Attached && !held_elsewhere {
         offers.push(UiOffer::new(
             at("connect"),
             "connect",
@@ -332,6 +338,32 @@ mod tests {
                 "forget" | "erase" | "remove-project" | "update-firmware" | "push"
             );
             assert_eq!(offer.consequence().arms(), lasting, "{verb}");
+        }
+    }
+
+    /// Z4: a board another tab holds offers no verb that would open its
+    /// port — not Connect, Retry or Identify; the controller offers
+    /// `take-over` there instead. When the fact clears they are back.
+    #[test]
+    fn a_board_another_tab_holds_offers_no_verb_that_opens_its_port() {
+        let mut view = ready();
+        view.status = DeviceStatus::Attached;
+        view.escapes = vec![Escape::Retry, Escape::Disconnect, Escape::Forget];
+        view.held_elsewhere = Some(lpa_devices::HeldElsewhere {
+            via: lpa_devices::HoldVia::Usb,
+            level: lpa_devices::HoldLevel::Watching,
+            taken_from_here: false,
+        });
+
+        let held = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        for verb in ["connect", "retry", "identify"] {
+            assert!(!held.iter().any(|path| path == verb), "{verb}: {held:?}");
+        }
+
+        view.held_elsewhere = None;
+        let free = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        for verb in ["connect", "retry"] {
+            assert!(free.iter().any(|path| path == verb), "{verb}: {free:?}");
         }
     }
 

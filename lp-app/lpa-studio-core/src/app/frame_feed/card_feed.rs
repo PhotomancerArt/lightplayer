@@ -99,21 +99,34 @@ impl CardFeedState {
         self.frame.as_ref()
     }
 
-    /// Seed the feed with a frame captured EARLIER — the persisted last
-    /// frame a remembered board's sidecar carries — stamped at
+    /// Seed the feed with a frame captured elsewhere or earlier — the
+    /// persisted last frame a board's sidecar carries — stamped at
     /// `captured_at` so it ages from when the board actually published it.
     ///
-    /// Only an EMPTY feed takes a seed: a frame this session pulled is
-    /// newer than anything on disk, and the seed must never regress it.
-    /// The per-output claims stay untouched, so the first live pull is a
-    /// moved revision and replaces the seed. Returns whether it seeded.
-    pub fn seed(&mut self, frame: UiControlProductPreview, captured_at: f64) -> bool {
-        if self.frame.is_some() {
-            return false;
+    /// It takes the seed when the feed has no frame, or when its frame is
+    /// not `live` (a seed, or the last pull on a link that is not open
+    /// here) and the seed is NEWER: the holder of a board in another tab
+    /// writes its sidecar, and this tab's picture follows it. A live frame
+    /// is never replaced, and a seed never regresses a newer frame. The
+    /// per-output claims stay untouched, so the first live pull is a moved
+    /// revision and replaces the seed. Returns whether it seeded.
+    pub fn seed_if_newer(
+        &mut self,
+        frame: UiControlProductPreview,
+        captured_at: f64,
+        live: bool,
+    ) -> bool {
+        let takes = match (&self.frame, self.last_frame_at) {
+            (None, _) => true,
+            (Some(_), _) if live => false,
+            (Some(_), Some(at)) => captured_at > at,
+            (Some(_), None) => true,
+        };
+        if takes {
+            self.frame = Some(frame);
+            self.last_frame_at = Some(captured_at);
         }
-        self.frame = Some(frame);
-        self.last_frame_at = Some(captured_at);
-        true
+        takes
     }
 
     /// When the newest frame arrived (injected-clock epoch seconds).
@@ -387,13 +400,13 @@ mod tests {
     }
 
     #[test]
-    fn a_seed_fills_only_an_empty_feed_and_ages_from_its_own_stamp() {
+    fn a_seed_fills_an_empty_feed_and_ages_from_its_own_stamp() {
         let mut feed = CardFeedState::default();
         feed.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])], NOW);
         let stored = feed.frame().expect("frame").clone();
 
         let mut fresh = CardFeedState::default();
-        assert!(fresh.seed(stored.clone(), NOW - 3_600.0));
+        assert!(fresh.seed_if_newer(stored.clone(), NOW - 3_600.0, false));
         assert_eq!(fresh.frame(), Some(&stored));
         assert_eq!(fresh.frame_age_secs(NOW), Some(3_600.0));
         // The seed is memory, not a connection claim: the first live pull
@@ -406,9 +419,35 @@ mod tests {
             "a pulled frame replaces the seed even at the same revision"
         );
 
-        // A feed that already has a picture keeps it.
-        assert!(!feed.seed(stored, NOW - 3_600.0));
+        // A feed whose picture is newer keeps it, live or not.
+        assert!(!feed.seed_if_newer(stored.clone(), NOW - 3_600.0, false));
+        assert!(!feed.seed_if_newer(stored, NOW - 3_600.0, true));
         assert_eq!(feed.last_frame_at(), Some(NOW));
+    }
+
+    /// Another tab holds the board and writes its sidecar: a NEWER sidecar
+    /// frame replaces a picture that is not live here, and never a live one.
+    #[test]
+    fn a_newer_seed_replaces_a_frame_that_is_not_live_and_never_a_live_one() {
+        let mut feed = CardFeedState::default();
+        feed.apply(&[entry(4, 1, vec![1, 0, 2, 0, 3, 0])], NOW);
+        let mut newer = feed.frame().expect("frame").clone();
+        newer.revision = 2;
+
+        assert!(
+            !feed.seed_if_newer(newer.clone(), NOW + 5.0, true),
+            "a live frame is never replaced"
+        );
+        assert_eq!(feed.frame().map(|frame| frame.revision), Some(1));
+
+        assert!(feed.seed_if_newer(newer.clone(), NOW + 5.0, false));
+        assert_eq!(feed.frame().map(|frame| frame.revision), Some(2));
+        assert_eq!(feed.last_frame_at(), Some(NOW + 5.0));
+
+        assert!(
+            !feed.seed_if_newer(newer, NOW + 5.0, false),
+            "the same sidecar again is not newer"
+        );
     }
 
     #[test]

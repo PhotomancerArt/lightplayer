@@ -93,6 +93,10 @@ pub struct DeviceRosterView {
     /// The add slot's "Connect a board on Wi‑Fi" under way, or why it
     /// failed (`devices/connect-wifi-address`).
     pub wifi_address_connect: Option<super::UiWifiConnect>,
+    /// Each board another tab held whose Connect is under way here, or why
+    /// it failed (`devices/<board>/take-over`). Joined by the controller,
+    /// which holds the asks; absent = nothing to say.
+    pub take_overs: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiTakeOver>,
     /// Each device's firmware-update words (the update-states spike,
     /// direction C): the firmware zone's line and bar, the picture slot's
     /// sentence and light, the header chip and version. Joined by the
@@ -130,6 +134,7 @@ impl Default for DeviceRosterView {
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            take_overs: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
@@ -186,11 +191,17 @@ pub struct RememberedView {
 /// Split a roster view into cards worth drawing and the quiet remembered
 /// line underneath (D7). Connected order is preserved; remembered devices
 /// keep the roster's own (last-seen-sorted) order too.
+///
+/// A board another tab of this browser holds is connected, whatever its
+/// status here: it is plugged in and running, and "offline" would be false
+/// (it has no link in this tab only because that tab has the port).
 pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
     let mut connected = Vec::new();
     let mut remembered = Vec::new();
     for device in &roster.roster.devices {
-        if device.status == lpa_devices::device::DeviceStatus::Offline {
+        if device.status == lpa_devices::device::DeviceStatus::Offline
+            && device.held_elsewhere.is_none()
+        {
             remembered.push(RememberedView {
                 id: device.id,
                 title: device.title.clone(),
@@ -457,6 +468,8 @@ impl DeviceRoster {
             // Joined by the controller, which holds the connects.
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            // Joined by the controller, which holds the asks.
+            take_overs: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
@@ -914,6 +927,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            take_overs: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![
@@ -978,6 +992,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            take_overs: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
@@ -1002,5 +1017,36 @@ mod tests {
             .collect();
         assert_eq!(titles, vec!["A", "B", "C"]);
         assert!(split.remembered.is_empty());
+    }
+
+    /// Z9: a remembered board another tab of this browser holds is
+    /// connected — plugged in and running there — even with no link here;
+    /// one nobody holds stays on the remembered line.
+    #[test]
+    fn a_board_another_tab_holds_is_connected_not_remembered() {
+        let mut held = offline_view(2, "Held", None);
+        held.held_elsewhere = Some(lpa_devices::HeldElsewhere {
+            via: lpa_devices::HoldVia::Usb,
+            level: lpa_devices::HoldLevel::Watching,
+            taken_from_here: false,
+        });
+        let view = DeviceRosterView {
+            roster: RosterView {
+                devices: vec![held, offline_view(3, "Unplugged", None)],
+                pending: Vec::new(),
+            },
+            ..DeviceRosterView::default()
+        };
+
+        let split = split_roster(&view);
+
+        let connected: Vec<&str> = split
+            .connected
+            .iter()
+            .map(|device| device.title.as_str())
+            .collect();
+        assert_eq!(connected, vec!["Held"]);
+        assert_eq!(split.remembered.len(), 1);
+        assert_eq!(split.remembered[0].title, "Unplugged");
     }
 }

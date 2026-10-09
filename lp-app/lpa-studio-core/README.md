@@ -499,6 +499,15 @@ is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
 is published disabled with its reason. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
+A board another tab of this browser holds offers `devices/<board
+ref>/take-over` (`take_over_offer.rs`; the controller decides when) instead
+of `connect`, `retry` and `identify`, which would each open a port that tab
+holds. Its level is what it closes over there, by the holder's last word:
+`Watching` is Routine, `Open` (and a level not said yet) is Undoable, and
+`Busy` is disabled with "Busy in the other tab: <label>". It asks the
+holder, waits five seconds, and on `Released` opens the ports the hold kept
+shut; the progress is `DeviceRosterView.take_overs` (`UiTakeOver`).
+
 ### Which board plays which project
 
 A board's heartbeat says that something runs, never which library project it
@@ -542,8 +551,12 @@ who holds what (`BoardHoldBook`), the one door to the browser
 arrive as `StudioCommand::BoardHold`), and its host double
 (`MemoryBoardHoldBus`, several tabs on one bus). The device model carries
 the fact on the board (`Event::BoardHeld`, `DeviceView.held_elsewhere`) and
-on a port it must not open (`Event::LinkHeld`). Taking a board over will be
-an offer at `devices/<board ref>/take-over`.
+on a port it must not open (`Event::LinkHeld`). Taking a board over is the
+offer at `devices/<board ref>/take-over` (above, "Device verbs are
+offers"), the asker's side in `studio_controller/take_over_flow.rs`. A
+board another tab holds counts as online (`split_roster`), and its picture
+follows the holder's sidecar: a newer sidecar frame replaces a frame that
+is not live here (`CardFeedState::seed_if_newer`).
 
 The holder's side (`studio_controller/board_hold_flow.rs`, pure halves in
 `board_hold/`): a tab's first sweep waits for one look at the lock manager

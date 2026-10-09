@@ -150,6 +150,22 @@ mod tests {
         );
     }
 
+    /// A port another tab holds offers no dismiss: dismissing hands the
+    /// site's grant back, which can pull the port from that tab.
+    #[test]
+    fn a_port_another_tab_holds_cannot_be_dismissed() {
+        let mut held = pending(FirmwareFace::Unknown);
+        held.held_by_tab = true;
+
+        let offers = pending_link_offers(&held, &prefix(), ResetReach::Lines);
+
+        assert!(
+            !paths(&offers).iter().any(|path| path.ends_with("/dismiss")),
+            "{:?}",
+            paths(&offers)
+        );
+    }
+
     fn paths(offers: &[UiOffer]) -> Vec<String> {
         offers.iter().map(|offer| offer.path.to_string()).collect()
     }

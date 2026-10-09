@@ -735,6 +735,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            take_overs: Default::default(),
             updates: Default::default(),
             roster,
             transport_available,
