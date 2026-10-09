@@ -65,15 +65,26 @@ impl StudioController {
                 }
                 self.board_hold_flow.watching.remove(&key);
                 if freed {
-                    let change = self
+                    // A hold read off the lock manager at load whose holder
+                    // never said a word is a page that is gone: the old page
+                    // of a reload, whose lock outlived it for a moment. Its
+                    // freeing opens the ports it kept shut, as a fresh load
+                    // would have. A holder that was heard from and then died
+                    // opens nothing (R3).
+                    let unheard = self
+                        .board_hold_book
+                        .as_ref()
+                        .and_then(|book| book.held_elsewhere(&key))
+                        .is_some_and(|hold| hold.tab.is_none());
+                    let freed = self
                         .board_hold_book
                         .as_mut()
                         .and_then(|book| book.freed_by_watch(&key));
-                    if let Some(change) = change {
+                    if freed.is_some() {
                         self.journal_hold(format!(
                             "hold: {key} came free (its tab let go or closed)"
                         ));
-                        self.react_to_hold_changes(&[change]);
+                        self.hold_freed(key, unheard);
                     }
                 }
             }
@@ -100,7 +111,7 @@ impl StudioController {
                             ))
                     ));
                 }
-                BookChange::Freed { key } => self.hold_freed(*key),
+                BookChange::Freed { key } => self.hold_freed(*key, false),
                 BookChange::AskReceived {
                     from,
                     request,
@@ -548,13 +559,35 @@ impl StudioController {
     /// Another tab's hold on `key` ended: the ports of its kind leave the
     /// gate (nothing opens them), the fact clears, and an ask waiting on
     /// it may open the board.
-    fn hold_freed(&mut self, key: HoldKey) {
+    ///
+    /// Once no claim of that kind stands, the ports the claims kept shut
+    /// lose their "held by another tab" mark (`Event::LinkFreed`), so a
+    /// pending card stops saying "open in another Studio tab". With another
+    /// board of the kind still held, the marks stay: which port was the
+    /// freed board's is not known (two of a kind, a known limit).
+    ///
+    /// `stale`: the hold was read off the lock manager at load and its
+    /// holder never spoke — the old page of a reload. The ports it kept
+    /// shut open now, as a fresh load opens every granted port. Any other
+    /// hold that ends opens nothing (R3): Connect is the person's.
+    fn hold_freed(&mut self, key: HoldKey, stale: bool) {
+        let mut released = Vec::new();
         if let Some(pair) = key.usb_pair() {
-            self.devices
+            released = self
+                .devices
                 .effects()
                 .hold_gate()
                 .borrow_mut()
                 .release_pair(pair);
+            let kind_still_held = self
+                .board_hold_book
+                .as_ref()
+                .is_some_and(|book| book.claims_for_usb(pair.vendor, pair.product) > 0);
+            if !kind_still_held {
+                for link in self.links_marked_held(pair) {
+                    self.fold_device_input(DeviceInput::Event(DeviceEvent::LinkFreed { link }));
+                }
+            }
         }
         let still_held = self
             .board_hold_book
@@ -564,7 +597,63 @@ impl StudioController {
             self.board_hold_flow.taken_from_here.remove(&key.mac());
         }
         self.journal_hold(format!("hold: {key} is free"));
+        let asked = !self.take_overs.asking_for(&key).is_empty();
         self.take_over_freed(key);
+        if stale && !asked && !released.is_empty() {
+            self.journal_hold(format!(
+                "hold: {key} was a page that is gone (it never spoke); opening its ports as a \
+                 fresh load does"
+            ));
+            self.open_released_ports(&released);
+        }
+    }
+
+    /// Open `ports`, which the hold gate kept shut, the way a fresh load
+    /// opens a granted port: a board's own link connects, and a pending
+    /// port identifies. The OS lets only a free one open.
+    fn open_released_ports(&mut self, ports: &[LinkId]) {
+        let roster = self.devices.roster();
+        let boards: Vec<crate::DeviceId> = roster
+            .devices()
+            .iter()
+            .filter(|device| {
+                device.link().is_some_and(|link| ports.contains(&link))
+                    && !device.evidence.presence.is_open()
+            })
+            .map(|device| device.id)
+            .collect();
+        let pending: Vec<crate::DeviceId> = roster
+            .pending()
+            .iter()
+            .filter(|pending| ports.contains(&pending.link))
+            .map(|pending| pending.device_id())
+            .collect();
+        for device in boards {
+            self.fold_device_input(DeviceInput::Action(DeviceAction::Connect { device }));
+        }
+        for device in pending {
+            self.fold_device_input(DeviceInput::Action(DeviceAction::Identify { device }));
+        }
+    }
+
+    /// This tab's links of `pair` that carry the "held by another tab"
+    /// mark: pending ports and boards' own links alike.
+    fn links_marked_held(&self, pair: UsbPair) -> Vec<LinkId> {
+        let roster = self.devices.roster();
+        let pending = roster
+            .pending()
+            .iter()
+            .filter(|pending| {
+                pending.evidence().link_held_by_tab() && usb_pair_of(&pending.info) == Some(pair)
+            })
+            .map(|pending| pending.link);
+        let devices = roster.devices().iter().filter_map(|device| {
+            let link = device.link()?;
+            (device.evidence.link_held_by_tab()
+                && roster.link_info(link).and_then(usb_pair_of) == Some(pair))
+            .then_some(link)
+        });
+        pending.chain(devices).collect()
     }
 
     /// One sentinel per hold elsewhere; none for a hold that went.

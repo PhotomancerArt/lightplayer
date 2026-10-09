@@ -10,6 +10,13 @@
 //! to say their levels. A look that fails is "nothing held". A look that
 //! never answers stops being waited for after [`PRIMING_PATIENCE_SECS`]: a
 //! tab with no boards at all is worse than a tab that opened one held port.
+//!
+//! A hold read here whose holder never says a word is a page that is gone:
+//! the old page of a reload, whose Web Lock outlives it for a moment. The
+//! ports it accounts for stay shut while it lingers, and when its lock
+//! frees they open the way a fresh load opens them (the controller's
+//! `hold_freed`, `stale`). A holder that was heard from and later dies never
+//! makes this tab open a port.
 
 /// How long the first sweep waits for the lock manager's answer.
 pub const PRIMING_PATIENCE_SECS: f64 = 2.0;

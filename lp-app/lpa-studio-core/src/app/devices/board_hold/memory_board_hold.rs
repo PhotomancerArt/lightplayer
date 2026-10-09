@@ -63,8 +63,24 @@ impl MemoryBoardHoldBus {
     /// `Gone`, so other tabs' watches on them resolve; its own watches end;
     /// it hears nothing more and nothing it does reaches the bus.
     pub fn kill(&self, tab: &TabId) {
+        self.silence(tab);
+        self.drop_locks(tab);
+    }
+
+    /// `tab`'s page went (a reload, a close) but its locks have not been
+    /// let go yet: the browser frees a gone document's Web Locks a moment
+    /// later. It hears nothing more, says nothing more, and its own watches
+    /// end; [`Self::drop_locks`] is that moment.
+    pub fn silence(&self, tab: &TabId) {
         let mut state = self.state.borrow_mut();
         state.inboxes.remove(tab);
+        state.end_watches(|watch| &watch.tab == tab, false);
+    }
+
+    /// Every lock `tab` holds drops, with no `Gone`: other tabs' watches on
+    /// them resolve.
+    pub fn drop_locks(&self, tab: &TabId) {
+        let mut state = self.state.borrow_mut();
         let held: Vec<String> = state
             .locks
             .iter()
@@ -74,7 +90,6 @@ impl MemoryBoardHoldBus {
         for name in held {
             state.free(&name);
         }
-        state.end_watches(|watch| &watch.tab == tab, false);
     }
 
     /// Who holds `key`'s lock, if anyone.
@@ -366,6 +381,27 @@ mod tests {
         a.post(&HoldNote::Who);
         assert!(b.take_inbox().is_empty());
         assert_eq!(ready(a.claim(&key(1))), ClaimAnswer::Unavailable);
+        assert_eq!(bus.holder_of(&key(1)), None);
+    }
+
+    /// A reload: the old page is gone (it hears and says nothing) while
+    /// its lock lingers, listed and watched like any other, until the
+    /// browser lets it go.
+    #[test]
+    fn a_silenced_tabs_locks_linger_until_they_drop() {
+        let bus = MemoryBoardHoldBus::new();
+        let (a, b) = (bus.tab(), bus.tab());
+        ready(a.claim(&key(1)));
+
+        bus.silence(&a.tab_id());
+        a.post(&HoldNote::Who);
+        assert!(b.take_inbox().is_empty(), "the old page says nothing");
+        assert_eq!(ready(b.held_now()), vec![key(1)], "its lock lingers");
+        let mut watch = b.watch(&key(1));
+        assert_eq!(poll(&mut watch), Poll::Pending);
+
+        bus.drop_locks(&a.tab_id());
+        assert_eq!(poll(&mut watch), Poll::Ready(true));
         assert_eq!(bus.holder_of(&key(1)), None);
     }
 

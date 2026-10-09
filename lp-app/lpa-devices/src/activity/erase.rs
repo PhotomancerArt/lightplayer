@@ -247,6 +247,7 @@ impl ActivityReducer for EraseActivity {
                 // reducer's: a link this activity runs on was opened here.
                 | Event::BoardHeld { .. }
                 | Event::LinkHeld { .. }
+                | Event::LinkFreed { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 // The wire borrow is the fold's business (it pauses

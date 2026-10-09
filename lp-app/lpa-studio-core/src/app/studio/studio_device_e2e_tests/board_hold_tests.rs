@@ -975,6 +975,234 @@ fn z10_after_a_crash_connect_is_back_and_opens_the_board() {
 }
 
 // ---------------------------------------------------------------------
+// The director's fixes to P3–P4 (DD35)
+// ---------------------------------------------------------------------
+
+/// F1: a reload works as it does today. Tab A holds the board and reloads:
+/// the old page goes (the browser closes its port) but its Web Lock lingers
+/// a moment, so the new page primes with a hold whose holder never answers
+/// `Who`. The new page keeps the port shut meanwhile; when the lock frees
+/// — sooner than the priming patience — it opens the port as a fresh load
+/// does, and ends holding the board, Ready, with no press.
+#[test]
+fn f1_a_reload_opens_the_board_once_the_old_pages_lock_frees() {
+    let desk = Desk::new(&[("dev000000holdf1aa", MAC_A)]);
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let old_page = desk.reload(a);
+
+    let mut new_page = desk.tab("A2", &[0]);
+    new_page.library_changed();
+    let primed_at = desk.clock.get();
+    run_until(
+        &mut [&mut new_page],
+        "the new page to prime with the old page's lock",
+        |tabs| tabs[0].fact(MAC_A).is_some(),
+    );
+    for _ in 0..40 {
+        new_page.step();
+    }
+    assert!(
+        desk.clock.get() - primed_at < crate::app::devices::board_hold::PRIMING_PATIENCE_SECS,
+        "the lock lingers for less than the patience"
+    );
+    assert_eq!(desk.attempts(0, "A2"), 0, "shut while the old lock lingers");
+
+    desk.bus.drop_locks(&old_page);
+    run_until(
+        &mut [&mut new_page],
+        "the new page to hold the board",
+        |tabs| {
+            tabs[0].holds(MAC_A)
+                && tabs[0]
+                    .card(MAC_A)
+                    .is_some_and(|card| card.status == DeviceStatus::Ready)
+        },
+    );
+
+    assert_eq!(desk.attempts(0, "A2"), 1, "opened once, with no press");
+    assert_eq!(new_page.fact(MAC_A), None);
+    assert!(new_page.bench.view().pending.is_empty());
+    assert_eq!(desk.bus.holder_of(&usb_key(MAC_A)), Some(new_page.tab_id()));
+}
+
+/// F1, the other side of the line: past the patience, a lingering lock
+/// whose holder never spoke is still the gone page's, and its freeing
+/// still opens the port. A holder that WAS heard from and then dies opens
+/// nothing (T6, Z10).
+#[test]
+fn f1_a_lock_that_lingers_past_the_patience_still_opens_once_it_frees() {
+    let desk = Desk::new(&[("dev000000holdf1bb", MAC_A)]);
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let old_page = desk.reload(a);
+    let mut new_page = desk.tab("A2", &[0]);
+    new_page.library_changed();
+    run_until(&mut [&mut new_page], "the new page to prime", |tabs| {
+        tabs[0].fact(MAC_A).is_some()
+    });
+    desk.clock
+        .set(desk.clock.get() + crate::app::devices::board_hold::PRIMING_PATIENCE_SECS + 1.0);
+    for _ in 0..40 {
+        new_page.step();
+    }
+    assert_eq!(desk.attempts(0, "A2"), 0);
+
+    desk.bus.drop_locks(&old_page);
+    run_until(
+        &mut [&mut new_page],
+        "the new page to hold the board",
+        |tabs| {
+            tabs[0].holds(MAC_A)
+                && tabs[0]
+                    .card(MAC_A)
+                    .is_some_and(|card| card.status == DeviceStatus::Ready)
+        },
+    );
+    assert_eq!(desk.attempts(0, "A2"), 1);
+}
+
+/// F2: no verb on a board another tab holds hands its port or its record
+/// away. Forget revokes the site's port grant (which can pull the port from
+/// the tab that holds it) and deletes the registry row every tab of this
+/// browser shares, so it is not offered on the held card — nor on the card
+/// of the tab that let the board go — until the hold ends; nor is anything
+/// that would touch the held port's firmware or lines.
+#[test]
+fn f2_a_held_board_offers_no_forget_and_nothing_that_touches_its_port() {
+    let desk = Desk::new(&[("dev000000holdf2aa", MAC_A)]);
+    let (mut a, mut b) = holder_and_watcher(&desk);
+    run_until(
+        &mut [&mut a, &mut b],
+        "B's port to merge onto the card",
+        |tabs| {
+            tabs[1]
+                .card(MAC_A)
+                .is_some_and(|card| card.status == DeviceStatus::Attached)
+                && tabs[1].bench.view().pending.is_empty()
+        },
+    );
+    let held_verbs = b.verbs(MAC_A);
+    for verb in ["forget", "reset-board", "flash", "erase"] {
+        assert!(
+            !held_verbs.iter().any(|offered| offered == verb),
+            "{verb} would act on a port or a record another tab holds: {held_verbs:?}"
+        );
+    }
+
+    // The tab that let it go keeps no Forget either.
+    b.bench
+        .press(b.verb(MAC_A, "take-over"), OfferArgs::new())
+        .expect("press");
+    run_until(&mut [&mut a, &mut b], "A to wear \"taken\"", |tabs| {
+        tabs[1].holds(MAC_A) && tabs[0].fact(MAC_A).is_some_and(|fact| fact.taken_from_here)
+    });
+    a.bench.not_offered(a.verb(MAC_A, "forget"));
+    b.bench.offered(b.verb(MAC_A, "forget"));
+
+    // The hold ends: Forget is back on the board the tab let go.
+    desk.crash(b);
+    run_until(&mut [&mut a], "A's fact to clear", |tabs| {
+        tabs[0].fact(MAC_A).is_none()
+    });
+    assert!(
+        a.bench
+            .offered(a.verb(MAC_A, "forget"))
+            .consequence()
+            .arms(),
+        "Forget is back, Lasting as ever"
+    );
+}
+
+/// F2, the pending port: a tab that never met two boards of one kind,
+/// both held by another tab, keeps their ports as pending cards ("open in
+/// another Studio tab") that offer neither Reset (the lines are the other
+/// tab's port's) nor dismiss (handing the grant back can pull the port).
+#[test]
+fn f2_a_held_pending_port_offers_no_reset_and_no_dismiss() {
+    let desk = Desk::new(&[("dev000000holdf2bb", MAC_A), ("dev000000holdf2cc", MAC_B)]);
+    let mut a = desk.tab("A", &[0, 1]);
+    run_until(&mut [&mut a], "A to hold both boards", |tabs| {
+        tabs[0].holds(MAC_A) && tabs[0].holds(MAC_B)
+    });
+    // C never loads the library: no record names either board.
+    let mut c = desk.tab("C", &[0, 1]);
+    run_until(&mut [&mut a, &mut c], "C's ports to be held", |tabs| {
+        let pending = tabs[1].bench.view().pending;
+        pending.len() == 2 && pending.iter().all(|pending| pending.held_by_tab)
+    });
+
+    let offers = c.bench.controller.view().offers;
+    for pending in c.bench.view().pending {
+        let prefix = offers
+            .device_prefix(pending.device)
+            .expect("the pending card's place")
+            .clone();
+        for verb in ["reset-board", "dismiss"] {
+            c.bench.not_offered(prefix.clone().child(verb));
+        }
+    }
+    assert_eq!(desk.attempts(0, "C") + desk.attempts(1, "C"), 0);
+}
+
+/// F3: a held port's mark goes with its hold. A tab that never met two
+/// boards of one kind keeps their held ports as pending cards ("open in
+/// another Studio tab"); the holder closes, both holds end, and the cards
+/// stop saying so — and still nothing opens the ports (R3: the holder was
+/// heard from).
+#[test]
+fn f3_a_freed_port_stops_saying_another_tab_holds_it() {
+    let desk = Desk::new(&[("dev000000holdf3aa", MAC_A), ("dev000000holdf3bb", MAC_B)]);
+    let mut a = desk.tab("A", &[0, 1]);
+    run_until(&mut [&mut a], "A to hold both boards", |tabs| {
+        tabs[0].holds(MAC_A) && tabs[0].holds(MAC_B)
+    });
+    let mut c = desk.tab("C", &[0, 1]);
+    run_until(&mut [&mut a, &mut c], "C to hear A's levels", |tabs| {
+        let pending = tabs[1].bench.view().pending;
+        pending.len() == 2
+            && pending.iter().all(|pending| pending.held_by_tab)
+            && tabs[1]
+                .bench
+                .controller
+                .board_hold_book()
+                .is_some_and(|book| book.others().all(|(_, hold)| hold.tab.is_some()))
+    });
+
+    desk.crash(a);
+    run_until(&mut [&mut c], "the marks to go", |tabs| {
+        tabs[0]
+            .bench
+            .view()
+            .pending
+            .iter()
+            .all(|pending| !pending.held_by_tab)
+    });
+    for _ in 0..200 {
+        c.step();
+    }
+
+    let pending = c.bench.view().pending;
+    assert_eq!(pending.len(), 2, "{pending:?}");
+    for card in &pending {
+        assert!(!card.held_by_tab);
+        assert_ne!(
+            card.state_label,
+            "New device found \u{2014} open in another Studio tab"
+        );
+    }
+    assert_eq!(
+        desk.attempts(0, "C") + desk.attempts(1, "C"),
+        0,
+        "nothing opened the ports"
+    );
+}
+
+// ---------------------------------------------------------------------
 // The desk: boards shared by tabs
 // ---------------------------------------------------------------------
 
@@ -1240,7 +1468,19 @@ impl Desk {
     /// `tab` crashes: its locks vanish with no word (the bus), and the
     /// browser closes the ports it had open (the desk).
     fn crash(&self, tab: Tab) {
-        self.bus.kill(&tab.tab_id());
+        let id = tab.tab_id();
+        self.reload(tab);
+        self.bus.drop_locks(&id);
+    }
+
+    /// `tab`'s page goes (a reload): the browser closes the ports it had
+    /// open, and it says and hears nothing more — but its locks linger
+    /// until the test lets them go ([`MemoryBoardHoldBus::drop_locks`] with
+    /// the id this returns), as a gone page's Web Locks outlive it for a
+    /// moment.
+    fn reload(&self, tab: Tab) -> TabId {
+        let id = tab.tab_id();
+        self.bus.silence(&id);
         for board in &self.boards {
             let mut state = board.state.borrow_mut();
             if state.holder == Some(tab.name) {
@@ -1249,6 +1489,7 @@ impl Desk {
             }
         }
         drop(tab);
+        id
     }
 
     /// How many opens `tab` attempted on board `index`.
@@ -1459,6 +1700,26 @@ impl Tab {
             .unwrap_or_else(|| panic!("{id:?} has no place in the offer tree"))
             .clone()
             .child(verb)
+    }
+
+    /// Every verb this tab's card for the board with `mac` offers, by its
+    /// last path segment.
+    fn verbs(&self, mac: &str) -> Vec<String> {
+        let id = self.device_id(mac);
+        let offers = self.bench.controller.view().offers;
+        let prefix = offers.device_prefix(id).expect("a place").clone();
+        offers
+            .verbs_of(&prefix)
+            .map(|offer| {
+                offer
+                    .path
+                    .to_string()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect()
     }
 
     /// What this tab's card says about its take-over of the board.

@@ -256,6 +256,9 @@ impl Evidence {
             // presence stays `Present`, and the MAC the claims name (when
             // they name exactly this link's board) is learned as a hello's
             // would be.
+            // The hold that kept it shut ended: the mark goes, and the port
+            // stays as it was (not open here).
+            Event::LinkFreed { .. } => self.link_held_by_tab = false,
             Event::LinkHeld { mac, .. } => {
                 self.link_held_by_tab = true;
                 if let Some(mac) = mac {

@@ -262,6 +262,7 @@ impl ActivityReducer for PushActivity {
                 // reducer's: a link this activity runs on was opened here.
                 | Event::BoardHeld { .. }
                 | Event::LinkHeld { .. }
+                | Event::LinkFreed { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 // The borrow this push's own effect holds: fold business

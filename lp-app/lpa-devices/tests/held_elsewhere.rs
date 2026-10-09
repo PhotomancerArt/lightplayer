@@ -252,6 +252,40 @@ fn a_held_link_the_claims_cannot_name_stays_pending_and_says_so() {
     );
 }
 
+/// The hold that kept a pending port shut ends (`LinkFreed`): the mark and
+/// its words go, and nothing else moves — the port is not opened, its
+/// identify does not run again, and it reads as the shut port it is.
+#[test]
+fn a_freed_port_loses_its_mark_and_stays_shut() {
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(10), Step::link_held(1, None));
+    assert!(replay.view().pending[0].held_by_tab);
+
+    let before = replay.commands().len();
+    let commands = replay.step(Millis(20), Step::link_freed(1));
+
+    let view = replay.view();
+    let pending = &view.pending[0];
+    assert!(!pending.held_by_tab);
+    assert_ne!(
+        pending.state_label,
+        "New device found — open in another Studio tab"
+    );
+    assert!(!opens(&commands, LinkId(1)), "{commands:?}");
+    assert!(!replay.roster().pending()[0].is_identifying());
+    replay.advance_to(Millis(
+        20 + (config.identify_deadline_ms + 1_000) * u64::from(config.identify_auto_retries + 2),
+    ));
+    assert!(
+        !replay.commands()[before..].iter().any(
+            |(_, command)| matches!(command, Command::Link { link, .. } if *link == LinkId(1))
+        ),
+        "nothing opens it"
+    );
+}
+
 /// A refused open the claims explain later (the OS refused the port before
 /// any other tab said it held it): the existing words stand until the
 /// `LinkHeld` arrives, then the other tab's own word replaces them.
@@ -390,6 +424,7 @@ fn the_hold_events_round_trip_through_json() {
             link: LinkId(1),
             mac: Some(MacAddress(BOARD_MAC.to_string())),
         }),
+        Input::Event(Event::LinkFreed { link: LinkId(1) }),
     ];
     for input in inputs {
         let json = serde_json::to_string(&input).expect("serialize");
@@ -408,10 +443,11 @@ fn the_hold_events_round_trip_through_json() {
     );
 
     // And a fixture step that scripts them parses back the same.
-    let step = Step::link_held(1, Some(BOARD_MAC));
-    let json = serde_json::to_string(&step).expect("step serializes");
-    let back: Step = serde_json::from_str(&json).expect("step parses");
-    assert_eq!(serde_json::to_string(&back).expect("re-serializes"), json);
+    for step in [Step::link_held(1, Some(BOARD_MAC)), Step::link_freed(1)] {
+        let json = serde_json::to_string(&step).expect("step serializes");
+        let back: Step = serde_json::from_str(&json).expect("step parses");
+        assert_eq!(serde_json::to_string(&back).expect("re-serializes"), json);
+    }
 }
 
 /// The same story as JSON, the shape a triaged bug's fixture takes: the

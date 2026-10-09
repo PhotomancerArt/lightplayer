@@ -571,7 +571,14 @@ A holder announces `Watching`, `Open` (its editor is on the board) or
 `Busy(label)`; it refuses an ask while busy and otherwise closes the editor,
 writes the last picture, disconnects, waits for the close, releases, then
 says `Released` (`hold_answer`). A sentinel watch per hold elsewhere clears
-the fact when the holder dies, and never opens the port.
+the fact when the holder dies, and never opens the port — except for a hold
+read off the lock manager at load whose holder never spoke: that is the old
+page of a reload, whose lock outlives it for a moment, and when it frees the
+ports it kept shut open as a fresh load opens them. A port the claims kept
+shut loses its "held by another tab" mark (`Event::LinkFreed`) once no claim
+of its kind stands. No verb on a held board hands its port or its record
+away: no Forget, and over USB no Flash, Erase or Reset; a held pending port
+offers no Reset or dismiss.
 
 ## Device Management UX
 

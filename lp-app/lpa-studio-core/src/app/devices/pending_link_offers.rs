@@ -8,7 +8,7 @@
 //! |---|---|
 //! | `flash` | the link settled on a needs-firmware verdict ([`flash_pending_offer`]); pressing it adopts the link |
 //! | `adopt` | "Set up this device", where Flash is not already that gesture |
-//! | `reset-board` | always: the recovery for a chip parked silent in its ROM downloader; disabled on a network link (Bluetooth, Wi‑Fi, the relay), whose Reset is a request to a board that has not answered yet |
+//! | `reset-board` | the recovery for a chip parked silent in its ROM downloader; disabled on a network link (Bluetooth, Wi‑Fi, the relay), whose Reset is a request to a board that has not answered yet; not on a port another tab holds (its lines are that tab's) |
 //! | `dismiss` | the projection's escape (it says Forget; dismissing hands the grant back), Lasting through its meta; not on a port another tab holds (handing the grant back can pull the port from that tab) |
 //!
 //! A pending link is not a device, so its adopt and dismiss address the
@@ -46,18 +46,21 @@ pub fn pending_link_offers(
     // Over a cable, Reset pulses the reset lines — the way out of a chip
     // that prints nothing. Over a network link it would be a restart
     // request to a board that has not said hello yet (and whose password
-    // nobody has checked), so it waits for the answer.
-    let action = DevicesOp::action_for(Action::ResetBoard {
-        device: pending.device,
-    });
-    offers.push(UiOffer::new(
-        at("reset-board"),
-        "reset",
-        match reset {
-            ResetReach::Lines => action,
-            ResetReach::Request { .. } => action.disabled(RESET_WAITS_FOR_ANSWER),
-        },
-    ));
+    // nobody has checked), so it waits for the answer. A port another tab
+    // holds is that tab's, lines and all: no Reset here.
+    if !pending.held_by_tab {
+        let action = DevicesOp::action_for(Action::ResetBoard {
+            device: pending.device,
+        });
+        offers.push(UiOffer::new(
+            at("reset-board"),
+            "reset",
+            match reset {
+                ResetReach::Lines => action,
+                ResetReach::Request { .. } => action.disabled(RESET_WAITS_FOR_ANSWER),
+            },
+        ));
+    }
     // Every escape the projection grants a pending link dismisses it; one
     // verb, however many it names. Not a port another tab holds: dismissing
     // hands the site's grant back (`port.forget()`), which can pull the
@@ -150,20 +153,23 @@ mod tests {
         );
     }
 
-    /// A port another tab holds offers no dismiss: dismissing hands the
-    /// site's grant back, which can pull the port from that tab.
+    /// A port another tab holds offers no dismiss (dismissing hands the
+    /// site's grant back, which can pull the port from that tab) and no
+    /// Reset (its lines are that tab's).
     #[test]
-    fn a_port_another_tab_holds_cannot_be_dismissed() {
+    fn a_port_another_tab_holds_cannot_be_dismissed_or_reset() {
         let mut held = pending(FirmwareFace::Unknown);
         held.held_by_tab = true;
 
         let offers = pending_link_offers(&held, &prefix(), ResetReach::Lines);
 
-        assert!(
-            !paths(&offers).iter().any(|path| path.ends_with("/dismiss")),
-            "{:?}",
-            paths(&offers)
-        );
+        for verb in ["/dismiss", "/reset-board"] {
+            assert!(
+                !paths(&offers).iter().any(|path| path.ends_with(verb)),
+                "{verb}: {:?}",
+                paths(&offers)
+            );
+        }
     }
 
     fn paths(offers: &[UiOffer]) -> Vec<String> {

@@ -590,6 +590,7 @@ impl Roster {
                 // `handle` puts the book on the devices after every input.
                 Vec::new()
             }
+            Event::LinkFreed { link } => self.dispatch_to_owner(now, *link, input),
             Event::LinkHeld { link, mac } => {
                 let owned = self.owner_of(*link).is_some();
                 let commands = self.dispatch_to_owner(now, *link, input);

@@ -262,6 +262,7 @@ impl IdentifyActivity {
             | Event::LinkDetached { .. }
             | Event::LinkBorrow { .. }
             | Event::BoardHeld { .. }
+            | Event::LinkFreed { .. }
             | Event::ActivityMarker { .. }
             | Event::IdentityObserved { .. }
             | Event::GrantAnswered { .. } => ActivityStep::nothing(),

@@ -310,6 +310,10 @@ pub enum Step {
         #[serde(default)]
         mac: Option<String>,
     },
+    /// The hold that kept this link's port shut has ended.
+    LinkFreed {
+        link: u64,
+    },
     SetName {
         device: u64,
         name: String,
@@ -422,6 +426,11 @@ impl Step {
             link,
             mac: mac.map(str::to_string),
         }
+    }
+
+    /// The hold that kept this link's port shut has ended.
+    pub fn link_freed(link: u64) -> Self {
+        Self::LinkFreed { link }
     }
 
     /// Attach a MAC to a `hello` or `heartbeat` step.
@@ -709,6 +718,7 @@ impl Step {
                 link: LinkId(link),
                 mac: mac.map(MacAddress),
             }),
+            Self::LinkFreed { link } => Input::Event(Event::LinkFreed { link: LinkId(link) }),
             Self::Advance => return None,
         })
     }

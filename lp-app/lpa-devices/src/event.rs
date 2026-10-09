@@ -312,6 +312,16 @@ pub enum Event {
         #[serde(default)]
         mac: Option<crate::identity::MacAddress>,
     },
+    /// The hold that kept this link's port shut ([`Self::LinkHeld`]) has
+    /// ended: no other tab says it holds a board of this port's kind now.
+    ///
+    /// Clears the link's "held by another tab" mark, and nothing else: the
+    /// port stays shut, its identify stays settled, and a MAC the claims
+    /// presumed stays a presumption. Opening the port is a person's choice
+    /// (Connect), never this event's.
+    LinkFreed {
+        link: LinkId,
+    },
     TimerFired {
         timer: TimerId,
     },

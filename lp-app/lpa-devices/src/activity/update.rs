@@ -486,6 +486,7 @@ impl ActivityReducer for UpdateActivity {
                 // reducer's: a link this activity runs on was opened here.
                 | Event::BoardHeld { .. }
                 | Event::LinkHeld { .. }
+                | Event::LinkFreed { .. }
                 | Event::LinkBorrow { .. } => ActivityStep::nothing(),
             },
         }
