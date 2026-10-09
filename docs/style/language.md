@@ -88,6 +88,18 @@ board**, **Offline boards**, **Other projects**, **Your patterns**, then
 the examples. Its tabs are **All**, **Boards**, **Projects** and
 **Patterns**.
 
+The rest of the page's words:
+
+- The catalog's two sections are **Example projects** and **Example
+  patterns**. The archive drawer is **Archived projects**. The Projects
+  tab's own section, every project in the library, is **Projects**.
+- Under the boards sits a closed fold, **Unlocking your boards**.
+- Connect a board's squares read **USB**, **Bluetooth** and **Network**.
+  The quiet verb under them is **start a board here**. A first visit adds
+  one hint line: "No board? Try an example ↓".
+- Someone with something to keep and no account sees one line: "Sign in to
+  unlock your boards from any browser." A first visit doesn't.
+
 The board card's verbs:
 
 - **Connect** — open the board here and show its panel on the card. The

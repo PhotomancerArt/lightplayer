@@ -299,3 +299,55 @@ Each amended record carries a reciprocal note dated 2026-10-08.
   "Start a board here" stays in Connect a board. The runtime band's words
   move to the hardware bar. How a project starts on a stand-in from the
   home page is open (the roadmap's "Editing without the board").
+
+## Amendment 2026-10-09: how the page is built
+
+Section 1 stands. This is how the home page is built (plan
+`lp2025/2026-10-08-2050-one-home-page`), and where the build departs from
+the spike. It is not a new decision.
+
+- **The page's data is core's.** `UiHomeView.sections` holds it: the online
+  and offline boards, the Connect a board offers, Other projects, Projects,
+  Your patterns (as `prj…` uids), and `newcomer` (no board of any kind and no
+  library project of any kind: a first visit, with no tabs, no switch, and
+  Connect a board first with its one hint). `UiHomeTab::shows` is the tab
+  rule, the one table of which tab shows which section. The web draws and
+  decides nothing about which board or project sits in which section.
+- **The sections come from the board↔project join** (`BoardProjects`). A
+  project is under Other projects when no board plays it, and a project an
+  offline board plays is on a board. The Online/Offline split is the
+  roster's own status.
+- **The Projects tab lists every library project,** so a board's project,
+  even an offline board's, keeps Rename, Duplicate, Download and Delete and
+  still opens on a sim, each saying which boards play it ("On Desk C6").
+  **Other projects** (the All tab) lists only the unattached.
+- **Tabs are view state, not offers.** So are the cards/list switch and the
+  "Unlocking your boards" fold: no `UiAction`, not in the offer tree. The
+  switch is remembered in `localStorage` under `lp.home.view.v1` (`"cards"`
+  or `"list"`; anything else reads as cards; every access is inside a
+  try/catch). The tab is not remembered.
+- **The top bar has no Devices or Projects tab;** the logo is Home's tab.
+  `/devices`, `/projects`, `/home`, and a bare `/device` or junk under it,
+  parse as Home and heal to `/` with the page's query kept (every flag, not
+  `?on=`). The route, site-section and page variants for the two are gone,
+  and "Back to devices" is "Back home".
+- **`StudioShell`'s no-editor arm draws the same page,** because that arm
+  also serves a cold `/device/<uid>` load (the cards are the connect
+  evidence) and a lens detaching.
+- **`BoardCardSlot` is the one place a board's card is mounted,** keyed by
+  the section entry, so the board card (the roadmap's card milestone) swaps
+  one body.
+
+**Deliberate differences from the spike:**
+
+- no stage (Q28);
+- the tabs are All · Boards · Projects · Patterns, not group tabs (Q31);
+- Network opens an inline address row under the squares, as the spike drew
+  it; the vision's Q12 said "a small sheet", so the page's visual gate asks;
+- patterns draw as cards;
+- "Unlocking your boards" is a closed fold under the boards;
+- a newcomer sees one quiet project add row (Other projects is only New ·
+  Import · Paste);
+- the sign-in line reads "Sign in to unlock your boards from any browser."
+  because what an account keeps today is the key that unlocks a board in any
+  browser; the account's own board list is step 2.
