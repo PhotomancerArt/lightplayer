@@ -14,12 +14,19 @@
 //! ([`RichDetailSection`]), then the panels ([`BarDetailPanel`]), then the
 //! Danger section, which always comes last. While core raises the details
 //! (`raised`: a question that must be answered now, Q40) they open by
-//! themselves and stay open until core lowers them.
+//! themselves and stay open until core lowers them — or, for a refusal,
+//! until its Close closes it, which the details remember until core's panel
+//! changes. Opening details that hold the Wi‑Fi panel asks the board for
+//! its networks again, as opening today's Wi‑Fi popover did.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{OfferPath, RichSection, RichWeight, UiAction, UiCardAction, UiDetailPanel};
+use lpa_studio_core::{
+    NetworkCommand, OfferPath, RichSection, RichWeight, UiAction, UiCardAction, UiDetailPanel,
+    UiLayoutPanel,
+};
 
 use super::bar_detail_panel::BarDetailPanel;
+use crate::app::home::access_ui_context::network_handler;
 use crate::base::{DetailPopover, PopoverPlacement, StudioIconName};
 use crate::core::RichDetailSection;
 
@@ -47,6 +54,14 @@ pub fn BarDetails(
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    // A refusal its Close closed stays closed until core's panel changes
+    // (today's card's `closed_sheet`): `raised` does not reopen it.
+    let mut closed_layout = use_signal(|| None::<UiLayoutPanel>);
+    let layout = panels.iter().find_map(|panel| match panel {
+        UiDetailPanel::Layout(layout) => Some(layout.clone()),
+        _ => None,
+    });
+    let raised = raised && (layout.is_none() || *closed_layout.read() != layout);
     let mut open = use_signal(|| initially_open || raised);
     // Whether the details are open because core raised them, so lowering
     // them closes only what core opened.
@@ -64,6 +79,23 @@ pub fn BarDetails(
             open.set(false);
         }
     }));
+    // Opening details that hold the Wi‑Fi panel asks the board again, and
+    // what it hears (core asks nothing of a board that cannot scan) — as
+    // opening today's Wi‑Fi popover does.
+    let wifi = panels.iter().find_map(|panel| match panel {
+        UiDetailPanel::Wifi(wifi) => Some(wifi.device),
+        _ => None,
+    });
+    let on_network = network_handler();
+    use_effect(use_reactive!(|wifi| {
+        if let Some(device) = wifi.filter(|_| open()) {
+            on_network.call(NetworkCommand::Refresh { device });
+            on_network.call(NetworkCommand::Scan { device });
+        }
+    }));
+    let on_close_layout = use_callback(move |refusal: UiLayoutPanel| {
+        closed_layout.set(Some(refusal));
+    });
     let (danger, rest): (Vec<_>, Vec<_>) = sections
         .into_iter()
         .partition(|section| section.weight == RichWeight::Danger);
@@ -86,7 +118,13 @@ pub fn BarDetails(
                     RichDetailSection { key: "section-{index}", section, on_action }
                 }
                 for (index, panel) in panels.into_iter().enumerate() {
-                    BarDetailPanel { key: "panel-{index}", panel, board: board.clone(), on_action }
+                    BarDetailPanel {
+                        key: "panel-{index}",
+                        panel,
+                        board: board.clone(),
+                        on_close_layout,
+                        on_action,
+                    }
                 }
                 for (index, section) in danger.into_iter().enumerate() {
                     RichDetailSection { key: "danger-{index}", section, on_action }

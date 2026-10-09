@@ -20,7 +20,7 @@ use lpa_studio_core::{
 };
 
 use super::board_picture::BoardPicture;
-use super::card_action::{CardScope, use_provide_card_scope};
+use super::card_action::{CardPreviews, CardScope, use_provide_card_scope};
 use super::name_bar::NameBar;
 use super::stack_bar::StackBar;
 use super::status_corner::StatusCorner;
@@ -52,6 +52,9 @@ pub fn BoardCard(
     /// Stories only: the action at this path renders already armed.
     #[props(default)]
     armed_preview: Option<OfferPath>,
+    /// Stories only: panels in a state a capture cannot click to.
+    #[props(default)]
+    previews: CardPreviews,
 ) -> Element {
     let device = card.device;
     let leases = card.presence != UiBoardPresence::New;
@@ -71,7 +74,9 @@ pub fn BoardCard(
         projects,
         examples,
         board_title: card.name_bar.title.clone(),
+        device: Some(device),
         armed: armed_preview,
+        previews,
     });
     let board = card.board.clone();
     rsx! {

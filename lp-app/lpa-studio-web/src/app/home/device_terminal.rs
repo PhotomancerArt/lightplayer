@@ -391,12 +391,18 @@ mod tests {
         assert!(!is_pinned_to_bottom(95.0, 260, 160));
     }
 
-    /// FLUSH (G1 2026-09-03): the ground reaches the card's edges, so the
-    /// block carries no padding and no hairline of its own — the firmware
-    /// zone above owns the separator — and the ground itself keeps only the
-    /// small reading inset that stops text touching the edge.
+    /// FLUSH (G1 2026-09-03): in the board card's status corner details the
+    /// terminal's ground reaches the details card's edges, so the block
+    /// carries no padding and no hairline of its own — the section above it
+    /// owns the separator — and the ground itself keeps only the small
+    /// reading inset that stops text touching the edge. Its height is fixed
+    /// there, so a long log scrolls and never grows the card.
     #[test]
-    fn the_terminal_is_flush_with_the_cards_edges() {
+    fn the_terminal_sits_flush_in_the_corners_details() {
+        assert_eq!(
+            crate::app::board_card::bar_detail_panel::TERMINAL_HEIGHT_CLASS,
+            "tw:h-40"
+        );
         assert!(!ZONE_CLASS.contains("px-"), "{ZONE_CLASS}");
         assert!(!ZONE_CLASS.contains("py-"), "{ZONE_CLASS}");
         assert!(!ZONE_CLASS.contains("border"), "{ZONE_CLASS}");

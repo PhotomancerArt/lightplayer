@@ -764,7 +764,7 @@ fn devices_card_not_responding() -> Element {
 }
 
 #[story(
-    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live, and it acts on ONE press: the sheet is the question, so Continue does not arm a second time (G1 walk 2026-10-03; it keeps its Lasting tint, and the app agent still hands it to the user). Download backup is always there, Cancel leaves the board untouched. Behind the sheet the card says \"Waiting for your answer…\", not \"Flashing firmware…\". Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. The sheets are pinned in their boxes for capture; on the page they rise over it, so asking never changes the card's height."
+    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live, and it acts on ONE press: the sheet is the question, so Continue does not arm a second time (G1 walk 2026-10-03; it keeps its Lasting tint, and the app agent still hands it to the user). Download backup is always there, Cancel leaves the board untouched. Behind the sheet the card says \"Waiting for your answer…\", not \"Flashing firmware…\". Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. Until the board card replaces this card, the question sits at the card's foot; the board card asks it in its firmware details."
 )]
 fn devices_card_layout_change() -> Element {
     use lpa_studio_core::app::devices::device_layout_step::LayoutStaging;
@@ -874,7 +874,6 @@ fn devices_card_layout_change() -> Element {
                         projects: vec![],
                         examples: vec![],
                         layout,
-                        layout_sheet_inline: true,
                         on_action: |_| {},
                     }
                 }
@@ -953,7 +952,6 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
                     projects: vec![],
                     examples: vec![],
                     layout,
-                    layout_sheet_inline: true,
                     on_action: |_| {},
                 }
             }

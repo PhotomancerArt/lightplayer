@@ -22,6 +22,7 @@ pub(crate) mod device_layout_sheet;
 #[cfg(feature = "stories")]
 pub(crate) mod device_offer_story_fixtures;
 pub(crate) mod device_pick_popover;
+pub(crate) mod device_rename_section;
 pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;
 #[cfg(feature = "stories")]

@@ -299,7 +299,9 @@ pub(crate) fn StoryDeviceCard(
     #[props(default)] menu_initially_open: bool,
     /// The install verb's version list, mounted open (and picked/armed).
     #[props(default)]
-    install_picker_preview: Option<crate::app::home::device_roster_card::OfferPickerPreview>,
+    install_picker_preview: Option<
+        crate::app::board_card::other_version_form::OfferPickerPreview,
+    >,
     /// The card's update words (core's, from the story's update fixture).
     #[props(default)]
     update: Option<lpa_studio_core::UiDeviceUpdate>,
@@ -404,6 +406,7 @@ pub(crate) fn StoryBoardCard(
     #[props(default)] editor_holds_it: bool,
     #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
     #[props(default)] armed_preview: Option<OfferPath>,
+    #[props(default)] previews: crate::app::board_card::CardPreviews,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
     let face = match runtime.is_some() {
@@ -468,6 +471,7 @@ pub(crate) fn StoryBoardCard(
                 examples,
                 details_open,
                 armed_preview,
+                previews,
                 on_action,
             }
         }

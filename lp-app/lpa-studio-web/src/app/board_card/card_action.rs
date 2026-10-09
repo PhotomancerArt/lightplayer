@@ -18,7 +18,7 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    OfferArgs, OfferPath, UiAction, UiActionDraw, UiCardAction, UiExampleCard, UiOffer,
+    DeviceId, OfferArgs, OfferPath, UiAction, UiActionDraw, UiCardAction, UiExampleCard, UiOffer,
     UiPackageCard,
 };
 
@@ -61,17 +61,31 @@ impl CardActionLook {
     }
 }
 
-/// What every action under one card shares: the page's lists (the project
-/// pick reads them), the board's name (a new project's default name), and
-/// a story's armed preview. Provided by [`super::BoardCard`]; outside one
-/// an action has empty lists and nothing armed.
+/// What every action and panel under one card shares: the page's lists
+/// (the project pick reads them), the board's name (a new project's default
+/// name), its roster handle (the panels that hand core a file, or flip the
+/// Bluetooth switch, name the board by it), and a story's previews.
+/// Provided by [`super::BoardCard`]; outside one an action has empty lists
+/// and nothing armed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct CardScope {
     pub projects: Vec<UiPackageCard>,
     pub examples: Vec<UiExampleCard>,
     pub board_title: String,
+    pub device: Option<DeviceId>,
     /// Stories: the action at this path renders already armed.
     pub armed: Option<OfferPath>,
+    /// Stories: panels mounted in a state a capture cannot click to.
+    pub previews: CardPreviews,
+}
+
+/// Stories only: panels mounted in a state a capture cannot click to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CardPreviews {
+    /// The access panel's keys list, open.
+    pub access_keys_open: bool,
+    /// The other-version form with values picked (and armed).
+    pub other_version: Option<super::other_version_form::OfferPickerPreview>,
 }
 
 /// Provide `scope` to every action below the caller; readers re-render
@@ -84,7 +98,7 @@ pub(crate) fn use_provide_card_scope(scope: CardScope) {
 }
 
 /// The card's shared facts, or an empty scope outside a card.
-fn use_card_scope() -> CardScope {
+pub(crate) fn use_card_scope() -> CardScope {
     let fallback = use_signal(CardScope::default);
     let scope = use_hook(try_consume_context::<Signal<CardScope>>).unwrap_or(fallback);
     scope.read().clone()
@@ -173,7 +187,8 @@ pub fn CardAction(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn OfferAction(
     path: OfferPath,
-    look: CardActionLook,
+    /// How the button looks where it sits.
+    variant: ActionButtonVariant,
     /// The surface around the button IS the question its press answers (a
     /// layout question's Continue): a Lasting press acts at once.
     #[props(default)]
@@ -189,7 +204,7 @@ pub fn OfferAction(
             ActionButton {
                 action: offer.action,
                 running: false,
-                variant: look.variant(),
+                variant,
                 armed_preview: scope.armed.as_ref() == Some(&path),
                 asked_by_surface,
                 on_action,

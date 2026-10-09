@@ -17,8 +17,9 @@ use lpa_studio_core::{BarWorkState, OfferPath, UiAction, UiStackBar, UiStatusKin
 
 use super::bar_details::BarDetails;
 use super::bar_work::{BarWork, work_state_name};
-use super::card_action::{CardAction, CardActionLook};
+use super::card_action::{CardAction, CardActionLook, OfferAction};
 use crate::base::{PopoverPlacement, StudioIcon, StudioIconName, action_icon_name};
+use crate::core::ActionButtonVariant;
 
 /// One bar. See the module doc.
 #[component]
@@ -56,7 +57,7 @@ pub fn StackBar(
         Some(work) => match &work.state {
             BarWorkState::Running => work.cancel.clone().map(|cancel| {
                 rsx! {
-                    super::card_action::OfferAction { path: cancel, look: CardActionLook::BarEnd, on_action }
+                    OfferAction { path: cancel, variant: ActionButtonVariant::RowEnd, on_action }
                 }
             }),
             BarWorkState::Failed { retry: Some(retry) } => Some(rsx! {

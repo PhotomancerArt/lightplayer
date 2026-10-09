@@ -18,8 +18,13 @@
 //! | [`StackBar`](stack_bar::StackBar) | one 28 px bar: icon, summary, aside (one trigger for its details), its action outside the trigger |
 //! | [`BarWork`](bar_work::BarWork) | a bar's work: spinner and words with the iridescent foot, green when done, striped when failed |
 //! | [`BarDetails`](bar_details::BarDetails) | a bar's (or the corner's) details: the merged detail card, its sections, panels and danger zone |
-//! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card |
+//! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, the Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other version, restore from file |
 //! | [`CardAction`] | one action from the offer it presses, in the card's word and icon |
+//!
+//! The panels moved here from today's card (`bluetooth_switch_panel`,
+//! `link_counters_section`, `other_version_form`,
+//! `restore_from_file_button`) are sections of the details card they sit
+//! in: no box in a box, no popover in a popover.
 //!
 //! # Walk hooks
 //!
@@ -41,6 +46,7 @@
 pub mod bar_detail_panel;
 pub mod bar_details;
 pub mod bar_work;
+pub(crate) mod bluetooth_switch_panel;
 pub mod board_card;
 #[cfg(feature = "stories")]
 pub(crate) mod board_card_stories;
@@ -48,9 +54,12 @@ pub mod board_picture;
 pub mod card_action;
 #[cfg(test)]
 pub(crate) mod card_test_fixtures;
+pub(crate) mod link_counters_section;
 pub mod name_bar;
+pub mod other_version_form;
+pub(crate) mod restore_from_file_button;
 pub mod stack_bar;
 pub mod status_corner;
 
 pub use board_card::{BoardCard, CardPart};
-pub use card_action::{CardAction, CardActionLook, OfferAction};
+pub use card_action::{CardAction, CardActionLook, CardPreviews, OfferAction};

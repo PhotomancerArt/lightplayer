@@ -127,29 +127,30 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ActionEnablement, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
-    DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
-    PickedFirmwareFile, RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind,
-    UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateRowKind,
-    check_backup_file, device_firmware_line, device_identity_line, device_restore_from_file_action,
-    device_status_kind, escape_verb, firmware_face_preview_sentence, firmware_file_action,
-    pending_firmware_line, pending_identity_rows,
+    DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, PendingLinkView, UiAction,
+    UiDeviceUpdate, UiExampleCard, UiLinkKind, UiOffer, UiPackageCard, UiRuntimeBand, UiStatus,
+    UiStatusKind, UiUnlockOffer, UpdateRowKind, device_firmware_line, device_identity_line,
+    device_status_kind, escape_verb, firmware_face_preview_sentence, pending_firmware_line,
+    pending_identity_rows,
 };
 
 use super::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickMode, ProjectPickPopover, joined_chip,
 };
+use super::device_rename_section::DeviceRenameSection;
 use super::device_terminal::DeviceTerminal;
 use super::play_feed_text::frame_age_label;
 use crate::app::agent::AgentMark;
 use crate::app::board_card::board_picture::UpdateLightSlot;
-use crate::app::node::lamp_view::LampView;
-use crate::base::{
-    DetailPopover, DetailSection, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
-    StudioIconName,
+use crate::app::board_card::link_counters_section::LinkCountersSection;
+use crate::app::board_card::other_version_form::{
+    OfferPickerPreview, OtherVersionForm, other_version_popup_class,
 };
+use crate::app::board_card::restore_from_file_button::RestoreFromFileButton;
+use crate::app::node::lamp_view::LampView;
+use crate::base::{DetailPopover, PopoverButton, PopoverPlacement, StudioIcon, StudioIconName};
 use crate::core::{
-    ActionButton, ActionButtonVariant, OfferParamsForm, OfferPressButton, StatusChip,
-    pressed_or_refused, quiet_action_class, use_device_verbs, verb_named,
+    ActionButton, ActionButtonVariant, StatusChip, quiet_action_class, use_device_verbs, verb_named,
 };
 
 /// One device card.
@@ -219,9 +220,6 @@ pub(crate) fn DeviceRosterCard(
     /// tree, drawn with the other firmware verbs.
     #[props(default)]
     update: Option<UiDeviceUpdate>,
-    /// Stories: pin the layout sheet in the card's box, not the viewport.
-    #[props(default)]
-    layout_sheet_inline: bool,
     /// Open the header's ⋯ menu immediately (stories only).
     #[props(default = false)]
     menu_initially_open: bool,
@@ -487,14 +485,6 @@ pub(crate) fn DeviceRosterCard(
         && finish_update.is_none()
         && !firmware_blocked
         && (restore_files.is_some() || restore_from_file);
-    let sheet_verbs =
-        layout_sheet
-            .as_ref()
-            .map(|panel| super::device_layout_sheet::LayoutSheetVerbs {
-                download: offered(Some(&panel.download)),
-                cancel: offered(panel.cancel.as_ref()),
-                continue_action: offered(panel.continue_action.as_ref()),
-            });
     let device_line = info_line(
         lan.as_ref(),
         access.as_ref().and_then(|access| access.line.as_deref()),
@@ -788,6 +778,7 @@ pub(crate) fn DeviceRosterCard(
                             RestoreFromFileButton {
                                 device,
                                 current_base_mac: current_base_mac.clone(),
+                                class: quiet_action_class(),
                                 on_action,
                             }
                         }
@@ -858,15 +849,12 @@ pub(crate) fn DeviceRosterCard(
                                     }
                                 } else {
                                     OfferChoicePopover {
+                                        device,
                                         offer: install,
                                         preview: install_picker_preview.clone(),
                                         // "From a file…": a custom build's
                                         // files, under the list.
-                                        footer: verb("install-firmware-file").map(|file| rsx! {
-                                            AgentMark { path: file.path.clone(),
-                                                FirmwareFileButton { device, offer: file, on_action }
-                                            }
-                                        }),
+                                        from_file: verb("install-firmware-file"),
                                         on_action,
                                     }
                                 }
@@ -1041,18 +1029,15 @@ pub(crate) fn DeviceRosterCard(
                     p { class: row_reason_class(), "{reason}" }
                 }
             }
-            // The layout question (or refusal): a sheet over the page, so
-            // asking never changes the card's height.
-            if let (Some(panel), Some(verbs)) = (layout_sheet, sheet_verbs) {
+            // The layout question (or refusal), at the card's foot until
+            // the board card draws it in its firmware details.
+            if let Some(panel) = layout_sheet {
                 super::device_layout_sheet::DeviceLayoutSheet {
                     on_close: panel.cancel.is_none().then(|| {
                         let refusal = panel.clone();
                         EventHandler::new(move |_| closed_sheet.set(Some(refusal.clone())))
                     }),
                     panel,
-                    verbs,
-                    device_name: card.title.clone(),
-                    inline: layout_sheet_inline,
                     on_action,
                 }
             }
@@ -1107,92 +1092,7 @@ fn DeviceCardMenu(
                 DeviceRenameSection { offer: rename, title, on_action }
             }
             if let Some(counters) = link_counters {
-                DeviceLinkSection { counters }
-            }
-        }
-    }
-}
-
-/// The ⋯ menu's link section: the board's counters as label/value rows,
-/// words and units from core (`link_counter_rows`). A count the link had
-/// to recover from wears the warning tone; a clean link reads as zeros.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn DeviceLinkSection(counters: lpa_studio_core::DeviceLinkCounters) -> Element {
-    let rows = lpa_studio_core::link_counter_rows(&counters);
-    rsx! {
-        DetailSection { title: Some("Link".to_string()),
-            dl { class: "tw:m-0 tw:grid tw:grid-cols-[auto_1fr] tw:gap-x-4 tw:gap-y-1 tw:text-xs tw:leading-snug",
-                for row in rows {
-                    // A `div` per pair is valid inside `dl`, and gives the
-                    // pair one key; `contents` keeps the grid flat.
-                    div { key: "{row.label}", class: "tw:contents",
-                        dt { class: "tw:m-0 tw:text-muted-foreground", "{row.label}" }
-                        dd { class: if row.notable { LINK_VALUE_NOTABLE_CLASS } else { LINK_VALUE_CLASS },
-                            "{row.value}"
-                        }
-                    }
-                }
-            }
-            p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                "{lpa_studio_core::LINK_COUNTERS_CAPTION}"
-            }
-        }
-    }
-}
-
-/// A link counter's value: tabular, selectable, the card's strong ink.
-const LINK_VALUE_CLASS: &str = "tw:m-0 tw:font-mono tw:tabular-nums tw:text-strong-foreground";
-/// …and one the link had to recover from.
-const LINK_VALUE_NOTABLE_CLASS: &str =
-    "tw:m-0 tw:font-mono tw:tabular-nums tw:text-status-warning-foreground";
-
-/// The "Rename" section: the device's `rename` offer, its one Text param
-/// drawn as one form, on the project card's Rename precedent (a form in the
-/// menu, never a dialog). Prefilled with what the card says now, so a board
-/// wearing the derived "<board> · <Mon D>" is a few keystrokes from a name
-/// of its own. Submitting presses the offer with the typed name — the
-/// user-stream `SetName` the model persists to the registry (the name is
-/// Studio's, never written to the board) — and closes the menu: a rename is
-/// a completed gesture.
-///
-/// Shared with the header session control's device panel, which is the
-/// other place the name is shown.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn DeviceRenameSection(
-    /// `devices/<board>/rename`.
-    offer: UiOffer,
-    /// What the device is called right now — the field's starting value.
-    title: String,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let mut value = use_signal(|| title);
-    let close = try_consume_context::<PopoverCloseHandle>();
-
-    rsx! {
-        DetailSection { title: Some("Rename".to_string()),
-            form {
-                class: "tw:flex tw:gap-2",
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    let args = OfferArgs::new().with(RENAME_NAME_PARAM, value.read().clone());
-                    // A blank name binds nothing: the field stays put.
-                    let Ok(action) = offer.press(&args) else {
-                        return;
-                    };
-                    on_action.call(action);
-                    if let Some(mut close) = close {
-                        close.close();
-                    }
-                },
-                input {
-                    class: RENAME_INPUT_CLASS,
-                    aria_label: "Device name",
-                    value: "{value}",
-                    oninput: move |event| value.set(event.value()),
-                }
-                button { class: quiet_action_class(), r#type: "submit", "Rename" }
+                LinkCountersSection { counters }
             }
         }
     }
@@ -1212,9 +1112,6 @@ const ACCOUNT_KEY_REFUSED_CLASS: &str = "tw:m-0 tw:min-w-0 tw:rounded tw:border 
 pub(super) const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
 
 const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
-
-/// The rename form's field — the project card's rename input, verbatim.
-const RENAME_INPUT_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-2 tw:py-1 tw:text-sm tw:text-strong-foreground";
 
 /// One zone's 4px bar slot: present in every state, lit only when the
 /// work running belongs to THIS zone — its activity's, or (the firmware
@@ -1256,44 +1153,19 @@ fn UpdateLine(update: UiDeviceUpdate) -> Element {
     }
 }
 
-/// Stories only: an offer popover mounted open, with values already
-/// picked, and its press armed when `armed`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct OfferPickerPreview {
-    pub args: OfferArgs,
-    pub armed: bool,
-}
-
 /// An offer with parameters drawn from a verb row (an install's `version`
 /// choice): the quiet chip, in the offer's own words, opens a panel that
 /// floats in the top layer — so asking cannot change the card's height —
-/// holding the offer's parameters ([`OfferParamsForm`]) and its press
-/// ([`OfferPressButton`], which arms a Lasting binding on itself). The
-/// board pick's grammar, with the generic form for the values.
-///
-/// When the picked value binds a Lasting action, its copy (core's title and
-/// sentence: what installing that version changes) is drawn above the
-/// press, so it is read before the two clicks rather than only on hover.
+/// holding the firmware details' own form ([`OtherVersionForm`]).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn OfferChoicePopover(
+    device: DeviceId,
     offer: UiOffer,
+    #[props(default)] from_file: Option<UiOffer>,
     #[props(default)] preview: Option<OfferPickerPreview>,
-    /// Drawn under the press: another way to the same verb (an install's
-    /// "From a file…").
-    #[props(default)]
-    footer: Option<Element>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let initial = preview.as_ref().map(|p| p.args.clone()).unwrap_or_default();
-    let args = use_signal(move || initial);
-    let current = args.read().clone();
-    let copy = pressed_or_refused(&offer, &current)
-        .meta()
-        .consequence
-        .copy()
-        .cloned();
-    let armed_preview = preview.as_ref().is_some_and(|p| p.armed);
     rsx! {
         PopoverButton {
             class: quiet_action_class().to_string(),
@@ -1303,105 +1175,17 @@ fn OfferChoicePopover(
             },
             label: offer.label().to_string(),
             title: offer.summary().to_string(),
-            popup_class: OFFER_CHOICE_POPUP_CLASS.to_string(),
+            popup_class: other_version_popup_class().to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomStart,
             layer_keeps_layout: true,
             initially_open: preview.is_some(),
-            div { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:p-2.5",
-                OfferParamsForm { offer: offer.clone(), args }
-                if let Some(copy) = copy {
-                    div { class: OFFER_CHOICE_COPY_CLASS,
-                        p { class: "tw:m-0 tw:font-semibold tw:text-strong-foreground", "{copy.title}" }
-                        p { class: "tw:m-0", "{copy.message}" }
-                    }
-                }
-                div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-2",
-                    if let Some(footer) = footer {
-                        {footer}
-                    } else {
-                        span {}
-                    }
-                    OfferPressButton {
-                        offer,
-                        args: current,
-                        variant: ActionButtonVariant::Outline,
-                        armed_preview,
-                        on_action,
-                    }
-                }
+            div { class: "tw:p-2.5",
+                OtherVersionForm { device, install: offer, from_file, preview, on_action }
             }
         }
     }
 }
-
-/// "From a file…" (`install-firmware-file`): a quiet button in the offer's
-/// own words, paired with a hidden multi-file input — a file dialog cannot
-/// be a [`UiAction`], the same reasoning as [`RestoreFromFileButton`].
-/// Core's offer exists so the app agent can see this is possible
-/// (`needs_user_activation`); picking files reads their bytes and hands them
-/// to core ([`firmware_file_action`]), which checks them against their
-/// manifest and lists the build — or says why not.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn FirmwareFileButton(
-    device: DeviceId,
-    offer: UiOffer,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let input_id = format!("firmware-file-{}", device.0);
-    let disabled = !offer.is_enabled();
-    rsx! {
-        button {
-            class: FIRMWARE_FILE_BUTTON_CLASS,
-            r#type: "button",
-            disabled,
-            title: "{offer.summary()}",
-            onclick: {
-                let input_id = input_id.clone();
-                move |_| open_restore_from_file_picker(&input_id)
-            },
-            "{offer.label()}"
-        }
-        input {
-            class: "tw:hidden",
-            id: "{input_id}",
-            r#type: "file",
-            multiple: true,
-            accept: ".json,.bin,.z",
-            onchange: move |event| {
-                let files = event.files();
-                spawn(async move {
-                    let mut picked = Vec::new();
-                    for file in files {
-                        let name = file.name();
-                        match file.read_bytes().await {
-                            Ok(bytes) => picked.push(PickedFirmwareFile { name, bytes: bytes.to_vec() }),
-                            Err(error) => {
-                                log::warn!("from a file: could not read {name}: {error}");
-                                say(&format!("{name} could not be read"));
-                                return;
-                            }
-                        }
-                    }
-                    if !picked.is_empty() {
-                        on_action.call(firmware_file_action(device, picked));
-                    }
-                });
-            },
-        }
-    }
-}
-
-/// "From a file…": a text button, quieter than the press beside it.
-const FIRMWARE_FILE_BUTTON_CLASS: &str = "tw:shrink-0 tw:whitespace-nowrap tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:px-0 tw:py-1.5 tw:text-[11px] tw:font-semibold tw:text-subtle-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60";
-
-/// What a Lasting pick changes, in core's words: wraps, never clips, at the
-/// panel's width.
-const OFFER_CHOICE_COPY_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-1 tw:rounded-sm tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-2 tw:text-[11px] tw:leading-snug tw:text-muted-foreground tw:whitespace-normal tw:break-words";
-
-/// The parameter panel's box: narrow, in the popover's neutral chrome.
-const OFFER_CHOICE_POPUP_CLASS: &str = "tw:grid tw:w-[260px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground";
 
 /// The roster's "new device found, identifying…" entry.
 ///
@@ -2239,137 +2023,6 @@ fn RuntimeBand(runtime: UiRuntimeBand) -> Element {
 fn runtime_band_class() -> &'static str {
     "tw:m-0 tw:flex tw:h-6 tw:min-w-0 tw:items-center tw:truncate tw:text-[0.68rem] \
      tw:leading-6 tw:text-status-bound-foreground"
-}
-
-/// "Restore from a backup file…" (Decision 11, plan P01): a plain button
-/// wearing the same quiet chip as every other verb, paired with a hidden
-/// file input — a file dialog cannot be a [`UiAction`], the same reasoning
-/// as the project library's own zip Import
-/// (`crate::app::home::projects_page`). Core's own offer at this card's
-/// `restore-from-file` path exists only so the app agent can SEE this is
-/// possible (`needs_user_activation`); pressing it for real never reaches
-/// that op — picking a file reads its bytes and dispatches
-/// [`device_restore_from_file_action`]'s action directly.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RestoreFromFileButton(
-    device: DeviceId,
-    current_base_mac: Option<String>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    let input_id = format!("restore-from-file-{}", device.0);
-    let picked = restore_from_file_handler(device, current_base_mac, on_action);
-    rsx! {
-        button {
-            class: quiet_action_class(),
-            r#type: "button",
-            title: "Pick a backup .zip from your computer and replace this board's files with it.",
-            onclick: {
-                let input_id = input_id.clone();
-                move |_| open_restore_from_file_picker(&input_id)
-            },
-            span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
-                StudioIcon { name: StudioIconName::Upload, size: 14 }
-            }
-            span { "Restore from a backup file…" }
-        }
-        input {
-            class: "tw:hidden",
-            id: "{input_id}",
-            r#type: "file",
-            accept: ".zip",
-            onchange: move |event| picked(event.files()),
-        }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn open_restore_from_file_picker(input_id: &str) {
-    use wasm_bindgen::JsCast;
-    if let Some(input) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(input_id))
-        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-    {
-        input.click();
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn open_restore_from_file_picker(_input_id: &str) {}
-
-/// Read the picked `.zip`, ask the one question a mismatched backup ever
-/// asks (a native confirm — the same `window.confirm` idiom
-/// `unsaved_gate.rs` uses for a quick sanity check ahead of a destructive
-/// action), and dispatch the real import. A refused archive is said in
-/// words, never a raw code, through a native alert: this click never goes
-/// near `on_action`'s generic dispatch until the file has already checked
-/// out.
-fn restore_from_file_handler(
-    device: DeviceId,
-    current_base_mac: Option<String>,
-    on_action: EventHandler<UiAction>,
-) -> impl Fn(Vec<dioxus::html::FileData>) + Clone + 'static {
-    move |files: Vec<dioxus::html::FileData>| {
-        let current_base_mac = current_base_mac.clone();
-        spawn(async move {
-            let Some(file) = files.into_iter().next() else {
-                return;
-            };
-            let name = file.name();
-            if !name.to_lowercase().ends_with(".zip") {
-                say(&format!("{name} is not a backup .zip"));
-                return;
-            }
-            let bytes = match file.read_bytes().await {
-                Ok(bytes) => bytes.to_vec(),
-                Err(error) => {
-                    log::warn!("restore from file: could not read {name}: {error}");
-                    say(&format!("{name} could not be read"));
-                    return;
-                }
-            };
-            match check_backup_file(&bytes, current_base_mac.as_deref()) {
-                Err(message) => say(&message),
-                Ok(Some(mismatch)) => {
-                    if !confirm(&format!("{mismatch} Restore it onto this board anyway?")) {
-                        return;
-                    }
-                    on_action.call(device_restore_from_file_action(device, name, bytes));
-                }
-                Ok(None) => {
-                    on_action.call(device_restore_from_file_action(device, name, bytes));
-                }
-            }
-        });
-    }
-}
-
-/// One native dialog, in words — never a raw code (plan P01). Host builds
-/// (and any context without a `window`) just log it.
-#[cfg(target_arch = "wasm32")]
-fn say(message: &str) {
-    let _ = web_sys::window().and_then(|window| window.alert_with_message(message).ok());
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn say(message: &str) {
-    log::warn!("{message}");
-}
-
-/// The one question a mismatched backup ever asks (ease over ceremony: no
-/// second confirmation stacks on top of it). Host builds proceed — the gate
-/// is a browser affordance, same reasoning as `confirm_discarding_unsaved`.
-#[cfg(target_arch = "wasm32")]
-fn confirm(message: &str) -> bool {
-    web_sys::window()
-        .and_then(|window| window.confirm_with_message(message).ok())
-        .unwrap_or(true)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn confirm(_message: &str) -> bool {
-    true
 }
 
 #[cfg(test)]

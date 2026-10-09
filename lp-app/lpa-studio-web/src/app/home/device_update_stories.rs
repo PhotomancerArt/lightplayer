@@ -28,8 +28,8 @@ use lpa_studio_core::{
 };
 use lpa_studio_web_story_macros::story;
 
+use crate::app::board_card::other_version_form::OfferPickerPreview;
 use crate::app::home::device_offer_story_fixtures::{StoryDeviceCard, session_device_tree};
-use crate::app::home::device_roster_card::OfferPickerPreview;
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
 use crate::app::layout::LinkReconnectingStrip;
 use crate::app::layout::session_control::SessionDevicePanel;
