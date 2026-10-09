@@ -18,7 +18,6 @@ use lpa_studio_core::{
 };
 
 use crate::app::home::device_offer_story_fixtures::StoryHomePage;
-use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -52,22 +51,15 @@ fn studio_hero() -> Element {
 
 #[story(
     screenshot,
-    description = "README home shot: the gallery with a sim running a project, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
+    description = "README home shot: the home page with a sim running a project, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
 )]
 fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
-            div { class: "tw:grid tw:gap-10",
-                StoryHomePage {
-                    home: readme_home_view(),
-                    now_secs: Some(STORY_NOW),
-                    on_action: |_| {},
-                }
-                StoryProjectsPage {
-                    home: readme_home_view(),
-                    now_secs: Some(STORY_NOW),
-                    on_action: |_| {},
-                }
+            StoryHomePage {
+                home: readme_home_view(),
+                now_secs: Some(STORY_NOW),
+                on_action: |_| {},
             }
         }
     }

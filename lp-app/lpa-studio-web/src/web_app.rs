@@ -1671,21 +1671,8 @@ pub fn App() -> Element {
                     // are leased controllers of their own (D2).
                     crate::app::DocsPage { page, anchor, on_studio_action: on_action }
                 },
-                StudioRoute::Projects => rsx! {
-                    StudioShell {
-                        view: current_view,
-                        running: false,
-                        gallery: crate::app::layout::ShellGallery::Projects,
-                        opening_frame,
-                        mismatch: mismatch.clone(),
-                        play,
-                        project_view,
-                        workbench_hrefs: workbench_hrefs.clone(),
-                        on_action,
-                    }
-                },
-                // Devices (`#/`) and the lens routes: the shell's default
-                // gallery page is Devices.
+                // `/devices`, `/projects` and the lens routes: the shell,
+                // whose no-editor arm draws the home page.
                 _ => rsx! {
                     StudioShell {
                         view: current_view,

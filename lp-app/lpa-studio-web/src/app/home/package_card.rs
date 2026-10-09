@@ -1,4 +1,6 @@
-//! A "Your projects" gallery card.
+//! A library project's card on the home page (Other projects, Projects,
+//! Your patterns): the poster, the slim glass bar, and the ⋯ menu with the
+//! project's verbs. "On <boards>" says which boards play it.
 
 use dioxus::prelude::*;
 use lpa_studio_core::app::library::PackageHealth;
@@ -11,6 +13,7 @@ use lpc_cloud_api::share_link::slugify;
 
 use crate::router::canonical_share_path;
 
+use crate::app::home::boards_line::boards_line;
 use crate::app::home::card_footer::{
     CardContextLine, CardGlassFooter, CardStatusGlyph, ContextTone, GlyphTone,
 };
@@ -128,10 +131,17 @@ pub(crate) fn PackageCard(
                 // saying something louder (blocked / opening).
                 reveal: (blocked.is_none() && !opening).then(|| {
                     let live = live_presence_line(&card);
+                    let on_boards = boards_line(&card.on_boards);
                     rsx! {
                         if let Some(edited) = edited_line.clone() {
                             p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-muted-foreground",
                                 "Edited {edited}"
+                            }
+                        }
+                        // Which boards play it ("On Desk C6").
+                        if let Some(boards) = on_boards {
+                            p { class: "tw:m-0 tw:truncate tw:text-xs tw:text-muted-foreground",
+                                "{boards}"
                             }
                         }
                         if let Some(provenance) = card.provenance.clone() {
@@ -253,14 +263,7 @@ pub(crate) fn PackageCardMenu(
         "Delete",
     ));
 
-    // "New project from this…" (module authoring unit, P5): only a
-    // PATTERN project has an export to build a project around, so the row
-    // is absent — not disabled — on everything else. A general project has
-    // no answer to "from WHICH module", and a disabled row that can never
-    // become enabled teaches nothing.
-    let new_from =
-        (!blocked && card.project_kind == PATTERN_KIND_LABEL && !card.exports.is_empty())
-            .then(|| card.exports.clone());
+    let new_from = new_from_exports(&card);
 
     // The status facts, in words — everything the slim face compresses
     // away (card-overlay redesign). Derived here so the section renders
@@ -273,9 +276,8 @@ pub(crate) fn PackageCardMenu(
         PackageHealth::UpgradesOnOpen { found } => Some(found),
         _ => None,
     };
-    // The boards that play this project, by name (the join's answer;
-    // P05 words and places the line).
-    let association = (!card.on_boards.is_empty()).then(|| card.on_boards.join(", "));
+    // The boards that play this project, by name (the join's answer).
+    let on_boards = boards_line(&card.on_boards);
     let live = live_presence_line(&card);
 
     rsx! {
@@ -327,12 +329,11 @@ pub(crate) fn PackageCardMenu(
                     if let Some(provenance) = card.provenance.clone() {
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "{provenance}" }
                     }
-                    // the boards line yields to the LIVE indication when
-                    // the device is actually here
-                    if let Some(boards) = association {
-                        p { class: "tw:m-0 tw:text-xs tw:text-status-good-foreground",
-                            "On {boards}"
-                        }
+                    // Which boards play it: a quiet fact (the join's
+                    // answer, which a board may not be showing right now),
+                    // not the live indication below.
+                    if let Some(boards) = on_boards {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "{boards}" }
                     }
                     // D28 runtime presence, in full: the aggregate line
                     // spells out both places on its own second line —
@@ -450,9 +451,16 @@ pub(crate) fn PackageCardMenu(
     }
 }
 
-/// The display label a pattern project's kind reads as (core's
-/// `package_manifest::kind_label`).
-const PATTERN_KIND_LABEL: &str = "Pattern";
+/// "New project from this…" (module authoring unit, P5): only a PATTERN
+/// project has an export to build a project around, so the row is absent —
+/// not disabled — on everything else. A general project has no answer to
+/// "from WHICH module", and a disabled row that can never become enabled
+/// teaches nothing. Whether a card is a pattern is core's one fact
+/// ([`UiPackageCard::is_pattern`]); a card that will not open offers none.
+fn new_from_exports(card: &UiPackageCard) -> Option<Vec<String>> {
+    (card.health.is_openable() && card.is_pattern() && !card.exports.is_empty())
+        .then(|| card.exports.clone())
+}
 
 /// The inline "New project from this…" form (the Rename precedent: a form
 /// in the menu, never a dialog).
@@ -747,6 +755,36 @@ mod tests {
         ] {
             assert!(!resting.contains("ux-ir-ring-on"), "{resting}");
         }
+    }
+
+    /// "New project from this…" is a pattern's verb, decided by core's
+    /// `is_pattern` and never by the web reading the kind's label.
+    #[test]
+    fn a_pattern_card_offers_new_project_from_this_and_a_general_card_does_not() {
+        let pattern = UiPackageCard {
+            project_kind: lpa_studio_core::app::library::package_manifest::PATTERN_KIND_LABEL
+                .to_string(),
+            exports: vec!["effect".to_string()],
+            ..card(false)
+        };
+        assert!(pattern.is_pattern());
+        assert_eq!(new_from_exports(&pattern), Some(vec!["effect".to_string()]));
+
+        let general = UiPackageCard {
+            exports: vec!["effect".to_string()],
+            ..card(false)
+        };
+        assert!(!general.is_pattern());
+        assert_eq!(new_from_exports(&general), None);
+
+        let blocked = UiPackageCard {
+            health: PackageHealth::Blocked {
+                headline: "Format 3 — too old for this Studio".to_string(),
+                remedy: "Export a copy or delete it.".to_string(),
+            },
+            ..pattern
+        };
+        assert_eq!(new_from_exports(&blocked), None);
     }
 
     /// The runtime-presence line has no producer while the device pairing

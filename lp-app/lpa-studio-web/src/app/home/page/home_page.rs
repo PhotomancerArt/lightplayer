@@ -11,9 +11,18 @@
 //! 3. the sections the selected tab shows, in the order core lists them
 //!    ([`UiHomeSections::visible`](lpa_studio_core::UiHomeSections::visible)):
 //!    Online boards, **Connect a board**, Offline boards, the "Unlocking
-//!    your boards" fold, Other projects, Your patterns, then the catalog's
-//!    Example projects and Example patterns;
+//!    your boards" fold, Other projects (or, on the Projects tab, every
+//!    project), Your patterns, Archived projects, then the catalog's
+//!    Example projects and Example patterns ([`home_parts`] says which of
+//!    them this page draws, and where one line stands in for a library
+//!    this browser does not have);
 //! 4. the footer.
+//!
+//! A project zip dropped anywhere on the page, and a project envelope
+//! pasted anywhere, install it ([`LibraryDrop`]); the add row at the end
+//! of the projects sections has New, Import and Paste.
+//!
+//! [`home_parts`]: super::home_parts::home_parts
 //!
 //! Core decides what is in each section and which tab shows it
 //! (`UiHomeView::sections`, `UiHomeTab::shows`); this page draws. The tab and
@@ -36,18 +45,24 @@ use lpa_studio_core::{UiAction, UiHomeSection, UiHomeTab, UiHomeView, example_gr
 
 use super::example_groups::{ExampleGroups, ExampleHeading};
 use super::filter_tabs::{FilterTabs, home_filter_tabs, home_tab_for_key};
+use super::home_parts::{HomePart, LIBRARY_UNAVAILABLE_LINE, home_parts};
 use super::home_view_mode::HomeViewMode;
 use super::keys_fold::KeysFold;
+use super::library_drop::LibraryDrop;
 use super::offline_boards::OfflineBoards;
 use super::online_boards::OnlineBoards;
+use super::other_projects::OtherProjects;
+use super::projects_tab_section::ProjectsTabSection;
 use super::sign_in_prompt::SignInPrompt;
 use super::view_switch::ViewSwitch;
+use super::your_patterns::YourPatterns;
 use crate::app::home::connect_board::ConnectBoardSection;
 use crate::app::home::connect_board::connect_board_section::{ConnectStoryPins, HOME_EXAMPLES_ID};
 use crate::app::home::device_layout_sheet::BackupDownloadWatcher;
 use crate::app::home::example_card::embedded_example_cards;
 use crate::app::home::gallery_preview::HoveredCard;
 use crate::app::home::project_opening_frame::OpenFailureNotice;
+use crate::app::share::ArchivedProjectsSection;
 use crate::cloud::SharedOpenState;
 
 /// The home page.
@@ -75,9 +90,6 @@ pub fn HomePage(
     #[props(default)]
     connect_pins: ConnectStoryPins,
 ) -> Element {
-    // Read by the projects sections ("edited 3 days ago"); the page frame
-    // itself shows no time.
-    let _ = now_secs;
     let mut tab = use_signal(|| initial_tab.unwrap_or_default());
     let mut mode = use_signal(|| initial_mode.unwrap_or_else(HomeViewMode::load));
     // Hover-to-play for the example grid: one signal names one hovered
@@ -111,6 +123,8 @@ pub fn HomePage(
         .as_ref()
         .map(|home| home.sections.visible(shown_tab))
         .unwrap_or_default();
+    let library_available = home.as_ref().is_some_and(|home| home.library_available);
+    let parts = home_parts(&visible, library_available, newcomer);
     let examples = embedded_example_cards();
     let groups: Vec<_> = example_groups(&examples)
         .into_iter()
@@ -127,7 +141,12 @@ pub fn HomePage(
     let on_action_or_none = on_action.unwrap_or_else(|| EventHandler::new(|_| {}));
 
     rsx! {
-        div { class: "tw:mx-auto tw:grid tw:w-full tw:max-w-[1140px] tw:content-start tw:gap-7",
+        // A project zip dropped anywhere on the page, an envelope pasted
+        // anywhere (PD8): only while the library is there to take them.
+        LibraryDrop {
+            class: "tw:mx-auto tw:grid tw:w-full tw:max-w-[1140px] tw:content-start tw:gap-7",
+            enabled: library_available,
+            on_action: on_action_or_none,
             if let Some((line, refusal)) = shared_line {
                 p {
                     class: if refusal { "{SHARED_LINE_CLASS} tw:border-status-warning-border tw:bg-status-warning-bg tw:text-status-warning-foreground" } else { "{SHARED_LINE_CLASS} tw:border-border tw:bg-card tw:text-muted-foreground" },
@@ -172,19 +191,19 @@ pub fn HomePage(
                 // A board's backup, handed over as a file when core
                 // prepares one. Invisible; mounted wherever the page is.
                 BackupDownloadWatcher { download: home.devices.backup_download.clone() }
-                for section in visible {
-                    match section {
-                        UiHomeSection::OnlineBoards => rsx! {
+                for part in parts {
+                    match part {
+                        HomePart::Section(UiHomeSection::OnlineBoards) => rsx! {
                             OnlineBoards {
-                                key: "{section:?}",
+                                key: "{part:?}",
                                 home: home.clone(),
                                 mode: mode(),
                                 on_action: on_action_or_none,
                             }
                         },
-                        UiHomeSection::ConnectBoard => rsx! {
+                        HomePart::Section(UiHomeSection::ConnectBoard) => rsx! {
                             ConnectBoardSection {
-                                key: "{section:?}",
+                                key: "{part:?}",
                                 usb_available: home.devices.usb_available,
                                 transport_available: home.devices.transport_available,
                                 wifi_connect: home.devices.wifi_address_connect.clone(),
@@ -197,21 +216,61 @@ pub fn HomePage(
                                 on_action: on_action_or_none,
                             }
                         },
-                        UiHomeSection::OfflineBoards => rsx! {
+                        HomePart::Section(UiHomeSection::OfflineBoards) => rsx! {
                             OfflineBoards {
-                                key: "{section:?}",
+                                key: "{part:?}",
                                 home: home.clone(),
                                 mode: mode(),
                                 on_action: on_action_or_none,
                             }
                         },
-                        // A first visit has no board to unlock.
-                        UiHomeSection::UnlockingYourBoards if !newcomer => rsx! {
-                            KeysFold { key: "{section:?}" }
+                        HomePart::Section(UiHomeSection::UnlockingYourBoards) => rsx! {
+                            KeysFold { key: "{part:?}" }
                         },
-                        // The projects sections arrive with their own
-                        // phase; the catalog draws below.
-                        _ => rsx! {},
+                        HomePart::Section(UiHomeSection::OtherProjects) => rsx! {
+                            OtherProjects {
+                                key: "{part:?}",
+                                home: home.clone(),
+                                mode: mode(),
+                                now_secs,
+                                on_action: on_action_or_none,
+                            }
+                        },
+                        HomePart::Section(UiHomeSection::Projects) => rsx! {
+                            ProjectsTabSection {
+                                key: "{part:?}",
+                                home: home.clone(),
+                                mode: mode(),
+                                now_secs,
+                                on_action: on_action_or_none,
+                            }
+                        },
+                        HomePart::Section(UiHomeSection::YourPatterns) => rsx! {
+                            YourPatterns {
+                                key: "{part:?}",
+                                home: home.clone(),
+                                mode: mode(),
+                                now_secs,
+                                on_action: on_action_or_none,
+                            }
+                        },
+                        // The archive, collapsed. It reads the account's own
+                        // project list, so it renders nothing at all when
+                        // signed out, unreachable, or empty.
+                        HomePart::Section(UiHomeSection::ArchivedProjects) => rsx! {
+                            ArchivedProjectsSection { key: "{part:?}" }
+                        },
+                        HomePart::LibraryUnavailable => rsx! {
+                            p {
+                                key: "{part:?}",
+                                class: "tw:m-0 tw:text-sm tw:text-muted-foreground",
+                                "{LIBRARY_UNAVAILABLE_LINE}"
+                            }
+                        },
+                        // The catalog's sections draw below, never as parts.
+                        HomePart::Section(
+                            UiHomeSection::ExampleProjects | UiHomeSection::ExamplePatterns,
+                        ) => rsx! {},
                     }
                 }
             }

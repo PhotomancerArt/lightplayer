@@ -1,9 +1,8 @@
-//! The home page and the pages beside it (P09 split, vision D9/D10/D14):
-//! the home page itself ([`page`]: `/`, one page for the boards, the
-//! projects and the catalog; it took in the Devices page's roster),
-//! Projects (the library — being folded into the home page too) and
-//! Explore (examples) — plus the cards they share. One combined gallery
-//! page lived here until the chrome C reorg split it.
+//! The home page and the pages beside it: the home page itself ([`page`]:
+//! `/`, one page for the boards, the projects and the catalog — it took in
+//! the Devices page's roster and the Projects page's library), Explore
+//! (examples), and the pages a link lands on (Unlock, the opening frame) —
+//! plus the cards they share.
 
 pub(crate) mod access_added_toast;
 pub(crate) mod access_fields;
@@ -13,6 +12,7 @@ pub(crate) mod access_ui_context;
 #[cfg(feature = "stories")]
 pub(crate) mod ble_access_stories;
 pub(crate) mod ble_reach;
+pub(crate) mod boards_line;
 pub(crate) mod browser_identity;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
@@ -35,8 +35,6 @@ pub(crate) mod gallery_preview;
 pub(crate) mod home_gallery_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod home_landing_stories;
-#[cfg(feature = "stories")]
-pub(crate) mod home_offer_story_fixtures;
 /// The `catalog/logo-sign` mapping generator plus its drift gate. Test-only:
 /// the running app reads the committed document, never this.
 #[cfg(test)]
@@ -53,7 +51,6 @@ pub(crate) mod play_feed_text;
 pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
-pub mod projects_page;
 pub(crate) mod reach_note;
 #[cfg(feature = "stories")]
 pub(crate) mod relay_connect_stories;
@@ -86,14 +83,13 @@ pub(crate) mod wifi_stories;
 pub use explore_page::ExplorePage;
 pub use page::HomePage;
 pub use project_opening_frame::ProjectOpeningFrame;
-pub use projects_page::ProjectsPage;
 
 /// Shared section-header treatment across the gallery pages.
 pub(crate) fn section_title_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:font-extrabold tw:uppercase tw:leading-none tw:text-heading"
 }
 
-/// The compact card grid (Projects / Explore).
+/// The compact card grid (the home page's projects, Explore).
 pub(crate) fn card_grid_class() -> &'static str {
     "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] tw:gap-3.5"
 }

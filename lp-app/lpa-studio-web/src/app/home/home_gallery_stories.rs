@@ -1,7 +1,8 @@
 //! Gallery-page stories: first run, populated, opening, and no-store.
 //! The P09 split divided the combined gallery into Devices / Projects /
-//! Explore pages; these stories stack all three from one fixture so the
-//! old coverage stays in frame.
+//! Explore pages, and the home page (2026-10-08) folded all three back into
+//! one: these stories draw that page from one fixture, so the old coverage
+//! stays in frame under the old names.
 //!
 //! ⚠️ The DEVICE-roster rows (the connected/offline/blank/safe-mode cards,
 //! the empty-device push buttons, the section-label candidates over a
@@ -39,7 +40,6 @@ use crate::app::home::device_pick_popover::{
 };
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
-use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
 use crate::core::OffersProvider;
 use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
@@ -2296,8 +2296,8 @@ fn store_unavailable_with_issue() -> Element {
     }
 }
 
-/// The P09 pages stacked from one fixture — the story stand-in for the
-/// old combined gallery page (the app renders them on separate routes).
+/// The home page from one fixture — what the old Devices, Projects and
+/// Explore pages stacked here now all draw as one page.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn GalleryPages(
@@ -2306,10 +2306,7 @@ fn GalleryPages(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     rsx! {
-        div { class: "tw:grid tw:gap-10",
-            StoryHomePage { home: home.clone(), now_secs, on_action }
-            StoryProjectsPage { home: home.clone(), now_secs, on_action }
-        }
+        StoryHomePage { home, now_secs, on_action }
     }
 }
 
