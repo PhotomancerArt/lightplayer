@@ -64,10 +64,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             let Some(victim) = choose_victim(&self.log, self.cfg.gc_policy) else {
                 break;
             };
-            let copied = collect_sector(&mut self.log, victim)?;
-            self.stats.gc_runs += 1;
-            self.stats.gc_copies += copied.records;
-            self.stats.gc_copy_bytes += copied.bytes;
+            collect_sector(&mut self.log, victim)?;
+            stat!(self.stats.gc_runs += 1);
             if self.enough(need) {
                 return Ok(());
             }
@@ -96,7 +94,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         roots.extend(self.delta.set_ids().map(|id| (id, MarkRole::Node)));
         roots.extend(self.inflight.iter().copied());
         let mut m = mark(&mut self.log, &roots, want_lens)?;
-        self.stats.marks += 1;
+        stat!(self.stats.marks += 1);
         let lens = core::mem::take(&mut m.lens);
         prune(&mut self.log, m);
         self.live_after_mark = self.log.index.len();

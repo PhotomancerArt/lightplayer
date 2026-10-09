@@ -46,6 +46,7 @@ pub struct Walked {
     /// Exact live bytes per sector.
     pub live: Vec<u16>,
     /// Header scans made (one per level below the root).
+    #[cfg(feature = "stats")]
     pub scans: u32,
 }
 
@@ -61,6 +62,7 @@ pub fn index_closure<F: Flash, K>(
     log.index = RamIndex::default();
     let mut out = Walked {
         live: alloc::vec![0u16; log.sector_count as usize],
+        #[cfg(feature = "stats")]
         scans: 0,
     };
     let mut level: Vec<(ObjectId, MarkRole)> = alloc::vec![(root.id, MarkRole::Root)];
@@ -117,7 +119,7 @@ pub fn index_closure<F: Flash, K>(
         }
         level = core::mem::take(&mut next);
         locate(log, &level, sectors)?;
-        out.scans += 1;
+        stat!(out.scans += 1);
     }
     log.note(peak);
     Ok(out)

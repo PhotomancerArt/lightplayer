@@ -12,17 +12,10 @@ use crate::record_log::RecordLog;
 use crate::sector_header::HeadKind;
 use crate::store_error::StoreError;
 
-/// Records and bytes copied.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct CopyCount {
-    pub records: u64,
-    pub bytes: u64,
-}
-
 pub fn collect_sector<F: Flash>(
     log: &mut RecordLog<F>,
     victim: u32,
-) -> Result<CopyCount, StoreError<F::Error>> {
+) -> Result<(), StoreError<F::Error>> {
     let mut items: Vec<(u32, ObjectId)> = log
         .index
         .positions_in(victim)
@@ -31,14 +24,15 @@ pub fn collect_sector<F: Flash>(
     heap_sort_by(&mut items, |a, b| a.0 < b.0);
     log.note(items.capacity() * core::mem::size_of::<(u32, ObjectId)>());
     log.gc_victim = Some(victim);
-    let mut count = CopyCount::default();
     for (_, id) in items {
         let (h, payload) = log.read_record(id)?;
         log.append(HeadKind::Cold, h.kind, h.codec, id, &[&payload])?;
-        count.records += 1;
-        count.bytes += u64::from(h.total_len());
+        stat!(
+            log.counters.gc_copies += 1;
+            log.counters.gc_copy_bytes += u64::from(h.total_len());
+        );
     }
     log.gc_victim = None;
     log.kill_and_erase(victim)?;
-    Ok(count)
+    Ok(())
 }

@@ -10,6 +10,18 @@
 
 extern crate alloc;
 
+/// A statement that runs only with the `stats` feature: the counters and the
+/// RAM-peak accounting `TreeStore::stats` reports. Off in firmware (they are
+/// ~0.7 KB of RV32 code); the crate's tests and `lp-store-bench` turn it on.
+macro_rules! stat {
+    ($($s:tt)*) => {
+        #[cfg(feature = "stats")]
+        {
+            $($s)*
+        }
+    };
+}
+
 mod blob_codec;
 mod dir_node;
 mod dir_rebuild;
@@ -42,6 +54,7 @@ mod store_config;
 mod store_error;
 mod store_mount;
 mod store_space;
+#[cfg(feature = "stats")]
 mod store_stats;
 mod tree_delta;
 mod tree_store;
@@ -77,5 +90,6 @@ pub use object_id::ObjectId;
 pub use sector_header::FORMAT_VERSION;
 pub use store_config::{GcPolicy, StoreConfig};
 pub use store_error::StoreError;
+#[cfg(feature = "stats")]
 pub use store_stats::TreeStoreStats;
 pub use tree_store::{MAX_DEPTH, TreeStore, is_hot, valid_path};

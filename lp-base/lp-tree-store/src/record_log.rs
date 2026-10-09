@@ -18,7 +18,8 @@ use crate::sector_header::{HeadKind, KILLED_SECTOR_HEADER, SECTOR_HEADER_LEN, Se
 use crate::sector_table::{ERASED, NEEDS_ERASE, SectorTable};
 use crate::store_error::StoreError;
 
-/// Flash-level counters.
+/// Flash-level counters (feature `stats`).
+#[cfg(feature = "stats")]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LogCounters {
     pub bytes_read: u64,
@@ -27,6 +28,8 @@ pub struct LogCounters {
     pub sectors_opened: u64,
     pub erases: u64,
     pub verify_failures: u64,
+    pub gc_copies: u64,
+    pub gc_copy_bytes: u64,
 }
 
 /// Sectors + heads + index over a [`Flash`].
@@ -41,8 +44,10 @@ pub struct RecordLog<F: Flash> {
     pub next_sector_seq: u32,
     /// A sector being collected: never handed out as free.
     pub gc_victim: Option<u32>,
+    #[cfg(feature = "stats")]
     pub counters: LogCounters,
-    /// The largest transient buffer seen (stats).
+    /// The largest transient buffer seen.
+    #[cfg(feature = "stats")]
     pub largest_buffer: usize,
 }
 
@@ -64,7 +69,9 @@ impl<F: Flash> RecordLog<F> {
             heads: [None, None],
             next_sector_seq: 1,
             gc_victim: None,
+            #[cfg(feature = "stats")]
             counters: LogCounters::default(),
+            #[cfg(feature = "stats")]
             largest_buffer: 0,
         }
     }
@@ -78,12 +85,15 @@ impl<F: Flash> RecordLog<F> {
         sector * self.sector_size + offset
     }
 
-    pub fn note(&mut self, bytes: usize) {
-        self.largest_buffer = self.largest_buffer.max(bytes);
+    /// A transient buffer of `bytes` (the peak `stats` reports; nothing
+    /// without the feature).
+    #[inline(always)]
+    pub fn note(&mut self, _bytes: usize) {
+        stat!(self.largest_buffer = self.largest_buffer.max(_bytes));
     }
 
     pub fn read(&mut self, addr: u32, buf: &mut [u8]) -> R<(), F> {
-        self.counters.bytes_read += buf.len() as u64;
+        stat!(self.counters.bytes_read += buf.len() as u64);
         self.flash.read(addr, buf).map_err(StoreError::Flash)
     }
 
@@ -194,11 +204,13 @@ impl<F: Flash> RecordLog<F> {
                     offset: end,
                 };
                 self.index.insert(id, loc);
-                self.counters.records_written += 1;
-                self.counters.record_bytes_written += u64::from(total);
+                stat!(
+                    self.counters.records_written += 1;
+                    self.counters.record_bytes_written += u64::from(total);
+                );
                 return Ok(loc);
             }
-            self.counters.verify_failures += 1;
+            stat!(self.counters.verify_failures += 1);
             self.retire(s);
         }
         Err(StoreError::Corrupt("flash keeps failing verification"))
@@ -240,7 +252,7 @@ impl<F: Flash> RecordLog<F> {
                 ok = self.verify(addr, &bytes, &[])?;
             }
             if !ok {
-                self.counters.verify_failures += 1;
+                stat!(self.counters.verify_failures += 1);
                 self.retire(pick);
                 continue;
             }
@@ -248,7 +260,7 @@ impl<F: Flash> RecordLog<F> {
             self.sectors.live[pick as usize] = 0;
             self.sectors.seq[pick as usize] = header.seq;
             self.heads[kind.index()] = Some(pick);
-            self.counters.sectors_opened += 1;
+            stat!(self.counters.sectors_opened += 1);
             return Ok(pick);
         }
     }
@@ -262,11 +274,11 @@ impl<F: Flash> RecordLog<F> {
         let addr = self.addr(s, 0);
         self.program(addr, &KILLED_SECTOR_HEADER)?;
         self.flash.erase_sector(s).map_err(StoreError::Flash)?;
-        self.counters.erases += 1;
+        stat!(self.counters.erases += 1);
         let c = &mut self.sectors.erase_count[s as usize];
         *c = c.wrapping_add(1);
         if !self.reads_erased(s, 0)? {
-            self.counters.verify_failures += 1;
+            stat!(self.counters.verify_failures += 1);
             self.retire(s);
             return Ok(false);
         }

@@ -73,8 +73,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let Some((id, walked)) = chosen else {
             return Err(StoreError::Corrupt("no complete root"));
         };
-        self.stats.marks += 1;
-        self.stats.mount_scans = walked.scans;
+        stat!(
+            self.stats.marks += 1;
+            self.stats.mount_scans = walked.scans;
+        );
         self.log.sectors.live = walked.live;
         self.log.index.shrink();
         self.live_after_mark = self.log.index.len();
@@ -108,7 +110,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 }
             }
         }
-        self.stats.mount_bytes_read = self.log.counters.bytes_read;
+        stat!(self.stats.mount_bytes_read = self.log.counters.bytes_read);
         Ok(())
     }
 

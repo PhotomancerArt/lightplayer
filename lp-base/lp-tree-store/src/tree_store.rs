@@ -27,6 +27,7 @@ use crate::root_record::RootRecord;
 use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN};
 use crate::store_config::StoreConfig;
 use crate::store_error::StoreError;
+#[cfg(feature = "stats")]
 use crate::store_stats::TreeStoreStats;
 use crate::tree_delta::{FileEntry, TreeDelta};
 use crate::txn_undo::TxnUndo;
@@ -72,6 +73,7 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     pub(crate) table: PathTable,
     pub(crate) undo: TxnUndo,
     pub(crate) txn: Txn,
+    #[cfg(feature = "stats")]
     pub(crate) stats: TreeStoreStats,
     /// Index entries the last mark left (the growth bound's base).
     pub(crate) live_after_mark: usize,
@@ -285,6 +287,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.log.free_count()
     }
 
+    /// What the store measured about itself (feature `stats`).
+    #[cfg(feature = "stats")]
     pub fn stats(&self) -> TreeStoreStats {
         let mut s = self.stats.clone();
         s.index_entries = self.log.index.len();
@@ -300,11 +304,14 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         s.sectors_opened = self.log.counters.sectors_opened;
         s.erases = self.log.counters.erases;
         s.verify_failures = self.log.counters.verify_failures;
+        s.gc_copies = self.log.counters.gc_copies;
+        s.gc_copy_bytes = self.log.counters.gc_copy_bytes;
         s.retired_sectors = self.log.sectors.retired.len();
         s
     }
 
     /// Forget the transient peak (a harness measuring one operation).
+    #[cfg(feature = "stats")]
     pub fn reset_transient_peak(&mut self) {
         self.log.largest_buffer = 0;
         self.stats.transient_peak_bytes = 0;
@@ -327,6 +334,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             table: PathTable::default(),
             undo: TxnUndo::default(),
             txn: Txn::None,
+            #[cfg(feature = "stats")]
             stats: TreeStoreStats::default(),
             live_after_mark: 0,
             inflight: Vec::new(),
@@ -403,7 +411,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         )?;
         self.max_root_seq = root.seq;
         self.committed = Some(Committed { id, root });
-        self.stats.commits += 1;
+        stat!(self.stats.commits += 1);
         Ok(())
     }
 

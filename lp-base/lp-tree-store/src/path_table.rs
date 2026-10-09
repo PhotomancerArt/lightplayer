@@ -13,7 +13,6 @@
 //! (spike U9), stated in FORMAT.md.
 
 use alloc::vec::Vec;
-use core::mem::size_of;
 
 use crate::heap_sort::heap_sort_by;
 use crate::object_id::ObjectId;
@@ -46,6 +45,7 @@ pub struct PathTable {
 }
 
 impl PathTable {
+    #[cfg(feature = "stats")]
     pub fn len(&self) -> usize {
         self.rows.len()
     }
@@ -148,8 +148,9 @@ impl PathTable {
         self.rows.shrink_to_fit();
     }
 
+    #[cfg(feature = "stats")]
     pub fn ram_bytes(&self) -> usize {
-        self.rows.capacity() * size_of::<PathRow>()
+        self.rows.capacity() * core::mem::size_of::<PathRow>()
     }
 }
 
@@ -159,7 +160,7 @@ mod tests {
 
     #[test]
     fn rows_and_collisions() {
-        assert_eq!(size_of::<PathRow>(), 20);
+        assert_eq!(core::mem::size_of::<PathRow>(), 20);
         let mut t = PathTable::default();
         t.push_unsorted(9, ObjectId(1), 10);
         t.push_unsorted(3, ObjectId(2), 20);

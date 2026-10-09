@@ -254,7 +254,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         parts: &[&[u8]],
     ) -> Res<(), F> {
         if self.log.index.contains(id) {
-            self.stats.dedup_hits += 1;
+            stat!(self.stats.dedup_hits += 1);
             return Ok(());
         }
         self.log.append(head, kind, codec, id, parts)?;

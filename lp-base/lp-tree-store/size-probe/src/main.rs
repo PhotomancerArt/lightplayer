@@ -1,7 +1,7 @@
 //! lp-tree-store's RV32 size probe: every public entry point the firmware
 //! will call (format, mount, put, append, put_chunk_deflated, get,
-//! file_size, exists, list, delete, delete_prefix, begin/commit/abort,
-//! stats) on a RAM flash.
+//! file_size, exists, list, delete, delete_prefix, begin/commit/abort)
+//! on a RAM flash. No `stats`: the firmware builds without that feature.
 //!
 //! The hasher is the firmware's to inject (the C6 has SHA in hardware), so
 //! by default the probe passes a stand-in that costs a few bytes: the ELF
@@ -115,7 +115,6 @@ pub extern "C" fn _start() -> ! {
         let _ = black_box(st.file_size(black_box("/a")));
         let _ = black_box(st.exists(black_box("/b")));
         let _ = black_box(st.list(black_box("/")));
-        black_box(st.stats());
     }
     loop {}
 }

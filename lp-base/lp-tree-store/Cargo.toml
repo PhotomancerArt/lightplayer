@@ -19,6 +19,9 @@ host-deflate = ["dep:miniz_oxide", "soft-sha"]
 lpfs = ["dep:lpfs"]
 # `impl Flash for lp_nor_sim::NorFlashSim`.
 nor-sim = ["dep:lp-nor-sim"]
+# `TreeStore::stats`: counters and RAM-peak accounting (tests, the bench).
+# Off in firmware: ~0.7 KB of RV32 code for numbers nothing on a device reads.
+stats = []
 
 [dependencies]
 lp-crc32 = { path = "../lp-crc32" }
@@ -30,8 +33,8 @@ lp-nor-sim = { path = "../../lp-emu/lp-nor-sim", optional = true }
 
 [dev-dependencies]
 # The crate's own optional parts, on for its tests (the LpFs conformance
-# test, the host deflater).
-lp-tree-store = { path = ".", features = ["lpfs", "host-deflate", "nor-sim"] }
+# test, the host deflater, the stats the RAM and sweep tests read).
+lp-tree-store = { path = ".", features = ["lpfs", "host-deflate", "nor-sim", "stats"] }
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 

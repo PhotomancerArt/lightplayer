@@ -3,7 +3,6 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
-use core::mem::size_of;
 
 /// `end` value: no valid header — whatever it reads, it must be erased.
 pub const NEEDS_ERASE: u16 = 0;
@@ -57,11 +56,12 @@ impl SectorTable {
         *v = v.saturating_add(n as u16);
     }
 
+    #[cfg(feature = "stats")]
     pub fn ram_bytes(&self) -> usize {
-        self.end.capacity() * size_of::<u16>()
-            + self.live.capacity() * size_of::<u16>()
-            + self.erase_count.capacity() * size_of::<u32>()
-            + self.seq.capacity() * size_of::<u32>()
-            + self.retired.capacity() * size_of::<u16>()
+        self.end.capacity() * core::mem::size_of::<u16>()
+            + self.live.capacity() * core::mem::size_of::<u16>()
+            + self.erase_count.capacity() * core::mem::size_of::<u32>()
+            + self.seq.capacity() * core::mem::size_of::<u32>()
+            + self.retired.capacity() * core::mem::size_of::<u16>()
     }
 }
