@@ -1302,9 +1302,8 @@ pub fn App() -> Element {
     // held here so the chrome's hint and the palette share it.
     let mut palette_open = use_signal(|| false);
     // The app chat's drawer and draft: web chrome too (plan A2), held here
-    // so the header button, the home page's front door and the drawer —
-    // mounted below every route's body, so it stays open across
-    // navigation — share them.
+    // so the header button and the drawer — mounted below every route's
+    // body, so it stays open across navigation — share them.
     let app_chat = crate::app::agent::use_provide_app_chat_chrome();
     // Place (M7): the route and the chrome's open flags, reported to core
     // whenever they change. Core reads them (the agent's readout, ⌘K's
@@ -1622,7 +1621,6 @@ pub fn App() -> Element {
                     crate::app::HomePage {
                         on_action,
                         home: current_view.home.clone().map(|home| *home),
-                        app_agent: Some(current_view.app_agent.clone()),
                     }
                 },
                 StudioRoute::Account => rsx! {

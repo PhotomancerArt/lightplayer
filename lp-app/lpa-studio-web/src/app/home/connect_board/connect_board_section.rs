@@ -31,8 +31,8 @@ use crate::app::home::connect_board::connect_square::ConnectSquare;
 use crate::app::home::connect_board::transport_offer::{
     AddSlotNotes, ReachNoteLines, add_slot_notes,
 };
+use crate::app::home::page::page_section::PageSection;
 use crate::app::home::reach_note::{ReachNote, this_page_url};
-use crate::app::home::section_title_class;
 use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::app::home::wifi_address_entry::WifiAddressEntry;
 use crate::core::use_offer_at;
@@ -43,6 +43,23 @@ pub(crate) const HOME_EXAMPLES_ID: &str = "home-examples";
 
 /// The id of this section's root: the walks scope their clicks to it.
 pub(crate) const CONNECT_BOARD_ID: &str = "home-connect-board";
+
+/// The Connect a board section's story-only pins, bundled so a page that
+/// hosts the section can pass them through whole. Real surfaces leave them
+/// at their defaults and the section asks the browser itself.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ConnectStoryPins {
+    /// What the Bluetooth half says.
+    pub ble_reach: Option<BluetoothReach>,
+    /// The address the copy lines show.
+    pub page_url: Option<String>,
+    /// The Network field as typed.
+    pub wifi_typed: Option<String>,
+    /// Mount the "start a board here" menu open.
+    pub pick_open: bool,
+    /// Mount with the Network row already open.
+    pub network_open: bool,
+}
 
 /// The words on the three squares. A walk clicks them by these, exactly, inside
 /// `#home-connect-board`.
@@ -112,10 +129,7 @@ pub(crate) fn ConnectBoardSection(
     let hint = welcome_hint(welcome);
 
     rsx! {
-        section { id: CONNECT_BOARD_ID, class: "tw:grid tw:gap-3",
-            header { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
-                h2 { class: section_title_class(), "{heading}" }
-            }
+        PageSection { title: heading, id: CONNECT_BOARD_ID,
             if body == ConnectBody::NoTransport {
                 UnavailableNote {}
             }

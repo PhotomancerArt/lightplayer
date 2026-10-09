@@ -1,8 +1,8 @@
 //! Stories for the app chat window (agentic-UI roadmap M5): the header
-//! button and the drawer it opens, the home page's front door, the
-//! not-configured state, a transcript with edit rows, the cards (a pending
-//! connect, a pending flash over somebody's firmware, a done one), and the
-//! hand-off into a shader's own agent.
+//! button and the drawer it opens, the not-configured state, a transcript
+//! with edit rows, the cards (a pending connect, a pending flash over
+//! somebody's firmware, a done one), and the hand-off into a shader's own
+//! agent.
 //!
 //! Fixed transcripts for deterministic PNGs. The drawer is drawn against
 //! its story frame's right edge (`inline`) rather than the viewport's.
@@ -18,8 +18,7 @@ use lpa_studio_core::{
 use lpa_studio_web_story_macros::story;
 
 use super::agent_card_view_stories::{agent_card, foreign_flash};
-use super::{AppChatButton, AppChatDrawer, use_provide_app_chat_chrome};
-use crate::app::HomePage;
+use super::{AppChatButton, AppChatDrawer};
 use crate::app::layout::site_chrome::{SiteChrome, SiteSection};
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::shader_node_view;
@@ -44,17 +43,6 @@ fn drawer_closed() -> Element {
 fn drawer_open() -> Element {
     rsx! {
         PageFrame { view: ready_view(Vec::new(), UiAgentStatus::Idle) }
-    }
-}
-
-#[story(
-    description = "The home page's front door (A3): with no project open, the landing's first ask is a big box under the slogan — \"What do you want your lights to do?\". It is the same session as the header's drawer: Ask sends and opens the drawer, where the conversation goes on. Before a provider is set up, Ask opens the drawer on the setup state and the words stay in the box."
-)]
-fn home_front_door() -> Element {
-    rsx! {
-        ChromeProvider {
-            HomePage { app_agent: Some(ready_view(Vec::new(), UiAgentStatus::Idle)) }
-        }
     }
 }
 
@@ -241,14 +229,6 @@ fn DrawerFrame(
             }
         }
     }
-}
-
-/// The web app's app-chat chrome, which the front door needs.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ChromeProvider(children: Element) -> Element {
-    use_provide_app_chat_chrome();
-    children
 }
 
 fn model() -> UiAgentModelView {
