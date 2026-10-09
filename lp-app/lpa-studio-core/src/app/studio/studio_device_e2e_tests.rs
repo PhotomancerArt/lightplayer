@@ -6335,6 +6335,90 @@ fn removing_the_project_clears_the_board_and_leaves_the_library_alone() {
     );
 }
 
+/// Which board plays which project (`DeviceRosterView.board_projects`), end
+/// to end: a verified push banks an association, so the board is `Given` at
+/// the project's head; the editor opened on it is `Open`; closing the editor
+/// is `Given` again; and once the board itself reports it runs nothing, a
+/// live "nothing" beats the registry row that still remembers the project.
+#[test]
+fn the_roster_view_says_which_project_a_board_plays() {
+    use crate::BoardPlays;
+
+    let device = empty_light_player("dev000000daqf6dvvr6");
+    let (mut bench, tasks) = identified(&device, "usb-plays-1");
+    let (device_uid, project) = a_board_running_a_library_project(&mut bench, &tasks);
+    let project_uid = project.to_string();
+    let device_id = bench.view().devices[0].id;
+
+    let join = bench.controller.device_roster_view().board_projects;
+    assert_eq!(
+        join.plays(device_id),
+        &BoardPlays::Given {
+            project_uid: project_uid.clone(),
+            at_head: true
+        },
+        "the verified push is banked at the project's head"
+    );
+    assert_eq!(join.boards_playing(&project_uid), vec![device_id]);
+    assert_eq!(join.sharing(device_id), 1);
+
+    // The editor on the board: the lens outranks the registry's memory.
+    bench.open_lens(&device_uid).expect("the board opens");
+    assert_eq!(
+        bench
+            .controller
+            .device_roster_view()
+            .board_projects
+            .plays(device_id),
+        &BoardPlays::Open {
+            project_uid: project_uid.clone()
+        },
+        "the editor is looking at it"
+    );
+
+    // And back out: the registry's answer stands again.
+    bench.detach_lens();
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+    assert_eq!(
+        bench
+            .controller
+            .device_roster_view()
+            .board_projects
+            .plays(device_id),
+        &BoardPlays::Given {
+            project_uid: project_uid.clone(),
+            at_head: true
+        }
+    );
+
+    // The board is emptied; the registry row still names the project.
+    bench.press_device_lasting(device_id, "remove-project", OfferArgs::new());
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.loaded_project == lpa_devices::view::LoadedProject::Empty
+        })
+    });
+    assert!(
+        bench.registry()[0].association.is_some(),
+        "the registry still remembers what it gave the board"
+    );
+    let join = bench.controller.device_roster_view().board_projects;
+    assert_eq!(
+        join.plays(device_id),
+        &BoardPlays::Nothing,
+        "the board's own word beats the stale association"
+    );
+    assert_eq!(join.sharing(device_id), 0);
+    assert!(join.boards_playing(&project_uid).is_empty());
+}
+
 /// A removal the board refuses lands on the problem face with the reason,
 /// and the running face is still there — nothing was half-claimed.
 #[test]
