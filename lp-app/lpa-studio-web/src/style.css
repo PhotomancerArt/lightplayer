@@ -6643,6 +6643,13 @@ select:focus-visible {
     transition: opacity 0.16s ease;
 }
 
+/* A menu row reads from its leading edge: both labels sit left in the
+   reserved cell, so arming swaps the words in place without centring the
+   resting one in the armed reading's width. */
+.ux-armed-labels.ux-armed-labels-start > span {
+    justify-content: flex-start;
+}
+
 /* `visibility` (not `display`) keeps the armed label in the layout so it
    holds the width; `opacity` is what the swap animates. */
 .ux-armed-labels > .ux-armed-label-armed {

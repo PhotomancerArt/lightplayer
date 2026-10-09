@@ -161,7 +161,7 @@ pub fn ActionButton(
                 // its neighbours. The armed label is hidden from AT — the
                 // armed `title` carries the confirmation message.
                 if arms {
-                    span { class: "ux-armed-labels",
+                    span { class: armed_labels_class(variant),
                         span { class: "ux-armed-label-rest", "{rest_label}" }
                         span { class: "ux-armed-label-armed", aria_hidden: "true", "{armed_label}" }
                     }
@@ -180,6 +180,16 @@ pub fn ActionButton(
                 span { class: "tw:sr-only", "{reason}" }
             }
         }
+    }
+}
+
+/// The two stacked labels' classes: a menu row's sit at its leading edge
+/// (`ux-armed-labels-start`, style.css), as its text does; every other look
+/// centres them in the reserved width.
+fn armed_labels_class(variant: ActionButtonVariant) -> &'static str {
+    match variant {
+        ActionButtonVariant::MenuItem => "ux-armed-labels ux-armed-labels-start",
+        _ => "ux-armed-labels",
     }
 }
 
@@ -604,6 +614,35 @@ mod tests {
             assert!(!class.contains("ux-ir-ring"), "{class}");
             assert!(!class.contains("ux-spectrum-cta"), "{class}");
         }
+    }
+
+    /// A Lasting menu row keeps its words at its leading edge, armed or
+    /// not (`ux-armed-labels-start`, style.css); every other look centres
+    /// them in the reserved width.
+    #[test]
+    fn a_lasting_menu_rows_labels_sit_at_its_leading_edge() {
+        assert_eq!(
+            armed_labels_class(ActionButtonVariant::MenuItem),
+            "ux-armed-labels ux-armed-labels-start"
+        );
+        for variant in [
+            ActionButtonVariant::Solid,
+            ActionButtonVariant::Quiet,
+            ActionButtonVariant::Outline,
+            ActionButtonVariant::RowEnd,
+            ActionButtonVariant::RowPrimary,
+        ] {
+            assert_eq!(
+                armed_labels_class(variant),
+                "ux-armed-labels",
+                "{variant:?}"
+            );
+        }
+        let css = include_str!("../../style.css");
+        let rule = ".ux-armed-labels.ux-armed-labels-start > span {";
+        let at = css.find(rule).expect("the leading-edge rule");
+        let body = &css[at..at + css[at..].find('}').expect("closes")];
+        assert!(body.contains("justify-content: flex-start"), "{body}");
     }
 
     #[test]
