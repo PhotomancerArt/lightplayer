@@ -54,7 +54,7 @@ use super::sim_record::emu_link_info;
 /// The root, not the current address. `firmware/<build id>/` is published
 /// at the site root by `lp-cli firmware package`, exactly as the engine
 /// sidecars are (`/pkg/…`, `sync-engine-sidecar.sh`), so a `./firmware/…`
-/// resolved against the page would name a different URL on `/devices` than
+/// resolved against the page would name a different URL on `/device/<uid>` than
 /// on `/p/<slug>-prj…` and be wrong on all but one of them.
 ///
 /// A path that is already absolute comes back unchanged. A build with no

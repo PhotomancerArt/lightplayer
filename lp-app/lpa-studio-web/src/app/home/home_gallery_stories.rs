@@ -503,7 +503,7 @@ fn devices_target_pick_open() -> Element {
             OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
                 ConnectBoardSection {
                     ble_reach: Some(BluetoothReach::Ready),
-                    page_url: Some("https://lightplayer.app/devices".to_string()),
+                    page_url: Some("https://lightplayer.app/".to_string()),
                     pick_open: true,
                     on_action: |_| {},
                 }

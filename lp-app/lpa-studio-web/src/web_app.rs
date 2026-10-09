@@ -146,7 +146,7 @@ pub fn App() -> Element {
     // The one transient-confirmation slot (base/toast.rs). Provided here so
     // a line survives the surface that raised it: archiving navigates Home
     // and unmounts the menu row that asked for it, and the "Archived —
-    // Restore from the Projects page." line still has to land.
+    // Restore it from Archived projects." line still has to land.
     let toasts = use_toast_provider();
     // The route: parsed from the URL at boot, canonicalized once, then
     // kept in sync bidirectionally — the view loop below mirrors the LENS
@@ -396,7 +396,7 @@ pub fn App() -> Element {
         // The rebuilt device layer (M3): the roster's effects run device IO
         // in spawned futures on the browser's executor, and reach real ports
         // through the Web Serial provider. A browser without Web Serial
-        // installs no serial transport, and the devices page says so rather
+        // installs no serial transport, and the home page says so rather
         // than showing an empty roster that reads like "you have none" —
         // but it still reaches SIMS, which are workers, not ports.
         #[cfg(target_arch = "wasm32")]
@@ -483,7 +483,7 @@ pub fn App() -> Element {
             // Boards on the LAN (Wi-Fi M6 P07; no flag since the network
             // transport's P01): in every browser with a WebSocket. A board
             // is reached at an address this browser remembered for it
-            // ("Connect over Wi‑Fi"), one typed into the add slot, or one
+            // ("Connect over Wi‑Fi"), one typed into Connect a board's Network row, or one
             // the `?lan=` dev shortcut names, dialled at once. Each link is
             // a secure lp-link presenting this browser's access keys, the
             // same the access controller unlocks a Bluetooth board with.

@@ -625,7 +625,7 @@ fn AddSlotAs(reach: BluetoothReach, usb: bool) -> Element {
                 ConnectBoardSection {
                     ble_reach: Some(reach),
                     usb_available: usb,
-                    page_url: Some("https://lightplayer.app/devices".to_string()),
+                    page_url: Some("https://lightplayer.app/".to_string()),
                     on_action: |_| {},
                 }
             }
@@ -633,7 +633,7 @@ fn AddSlotAs(reach: BluetoothReach, usb: bool) -> Element {
     }
 }
 
-/// The settings section as the Devices page draws it, on a Mac in Chrome.
+/// The settings section as the home page's fold draws it, on a Mac in Chrome.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SettingsAs(

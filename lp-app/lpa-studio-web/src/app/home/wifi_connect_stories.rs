@@ -181,7 +181,7 @@ fn add_slot(typed: Option<&str>, connect: Option<UiWifiConnect>, connecting: boo
                 ConnectBoardSection {
                     ble_reach: Some(BluetoothReach::Ready),
                     usb_available: true,
-                    page_url: Some("https://lightplayer.app/devices".to_string()),
+                    page_url: Some("https://lightplayer.app/".to_string()),
                     wifi_connect: connect,
                     wifi_typed: typed.map(str::to_string),
                     network_open: true,

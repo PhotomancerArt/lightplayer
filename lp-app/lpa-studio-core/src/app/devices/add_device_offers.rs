@@ -1,5 +1,5 @@
 //! `devices/connect-usb`, `devices/connect-ble` and
-//! `devices/connect-wifi-address`: the add slot's three ways a board comes
+//! `devices/connect-wifi-address`: Connect a board's three ways a board comes
 //! in, each named for what it does.
 //!
 //! All three are ALWAYS offered (G3, 2026-09-24): a transport this browser
@@ -38,7 +38,7 @@ pub const WIFI_CONNECTING: &str = "Connecting\u{2026}";
 /// The address parameter of `devices/connect-wifi-address`.
 pub const WIFI_ADDRESS_PARAM: &str = "address";
 
-/// What the add slot's Wi‑Fi entry can do right now.
+/// What Connect a board's Network entry can do right now.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct WifiAddressReach {
     /// This page reaches the LAN (a WebSocket, the LAN transport installed).
@@ -47,7 +47,7 @@ pub struct WifiAddressReach {
     pub connecting: bool,
 }
 
-/// The add slot's transports, USB first: `usb_available` is whether this
+/// Connect a board's transports, USB first: `usb_available` is whether this
 /// page has Web Serial (or the `?emu=` shim standing in for it), `bluetooth`
 /// what the browser answered about Bluetooth, `wifi` whether a typed
 /// address can be reached.
@@ -105,7 +105,7 @@ fn connect_wifi_address_offer(wifi: WifiAddressReach) -> UiOffer {
     offer
 }
 
-/// Why the add slot's Wi‑Fi entry cannot be pressed now, if it cannot.
+/// Why Connect a board's Network entry cannot be pressed now, if it cannot.
 fn wifi_waits(wifi: WifiAddressReach) -> Option<&'static str> {
     if !wifi.available {
         Some(WIFI_NEEDS_WEBSOCKET)

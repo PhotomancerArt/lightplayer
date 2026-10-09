@@ -241,7 +241,8 @@ fn project(uid: &str, slug: &str, saved: f64, provenance: Option<&str>) -> UiPac
 
 fn pattern(uid: &str, slug: &str, saved: f64) -> UiPackageCard {
     UiPackageCard {
-        project_kind: "Pattern".to_string(),
+        project_kind: lpa_studio_core::app::library::package_manifest::PATTERN_KIND_LABEL
+            .to_string(),
         exports: vec!["effect".to_string()],
         ..project(uid, slug, saved, None)
     }

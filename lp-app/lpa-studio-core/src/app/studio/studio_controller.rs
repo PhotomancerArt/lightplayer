@@ -668,7 +668,7 @@ impl StudioController {
     /// beside the others: in every browser with a WebSocket. Its links
     /// present [`Self::network_link_keys`]. With it installed, a board this
     /// browser remembers an address for is offered "Connect over Wi‑Fi",
-    /// and the add slot takes an address.
+    /// and Connect a board's Network row takes an address.
     pub fn set_lan_transport(&mut self, transport: Rc<crate::LanDeviceTransport>) {
         self.lan_transport = Some(transport);
         self.install_device_transport();
@@ -2101,7 +2101,7 @@ impl StudioController {
 
     /// Whether this page can reach a board over USB. Web Serial (or the
     /// `?emu=` shim that polyfills it) is what built a serial transport;
-    /// without one the add slot keeps its USB verb out of the primary
+    /// without one Connect a board keeps its USB square out of the primary
     /// position (iPhone, Bluefy, Firefox, Safari), and the offer tree's
     /// `devices/connect-usb` is disabled with the reason.
     fn usb_available(&self) -> bool {
@@ -3158,7 +3158,7 @@ impl StudioController {
                 let on_lens_card = lens.is_some()
                     && owner.as_ref().and_then(|owner| offers.device_at(owner)) == lens;
                 (!(place.page.is_editor() && on_lens_card))
-                    .then(|| "It is on the Devices page.".to_string())
+                    .then(|| "It is on the home page.".to_string())
             }
             _ => None,
         }

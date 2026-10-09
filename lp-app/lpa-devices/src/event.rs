@@ -49,7 +49,7 @@ impl Input {
 pub enum Action {
     /// "Add a device" — ask the platform for a USB grant.
     AddFromUsb,
-    /// "via Bluetooth" (the add slot) — ask the platform's Bluetooth chooser for a
+    /// Connect a board's Bluetooth square — ask the platform's Bluetooth chooser for a
     /// device. The sibling of [`Self::AddFromUsb`], not a mode of it: the two
     /// choosers are different browser prompts with different filters, and a
     /// picked device folds into the roster exactly like a picked port (a

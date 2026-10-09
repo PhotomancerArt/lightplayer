@@ -77,5 +77,5 @@ pub fn this_page_url() -> String {
             return href;
         }
     }
-    "https://lightplayer.app/devices".to_string()
+    "https://lightplayer.app/".to_string()
 }

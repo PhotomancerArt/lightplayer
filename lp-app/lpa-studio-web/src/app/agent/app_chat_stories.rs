@@ -72,7 +72,7 @@ fn seans_project() -> Element {
 
 #[story(
     label = "Rows say where, with Show",
-    description = "Each row says where its press or edit lives (agentic-UI M8), in the page's words, and links there. The `edit_project` rows carry one Show per node they changed (Show playlist, Show output, Show fixture) — the refused fixture edit in the first batch landed nowhere, so it links nowhere. The `act` rows read \"pressed Save in the project header\" (no Show: Save is gone once saved — the row still says where it was), \"pressed Remove node on the clock card\" (Show), and a press on a board's card with its Show drawn disabled, because that card is on the Devices page and the user is in the editor — the tooltip says so. Show is a core offer (`show/<path>`), not a web link: pressing it focuses a node's card the way a tree-row click does, lights the control again, and scrolls it into view — scroll only, never keyboard focus, so it never steals the caret from someone typing."
+    description = "Each row says where its press or edit lives (agentic-UI M8), in the page's words, and links there. The `edit_project` rows carry one Show per node they changed (Show playlist, Show output, Show fixture) — the refused fixture edit in the first batch landed nowhere, so it links nowhere. The `act` rows read \"pressed Save in the project header\" (no Show: Save is gone once saved — the row still says where it was), \"pressed Remove node on the clock card\" (Show), and a press on a board's card with its Show drawn disabled, because that card is on the home page and the user is in the editor — the tooltip says so. Show is a core offer (`show/<path>`), not a web link: pressing it focuses a node's card the way a tree-row click does, lights the control again, and scrolls it into view — scroll only, never keyboard focus, so it never steals the caret from someone typing."
 )]
 fn rows_with_show() -> Element {
     let (turns, offers) = placed_transcript();
@@ -84,7 +84,7 @@ fn rows_with_show() -> Element {
 }
 
 #[story(
-    description = "A pending connect card. The assistant pressed `devices/connect-usb`, which needs the browser's own click (the USB chooser), so its `act` became this card: the same Connect button the Devices page draws, and the user's click on it is what opens the chooser — the card dispatches the action inside the click, so the browser sees the gesture. Dismiss is the card's own action from core."
+    description = "A pending connect card. The assistant pressed `devices/connect-usb`, which needs the browser's own click (the USB chooser), so its `act` became this card: the same USB square Connect a board draws, and the user's click on it is what opens the chooser — the card dispatches the action inside the click, so the browser sees the gesture. Dismiss is the card's own action from core."
 )]
 fn connect_card_pending() -> Element {
     let card = connect_card(UiAgentCardState::Pending);
@@ -431,7 +431,7 @@ fn placed_transcript() -> (Vec<UiAgentTurn>, UiOfferTree) {
         (&output, "output", None),
         (&fixture, "fixture", None),
         (&clock.clone().child("remove"), "Remove node", None),
-        (&push, "Update firmware", Some("It is on the Devices page.")),
+        (&push, "Update firmware", Some("It is on the home page.")),
     ] {
         offers.publish(show_offer(target, label, blocked));
     }
@@ -518,7 +518,7 @@ fn placed_act_row(id: &str, path: OfferPath, place: UiAgentPlace) -> UiAgentTurn
     })
 }
 
-/// The add slot's offers, `devices/connect-usb` among them, in a browser
+/// Connect a board's offers, `devices/connect-usb` among them, in a browser
 /// with Web Serial.
 fn connect_offers() -> UiOfferTree {
     let mut offers = UiOfferTree::new();
@@ -538,7 +538,7 @@ fn connect_card(state: UiAgentCardState) -> UiAgentCard {
         .iter()
         .find(|offer| offer.path.to_string() == "devices/connect-usb")
         .cloned()
-        .expect("the add slot publishes connect-usb");
+        .expect("Connect a board publishes connect-usb");
     let mut card = UiAgentCard::new(
         "c1",
         offer.action.clone(),

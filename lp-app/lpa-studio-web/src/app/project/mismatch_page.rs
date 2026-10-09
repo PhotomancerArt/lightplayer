@@ -16,7 +16,7 @@
 //! The page draws the real cards, not descriptions of them: the device's
 //! own roster card (the fold's live view, feed and all) and the running
 //! project's gallery card. Nothing here is a second rendering of a device
-//! that could drift from the Devices page.
+//! that could drift from the home page.
 //!
 //! # Why nothing here backs anything up (Q7, DD19)
 //!
@@ -117,7 +117,7 @@ pub fn MismatchPage(
             }
 
             div { class: "tw:grid tw:gap-3.5 tw:grid-cols-2 tw:max-[860px]:grid-cols-1",
-                // The device, as the Devices page draws it — the fold's
+                // The device, as the home page draws it — the fold's
                 // live view, never a second telling of it.
                 match device_card {
                     Some(card) => rsx! {

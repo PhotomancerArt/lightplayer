@@ -55,7 +55,7 @@ pub struct DeviceRosterView {
     /// Whether this browser can reach a USB port — Web Serial, or the
     /// `?emu=` shim that stands in for it. `false` on iPhone/iPad (Safari,
     /// Bluefy), Firefox and Safari, where the roster is still reachable
-    /// (sims, Bluetooth) but the add slot must not offer the USB verb as its
+    /// (sims, Bluetooth) but Connect a board must not offer the USB square as its
     /// primary action: that verb could only fail there.
     ///
     /// Joined by the controller, which is what knows whether a serial
@@ -90,7 +90,7 @@ pub struct DeviceRosterView {
     /// failed (`devices/<board>/connect-wifi`). Joined by the controller,
     /// which holds the connects; absent = nothing to say.
     pub wifi_connects: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiWifiConnect>,
-    /// The add slot's "Connect a board on Wi‑Fi" under way, or why it
+    /// Connect a board's Network row, under way, or why it
     /// failed (`devices/connect-wifi-address`).
     pub wifi_address_connect: Option<super::UiWifiConnect>,
     /// Each device's firmware-update words (the update-states spike,
@@ -434,7 +434,7 @@ impl DeviceRoster {
         self.effects.sweep_departed_ports();
     }
 
-    /// The projection the devices page renders.
+    /// The projection the home page renders.
     pub fn view(&self, now: Millis) -> DeviceRosterView {
         DeviceRosterView {
             roster: roster_view(&self.roster, now),

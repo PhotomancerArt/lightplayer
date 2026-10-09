@@ -452,8 +452,8 @@ keeps a card attached — right for a board still on the desk, wrong for a
 runtime that no longer exists. Only the two verbs' WORDS fork ("Power on" /
 "Power off", via `DevicesOp`'s `face`); every other verb reads the same.
 
-**Creating one** is `SimCreateOp` (`devices/sim_create_op.rs`), the Devices
-page add slot's second verb — its own op rather than a `DevicesOp` variant
+**Creating one** is `SimCreateOp` (`devices/sim_create_op.rs`), the home
+page's Connect a board second verb — its own op rather than a `DevicesOp` variant
 because creating a device is not something the fold does: the record is
 written in the library (row + sidecar, one settle), the roster meets it as
 an ordinary device at the settle that follows, and only then is there a
@@ -474,14 +474,14 @@ whatever they arrived with.
 
 ### Device verbs are offers, and some take values
 
-Every verb a device card, the add slot or a pending link draws is a
+Every verb a device card, the Connect a board section or a pending link draws is a
 `UiOffer` in the tree at `devices/<board ref>/<verb>`
 (`devices/device_offers.rs`, `pending_link_offers.rs`,
 `add_device_offers.rs`, `new_sim_offer.rs`). The ref is a `BoardRef`
 (`devices/board_ref.rs`): `mac-<12 hex>` for a board known by its silicon
 MAC, `sim-…` and `emu-…` for made boards by their generated MAC, and
-`new-<n>` for a link that has not said who it is yet. The card, the add
-slot, the agent and the palette all read the same offers.
+`new-<n>` for a link that has not said who it is yet. The card, the Connect a board
+section, the agent and the palette all read the same offers.
 
 A verb that needs a value declares typed `params` (`core/offer/`:
 `OfferParam` of kind `Choice`, `Text` or `Toggle`) and holds an

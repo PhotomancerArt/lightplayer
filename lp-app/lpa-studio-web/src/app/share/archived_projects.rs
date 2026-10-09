@@ -148,7 +148,7 @@ pub fn archive_project(
             Ok(_) => {
                 on_archived();
                 if let Some(mut toasts) = toasts {
-                    toasts.say("Archived — Restore from the Projects page.");
+                    toasts.say("Archived — Restore it from Archived projects.");
                 }
             }
             Err(error) => {

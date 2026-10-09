@@ -11,7 +11,7 @@
 //! and the card says "Unlocked with friends · play".
 //!
 //! A browser without Web Bluetooth (Brave, Safari, Firefox, iPhone) gets
-//! the add slot's own explanation and way forward.
+//! Connect a board's own explanation and way forward.
 
 use std::cell::RefCell;
 
