@@ -41,6 +41,8 @@
 pub mod add_device_offers;
 pub mod ble_transport;
 pub mod bluetooth_reach;
+pub mod board_plays;
+pub mod board_projects;
 pub mod board_ref;
 /// Bluetooth devices backed by the page's Web Bluetooth. wasm-only, and only
 /// when the studio is built with the provider that owns them.
@@ -143,6 +145,8 @@ pub use add_device_offers::{
 };
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
+pub use board_plays::BoardPlays;
+pub use board_projects::{BoardProjectInputs, BoardProjects, board_projects};
 pub use board_ref::{BoardRef, BoardRefError};
 #[cfg(all(feature = "browser-ble", target_arch = "wasm32"))]
 pub use browser_ble_source::BrowserBleSource;

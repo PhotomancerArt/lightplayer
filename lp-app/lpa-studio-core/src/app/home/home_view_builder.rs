@@ -8,9 +8,10 @@
 //! so nothing about a sim is built here.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use lpc_history::EventKind;
+use lpc_history::{ContentHash, EventKind};
 use lpfs::LpFs;
 
 use super::embedded_example::embedded_examples;
@@ -35,6 +36,10 @@ pub struct HomeInputs {
     /// lens device's `board_id`, and the deviceless stub names what Studio
     /// still remembers. Read through `StudioController::lens_board_id`.
     pub registered: Vec<RegisteredDevice>,
+    /// Each library project's history head, by `prj…` uid: the version a
+    /// board has to hold to be "at head" (`BoardProjects`). A package that
+    /// would not open has none.
+    pub project_heads: BTreeMap<String, ContentHash>,
     /// Listing failed — the gallery surfaces this instead of an empty
     /// library.
     pub issue: Option<UiIssue>,
@@ -54,6 +59,7 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
         });
 
     let mut issue = None;
+    let mut project_heads = BTreeMap::new();
     let projects: Vec<UiPackageCard> = match store.list() {
         // Every listed package gets a card. Dropping the ones whose history
         // or provenance would not load is how a project vanished from the
@@ -64,11 +70,14 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
             .map(|summary| {
                 package_card(&store, &registered, summary.clone()).unwrap_or_else(|error| {
                     log::warn!("home: {} listed without its history: {error}", summary.slug);
-                    degraded_package_card(summary)
+                    (degraded_package_card(summary), None)
                 })
             })
-            .map(|mut card| {
+            .map(|(mut card, head)| {
                 card.open_elsewhere = open_elsewhere.iter().any(|uid| *uid == card.uid);
+                if let Some(head) = head {
+                    project_heads.insert(card.uid.clone(), head);
+                }
                 card
             })
             .collect(),
@@ -83,6 +92,7 @@ pub fn hydrate_home_inputs(fs: Rc<RefCell<dyn LpFs>>, open_elsewhere: &[String])
     HomeInputs {
         projects,
         registered,
+        project_heads,
         issue,
     }
 }
@@ -207,11 +217,13 @@ pub fn builtin_importable_patterns() -> Vec<crate::UiImportablePattern> {
         .collect()
 }
 
+/// A package's gallery card, and its history head (the version a board has
+/// to hold to be at head — [`HomeInputs::project_heads`]).
 fn package_card(
     store: &LibraryStore,
     registered: &[RegisteredDevice],
     summary: crate::app::library::PackageSummary,
-) -> Result<UiPackageCard, crate::app::library::LibraryError> {
+) -> Result<(UiPackageCard, Option<ContentHash>), crate::app::library::LibraryError> {
     let handle = store.open(summary.uid)?;
     let meta = crate::app::library::package_meta::read_meta(&*handle.package_fs.borrow())?;
     // Advisory board target (vision D3) + authored project kind (module
@@ -237,7 +249,8 @@ fn package_card(
         .or(meta.as_ref().map(|meta| meta.created_at));
 
     let uid = summary.uid.to_string();
-    let on_device = handle.history.head().and_then(|head| {
+    let head = handle.history.head();
+    let on_device = head.and_then(|head| {
         registered.iter().find_map(|device| {
             let association = device.association.as_ref()?;
             (association.project.to_string() == uid && association.version == head)
@@ -245,7 +258,7 @@ fn package_card(
         })
     });
 
-    Ok(UiPackageCard {
+    let card = UiPackageCard {
         uid,
         kind: summary.kind,
         project_kind,
@@ -257,7 +270,8 @@ fn package_card(
         open_elsewhere: false, // stamped by the hydration pass
         target,
         health: summary.health,
-    })
+    };
+    Ok((card, head))
 }
 
 /// The card for a package whose history or provenance would not open. The

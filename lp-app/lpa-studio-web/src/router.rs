@@ -49,7 +49,11 @@
 //!                       its fresh `/p/<slug>-<uid>`). View suffixes ride
 //!                       it like any lens route. An unknown bare segment
 //!                       stays the landing, never a guess.
-//! /device/<dev-uid>     a RESOLVER, never an emitted address (D51): the
+//! /device/<dev-uid>     a RESOLVER, emitted in one case only (D51, and Q3
+//!                       of `lp2025/2026-10-08-2330-connected-in-the-card`:
+//!                       an unbound lens that has just taken the editor
+//!                       from a route that is not a lens route, so the
+//!                       editor has a page; see `lens_sync_target`): the
 //!                       editor opens as a lens on that device's session and
 //!                       the URL heals to the project that device is
 //!                       running, plus the hint — `/p/<slug>-prj…?on=mac:…`.
@@ -61,8 +65,10 @@
 //!                       `docs/adr/2026-09-22-opening-a-board-adopts-its-project.md`.
 //!                       Devices keep their own `dev…` identity (vision
 //!                       D13), so the address stays parseable and
-//!                       linkable; it is simply never what the app writes.
-//! /device/<uid>/play    likewise.
+//!                       linkable; the app writes it in the one case above
+//!                       and nowhere else.
+//! /device/<uid>/play    likewise, and the heal keeps the view:
+//!                       `/p/<slug>-prj…/play?on=mac:…`.
 //! /stories[/<story-id>] the story book (dev)
 //! /mapping              the standalone 2D mapping editor
 //! /boards[/<vendor>/<product>], /boards/edit
@@ -127,9 +133,13 @@
 //!   the library's own copy of it, or by adopting it into the library
 //!   first when this library did not already have it (D1-D5 of
 //!   `docs/adr/2026-09-22-opening-a-board-adopts-its-project.md`).
+//!   A `/device/` address's view suffix rides the heal, so
+//!   `/device/<uid>/play` lands on `/p/…/play`.
 //!   A not-yet-identified device, and a board whose content is not at the
 //!   library head (the divergence case, F1), are the two lenses with no
-//!   honest project address; the URL stays put.
+//!   honest project address; the URL stays put — unless the editor has
+//!   just appeared from a route that is not a lens route, where the URL
+//!   goes to `/device/<uid>` so the editor has a page to show on (Q3).
 //! - the open project's display name is known (or changed) → the address
 //!   bar HEALS to `/p/<slugify(name)>-<uid>` via `replaceState` (D10), so
 //!   a stale slug, a case-mangled paste and a bare uid all straighten out
@@ -815,6 +825,12 @@ pub(crate) fn install_legacy_hash_shim() {}
 /// device whose identity has not landed — in each case the caller leaves
 /// the URL alone.
 ///
+/// With one exception, ruled narrowly (Q3 of
+/// `lp2025/2026-10-08-2330-connected-in-the-card`): an unbound lens that
+/// has just taken the editor from a route that is not a lens route goes to
+/// `/device/<uid>`, the only time that address is emitted, so its editor
+/// has a page to show on ([`lens_sync_target`]).
+///
 /// The caller gates on "the editor is showing" (`!view.panes.is_empty()`):
 /// mid-open views (lens claimed, mirror not yet built) must not rewrite
 /// the URL that requested them.
@@ -825,7 +841,8 @@ pub(crate) fn install_legacy_hash_shim() {}
 pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
     // The URL is the PROJECT, whatever backs it (D35): both arms emit a
     // project address, and the device rides along as the `?on=` hint.
-    // `/device/<uid>` is never emitted (D51) — it only resolves.
+    // `/device/<uid>` is never answered here (D51) — it only resolves; the
+    // sync's one narrow exception lives in `lens_sync_target`.
     let UiLensRuntime::Device {
         transport,
         project_uid,
@@ -880,6 +897,93 @@ pub(crate) fn lens_route(view: &UiStudioView) -> Option<StudioRoute> {
         view: ProjectView::Workspace,
         on,
     })
+}
+
+/// The lens's registry uid (`UiLensRuntime::Device.uid`), whether or not
+/// it has a project address. The lens sync tells a new UNBOUND lens by it:
+/// such a lens has no route for the sync's bound-route latch to hold.
+pub(crate) fn lens_device_uid(view: &UiStudioView) -> Option<&str> {
+    let UiLensRuntime::Device { uid, .. } = view.lens.as_ref()?;
+    Some(uid)
+}
+
+/// What the lens sync writes to the address bar ([`lens_sync_target`]).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct LensSyncMove {
+    /// The address to write.
+    pub(crate) route: StudioRoute,
+    /// `true` rewrites the current history entry: boot or forward
+    /// resolution on a `/p/` or example route (uid → slug, an identity
+    /// landing), the same place under the lens's name, with no duplicate
+    /// entry. `false` pushes one: an open from a page, which Back returns
+    /// to.
+    pub(crate) replace: bool,
+}
+
+/// Where the lens sync sends the address when the editor shows, or `None`
+/// to leave it. `current` is the route on screen, `bound` the lens's own
+/// address ([`lens_route`]), `lens_uid` the lens's registry uid
+/// ([`lens_device_uid`]), `on_shell_route` whether `current` is a route
+/// the editor renders on (the view loop owns that set), and
+/// `bound_changed` whether a new document took the lens this emission.
+///
+/// The view loop asks only while the editor shows and no leave-the-studio
+/// teardown is in flight. The answers, in order:
+///
+/// 1. A STEADY lens moves the address only from a shell route. Anywhere
+///    else (Home, Explore, Docs…) the user left the editor surface on
+///    purpose, and yanking the URL back would make those pages
+///    unreachable. A new document (`bound_changed`) moves it from
+///    anywhere: an example opened from Explore lands in the editor.
+/// 2. A lens already at its own session's address leaves it.
+///    [`StudioRoute::same_session`], not `==`: play is a zoom on the same
+///    document and the lens's own route always reads non-play, so `==`
+///    would rewrite the user straight back out of `/…/play`.
+/// 3. On a `/p/` or example route the lens's address REPLACES the entry.
+/// 4. On `/device/<uid>[/<view>]` it is pushed with the device route's
+///    view kept, so `/device/<uid>/play` heals to `/p/…/play`
+///    (`docs/defects/2026-10-08-the-device-play-address-loses-play.md`).
+///    [`lens_route`] only answers `/p/` addresses (a project or an
+///    example), and both carry a view.
+/// 5. From any other page it is pushed as it is: Back returns there.
+/// 6. An unbound lens (no project address) leaves the address alone, with
+///    one exception (Q3 of `lp2025/2026-10-08-2330-connected-in-the-card`):
+///    a NEW one that took the editor from a route that is not a lens route
+///    is pushed to `/device/<uid>`, so its editor has a page to show on
+///    once Home is outside the shell. An unbound lens on a lens route (a
+///    `/p/` load whose bind failed, a typed `/device/<uid>`) stays where
+///    the user put it.
+pub(crate) fn lens_sync_target(
+    current: &StudioRoute,
+    bound: Option<&StudioRoute>,
+    lens_uid: Option<&str>,
+    on_shell_route: bool,
+    bound_changed: bool,
+) -> Option<LensSyncMove> {
+    if !on_shell_route && !bound_changed {
+        return None;
+    }
+    let Some(target) = bound else {
+        return match lens_uid {
+            Some(uid) if bound_changed && !current.is_lens() => Some(LensSyncMove {
+                route: StudioRoute::Device {
+                    uid: uid.to_string(),
+                    view: ProjectView::Workspace,
+                },
+                replace: false,
+            }),
+            _ => None,
+        };
+    };
+    if target.same_session(current) {
+        return None;
+    }
+    let (route, replace) = match current {
+        StudioRoute::Project { .. } | StudioRoute::Example { .. } => (target.clone(), true),
+        StudioRoute::Device { view, .. } => (target.with_view(*view), false),
+        _ => (target.clone(), false),
+    };
+    Some(LensSyncMove { route, replace })
 }
 
 /// The route at page boot: the path, verbatim (the legacy shim has already
@@ -2453,5 +2557,265 @@ mod tests {
             }
             .project_matches_view(&view)
         );
+    }
+
+    // -----------------------------------------------------------------
+    // lens_sync_target: where the address goes when the editor shows
+    // -----------------------------------------------------------------
+    //
+    // `on_shell_route` is the view loop's own set (`web_app.rs`): the
+    // gallery sections and the lens routes. The tests pass it by hand,
+    // `true` for those and `false` for every other page.
+
+    /// The defect (docs/defects/2026-10-08-the-device-play-address-loses-play.md):
+    /// a `/device/<uid>/play` load heals to the project's address WITH
+    /// play, as a push, both on the emission the lens binds and on any
+    /// steady one after it.
+    #[test]
+    fn a_device_play_address_heals_to_the_projects_play_address() {
+        let current = StudioRoute::parse("/device/dev000000daqf6dvvqz/play");
+        let bound = lens_route(&board_view(Some(SHARE_UID)));
+        for bound_changed in [true, false] {
+            let lens_move = lens_sync_target(
+                &current,
+                bound.as_ref(),
+                Some(BOARD_UID),
+                true,
+                bound_changed,
+            )
+            .expect("the device address heals");
+            assert!(!lens_move.replace, "a heal from /device/ is a navigation");
+            assert!(lens_move.route.is_play(), "bound_changed {bound_changed}");
+            assert_eq!(
+                lens_move.route.path(),
+                format!("/p/porch-sign-{SHARE_UID}/play?on=mac:60:55:f9:0a:0b:0c")
+            );
+        }
+        // …and once there, the lens is home: play is the same session
+        let healed = lens_sync_target(&current, bound.as_ref(), Some(BOARD_UID), true, true)
+            .expect("the device address heals")
+            .route;
+        assert_eq!(
+            lens_sync_target(&healed, bound.as_ref(), Some(BOARD_UID), true, false),
+            None
+        );
+    }
+
+    /// Every view suffix rides the heal, and the bare device address heals
+    /// to the bare project address, as it always has.
+    #[test]
+    fn a_device_address_heals_to_the_project_with_its_view() {
+        let bound = lens_route(&board_view(Some(SHARE_UID)));
+        for (path, healed) in [
+            ("/device/dev000000daqf6dvvqz", ""),
+            ("/device/dev000000daqf6dvvqz/patch", "/patch"),
+            ("/device/dev000000daqf6dvvqz/mapping", "/mapping"),
+        ] {
+            let lens_move = lens_sync_target(
+                &StudioRoute::parse(path),
+                bound.as_ref(),
+                Some(BOARD_UID),
+                true,
+                true,
+            )
+            .expect("the device address heals");
+            assert!(
+                !lens_move.replace,
+                "{path}: a heal from /device/ is a navigation"
+            );
+            assert_eq!(
+                lens_move.route.path(),
+                format!("/p/porch-sign-{SHARE_UID}{healed}?on=mac:60:55:f9:0a:0b:0c"),
+                "{path}"
+            );
+        }
+    }
+
+    /// Boot on a `/p/` address: the lens binding the same project leaves
+    /// it alone, view and all (the slug heal, not this, writes the slug);
+    /// a lens that lands on another document REPLACES the entry, so the
+    /// resolution spends no history.
+    #[test]
+    fn a_project_address_resolves_in_place() {
+        let bound = lens_route(&board_view(Some(SHARE_UID)));
+        for path in [
+            format!("/p/{SHARE_UID}/play"),
+            format!("/p/{SHARE_UID}"),
+            format!("/p/old-name-{SHARE_UID}/patch?on=sim"),
+        ] {
+            assert_eq!(
+                lens_sync_target(
+                    &StudioRoute::parse(&path),
+                    bound.as_ref(),
+                    Some(BOARD_UID),
+                    true,
+                    true,
+                ),
+                None,
+                "{path}"
+            );
+        }
+        for path in ["/p/fyeah-sign", "/p/prj0000000000000000"] {
+            let current = StudioRoute::parse(path);
+            assert!(current.is_lens(), "{path} is a lens route");
+            assert_eq!(
+                lens_sync_target(&current, bound.as_ref(), Some(BOARD_UID), true, true),
+                Some(LensSyncMove {
+                    route: bound.clone().expect("the lens has an address"),
+                    replace: true,
+                }),
+                "{path}"
+            );
+        }
+    }
+
+    /// Q3: an unbound lens that has just taken the editor from a page that
+    /// is not a lens route (Home, or the gallery while it exists) goes to
+    /// `/device/<uid>`, the only time that address is written. A steady
+    /// one there is left where it is.
+    #[test]
+    fn an_unbound_lens_opened_from_a_page_goes_to_its_device_address() {
+        let bound = lens_route(&board_view(None));
+        assert_eq!(bound, None, "no project address");
+        for (current, on_shell_route) in [(StudioRoute::Home, false), (StudioRoute::Devices, true)]
+        {
+            let lens_move = lens_sync_target(
+                &current,
+                bound.as_ref(),
+                Some(BOARD_UID),
+                on_shell_route,
+                true,
+            )
+            .expect("a new unbound lens needs a page");
+            assert_eq!(
+                lens_move,
+                LensSyncMove {
+                    route: StudioRoute::Device {
+                        uid: BOARD_UID.to_string(),
+                        view: ProjectView::Workspace,
+                    },
+                    replace: false,
+                },
+                "{current:?}"
+            );
+            assert_eq!(lens_move.route.path(), format!("/device/{BOARD_UID}"));
+            assert_eq!(
+                lens_sync_target(
+                    &current,
+                    bound.as_ref(),
+                    Some(BOARD_UID),
+                    on_shell_route,
+                    false
+                ),
+                None,
+                "a steady unbound lens on {current:?}"
+            );
+        }
+        // no lens uid, nothing to name
+        assert_eq!(
+            lens_sync_target(&StudioRoute::Home, None, None, false, true),
+            None
+        );
+    }
+
+    /// An unbound lens on a lens route stays where the user put it: a
+    /// `/p/` load whose bind failed, a typed `/device/<uid>` (with any
+    /// view), new or steady.
+    #[test]
+    fn an_unbound_lens_on_a_lens_route_stays_put() {
+        for path in [
+            format!("/p/porch-sign-{SHARE_UID}"),
+            format!("/p/porch-sign-{SHARE_UID}/play?on=mac:60:55:f9:0a:0b:0c"),
+            format!("/device/{BOARD_UID}"),
+            format!("/device/{BOARD_UID}/play"),
+        ] {
+            for bound_changed in [true, false] {
+                assert_eq!(
+                    lens_sync_target(
+                        &StudioRoute::parse(&path),
+                        None,
+                        Some(BOARD_UID),
+                        true,
+                        bound_changed,
+                    ),
+                    None,
+                    "{path}, bound_changed {bound_changed}"
+                );
+            }
+        }
+    }
+
+    /// Today's rule, pinned: a STEADY lens moves the address only from a
+    /// shell route. Off them (Home, Explore, Docs) the user left the editor
+    /// surface on purpose, so the address is left alone; a NEW document
+    /// moves it from anywhere (an example opened from Explore lands in the
+    /// editor), as a push.
+    #[test]
+    fn a_steady_lens_off_the_shell_routes_is_left_alone() {
+        let bound = lens_route(&board_view(Some(SHARE_UID)));
+        for current in [
+            StudioRoute::Home,
+            StudioRoute::Explore,
+            StudioRoute::Docs {
+                page: None,
+                anchor: None,
+            },
+        ] {
+            assert_eq!(
+                lens_sync_target(&current, bound.as_ref(), Some(BOARD_UID), false, false),
+                None,
+                "a steady lens on {current:?}"
+            );
+            assert_eq!(
+                lens_sync_target(&current, bound.as_ref(), Some(BOARD_UID), false, true),
+                Some(LensSyncMove {
+                    route: bound.clone().expect("the lens has an address"),
+                    replace: false,
+                }),
+                "a new lens from {current:?}"
+            );
+        }
+        // …while on a gallery section (a shell route) even a steady lens
+        // is followed, as a push
+        assert_eq!(
+            lens_sync_target(
+                &StudioRoute::Projects,
+                bound.as_ref(),
+                Some(BOARD_UID),
+                true,
+                false
+            ),
+            Some(LensSyncMove {
+                route: bound.clone().expect("the lens has an address"),
+                replace: false,
+            })
+        );
+    }
+
+    #[test]
+    fn the_lens_device_uid_is_read_bound_or_not() {
+        assert_eq!(lens_device_uid(&board_view(None)), Some(BOARD_UID));
+        assert_eq!(
+            lens_device_uid(&board_view(Some(SHARE_UID))),
+            Some(BOARD_UID)
+        );
+        assert_eq!(lens_device_uid(&editor_view(None)), None);
+    }
+
+    const BOARD_UID: &str = "dev000000daqf6dvvqz";
+
+    /// The editor open on a board over USB, running `project_uid` (or a
+    /// project with no address, for `None`).
+    fn board_view(project_uid: Option<&str>) -> UiStudioView {
+        editor_view(Some(UiLensRuntime::Device {
+            uid: BOARD_UID.to_string(),
+            transport: lpa_studio_core::LinkTransport::Serial,
+            project_uid: project_uid.map(str::to_string),
+            base_mac: Some("60:55:f9:0a:0b:0c".to_string()),
+        }))
+        .with_open_project(
+            project_uid.map(str::to_string),
+            Some("porch-sign".to_string()),
+        )
     }
 }
