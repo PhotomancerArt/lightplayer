@@ -208,8 +208,9 @@ pub(crate) fn tone_icon(tone: UiStatusKind) -> Option<StudioIconName> {
 const BAR_BASE_CLASS: &str = "ux-board-bar tw:relative tw:flex tw:h-7 tw:min-w-0 tw:items-stretch tw:border-0 tw:border-t tw:border-solid tw:text-[11.5px] tw:last:rounded-b-[7px]";
 
 /// The trigger's slot: the rest of the row, its popover wrapper stretched to
-/// it (the wrapper is an inline grid that centres its button).
-const TRIGGER_SLOT_CLASS: &str = "tw:grid tw:min-w-0 tw:flex-1 tw:[&>span]:h-full tw:[&>span]:w-full tw:[&>span]:place-items-stretch";
+/// it (the wrapper is an inline grid that centres its button). Positioned:
+/// a pick the details hand back opens over it.
+const TRIGGER_SLOT_CLASS: &str = "tw:relative tw:grid tw:min-w-0 tw:flex-1 tw:[&>span]:h-full tw:[&>span]:w-full tw:[&>span]:place-items-stretch";
 
 /// The trigger: the row's icon, summary and aside as one button, the row's
 /// own ink. Tailwind preflight is not loaded, so the UA chrome is reset.

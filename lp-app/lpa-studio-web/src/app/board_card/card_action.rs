@@ -15,6 +15,11 @@
 //! [`OfferAction`] is the same for a bare offer path the card names without
 //! words of its own (a running work's Cancel, a layout question's
 //! buttons): the offer's own action, as published.
+//!
+//! **One popover at a time.** A pick drawn inside a details card (a project
+//! pick, a board pick) is a menu row there, not a second popover: pressing
+//! it closes the details card and opens the picker over the bar the details
+//! opened from ([`DetailsPick`], [`AnchoredPick`]).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -104,6 +109,18 @@ pub(crate) fn use_card_scope() -> CardScope {
     scope.read().clone()
 }
 
+/// Inside a details card: where its pick actions hand their picker. A
+/// pick pressed there closes the details (`details_open`) and names itself
+/// in `pick`, which the details card draws over its bar ([`AnchoredPick`]).
+/// Provided by [`super::bar_details::BarDetails`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DetailsPick {
+    /// The details card's own open state.
+    pub details_open: Signal<bool>,
+    /// The pick handed back to the bar, while its picker is up.
+    pub pick: Signal<Option<UiCardAction>>,
+}
+
 /// One card action. See the module doc.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -113,6 +130,7 @@ pub fn CardAction(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let scope = use_card_scope();
+    let details_pick = use_hook(try_consume_context::<DetailsPick>);
     let Some(offer) = use_offer_at(action.offer.clone())() else {
         return rsx! {};
     };
@@ -135,36 +153,20 @@ pub fn CardAction(
                 on_action,
             }
         },
-        UiActionDraw::ProjectPick { board_id } => rsx! {
-            PickSlot { look,
-                ProjectPickPopover {
-                    offer,
-                    board_id,
-                    board_title: scope.board_title.clone(),
-                    projects: scope.projects.clone(),
-                    examples: scope.examples.clone(),
-                    mode: ProjectPickMode::Verb,
-                    initial_args: action.args.clone(),
-                    verb_trigger: verb_trigger(&action, look),
-                    on_action,
-                }
+        UiActionDraw::ProjectPick { .. } | UiActionDraw::BoardPick { .. } => {
+            match details_pick.filter(|_| look == CardActionLook::MenuItem) {
+                // A pick inside a details card: a row that hands the picker
+                // back to the bar — one popover at a time.
+                Some(handoff) => rsx! {
+                    PickHandoff { action: action.clone(), handoff, title: offer.summary().to_string() }
+                },
+                None => rsx! {
+                    PickSlot { look,
+                        {pick_popover(&offer, &action, &scope, verb_trigger(&action, look), None, on_action)}
+                    }
+                },
             }
-        },
-        UiActionDraw::BoardPick {
-            chip,
-            chip_from_banner,
-        } => rsx! {
-            PickSlot { look,
-                BoardPickPopover {
-                    offer,
-                    chip: chip.map(|chip| (chip, chip_source(chip_from_banner))),
-                    mode: BoardPickMode::Verb,
-                    initial_args: action.args.clone(),
-                    verb_trigger: verb_trigger(&action, look),
-                    on_action,
-                }
-            }
-        },
+        }
         UiActionDraw::Choice => rsx! {
             ChoiceAction {
                 offer,
@@ -210,6 +212,119 @@ pub fn OfferAction(
                 on_action,
             }
         }
+    }
+}
+
+/// A pick's row inside a details card: its word and icon on a menu row.
+/// Pressing it closes the details and hands the pick to the bar.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PickHandoff(action: UiCardAction, handoff: DetailsPick, title: String) -> Element {
+    let DetailsPick {
+        mut details_open,
+        mut pick,
+    } = handoff;
+    let trigger = verb_trigger(&action, CardActionLook::MenuItem).expect("a pick has a trigger");
+    let label = trigger.word.clone();
+    rsx! {
+        button {
+            class: "{trigger.class}",
+            r#type: "button",
+            title: "{title}",
+            aria_label: "{label}",
+            aria_haspopup: "dialog",
+            onclick: move |_| {
+                details_open.set(false);
+                pick.set(Some(action.clone()));
+            },
+            {trigger.content()}
+        }
+    }
+}
+
+/// A pick a details card handed back: its picker, opened over the bar the
+/// details opened from, its trigger the bar's own line (`trigger`, on
+/// `trigger_class`). Closing the picker — a press, Escape, a click outside —
+/// clears the pick.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn AnchoredPick(
+    action: UiCardAction,
+    trigger: Element,
+    trigger_class: String,
+    mut pick: Signal<Option<UiCardAction>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let scope = use_card_scope();
+    let open = use_signal(|| true);
+    use_effect(move || {
+        if !open() && pick.peek().is_some() {
+            pick.set(None);
+        }
+    });
+    let Some(offer) = use_offer_at(action.offer.clone())() else {
+        return rsx! {};
+    };
+    let over_bar = VerbTrigger {
+        word: action.word.clone(),
+        icon: action_icon_name(action.icon.as_deref()),
+        class: trigger_class,
+        content: Some(trigger),
+    };
+    pick_popover(
+        &offer,
+        &action,
+        &scope,
+        Some(over_bar),
+        Some(open),
+        on_action,
+    )
+}
+
+/// A pick's popover in verb mode: the project pick or the board pick the
+/// action's draw names, with `trigger` and, when the surface owns it,
+/// `open`. Nothing for any other draw.
+fn pick_popover(
+    offer: &UiOffer,
+    action: &UiCardAction,
+    scope: &CardScope,
+    trigger: Option<VerbTrigger>,
+    open: Option<Signal<bool>>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let initially_open = open.is_some_and(|open| *open.peek());
+    match action.draw.clone() {
+        UiActionDraw::ProjectPick { board_id } => rsx! {
+            ProjectPickPopover {
+                offer: offer.clone(),
+                board_id,
+                board_title: scope.board_title.clone(),
+                projects: scope.projects.clone(),
+                examples: scope.examples.clone(),
+                mode: ProjectPickMode::Verb,
+                initial_args: action.args.clone(),
+                verb_trigger: trigger,
+                initially_open,
+                open_signal: open,
+                on_action,
+            }
+        },
+        UiActionDraw::BoardPick {
+            chip,
+            chip_from_banner,
+        } => rsx! {
+            BoardPickPopover {
+                offer: offer.clone(),
+                chip: chip.map(|chip| (chip, chip_source(chip_from_banner))),
+                mode: BoardPickMode::Verb,
+                initial_args: action.args.clone(),
+                verb_trigger: trigger,
+                initially_open,
+                open_signal: open,
+                on_action,
+            }
+        },
+        UiActionDraw::Press | UiActionDraw::Sheet | UiActionDraw::Choice => rsx! {},
     }
 }
 
@@ -281,7 +396,8 @@ fn verb_trigger(action: &UiCardAction, look: CardActionLook) -> Option<VerbTrigg
     Some(VerbTrigger {
         word: action.word.clone(),
         icon: action_icon_name(action.icon.as_deref()),
-        class: action_variant_class(look.variant(), false),
+        class: action_variant_class(look.variant(), false).to_string(),
+        content: None,
     })
 }
 

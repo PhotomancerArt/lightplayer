@@ -112,7 +112,7 @@ pub struct DeviceRosterView {
     /// Joined by the controller, which holds the library and the lens.
     pub board_projects: super::BoardProjects,
     /// How each board is reached — the open link's kind, else the last
-    /// one's — read off the roster `Device`'s endpoint
+    /// one's; for a new board, its pending link's — read off the endpoint
     /// ([`super::UiLinkKind::of_endpoint`]), never off
     /// `DeviceView::is_over_bluetooth` (true on every network link). Absent
     /// for a board no link has named (a row rehydrated cold).
@@ -502,6 +502,7 @@ impl DeviceRoster {
             backup_download: self.effects.layout().download(),
             // Joined by the controller, which holds the library and the lens.
             board_projects: super::BoardProjects::default(),
+            // A new board's kind is its pending link's endpoint.
             link_kinds: self
                 .roster
                 .devices()
@@ -510,6 +511,12 @@ impl DeviceRoster {
                     let endpoint = device.identity.endpoint.as_ref()?;
                     Some((device.id, super::UiLinkKind::of_endpoint(Some(endpoint))))
                 })
+                .chain(self.roster.pending().iter().map(|entry| {
+                    (
+                        entry.device_id(),
+                        super::UiLinkKind::of_endpoint(Some(&entry.info.endpoint)),
+                    )
+                }))
                 .collect(),
             // Joined by the controller, which holds the registry rows.
             last_seen: std::collections::BTreeMap::new(),

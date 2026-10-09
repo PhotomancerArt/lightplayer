@@ -41,15 +41,15 @@ fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
 pub(crate) fn simulator_lens_card() -> UiLensCard {
     let view = sim_lens_device_view();
     let runtime = UiRuntimeBand::sim("lightplayer/desktop", Some("gpu"));
-    // The board card core builds for it, with the editor holding it. No
-    // verbs: nothing on screen draws this card until the dock does (P08).
-    let board = lpa_studio_core::OfferPath::board(&lpa_studio_core::BoardRef::Sim(
-        lpa_studio_core::BoardKey::parse("02:1a:2b:3c:4d:5e").expect("a MAC"),
-    ));
+    // The board card core builds for it over its own verbs
+    // ([`simulator_lens_offers`]), with the editor holding it.
+    let board = crate::app::home::device_offer_story_fixtures::story_board_prefix(view.id);
+    let tree = simulator_lens_offers();
+    let verbs: Vec<UiOffer> = tree.own_verbs_of(&board).cloned().collect();
     let card = lpa_studio_core::board_card(&lpa_studio_core::BoardCardInput {
         view: &view,
         board: &board,
-        offers: &[],
+        offers: &verbs,
         link: Some(lpa_studio_core::UiLinkKind::Usb),
         feed: None,
         runtime: Some(&runtime),
@@ -70,11 +70,27 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         editor_holds_it: true,
         now: 0.0,
     });
-    UiLensCard::Board {
-        card: Box::new(card),
-        view,
-        runtime: Some(runtime),
-    }
+    UiLensCard::Board(Box::new(card))
+}
+
+/// The verbs core publishes for [`simulator_lens_card`]'s board — the
+/// home page's own tree for a Desktop sim.
+///
+/// Every story that docks a lens card docks that one, so this is the tree
+/// they fold in. `StudioShell` always re-publishes the offer context from
+/// `view.offers` (never an ancestor's — see its `use_provide_offers` call),
+/// so a story that docks the lens card folds this into
+/// `UiStudioView::offers` itself; a bare `WorkbenchFrame` story (no
+/// `StudioShell`) may wrap it in [`OffersProvider`](crate::core::OffersProvider)
+/// directly.
+pub(crate) fn simulator_lens_offers() -> UiOfferTree {
+    crate::app::home::device_offer_story_fixtures::card_tree(
+        &sim_lens_device_view(),
+        lpa_studio_core::DeviceFace::Sim,
+        false,
+        &[],
+        &[],
+    )
 }
 
 /// The lens device behind [`simulator_lens_card`]: a Desktop sim running
@@ -127,11 +143,11 @@ pub(crate) fn shell_story(
     // view so fixtures stay honest about what the controller carries
     view.console.entries.extend(story_logs);
     // `StudioShell` always re-publishes the offer context from
-    // `view.offers` (never an ancestor's), so a lens card's Device panel
-    // needs its verbs folded in here — the same tree core would build —
-    // or it draws with none (devices-as-offers).
-    if let Some(card) = &view.lens_card {
-        view.offers = crate::app::home::device_offer_story_fixtures::lens_card_offer_tree(card);
+    // `view.offers` (never an ancestor's), so the docked lens card needs
+    // its verbs folded in here — the same tree core would build — or it
+    // draws with none (devices-as-offers).
+    if view.lens_card.is_some() {
+        view.offers = simulator_lens_offers();
     }
     rsx! {
         // Body only: the site chrome above it is `web_app`'s, and has its

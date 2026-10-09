@@ -64,7 +64,7 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
         "one open: the same session, never a second"
     );
     let view = bench.controller.view();
-    let crate::UiLensCard::Board { card, .. } =
+    let crate::UiLensCard::Board(card) =
         *view.lens_card.expect("the editor docks the board's card");
     assert_eq!(card.device, id);
     assert_eq!(

@@ -888,14 +888,11 @@ fn devices_card_layout_change() -> Element {
         let layout = device_layout_view(&card, prefix, fs, true, staged, None, None, &mut offers);
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
-                crate::core::OffersProvider { offers,
-                    crate::app::home::device_roster_card::DeviceRosterCard {
-                        card,
-                        projects: vec![],
-                        examples: vec![],
-                        layout,
-                        on_action: |_| {},
-                    }
+                crate::app::home::device_offer_story_fixtures::StoryBoardCard {
+                    card,
+                    layout,
+                    extra_offers: Some(offers),
+                    on_action: |_| {},
                 }
             }
         }
@@ -966,14 +963,11 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
     );
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-2",
-            crate::core::OffersProvider { offers,
-                crate::app::home::device_roster_card::DeviceRosterCard {
-                    card,
-                    projects: vec![],
-                    examples: vec![],
-                    layout,
-                    on_action: |_| {},
-                }
+            crate::app::home::device_offer_story_fixtures::StoryBoardCard {
+                card,
+                layout,
+                extra_offers: Some(offers),
+                on_action: |_| {},
             }
         }
     }
@@ -1001,14 +995,13 @@ fn removed_board_note_cell() -> Element {
         prefix, "studio-b",
     ));
     rsx! {
-        crate::core::OffersProvider { offers,
-            crate::app::home::device_roster_card::DeviceRosterCard {
-                card,
-                projects: packages(),
-                examples: examples(),
-                layout,
-                on_action: |_| {},
-            }
+        crate::app::home::device_offer_story_fixtures::StoryBoardCard {
+            card,
+            projects: packages(),
+            examples: examples(),
+            layout,
+            extra_offers: Some(offers),
+            on_action: |_| {},
         }
     }
 }

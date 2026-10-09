@@ -81,15 +81,15 @@
 use dioxus::prelude::*;
 use lpa_boards::{BoardDiagram, DiagramMode};
 use lpa_studio_core::{
-    ActionEnablement, DeviceView, FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM,
-    FirmwareVerb, OfferArgs, OfferChoice, OfferParam, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM,
-    PUSH_SOURCE_PARAM, PreviewSource, PushOffer, PushSource, PushSourceChoice, PushSourceGroup,
-    UiAction, UiExampleCard, UiOffer, UiPackageCard, device_chip, push_offer,
+    ActionEnablement, FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FirmwareVerb,
+    OfferArgs, OfferChoice, OfferParam, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
+    PreviewSource, PushOffer, PushSource, PushSourceChoice, PushSourceGroup, UiAction,
+    UiExampleCard, UiOffer, UiPackageCard, push_offer,
 };
 
 use super::card_thumb::{CardThumb, thumb_swatch_style};
-use super::device_roster_card::{LINE_VERB_CLASS, RowCta, RowCtaDisabled, row_note_class};
 use super::package_card::platform_now_secs;
+use super::row_cta::{RowCta, RowCtaDisabled};
 use super::thumb_poster::cached_poster;
 use crate::base::{
     OPTION_CARD_CHECK_CLASS, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
@@ -116,17 +116,6 @@ impl ChipSource {
             Self::Firmware => "from its firmware",
         }
     }
-}
-
-/// The chip a card's board pick is filtered by, and which source answered.
-///
-/// Mirrors [`device_chip`]'s own priority: the boot banner first, then the
-/// catalog family of the board id the hello carried.
-pub(crate) fn joined_chip(card: &DeviceView) -> Option<(String, ChipSource)> {
-    if let Some(chip) = card.detected_chip.clone() {
-        return Some((chip, ChipSource::BootBanner));
-    }
-    device_chip(card).map(|chip| (chip, ChipSource::Firmware))
 }
 
 /// Which half of the gallery popover is showing. One tab per
@@ -175,12 +164,19 @@ pub(crate) struct VerbTrigger {
     /// The icon leading the word.
     pub icon: Option<StudioIconName>,
     /// The trigger button's classes, open or not.
-    pub class: &'static str,
+    pub class: String,
+    /// Drawn in place of the icon and the word: a pick a details card handed
+    /// back to its bar opens over the bar's own line.
+    pub content: Option<Element>,
 }
 
 impl VerbTrigger {
-    /// The trigger's content: the icon, then the word.
-    fn content(&self) -> Element {
+    /// The trigger's content: `content` when the surface gave one, else the
+    /// icon, then the word.
+    pub(crate) fn content(&self) -> Element {
+        if let Some(content) = &self.content {
+            return content.clone();
+        }
         rsx! {
             if let Some(icon) = self.icon {
                 span { class: "tw:inline-flex tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
@@ -239,6 +235,10 @@ pub(crate) fn ProjectPickPopover(
     /// keeps "Replace…".
     #[props(default)]
     verb_trigger: Option<VerbTrigger>,
+    /// Verb mode: the surface owns the open state (a details card hands
+    /// its pick back to its bar, opened).
+    #[props(default)]
+    open_signal: Option<Signal<bool>>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Every hook first: the "nothing to offer" row below is an early
@@ -296,8 +296,8 @@ pub(crate) fn ProjectPickPopover(
     match mode {
         ProjectPickMode::Verb => rsx! {
             PopoverButton {
-                class: verb_trigger.as_ref().map_or(LINE_VERB_CLASS, |trigger| trigger.class).to_string(),
-                open_class: verb_trigger.as_ref().map_or(LINE_VERB_CLASS, |trigger| trigger.class).to_string(),
+                class: verb_trigger.as_ref().map_or_else(|| LINE_VERB_CLASS.to_string(), |trigger| trigger.class.clone()),
+                open_class: verb_trigger.as_ref().map_or_else(|| LINE_VERB_CLASS.to_string(), |trigger| trigger.class.clone()),
                 trigger: match &verb_trigger {
                     Some(trigger) => trigger.content(),
                     None => rsx! {
@@ -316,6 +316,7 @@ pub(crate) fn ProjectPickPopover(
                 placement: PopoverPlacement::BottomStart,
                 layer_keeps_layout: true,
                 initially_open,
+                open_signal,
                 {panel}
             }
         },
@@ -732,6 +733,10 @@ pub(crate) fn BoardPickPopover(
     /// keeps the quiet chip in the offer's own words.
     #[props(default)]
     verb_trigger: Option<VerbTrigger>,
+    /// Verb mode: the surface owns the open state (a details card hands
+    /// its pick back to its bar, opened).
+    #[props(default)]
+    open_signal: Option<Signal<bool>>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Hooks before the early return, for the same reason the gallery's are.
@@ -771,8 +776,8 @@ pub(crate) fn BoardPickPopover(
     match mode {
         BoardPickMode::Verb => rsx! {
             PopoverButton {
-                class: verb_trigger.as_ref().map_or(quiet_action_class(), |trigger| trigger.class).to_string(),
-                open_class: verb_trigger.as_ref().map_or(quiet_action_class(), |trigger| trigger.class).to_string(),
+                class: verb_trigger.as_ref().map_or_else(|| quiet_action_class().to_string(), |trigger| trigger.class.clone()),
+                open_class: verb_trigger.as_ref().map_or_else(|| quiet_action_class().to_string(), |trigger| trigger.class.clone()),
                 trigger: match &verb_trigger {
                     Some(trigger) => trigger.content(),
                     None => rsx! {
@@ -788,6 +793,7 @@ pub(crate) fn BoardPickPopover(
                 placement: PopoverPlacement::BottomStart,
                 layer_keeps_layout: true,
                 initially_open,
+                open_signal,
                 {panel}
             }
         },
@@ -1180,6 +1186,16 @@ pub(crate) fn BoardSwatch(board_id: Option<String>) -> Element {
     }
 }
 
+/// A pick row with nothing to offer says why, on the row's one line.
+fn row_note_class() -> &'static str {
+    "tw:m-0 tw:min-w-0 tw:flex-1 tw:truncate tw:text-xs tw:leading-[30px] tw:text-subtle-foreground"
+}
+
+/// "Replace…" when no surface draws the verb's trigger: text with a dotted
+/// underline, no chrome, so it fits a line's height and reads as something
+/// to press.
+const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
+
 /// The verb row's slot for a picker trigger: a GRID so [`PopoverButton`]'s
 /// own inline-grid wrapper stretches into it, and `flex-1` so the trigger
 /// takes the row's free width while the CTA keeps its own. (The palette
@@ -1402,7 +1418,7 @@ fn board_tile_family_class(matches: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpa_studio_core::{DeviceId, flash_offer};
+    use lpa_studio_core::flash_offer;
 
     /// AC4: the filter line states the filter AND the source that answered
     /// it, says how many boards survived, and reads honestly in the two
@@ -1543,26 +1559,6 @@ mod tests {
         assert_eq!(provenance_tag(PushSourceGroup::New), "new");
     }
 
-    /// The joined chip names its own source: the boot banner when the ROM
-    /// printed one, the firmware's board id otherwise (P2's join).
-    #[test]
-    fn the_chip_source_says_which_fact_answered() {
-        let mut card = card_fixture();
-        assert_eq!(joined_chip(&card), None);
-
-        card.board_id = Some("seeed/xiao-esp32-c6".to_string());
-        assert_eq!(
-            joined_chip(&card),
-            Some(("esp32c6".to_string(), ChipSource::Firmware))
-        );
-
-        card.detected_chip = Some("esp32c6".to_string());
-        assert_eq!(
-            joined_chip(&card),
-            Some(("esp32c6".to_string(), ChipSource::BootBanner))
-        );
-    }
-
     /// The board trigger says what is picked, or how many are waiting for a
     /// pick — never an empty chip.
     #[test]
@@ -1579,37 +1575,6 @@ mod tests {
             board_trigger_label(&Some(OfferChoice::new(choice.board_id, choice.title)), 2),
             title
         );
-    }
-
-    fn card_fixture() -> DeviceView {
-        use lpa_studio_core::{DeviceEscape, DeviceLoadedProject, DeviceStatus};
-        DeviceView {
-            id: DeviceId(1),
-            title: "Bench board".to_string(),
-            status: DeviceStatus::Ready,
-            state_label: "Ready".to_string(),
-            detail: None,
-            freshness_label: None,
-            identity_label: None,
-            detected_chip: None,
-            board_id: None,
-            firmware_face: lpa_studio_core::DeviceFirmwareFace::Unknown,
-            remembered_firmware: None,
-            degraded: None,
-            loaded_project: DeviceLoadedProject::Empty,
-            engine_fps: None,
-            link_counters: None,
-            can_receive_project: true,
-            can_remove_project: false,
-            activity: None,
-            last_outcome: None,
-            terminal: Vec::new(),
-            terminal_dropped: 0,
-            firmware_blocked: None,
-            escapes: vec![DeviceEscape::Forget],
-            update_blocked: None,
-            last_update_outcome: None,
-        }
     }
 }
 

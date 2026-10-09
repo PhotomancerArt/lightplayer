@@ -59,18 +59,9 @@ pub enum UiChromeSessionStatus {
 /// one kind of runtime (PD9).
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiLensCard {
-    Board {
-        /// The board's card (`crate::board_card`, with the editor holding
-        /// it: no primary until Done lands).
-        card: Box<crate::UiBoardCard>,
-        /// The roster's own projection of the device, which the dock still
-        /// draws until the web draws the board card there (the board card
-        /// plan's P08 drops this and `runtime`).
-        view: crate::DeviceView,
-        /// The runtime band, for a lens on a sim (PD11), for the same
-        /// docked card.
-        runtime: Option<crate::UiRuntimeBand>,
-    },
+    /// The board's card (`crate::board_card`, with the editor holding it:
+    /// no primary until Done lands).
+    Board(Box<crate::UiBoardCard>),
 }
 
 /// The tab's ONE runtime session, projected for the header

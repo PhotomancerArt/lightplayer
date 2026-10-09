@@ -43,23 +43,27 @@
 //! stories ([`board_card_stories`]). The module is public so its pieces
 //! are not dead code until then.
 
-pub mod bar_detail_panel;
-pub mod bar_details;
-pub mod bar_work;
+pub(crate) mod bar_detail_panel;
+pub(crate) mod bar_details;
+pub(crate) mod bar_work;
 pub(crate) mod bluetooth_switch_panel;
-pub mod board_card;
+pub(crate) mod board_card;
 #[cfg(feature = "stories")]
 pub(crate) mod board_card_stories;
-pub mod board_picture;
-pub mod card_action;
+pub(crate) mod board_picture;
+pub(crate) mod card_action;
 #[cfg(test)]
 pub(crate) mod card_test_fixtures;
 pub(crate) mod link_counters_section;
-pub mod name_bar;
-pub mod other_version_form;
+pub(crate) mod name_bar;
+pub(crate) mod other_version_form;
 pub(crate) mod restore_from_file_button;
-pub mod stack_bar;
-pub mod status_corner;
+pub(crate) mod stack_bar;
+pub(crate) mod status_corner;
 
-pub use board_card::{BoardCard, CardPart};
-pub use card_action::{CardAction, CardActionLook, CardPreviews, OfferAction};
+pub(crate) use board_card::BoardCard;
+#[cfg(any(test, feature = "stories"))]
+pub(crate) use board_card::CardPart;
+#[cfg(any(test, feature = "stories"))]
+pub(crate) use card_action::CardPreviews;
+pub(crate) use card_action::{CardAction, CardActionLook, OfferAction};

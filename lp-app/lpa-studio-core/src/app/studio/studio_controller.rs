@@ -2193,106 +2193,27 @@ impl StudioController {
             .collect()
     }
 
-    /// Every board's card ([`crate::board_card`]): new boards first, then
-    /// the roster's boards in order, each pointing only at the verbs
-    /// `offers` publishes for it. Called once the view's offers are
-    /// published.
-    fn board_cards(
-        &self,
-        roster: &crate::DeviceRosterView,
-        offers: &crate::UiOfferTree,
-    ) -> Vec<crate::UiBoardCard> {
-        let lens = self
-            .pool
-            .attached_session()
-            .map(|session| session.attachment().device);
-        let mut cards = Vec::new();
-        for pending in &roster.roster.pending {
-            let Some(board) = offers.device_prefix(pending.device) else {
-                continue;
-            };
-            let verbs: Vec<crate::UiOffer> = offers.own_verbs_of(board).cloned().collect();
-            // The kind of the link it arrived on, off the pending entry's
-            // endpoint (as its Reset reach is read).
-            let link = self
-                .devices
-                .roster()
-                .pending()
-                .iter()
-                .find(|entry| entry.link == pending.link)
-                .map(|entry| crate::UiLinkKind::of_endpoint(Some(&entry.info.endpoint)))
-                .unwrap_or_default();
-            cards.push(crate::pending_board_card(pending, board, &verbs, link));
-        }
-        for view in &roster.roster.devices {
-            if let Some(card) = self.board_card_for(roster, offers, view, lens == Some(view.id)) {
-                cards.push(card);
-            }
-        }
-        cards
-    }
-
-    /// One roster board's card, built from the roster view's joins and the
-    /// board's own verbs in `offers`; `None` for a board the tree places
-    /// nowhere.
-    fn board_card_for(
-        &self,
-        roster: &crate::DeviceRosterView,
-        offers: &crate::UiOfferTree,
-        view: &crate::DeviceView,
-        editor_holds_it: bool,
-    ) -> Option<crate::UiBoardCard> {
-        let board = offers.device_prefix(view.id)?;
-        let verbs: Vec<crate::UiOffer> = offers.own_verbs_of(board).cloned().collect();
-        let plays = roster.board_projects.plays(view.id);
-        let projects = self
-            .home_inputs
-            .as_ref()
-            .map(|inputs| inputs.projects.as_slice())
-            .unwrap_or_default();
-        let project = plays
-            .project_uid()
-            .and_then(|uid| projects.iter().find(|project| project.uid == uid));
-        // The other boards playing the same project, by title, in roster
-        // order.
-        let shared_with: Vec<String> = plays
-            .project_uid()
-            .map(|uid| roster.board_projects.boards_playing(uid))
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|board| *board != view.id)
-            .filter_map(|board| {
-                roster
-                    .roster
-                    .devices
-                    .iter()
-                    .find(|device| device.id == board)
-                    .map(|device| device.title.clone())
-            })
-            .collect();
-        let input = crate::BoardCardInput {
-            view,
-            board,
-            offers: &verbs,
-            link: roster.link_kinds.get(&view.id).copied(),
-            feed: roster.feeds.get(&view.id),
-            runtime: roster.runtime_bands.get(&view.id),
-            access: roster.access.get(&view.id),
-            wifi: roster.wifi.get(&view.id),
-            lan: roster.lan_links.get(&view.id),
-            wifi_connect: roster.wifi_connects.get(&view.id),
-            update: roster.updates.get(&view.id),
-            layout: roster.layout.get(&view.id),
-            plays,
-            sharing: roster.board_projects.sharing(view.id),
-            project,
-            shared_with: &shared_with,
-            last_seen_at: roster.last_seen.get(&view.id).copied(),
-            ended: roster.ends.get(&view.id),
-            editor_holds_it,
+    /// The inputs every card on the roster is built from: the view's
+    /// published tree, the library, the board the editor is open on, now.
+    fn roster_cards_input<'a>(
+        &'a self,
+        roster: &'a crate::DeviceRosterView,
+        offers: &'a crate::UiOfferTree,
+    ) -> crate::RosterCardsInput<'a> {
+        crate::RosterCardsInput {
+            roster,
+            offers,
+            projects: self
+                .home_inputs
+                .as_ref()
+                .map(|inputs| inputs.projects.as_slice())
+                .unwrap_or_default(),
+            lens: self
+                .pool
+                .attached_session()
+                .map(|session| session.attachment().device),
             now: (self.now_secs)(),
-        };
-        Some(crate::board_card(&input))
+        }
     }
 
     /// Which board plays which project: the roster joined to the library
@@ -3138,7 +3059,8 @@ impl StudioController {
             }
             self.publish_device_offers(&mut offers);
             // Each board's card points at the verbs just published.
-            home.devices.cards = self.board_cards(&home.devices, &offers);
+            home.devices.cards =
+                crate::roster_board_cards(&self.roster_cards_input(&home.devices, &offers));
             offers.set_focus(self.offer_focus(true));
             let app_agent = self.app_agent_view_placed(&mut offers);
             return UiStudioView::new(Vec::new(), self.console_view())
@@ -3681,12 +3603,8 @@ impl StudioController {
             .iter()
             .find(|card| card.id == attachment.device)?
             .clone();
-        let card = self.board_card_for(&roster, offers, &view, true)?;
-        Some(crate::UiLensCard::Board {
-            card: Box::new(card),
-            runtime: roster.runtime_bands.get(&view.id).cloned(),
-            view,
-        })
+        let card = crate::roster_board_card(&self.roster_cards_input(&roster, offers), &view)?;
+        Some(crate::UiLensCard::Board(Box::new(card)))
     }
 
     /// The header session·project control's ONE session (single-session

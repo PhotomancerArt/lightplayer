@@ -235,23 +235,15 @@ fn play_mode_face(
     }
 }
 
-/// The docked lens card: the roster's device card — the SAME `DeviceView`
-/// the gallery renders, for every runtime (PD9), with no picker lists (a
-/// device the editor is open on is running something; the empty face's
-/// picker belongs to the gallery).
+/// The docked lens card: the board card the home page draws for the device
+/// the editor is open on (D43) — core's card, with the editor holding it,
+/// for every runtime (PD9). No picker lists: a board the editor is open on
+/// is running something, and the project pick belongs to the home page.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn LensCardPane(card: UiLensCard, on_action: EventHandler<UiAction>) -> Element {
-    // Until the dock draws the board card (P08), it draws the roster's own
-    // projection the lens card still carries.
-    let UiLensCard::Board { view, runtime, .. } = card;
+    let UiLensCard::Board(card) = card;
     rsx! {
-        crate::app::home::device_roster_card::DeviceRosterCard {
-            card: view,
-            runtime,
-            projects: Vec::new(),
-            examples: Vec::new(),
-            on_action,
-        }
+        crate::app::board_card::BoardCard { card: *card, on_action }
     }
 }

@@ -16,7 +16,8 @@
 //!   per decision: [`board_picture`], [`status_corner`], [`primary_action`],
 //!   [`bar_work`], and one per bar — [`project_bar`], [`connection_bar`],
 //!   [`access_bar`], [`firmware_bar`], [`hardware_bar`] — with
-//!   [`ui_bluetooth_switch`].
+//!   [`ui_bluetooth_switch`]; [`roster_board_cards`] builds every card on a
+//!   roster.
 
 pub mod access_bar;
 pub mod bar_work;
@@ -31,6 +32,7 @@ pub mod firmware_bar;
 pub mod hardware_bar;
 pub mod primary_action;
 pub mod project_bar;
+pub mod roster_board_cards;
 pub mod status_corner;
 pub mod ui_bar_work;
 pub mod ui_bluetooth_switch;
@@ -50,6 +52,7 @@ pub use board_picture::LOCKED_PREVIEW_SENTENCE;
 pub use connection_bar::SOMEONE_ELSE_SENTENCE;
 pub use hardware_bar::chip_words;
 pub use primary_action::NOTHING_TO_EDIT;
+pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
 pub use ui_bar_work::{BarWorkState, UiBarWork};
 pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};

@@ -14,18 +14,17 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
-    OfferPath, PendingLinkView, ResetReach, UiDeviceSettingsView, UiExampleCard, UiHomeSections,
-    UiHomeView, UiLensCard, UiOfferTree, UiPackageCard, UiUnlockOffer, UpdateOfferFacts,
+    OfferPath, PendingLinkView, ResetReach, RosterCardsInput, UiDeviceSettingsView, UiExampleCard,
+    UiHomeSections, UiHomeView, UiOfferTree, UiPackageCard, UiUnlockOffer, UpdateOfferFacts,
     WifiAddressReach, add_device_offers, build_home_sections, connect_relay_offer,
     connect_wifi_offer, device_offers, device_unlock_offer, home_offers, new_sim_offer,
-    pending_link_offers, stamp_on_boards, unlock_offer,
+    pending_link_offers, roster_board_cards, stamp_on_boards, unlock_offer,
 };
 
 use crate::app::board_card::BoardCard;
 use crate::app::home::HomePage;
 use crate::app::home::ble_reach::use_ble_reach;
 use crate::app::home::connect_board::connect_board_section::ConnectStoryPins;
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::page::home_view_mode::HomeViewMode;
 use crate::core::OffersProvider;
 
@@ -235,16 +234,6 @@ pub(crate) fn CardOffers(
     }
 }
 
-/// `children` under the tree core would publish for these pending links.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn PendingOffers(pending: Vec<PendingLinkView>, children: Element) -> Element {
-    let offers = pending_tree(&pending);
-    rsx! {
-        OffersProvider { offers, {children} }
-    }
-}
-
 /// `children` under the tree core would publish for a whole roster. The
 /// Bluetooth half is `ble_reach` when a story pins it, else what this
 /// browser answers — the same answer the Connect a board section's notes read, so the
@@ -279,10 +268,17 @@ pub(crate) fn RosterOffers(
     }
 }
 
-/// [`DeviceRosterCard`] under the tree core would publish for its card —
-/// the card's own props, passed straight through. A runtime band makes it
-/// a sim (the power verbs' words); a Locked access makes it locked (no
-/// push), exactly as core reads the roster.
+/// A device-card story's props, drawn as the board card: core's card over
+/// the tree core would publish for it ([`StoryBoardCard`]). A runtime band
+/// makes it a sim (the power verbs' words); a Locked access makes it locked
+/// (no push), exactly as core reads the roster.
+///
+/// The props that opened a part of today's card open the details that
+/// hold it now: `menu_initially_open` (Rename) the hardware details,
+/// `access_panel_open` the access details, `install_picker_preview` the
+/// firmware details with the Other version form, `armed_preview` the
+/// hardware details with Forget armed, `armed_remove_preview` the project
+/// details with Remove project armed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn StoryDeviceCard(
@@ -297,6 +293,9 @@ pub(crate) fn StoryDeviceCard(
     #[props(default)] access: Option<lpa_studio_core::UiDeviceAccess>,
     #[props(default)] wifi: Option<lpa_studio_core::UiDeviceWifi>,
     #[props(default)] lan: Option<lpa_studio_core::UiLanLink>,
+    /// How the board is reached; USB when unsaid.
+    #[props(default)]
+    link: Option<lpa_studio_core::UiLinkKind>,
     #[props(default)] access_panel_open: bool,
     #[props(default)] keys_open_preview: bool,
     #[props(default)] menu_initially_open: bool,
@@ -311,36 +310,61 @@ pub(crate) fn StoryDeviceCard(
     /// The board's update standing and route, for its offers.
     #[props(default)]
     update_facts: UpdateOfferFacts,
+    /// The board's files across a layout change (its verbs in
+    /// `extra_offers`).
+    #[props(default)]
+    layout: Option<lpa_studio_core::UiDeviceLayout>,
+    /// More verbs the controller publishes under the board's prefix.
+    #[props(default)]
+    extra_offers: Option<UiOfferTree>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
-    let unlock = access.as_ref().and_then(|access| access.unlock);
+    use crate::app::board_card::CardPart;
+    use lpa_studio_core::BarLayer;
+    let prefix = story_board_prefix(card.id);
+    let (details_open, armed) = if armed_remove_preview {
+        (
+            Some(CardPart::Bar(BarLayer::Project)),
+            Some(prefix.child("remove-project")),
+        )
+    } else if armed_preview {
+        (
+            Some(CardPart::Bar(BarLayer::Hardware)),
+            Some(prefix.child("forget")),
+        )
+    } else if install_picker_preview.is_some() {
+        (Some(CardPart::Bar(BarLayer::Firmware)), None)
+    } else if access_panel_open {
+        (Some(CardPart::Bar(BarLayer::Access)), None)
+    } else if menu_initially_open {
+        (Some(CardPart::Bar(BarLayer::Hardware)), None)
+    } else {
+        (None, None)
+    };
+    let previews = crate::app::board_card::CardPreviews {
+        access_keys_open: keys_open_preview,
+        other_version: install_picker_preview,
+    };
     rsx! {
-        CardOffers {
-            card: card.clone(),
-            sim: runtime.is_some(),
-            unlock,
-            projects: projects.clone(),
-            examples: examples.clone(),
-            update: update_facts,
-            DeviceRosterCard {
-                update,
-                card,
-                projects,
-                examples,
-                armed_preview,
-                armed_remove_preview,
-                open_uid,
-                feed,
-                runtime,
-                access,
-                wifi,
-                lan,
-                access_panel_open,
-                keys_open_preview,
-                menu_initially_open,
-                install_picker_preview,
-                on_action,
-            }
+        StoryBoardCard {
+            card,
+            projects,
+            examples,
+            open_uid,
+            feed,
+            runtime,
+            access,
+            wifi,
+            lan,
+            link,
+            update,
+            update_facts,
+            layout,
+            extra_offers,
+            details_open,
+            armed_preview: armed,
+            previews,
+            on_action,
         }
     }
 }
@@ -502,17 +526,17 @@ pub(crate) fn StoryNewBoardCard(
     }
 }
 
-/// [`PendingLinkCard`] under the tree core would publish for its link.
+/// A new board's card for a pending-card story: [`StoryNewBoardCard`],
+/// arrived over `link` (USB when unsaid).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn StoryPendingCard(
     pending: PendingLinkView,
+    #[props(default)] link: lpa_studio_core::UiLinkKind,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
     rsx! {
-        PendingOffers { pending: vec![pending.clone()],
-            PendingLinkCard { pending, on_action }
-        }
+        StoryNewBoardCard { pending, link, on_action }
     }
 }
 
@@ -580,6 +604,7 @@ pub(crate) fn StoryHomePage(
     for offer in home_offers(&home) {
         offers.publish(offer);
     }
+    let home = with_core_cards(home, &offers, now_secs.unwrap_or(STORY_BOARD_NOW));
     rsx! {
         OffersProvider { offers,
             HomePage {
@@ -619,29 +644,23 @@ pub(crate) fn with_core_sections(mut home: UiHomeView) -> UiHomeView {
     home
 }
 
-/// The tree core would publish for a docked lens card (D43): the gallery's
-/// own `card_tree`, read off the `UiLensCard` the view already carries, so
-/// a `StudioShell`/`WorkbenchFrame` story needs only `simulator_lens_card()`
-/// (or whatever lens it docks) to build both the card and its offers.
-///
-/// `StudioShell` always re-publishes the offer context from `view.offers`
-/// (never an ancestor's — see its `use_provide_offers` call), so a story
-/// that docks a lens card must fold this into `UiStudioView::offers`
-/// itself; wrapping the shell in [`OffersProvider`] from outside has no
-/// effect on anything under it. A bare `WorkbenchFrame` story (no
-/// `StudioShell`) has no such shadowing and may use this with
-/// [`OffersProvider`] directly.
-pub(crate) fn lens_card_offer_tree(card: &UiLensCard) -> UiOfferTree {
-    let UiLensCard::Board {
-        view: card,
-        runtime,
-        ..
-    } = card;
-    let face = match runtime.is_some() {
-        true => DeviceFace::Sim,
-        false => DeviceFace::Wire,
-    };
-    card_tree(card, face, false, &[], &[])
+/// `home` with the board cards core would build for its roster over
+/// `offers` ([`roster_board_cards`]), as `StudioController::view` does once
+/// the view's offers are published — so a story's page draws exactly the
+/// cards core would, and never hand-builds one. A story that pins its own
+/// cards keeps them.
+pub(crate) fn with_core_cards(mut home: UiHomeView, offers: &UiOfferTree, now: f64) -> UiHomeView {
+    if home.devices.cards.is_empty() {
+        let cards = roster_board_cards(&RosterCardsInput {
+            roster: &home.devices,
+            offers,
+            projects: &home.projects,
+            lens: None,
+            now,
+        });
+        home.devices.cards = cards;
+    }
+    home
 }
 
 /// The tree a session's device lens is offered under: the device's own

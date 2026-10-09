@@ -52,11 +52,11 @@ pub use app::devices::BrowserSerialTransport;
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
     ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput, CornerMark,
-    LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT, PictureSource, SOMEONE_ELSE_SENTENCE, UiActionDraw,
-    UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard, UiBoardPicture, UiBoardPresence,
-    UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar, UiStatusCorner,
-    activity_bar, activity_words, bluetooth_switch, board_card, chip_words, link_icon,
-    pending_board_card,
+    LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT, PictureSource, RosterCardsInput,
+    SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard,
+    UiBoardPicture, UiBoardPresence, UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar,
+    UiPrimary, UiStackBar, UiStatusCorner, activity_bar, activity_words, bluetooth_switch,
+    board_card, chip_words, link_icon, pending_board_card, roster_board_card, roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{

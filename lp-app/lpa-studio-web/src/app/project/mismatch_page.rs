@@ -13,8 +13,8 @@
 //! - **Push <this> here** — replace what is running, now that the
 //!   consequence has been read.
 //!
-//! The page draws the real cards, not descriptions of them: the device's
-//! own roster card (the fold's live view, feed and all) and the running
+//! The page draws the real cards, not descriptions of them: the board's
+//! own card (core's, as the home page draws it, picture and all) and the running
 //! project's gallery card. Nothing here is a second rendering of a device
 //! that could drift from the home page.
 //!
@@ -53,7 +53,7 @@ use lpa_studio_core::{
     HOME_NODE_ID, HomeOp, UiAction, UiHomeView, UiOpenMismatch, UiRunningProject,
 };
 
-use crate::app::home::device_roster_card::DeviceRosterCard;
+use crate::app::board_card::BoardCard;
 use crate::app::home::package_card::PackageCard;
 use crate::core::solid_action_class;
 use crate::device_hint::DeviceHint;
@@ -74,12 +74,20 @@ pub fn MismatchPage(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let hint = DeviceHint::Mac(mismatch.device_base_mac.clone());
+    // The board's card, as the home page draws it: core's card for the
+    // roster device the address names.
     let device_card = home.as_ref().and_then(|home| {
-        home.devices
+        let device = home
+            .devices
             .roster
             .devices
             .iter()
-            .find(|card| Some(&mismatch.device_key) == home.devices.open_addresses.get(&card.id.0))
+            .find(|card| Some(&mismatch.device_key) == home.devices.open_addresses.get(&card.id.0))?
+            .id;
+        home.devices
+            .cards
+            .iter()
+            .find(|card| card.device == device)
             .cloned()
     });
     let running_card = mismatch.running.as_ref().and_then(|running| {
@@ -117,16 +125,12 @@ pub fn MismatchPage(
             }
 
             div { class: "tw:grid tw:gap-3.5 tw:grid-cols-2 tw:max-[860px]:grid-cols-1",
-                // The device, as the home page draws it — the fold's
-                // live view, never a second telling of it.
+                // The board, as the home page draws it — its card, never a
+                // second telling of it.
                 match device_card {
                     Some(card) => rsx! {
-                        DeviceRosterCard {
-                            key: "mismatch-device-{card.id.0}",
-                            open_uid: Some(mismatch.device_key.clone()),
-                            feed: home.as_ref().and_then(|home| home.devices.feeds.get(&card.id).cloned()),
-                            runtime: home.as_ref().and_then(|home| home.devices.runtime_bands.get(&card.id).cloned()),
-                            update: home.as_ref().and_then(|home| home.devices.updates.get(&card.id).cloned()),
+                        BoardCard {
+                            key: "mismatch-device-{card.device.0}",
                             card,
                             projects: home.as_ref().map(|home| home.projects.clone()).unwrap_or_default(),
                             examples: home.as_ref().map(|home| home.examples.clone()).unwrap_or_default(),

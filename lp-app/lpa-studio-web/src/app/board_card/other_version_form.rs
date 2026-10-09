@@ -146,12 +146,6 @@ pub(crate) fn FirmwareFileButton(
     }
 }
 
-/// The parameter panel's box where today's card floats the form in its own
-/// popover: narrow, in the popover's neutral chrome.
-pub(crate) fn other_version_popup_class() -> &'static str {
-    "tw:grid tw:w-[260px] tw:max-w-[calc(100vw-80px)] tw:min-w-0 tw:overflow-hidden tw:whitespace-normal tw:rounded-md tw:border tw:text-sm tw:text-muted-foreground"
-}
-
 /// The form: the params, the copy, the press — no frame of its own.
 const FORM_CLASS: &str = "tw:grid tw:min-w-0 tw:gap-2.5";
 

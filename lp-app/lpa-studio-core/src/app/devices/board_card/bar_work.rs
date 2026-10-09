@@ -187,6 +187,41 @@ mod tests {
         assert_eq!(activity_bar(ActivityKind::Identify), BarLayer::Connection);
     }
 
+    /// The board pick's chip filter names its own source: the boot banner
+    /// when the ROM printed one, the firmware's board id otherwise, nothing
+    /// when neither knows (moved from the web's `joined_chip`).
+    #[test]
+    fn the_board_picks_chip_says_which_fact_answered() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.board_id = None;
+        fixture.view.detected_chip = None;
+        assert_eq!(
+            board_pick(&fixture.input()),
+            UiActionDraw::BoardPick {
+                chip: None,
+                chip_from_banner: false
+            }
+        );
+
+        fixture.view.board_id = Some("seeed/xiao-esp32-c6".to_string());
+        assert_eq!(
+            board_pick(&fixture.input()),
+            UiActionDraw::BoardPick {
+                chip: Some("esp32c6".to_string()),
+                chip_from_banner: false
+            }
+        );
+
+        fixture.view.detected_chip = Some("esp32c6".to_string());
+        assert_eq!(
+            board_pick(&fixture.input()),
+            UiActionDraw::BoardPick {
+                chip: Some("esp32c6".to_string()),
+                chip_from_banner: true
+            }
+        );
+    }
+
     /// The activity's own reading: label, the cancel it was asked for, and
     /// the percentage — all on the one line the bar allows.
     #[test]

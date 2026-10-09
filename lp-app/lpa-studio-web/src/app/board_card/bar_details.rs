@@ -18,6 +18,11 @@
 //! until its Close closes it, which the details remember until core's panel
 //! changes. Opening details that hold the Wi‑Fi panel asks the board for
 //! its networks again, as opening today's Wi‑Fi popover did.
+//!
+//! One popover at a time: a pick in the details (a project pick, a board
+//! pick) closes them and opens its picker over the same trigger, the bar's
+//! own line ([`DetailsPick`], [`AnchoredPick`]) — never a popover inside
+//! the details card.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -26,6 +31,7 @@ use lpa_studio_core::{
 };
 
 use super::bar_detail_panel::BarDetailPanel;
+use super::card_action::{AnchoredPick, DetailsPick};
 use crate::app::home::access_ui_context::network_handler;
 use crate::base::{DetailPopover, PopoverPlacement, StudioIconName};
 use crate::core::RichDetailSection;
@@ -96,6 +102,15 @@ pub fn BarDetails(
     let on_close_layout = use_callback(move |refusal: UiLayoutPanel| {
         closed_layout.set(Some(refusal));
     });
+    // A pick pressed inside closes the details and comes back here, to be
+    // drawn over the same trigger.
+    let pick = use_signal(|| None::<UiCardAction>);
+    use_context_provider(|| DetailsPick {
+        details_open: open,
+        pick,
+    });
+    let pick_trigger = trigger.clone();
+    let pick_class = trigger_open_class.clone();
     let (danger, rest): (Vec<_>, Vec<_>) = sections
         .into_iter()
         .partition(|section| section.weight == RichWeight::Danger);
@@ -131,8 +146,24 @@ pub fn BarDetails(
                 }
             }
         }
+        if let Some(action) = pick() {
+            div { class: PICK_OVER_TRIGGER_CLASS,
+                AnchoredPick {
+                    action,
+                    trigger: pick_trigger,
+                    trigger_class: pick_class,
+                    pick,
+                    on_action,
+                }
+            }
+        }
     }
 }
+
+/// A handed-back pick's slot: laid over the details' trigger, the same box,
+/// its popover wrapper stretched to it, so the picker opens where the
+/// details did.
+const PICK_OVER_TRIGGER_CLASS: &str = "tw:absolute tw:inset-0 tw:grid tw:[&>span]:h-full tw:[&>span]:w-full tw:[&>span]:place-items-stretch";
 
 /// The details card's body: one grid of sections, scrolling inside itself
 /// past the viewport's budget so a long card (a Wi‑Fi list, a terminal)
@@ -141,6 +172,12 @@ const DETAILS_BODY_CLASS: &str = "tw:grid tw:max-h-[min(560px,calc(100vh-48px))]
 
 #[cfg(test)]
 mod tests {
+    use lpa_studio_core::{BarLayer, UiActionDraw};
+
+    use super::super::CardPart;
+    use super::super::card_test_fixtures::{
+        attribute_values, card_and_tree, porch_view, render_card,
+    };
     use super::*;
 
     /// The body scrolls inside itself rather than growing past the page,
@@ -151,5 +188,47 @@ mod tests {
         assert!(DETAILS_BODY_CLASS.contains("tw:max-h-"));
         assert!(!DETAILS_BODY_CLASS.contains("border"));
         assert!(!DETAILS_BODY_CLASS.contains("rounded"));
+    }
+
+    /// One popover at a time: a pick in a bar's details (the project
+    /// bar's "Put another project on it") is a row that hands its picker
+    /// back to the bar, not a popover trigger inside the details card.
+    #[test]
+    fn a_pick_in_the_details_is_a_row_not_a_second_popover() {
+        let (card, tree) = card_and_tree(&porch_view());
+        let picks: Vec<String> = card
+            .bar(BarLayer::Project)
+            .details
+            .sections
+            .iter()
+            .flat_map(|section| section.affordances.iter())
+            .filter(|action| {
+                matches!(
+                    action.draw,
+                    UiActionDraw::ProjectPick { .. } | UiActionDraw::BoardPick { .. }
+                )
+            })
+            .map(|action| action.word.clone())
+            .collect();
+        assert!(!picks.is_empty(), "the project details hold a pick");
+        let closed = render_card(card.clone(), tree.clone(), None);
+        let open = render_card(card, tree, Some(CardPart::Bar(BarLayer::Project)));
+        assert_eq!(
+            attribute_values(&open, "aria-expanded").len(),
+            attribute_values(&closed, "aria-expanded").len(),
+            "the open details add no popover trigger"
+        );
+        let handed_back = attribute_values(&open, "aria-haspopup");
+        assert_eq!(handed_back.len(), picks.len(), "{handed_back:?}");
+        for word in picks {
+            assert!(open.contains(&word), "{word} is drawn: {open}");
+        }
+    }
+
+    /// A handed-back pick opens over the same box as the details' trigger.
+    #[test]
+    fn a_handed_back_pick_lies_over_the_trigger() {
+        assert!(PICK_OVER_TRIGGER_CLASS.contains("tw:absolute tw:inset-0"));
+        assert!(PICK_OVER_TRIGGER_CLASS.contains("tw:[&>span]:h-full"));
     }
 }
