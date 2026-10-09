@@ -30,6 +30,8 @@ mod gc_copy;
 mod gc_mark;
 mod gc_victim;
 mod heap_sort;
+#[cfg(feature = "inspect")]
+mod image_inspect;
 #[cfg(feature = "host-deflate")]
 mod host_deflate;
 #[cfg(feature = "lpfs")]
@@ -81,6 +83,8 @@ pub use flash::Flash;
 pub use host_deflate::{HostChunk, host_deflate_chunks};
 #[cfg(feature = "lpfs")]
 pub use lp_fs_tree::LpFsTree;
+#[cfg(feature = "inspect")]
+pub use image_inspect::*;
 pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;

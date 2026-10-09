@@ -6339,6 +6339,7 @@ dependencies = [
  "lp-tree-store",
  "lpfs",
  "miniz_oxide",
+ "serde",
  "sha2",
 ]
 
