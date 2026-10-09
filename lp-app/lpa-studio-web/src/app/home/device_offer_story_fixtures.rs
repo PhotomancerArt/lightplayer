@@ -15,13 +15,16 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
     OfferPath, PendingLinkView, ResetReach, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
-    UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_relay_offer,
-    connect_wifi_offer, device_offers, new_sim_offer, pending_link_offers,
+    UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, build_home_sections,
+    connect_relay_offer, connect_wifi_offer, device_offers, home_offers, new_sim_offer,
+    pending_link_offers,
 };
 
-use crate::app::home::DevicesPage;
+use crate::app::home::HomePage;
 use crate::app::home::ble_reach::use_ble_reach;
+use crate::app::home::connect_board::connect_board_section::ConnectStoryPins;
 use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::app::home::page::home_view_mode::HomeViewMode;
 use crate::core::OffersProvider;
 
 /// The tree core would publish for `devices`: the add slot's transports at
@@ -349,13 +352,29 @@ pub(crate) fn add_slot_tree(usb_available: bool, bluetooth: BluetoothReach) -> U
     tree
 }
 
-/// [`DevicesPage`] under the tree core would publish for its roster.
+/// [`HomePage`] under the tree core would publish for its view: the
+/// roster's verbs and Home's own (`project/new`, `project/open`).
+///
+/// A story that leaves `home.sections` at its default gets the sections
+/// core would build from the story's own library and roster
+/// ([`build_home_sections`]), as `StudioController::home_view` does; a story
+/// that pins them keeps its own.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn StoryDevicesPage(
+pub(crate) fn StoryHomePage(
     home: lpa_studio_core::UiHomeView,
-    #[props(default)] remembered_open: bool,
-    #[props(default)] target_pick_open: bool,
+    /// A fixed clock ("edited 3 days ago" is read against it).
+    #[props(default)]
+    now_secs: Option<f64>,
+    /// The tab the page starts on.
+    #[props(default)]
+    initial_tab: Option<lpa_studio_core::UiHomeTab>,
+    /// Cards or rows (the page otherwise reads the browser's choice).
+    #[props(default)]
+    initial_mode: Option<HomeViewMode>,
+    /// The Connect a board section's pins.
+    #[props(default)]
+    connect_pins: ConnectStoryPins,
     /// Remembered boards this browser knows a Wi‑Fi address for.
     #[props(default)]
     wifi_addresses: Vec<(lpa_studio_core::DeviceId, String)>,
@@ -364,14 +383,38 @@ pub(crate) fn StoryDevicesPage(
     relay_boards: Vec<lpa_studio_core::DeviceId>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
+    let mut home = home;
+    if home.sections == lpa_studio_core::UiHomeSections::default() {
+        home.sections = build_home_sections(&home.projects, &home.devices);
+    }
+    // The Bluetooth half is the pinned answer, else this browser's — the
+    // same answer the section's notes read, so the square and the way
+    // forward under it never disagree.
+    let asked = use_ble_reach();
+    let reach = connect_pins.ble_reach.unwrap_or_else(|| asked());
+    let mut offers = roster_tree(
+        &home.devices,
+        &home.projects,
+        &home.examples,
+        reach,
+        &wifi_addresses,
+        &relay_boards,
+    );
+    for offer in home_offers(&home) {
+        offers.publish(offer);
+    }
     rsx! {
-        RosterOffers {
-            devices: home.devices.clone(),
-            projects: home.projects.clone(),
-            examples: home.examples.clone(),
-            wifi_addresses,
-            relay_boards,
-            DevicesPage { home, remembered_open, target_pick_open, on_action }
+        OffersProvider { offers,
+            HomePage {
+                home: Some(home),
+                now_secs,
+                on_action: Some(on_action),
+                initial_tab,
+                // A capture never reads the story server's own storage:
+                // cards unless the story asks for rows.
+                initial_mode: Some(initial_mode.unwrap_or_default()),
+                connect_pins,
+            }
         }
     }
 }

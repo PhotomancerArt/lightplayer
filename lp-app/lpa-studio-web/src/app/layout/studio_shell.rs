@@ -5,14 +5,15 @@ use crate::app::layout::ReconnectingCurtain;
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
 use crate::app::project::MismatchPage;
 use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
-use crate::app::{DevicesPage, ProjectOpeningFrame, ProjectsPage};
+use crate::app::{HomePage, ProjectOpeningFrame, ProjectsPage};
 use crate::core::PaneView;
 use crate::router::ProjectView;
 
 /// Which gallery page the shell renders when the view has no open
-/// editor (P09 split): the route picks it — `#/` = Devices,
-/// `#/projects` = Projects. Lens routes leave the default; they only
-/// see the gallery in transient detach windows.
+/// editor (P09 split): the route picks it — the home page by default,
+/// `/projects` = Projects. Lens routes leave the default; they see the
+/// home page in a cold `/device/<uid>` load (its cards are the connect
+/// evidence) and in transient detach windows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ShellGallery {
     #[default]
@@ -132,10 +133,11 @@ pub fn StudioShell(
 
     if let Some(home) = home {
         return match gallery {
+            // The same page `/` draws (PD1): this arm also serves cold
+            // `/device/<uid>` loads, where the cards are the connect
+            // evidence, and a lens detaching.
             ShellGallery::Devices => rsx! {
-                div { class: "tw:grid tw:gap-7",
-                    DevicesPage { home: *home, on_action }
-                }
+                HomePage { home: Some(*home), on_action: Some(on_action), now_secs }
             },
             ShellGallery::Projects => rsx! {
                 div { class: "tw:grid tw:gap-7",

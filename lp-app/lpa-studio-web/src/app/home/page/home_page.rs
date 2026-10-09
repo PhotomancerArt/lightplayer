@@ -10,9 +10,9 @@
 //!    the cards/list switch, both hidden on a first visit;
 //! 3. the sections the selected tab shows, in the order core lists them
 //!    ([`UiHomeSections::visible`](lpa_studio_core::UiHomeSections::visible)):
-//!    Online boards, **Connect a board**, Offline boards, Other projects,
-//!    Your patterns, then the catalog's Example projects and Example
-//!    patterns;
+//!    Online boards, **Connect a board**, Offline boards, the "Unlocking
+//!    your boards" fold, Other projects, Your patterns, then the catalog's
+//!    Example projects and Example patterns;
 //! 4. the footer.
 //!
 //! Core decides what is in each section and which tab shows it
@@ -20,6 +20,12 @@
 //! the cards/list switch are view state (PD4): neither is an action nor in
 //! the offer tree. The switch is remembered in the browser
 //! ([`HomeViewMode`]); the tab is not.
+//!
+//! Every board's card is mounted by one component,
+//! [`BoardCardSlot`](super::board_card_slot::BoardCardSlot), so the board
+//! card (M2) swaps one body. The page also serves the shell's no-editor
+//! arm (PD1): a cold `/device/<uid>` load draws it while the board
+//! connects, its card being the connect evidence.
 //!
 //! The page takes `Option<UiHomeView>` and assumes no `StudioShell` around
 //! it. With `None` (a story with no view, a frame while a project loads) it
@@ -31,10 +37,14 @@ use lpa_studio_core::{UiAction, UiHomeSection, UiHomeTab, UiHomeView, example_gr
 use super::example_groups::{ExampleGroups, ExampleHeading};
 use super::filter_tabs::{FilterTabs, home_filter_tabs, home_tab_for_key};
 use super::home_view_mode::HomeViewMode;
+use super::keys_fold::KeysFold;
+use super::offline_boards::OfflineBoards;
+use super::online_boards::OnlineBoards;
 use super::sign_in_prompt::SignInPrompt;
 use super::view_switch::ViewSwitch;
 use crate::app::home::connect_board::ConnectBoardSection;
 use crate::app::home::connect_board::connect_board_section::{ConnectStoryPins, HOME_EXAMPLES_ID};
+use crate::app::home::device_layout_sheet::BackupDownloadWatcher;
 use crate::app::home::example_card::embedded_example_cards;
 use crate::app::home::gallery_preview::HoveredCard;
 use crate::app::home::project_opening_frame::OpenFailureNotice;
@@ -159,23 +169,49 @@ pub fn HomePage(
                 }
             }
             if let Some(home) = home.as_ref() {
+                // A board's backup, handed over as a file when core
+                // prepares one. Invisible; mounted wherever the page is.
+                BackupDownloadWatcher { download: home.devices.backup_download.clone() }
                 for section in visible {
-                    // The boards and projects sections arrive with their
-                    // own phases; the rest draw nothing here.
-                    if section == UiHomeSection::ConnectBoard {
-                        ConnectBoardSection {
-                            key: "{section:?}",
-                            usb_available: home.devices.usb_available,
-                            transport_available: home.devices.transport_available,
-                            wifi_connect: home.devices.wifi_address_connect.clone(),
-                            welcome: home.sections.connect.welcome,
-                            ble_reach: connect_pins.ble_reach,
-                            page_url: connect_pins.page_url.clone(),
-                            wifi_typed: connect_pins.wifi_typed.clone(),
-                            pick_open: connect_pins.pick_open,
-                            network_open: connect_pins.network_open,
-                            on_action: on_action_or_none,
-                        }
+                    match section {
+                        UiHomeSection::OnlineBoards => rsx! {
+                            OnlineBoards {
+                                key: "{section:?}",
+                                home: home.clone(),
+                                mode: mode(),
+                                on_action: on_action_or_none,
+                            }
+                        },
+                        UiHomeSection::ConnectBoard => rsx! {
+                            ConnectBoardSection {
+                                key: "{section:?}",
+                                usb_available: home.devices.usb_available,
+                                transport_available: home.devices.transport_available,
+                                wifi_connect: home.devices.wifi_address_connect.clone(),
+                                welcome: home.sections.connect.welcome,
+                                ble_reach: connect_pins.ble_reach,
+                                page_url: connect_pins.page_url.clone(),
+                                wifi_typed: connect_pins.wifi_typed.clone(),
+                                pick_open: connect_pins.pick_open,
+                                network_open: connect_pins.network_open,
+                                on_action: on_action_or_none,
+                            }
+                        },
+                        UiHomeSection::OfflineBoards => rsx! {
+                            OfflineBoards {
+                                key: "{section:?}",
+                                home: home.clone(),
+                                mode: mode(),
+                                on_action: on_action_or_none,
+                            }
+                        },
+                        // A first visit has no board to unlock.
+                        UiHomeSection::UnlockingYourBoards if !newcomer => rsx! {
+                            KeysFold { key: "{section:?}" }
+                        },
+                        // The projects sections arrive with their own
+                        // phase; the catalog draws below.
+                        _ => rsx! {},
                     }
                 }
             }

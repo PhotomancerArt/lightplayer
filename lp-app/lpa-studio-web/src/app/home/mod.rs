@@ -1,9 +1,9 @@
 //! The home page and the pages beside it (P09 split, vision D9/D10/D14):
 //! the home page itself ([`page`]: `/`, one page for the boards, the
-//! projects and the catalog), the Devices page (the runtime roster — being
-//! folded into the home page, see [`devices_page`]), Projects (the library,
-//! likewise) and Explore (examples) — plus the cards they share. One
-//! combined gallery page lived here until the chrome C reorg split it.
+//! projects and the catalog; it took in the Devices page's roster),
+//! Projects (the library — being folded into the home page too) and
+//! Explore (examples) — plus the cards they share. One combined gallery
+//! page lived here until the chrome C reorg split it.
 
 pub(crate) mod access_added_toast;
 pub(crate) mod access_fields;
@@ -27,7 +27,6 @@ pub(crate) mod device_roster_card;
 pub(crate) mod device_terminal;
 #[cfg(feature = "stories")]
 pub(crate) mod device_update_stories;
-pub mod devices_page;
 pub(crate) mod example_card;
 pub mod explore_page;
 pub(crate) mod gallery_paste;
@@ -84,7 +83,6 @@ pub(crate) mod wifi_panel;
 #[cfg(feature = "stories")]
 pub(crate) mod wifi_stories;
 
-pub use devices_page::DevicesPage;
 pub use explore_page::ExplorePage;
 pub use page::HomePage;
 pub use project_opening_frame::ProjectOpeningFrame;

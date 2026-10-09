@@ -30,7 +30,8 @@ pub(crate) fn PageSection(
     }
 }
 
-/// The title: extrabold small caps in the subtle ink.
-const TITLE_CLASS: &str = "tw:m-0 tw:whitespace-nowrap tw:text-[11px] tw:font-extrabold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground";
+/// The title: extrabold small caps in the subtle ink. A fold's toggle wears
+/// it too (`keys_fold`), so a folded section reads as a section.
+pub(crate) const TITLE_CLASS: &str = "tw:m-0 tw:whitespace-nowrap tw:text-[11px] tw:font-extrabold tw:uppercase tw:tracking-[0.08em] tw:text-subtle-foreground";
 /// The count after the title.
 const COUNT_CLASS: &str = "tw:text-[11px] tw:font-semibold tw:text-dim-foreground";

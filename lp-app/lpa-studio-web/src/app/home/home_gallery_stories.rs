@@ -17,7 +17,7 @@ use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
-    UiControlProductPreview, UiControlSampleFormat, UiExampleCard, UiHomeView, UiIssue,
+    UiControlProductPreview, UiControlSampleFormat, UiExampleCard, UiHomeTab, UiHomeView, UiIssue,
     UiPackageCard, UiRuntimeBand,
 };
 
@@ -28,10 +28,9 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
-use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::connect_board::ConnectBoardSection;
-use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 use crate::app::home::device_offer_story_fixtures::{
     StoryDeviceCard, StoryPendingCard, add_slot_tree,
 };
@@ -448,7 +447,7 @@ fn gallery(home: UiHomeView) -> Element {
 }
 
 #[story(
-    description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\"."
+    description = "No transport (a browser without Web Serial, or a build without the provider): the home page's Connect a board says so rather than showing squares that can only fail, which would read as \"you have no boards\"."
 )]
 fn devices_page_without_a_transport() -> Element {
     gallery(UiHomeView {
@@ -463,22 +462,22 @@ fn devices_page_without_a_transport() -> Element {
 }
 
 #[story(
-    description = "The Devices page under D7 (disconnect → disappear, AC9), with the cards in their four-zone reading (P9): each card is header · PROJECT (preview, the project name or \"Nothing loaded\", its verbs) · FIRMWARE (\"<firmware> · <board>\", Flash firmware … Factory reset, with the terminal flush edge to edge underneath as the same zone's second half) · DEVICE (freshness, Reset · Disconnect … Forget), with no labels anywhere — a zone is known by what it says and what it offers. The pending link wears the same grammar minus the project zone, which it has nothing to fill. The grid holds only boards that are actually THERE — a pending link still identifying, the two connected cards, and the add slot at the insertion point. The board Studio remembers but cannot see is not a card at all: it is the one quiet line under the grid, counted and collapsed, with 'show' as the way in. That line is where Forget lives for an absent board, which is why an unplugged board can still be removed without plugging it back in. Compare with devices_page_remembered_open."
+    description = "The home page's boards (the Devices page's roster, folded in), with the cards in their four-zone reading (P9): each card is header · PROJECT (preview, the project name or \"Nothing loaded\", its verbs) · FIRMWARE (\"<firmware> · <board>\", Flash firmware … Factory reset, with the terminal flush edge to edge underneath as the same zone's second half) · DEVICE (freshness, Reset · Disconnect … Forget), with no labels anywhere — a zone is known by what it says and what it offers. The pending link wears the same grammar minus the project zone, which it has nothing to fill. Online boards holds the boards that are THERE — the pending link first, then the two connected cards — then Connect a board, then Offline boards: the board Studio remembers and cannot see is a card of its own there (the 2026-10-08 ADR reverses the old \"disconnect → disappear\" line), carrying Reconnect and Forget, so an unplugged board can still be removed without plugging it back in. \"Unlocking your boards\" is the closed fold under them. Compare with devices_page_remembered_open."
 )]
 fn devices_page_roster() -> Element {
-    devices_page_story(false)
+    devices_page_story(UiHomeTab::All)
 }
 
 #[story(
-    description = "The same page with the remembered line expanded (D7, AC9). Each absent board is a dashed, dimmed tile at card width: its name, the 120px preview slot saying WHY there is no picture (not connected, and when it was last heard — never a stale frame passed off as current), the board id · last-seen meta, and the two verbs an absent board can honestly offer — Reconnect in the outline voice (some bridges' port grants do not survive a replug) and Forget as a reserve-width inline confirm. The tiles are deliberately not cards: an offline board has no project, firmware, terminal or device zone to fill, because it has none of those facts to hand."
+    description = "The same boards on the Boards tab: Online boards, Connect a board, Offline boards and the \"Unlocking your boards\" fold, with nothing of the library or the catalog under them. Each offline board is a dashed, dimmed card at card width: its name, the 120px preview slot saying WHY there is no picture (not connected, and when it was last heard — never a stale frame passed off as current), the board id · last-seen meta, and the verbs an absent board can honestly offer — Reconnect in the outline voice (some bridges' port grants do not survive a replug) and Forget as a reserve-width inline confirm."
 )]
 fn devices_page_remembered_open() -> Element {
-    devices_page_story(true)
+    devices_page_story(UiHomeTab::Boards)
 }
 
 /// The page stories' one body: the roster with a pending link, two
-/// connected boards and one remembered board, with the line open or shut.
-fn devices_page_story(remembered_open: bool) -> Element {
+/// connected boards and one remembered board, on `tab`.
+fn devices_page_story(tab: UiHomeTab) -> Element {
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),
@@ -490,7 +489,12 @@ fn devices_page_story(remembered_open: bool) -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryDevicesPage { home, remembered_open, on_action: |_| {} }
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(tab),
+                on_action: |_| {},
+            }
         }
     }
 }
@@ -517,7 +521,7 @@ fn devices_target_pick_open() -> Element {
 }
 
 #[story(
-    description = "A powered-off sim, where Q5 put it: on the remembered line, in the same dashed tile an unplugged board gets. Powering a sim off keeps its record and takes everything else — so the tile says what it has (a name, the board it acts as) and nothing it does not, and its preview slot carries the honest sentence rather than a stale picture. The one thing that differs from a board's tile is the verb in the Reconnect slot: a runtime this tab makes has no port grant to ask the browser back for, so the escape reads POWER ON, in the same outline voice, dispatching the same `Connect` the model already has (PD8/Q15 — a sim adds a link and an effect backend, never a fifth flow). Forget keeps its inline confirm, whose words are the sim's own: \"Forget this sim? Its record and name go; nothing else exists.\" (D46)."
+    description = "A powered-off sim, where Q5 put it: under Offline boards (the Boards tab), in the same dashed card an unplugged board gets. Powering a sim off keeps its record and takes everything else — so the tile says what it has (a name, the board it acts as) and nothing it does not, and its preview slot carries the honest sentence rather than a stale picture. The one thing that differs from a board's tile is the verb in the Reconnect slot: a runtime this tab makes has no port grant to ask the browser back for, so the escape reads POWER ON, in the same outline voice, dispatching the same `Connect` the model already has (PD8/Q15 — a sim adds a link and an effect backend, never a fifth flow). Forget keeps its inline confirm, whose words are the sim's own: \"Forget this sim? Its record and name go; nothing else exists.\" (D46)."
 )]
 fn devices_card_sim_powered_off() -> Element {
     let home = UiHomeView {
@@ -531,7 +535,12 @@ fn devices_card_sim_powered_off() -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                on_action: |_| {},
+            }
         }
     }
 }
@@ -573,7 +582,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
 }
 
 #[story(
-    description = "The remembered line open, with the board's LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open`, but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. The tile's 120px slot draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+    description = "An offline board with its LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open` (the Boards tab), but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. Its card's 120px slot under Offline boards draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
 )]
 fn devices_page_remembered_last_frame() -> Element {
     let mut devices = roster_page_fixture();
@@ -604,7 +613,12 @@ fn devices_page_remembered_last_frame() -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                on_action: |_| {},
+            }
         }
     }
 }
@@ -2293,9 +2307,8 @@ fn GalleryPages(
 ) -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-10",
-            StoryDevicesPage { home: home.clone(), on_action }
+            StoryHomePage { home: home.clone(), now_secs, on_action }
             StoryProjectsPage { home: home.clone(), now_secs, on_action }
-            ExplorePage { home: Some(home), on_action }
         }
     }
 }

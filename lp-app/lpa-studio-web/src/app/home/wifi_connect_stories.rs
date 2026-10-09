@@ -10,19 +10,19 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BluetoothReach, DeviceEscape, DeviceRosterView, DeviceStatus, RosterView, UiHomeView,
-    UiOfferTree, UiWifiConnect, WifiAddressReach, WifiConnectFailure, add_device_offers,
-    new_sim_offer,
+    BluetoothReach, DeviceEscape, DeviceRosterView, DeviceStatus, RosterView, UiHomeTab,
+    UiHomeView, UiOfferTree, UiWifiConnect, WifiAddressReach, WifiConnectFailure,
+    add_device_offers, new_sim_offer,
 };
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::ble_access_stories::usb_card;
 use crate::app::home::connect_board::ConnectBoardSection;
-use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 use crate::core::OffersProvider;
 
 #[story(
-    description = "A board Studio met over USB, unplugged: it is on the remembered line (opened here), and because its Wi‑Fi status said it is on the network at 192.168.1.40 — learned over USB and kept in this browser, never in the registry — its tile offers \"Connect over Wi‑Fi\" (`devices/<board>/connect-wifi`, a core offer the app agent sees too) beside Reconnect and Forget. It wears the outline voice the tile's call to action wears. No flag: Studio installs the LAN link in every browser with a WebSocket."
+    description = "A board Studio met over USB, unplugged: it is a card under Offline boards, and because its Wi‑Fi status said it is on the network at 192.168.1.40 — learned over USB and kept in this browser, never in the registry — its tile offers \"Connect over Wi‑Fi\" (`devices/<board>/connect-wifi`, a core offer the app agent sees too) beside Reconnect and Forget. It wears the outline voice the tile's call to action wears. No flag: Studio installs the LAN link in every browser with a WebSocket."
 )]
 fn wifi_remembered_board_offers_connect() -> Element {
     remembered_tile(None)
@@ -153,9 +153,9 @@ fn remembered_tile(connect: Option<UiWifiConnect>) -> Element {
     };
     rsx! {
         section { class: "tw:max-w-[760px] tw:p-4",
-            StoryDevicesPage {
+            StoryHomePage {
                 home,
-                remembered_open: true,
+                initial_tab: Some(UiHomeTab::Boards),
                 wifi_addresses: vec![(id, "192.168.1.40".to_string())],
                 on_action: |_| {},
             }
