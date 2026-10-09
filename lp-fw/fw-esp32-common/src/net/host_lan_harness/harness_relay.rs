@@ -2,7 +2,9 @@
 //! task (`fw-esp32c6/src/net/relay_task.rs`). The board's own relay driver
 //! and device-leg loop (`net::relay`) over a std socket; its routes land on
 //! the same network slot the harness's LAN endpoint uses, so the two share
-//! one session exactly as on a C6.
+//! one session exactly as on a C6. Its pictures and project facts (relay
+//! protocol 2) cross the same [`RelayBoard`] the C6's do, answered by the
+//! harness's server thread with the same `serve_relay`.
 
 extern crate std;
 
@@ -22,7 +24,10 @@ use lpc_relay::{ROUTE_FRAME_OVERHEAD, RelayAccount, RelayClientConfig, RelayEven
 use super::harness_block_on::{block_on, until_micros};
 use super::harness_entropy::harness_entropy;
 use super::std_tcp_byte_stream::StdTcpByteStream;
-use crate::net::relay::{RelayCounters, RelayDriver, RelayLegIo, RelayLegSizes, run_relay_leg};
+use crate::net::relay::{
+    RelayBoard, RelayCounters, RelayDriver, RelayLegIo, RelayLegSizes, RelayPictureSlot,
+    run_relay_leg,
+};
 use crate::net::ws::RX_OVERHEAD;
 use crate::radio_link::lan_link_config::LAN_MAX_FRAME;
 use crate::radio_link::{RADIO_LINK_SLOTS, SharedPort, now_us};
@@ -40,11 +45,14 @@ pub struct HarnessRelay {
     pub label: String,
 }
 
-/// What the relay thread shares with the harness and its tests.
+/// What the relay thread shares with the harness, its server thread and
+/// its tests.
 #[derive(Default)]
 pub(super) struct RelayShared {
     inputs: Mutex<VecDeque<RelayEvent<'static>>>,
     state: Mutex<Option<(RelayState, RelayCounters)>>,
+    /// The board between the relay and the server thread, as on a C6.
+    pub(super) board: RelayBoard,
 }
 
 impl RelayShared {
@@ -149,15 +157,28 @@ impl RelayLegIo for StdRelayIo<'_> {
     }
 
     async fn next_input(&self) -> RelayEvent<'static> {
-        poll_fn(|_| match lock(&self.shared.inputs).pop_front() {
-            Some(input) => Poll::Ready(input),
-            None => Poll::Pending,
+        poll_fn(|_| {
+            if let Some(input) = lock(&self.shared.inputs).pop_front() {
+                return Poll::Ready(input);
+            }
+            if let Some(facts) = self.shared.board.take_project() {
+                return Poll::Ready(RelayEvent::Project(facts));
+            }
+            if self.shared.board.pictures.news() {
+                return Poll::Ready(RelayEvent::PictureReady);
+            }
+            Poll::Pending
         })
         .await
     }
 
+    fn picture_slot(&self) -> &RelayPictureSlot {
+        &self.shared.board.pictures
+    }
+
     fn publish(&self, driver: &RelayDriver) {
         *lock(&self.shared.state) = Some((driver.state(), driver.counters()));
+        self.shared.board.publish(driver, now_us());
     }
 
     fn stopping(&self) -> bool {

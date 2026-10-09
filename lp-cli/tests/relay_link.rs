@@ -321,6 +321,63 @@ fn a_boards_own_relay_driver_registers_with_its_lan_address_and_carries_a_sessio
     harness.stop();
 }
 
+/// The C6's own relay driver, picture slot and `serve_relay` (the host
+/// harness) against the real hub: its picture reaches the cache (no lamps:
+/// the harness loads no project), watching makes it send more, and the
+/// picture outlives the board, marked offline.
+#[test]
+fn a_boards_own_relay_driver_sends_pictures_and_its_picture_outlives_it() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
+    cloud.wait_for_boards(1);
+
+    let picture = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+    })
+    .expect("the board's picture reaches the hub");
+    assert!(picture.online);
+    assert!(picture.outputs.is_empty(), "the harness plays nothing");
+    assert_eq!(picture.colors.map(|colors| colors.0.len()), Some(0));
+    let listed = cloud.list_boards(&alice.session);
+    assert_eq!(listed.boards[0].relay_proto, 2);
+    assert_eq!(listed.boards[0].firmware.as_deref(), Some("host-harness"));
+
+    let before = harness.relay_status().1.pictures;
+    let started = Instant::now();
+    let mut after = before;
+    while started.elapsed() < Duration::from_secs(20) {
+        cloud.board_pictures(&alice.session, &[known(board, None)], true);
+        after = harness.relay_status().1.pictures;
+        if after >= before + 3 && started.elapsed() >= Duration::from_secs(2) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    println!(
+        "[relay-pictures] harness board: {before} -> {after} pictures in {:.1} s watched",
+        started.elapsed().as_secs_f64()
+    );
+    assert!(
+        after >= before + 3,
+        "watching made it fast: {before} -> {after}"
+    );
+
+    harness.stop();
+    let kept = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+            .filter(|picture| !picture.online)
+    })
+    .expect("the picture outlives the board");
+    assert_eq!(kept.id, board.to_string());
+}
+
 /// D2 with the real hub and clients: Alice's relay session moves to the LAN
 /// when she opens it with the same key, and Bob, through the relay, is told
 /// busy while she holds it.

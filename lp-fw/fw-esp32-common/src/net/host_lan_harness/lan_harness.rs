@@ -21,7 +21,7 @@ use super::harness_counters::{HarnessCounters, HarnessStats};
 use super::harness_edge::{refuse_connection, serve_connection};
 use super::harness_relay::{HarnessRelay, RelayShared, run_relay};
 use super::harness_server::{ServerSetup, run_server};
-use crate::net::relay::RelayCounters;
+use crate::net::relay::{RelayCounters, RelayPictureMode};
 use crate::radio_link::{NETWORK_LINK_SLOTS, SharedPort};
 
 /// Who may do what on the harness board: its device store
@@ -107,12 +107,14 @@ impl LanHarness {
             .graphics
             .unwrap_or_else(|| Arc::new(lp_gfx::NullGraphics::new()));
         let accounts = RelayAccount::from_entries(&options.access.secrets);
+        let relay_shared = Arc::new(RelayShared::default());
         let setup = ServerSetup {
             lock: port_lock,
             access_json: options.access.to_json(),
             graphics,
             stop: Arc::clone(&stop),
             counters: Arc::clone(&counters),
+            relay: options.relay.is_some().then(|| Arc::clone(&relay_shared)),
         };
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let server = std::thread::Builder::new()
@@ -128,7 +130,6 @@ impl LanHarness {
                 .name(String::from("lan-harness-accept"))
                 .spawn(move || accept_loop(&listener, shared, &stop, &counters))?
         };
-        let relay_shared = Arc::new(RelayShared::default());
         let mut threads = vec![accept, server];
         if let Some(relay) = options.relay {
             let stop = Arc::clone(&stop);
@@ -156,6 +157,20 @@ impl LanHarness {
     #[must_use]
     pub fn relay_status(&self) -> (RelayState, RelayCounters) {
         self.relay.snapshot()
+    }
+
+    /// The pictures the board's relay sent and what they are doing now, as
+    /// its heartbeat says them (`pictures N idle|watched|off`).
+    #[must_use]
+    pub fn relay_pictures(&self) -> (u32, RelayPictureMode) {
+        let (_, counters, _, mode) = self.relay.board.heartbeat();
+        (counters.pictures, mode)
+    }
+
+    /// Whether the board's picture slot holds a buffer (ready or spare).
+    #[cfg(test)]
+    pub(crate) fn relay_holds_a_picture_buffer(&self) -> bool {
+        self.relay.board.pictures.holds_a_buffer()
     }
 
     /// Tell the board's relay driver something, as the C6's relay task is

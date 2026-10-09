@@ -25,6 +25,13 @@
 //!   link is closed.
 //!
 //! One frame on a route is one lp-link frame; nothing here reads inside one.
+//!
+//! **Pictures** (relay protocol 2): the client's `TakePicture`,
+//! `SendPicture` and `DropPicture` pass through one to one
+//! ([`RelayDriverAction`]); the edge carries the buffer
+//! (`relay_picture_slot`). The driver counts the pictures sent and says
+//! what the pictures are doing ([`RelayDriver::picture_mode`]) for the
+//! heartbeat. It never touches a picture's bytes.
 
 use alloc::vec::Vec;
 
@@ -36,6 +43,7 @@ use lpc_relay::{
 use lpc_shared::transport::LinkTrust;
 
 use super::relay_driver_action::RelayDriverAction;
+use super::relay_picture_mode::RelayPictureMode;
 use super::relay_route_link::{RelayRouteLink, RouteSlotState};
 use crate::radio_link::{ChallengeVerdict, RadioLinkEvent, RadioLinkPort, SlotEdge};
 
@@ -57,6 +65,8 @@ pub struct RelayCounters {
     pub takeovers: u32,
     /// Routes turned away busy.
     pub busy: u32,
+    /// Pictures sent (relay protocol 2).
+    pub pictures: u32,
 }
 
 /// See the module doc.
@@ -116,6 +126,24 @@ impl RelayDriver {
     /// The edge sent `len` bytes on the device leg.
     pub fn note_sent(&mut self, len: usize) {
         self.counters.tx_bytes += len as u64;
+    }
+
+    /// The edge sent a picture (its bytes are noted by [`Self::note_sent`]).
+    pub fn note_picture_sent(&mut self) {
+        self.counters.pictures += 1;
+    }
+
+    /// What the pictures are doing at `now_us`: watched while the hub's
+    /// last rate's watch lasts, idle while a picture is due, off otherwise.
+    #[must_use]
+    pub fn picture_mode(&self, now_us: Micros) -> RelayPictureMode {
+        if self.client.pictures_watched(ms(now_us)) {
+            RelayPictureMode::Watched
+        } else if self.client.next_picture_due().is_some() {
+            RelayPictureMode::Idle
+        } else {
+            RelayPictureMode::Off
+        }
     }
 
     /// The route's next outgoing frame as one device-leg message, written
@@ -295,9 +323,9 @@ impl RelayDriver {
                 RelayAction::RouteOpened(route) => self.open_route(now_us, route),
                 RelayAction::RouteFrame { route, bytes } => self.route_in(now_us, route, &bytes),
                 RelayAction::RouteClosed(route) => self.route_gone(route),
-                // This board has no picture source yet: it never answers a
-                // `TakePicture`, so the client never asks it to send one.
-                RelayAction::TakePicture | RelayAction::SendPicture | RelayAction::DropPicture => {}
+                RelayAction::TakePicture => self.actions.push(RelayDriverAction::TakePicture),
+                RelayAction::SendPicture => self.actions.push(RelayDriverAction::SendPicture),
+                RelayAction::DropPicture => self.actions.push(RelayDriverAction::DropPicture),
             }
         }
     }
