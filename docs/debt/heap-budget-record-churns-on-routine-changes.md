@@ -335,6 +335,31 @@ long-lived branch conflict on this file whenever main re-baselined too.
   attributed cause. Workaround as before: the director takes CI's figures,
   never a local bless.
 
+- 2026-10-09 — **the app-version half, paid down** (auto-queue ticket
+  `2026-10-06-heap-ratchet-dirty-version-churn`). The finding behind the
+  2026-10-06/07 entries above: the C6 keeps the over-the-air manifest resident
+  and the manifest owns the version string, so the resident heap grows with the
+  string's length (one commit: used 90,200 / 90,208 / 90,216 / 90,232 B at 7 /
+  9 / 13 / 22 characters; the dirty flag itself moves nothing), and each build
+  path stamped a different length — CI shallow 7, desk 9, tagged main 13,
+  dirty 22+ (CI's bless dirties the tree, so its re-check could never pass its
+  own patch). `scripts/heap-budget-check.sh` now exports `APP_VERSION` (the
+  variable `tools/lp-app-version` honours; `LP_APP_VERSION` is only its output)
+  as the HEAD commit's 9-character sha for every firmware build it makes,
+  clean on a dirty tree, and the `emu-c6` and `heap-budget-chips` jobs pin the
+  same 9 characters into `$GITHUB_ENV`. Measured on a desk C6: a clean tree and
+  a dirty one read identical figures (105,716 / 195,820 / 116,744 B). The
+  gate's text now says `largestFreeBlock` is exact and CI is its one writer.
+  **Not paid down:** the host-side spread in `largestFreeBlock` (the
+  2026-10-06 #999 and 2026-10-07 #989 entries: a placement figure that differs
+  between machines on one image) and the 0 % margin over it; a desk build also
+  read 136 B above the CI-written record on 2026-10-09 while main's CI heap job
+  was green. Workaround stays: the record is CI's figure
+  (`just apply-ci-figures <pr>`), never a desk bless. Yona kept
+  `largestFreeBlock` exact (2026-10-07). Remaining paydown: make the manifest
+  borrow the version instead of owning it (ticket
+  `2026-10-07-board-manifest-borrows-version`).
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely
