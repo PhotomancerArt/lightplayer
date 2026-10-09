@@ -585,8 +585,20 @@ pub static RMT_RX: MaskSet = MaskSet {
     rules: &[&ANSI, &BOOT_TIMESTAMP],
 };
 
+/// The `flash-tears` set: ANSI and the boot banner's stamps. Every count in
+/// its records is the flash part's, and a tear is random on purpose, so
+/// there is nothing to mask and nothing two runs are expected to share
+/// beyond their shape.
+pub static FLASH_TEARS: MaskSet = MaskSet {
+    name: "flash-tears",
+    description: "ANSI and boot timestamps; every verdict and bit count is left \
+                  as the part reported it",
+    rules: &[&ANSI, &BOOT_TIMESTAMP],
+};
+
 pub static ALL_SETS: &[&MaskSet] = &[
     &NORMALIZE,
+    &FLASH_TEARS,
     &COMPILE_HARNESS,
     &WALK,
     &BOOT_LOG,

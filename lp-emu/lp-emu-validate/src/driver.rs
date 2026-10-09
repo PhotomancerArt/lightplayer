@@ -313,6 +313,12 @@ pub const DESK_FLASH_NO_MONITOR_SCRIPT: &str = "scripts/emu/desk-flash-no-monito
 /// RTS untouched) — the same open Studio and lp-cli make.
 pub const TTY_CAPTURE_SCRIPT: &str = "scripts/emu/tty-capture.py";
 
+/// The power-cut driver a [`Capture::PowerCuts`] payload is read by: it
+/// answers each boot's ready line, captures to the sentinel, waits a random
+/// interval, cuts the board's power with `board power-cycle`, and repeats.
+/// It refuses a board the desk registry does not tag `sacrificial`.
+pub const POWER_CUTS_SCRIPT: &str = "scripts/emu/flash-tears-cuts.py";
+
 /// The environment variable naming the `esp-emu` binary (spike report §1, §10).
 pub const ESP_EMU_ENV: &str = "LP_ESP_EMU";
 
@@ -1123,6 +1129,53 @@ impl ConfigurationDriver for SiliconDriver {
                     .with_note(note),
                 );
             }
+            Capture::PowerCuts {
+                cuts,
+                min_ms,
+                max_ms,
+            } => {
+                let mut command: Vec<String> =
+                    vec![DESK_FLASH_NO_MONITOR_SCRIPT.into(), "--".into()];
+                command.extend(flash_args(elf));
+                steps.push(
+                    PlanStep::new("flash in the foreground and RELEASE the port", command)
+                        .with_env("PORT_DEV", port)
+                        .with_note(
+                            "no --monitor: the power-cut driver below is the port's only \
+                             reader. espflash hard-resets the board after the write, so the \
+                             first boot the capture holds is that reset's (`usb-uart`), not \
+                             a cut",
+                        ),
+                );
+                steps.push(
+                    PlanStep::new(
+                        format!("cut the power {cuts} times, reading every boot"),
+                        vec![
+                            POWER_CUTS_SCRIPT.into(),
+                            "--port".into(),
+                            port.into(),
+                            "--capture".into(),
+                            capture.display().to_string(),
+                            "--cuts".into(),
+                            cuts.to_string(),
+                            "--min-ms".into(),
+                            min_ms.to_string(),
+                            "--max-ms".into(),
+                            max_ms.to_string(),
+                            "--until".into(),
+                            req.sentinel().marker().into(),
+                        ],
+                    )
+                    .with_note(
+                        "refuses unless `board show` names this port's board tagged \
+                         `sacrificial` with the allocated MAC, and cuts only through \
+                         `board power-cycle` as $BOARD_HOLDER (never uhubctl). Each boot: \
+                         open the port without the reset dance, answer the ready line, \
+                         read to the sentinel, close; then wait a random interval in the \
+                         range and cut. Every byte read goes into the one capture, in order",
+                    ),
+                );
+            }
             Capture::FlashThenOpenAfter(open_after_secs) => {
                 let mut command: Vec<String> =
                     vec![DESK_FLASH_NO_MONITOR_SCRIPT.into(), "--".into()];
@@ -1385,9 +1438,12 @@ pub const ROM_SHA256SUMS: &str = "lp-emu/esp/roms/SHA256SUMS";
 /// The net can end a run, never change one (the machine's rule): guest time is
 /// the scheduler's, and this is only here so a wedged run on a desk or in CI
 /// stops instead of burning a core all night. M3 P6 measured about 3x wall for
-/// emulated on this machine (5.5 s of guest time in ~15 s), so 20x is generous
-/// by a factor of six and still bounded.
-pub const WALL_TIMEOUT_FACTOR: u64 = 20;
+/// emulated on this machine (5.5 s of guest time in ~15 s) on a direct boot,
+/// which runs over the block cache. A ROM-up boot has no block cache, and a
+/// ROM-up image that keeps the hart busy costs far more: `flash-tears`
+/// (tree-store M4, 2026-10-08) ran 15 s of guest time in 378 s, 25x, which
+/// the old 20x net would have cut short. 40x covers that and is still bounded.
+pub const WALL_TIMEOUT_FACTOR: u64 = 40;
 
 impl ConfigurationDriver for LpEmuDriver {
     fn kind(&self) -> ConfigurationKind {
@@ -1752,6 +1808,13 @@ impl ConfigurationDriver for LpEmuDriver {
             // of a machine quietly answering questions it cannot answer.
             "--strict-bus".into(),
         ]);
+        // A payload whose subject is a power cut is cut by its host script's
+        // `power-cycle`s, and each one has to be a real reboot rather than the
+        // end of the run (the machine's default, which three M6 scenarios
+        // read as their evidence).
+        if matches!(req.payload.capture, Capture::PowerCuts { .. }) {
+            emu.push("--reboot-on-reset".into());
+        }
         if let Some(marker) = req.sentinel().exit_on() {
             emu.push("--exit-on".into());
             emu.push(marker.into());
@@ -2525,7 +2588,7 @@ mod tests {
         );
         // Emulated time carries its unit; the wall clock is only a net.
         assert!(rendered.contains("--timeout 120s"), "{rendered}");
-        assert!(rendered.contains("--wall-timeout 2400"), "{rendered}");
+        assert!(rendered.contains("--wall-timeout 4800"), "{rendered}");
         // The identity the configuration was given, not the machine default.
         assert!(
             rendered.contains("--efuse-mac a0:f2:62:87:b4:8c"),

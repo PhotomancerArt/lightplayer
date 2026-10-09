@@ -39,6 +39,12 @@ check-uart-bridge = []
 # and the driver itself is read and never written (E-product).
 check-espnow-broadcast = []
 check-oom = []
+# The `flash-tears` payload: the region layout, the alternating patterns, the
+# two-copy journal, the tear classifier, the records and the whole boot flow
+# over an injected flash (`checks::flash_tears`). No chip dependency — the
+# esp-storage driver, the clock, the USB link and the reset reason stay in
+# `fw-esp32c6`.
+check-flash-tears = []
 # The `rmt-chase` payload: the chase pattern, the FNV-1a checksum and the
 # per-frame record (`checks::rmt_chase`). No chip dependency at all — the
 # harness half (board init, `Rmt`, `LedChannel`, `embassy_time`) stays in
@@ -61,6 +67,15 @@ log = { workspace = true, default-features = false }
 # dependency of `fw-esp32c6` for the same harness — no new dependency to the
 # build, just newly linked into this crate.
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
+
+[dev-dependencies]
+# `examples/flash_tears_on_nor_sim.rs` only: the payload's flow on the
+# simulated part (MIT, `lp-emu/`; AGPL may depend on MIT, never the reverse).
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+
+[[example]]
+name = "flash_tears_on_nor_sim"
+required-features = ["check-flash-tears"]
 
 [lints]
 workspace = true
