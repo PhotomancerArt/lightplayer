@@ -96,6 +96,7 @@ fn ble_connections_over_bluetooth() -> Element {
         line: Some("Unlocked by Yona's iPhone".to_string()),
         unlock: None,
         panel: Some(panel),
+        account_key_refused: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -267,6 +268,7 @@ fn ble_access_popover_open_many_keys() -> Element {
         line: None,
         unlock: None,
         panel: Some(panel),
+        account_key_refused: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -325,6 +327,7 @@ fn ble_play_only_prompt() -> Element {
         line: Some("Unlocked with friends · play".to_string()),
         unlock: Some(UiUnlockOffer::PlayOnly),
         panel: None,
+        account_key_refused: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -349,6 +352,7 @@ fn ble_card_locked() -> Element {
         line: Some("Needs a device password".to_string()),
         unlock: Some(UiUnlockOffer::Locked),
         panel: None,
+        account_key_refused: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -941,6 +945,7 @@ pub(crate) fn usb_access(ble_enabled: Option<bool>, restart_pending: bool) -> Ui
         line: None,
         unlock: None,
         panel: Some(panel),
+        account_key_refused: None,
     }
 }
 

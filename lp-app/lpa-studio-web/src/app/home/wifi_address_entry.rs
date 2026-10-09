@@ -78,9 +78,10 @@ pub(crate) fn WifiAddressEntry(
 /// What a connect over Wi‑Fi says under its button: under way, or why it
 /// failed (core's sentence, as it is).
 pub(crate) fn connect_line(connect: &UiWifiConnect) -> String {
-    match (&connect.error, connect.connecting) {
+    match (&connect.error, connect.through_relay) {
         (Some(error), _) => error.clone(),
-        (None, _) => format!("Connecting to {}\u{2026}", connect.host),
+        (None, true) => format!("Connecting through {}\u{2026}", connect.host),
+        (None, false) => format!("Connecting to {}\u{2026}", connect.host),
     }
 }
 
@@ -99,6 +100,7 @@ mod tests {
     fn the_line_says_where_it_is_connecting_or_why_it_failed() {
         let connecting = UiWifiConnect {
             host: "192.168.1.40".to_string(),
+            through_relay: false,
             connecting: true,
             error: None,
         };
@@ -112,5 +114,15 @@ mod tests {
             ..connecting
         };
         assert_eq!(connect_line(&failed), lpa_studio_core::WIFI_BUSY_WORDS);
+        let relay = UiWifiConnect {
+            host: "lightplayer.app".to_string(),
+            through_relay: true,
+            connecting: true,
+            error: None,
+        };
+        assert_eq!(
+            connect_line(&relay),
+            "Connecting through lightplayer.app\u{2026}"
+        );
     }
 }

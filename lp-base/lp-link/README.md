@@ -15,7 +15,8 @@ and the emulator tools run the same crate.
 > LAN WebSocket at `ws://<board>/link`, the `ws()` preset with the secure
 > channel on, reached by `lp-cli`'s `lan:` and Studio's LAN link; and the
 > cloud relay, which carries the same `ws()` link unchanged, reached by
-> `lp-cli`'s `relay:` and Studio's relay link, which is behind `?relay=1` for now). It was built and measured
+> `lp-cli`'s `relay:` and Studio's relay link, on for everyone since the
+> network transport's PR C). It was built and measured
 > in the investigation `lp2025/2026-09-26-1720-reliable-device-link`, proven
 > on a C6 in the `test_comms_lab` firmware, cut over on USB in
 > `lp2025/2026-09-27-0215-lp-link-usb-cutover`, on the classic's UART in

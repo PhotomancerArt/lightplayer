@@ -179,9 +179,12 @@ mod lan_drop_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
 /// back on the redialled link with no click.
 mod lan_reset_tests;
-/// A board reached through lightplayer.app's relay (`relay:`, behind
-/// `?relay=1`): it identifies, refuses firmware, is never given keys, and
-/// comes back after its leg drops.
+/// "Connect through lightplayer.app" on a remembered board's tile: offered
+/// while signed in, dials `relay:<mac>`, and an offline board says so.
+mod relay_connect_tests;
+/// A board reached through lightplayer.app's relay (`relay:`): it
+/// identifies, refuses firmware, is never given keys, and comes back after
+/// its leg drops.
 mod relay_link_tests;
 /// Reaching a board over Wi‑Fi without a flag: its remembered address, an
 /// address typed into the add slot.

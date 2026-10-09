@@ -303,6 +303,7 @@ mod tests {
                 ble_enabled,
                 ..UiAccessPanel::reading(DeviceId(1))
             }),
+            account_key_refused: None,
         }
     }
 }
