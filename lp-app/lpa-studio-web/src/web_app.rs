@@ -220,6 +220,10 @@ pub fn App() -> Element {
     // looking at.
     let leaving_session = use_hook(|| Rc::new(Cell::new(false)));
     let bound_route_now = use_hook(|| Rc::new(RefCell::new(None::<StudioRoute>)));
+    // The device the editor's lens was on at the last emission. An UNBOUND
+    // lens has no route for the latch above to hold, so this is how the
+    // loop tells a new one (Q3, `router::lens_sync_target`).
+    let lens_uid_now = use_hook(|| Rc::new(RefCell::new(None::<String>)));
     let saw_opening = use_hook(|| Rc::new(Cell::new(false)));
     // A route-driven open we dispatched (startup / back-forward / hash nav)
     // that the actor hasn't started yet. While set, stale home views must
@@ -241,6 +245,7 @@ pub fn App() -> Element {
     let loop_session = Rc::clone(&session_now);
     let loop_leaving = Rc::clone(&leaving_session);
     let loop_bound_route = Rc::clone(&bound_route_now);
+    let loop_lens_uid = Rc::clone(&lens_uid_now);
     let loop_saw_opening = Rc::clone(&saw_opening);
     let loop_pending_route_open = Rc::clone(&pending_route_open);
     let loop_unsaved = Rc::clone(&unsaved);
@@ -587,15 +592,21 @@ pub fn App() -> Element {
                     loop_leaving.set(false);
                 }
                 let bound = editor_showing.then(|| router::lens_route(&next)).flatten();
+                let lens_uid = editor_showing
+                    .then(|| router::lens_device_uid(&next).map(str::to_string))
+                    .flatten();
+                let lens_uid_changed = lens_uid.is_some() && *loop_lens_uid.borrow() != lens_uid;
+                *loop_lens_uid.borrow_mut() = lens_uid.clone();
                 // A NEW document took the lens this emission (none → some,
                 // or a different session): that is a navigation the user
                 // caused from wherever they are — an example opened from
                 // Explore must land in the editor — so it rewrites the URL
-                // even off the shell routes below.
+                // even off the shell routes below. An unbound lens on a
+                // board the editor was not already showing is new too (Q3).
                 let bound_changed = match (&*loop_bound_route.borrow(), &bound) {
                     (None, Some(_)) => true,
                     (Some(previous), Some(next_bound)) => !previous.same_session(next_bound),
-                    _ => false,
+                    (_, None) => lens_uid_changed,
                 };
                 *loop_bound_route.borrow_mut() = bound.clone();
                 let opening_now = next
@@ -609,8 +620,11 @@ pub fn App() -> Element {
                 }
 
                 // view → route: the URL follows the LENS (SDI — the URL is
-                // the focused document): lens on the sim + open project →
-                // /p/<slug>-<uid>; lens on a device → /device/<uid>.
+                // the focused document): a lens with a project →
+                // /p/<slug>-<uid>?on=<device>. `/device/<uid>` is written
+                // only for an unbound lens that has just taken the editor
+                // from a route that is not a lens route (Q3 of
+                // lp2025/2026-10-08-2330-connected-in-the-card).
                 let current = route.peek().clone();
                 // A STEADY lens follows the URL only while a shell route
                 // is what's rendered (the gallery routes, where a card
@@ -638,34 +652,34 @@ pub fn App() -> Element {
                 // this the loop would push the user straight back into
                 // the editor they just left.
                 if editor_showing && !loop_leaving.get() && (on_shell_route || bound_changed) {
-                    // `same_session`, not `!=`: play is a lens ZOOM on the
-                    // same document, and the lens's own route always reads
-                    // non-play — comparing by equality would rewrite the
-                    // user straight back out of `/…/play`.
-                    if let Some(target) = bound.clone()
-                        && !target.same_session(&current)
-                    {
-                        if matches!(
-                            current,
-                            StudioRoute::Project { .. } | StudioRoute::Example { .. }
-                        ) {
+                    // Where the address goes is `router::lens_sync_target`'s
+                    // (`same_session`, so `/…/play` stays play; a
+                    // `/device/<uid>/play` heal keeps play). An unaddressable
+                    // lens keeps the URL as-is, but for one case: a new one
+                    // from a route that is not a lens route goes to
+                    // `/device/<uid>`, the only time it is emitted (Q3).
+                    if let Some(lens_move) = router::lens_sync_target(
+                        &current,
+                        bound.as_ref(),
+                        lens_uid.as_deref(),
+                        on_shell_route,
+                        bound_changed,
+                    ) {
+                        if lens_move.replace {
                             // boot/forward resolution on a lens route
                             // (uid → slug, identity landing): same place,
                             // no duplicate entries
-                            router::replace(&target);
+                            router::replace(&lens_move.route);
                             crate::route_recording::note_route_reason("lens-sync (replace)");
                         } else {
                             // an open from a page (gallery card, Explore
                             // example): a real navigation, so a real
                             // history entry (back returns to that page)
-                            router::navigate(&target);
+                            router::navigate(&lens_move.route);
                             crate::route_recording::note_route_reason("lens-sync (open)");
                         }
-                        route.set(target);
+                        route.set(lens_move.route);
                     }
-                    // an unaddressable lens (no library identity yet, or a
-                    // device whose identity has not landed) keeps the URL
-                    // as-is
                 } else if matches!(
                     current,
                     StudioRoute::Project { .. }
