@@ -5,6 +5,7 @@
 //! | Board | Summary | Aside | Tone | Action |
 //! |---|---|---|---|---|
 //! | A push or a removal running | (the work shows) | — | Neutral | the work's Cancel |
+//! | Locked (its link unlocked nothing) | "Not known yet" | — | Neutral | — |
 //! | Degraded | the fault, without its "Degraded: " lead | — | Attention | — |
 //! | Given an older version than the project's newest | "Out of date" | the project | Attention | "Send latest" (`push`, the project preset) |
 //! | Says it runs nothing | "Nothing on it yet", or what starts at its next power-up | — | Neutral | "Add a project" (`push`, the picker) |
@@ -52,7 +53,19 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         .and_then(|layout| layout.project_note.as_ref())
         .filter(|_| input.idle() && view.loaded_project == LoadedProject::Empty);
     let push = input.offer("push");
-    let (summary, aside, tone, action) = if let Some(fault) = &view.degraded {
+    // A link nothing has unlocked: the board answers only its hello and
+    // the unlock, so its "nothing on it" is a refused read, not its word.
+    let locked = input
+        .access
+        .is_some_and(|access| access.unlock == Some(crate::app::access::UiUnlockOffer::Locked));
+    let (summary, aside, tone, action) = if locked {
+        (
+            "Not known yet".to_string(),
+            None,
+            UiStatusKind::Neutral,
+            None,
+        )
+    } else if let Some(fault) = &view.degraded {
         (
             fault
                 .strip_prefix(DEGRADED_LEAD)
@@ -388,6 +401,18 @@ mod tests {
         let bar = project_bar(&CardFixture::ready().input());
         assert_eq!(bar.summary, "porch");
         assert_eq!(bar.tone, UiStatusKind::Neutral);
+    }
+
+    /// A Locked board answers only its hello and the unlock: what it runs
+    /// is not known, whatever its refused read said (Q38).
+    #[test]
+    fn a_locked_board_is_not_known_yet_even_when_its_read_said_nothing() {
+        let mut fixture = CardFixture::ready().locked();
+        fixture.view.loaded_project = LoadedProject::Empty;
+        fixture.plays = BoardPlays::Nothing;
+        let bar = project_bar(&fixture.input());
+        assert_eq!(bar.summary, "Not known yet");
+        assert_eq!(bar.action, None, "no Add a project on a locked board");
     }
 
     #[test]

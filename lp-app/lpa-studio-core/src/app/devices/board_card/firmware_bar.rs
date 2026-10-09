@@ -22,7 +22,7 @@
 //! | Older, the update offered by USB | the version alone | — | Live | Update (the board pick, when it must pick) |
 //! | Play only, an update available | the version alone | — | Live | Update with a lock (Unlock) |
 //! | Offline, or a closed port (nothing heard this time) | the remembered version | "last seen" ("when it's back" when the standing says Available) | Neutral (Live) | — |
-//! | The flash wants firmware | "No firmware", "Pre-hello firmware", … | — | Attention | — (Install is the primary) |
+//! | The flash wants firmware | "No firmware", "Pre-hello firmware", … | — | Attention | — (Install is the primary); Update (by USB) for an older LightPlayer whose board is known |
 //! | Nothing known | "Not known yet" | — | Neutral | — |
 //! | Otherwise | the version alone | — | Neutral | — |
 //!
@@ -132,10 +132,17 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         };
         (version.clone(), tone, None)
     } else if view.firmware_face.wants_flash() {
+        // Install (`flash`) is the primary. An older LightPlayer whose board
+        // is known is offered the USB update instead of a flash: that is
+        // the bar's answer, here where the face says it is needed.
+        let update = input
+            .offer("update-firmware")
+            .filter(|_| input.offer("flash").is_none())
+            .map(|update| usb_update(input, update));
         (
             face_words(&view.firmware_face).to_string(),
             UiStatusKind::Attention,
-            None,
+            update,
         )
     } else if let FirmwareFace::CoreOnly { .. } = view.firmware_face {
         (
@@ -352,8 +359,13 @@ fn details(
         lines.push(RichLine::new("Over this link", blocked.clone()));
     }
     let mut firmware = facts("Firmware", lines);
+    // The update's sentence when nothing above said it: while the board's
+    // lights are held, and for what is only worth knowing (up to date,
+    // rolled back, newer than this Studio).
     firmware.sentence = update
-        .filter(|update| update.light.is_some() && story.is_none())
+        .filter(|update| {
+            story.is_none() && (update.light.is_some() || update.kind == UpdateRowKind::Information)
+        })
         .map(|update| update.sentence.clone());
     sections.push(firmware);
 
@@ -447,9 +459,9 @@ fn newest(standing: &UpdateStanding) -> Option<String> {
         UpdateStanding::Available { to, .. } | UpdateStanding::PlayOnly { to, .. } => {
             Some(to.short())
         }
-        UpdateStanding::Newer { own, .. } | UpdateStanding::CantGetVersion { own, .. } => {
-            Some(own.short())
-        }
+        // Newer: the board's own is the newest, and the sentence names this
+        // Studio's.
+        UpdateStanding::CantGetVersion { own, .. } => Some(own.short()),
         _ => None,
     }
 }
@@ -470,7 +482,7 @@ mod tests {
     use lpa_devices::device::DeviceStatus;
     use lpa_devices::view::{Escape, LoadedProject};
 
-    use super::super::card_fixtures::{CardFixture, activity};
+    use super::super::card_fixtures::{CardFixture, activity, board};
     use super::super::primary_action::tests::pending_view;
     use super::*;
     use crate::app::devices::device_update_fixtures::{UpdateFixture, UpdateFixtureRow};
@@ -540,6 +552,33 @@ mod tests {
                 .cancel
                 .is_none()
         );
+    }
+
+    /// What is only worth knowing is never lost: up to date, rolled back
+    /// and newer than this Studio leave the bar at the version alone, and
+    /// the firmware details say the update's sentence. A newer board's
+    /// details never call this Studio's older build the newest.
+    #[test]
+    fn an_update_worth_knowing_says_its_sentence_in_the_details() {
+        for (row, says) in [
+            (UpdateFixtureRow::UpToDate, "the same as this Studio"),
+            (UpdateFixtureRow::RolledBack, "didn't start"),
+            (UpdateFixtureRow::Newer, "Reload Studio to catch up"),
+        ] {
+            let mut fixture = story(row);
+            let bar = firmware_bar(&fixture.input());
+            assert_eq!(bar.tone, UiStatusKind::Neutral, "{row:?}");
+            assert_eq!(bar.action, None, "{row:?}");
+            let sentence = bar
+                .details
+                .sections
+                .iter()
+                .find_map(|section| section.sentence.clone())
+                .unwrap_or_else(|| panic!("{row:?} says its sentence"));
+            assert!(sentence.contains(says), "{row:?}: {sentence}");
+        }
+        let mut newer = story(UpdateFixtureRow::Newer);
+        assert_eq!(line(&firmware_bar(&newer.input()), "Newest"), None);
     }
 
     #[test]
@@ -700,11 +739,32 @@ mod tests {
             fixture.view.loaded_project = LoadedProject::Unknown;
             fixture.view.can_receive_project = false;
             fixture.view.can_remove_project = false;
+            fixture.view.board_id = None;
             let bar = firmware_bar(&fixture.input());
             assert_eq!(bar.summary, words, "{face:?}");
             assert_eq!(bar.tone, UiStatusKind::Attention, "{face:?}");
             assert_eq!(bar.action, None, "Install is the primary");
         }
+    }
+
+    /// An older LightPlayer whose board is known is offered the USB update,
+    /// not a flash: the bar that says it is older carries it.
+    #[test]
+    fn an_older_lightplayer_with_a_known_board_updates_from_its_bar() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.status = DeviceStatus::NeedsAttention;
+        fixture.view.firmware_face = FirmwareFace::OlderLightPlayer { proto: Some(32) };
+        fixture.view.loaded_project = LoadedProject::Unknown;
+        fixture.view.can_receive_project = false;
+        fixture.view.can_remove_project = false;
+        let input = fixture.input();
+        assert!(input.offer("flash").is_none(), "no flash for a known board");
+        let bar = firmware_bar(&input);
+        assert_eq!(bar.summary, "Older LightPlayer");
+        assert_eq!(bar.tone, UiStatusKind::Attention);
+        let action = bar.action.expect("the USB update");
+        assert_eq!(action.offer, board().child("update-firmware"));
+        assert_eq!(action.word, "Update");
     }
 
     /// Ported: the face's verdict, joined to its board, is the details'
