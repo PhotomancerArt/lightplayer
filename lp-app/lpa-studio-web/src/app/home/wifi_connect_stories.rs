@@ -145,6 +145,7 @@ fn remembered_tile(connect: Option<UiWifiConnect>) -> Element {
         projects: Vec::new(),
         examples: Vec::new(),
         devices,
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,

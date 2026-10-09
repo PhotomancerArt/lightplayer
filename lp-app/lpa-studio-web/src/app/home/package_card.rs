@@ -273,7 +273,9 @@ pub(crate) fn PackageCardMenu(
         PackageHealth::UpgradesOnOpen { found } => Some(found),
         _ => None,
     };
-    let association = card.on_device.clone();
+    // The boards that play this project, by name (the join's answer;
+    // P05 words and places the line).
+    let association = (!card.on_boards.is_empty()).then(|| card.on_boards.join(", "));
     let live = live_presence_line(&card);
 
     rsx! {
@@ -325,11 +327,11 @@ pub(crate) fn PackageCardMenu(
                     if let Some(provenance) = card.provenance.clone() {
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "{provenance}" }
                     }
-                    // the association parity line yields to the LIVE
-                    // indication when the device is actually here
-                    if let Some(device) = association {
+                    // the boards line yields to the LIVE indication when
+                    // the device is actually here
+                    if let Some(boards) = association {
                         p { class: "tw:m-0 tw:text-xs tw:text-status-good-foreground",
-                            "On {device} ✓"
+                            "On {boards}"
                         }
                     }
                     // D28 runtime presence, in full: the aggregate line
@@ -694,7 +696,7 @@ mod tests {
             slug: "2026-07-09-1421-basic".to_string(),
             last_saved_at: None,
             provenance: None,
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: PackageHealth::Ready,

@@ -44,7 +44,7 @@ fn pattern_card(exports: Vec<String>) -> UiPackageCard {
         slug: "2026-08-06-0930-sparkle-pack".to_string(),
         last_saved_at: Some(STORY_NOW - 3.0 * 3600.0),
         provenance: None,
-        on_device: None,
+        on_boards: Vec::new(),
         open_elsewhere: false,
         target: None,
         health: PackageHealth::Ready,

@@ -422,7 +422,7 @@ mod tests {
             slug: "2026-08-30-porch".to_string(),
             last_saved_at: None,
             provenance: None,
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: crate::app::library::PackageHealth::Ready,
