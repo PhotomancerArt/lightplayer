@@ -4846,8 +4846,9 @@ walk-migration-emu *args:
     node scripts/emu/walk-migration-emu.mjs {{ args }}
 
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
-# → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
-# C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
+# → identify → push → the card's picture → Play → idle → knob, over `?ble=emu`
+# against an emulated C6, and the bytes/s the card and an idle Play-mode
+# Studio put on a `ble:` link (wire bytes over the emulated USB link, not air).
 # Needs a Studio on this worktree's port, like walk-no-board — or
 # `--serve-release` (after `just studio-web-story-build`), which serves the
 # release bundle itself. Not CI.
