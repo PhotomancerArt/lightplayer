@@ -4411,6 +4411,20 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# The flash-tears calibration: every committed `flash-tears` transcript
+# (lp-emu/transcripts/esp32c6/flash-tears/) sorted into tear shapes, written
+# into the report's generated block. Host only — reads transcripts, never a
+# port. Re-run after every batch of the CX1 sitting. `--json` for one line
+# per cut; with any argument the tables go to stdout instead.
+flash-tears-analyze *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{ args }}" ]; then
+        scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.md
+    else
+        scripts/emu/flash-tears-analyze.py {{ args }}
+    fi
+
 # The classic ESP32 (v3) machine's speed probe: three pinned reference images
 # at t1 — the only grade this machine has — both cores at the default
 # quantum, best of two runs, reported as user seconds, instructions/second in
