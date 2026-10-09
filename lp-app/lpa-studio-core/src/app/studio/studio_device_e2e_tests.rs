@@ -186,6 +186,9 @@ mod relay_connect_tests;
 /// identifies, refuses firmware, is never given keys, and comes back after
 /// its leg drops.
 mod relay_link_tests;
+/// Unlock as an offer, `devices/<board>/unlock`, on boards reached over
+/// Bluetooth that hold nothing, or only play.
+mod unlock_tests;
 /// Reaching a board over Wi‑Fi without a flag: its remembered address, an
 /// address typed into the add slot.
 mod wifi_connect_tests;
