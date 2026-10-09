@@ -70,6 +70,7 @@ number — not an emulator or silicon measurement.
 cargo run --release -p lp-store-bench -- smoke --candidates mem,mem-broken
 cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads 'push:c40;save:c13' --seeds 1,2
 cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads save:c40 --tears calibrated   # CX1's measured tears
+cargo run --release -p lp-store-bench -- smoke --candidates t1 --tears calibrated
 cargo run --release -p lp-store-bench -- double --candidates f2 --workloads save:c13
 cargo run --release -p lp-store-bench -- random --candidates s1 --seeds 8 --steps 300
 cargo run --release -p lp-store-bench -- measure --candidates f1,f2,s1,t1 --workloads 'push:c40;save:c40' --min-sectors
@@ -111,8 +112,12 @@ run" lists the units still queued at the end. `report` renders `report.md`
 (headline, cut totals with a replay command per failure, measures, fill, the
 T1 dial Pareto front) and `summary.json`.
 
-`sweep` and `double` take `--tears` (comma-separated tear model names;
-default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s `TearModel::ALL`).
+`sweep`, `double` and `random` take `--tears` (comma-separated tear model
+names; default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s
+`TearModel::ALL`; a walk draws each cut's model from the list). `smoke
+--tears <names>` runs every driver of the smoke under those models; without
+it the smoke is what it always was (the sweeps under the three guessed
+models, the double cut under `random_bits`).
 `calibrated` is the model measured on a real part (CX1, 200 cuts:
 `docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
 read `0x00` from the front or throughout, or silently read erased; it runs

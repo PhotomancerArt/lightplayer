@@ -171,16 +171,23 @@ newest of two copies indexed; the `LpFs` adapter against `LpFsMemory`; the
 format golden.
 
 **The cut sweeps** (`test_support::sweep`): for each step, every sampled
-cut point × every tear model (clean, byte-prefix, random-bits; torn erases
-leave weak bits): cut, power-cycle, mount, the **whole state** must be the
-old or the new one; a step that did not land is re-run (every third with a
-second cut inside the recovery) and must reach the new state, also after a
-remount. Workloads: per-call commits (put, panel, append, delete-tree,
+cut point × every tear model (by default the three guessed ones: clean,
+byte-prefix, random-bits; torn erases leave weak bits): cut, power-cycle,
+mount, the **whole state** must be the old or the new one; a step that did
+not land is re-run (every third with a second cut inside the recovery) and
+must reach the new state, also after a remount, with no sector retired (no
+sweep wears one out, so a retirement would be a tear mistaken for wear).
+Workloads: per-call commits (put, panel, append, delete-tree,
 delete) at `record_max` 256 and 1024; a transaction of ten puts and a
 delete-and-repush in one slot; a 40 KB file appended in 4 KiB calls; a
 deflated push in a transaction; GC-forcing churn on 10 sectors at 256 and
 1024. `LP_TREE_STORE_SWEEP_CUTS=1000000 LP_TREE_STORE_SWEEP_STEPS=12 cargo
-test --release -p lp-tree-store cut_sweep` runs every cut point.
+test --release -p lp-tree-store cut_sweep` runs every cut point;
+`LP_TREE_STORE_SWEEP_TEARS=calibrated` (or any of `lp-nor-sim`'s
+`TearModel::NAMED`, comma-separated) picks the tear models — the torn-header
+test (`a_torn_kill_erase_or_header_program_never_reads_as_newer`) follows the
+same dial — and `LP_TREE_STORE_SWEEP_SECTORS=128` the geometry of every sweep
+but the GC one, whose point is a small flash.
 
 ## Code size (RV32)
 
@@ -427,7 +434,92 @@ B in 1,376 reads.
   refusal and that header the append and GC sweeps fail (a torn header
   left the magic in front of a half-programmed version). Version 2 was
   9,819. The default run samples them in < 20 s.
-- `lp-store-bench smoke`, format version 3: T1 stored 862 cases + 25
-  random-walk cuts, T1 host_deflate 859 + 25, **0 failures, 0 non-atomic**
-  (version 2: 853 + 25 and 856 + 25; F2, which this format does not touch,
-  was 0 failures, 153 non-atomic at P7 and was not re-run).
+- `lp-store-bench smoke`, format version 3 after the size pass: T1 stored
+  865 cases + 25 random-walk cuts, T1 host_deflate 865 + 25, **0 failures,
+  0 non-atomic** (P9: 862 + 25 and 859 + 25; version 2: 853 + 25 and
+  856 + 25; F2, which this format does not touch, was 0 failures, 153
+  non-atomic at P7 and was not re-run).
+
+### Power cuts under the calibrated tears (P10)
+
+`TearModel::Calibrated` is the tear measured on a real C6's flash (CX1, 200
+cuts, `docs/reports/2026-10-08-c6-nor-tear-calibration.md` §5): a torn
+erase pre-programs the sector to `0x00` front to back before lifting it, so
+it leaves a `0x00` run from offset 0, all `0x00`, a zero residue with weak
+bits, or a sector that reads `0xFF` (silently, 101 of 166 erase cuts); a
+torn program stops on a 32-byte command or a 4-byte word. The five forced
+shapes (`calibrated_zeroing`, `_all_zero`, `_erasing`, `_reads_ff_weak`,
+`_reads_ff`) make every torn erase that one state. All numbers below are the
+**lp-nor-sim simulator**, release builds, every cut point; the store's code
+is `7bef0e91b`'s (P10 changed only the sweeps and the bench's drivers).
+
+**0 failures and 0 non-atomic outcomes under every model, in every row.**
+The cut points are the workload's, not the model's, so each row's cases and
+torn erases are the same under all nine models; only what a torn operation
+leaves differs.
+
+In-crate sweeps (`LP_TREE_STORE_SWEEP_CUTS=1000000
+LP_TREE_STORE_SWEEP_STEPS=12`), per model, under each of `clean`,
+`byte_prefix`, `random_bits`, `calibrated` and the five forced shapes:
+
+| geometry | cuts | of them torn erases | double cuts | failures | sectors retired |
+|---|---:|---:|---:|---:|---:|
+| the sweeps' own (16/24/32/16; GC churn on 10) | 3,321 | 71 | 1,085 | 0 | 0 |
+| 128 sectors (all but GC churn) | 941 | 19 | 301 | 0 | 0 |
+| 176 sectors (all but GC churn) | 941 | 19 | 301 | 0 | 0 |
+
+(3,321 = per-call 130 + 102, transaction 279, append 405, deflated push 25,
+GC churn 1,512 + 868; × 3 guessed models = the 9,963 above.) The torn-header
+test (a format over a live store cut at every op × 24 seeds, every header
+read 4×: never reads as a newer format) also passes under all nine.
+
+`lp-store-bench sweep` (exhaustive single cut, seeds 1 and 2), the same
+counts at 128 and at 176 sectors and under every one of the nine models:
+
+| candidate | workload | cases | of them torn erases | failures | non-atomic |
+|---|---|---:|---:|---:|---:|
+| t1 | save:c40 | 1,364 | 30 | 0 | 0 |
+| t1 | panel:c40 | 1,830 | 22 | 0 | 0 |
+| t1 | push:c40 | 3,288 | 108 | 0 | 0 |
+| t1@codec=host_deflate | save:c40 | 1,344 | 26 | 0 | 0 |
+| t1@codec=host_deflate | panel:c40 | 1,830 | 22 | 0 | 0 |
+| t1@codec=host_deflate | push:c40 | 1,890 | 42 | 0 | 0 |
+
+`lp-store-bench double` (sampled first cuts, a second cut in the recovery),
+under `calibrated` at 128 and 176 sectors and under the guessed three at 128:
+
+| candidate | workload | cases | of them torn erases | failures |
+|---|---|---:|---:|---:|
+| t1 | save:c40 | 2,560 | 32 | 0 |
+| t1 | panel:c40 | 12,512 | 176 | 0 |
+| t1 | push:c40 | 256 | 0 | 0 |
+| t1@codec=host_deflate | save:c40 | 2,560 | 0 | 0 |
+| t1@codec=host_deflate | panel:c40 | 12,512 | 176 | 0 |
+| t1@codec=host_deflate | push:c40 | 256 | 0 | 0 |
+
+`lp-store-bench smoke --tears <model>` at 128 and 176, each of `calibrated`
+and the five forced shapes: 299 cases (2 torn erases) + 25 random-walk cuts
+per codec, 0 failures, 0 non-atomic.
+
+Why the shapes change nothing here: mount marks every sector without a
+trusted header "needs erase" (`sector_table.rs` `NEEDS_ERASE`), and a
+sector is opened only after this session erased it and read it back as
+`0xFF` (`RecordLog::kill_and_erase`), so a torn erase in any state —
+`0x00` throughout, a residue, or one that reads erased — is erased again
+before it holds a record. The header's magic is programmed last
+(P9b), so a `0x00` run never meets a header that reads newer.
+
+What this does not cover: the model is one part on one board (JEDEC
+`0x464016`); weak bits are the 8 reads the calibration took, and retention
+of a sector that read erased after a torn erase is not measured (the store
+re-erases it, which is why it does not matter here unless a fully erased
+sector itself drifts); the model counts a program's 32-byte commands from
+the start of the in-flight page operation, and the store's records start
+at any offset, while every silicon program the calibration saw was
+page-aligned — whether the ROM's commands start at the address or at a
+32-byte boundary for an unaligned program is unmeasured. The c40 workloads
+peak at 71 of 128 sectors fault-free (`measure`: stored save 71, panel 67,
+push 56; host_deflate 36 / 34 / 23), which is why 176 reads the same, and
+few if any of their torn erases can be of a GC victim (a sector still
+holding records); the in-crate GC churn sweep (10 sectors, 16–17 GC runs a
+sweep) is where torn erases of collected sectors are met.
