@@ -2549,7 +2549,8 @@ fn device_pick_popover_new_tab() -> Element {
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
                     offer: pick_popover_push(),
-                    card: pick_popover_card(),
+                    board_id: pick_popover_card().board_id,
+                    board_title: pick_popover_card().title,
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
                     initially_open: true,
@@ -2623,7 +2624,8 @@ fn device_pick_popover_open() -> Element {
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
                     offer: pick_popover_push(),
-                    card: pick_popover_card(),
+                    board_id: pick_popover_card().board_id,
+                    board_title: pick_popover_card().title,
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
                     initially_open: true,

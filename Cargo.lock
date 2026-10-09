@@ -6660,6 +6660,7 @@ dependencies = [
  "base64 0.22.1",
  "dioxus",
  "dioxus-icons",
+ "dioxus-ssr",
  "futures-util",
  "gloo-net",
  "gloo-timers",

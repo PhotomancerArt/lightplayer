@@ -3800,7 +3800,7 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the empty face's primary verb is live: {card:?}"
     );
     // The picker really is built from the gallery's two lists.
-    let offer = crate::push_offer(&card, &[], &[]);
+    let offer = crate::push_offer(card.board_id.as_deref(), &[], &[]);
     assert!(
         offer.new_project_unavailable.is_some(),
         "a board that has not named itself cannot have a starter generated: {offer:?}"

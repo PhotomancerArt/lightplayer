@@ -129,11 +129,10 @@ use lpa_studio_core::{
     ActionEnablement, DeviceActivityView, DeviceCardFeedView, DeviceEscape, DeviceFeedOp, DeviceId,
     DeviceLoadedProject, DeviceStatus, DeviceView, FeedLiveness, OfferArgs, PendingLinkView,
     PickedFirmwareFile, RENAME_NAME_PARAM, UiAction, UiDeviceUpdate, UiExampleCard, UiLinkKind,
-    UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateLight,
-    UpdateRowKind, check_backup_file, device_firmware_line, device_identity_line,
-    device_restore_from_file_action, device_status_kind, escape_verb,
-    firmware_face_preview_sentence, firmware_file_action, pending_firmware_line,
-    pending_identity_rows,
+    UiOffer, UiPackageCard, UiRuntimeBand, UiStatus, UiStatusKind, UiUnlockOffer, UpdateRowKind,
+    check_backup_file, device_firmware_line, device_identity_line, device_restore_from_file_action,
+    device_status_kind, escape_verb, firmware_face_preview_sentence, firmware_file_action,
+    pending_firmware_line, pending_identity_rows,
 };
 
 use super::device_pick_popover::{
@@ -142,6 +141,7 @@ use super::device_pick_popover::{
 use super::device_terminal::DeviceTerminal;
 use super::play_feed_text::frame_age_label;
 use crate::app::agent::AgentMark;
+use crate::app::board_card::board_picture::UpdateLightSlot;
 use crate::app::node::lamp_view::LampView;
 use crate::base::{
     DetailPopover, DetailSection, PopoverButton, PopoverCloseHandle, PopoverPlacement, StudioIcon,
@@ -622,7 +622,8 @@ pub(crate) fn DeviceRosterCard(
                                 AgentMark { path: push.path.clone(),
                                     ProjectPickPopover {
                                         offer: push,
-                                        card: card.clone(),
+                                        board_id: card.board_id.clone(),
+                                        board_title: card.title.clone(),
                                         projects: projects.clone(),
                                         examples: examples.clone(),
                                         mode: ProjectPickMode::Verb,
@@ -659,7 +660,8 @@ pub(crate) fn DeviceRosterCard(
                         AgentMark { path: push.path.clone(),
                             ProjectPickPopover {
                                 offer: push,
-                                card: card.clone(),
+                                board_id: card.board_id.clone(),
+                                board_title: card.title.clone(),
                                 projects: projects.clone(),
                                 examples: examples.clone(),
                                 on_action,
@@ -2010,7 +2012,7 @@ fn preview_slot(
         update.and_then(|update| update.light.map(|light| (light, update.sentence.clone())))
     {
         return rsx! {
-            UpdateLightSlot { light, sentence }
+            UpdateLightSlot { light, sentence: Some(sentence) }
         };
     }
     // An update with no light is one the show keeps running through (core:
@@ -2064,36 +2066,6 @@ fn preview_slot(
                 }
             }
         }
-    }
-}
-
-/// The preview slot while the show has stopped for an update: a strip of
-/// lamps lit in the board's light (dark yellow: updating; dark red:
-/// waiting for its firmware), solid, so the card and the porch agree —
-/// and the update's sentence under it.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UpdateLightSlot(light: UpdateLight, sentence: String) -> Element {
-    rsx! {
-        div { class: "{preview_frame_class()} ux-update-light {update_light_class(light)}",
-            div { class: "ux-update-leds", aria_hidden: "true",
-                for lamp in 0..UPDATE_LIGHT_LAMPS {
-                    span { key: "{lamp}", class: "ux-update-led" }
-                }
-            }
-            p { class: "ux-update-light-sentence", title: "{sentence}", "{sentence}" }
-        }
-    }
-}
-
-/// How many lamps the light strip draws: one row across the slot.
-const UPDATE_LIGHT_LAMPS: usize = 16;
-
-/// The light's colour family (style.css `--studio-update-light-*`).
-fn update_light_class(light: UpdateLight) -> &'static str {
-    match light {
-        UpdateLight::DarkYellow => "ux-update-light-yellow",
-        UpdateLight::DarkRed => "ux-update-light-red",
     }
 }
 
@@ -2403,6 +2375,7 @@ fn confirm(_message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpa_studio_core::UpdateLight;
 
     /// A test card's link: Bluetooth when the card says so, else USB.
     fn card_link(card: &DeviceView) -> UiLinkKind {

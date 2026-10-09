@@ -8,6 +8,8 @@ pub mod account;
 pub(crate) mod affordance;
 /// The agent chats' shared parts and the app chat's window.
 pub(crate) mod agent;
+/// The board card's pieces, drawn from core's `UiBoardCard`.
+pub mod board_card;
 #[cfg(feature = "stories")]
 pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]

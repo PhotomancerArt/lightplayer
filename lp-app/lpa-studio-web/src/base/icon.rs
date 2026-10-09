@@ -1,13 +1,14 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Activity, ArrowUpRight, Asterisk, Bluetooth, Bot, Boxes, ChartLine, Check, ChevronDown,
-    ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleDot, CircleMinus,
-    CircleQuestionMark, Clock, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag,
+    Activity, ArrowUpRight, Asterisk, Binary, Bluetooth, Bot, Boxes, ChartLine, Check, ChevronDown,
+    ChevronLeft, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, CircleDot, CircleMinus,
+    CircleQuestionMark, Clock, Cloud, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag,
     FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, Lightbulb, Link,
     Link2, Link2Off, ListMusic, Locate, LocateFixed, Lock, LockOpen, Maximize2, Minimize2,
-    MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plus, Power, Radio, RadioTower, RefreshCw,
-    Route, Save, Settings, Smartphone, Sparkles, SquareArrowRight, SquareTerminal, Trash2,
-    TriangleAlert, Undo2, Upload, Usb, Users, Waypoints, Wifi, X, Zap,
+    MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus, Power, Radio, RadioTower,
+    RefreshCw, RotateCcw, Route, Save, Settings, Smartphone, Sparkles, SquareArrowRight,
+    SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb, Users, Waypoints, Wifi, X,
+    Zap,
 };
 
 #[component]
@@ -105,6 +106,14 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::AccessLocked => rsx! { Lock { size } },
         StudioIconName::AccessDone => rsx! { CircleCheck { size } },
         StudioIconName::AccessRegenerate => rsx! { RefreshCw { size } },
+        StudioIconName::Project => rsx! { Asterisk { size } },
+        StudioIconName::Chip => rsx! { Cpu { size } },
+        StudioIconName::Firmware => rsx! { Binary { size } },
+        StudioIconName::Cloud => rsx! { Cloud { size } },
+        StudioIconName::Newer => rsx! { CircleArrowUp { size } },
+        StudioIconName::Connect => rsx! { Plug { size } },
+        StudioIconName::Disconnect => rsx! { Unplug { size } },
+        StudioIconName::Restart => rsx! { RotateCcw { size } },
     }
 }
 
@@ -127,6 +136,20 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("grow") => Some(StudioIconName::Grow),
         Some("agent") => Some(StudioIconName::Agent),
         Some("show") => Some(StudioIconName::Show),
+        // The board card's tokens (`lpa_studio_core::UiBoardCard`): the
+        // bars' icons, the primary's, and the device offers' own.
+        Some("project") => Some(StudioIconName::Project),
+        Some("chip") => Some(StudioIconName::Chip),
+        Some("firmware") | Some("flash") => Some(StudioIconName::Firmware),
+        Some("cloud") => Some(StudioIconName::Cloud),
+        Some("lock") => Some(StudioIconName::AccessLocked),
+        Some("check") => Some(StudioIconName::StepComplete),
+        Some("retry") => Some(StudioIconName::Refresh),
+        Some("info") => Some(StudioIconName::Info),
+        Some("reset") => Some(StudioIconName::Restart),
+        Some("connect") => Some(StudioIconName::Connect),
+        Some("disconnect") => Some(StudioIconName::Disconnect),
+        Some("cancel") => Some(StudioIconName::Cancel),
         _ => None,
     }
 }
@@ -270,6 +293,24 @@ pub enum StudioIconName {
     AccessDone,
     /// Circling arrows: another random password.
     AccessRegenerate,
+    /// ✳: the board card's project bar — what a board plays (the spike's
+    /// spark; a play triangle means play and nothing else).
+    Project,
+    /// A chip with its pins: the board card's hardware bar.
+    Chip,
+    /// Ones and zeros: the board card's firmware bar, and Install.
+    Firmware,
+    /// A cloud: a board reached through lightplayer.app, and "also cloud".
+    Cloud,
+    /// A circled up-arrow: a blue (Live) bar's mark — a newer firmware is
+    /// offered.
+    Newer,
+    /// A plug: Connect, where no link names the way (an attached port).
+    Connect,
+    /// An unplugged plug: Disconnect.
+    Disconnect,
+    /// A counter-clockwise turn: Reset, the board restarting.
+    Restart,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable
@@ -343,6 +384,43 @@ mod tests {
                 node_kind_icon(slug),
                 StudioIconName::NodeKind(NodeKindIcon::Generic),
                 "slug {slug} must map to its own kind glyph"
+            );
+        }
+    }
+
+    /// Every icon token the board card emits — the bars', the primary's,
+    /// and the device offers' own — draws a glyph: no button on a card
+    /// draws without its icon.
+    #[test]
+    fn every_board_card_token_has_a_glyph() {
+        for token in [
+            "project",
+            "chip",
+            "firmware",
+            "flash",
+            "cloud",
+            "lock",
+            "check",
+            "play",
+            "retry",
+            "upload",
+            "add",
+            "download",
+            "info",
+            "edit",
+            "wifi",
+            "bluetooth",
+            "usb",
+            "revert",
+            "remove",
+            "reset",
+            "connect",
+            "disconnect",
+            "cancel",
+        ] {
+            assert!(
+                action_icon_name(Some(token)).is_some(),
+                "`{token}` draws no glyph"
             );
         }
     }

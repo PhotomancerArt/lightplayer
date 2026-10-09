@@ -164,6 +164,34 @@ impl PickTab {
     }
 }
 
+/// A verb-mode trigger drawn by its surface rather than in the offer's own
+/// words: the board card's word and icon on the card's look (a bar's flush
+/// end, the name bar's primary, a details row). Presentational only — the
+/// popover still owns the button, and the press is still the offer's.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct VerbTrigger {
+    /// The word on the trigger (and its accessible name).
+    pub word: String,
+    /// The icon leading the word.
+    pub icon: Option<StudioIconName>,
+    /// The trigger button's classes, open or not.
+    pub class: &'static str,
+}
+
+impl VerbTrigger {
+    /// The trigger's content: the icon, then the word.
+    fn content(&self) -> Element {
+        rsx! {
+            if let Some(icon) = self.icon {
+                span { class: "tw:inline-flex tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
+                    StudioIcon { name: icon, size: 12 }
+                }
+            }
+            span { class: "tw:truncate", "{self.word}" }
+        }
+    }
+}
+
 /// How the gallery pick is being asked for.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProjectPickMode {
@@ -191,7 +219,12 @@ pub(crate) enum ProjectPickMode {
 pub(crate) fn ProjectPickPopover(
     /// `devices/<board>/push`.
     offer: UiOffer,
-    card: DeviceView,
+    /// The board id its hello carried: whether a starter can be generated
+    /// for it ([`push_offer`]). It is all the gallery reads of the board.
+    board_id: Option<String>,
+    /// The board's name: what a new project is called if the field stays
+    /// blank.
+    board_title: String,
     projects: Vec<UiPackageCard>,
     examples: Vec<UiExampleCard>,
     #[props(default = ProjectPickMode::Row)] mode: ProjectPickMode,
@@ -202,6 +235,10 @@ pub(crate) fn ProjectPickPopover(
     /// already chose (a story's pick, the app agent's).
     #[props(default)]
     initial_args: OfferArgs,
+    /// Verb mode's trigger, drawn by the surface (the board card); `None`
+    /// keeps "Replace…".
+    #[props(default)]
+    verb_trigger: Option<VerbTrigger>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Every hook first: the "nothing to offer" row below is an early
@@ -221,7 +258,7 @@ pub(crate) fn ProjectPickPopover(
         };
     };
     let current = args.read().clone();
-    let full = push_offer(&card, &projects, &examples);
+    let full = push_offer(board_id.as_deref(), &projects, &examples);
     let choices = push_choices(&offer, &full);
     let picked_key = picked_choice(&offer, source, &current);
     let chosen = picked_key
@@ -243,7 +280,7 @@ pub(crate) fn ProjectPickPopover(
         .map(|choice| choice.key.clone())
         .unwrap_or_else(|| "no-pick".to_string());
     let press_args = push_press_args(&current, chosen.as_ref());
-    let board_title = card.title.trim().to_string();
+    let board_title = board_title.trim().to_string();
     let panel = rsx! {
         ProjectPickPanel {
             offer: offer.clone(),
@@ -259,12 +296,20 @@ pub(crate) fn ProjectPickPopover(
     match mode {
         ProjectPickMode::Verb => rsx! {
             PopoverButton {
-                class: LINE_VERB_CLASS.to_string(),
-                open_class: LINE_VERB_CLASS.to_string(),
-                trigger: rsx! {
-                    span { "{REPLACE_LABEL}" }
+                class: verb_trigger.as_ref().map_or(LINE_VERB_CLASS, |trigger| trigger.class).to_string(),
+                open_class: verb_trigger.as_ref().map_or(LINE_VERB_CLASS, |trigger| trigger.class).to_string(),
+                trigger: match &verb_trigger {
+                    Some(trigger) => trigger.content(),
+                    None => rsx! {
+                        span { "{REPLACE_LABEL}" }
+                    },
                 },
-                label: "Choose something else to put on this board".to_string(),
+                label: verb_trigger
+                    .as_ref()
+                    .map_or_else(
+                        || "Choose something else to put on this board".to_string(),
+                        |trigger| trigger.word.clone(),
+                    ),
                 title: offer.summary().to_string(),
                 popup_class: GALLERY_POPUP_CLASS.to_string(),
                 chrome_class: "ux-popover-chrome-neutral".to_string(),
@@ -683,6 +728,10 @@ pub(crate) fn BoardPickPopover(
     /// already chose (the app agent's).
     #[props(default)]
     initial_args: OfferArgs,
+    /// Verb mode's trigger, drawn by the surface (the board card); `None`
+    /// keeps the quiet chip in the offer's own words.
+    #[props(default)]
+    verb_trigger: Option<VerbTrigger>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // Hooks before the early return, for the same reason the gallery's are.
@@ -722,12 +771,17 @@ pub(crate) fn BoardPickPopover(
     match mode {
         BoardPickMode::Verb => rsx! {
             PopoverButton {
-                class: quiet_action_class().to_string(),
-                open_class: quiet_action_class().to_string(),
-                trigger: rsx! {
-                    span { "{offer.label()}" }
+                class: verb_trigger.as_ref().map_or(quiet_action_class(), |trigger| trigger.class).to_string(),
+                open_class: verb_trigger.as_ref().map_or(quiet_action_class(), |trigger| trigger.class).to_string(),
+                trigger: match &verb_trigger {
+                    Some(trigger) => trigger.content(),
+                    None => rsx! {
+                        span { "{offer.label()}" }
+                    },
                 },
-                label: offer.label().to_string(),
+                label: verb_trigger
+                    .as_ref()
+                    .map_or_else(|| offer.label().to_string(), |trigger| trigger.word.clone()),
                 title: offer.summary().to_string(),
                 popup_class: BOARD_POPUP_CLASS.to_string(),
                 chrome_class: "ux-popover-chrome-neutral".to_string(),
