@@ -482,6 +482,48 @@ fn extract_will_not_write_outside_its_directory() {
     assert_eq!(ex.skipped.len(), 1);
 }
 
+#[test]
+fn damaged_images_never_panic_the_inspector() {
+    let c = cfg();
+    let mut st = mount(formatted(NorGeometry::c6(16), &c), &c);
+    st.put("/a/b.json", &text(1, 3000)).unwrap();
+    st.put("/big.bin", &noise(2, 9000)).unwrap();
+    st.put("/p/.lp/panel.json", b"{}").unwrap();
+    let image = image_of(st.flash());
+    let mut x = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = move || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    for round in 0..400 {
+        let mut damaged = image.clone();
+        // Bytes anywhere, and now and then a burst inside the first sector
+        // of records, where the directories and the root live.
+        for _ in 0..1 + round % 5 {
+            let at = if round % 3 == 0 {
+                (next() % 3000) as usize
+            } else {
+                (next() % damaged.len() as u64) as usize
+            };
+            damaged[at] = next() as u8;
+        }
+        let img = StoreImage::open(&damaged, None).unwrap();
+        let _ = img.check(&mut SoftSha256, None);
+        let _ = img.extract();
+        let _ = img.report().mount.clone();
+    }
+    // Pure noise, and every length near a sector boundary.
+    for len in [512usize, 513, 4096, 4097, 8191, 16384] {
+        let noise: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+        if let Ok(img) = StoreImage::open(&noise, None) {
+            let _ = img.check(&mut SoftSha256, None);
+            let _ = img.extract();
+        }
+    }
+}
+
 // ---- helpers -----------------------------------------------------------------
 
 fn image_of(f: &NorFlashSim) -> Vec<u8> {
