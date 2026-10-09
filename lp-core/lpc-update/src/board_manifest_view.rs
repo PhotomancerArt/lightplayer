@@ -46,7 +46,7 @@ impl<'a> BoardManifestView<'a> {
     /// `'static` strings instead.
     #[must_use]
     pub fn with_text<'b>(
-        self,
+        &self,
         target: &'b str,
         chip: &'b str,
         version: &'b str,

@@ -96,20 +96,28 @@ pub fn install(
     // loop's first hello (which would stall the loop for the core's hash,
     // ~0.8 s emulated); dropped at once, so its buffers cost the engine's
     // heap nothing until a host arrives — the view kept owns no heap.
-    let at_install = new_edge(&setup)
-        .session
-        .manifest_view(super::update_edge::now_ms())
-        .with_text(
-            setup.identity.target,
-            setup.identity.chip,
-            setup.identity.version,
-        );
+    let at_install = resident_manifest(&setup);
     *RUNNING.0.borrow_mut() = Some(Running {
         setup,
         edge: None,
         at_install,
     });
     fw_esp32_common::usb_link::set_update_hook(usb_hook);
+}
+
+/// The manifest at install, borrowing the image's own strings. Its own
+/// frame (`inline(never)`), so the edge it reads from does not stay on the
+/// stack beside the view it returns.
+#[inline(never)]
+fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
+    let edge = new_edge(setup);
+    edge.session
+        .manifest_view(super::update_edge::now_ms())
+        .with_text(
+            setup.identity.target,
+            setup.identity.chip,
+            setup.identity.version,
+        )
 }
 
 /// The board manifest the hello carries (`ServerHello::firmware`, wire
