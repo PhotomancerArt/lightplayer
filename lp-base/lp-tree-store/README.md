@@ -153,6 +153,56 @@ under it, one change; any other prefix is `InvalidPath`),
 `flash`/`flash_mut`, `into_flash`, `into_parts`. After `StoreError::Flash`
 the store must be dropped.
 
+## Inspecting an image: `lp-cli hardware tree`
+
+Feature `inspect` (host tooling, never on a device; it adds `serde` for
+`--json`) is `StoreImage`: a read-only view of a raw image of the partition
+that repeats mount's decisions over the bytes instead of a `Flash`, using the
+store's own decoders. It never mounts, so it reads where mount refuses, and
+`lp-cli hardware tree` is built on it. Every command reads a raw partition
+image (`--image`: what `lp-cli hardware lpfs save` writes as
+`raw-lpfs-*.bin`, or a whole 4 MiB chip image) or a board (`--port`, over the
+bootloader as `lpfs report` does), and **never writes**:
+
+```bash
+lp-cli hardware tree inspect --image raw-lpfs-0x350000-123.bin [--records] [--json]
+lp-cli hardware tree check   --image raw-lpfs-0x350000-123.bin [--reread second.bin] [--json]
+lp-cli hardware tree extract --image raw-lpfs-0x350000-123.bin --out ./recovered
+```
+
+- **`inspect`** prints the sector table (state `valid` / `blank` / `killed` /
+  `needs-erase` / `NEWER` / `UNSUPPORTED`, head kind, seq, erase count,
+  records, live/used bytes, `RETIRED`, why a sector stopped being read), the
+  roots found and the one mount would choose (and why any was passed over),
+  the file tree with sizes, and live against garbage bytes. `--records`
+  lists every record (kind, codec, length, id, CRC, live/garbage/older copy);
+  `--json` is the library's `ImageReport` and always carries them.
+- **`check`** is the store's fsck. Beyond mount (which only needs every id a
+  root reaches to be present and parse) it recomputes every reachable id from
+  its bytes, inflates every chunk, checks multi levels and lengths, file
+  sizes against their entries, and every directory name against the writer's
+  rules (mount accepts a CRC-good tree whose names break them; `list` calls
+  such a name corrupt). It also accounts for the rest of the flash: every
+  sector that refuses the mount is named (`NEWER` = the magic and a format
+  version above this tool's, FORMAT.md "Sector" rule 0) with whether the
+  other sectors are a complete store, orphans, older copies (which must be
+  byte-identical), torn tails (a warning: a handled crash), retired sectors,
+  and, with `--reread` (or `--port`, which reads the board twice), sectors
+  that read differently. Exit **2** on any error-level finding; a missing
+  committed state is one. It never repairs.
+- **`extract`** writes the committed tree's files into a new or empty
+  directory. It reads the trusted sectors only, so it works on an image the
+  store refuses to mount (a leaked bit made one header read as a newer
+  version): the odd sector is reported and the rest extracted. A name that
+  could leave the directory, or a file whose path is also a directory, is
+  skipped and named (exit 2).
+
+Public API this added: `StoreImage` (`open`, `report`, `check`, `extract`),
+`detect_sector_size`, and the plain-data report types (`ImageReport` and its
+parts, `CheckReport`/`Finding`/`Severity`, `Extraction`). The tests hold it to
+the real mount (same root, same live bytes per sector, same files) on stores
+the writer made, to `tests/format_golden.hex`, and to forged images.
+
 ## Tests
 
 `cargo test -p lp-tree-store` (≈ 20 s debug, every test runs in parallel):

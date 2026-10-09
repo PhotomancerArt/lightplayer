@@ -32,6 +32,8 @@ mod gc_victim;
 mod heap_sort;
 #[cfg(feature = "host-deflate")]
 mod host_deflate;
+#[cfg(feature = "inspect")]
+mod image_inspect;
 #[cfg(feature = "lpfs")]
 mod lp_fs_tree;
 mod mount_walk;
@@ -79,6 +81,8 @@ pub use blob_codec::MAX_LOGICAL_CHUNK;
 pub use flash::Flash;
 #[cfg(feature = "host-deflate")]
 pub use host_deflate::{HostChunk, host_deflate_chunks};
+#[cfg(feature = "inspect")]
+pub use image_inspect::*;
 #[cfg(feature = "lpfs")]
 pub use lp_fs_tree::LpFsTree;
 pub use object_hasher::ObjectHasher;
