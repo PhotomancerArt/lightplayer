@@ -33,7 +33,8 @@ pub fn decode_blob_into(codec: ChunkCodec, payload: &[u8], out: &mut Vec<u8>) ->
         ChunkCodec::Stored => out.extend_from_slice(payload),
         ChunkCodec::Deflate => {
             out.resize(start + len, 0);
-            match lp_deflate::inflate(&payload[DEFLATE_PREFIX..], &mut out[start..], 0) {
+            let stream = payload.get(DEFLATE_PREFIX..)?;
+            match lp_deflate::inflate(stream, &mut out[start..], 0) {
                 Ok(n) if n == len => {}
                 _ => {
                     out.truncate(start);
