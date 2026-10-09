@@ -12,7 +12,9 @@ use lp_store_bench::driver_exhaustive::{
 };
 use lp_store_bench::driver_full_flash::{FullFlashParams, FullFlashSummary, full_flash};
 use lp_store_bench::driver_fuzz::{FuzzParams, FuzzSummary, fuzz};
-use lp_store_bench::driver_long::{LongParams, LongSummary, long_walk};
+use lp_store_bench::driver_long::{
+    LongCheckpoint, LongEnd, LongParams, LongSummary, long_walk, long_walk_resumable,
+};
 use lp_store_bench::driver_measure::{MeasureResult, measure, min_sectors};
 use lp_store_bench::driver_random::{RandomParams, random_walk};
 use lp_store_bench::{CorpusSet, Reproducer, Scoreboard, WorkloadSpec, replay};
@@ -139,6 +141,17 @@ enum Cmd {
         /// writes and re-pushes (keeps the flash near full: GC copies).
         #[arg(long)]
         edit_mix: bool,
+        /// Steps per piece (draws reseeded at each multiple; a walk may
+        /// pause there). 0 = one piece.
+        #[arg(long, default_value_t = 0)]
+        piece_steps: u64,
+        /// Where paused walks keep their checkpoints (resumed when present).
+        #[arg(long)]
+        checkpoint_dir: Option<PathBuf>,
+        /// Pause every walk at its first piece boundary past this
+        /// (`+<n>[smh]` or `HH:MM`); run again to go on.
+        #[arg(long)]
+        until: Option<String>,
     },
     /// Fill the store with unique copies of a project until it refuses, work
     /// at the edge with cuts in every step, then free space and recover.
@@ -177,6 +190,20 @@ enum Cmd {
         /// ones and `calibrated`.
         #[arg(long, default_value = "")]
         tears: String,
+    },
+    /// Mutation testing: every T1 mutant (`lp-tree-store`'s `mutants`
+    /// feature) through one fixed driver set; pass = each caught, the
+    /// unmutated store clean. Without the feature, re-runs itself through
+    /// `cargo run --release --features mutants`.
+    Mutants {
+        /// Mutant names, comma-separated (default: all; `none` = only the
+        /// unmutated store, which always runs first).
+        #[arg(long, default_value = "")]
+        only: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value_t = 8)]
+        threads: usize,
     },
     /// Fault-free measures (and the smallest partition each workload fits).
     Measure {
@@ -348,8 +375,17 @@ fn main() {
             tears,
             first_seed,
             edit_mix,
+            piece_steps,
+            checkpoint_dir,
+            until,
         } => {
             let ctx = Ctx::new(&common, "long");
+            let deadline = until
+                .as_deref()
+                .map(|u| lp_store_bench::overnight::parse_deadline(u).unwrap_or_else(|e| die(&e)));
+            if deadline.is_some() && (checkpoint_dir.is_none() || piece_steps == 0) {
+                die("--until needs --checkpoint-dir and --piece-steps");
+            }
             for (cand, cfg) in ctx.candidates() {
                 let runs: Vec<_> = (first_seed..first_seed + seeds)
                     .map(|seed| LongParams {
@@ -363,14 +399,17 @@ fn main() {
                         tears: tear_names(&tears),
                         wear: vec![],
                         edit_mix,
+                        piece_steps,
                     })
                     .collect();
                 use rayon::prelude::*;
                 let out: Vec<_> = runs
                     .par_iter()
-                    .map(|p| long_walk(cand.as_ref(), p, &ctx.corpora, &ctx.sink))
+                    .map(|p| {
+                        long_piece(cand.as_ref(), p, &ctx, checkpoint_dir.as_deref(), deadline)
+                    })
                     .collect();
-                for s in out {
+                for s in out.into_iter().flatten() {
                     print_long(&s);
                 }
             }
@@ -431,6 +470,7 @@ fn main() {
                 print_fuzz(&fuzz(cand.as_ref(), &p, &ctx.corpora, &ctx.sink));
             }
         }
+        Cmd::Mutants { only, out, threads } => mutants(&only, out, threads),
         Cmd::Measure {
             common,
             workloads,
@@ -755,6 +795,75 @@ fn print_measure(m: &MeasureResult) {
     );
 }
 
+/// One walk's piece: resume from `dir`'s checkpoint if there is one, run to
+/// the deadline (pausing at a piece boundary) or the end. `None` = paused.
+fn long_piece(
+    cand: &dyn lp_store_bench::Candidate,
+    p: &LongParams,
+    ctx: &Ctx,
+    dir: Option<&Path>,
+    deadline: Option<std::time::Instant>,
+) -> Option<LongSummary> {
+    let Some(dir) = dir else {
+        return Some(long_walk(cand, p, &ctx.corpora, &ctx.sink));
+    };
+    std::fs::create_dir_all(dir).unwrap_or_else(|e| die(&e.to_string()));
+    let stem = format!(
+        "long-{}{}-{}-{}{}",
+        p.candidate,
+        p.config
+            .dials_label()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>(),
+        p.config.sectors,
+        p.seed,
+        if p.edit_mix { "-edit" } else { "" }
+    );
+    let (json, img) = (
+        dir.join(format!("{stem}.ckpt.json")),
+        dir.join(format!("{stem}.img")),
+    );
+    if dir.join(format!("{stem}.done.json")).exists() {
+        eprintln!("{stem}: already done");
+        return None;
+    }
+    let resume = match (std::fs::read_to_string(&json), std::fs::read(&img)) {
+        (Ok(j), Ok(i)) => {
+            let ck: LongCheckpoint =
+                serde_json::from_str(&j).unwrap_or_else(|e| die(&e.to_string()));
+            if ck.params != *p {
+                die(&format!("{}: made by other params", json.display()));
+            }
+            eprintln!("{stem}: resuming at step {}", ck.next_step);
+            Some((ck, i))
+        }
+        _ => None,
+    };
+    match long_walk_resumable(cand, p, &ctx.corpora, &ctx.sink, resume, deadline) {
+        LongEnd::Paused(ck, image) => {
+            eprintln!(
+                "{stem}: paused at step {} (cuts {} gc runs {:?} failures {})",
+                ck.next_step, ck.summary.cuts, ck.summary.gc.gc_runs, ck.summary.failures
+            );
+            std::fs::write(&img, image).unwrap_or_else(|e| die(&e.to_string()));
+            std::fs::write(&json, serde_json::to_string(&ck).unwrap())
+                .unwrap_or_else(|e| die(&e.to_string()));
+            None
+        }
+        LongEnd::Done(s) => {
+            let _ = std::fs::remove_file(&img);
+            let _ = std::fs::remove_file(&json);
+            std::fs::write(
+                dir.join(format!("{stem}.done.json")),
+                serde_json::to_string(&s).unwrap(),
+            )
+            .unwrap_or_else(|e| die(&e.to_string()));
+            Some(s)
+        }
+    }
+}
+
 fn print_long(s: &LongSummary) {
     let opt = |v: Option<u64>| v.map(|v| v.to_string()).unwrap_or("-".into());
     println!(
@@ -791,6 +900,111 @@ fn print_long(s: &LongSummary) {
             .or(s.error.as_ref().map(|e| format!(" ERROR {e}")))
             .unwrap_or_default()
     );
+}
+
+#[cfg(feature = "mutants")]
+fn mutants(only: &str, out: Option<PathBuf>, threads: usize) {
+    use lp_store_bench::driver_mutants::run_mutants;
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global()
+        .ok();
+    let out = out.unwrap_or_else(|| PathBuf::from("target/lp-store-bench/mutants"));
+    let sink = Scoreboard::open(&out).unwrap_or_else(|e| die(&format!("{}: {e}", out.display())));
+    eprintln!("scoreboard: {}", out.join("scoreboard.jsonl").display());
+    let names: Vec<String> = only
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
+    let t0 = std::time::Instant::now();
+    let results = run_mutants(&names, &sink).unwrap_or_else(|e| die(&e));
+    let drivers: Vec<String> = results[0]
+        .drivers
+        .iter()
+        .map(|d| d.driver.clone())
+        .collect();
+    println!(
+        "{:<28} {:<10} {}",
+        "mutant",
+        "caught by",
+        drivers
+            .iter()
+            .map(|d| format!("{d:>11}"))
+            .collect::<String>()
+    );
+    let mut ok = true;
+    for r in &results {
+        let unmutated = r.mutant == "none";
+        ok &= if unmutated {
+            r.failures == 0
+        } else {
+            r.caught_by.is_some()
+        };
+        println!(
+            "{:<28} {:<10} {}",
+            r.mutant,
+            r.caught_by
+                .as_deref()
+                .unwrap_or(if unmutated { "(clean)" } else { "SURVIVED" }),
+            r.drivers
+                .iter()
+                .map(|d| format!("{:>11}", format!("{}/{}", d.failures, d.cases)))
+                .collect::<String>()
+        );
+    }
+    println!(
+        "(failures/cases per driver; a catch is a failure kind the unmutated store does not show in that driver; lp-nor-sim simulator)"
+    );
+    for r in &results {
+        for d in r.drivers.iter().filter(|d| d.failures > 0) {
+            println!(
+                "  {} {}: {:?} new {:?} first: {}",
+                r.mutant,
+                d.driver,
+                d.kinds,
+                d.new_kinds,
+                d.first.as_deref().unwrap_or("-")
+            );
+        }
+    }
+    println!(
+        "mutants: {} in {:.0} s",
+        if ok { "PASS" } else { "FAIL" },
+        t0.elapsed().as_secs_f64()
+    );
+    if !ok {
+        std::process::exit(1);
+    }
+}
+
+/// Without the feature: build and run this command again with it.
+#[cfg(not(feature = "mutants"))]
+fn mutants(only: &str, out: Option<PathBuf>, threads: usize) {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+    let mut cmd = std::process::Command::new(cargo);
+    cmd.args([
+        "run",
+        "--release",
+        "--manifest-path",
+        manifest,
+        "--features",
+        "mutants",
+        "--",
+        "mutants",
+        "--threads",
+        &threads.to_string(),
+    ]);
+    if !only.is_empty() {
+        cmd.args(["--only", only]);
+    }
+    if let Some(o) = out {
+        cmd.arg("--out").arg(o);
+    }
+    eprintln!("mutants: re-running with --features mutants");
+    let status = cmd.status().unwrap_or_else(|e| die(&format!("cargo: {e}")));
+    std::process::exit(status.code().unwrap_or(2));
 }
 
 fn label_of(cand: &str, cfg: &Option<lp_store_bench::CandidateConfig>) -> String {
@@ -833,6 +1047,9 @@ fn print_full_flash(s: &FullFlashSummary) {
             .or(s.error.as_ref().map(|e| format!(" ERROR {e}")))
             .unwrap_or_default()
     );
+    for f in s.failure_samples.iter().skip(1) {
+        println!("    also {f}");
+    }
 }
 
 fn print_fuzz(s: &FuzzSummary) {

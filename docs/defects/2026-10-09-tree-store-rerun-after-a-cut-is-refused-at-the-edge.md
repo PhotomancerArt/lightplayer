@@ -1,13 +1,13 @@
 ---
 status: open
 found: 2026-10-09      # test (M3 P2 long walk, lp-store-bench, lp-nor-sim)
-area: lp-tree-store `store_space.rs` `ensure_room` — GC's stall rule
+area: lp-tree-store `store_space.rs` `ensure_room` (GC's stall rule) and GC's victim choice
 class: budget-exhaustion
 related:
   - lp2025/2026-10-08-1017-tree-store-device-round
   - docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md
 ---
-# On a nearly full tree store, GC gives up on a re-run it can make room for: `NoSpace` after a cut
+# On a nearly full tree store, re-running a step after a cut is refused `NoSpace`
 
 **Symptom** — `lp-store-bench long` (the M3 long walk: one T1 store,
 128 sectors, the edit mix over c40 + c40reuse + c20 — the live set near
@@ -32,6 +32,27 @@ liveness is lost — no committed data: the store refuses a write it can hold
 until it is asked again. Instrumented by hand while finding it (the GC exit
 printed `stalls, free 14 best 14`); not fixed here (M3 reports; the store's
 fixes go in their own PR).
+
+**A second mechanism, the same symptom** — the full-flash driver
+(`lp-store-bench full-flash`: fill a 16-sector T1 with unique copies until it
+refuses, then saves, panel writes and re-pushes at the edge with sampled cuts)
+meets `rerun_failed: NoSpace` far more often, and most of those stay refused
+after another power cycle — `(a second attempt after a remount: NoSpace)` in
+the failure's detail (run_case now tries once more, for the record). With the
+stall rule disabled by hand (a local experiment, not committed) 8 of 687
+full-flash cases (the mutants command's set) still fail this way, against 23
+with it. Many are
+cuts at a step's last op (the root's program) or a clean cut after a few of a
+panel write's ops: the step fitted with almost no slack, the torn attempt's
+records are garbage, and the re-run cannot get that room back. Not proven
+which garbage is unreclaimable; the leading guess is the resumed head
+sector's — `choose_victim` never collects a head, and the packing bound counts
+that garbage as reclaimable. Seed 2 of
+`cargo run --release -p lp-store-bench -- full-flash --candidates t1 --sectors
+16 --corpus-name syn:3:900 --seeds 2 --edge-steps 24 --cuts-per-step 10
+--tears clean,byte_prefix,random_bits,calibrated`: 15 `rerun_failed`, 14 of
+them persistent (lp-nor-sim). In every case the committed state is intact
+(old) and the store recovers once space is freed (`recovered true`).
 
 **Fix** — none yet. Candidates for the store's PR: count a stall only when a
 collection frees nothing it could have (not when the free count merely

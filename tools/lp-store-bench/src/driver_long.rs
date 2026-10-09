@@ -54,6 +54,14 @@ pub struct LongParams {
     /// records and GC has to copy. Off = the random driver's mix.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub edit_mix: bool,
+    /// Steps per piece: the walk's draws are reseeded at every multiple, and
+    /// a resumable run may pause (and checkpoint) there. 0 = one piece.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub piece_steps: u64,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 /// A [`WearOut`], as a reproducer carries it.
@@ -120,20 +128,95 @@ impl LongParams {
     }
 }
 
+/// Run the walk to its end (or its first failure); the summary goes to `sink`.
 pub fn long_walk(
     cand: &dyn Candidate,
     p: &LongParams,
     corpora: &CorpusSet,
     sink: &Scoreboard,
 ) -> LongSummary {
-    let mut sum = LongSummary {
-        driver: "long".into(),
-        candidate: cand.name().into(),
-        config: Some(p.config.clone()),
-        seed: p.seed,
-        ..Default::default()
+    match long_walk_resumable(cand, p, corpora, sink, None, None) {
+        LongEnd::Done(s) => s,
+        LongEnd::Paused(..) => unreachable!("no deadline"),
+    }
+}
+
+/// A walk paused at a piece boundary (`LongParams::piece_steps`): enough,
+/// with the flash image beside it, to go on (`long --checkpoint-dir`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LongCheckpoint {
+    pub params: LongParams,
+    pub next_step: u64,
+    pub summary: LongSummary,
+    pub model: BTreeMap<String, Vec<u8>>,
+    /// Erases per sector before the checkpoint (a restored flash counts its
+    /// own from zero).
+    pub erases_per_sector: Vec<u32>,
+}
+
+/// How a resumable walk stopped.
+pub enum LongEnd {
+    Done(LongSummary),
+    /// The deadline passed at a piece boundary: the checkpoint and the
+    /// flash image (sector by sector; weak bits are frozen at the values
+    /// they read — they only ever sit in sectors the store re-erases).
+    Paused(Box<LongCheckpoint>, Vec<u8>),
+}
+
+/// [`long_walk`], from a checkpoint if given, pausing at the first piece
+/// boundary past `deadline`. The walk's draws are reseeded at every piece
+/// boundary, so a walk run in pieces is the walk run in one go.
+pub fn long_walk_resumable(
+    cand: &dyn Candidate,
+    p: &LongParams,
+    corpora: &CorpusSet,
+    sink: &Scoreboard,
+    resume: Option<(LongCheckpoint, Vec<u8>)>,
+    deadline: Option<std::time::Instant>,
+) -> LongEnd {
+    let (mut sum, start) = match resume {
+        Some((ck, image)) => {
+            let start = Start {
+                flash: restore(&p.config, &image),
+                model: ck
+                    .model
+                    .into_iter()
+                    .map(|(k, v)| (k, std::sync::Arc::new(v)))
+                    .collect(),
+                next_step: ck.next_step,
+                base_erases: ck.erases_per_sector,
+            };
+            (ck.summary, Some(start))
+        }
+        None => (
+            LongSummary {
+                driver: "long".into(),
+                candidate: cand.name().into(),
+                config: Some(p.config.clone()),
+                seed: p.seed,
+                ..Default::default()
+            },
+            None,
+        ),
     };
-    match crate::catch_quiet(|| walk(cand, p, corpora, &mut sum, None)) {
+    let base = start.as_ref().map(|s| s.base_erases.clone());
+    match crate::catch_quiet(|| walk(cand, p, corpora, &mut sum, start, None, deadline)) {
+        Ok(Ok(WalkEnd::Paused(flash, model, next_step))) => {
+            let mut erases = flash.stats().erases_per_sector.clone();
+            if let Some(b) = &base {
+                for (e, b) in erases.iter_mut().zip(b) {
+                    *e += b;
+                }
+            }
+            let ck = LongCheckpoint {
+                params: p.clone(),
+                next_step,
+                summary: sum,
+                model: model.into_iter().map(|(k, v)| (k, (*v).clone())).collect(),
+                erases_per_sector: erases,
+            };
+            return LongEnd::Paused(Box::new(ck), image_of(&flash));
+        }
         Ok(Ok(_)) => {}
         Ok(Err(e)) => sum.error = Some(e),
         Err(panic) => fail(&mut sum, Failure::new("panic", panic)),
@@ -149,7 +232,58 @@ pub fn long_walk(
         );
     }
     sink.write("long_summary", &sum);
-    sum
+    LongEnd::Done(sum)
+}
+
+/// A walk's starting point other than a fresh format.
+struct Start {
+    flash: NorFlashSim,
+    model: Model,
+    next_step: u64,
+    base_erases: Vec<u32>,
+}
+
+/// How [`walk`] stopped.
+enum WalkEnd {
+    Done,
+    /// At `stop_before`: the flash, the state and the step.
+    Prefix(NorFlashSim, Model, crate::Step),
+    /// At a piece boundary past the deadline: the flash, the state, the
+    /// next step's index.
+    Paused(NorFlashSim, Model, u64),
+}
+
+/// The flash's cells, sector after sector.
+fn image_of(f: &NorFlashSim) -> Vec<u8> {
+    let g = f.geometry();
+    let mut out = vec![0u8; (g.sector_count * g.sector_size) as usize];
+    f.peek(0, &mut out);
+    out
+}
+
+/// A flash holding `image` (counters from zero).
+fn restore(cfg: &CandidateConfig, image: &[u8]) -> NorFlashSim {
+    let mut f = NorFlashSim::new(cfg.geometry());
+    let ss = cfg.geometry().sector_size as usize;
+    for (s, cells) in image.chunks(ss).enumerate() {
+        if cells.iter().any(|&b| b != 0xFF) {
+            f.program((s * ss) as u32, cells)
+                .expect("program a restored image");
+        }
+    }
+    f.reset_stats();
+    f.set_panic_on_violation(true);
+    f
+}
+
+/// The walk's draws for step `i`'s piece (piece 0's are the walk's seed).
+fn piece_rng(p: &LongParams, i: u64) -> SimRng {
+    let piece = if p.piece_steps == 0 {
+        0
+    } else {
+        i / p.piece_steps
+    };
+    SimRng::new(p.seed ^ 0x10_C6_5EED ^ piece.wrapping_mul(0x9E37_79B9_7F4A_7C15))
 }
 
 fn fail(sum: &mut LongSummary, f: Failure) {
@@ -182,42 +316,56 @@ pub fn long_walk_prefix(
     before: u64,
 ) -> Result<(NorFlashSim, Model, crate::Step), String> {
     let mut sum = LongSummary::default();
-    let out = walk(cand, p, corpora, &mut sum, Some(before))?;
+    let out = walk(cand, p, corpora, &mut sum, None, Some(before), None)?;
     match (out, sum.first_failure) {
-        (Some(v), _) => Ok(v),
-        (None, Some(f)) => Err(format!("failed first: {}: {}", f.kind, f.detail)),
-        (None, None) => Err(format!("the walk has no step {before}")),
+        (WalkEnd::Prefix(f, m, s), _) => Ok((f, m, s)),
+        (_, Some(f)) => Err(format!("failed first: {}: {}", f.kind, f.detail)),
+        _ => Err(format!("the walk has no step {before}")),
     }
 }
 
-/// Run the walk; with `stop_before`, stop (unmounted) at that step and hand
-/// back the flash, the model and the step.
+/// Run the walk (from `start`, or a fresh format); with `stop_before`, stop
+/// (unmounted) at that step; with `deadline`, pause at the first piece
+/// boundary past it.
 fn walk(
     cand: &dyn Candidate,
     p: &LongParams,
     corpora: &CorpusSet,
     sum: &mut LongSummary,
+    start: Option<Start>,
     stop_before: Option<u64>,
-) -> Result<Option<(NorFlashSim, Model, crate::Step)>, String> {
+    deadline: Option<std::time::Instant>,
+) -> Result<WalkEnd, String> {
     let cfg = &p.config;
     let tears = p.tear_models()?;
-    let mut rng = SimRng::new(p.seed ^ 0x10_C6_5EED);
-    let mut flash = NorFlashSim::new(cfg.geometry());
-    flash.set_panic_on_violation(p.wear.is_empty());
-    for w in &p.wear {
-        flash.add_wear_out(w.wear_out());
-    }
-    cand.format(&mut flash, cfg)
-        .map_err(|e| format!("format: {e}"))?;
+    let (flash, mut model, first, base) = match start {
+        Some(s) => (s.flash, s.model, s.next_step, Some(s.base_erases)),
+        None => {
+            let mut flash = NorFlashSim::new(cfg.geometry());
+            flash.set_panic_on_violation(p.wear.is_empty());
+            for w in &p.wear {
+                flash.add_wear_out(w.wear_out());
+            }
+            cand.format(&mut flash, cfg)
+                .map_err(|e| format!("format: {e}"))?;
+            (flash, Model::new(), 0, None)
+        }
+    };
+    let mut rng = piece_rng(p, first);
     let mut store = match mount(cand, cfg, flash, "unmountable") {
         Ok(s) => s,
         Err(f) => {
             fail(sum, f);
-            return Ok(None);
+            return Ok(WalkEnd::Done);
         }
     };
-    let mut model = Model::new();
-    for i in 0..p.steps {
+    for i in first..p.steps {
+        if p.piece_steps > 0 && i % p.piece_steps == 0 && i > first {
+            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                return Ok(WalkEnd::Paused(sum.gc.unmount(store), model, i));
+            }
+            rng = piece_rng(p, i);
+        }
         let step = if i == 0 {
             board_step()
         } else if p.edit_mix {
@@ -226,7 +374,7 @@ fn walk(
             next_step(&mut rng, &model, corpora, &p.corpora)?
         };
         if stop_before == Some(i) {
-            return Ok(Some((sum.gc.unmount(store), model, step)));
+            return Ok(WalkEnd::Prefix(sum.gc.unmount(store), model, step));
         }
         sum.steps_run += 1;
         sum.logical_bytes += step.logical_bytes();
@@ -241,7 +389,7 @@ fn walk(
             Ok(v) => v,
             Err(f) => {
                 fail(sum, f);
-                return Ok(None);
+                return Ok(WalkEnd::Done);
             }
         };
         if p.check_every > 0 && (i + 1) % p.check_every == 0 {
@@ -249,16 +397,29 @@ fn walk(
                 Ok(s) => s,
                 Err(f) => {
                     fail(sum, f);
-                    return Ok(None);
+                    return Ok(WalkEnd::Done);
                 }
             };
         }
     }
     match check(cand, cfg, store, &model, sum) {
-        Ok(store) => drop(sum.gc.unmount(store)),
+        Ok(store) => {
+            let flash = sum.gc.unmount(store);
+            if let Some(b) = base {
+                let e: Vec<u32> = flash
+                    .stats()
+                    .erases_per_sector
+                    .iter()
+                    .zip(&b)
+                    .map(|(a, b)| a + b)
+                    .collect();
+                sum.gc.erases_total = e.iter().map(|&x| u64::from(x)).sum();
+                sum.gc.erases_max = e.iter().copied().max().unwrap_or(0);
+            }
+        }
         Err(f) => fail(sum, f),
     }
-    Ok(None)
+    Ok(WalkEnd::Done)
 }
 
 type Walked = (Box<dyn CandidateStore>, Model);
@@ -424,7 +585,50 @@ mod tests {
             tears: vec!["random_bits".into(), "calibrated".into()],
             wear: vec![],
             edit_mix: true,
+            piece_steps: 0,
         }
+    }
+
+    /// A walk paused at every piece boundary and resumed from its
+    /// checkpoint (through JSON) is the walk run in one go.
+    #[test]
+    fn a_walk_in_pieces_is_the_walk_in_one_go() {
+        let set = CorpusSet::new(None);
+        let sink = Scoreboard::memory();
+        let p = LongParams {
+            piece_steps: 100,
+            ..params(12)
+        };
+        let whole = long_walk(&TreeStoreCandidate, &p, &set, &sink);
+        let mut resume = None;
+        let mut pauses = 0;
+        let pieces = loop {
+            let past = Some(std::time::Instant::now());
+            match long_walk_resumable(&TreeStoreCandidate, &p, &set, &sink, resume, past) {
+                LongEnd::Done(s) => break s,
+                LongEnd::Paused(ck, image) => {
+                    pauses += 1;
+                    let ck: LongCheckpoint =
+                        serde_json::from_str(&serde_json::to_string(&*ck).unwrap()).unwrap();
+                    resume = Some((ck, image));
+                }
+            }
+        };
+        assert_eq!(pauses, 3);
+        let key = |s: &LongSummary| {
+            (
+                s.steps_run,
+                s.cuts,
+                s.landed,
+                s.checks,
+                s.failures,
+                s.steps_no_space,
+                s.gc.gc_runs,
+                s.gc.erases_total,
+                s.logical_bytes,
+            )
+        };
+        assert_eq!(key(&pieces), key(&whole), "{pieces:?}\n{whole:?}");
     }
 
     /// A short walk on a small flash: T1 runs GC, takes cuts and refusals,

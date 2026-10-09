@@ -69,6 +69,9 @@ pub struct FullFlashSummary {
     pub non_atomic: u64,
     pub kinds: BTreeMap<String, u64>,
     pub first_failure: Option<Failure>,
+    /// The first few failures' details (the first is `first_failure`).
+    #[serde(default)]
+    pub failure_samples: Vec<String>,
     /// Deleting all but one copy, then pushing a new one, worked.
     pub recovered: bool,
     pub gc: GcTally,
@@ -111,6 +114,10 @@ pub fn full_flash(
 fn fail(sum: &mut FullFlashSummary, f: Failure) {
     sum.failures += 1;
     *sum.kinds.entry(f.kind.clone()).or_default() += 1;
+    if sum.failure_samples.len() < 12 {
+        sum.failure_samples
+            .push(format!("{}: {}", f.kind, f.detail));
+    }
     if sum.first_failure.is_none() {
         sum.first_failure = Some(f);
     }

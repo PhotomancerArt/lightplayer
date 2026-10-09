@@ -25,6 +25,8 @@ pub mod driver_full_flash;
 pub mod driver_fuzz;
 pub mod driver_long;
 pub mod driver_measure;
+#[cfg(feature = "mutants")]
+pub mod driver_mutants;
 pub mod driver_random;
 pub mod gc_tally;
 pub mod oracle;
