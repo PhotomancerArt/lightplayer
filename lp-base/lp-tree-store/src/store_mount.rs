@@ -6,25 +6,20 @@
 //! the root by I1 (the newest CRC-good root whose closure is complete, else
 //! the one before it — no further, README defect 12) by indexing its
 //! closure (pass 2, `mount_walk.rs`: the index holds only live records, so
-//! mount's RAM does not grow with the garbage on flash); walk the tree to
-//! build the path table; resume each head only if its tail reads all
-//! `0xFF`.
+//! mount's RAM does not grow with the garbage on flash); resume each head
+//! only if its tail reads all `0xFF`.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::dir_node::EntryKind;
 use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
 use crate::mount_walk::index_closure;
-use crate::node_read::read_dir;
 use crate::object_hasher::ObjectHasher;
-use crate::object_id::{ObjectId, path_hash};
 use crate::record_scan::{RootCandidates, scan_sector};
 use crate::root_record::RootRecord;
 use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader, SectorRead};
 use crate::store_error::StoreError;
-use crate::tree_store::{Committed, MAX_DEPTH, Res, TreeStore, WorkDirs, is_hot, valid_path};
+use crate::tree_store::{Committed, Res, TreeStore, WorkDirs};
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub(crate) fn load(&mut self) -> Res<(), F> {
@@ -94,7 +89,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             hot: root.hot_dir,
         };
         self.committed = Some(Committed { id, root });
-        self.build_path_table()?;
 
         for kind in HeadKind::ALL {
             let cand = valid
@@ -111,44 +105,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             }
         }
         stat!(self.stats.mount_bytes_read = self.log.counters.bytes_read);
-        Ok(())
-    }
-
-    /// Hash every path in the tree into the path table.
-    fn build_path_table(&mut self) -> Res<(), F> {
-        let mut path = String::new();
-        self.table_walk(self.work.cold, &mut path, 0)?;
-        for e in read_dir(&mut self.log, self.work.hot)? {
-            if e.kind != EntryKind::File || !valid_path(&e.name) || !is_hot(&e.name) {
-                return Err(StoreError::Corrupt("hot dir entry"));
-            }
-            let h = path_hash(&mut self.hasher, &e.name);
-            self.table.push_unsorted(h, e.id, e.size);
-        }
-        self.table.finish_build();
-        Ok(())
-    }
-
-    fn table_walk(&mut self, id: ObjectId, path: &mut String, depth: usize) -> Res<(), F> {
-        if depth > MAX_DEPTH {
-            return Err(StoreError::Corrupt("dir depth"));
-        }
-        for e in read_dir(&mut self.log, id)? {
-            if e.name.is_empty() || e.name.contains('/') {
-                return Err(StoreError::Corrupt("dir entry name"));
-            }
-            let len = path.len();
-            path.push('/');
-            path.push_str(&e.name);
-            match e.kind {
-                EntryKind::File => {
-                    let h = path_hash(&mut self.hasher, path);
-                    self.table.push_unsorted(h, e.id, e.size);
-                }
-                EntryKind::Dir => self.table_walk(e.id, path, depth + 1)?,
-            }
-            path.truncate(len);
-        }
         Ok(())
     }
 }

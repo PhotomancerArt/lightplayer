@@ -9,7 +9,11 @@
 //! them), directory changes are held as a small delta in RAM (written as
 //! pending directories when it outgrows `txn_delta_max`), and only `commit`
 //! writes the root. A cut before that root leaves the pre-transaction state;
-//! `abort` drops the delta and puts the path table back.
+//! `abort` drops the delta.
+//!
+//! **Lookups walk.** The store keeps no path in RAM: `get`, `file_size` and
+//! `exists` read one directory record per path level from the working tree
+//! (with the delta laid over it), as writes do (`tree_walk.rs`).
 //!
 //! A per-call write is the same machinery as a one-call transaction.
 
@@ -19,8 +23,7 @@ use alloc::vec::Vec;
 use crate::flash::Flash;
 use crate::node_read::read_node_into;
 use crate::object_hasher::ObjectHasher;
-use crate::object_id::{IdTag, ObjectId, path_hash};
-use crate::path_table::{PathSlot, PathTable};
+use crate::object_id::{IdTag, ObjectId};
 use crate::record_kind::{ChunkCodec, RecordKind};
 use crate::record_log::RecordLog;
 use crate::root_record::RootRecord;
@@ -30,7 +33,6 @@ use crate::store_error::StoreError;
 #[cfg(feature = "stats")]
 use crate::store_stats::TreeStoreStats;
 use crate::tree_delta::{FileEntry, TreeDelta};
-use crate::txn_undo::TxnUndo;
 
 pub(crate) type Res<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
 
@@ -70,8 +72,6 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     pub(crate) max_root_seq: u64,
     pub(crate) work: WorkDirs,
     pub(crate) delta: TreeDelta,
-    pub(crate) table: PathTable,
-    pub(crate) undo: TxnUndo,
     pub(crate) txn: Txn,
     #[cfg(feature = "stats")]
     pub(crate) stats: TreeStoreStats,
@@ -132,8 +132,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         Ok(Some(out))
     }
 
-    /// The file's size, from the path table (no flash read unless its hash
-    /// collided).
+    /// The file's size (its directory entry: no read of the file).
     pub fn file_size(&mut self, path: &str) -> Res<Option<u32>, F> {
         Ok(self.lookup(path)?.map(|fe| fe.size))
     }
@@ -156,10 +155,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if bytes.len() > u32::MAX as usize {
             return Err(StoreError::TooLarge);
         }
-        self.op(|st| {
-            let existed = st.existing(path)?;
-            st.put_inner(path, existed, bytes)
-        })
+        self.op(|st| st.put_inner(path, bytes))
     }
 
     /// Append `bytes` to the file at `path` (creating it): writes the new
@@ -193,18 +189,24 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub fn delete(&mut self, path: &str) -> Res<bool, F> {
         check_path(path)?;
         self.op(|st| {
-            let Some(fe) = st.existing(path)? else {
+            if st.walk_file(path)?.is_none() {
                 return Ok(false);
-            };
-            st.record_delete(path, fe);
+            }
+            st.record_delete(path);
             Ok(true)
         })
     }
 
-    /// Remove every path starting with `prefix` (a plain string prefix). A
-    /// prefix `"<dir>/"` removes the directory as one change.
+    /// Remove the directory `"<dir>/"` names and everything under it, as
+    /// one change (no listing: one tree deletion in the delta). Any other
+    /// prefix (`"/"` included) is `InvalidPath`; nothing there is a no-op.
     pub fn delete_prefix(&mut self, prefix: &str) -> Res<(), F> {
-        self.op(|st| st.delete_prefix_inner(prefix))
+        let dir = prefix.strip_suffix('/').unwrap_or("");
+        check_path(dir)?;
+        self.op(|st| {
+            st.record_delete_tree(dir);
+            Ok(())
+        })
     }
 
     /// Delete the file at `path` and the directory at `path`, as one
@@ -212,12 +214,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub fn delete_file_and_tree(&mut self, path: &str) -> Res<(), F> {
         check_path(path)?;
         self.op(|st| {
-            if let Some(fe) = st.existing(path)? {
-                st.record_delete(path, fe);
-            }
-            let mut prefix = String::from(path);
-            prefix.push('/');
-            st.delete_prefix_inner(&prefix)
+            // Deleting what is not there changes no directory.
+            st.record_delete(path);
+            st.record_delete_tree(path);
+            Ok(())
         })
     }
 
@@ -293,11 +293,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut s = self.stats.clone();
         s.index_entries = self.log.index.len();
         s.index_ram_bytes = self.log.index.ram_bytes();
-        s.path_table_entries = self.table.len();
-        s.path_table_ram_bytes = self.table.ram_bytes();
         s.sector_table_ram_bytes = self.log.sectors.ram_bytes();
-        s.resident_ram_bytes =
-            s.index_ram_bytes + s.path_table_ram_bytes + s.sector_table_ram_bytes;
+        s.resident_ram_bytes = s.index_ram_bytes + s.sector_table_ram_bytes;
         s.transient_peak_bytes = s.transient_peak_bytes.max(self.log.largest_buffer);
         s.records_written = self.log.counters.records_written;
         s.record_bytes_written = self.log.counters.record_bytes_written;
@@ -331,8 +328,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 hot: ObjectId::NONE,
             },
             delta: TreeDelta::default(),
-            table: PathTable::default(),
-            undo: TxnUndo::default(),
             txn: Txn::None,
             #[cfg(feature = "stats")]
             stats: TreeStoreStats::default(),
@@ -375,12 +370,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if !unchanged {
             self.write_root()?;
         }
-        self.undo.clear();
         Ok(())
     }
 
     pub(crate) fn abort_inner(&mut self) {
-        self.undo.restore(&mut self.table);
         self.delta.clear();
         if let Some(c) = &self.committed {
             self.work = WorkDirs {
@@ -415,96 +408,36 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         Ok(())
     }
 
-    /// The file at `path` by the path table (a collided row walks).
+    /// The file at `path` (walking the working tree; `None` for an invalid
+    /// path).
     pub(crate) fn lookup(&mut self, path: &str) -> Res<Option<FileEntry>, F> {
         if !valid_path(path) {
             return Ok(None);
         }
-        let h = path_hash(&mut self.hasher, path);
-        match self.table.get(h) {
-            PathSlot::Absent => Ok(None),
-            PathSlot::File { id, size } => Ok(Some(FileEntry { id, size })),
-            PathSlot::Collided => self.walk_file(path),
-        }
+        self.walk_file(path)
     }
 
-    /// Whether the file at `path` exists, for a write: the table's row is
-    /// confirmed by a walk unless this transaction wrote the path itself, so
-    /// a row that belongs to another path (a hash collision) is found.
-    pub(crate) fn existing(&mut self, path: &str) -> Res<Option<FileEntry>, F> {
-        let h = path_hash(&mut self.hasher, path);
-        match self.table.get(h) {
-            PathSlot::Absent => Ok(None),
-            PathSlot::File { id, size } if matches!(self.delta.lookup(path), Some(Some(_))) => {
-                Ok(Some(FileEntry { id, size }))
-            }
-            _ => self.walk_file(path),
-        }
-    }
-
-    /// The path table and the delta after writing `fe` at `path`.
-    pub(crate) fn record_set(&mut self, path: &str, existed: Option<FileEntry>, fe: FileEntry) {
-        let h = path_hash(&mut self.hasher, path);
-        let prior = self.table.get(h);
-        self.undo.save(h, prior);
-        let slot = match prior {
-            PathSlot::Absent => PathSlot::File {
-                id: fe.id,
-                size: fe.size,
-            },
-            PathSlot::File { .. } if existed.is_some() => PathSlot::File {
-                id: fe.id,
-                size: fe.size,
-            },
-            _ => PathSlot::Collided,
-        };
-        self.table.set(h, slot);
+    /// The delta after writing `fe` at `path`.
+    pub(crate) fn record_set(&mut self, path: &str, fe: FileEntry) {
         self.delta.set(path, fe);
         self.note_txn_ram();
     }
 
-    /// The path table and the delta after deleting the (existing) file.
-    pub(crate) fn record_delete(&mut self, path: &str, _existed: FileEntry) {
-        let h = path_hash(&mut self.hasher, path);
-        let prior = self.table.get(h);
-        self.undo.save(h, prior);
-        if prior != PathSlot::Collided {
-            self.table.set(h, PathSlot::Absent);
-        }
+    /// The delta after deleting the file at `path`.
+    pub(crate) fn record_delete(&mut self, path: &str) {
         self.delta.delete(path);
         self.note_txn_ram();
     }
 
-    pub(crate) fn note_txn_ram(&mut self) {
-        let n = self.delta.ram_bytes() + self.undo.ram_bytes();
-        self.log.note(n);
+    /// The delta after deleting directory `dir` and everything under it.
+    pub(crate) fn record_delete_tree(&mut self, dir: &str) {
+        self.delta.delete_tree(dir);
+        self.note_txn_ram();
     }
 
-    fn delete_prefix_inner(&mut self, prefix: &str) -> Res<(), F> {
-        let files = self.list_files(prefix)?;
-        self.log.note(
-            files.capacity() * core::mem::size_of::<String>()
-                + files.iter().map(|f| f.capacity()).sum::<usize>(),
-        );
-        let tree = prefix
-            .strip_suffix('/')
-            .filter(|d| valid_path(d) && !files.is_empty());
-        for p in &files {
-            let h = path_hash(&mut self.hasher, p);
-            let prior = self.table.get(h);
-            self.undo.save(h, prior);
-            if prior != PathSlot::Collided {
-                self.table.set(h, PathSlot::Absent);
-            }
-            if tree.is_none() {
-                self.delta.delete(p);
-            }
-        }
-        if let Some(dir) = tree {
-            self.delta.delete_tree(dir);
-        }
-        self.note_txn_ram();
-        Ok(())
+    pub(crate) fn note_txn_ram(&mut self) {
+        let n = self.delta.ram_bytes();
+        self.log.note(n);
     }
 }
 

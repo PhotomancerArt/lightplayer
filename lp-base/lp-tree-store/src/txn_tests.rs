@@ -1,16 +1,13 @@
-//! Transactions, streaming appends, host-deflated chunks and path-hash
-//! collisions.
+//! Transactions, streaming appends and host-deflated chunks.
 
 use alloc::string::String;
 use alloc::vec;
-use alloc::vec::Vec;
 
 use lp_nor_sim::NorGeometry;
 
-use crate::object_hasher::ObjectHasher;
 use crate::object_id::{IdTag, ObjectId};
 use crate::test_support::{deflate, formatted, mount, noise, snapshot, text};
-use crate::{SoftSha256, StoreConfig, StoreError, TreeStore};
+use crate::{SoftSha256, StoreConfig, StoreError};
 
 fn cfg() -> StoreConfig {
     StoreConfig::default()
@@ -163,54 +160,4 @@ fn deflated_chunks_are_verified_stored_coded_and_read_back() {
     let mut st = mount(st.into_flash(), &c);
     assert_eq!(st.get("/p/s.glsl").unwrap().unwrap(), whole);
     assert_eq!(st.get("/p/n.bin").unwrap().unwrap(), n);
-}
-
-/// SHA-256, except every path containing `zz` hashes to one value.
-struct CollidingHasher;
-
-impl ObjectHasher for CollidingHasher {
-    fn sha256(&mut self, parts: &[&[u8]]) -> [u8; 32] {
-        if parts.first() == Some(&&[IdTag::Path as u8][..])
-            && parts[1].windows(2).any(|w| w == b"zz")
-        {
-            return [7; 32];
-        }
-        SoftSha256.sha256(parts)
-    }
-}
-
-#[test]
-fn colliding_path_hashes_fall_back_to_the_walk() {
-    let c = cfg();
-    let mut f = lp_nor_sim::NorFlashSim::new(NorGeometry::c6(32));
-    TreeStore::format(&mut f, &mut CollidingHasher, &c).unwrap();
-    let Ok(mut st) = TreeStore::mount(f, CollidingHasher, c.clone()) else {
-        panic!("mount")
-    };
-    st.put("/a/zz1.json", b"one").unwrap();
-    st.put("/b/zz2.json", b"two").unwrap();
-    st.put("/plain.json", b"plain").unwrap();
-    assert_eq!(st.get("/a/zz1.json").unwrap().unwrap(), b"one");
-    assert_eq!(st.get("/b/zz2.json").unwrap().unwrap(), b"two");
-    assert_eq!(st.file_size("/b/zz2.json").unwrap(), Some(3));
-    st.put("/a/zz1.json", b"one again").unwrap();
-    assert_eq!(st.get("/b/zz2.json").unwrap().unwrap(), b"two");
-    assert!(st.delete("/b/zz2.json").unwrap());
-    assert_eq!(st.get("/b/zz2.json").unwrap(), None);
-    assert_eq!(st.get("/a/zz1.json").unwrap().unwrap(), b"one again");
-    st.put("/c/zz3.json", b"three").unwrap();
-    // Mount rebuilds the table and finds the collision itself.
-    let (f, _) = st.into_parts();
-    let Ok(mut st) = TreeStore::mount(f, CollidingHasher, c) else {
-        panic!("remount")
-    };
-    let got: Vec<Vec<u8>> = ["/a/zz1.json", "/c/zz3.json", "/plain.json"]
-        .iter()
-        .map(|p| st.get(p).unwrap().unwrap())
-        .collect();
-    assert_eq!(
-        got,
-        vec![b"one again".to_vec(), b"three".to_vec(), b"plain".to_vec()]
-    );
-    assert_eq!(st.get("/b/zz2.json").unwrap(), None);
 }

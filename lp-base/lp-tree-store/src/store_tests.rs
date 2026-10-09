@@ -62,6 +62,32 @@ fn round_trip_list_delete_and_remount() {
     assert_eq!(st.put("/a/", b"x"), Err(StoreError::InvalidPath));
 }
 
+/// `delete_prefix` takes a whole directory (`"<dir>/"`) and nothing else; a
+/// directory that is not there is a no-op that writes nothing.
+#[test]
+fn delete_prefix_takes_whole_directories_only() {
+    let c = cfg();
+    let mut st = mount(formatted(NorGeometry::c6(32), &c), &c);
+    st.put("/a/x.json", b"x").unwrap();
+    st.put("/ab.json", b"ab").unwrap();
+    st.put("/a/.lp/panel.json", b"{}").unwrap();
+    for bad in ["/a", "/", "", "a/", "/a//"] {
+        assert_eq!(
+            st.delete_prefix(bad),
+            Err(StoreError::InvalidPath),
+            "{bad:?}"
+        );
+    }
+    let written = st.stats().record_bytes_written;
+    st.delete_prefix("/nope/").unwrap();
+    st.delete_file_and_tree("/nope").unwrap();
+    assert_eq!(st.stats().record_bytes_written, written, "a no-op wrote");
+    st.delete_prefix("/a/").unwrap();
+    assert_eq!(st.list("/").unwrap(), vec![String::from("/ab.json")]);
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(st.list("/").unwrap(), vec![String::from("/ab.json")]);
+}
+
 #[test]
 fn dedup_by_id_writes_once_and_an_unchanged_write_writes_nothing() {
     let c = cfg();

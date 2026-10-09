@@ -1,8 +1,8 @@
 //! **lp-tree-store**: a content-addressed copy-on-write tree store for NOR
 //! flash. `no_std` + `alloc`, sans-IO over a small [`Flash`] trait and an
 //! injected [`ObjectHasher`]. RAM-bounded: a sorted index of 12-byte
-//! entries, a path table of 20-byte rows and 12 bytes per sector are all it
-//! keeps between operations. See `FORMAT.md` for every on-flash byte and the
+//! entries and 12 bytes per sector are all it keeps between operations (no
+//! path in RAM: lookups walk the directories on flash). See `FORMAT.md` for every on-flash byte and the
 //! README for the design, the invariants (I1 root, I2 at least one copy, I3
 //! derived liveness), the dials and the measurements.
 
@@ -40,7 +40,6 @@ mod node_read;
 mod node_write;
 mod object_hasher;
 mod object_id;
-mod path_table;
 mod ram_index;
 mod record_header;
 mod record_kind;
@@ -59,7 +58,6 @@ mod store_stats;
 mod tree_delta;
 mod tree_store;
 mod tree_walk;
-mod txn_undo;
 mod vec_growth;
 
 #[cfg(test)]

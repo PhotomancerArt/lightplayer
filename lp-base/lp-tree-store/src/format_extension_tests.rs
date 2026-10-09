@@ -230,7 +230,7 @@ fn an_unknown_record_kind_is_skipped() {
     assert!(!st.log.index.contains(future));
     assert_eq!(st.get("/c.json").unwrap().unwrap(), text(5, 200));
     // Make the sector garbage, then churn until GC has erased it.
-    st.delete_prefix("/a").unwrap();
+    st.delete_prefix("/a/").unwrap();
     st.delete("/c.json").unwrap();
     let erases = st.log.sectors.erase_count[cold as usize];
     for round in 0..400u64 {

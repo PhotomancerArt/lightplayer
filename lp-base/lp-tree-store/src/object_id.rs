@@ -3,7 +3,7 @@
 //!
 //! Not cryptography (spike U9): no byte-compare on dedup, no defence against
 //! crafted collisions. The tag keeps a blob, a directory, a multi and a root
-//! with equal bytes apart; path hashes use their own tag.
+//! with equal bytes apart.
 
 use crate::object_hasher::ObjectHasher;
 
@@ -24,8 +24,7 @@ pub enum IdTag {
     Multi = 3,
     /// A `Root` record: its payload.
     Root = 4,
-    /// A path, for the RAM path table (never a record id).
-    Path = 5,
+    // 5 was the RAM path table's path hash (never written; FORMAT.md "Ids").
 }
 
 impl ObjectId {
@@ -42,11 +41,6 @@ impl ObjectId {
     pub fn is_none(self) -> bool {
         self.0 == 0
     }
-}
-
-/// The 64-bit hash of `path` the path table is keyed by.
-pub fn path_hash<H: ObjectHasher>(h: &mut H, path: &str) -> u64 {
-    hash64(h, IdTag::Path, &[path.as_bytes()])
 }
 
 fn hash64<H: ObjectHasher>(h: &mut H, tag: IdTag, parts: &[&[u8]]) -> u64 {

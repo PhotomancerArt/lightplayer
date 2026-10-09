@@ -11,18 +11,13 @@ pub struct TreeStoreStats {
     pub index_entries: usize,
     /// 12 B per index slot.
     pub index_ram_bytes: usize,
-    /// Files in the path table.
-    pub path_table_entries: usize,
-    /// 20 B per path-table slot.
-    pub path_table_ram_bytes: usize,
     /// 12 B per sector, plus the retired list.
     pub sector_table_ram_bytes: usize,
-    /// Index + path table + sector table: what the store holds between
-    /// operations.
+    /// Index + sector table: what the store holds between operations.
     pub resident_ram_bytes: usize,
     /// The largest single buffer an operation allocated (a record, a
     /// directory's bytes, a leaf list, a mark set, an inflate buffer, the
-    /// transaction's delta and undo log, mount's scan index). Excludes the
+    /// transaction's delta, mount's scan index). Excludes the
     /// caller's file buffer.
     pub transient_peak_bytes: usize,
     pub dedup_hits: u64,

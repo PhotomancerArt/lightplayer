@@ -74,11 +74,10 @@ fn c40_budget_on(sectors: u32) {
         });
     let s = st.stats();
     std::println!(
-        "c40/{sectors}: resident {} B (index {} × 12, paths {} × 20, sectors {}), mount peak {} B, \
-         held {} B, mount read {} B in 1 + {} scans",
+        "c40/{sectors}: resident {} B (index {} × 12, sectors {}), mount peak {} B, held {} B, \
+         mount read {} B in 1 + {} scans",
         s.resident_ram_bytes,
         s.index_entries,
-        s.path_table_entries,
         s.sector_table_ram_bytes,
         mount_peak,
         held,

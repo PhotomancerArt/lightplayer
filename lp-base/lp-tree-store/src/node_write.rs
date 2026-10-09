@@ -24,12 +24,7 @@ use crate::tree_store::{Res, TreeStore, Txn, head_for};
 const HDR: u32 = RECORD_HEADER_LEN;
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
-    pub(crate) fn put_inner(
-        &mut self,
-        path: &str,
-        existed: Option<FileEntry>,
-        bytes: &[u8],
-    ) -> Res<(), F> {
+    pub(crate) fn put_inner(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
         let head = head_for(path);
         let mut need = Vec::new();
         let chunks = self.stored_chunk_need(head, bytes.len(), &mut need);
@@ -40,14 +35,13 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.write_stored_chunks(head, bytes, &[], &mut leaves)?;
         let id = self.write_tree(head, &leaves, false)?;
         let size = bytes.len() as u32;
-        self.record_set(path, existed, FileEntry { id, size });
+        self.record_set(path, FileEntry { id, size });
         Ok(())
     }
 
     pub(crate) fn append_inner(&mut self, path: &str, bytes: &[u8]) -> Res<(), F> {
-        let existed = self.existing(path)?;
-        let Some(fe) = existed else {
-            return self.put_inner(path, None, bytes);
+        let Some(fe) = self.walk_file(path)? else {
+            return self.put_inner(path, bytes);
         };
         let size =
             u32::try_from(fe.size as usize + bytes.len()).map_err(|_| StoreError::TooLarge)?;
@@ -68,7 +62,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.ensure_room(&need)?;
         self.write_stored_chunks(head, &tail, bytes, &mut leaves)?;
         let id = self.write_tree(head, &leaves, false)?;
-        self.record_set(path, existed, FileEntry { id, size });
+        self.record_set(path, FileEntry { id, size });
         Ok(())
     }
 
@@ -84,7 +78,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if logical > MAX_LOGICAL_CHUNK {
             return Err(StoreError::TooLarge);
         }
-        let existed = self.existing(path)?;
+        let existed = self.walk_file(path)?;
         let mut leaves = match (offset, existed) {
             (0, _) => Vec::new(),
             (o, Some(fe)) if fe.size == o => leaf_list(&mut self.log, fe.id)?,
@@ -134,7 +128,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             self.write_stored_chunks(head, &buf, &[], &mut leaves)?;
         }
         let node = self.write_tree(head, &leaves, false)?;
-        self.record_set(path, existed, FileEntry { id: node, size });
+        self.record_set(path, FileEntry { id: node, size });
         Ok(())
     }
 

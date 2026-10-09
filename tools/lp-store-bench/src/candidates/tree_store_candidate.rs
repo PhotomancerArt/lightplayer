@@ -161,8 +161,6 @@ impl CandidateStore for TreeStoreAdapter {
         for (k, v) in [
             ("index_entries", st.index_entries as f64),
             ("index_ram_bytes", st.index_ram_bytes as f64),
-            ("path_table_entries", st.path_table_entries as f64),
-            ("path_table_ram_bytes", st.path_table_ram_bytes as f64),
             ("sector_table_ram_bytes", st.sector_table_ram_bytes as f64),
             ("resident_ram_bytes", st.resident_ram_bytes as f64),
             ("transient_peak_bytes", st.transient_peak_bytes as f64),
