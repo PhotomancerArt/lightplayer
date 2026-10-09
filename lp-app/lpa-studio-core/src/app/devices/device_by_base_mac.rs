@@ -145,12 +145,24 @@ fn is_running_a_project(device: &Device) -> bool {
 /// names a project, never a version anyone has re-checked — so the caller
 /// verifies by content before acting on it.
 pub(crate) fn last_given_project(registry: &[RegisteredDevice], key: &str) -> Option<String> {
+    given_association(registry, key).map(|association| association.project.to_string())
+}
+
+/// The registry row's whole association — which project, and which version
+/// of it, a verified push last gave the board — when the row has one.
+///
+/// The one registry lookup behind [`last_given_project`] and the
+/// board-to-project join ([`super::board_projects`]), which also needs the
+/// version to say whether the board is behind.
+pub(crate) fn given_association<'a>(
+    registry: &'a [RegisteredDevice],
+    key: &str,
+) -> Option<&'a lpc_history::DeviceAssociation> {
     registry
         .iter()
         .find(|row| row.uid == key)?
         .association
         .as_ref()
-        .map(|association| association.project.to_string())
 }
 
 #[cfg(test)]
