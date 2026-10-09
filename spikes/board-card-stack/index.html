@@ -2,631 +2,195 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Stack card, round 3</title>
+<title>Board card, round 5</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-/* Palette and shared pieces copied from spikes/board-card (itself from
-   lpa-studio-web/src/style.css :root). Throwaway: production never imports
-   spikes/. Design record for lp2025/2026-10-06-1530-boards-and-projects-model. */
-
-/* Palette and shared pieces copied from spikes/one-home-page (itself from
-   lpa-studio-web/src/style.css :root). Throwaway: production never imports
-   spikes/. Design record for lp2025/2026-10-06-1530-boards-and-projects-model. */
-
 /* =====================================================================
-   Studio's palette, from lpa-studio-web/src/style.css :root (2026-10-08).
-   Spike shell is deliberately plain, matching the other spikes.
-   Design record for lp2025/2026-10-06-1530-boards-and-projects-model
-   (vision.md, D6–D21). Throwaway: production never imports spikes/.
+   The board card, round 5. Palette from lpa-studio-web/src/style.css
+   :root (2026-10-08). Throwaway: production never imports spikes/.
+   Design record for lp2025/2026-10-06-1530-boards-and-projects-model.
+   Round 4 (the whole stack-card history) is commit acc193502.
    ===================================================================== */
 :root {
   color-scheme: dark;
   --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
-
-  --bg:#0d0d13; --surface:#14141c; --surface-muted:#0f0f15; --panel:#17171f; --raised:#1d1d28;
-  --raised-strong:#252532; --terminal:#09090e;
+  --bg:#0d0d13; --surface:#14141c; --surface-muted:#0f0f15; --panel:#17171f; --raised:#1d1d28; --raised-strong:#252532; --terminal:#09090e;
   --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
-  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --dim:#9ea0ac; --faint:#6d6f7a;
-  --heading:#e9e9ef;
-  --sel-bd:#d6dae0; --sel-bg:rgba(214,218,224,.12);
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --faint:#6d6f7a; --heading:#e9e9ef;
   --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
   --spectrum-cool:#5fe08b,#53c6f2,#a58af7;
   --glow:rgba(140,170,255,.3);
-
   --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
   --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
-  --st-neutral-bg:#12171c;   --st-neutral-bd:#3a444c;   --st-neutral-tx:#d9e2df;
-  --st-working-bg:#24230f;   --st-working-bd:#706730;   --st-working-tx:#f2e6a2;
-  --st-warning-bg:#292614;   --st-warning-bd:#796c33;   --st-warning-tx:#f0dc7a;
   --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
   --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
-  --st-bound-bg:#241a33;     --st-bound-bd:#5f4a85;     --st-bound-tx:#c9b1f5;
-  --st-example-bg:rgba(168,163,196,.09); --st-example-bd:#565177; --st-example-tx:#a8a3c4;
-
-  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66;
-  --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
+  --st-engaged-bg:#292213;   --st-engaged-bd:#8a6f35;   --st-engaged-tx:#e8c56b;
+  --st-error-stripes:repeating-linear-gradient(135deg, rgba(255,93,93,.09) 0 6px, transparent 6px 12px);
+  --shell-bg:#0b0c0e; --shell-mut:#9a978f; --shell-dim:#6f6d66; --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
 }
 * { box-sizing:border-box; }
 body { margin:0; padding-block:28px 160px; padding-inline:clamp(16px, 3vw, 32px); background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
 h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
-p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:940px; }
+p.hint { color:var(--shell-dim); font-size:12.5px; margin:0 0 8px; max-width:980px; }
 p.hint b { color:var(--shell-mut); font-weight:600; }
-h2 { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:46px 0 6px; }
-h2 .n { color:var(--shell-dim); margin-right:6px; }
-p.sub { color:var(--shell-dim); font-size:12px; margin:0 0 14px; max-width:940px; }
-p.sub b { color:var(--shell-mut); font-weight:600; }
 code { font-family:var(--mono); font-size:11px; color:var(--shell-mut); }
 
-/* ---- exploration controls ------------------------------------------ */
-.controls { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:10px 14px; margin-top:14px;
-  border:1px dashed var(--shell-bd-strong); border-radius:8px; color:var(--shell-mut); font-size:12px;
-  position:sticky; top:8px; z-index:80; background:rgba(11,12,14,.94); backdrop-filter:blur(8px); }
-.controls b { color:var(--shell-tx); font-weight:600; }
-.controls button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx);
-  border:1px solid var(--shell-bd-strong); border-radius:6px; padding:3px 10px; font-size:12px; }
-.controls button:hover { background:#1e2126; }
-.controls button.active { border-color:#7be0b2; color:#7be0b2; }
-.controls button:disabled { opacity:.4; cursor:not-allowed; }
-.controls .grp { display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
-.controls .sep { width:1px; height:18px; background:var(--shell-bd-strong); }
-.stepnote { font-size:11.5px; color:var(--shell-dim); margin:8px 2px 0; max-width:1100px; min-height:17px; }
-.stepnote b { color:var(--shell-mut); }
-
-.lean { border:1px solid #365545; border-radius:8px; padding:12px 16px; margin-top:26px; font-size:12.5px; color:var(--shell-mut); max-width:980px; }
-.lean b { color:#7be0b2; }
-.lean ol, .lean ul { margin:6px 0 0; padding-left:20px; } .lean li { margin:4px 0; }
-.cnotes { font-size:11.5px; color:var(--shell-mut); margin:10px 2px 0; line-height:1.6; max-width:1100px; }
-.cnotes b { color:var(--shell-tx); font-weight:600; }
-
-/* =====================================================================
-   The app frame (Studio chrome, simplified)
-   ===================================================================== */
-.app { position:relative; background:var(--bg); color:var(--tx); border:1px solid var(--shell-bd); border-radius:12px;
-  overflow:hidden; font-size:13px; font-family:var(--font); margin:0 auto; }
+/* ---- the app frame -------------------------------------------------- */
+.app { position:relative; background:var(--bg); color:var(--tx); border:1px solid var(--shell-bd); border-radius:12px; font-size:13px; font-family:var(--font); }
 .app.phone { width:390px; }
-.topbar { display:flex; align-items:center; gap:22px; height:48px; padding:0 18px; border-bottom:1px solid var(--bd-mut); }
-.logo { display:inline-flex; align-items:center; gap:7px; font-weight:800; font-size:13px; letter-spacing:-.01em; }
-.logo svg { width:16px; height:16px; color:var(--strong); }
-.logo span { background:linear-gradient(90deg,#ff6b9a,#f5c84e 45%,#5fe08b); -webkit-background-clip:text; background-clip:text; color:transparent; }
-.navtab { position:relative; font-size:12px; font-weight:600; color:var(--muted); padding:14px 0; }
-.navtab.on { color:var(--strong); }
-.navtab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
-.tright { margin-left:auto; display:flex; gap:12px; align-items:center; color:var(--subtle); font-size:12px; font-weight:600; }
-.kbd { border:1px solid var(--bd); border-radius:5px; padding:2px 6px; font:700 10px var(--mono); color:var(--muted); }
-.ibtn { width:26px; height:26px; border-radius:50%; border:1px solid var(--bd); display:inline-grid; place-items:center; color:var(--muted); }
-.ibtn svg { width:13px; height:13px; }
-.avatar { position:relative; width:26px; height:26px; border-radius:50%; display:inline-grid; place-items:center; font-size:11px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#a58af7,#53c6f2); }
-.avatar.dot::after { content:""; position:absolute; top:-2px; right:-2px; width:9px; height:9px; border-radius:50%; background:var(--st-attention-tx); border:2px solid var(--bg); }
-.app.narrow .hide-phone { display:none !important; }
-.page { padding:20px 24px 34px; max-width:1140px; margin:0 auto; }
-.app.narrow .page { padding:14px 14px 26px; }
-
-/* ---- icons, buttons, tags ------------------------------------------- */
+.page { padding:18px 20px 30px; }
+.app.narrow .page { padding:14px 12px 24px; }
+.app.narrow .nh, .app.narrow .cbar .blocks { display:none; }
 svg.i { width:14px; height:14px; flex:none; }
-.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px;
-  height:30px; padding:0 11px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx);
-  font-size:12px; font-weight:600; white-space:nowrap; text-decoration:none; }
+.btn { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px; height:30px; padding:0 11px; border-radius:6px; border:1px solid var(--bd); background:var(--raised); color:var(--tx); font-size:12px; font-weight:600; white-space:nowrap; }
 .btn:hover { border-color:var(--bd-strong); color:var(--strong); }
 .btn.sm { height:26px; padding:0 9px; font-size:11.5px; }
-.btn.quiet { background:transparent; border-color:transparent; color:var(--muted); }
-.btn.quiet:hover { background:var(--raised); color:var(--strong); }
 .btn.outline { background:transparent; }
-.cta { position:relative; border-color:transparent; background:transparent; color:var(--strong); }
-.cta::before { content:""; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
-  background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
-  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
-  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor;
-  opacity:.62; pointer-events:none; transition:opacity .3s; }
-.cta:hover::before { opacity:1; }
-.cta:hover { box-shadow:0 2px 24px var(--glow); }
-.connect { display:inline-flex; gap:6px; align-items:center; position:relative; }
-.connect .btn { height:28px; padding:0 10px; font-size:11.5px; }
-.connect.big .btn { height:44px; padding:0 18px; font-size:13.5px; gap:9px; border-radius:8px; }
-.connect.big svg.i { width:17px; height:17px; }
-.gtag { display:inline-flex; align-items:center; gap:4px; padding:1px 6px; border-radius:4px; border:1px solid var(--bd-mut);
-  background:var(--surface); font-size:10.5px; font-weight:600; color:var(--subtle); white-space:nowrap; flex:none; max-width:140px; overflow:hidden; text-overflow:ellipsis; }
-.gtag svg.i { width:11px; height:11px; }
-.gtag.shared { color:var(--st-bound-tx); border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
-.chipst { display:inline-flex; align-items:center; gap:5px; height:20px; padding:0 7px; border-radius:999px; border:1px solid; font-size:10.5px; font-weight:700; white-space:nowrap; flex:none; }
-.chipst .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
-.s-here { background:var(--st-good-bg); border-color:var(--st-good-bd); color:var(--st-good-tx); }
-.s-here .dot { animation:blink 2s ease-in-out infinite; }
-.s-online { background:var(--st-live-bg); border-color:var(--st-live-bd); color:var(--st-live-tx); }
-.s-busy { background:var(--st-attention-bg); border-color:var(--st-attention-bd); color:var(--st-attention-tx); }
-.s-offline, .s-seen, .s-empty { background:var(--st-neutral-bg); border-color:var(--st-neutral-bd); color:var(--subtle); }
-.s-working { background:var(--st-working-bg); border-color:var(--st-working-bd); color:var(--st-working-tx); }
-.s-behind { background:var(--st-warning-bg); border-color:var(--st-warning-bd); color:var(--st-warning-tx); }
-@keyframes blink { 50% { opacity:.35 } }
-.sync { display:inline-flex; align-items:center; gap:3px; font:700 10.5px var(--font); color:var(--st-bound-tx); flex:none; }
-.sync svg.i { width:11px; height:11px; }
 .ell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-/* the corner pill on a preview (production ux-play pill) */
-.pill { position:absolute; top:6px; right:6px; display:inline-flex; align-items:center; gap:5px; padding:1px 6px; border:1px solid var(--bd);
-  border-radius:4px; background:color-mix(in srgb, var(--terminal) 80%, transparent); font:800 9.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; z-index:2; }
-.pill .dot { width:6px; height:6px; border-radius:50%; background:currentcolor; flex:none; }
-.pill.here { color:var(--st-good-tx); } .pill.here .dot { animation:blink 2s ease-in-out infinite; }
-.pill.online { color:var(--st-live-tx); } .pill.busy { color:var(--st-attention-tx); }
-.pill.offline, .pill.seen, .pill.empty { color:var(--subtle); } .pill.working { color:var(--st-working-tx); }
-
-/* shared slim lines at the top of the page */
-.line { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:8px; border:1px solid; font-size:12.5px; margin-bottom:12px; flex-wrap:wrap; }
-.line .grow { flex:1; min-width:120px; }
-.line.signin { border-color:var(--bd); background:var(--panel); color:var(--muted); }
-.line.request { border-color:var(--st-attention-bd); background:var(--st-attention-bg); color:var(--st-attention-tx); }
-.line.request b { color:var(--strong); font-weight:700; }
-.line.request .note { color:var(--muted); font-style:italic; }
-.face { width:22px; height:22px; border-radius:50%; display:inline-grid; place-items:center; font-size:10px; font-weight:800; color:#0d0d13; flex:none; }
-
-/* welcome (brand new) */
-.welcome { display:grid; justify-items:center; gap:16px; text-align:center; padding:46px 16px 40px; border:1px dashed var(--bd); border-radius:12px; }
-.welcome h3 { margin:0; font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
-.welcome .or { font-size:12px; color:var(--subtle); }
-.welcome .or a { color:var(--muted); font-weight:600; }
-.app.narrow .connect.big { flex-direction:column; width:100%; }
-.app.narrow .connect.big .btn { width:100%; }
-
-/* section labels */
-.sect { display:flex; align-items:center; gap:10px; margin:22px 0 10px; }
-.sect h4 { margin:0; font:800 11px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); white-space:nowrap; }
-.sect .rule { flex:1; height:1px; background:var(--bd-mut); }
-.sect .count { font:600 11px var(--font); color:var(--faint); }
-.divider { display:flex; align-items:center; gap:14px; margin:30px 0 14px; }
-.divider span { flex:1; height:1px; background:var(--bd-mut); }
-.divider h4 { margin:0; font:800 14px/1 var(--font); text-transform:uppercase; letter-spacing:.06em; color:var(--heading); }
-
-/* catalog (production example cards: poster + glass name footer) */
-.catalog { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
-.app.narrow .catalog { grid-template-columns:repeat(2,1fr); gap:9px; }
-.ex { position:relative; height:118px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; }
-.ex .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.4); }
-.ex .foot { position:absolute; left:0; right:0; bottom:0; padding:7px 9px; background:rgba(12,12,20,.62); backdrop-filter:blur(10px);
-  font-size:12px; font-weight:700; color:var(--strong); border-top:1px solid rgba(255,255,255,.08); }
-.catlede { font-size:12px; color:var(--subtle); text-align:center; margin:-4px 0 12px; }
-
-/* previews */
-.prev { position:relative; background:#07080a; overflow:hidden; }
-.prev canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
-.prev .poster { position:absolute; inset:0; display:grid; place-items:center; font:800 22px var(--font); color:rgba(255,255,255,.38); }
-
-/* toast + popover */
+.mono { font:11px var(--mono); color:var(--muted); }
 .toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px); opacity:0; z-index:200; pointer-events:none;
   background:var(--raised-strong); border:1px solid var(--bd-strong); border-radius:10px; padding:9px 14px; box-shadow:0 18px 50px rgba(0,0,0,.6);
   font-size:12.5px; color:var(--tx); transition:opacity .2s, transform .2s; max-width:min(720px, 92vw); }
 .toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
-.toast code { color:var(--st-live-tx); font-size:11.5px; }
 .toast .sub { display:block; color:var(--subtle); font-size:11.5px; margin-top:2px; }
-.netpop { position:absolute; right:0; top:calc(100% + 6px); z-index:30; width:290px; display:grid; gap:8px; padding:12px;
-  border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); text-align:left; }
-.connect.big .netpop { right:auto; left:50%; transform:translateX(-50%); }
-.netpop label { font-size:11px; font-weight:700; color:var(--subtle); }
-.netpop .row2 { display:flex; gap:6px; }
-.netpop input { flex:1; min-width:0; height:30px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 9px; font:12px var(--mono); }
 
-/* =====================================================================
-   §1 Today (faithful, compact)
-   ===================================================================== */
-.today { max-height:720px; overflow:hidden; position:relative; }
-.today::after { content:""; position:absolute; left:0; right:0; bottom:0; height:120px; background:linear-gradient(transparent, var(--bg)); pointer-events:none; }
-.t-hero { display:grid; justify-items:center; gap:14px; padding:26px 0 8px; text-align:center; }
-.t-tri { width:110px; height:120px; clip-path:polygon(12% 4%, 96% 50%, 12% 96%); border-radius:14px;
-  background:radial-gradient(circle at 35% 45%, #ff5fa8, #a24cff 55%, #4b6bff); filter:drop-shadow(0 0 30px rgba(170,90,255,.5)); }
-.t-word { font-size:30px; font-weight:800; letter-spacing:-.02em; background:linear-gradient(90deg,#ff6b9a,#c77dff 50%,#5fe08b); -webkit-background-clip:text; background-clip:text; color:transparent; }
-.t-slogan { font-size:14px; font-weight:600; color:var(--strong); }
-.t-pill { display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:999px; border:1px solid var(--bd); background:var(--panel); font-size:12.5px; font-weight:700; color:var(--strong); }
-.t-ask { width:min(420px,100%); display:grid; gap:6px; margin-top:6px; }
-.t-ask b { font-size:15px; color:var(--strong); }
-.t-box { height:56px; border-radius:8px; border:1px solid var(--bd); background:var(--surface); text-align:left; padding:8px 10px; font-size:12px; color:var(--faint); }
-.t-slop { font-size:11px; color:var(--subtle); }
-.t-slop mark { background:rgba(255,93,93,.18); color:var(--st-error-tx); border-radius:3px; padding:0 3px; }
-.t-doors { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; width:min(760px,100%); margin:0 auto; }
-.t-door { display:grid; justify-items:center; gap:6px; padding:14px 10px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); text-align:center; }
-.t-door b { font-size:12.5px; color:var(--strong); } .t-door span { font-size:11px; color:var(--muted); line-height:1.35; }
-.t-door .ic { width:30px; height:30px; border-radius:6px; border:1px solid var(--bd); display:grid; place-items:center; color:var(--heading); background:var(--surface-muted); }
-.t-col { width:min(760px,100%); margin:0 auto; }
-
-/* =====================================================================
-   §2 A · Pair cards
-   ===================================================================== */
-.a-bar { display:flex; align-items:center; gap:12px; margin-bottom:14px; min-width:0; }
-.a-filter { display:flex; gap:6px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; mask:linear-gradient(90deg,#000 88%,transparent); -webkit-mask:linear-gradient(90deg,#000 88%,transparent); padding-right:30px; }
-.a-filter.fits { mask:none; -webkit-mask:none; }
-.fchip { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 11px; border-radius:999px;
-  border:1px solid var(--bd); background:transparent; color:var(--muted); font-size:12px; font-weight:600; white-space:nowrap; flex:none; }
-.fchip:hover { border-color:var(--bd-strong); color:var(--strong); }
-.fchip.on { border-color:var(--sel-bd); background:var(--sel-bg); color:var(--strong); }
-.fchip.shared { color:var(--st-bound-tx); }
-.fchip.shared.on { border-color:var(--st-bound-bd); background:var(--st-bound-bg); }
-.fchip .n { color:var(--faint); font-weight:600; }
-.fchip.idea { border-style:dashed; }
-.app.narrow .a-bar { flex-wrap:wrap; }
-.app.narrow .a-bar .connect { order:-1; width:100%; justify-content:flex-end; }
-.pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; }
-.app.narrow .pgrid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-.pair { position:relative; display:grid; grid-template-rows:auto 1fr; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; cursor:pointer; min-width:0; transition:border-color .15s, box-shadow .15s; }
-.pair:hover { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.12); }
-.pair.is-here { border-color:var(--st-good-bd); }
-.pair .prev { height:112px; border-bottom:1px solid var(--bd-mut); }
-.app.narrow .pair .prev { height:84px; }
-.pair .body { padding:9px 11px 10px; display:grid; gap:4px; min-width:0; }
-.pair .r1, .pair .r2 { display:flex; align-items:center; gap:6px; min-width:0; }
-.pair .bname { font-weight:700; font-size:13px; color:var(--strong); }
-.pair .pname { font-size:12px; color:var(--muted); }
-.pair .pname .arrow { color:var(--faint); margin-right:3px; }
-.pair .r1 .spring, .pair .r2 .spring { flex:1; }
-.pair .share { position:absolute; top:6px; left:6px; z-index:3; opacity:0; transition:opacity .15s; }
-.pair:hover .share { opacity:1; }
-.app.narrow .pair .share { display:none; }
-.pair.project .bname { font-weight:700; }
-.pair.project .quietline { font-size:11.5px; color:var(--subtle); }
-.pair.pattern .prev { height:72px; }
-.pgrid.patterns { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); }
-.app.narrow .pgrid.patterns { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.a-gap { height:16px; }
-
-/* =====================================================================
-   §3 B · One list
-   ===================================================================== */
-.b-head { display:flex; align-items:center; gap:12px; margin-bottom:6px; position:relative; }
-.b-title { appearance:none; font:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:8px; background:transparent; border:0; padding:4px 6px; margin-left:-6px; border-radius:8px;
-  font-size:20px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
-.b-title:hover { background:var(--raised); }
-.b-title svg.i { width:16px; height:16px; color:var(--subtle); }
-.b-title .shared-ic { color:var(--st-bound-tx); }
-.b-title { white-space:nowrap; }
-.app.narrow .b-head { flex-wrap:wrap; }
-.app.narrow .b-head > span[style] { display:none; }
-.app.narrow .b-head .connect { width:100%; justify-content:flex-end; }
-.b-url { font:11px var(--mono); color:var(--faint); margin:0 0 14px; }
-.b-menu { position:absolute; left:0; top:calc(100% + 4px); z-index:30; width:250px; padding:6px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; gap:1px; max-height:340px; overflow:auto; }
-.b-menu button { appearance:none; font:inherit; cursor:pointer; display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; border:0; background:transparent; color:var(--tx); font-size:12.5px; text-align:left; }
-.b-menu button:hover { background:var(--raised-strong); }
-.b-menu button.on { background:var(--sel-bg); }
-.b-menu button .n { margin-left:auto; color:var(--faint); font-size:11px; }
-.b-menu hr { border:0; border-top:1px solid var(--bd-mut); margin:4px 2px; }
-.b-menu .shared-row { color:var(--st-bound-tx); }
-.list { border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:hidden; }
-.lrow { display:grid; grid-template-columns:78px minmax(0,1.15fr) minmax(0,1fr) 120px minmax(128px,auto) 60px; align-items:center; gap:12px; padding:7px 12px; border-top:1px solid var(--bd-mut); cursor:pointer; min-height:44px; }
-.lrow:first-child { border-top:0; }
-.lrow:hover { background:var(--raised); }
-.lrow .prev { height:28px; border-radius:4px; border:1px solid var(--bd-mut); }
-.lrow .who { display:flex; align-items:center; gap:7px; min-width:0; }
-.lrow .who b { font-size:13px; color:var(--strong); font-weight:700; }
-.lrow .proj { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); min-width:0; }
-.lrow .proj .arrow { color:var(--faint); }
-.lrow .st { display:flex; justify-content:flex-start; gap:5px; flex-wrap:wrap; }
-.lrow .go { justify-self:end; opacity:.0; transition:opacity .12s; }
-.lrow:hover .go { opacity:1; }
-.lrow.parent { background:color-mix(in srgb, var(--st-bound-bg) 35%, var(--panel)); }
-.lrow.parent .who b { color:var(--strong); }
-.lrow.child .who { padding-left:16px; position:relative; }
-.lrow.child .who::before { content:""; position:absolute; left:4px; top:-12px; bottom:50%; width:8px; border-left:1px solid var(--st-bound-bd); border-bottom:1px solid var(--st-bound-bd); border-bottom-left-radius:4px; }
-.lrow .meta { font-size:11.5px; color:var(--subtle); }
-.app.narrow .lrow { grid-template-columns:56px minmax(0,1fr) auto; gap:9px; padding:7px 10px; }
-.app.narrow .lrow .proj, .app.narrow .lrow .grp, .app.narrow .lrow .go { display:none; }
-.app.narrow .lrow .who { flex-direction:column; align-items:flex-start; gap:1px; }
-.lrow .who .sub2 { display:none; font-size:11.5px; color:var(--muted); }
-.app.narrow .lrow .who .sub2 { display:block; }
-.app.narrow .lrow.child .who { padding-left:12px; }
-.b-patterns { display:flex; flex-wrap:wrap; gap:8px; }
-.pchip { display:inline-flex; align-items:center; gap:8px; padding:4px 10px 4px 4px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; font-size:12px; font-weight:600; color:var(--tx); }
-.pchip:hover { border-color:var(--bd-strong); }
-.pchip .prev { width:44px; height:26px; border-radius:5px; }
-
-/* =====================================================================
-   §4 C · Stage
-   ===================================================================== */
-.c-stage { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(0,1fr); gap:12px; }
-.app.narrow .c-stage { grid-template-columns:1fr; }
-.c-hero { position:relative; border-radius:12px; overflow:hidden; border:1px solid var(--st-good-bd); background:#07080a; height:290px; cursor:pointer; }
-.app.narrow .c-hero { height:230px; }
-.c-hero .prev { position:absolute; inset:0; }
-.c-hero .ov { position:absolute; left:0; right:0; bottom:0; padding:40px 18px 16px; background:linear-gradient(transparent, rgba(7,8,10,.94) 55%); display:flex; align-items:flex-end; gap:12px; z-index:2; }
-.c-hero .ov .names { flex:1; min-width:0; display:grid; gap:3px; }
-.c-hero .ov .bn { font-size:22px; font-weight:800; color:var(--strong); letter-spacing:-.01em; }
-.c-hero .ov .pn { font-size:13px; color:var(--muted); display:flex; gap:8px; align-items:center; min-width:0; }
-.c-hero .ov .btn { height:36px; padding:0 16px; font-size:13px; }
-.c-side { display:grid; gap:8px; align-content:start; }
-.c-mini { display:grid; grid-template-columns:96px minmax(0,1fr); gap:10px; align-items:center; padding:6px; border-radius:8px; border:1px solid var(--bd); background:var(--panel); cursor:pointer; min-width:0; }
-.c-mini:hover { border-color:var(--bd-strong); }
-.c-mini .prev { height:54px; border-radius:5px; }
-.c-mini .t { display:grid; gap:2px; min-width:0; }
-.c-mini .t b { font-size:12.5px; color:var(--strong); }
-.c-mini .t span { font-size:11.5px; color:var(--muted); }
-.c-side .more { font-size:11.5px; color:var(--subtle); padding:2px 4px; }
-.c-tabs { display:flex; align-items:flex-end; gap:20px; border-bottom:1px solid var(--bd-mut); margin:22px 0 14px; min-width:0; }
-.c-tabs .tabs { display:flex; gap:18px; overflow-x:auto; scrollbar-width:none; flex:1; min-width:0; }
-.c-tab { appearance:none; font:inherit; cursor:pointer; background:transparent; border:0; position:relative; padding:8px 0 9px; font-size:12.5px; font-weight:600; color:var(--muted); white-space:nowrap; display:inline-flex; gap:5px; align-items:center; }
-.c-tab:hover { color:var(--strong); }
-.c-tab.on { color:var(--strong); }
-.c-tab.on::after { content:""; position:absolute; left:0; right:0; bottom:-1px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); }
-.c-tab.shared { color:var(--st-bound-tx); }
-.c-tabs .connect { padding-bottom:6px; }
-.app.narrow .c-tabs { flex-direction:column; align-items:stretch; gap:6px; }
-.app.narrow .c-tabs .connect { order:-1; justify-content:flex-end; padding:0; }
-.tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(178px,1fr)); gap:12px; }
-.app.narrow .tiles { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-.tile { position:relative; height:132px; border-radius:8px; border:1px solid var(--bd); overflow:hidden; cursor:pointer; background:#07080a; min-width:0; }
-.tile:hover { border-color:var(--bd-strong); }
-.tile.is-here { border-color:var(--st-good-bd); }
-.tile .prev { position:absolute; inset:0; }
-.tile .foot { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:6px 9px 7px; background:rgba(12,12,20,.66); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.08); display:grid; gap:1px; }
-.tile .foot .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
-.tile .foot .l1 b { font-size:12px; color:var(--strong); }
-.tile .foot .l2 { font-size:11px; color:var(--muted); display:flex; gap:6px; align-items:center; min-width:0; }
-.sdot { display:inline-block; vertical-align:middle; width:7px; height:7px; border-radius:50%; flex:none; }
-.sdot.here { background:var(--st-good-tx); box-shadow:0 0 8px var(--st-good-tx); animation:blink 2s ease-in-out infinite; }
-.sdot.online { background:var(--st-live-tx); }
-.sdot.busy { background:var(--st-attention-tx); }
-.sdot.offline, .sdot.seen, .sdot.empty { background:transparent; border:1.5px solid var(--faint); }
-.sdot.working { background:var(--st-working-tx); }
-.tile .gcorner { position:absolute; top:6px; left:6px; z-index:2; }
-.tile.stack { overflow:visible; box-shadow:0 -4px 0 -2px #2c2c3b, 0 -8px 0 -5px #22222e; }
-.tile.stack .prev { border-radius:8px 8px 0 0; overflow:hidden; }
-.tile.stack .foot { border-radius:0 0 8px 8px; }
-.dots { display:inline-flex; gap:3px; flex:none; }
-.sdot.behind { background:var(--st-warning-tx); }
-.c-welcome { display:grid; justify-items:center; gap:14px; text-align:center; padding:22px 0 10px; }
-.c-welcome .t-tri { width:96px; height:104px; }
-
-/* screenshot mode (?shot=<id>): one section alone, for gate crops */
-body.shot { padding:16px; }
-body.shot > *:not(.shot-keep):not(script) { display:none !important; }
-
-/* §5 legend */
-.legend { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
-.lg { display:grid; grid-template-columns:132px 1fr; gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--shell-bd); border-radius:8px; background:var(--bg); }
-.lg .w { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
-.lg .what { font-size:12px; color:var(--muted); }
-.lg .what b { color:var(--strong); }
-.lg .src { display:block; font-size:11px; color:var(--subtle); margin-top:3px; }
-.lg .step { font:700 10px var(--mono); color:var(--faint); }
-
-/* =====================================================================
-   Round 2 (gate 2026-10-08): question sections, no control strip.
-   Yona kept A (cards) and B (list) behind one switch, cards by default,
-   remembered in this browser. One section per open question, options
-   lettered to match the chat (Q1-A, Q1-B…).
-   ===================================================================== */
-.qsec { margin-top:56px; }
-.qsec > h2 { display:flex; align-items:center; gap:10px; font-size:16px; letter-spacing:0; text-transform:none; color:var(--shell-tx); margin:0 0 6px; }
-.qn { font:800 12px var(--mono); color:#0b0c0e; background:var(--shell-tx); border-radius:5px; padding:3px 8px; }
-.qsec > p.ask { color:var(--shell-mut); font-size:13px; margin:0 0 16px; max-width:980px; }
-.qsec > p.ask b { color:var(--shell-tx); }
-.opts { display:grid; gap:18px; align-items:start; }
-.opts.c2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
-.opts.c3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
-.opt { border:1px solid var(--shell-bd); border-radius:12px; padding:14px; background:#0e0f12; display:grid; gap:10px; align-content:start; min-width:0; }
-.opt.leanopt { border-color:#365545; box-shadow:inset 0 0 0 1px #365545; }
-.ohead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.olabel { font:800 20px/1 var(--mono); color:var(--shell-tx); }
-.oname { font-size:14px; font-weight:700; color:var(--shell-tx); }
-.leanb { font-size:11px; font-weight:700; color:#7be0b2; border:1px solid #365545; border-radius:999px; padding:1px 9px; }
-.owhat { font-size:12.5px; color:var(--shell-mut); margin:0; }
-.ofa { font-size:12px; color:var(--shell-dim); margin:0; line-height:1.5; }
-.ofa b { color:var(--shell-mut); font-weight:600; }
-.crop { position:relative; overflow:hidden; border-radius:12px; }
-.crop.fade::after { content:""; position:absolute; left:0; right:0; bottom:0; height:70px; background:linear-gradient(transparent, #0e0f12); pointer-events:none; z-index:20; }
-.crop > .app { border-radius:12px; }
-.duo { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-items:start; }
-.duo.phoneduo { grid-template-columns:minmax(0,1fr) 392px; }
-.vlabel { font:700 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--shell-dim); margin:0 0 5px 2px; }
-.decided { border:1px dashed var(--shell-bd-strong); border-radius:8px; padding:12px 16px; margin-top:16px; font-size:12.5px; color:var(--shell-mut); max-width:980px; }
-.decided b { color:var(--shell-tx); }
-.decided ul { margin:6px 0 0; padding-left:18px; } .decided li { margin:3px 0; }
-.usinglean { font-size:12px; color:var(--shell-dim); margin:0 0 10px; }
-.usinglean b { color:var(--shell-mut); }
-.refrow { display:grid; grid-template-columns:repeat(3, 392px); gap:16px; justify-content:start; overflow-x:auto; }
-
-/* the cards/list switch (an app control, not a spike control) */
-.vswitch { display:inline-flex; border:1px solid var(--bd); border-radius:7px; overflow:hidden; flex:none; }
-.vswitch button { appearance:none; cursor:pointer; border:0; background:transparent; color:var(--subtle); width:30px; height:26px; display:grid; place-items:center; }
-.vswitch button + button { border-left:1px solid var(--bd); }
-.vswitch button:hover { color:var(--strong); }
-.vswitch button.on { background:var(--sel-bg); color:var(--strong); }
-.vswitch svg.i { width:14px; height:14px; }
-.tools { display:flex; align-items:center; gap:10px; flex:none; }
-.app.narrow .tools { width:100%; justify-content:space-between; }
-.app.narrow .a-bar .tools, .app.narrow .c-tabs .tools { order:-1; }
-
-/* a project on several boards, as one card */
-.pair.set { box-shadow:0 -4px 0 -2px #2c2c3b, 0 -8px 0 -5px #22222e; overflow:visible; }
-.pair.set .prev { border-radius:8px 8px 0 0; }
-.pair.set .boards { display:flex; align-items:center; gap:6px; min-width:0; font-size:11.5px; color:var(--muted); }
-.pgrid { align-items:start; }
-.pair .prev .pv { position:absolute; bottom:6px; right:6px; z-index:2; font:800 9px var(--mono); letter-spacing:.07em; color:var(--subtle); text-transform:uppercase; opacity:0; transition:opacity .15s; }
-.pair:hover .prev[data-hover] .pv { opacity:1; }
-.lrow .sync { margin-left:2px; }
-.pair.addcard { align-self:stretch; border:1px dashed var(--bd-strong); background:transparent; cursor:default; display:grid; place-items:center; min-height:176px; }
-.pair.addcard:hover { box-shadow:none; }
-.addin { display:grid; gap:10px; justify-items:center; padding:14px; width:100%; }
-.addin b { font-size:13px; color:var(--strong); }
-.addbtns { display:grid; gap:6px; width:100%; max-width:180px; }
-.addbtns .btn { width:100%; justify-content:flex-start; }
-.addin .row2, .addrow .row2, .connpop .row2 { display:flex; gap:6px; width:100%; }
-.addin input, .addrow input, .connpop input { flex:1; min-width:0; height:28px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 8px; font:11.5px var(--mono); }
-.addrow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 12px; border-top:1px dashed var(--bd-strong); }
-.addrow b { font-size:12.5px; color:var(--strong); }
-.addrow .spring, .cstrip .spring { flex:1; }
-.addrow .plus, .cstrip .plus { width:22px; height:22px; border-radius:6px; border:1px dashed var(--bd-strong); display:grid; place-items:center; color:var(--muted); }
-.addrow .plus svg.i, .cstrip .plus svg.i { width:12px; height:12px; }
-.addrow .connect .btn { height:26px; }
-.addrow .row2 { flex-basis:100%; max-width:320px; margin-left:auto; }
-.cstrip { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 12px; margin:0 0 6px; border:1px dashed var(--bd-strong); border-radius:8px; }
-.cstrip b { font-size:12.5px; color:var(--strong); }
-.app.narrow .cstrip .connect { width:100%; justify-content:flex-end; }
-.topconn { position:relative; }
-.topconn .btn svg.i { width:12px; height:12px; }
-.connpop { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:220px; display:grid; gap:6px; padding:8px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.6); }
-.connpop .btn { width:100%; justify-content:flex-start; }
-.sqrow { display:flex; align-items:flex-start; gap:10px; flex-wrap:wrap; }
-.sq { appearance:none; font:inherit; cursor:pointer; position:relative; width:84px; height:72px; display:grid; place-items:center; align-content:center; gap:6px;
-  border:1px solid var(--bd); border-radius:8px; background:var(--panel); color:var(--tx); font-size:11.5px; font-weight:600; transition:border-color .15s, box-shadow .15s; }
-.sq svg.i { width:20px; height:20px; color:var(--heading); }
-.sq:hover, .sq.on { border-color:var(--bd-strong); box-shadow:0 2px 20px rgba(140,170,255,.14); }
-.sq.on { border-color:var(--sel-bd); }
-.sqnet { display:grid; gap:6px; align-content:center; height:72px; min-width:240px; }
-.sqnet label { font-size:11px; font-weight:700; color:var(--subtle); }
-.sqnet .row2 { display:flex; gap:6px; }
-.sqnet input { flex:1; min-width:0; height:30px; border-radius:6px; border:1px solid var(--bd); background:var(--surface-muted); color:var(--tx); padding:0 9px; font:12px var(--mono); }
-.sqhint { align-self:center; font-size:12px; color:var(--subtle); margin-left:6px; }
-.sqhint a { color:var(--muted); font-weight:600; }
-.app.narrow .sqhint { flex-basis:100%; margin:2px 0 0; }
-
-/* =====================================================================
-   Board-card spike (round 1). The card on the home page, not the full
-   device card. Same eight boards in every option.
-   ===================================================================== */
-.cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; align-items:start; }
-.app.narrow .cards { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-.k { display:inline-flex; align-items:center; gap:3px; color:var(--subtle); flex:none; }
-.k svg.i { width:13px; height:13px; }
-.k.cloud { color:var(--st-live-tx); }
-.k.dim { color:var(--faint); }
-.bc { position:relative; border-radius:8px; border:1px solid var(--bd); background:var(--panel); overflow:hidden; cursor:pointer; min-width:0; }
-.bc:hover { border-color:var(--bd-strong); }
-.bc.live { border-color:var(--st-good-bd); }
-.bc .pic { position:relative; background:#07080a; }
-.bc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
-.ell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mini-btn { appearance:none; font:inherit; cursor:pointer; height:24px; padding:0 9px; border-radius:6px; border:1px solid var(--bd-strong); background:var(--raised); color:var(--strong); font-size:11px; font-weight:700; white-space:nowrap; }
-.mini-btn:hover { border-color:var(--sel-bd); }
-
-/* A · picture first, words only when something needs you */
-.ca .pic { position:absolute; left:0; right:0; top:0; bottom:46px; }
-.ca .foot { position:absolute; left:0; right:0; bottom:0; z-index:2; padding:7px 10px 8px; background:rgba(12,12,20,.7); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.07); display:grid; gap:1px; }
-.ca .l1 { display:flex; align-items:center; gap:6px; min-width:0; }
-.ca .l1 b { font-size:12.5px; color:var(--strong); }
-.ca .l2 { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); min-width:0; }
-.ca .note { position:absolute; top:7px; left:7px; right:7px; z-index:2; display:flex; justify-content:flex-end; gap:6px; }
-.ca .note .pill { position:static; }
-.ca .note .mini-btn { height:20px; font-size:10px; padding:0 7px; }
-.ca { height:164px; }
-.app.narrow .ca { height:140px; }
-
-/* B · name first, a status line always */
-.cb { display:grid; }
-.cb .hd { display:flex; align-items:center; gap:7px; padding:9px 11px 0; min-width:0; }
-.cb .hd b { font-size:13px; color:var(--strong); }
-.cb .sub { padding:1px 11px 8px; font-size:11.5px; color:var(--muted); display:flex; gap:6px; align-items:center; min-width:0; }
-.cb .pic { height:84px; border-top:1px solid var(--bd-mut); border-bottom:1px solid var(--bd-mut); }
-.cb .st { display:flex; align-items:center; gap:4px 6px; flex-wrap:wrap; padding:7px 11px 8px; font-size:11.5px; color:var(--muted); min-height:36px; }
-.cb .st .dot { width:7px; height:7px; border-radius:50%; flex:none; }
-.cb .st .spring { flex:1; }
-
-/* C · one sentence */
-.cc .pic { height:96px; border-bottom:1px solid var(--bd-mut); }
-.cc .bd { padding:8px 11px 10px; display:grid; gap:3px; }
-.cc .hd { display:flex; align-items:center; gap:6px; min-width:0; }
-.cc .hd b { font-size:13px; color:var(--strong); }
-.cc .say { font-size:11.5px; line-height:1.4; color:var(--muted); min-height:32px; }
-.cc .say em { font-style:normal; color:var(--tx); font-weight:600; }
-.cc .say .warn { color:var(--st-warning-tx); }
-.cc .say .att { color:var(--st-attention-tx); }
-.cc .say a { color:var(--strong); font-weight:700; text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
-
-/* D · board above, project below */
-.cd .bz { padding:9px 11px 8px; display:grid; gap:6px; }
-.cd .hd { display:flex; align-items:center; gap:6px; min-width:0; }
-.cd .hd b { font-size:13px; color:var(--strong); }
-.cd .hd .spring { flex:1; }
-.cd .pic { height:86px; border-radius:6px; border:1px solid var(--bd-mut); overflow:hidden; }
-.cd .pz { border-top:1px solid var(--bd); padding:7px 11px 8px; display:flex; align-items:center; gap:7px; min-width:0; background:var(--surface); }
-.cd .pz .th { width:22px; height:16px; border-radius:3px; flex:none; }
-.cd .pz .nm { font-size:12px; color:var(--tx); font-weight:600; }
-.cd .pz .spring { flex:1; }
-.cd .pz .ok { font-size:10.5px; color:var(--subtle); flex:none; }
-.cd .pz .warn { font-size:10.5px; color:var(--st-warning-tx); font-weight:700; flex:none; }
-
-.stagecrop { max-height:560px; }
-.principle { font-size:12px; color:var(--shell-mut); margin:0; }
-.principle b { color:var(--shell-tx); }
-
-
-/* =====================================================================
-   Round 2 of the stack card. Rows, top to bottom (Yona): project and
-   status · where and connection · firmware · hardware. Every card is the
-   same height in every state: rows never appear or disappear, a notice
-   only tints its row.
-   ===================================================================== */
+/* ---- the card ------------------------------------------------------- */
 .scards { display:grid; grid-template-columns:repeat(auto-fill,minmax(244px,1fr)); gap:14px; align-items:start; }
 .app.narrow .scards { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-.opt .app:not(.phone) { margin:0; }
-.app.narrow .nh { display:none; }
 .sc { position:relative; border-radius:8px; border:1px solid var(--bd); background:var(--panel); min-width:0; }
-.sc .pic { position:relative; height:150px; background:#07080a; border-radius:7px 7px 0 0; overflow:hidden; cursor:pointer; }
-.sc.lab-glass .pic, .sc.lab-top .pic { height:138px; }
-.app.narrow .sc .pic { height:112px; }
-.app.narrow .sc.lab-glass .pic, .app.narrow .sc.lab-top .pic { height:112px; }
+.sc .pic { position:relative; height:138px; background:#07080a; border-radius:7px 7px 0 0; cursor:pointer; }
+.app.narrow .sc .pic { height:108px; }
 .sc .pic canvas { position:absolute; inset:0; width:100%; height:100%; display:block; border-radius:7px 7px 0 0; }
+.sc.mini .pic { height:62px; }
+.cap { font:700 10.5px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--shell-dim); margin:0 0 5px 2px; }
 
-/* the label: name, then line 2 (what it plays, or a project notice). Two lines, always. */
-.lab { display:flex; align-items:center; gap:8px; padding:7px 8px 8px 10px; min-width:0; cursor:pointer; }
-.lab .txt { flex:1; min-width:0; display:grid; gap:1px; }
-.go { height:28px; padding:0 12px; border-radius:7px; font-size:12px; font-weight:800; flex:none; }
-.go[disabled] { opacity:.45; cursor:not-allowed; }
-/* Q11-B: the primary action as a section of the name bar, flush like a bar's action, the
-   primary voice kept as a thin spectrum line along its foot */
-.gosec { appearance:none; font:inherit; cursor:pointer; position:relative; align-self:stretch; margin:0 -8px 0 0; padding:0 16px; border:0; border-left:1px solid var(--bd);
-  background:rgba(255,255,255,.035); color:var(--strong); font-size:12.5px; font-weight:800; white-space:nowrap; flex:none; }
-.gosec::after { content:""; position:absolute; left:10px; right:10px; bottom:7px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); opacity:.75; transition:opacity .2s, left .2s, right .2s; }
-.gosec:hover { background:rgba(255,255,255,.08); }
-.gosec:hover::after { opacity:1; left:6px; right:6px; }
-.gosec[disabled] { color:var(--subtle); cursor:not-allowed; background:transparent; }
-.gosec[disabled]::after { display:none; }
-.go.split-go { padding:0 0 0 12px; display:inline-flex; align-items:stretch; overflow:hidden; }
-.go.split-go span.car { display:inline-grid; place-items:center; width:24px; margin-left:10px; border-left:1px solid var(--bd-strong); }
-.lab .l1 { display:flex; align-items:center; gap:6px; min-width:0; height:18px; }
-.lab .l1 b { font-size:13px; color:var(--strong); }
-.lab .l2 { display:flex; align-items:center; gap:5px; min-width:0; height:18px; font-size:11.5px; color:var(--muted); }
-.lab .l2 svg.i { width:12px; height:12px; flex:none; }
-.lab.under { border-top:1px solid var(--bd-mut); }
-.lab.glass { position:absolute; left:0; right:0; bottom:0; z-index:2; background:rgba(12,12,20,.62); backdrop-filter:blur(10px); border-top:1px solid rgba(255,255,255,.08); }
-.lab.top { position:absolute; left:0; right:0; top:0; z-index:2; background:linear-gradient(rgba(7,8,10,.86), rgba(7,8,10,.0)); padding-bottom:18px; }
-.lab.t-att { background:color-mix(in srgb, var(--st-attention-bg) 92%, transparent); }
-.lab.t-att .l2 { color:var(--st-attention-tx); font-weight:700; }
-.lab.t-err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); }
-.lab.t-err .l2 { color:var(--st-error-tx); font-weight:700; }
-.lab.top.t-att, .lab.top.t-err { background-image:none; }
-.lab .mini { appearance:none; font:inherit; cursor:pointer; height:18px; padding:0 7px; border-radius:5px; border:1px solid currentColor; background:transparent; color:inherit; font-size:10.5px; font-weight:800; flex:none; }
-
-/* the status: how fresh the picture is (frame rate when watched, an age when not) */
-.fps { font:700 10.5px var(--mono); color:var(--st-live-tx); flex:none; }
-.age { font:600 10.5px var(--font); color:var(--subtle); flex:none; }
-/* Q5-A: a cutout notched into the card's corner, in the card's own colour */
-.notch { appearance:none; font:inherit; cursor:pointer; border:0; position:absolute; top:0; right:0; z-index:4; height:24px; display:inline-flex; align-items:center; gap:5px; padding:0 9px 0 9px; background:var(--panel); color:var(--muted); border-bottom-left-radius:9px; }
+/* the status, cut out of the picture's corner */
+.notch { appearance:none; font:inherit; cursor:pointer; border:0; position:absolute; top:0; right:0; z-index:4; height:24px; display:inline-flex; align-items:center; gap:5px; padding:0 9px; background:var(--panel); color:var(--muted); border-bottom-left-radius:9px; border-top-right-radius:7px; }
 .notch:hover { color:var(--strong); }
 .notch svg.i { width:13px; height:13px; }
+.notch::before, .notch::after { content:""; position:absolute; width:9px; height:9px; background:radial-gradient(circle at 0 100%, transparent 8.5px, var(--panel) 9px); }
+.notch::before { left:-9px; top:0; }
+.notch::after { right:0; bottom:-9px; }
+.fps { font:700 10.5px var(--mono); color:var(--st-live-tx); }
+.age { font:600 10.5px var(--font); color:var(--subtle); }
+.pct { font:700 10.5px var(--mono); color:var(--strong); }
 .sicon { display:inline-grid; place-items:center; flex:none; }
 .sicon.ok { width:8px; height:8px; border-radius:50%; background:var(--st-live-tx); box-shadow:0 0 6px rgba(156,200,238,.6); margin:0 2px; }
 .sicon.idle { width:8px; height:8px; border-radius:50%; border:1.5px solid var(--faint); margin:0 2px; }
 .sicon.warn { color:var(--st-attention-tx); }
 .sicon.err { color:var(--st-error-tx); }
-.nb { display:flex; align-items:center; gap:8px; height:44px; padding:0 8px 0 11px; border-top:1px solid var(--bd-mut); min-width:0; cursor:pointer; }
-.nb.two { height:50px; }
-.nb .nbt { flex:1; min-width:0; display:grid; gap:1px; }
-.nb .nbt .grp { font-size:11.5px; }
-.nb .nbt .grp svg.i { width:12px; height:12px; }
-.nb b { font-size:13.5px; color:var(--strong); }
-.pop.top { top:28px; left:auto; right:-1px; width:300px; }
-.pop ul { margin:0; padding:0; list-style:none; display:grid; gap:4px; }
-.pop li { display:flex; gap:7px; align-items:center; font-size:12px; color:var(--tx); }
-.pop li svg.i { width:12px; height:12px; flex:none; }
-.pop li .ly { font:800 9.5px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--subtle); width:66px; flex:none; }
-.notch::before, .notch::after { content:""; position:absolute; width:9px; height:9px; background:radial-gradient(circle at 0 100%, transparent 8.5px, var(--panel) 9px); }
-.notch::before { left:-9px; top:0; }
-.notch::after { right:0; bottom:-9px; }
+/* Studio's working vocabulary (docs/style/ui.md): the conic spinner, the iridescent fill */
+.spin { width:11px; height:11px; border-radius:50%; flex:none; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); -webkit-mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); animation:spin 1.1s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.ring { width:13px; height:13px; border-radius:50%; flex:none; background:conic-gradient(var(--st-live-tx) 0 var(--p), rgba(255,255,255,.12) var(--p) 100%);
+  mask:radial-gradient(circle closest-side, transparent 50%, #000 58%); -webkit-mask:radial-gradient(circle closest-side, transparent 50%, #000 58%); }
+.ring.iri { background:conic-gradient(from 0deg, var(--spectrum) ) ; }
+.iri { position:absolute; left:0; bottom:0; height:2px; border-radius:0 2px 2px 0; background:linear-gradient(90deg, var(--spectrum), #5fe08b); background-size:300% 100%; animation:iri 4s linear infinite; }
+.iri.sweep { width:35%; animation:iri 4s linear infinite, sweep 1.1s ease-in-out infinite; }
+@keyframes iri { to { background-position:300% 0; } }
+@keyframes sweep { 0% { left:-35%; } 100% { left:100%; } }
+@media (prefers-reduced-motion: reduce) { .spin, .iri, .iri.sweep { animation:none; } }
 
-/* details: Studio's detail card (base/detail_popover.rs), its outline merged with the bar
-   that opened it (docs/adr/2026-07-15-popover-svg-merged-outline.md; production draws the
-   union as one SVG path, this spike approximates it with borders) */
-.srow.open { z-index:41; background:var(--raised); box-shadow:inset 1px 0 0 var(--bd-strong), inset -1px 0 0 var(--bd-strong), inset 0 1px 0 var(--bd-strong); }
+/* the name bar: name, place, and the primary action as a section */
+.nb { position:relative; display:flex; align-items:center; gap:8px; height:50px; padding:0 8px 0 11px; border-top:1px solid var(--bd-mut); min-width:0; cursor:pointer; }
+.nb .nbt { flex:1; min-width:0; display:grid; gap:1px; }
+.nb b { font-size:13.5px; color:var(--strong); }
+.grp { display:inline-flex; align-items:center; gap:4px; color:var(--subtle); min-width:0; font-size:11.5px; }
+.grp svg.i { width:12px; height:12px; }
+.av { width:14px; height:14px; border-radius:50%; display:inline-grid; place-items:center; font-size:8px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#ffab4a,#ff5d5d); flex:none; }
+.gosec { appearance:none; font:inherit; cursor:pointer; position:relative; align-self:stretch; margin:0 -8px 0 0; padding:0 16px; border:0; border-left:1px solid var(--bd);
+  background:transparent; color:var(--strong); font-size:12.5px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:6px; }
+.gosec svg.i { width:12px; height:12px; }
+.gosec + .gosec { margin-left:-8px; }
+.gosec.plain { color:var(--muted); font-weight:700; padding:0 13px; }
+.gosec.plain:hover { color:var(--strong); background:rgba(255,255,255,.06); }
+.gosec[disabled] { color:var(--faint); cursor:not-allowed; background:transparent !important; box-shadow:none !important; }
+.gosec[disabled]::before, .gosec[disabled]::after { display:none !important; }
+.gosec::before { content:""; position:absolute; inset:0; padding:1px; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; opacity:0; transition:opacity .2s; pointer-events:none; }
+/* Q12 · the five looks */
+.cta-foot .gosec:not(.plain) { background:rgba(255,255,255,.035); }
+.cta-foot .gosec:not(.plain)::after { content:""; position:absolute; left:10px; right:10px; bottom:7px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); opacity:.75; }
+.cta-foot .gosec:not(.plain):is(:hover,.hov) { background:rgba(255,255,255,.08); }
+.cta-key .gosec:not(.plain) { background:var(--raised-strong); box-shadow:inset 0 1px 0 rgba(255,255,255,.05); }
+.cta-key .gosec:not(.plain):is(:hover,.hov) { background:#2c2c3b; box-shadow:0 0 22px rgba(140,170,255,.22); }
+.cta-key .gosec:not(.plain):is(:hover,.hov)::before { opacity:1; }
+.cta-key .gosec:not(.plain):active { background:#383848; }
+.cta-outline .gosec:not(.plain)::after { content:""; position:absolute; inset:7px 6px; border:1px solid var(--bd-strong); border-radius:6px; pointer-events:none; transition:opacity .2s; }
+.cta-outline .gosec:not(.plain)::before { inset:7px 6px; border-radius:6px; }
+.cta-outline .gosec:not(.plain):is(:hover,.hov)::before { opacity:1; }
+.cta-outline .gosec:not(.plain):is(:hover,.hov)::after { opacity:0; }
+.cta-glyph .gosec:not(.plain):is(:hover,.hov) { background:rgba(255,255,255,.07); }
+.cta-glyph .gosec:not(.plain):is(:hover,.hov)::before { opacity:1; }
+.cta-fill .gosec:not(.plain) { background:linear-gradient(100deg, var(--spectrum)); color:#0d0d13; }
+.cta-fill .gosec:not(.plain):is(:hover,.hov) { filter:brightness(1.12); box-shadow:0 0 22px var(--glow); }
+.cta-fill .gosec[disabled] { background:transparent; }
+
+/* stack bars */
+.srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); }
+.srow svg.i { width:12px; height:12px; flex:none; color:var(--subtle); }
+.srow .spring { flex:1; }
+.srow .chev { color:var(--faint); font-size:12px; flex:none; }
+.srow.layer { cursor:pointer; }
+.srow.layer:hover { background:var(--raised); }
+.sc > .nb:last-child { border-radius:0 0 7px 7px; }
+.srow .nw { font-weight:700; display:inline-flex; align-items:center; gap:5px; min-width:0; }
+.srow.t-att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-top-color:var(--st-attention-bd); }
+.srow.t-err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-top-color:var(--st-error-bd); }
+.srow.t-neu { background:var(--surface); color:var(--muted); }
+.srow.t-up  { background:var(--st-live-bg); color:var(--st-live-tx); border-top-color:var(--st-live-bd); }
+.srow.t-good { background:var(--st-good-bg); color:var(--st-good-tx); border-top-color:var(--st-good-bd); }
+.srow[class*="t-"] svg.i { color:currentColor; }
+.srow.working { color:var(--strong); }
+.srow.working .ww { font-weight:700; }
+.lvl { display:inline-flex; align-items:center; gap:5px; flex:none; color:var(--muted); min-width:0; }
+.lvl b { color:var(--st-live-tx); font-weight:700; }
+/* a bar's action: flush at its end, the bar's own height */
+.wo { appearance:none; font:inherit; cursor:pointer; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid var(--bd); background:rgba(255,255,255,.035); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; }
+.wo svg.i { width:11px !important; height:11px !important; color:currentColor !important; }
+.srow[class*="t-"] .wo { border-left-color:currentColor; }
+.wo:hover { background:rgba(255,255,255,.1); }
+.wo.quiet { color:var(--muted); background:transparent; }
+.wo.quiet:hover { color:var(--strong); background:rgba(255,255,255,.07); }
+
+/* control bars: a panel control as a bar. The fill is the value (bright neutral, ui.md:
+   authored values glow neutral); touched, the grip turns gold (engaged) and ↺ lets go. */
+.cbar { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); user-select:none; -webkit-user-select:none; overflow:hidden; }
+.cbar.fader { cursor:ew-resize; touch-action:none; }
+.cbar svg.i { width:12px; height:12px; flex:none; color:var(--subtle); position:relative; }
+.cbar .fill { position:absolute; left:0; top:0; bottom:0; width:calc(var(--v) * 100%); background:rgba(255,250,240,.075); pointer-events:none; }
+.cbar .fill::after { content:""; position:absolute; right:0; top:5px; bottom:5px; width:2px; border-radius:2px; background:var(--strong); opacity:.85; }
+.cbar.eng .fill::after { background:var(--st-engaged-tx); box-shadow:0 0 6px rgba(232,197,107,.55); opacity:1; }
+.cbar.eng .val { color:var(--st-engaged-tx); }
+.cbar .lbl { position:relative; color:var(--tx); font-weight:600; }
+.cbar .val { position:relative; font:600 11px var(--mono); color:var(--strong); flex:none; }
+.cbar .spring { flex:1; }
+.cbar .wo { position:relative; }
+.cbar .clr { display:none; color:var(--st-engaged-tx); }
+.cbar.eng .clr { display:inline-flex; }
+.cbar.more { cursor:pointer; color:var(--muted); }
+.cbar.more:hover { background:var(--raised); color:var(--strong); }
+.cbar.step .blocks { position:relative; display:inline-flex; gap:2px; }
+.cbar.step .blocks i { width:7px; height:7px; background:rgba(255,255,255,.12); }
+.cbar.step .blocks i.on { background:var(--strong); }
+.cbar.step.eng .blocks i.on { background:var(--st-engaged-tx); }
+.cbar.big { height:40px; font-size:13px; padding:0 14px; }
+.cbar.big .val { font-size:12.5px; }
+.cbar.big svg.i { width:15px; height:15px; }
+.cbar.big .wo { margin-right:-14px; padding:0 14px; font-size:12px; }
+
+/* details: Studio's detail card, merged with the bar that opened it */
+.srow.open, .nb.open { z-index:41; background:var(--raised); box-shadow:inset 1px 0 0 var(--bd-strong), inset -1px 0 0 var(--bd-strong), inset 0 1px 0 var(--bd-strong); }
 .dpop { position:absolute; left:0; right:0; top:100%; z-index:40; max-width:320px; min-width:100%; background:var(--raised); border:1px solid var(--bd-strong); border-top:0;
   border-radius:0 0 10px 10px; box-shadow:0 18px 50px rgba(0,0,0,.6); display:grid; color:var(--muted); font-size:12px; cursor:default; }
 .dpop::before { content:""; position:absolute; left:10px; right:10px; top:0; height:1px; background:var(--bd-mut); }
 .dpop.top { left:auto; right:-1px; top:24px; width:300px; border-top:1px solid var(--bd-strong); border-radius:10px 0 10px 10px; }
 .dpop.top::before { display:none; }
+.dpop.panel { max-width:none; overflow:hidden; }
+.dpop.panel .cbar:first-child { border-top:0; }
 .dsec { display:grid; gap:2px; padding:6px 12px; border-top:1px solid var(--bd-mut); }
 .dsec:first-child { border-top:0; }
 .dsec h6 { margin:0; font:700 11px var(--font); letter-spacing:.04em; text-transform:uppercase; color:var(--heading); }
@@ -641,67 +205,64 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .dsec .acts .btn { height:26px; font-size:11px; padding:0 9px; }
 .dsec .acts .btn.lasting { color:var(--st-error-tx); }
 
-/* rows */
-.srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); }
-.srow svg.i { width:12px; height:12px; flex:none; color:var(--subtle); }
-.srow .spring { flex:1; }
-.srow .chev { color:var(--faint); font-size:12px; flex:none; }
-.srow.layer { cursor:pointer; }
-.srow.layer:hover { background:var(--raised); }
-.srow:last-child { border-radius:0 0 7px 7px; }
-.mono { font:11px var(--mono); color:var(--muted); }
-.grp { display:inline-flex; align-items:center; gap:4px; color:var(--subtle); min-width:0; }
-.av { width:14px; height:14px; border-radius:50%; display:inline-grid; place-items:center; font-size:8px; font-weight:800; color:#0d0d13; background:linear-gradient(135deg,#ffab4a,#ff5d5d); flex:none; }
-.lvl { display:inline-flex; align-items:center; gap:5px; flex:none; color:var(--muted); }
-.lvl b { color:var(--st-live-tx); font-weight:700; }
-.srow.t-att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-top-color:var(--st-attention-bd); }
-.srow.t-err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-top-color:var(--st-error-bd); }
-.srow.t-neu { background:var(--surface); color:var(--muted); }
-.srow.t-up  { background:var(--st-live-bg); color:var(--st-live-tx); border-top-color:var(--st-live-bd); }
-.srow.t-att svg.i, .srow.t-err svg.i, .srow.t-up svg.i { color:currentColor; }
-.srow .nw { font-weight:700; display:inline-flex; align-items:center; gap:5px; min-width:0; }
-/* a row's action: flush at its end, the row's own height */
-.wo { appearance:none; font:inherit; cursor:pointer; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid var(--bd); background:rgba(255,255,255,.035); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; flex:none; }
-.srow[class*="t-"] .wo { border-left-color:currentColor; }
-.wo:hover { background:rgba(255,255,255,.1); }
-.wo.primary { position:relative; }
-.wo.primary::after { content:""; position:absolute; left:8px; right:8px; bottom:4px; height:1.5px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum-cool)); opacity:.8; }
-.srow:last-child .wo { border-bottom-right-radius:7px; }
-.split { display:inline-flex; align-self:stretch; margin:0 -10px 0 4px; }
-.split .wo { margin:0; }
-.split .wo + .wo { padding:0 8px; }
-/* progress inside a row: the iridescent fill, never a flat bar */
-.prog { position:absolute; left:0; bottom:0; height:2px; background:linear-gradient(90deg,var(--spectrum)); border-radius:0 2px 2px 0; }
+/* the face under the name bar: the board's facts (watching) or its panel (connected) */
+.face > :last-child { border-radius:0 0 7px 7px; }
+.face > :last-child .wo:last-child, .face > :last-child > span:last-child .wo:last-child { border-bottom-right-radius:7px; }
+.face.anim > * { animation:rise .32s cubic-bezier(.2,.8,.3,1) both; }
+.face.anim > :nth-child(2) { animation-delay:.04s; } .face.anim > :nth-child(3) { animation-delay:.08s; }
+.face.anim > :nth-child(4) { animation-delay:.12s; } .face.anim > :nth-child(5) { animation-delay:.16s; } .face.anim > :nth-child(n+6) { animation-delay:.2s; }
+@keyframes rise { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { .face.anim > * { animation:none; } }
+.cbar.tall { height:34px; }
+/* Q14-B · Studio's panel widgets: a knob is a 270° arc, value inside, label under; a discrete
+   control is squared blocks, one per step (the panel's discrete language) */
+.krow { display:flex; justify-content:space-around; align-items:flex-start; height:84px; padding:6px 4px 0; border-top:1px solid var(--bd); }
+.knob { display:grid; justify-items:center; gap:2px; width:33%; min-width:0; cursor:ns-resize; touch-action:none; user-select:none; -webkit-user-select:none; }
+.knob svg { width:48px; height:48px; overflow:visible; }
+.knob .kv { font:700 10px var(--mono); fill:var(--strong); }
+.knob.eng .kv { fill:var(--st-engaged-tx); }
+.knob .kl { font-size:10.5px; color:var(--muted); font-weight:600; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.knob .kclr { appearance:none; border:0; background:none; color:var(--st-engaged-tx); font:inherit; font-size:10px; cursor:pointer; padding:0; visibility:hidden; display:inline-flex; align-items:center; gap:2px; }
+.knob.eng .kclr { visibility:visible; }
+.knob .kclr svg { width:10px; height:10px; }
 
-/* details */
-.pop { position:absolute; left:-1px; right:-1px; top:calc(100% - 2px); z-index:40; padding:10px 12px; border-radius:10px; border:1px solid var(--bd-strong); background:var(--raised); box-shadow:0 18px 50px rgba(0,0,0,.65); display:grid; gap:8px; font-size:12px; color:var(--muted); min-width:280px; }
-.pop h5 { margin:0; font:800 10px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--heading); }
-.pop .kv { display:grid; grid-template-columns:92px minmax(0,1fr); gap:3px 10px; }
-.pop .kv span:nth-child(odd) { color:var(--subtle); }
-.pop .kv span:nth-child(even) { color:var(--tx); }
-.pop .kv .m { font:11px var(--mono); }
-.pop .acts { display:flex; gap:6px; flex-wrap:wrap; border-top:1px solid var(--bd-mut); padding-top:8px; }
-.pop .acts .btn { height:26px; font-size:11px; padding:0 9px; }
-.pop .acts .btn.lasting { color:var(--st-error-tx); }
-.anatomy2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; max-width:1180px; }
-.anatomy2 .ac { border:1px solid var(--shell-bd); border-radius:10px; padding:12px 14px; background:var(--bg); display:grid; gap:8px; }
-.anatomy2 .acn { font-size:13px; font-weight:700; color:var(--shell-tx); }
-.anatomy2 .acn small { font-weight:500; color:var(--shell-dim); margin-left:6px; }
-.anatomy2 p { margin:0; font-size:12px; color:var(--shell-mut); line-height:1.5; }
-.slotrow { display:flex; gap:6px; flex-wrap:wrap; }
-.slot { font:11px var(--mono); color:var(--muted); border:1px dashed var(--bd-strong); border-radius:5px; padding:3px 8px; }
-.slot.big { flex:1; }
-.slot.cta { border-style:solid; border-color:#5fe08b; color:var(--strong); }
-pre.shape { max-width:1180px; margin:12px 0 0; padding:12px 14px; border:1px solid var(--shell-bd); border-radius:10px; background:#08090b; color:var(--shell-mut); font:11.5px/1.55 var(--mono); overflow:auto; }
-.levels { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; max-width:1180px; }
-.levels .lv { border:1px solid var(--shell-bd); border-radius:10px; padding:12px 14px; background:var(--bg); font-size:12.5px; color:var(--shell-mut); }
-.levels .lv b { color:var(--shell-tx); display:block; margin-bottom:4px; font-size:13px; }
-.levels .lv code { font-size:11px; }
 /* =====================================================================
-   The gate kit: pick an option, leave a note, comment anywhere. On
-   claude.ai the answers go to the page's own store (Claude reads them);
-   opened as a local file they stay in this browser, with a Copy button.
+   Spike shell: one section per question, options lettered to match chat
    ===================================================================== */
+.qsec { margin-top:56px; }
+.qsec > h2 { display:flex; align-items:center; gap:10px; font-size:16px; letter-spacing:0; text-transform:none; color:var(--shell-tx); margin:0 0 6px; }
+h2.plainh { font-size:12px; letter-spacing:.1em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
+.qn { font:800 12px var(--mono); color:#0b0c0e; background:var(--shell-tx); border-radius:5px; padding:3px 8px; }
+.qsec > p.ask { color:var(--shell-mut); font-size:13px; margin:0 0 16px; max-width:1000px; }
+.qsec > p.ask b { color:var(--shell-tx); }
+.opts { display:grid; gap:18px; align-items:start; }
+.opts.c1 { grid-template-columns:minmax(0,1fr); }
+.opts.c2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.opts.c3 { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.opt { border:1px solid var(--shell-bd); border-radius:12px; padding:14px; background:#0e0f12; display:grid; gap:10px; align-content:start; min-width:0; }
+.opt.leanopt { border-color:#365545; box-shadow:inset 0 0 0 1px #365545; }
+.ohead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.olabel { font:800 20px/1 var(--mono); color:var(--shell-tx); }
+.oname { font-size:14px; font-weight:700; color:var(--shell-tx); }
+.leanb { font-size:11px; font-weight:700; color:#7be0b2; border:1px solid #365545; border-radius:999px; padding:1px 9px; }
+.owhat { font-size:12.5px; color:var(--shell-mut); margin:0; }
+.ofa { font-size:12px; color:var(--shell-dim); margin:0; line-height:1.5; }
+.ofa b { color:var(--shell-mut); font-weight:600; }
+.strip { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:12px; align-items:start; }
+.strip.wide { grid-template-columns:repeat(auto-fill,minmax(236px,1fr)); }
+.opt .app { border-radius:10px; }
+.opt .app .page { padding:14px; }
+.popspace { padding-bottom:150px; }
+.duo { display:grid; grid-template-columns:minmax(0,1fr) 392px; gap:12px; align-items:start; }
+.vlabel { font:700 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--shell-dim); margin:0 0 5px 2px; }
+.usinglean { font-size:12.5px; color:var(--shell-dim); margin:0 0 10px; max-width:1100px; }
+.usinglean b { color:var(--shell-mut); }
+.note { border:1px dashed var(--shell-bd-strong); border-radius:8px; padding:12px 16px; margin-top:12px; font-size:12.5px; color:var(--shell-mut); max-width:1000px; }
+.note b { color:var(--shell-tx); }
+.note ul, .note ol { margin:6px 0 0; padding-left:18px; } .note li { margin:3px 0; }
+pre.shape { max-width:1000px; margin:10px 0 0; padding:12px 14px; border:1px solid var(--shell-bd); border-radius:10px; background:#08090b; color:var(--shell-mut); font:11.5px/1.55 var(--mono); overflow:auto; }
+
+/* the gate kit: pick an option, leave a note, comment anywhere */
 .gatebar { position:sticky; top:env(safe-area-inset-top, 0px); z-index:90; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px;
   margin:14px 0 0; padding:9px 12px; border:1px solid var(--shell-bd-strong); border-radius:10px; background:rgba(14,15,18,.94); backdrop-filter:blur(8px); font-size:12.5px; color:var(--shell-mut); }
 .gatebar b { color:var(--shell-tx); }
@@ -721,85 +282,91 @@ pre.shape { max-width:1180px; margin:12px 0 0; padding:12px 14px; border:1px sol
 .qtools label { font-size:11.5px; font-weight:700; color:var(--shell-dim); letter-spacing:.04em; }
 .qtools .row { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
 .qtools textarea { flex:1; min-width:0; min-height:44px; resize:vertical; border-radius:8px; border:1px solid var(--shell-bd-strong); background:#0e0f12; color:var(--shell-tx); padding:8px 10px; font:13px/1.45 var(--font); }
-.qtools textarea:focus-visible, .pickbtn:focus-visible, .gatebar button:focus-visible { outline:2px solid #a5b8ff; outline-offset:2px; }
-.gatebar .cmt-hint { font-size:11.5px; color:var(--shell-dim); }
+.qtools textarea:focus-visible, .pickbtn:focus-visible, .gatebar button:focus-visible, .gosec:focus-visible, .wo:focus-visible { outline:2px solid #a5b8ff; outline-offset:2px; }
 
-/* phone width: one column, no sideways scroll */
 @media (max-width: 760px) {
-  .opts.c2, .opts.c3, .duo, .duo.phoneduo, .anatomy2, .levels, .refrow { grid-template-columns:1fr !important; }
+  .opts.c2, .opts.c3, .duo { grid-template-columns:1fr !important; }
   .app.phone { width:100%; }
-  table.v { display:block; overflow-x:auto; }
   pre.shape { font-size:10.5px; }
 }
 </style>
 </head>
 <body>
 
-<h1>The stack card — round 4</h1>
-<p class="hint"><b>Round 3</b> (Yona, round 2: “very close”): don’t cover the picture, give the project its own bar, and give the status an icon that carries errors and warnings and opens a popover. <b>Round 1</b> settled the direction (“much better, I really like the overall idea”). <b>This round, one section per part of the card</b>, top to bottom in Yona’s order: <b>project and status · where and connection · firmware · hardware</b>.
-Two rules for every option: <b>a card never changes height</b> (rows never appear or disappear; a notice only tints its row), and <b>no boxes in boxes</b> (a notice is its row, edge to edge).
-The card is <b>two components</b>: one special <b>name bar</b> with the primary action, then a standard stack of <b>bars</b> that hold info and actions (below). The primary action connects to a board or opens it, across the three levels of connection.
-The page uses the leans; the questions are lettered to match the chat. Click a picture or name to open; click a firmware or hardware row for details.</p>
+<h1>The board card — round 5</h1>
+<p class="hint"><b>Round 4</b> (Yona): “we’re really close.” This round takes three things further: <b>the primary action’s look</b> (Q12), <b>how work in progress shows</b> (Q13), and <b>the panel</b>: connecting to a board turns its rows into its panel, and opening it in Studio becomes a separate Edit action (Q14–Q16).
+The card so far uses every lean; the questions are lettered to match the chat. Pick in the page, leave a note, or comment anywhere.</p>
 
 <div class="gatebar" id="gatebar"></div>
 
-<section class="qsec" id="levels">
-  <h2>The three levels of connection (vision D23–D26)</h2>
-  <div class="levels">
-    <div class="lv"><b>Watching</b>The picture and status, with no Studio session. Cloud-connected boards are watched through the cloud; a nearby board over its link (USB opens without asking; Bluetooth needs one tap to pick it; Wi‑Fi dials the address it last gave). Watching never blocks anyone.</div>
-    <div class="lv"><b>Connected</b>Studio holds a link it can open a session on. For a direct board, connecting is what starts watching it. The row says the link: “USB”, “Bluetooth”, “Wi‑Fi”, or the cloud.</div>
-    <div class="lv"><b>Open</b>The Studio session: the editor, with this board as the target. One per board; a watch steps aside for it, and someone else’s open shows as “Sean is editing” or “Open in another tab”.</div>
-  </div>
-</section>
-
-<section class="qsec" id="components">
-  <h2>Two components, driven by data (Yona: “one special bar that’s the main name / CTA, then a standardized stack of bars”)</h2>
-  <p class="ask" style="max-width:1100px">Like the node cards: the view model (in core, so every button is an offer the agent can see and press) says <b>what</b> is in each part; the components decide <b>how</b> it looks. The same two components can later carry project and pattern cards.</p>
-  <div class="anatomy2">
-    <div class="ac"><div class="acn">The name bar <small>one per card</small></div>
-      <div class="slotrow"><span class="slot big">title</span><span class="slot cta">primary action</span></div>
-      <p>One line, under the picture. The primary action is one offer: Open, Connect, Take over, Unlock, Install (Q7). The status (an icon for the worst problem, then the frame rate or the picture’s age) is cut out of the picture’s corner and opens its own popover.</p></div>
-    <div class="ac"><div class="acn">A stack bar <small>any number, one per layer</small></div>
-      <div class="slotrow"><span class="slot">icon</span><span class="slot big">summary</span><span class="slot">aside</span><span class="slot">action?</span><span class="slot">›</span></div>
-      <p>One line, 28 px, always. A <b>tone</b> (attention, error, neutral, live) tints the whole bar when it carries a notice; the summary becomes the notice’s words and the action its fix. <b>›</b> opens the bar’s details (Q3). Bars today: project · where &amp; connection · firmware · hardware.</p></div>
-  </div>
-  <pre class="shape">BoardCard {
-  picture:  Picture { feed: Live | CloudFrames | Still { age } }
-  status:   Status { worst: Fine | Warning | Error, reading: Fps(58) | Age("5 h ago"), details: Details }
-  name_bar: NameBar { title, primary: Offer }          // devices/&lt;board ref&gt;/open · connect · take-over · unlock · install
-  bars:     [StackBar { layer: Project | Where | Firmware | Hardware,
-                        icon, summary, aside, tone: Option&lt;Tone&gt;, action: Option&lt;Offer&gt;, details: Details }]
-}</pre>
-</section>
-
 <section class="qsec" id="page">
-  <h2>The card so far</h2>
-  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Round 4: the hardware bar says only the board (the LED count belongs to the project, in its details); no “open in another tab” on the card (that’s found out, and taken over, when you connect). Uses the leans for the two open questions: Q10-A (an access bar) and Q11-B (the primary action as a section of the name bar). Click any bar. Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
-  <div class="duo phoneduo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
+  <h2 class="plainh">The card so far</h2>
+  <p class="usinglean">Every lean at once. <b>Connect</b> on any card: it connects (the connection bar says so for a moment), then <b>its rows become its panel</b>. Drag a control; a touched control turns gold and gets <b>↺</b> to let go. <b>Done</b> disconnects, and the rows come back. <b>Edit</b> is the project bar’s action. <b>Kitchen shelf</b> is updating its firmware, and its lights are the progress. <b>Maya’s choker</b> connects over Bluetooth, which takes a little longer. Click any bar for its details.</p>
+  <div class="duo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
 </section>
 
-<section class="qsec" id="q10"><h2><span class="qn">Q10</span>Where does access live?</h2>
-  <p class="ask">From your note: “the access control needs a bar too, probably, or it lives in the connection spot.” Access is what you can do with this board (play, edit, nothing yet) and the key that lets you.</p><div class="opts c2" id="q10o"></div></section>
-<section class="qsec" id="q11"><h2><span class="qn">Q11</span>The primary action: a button, or a section of the name bar?</h2>
-  <p class="ask">From your note: every other action sits flush at the end of its bar, but Open / Connect is a rounded button. A section of the name bar is consistent; the button keeps the spectrum outline, the primary voice everywhere else in Studio.</p><div class="opts c2" id="q11o"></div></section>
+<section class="qsec" id="q12"><h2><span class="qn">Q12</span>What does the primary action look like?</h2>
+  <p class="ask">Q11 is settled: the primary action is a section of the name bar. Now its look. One rule from Studio’s style guide decides a lot here: <b>the spectrum is the pointer’s answer, not resting chrome</b> (“multi-color is a moment, not a wall”), and a static spectrum line under a word already means <b>“you are here”</b> on Studio’s tabs. Each option shows a board you can connect to, the same one hovered, a Bluetooth board, and one you can’t connect to right now (it’s updating). Hover them yourself, too.</p>
+  <div class="opts c2" id="q12o"></div></section>
+
+<section class="qsec" id="q13"><h2><span class="qn">Q13</span>How does work in progress show?</h2>
+  <p class="ask">A firmware update, start to finish, then a project being sent and a board connecting. In every option the bar doing the work goes neutral and says what’s happening with Studio’s spinner. Progress never sits on a status colour, by the style guide. Afterwards it’s green for a few seconds, or striped with <b>Retry</b>. The options differ in where the progress itself shows. From your note: <b>“probably replacing the lights.”</b></p>
+  <div class="opts c1" id="q13o"></div></section>
+
+<section class="qsec" id="q14"><h2><span class="qn">Q14</span>The rows become the panel. How does it look?</h2>
+  <p class="ask">From your notes: <b>“connecting opens the panel for controlling it, and loading it in Studio is a separate edit action”</b>, and <b>“when you connect a card, all the rows disappear and become the panel.”</b> The panel is the board’s own controls: brightness, speed, palette and whatever the project publishes, which is exactly what the play password gives. Each option shows Porch and Fyeah Sign connected (Porch’s brightness has been touched, so it’s gold) beside Garage, which is only watched, so you can compare heights. Drag any control.</p>
+  <div class="opts c1" id="q14o"></div></section>
+
+<section class="qsec" id="q15"><h2><span class="qn">Q15</span>Where does Edit live?</h2>
+  <p class="ask">With Connect as the way in, Edit opens the project in Studio’s editor with this board as its target. It shows only to people who can edit. Each option shows Porch watched and connected, Living room (Sean shared it to play) and Maya’s choker (anyone can play; editing needs its password).</p>
+  <div class="opts c1" id="q15o"></div></section>
+
+<section class="qsec" id="q16"><h2><span class="qn">Q16</span>What does the button say?</h2>
+  <p class="ask">The word on the primary action of a board you can reach. Unlock and Install stay as they are; a turned-over card says Done.</p>
+  <div class="opts c2" id="q16o"></div></section>
+
+<section class="qsec" id="assume">
+  <h2 class="plainh">Assumptions behind this round</h2>
+  <div class="note"><ol>
+    <li><b>A1.</b> The panel on a card is the board’s own panel (vision: the board serves its panel), its first controls in the board’s order. The rest are behind <b>All controls</b>, which opens the board’s own page (today’s play mode, <code>/device/…/play</code>).</li>
+    <li><b>A2.</b> The play password (or a play share) is enough to connect and use the panel; Edit needs the edit password. That’s access as shipped.</li>
+    <li><b>A3.</b> The card shows the board’s facts while it’s watched and its panel while it’s connected. <b>Done disconnects</b>: the board goes back to being watched, and its connection is free for someone else.</li>
+    <li><b>A4.</b> You can connect while someone else is editing: the panel is built for several phones at once (panel.md P9). Today a C6 has one network slot, so a second client over Wi‑Fi or the cloud is a firmware question this needs answered.</li>
+    <li><b>A5.</b> During an update you can’t connect; the panel comes back with the board. Notices that arrive while you’re connected show in the status corner.</li>
+    <li><b>A6.</b> The project bar’s icon changes from ▶ to ✳, so a play triangle means one thing.</li>
+  </ol></div>
+</section>
+
+<section class="qsec" id="shape">
+  <h2 class="plainh">The components, driven by data</h2>
+  <p class="usinglean">Three bar kinds now, all built in core as offers the agent can see and press: <b>the name bar</b> (one per card), <b>stack bars</b> (the board’s facts), and <b>control bars</b> (its panel). Watched, a card shows its facts; connected, its panel.</p>
+  <pre class="shape">BoardCard {
+  picture:  Picture { feed: Live | CloudFrames | Still { age } | Work(Progress) }   // Q13-B: the lights carry the progress
+  status:   Status { worst: Fine | Working | Warning | Error, reading: Fps(58) | Age("5 h ago"), details }
+  name_bar: NameBar { title, place, primary: Offer }     // devices/&lt;board&gt;/connect · unlock · install · done (disconnect)
+  face:     Facts { bars: [StackBar] }                   // watched
+          | Panel { controls: [ControlBar], all: Offer } // connected (Q14 says how many, and how they look)
+}
+StackBar   { layer: Project | Connection | Access | Firmware | Hardware, icon, summary, aside,
+             tone: Option&lt;Tone&gt;, action: Option&lt;Offer&gt;, work: Option&lt;Work&gt;, details }
+Work       { words, progress: Percent(64) | Unknown, ends: Done(words) | Failed { words, retry: Offer } }
+ControlBar { channel, label, widget: Fader { v } | Step { options, i } | Momentary, engaged: bool, clear: Option&lt;Offer&gt; }</pre>
+</section>
 
 <section class="qsec" id="ref">
-  <div class="decided"><b>Decided so far</b>
+  <div class="note"><b>Decided so far</b>
     <ul>
-      <li><b>Round 1:</b> the stack card, with firmware and hardware on every card (“much better”). Notices tint their layer’s row (Q1 → A); a status in the corner is fine too as long as it’s cut out of the card, not a pill (now Q5).</li>
-      <li><b>Round 1, Q2 → A</b> by the height rule: an action sits flush at the end of its row; a full-width last row would change the card’s height.</li>
-      <li><b>Order of rows</b> (Yona): project and status · where and connection · firmware · hardware.</li>
-      <li><b>Fixed height</b> (Yona): try hard never to change a card’s height.</li>
-      <li><b>Round 2, Q4 → none of them:</b> never cover the picture; let it be taller. The name bar sits under it, one line: the name and the primary action.</li>
-      <li><b>Round 2, Q5 → A, with an icon:</b> the status is cut out of the corner and shows an icon (blue dot when fine, an orange or red sign for the worst warning or error on the card) and the frame rate; clicking it opens the status popover, which lists every notice.</li>
-      <li><b>Round 2:</b> the project gets its own bar, first in the stack (“might be redundant, but I wanna see”).</li>
-      <li><b>Q3 → A:</b> details open as Studio’s detail card, its outline merged with the bar that opened it.</li>
-      <li><b>Q6 → D:</b> the group sits under the name (the board’s place); the connection gets a bar to itself.</li>
-      <li><b>Q7 → A:</b> one primary action at the end of the name bar, always the way in (Open, Connect, Unlock, Install); its form is Q11.</li>
-      <li><b>Q8 → A, revised:</b> the firmware bar says the version (it carries its date) and nothing else; older than the newest, it turns blue and offers Update.</li>
-      <li><b>Q9 → the board only:</b> the hardware bar says the board model; the LED count is the project’s, in its details.</li>
-      <li><b>Round 3:</b> no “open in another tab / take over” on the card. Studio finds out when you connect, and offers to take over then (vision D25 still holds there).</li>
-      <li>The vocabulary (glossary, colours, actions by consequence) is <code>spikes/board-card</code> round 2; its open questions fold into this spike next round.</li>
+      <li><b>The stack card</b> (round 1, “much better”): a picture, the name bar, then a stack of bars. Notices tint their bar; actions sit flush at a bar’s end; <b>a card never changes height</b>; no boxes in boxes.</li>
+      <li><b>Order:</b> project · connection · access · firmware · hardware.</li>
+      <li><b>The picture is never covered</b> (round 2); the name bar sits under it.</li>
+      <li><b>The status</b> is cut out of the picture’s corner: an icon for the worst notice (a blue dot when fine), then the frame rate or the picture’s age; it opens its own details (round 2, Q5).</li>
+      <li><b>Details</b> open as Studio’s detail card, merged with the bar that opened it (Q3 → A).</li>
+      <li><b>The group sits under the name</b>; the connection has its own bar (Q6 → D).</li>
+      <li><b>One primary action</b> at the end of the name bar, always the way in (Q7 → A), as <b>a section of the name bar</b> (Q11 → B, “I generally like it”); its look is Q12.</li>
+      <li><b>Firmware</b> says the version and nothing else; older than the newest, it turns blue and offers Update (Q8 → A, revised).</li>
+      <li><b>Hardware</b> says the board model only; the LED count is the project’s (Q9).</li>
+      <li><b>Access has its own bar</b> (Q10 → A, taken from the lean; it wasn’t answered, so say if not).</li>
+      <li><b>No “open in another tab / take over” on the card</b>: Studio finds out when you connect, and offers to take over then.</li>
     </ul></div>
 </section>
 
@@ -807,291 +374,464 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
 
 <script>
 /* =====================================================================
-   Icons (simple geometric paths)
+   Icons
    ===================================================================== */
 const IC = {
   usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="18.5" r="2.5"/><path d="M7 9v2.5l5 3"/><path d="M17 8v3.5l-5 3"/><rect x="5.6" y="7" width="2.8" height="2.4" rx=".4"/><circle cx="17" cy="7.5" r="1.3"/>',
   ble:'<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
   net:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor"/>',
-  people:'<circle cx="9" cy="8" r="3.3"/><path d="M2.8 20a6.2 6.2 0 0 1 12.4 0"/><path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4"/><path d="M17.8 14.2a6.2 6.2 0 0 1 3.4 5.8"/>',
-  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
-  share:'<circle cx="18" cy="5.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4.1M8.2 13.2l7.6 4.1"/>',
-  chev:'<path d="m6 9 6 6 6-6"/>',
   play:'<path d="M7 4.5v15l12.5-7.5z" fill="currentColor" stroke="none"/>',
-  search:'<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
-  tag:'<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8" r="1.3"/>',
   spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
-  bot:'<rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="9.5" cy="13.5" r="1" fill="currentColor"/><circle cx="14.5" cy="13.5" r="1" fill="currentColor"/>',
-  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.8" r=".9" fill="currentColor"/>',
   chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
-  sim:'<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8 20h8M12 16.5V20"/><path d="M10.5 8.5v4.5l4-2.25z" fill="currentColor"/>',
+  cloud:'<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/>',
+  folder:'<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  unlock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.9"/>',
+  unlockplay:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.9"/><path d="m11 13.5 3 2-3 2z" fill="currentColor" stroke="none"/>',
+  alert:'<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5"/><circle cx="12" cy="17" r=".9" fill="currentColor"/>',
+  person:'<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  history:'<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>',
+  fw:'<rect x="4" y="3.5" width="5" height="7" rx="2.5"/><path d="M15 3.5h2v7M15 10.5h4"/><path d="M5 13.5h2v7M5 20.5h4"/><rect x="15" y="13.5" width="5" height="7" rx="2.5"/>',
+  check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  xoct:'<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="m9 9 6 6M15 9l-6 6"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
+  speed:'<path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 17 4-6"/>',
+  hue:'<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>',
+  palette:'<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 1.8-1 1.3-2-.6-1.1.1-2.3 1.4-2.3H17a3.5 3.5 0 0 0 3.5-3.5c0-5.3-3.8-9.2-8.5-9.2z"/><circle cx="7.8" cy="11" r="1.1" fill="currentColor"/><circle cx="10.5" cy="7.3" r="1.1" fill="currentColor"/><circle cx="15" cy="7.8" r="1.1" fill="currentColor"/>',
+  grid:'<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  reset:'<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/>',
+  sliders:'<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  back:'<path d="m15 6-6 6 6 6"/>',
+  x:'<path d="M6 6l12 12M18 6 6 18"/>',
   edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  next:'<path d="m9 6 6 6-6 6"/>',
+  prev:'<path d="m15 6-6 6 6 6"/>',
 };
 const ic = (n, cls='i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${IC[n]}</svg>`;
 
-
-IC.grid = '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>';
-IC.plus = '<path d="M12 5v14M5 12h14"/>';
-IC.list = '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>';
-
-
-
-IC.cloud = '<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/>';
-IC.folder = '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>';
-IC.up = '<path d="M12 19V6M6 11l6-6 6 6"/>';
-IC.lock = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>';
-IC.alert = '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5"/><circle cx="12" cy="17" r=".9" fill="currentColor"/>';
-IC.person = '<circle cx="12" cy="8" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/>';
-IC.tab = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M8 5v4"/>';
-IC.history = '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path d="M12 8v4l3 2"/>';
-IC.fw = '<rect x="4" y="3.5" width="5" height="7" rx="2.5"/><path d="M15 3.5h2v7M15 10.5h4"/><path d="M5 13.5h2v7M5 20.5h4"/><rect x="15" y="13.5" width="5" height="7" rx="2.5"/>';
+/* =====================================================================
+   The boards
+   ===================================================================== */
 const STUDIO_FW = '2026.10.08-16';
-IC.check = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
-IC.unlock = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.9"/>';
-IC.unlockplay = '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.9"/><path d="m11 13.5 3 2-3 2z" fill="currentColor" stroke="none"/>';
-IC.xoct = '<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="m9 9 6 6M15 9l-6 6"/>';
-
-/* where: group or owner. link: how Studio reaches it now. conn: the connection state. */
 const BOARDS = [
-  { id:'desk', acc:'usb',   title:'Fyeah Sign',    plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'2026.10.07-3', fwAge:'2 days', model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB',
-    fwOld:true },
-  { id:'porch', acc:'edit',  title:'Porch',         plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
-  { id:'garage', acc:'edit', title:'Garage',        plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
+  { id:'desk', acc:'usb', title:'Fyeah Sign', plays:null, pat:'rainbow', layout:'matrix', fps:58, cloud:true, link:'usb', conn:'watch', group:'Studio', fw:'2026.10.07-3', fwOld:true, model:'ESP32-C6 DevKit', leds:128, mac:'8c11', free:'212 KB' },
+  { id:'porch', acc:'edit', title:'Porch', plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'roof', fps:60, cloud:true, conn:'watch', group:'House', fw:STUDIO_FW, model:'ESP32-C6 mini', leds:60, mac:'8c3e', free:'230 KB' },
+  { id:'garage', acc:'edit', title:'Garage', plays:'Holiday Eaves', synced:3, pat:'eaves', layout:'strip', fps:60, cloud:true, conn:'watch', group:'House', fw:STUDIO_FW, model:'ESP32-C6 mini', leds:96, mac:'90a2', free:'201 KB',
     projNote:{ tone:'att', icon:'history', text:'Out of date · v11', act:'Send latest' } },
-  { id:'kitchen', acc:'edit', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-9', fwAge:'today', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
-    fwNote:{ tone:'up', icon:'up', text:'Updating · 42%', prog:42 } },
-  { id:'living', acc:'play', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
-  { id:'shelf', acc:'browser',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', fps:60, cloud:false, link:'wifi', conn:'watch', group:'Studio', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
-  { id:'choker', acc:'anyone', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'2026.09.21-1', fwAge:'2½ weeks', fwOld:true, model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
-  { id:'truck', acc:'edit',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'2026.09.02-4', fwAge:'5 weeks', fwOld:true, model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
-  { id:'window', acc:'edit', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
+  { id:'kitchen', acc:'edit', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-9', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
+    work:{ layer:'fw', words:'Updating', prog:42, live:true } },
+  { id:'living', acc:'play', title:'Living room', plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:STUDIO_FW, model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
+  { id:'shelf', acc:'browser', title:'Slow Rainbow', plays:null, pat:'rainbow2', layout:'strip', fps:60, cloud:false, link:'wifi', conn:'watch', group:'Studio', fw:STUDIO_FW, model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—' },
+  { id:'choker', acc:'anyone', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'2026.09.21-1', fwOld:true, model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
+  { id:'truck', acc:'edit', title:'Truck', plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'2026.09.02-4', fwOld:true, model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
+  { id:'window', acc:'edit', title:'Window', plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:STUDIO_FW, model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
     projNote:{ tone:'err', icon:'alert', text:'Shader error', act:'Show' } },
-  { id:'lamp', acc:'locked',   title:'Ember Drift',   plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:'2026.10.08-16', fwAge:'today', model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
-  { id:'newb', acc:'usb',   title:'New board',     plays:null, blank:true, pat:'off', layout:'strip', cloud:false, link:'usb', conn:'connected', group:null, fw:null, model:'ESP32-C6', leds:null, mac:'c0de', free:'—', off:true,
+  { id:'lamp', acc:'locked', title:'Ember Drift', plays:null, pat:'off', layout:'ring', age:'1 d ago', cloud:false, link:'ble', conn:'locked', group:'Gifts', fw:STUDIO_FW, model:'XIAO ESP32-C6', leds:24, mac:'b10c', free:'—', off:true },
+  { id:'newb', acc:'usb', title:'New board', plays:null, blank:true, pat:'off', layout:'strip', cloud:false, link:'usb', conn:'connected', group:null, fw:null, model:'ESP32-C6', leds:null, mac:'c0de', free:'—', off:true,
     fwNote:{ tone:'att', icon:'fw', text:'No firmware' } },
 ];
+const byId = id => BOARDS.find(b => b.id===id);
 const LINK_ICON = { usb:'usb', ble:'ble', wifi:'net' };
 const LINK_WORD = { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' };
-const LEAN = { label:'glass', status:'notch', conn:'own', action:'rowbtn', fw:'A', hw:'A', detail:'pop', access:'bar', cta:'section' };
-/* access: what YOU can do with this board, and with which key */
 const ACC = {
-  edit:   { you:'play and edit', via:'your account key', short:'You can edit' },
-  usb:    { you:'play and edit', via:'USB (always)', short:'You can edit' },
-  browser:{ you:'play and edit', via:'this browser’s key', short:'You can edit' },
-  play:   { you:'play', via:'shared by Sean', short:'You can play' },
-  anyone: { you:'play (edit needs a password)', via:'anyone can play', short:'You can play' },
-  locked: { you:'nothing yet', via:'—', short:'Locked' },
-  none:   { you:'play and edit', via:'USB (always)', short:'You can edit' },
+  edit:   { you:'play and edit', via:'your account key', short:'You can edit', edit:true },
+  usb:    { you:'play and edit', via:'USB (always)', short:'You can edit', edit:true },
+  browser:{ you:'play and edit', via:'this browser’s key', short:'You can edit', edit:true },
+  play:   { you:'play', via:'shared by Sean', short:'You can play', edit:false },
+  anyone: { you:'play (edit needs a password)', via:'anyone can play', short:'You can play', edit:'locked' },
+  locked: { you:'nothing yet', via:'—', short:'Locked', edit:false },
 };
+/* the leans */
+const LEAN = { cta:'key', prog:'lights', panel:'turn', look:'bars', edit:'proj', word:'Connect' };
 
+/* the panel: the board's own controls, first four on the card */
+const F = (label, icon, v, fmt) => ({ k:'fader', label, icon, v, fmt });
+const S = (label, icon, opts, i) => ({ k:'step', label, icon, opts, i });
+const FMT = { pct:v => Math.round(v*100)+'%', x:v => (0.1 + v*1.9).toFixed(1)+'×', deg:v => Math.round(v*360)+'°' };
+const PANELS = {
+  desk:   { ctl:[F('Brightness','sun',.8,'pct'), F('Speed','speed',.47,'x'), F('Hue shift','hue',.2,'deg'), F('Density','grid',.6,'pct')], more:2 },
+  porch:  { ctl:[F('Brightness','sun',.7,'pct'), F('Speed','speed',.42,'x'), S('Palette','palette',['Classic','Warm white','Candy cane','Icicle'],0), F('Twinkle','spark',.4,'pct')], more:3 },
+  garage: { ctl:[F('Brightness','sun',.7,'pct'), F('Speed','speed',.42,'x'), S('Palette','palette',['Classic','Warm white','Candy cane','Icicle'],0), F('Twinkle','spark',.4,'pct')], more:3 },
+  choker: { ctl:[F('Brightness','sun',.35,'pct'), F('Speed','speed',.3,'x'), S('Mood','palette',['Calm','Party','Heartbeat'],2), F('Pulse width','spark',.55,'pct')], more:0 },
+};
+const panelOf = b => PANELS[b.id] || { ctl:[F('Brightness','sun',.75,'pct'), F('Speed','speed',.47,'x'), S('Palette','palette',['Original','Ember','Ocean','Forest'],0), F('Intensity','spark',.5,'pct')], more:1 };
+/* engaged controls: key board:label → value (a fader's v, or a step's i). Porch's brightness was touched. */
+const ENG = { 'porch:Brightness':.55 };
+
+/* =====================================================================
+   The card
+   ===================================================================== */
+const running = b => b.work && !b.work.state;
 function watched(b){ return b.conn==='watch' || b.conn==='held' || (b.conn==='connected' && !b.off); }
-function canvasOf(b){
-  const rate = (b.conn==='watch' && b.link) ? 'live' : watched(b) ? 'slow' : 'still';
-  return `<canvas data-pat="${b.pat}" data-layout="${b.layout}" data-rate="${rate}" data-live="${rate==='live'?1:0}" data-dim="${b.dim?1:0}" data-off="${b.off?1:0}" data-seed="${b.id.length}"></canvas>`;
+function workProg(b){ return b.work && b.work.live ? LIVE.prog : b.work && b.work.prog; }
+function workWords(b){ const p = workProg(b); return b.work.words + (p!=null ? ` · ${Math.round(p)}%` : '…'); }
+function canvasOf(b, c){
+  let rate = watched(b) || b.conn==='watch' ? 'live' : 'still';
+  let extra = '';
+  if (running(b) && c.prog==='lights' && (b.work.layer!=='conn' || !watched(b))){ rate = 'live'; extra = b.work.prog==null && !b.work.live ? ' data-work="sweep"' : ` data-work="fill" data-prog="${b.work.prog||0}"${b.work.live?' data-livework="1"':''}`; }
+  if (running(b) && c.prog==='corner'){ rate = 'still'; }
+  const dim = b.dim || (running(b) && c.prog==='corner');
+  return `<canvas data-pat="${b.pat}" data-layout="${b.layout}" data-rate="${rate}" data-dim="${dim?1:0}" data-off="${b.off?1:0}" data-seed="${b.id.length + (b.seedAdd||0)}"${extra}></canvas>`;
 }
-function statusText(b){
-  if (b.blank) return '';
-  if (watched(b) && b.fps) return `<span class="fps" title="Running at ${b.fps} frames a second">${b.fps} fps</span>`;
-  if (watched(b) && b.fps===0) return `<span class="fps" style="color:var(--st-error-tx)">0 fps</span>`;
-  return b.age ? `<span class="age" title="How old this picture is">${b.age}</span>` : '';
-}
-/* the name bar: the name and the primary action, one line */
-function nameBar(b, c){
-  if (c.conn==='own') return `<div class="nb two" data-open="${b.id}"><div class="nbt"><b class="ell">${b.title}</b>${whereHtml(b)}</div>${mainAction(b, c)}</div>`;
-  return `<div class="nb" data-open="${b.id}"><b class="ell">${b.title}</b><span style="flex:1"></span>${mainAction(b, c)}</div>`;
-}
-/* the project bar: what it plays, or what's wrong with the project */
-function projRow(b, c){
-  const n = b.projNote;
-  if (n) return `<div class="srow layer t-${n.tone}" data-detail="proj" data-id="${b.id}"><span class="nw">${ic(n.icon)}<span class="ell">${n.text}</span></span><span class="spring"></span>${n.act ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}</div>`;
-  if (b.blank) return `<div class="srow layer t-neu" data-detail="proj" data-id="${b.id}"><span class="nw" style="font-weight:600">${ic('play')}Nothing on it yet</span><span class="spring"></span><span class="chev">›</span></div>`;
-  const name = b.plays || b.title;
-  const aside = b.synced ? `${b.synced} boards` : (b.ver || '');
-  return `<div class="srow layer" data-detail="proj" data-id="${b.id}">${ic('play')}<span class="ell" style="color:var(--tx)">${name}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${aside}</span><span class="chev">›</span></div>`;
-}
-/* the status: the worst notice across the bars, then the frame rate (or the picture's age) */
 function severity(b){
+  if (b.work && b.work.state==='fail') return 'err';
   const tones = [b.projNote, b.fwNote].filter(Boolean).map(n => n.tone);
-  if (b.conn==='held' || b.conn==='othertab') tones.push('att');
+  if (b.conn==='held') tones.push('att');
   if (tones.includes('err')) return 'err';
   if (tones.includes('att')) return 'warn';
   return watched(b) ? 'ok' : 'idle';
 }
-function statusNotch(b){
+function statusText(b){
   if (b.blank) return '';
+  if (watched(b) && b.fps) return `<span class="fps">${b.fps} fps</span>`;
+  if (watched(b) && b.fps===0) return `<span class="fps" style="color:var(--st-error-tx)">0 fps</span>`;
+  return b.age ? `<span class="age">${b.age}</span>` : '';
+}
+function statusNotch(b, c){
+  if (b.blank) return '';
+  if (running(b) && c.prog==='lights') return `<button class="notch" data-detail="status" data-id="${b.id}" title="Working"><span class="spin"></span></button>`;
+  if (running(b) && c.prog==='corner'){
+    const p = workProg(b);
+    return `<button class="notch" data-detail="status" data-id="${b.id}" title="Working">${p!=null ? `<span class="ring" style="--p:${p}%"></span><span class="pct" ${b.work.live?'data-livepct="1"':''}>${Math.round(p)}%</span>` : '<span class="spin"></span>'}</button>`;
+  }
   const sev = severity(b);
   const icon = sev==='err' ? `<span class="sicon err">${ic('xoct')}</span>` : sev==='warn' ? `<span class="sicon warn">${ic('alert')}</span>` : `<span class="sicon ${sev}"></span>`;
   return `<button class="notch" data-detail="status" data-id="${b.id}" title="Status">${icon}${statusText(b)}</button>`;
 }
-/* the primary action: whatever gets you into the board, one button, always in the same place */
-function primaryOf(b){
-  switch (b.conn){
-    case 'idle': return { act:'Connect' };
-    case 'othertab': return { act:'Take over' };
-    case 'locked': return { act:'Unlock' };
-    case 'held': return { act:'Open', disabled:true, why:'Sean has it open' };
-    case 'connected': return b.blank ? { act:'Install' } : { act:'Open' };
-  }
-  if (b.fwNote && b.fwNote.prog) return { act:'Open', disabled:true, why:'Updating firmware' };
-  return { act:'Open' };
-}
-function mainAction(b, c){
-  if (c.action==='card') return '';
-  const p = primaryOf(b);
-  if (c.action==='split' && p.act==='Open' && !p.disabled) return `<button class="btn cta go split-go" data-act="Open">Open<span class="car" data-act="links">▾</span></button>`;
-  if (c.cta==='section') return `<button class="gosec" data-act="${p.act}" ${p.disabled ? `disabled title="${p.why}"` : ''}>${p.act}</button>`;
-  return `<button class="btn cta go" data-act="${p.act}" ${p.disabled ? `disabled title="${p.why}"` : ''}>${p.act}</button>`;
-}
-/* where + connection */
 function whereHtml(b){
   if (b.owner) return `<span class="grp"><span class="av">${b.owner[0]}</span><span class="ell">${b.owner}</span></span>`;
   if (b.group) return `<span class="grp">${ic('folder')}<span class="ell">${b.group}</span></span>`;
   return `<span class="grp" style="color:var(--faint)">No group</span>`;
 }
+const GLYPH = { Play:'play', Control:'sliders', Panel:'sliders', Unlock:'unlock', Install:'fw', Done:'check', Edit:'edit' };
+function primaryOf(b, c){
+  const w = c.word || 'Play';
+  if (isTurned(b, c)) return { act:'Done', label:'Done' };
+  if (running(b) && b.work.layer==='conn') return { act:'Connect', label:'Connecting', disabled:true, why:'Connecting' };
+  if (b.conn==='idle') return { act:'Connect', label:'Connect', glyph:LINK_ICON[b.link] };
+  if (b.conn==='locked') return { act:'Unlock', label:'Unlock' };
+  if (b.blank) return { act:'Install', label:'Install' };
+  if (b.conn==='offline') return { act:'Connect', label:w, disabled:true, why:'Offline for 2 weeks' };
+  if (running(b)) return { act:'Connect', label:w, disabled:true, why:'Busy: '+workWords(b) };
+  return { act:'Connect', label:w, glyph: w==='Connect' ? (b.link ? LINK_ICON[b.link] : 'cloud') : null };
+}
+function section(p, c, extraCls=''){
+  const g = c.cta==='glyph' ? (p.glyph ? ic(p.glyph) : GLYPH[p.label] ? ic(GLYPH[p.label]) : '') : '';
+  return `<button class="gosec ${extraCls}" data-act="${p.act}" data-id="${p.id||''}" ${p.disabled ? `disabled title="${p.why}"` : ''}>${g}${p.label}</button>`;
+}
+function nameBar(b, c){
+  const p = { ...primaryOf(b, c), id:b.id };
+  const edit = c.edit==='name' && ACC[b.acc].edit && !isTurned(b,c) && !b.blank ? section({ act: ACC[b.acc].edit==='locked' ? 'EditLocked' : 'Edit', label:'Edit', id:b.id }, c, 'plain') : '';
+  return `<div class="nb" data-open="${b.id}"><div class="nbt"><b class="ell">${b.title}</b>${whereHtml(b)}</div>${edit}${section(p, c, c.hovId===b.id ? 'hov' : '')}</div>`;
+}
+/* a bar doing work: neutral, Studio's spinner, its words; Q13-A adds the iridescent line */
+function workBar(b, c){
+  const w = b.work;
+  if (w.state==='done') return `<div class="srow layer t-good">${ic('check')}<span class="nw ell">${w.words}</span></div>`;
+  if (w.state==='fail') return `<div class="srow layer t-err"><span class="nw">${ic('alert')}<span class="ell">${w.words}</span></span><span class="spring"></span><button class="wo" data-act="Retry">Retry</button></div>`;
+  const p = workProg(b);
+  const line = c.prog==='bar' ? (p!=null ? `<span class="iri" style="width:${p}%" ${w.live?'data-livebar="1"':''}></span>` : '<span class="iri sweep"></span>') : '';
+  return `<div class="srow layer working" data-detail="${w.layer}" data-id="${b.id}"><span class="spin"></span><span class="ww ell" ${w.live?'data-livewords="1"':''}>${workWords(b)}</span><span class="spring"></span>${line}</div>`;
+}
+function projRow(b, c){
+  if (b.work && b.work.layer==='proj') return workBar(b, c);
+  const n = b.projNote;
+  if (n) return `<div class="srow layer t-${n.tone}" data-detail="proj" data-id="${b.id}"><span class="nw">${ic(n.icon)}<span class="ell">${n.text}</span></span><span class="spring"></span>${n.act ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}</div>`;
+  if (b.blank) return `<div class="srow layer t-neu" data-detail="proj" data-id="${b.id}"><span class="nw" style="font-weight:600">${ic('spark')}Nothing on it yet</span><span class="spring"></span><span class="chev">›</span></div>`;
+  const name = b.plays || b.title;
+  const aside = b.synced ? `<span class="nh" style="color:var(--subtle)">${b.synced} boards</span>` : '';
+  const can = ACC[b.acc].edit;
+  const tail = c.edit==='proj' && can ? `<button class="wo" data-act="${can==='locked' ? 'EditLocked' : 'Edit'}" data-id="${b.id}">${can==='locked' ? ic('lock') : ''}Edit</button>` : '<span class="chev">›</span>';
+  return `<div class="srow layer" data-detail="proj" data-id="${b.id}">${ic('spark')}<span class="ell" style="color:var(--tx)">${name}</span><span class="spring"></span>${aside}${tail}</div>`;
+}
 function connState(b){
-  // what the row says about the link, and the primary action that goes with it
   switch (b.conn){
-    case 'watch':    return b.link ? { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · live` } : { icon:'cloud', words:'Cloud · live' };
+    case 'watch':    return b.link ? { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · <b>live</b>` } : { icon:'cloud', words:'Cloud · <b>live</b>' };
     case 'connected':return { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · connected` };
     case 'idle':     return { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · not connected` };
     case 'offline':  return { tone:'neu', icon:'cloud', words:`Offline · ${b.offlineFor}` };
     case 'held':     return { tone:'att', icon:'person', words:b.who };
-    case 'othertab': return { tone:'att', icon:'tab', words:'Open in another tab' };
     case 'locked':   return { icon:LINK_ICON[b.link], words:`${LINK_WORD[b.link]} · connected` };
   }
 }
 function connRow(b, c){
+  if (b.work && b.work.layer==='conn') return workBar(b, c);
   const s = connState(b);
-  const tone = s.tone ? ` t-${s.tone}` : '';
-  const btn = '';
-  const hint = c.action==='card' && b.conn==='idle' ? ' · tap to connect' : '';
-  if (s.tone) return `<div class="srow layer conn${tone}" data-detail="conn" data-id="${b.id}"><span class="nw">${ic(s.icon)}<span class="ell">${s.words}</span></span><span class="spring"></span>${btn}</div>`;
-  const live = s.words.includes('live');
-  const words = s.words.replace('live', '<b>live</b>');
-  if (c.conn==='icons') return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl" title="${s.words}">${ic(s.icon)}${b.cloud && b.link ? ic('cloud') : ''}${live ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--st-live-tx)"></span>' : ''}</span>${btn}</div>`;
-  const tier = c.access==='conn' ? (b.acc==='locked' ? `<span class="lvl" style="color:var(--st-attention-tx)">${ic('lock')}<span class="nh">locked</span></span>` : `<span class="lvl" title="${ACC[b.acc].you}">${ic('unlock')}<span class="nh">${b.acc==='play'||b.acc==='anyone' ? 'play' : 'edit'}</span></span>`) : '';
-  if (c.conn==='own' && c.access==='conn') return `<div class="srow layer conn" data-detail="conn" data-id="${b.id}"><span class="lvl">${ic(s.icon)}<span class="ell">${words}</span></span><span class="spring"></span>${tier}<span class="chev">›</span></div>`;
-  if (c.conn==='own') return `<div class="srow layer conn" data-detail="conn" data-id="${b.id}"><span class="lvl">${ic(s.icon)}<span class="ell">${words}${hint}</span></span><span class="spring"></span>${b.cloud && b.link ? `<span class="lvl" title="Also reachable from anywhere">${ic('cloud')}<span class="nh">also cloud</span></span>` : (!b.cloud ? '<span class="nh" style="color:var(--faint)">direct only</span>' : '')}</div>`;
-  if (c.conn==='wordsLeft') return `<div class="srow conn"><span class="lvl">${ic(s.icon)}<span>${words}${hint}</span></span><span class="spring"></span>${btn}</div>`;
-  return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl">${ic(s.icon)}<span class="nh">${words}${hint}</span>${b.cloud && b.link ? `<span title="Also cloud connected">${ic('cloud')}</span>` : ''}</span><span class="chev" style="visibility:hidden">›</span></div>`;
+  if (s.tone) return `<div class="srow layer t-${s.tone}" data-detail="conn" data-id="${b.id}"><span class="nw">${ic(s.icon)}<span class="ell">${s.words}</span></span></div>`;
+  const also = b.cloud && b.link ? `<span class="lvl">${ic('cloud')}<span class="nh">also cloud</span></span>` : (!b.cloud ? '<span class="nh" style="color:var(--faint)">direct only</span>' : '');
+  return `<div class="srow layer" data-detail="conn" data-id="${b.id}"><span class="lvl">${ic(s.icon)}<span class="ell">${s.words}</span></span><span class="spring"></span>${also}</div>`;
 }
-function accessRow(b, c){
+function accessRow(b){
   const a = ACC[b.acc];
   if (b.acc==='locked') return `<div class="srow layer t-neu" data-detail="acc" data-id="${b.id}"><span class="nw">${ic('lock')}<span>Locked</span></span><span class="spring"></span><span class="nh" style="color:var(--subtle)">needs a password</span><span class="chev">›</span></div>`;
-  return `<div class="srow layer" data-detail="acc" data-id="${b.id}">${ic(b.acc==='play'||b.acc==='anyone' ? 'unlockplay' : 'unlock')}<span class="ell" style="color:var(--tx)">${a.short}</span><span class="spring"></span><span class="nh ell" style="color:var(--subtle)">${a.via}</span><span class="chev">›</span></div>`;
+  return `<div class="srow layer" data-detail="acc" data-id="${b.id}">${ic(a.edit===true ? 'unlock' : 'unlockplay')}<span class="ell" style="color:var(--tx)">${a.short}</span><span class="spring"></span><span class="nh ell" style="color:var(--subtle)">${a.via}</span><span class="chev">›</span></div>`;
 }
 function fwRow(b, c){
+  if (b.work && b.work.layer==='fw') return workBar(b, c);
   const n = b.fwNote;
-  if (n) return `<div class="srow layer t-${n.tone}" data-detail="fw" data-id="${b.id}"><span class="nw">${ic(n.icon)}<span class="ell">${n.text}</span></span><span class="spring"></span>${n.act ? `<button class="wo" data-act="${n.act}">${n.act}</button>` : ''}${n.prog ? `<span class="prog" style="width:${n.prog}%"></span>` : ''}</div>`;
-  // older than Studio's: the bar offers the update (an offline board gets it when it's back)
-  if (b.fwOld && c.fw==='A'){
+  if (n) return `<div class="srow layer t-${n.tone}" data-detail="fw" data-id="${b.id}"><span class="nw">${ic(n.icon)}<span class="ell">${n.text}</span></span></div>`;
+  if (b.fwOld){
     const act = b.conn==='offline' ? `<span class="nh" style="opacity:.8">when it’s back</span>` : `<button class="wo" data-act="Update">Update</button>`;
     return `<div class="srow layer t-up" data-detail="fw" data-id="${b.id}">${ic('fw')}<span class="mono ell" style="color:inherit">LightPlayer ${b.fw}</span><span class="spring"></span>${act}</div>`;
   }
-  const body = c.fw==='B' ? `${ic('fw')}<span class="mono">${b.fw}</span><span style="color:var(--st-good-tx);display:inline-flex">${ic('check')}</span>`
-    : c.fw==='C' ? `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.fwAge==='today' ? 'today' : b.fwAge+' old'}</span>`
-    : `${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span>`;
-  return `<div class="srow layer" data-detail="fw" data-id="${b.id}">${body}<span class="spring"></span><span class="chev">›</span></div>`;
+  return `<div class="srow layer" data-detail="fw" data-id="${b.id}">${ic('fw')}<span class="mono ell">LightPlayer ${b.fw}</span><span class="spring"></span><span class="chev">›</span></div>`;
 }
-function hwRow(b, c){
-  const body = c.hw==='B' ? `${ic('chip')}<span class="mono ell">ESP32-C6</span><span class="nh mono" style="color:var(--subtle)">· …${b.mac}</span>`
-    : c.hw==='C' ? `${ic('chip')}<span class="mono ell">${b.model}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.free==='—' ? '' : b.free+' free'}</span>`
-    : `${ic('chip')}<span class="mono ell">${b.model}</span>`;
-  const where = c.conn==='wordsLeft' ? `<span class="nh" style="margin-left:6px">${whereHtml(b)}</span>` : '';
-  return `<div class="srow layer" data-detail="hw" data-id="${b.id}">${body}${where}<span class="spring"></span><span class="chev">›</span></div>`;
+function hwRow(b){
+  return `<div class="srow layer" data-detail="hw" data-id="${b.id}">${ic('chip')}<span class="mono ell">${b.model}</span><span class="spring"></span><span class="chev">›</span></div>`;
 }
+
+/* control bars */
+function ctlVal(b, ctl){ const k = `${b.id}:${ctl.label}`; return k in ENG ? { v:ENG[k], eng:true } : { v: ctl.k==='fader' ? ctl.v : ctl.i, eng:false }; }
+function cbar(b, ctl, size=''){
+  const { v, eng } = ctlVal(b, ctl);
+  const clr = `<button class="wo clr" data-clear="${b.id}:${ctl.label}" title="Let go: back to the project’s value">${ic('reset')}</button>`;
+  if (ctl.k==='fader') return `<div class="cbar fader ${size} ${eng?'eng':''}" style="--v:${v}" data-ctl="${b.id}:${ctl.label}" data-fmt="${ctl.fmt}"><span class="fill"></span>${ic(ctl.icon)}<span class="lbl">${ctl.label}</span><span class="spring"></span><span class="val">${FMT[ctl.fmt](v)}</span>${clr}</div>`;
+  const blocks = ctl.opts.map((_, i) => `<i class="${i===v?'on':''}"></i>`).join('');
+  return `<div class="cbar step ${size} ${eng?'eng':''}" data-ctl="${b.id}:${ctl.label}"><span class="fill" style="width:0"></span>${ic(ctl.icon)}<span class="lbl">${ctl.label}</span><span class="spring"></span><span class="blocks">${blocks}</span><span class="val ell">${ctl.opts[v]}</span>${clr}<span style="display:inline-flex;align-self:stretch;margin-right:-10px"><button class="wo quiet" data-step="${b.id}:${ctl.label}:-1" title="Previous">${ic('prev')}</button><button class="wo quiet" data-step="${b.id}:${ctl.label}:1" title="Next" style="margin:0;border-left:0">${ic('next')}</button></span></div>`;
+}
+function moreBar(b, c, size=''){
+  const p = panelOf(b);
+  if (c.edit==='panel' && ACC[b.acc].edit) return `<div class="cbar more ${size}" data-act="${ACC[b.acc].edit==='locked'?'EditLocked':'Edit'}" data-id="${b.id}">${ic('edit')}<span class="lbl">Edit in Studio</span><span class="spring"></span><span class="chev">›</span></div>`;
+  return `<div class="cbar more ${size}" data-act="All" data-id="${b.id}">${ic('sliders')}<span class="lbl">All controls</span><span class="spring"></span><span style="color:var(--subtle)">${p.more ? p.more+' more' : ''}</span><span class="chev" style="margin-left:4px">›</span></div>`;
+}
+/* a knob: Studio's 270° arc (continuous) or squared blocks, one per step (discrete) */
+function knob(b, ctl){
+  const { v, eng } = ctlVal(b, ctl);
+  const C = 'cx="24" cy="24" r="19" fill="none" pathLength="100" transform="rotate(135 24 24)" stroke-linecap="butt"';
+  let arcs, txt;
+  if (ctl.k==='fader'){
+    arcs = `<circle ${C} stroke="rgba(255,255,255,.12)" stroke-width="4" stroke-dasharray="75 100"/><circle class="ka" ${C} stroke="${eng ? 'var(--st-engaged-tx)' : 'var(--strong)'}" stroke-width="4" stroke-dasharray="${(75*v).toFixed(2)} 100"/>`;
+    txt = FMT[ctl.fmt](v);
+  } else {
+    const n = ctl.opts.length, L = 75/n, gap = Math.min(2.6, Math.max(.9, L*.22));
+    arcs = ctl.opts.map((_, i) => `<circle ${C} stroke="${i===v ? (eng ? 'var(--st-engaged-tx)' : 'var(--strong)') : 'rgba(255,255,255,.12)'}" stroke-width="4" stroke-dasharray="${(L-gap).toFixed(2)} 100" stroke-dashoffset="${(-i*L).toFixed(2)}"/>`).join('');
+    txt = ctl.opts[v].split(' ')[0].slice(0, 6);
+  }
+  return `<div class="knob ${eng?'eng':''}" data-knob="${b.id}:${ctl.label}"><svg viewBox="0 0 48 48">${arcs}<text class="kv" x="24" y="27.5" text-anchor="middle" style="font-size:${ctl.k==='step' ? 8.5 : 10}px">${txt}</text></svg><span class="kl">${ctl.label}</span><button class="kclr" data-clear="${b.id}:${ctl.label}">${ic('reset')}let go</button></div>`;
+}
+const EXTRA = [F('Sparkle size','spark',.3,'pct'), F('Wind','speed',.6,'pct')];
+/* the panel face: how the rows become the panel (Q14) */
+function panelFace(b, c){
+  const ctl = panelOf(b).ctl;
+  if (c.look==='knobs') return cbar(b, ctl[0]) + `<div class="krow">${ctl.slice(1, 4).map(k => knob(b, k)).join('')}</div>` + moreBar(b, c);
+  if (c.look==='grow') return [...ctl, ...EXTRA].map(k => cbar(b, k, 'tall')).join('') + moreBar(b, c, 'tall');
+  if (c.look==='proj') return projRow(b, { ...c, edit: c.edit==='panel' ? 'proj' : c.edit }) + ctl.slice(0, 3).map(k => cbar(b, k)).join('') + moreBar(b, { ...c, edit:'proj' });
+  return ctl.slice(0, 4).map(k => cbar(b, k)).join('') + moreBar(b, c);
+}
+function isTurned(b, c){ return c.panel==='turn' && (c.turned ? c.turned.includes(b.id) : TURNED.has(b.id)); }
+
+/* details */
 function kvl(k, v){ return `<div class="kvl"><span>${k}</span><span>${v}</span></div>`; }
 function sec(title, body, tint=''){ return `<div class="dsec ${tint ? 'tw-'+tint : ''}"><h6>${title}</h6>${body}</div>`; }
 function acts(list){ return `<div class="acts">${list.join('')}</div>`; }
 function popHtml(b, which){
   if (which==='status'){
     const parts = [];
+    if (running(b)) parts.push(sec(b.work.layer==='fw' ? 'Firmware' : b.work.layer==='proj' ? 'Project' : 'Connection', `<p>${workWords(b)}. You can connect when it’s done.</p>`, 'live'));
     if (b.projNote) parts.push(sec(b.projNote.tone==='err' ? 'Project · error' : 'Project', `<p>${b.projNote.tone==='err' ? 'Shader error in sparkle.glsl, line 12: undeclared identifier “hue”.' : 'Out of date: the board has v11; the project is at v12.'}</p>`, b.projNote.tone==='err' ? 'err' : 'att'));
-    if (b.conn==='held' || b.conn==='othertab') parts.push(sec('Connection', `<p>${b.conn==='held' ? 'Sean has it open, since 10:42.' : 'Open in your other tab (Chrome on Mac).'}</p>`, 'att'));
-    if (b.fwNote && b.fwNote.prog) parts.push(sec('Firmware', `<p>Updating to ${STUDIO_FW} · 42%.</p>`, 'live'));
-    else if (b.fwOld) parts.push(sec('Firmware', `<p>${STUDIO_FW} is newer than its ${b.fw}.</p>`, 'live'));
+    if (b.conn==='held') parts.push(sec('Connection', `<p>Sean is editing, since 10:42. You can still play it.</p>`, 'att'));
+    if (b.fwOld && !running(b)) parts.push(sec('Firmware', `<p>${STUDIO_FW} is newer than its ${b.fw}.</p>`, 'live'));
     if (!parts.length) parts.push(sec('Status', `<p>Nothing needs you.</p>`));
-    parts.push(sec('Running', kvl('Frame rate', watched(b) && b.fps ? b.fps+' fps · 17 ms' : b.fps===0 ? 'stopped' : 'not watched') + kvl('Picture', watched(b) ? 'live' : (b.age||'—')) + kvl('Memory', b.free+' free') + kvl('Up', '3 days')));
+    parts.push(sec('Running', kvl('Frame rate', watched(b) && b.fps ? b.fps+' fps · 17 ms' : b.fps===0 ? 'stopped' : 'not watched') + kvl('Picture', watched(b) ? 'live' : (b.age||'—')) + kvl('Memory', b.free+' free')));
     return `<div class="dpop top">${parts.join('')}</div>`;
   }
   if (which==='proj') return `<div class="dpop">${
     (b.projNote ? sec(b.projNote.tone==='err' ? 'Error' : 'Out of date', `<p>${b.projNote.tone==='err' ? 'Shader error in sparkle.glsl, line 12.' : 'This board has v11; the project is at v12, saved 2 h ago.'}</p>`, b.projNote.tone==='err' ? 'err' : 'att') : '')
-    + sec('Project', kvl('Playing', b.plays || b.title) + kvl('Version', b.projNote && b.projNote.icon==='history' ? 'v11' : 'v12') + kvl('Saved', '2 h ago') + kvl('LEDs', b.leds ? b.leds+' · WS2812 · pin 10' : '—'))
-    + sec('In sync', kvl('With', b.synced ? 'Porch · Garage · Back fence' : 'only this board') + kvl('Copied from', b.id==='choker' ? 'PLAYFUL Choker' : '—'))
-    + sec('Actions', acts([`<button class="btn sm">Open</button>`, `<button class="btn sm outline">Share</button>`, `<button class="btn sm outline">Put another project on it</button>`]))}</div>`;
+    + sec('Project', kvl('Playing', b.plays || b.title) + kvl('Version', 'v12') + kvl('Saved', '2 h ago') + kvl('LEDs', b.leds ? b.leds+' · WS2812 · pin 10' : '—'))
+    + sec('In sync', kvl('With', b.synced ? 'Porch · Garage · Back fence' : 'only this board'))
+    + sec('Actions', acts([ACC[b.acc].edit ? `<button class="btn sm">Edit</button>` : '', `<button class="btn sm outline">Share</button>`, `<button class="btn sm outline">Put another project on it</button>`]))}</div>`;
   if (which==='fw') return `<div class="dpop">${
-    (b.fwOld ? sec('Update', `<p>${STUDIO_FW} is newer.</p>` + acts([`<button class="btn sm">Update to ${STUDIO_FW}</button>`]), 'live') : '')
-    + sec('Firmware', kvl('Version', b.fw ? 'LightPlayer '+b.fw : 'none') + kvl('Newest', STUDIO_FW) + kvl('Image', 'split') + kvl('Last update', b.fwAge ? 'over the cloud, '+b.fwAge+(b.fwAge==='today'?'':' ago') : '—'))
+    (b.fwOld && !running(b) ? sec('Update', `<p>${STUDIO_FW} is newer.</p>` + acts([`<button class="btn sm">Update to ${STUDIO_FW}</button>`]), 'live') : '')
+    + sec('Firmware', kvl('Version', b.fw ? 'LightPlayer '+b.fw : 'none') + kvl('Newest', STUDIO_FW) + kvl('Image', 'split'))
     + sec('Actions', acts([`<button class="btn sm outline">Reinstall</button>`, `<button class="btn sm outline">Other version…</button>`, `<button class="btn sm outline lasting">Factory reset…</button>`]))}</div>`;
   if (which==='acc') return `<div class="dpop">${
     (b.acc==='locked' ? sec('Locked', `<p>It needs a password before you can play it or edit it.</p>` + acts([`<button class="btn sm">Unlock…</button>`]), 'att') : '')
     + sec('Your access', kvl('You can', ACC[b.acc].you) + kvl('With', ACC[b.acc].via))
-    + sec('This board', kvl('Play', b.accPlay || 'anyone') + kvl('Edit', 'password'))
+    + sec('This board', kvl('Play', 'anyone') + kvl('Edit', 'password'))
     + sec('Actions', acts([`<button class="btn sm outline">Change passwords…</button>`, `<button class="btn sm outline">Forget this browser’s key</button>`]))}</div>`;
   if (which==='conn') return `<div class="dpop">${
-    sec('Reach', kvl('Now', connState(b).words) + kvl('Cloud', b.cloud ? 'connected · online' : 'off') + kvl('Wi‑Fi', b.link==='ble' ? '—' : '192.168.1.40') + kvl('Last seen', b.age || 'now'))
+    sec('Reach', kvl('Now', connState(b).words.replace(/<\/?b>/g,'')) + kvl('Cloud', b.cloud ? 'connected · online' : 'off') + kvl('Wi‑Fi', b.link==='ble' ? '—' : '192.168.1.40') + kvl('Last seen', b.age || 'now'))
     + sec('Actions', acts([`<button class="btn sm outline">Connect another way…</button>`, `<button class="btn sm outline">Disconnect</button>`]))}</div>`;
   return `<div class="dpop">${
     sec('Board', kvl('Model', b.model) + kvl('Chip', 'ESP32-C6 · 4 MB flash') + kvl('Id', 'a0:f2:62:b4:'+b.mac.slice(0,2)+':'+b.mac.slice(2)))
-    + sec('Running', kvl('Memory', b.free+' free') + kvl('Up', '3 days'))
     + sec('Actions', acts([`<button class="btn sm outline">Rename</button>`, `<button class="btn sm outline">Move to a group</button>`, `<button class="btn sm outline">Reset</button>`, `<button class="btn sm outline lasting">Forget…</button>`]))}</div>`;
 }
-/* put a bar's details inside the bar, so its outline merges with the bar's */
 function withPop(html, b, which, open){
   if (!(open && open[0]===b.id && open[1]===which)) return html;
   const k = html.lastIndexOf('</div>');
   return html.replace('class="srow', 'class="srow open').slice(0, k + ' open'.length) + popHtml(b, which) + '</div>';
 }
-function card(b, c=LEAN, open=null){
+function card(b, c, open=null){
   const statusPop = open && open[0]===b.id && open[1]==='status' ? popHtml(b, 'status') : '';
-  return `<div class="sc" data-comment-target><div class="pic" data-open="${b.id}" style="overflow:visible">${canvasOf(b)}${statusNotch(b)}</div>${statusPop}${nameBar(b, c)}
-    ${withPop(projRow(b, c), b, 'proj', open)}${withPop(connRow(b, c), b, 'conn', open)}${c.access==='bar' ? withPop(accessRow(b, c), b, 'acc', open) : ''}${withPop(fwRow(b, c), b, 'fw', open)}${withPop(hwRow(b, c), b, 'hw', open)}</div>`;
+  const turned = isTurned(b, c);
+  const face = turned ? panelFace(b, c)
+    : withPop(projRow(b, c), b, 'proj', open) + withPop(connRow(b, c), b, 'conn', open) + withPop(accessRow(b), b, 'acc', open) + withPop(fwRow(b, c), b, 'fw', open) + withPop(hwRow(b), b, 'hw', open);
+  const anim = c.live && JUST===b.id ? ' anim' : '';
+  return `<div class="sc cta-${c.cta}" data-comment-target><div class="pic" data-open="${b.id}">${canvasOf(b, c)}${statusNotch(b, c)}</div>${statusPop}${nameBar(b, c)}<div class="face ${turned ? 'panel' : 'facts'}${anim}">${face}</div></div>`;
 }
-function grid(ids, c=LEAN, open=null){
-  const bs = ids ? ids.map(id => BOARDS.find(b=>b.id===id)) : BOARDS;
-  return `<div class="page"><div class="scards">${bs.map(b => card(b, { ...LEAN, ...c }, open)).join('')}</div></div>`;
-}
+function miniCard(b, c){ return `<div class="sc mini cta-${c.cta}" data-comment-target><div class="pic">${canvasOf(b, c)}${statusNotch(b, c)}</div>${nameBar(b, c)}</div>`; }
+function grid(list, c, open=null){ return `<div class="page"><div class="scards">${list.map(b => card(b, c, open)).join('')}</div></div>`; }
+
+/* =====================================================================
+   The questions
+   ===================================================================== */
 function option(q, letter, o, body){
   return `<div class="opt ${o.lean?'leanopt':''}"><div class="ohead"><span class="olabel">${q.toUpperCase()}-${letter}</span><span class="oname">${o.name}</span>${o.lean?'<span class="leanb">lean</span>':''}</div>
     <p class="owhat">${o.what}</p><p class="ofa"><b>For:</b> ${o.pro}<br><b>Against:</b> ${o.con}</p>${body}</div>`;
 }
-function q(id, ids, opts){ document.getElementById(`${id}o`).innerHTML = Object.entries(opts).map(([l,o]) => option(id, l, o, `<div class="app">${grid(ids, o.c)}</div>`)).join(''); }
+function put(id, opts, body){ document.getElementById(`${id}o`).innerHTML = Object.entries(opts).map(([l,o]) => option(id, l, o, body(o.c, l))).join(''); }
+const cfg = o => ({ ...LEAN, panel:'none', ...o });
 
 function build(){
-  q('q10', ['desk','choker','living','lamp'], {
-    A:{ name:'Its own bar', lean:true, what:'An access bar: what you can do (“You can edit”, “You can play”, “Locked”) and with which key (your account key, this browser, USB, shared by Sean). Its details hold the board’s play and edit settings.', pro:'access gets a home for its notice (Locked) and its settings; it reads per person, which shared boards need.', con:'a fifth bar on every card.', c:{ access:'bar' } },
-    B:{ name:'At the end of the connection bar', what:'The connection bar ends with a lock and your tier (“edit”, “play”, “locked”); its details include access.', pro:'one bar shorter; the tier comes from the key you connected with, so they belong together.', con:'two facts share a bar, and “Locked” gets no room for words on a phone.', c:{ access:'conn' } },
-  });
-  q('q11', ['desk','choker','living','lamp'], {
-    A:{ name:'A rounded button', what:'Today’s look: a small outlined button with the spectrum ring, inside the name bar.', pro:'reads as the primary action at a glance; the spectrum ring is Studio’s primary voice.', con:'the one rounded button in a card where every other action is flush with its bar.', c:{ cta:'button' } },
-    B:{ name:'A section of the name bar', lean:true, what:'Flush at the end of the name bar, full height, divided off like a bar’s action; a thin spectrum line along its foot keeps the primary voice.', pro:'one action grammar across the card; a bigger target.', con:'quieter than the button; the spectrum shrinks to a line.', c:{ cta:'section' } },
-  });
+  /* Q12 · the look of the section */
+  const q12boards = [ { ...byId('porch') }, { ...byId('porch'), seedAdd:3 }, { ...byId('choker') }, { ...byId('kitchen'), work:{ layer:'fw', words:'Updating', prog:42 } } ];
+  const q12caps = ['Ready', 'Ready · hovered', 'Bluetooth, not yet picked', 'Can’t connect now'];
+  put('q12', {
+    A:{ name:'A spectrum foot line', what:'Round 4: a slightly raised section with a thin, static spectrum line along its foot.', pro:'reads as special at a glance, on every card.', con:'a static spectrum line under a word is Studio’s “you are here” mark (the tabs). Eleven of them at rest is the wall the style guide rules out.', c:{ cta:'foot' } },
+    B:{ name:'A bright key; the spectrum answers the pointer', lean:true, what:'A raised neutral section, a step brighter than the bar, like a key. The spectrum ring lights its edges only on hover, then it flares on press.', pro:'Studio’s own rule for actions (bright neutral at rest, the spectrum is the pointer’s answer); still the brightest thing on the card; a full-height target.', con:'no colour at rest. It says “button” by brightness alone.', c:{ cta:'key' } },
+    C:{ name:'An outline', what:'No fill: a hairline box inside the section, which becomes the spectrum ring on hover.', pro:'closest to the old rounded button, so it reads as a button.', con:'a box inside a bar, the boxes-in-boxes you dislike; quieter than B.', c:{ cta:'outline' } },
+    D:{ name:'A glyph leads the word', what:'A plain section; an icon leads the word: the link’s icon before Connect, a lock before Unlock, ✓ before Done. Hover lights the ring.', pro:'says what will happen before you read it; no extra paint.', con:'one more icon on a card full of icons; at rest it looks like any other bar’s action.', c:{ cta:'glyph' } },
+    E:{ name:'The gradient fill', what:'Studio’s one loud style, the gradient Primary, as the section’s fill.', pro:'unmistakable.', con:'the style guide keeps it for the one Primary on a surface; a page of cards would be a wall of rainbow, and the warm end reads as a warning next to orange notices.', c:{ cta:'fill' } },
+  }, c => `<div class="app"><div class="page"><div class="strip">${q12boards.map((b, i) => `<div><p class="cap">${q12caps[i]}</p>${miniCard(b, cfg({ ...c, hovId: i===1 ? b.id : null }))}</div>`).join('')}</div></div></div>`);
+
+  /* Q13 · work in progress, in moments */
+  const desk = byId('desk'), garage = byId('garage'), choker = byId('choker');
+  const M = [
+    ['1 · Update offered', { ...desk }],
+    ['2 · Backing up the project', { ...desk, seedAdd:1, work:{ layer:'fw', words:'Backing up the project', prog:null } }],
+    ['3 · Updating', { ...desk, seedAdd:2, work:{ layer:'fw', words:'Updating', prog:64 } }],
+    ['4 · Restarting', { ...desk, seedAdd:3, work:{ layer:'fw', words:'Restarting', prog:null } }],
+    ['5 · Done, for a few seconds', { ...desk, seedAdd:4, fw:STUDIO_FW, fwOld:false, work:{ layer:'fw', state:'done', words:'Updated to '+STUDIO_FW } }],
+    ['Or: it didn’t finish', { ...desk, seedAdd:5, work:{ layer:'fw', state:'fail', words:'Update didn’t finish' } }],
+    ['Sending a project', { ...garage, projNote:null, work:{ layer:'proj', words:'Sending v12', prog:40 } }],
+    ['Connecting', { ...choker, work:{ layer:'conn', words:'Connecting', prog:null } }],
+  ];
+  put('q13', {
+    A:{ name:'In its bar', what:'The bar doing the work carries the progress: the iridescent fill grows along its foot (or sweeps, when there’s no percent). The picture and the corner don’t change.', pro:'the progress sits beside its words; nothing else moves.', con:'a 2 px line at the bottom of a 28 px bar is easy to miss; the picture keeps looking as if nothing is happening.', c:{ prog:'bar' } },
+    B:{ name:'The lights become the progress', lean:true, what:'The picture shows the work: the board’s own LEDs light up in order as it goes, in the iridescent fill’s colours (a comet sweeps when there’s no percent). The corner shows Studio’s spinner; the bar says the step and the percent.', pro:'impossible to miss; honest (the board isn’t playing its pattern while it updates); the progress is drawn in the board’s own shape. A board could later do the same on its real LEDs.', con:'the picture stops showing the pattern during a send, too, which is short.', c:{ prog:'lights' } },
+    C:{ name:'The corner', what:'The status corner becomes a progress ring and a percent; the picture holds its last frame, dimmed.', pro:'the status already lives there; the picture still shows what it played.', con:'small; the ring competes with the frame rate it replaces.', c:{ prog:'corner' } },
+  }, c => `<div class="app"><div class="page"><div class="strip wide">${M.map(([cap, b]) => `<div><p class="cap">${cap}</p>${card(b, cfg(c))}</div>`).join('')}</div></div></div>`);
+
+  /* Q14 · how the rows become the panel */
+  const q14b = [byId('porch'), byId('desk'), byId('garage')];
+  put('q14', {
+    A:{ name:'Control bars, same height', lean:true, what:'The five rows become four control bars and All controls. A control bar is a stack bar whose fill is its value: drag across it. A stepped control (Palette) shows its steps as blocks, with ‹ › at its end. Touched, the grip turns gold and ↺ lets go.', pro:'the card keeps its height; control bars are the same family as the stack bars (one grammar, data-driven); several boards can be connected side by side.', con:'four controls; a 28 px bar is a small target on a phone.', c:{ look:'bars' } },
+    B:{ name:'Studio’s knobs', what:'Brightness stays a full-width fader bar (it’s the master); the next three controls are Studio’s panel knobs (an arc, the value inside, the label under; a stepped control in blocks). Same height.', pro:'looks like the panel everywhere else in Studio; knobs read as “controls” instantly.', con:'three knobs on a card are small; a second widget family inside one card.', c:{ look:'knobs' } },
+    C:{ name:'The card grows to the whole panel', what:'Every control, as taller bars (34 px). The card grows while it’s connected and shrinks back on Done.', pro:'the whole panel without leaving the home page; touch-friendly.', con:'breaks the one-height rule (the grid jumps when you connect); a long panel makes a very tall card.', c:{ look:'grow' } },
+    D:{ name:'The project bar stays as its title', what:'The project bar stays on top (the panel is the project’s, and Edit stays in reach); the other four rows become three controls and All controls.', pro:'you always see what you’re controlling, and Edit is one click away while connected.', con:'one fewer control; not quite “all the rows become the panel”.', c:{ look:'proj' } },
+  }, c => `<div class="app"><div class="page"><div class="scards">${q14b.map(b => card(b, cfg({ ...c, panel:'turn', turned:['porch','desk'] }))).join('')}</div></div></div>`);
+
+  /* Q15 · where Edit lives */
+  const porchW = { ...byId('porch') }, porchC = { ...byId('porch'), seedAdd:2, id:'porch' };
+  put('q15', {
+    A:{ name:'The project bar’s action', lean:true, what:'Edit sits flush at the end of the project bar: you edit the project. A board shared to play has no Edit; one that needs the edit password shows a lock on it. A project notice (Send latest, Show) takes the slot, and Edit moves into the project’s details.', pro:'board → Connect, project → Edit: each verb on the thing it acts on; no new piece.', con:'while connected the project bar is gone, and Edit with it (unless Q14-D keeps it); Edit is below the name bar.', c:{ edit:'proj' } },
+    B:{ name:'A second section in the name bar', what:'Edit sits beside the primary action at the end of the name bar, plain, with the primary as the key. It’s there whether the card is watched or connected.', pro:'both ways in, side by side, in both faces of the card.', con:'two sections squeeze the name on narrow cards; Edit is about the project, not the board.', c:{ edit:'name' } },
+    C:{ name:'The panel’s last bar', what:'Connected, the last bar is Edit in Studio, in place of All controls. Watched, Edit is only in the project’s details.', pro:'connect first, edit from there; the facts side stays clean.', con:'two clicks to edit; All controls loses its place.', c:{ edit:'panel' } },
+  }, c => `<div class="app"><div class="page"><div class="scards">${[porchW, porchC, byId('living'), byId('choker')].map((b, i) => `<div><p class="cap">${['Watched','Connected','Shared to play','Edit needs a password'][i]}</p>${card(b, cfg({ ...c, panel:'turn', turned: i===1 ? ['porch'] : [] }))}</div>`).join('')}</div></div></div>`);
+
+  /* Q16 · the word */
+  const q16b = [byId('porch'), byId('living'), byId('desk')];
+  put('q16', {
+    A:{ name:'Play', what:'“Play”: the access tier is already called play (“You can play”), and so is the panel’s address (/play).', pro:'matches the play password and the access bar word for word.', con:'can read as “start it” on a board that’s already playing; a Bluetooth board still says Connect first.', c:{ word:'Play' } },
+    B:{ name:'Control', what:'“Control”: says what you’ll do.', pro:'no doubt about what it opens.', con:'a new word beside “You can play”; a little technical.', c:{ word:'Control' } },
+    C:{ name:'Panel', what:'“Panel”: names what opens, as the rest of Studio does.', pro:'one name for the thing everywhere.', con:'a noun on a button; less inviting.', c:{ word:'Panel' } },
+    D:{ name:'Connect, on every board', lean:true, what:'“Connect”, with the link’s icon: the same word whether the board is watched through the cloud, on USB, or waiting for its Bluetooth picker. Connected, the card shows its panel; Done disconnects.', pro:'your words (“when you connect a card”); one verb for the one way in, and it matches the card’s two states, watched and connected.', con:'says how, not what for: the panel is implied, not named.', c:{ word:'Connect' } },
+  }, c => `<div class="app"><div class="page"><div class="strip">${[...q16b, byId('choker')].map(b => miniCard(b, cfg(c))).join('')}</div></div></div>`);
 }
 
-/* the live page */
-let OPEN = null;
+/* =====================================================================
+   The live page
+   ===================================================================== */
+const TURNED = new Set();
+let OPEN = null, JUST = null;
+const LIVE = { prog:42 };
 function renderPage(){
-  document.getElementById('pg').innerHTML = grid(null, LEAN, OPEN);
-  document.getElementById('pgp').innerHTML = grid(null, LEAN, null);
+  document.getElementById('pg').innerHTML = grid(BOARDS, { ...LEAN, live:true }, OPEN);
+  document.getElementById('pgp').innerHTML = grid(BOARDS, { ...LEAN, live:true }, null);
+  JUST = null;
   requestAnimationFrame(mountCanvases);
 }
 let toastT;
-function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4000); }
-const ACT = { Open:'Opens the board in Studio: a session on the link it’s watched over.', Connect:'Connect over Bluetooth: the browser asks you to pick the board once; then it’s watched.', 'Take over':'Your other tab lets go; this tab opens it, and the other tab is told.', Watch:'Sean has it open; you keep watching (frames through the cloud).', Unlock:'Enter its password, once per browser.', Update:'Update the firmware to 2026.10.08-16 (over the link it’s watched on).', Install:'Install LightPlayer over USB.', 'Send latest':'Send the project’s last save (v12) to this board.', Show:'Open the editor at the shader error.', links:'Open over: USB · Wi‑Fi · Cloud' };
+function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'), 4200); }
+const ACT = {
+  Connect:'Connects, then the card’s rows become the board’s panel. Done disconnects.',
+  Done:'Disconnects: the rows come back. Touched controls keep holding on the board.',
+  Unlock:'Enter its play or edit password, once per browser.',
+  Install:'Install LightPlayer over USB.',
+  Edit:'Opens the project in Studio’s editor, with this board as its target.',
+  EditLocked:'Editing needs the edit password: Studio asks once, then opens the editor.',
+  All:'The board’s whole panel, on its own page (Q14-C).',
+  Update:'Update the firmware to 2026.10.08-16, over the link it’s watched on.',
+  Retry:'Try the update again. The board is still on 2026.10.07-3 and playing.',
+  'Send latest':'Send the project’s last save (v12) to this board.',
+  Show:'Open the editor at the shader error.',
+  Back:'Back to the boards.',
+};
+function inLive(el){ return el.closest('#pg, #pgp'); }
 document.body.addEventListener('click', e => {
+  const clr = e.target.closest('[data-clear]');
+  if (clr){ e.stopPropagation(); delete ENG[clr.dataset.clear]; const [id, label] = clr.dataset.clear.split(':'); const ctl = ctlOf(id, label);
+    const k = clr.closest('.knob'); if (k){ k.outerHTML = knob(byId(id), ctl); return; }
+    paintCtl(clr.closest('.cbar'), ctl, ctl.k==='fader' ? ctl.v : ctl.i, false); return; }
+  const st = e.target.closest('[data-step]');
+  if (st){ e.stopPropagation(); const [id, label, d] = st.dataset.step.split(':'); const ctl = ctlOf(id, label); const cur = ctlVal(byId(id), ctl).v; const v = (cur + +d + ctl.opts.length) % ctl.opts.length; ENG[`${id}:${label}`] = v; paintCtl(st.closest('.cbar'), ctl, v, true); return; }
   const act = e.target.closest('[data-act]');
-  if (act){ e.stopPropagation(); toast(`<b>${act.dataset.act==='links'?'Open over…':act.dataset.act}</b><span class="sub">${ACT[act.dataset.act]||''}</span>`); return; }
-  if (e.target.closest('.pop')) return;
+  if (act){
+    e.stopPropagation();
+    const a = act.dataset.act, id = act.dataset.id || (act.closest('[data-open]') && act.closest('[data-open]').dataset.open);
+    if (inLive(act) && id){
+      const b = byId(id);
+      if (a==='Done'){ TURNED.delete(id); JUST = id; return renderPage(); }
+      if (a==='Connect'){
+        OPEN = null; b.work = { layer:'conn', words: b.conn==='idle' ? 'Connecting over Bluetooth' : 'Connecting', prog:null }; renderPage();
+        setTimeout(() => {
+          b.work = null; if (b.conn==='idle') Object.assign(b, { conn:'watch', fps:60, age:null, dim:false });
+          TURNED.add(id); JUST = id; renderPage();
+        }, b.link==='ble' ? 1800 : 700);
+        return;
+      }
+    }
+    return toast(`<b>${a==='EditLocked' ? 'Edit' : a==='All' ? 'All controls' : a}</b><span class="sub">${ACT[a]||''}</span>`);
+  }
+  if (e.target.closest('.cbar, .knob')) return;
   const d = e.target.closest('[data-detail]');
   if (d && d.closest('#pg')){ const key = [d.dataset.id, d.dataset.detail]; OPEN = (OPEN && OPEN[0]===key[0] && OPEN[1]===key[1]) ? null : key; return renderPage(); }
   const o = e.target.closest('[data-open]');
-  if (o){ const b = BOARDS.find(x=>x.id===o.dataset.open); return toast(`<b>Open ${b.title}</b><span class="sub">${ACT.Open}</span>`); }
+  if (o && !e.target.closest('.dpop')){ const b = byId(o.dataset.open); return toast(`<b>${b.title}</b><span class="sub">The picture and the name do what the primary action does.</span>`); }
   if (OPEN){ OPEN=null; renderPage(); }
 });
+/* dragging a fader: the fill follows; the first touch engages it (gold) */
+function paintCtl(bar, ctl, v, eng){
+  bar.classList.toggle('eng', eng);
+  if (ctl.k==='fader'){ bar.style.setProperty('--v', v); bar.querySelector('.val').textContent = FMT[ctl.fmt](v); }
+  else { bar.querySelectorAll('.blocks i').forEach((x, i) => x.classList.toggle('on', i===v)); bar.querySelector('.val').textContent = ctl.opts[v]; }
+}
+const ctlOf = (id, label) => [...panelOf(byId(id)).ctl, ...EXTRA].find(x => x.label===label);
+let drag = null;
+document.addEventListener('pointerdown', e => {
+  if (e.target.closest('.wo, .kclr')) return;
+  const kn = e.target.closest('.knob');
+  if (kn){ const [id, label] = kn.dataset.knob.split(':'); const ctl = ctlOf(id, label);
+    drag = { knob:true, el:kn, id, ctl, key:kn.dataset.knob, y:e.clientY, v0:ctlVal(byId(id), ctl).v }; e.preventDefault(); return; }
+  const bar = e.target.closest('.cbar.fader'); if (!bar) return;
+  const [id, label] = bar.dataset.ctl.split(':'); const ctl = ctlOf(id, label);
+  drag = { bar, ctl, key:bar.dataset.ctl }; bar.setPointerCapture(e.pointerId); move(e); e.preventDefault();
+});
+function move(e){
+  if (!drag) return;
+  if (drag.knob){
+    const dy = drag.y - e.clientY;
+    const v = drag.ctl.k==='fader' ? Math.max(0, Math.min(1, drag.v0 + dy/140)) : Math.max(0, Math.min(drag.ctl.opts.length-1, Math.round(drag.v0 + dy/28)));
+    ENG[drag.key] = v; const fresh = document.createElement('div'); fresh.innerHTML = knob(byId(drag.id), drag.ctl); const nk = fresh.firstChild; drag.el.replaceWith(nk); drag.el = nk; return;
+  }
+  const r = drag.bar.getBoundingClientRect(); const v = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); ENG[drag.key] = v; paintCtl(drag.bar, drag.ctl, v, true);
+}
+document.addEventListener('pointermove', move);
+document.addEventListener('pointerup', () => { drag = null; });
 
 /* =====================================================================
-   LED renderer: dots like the production lamp view. Live only for boards
-   connected in this tab; everything else is a still frame (a poster).
+   LED renderer: dots like the production lamp view. Work draws the
+   progress across the board's own LEDs (Q13-B).
    ===================================================================== */
 function hsv(h,s,v){ const i=Math.floor(h*6), f=h*6-i, p=v*(1-s), q=v*(1-f*s), t=v*(1-(1-f)*s);
   const [r,g,b]=[[v,t,p],[q,v,p],[p,v,t],[p,q,v],[t,p,v],[v,p,q]][((i%6)+6)%6]; return [r*255,g*255,b*255]; }
@@ -1100,21 +840,17 @@ const PAT = {
   rainbow2:(u,v,t)=>hsv((u*.35+t*.04)%1,.7,.9),
   eaves:(u,v,t)=>{ const k=Math.floor(u*36 - t*3); const tw=.6+.4*Math.sin(t*5+u*90); return (k%3===0)?[255*tw,40,30]:(k%3===1)?[40,210*tw,80]:[255*tw,190*tw,90]; },
   aurora:(u,v,t)=>{ const a=.5+.5*Math.sin(u*5+t*.9), b=.5+.5*Math.sin(u*9-t*.6+v*3); return [80*b+40, 200*a+40, 150+90*b]; },
-  aurora2:(u,v,t)=>{ const a=.5+.5*Math.sin(u*4+t*.5+v*4); return hsv(.45+.25*a, .7, .5+.5*a); },
   pulse:(u,v,t)=>{ const p=.5+.5*Math.sin(t*2.2 - u*6); return [255*p, 60*p+20, 200*p+30]; },
   rocaille:(u,v,t)=>hsv(.03+.07*Math.sin(u*7+t*.7+v*5), .8, .55+.45*Math.sin(u*3-t*.9)),
   comet:(u,v,t)=>{ const head=(t*.35)%1.3; const d=head-u; const k=d<0||d>.4?0:Math.pow(1-d/.4,3); return [140*k+10, 200*k+10, 255*k+20]; },
-  wipe:(u,v,t)=>{ const x=(t*.25)%2; return u < (x%1) ? (x<1?[255,120,60]:[60,140,255]) : (x<1?[60,140,255]:[255,120,60]); },
-  ember:(u,v,t)=>{ const f=.55+.45*Math.sin(t*7+u*23)*Math.sin(t*3.1+u*11); return [255*f, 110*f*f, 20*f]; },
   off:()=>[0,0,0],
 };
 function layoutPts(kind, w, h, dpr=1){
   const pts=[]; const pad=Math.min(w,h)*.12; const sp=11*dpr;
   if (kind==='matrix'){ const cols=Math.max(8,Math.round(w/sp)), rows=Math.max(4,Math.round(h/sp));
     for (let y=0;y<rows;y++) for (let x=0;x<cols;x++) pts.push([pad+(w-2*pad)*x/(cols-1), pad+(h-2*pad)*y/(rows-1), x/(cols-1), y/(rows-1)]); }
-  else if (kind==='ring'){ const n=24, r=Math.min(w,h)*.36; for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; pts.push([w/2+r*Math.cos(a), h/2+r*Math.sin(a), i/n, .5]); } }
+  else if (kind==='ring'){ const n=24, r=Math.min(w,h)*.36; for (let i=0;i<n;i++){ const a=i/n*Math.PI*2 - Math.PI/2; pts.push([w/2+r*Math.cos(a), h/2+r*Math.sin(a), i/n, .5]); } }
   else if (kind==='roof'){ const n=Math.max(18,Math.round(w/(sp*.8))); for (let i=0;i<n;i++){ const u=i/(n-1); const y = h*.72 - (1-Math.abs(u-.5)*2)*h*.42; pts.push([pad+(w-2*pad)*u, y, u, .5]); } }
-  else if (kind==='dome'){ [[8,.15],[14,.28],[20,.41]].forEach(([n,rr],ri)=>{ for (let i=0;i<n;i++){ const a=i/n*Math.PI*2; const R=Math.min(w,h)*rr*1.05; pts.push([w/2+R*Math.cos(a), h/2+R*Math.sin(a)*.8, i/n, ri/2]); } }); }
   else { const n=Math.max(14,Math.round(w/(sp*.8))); for (let i=0;i<n;i++){ const u=i/(n-1); pts.push([pad+(w-2*pad)*u, h/2, u, .5]); } }
   return pts;
 }
@@ -1124,8 +860,8 @@ function mountCanvases(){
     const dpr = Math.min(2, window.devicePixelRatio||1); const r = c.getBoundingClientRect();
     c.width = Math.max(1, Math.round(r.width*dpr)); c.height = Math.max(1, Math.round(r.height*dpr));
     const entry = { c, ctx:c.getContext('2d'), pat:PAT[c.dataset.pat]||PAT.off, pts:layoutPts(c.dataset.layout, c.width, c.height, dpr),
-      live:c.dataset.live==='1', dim:c.dataset.dim==='1', off:c.dataset.off==='1', seed:+c.dataset.seed, dpr,
-      hover:c.dataset.hover==='1', host:c.closest('.pair, .lrow') };
+      live:c.dataset.rate==='live', dim:c.dataset.dim==='1', off:c.dataset.off==='1', seed:+c.dataset.seed, dpr,
+      work:c.dataset.work, prog:+(c.dataset.prog||0), liveWork:c.dataset.livework==='1' };
     draw(entry, 4 + entry.seed*1.7);
     return entry;
   });
@@ -1135,44 +871,57 @@ function draw(e, t){
   const spacing = pts.length>1 ? Math.hypot(pts[1][0]-pts[0][0], pts[1][1]-pts[0][1]) : 10;
   const R = Math.max(1.4*e.dpr, Math.min(spacing*.32, 4.2*e.dpr));
   ctx.globalCompositeOperation='lighter';
-  for (const [x,y,u,v] of pts){
-    let [r,g,b] = e.off ? [18,18,24] : e.pat(u,v,t);
-    if (e.dim){ const m=(r+g+b)/3; r=(r*.5+m*.5)*.55; g=(g*.5+m*.5)*.55; b=(b*.5+m*.5)*.55; }
-    if (!e.off){ ctx.fillStyle=`rgba(${r|0},${g|0},${b|0},.16)`; ctx.beginPath(); ctx.arc(x,y,R*2.6,0,7); ctx.fill(); }
+  const n = pts.length;
+  pts.forEach(([x,y,u,v], i) => {
+    let col, glow = true;
+    if (e.work){
+      const f = i / n;
+      if (e.work==='fill'){
+        const p = (e.liveWork ? LIVE.prog : e.prog) / 100;
+        if (f < p){ const head = f > p - 1.5/n; const k = head ? .65 + .35*Math.sin(t*6) : .8; col = hsv((f*.85 + t*.03) % 1, .7, k); }
+        else { col = [22,22,30]; glow = false; }
+      } else {
+        const head = (t*.45) % 1.25; const d = head - f; const k = d < 0 || d > .25 ? 0 : Math.pow(1 - d/.25, 2);
+        col = k > .02 ? hsv((f*.85 + t*.05) % 1, .7, .25 + .75*k) : [22,22,30]; glow = k > .05;
+      }
+    } else {
+      col = e.off ? [18,18,24] : e.pat(u,v,t);
+      if (e.dim){ const m=(col[0]+col[1]+col[2])/3; col = col.map(x => (x*.5+m*.5)*.5); }
+      glow = !e.off;
+    }
+    const [r,g,b] = col;
+    if (glow){ ctx.fillStyle=`rgba(${r|0},${g|0},${b|0},.16)`; ctx.beginPath(); ctx.arc(x,y,R*2.6,0,7); ctx.fill(); }
     ctx.fillStyle=`rgb(${r|0},${g|0},${b|0})`; ctx.beginPath(); ctx.arc(x,y,R,0,7); ctx.fill();
-  }
+  });
 }
-let last=0;
-function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of canvases){
-    const h = e.hover && e.host && e.host.matches(':hover');
-    if (e.live || h){ draw(e, t + e.seed); e.wasH = h; }
-    else if (e.wasH){ e.wasH = false; draw(e, 4 + e.seed*1.7); }
-  } } requestAnimationFrame(loop); }
+let last = 0, t0 = performance.now();
+function loop(ts){
+  if (ts - last > 33){
+    last = ts; const t = ts/1000;
+    LIVE.prog = ((ts - t0) / 1000 * 2.4 + 42) % 100;
+    for (const e of canvases) if (e.live || e.work) draw(e, t + e.seed);
+    document.querySelectorAll('[data-livewords]').forEach(s => s.textContent = `Updating · ${Math.round(LIVE.prog)}%`);
+    document.querySelectorAll('[data-livepct]').forEach(s => s.textContent = `${Math.round(LIVE.prog)}%`);
+    document.querySelectorAll('[data-livebar]').forEach(s => s.style.width = LIVE.prog + '%');
+  }
+  requestAnimationFrame(loop);
+}
 
-
-
-
-
-setInterval(() => { const t = performance.now()/1000; for (const e of canvases) if (e.c.dataset.rate==='slow') draw(e, t + e.seed); }, 700);
-
-window.GATE = { round:'stack-card-r4', leans:{ q10:'A', q11:'B' } };
 /* =====================================================================
-   The gate kit (see the CSS above). Works in three places:
-   - on claude.ai with `db`: answers saved to the store (Claude reads
-     them with ArtifactData), restored on load;
-   - anywhere else: answers saved in this browser, plus Copy answers;
-   - with `comments`: a Comment button per question opens the shell's
-     composer there (and every option is a comment target).
+   The gate kit. On claude.ai with `db`: answers saved to the store
+   (Claude reads them), restored on load. Anywhere else: this browser,
+   plus Copy answers. With `comments`: a Comment button per question.
    ===================================================================== */
-const GATE = window.GATE || { round:'round', leans:{} };
+window.GATE = { round:'stack-card-r5', leans:{ q12:'B', q13:'B', q14:'A', q15:'A', q16:'D' } };
+const GATE = window.GATE;
 const gate = { picks:{}, notes:{}, mode:'local', doc:null, timer:null };
 const LS_KEY = 'lp-spike-gate:' + GATE.round;
 function gateLoadLocal(){ try { const v = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); if (v) { gate.picks = v.picks || {}; gate.notes = v.notes || {}; } } catch {} }
 function gateSaveLocal(){ try { localStorage.setItem(LS_KEY, JSON.stringify({ picks:gate.picks, notes:gate.notes })); } catch {} }
 function gateQuestions(){ return [...document.querySelectorAll('section.qsec[id^="q"]')].filter(s => s.querySelector('.opts')); }
 function gateSummary(){
-  return gateQuestions().map(s => { const q = s.id; const p = gate.picks[q]; return `${q.toUpperCase()} ${p || '—'}`; }).join(', ')
-    + (Object.entries(gate.notes).filter(([,n]) => n && n.trim()).map(([q,n]) => `\n${q.toUpperCase()}: ${n.trim()}`).join(''));
+  return gateQuestions().map(s => `${s.id.toUpperCase()} ${gate.picks[s.id] || '—'}`).join(', ')
+    + Object.entries(gate.notes).filter(([,n]) => n && n.trim()).map(([q,n]) => `\n${q.toUpperCase()}: ${n.trim()}`).join('');
 }
 function gateRenderBar(status){
   const bar = document.getElementById('gatebar'); if (!bar) return;
@@ -1200,7 +949,6 @@ function gateSave(){
   }, 500);
 }
 function gateDecorate(){
-  // a Pick button in every option's header, a note box and a Comment button under every question
   gateQuestions().forEach(s => {
     s.querySelectorAll('.opt').forEach(o => {
       const label = o.querySelector('.olabel'); if (!label) return;
@@ -1216,10 +964,10 @@ function gateDecorate(){
 }
 document.addEventListener('click', async e => {
   const pick = e.target.closest('[data-pick]');
-  if (pick){ e.stopPropagation(); const [q, l] = pick.dataset.pick.split(':'); gate.picks[q] = gate.picks[q] === l ? undefined : l; if (!gate.picks[q]) delete gate.picks[q]; gateMarkPicks(); gateSave(); return; }
+  if (pick){ e.stopPropagation(); const [q, l] = pick.dataset.pick.split(':'); if (gate.picks[q] === l) delete gate.picks[q]; else gate.picks[q] = l; gateMarkPicks(); gateSave(); return; }
   const g = e.target.closest('[data-gate]');
   if (g && g.dataset.gate === 'leans'){ Object.assign(gate.picks, GATE.leans); gateMarkPicks(); gateSave(); return; }
-  if (g && g.dataset.gate === 'copy'){ const text = gateSummary(); try { await navigator.clipboard.writeText(text); g.textContent = 'Copied'; } catch { prompt && window.getSelection && (g.textContent = 'Select the summary to copy'); } setTimeout(() => g.textContent = 'Copy answers', 1500); return; }
+  if (g && g.dataset.gate === 'copy'){ try { await navigator.clipboard.writeText(gateSummary()); g.textContent = 'Copied'; } catch { g.textContent = 'Copy failed'; } setTimeout(() => g.textContent = 'Copy answers', 1500); return; }
   const c = e.target.closest('[data-comment]');
   if (c && gate.comments){ try { await gate.comments.openComposer({ element: document.getElementById(c.dataset.comment) }); } catch { c.hidden = true; } }
 }, true);
@@ -1237,10 +985,10 @@ async function gateStart(){
 
 build(); renderPage(); gateStart();
 const qs = new URLSearchParams(location.search);
+if (qs.get('turn')) { qs.get('turn').split(',').forEach(id => TURNED.add(id)); renderPage(); }
 if (qs.get('open')) { OPEN = qs.get('open').split(':'); renderPage(); }
-if (qs.get('shot')) { document.body.classList.add('shot'); document.getElementById(qs.get('shot')).classList.add('shot-keep'); }
 requestAnimationFrame(() => { mountCanvases(); requestAnimationFrame(loop); });
-window.addEventListener('resize', ()=>requestAnimationFrame(mountCanvases));
+window.addEventListener('resize', () => requestAnimationFrame(mountCanvases));
 </script>
 </body>
 </html>
