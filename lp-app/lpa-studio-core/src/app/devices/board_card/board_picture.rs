@@ -67,8 +67,8 @@ pub(crate) fn picture_line(input: &BoardCardInput<'_>) -> Option<String> {
         return Some(LOCKED_PREVIEW_SENTENCE.to_string());
     }
     let feed = picture_feed(input);
-    preview_slot_sentence(input.view, activity, feed, input.link_kind())
-        .or_else(|| feed.and_then(|feed| source_words(feed, activity)))
+    preview_slot_sentence(input.view, activity, feed)
+        .or_else(|| feed.and_then(|feed| source_words(feed, activity, input.link_kind())))
 }
 
 /// The feed the picture is drawn from: none on a locked board (it answers
@@ -79,9 +79,15 @@ fn picture_feed<'a>(input: &BoardCardInput<'a>) -> Option<&'a DeviceCardFeedView
 
 /// Where the picture came from and how old it is — today's pill: nothing
 /// while an activity runs or before a frame exists.
+///
+/// Over Bluetooth the live words also say how often the picture moves: the
+/// card pulls there at a gentler pace (`DEVICE_CARD_FEED_BLE_INTERVAL`, one
+/// to two pictures a second), so the board's "43 fps" beside a picture
+/// that steps once a second would read as a stall.
 pub(crate) fn source_words(
     feed: &DeviceCardFeedView,
     activity: Option<&ActivityView>,
+    over: UiLinkKind,
 ) -> Option<String> {
     if activity.is_some() {
         return None;
@@ -92,27 +98,32 @@ pub(crate) fn source_words(
         FeedLiveness::Waiting => return None,
         // The board's engine rate off its heartbeat; a board that has not
         // reported one says "live" and nothing more.
-        FeedLiveness::Live => match feed.engine_fps {
-            Some(fps) => format!("live · {fps} fps"),
-            None => "live".to_string(),
+        FeedLiveness::Live => match (feed.engine_fps, over == UiLinkKind::Bluetooth) {
+            (Some(fps), false) => format!("live · {fps} fps"),
+            (None, false) => "live".to_string(),
+            (Some(fps), true) => format!("live · {fps} fps · {BLUETOOTH_PICTURE_PACE}"),
+            (None, true) => format!("live · {BLUETOOTH_PICTURE_PACE}"),
         },
         FeedLiveness::Stale | FeedLiveness::Offline => format!("last frame · {}", age()),
         FeedLiveness::Lens => "editor has the wire".to_string(),
     })
 }
 
+/// How often a Bluetooth card's picture moves, in the live words (see
+/// [`source_words`]).
+const BLUETOOTH_PICTURE_PACE: &str = "shown 1–2/s";
+
 /// The sentence when the picture is not the whole story.
 fn preview_slot_sentence(
     view: &DeviceView,
     activity: Option<&ActivityView>,
     feed: Option<&DeviceCardFeedView>,
-    over: UiLinkKind,
 ) -> Option<String> {
     if activity.is_some() {
-        return Some(preview_sentence(view, activity, over));
+        return Some(preview_sentence(view, activity));
     }
     let Some(feed) = feed else {
-        return Some(preview_sentence(view, activity, over));
+        return Some(preview_sentence(view, activity));
     };
     match &feed.frame {
         Some(frame) if frame.display_layout.is_some() => None,
@@ -128,17 +139,14 @@ fn preview_slot_sentence(
             // The editor lens holds this board's wire, so the feed does not
             // pull (ADR 2026-09-06, "never pull under a borrow").
             FeedLiveness::Lens => "Picture paused while the editor is open.".to_string(),
-            _ => preview_sentence(view, activity, over),
+            _ => preview_sentence(view, activity),
         }),
     }
 }
 
-/// Why there is no picture, in this state, in plain words.
-fn preview_sentence(
-    view: &DeviceView,
-    activity: Option<&ActivityView>,
-    over: UiLinkKind,
-) -> String {
+/// Why there is no picture, in this state, in plain words — the same on
+/// every link: the feed runs over USB, Wi‑Fi and Bluetooth alike.
+fn preview_sentence(view: &DeviceView, activity: Option<&ActivityView>) -> String {
     if activity.is_none()
         && let Some(sentence) = firmware_face_preview_sentence(&view.firmware_face)
     {
@@ -158,13 +166,6 @@ fn preview_sentence(
     }
     if view.loaded_project == LoadedProject::Empty {
         return "Nothing on it yet — no picture until something runs.".to_string();
-    }
-    // The card's live picture is not streamed over Bluetooth (that air time
-    // is the board's ESP-NOW's too), so "coming" would be a promise. Over
-    // USB and Wi‑Fi the feed runs, and the picture is on its way.
-    if over == UiLinkKind::Bluetooth {
-        return "No live picture over Bluetooth — open it in the editor to see and control it."
-            .to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }
@@ -270,17 +271,16 @@ mod tests {
     #[test]
     fn the_slot_sentence_yields_to_the_picture() {
         let card = CardFixture::ready().view;
-        let usb = UiLinkKind::Usb;
         assert_eq!(
-            preview_slot_sentence(&card, None, Some(&feed(FeedLiveness::Live, true)), usb),
+            preview_slot_sentence(&card, None, Some(&feed(FeedLiveness::Live, true))),
             None
         );
         assert!(
-            preview_slot_sentence(&card, None, Some(&feed(FeedLiveness::Live, false)), usb)
+            preview_slot_sentence(&card, None, Some(&feed(FeedLiveness::Live, false)))
                 .is_some_and(|s| s.contains("too large to preview")),
         );
         assert_eq!(
-            preview_slot_sentence(&card, None, Some(&feed(FeedLiveness::Waiting, true)), usb),
+            preview_slot_sentence(&card, None, Some(&feed(FeedLiveness::Waiting, true))),
             Some("Waiting for the first frame…".to_string())
         );
         let lens_no_frame = DeviceCardFeedView {
@@ -290,49 +290,47 @@ mod tests {
             engine_fps: None,
         };
         assert_eq!(
-            preview_slot_sentence(&card, None, Some(&lens_no_frame), usb),
+            preview_slot_sentence(&card, None, Some(&lens_no_frame)),
             Some("Picture paused while the editor is open.".to_string())
         );
         assert_eq!(
-            preview_slot_sentence(&card, None, None, usb),
-            Some(preview_sentence(&card, None, usb))
+            preview_slot_sentence(&card, None, None),
+            Some(preview_sentence(&card, None))
         );
         let flashing = activity(ActivityKind::Flash, "Flashing firmware…", None);
         assert_eq!(
             preview_slot_sentence(
                 &card,
                 Some(&flashing),
-                Some(&feed(FeedLiveness::Live, true)),
-                usb
+                Some(&feed(FeedLiveness::Live, true))
             ),
-            Some(preview_sentence(&card, Some(&flashing), usb))
+            Some(preview_sentence(&card, Some(&flashing)))
         );
     }
 
     /// Ported: every state's picture line says something honest.
     #[test]
     fn every_state_has_an_honest_preview_sentence() {
-        let usb = UiLinkKind::Usb;
         let mut card = CardFixture::ready().view;
         assert_eq!(
-            preview_sentence(&card, None, usb),
+            preview_sentence(&card, None),
             "No picture yet — the live feed is coming."
         );
         card.loaded_project = LoadedProject::Empty;
         assert_eq!(
-            preview_sentence(&card, None, usb),
+            preview_sentence(&card, None),
             "Nothing on it yet — no picture until something runs."
         );
         card.firmware_face = FirmwareFace::Blank;
         assert_eq!(
-            preview_sentence(&card, None, usb),
+            preview_sentence(&card, None),
             "Nothing running — a blank chip has no picture."
         );
         // An activity outranks the blank-chip reading, and the label's own
         // trailing ellipsis is not doubled.
         let flashing = activity(ActivityKind::Flash, "Flashing firmware…", None);
         assert_eq!(
-            preview_sentence(&card, Some(&flashing), usb),
+            preview_sentence(&card, Some(&flashing)),
             "Flashing firmware… the picture returns when the board does."
         );
     }
@@ -363,25 +361,48 @@ mod tests {
         );
     }
 
-    /// Ported: a network board is blocked for firmware on Bluetooth and the
-    /// LAN alike, but only Bluetooth goes without a picture.
+    /// The picture runs on every link (#1062: over Bluetooth at a gentler
+    /// pace), so no link says it has none, and a live Bluetooth picture's
+    /// words say how often it moves.
     #[test]
-    fn a_wifi_card_waits_for_its_picture_and_never_names_bluetooth() {
-        let card = CardFixture::ready().over(UiLinkKind::Wifi).view;
+    fn every_link_waits_for_its_picture_and_bluetooth_says_its_pace() {
+        for link in [
+            UiLinkKind::Usb,
+            UiLinkKind::Wifi,
+            UiLinkKind::Relay,
+            UiLinkKind::Bluetooth,
+        ] {
+            let mut fixture = CardFixture::ready().over(link);
+            assert_eq!(
+                picture_line(&fixture.input()).as_deref(),
+                Some("No picture yet — the live feed is coming."),
+                "{link:?}"
+            );
+        }
+        let mut live = CardFixture::ready().over(UiLinkKind::Bluetooth);
+        live.feed = Some(feed(FeedLiveness::Live, true));
         assert_eq!(
-            preview_sentence(&card, None, UiLinkKind::Wifi),
-            "No picture yet — the live feed is coming."
+            picture_line(&live.input()).as_deref(),
+            Some("live · 43 fps · shown 1–2/s")
         );
+        let mut no_fps = live.clone();
+        no_fps.feed.as_mut().expect("a feed").engine_fps = None;
         assert_eq!(
-            preview_sentence(&card, None, UiLinkKind::Relay),
-            "No picture yet — the live feed is coming."
+            picture_line(&no_fps.input()).as_deref(),
+            Some("live · shown 1–2/s")
         );
-        assert!(preview_sentence(&card, None, UiLinkKind::Bluetooth).contains("over Bluetooth"));
-        // Through the card's own input: the link comes from the endpoint.
-        let mut relay = CardFixture::ready().over(UiLinkKind::Relay);
+        // Stale reads the same on every link; Wi‑Fi's live words have no pace.
+        let mut stale = CardFixture::ready().over(UiLinkKind::Bluetooth);
+        stale.feed = Some(feed(FeedLiveness::Stale, true));
         assert_eq!(
-            picture_line(&relay.input()).as_deref(),
-            Some("No picture yet — the live feed is coming.")
+            picture_line(&stale.input()).as_deref(),
+            Some("last frame · 12 s ago")
+        );
+        let mut wifi = CardFixture::ready().over(UiLinkKind::Wifi);
+        wifi.feed = Some(feed(FeedLiveness::Live, true));
+        assert_eq!(
+            picture_line(&wifi.input()).as_deref(),
+            Some("live · 43 fps")
         );
     }
 

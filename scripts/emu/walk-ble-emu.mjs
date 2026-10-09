@@ -8,7 +8,8 @@
 // write datagrams translated to and from the board's stream framing):
 //
 //     add over Bluetooth → identify (flash disabled, with its reason)
-//       → clear + push a project over Bluetooth → the editor (authoring,
+//       → clear + push a project over Bluetooth → the card's picture,
+//       at the Bluetooth pace → the editor (authoring,
 //       counted for comparison) → out of range under the editor
 //       → Play → idle → turn a knob
 //       → the board goes away and comes back → the radio blips
@@ -65,6 +66,8 @@ const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 const IDLE_WINDOW_MS = Number(process.env.BLE_IDLE_WINDOW_MS ?? 75_000);
 /// The editor's (authoring) comparison window: the same count, shorter.
 const EDITOR_WINDOW_MS = Number(process.env.BLE_EDITOR_WINDOW_MS ?? 20_000);
+/// The card's window: its picture watched on the home page.
+const CARD_WINDOW_MS = Number(process.env.BLE_CARD_WINDOW_MS ?? 20_000);
 const STEP_DEADLINE_MS = 180_000;
 const STUDIO_LOAD_DEADLINE_MS = 420_000;
 
@@ -294,6 +297,32 @@ async function main() {
       await driver.boardSaid("Project loaded", { timeoutMs: STEP_DEADLINE_MS });
       const after = await stats();
       return `the board said Project loaded; the push wrote ${after.written - before.written} B in ${after.writes - before.writes} writes`;
+    });
+
+    // The card's picture over Bluetooth (2026-10-08): the feed runs at its
+    // gentle pace, and the picture line says how often it moves. The
+    // counts are wire bytes over the emulated board's USB link standing in
+    // for the radio, and the read rate is the page's pace against an
+    // emulated clock: neither is a Bluetooth number.
+    await step("card", `the card shows the board's picture over Bluetooth, then ${CARD_WINDOW_MS / 1000} s watched`, async () => {
+      // The board card says where its picture comes from in the status
+      // corner's details, the "Picture" line (today's pill, word for word):
+      // live, at the Bluetooth pace.
+      await driver.openCorner({ timeoutMs: STEP_DEADLINE_MS });
+      const pill = await driver.waitFor(
+        `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
+                  const dt = [...card.querySelectorAll('[data-board-corner] [id^="ux-popover-panel"] dt')]
+                    .find((el) => (el.textContent || '').trim().toLowerCase() === 'picture');
+                  const line = (dt?.nextElementSibling?.textContent || '').trim();
+                  return line.startsWith('live') && line.includes('shown 1–2/s') ? line : false; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's picture line, live at the Bluetooth pace" },
+      );
+      await driver.closeDetails();
+      report.card = await measure(CARD_WINDOW_MS);
+      if (!report.card.previewChangedWhileIdle) throw new Error("the card's picture did not move while watched");
+      const reads = report.card.studioRequestsByKind.projectRead ?? 0;
+      if (reads < 2) throw new Error(`the card read ${reads} time(s) in ${report.card.seconds} s`);
+      return `pill "${pill}"; ${JSON.stringify(report.card)}`;
     });
 
     await step("editor", `open the board in the editor, then ${EDITOR_WINDOW_MS / 1000} s untouched (authoring, for comparison)`, async () => {
@@ -554,6 +583,13 @@ async function main() {
 
   console.log("\n=== the Bluetooth walk, step by step");
   for (const s of report.steps) console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${path.basename(s.shot)}`);
+  if (report.card) {
+    console.log(
+      `\n  the card over ble: ${report.card.studioRequestsByKind.projectRead ?? 0} reads in ${report.card.seconds} s; ` +
+        `Studio→board ${report.card.studioToBoardBytesPerSecond} B/s, ` +
+        `board→Studio ${report.card.boardToStudioBytesPerSecond} B/s (emulated link, not air)`,
+    );
+  }
   if (report.editorIdle) {
     console.log(
       `\n  editor over ble (authoring): Studio→board ${report.editorIdle.studioToBoardBytesPerSecond} B/s, ` +
@@ -588,7 +624,7 @@ async function main() {
     console.error(`\nThe walk's steps passed, but the page panicked ${panics.length} time(s).`);
     process.exit(1);
   }
-  console.log("\n✓ the Bluetooth walk finished: add → identify → push → Play → idle → knob → a quiet drop under the editor and four on Play ridden out, with no board.");
+  console.log("\n✓ the Bluetooth walk finished: add → identify → push → the card's picture → Play → idle → knob → a quiet drop under the editor and four on Play ridden out, with no board.");
 }
 
 await main();

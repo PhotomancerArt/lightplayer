@@ -122,6 +122,14 @@ pub const PASSIVE_PREEMPTIONS_BEFORE_PROMOTION: u8 = 1;
 /// read a minute so the panel cannot drift far from the board. The editor
 /// over BLE is authoring and keeps [`DEVICE_REFRESH_INTERVAL`]; continuous
 /// controls (XY pads, MIDI) are a future real-time class, not this one.
+///
+/// The device CARD's picture over Bluetooth went from none to a gentle
+/// [`DEVICE_CARD_FEED_BLE_INTERVAL`] on 2026-10-08; Play kept this minute.
+/// The card is something a person glances at on the Devices page, and its
+/// read is the frame alone. Play is held for hours on a phone at the piece
+/// (its read is the whole panel state with the preview), and its surface
+/// puts the controls first and the picture in a slim banner. Revisit it with
+/// a desk measurement of the card's pace, not by analogy.
 pub const BLE_PLAY_IDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The lens's passive-pull gap, as a pure function of the facts that decide
@@ -177,6 +185,41 @@ pub const DEVICE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// them faster — it would only remove the device's breathing room between
 /// reads. Tune at the hardware feel-walk (G1), not here.
 pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
+
+/// Completion-gap for the device card's picture over a BLUETOOTH link:
+/// about one to two pictures a second instead of USB's five to seven.
+///
+/// Until 2026-10-08 a Bluetooth card had no picture at all (BLE M5: a
+/// picture every 150 ms is a stream, on air the board shares with
+/// ESP-NOW). What changed: the link is lp-link with packed replies, so one
+/// steady card reply is the frame's raw sRGB bytes (3 B a lamp) plus ~87 B
+/// — 254 B for Peach's 56 lamps and 811 B for Logo Sign's 241, measured off
+/// the wire tap; ~0.5 KB at 128 lamps, ~1.6 KB at 512 — beside a 187 B
+/// request; and a connected central was re-ruled an operating state whose
+/// ESP-NOW cost is measured, not gated (`docs/adr/2026-09-24-ble-transport.md`,
+/// its 2026-09-24 and 2026-10-08 amendments). The editor over Bluetooth
+/// already reads at the device cadence; a card at this gap moves a fraction
+/// of what the editor does.
+///
+/// Under completion-based pacing the real period is this gap plus the
+/// read's own time on the air, so a bigger frame self-throttles. At the
+/// Mac's measured 5–12 KB/s of notifications a 512-lamp reply is a few
+/// hundred milliseconds, which still lands near a picture a second; a small
+/// one near two. On silicon (2026-10-09, a XIAO C6 running 241 lamps, Brave on
+/// a Mac as the central) the card got 0.94–1.24 pictures a second and the
+/// board ran 29 fps against 30 with the card off screen. The feed still pulls
+/// only while its card is mounted and the page is visible.
+pub const DEVICE_CARD_FEED_BLE_INTERVAL: Duration = Duration::from_millis(500);
+
+/// The card feed's completion gap for a board, by the link it is reached
+/// over: Bluetooth's gentle one, or [`DEVICE_CARD_FEED_INTERVAL`] for USB,
+/// the LAN and the relay.
+pub fn card_feed_gap_policy(over_bluetooth: bool) -> Duration {
+    match over_bluetooth {
+        true => DEVICE_CARD_FEED_BLE_INTERVAL,
+        false => DEVICE_CARD_FEED_INTERVAL,
+    }
+}
 
 /// How old the newest device frame may get before the card's ▶ tab calls
 /// it stale (amber "last frame · N s ago" instead of calm green).
@@ -312,6 +355,18 @@ mod tests {
         // One read a minute is the whole idle budget: well under one pull
         // per heartbeat the board sends on its own (every 5 s).
         assert!(BLE_PLAY_IDLE_REFRESH_INTERVAL >= Duration::from_secs(30));
+    }
+
+    /// A Bluetooth card gets a picture, gently: slower than USB's, and
+    /// still a picture at least once a second plus its read — well inside
+    /// the five seconds after which the card calls a frame stale.
+    #[test]
+    fn a_card_over_bluetooth_pulls_gently() {
+        assert_eq!(card_feed_gap_policy(false), DEVICE_CARD_FEED_INTERVAL);
+        assert_eq!(card_feed_gap_policy(true), DEVICE_CARD_FEED_BLE_INTERVAL);
+        assert!(DEVICE_CARD_FEED_BLE_INTERVAL > DEVICE_CARD_FEED_INTERVAL);
+        assert!(DEVICE_CARD_FEED_BLE_INTERVAL <= Duration::from_secs(1));
+        assert!(DEVICE_CARD_FEED_BLE_INTERVAL.as_secs_f64() * 4.0 < FRAME_STALE_AFTER_SECS);
     }
 
     #[test]

@@ -40,11 +40,14 @@
 //!   loaded-project change (the dead-wire backstop, mirroring the lens's
 //!   `LENS_DEAD_WIRE_FAILURES`). Card freshness stays the model's job.
 //!
-//! Cadence is the completion gap the sim feed uses
-//! (`DEVICE_CARD_FEED_INTERVAL`, counted from each pull's completion, so a
-//! big dome frame self-throttles) under `DEVICE_CARD_FEED_CLASS`: the
-//! actor's passive tick runs due pulls beside the sim's and a preempting
-//! gesture cancels the in-flight read at its next frame boundary.
+//! Cadence is a completion gap, counted from each pull's completion so a
+//! big dome frame self-throttles, and it follows the link ([`feed_gap`]):
+//! `DEVICE_CARD_FEED_INTERVAL` over USB, the LAN and the relay, and the
+//! gentler `DEVICE_CARD_FEED_BLE_INTERVAL` over Bluetooth — about one to two
+//! pictures a second, where the board's air is shared with ESP-NOW. Pulls
+//! run under `DEVICE_CARD_FEED_CLASS`: the actor's passive tick runs due
+//! pulls beside the sim's and a preempting gesture cancels the in-flight
+//! read at its next frame boundary.
 //!
 //! # The last frame outlives the tab
 //!
@@ -99,17 +102,6 @@ pub(crate) struct FeedTarget {
 /// `None` is the common case (no board, nothing running, an activity, a
 /// borrowed wire); the caller stamps the attempt and moves on.
 pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<FeedTarget> {
-    // No live card picture over Bluetooth (M5): a picture every 150 ms is a
-    // stream on a link whose air time the board shares with ESP-NOW, and a
-    // card is not what anyone is controlling. The card keeps its last frame.
-    if device
-        .identity
-        .endpoint
-        .as_ref()
-        .is_some_and(|endpoint| endpoint.is_bluetooth())
-    {
-        return None;
-    }
     let evidence = &device.evidence;
     if !evidence.presence.is_open()
         || !evidence.classification.is_light_player()
@@ -129,6 +121,20 @@ pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<Fe
         loaded_path,
         hello_at: evidence.hello_heard_at(),
     })
+}
+
+/// The completion gap between one device's pulls, by the link it is on: a
+/// Bluetooth board's card pulls gently (see
+/// [`DEVICE_CARD_FEED_BLE_INTERVAL`](crate::DEVICE_CARD_FEED_BLE_INTERVAL)),
+/// every other board's at the card cadence.
+pub(crate) fn feed_gap(device: &Device) -> Duration {
+    crate::app::studio::card_feed_gap_policy(
+        device
+            .identity
+            .endpoint
+            .as_ref()
+            .is_some_and(|endpoint| endpoint.is_bluetooth()),
+    )
 }
 
 /// The card's pull: one output-frame probe, no mirror queries — a picture,
@@ -384,8 +390,13 @@ impl DeviceFrameFeeds {
             .retain(|device, _| roster.device(*device).is_some());
     }
 
-    /// Devices whose feed would pull right now, with what they need.
-    fn active(&self, roster: &Roster, effects: &DeviceEffects) -> Vec<(DeviceId, FeedTarget)> {
+    /// Devices whose feed would pull right now, with what they need and
+    /// the gap their link asks for.
+    fn active(
+        &self,
+        roster: &Roster,
+        effects: &DeviceEffects,
+    ) -> Vec<(DeviceId, FeedTarget, Duration)> {
         if !self.page_visible {
             return Vec::new();
         }
@@ -401,7 +412,7 @@ impl DeviceFrameFeeds {
                 continue;
             };
             if feed.armed_for(&target) {
-                active.push((*id, target));
+                active.push((*id, target, feed_gap(device)));
             }
         }
         active
@@ -409,22 +420,30 @@ impl DeviceFrameFeeds {
 
     /// Time until the earliest due pull, for the actor's min-over-lanes
     /// delay. `None` when nothing is feeding — the common case.
-    pub fn due_in(
+    pub fn due_in(&self, now: f64, roster: &Roster, effects: &DeviceEffects) -> Option<Duration> {
+        self.active(roster, effects)
+            .into_iter()
+            .filter_map(|(id, _, gap)| self.by_device.get(&id).map(|feed| feed.due_in(now, gap)))
+            .min()
+    }
+
+    /// The gap `device`'s feed would pull at, when it is feeding (tests: the
+    /// Bluetooth cadence is a fact about this number).
+    #[cfg(test)]
+    pub(crate) fn active_gap_for_test(
         &self,
-        now: f64,
-        gap: Duration,
+        device: DeviceId,
         roster: &Roster,
         effects: &DeviceEffects,
     ) -> Option<Duration> {
         self.active(roster, effects)
             .into_iter()
-            .filter_map(|(id, _)| self.by_device.get(&id))
-            .map(|feed| feed.due_in(now, gap))
-            .min()
+            .find(|(id, _, _)| *id == device)
+            .map(|(_, _, gap)| gap)
     }
 
     /// Pull one published frame per feeding device whose completion gap
-    /// elapsed.
+    /// (its link's, [`feed_gap`]) elapsed.
     ///
     /// Returns `(preempted, new_frame)`: whether a due pull was skipped or
     /// cut short by cancellation (the actor's starvation floor), and
@@ -432,7 +451,6 @@ impl DeviceFrameFeeds {
     pub async fn run_due<MakeTimer, Timer, Cancel>(
         &mut self,
         now_secs: &dyn Fn() -> f64,
-        gap: Duration,
         deadline_budget: Duration,
         roster: &Roster,
         effects: &DeviceEffects,
@@ -448,11 +466,12 @@ impl DeviceFrameFeeds {
         let due: Vec<(DeviceId, FeedTarget)> = self
             .active(roster, effects)
             .into_iter()
-            .filter(|(id, _)| {
+            .filter(|(id, _, gap)| {
                 self.by_device
                     .get(id)
-                    .is_some_and(|feed| feed.due(now, gap))
+                    .is_some_and(|feed| feed.due(now, *gap))
             })
+            .map(|(id, target, _)| (id, target))
             .collect();
         let mut preempted = false;
         let mut new_frame = false;
