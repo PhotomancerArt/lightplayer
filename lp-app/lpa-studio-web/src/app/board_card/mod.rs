@@ -37,11 +37,19 @@
 //! - `data-bar="project|connection|access|firmware|hardware"` on each bar;
 //! - `data-bar-work="running|done|failed"` on a bar while it carries work;
 //! - `data-offer-path="devices/<board ref>/<verb>"` on every action
-//!   (`AgentMark`), so a walk presses an offer by its path.
+//!   (`AgentMark`), so a walk presses an offer by its path;
+//! - `data-board-terminal` on the board's terminal in the corner's details
+//!   (`DeviceTerminal`): what the board said, in its own words.
 //!
-//! Nothing in the app mounts the card yet (plan P08): it is drawn by its
-//! stories ([`board_card_stories`]). The module is public so its pieces
-//! are not dead code until then.
+//! A bar's details trigger is the button named "<Bar> details" ("Project
+//! details", …), the corner's "Status details". Details render inside the
+//! card's DOM (the popover's layer is the trigger's sibling, raised to the
+//! top layer), so a walk scopes every read to its card. The helpers that
+//! read these are `scripts/emu/studio-driver.mjs`'s card helpers.
+//!
+//! The card is mounted wherever a board appears: the home page's
+//! `BoardCardSlot`, the editor's docked card (`LensCardPane`) and the
+//! mismatch page. Its stories are [`board_card_stories`].
 
 pub(crate) mod bar_detail_panel;
 pub(crate) mod bar_details;

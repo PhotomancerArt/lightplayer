@@ -162,6 +162,9 @@ pub(crate) fn DeviceTerminal(
                 }
                 div {
                     class: "{TERMINAL_CLASS} {height_class}",
+                    // The walk hook: what the board said, read by the walks
+                    // (`app/board_card/mod.rs`, "Walk hooks").
+                    "data-board-terminal": "true",
                     onmounted: move |event| {
                         let element = event.data();
                         terminal_element.set(Some(element.clone()));
