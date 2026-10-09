@@ -1,12 +1,16 @@
 //! A secure link in core-only (OTA Wi-Fi plan WD1, WD6): the core answers
 //! its key lookup from the store's secrets, the key that verifies decides
 //! its tier, a wrong guess shares the `L` login's backoff, and a keyed link
-//! never logs in over channel 3.
+//! never logs in over channel 3. Through the cloud relay (WD13) the same,
+//! with the relay's second lock: the anonymous key is refused and the
+//! device's `open` never applies.
 
 mod support;
 
 use lpc_access::{LoginMac, OpenTo, SecretEntry, Tier, derive_login_key, link_psk};
-use lpc_update::board::{AccessFacts, CoreKeyAnswer, LinkId, LinkTrust, SessionConfig};
+use lpc_update::board::{
+    AccessFacts, CoreKeyAnswer, LinkId, LinkTrust, NetworkPath, SessionConfig,
+};
 use lpc_update::code_table::CHUNK;
 use lpc_update::testing::{BoardRig, FakeBoard, MODEL_REGION_START, ModelBuild};
 use lpc_update::{
@@ -28,25 +32,28 @@ fn a_known_salt_is_answered_with_its_candidates_and_the_match_decides_the_tier()
     let edit = secret(Tier::Edit, 2);
     let s = session(&mut rig);
     assert_eq!(
-        s.key_lookup(1, RADIO, &EDIT_SALT),
+        s.key_lookup(1, RADIO, NetworkPath::Lan, &EDIT_SALT),
         CoreKeyAnswer::Keys(vec![link_psk(&edit.k)])
     );
-    assert_eq!(s.key_authenticated(RADIO, 0), LinkTrust::Keyed(Tier::Edit));
+    assert_eq!(
+        s.key_authenticated(RADIO, NetworkPath::Lan, 0),
+        LinkTrust::Keyed(Tier::Edit)
+    );
 
     let play = secret(Tier::Play, 1);
     assert_eq!(
-        s.key_lookup(2, RADIO_2, &PLAY_SALT),
+        s.key_lookup(2, RADIO_2, NetworkPath::Lan, &PLAY_SALT),
         CoreKeyAnswer::Keys(vec![link_psk(&play.k)])
     );
     assert_eq!(
-        s.key_authenticated(RADIO_2, 0),
+        s.key_authenticated(RADIO_2, NetworkPath::Lan, 0),
         LinkTrust::Keyed(Tier::Play)
     );
 
     // A candidate it never offered, or a link it never looked up, is no
     // grant.
     assert_eq!(
-        s.key_authenticated(LinkId(9), 0),
+        s.key_authenticated(LinkId(9), NetworkPath::Lan, 0),
         LinkTrust::Untrusted,
         "no lookup"
     );
@@ -58,10 +65,13 @@ fn the_anonymous_key_gets_the_zero_psk_and_grants_nothing() {
     let mut rig = engineless_rig(access(OpenTo::Edit), vec![x]);
     let s = session(&mut rig);
     assert_eq!(
-        s.key_lookup(1, RADIO, &[0; 16]),
+        s.key_lookup(1, RADIO, NetworkPath::Lan, &[0; 16]),
         CoreKeyAnswer::Keys(vec![[0; 32]])
     );
-    assert_eq!(s.key_authenticated(RADIO, 0), LinkTrust::Untrusted);
+    assert_eq!(
+        s.key_authenticated(RADIO, NetworkPath::Lan, 0),
+        LinkTrust::Untrusted
+    );
 }
 
 #[test]
@@ -70,10 +80,13 @@ fn an_unknown_salt_is_refused_and_not_charged() {
     let mut rig = engineless_rig(access(OpenTo::Nobody), vec![x]);
     let s = session(&mut rig);
     for now in 0..10 {
-        assert_eq!(s.key_lookup(now, RADIO, &[9; 16]), CoreKeyAnswer::Unknown);
+        assert_eq!(
+            s.key_lookup(now, RADIO, NetworkPath::Lan, &[9; 16]),
+            CoreKeyAnswer::Unknown
+        );
     }
     assert!(matches!(
-        s.key_lookup(11, RADIO, &EDIT_SALT),
+        s.key_lookup(11, RADIO, NetworkPath::Lan, &EDIT_SALT),
         CoreKeyAnswer::Keys(_)
     ));
 }
@@ -88,24 +101,26 @@ fn wrong_keys_put_the_board_in_the_logins_backoff() {
         let s = session(&mut rig);
         for now in 0..3 {
             assert!(matches!(
-                s.key_lookup(now, RADIO, &EDIT_SALT),
+                s.key_lookup(now, RADIO, NetworkPath::Lan, &EDIT_SALT),
                 CoreKeyAnswer::Keys(_)
             ));
             s.key_wrong(now, RADIO);
         }
         assert_eq!(
-            s.key_lookup(10, RADIO, &EDIT_SALT),
+            s.key_lookup(10, RADIO, NetworkPath::Lan, &EDIT_SALT),
             CoreKeyAnswer::Keys(vec![link_psk(&secret(Tier::Edit, 2).k)]),
             "three are free"
         );
         s.key_wrong(10, RADIO);
-        let CoreKeyAnswer::Backoff { retry_after_ms } = s.key_lookup(11, RADIO, &EDIT_SALT) else {
+        let CoreKeyAnswer::Backoff { retry_after_ms } =
+            s.key_lookup(11, RADIO, NetworkPath::Lan, &EDIT_SALT)
+        else {
             panic!("in backoff");
         };
         assert!(retry_after_ms > 0);
         // Even an unknown or anonymous key: nothing is read in backoff.
         assert!(matches!(
-            s.key_lookup(12, RADIO, &[0; 16]),
+            s.key_lookup(12, RADIO, NetworkPath::Lan, &[0; 16]),
             CoreKeyAnswer::Backoff { .. }
         ));
     }
@@ -119,14 +134,17 @@ fn wrong_keys_put_the_board_in_the_logins_backoff() {
     // Past it, a right key clears the count, as a login does.
     let s = session(&mut rig);
     assert!(matches!(
-        s.key_lookup(60_000, RADIO, &EDIT_SALT),
+        s.key_lookup(60_000, RADIO, NetworkPath::Lan, &EDIT_SALT),
         CoreKeyAnswer::Keys(_)
     ));
-    assert_eq!(s.key_authenticated(RADIO, 0), LinkTrust::Keyed(Tier::Edit));
+    assert_eq!(
+        s.key_authenticated(RADIO, NetworkPath::Lan, 0),
+        LinkTrust::Keyed(Tier::Edit)
+    );
     s.key_wrong(60_001, RADIO_2);
     assert!(
         matches!(
-            s.key_lookup(60_002, RADIO_2, &EDIT_SALT),
+            s.key_lookup(60_002, RADIO_2, NetworkPath::Lan, &EDIT_SALT),
             CoreKeyAnswer::Keys(_)
         ),
         "the count started again"
@@ -233,6 +251,101 @@ fn a_keyed_link_is_refused_the_cores_login_and_an_untrusted_one_is_not() {
     assert_eq!(login(&mut rig, 5, RADIO_2), Some(Tier::Edit));
 }
 
+/// WD13: through the relay the anonymous key is refused like an unknown
+/// one (not charged), and a held key comes up relayed at its tier.
+#[test]
+fn through_the_relay_the_anonymous_key_is_refused_and_a_held_key_comes_up_relayed() {
+    let (x, _) = x_and_y();
+    let mut rig = engineless_rig(access(OpenTo::Edit), vec![x]);
+    let s = session(&mut rig);
+    for now in 0..10 {
+        assert_eq!(
+            s.key_lookup(now, RADIO, NetworkPath::Relay, &[0; 16]),
+            CoreKeyAnswer::Unknown,
+            "no anonymous key through the relay, whatever `open` says"
+        );
+    }
+    assert_eq!(
+        s.key_lookup(11, RADIO, NetworkPath::Relay, &PLAY_SALT),
+        CoreKeyAnswer::Keys(vec![link_psk(&secret(Tier::Play, 1).k)]),
+        "not charged"
+    );
+    assert_eq!(
+        s.key_authenticated(RADIO, NetworkPath::Relay, 0),
+        LinkTrust::Relayed(Some(Tier::Play))
+    );
+    assert_eq!(
+        s.key_authenticated(LinkId(9), NetworkPath::Relay, 0),
+        LinkTrust::Relayed(None),
+        "no lookup, no tier — and still relayed"
+    );
+}
+
+/// WD13: on a board open at edit, a relayed play key may query and may not
+/// install a core (`open` never applies over the relay), may not log in
+/// with `L`, and still heals the board's own engine (Y8); a relayed edit
+/// key installs the core, start to finish.
+#[test]
+fn through_the_relay_open_never_applies_and_an_edit_key_installs_a_core() {
+    let (x, y) = x_and_y();
+    let mut rig = engineless_rig(access(OpenTo::Edit), vec![x.clone(), y.clone()]);
+    let up = relayed_up(&mut rig, RADIO, &PLAY_SALT);
+    assert!(
+        matches!(
+            BoardMessage::decode(&up[0].bytes),
+            Ok(BoardMessage::Manifest(_))
+        ),
+        "M on up"
+    );
+    assert_eq!(
+        refusal(&say(&mut rig, 3, RADIO, &offer_of(&y).encode())[0]),
+        Some(Refusal::Access)
+    );
+    let out = say(&mut rig, 4, RADIO, &HostLoginStep::Begin.encode());
+    assert_eq!(verdict(&out[0]), (None, 0), "no login through the relay");
+
+    relayed_up(&mut rig, RADIO_2, &EDIT_SALT);
+    let mut host = Host::new(y.clone());
+    let mut now = 10;
+    exchange(
+        &mut rig,
+        &mut host,
+        RADIO_2,
+        offer_of(&y).encode(),
+        &mut now,
+    );
+    assert!(host.refusals.is_empty(), "{:?}", host.refusals);
+    assert!(rig.reset_pending, "the core committed");
+
+    let mut rig = engineless_rig(access(OpenTo::Edit), vec![x.clone(), y]);
+    relayed_up(&mut rig, RADIO, &PLAY_SALT);
+    let mut host = Host::new(x.clone());
+    exchange(&mut rig, &mut host, RADIO, offer_of(&x).encode(), &mut now);
+    assert!(host.refusals.is_empty(), "{:?}", host.refusals);
+    assert!(rig.reset_pending, "the heal committed");
+}
+
+/// While the engine runs, a relayed link holds the server's grant and
+/// nothing `open` gives: with no grant it may not read back, even on a
+/// board open at edit; with a play grant it may.
+#[test]
+fn while_the_engine_runs_a_relayed_link_holds_its_grant_and_never_open() {
+    let (x, _) = x_and_y();
+    let mut rig = running_rig(access(OpenTo::Edit), vec![x]);
+    rig.link_up(1, RADIO, LinkTrust::Relayed(None));
+    let g = read_back_request();
+    let out = rig.deliver(2, RADIO, None, &g);
+    assert_eq!(refusal(&out[0].bytes), Some(Refusal::Access));
+    let out = rig.deliver(3, RADIO, Some(Tier::Play), &g);
+    assert!(
+        matches!(
+            BoardMessage::decode(&out[0].bytes),
+            Ok(BoardMessage::Data(_))
+        ),
+        "a play grant reads back"
+    );
+}
+
 // ---- helpers ----
 
 fn nonce(buf: &mut [u8]) {
@@ -282,10 +395,25 @@ fn session(rig: &mut BoardRig) -> &mut lpc_update::board::BoardSession {
 fn keyed_up(rig: &mut BoardRig, link: LinkId, salt: &[u8; 16]) -> Vec<lpc_update::board::Outgoing> {
     let s = session(rig);
     assert!(matches!(
-        s.key_lookup(1, link, salt),
+        s.key_lookup(1, link, NetworkPath::Lan, salt),
         CoreKeyAnswer::Keys(_)
     ));
-    let trust = s.key_authenticated(link, 0);
+    let trust = s.key_authenticated(link, NetworkPath::Lan, 0);
+    rig.link_up(1, link, trust)
+}
+
+/// [`keyed_up`] through the relay.
+fn relayed_up(
+    rig: &mut BoardRig,
+    link: LinkId,
+    salt: &[u8; 16],
+) -> Vec<lpc_update::board::Outgoing> {
+    let s = session(rig);
+    assert!(matches!(
+        s.key_lookup(1, link, NetworkPath::Relay, salt),
+        CoreKeyAnswer::Keys(_)
+    ));
+    let trust = s.key_authenticated(link, NetworkPath::Relay, 0);
     rig.link_up(1, link, trust)
 }
 

@@ -16,6 +16,7 @@
 //! - [`crate::slot`] defines [`crate::SlotPath`], the path language used by
 //!   overlays and [`crate::NodeUseLocation`].
 
+pub mod body_bytes;
 pub mod change_summary;
 pub mod config;
 pub mod export_check;

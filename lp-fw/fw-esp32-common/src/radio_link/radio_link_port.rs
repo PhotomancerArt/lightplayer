@@ -52,9 +52,9 @@
 //!   replies onto it (`with_link`, crate-internal); core-only takes the
 //!   link's events itself ([`RadioLinkSlot::recv`]). Channel 3, the update
 //!   protocol, is answered through [`RadioLinkPort::send_update`] by either
-//!   (the running engine's update hook, or core-only), on a Bluetooth link
-//!   or a LAN link (a relayed link's channel 3 is not served yet). Core-only
-//!   also answers a LAN link's key lookup itself
+//!   (the running engine's update hook, or core-only), on a Bluetooth link,
+//!   a LAN link or a relayed one. Core-only also answers a network link's
+//!   key lookup itself
 //!   ([`RadioLinkSlot::poll_key_event`], [`RadioLinkSlot::answer_key`]),
 //!   since no server runs there. A long reply stays in the
 //!   shared static frame buffer (`serial::server_msg`) as an lp-link

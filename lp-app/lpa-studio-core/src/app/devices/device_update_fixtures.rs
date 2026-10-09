@@ -237,6 +237,15 @@ impl UpdateFixture {
         self
     }
 
+    /// The same board and Studio a few days on, after every link's first
+    /// update release (`2026.10.08-9`): the board on `2026.10.09-1`, this
+    /// Studio's build `2026.10.09-2` (the same hashes).
+    pub fn on_recent_firmware(mut self) -> Self {
+        self.facts = facts_of(&manifest("2026.10.09-1", [0xAA; 32], [0xAE; 32]));
+        self.own = build("2026.10.09-2", [0xBB; 32], [0xBE; 32]);
+        self
+    }
+
     /// The same board, with no release index: only this Studio's build to
     /// choose from, and the list says why.
     pub fn offline(mut self) -> Self {

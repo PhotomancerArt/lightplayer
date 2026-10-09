@@ -390,6 +390,28 @@ a fielded core's `RELAY_PROTO_VERSION` has to stay listed in the hub for as
 long as boards run it, which matters most for cores that will update over the
 relay (OTA M8).
 
+## Amendment (2026-10-08): a fielded core's relay version is never refused (OTA M8, W7)
+
+Plan `lp2025/2026-10-06-2249-ota-wifi-updates`, PR C: boards now take
+firmware updates through the relay (channel 3 on a relayed link,
+`docs/adr/2026-10-06-ota-update-protocol.md`'s amendment of this date), and
+the core is what dials the relay, in core-only too. A house board with no
+cable and no Studio on its network has no other way to be updated, so:
+
+- **The device leg of every fielded core is a never-break surface.** Once a
+  core that updates through the relay is in a release, the hub keeps that
+  core's `RELAY_PROTO_VERSION` in `SUPPORTED_RELAY_PROTO_VERSIONS` for as
+  long as such cores may exist, and keeps answering its hello, proof,
+  routes and frames as they are today. Dropping a version needs a decision
+  of its own (and a path for the boards on it), never a deploy.
+- `lpc-relay/tests/relay_frame_golden.rs` is already never edited to make a
+  change pass; with this it pins what fielded cores speak, beside lp-link's
+  and channel 3's goldens.
+- A new relay feature is a new version **added** to the list; the old one
+  stays.
+
+No version moves in PR C: nothing about the relay's bytes changed.
+
 ## Consequences
 
 - lightplayer.app serves one plain-HTTP path, and the redirect that keeps

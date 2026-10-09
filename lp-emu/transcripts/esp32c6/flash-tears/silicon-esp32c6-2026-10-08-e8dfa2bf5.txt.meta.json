@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "payload": "flash-tears",
+  "chip": "esp32c6",
+  "configuration": "silicon:esp32c6",
+  "date": "2026-10-08",
+  "firmware_commit": "e8dfa2bf5904",
+  "firmware_features": [
+    "ble",
+    "default",
+    "esp32c6",
+    "esp_radio",
+    "io_thread",
+    "json_pack",
+    "lp_gfx_lpvm",
+    "lpa_server",
+    "lpc_hardware",
+    "lpc_model",
+    "lpc_shared",
+    "lpc_wire",
+    "lpfs",
+    "radio",
+    "server",
+    "test_flash_tears",
+    "wifi"
+  ],
+  "firmware_dirty": false,
+  "firmware_sha256": "513dd187e37ed950f17557b94762fcea2ac1450aebc596127a016c3df055980f",
+  "source": "(cd lp-fw/fw-esp32c6 && cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,test_flash_tears) && cargo run -q -p lp-cli -- hardware lpfs preflight --port /dev/cu.usbmodem112101 --table lp-fw/fw-esp32c6/partitions.csv && PORT_DEV=/dev/cu.usbmodem112101 scripts/emu/desk-flash-no-monitor.sh -- flash --chip esp32c6 --port /dev/cu.usbmodem112101 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size 4mb --after hard-reset target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32c6 && scripts/emu/flash-tears-cuts.py --port /dev/cu.usbmodem112101 --capture target/validate/flash-tears.cap --cuts 50 --min-ms 50 --max-ms 2000 --until '[flash-tears] === SCAN DONE ==='",
+  "capture": "lp-cli validate record flash-tears --config silicon:esp32c6",
+  "trust": [
+    {
+      "class": "memory",
+      "grade": "measured",
+      "because": "the board is the ground truth; nothing models it"
+    },
+    {
+      "class": "timing",
+      "grade": "measured",
+      "because": "a real clock on real flash with real wait states"
+    },
+    {
+      "class": "pin",
+      "grade": "measured",
+      "because": "a scope or a logic analyser on the header pin is the definition of what the pin did"
+    },
+    {
+      "class": "usb-serial-jtag",
+      "grade": "measured",
+      "because": "a real host really attaches, or really does not"
+    },
+    {
+      "class": "boot-log",
+      "grade": "measured",
+      "because": "the real ROM and the real IDF bootloader printed it"
+    },
+    {
+      "class": "wire",
+      "grade": "measured",
+      "because": "real bytes over a real port"
+    }
+  ]
+}

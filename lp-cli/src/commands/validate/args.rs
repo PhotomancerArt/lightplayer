@@ -131,6 +131,20 @@ pub struct RecordArgs {
     /// filed exactly where it always was.
     #[arg(long)]
     pub machine: Option<String>,
+    /// The board the capture is taken on, for the sidecar's `board` (a
+    /// silicon configuration cannot read it): its desk mark and slug and what
+    /// it is, e.g. `CX1 c6-expendable (Generic ESP32-C6 dev board)`. Refused
+    /// if the configuration pins a different board.
+    #[arg(long)]
+    pub board: Option<String>,
+    /// The board's MAC, for the sidecar's `mac`. Refused if the configuration
+    /// pins a different one.
+    #[arg(long)]
+    pub mac: Option<String>,
+    /// A sentence for the sidecar's `note` (appended to the driver's own), e.g.
+    /// the flash part's JEDEC id.
+    #[arg(long)]
+    pub note: Option<String>,
     /// Who reads the shipped image's USB link: `lp-link` (default) hosts the
     /// product's link — the image speaks lp-link since wire proto 30, and
     /// its hello, heartbeats and log lines leave the board only once a host

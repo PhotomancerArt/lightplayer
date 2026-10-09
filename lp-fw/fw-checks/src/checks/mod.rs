@@ -7,6 +7,8 @@
 pub mod cycle_probe;
 #[cfg(any(feature = "check-espnow-broadcast", test))]
 pub mod espnow_broadcast;
+#[cfg(any(feature = "check-flash-tears", test))]
+pub mod flash_tears;
 #[cfg(any(feature = "check-gpio-calibrate", test))]
 pub mod gpio_calibrate;
 #[cfg(any(feature = "check-gpio-input", test))]

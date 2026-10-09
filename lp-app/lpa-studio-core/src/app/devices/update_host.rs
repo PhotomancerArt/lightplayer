@@ -534,6 +534,7 @@ impl HostState {
                         UpdateLink::Usb => ServeConfig::USB,
                         UpdateLink::Bluetooth => ServeConfig::BLE,
                         UpdateLink::Wifi => ServeConfig::LAN,
+                        UpdateLink::Relay => ServeConfig::RELAY,
                     },
                     link_word: link,
                     phase: RunPhase::New,
@@ -1437,7 +1438,7 @@ impl HostState {
     /// [`WIFI_SILENT_ANSWER_MS`]: the board's LAN link ignores the update
     /// channel (W6).
     fn silent_over_wifi(run: &UpdateRun, now: u64) -> bool {
-        run.link_word == UpdateLink::Wifi
+        run.link_word.is_wifi()
             && !run.session_reset
             && run
                 .asked_unanswered_at
@@ -1460,10 +1461,15 @@ impl HostState {
         };
         if Self::silent_over_wifi(run, now) {
             log::info!("update: {device:?} heard nothing on channel 3 over Wi-Fi");
+            let line = if run.link_word == UpdateLink::Relay {
+                "no answer through lightplayer.app; update it nearby once"
+            } else {
+                "no answer on the update channel over Wi\u{2011}Fi"
+            };
             self.finish(
                 device,
                 UpdateOutcomeFacts::NotOverWifi,
-                Some("no answer on the update channel over Wi\u{2011}Fi".to_string()),
+                Some(line.to_string()),
             );
             return false;
         }
