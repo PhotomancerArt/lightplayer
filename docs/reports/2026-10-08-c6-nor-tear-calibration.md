@@ -558,7 +558,7 @@ The firmware's `verdict` against the phase it was sorted into:
 
 | transcript | date | firmware | cycles | boots | cuts | not cuts |
 |---|---|---|---|---:|---:|---|
-| `lp-emu-esp32c6-t1-2026-10-08-060dd91ea.txt` | 2026-10-08 | `060dd91ea` | 231–2692 | 6 | 5 | 1× fresh region (first boot, nothing in flight) |
+| `lp-emu-esp32c6-t1-2026-10-08-f8f2be0e6.txt` | 2026-10-08 | `f8f2be0e6` | 246–2895 | 6 | 5 | 1× fresh region (first boot, nothing in flight) |
 | **all** | | | | 6 | **5** | |
 
 Who the records say ran it (from every `ft-boot`):
@@ -573,43 +573,43 @@ Boots that were not power cuts (left out of every count below):
 
 | boot | reset | state | in-flight sector |
 |---|---|---|---|
-| `lp-emu-esp32c6-t1-2026-10-08-060dd91ea.txt` boot 0 | `poweron` | fresh | — |
+| `lp-emu-esp32c6-t1-2026-10-08-f8f2be0e6.txt` boot 0 | `poweron` | fresh | — |
 
 Outside the in-flight sector, over every cut:
 
 - settled sectors not holding their last cycle's pattern: **0** (of 75 read)
 - weak bits in settled sectors: **0**
 - damaged journal slots: **0**; torn next slots: **0**
-- work cycles completed between a scan and its cut (min / median / max): 153 / 418 / 1494
+- work cycles completed between a scan and its cut (min / median / max): 174 / 433.5 / 1494
 
 **Tear shapes, 5 cuts** (the in-flight sector of each):
 
 | phase | shape | cuts | share |
 |---|---|---:|---:|
-| erase | untouched: the old pattern, whole (cut before the erase moved a cell) | 1 | 20.0 % |
+| erase | untouched: the old pattern, whole (cut before the erase moved a cell) | 2 | 40.0 % |
 | erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 0 | 0.0 % |
 | erase | torn erase, all `0x00` | 0 | 0.0 % |
 | erase | torn erase, erasing: stable zeros spread over old **and** new zero positions | 0 | 0.0 % |
 | erase | torn erase, old data left (only old zeros, more than a residue) | 0 | 0.0 % |
 | erase | torn erase that reads all `0xFF` but has weak bits | 0 | 0.0 % |
 | erase | erased: all `0xFF`, no weak bits | 2 | 40.0 % |
-| program | torn program, prefix ending where a write starts (a cut between two ROM calls) | 0 | 0.0 % |
-| program | torn program, prefix ending on a ROM command boundary (32 B from the write's address in its first page, 32 B from the page after) | 2 | 40.0 % |
+| program | torn program, prefix ending where a write starts (a cut between two ROM calls) | 1 | 20.0 % |
+| program | torn program, prefix ending on a ROM command boundary (32 B from the write's address in its first page, 32 B from the page after) | 0 | 0.0 % |
 | program | torn program, prefix ending on a 4-byte word inside a command | 0 | 0.0 % |
 | program | torn program, prefix ending inside a 4-byte word (or a partial byte) | 0 | 0.0 % |
 | program | torn program, scattered clears (no prefix) | 0 | 0.0 % |
 | program | complete: the new pattern, whole | 0 | 0.0 % |
 | none | unknown | 0 | 0.0 % |
-| **erase** | | **3** | 60.0 % |
-| **program** | | **2** | 40.0 % |
+| **erase** | | **4** | 80.0 % |
+| **program** | | **1** | 20.0 % |
 
 The firmware's `verdict` against the phase it was sorted into:
 
 | firmware verdict | phase | cuts |
 |---|---|---:|
 | `erased` | erased | 2 |
-| `old` | untouched | 1 |
-| `torn-program` | program:command-boundary | 2 |
+| `old` | untouched | 2 |
+| `torn-program` | program:between-writes | 1 |
 
 **Weak bits** (a bit that did not read the same all 8 times):
 
@@ -617,9 +617,9 @@ The firmware's `verdict` against the phase it was sorted into:
 
 | phase | cuts | with weak bits | weak bits (min / median / max, where any) |
 |---|---:|---:|---|
-| untouched | 1 | 0 | — |
+| untouched | 2 | 0 | — |
 | erased | 2 | 0 | — |
-| program:command-boundary | 2 | 0 | — |
+| program:between-writes | 1 | 0 | — |
 
 - sectors reading all `0xFF` in every stable bit: 2; of those with weak bits: **0** (no weak bits)
 
@@ -627,24 +627,23 @@ The firmware's `verdict` against the phase it was sorted into:
 
 | cut | write (at, len) | prefix ends at | into the write | first page of it | end mod 32 | from the write mod 32 | rom | absolute | relative | class |
 |---|---|---|---:|---|---:|---:|---|---|---|---|
-| `lp-emu-esp32c6-t1-2026-10-08-060dd91ea.txt` boot 2 | (2276, 176) | 2336 | 60 | no | 0 | 28 | yes | yes | no | program:command-boundary |
-| `lp-emu-esp32c6-t1-2026-10-08-060dd91ea.txt` boot 4 | (2404, 224) | 2468 | 64 | yes | 4 | 0 | yes | no | yes | program:command-boundary |
+| `lp-emu-esp32c6-t1-2026-10-08-f8f2be0e6.txt` boot 1 | — | 1116 | 0 | — | — | — | — | — | — | program:between-writes |
 
-- prefixes ending inside a write: **2** (0 more ended where a write starts); on a 4-byte word: **2**
-- of those on a word, on a boundary under `rom`: **2**, `absolute`: **1**, `relative`: **1**
-- ends that tell the three apart (a boundary under one, not under another): **2**; of them `rom` 2, `absolute` 1, `relative` 1
-- ends inside the write's first page: 1 (where `rom` and `relative` say a command starts 4 or 20 bytes past a 32-byte boundary and `absolute` says on one)
+- prefixes ending inside a write: **0** (1 more ended where a write starts); on a 4-byte word: **0**
+- of those on a word, on a boundary under `rom`: **0**, `absolute`: **0**, `relative`: **0**
+- ends that tell the three apart (a boundary under one, not under another): **0**; of them `rom` 0, `absolute` 0, `relative` 0
+- ends inside the write's first page: 0 (where `rom` and `relative` say a command starts a word or more past a 32-byte boundary and `absolute` says on one)
 
-- erase-phase cuts with a stable `0` where the old data had a `1`: **0** of 3
+- erase-phase cuts with a stable `0` where the old data had a `1`: **0** of 4
 
 **Timing of one cycle** (the timed cycle after each scan, 6 boots; µs, min / median / max — emulated time, a model and not a measurement):
 
 - `journal_us`: 16 / 16 / 16
-- `erase_us`: 4 / 4 / 5
-- `program_us`: 859 / 880 / 901
-- `page_us_min`: 5 / 5 / 6
-- `page_us_max`: 27 / 28 / 31
-- share of a cycle (medians): journal 1.8 %, erase 0.4 %, program 97.8 %; the cuts landed 60.0 % in the erase and 40.0 % in the program
+- `erase_us`: 4 / 5 / 5
+- `program_us`: 774 / 824.5 / 866
+- `page_us_min`: 5 / 5 / 5
+- `page_us_max`: 40 / 76 / 90
+- share of a cycle (medians): journal 1.9 %, erase 0.6 %, program 97.5 %; the cuts landed 80.0 % in the erase and 20.0 % in the program
 
 
 <!-- flash-tears-analyze:end -->
@@ -662,11 +661,15 @@ counts commands from the start of each page operation.
 with `test_flash_tears_unaligned`: same region, journal, patterns, scan,
 gates and cut driver; only the program plan differs
 (`lp-fw/fw-checks/src/checks/flash_tears/program_plan.rs`). Each cycle
-programs its sector as a 20-byte write at offset 0, then writes of 16–272
-bytes (multiples of 16, drawn from sector and cycle) back to back, so every
-write after the first starts at `20 + k·16` — 4 or 20 bytes past a 32-byte
-boundary, never on one. Each write is one esp-storage write, so one call
-into the mask ROM. The in-flight record lists the cycle's plan
+programs its sector as a 20-byte write at offset 0, then writes of 16–1,040
+bytes (multiples of 4, drawn from sector and cycle) back to back, so every
+write after the first starts at `20 + k·4` — at a word, never on a 32-byte
+boundary (a length that would put the next write on one is moved by a
+word). That is the store's own case: its `Flash` goes through esp-storage,
+which takes only 4-byte-aligned offsets and lengths, so its programs reach
+the ROM word-aligned at any word inside a page. Byte-unaligned offsets are
+not measured: esp-storage cannot produce them. Each write is one
+esp-storage write, so one call into the mask ROM. The in-flight record lists the cycle's plan
 (`"writes":[[at,len],…]`); the analysis recomputes it and refuses a
 mismatch. Its transcripts go to
 `lp-emu/transcripts/esp32c6/flash-tears-unaligned/` and are reported apart:
@@ -674,20 +677,23 @@ they never feed `--model-table`.
 
 **What the ROM does with such a write** — measured on the emulator, which
 runs the real mask ROM (`lp-emu-esp32c6 --trace SPI1` on the
-`flash-tears-unaligned` image at `060dd91ea`, read by
+`flash-tears-unaligned` image at `f8f2be0e6`, read by
 `scripts/emu/flash-tears-analyze.py --rom-split`). Over the init pass's 16
-sectors (2,351 command starts inside the plan's writes):
+sectors (2,273 command starts inside the plan's writes):
 
 | where a page-program command starts | commands |
 |---|---:|
-| at the write's address | 474 |
-| 32 B on from the address, inside the write's first page | 1,061 |
+| at the write's address | 286 |
+| 32 B on from the address, inside the write's first page | 740 |
 | on a page boundary (a short command before it ends the first page) | 240 |
-| on an absolute 32-byte boundary, after the first page | 576 |
+| on an absolute 32-byte boundary, after the first page | 1,007 |
 | anywhere else | 0 |
 
-For example, an 80-byte write at offset 740 is sent as `740+28`, `768+32`,
-`800+20`, and a 96-byte write at 644 as three commands of 32 from 644. So the ROM counts 32-byte commands from
+For example, a 340-byte write at offset 1,092 is sent as `1092+32` …
+`1220+32`, `1252+28`, then `1280+32` … `1376+32`, `1408+24`; a 116-byte
+write at 976 as `976+32`, `1008+16`, `1024+32`, `1056+32`, `1088+4`. (The
+same split held on the first image of this payload, `104c1a547`, with
+16-byte-stepped writes.) So the ROM counts 32-byte commands from
 the write's address **inside its first page** and from the page boundary
 after it — which is exactly how `lp-nor-sim` tears an unaligned program (it
 splits a write at pages, one operation each, and the calibrated model counts
@@ -699,42 +705,47 @@ boundaries of the flash) and `relative` (32 bytes from the write's address
 all the way) — and the cuts that end inside a write's first page are the
 ones that tell `rom` from `absolute`.
 
-**Why 16–272 bytes, not the 16–1,040 sketched in the brief** (a deviation).
-Only a write's first-page commands are unaligned; after the first page
-boundary the ROM is page-aligned again, and a cut there is the old
-experiment. With writes of up to 1,040 bytes about 27 % of the programmed
-bytes are in unaligned commands; with up to 272, about 67 %, and about half
-the writes still cross a page (an estimate over 9,000 sector plans). One
-constant (`UNALIGNED_MAX_WRITE`) puts it back.
+**Why three lengths in four are short.** Only a write's first-page
+commands are unaligned; after the first page boundary the ROM is
+page-aligned again, and a cut there is the old experiment. Lengths uniform
+over 16–1,040 put about 27 % of the programmed bytes in unaligned commands;
+drawing three in four from 16–272 and one from the whole range puts about
+45 % there and keeps the range (about 60 % of the writes still cross a
+page; an estimate over 3,000 sector plans). Lengths of at most 272 would put
+67 % there, at the cost of the long writes.
 
-**The emulator dry run** (`lp-emu:esp32c6:t1`, `060dd91ea`, five cuts):
+**The emulator dry run** (`lp-emu:esp32c6:t1`, `f8f2be0e6`, five cuts):
 75 settled sectors read, every one whole, no weak bit — so the ROM put every
-unaligned, page-crossing write where it belonged. In flight: two erased, one
-old, and two torn programs ending on the ROM's own command boundaries (one
-inside a write's first page, at 4 mod 32: `rom` and `relative` yes,
-`absolute` no). An emulated cut lands between two flash commands by
-construction, so this proves the payload and the parser, not the part.
+unaligned, page-crossing write where it belonged. In flight: two erased, two
+old, and one torn program ending exactly where a write starts (offset
+1,116). An emulated cut lands between two flash commands by construction,
+so this proves the payload and the parser, not the part. (The first dry run,
+on `060dd91ea`'s 16-byte-stepped plan, had two cuts on the ROM's command
+boundaries, one inside a write's first page; it was removed from this
+unmerged branch when the plan changed, because the analysis refuses a
+record whose plan is not today's.)
 
 **What the models predict** (`just flash-tears-sim-unaligned`, seed 1, 300
 cuts each, simulator numbers):
 
 | model | torn programs | between writes | on a `rom` boundary (of them also `absolute`) | mid-command, on a word | mid-word / partial byte |
 |---|---:|---:|---|---:|---:|
-| `calibrated` | 51 | 9 | 31 (9) | 11 | 0 |
-| `clean` | 51 | 42 | 9 (9) | 0 | 0 |
-| `byte_prefix` | 51 | 0 | 1 (0) | 1 | 49 |
+| `calibrated` | 51 | 5 | 35 (25) | 11 | 0 |
+| `clean` | 51 | 24 | 27 (27) | 0 | 0 |
+| `byte_prefix` | 51 | 2 | 0 (0) | 0 | 49 |
 
 **What would change the model.** If the part's torn prefixes land on `rom`
-boundaries that are not `absolute` ones (inside a write's first page, at 4
-or 20 mod 32), the model is confirmed as it is. If they land on `absolute`
+boundaries that are not `absolute` ones (inside a write's first page, a
+word or more past a 32-byte boundary), the model is confirmed as it is. If they land on `absolute`
 boundaries the ROM never sent a command boundary to, the part aligns inside
 a command on its own: an additive program shape in `lp-nor-sim`, and the
 t1/f2/f3 sweeps re-run under it.
 
 **How many cuts.** 17 % of CX1's cuts landed in the program. At that share,
-100 unaligned cuts give about 17 torn programs, about 10 on command
-boundaries, and — at the simulator's 22 in 31 — about 7 that tell `rom`
-from `absolute`. Two batches meet the brief; four make the answer firmer.
+100 unaligned cuts give about 17 torn programs, about 12 on command
+boundaries, and — at the simulator's 10 in 35 — **about 3 that tell `rom`
+from `absolute`**. Two batches meet the brief's ≥ 100 but give a thin
+answer; four batches (200 cuts, about 7) are what section 9's command runs.
 
 ## 9. The owed sitting, in one command
 
@@ -743,7 +754,7 @@ first 200 cuts used. Not the hub at Yona's other house.
 
 ```bash
 scripts/emu/flash-tears-soak.sh --batches 6 \
-  && scripts/emu/flash-tears-soak.sh --unaligned --batches 2 \
+  && scripts/emu/flash-tears-soak.sh --unaligned --batches 4 \
   && just flash-tears-analyze && just flash-tears-analyze --check-model
 ```
 
@@ -754,8 +765,9 @@ checks every boot's JEDEC id. **The first cut of each batch proves itself:**
 `flash-tears-cuts.py` stops (exit 5) if the boot after a power cycle does not
 say reset `poweron`, or never comes. An agent running it splits it into one
 `--batches 1` run per foreground call and commits each transcript before the
-next. The aligned batches add cuts 201–500; the unaligned ones go to section
-8's table.
+next. The aligned batches add cuts 201–500; the unaligned ones (200; two
+batches if time is short, which meets the brief's ≥ 100) go to section 8's
+table.
 
 **`--check-model` will say MODEL DIFFERS at 500 whatever the part did**: it
 compares the weights in `calibrated_tear.rs` with the transcripts' raw

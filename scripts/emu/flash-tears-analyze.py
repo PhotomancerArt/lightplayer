@@ -793,7 +793,7 @@ def unaligned_section(cuts) -> list[str]:
       f"`absolute` {sum(1 for ph in tells if ph.detail['fits_absolute'])}, "
       f"`relative` {sum(1 for ph in tells if ph.detail['fits_relative'])}")
     w(f"- ends inside the write's first page: {len(first_page)} (where `rom` and `relative` say a command "
-      f"starts 4 or 20 bytes past a 32-byte boundary and `absolute` says on one)")
+      f"starts a word or more past a 32-byte boundary and `absolute` says on one)")
     mid = [ph for ph in on_word if not ph.detail["fits_rom"]]
     if mid:
         w(f"- mid-command ends (on a word, on no `rom` boundary): {len(mid)}; their offset into the command "
@@ -951,7 +951,7 @@ def self_test() -> int:
         assert ws[0] == (0, UNALIGNED_FIRST) and sum(n for _, n in ws) == SECTOR, ws
         assert all(a % COMMAND != 0 and n % WORD == 0 for a, n in ws[1:]), ws
     # The first boot of the committed emulated dry run lists this plan.
-    assert plan(7, 231)[:3] == [(0, 20), (20, 112), (132, 176)], plan(7, 231)[:3]
+    assert plan(6, 246)[:3] == [(0, 20), (20, 944), (964, 56)], plan(6, 246)[:3]
     print("self-test ok")
     return 0
 
