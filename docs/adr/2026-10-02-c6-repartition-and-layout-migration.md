@@ -150,6 +150,13 @@ already asked the question (landed in `828dcb97c`).
   `2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`,
   Consequences.
 
+- 2026-10-08: over-the-air updates needed no second repartition. The split
+  image's whole layout (loader, progress record, boot records, two cores, the
+  engine) lives inside `factory`; `lpfs` and the table are untouched by an
+  update, and a board that already had this table needed only an ordinary
+  Studio "Update firmware" to take the split image. See the split-image ADR
+  and the flash budget's amendment.
+
 - Studio ZIP-file import of a device backup — before the image crosses
   `0x300000` (Decision 11).
 - `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`

@@ -1,15 +1,19 @@
 # ADR: Firmware distribution — every release carries its firmware, lightplayer.app serves it, and the deploys ship the same bytes
 
-- **Status:** Proposed (Accepted when PR-3 merges; `yona-ship` flips it)
+- **Status:** Accepted (2026-10-08, at the OTA roadmap's closeout. PR-3, #1003, merged
+  2026-10-06 and every release since carries its firmware; the release index
+  amendment below shipped as #1027)
 - **Date:** 2026-10-06
 - **Deciders:** Photomancer
 - **Supersedes:** None
 - **Superseded by:** None
+- **Related:** the OTA ADR set, closed out 2026-10-08: [2026-10-04-c6-split-link-firmware-loader-and-boot-records](2026-10-04-c6-split-link-firmware-loader-and-boot-records.md) (the split image), [2026-10-06-ota-update-protocol](2026-10-06-ota-update-protocol.md) (the update protocol), [2026-10-06-studio-updates-over-the-update-channel](2026-10-06-studio-updates-over-the-update-channel.md) (Studio's updates). The C6's flash spend is in
+  [`2026-07-28-esp32c6-flash-budget.md`](2026-07-28-esp32c6-flash-budget.md)'s ledger.
 - **Plan:** `lp2025/2026-10-04-0757-ota-firmware-distribution` (M5 of the OTA
   roadmap `lp2025/2026-10-03-1330-ota-firmware-updates`): PR-1 #974 (the
   format crate, the lookup, Studio's engine cache), PR-2 #984 (the OTA files
   in every split package, `release-assets`, `release-check`), PR-3 (the
-  release workflow, one build, the install hook — this ADR's PR). The formats
+  release workflow, one build, the install hook — #1003). The formats
   it binds were decided in that roadmap's `one-way-doors.md` (2026-10-04).
 
 ## Context
@@ -364,3 +368,14 @@ downgrade (it is a lasting action, the user's own button).
 **No wire change.** Nothing on the board changes: no wire protocol bump, no
 lp-link or channel 3 change. Channel 3's never-break rule is what makes a
 board on an older release updatable again.
+
+## Amendment (2026-10-08): where the bundle's own update files live
+
+The Studio bundle's update files (`ota-manifest.json`, `core.z`,
+`engine.z`, for own-build updates) first shipped at `/firmware/<target>/ota/…`
+(#996), where the cloud lookup route shadowed them: a 404 in production
+(`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md`).
+#1004 moved them to `firmware/<target>/{ota-manifest.json,core.z,engine.z}`,
+two segments deep, which the lookup never matches; decision 6 above already
+reads that way. The public lookup contract was not touched, and no
+`ota` word was reserved in it.

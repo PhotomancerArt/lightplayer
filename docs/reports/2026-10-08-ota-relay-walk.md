@@ -1,8 +1,11 @@
 # Studio updates a board through lightplayer.app: the relay walk (protocol)
 
-**Status: not walked yet.** Gate G2 of
+**Status: walked and passed, 2026-10-08, by Yona.** loose-c6 updated to
+`2026.10.08-10` through lightplayer.app's relay; he unplugged it mid-update
+and it resumed without incident. The steps below are the protocol he walked
+from; the rows were not filled in, and this is the record. Gate G2 of
 `lp2025/2026-10-06-2249-ota-wifi-updates` (PR C, P10). A walk of its own:
-the Wi‑Fi roadmap's relay walk passed, but no update has ever gone through
+the Wi‑Fi roadmap's relay walk passed, but before this walk no update had gone through
 the relay on a real board. About 30 minutes.
 
 ## Before you start: what must be true
