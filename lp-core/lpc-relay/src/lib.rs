@@ -63,7 +63,8 @@ pub use picture_rate::PictureRate;
 pub use refuse_reason::RefuseReason;
 pub use relay_board_id::{BadRelayBoardId, RelayBoardId};
 pub use relay_client::{
-    RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent, RelayState,
+    RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent, RelayProjectFacts,
+    RelayState,
 };
 pub use relay_close_code::RelayCloseCode;
 pub use relay_frame::{

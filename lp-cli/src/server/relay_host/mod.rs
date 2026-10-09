@@ -133,6 +133,7 @@ pub fn start_relay_host<T: ServerTransport>(
         label,
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
         max_routes: 1,
+        firmware: String::from(env!("LP_APP_VERSION")),
     };
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();

@@ -295,6 +295,9 @@ impl RelayDriver {
                 RelayAction::RouteOpened(route) => self.open_route(now_us, route),
                 RelayAction::RouteFrame { route, bytes } => self.route_in(now_us, route, &bytes),
                 RelayAction::RouteClosed(route) => self.route_gone(route),
+                // This board has no picture source yet: it never answers a
+                // `TakePicture`, so the client never asks it to send one.
+                RelayAction::TakePicture | RelayAction::SendPicture | RelayAction::DropPicture => {}
             }
         }
     }
@@ -556,6 +559,7 @@ mod tests {
                 label: String::from("test"),
                 wire_proto: 1,
                 max_routes: 1,
+                firmware: String::from("test-1"),
             },
             entropy,
             RadioLinkPort::leak(),

@@ -443,6 +443,7 @@ async fn drive_board(
             label: "Lamp".into(),
             wire_proto: 39,
             max_routes: 1,
+            firmware: "fake-board-1".into(),
         },
         |bytes| bytes.fill(7),
     );
@@ -500,7 +501,11 @@ async fn drive_board(
                             bytes: &bytes,
                         },
                     )),
-                    RelayAction::RouteOpened(_) | RelayAction::RouteClosed(_) => {}
+                    RelayAction::RouteOpened(_)
+                    | RelayAction::RouteClosed(_)
+                    | RelayAction::TakePicture
+                    | RelayAction::SendPicture
+                    | RelayAction::DropPicture => {}
                 }
             }
         }

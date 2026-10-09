@@ -22,9 +22,11 @@
 //!   [`RelayState::WaitingForInternet`]; a drop after it says
 //!   [`RelayState::Connecting`] while it waits to dial again.
 //! - **Refusals:** `UnknownAccount` waits until the account entries change;
-//!   a version refusal waits [`VERSION_REFUSED_RETRY_MS`] (an update, or the
-//!   hub taking the version back); the rest back off as a failure would, at
-//!   least as long as the hub's `retry_after_s`.
+//!   `VersionTooOld` waits [`VERSION_REFUSED_RETRY_MS`] (an hour: the board
+//!   needs an update); `VersionTooNew` waits [`VERSION_TOO_NEW_RETRY_MS`]
+//!   (five minutes: the hub is behind the board, a deploy in progress or a
+//!   rollback); the rest back off as a failure would. Each waits at least
+//!   as long as the hub's `retry_after_s`.
 //! - **New account entries while registered** re-register, so the hub
 //!   learns them.
 //! - **A leg silent** for [`SILENT_CLOSE_S`](crate::SILENT_CLOSE_S) is
@@ -32,21 +34,45 @@
 //! - **Routes**: at most `max_routes` open; an `Open` past that is answered
 //!   `Close { Busy }` at once and never reaches the board. The leg closing
 //!   closes every route.
+//! - **The hello is protocol 2** and carries the configured firmware
+//!   version ([`RelayClientConfig::firmware`]).
+//! - **The project** ([`RelayEvent::Project`]) goes to the hub after every
+//!   `Registered` (once the board has said it) and on every change while
+//!   registered: its name, cut to 32 bytes, and its uid and package hash
+//!   only as tags ([`crate::relay_project`]) keyed by the first verified
+//!   account (the lowest set bit of `accounts_ok`). The facts are kept
+//!   across reconnects.
+//! - **Pictures** follow the hub's [`PictureRate`](crate::PictureRate)
+//!   (the schedule's rules are in `picture_schedule.rs`): none before the
+//!   first rate after a `Registered`; each rate asks for one at once
+//!   ([`RelayAction::TakePicture`]), then its cadence, watched then idle;
+//!   at most one in flight. A [`RelayEvent::PictureReady`] while
+//!   registered with a picture asked for is sent
+//!   ([`RelayAction::SendPicture`]); any other is dropped
+//!   ([`RelayAction::DropPicture`]). Every `Registered`, and the leg
+//!   going, clears the schedule.
+//! - **Never sent:** the project's uid and its package hash. Only their
+//!   tags cross the leg.
 
 use alloc::vec::Vec;
 
+use alloc::string::String;
+
+use super::picture_schedule::PictureSchedule;
 use super::relay_account::RelayAccount;
 use super::relay_action::RelayAction;
 use super::relay_backoff::RelayBackoff;
 use super::relay_client_config::RelayClientConfig;
 use super::relay_event::RelayEvent;
+use super::relay_project_facts::RelayProjectFacts;
 use super::relay_routes::RelayRoutes;
 use super::relay_state::RelayState;
 use crate::lan_address::LanAddress;
 use crate::refuse_reason::RefuseReason;
 use crate::relay_frame::{RelayFrame, encode_route_frame};
-use crate::relay_hello::RelayHello;
-use crate::relay_limits::{MAX_HELLO_ACCOUNTS, SILENT_CLOSE_S};
+use crate::relay_hello::{RelayHello, cut_utf8};
+use crate::relay_limits::{MAX_HELLO_ACCOUNTS, MAX_PROJECT_NAME_BYTES, SILENT_CLOSE_S};
+use crate::relay_project::{RelayProject, project_content_tag, project_tag_key, project_uid_tag};
 use crate::relay_proof::{RELAY_NONCE_BYTES, relay_auth_key, relay_proof};
 use crate::route_close_reason::RouteCloseReason;
 
@@ -56,9 +82,13 @@ pub const RESOLVE_TIMEOUT_MS: u64 = 10_000;
 pub const CONNECT_TIMEOUT_MS: u64 = 10_000;
 /// How long the hub may take from the hello to `Registered`.
 pub const HANDSHAKE_TIMEOUT_MS: u64 = 10_000;
-/// How long a board refused for its relay version waits before it asks
-/// again: an hour.
+/// How long a board refused `VersionTooOld` waits before it asks again: an
+/// hour. The board needs an update.
 pub const VERSION_REFUSED_RETRY_MS: u64 = 60 * 60 * 1000;
+/// How long a board refused `VersionTooNew` waits before it asks again:
+/// five minutes. A hub that does not know the board's protocol is behind
+/// it (a deploy in progress, a rollback), which passes.
+pub const VERSION_TOO_NEW_RETRY_MS: u64 = 5 * 60 * 1000;
 
 const SILENT_CLOSE_MS: u64 = SILENT_CLOSE_S as u64 * 1000;
 
@@ -78,6 +108,11 @@ pub struct RelayClient {
     registered_with: Vec<[u8; 16]>,
     /// Which of them verified, as the hub's bitmask.
     accounts_ok: u8,
+    /// The board's project as the edge last said; `None` until it says.
+    /// Kept across reconnects.
+    project: Option<Option<RelayProjectFacts>>,
+    /// When the next picture is due.
+    pictures: PictureSchedule,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +163,8 @@ impl RelayClient {
             routes,
             registered_with: Vec::new(),
             accounts_ok: 0,
+            project: None,
+            pictures: PictureSchedule::new(),
         }
     }
 
@@ -162,6 +199,20 @@ impl RelayClient {
                 }
             }
             RelayEvent::RouteSend { route, bytes } => self.route_send(route, bytes, &mut actions),
+            RelayEvent::Project(facts) => {
+                self.project = Some(facts);
+                self.send_project(&mut actions);
+            }
+            RelayEvent::PictureReady => {
+                let wanted = self.pictures.ready();
+                actions.push(
+                    if wanted && matches!(self.phase, Phase::Registered { .. }) {
+                        RelayAction::SendPicture
+                    } else {
+                        RelayAction::DropPicture
+                    },
+                );
+            }
             RelayEvent::RouteClose { route, reason } => {
                 if self.routes.close(route) && matches!(self.phase, Phase::Registered { .. }) {
                     actions.push(RelayAction::Send(
@@ -190,9 +241,29 @@ impl RelayClient {
             | Phase::Connecting { until }
             | Phase::Registering { until } => Some(until),
             Phase::Blocked { until } => until,
-            Phase::Registered { heard } => Some(heard + SILENT_CLOSE_MS),
+            Phase::Registered { heard } => {
+                let silent = heard + SILENT_CLOSE_MS;
+                Some(
+                    self.pictures
+                        .next_wake()
+                        .map_or(silent, |at| at.min(silent)),
+                )
+            }
             Phase::Idle => None,
         }
+    }
+
+    /// When the next picture is due, while the hub has asked for pictures.
+    #[must_use]
+    pub fn next_picture_due(&self) -> Option<u64> {
+        self.pictures.next_due()
+    }
+
+    /// Whether the board counts as watched at `now_ms`: the hub's last rate
+    /// asked for watched pictures, and its watch has not run out.
+    #[must_use]
+    pub fn pictures_watched(&self, now_ms: u64) -> bool {
+        self.pictures.is_watched(now_ms)
     }
 
     /// The configuration the client was built with.
@@ -322,7 +393,8 @@ impl RelayClient {
             self.config.wire_proto,
             self.lan,
             salts.clone(),
-        );
+        )
+        .with_firmware(&self.config.firmware);
         self.registered_with = salts;
         self.phase = Phase::Registering {
             until: now + HANDSHAKE_TIMEOUT_MS,
@@ -336,7 +408,7 @@ impl RelayClient {
             return;
         }
         let was_open = !matches!(self.phase, Phase::Connecting { .. });
-        self.close_routes(actions);
+        self.leg_gone(actions);
         if going_away {
             let wait = self.backoff.after_going_away(self.random());
             self.phase = Phase::Waiting { until: now + wait };
@@ -366,6 +438,9 @@ impl RelayClient {
                 self.backoff.reset();
                 self.phase = Phase::Registered { heard: now };
                 self.state = RelayState::Connected;
+                // No pictures until this hub asks.
+                self.pictures.clear();
+                self.send_project(actions);
             }
             (
                 Phase::Registering { .. } | Phase::Registered { .. },
@@ -410,6 +485,12 @@ impl RelayClient {
                     actions.push(RelayAction::RouteClosed(route));
                 }
             }
+            RelayFrame::PictureRate(rate) => {
+                if self.pictures.rate(now, rate) {
+                    actions.push(RelayAction::TakePicture);
+                }
+            }
+            // `Project` and `Picture` only travel board → hub.
             _ => self.protocol_error(now, actions),
         }
     }
@@ -422,13 +503,16 @@ impl RelayClient {
         actions: &mut Vec<RelayAction>,
     ) {
         actions.push(RelayAction::Close);
-        self.close_routes(actions);
+        self.leg_gone(actions);
         self.state = RelayState::Refused { reason };
         let hub_wait = u64::from(retry_after_s) * 1000;
         self.phase = match reason {
             RefuseReason::UnknownAccount => Phase::Blocked { until: None },
-            RefuseReason::VersionTooOld | RefuseReason::VersionTooNew => Phase::Blocked {
+            RefuseReason::VersionTooOld => Phase::Blocked {
                 until: Some(now + VERSION_REFUSED_RETRY_MS.max(hub_wait)),
+            },
+            RefuseReason::VersionTooNew => Phase::Blocked {
+                until: Some(now + VERSION_TOO_NEW_RETRY_MS.max(hub_wait)),
             },
             RefuseReason::TooManyBoards | RefuseReason::Malformed | RefuseReason::Busy => {
                 let wait = self.backoff.after_failure(self.random()).max(hub_wait);
@@ -472,8 +556,13 @@ impl RelayClient {
             }
             Phase::Registered { heard } if now >= heard + SILENT_CLOSE_MS => {
                 actions.push(RelayAction::Close);
-                self.close_routes(actions);
+                self.leg_gone(actions);
                 self.fail_dropped(now);
+            }
+            Phase::Registered { .. } => {
+                if self.pictures.tick(now) {
+                    actions.push(RelayAction::TakePicture);
+                }
             }
             _ => {}
         }
@@ -483,7 +572,7 @@ impl RelayClient {
     /// off.
     fn protocol_error(&mut self, now: u64, actions: &mut Vec<RelayAction>) {
         actions.push(RelayAction::Close);
-        self.close_routes(actions);
+        self.leg_gone(actions);
         self.fail_dropped(now);
     }
 
@@ -506,13 +595,55 @@ impl RelayClient {
         if self.phase.has_socket() {
             actions.push(RelayAction::Close);
         }
-        self.close_routes(actions);
+        self.leg_gone(actions);
     }
 
-    fn close_routes(&mut self, actions: &mut Vec<RelayAction>) {
+    /// The leg is gone (or going): every route closes, and no picture is
+    /// due until the next hub asks.
+    fn leg_gone(&mut self, actions: &mut Vec<RelayAction>) {
         for route in self.routes.take_all() {
             actions.push(RelayAction::RouteClosed(route));
         }
+        self.pictures.clear();
+    }
+
+    /// Tell the hub the board's project, if the board has said it and the
+    /// leg is registered.
+    fn send_project(&self, actions: &mut Vec<RelayAction>) {
+        if !matches!(self.phase, Phase::Registered { .. }) {
+            return;
+        }
+        let Some(facts) = &self.project else {
+            return;
+        };
+        let project = facts.as_ref().map(|facts| self.project_frame(facts));
+        actions.push(RelayAction::Send(RelayFrame::Project(project).encode()));
+    }
+
+    /// The facts as the hub may see them: the name, and the uid and the
+    /// hash only as tags.
+    fn project_frame(&self, facts: &RelayProjectFacts) -> RelayProject {
+        let tag_key = self
+            .tag_account()
+            .map(|account| project_tag_key(&account.k));
+        RelayProject {
+            name: String::from(cut_utf8(&facts.name, MAX_PROJECT_NAME_BYTES)),
+            uid_tag: tag_key
+                .zip(facts.uid.as_deref())
+                .map(|(key, uid)| project_uid_tag(&key, uid)),
+            content_tag: tag_key
+                .zip(facts.content_hash.as_ref())
+                .map(|(key, hash)| project_content_tag(&key, hash)),
+        }
+    }
+
+    /// The account the project tags are keyed with: the first verified one
+    /// (the lowest set bit of `accounts_ok`, indexing the hello's salts),
+    /// which the hub knows as the first of the board's proven accounts.
+    fn tag_account(&self) -> Option<&RelayAccount> {
+        let first = self.accounts_ok.trailing_zeros() as usize;
+        let salt = self.registered_with.get(first)?;
+        self.accounts.iter().find(|account| account.salt == *salt)
     }
 
     /// The salts the next hello names: the first

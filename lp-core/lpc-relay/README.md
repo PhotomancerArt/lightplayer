@@ -32,7 +32,7 @@ route ids and frame lengths, never their contents.
 | `relay_version` | `RELAY_PROTO_1`, `RELAY_PROTO_2`, `RELAY_PROTO_VERSION`, `SUPPORTED_RELAY_PROTO_VERSIONS` and `check_relay_version`: version-and-refuse. |
 | `refuse_reason`, `route_close_reason` | The one-byte reason codes. |
 | `relay_limits` | Frame size, accounts per hello, routes per board, ping and silence intervals; protocol 2's firmware, name, tag and picture limits, and the board's clamps on a `PictureRate`. |
-| `relay_client` | `RelayClient`: the board's state machine — when to dial (`may_dial`: joined, Cloud relay on, an account entry; the C6's driver and relay task both ask it), backoff, the challenge, the route table, the status. |
+| `relay_client` | `RelayClient`: the board's state machine — when to dial (`may_dial`: joined, Cloud relay on, an account entry; the C6's driver and relay task both ask it), backoff, the challenge, the route table, the status; and (protocol 2) the hello's firmware, the project report (tags, never the uid or the hash), and the picture schedule (`picture_schedule.rs`: `TakePicture` out, `PictureReady` in, at most one in flight). |
 
 ## The registration
 

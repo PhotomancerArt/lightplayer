@@ -97,6 +97,11 @@ pub async fn run_device_leg(
                     RelayAction::RouteClosed(route) => {
                         let _ = events.send(LegEvent::RouteClosed(route));
                     }
+                    // No picture source here yet: a `TakePicture` is never
+                    // answered, so the client never asks to send one.
+                    RelayAction::TakePicture
+                    | RelayAction::SendPicture
+                    | RelayAction::DropPicture => {}
                 }
             }
         }

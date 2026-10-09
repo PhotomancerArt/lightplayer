@@ -19,4 +19,9 @@ pub struct RelayClientConfig {
     /// How many browser sessions the board holds at once (the C6: one).
     /// An `Open` past it is answered `Close { Busy }`.
     pub max_routes: usize,
+    /// The version of the image the client runs in (on a split C6, the
+    /// core's): the protocol 2 hello's firmware, cut to
+    /// [`MAX_FIRMWARE_BYTES`](crate::MAX_FIRMWARE_BYTES) of ASCII. Empty
+    /// means "unknown".
+    pub firmware: String,
 }
