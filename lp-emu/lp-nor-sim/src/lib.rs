@@ -15,6 +15,7 @@
 
 extern crate alloc;
 
+pub mod calibrated_tear;
 mod embedded_storage_impl;
 mod fault_plan;
 mod nor_error;
@@ -24,6 +25,7 @@ mod nor_sector_state;
 mod nor_stats;
 mod sim_rng;
 
+pub use calibrated_tear::TearMix;
 pub use embedded_storage_impl::NorSimFlashError;
 pub use fault_plan::{FaultPlan, TearModel};
 pub use nor_error::NorError;

@@ -11,13 +11,29 @@ pub enum TearModel {
     /// A program: a random subset of the page's intended 1→0 clears lands,
     /// anywhere in the page.
     RandomBits,
+    /// Tears shaped and weighted the way a real part tore (CX1, 200 cuts):
+    /// programs stop on a 32-byte command or a 4-byte word; erases leave a
+    /// `0x00` run from the front, all `0x00`, a zero residue with weak bits,
+    /// or a sector reading `0xFF` (see [`crate::calibrated_tear`]). Not in
+    /// [`TearModel::ALL`]: name it to run it.
+    Calibrated,
 }
 
 impl TearModel {
+    /// The three original (guessed) models: every driver's default list.
     pub const ALL: [TearModel; 3] = [
         TearModel::Clean,
         TearModel::BytePrefix,
         TearModel::RandomBits,
+    ];
+
+    /// Every model a name can select: [`TearModel::ALL`] and the calibrated
+    /// one.
+    pub const NAMED: [TearModel; 4] = [
+        TearModel::Clean,
+        TearModel::BytePrefix,
+        TearModel::RandomBits,
+        TearModel::Calibrated,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -25,11 +41,12 @@ impl TearModel {
             TearModel::Clean => "clean",
             TearModel::BytePrefix => "byte_prefix",
             TearModel::RandomBits => "random_bits",
+            TearModel::Calibrated => "calibrated",
         }
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|t| t.name() == name)
+        Self::NAMED.into_iter().find(|t| t.name() == name)
     }
 }
 
@@ -38,7 +55,8 @@ impl TearModel {
 ///
 /// Every program page and every sector erase is one operation; reads are not.
 /// Erases are torn under every model except [`TearModel::Clean`] (a torn erase
-/// leaves a mix of old bytes, `0xFF`, and *weak* bits; see the README).
+/// leaves a mix of old bytes, `0xFF`, and *weak* bits; under
+/// [`TearModel::Calibrated`], the shapes a real part left; see the README).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FaultPlan {
     pub cut_after: Option<u64>,
