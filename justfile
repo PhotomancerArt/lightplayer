@@ -4432,7 +4432,8 @@ flash-tears-analyze *args:
 # as the silicon transcripts: does a model reproduce CX1's tear histogram?
 # Simulator numbers, written under target/, never committed. Then
 # `just flash-tears-analyze --check-model` says whether lp-nor-sim's
-# calibrated weights still match every committed silicon cut.
+# calibrated shares are still within sampling noise of every committed
+# silicon cut (the rule is in its --help).
 flash-tears-sim cuts="200" seed="1":
     #!/usr/bin/env bash
     set -euo pipefail

@@ -6,7 +6,7 @@
     scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.md
     scripts/emu/flash-tears-analyze.py --json               # one JSON object per cut, for a notebook-free pipe
     scripts/emu/flash-tears-analyze.py --model-table        # lp-nor-sim's calibrated model, as Rust
-    scripts/emu/flash-tears-analyze.py --check-model        # does lp-nor-sim hold those numbers?
+    scripts/emu/flash-tears-analyze.py --check-model        # are lp-nor-sim's shares confirmed? (DD29, see --help)
     scripts/emu/flash-tears-analyze.py --rom-split <trace>  # how the emulated ROM split the unaligned writes
 
 The `flash-tears` payload (`lp-fw/fw-checks/src/checks/flash_tears/`) prints,
@@ -47,6 +47,30 @@ in PATH; the prose around it is left alone. Re-run it after every batch.
 """
 
 from __future__ import annotations
+
+CHECK_MODEL_RULE = """\
+--check-model (DD29) -- is lp-nor-sim's TearMix::CX1 confirmed by the silicon cuts?
+
+  1. Per payload. Only the page-aligned `flash-tears` silicon cuts feed the
+     model's shares. `flash-tears-unaligned` silicon cuts are counted and
+     printed apart; they neither confirm nor refute the erase mix.
+  2. Per family. Which operation a cut tore is the workload's, so the erase
+     shapes are compared among the torn erases and the program shapes among
+     the torn programs. A cut after the program finished ("complete") is not
+     a torn operation and is left out.
+  3. Confirmed when EVERY shape's observed share lies inside its 95 % Wilson
+     score interval around the MODEL's share, at the observed n of its family.
+  4. Pooling: a shape expected fewer than 5 times at that n (model share x n)
+     is pooled with the other such shapes into one cell. A pool (or a lone thin
+     shape) still under 5 joins the thinnest remaining cell, so no cell is
+     tested on fewer than 5 expected cuts.
+  5. A silicon class the model has no shape for (untouched, erase:old-left,
+     program:scattered, ...) is never pooled away: seeing one is a failure.
+  6. Otherwise print the re-fit table (what --model-table prints) and exit 1.
+
+Only the shares are judged; the CX1_ERASING and CX1_READS_FF_WEAK residue
+tables are not (they are drawn values, not shares).
+"""
 
 import argparse
 import glob
@@ -952,8 +976,68 @@ def self_test() -> int:
         assert all(a % COMMAND != 0 and n % WORD == 0 for a, n in ws[1:]), ws
     # The first boot of the committed emulated dry run lists this plan.
     assert plan(6, 246)[:3] == [(0, 20), (20, 944), (964, 56)], plan(6, 246)[:3]
+    check_model_self_test()
     print("self-test ok")
     return 0
+
+
+# `TearMix::CX1` as the first 200 cuts fitted it, held here so the test of the
+# RULE does not move when a later re-fit changes the model file.
+CX1_200_RS = """pub const CX1: TearMix = TearMix {
+    erase_zeroing: 10, erase_all_zero: 26, erase_erasing: 28, erase_reads_ff_weak: 1,
+    erase_reads_ff: 101, program_command_boundary: 26, program_mid_command: 7,
+};"""
+CX1_200_CUTS = {
+    "erase:zeroing": 10, "erase:all-zero": 26, "erase:erasing": 28, "erase:reads-ff-weak": 1,
+    "erased": 101, "program:command-boundary": 26, "program:mid-command": 7, "complete": 1,
+}
+
+
+def synthetic_rows(counts: dict[str, int], payload: str = PAYLOAD, config: str = "silicon:esp32c6") -> list[dict]:
+    return [{"configuration": config, "payload": payload, "class": c} for c, k in counts.items() for _ in range(k)]
+
+
+def check_model_self_test() -> None:
+    """DD29's rule, on synthetic transcripts."""
+    # Today's 200 cuts against today's model confirm. (The model's shares ARE
+    # these cuts' shares, so this also pins the arithmetic: no cell can fail.)
+    ok, lines = judge_model(synthetic_rows(CX1_200_CUTS), CX1_200_RS)
+    assert ok, "\n".join(lines)
+    # The thin shape (1 weak-bit cut, expected 1.0) is pooled, not tested alone.
+    assert any("pooled" in l and "erase:reads-ff-weak" in l for l in lines), lines
+    # 500 cuts drawn the way the model draws them (a share each is off by well
+    # under noise) still confirm; the same 500 with every count nudged by 2.
+    near = {k: round(v * 2.5) + d for (k, v), d in zip(CX1_200_CUTS.items(), (2, -2, 3, 0, -3, 2, -1, 0))}
+    assert judge_model(synthetic_rows(near), CX1_200_RS)[0], near
+    # One shape doubled fails: all-zero erases at 52 against the same others.
+    doubled = dict(CX1_200_CUTS, **{"erase:all-zero": 52})
+    ok, lines = judge_model(synthetic_rows(doubled), CX1_200_RS)
+    assert not ok and any("OUTSIDE" in l and "erase:all-zero" in l for l in lines), lines
+    # ... and so does a program shape at three times (n = 33 is thin: doubling 7 to 14 is inside noise).
+    ok, lines = judge_model(synthetic_rows(dict(CX1_200_CUTS, **{"program:mid-command": 21})), CX1_200_RS)
+    assert not ok and any("OUTSIDE" in l and "program:mid-command" in l for l in lines), lines
+    # A shape the model has no weight for is a failure, never pooled away.
+    ok, lines = judge_model(synthetic_rows(dict(CX1_200_CUTS, **{"erase:old-left": 1})), CX1_200_RS)
+    assert not ok and any("NOT MODELLED" in l for l in lines), lines
+    # Per payload: unaligned silicon cuts (any shape) and emulated cuts feed nothing.
+    extra = synthetic_rows({"erase:all-zero": 90, "program:scattered": 9}, payload=PAYLOAD_UNALIGNED)
+    extra += synthetic_rows({"erase:all-zero": 90}, config="lp-emu:esp32c6:t1")
+    ok, lines = judge_model(synthetic_rows(CX1_200_CUTS) + extra, CX1_200_RS)
+    assert ok and any("flash-tears-unaligned" in l and "99 silicon" in l for l in lines), lines
+    # Pooling: c and d are each expected 1 time in 200; alone, "c seen 0" would
+    # fall outside its own Wilson interval, pooled it does not.
+    weights = {"a": 900, "b": 90, "c": 5, "d": 5}
+    assert wilson(0.005, 200)[0] > 0
+    cells = judge_family({"a": 180, "b": 18, "c": 0, "d": 2}, weights)
+    assert all(c["ok"] for c in cells), cells
+    assert sorted(len(c["classes"]) for c in cells) == [1, 3], cells  # {a}, {b, c, d}
+    # A cell that is not thin is never pooled, and a plain miss still fails.
+    cells = judge_family({"a": 100, "b": 100}, {"a": 1, "b": 1})
+    assert [c["classes"] for c in cells] == [["a"], ["b"]] and all(c["ok"] for c in cells), cells
+    assert not any(c["ok"] for c in judge_family({"a": 190, "b": 10}, {"a": 1, "b": 1}))
+    # The interval itself: Wilson at p = 0.5, n = 100 is 40.4 % - 59.6 %.
+    lo, hi = wilson(0.5, 100)
+    assert abs(lo - 0.4038) < 1e-3 and abs(hi - 0.5962) < 1e-3, (lo, hi)
 
 
 MODEL_RS = "lp-emu/lp-nor-sim/src/calibrated_tear.rs"
@@ -992,42 +1076,184 @@ def model_table(rows: list[dict]) -> str:
     return "\n".join(out) + "\n"
 
 
-def check_model(table: str, rs_path: str) -> int:
-    """Does the model file hold the numbers these transcripts give?"""
+# The model's seven shapes, by the class this script sorts a cut into, and the
+# `TearMix` field that weighs each. Which operation a cut tears is the
+# workload's business, so the check compares shapes WITHIN a family: the erase
+# shapes among the torn erases, the program shapes among the torn programs.
+MODEL_SHAPES = {
+    "erase": [
+        ("erase:zeroing", "erase_zeroing"),
+        ("erase:all-zero", "erase_all_zero"),
+        ("erase:erasing", "erase_erasing"),
+        ("erase:reads-ff-weak", "erase_reads_ff_weak"),
+        ("erased", "erase_reads_ff"),
+    ],
+    "program": [
+        ("program:command-boundary", "program_command_boundary"),
+        ("program:mid-command", "program_mid_command"),
+    ],
+}
+# A class that is not a torn operation: a cut after the program finished.
+NOT_TORN = {"complete"}
+# DD29: a shape expected fewer times than this at the observed n is pooled.
+POOL_BELOW = 5.0
+Z95 = 1.959964
+
+
+def wilson(p: float, n: int, z: float = Z95) -> tuple[float, float]:
+    """The 95 % Wilson score interval for a binomial share `p` at `n` trials.
+
+    Here `p` is the MODEL's share, not an observed one: the interval is the
+    band an honest sample of `n` cuts from the model lands in."""
+    if n <= 0:
+        return 0.0, 1.0
+    d = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / d
+    half = z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5 / d
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def judge_family(observed: dict[str, int], weights: dict[str, int]) -> list[dict]:
+    """DD29, for one family of shapes: pool the thin shapes, test each cell.
+
+    `observed` maps a class to its cut count (unmodelled classes too);
+    `weights` maps each MODELLED class to its model weight. Every cell has
+    `ok` and the `classes` it stands for. A class the model has no weight for
+    is a cell of its own that fails whenever it was seen: a shape the model
+    cannot draw cannot be pooled away.
+    """
+    n = sum(observed.values())
+    total = sum(weights.values())
+    cells = [
+        {"classes": [cls], "model": (w / total if total else 0.0), "seen": observed.get(cls, 0)}
+        for cls, w in weights.items()
+    ]
+    # Every shape expected fewer than POOL_BELOW times at this n goes into one cell.
+    thin = [c for c in cells if c["model"] * n < POOL_BELOW]
+    if len(thin) > 1:
+        cells = [c for c in cells if c not in thin]
+        cells.append({
+            "classes": [cls for c in thin for cls in c["classes"]],
+            "model": sum(c["model"] for c in thin),
+            "seen": sum(c["seen"] for c in thin),
+        })
+    # A pool that is itself still thin (or one thin shape left alone) joins the
+    # thinnest of the others, so no cell is tested on fewer than POOL_BELOW.
+    thin = [c for c in cells if c["model"] * n < POOL_BELOW]
+    if len(cells) > 1 and len(thin) == 1:
+        rest = min((c for c in cells if c is not thin[0]), key=lambda c: c["model"])
+        rest["classes"] = rest["classes"] + thin[0]["classes"]
+        rest["model"] += thin[0]["model"]
+        rest["seen"] += thin[0]["seen"]
+        cells.remove(thin[0])
+    for c in cells:
+        c["n"] = n
+        c["expected"] = c["model"] * n
+        c["share"] = c["seen"] / n if n else 0.0
+        c["lo"], c["hi"] = wilson(c["model"], n)
+        c["ok"] = n == 0 or c["lo"] <= c["share"] <= c["hi"]
+    for cls, k in sorted(observed.items()):
+        if cls not in weights and k:
+            cells.append({
+                "classes": [cls], "model": 0.0, "seen": k, "n": n, "expected": 0.0,
+                "share": k / n, "lo": 0.0, "hi": 0.0, "ok": False, "unmodelled": True,
+            })
+    cells.sort(key=lambda c: -c["model"])
+    return cells
+
+
+def family_counts(rows: list[dict], family: str, payload: str = PAYLOAD) -> dict[str, int]:
+    """The silicon cuts of `payload` that tore an operation of `family`."""
+    return dict(Counter(
+        r["class"] for r in rows
+        if r["configuration"].startswith("silicon") and r["payload"] == payload
+        and PHASE_OF.get(r["class"], "none") == family and r["class"] not in NOT_TORN
+    ))
+
+
+def read_weights(rs: str) -> dict[str, int]:
+    """`TearMix::CX1`'s fields out of the model file."""
     import re
 
+    at = rs.index("pub const CX1: TearMix = TearMix {")
+    body = rs[at : rs.index("};", at)]
+    return {k: int(v.replace("_", "")) for k, v in re.findall(r"(\w+):\s*(\d[\d_]*)", body)}
+
+
+def judge_model(rows: list[dict], rs: str) -> tuple[bool, list[str]]:
+    """The check: the page-aligned silicon cuts against `TearMix::CX1`.
+
+    Returns (confirmed, lines). Only `flash-tears` (page-aligned) cuts feed
+    the model's shares; `flash-tears-unaligned` is reported apart, below."""
+    fields = read_weights(rs)
+    out = []
+    confirmed = True
+    for family, shapes in MODEL_SHAPES.items():
+        observed = family_counts(rows, family)
+        n = sum(observed.values())
+        weights = {cls: fields[f] for cls, f in shapes}
+        cells = judge_family(observed, weights)
+        out += [
+            f"torn {family}s: {n} cut(s) (page-aligned `{PAYLOAD}`, silicon)",
+            "",
+            "| shape | cuts | share | model share | 95 % Wilson interval at n | expected | |",
+            "|---|---:|---:|---:|---|---:|---|",
+        ]
+        for c in cells:
+            name = " + ".join(f"`{x}`" for x in c["classes"])
+            if len(c["classes"]) > 1:
+                name += " (pooled: a shape expected < 5)"
+            if c.get("unmodelled"):
+                out.append(f"| {name} | {c['seen']} | {c['share']:.1%} | 0 (no such shape) | - | 0 | **NOT MODELLED** |")
+            else:
+                out.append(
+                    f"| {name} | {c['seen']} | {c['share']:.1%} | {c['model']:.1%} | "
+                    f"{c['lo']:.1%} - {c['hi']:.1%} | {c['expected']:.1f} | {'ok' if c['ok'] else '**OUTSIDE**'} |"
+                )
+            confirmed = confirmed and c["ok"]
+        out.append("")
+    out += unaligned_report(rows)
+    return confirmed, out
+
+
+def unaligned_report(rows: list[dict]) -> list[str]:
+    """`flash-tears-unaligned` silicon cuts: counted, never judged. They
+    neither confirm nor refute the erase mix (the program is not what tore
+    it); section 8 of the report is where their program shapes are read."""
+    counts = Counter(
+        r["class"] for r in rows
+        if r["configuration"].startswith("silicon") and r["payload"] == PAYLOAD_UNALIGNED
+    )
+    if not counts:
+        return ["`flash-tears-unaligned`: no silicon cuts yet (reported apart; never part of this verdict)", ""]
+    return [
+        f"`flash-tears-unaligned`: {sum(counts.values())} silicon cut(s), reported apart, NOT part of the verdict "
+        "(they neither confirm nor refute the erase mix)",
+        "",
+        *[f"- `{cls}`: {k}" for cls, k in sorted(counts.items())],
+        "",
+    ]
+
+
+def check_model(rows: list[dict], table: str, rs_path: str) -> int:
+    """DD29: is `TearMix::CX1` confirmed by these transcripts?"""
     with open(rs_path) as f:
         rs = f.read()
-
-    def numbers(text: str, start: str, end: str) -> list[int]:
-        at = text.index(start)
-        body = text[at + len(start) : text.index(end, at + len(start))]
-        body = re.sub(r"//[^\n]*", "", body)
-        return [int(x.replace("_", "")) for x in re.findall(r"\b\d[\d_]*\b", body)]
-
-    ok = True
-    for start, end in (
-        ("pub const CX1: TearMix = TearMix {", "};"),
-        ("pub const CX1_ERASING: [(u32, u32);", "];"),
-        ("pub const CX1_READS_FF_WEAK: [u32;", ";"),
-    ):
-        want, have = numbers(table, start, end), numbers(rs, start, end)
-        if want != have:
-            ok = False
-            print(f"MODEL DIFFERS: `{start.split(':')[0]}` holds {have}, the transcripts give {want}")
-    for line in table.splitlines():
-        if line.startswith("// NOT MODELLED"):
-            ok = False
-            print(line)
-    if ok:
-        print(f"{rs_path} matches the transcripts ({table.splitlines()[0][3:]})")
+    confirmed, lines = judge_model(rows, rs)
+    print("\n".join(lines))
+    if confirmed:
+        print(f"CONFIRMED: every shape's share lies inside its 95 % Wilson interval around {rs_path} "
+              f"({table.splitlines()[0][3:].rstrip(".")})")
         return 0
-    print(f"re-run with --model-table and update {rs_path} (and its doc comment's counts)")
+    print(f"MODEL DIFFERS: a shape lies outside its 95 % Wilson interval. Re-fit {rs_path} from this table "
+          "(and its doc comment's counts), then re-run the t1/f2/f3 sweeps under it:\n")
+    sys.stdout.write(table)
     return 1
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog=CHECK_MODEL_RULE,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("transcripts", nargs="*", help=f"default: {DEFAULT_GLOB}")
     ap.add_argument("--write-report", metavar="PATH",
                     help=f"replace the block between {BEGIN} and {END} in PATH")
@@ -1036,7 +1262,7 @@ def main() -> int:
     ap.add_argument("--model-table", action="store_true",
                     help="print lp-nor-sim's calibrated model as the silicon cuts give it (Rust)")
     ap.add_argument("--check-model", action="store_true",
-                    help=f"exit 1 unless {MODEL_RS} holds what --model-table prints")
+                    help=f"is {MODEL_RS} confirmed by the silicon cuts? (rule below); exit 1 with the re-fit table if not")
     ap.add_argument("--rom-split", metavar="TRACE",
                     help="read an `lp-emu-esp32c6 --trace SPI1` log of the unaligned image and print how "
                          "the ROM split each write into program commands")
@@ -1059,7 +1285,7 @@ def main() -> int:
             sys.stdout.write(table)
             return 0
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        return check_model(table, os.path.join(root, MODEL_RS))
+        return check_model(rows, table, os.path.join(root, MODEL_RS))
     if args.json:
         for r in rows:
             print(json.dumps(r, sort_keys=True))
