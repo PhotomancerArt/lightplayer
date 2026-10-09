@@ -201,7 +201,7 @@ payloads = ["flash-tears"]
 
 [[set]]
 name = "flash-tears-unaligned"
-description = "Tree-store M4's owed sitting (from M2 P10): the `flash-tears` power cuts on the same SACRIFICIAL C6, with every program started off a 32-byte boundary (a 20-byte write at offset 0, then 16-1040-byte writes at `20 + k*16`, drawn from sector and cycle), to measure whether a torn prefix stops relative to the write's address or on absolute 32-byte boundaries. Same image gates, cut driver and emulated dry run as `flash-tears`; `scripts/emu/flash-tears-soak.sh --unaligned` runs it."
+description = "Tree-store M4's owed sitting (from M2 P10): the `flash-tears` power cuts on the same SACRIFICIAL C6, with every program started off a 32-byte boundary (a 20-byte write at offset 0, then 16-272-byte writes at `20 + k*16`, drawn from sector and cycle), to measure whether a torn prefix stops relative to the write's address or on absolute 32-byte boundaries. Same image gates, cut driver and emulated dry run as `flash-tears`; `scripts/emu/flash-tears-soak.sh --unaligned` runs it."
 payloads = ["flash-tears-unaligned"]
 
 # ---------------------------------------------------------------------------

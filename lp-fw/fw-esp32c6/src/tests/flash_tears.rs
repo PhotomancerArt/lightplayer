@@ -26,7 +26,7 @@
 //!
 //! Built with `test_flash_tears_unaligned` instead, the same harness is the
 //! `flash-tears-unaligned` payload: every work cycle programs its sector in
-//! 16–1,040-byte writes starting off every 32-byte boundary
+//! 16–272-byte writes starting off every 32-byte boundary
 //! (`fw_checks::checks::flash_tears::program_plan`), each one esp-storage
 //! write and so one call into the mask ROM, to measure whether a torn
 //! prefix stops relative to the write's address or on absolute 32-byte
@@ -241,7 +241,7 @@ impl fmt::Write for Out {
 /// so every transfer goes through a word-aligned bounce buffer: a journal
 /// entry is a 16-byte stack array with no alignment of its own. Programs go
 /// through the boxed one, which holds the longest write either plan makes
-/// (1,040 bytes under the unaligned plan) as ONE esp-storage write — one
+/// (272 bytes under the unaligned plan) as ONE esp-storage write — one
 /// call into the ROM, which is what the unaligned payload measures.
 struct Flash(FlashStorage<'static>, Box<Bounce>);
 

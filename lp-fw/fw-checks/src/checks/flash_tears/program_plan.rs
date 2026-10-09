@@ -10,13 +10,25 @@
 //!   write the two are the same offsets.
 //! - **[`ProgramMode::Unaligned`]** (`flash-tears-unaligned`, tree-store M2
 //!   P10's question): one 20-byte write at offset 0, then writes of
-//!   16–1,040 bytes (a multiple of 16) back to back to the end of the sector,
+//!   16–272 bytes (a multiple of 16) back to back to the end of the sector,
 //!   so every write after the first starts at `20 + k·16` — 4 or 20 past a
-//!   32-byte boundary, never on one — and most cross a page. The lengths are
-//!   drawn from (sector, cycle), so where a write starts inside its page
-//!   moves from cycle to cycle. A torn prefix then stops either `32·n` bytes
-//!   after its write's start (commands counted from the address), on an
-//!   absolute 32-byte boundary, or neither.
+//!   32-byte boundary, never on one. The lengths are drawn from (sector,
+//!   cycle), so where a write starts inside its page moves from cycle to
+//!   cycle. A torn prefix then stops either `32·n` bytes after its write's
+//!   start (commands counted from the address), on an absolute 32-byte
+//!   boundary, or neither.
+//!
+//! **Why writes this short.** The mask ROM splits a write at its page
+//! boundaries, and the emulator — which runs that ROM — shows it counting
+//! 32-byte commands from the write's address only up to the end of its
+//! first page; after that the commands are page-aligned, so absolute again
+//! (`scripts/emu/flash-tears-analyze.py --rom-split`). Only a write's
+//! first-page commands are unaligned, so the shorter the writes, the more
+//! of the program time a cut can land in is in them: about 67 % of the
+//! programmed bytes with writes of 16–272 bytes, against 27 % with the
+//! 16–1,040 the brief sketched (a 2,000-sector estimate of this plan). Long
+//! enough that about half the writes still cross a page, so the ROM's
+//! realignment after a page boundary is cut into as well.
 //!
 //! The whole sector is still programmed, with the same pattern
 //! ([`super::pattern`]), so old and new stay complements and the scan's
@@ -33,8 +45,8 @@ pub const UNALIGNED_FIRST: usize = 20;
 /// Every unaligned write's length is a multiple of this.
 pub const UNALIGNED_STEP: usize = 16;
 
-/// The longest unaligned write: 65 steps.
-pub const UNALIGNED_MAX_WRITE: usize = 65 * UNALIGNED_STEP;
+/// The longest unaligned write: 17 steps.
+pub const UNALIGNED_MAX_WRITE: usize = 17 * UNALIGNED_STEP;
 
 /// The longest write either plan makes: what a harness's bounce buffer holds.
 pub const MAX_WRITE: usize = if UNALIGNED_MAX_WRITE > PAGE_SIZE {
@@ -48,7 +60,7 @@ pub const MAX_WRITE: usize = if UNALIGNED_MAX_WRITE > PAGE_SIZE {
 pub enum ProgramMode {
     /// Sixteen page-aligned 256-byte writes.
     Pages,
-    /// A 20-byte write, then 16–1,040-byte writes starting at `20 + k·16`.
+    /// A 20-byte write, then 16–272-byte writes starting at `20 + k·16`.
     Unaligned,
 }
 

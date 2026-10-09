@@ -4441,6 +4441,21 @@ flash-tears-sim cuts="200" seed="1":
     done
     scripts/emu/flash-tears-analyze.py target/flash-tears-sim/*-{{ seed }}.txt
 
+# The same, programming by the `flash-tears-unaligned` payload's plan: where
+# each model says an unaligned torn prefix stops (`lp-nor-sim` tears each
+# page op from its own start, which is the split the emulated mask ROM makes
+# — `scripts/emu/flash-tears-analyze.py --rom-split`). Simulator numbers,
+# never committed; the desk sitting is what says whether silicon agrees.
+flash-tears-sim-unaligned cuts="300" seed="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tear in clean byte_prefix calibrated; do
+        cargo run -q -p fw-checks --features check-flash-tears --example flash_tears_on_nor_sim -- \
+            --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --unaligned \
+            --out "target/flash-tears-sim-unaligned/$tear-{{ seed }}.txt"
+    done
+    scripts/emu/flash-tears-analyze.py target/flash-tears-sim-unaligned/*-{{ seed }}.txt
+
 # The classic ESP32 (v3) machine's speed probe: three pinned reference images
 # at t1 — the only grade this machine has — both cores at the default
 # quantum, best of two runs, reported as user seconds, instructions/second in
