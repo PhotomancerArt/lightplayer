@@ -26,7 +26,7 @@ import { connect as netConnect, createServer as createNetServer } from "node:net
 /// The walk's made-up account.
 export const WALK_EMAIL = "walk-relay@example.com";
 /// The cloud API's version (`lpc_cloud_api::CLOUD_API_VERSION`).
-const CLOUD_API_VERSION = 5;
+const CLOUD_API_VERSION = 6;
 
 /// Start the cloud for a Studio served at `studioOrigin`. `binary` is a
 /// built `lp-cloud-server`; its output goes to `log`. The device-leg forward

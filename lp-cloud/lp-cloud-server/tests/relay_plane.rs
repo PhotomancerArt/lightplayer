@@ -18,11 +18,13 @@ use lp_cloud_server::ports::{AnyBlobStore, AnyMetaStore};
 use lp_cloud_server::router::build_router;
 use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
 use lpc_cloud_api::{
-    Actor, BoardList, CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest, CloudResponse,
+    Actor, Base64Bytes, BoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION, CloudCall,
+    CloudReply, CloudRequest, CloudResponse, KnownPicture,
 };
 use lpc_relay::{
-    LanAddress, RELAY_PROTO_VERSION, RefuseReason, RelayAccount, RelayAction, RelayClient,
-    RelayClientConfig, RelayEvent, RelayFrame, RelayHello, RelayState,
+    LanAddress, PictureRate, RELAY_PROTO_VERSION, RefuseReason, RelayAccount, RelayAction,
+    RelayClient, RelayClientConfig, RelayEvent, RelayFrame, RelayHello, RelayPicture, RelayProject,
+    RelayProjectFacts, RelayState, RouteCloseReason, frame_protocol, relay_auth_key, relay_proof,
 };
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -220,6 +222,246 @@ async fn a_reconnect_storm_of_fifty_boards_does_not_starve_the_api() {
     );
 }
 
+/// Protocol 1, the bytes every fielded core speaks: a board registered by
+/// hand (no `RelayClient`, which speaks protocol 2 now) registers, is
+/// listed, routes a member's session, and is never sent a protocol 2
+/// frame — not while its member watches it and asks for its picture, not
+/// when another board registers beside it.
+#[tokio::test]
+async fn a_protocol_1_board_registers_and_routes_as_before() {
+    let server = Server::start().await;
+    let alice = server.account("alice").await;
+    let hello = RelayHello::new(MAC, "Old lamp", 39, None, vec![alice.salt]);
+    let mut board = RawBoard::register(&server, &alice, hello).await;
+
+    let listed = server.list_boards(&alice.cookie).await;
+    assert_eq!(listed.boards.len(), 1);
+    assert_eq!(listed.boards[0].label, "Old lamp");
+    assert_eq!(listed.boards[0].relay_proto, 1);
+    assert_eq!(listed.boards[0].firmware, None);
+    assert_eq!(listed.boards[0].project, None);
+
+    let mut session = server.browser(BOARD_ID, Some(&alice.cookie)).await;
+    let RelayFrame::Open { route } = board.next_frame().await else {
+        panic!("not an open");
+    };
+    session
+        .send(Message::Binary(vec![0xa5, 1, 2]))
+        .await
+        .unwrap();
+    let frame = board.next_frame().await;
+    assert_eq!(
+        frame,
+        RelayFrame::Frame {
+            route,
+            bytes: vec![0xa5, 1, 2]
+        }
+    );
+    board.send(&frame).await;
+    assert_eq!(next_binary(&mut session).await, [0xa5, 1, 2]);
+
+    // Its member watches it and asks for its picture: there is none, and
+    // nothing of it reaches the board.
+    for _ in 0..3 {
+        let pictures = server
+            .board_pictures(&alice.cookie, &[(BOARD_ID, None)], true)
+            .await;
+        assert!(pictures.pictures.is_empty());
+    }
+    session.close(None).await.unwrap();
+    assert_eq!(
+        board.next_frame().await,
+        RelayFrame::Close {
+            route,
+            reason: RouteCloseReason::Gone
+        }
+    );
+
+    // A protocol 2 board registers beside it, under the same account.
+    let other = FakeBoard::spawn_as(
+        server.port,
+        [0x02, 0, 0, 0, 0, 9],
+        vec![alice.relay_account()],
+    );
+    other.wait_for(RelayState::Connected).await;
+
+    board.listen(Duration::from_secs(3)).await;
+    board.assert_protocol_1_only();
+}
+
+#[tokio::test]
+async fn a_protocol_2_board_gets_its_rate_and_its_picture_is_read_through_the_api() {
+    let server = Server::start().await;
+    let alice = server.account("alice").await;
+    let bob = server.account("bob").await;
+    let guest = server.guest().await;
+    let hello = RelayHello::new(MAC, "Lamp", 39, None, vec![alice.salt]).with_firmware("raw-2");
+    let mut board = RawBoard::register(&server, &alice, hello).await;
+
+    // `Registered`, then at once its rate: idle, nobody watching.
+    assert_eq!(
+        board.next_frame().await,
+        RelayFrame::PictureRate(PictureRate {
+            idle_s: 60,
+            watched_ms: 500,
+            watched_for_s: 0
+        })
+    );
+    board
+        .send(&RelayFrame::Project(Some(RelayProject {
+            name: "Rocaille".into(),
+            uid_tag: Some([0xa1; 16]),
+            content_tag: None,
+        })))
+        .await;
+    board.send(&RelayFrame::Picture(fake_picture())).await;
+
+    let first = server.wait_for_picture(&alice.cookie, BOARD_ID).await;
+    assert!(first.online);
+    assert_eq!(first.outputs, [5, 3]);
+    assert_eq!(first.colors, Some(Base64Bytes(fake_picture().colors)));
+    let again = server
+        .board_pictures(&alice.cookie, &[(BOARD_ID, Some(first.seq))], false)
+        .await;
+    assert_eq!(again.pictures.len(), 1);
+    assert_eq!(again.pictures[0].seq, first.seq);
+    assert_eq!(again.pictures[0].colors, None, "she has this one");
+
+    // Bob and a guest read nothing, and their watching tells the board
+    // nothing.
+    for cookie in [&bob.cookie, &guest] {
+        let pictures = server
+            .board_pictures(cookie, &[(BOARD_ID, None)], true)
+            .await;
+        assert!(pictures.pictures.is_empty());
+    }
+    assert!(
+        board.listen(Duration::from_millis(500)).await.is_empty(),
+        "no rate for a non-member's watch"
+    );
+
+    let listed = &server.list_boards(&alice.cookie).await.boards[0];
+    assert_eq!(
+        (
+            listed.relay_proto,
+            listed.firmware.as_deref(),
+            listed.project.as_deref()
+        ),
+        (2, Some("raw-2"), Some("Rocaille"))
+    );
+
+    // Alice watches: the board is told to be fast for the lease.
+    server
+        .board_pictures(&alice.cookie, &[(BOARD_ID, None)], true)
+        .await;
+    assert_eq!(
+        board.next_frame().await,
+        RelayFrame::PictureRate(PictureRate {
+            idle_s: 60,
+            watched_ms: 500,
+            watched_for_s: 15
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_picture_outlives_its_board_until_the_server_restarts() {
+    let server = Server::start().await;
+    let alice = server.account("alice").await;
+    let hello = RelayHello::new(MAC, "Lamp", 39, None, vec![alice.salt]).with_firmware("raw-2");
+    let mut board = RawBoard::register(&server, &alice, hello).await;
+    board.next_frame().await; // its rate
+    board.send(&RelayFrame::Picture(fake_picture())).await;
+    let seen = server.wait_for_picture(&alice.cookie, BOARD_ID).await;
+
+    board.ws.close(None).await.unwrap();
+    drop(board);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !server.list_boards(&alice.cookie).await.boards.is_empty() {
+        assert!(Instant::now() < deadline, "the board never left");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let kept = server
+        .board_pictures(&alice.cookie, &[(BOARD_ID, None)], true)
+        .await;
+    assert_eq!(kept.pictures.len(), 1);
+    assert!(!kept.pictures[0].online);
+    assert_eq!(kept.pictures[0].seq, seen.seq);
+    assert_eq!(
+        kept.pictures[0].colors,
+        Some(Base64Bytes(fake_picture().colors))
+    );
+
+    // A deploy: the process goes away, and every picture with it.
+    server.state.relay().going_away();
+    assert!(
+        server
+            .board_pictures(&alice.cookie, &[(BOARD_ID, None)], false)
+            .await
+            .pictures
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn protocol_1_and_2_boards_share_one_hub() {
+    let server = Server::start().await;
+    let alice = server.account("alice").await;
+    const OLD_ID: &str = "020000000001";
+    let hello = RelayHello::new(
+        [0x02, 0, 0, 0, 0, 1],
+        "Old lamp",
+        39,
+        None,
+        vec![alice.salt],
+    );
+    let mut old = RawBoard::register(&server, &alice, hello).await;
+    let new = FakeBoard::spawn(server.port, vec![alice.relay_account()]);
+    new.wait_for(RelayState::Connected).await;
+
+    let picture = server.wait_for_picture(&alice.cookie, BOARD_ID).await;
+    assert_eq!(picture.colors, Some(Base64Bytes(fake_picture().colors)));
+    let mut listed = server.list_boards(&alice.cookie).await.boards;
+    listed.sort_by(|a, b| a.id.cmp(&b.id));
+    let seen: Vec<(&str, u16, Option<&str>, Option<&str>)> = listed
+        .iter()
+        .map(|board| {
+            (
+                board.id.as_str(),
+                board.relay_proto,
+                board.firmware.as_deref(),
+                board.project.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (OLD_ID, 1, None, None),
+            (BOARD_ID, 2, Some("fake-board-1"), Some("Rocaille")),
+        ]
+    );
+
+    // Alice watches both: the new board goes fast, the old hears nothing
+    // new.
+    let before = new.pictures_sent();
+    for _ in 0..6 {
+        let pictures = server
+            .board_pictures(&alice.cookie, &[(BOARD_ID, None), (OLD_ID, None)], true)
+            .await;
+        assert_eq!(pictures.pictures.len(), 1, "the old board has no picture");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    assert!(
+        new.pictures_sent() >= before + 2,
+        "watched pictures every 500 ms: {} → {}",
+        before,
+        new.pictures_sent()
+    );
+    old.listen(Duration::from_millis(500)).await;
+    old.assert_protocol_1_only();
+}
+
 // ---- harness ---------------------------------------------------------
 
 struct Server {
@@ -342,6 +584,141 @@ impl Server {
             .unwrap()
             .0
     }
+
+    /// One `/api` call with `cookie`.
+    async fn call(&self, cookie: &str, request: CloudRequest) -> CloudResponse {
+        let reply: CloudReply = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{}/api", self.port))
+            .header("cookie", cookie)
+            .json(&CloudCall {
+                version: CLOUD_API_VERSION,
+                request,
+            })
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        reply.result.unwrap()
+    }
+
+    /// `BoardPictures` through `/api`: each board with the `seq` the caller
+    /// holds.
+    async fn board_pictures(
+        &self,
+        cookie: &str,
+        boards: &[(&str, Option<u64>)],
+        watch: bool,
+    ) -> BoardPictureList {
+        let request = CloudRequest::BoardPictures(BoardPictures {
+            boards: boards
+                .iter()
+                .map(|(id, seq)| KnownPicture {
+                    id: (*id).to_string(),
+                    seq: *seq,
+                })
+                .collect(),
+            watch,
+        });
+        match self.call(cookie, request).await {
+            CloudResponse::BoardPictureList(list) => list,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Board `id`'s picture, once the hub has one (within 5 s).
+    async fn wait_for_picture(&self, cookie: &str, id: &str) -> lpc_cloud_api::BoardPicture {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let list = self.board_pictures(cookie, &[(id, None)], false).await;
+            if let Some(picture) = list.pictures.into_iter().next() {
+                return picture;
+            }
+            assert!(Instant::now() < deadline, "no picture of {id} within 5 s");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+}
+
+/// A board registered by hand, frame by frame, at whatever protocol its
+/// hello says: what a fielded protocol 1 core does, with every byte the hub
+/// sends it kept.
+struct RawBoard {
+    ws: Ws,
+    received: Vec<Vec<u8>>,
+}
+
+impl RawBoard {
+    /// Hello, challenge, proof (for `account`), `Registered`.
+    async fn register(server: &Server, account: &Account, hello: RelayHello) -> Self {
+        let mac = hello.board_mac;
+        let mut board = Self {
+            ws: server.device_socket().await,
+            received: Vec::new(),
+        };
+        board.send(&RelayFrame::Hello(hello)).await;
+        let RelayFrame::Challenge { nonce } = board.next_frame().await else {
+            panic!("no challenge");
+        };
+        let proof = relay_proof(&relay_auth_key(&account.k), &nonce, &mac);
+        board
+            .send(&RelayFrame::Proof {
+                proofs: vec![proof],
+            })
+            .await;
+        assert_eq!(
+            board.next_frame().await,
+            RelayFrame::Registered {
+                accounts_ok: 1,
+                ping_s: 25
+            }
+        );
+        board
+    }
+
+    async fn send(&mut self, frame: &RelayFrame) {
+        self.ws.send(Message::Binary(frame.encode())).await.unwrap();
+    }
+
+    /// The next frame the hub sends (within 5 s).
+    async fn next_frame(&mut self) -> RelayFrame {
+        let bytes = next_binary(&mut self.ws).await;
+        self.received.push(bytes.clone());
+        RelayFrame::decode(&bytes).expect("a relay frame")
+    }
+
+    /// Whatever the hub sends for `period`; kept, and returned.
+    async fn listen(&mut self, period: Duration) -> Vec<Vec<u8>> {
+        let mut heard = Vec::new();
+        let deadline = tokio::time::sleep(period);
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                message = self.ws.next() => match message {
+                    Some(Ok(Message::Binary(bytes))) => {
+                        self.received.push(bytes.clone());
+                        heard.push(bytes);
+                    }
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
+                    other => panic!("the leg ended: {other:?}"),
+                },
+                () = &mut deadline => return heard,
+            }
+        }
+    }
+
+    /// Every message the hub ever sent this board is a protocol 1 frame.
+    fn assert_protocol_1_only(&self) {
+        assert!(!self.received.is_empty());
+        for bytes in &self.received {
+            assert_eq!(
+                frame_protocol(bytes),
+                Some(1),
+                "a protocol 1 board was sent {bytes:02x?}"
+            );
+        }
+    }
 }
 
 fn cookie(token: &[u8]) -> String {
@@ -378,8 +755,10 @@ async fn close_code(ws: &mut Ws) -> u16 {
     }
 }
 
-/// A board on the relay: `lpc-relay`'s client, driven by a task over
-/// tokio-tungstenite, echoing every session frame back.
+/// A board on the relay: `lpc-relay`'s client (relay protocol 2), driven by
+/// a task over tokio-tungstenite, echoing every session frame back,
+/// reporting the project "Rocaille", and sending [`fake_picture`] whenever
+/// the client asks for a picture.
 struct FakeBoard {
     shared: Arc<Mutex<BoardShared>>,
 }
@@ -387,6 +766,19 @@ struct FakeBoard {
 struct BoardShared {
     state: RelayState,
     next_wake_in: Option<Duration>,
+    pictures_sent: usize,
+}
+
+/// The fake board's project uid: a capability, which must never reach the
+/// hub (only its tag does).
+const FAKE_PROJECT_UID: &str = "prj7m3qk2x9z4w8v6t5r1n0p2a4c";
+
+/// What the fake board's lamps always show: 5 + 3 lamps, 4 samples.
+fn fake_picture() -> RelayPicture {
+    RelayPicture {
+        outputs: vec![5, 3],
+        colors: vec![0xff, 0, 0, 0, 0xff, 0, 0, 0, 0xff, 0x10, 0x20, 0x30],
+    }
 }
 
 impl FakeBoard {
@@ -398,9 +790,14 @@ impl FakeBoard {
         let shared = Arc::new(Mutex::new(BoardShared {
             state: RelayState::Off,
             next_wake_in: None,
+            pictures_sent: 0,
         }));
         tokio::spawn(drive_board(port, mac, accounts, Arc::clone(&shared)));
         Self { shared }
+    }
+
+    fn pictures_sent(&self) -> usize {
+        self.shared.lock().unwrap().pictures_sent
     }
 
     async fn wait_for(&self, wanted: RelayState) {
@@ -456,6 +853,14 @@ async fn drive_board(
             port: 80,
         })),
     ));
+    pending.extend(client.handle(
+        now(),
+        RelayEvent::Project(Some(RelayProjectFacts {
+            name: "Rocaille".into(),
+            uid: Some(FAKE_PROJECT_UID.into()),
+            content_hash: None,
+        })),
+    ));
     pending.extend(client.handle(now(), RelayEvent::Network { joined: true }));
     pending.extend(client.handle(now(), RelayEvent::CloudRelay(true)));
     pending.extend(client.handle(now(), RelayEvent::Accounts(accounts)));
@@ -501,10 +906,20 @@ async fn drive_board(
                             bytes: &bytes,
                         },
                     )),
+                    // The fake's lamps always show the same picture, taken
+                    // at once.
+                    RelayAction::TakePicture => {
+                        pending.extend(client.handle(now(), RelayEvent::PictureReady));
+                    }
+                    RelayAction::SendPicture => {
+                        if let Some(socket) = ws.as_mut() {
+                            let picture = RelayFrame::Picture(fake_picture()).encode();
+                            let _ = socket.send(Message::Binary(picture)).await;
+                        }
+                        shared.lock().unwrap().pictures_sent += 1;
+                    }
                     RelayAction::RouteOpened(_)
                     | RelayAction::RouteClosed(_)
-                    | RelayAction::TakePicture
-                    | RelayAction::SendPicture
                     | RelayAction::DropPicture => {}
                 }
             }
