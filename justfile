@@ -4412,8 +4412,9 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
-# The flash-tears calibration: every committed `flash-tears` transcript
-# (lp-emu/transcripts/esp32c6/flash-tears/) sorted into tear shapes, written
+# The flash-tears calibration: every committed `flash-tears` and
+# `flash-tears-unaligned` transcript (lp-emu/transcripts/esp32c6/flash-tears*/,
+# reported apart) sorted into tear shapes, written
 # into the report's generated block. Host only — reads transcripts, never a
 # port. Re-run after every batch of the CX1 sitting. `--json` for one line
 # per cut; with any argument the tables go to stdout instead.

@@ -7,6 +7,7 @@
     scripts/emu/flash-tears-analyze.py --json               # one JSON object per cut, for a notebook-free pipe
     scripts/emu/flash-tears-analyze.py --model-table        # lp-nor-sim's calibrated model, as Rust
     scripts/emu/flash-tears-analyze.py --check-model        # does lp-nor-sim hold those numbers?
+    scripts/emu/flash-tears-analyze.py --rom-split <trace>  # how the emulated ROM split the unaligned writes
 
 The `flash-tears` payload (`lp-fw/fw-checks/src/checks/flash_tears/`) prints,
 on every boot, one `[fw-check-json]` record per region sector. This reads
@@ -27,6 +28,18 @@ Two things are reconstructed here rather than read:
   firmware counted `leading_zero_bytes` (3cfd41265): the per-page count of
   new zeros landed, laid against the pattern, pins the byte the run ended at
   (or a short range of them, where the pattern has `0xFF` bytes).
+
+**Two payloads.** `flash-tears` programs each sector page by page;
+`flash-tears-unaligned` programs it as a 20-byte write and then 16-272-byte
+writes starting at `20 + k*16` (`program_plan.rs`, mirrored by `plan()`
+here and checked against the `writes` its in-flight records list). Their
+transcripts sit in sibling directories and are reported apart: only the
+page-aligned silicon cuts give `--model-table` its numbers. For the
+unaligned payload a torn program is judged by where its prefix stops against
+the write it was in: on a command counted from the write's address inside its
+first page and from the page after it (the split the emulated mask ROM makes,
+`--rom-split`), on an absolute 32-byte boundary, on a 32-byte step from the
+write's address all the way, or none of them.
 
 With `--write-report PATH` the generated tables replace the block between
 `<!-- flash-tears-analyze:begin -->` and `<!-- flash-tears-analyze:end -->`
@@ -58,7 +71,9 @@ SCAN_READS = 8
 
 JSON_TAG = "[fw-check-json] "
 SCAN_DONE = "[flash-tears] === SCAN DONE ==="
-DEFAULT_GLOB = "lp-emu/transcripts/esp32c6/flash-tears/*.txt"
+DEFAULT_GLOB = "lp-emu/transcripts/esp32c6/flash-tears*/*.txt"
+PAYLOAD = "flash-tears"
+PAYLOAD_UNALIGNED = "flash-tears-unaligned"
 BEGIN = "<!-- flash-tears-analyze:begin -->"
 END = "<!-- flash-tears-analyze:end -->"
 
@@ -101,6 +116,25 @@ def zeros(b: int) -> int:
     return 8 - bin(b).count("1")
 
 
+# The unaligned program plan, as `program_plan.rs` writes it.
+UNALIGNED_FIRST = 20
+UNALIGNED_STEP = 16
+UNALIGNED_MAX_STEPS = 17
+
+
+def plan(sector: int, cycle: int) -> list[tuple[int, int]]:
+    """`program_plan::writes(ProgramMode::Unaligned, sector, cycle)`."""
+    state = splitmix((0x0A11_6AED_0000_0000 ^ (sector << 32) ^ cycle) & M64)
+    out = [(0, UNALIGNED_FIRST)]
+    at = UNALIGNED_FIRST
+    while at < SECTOR:
+        state = splitmix(state)
+        n = min((1 + state % UNALIGNED_MAX_STEPS) * UNALIGNED_STEP, SECTOR - at)
+        out.append((at, n))
+        at += n
+    return out
+
+
 # --------------------------------------------------------------------------
 # Reading transcripts.
 
@@ -127,6 +161,7 @@ class Transcript:
     path: str
     meta: dict
     boots: list
+    payload: str = PAYLOAD
 
 
 def read_transcript(path: str) -> Transcript:
@@ -136,9 +171,12 @@ def read_transcript(path: str) -> Transcript:
         with open(meta_path) as f:
             meta = json.load(f)
     boots: list[Boot] = []
+    payload = meta.get("payload")
     with open(path, "rb") as f:
         for raw in f:
             line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if payload is None and "[fw-checks-header] " in line:
+                payload = json.loads(line.split("[fw-checks-header] ", 1)[1]).get("payload")
             if SCAN_DONE in line and boots:
                 tail = line.split("next=", 1)
                 if len(tail) == 2 and tail[1].strip().isdigit():
@@ -162,7 +200,7 @@ def read_transcript(path: str) -> Transcript:
                 boots[-1].repair = rec
             elif kind == "ft-timing":
                 boots[-1].timing = rec
-    return Transcript(path, meta, boots)
+    return Transcript(path, meta, boots, payload or PAYLOAD)
 
 
 def is_cut(b: Boot) -> bool:
@@ -202,8 +240,84 @@ PHASE_ORDER = [
     ("complete", "program", "complete: the new pattern, whole"),
     ("unknown", "none", "unknown"),
 ]
-PHASE_TEXT = {k: t for k, _, t in PHASE_ORDER}
-PHASE_OF = {k: p for k, p, _ in PHASE_ORDER}
+# The unaligned payload's rows: the erase rows are the same; a torn program
+# is sorted by where its prefix stops against the write it was in.
+PHASE_ORDER_UNALIGNED = [
+    *[row for row in PHASE_ORDER if row[1] == "erase"],
+    ("program:between-writes", "program",
+     "torn program, prefix ending where a write starts (a cut between two ROM calls)"),
+    ("program:command-boundary", "program",
+     "torn program, prefix ending on a ROM command boundary (32 B from the write's address in its "
+     "first page, 32 B from the page after)"),
+    ("program:mid-command", "program", "torn program, prefix ending on a 4-byte word inside a command"),
+    ("program:mid-word", "program", "torn program, prefix ending inside a 4-byte word (or a partial byte)"),
+    ("program:scattered", "program", "torn program, scattered clears (no prefix)"),
+    ("complete", "program", "complete: the new pattern, whole"),
+    ("unknown", "none", "unknown"),
+]
+PHASE_TEXT = {k: t for k, _, t in PHASE_ORDER + PHASE_ORDER_UNALIGNED}
+PHASE_OF = {k: p for k, p, _ in PHASE_ORDER + PHASE_ORDER_UNALIGNED}
+
+
+def phase_order(payload: str) -> list:
+    return PHASE_ORDER_UNALIGNED if payload == PAYLOAD_UNALIGNED else PHASE_ORDER
+
+
+def unaligned_end(r: dict, new: bytes, writes: list[tuple[int, int]]) -> dict:
+    """Where an unaligned torn program's prefix stops, judged against the
+    write it was in and every alignment hypothesis.
+
+    The prefix's last landed clear is at `landed_extent - 1`; bytes after it
+    that the pattern leaves at `0xFF` need no clear, so with no partial byte
+    the prefix may have run on through them: the end is a range
+    `[landed_extent, next byte with a clear]`, and a hypothesis fits when any
+    end in the range is one of its boundaries."""
+    p = r["program"]
+    extent, partial = p["landed_extent"], p["partial_bytes"]
+    if partial:
+        ends = [extent]  # inside byte extent-1: no boundary fits
+    else:
+        hi = extent
+        while hi < SECTOR and new[hi] == 0xFF:
+            hi += 1
+        ends = list(range(extent, hi + 1))
+    starts = {a for a, _ in writes}
+
+    def write_of(e: int) -> tuple[int, int]:
+        # The write the prefix stopped inside (`e` past its start).
+        return next((a, n) for a, n in writes if a < e <= a + n)
+
+    def rom(e: int) -> bool:
+        a, _ = write_of(e)
+        first_page_end = (a // PAGE + 1) * PAGE
+        if e <= first_page_end:
+            return (e - a) % COMMAND == 0 or e == first_page_end
+        return e % COMMAND == 0
+
+    between = [e for e in ends if e in starts or e == SECTOR]
+    inside = [e for e in ends if e not in starts and e != SECTOR]
+    d = {
+        "end": ends[0] if len(ends) == 1 else (ends[0], ends[-1]),
+        "partial_bytes": partial,
+        "fits_rom": any(rom(e) for e in inside),
+        "fits_absolute": any(e % COMMAND == 0 for e in inside),
+        "fits_relative": any((e - write_of(e)[0]) % COMMAND == 0 for e in inside),
+        "on_word": (not partial) and any(e % WORD == 0 for e in ends),
+    }
+    if inside:
+        a, n = write_of(inside[0])
+        d.update(write=(a, n), offset_in_write=inside[0] - a, in_first_page=inside[0] <= (a // PAGE + 1) * PAGE,
+                 end_mod_32=inside[0] % COMMAND, rel_mod_32=(inside[0] - a) % COMMAND)
+    if between and not inside:
+        cls = "program:between-writes"
+    elif partial or not d["on_word"]:
+        cls = "program:mid-word"
+    elif d["fits_rom"]:
+        cls = "program:command-boundary"
+    else:
+        cls = "program:mid-command"
+    d["between_writes"] = bool(between)
+    return {"class": cls, **d}
 
 
 def leading_zero_run(r: dict, new: bytes) -> tuple[int, int] | None:
@@ -249,7 +363,7 @@ def leading_zero_run(r: dict, new: bytes) -> tuple[int, int] | None:
     return (lo, hi)
 
 
-def classify(r: dict) -> Phase:
+def classify(r: dict, payload: str = PAYLOAD) -> Phase:
     sector, wrote = r["sector"], r["wrote"]
     old = pattern(sector, wrote - REGION)
     new = pattern(sector, wrote)
@@ -280,9 +394,22 @@ def classify(r: dict) -> Phase:
         return Phase("complete", "program", d)
     if v == "erased-weak":
         return Phase("erase:reads-ff-weak", "erase", d)
+    if payload == PAYLOAD_UNALIGNED:
+        writes = [tuple(w) for w in r.get("writes") or []]
+        if writes != plan(sector, wrote):
+            raise SystemExit(
+                f"PLAN MISMATCH: sector {sector} cycle {wrote}: the record lists {writes}, this "
+                f"script {plan(sector, wrote)}; plan() no longer matches program_plan.rs"
+            )
     if v == "torn-program":
         p = r["program"] or {}
         shape = p.get("shape")
+        if payload == PAYLOAD_UNALIGNED and shape in ("op-boundary", "byte-prefix"):
+            # The firmware judges commands on absolute 32-byte boundaries;
+            # an unaligned write's are not, so the end is judged here.
+            u = unaligned_end(r, new, writes)
+            d.update({k: v for k, v in u.items() if k != "class"})
+            return Phase(u["class"], "program", d)
         if shape in ("op-boundary", "byte-prefix"):
             extent = p["landed_extent"]
             if shape == "op-boundary":
@@ -371,23 +498,23 @@ def fmt_frac(x: float) -> str:
 
 def analyze(paths: list[str]) -> tuple[str, list[dict]]:
     transcripts = [read_transcript(p) for p in paths]
-    by_config: dict[str, list[Transcript]] = defaultdict(list)
+    by_config: dict[tuple[str, str], list[Transcript]] = defaultdict(list)
     for t in transcripts:
-        by_config[t.meta.get("configuration", "?")].append(t)
+        by_config[(t.payload, t.meta.get("configuration", "?"))].append(t)
     out: list[str] = []
     rows: list[dict] = []
     w = out.append
     w(f"_Generated by `scripts/emu/flash-tears-analyze.py` over {len(paths)} transcript(s). "
       "Do not edit by hand; re-run it._")
     w("")
-    for config in sorted(by_config, key=lambda c: (not c.startswith("silicon"), c)):
+    for payload, config in sorted(by_config, key=lambda k: (k[0] != PAYLOAD, not k[1].startswith("silicon"), k)):
         # In the order they were taken: one board's cycle count only grows.
-        ts = sorted(by_config[config], key=lambda t: (
+        ts = sorted(by_config[(payload, config)], key=lambda t: (
             t.meta.get("date", ""),
             next((b.boot.get("latest") or 0 for b in t.boots), 0),
             t.path,
         ))
-        w(f"### `{config}`")
+        w(f"### `{config}`" if payload == PAYLOAD else f"### `{payload}` on `{config}`")
         w("")
         w("| transcript | date | firmware | cycles | boots | cuts | not cuts |")
         w("|---|---|---|---|---:|---:|---|")
@@ -401,12 +528,13 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
             for b in t.boots:
                 idents[(b.boot.get("mac", "—"), b.boot.get("flash_id", "—"), b.boot.get("base", "—"))] += 1
                 f = b.in_flight
-                ph = classify(f) if f else None
+                ph = classify(f, payload) if f else None
                 if is_cut(b) and f is not None:
                     n_cut += 1
                     cuts.append((b, ph))
                     loop_from = prev.scan_done_next if prev else None
                     rows.append({
+                        "payload": payload,
                         "configuration": config,
                         "transcript": os.path.basename(t.path),
                         "boot": b.index,
@@ -473,7 +601,7 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
         w("")
         w("| phase | shape | cuts | share |")
         w("|---|---|---:|---:|")
-        for cls, phase, text in PHASE_ORDER:
+        for cls, phase, text in phase_order(payload):
             w(f"| {phase} | {text} | {hist.get(cls, 0)} | {pct(hist.get(cls, 0), total)} |")
         erase_n = sum(n for c, n in hist.items() if PHASE_OF[c] == "erase")
         prog_n = sum(n for c, n in hist.items() if PHASE_OF[c] == "program")
@@ -502,7 +630,7 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
         w("")
         w("| phase | cuts | with weak bits | weak bits (min / median / max, where any) |")
         w("|---|---:|---:|---|")
-        for cls, _, _ in PHASE_ORDER:
+        for cls, _, _ in phase_order(payload):
             mine = [n for ph, n in weak if ph.cls == cls]
             if not mine:
                 continue
@@ -516,6 +644,10 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
 
         # Program tears.
         prog = [ph for _, ph in cuts if ph.cls.startswith("program:") and "end" in ph.detail]
+        if payload == PAYLOAD_UNALIGNED:
+            for line in unaligned_section(cuts):
+                w(line)
+            prog = []
         if prog:
             w("**Torn programs**: where the landed prefix ends (byte offset in the sector):")
             w("")
@@ -593,7 +725,7 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
               f"{pct(prog_n, total)} in the program")
             w("")
 
-        if config.startswith("silicon"):
+        if config.startswith("silicon") and payload == PAYLOAD:
             w(f"**`lp-nor-sim`'s assumptions against these {total} cuts** (the models as `lp-emu/lp-nor-sim` "
               "has them; the verdict is mechanical, from the counts above):")
             w("")
@@ -602,6 +734,126 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
                 w(line)
             w("")
     return "\n".join(out) + "\n", rows
+
+
+def unaligned_section(cuts) -> list[str]:
+    """Where unaligned torn programs stopped, against each hypothesis."""
+    prog = [(b, ph) for b, ph in cuts if ph.cls.startswith("program:") and ph.cls != "program:scattered"
+            and "fits_rom" in ph.detail]
+    out = []
+    w = out.append
+    if not prog:
+        w("**Unaligned torn programs**: none yet.")
+        w("")
+        return out
+    judged = [(b, ph) for b, ph in prog if not ph.detail["between_writes"]]
+    w("**Unaligned torn programs**: where each prefix stopped, against the write it was in. "
+      "`rom` = 32 B from the write's address inside its first page, then 32 B from the page boundary "
+      "(the split the emulated mask ROM makes, and `lp-nor-sim`'s per-page op); `absolute` = a 32-byte "
+      "boundary of the flash; `relative` = 32 B from the write's address all the way.")
+    w("")
+    w("| cut | write (at, len) | prefix ends at | into the write | first page of it | end mod 32 | "
+      "from the write mod 32 | rom | absolute | relative | class |")
+    w("|---|---|---|---:|---|---:|---:|---|---|---|---|")
+    yn = lambda x: "yes" if x else "no"  # noqa: E731
+    for b, ph in prog:
+        d = ph.detail
+        end = d["end"] if not isinstance(d["end"], tuple) else f"{d['end'][0]}–{d['end'][1]}"
+        if d["between_writes"]:
+            w(f"| `{os.path.basename(b.transcript)}` boot {b.index} | — | {end} | 0 | — | — | — | — | — | — | "
+              f"{ph.cls} |")
+            continue
+        wa, wl = d["write"]
+        w(f"| `{os.path.basename(b.transcript)}` boot {b.index} | ({wa}, {wl}) | {end} | {d['offset_in_write']} | "
+          f"{yn(d['in_first_page'])} | {d['end_mod_32']} | {d['rel_mod_32']} | {yn(d['fits_rom'])} | "
+          f"{yn(d['fits_absolute'])} | {yn(d['fits_relative'])} | {ph.cls} |")
+    w("")
+    n = len(judged)
+    on_word = [ph for _, ph in judged if ph.detail["on_word"]]
+    rom = sum(1 for ph in on_word if ph.detail["fits_rom"])
+    ab = sum(1 for ph in on_word if ph.detail["fits_absolute"])
+    rel = sum(1 for ph in on_word if ph.detail["fits_relative"])
+    # The cuts that tell the hypotheses apart: an end that is a boundary
+    # under one and not another.
+    tells = [ph for ph in on_word
+             if len({ph.detail["fits_rom"], ph.detail["fits_absolute"], ph.detail["fits_relative"]}) > 1]
+    first_page = [ph for ph in on_word if ph.detail["in_first_page"]]
+    w(f"- prefixes ending inside a write: **{n}** ({len(prog) - n} more ended where a write starts); "
+      f"on a 4-byte word: **{len(on_word)}**")
+    w(f"- of those on a word, on a boundary under `rom`: **{rom}**, `absolute`: **{ab}**, `relative`: **{rel}**")
+    w(f"- ends that tell the three apart (a boundary under one, not under another): **{len(tells)}**; "
+      f"of them `rom` {sum(1 for ph in tells if ph.detail['fits_rom'])}, "
+      f"`absolute` {sum(1 for ph in tells if ph.detail['fits_absolute'])}, "
+      f"`relative` {sum(1 for ph in tells if ph.detail['fits_relative'])}")
+    w(f"- ends inside the write's first page: {len(first_page)} (where `rom` and `relative` say a command "
+      f"starts 4 or 20 bytes past a 32-byte boundary and `absolute` says on one)")
+    mid = [ph for ph in on_word if not ph.detail["fits_rom"]]
+    if mid:
+        w(f"- mid-command ends (on a word, on no `rom` boundary): {len(mid)}; their offset into the command "
+          f"they stopped in, mod 32 from the write in its first page / absolute after: "
+          f"{', '.join(str(ph.detail['rel_mod_32'] if ph.detail['in_first_page'] else ph.detail['end_mod_32']) for ph in mid)}")
+    w("")
+    return out
+
+
+def rom_split(trace: str) -> int:
+    """How the emulated mask ROM split the unaligned plan's writes into
+    page-program commands, from an `lp-emu-esp32c6 --trace SPI1` log of the
+    `flash-tears-unaligned` image's first boot (the init pass writes sector
+    `c` in cycle `c`). Prints each write's commands as offsets in its sector,
+    then a count of the command starts by kind."""
+    import re
+
+    region = 0x352000  # lpfs + two journal sectors on the C6's table
+    addr = dlen = None
+    cmds = []
+    with open(trace) as f:
+        for line in f:
+            m = re.search(r"W4 SPI1\+0x(\w+) \w+ = 0x([0-9a-f]+)", line)
+            if not m:
+                continue
+            reg, val = m.group(1), int(m.group(2), 16)
+            if reg == "004":
+                addr = val
+            elif reg == "024":
+                dlen = val
+            elif reg == "020" and (val & 0xFF) == 0x02:  # user2: page program
+                cmds.append((addr, (dlen + 1) // 8))
+    kinds = Counter()
+    i, shown = 0, 0
+    for cycle in range(REGION):
+        base = region + cycle * SECTOR
+        while i < len(cmds) and not (base <= cmds[i][0] < base + SECTOR):
+            i += 1
+        for at, n in plan(cycle, cycle):
+            got, need = [], n
+            while need > 0 and i < len(cmds):
+                a, ln = cmds[i]
+                got.append((a - base, ln))
+                need -= ln
+                i += 1
+            if need:
+                print(f"cycle {cycle}: the trace ends inside write ({at}, {n})")
+                break
+            first_page_end = (at // PAGE + 1) * PAGE
+            for a, _ in got:
+                if a == at:
+                    kinds["at the write's address"] += 1
+                elif a % PAGE == 0:
+                    kinds["on a page boundary"] += 1
+                elif a < first_page_end and (a - at) % COMMAND == 0:
+                    kinds["32 B on from the address, first page"] += 1
+                elif a % COMMAND == 0:
+                    kinds["absolute 32 B, after the first page"] += 1
+                else:
+                    kinds["elsewhere"] += 1
+            if shown < 8:
+                print(f"cycle {cycle} write ({at}, {n}): {got}")
+                shown += 1
+    print(f"{len(cmds)} program commands in the trace; command starts in the init pass's writes:")
+    for k, v in kinds.most_common():
+        print(f"  {v:6d}  {k}")
+    return 0 if kinds and "elsewhere" not in kinds else 1
 
 
 def assumptions(cuts, reads_ff, reads_ff_weak, prog, zr, er, erase_cuts, lifted_to_zero,
@@ -687,6 +939,12 @@ def self_test() -> int:
         assert all(new[i] == 0xFF for i in range(lo, hi)), (n, lo, hi)
         r["leading_zero_bytes"] = n
         assert leading_zero_run(r, new) == (n, n)
+    for sector, cycle in ((0, 0), (2, 10), (15, 46_528)):
+        ws = plan(sector, cycle)
+        assert ws[0] == (0, UNALIGNED_FIRST) and sum(n for _, n in ws) == SECTOR, ws
+        assert all(a % COMMAND != 0 and n % WORD == 0 for a, n in ws[1:]), ws
+    # The first boot of the committed emulated dry run lists this plan.
+    assert plan(7, 231)[:3] == [(0, 20), (20, 112), (132, 176)], plan(7, 231)[:3]
     print("self-test ok")
     return 0
 
@@ -698,7 +956,7 @@ def model_table(rows: list[dict]) -> str:
     """`lp-nor-sim`'s calibrated model (`TearMix::CX1`, `CX1_ERASING`,
     `CX1_READS_FF_WEAK`) as these silicon cuts give it, in the Rust the
     model file holds."""
-    rows = [r for r in rows if r["configuration"].startswith("silicon")]
+    rows = [r for r in rows if r["configuration"].startswith("silicon") and r["payload"] == PAYLOAD]
     n = Counter(r["class"] for r in rows)
     erasing = sorted(
         ((r["residual_zero_bits"], r["weak_bits"]) for r in rows if r["class"] == "erase:erasing"),
@@ -772,9 +1030,14 @@ def main() -> int:
                     help="print lp-nor-sim's calibrated model as the silicon cuts give it (Rust)")
     ap.add_argument("--check-model", action="store_true",
                     help=f"exit 1 unless {MODEL_RS} holds what --model-table prints")
+    ap.add_argument("--rom-split", metavar="TRACE",
+                    help="read an `lp-emu-esp32c6 --trace SPI1` log of the unaligned image and print how "
+                         "the ROM split each write into program commands")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
+    if args.rom_split:
+        return rom_split(args.rom_split)
     paths = args.transcripts
     if not paths:
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
