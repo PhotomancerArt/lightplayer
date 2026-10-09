@@ -13,10 +13,13 @@
 //! frames only for a card on screen) — plumbing, not a verb: it is no offer
 //! and builds none. A new board has no picture to lease.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BarLayer, DeviceFeedOp, OfferPath, UiAction, UiBoardCard, UiBoardPresence, UiExampleCard,
-    UiPackageCard,
+    BarLayer, DeviceFeedOp, DeviceId, OfferPath, UiAction, UiBoardCard, UiBoardPresence,
+    UiExampleCard, UiPackageCard,
 };
 
 use super::board_picture::BoardPicture;
@@ -59,15 +62,25 @@ pub fn BoardCard(
     let device = card.device;
     let leases = card.presence != UiBoardPresence::New;
     // The mount lease (today's card's): a card on screen wants its board's
-    // picture; a card leaving the page stops the pull.
-    use_effect(move || {
-        if leases {
-            on_action.call(DeviceFeedOp::action_for(device, true));
+    // picture; a card leaving the page stops the pull. It follows the card:
+    // a new board's card is the same card once the board says who it is
+    // (adoption keeps its handle), so the lease starts then, not only at
+    // mount — a card mounted New would otherwise never ask for a picture.
+    let leased = use_hook(|| Rc::new(Cell::new(None::<DeviceId>)));
+    let leased_now = leased.clone();
+    use_effect(use_reactive!(|leases, device| {
+        let (release, lease) = lease_change(leased_now.get(), leases.then_some(device));
+        if let Some(old) = release {
+            on_action.call(DeviceFeedOp::action_for(old, false));
         }
-    });
+        if let Some(new) = lease {
+            on_action.call(DeviceFeedOp::action_for(new, true));
+        }
+        leased_now.set(leases.then_some(device));
+    }));
     use_drop(move || {
-        if leases {
-            on_action.call(DeviceFeedOp::action_for(device, false));
+        if let Some(old) = leased.get() {
+            on_action.call(DeviceFeedOp::action_for(old, false));
         }
     });
     use_provide_card_scope(CardScope {
@@ -101,6 +114,19 @@ pub fn BoardCard(
                 }
             }
         }
+    }
+}
+
+/// How the picture lease moves when the card's board, or whether it leases,
+/// changes: the board to release, and the board to lease. Nothing moves
+/// while it stays the same.
+fn lease_change(
+    had: Option<DeviceId>,
+    want: Option<DeviceId>,
+) -> (Option<DeviceId>, Option<DeviceId>) {
+    match had == want {
+        true => (None, None),
+        false => (had, want),
     }
 }
 
@@ -138,6 +164,26 @@ mod tests {
             "the narrow card's picture rule"
         );
         assert!(css_rule(".ux-board-card").contains("container: board-card / inline-size"));
+    }
+
+    /// The picture lease follows the card: a new board's card asks for
+    /// nothing, the same card asks once its board says who it is, a card
+    /// keeping its board asks nothing again, and one handed another board
+    /// releases the first.
+    #[test]
+    fn the_picture_lease_follows_the_cards_presence() {
+        let board = Some(DeviceId(7));
+        // Mounted New: nothing leased.
+        assert_eq!(lease_change(None, None), (None, None));
+        // The board said who it is: lease it.
+        assert_eq!(lease_change(None, board), (None, board));
+        // Re-rendered, the same board: nothing moves.
+        assert_eq!(lease_change(board, board), (None, None));
+        // Another board in the same card: release, then lease.
+        assert_eq!(
+            lease_change(board, Some(DeviceId(8))),
+            (board, Some(DeviceId(8)))
+        );
     }
 
     /// Nothing on the card clips: the primary's hover glow is a bloom past
