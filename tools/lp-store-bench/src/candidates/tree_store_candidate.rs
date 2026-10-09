@@ -1,18 +1,32 @@
-//! T1: the content-addressed copy-on-write tree store (`lp-tree-store`), the
-//! candidate the race exists to test. Dials: `record_max`, `gc_policy`
-//! (`greedy` | `cost_benefit`), `reserve`, `codec` (`stored` | `deflate` |
-//! `deflate_dict`), `dict_size`, `json_tree` (`on` | `off`).
+//! T1: the content-addressed copy-on-write tree store (`lp-tree-store` v1).
+//! Dials: `record_max`, `gc_policy` (`greedy` | `cost_benefit`), `reserve`,
+//! `txn_delta_max`, `codec` (`stored` | `host_deflate`).
+//!
+//! A workload step is one store transaction (`begin` at the step's first
+//! write, `commit` at its end), so T1 is scored step-atomic. With
+//! `codec=host_deflate` every write but the board's own hot files (`…/.lp/
+//! panel.json`, written by the device) arrives as the wire will carry it
+//! after M6: host-deflated chunks of ≤ 4 KiB logical, `put_chunk_deflated`
+//! at offset 0 then the running size. `stored` writes every file stored.
 
 use lp_nor_sim::{NorError, NorFlashSim};
-use lp_tree_store::{Codec, GcPolicy, StoreConfig, TreeStore};
+use lp_tree_store::{GcPolicy, SoftSha256, StoreConfig, TreeStore, host_deflate_chunks, is_hot};
 
 use crate::{Candidate, CandidateConfig, CandidateReport, CandidateStore, StoreError};
 
 pub struct TreeStoreCandidate;
 
-/// The store's config from the candidate's dials (defaults = the crate's).
-pub fn tree_store_config(cfg: &CandidateConfig) -> Result<StoreConfig, StoreError> {
+/// How the adapter writes non-hot files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum T1Codec {
+    Stored,
+    HostDeflate,
+}
+
+/// The store's config and the codec dial (defaults = the crate's, stored).
+pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec), StoreError> {
     let mut c = StoreConfig::default();
+    let mut codec = T1Codec::Stored;
     for (k, v) in &cfg.dials {
         let num = || {
             v.parse::<u32>()
@@ -21,7 +35,7 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<StoreConfig, StoreErro
         match k.as_str() {
             "record_max" => c.record_max = num()?,
             "reserve" => c.reserve = num()?,
-            "dict_size" => c.dict_size = num()?,
+            "txn_delta_max" => c.txn_delta_max = num()?,
             "gc_policy" => {
                 c.gc_policy = match v.as_str() {
                     "greedy" => GcPolicy::Greedy,
@@ -30,18 +44,16 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<StoreConfig, StoreErro
                 }
             }
             "codec" => {
-                c.codec = match v.as_str() {
-                    "stored" => Codec::Stored,
-                    "deflate" => Codec::Deflate,
-                    "deflate_dict" => Codec::DeflateDict,
+                codec = match v.as_str() {
+                    "stored" => T1Codec::Stored,
+                    "host_deflate" => T1Codec::HostDeflate,
                     _ => return Err(StoreError::Other(format!("dial codec={v}"))),
                 }
             }
-            "json_tree" => c.json_tree = v == "on" || v == "true",
             _ => return Err(StoreError::Other(format!("unknown t1 dial {k}"))),
         }
     }
-    Ok(c)
+    Ok((c, codec))
 }
 
 fn map_err(e: lp_tree_store::StoreError<NorError>) -> StoreError {
@@ -61,7 +73,7 @@ impl Candidate for TreeStoreCandidate {
     }
 
     fn format(&self, flash: &mut NorFlashSim, cfg: &CandidateConfig) -> Result<(), StoreError> {
-        TreeStore::format(flash, &tree_store_config(cfg)?).map_err(map_err)
+        TreeStore::format(flash, &mut SoftSha256, &tree_store_config(cfg)?.0).map_err(map_err)
     }
 
     fn mount(
@@ -69,24 +81,46 @@ impl Candidate for TreeStoreCandidate {
         flash: NorFlashSim,
         cfg: &CandidateConfig,
     ) -> Result<Box<dyn CandidateStore>, (StoreError, NorFlashSim)> {
-        let sc = match tree_store_config(cfg) {
+        let (sc, codec) = match tree_store_config(cfg) {
             Ok(c) => c,
             Err(e) => return Err((e, flash)),
         };
-        match TreeStore::mount(flash, sc) {
-            Ok(store) => Ok(Box::new(TreeStoreAdapter { store })),
-            Err((e, flash)) => Err((map_err(e), flash)),
+        match TreeStore::mount(flash, SoftSha256, sc) {
+            Ok(store) => Ok(Box::new(TreeStoreAdapter { store, codec })),
+            Err((e, flash, _)) => Err((map_err(e), flash)),
         }
     }
 }
 
 struct TreeStoreAdapter {
-    store: TreeStore<NorFlashSim>,
+    store: TreeStore<NorFlashSim, SoftSha256>,
+    codec: T1Codec,
+}
+
+impl TreeStoreAdapter {
+    fn in_step(&mut self) -> Result<(), StoreError> {
+        if !self.store.in_transaction() {
+            self.store.begin().map_err(map_err)?;
+        }
+        Ok(())
+    }
 }
 
 impl CandidateStore for TreeStoreAdapter {
     fn put(&mut self, path: &str, bytes: &[u8]) -> Result<(), StoreError> {
-        self.store.put(path, bytes).map_err(map_err)
+        self.in_step()?;
+        if self.codec == T1Codec::Stored || is_hot(path) {
+            return self.store.put(path, bytes).map_err(map_err);
+        }
+        let rm = self.store.config().record_max;
+        let mut offset = 0;
+        for c in host_deflate_chunks(&mut SoftSha256, bytes, rm) {
+            self.store
+                .put_chunk_deflated(path, offset, c.logical_len, Some(c.id), &c.deflated)
+                .map_err(map_err)?;
+            offset += c.logical_len;
+        }
+        Ok(())
     }
 
     fn get(&mut self, path: &str) -> Result<Option<Vec<u8>>, StoreError> {
@@ -94,6 +128,7 @@ impl CandidateStore for TreeStoreAdapter {
     }
 
     fn delete_prefix(&mut self, prefix: &str) -> Result<(), StoreError> {
+        self.in_step()?;
         self.store.delete_prefix(prefix).map_err(map_err)
     }
 
@@ -102,7 +137,13 @@ impl CandidateStore for TreeStoreAdapter {
     }
 
     fn commit(&mut self) -> Result<(), StoreError> {
-        self.store.commit().map_err(map_err)
+        let r = self.store.commit().map_err(map_err);
+        if r.is_err() {
+            // A step that did not commit leaves nothing: a store with the
+            // transaction still open would carry it into the next step.
+            let _ = self.store.abort();
+        }
+        r
     }
 
     fn into_flash(self: Box<Self>) -> NorFlashSim {
@@ -120,21 +161,24 @@ impl CandidateStore for TreeStoreAdapter {
         for (k, v) in [
             ("index_entries", st.index_entries as f64),
             ("index_ram_bytes", st.index_ram_bytes as f64),
-            ("tree_ram_bytes", st.tree_ram_bytes as f64),
             ("sector_table_ram_bytes", st.sector_table_ram_bytes as f64),
-            ("largest_buffer", st.largest_buffer as f64),
+            ("resident_ram_bytes", st.resident_ram_bytes as f64),
+            ("transient_peak_bytes", st.transient_peak_bytes as f64),
             ("dedup_hits", st.dedup_hits as f64),
+            ("marks", st.marks as f64),
             ("gc_copies", st.gc_copies as f64),
             ("gc_copy_bytes", st.gc_copy_bytes as f64),
             ("gc_runs", st.gc_runs as f64),
             ("records_written", st.records_written as f64),
             ("record_bytes_written", st.record_bytes_written as f64),
+            ("verify_failures", st.verify_failures as f64),
+            ("retired_sectors", st.retired_sectors as f64),
             ("free_sectors", self.store.free_sectors() as f64),
         ] {
             extra.insert(k.to_string(), v);
         }
         CandidateReport {
-            ram_bytes: (st.index_ram_bytes + st.tree_ram_bytes + st.sector_table_ram_bytes) as u64,
+            ram_bytes: st.resident_ram_bytes as u64,
             used_sectors: Some(sectors - self.store.free_sectors()),
             step_atomic: true,
             extra,
@@ -151,36 +195,43 @@ mod tests {
     #[test]
     fn dials_parse() {
         let cfg = CandidateConfig::new(32)
-            .with_dial("codec", "stored")
+            .with_dial("codec", "host_deflate")
             .with_dial("record_max", "512")
             .with_dial("gc_policy", "greedy");
-        let c = tree_store_config(&cfg).unwrap();
-        assert_eq!(c.codec, Codec::Stored);
+        let (c, codec) = tree_store_config(&cfg).unwrap();
+        assert_eq!(codec, T1Codec::HostDeflate);
         assert_eq!(c.record_max, 512);
         assert!(tree_store_config(&CandidateConfig::new(32).with_dial("nope", "1")).is_err());
+        assert!(
+            tree_store_config(&CandidateConfig::new(32).with_dial("codec", "deflate_dict"))
+                .is_err()
+        );
     }
 
     #[test]
     fn a_small_sweep_has_no_failures() {
-        let wl = CorpusSet::new(None)
-            .build(&WorkloadSpec::new(WorkloadKind::Save, "syn:3:300", 1))
-            .unwrap();
-        let params = SweepParams {
-            seeds: vec![1],
-            max_cuts_per_step: Some(24),
-            steps: Some(vec![2, 3]),
-            ..Default::default()
-        };
-        let out = sweep_exhaustive(
-            &TreeStoreCandidate,
-            &CandidateConfig::new(32),
-            &wl,
-            &params,
-            &Scoreboard::memory(),
-        );
-        assert!(
-            out.iter().all(|s| s.cases > 0 && s.failures == 0),
-            "{out:?}"
-        );
+        for codec in ["stored", "host_deflate"] {
+            let wl = CorpusSet::new(None)
+                .build(&WorkloadSpec::new(WorkloadKind::Save, "syn:3:300", 1))
+                .unwrap();
+            let params = SweepParams {
+                seeds: vec![1],
+                max_cuts_per_step: Some(24),
+                steps: Some(vec![2, 3]),
+                ..Default::default()
+            };
+            let out = sweep_exhaustive(
+                &TreeStoreCandidate,
+                &CandidateConfig::new(32).with_dial("codec", codec),
+                &wl,
+                &params,
+                &Scoreboard::memory(),
+            );
+            assert!(
+                out.iter()
+                    .all(|s| s.cases > 0 && s.failures == 0 && s.non_atomic == 0),
+                "{codec}: {out:?}"
+            );
+        }
     }
 }

@@ -1,40 +1,45 @@
-//! The root record: the commit anchor (invariant I1).
+//! The root record: the commit anchor (invariant I1), and the one place the
+//! retired-sector list is persisted.
 //!
-//! Payload (36 bytes, little-endian): seq u64 | cold dir id u64 | hot dir id
-//! u64 | dictionary id u64 (0 = none) | next key id u32 (JSON-tree mode;
-//! always 0 here). The record's id is the hash of the payload.
+//! Payload (little-endian): seq u64 | cold dir id u64 | hot dir id u64 |
+//! retired count u16 | retired sector u16 × count (ascending) | a tail of
+//! TLV entries (tag u8 | length u16 | value) to the payload's end. This
+//! version defines no tag: a reader skips every one, and a writer does not
+//! carry them into its next root (FORMAT.md "Root tail"). The record's id is
+//! `H(Root ++ payload)`.
 
 use alloc::vec::Vec;
 
-use crate::object_id::{IdTag, ObjectId};
+use crate::object_id::ObjectId;
 
-pub const ROOT_PAYLOAD_LEN: usize = 36;
+pub const ROOT_FIXED_LEN: usize = 26;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RootRecord {
     pub seq: u64,
     /// The cold tree (`/` minus the hot files).
     pub cold_dir: ObjectId,
     /// The hot files (`…/.lp/panel.json`), flat, named by full path.
     pub hot_dir: ObjectId,
-    /// The dictionary new chunks are coded against.
-    pub dict: ObjectId,
-    pub next_key_id: u32,
+    /// Sectors that failed verification and are never allocated again.
+    pub retired: Vec<u16>,
 }
 
 impl RootRecord {
     pub fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(ROOT_PAYLOAD_LEN);
+        let mut b = Vec::with_capacity(ROOT_FIXED_LEN + 2 * self.retired.len());
         b.extend_from_slice(&self.seq.to_le_bytes());
         b.extend_from_slice(&self.cold_dir.0.to_le_bytes());
         b.extend_from_slice(&self.hot_dir.0.to_le_bytes());
-        b.extend_from_slice(&self.dict.0.to_le_bytes());
-        b.extend_from_slice(&self.next_key_id.to_le_bytes());
+        b.extend_from_slice(&(self.retired.len() as u16).to_le_bytes());
+        for s in &self.retired {
+            b.extend_from_slice(&s.to_le_bytes());
+        }
         b
     }
 
     pub fn decode(b: &[u8]) -> Option<Self> {
-        if b.len() != ROOT_PAYLOAD_LEN {
+        if b.len() < ROOT_FIXED_LEN {
             return None;
         }
         let u = |i: usize| {
@@ -42,28 +47,46 @@ impl RootRecord {
             x.copy_from_slice(&b[i..i + 8]);
             u64::from_le_bytes(x)
         };
+        let n = usize::from(u16::from_le_bytes([b[24], b[25]]));
+        let tail_at = ROOT_FIXED_LEN + 2 * n;
+        if b.len() < tail_at {
+            return None;
+        }
+        // The tail: well-formed entries to the end, every tag skipped.
+        let mut t = tail_at;
+        while t < b.len() {
+            if t + 3 > b.len() {
+                return None;
+            }
+            t += 3 + usize::from(u16::from_le_bytes([b[t + 1], b[t + 2]]));
+        }
+        if t != b.len() {
+            return None;
+        }
+        let retired: Vec<u16> = b[ROOT_FIXED_LEN..tail_at]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        if retired.windows(2).any(|w| w[0] >= w[1]) {
+            return None;
+        }
+        let (cold_dir, hot_dir) = (ObjectId(u(8)), ObjectId(u(16)));
+        if cold_dir.is_none() || hot_dir.is_none() {
+            return None;
+        }
         Some(RootRecord {
             seq: u(0),
-            cold_dir: ObjectId(u(8)),
-            hot_dir: ObjectId(u(16)),
-            dict: ObjectId(u(24)),
-            next_key_id: u32::from_le_bytes([b[32], b[33], b[34], b[35]]),
+            cold_dir,
+            hot_dir,
+            retired,
         })
-    }
-
-    pub fn id_of(payload: &[u8]) -> ObjectId {
-        ObjectId::of(IdTag::Root, payload)
-    }
-
-    /// Everything the root names.
-    pub fn refs(&self) -> [ObjectId; 3] {
-        [self.cold_dir, self.hot_dir, self.dict]
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn round_trip() {
@@ -71,10 +94,37 @@ mod tests {
             seq: 9,
             cold_dir: ObjectId(1),
             hot_dir: ObjectId(2),
-            dict: ObjectId::NONE,
-            next_key_id: 0,
+            retired: vec![3, 17],
         };
-        assert_eq!(RootRecord::decode(&r.encode()), Some(r));
+        assert_eq!(RootRecord::decode(&r.encode()), Some(r.clone()));
+        let mut e = r.encode();
+        e.pop();
+        assert_eq!(RootRecord::decode(&e), None);
         assert_eq!(RootRecord::decode(&[0; 3]), None);
+        let unsorted = RootRecord {
+            retired: vec![5, 5],
+            ..r.clone()
+        };
+        assert_eq!(RootRecord::decode(&unsorted.encode()), None);
+    }
+
+    #[test]
+    fn the_tail_is_skipped_when_well_formed() {
+        let r = RootRecord {
+            seq: 9,
+            cold_dir: ObjectId(1),
+            hot_dir: ObjectId(2),
+            retired: vec![3],
+        };
+        let mut e = r.encode();
+        e.extend_from_slice(&[0x40, 3, 0, b'a', b'b', b'c', 0x41, 0, 0]);
+        assert_eq!(RootRecord::decode(&e), Some(r.clone()));
+        for cut in 1..9 {
+            let short = &e[..e.len() - cut];
+            assert_eq!(RootRecord::decode(short).is_some(), cut == 3, "cut {cut}");
+        }
+        let mut odd = r.encode();
+        odd.push(0);
+        assert_eq!(RootRecord::decode(&odd), None, "half an entry");
     }
 }

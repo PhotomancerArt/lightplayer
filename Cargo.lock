@@ -6333,10 +6333,12 @@ dependencies = [
 name = "lp-tree-store"
 version = "40.0.0"
 dependencies = [
- "flate2",
  "lp-crc32",
  "lp-deflate",
  "lp-nor-sim",
+ "lp-tree-store",
+ "lpfs",
+ "miniz_oxide",
  "sha2",
 ]
 

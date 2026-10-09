@@ -47,7 +47,15 @@ struct Common {
 #[derive(Subcommand)]
 enum Cmd {
     /// A 1–2 minute end-to-end run of every driver on small workloads.
-    Smoke(Common),
+    Smoke {
+        #[command(flatten)]
+        common: Common,
+        /// Tear models for every driver, comma-separated, by name (see
+        /// `sweep --tears`). Unset: the sweeps run the three guessed models,
+        /// the double cut `random_bits`, and the walks draw from the three.
+        #[arg(long)]
+        tears: Option<String>,
+    },
     /// Exhaustive single-cut sweep.
     Sweep {
         #[command(flatten)]
@@ -96,6 +104,10 @@ enum Cmd {
         cut_one_in: u64,
         #[arg(long, default_value = "c13,c20")]
         corpora: String,
+        /// Tear models a cut draws from, comma-separated, by name (see
+        /// `sweep --tears`); default the three guessed ones.
+        #[arg(long, default_value = "")]
+        tears: String,
     },
     /// Fault-free measures (and the smallest partition each workload fits).
     Measure {
@@ -161,7 +173,7 @@ enum Cmd {
 fn main() {
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Smoke(c) => smoke(&c),
+        Cmd::Smoke { common, tears } => smoke(&common, tears.as_deref().map(parse_tears)),
         Cmd::Sweep {
             common,
             workloads,
@@ -221,6 +233,7 @@ fn main() {
             steps,
             cut_one_in,
             corpora,
+            tears,
         } => {
             let ctx = Ctx::new(&common, "random");
             for (cand, cfg) in ctx.candidates() {
@@ -233,6 +246,7 @@ fn main() {
                         steps,
                         cut_one_in,
                         stop_at_cut: None,
+                        tears: tear_names(&tears),
                     })
                     .collect();
                 use rayon::prelude::*;
@@ -451,7 +465,7 @@ fn spec_name(name: &str, _cfg: &lp_store_bench::CandidateConfig) -> String {
     name.to_string()
 }
 
-fn smoke(c: &Common) {
+fn smoke(c: &Common, tears: Option<Vec<TearModel>>) {
     let ctx = Ctx::new(c, "smoke");
     let have_corpus = ctx.corpora.get("c13").is_ok();
     let t0 = std::time::Instant::now();
@@ -474,6 +488,7 @@ fn smoke(c: &Common) {
         let quick = SweepParams {
             seeds: vec![1],
             max_cuts_per_step: Some(48),
+            tears: tears.clone().unwrap_or_else(|| TearModel::ALL.to_vec()),
             ..Default::default()
         };
         for (s, steps) in [
@@ -497,7 +512,7 @@ fn smoke(c: &Common) {
         let p = SweepParams {
             steps: Some(vec![2]),
             seeds: vec![1],
-            tears: vec![TearModel::RandomBits],
+            tears: tears.clone().unwrap_or_else(|| vec![TearModel::RandomBits]),
             ..Default::default()
         };
         print_sweeps(&sweep_double_cut(
@@ -523,6 +538,11 @@ fn smoke(c: &Common) {
                     steps: 40,
                     cut_one_in: 3,
                     stop_at_cut: None,
+                    tears: tears
+                        .iter()
+                        .flatten()
+                        .map(|t| t.name().to_string())
+                        .collect(),
                 },
                 &ctx.corpora,
                 &ctx.sink,
@@ -602,6 +622,14 @@ fn print_sweeps(out: &[SweepSummary]) {
 
 fn parse_list(s: &str) -> Vec<u64> {
     s.split(',').filter_map(|v| v.trim().parse().ok()).collect()
+}
+
+/// `--tears` for a walk: validated names (empty = the guessed three).
+fn tear_names(s: &str) -> Vec<String> {
+    parse_tears(s)
+        .iter()
+        .map(|t| t.name().to_string())
+        .collect()
 }
 
 fn parse_tears(s: &str) -> Vec<TearModel> {
