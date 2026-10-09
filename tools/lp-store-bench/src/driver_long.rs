@@ -94,6 +94,8 @@ impl WearSpec {
 pub struct LongSummary {
     pub driver: String,
     pub candidate: String,
+    #[serde(default)]
+    pub edit_mix: bool,
     pub config: Option<CandidateConfig>,
     pub seed: u64,
     pub steps_run: u64,
@@ -192,6 +194,7 @@ pub fn long_walk_resumable(
             LongSummary {
                 driver: "long".into(),
                 candidate: cand.name().into(),
+                edit_mix: p.edit_mix,
                 config: Some(p.config.clone()),
                 seed: p.seed,
                 ..Default::default()

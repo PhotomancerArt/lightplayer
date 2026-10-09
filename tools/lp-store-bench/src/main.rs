@@ -205,6 +205,19 @@ enum Cmd {
         #[arg(long, default_value_t = 8)]
         threads: usize,
     },
+    /// T1's GC dials (policy × reserve × codec) at partitions where c40
+    /// meets GC: fault-free save/panel GC figures plus a save cut sweep.
+    GcDials {
+        #[command(flatten)]
+        common: Common,
+        #[arg(long)]
+        quick: bool,
+        #[arg(long, default_value_t = 32)]
+        cuts_per_step: u64,
+        /// Tear models (see `sweep --tears`).
+        #[arg(long, default_value = "clean,byte_prefix,random_bits,calibrated")]
+        tears: String,
+    },
     /// Fault-free measures (and the smallest partition each workload fits).
     Measure {
         #[command(flatten)]
@@ -252,6 +265,17 @@ enum Cmd {
         /// Shrink every unit (a smoke of the runner itself).
         #[arg(long)]
         quick: bool,
+        /// Tear models every cut sweep and walk uses (see `sweep --tears`).
+        #[arg(long, default_value = "clean,byte_prefix,random_bits")]
+        tears: String,
+        /// Stop after this many rounds (default: repeat until the deadline).
+        #[arg(long)]
+        rounds: Option<u32>,
+        /// Skip the units `--out`'s scoreboard already has done, and run
+        /// every unit whole (the deadline only stops new units starting):
+        /// the overnight run as foreground pieces.
+        #[arg(long)]
+        resume: bool,
     },
     /// Render `<out>/report.md` and `<out>/summary.json` from the scoreboard.
     Report {
@@ -471,6 +495,52 @@ fn main() {
             }
         }
         Cmd::Mutants { only, out, threads } => mutants(&only, out, threads),
+        Cmd::GcDials {
+            common,
+            quick,
+            cuts_per_step,
+            tears,
+        } => {
+            let ctx = Ctx::new(&common, "gc-dials");
+            let rows = lp_store_bench::driver_gc_dials::gc_dial_sweep(
+                &ctx.corpora,
+                &ctx.sink,
+                &lp_store_bench::driver_gc_dials::gc_dial_settings(quick),
+                &parse_tears(&tears),
+                cuts_per_step,
+            );
+            println!(
+                "{:<42} {:<10} {:>4} {:>8} {:>9} {:>6} {:>12} {:>9} {:>8}",
+                "t1 setting [sectors]",
+                "workload",
+                "ok",
+                "gc runs",
+                "gc copies",
+                "wa",
+                "erases med/max",
+                "cut cases",
+                "failures"
+            );
+            for r in rows {
+                println!(
+                    "{:<42} {:<10} {:>4} {:>8} {:>9} {:>6.2} {:>12} {:>9} {:>8} {}",
+                    format!("t1@{}[{}]", r.config.dials_label(), r.config.sectors),
+                    r.workload,
+                    if r.ok { "ok" } else { "FAIL" },
+                    r.gc_runs,
+                    r.gc_copies,
+                    r.write_amp,
+                    format!("{}/{}", r.erases_median, r.erases_max),
+                    r.cut_cases,
+                    r.cut_failures,
+                    if r.cut_kinds.is_empty() {
+                        r.error.clone().unwrap_or_default()
+                    } else {
+                        format!("{:?}", r.cut_kinds)
+                    }
+                );
+            }
+        }
         Cmd::Measure {
             common,
             workloads,
@@ -544,12 +614,31 @@ fn main() {
             threads,
             sectors,
             quick,
+            tears,
+            rounds,
+            resume,
         } => {
             rayon::ThreadPoolBuilder::new()
                 .num_threads(threads)
                 .build_global()
                 .ok();
             let out = expand(&out);
+            // Units an earlier piece finished (`--resume`).
+            let done: std::collections::BTreeSet<(u32, String)> = if resume {
+                lp_store_bench::read_scoreboard(&out)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|r| r["type"] == "unit" && r["status"] == "done")
+                    .filter_map(|r| {
+                        Some((r["round"].as_u64()? as u32, r["name"].as_str()?.to_string()))
+                    })
+                    .collect()
+            } else {
+                Default::default()
+            };
+            if resume {
+                eprintln!("resume: {} unit(s) already done", done.len());
+            }
             let sink =
                 Scoreboard::open(&out).unwrap_or_else(|e| die(&format!("{}: {e}", out.display())));
             let deadline =
@@ -568,6 +657,7 @@ fn main() {
                     "started": cmd(&["date", "+%Y-%m-%d %H:%M:%S %Z"]),
                     "until": until, "candidates": candidates, "threads": threads,
                     "sectors": sectors, "quick": quick, "pid": std::process::id(),
+                    "tears": tears, "rounds": rounds, "resume": resume,
                 }),
             );
             let p = lp_store_bench::overnight::OvernightParams {
@@ -575,6 +665,10 @@ fn main() {
                 candidates: candidates.split(',').map(String::from).collect(),
                 sectors,
                 quick,
+                tears: parse_tears(&tears),
+                max_round: rounds,
+                done,
+                whole_units: resume,
             };
             let corpora = CorpusSet::new(Some(expand(&corpus)));
             lp_store_bench::overnight::run_overnight(&p, &corpora, &sink);

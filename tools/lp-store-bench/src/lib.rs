@@ -23,6 +23,7 @@ pub mod driver_exhaustive;
 pub mod driver_fill;
 pub mod driver_full_flash;
 pub mod driver_fuzz;
+pub mod driver_gc_dials;
 pub mod driver_long;
 pub mod driver_measure;
 #[cfg(feature = "mutants")]

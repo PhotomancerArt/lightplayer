@@ -14,6 +14,9 @@ use crate::driver_double_cut::{DoubleCutParams, sweep_double_cut};
 use crate::driver_endurance::{DayShape, endurance};
 use crate::driver_exhaustive::{SweepParams, sweep_exhaustive};
 use crate::driver_fill::{fill_slots, largest_project};
+use crate::driver_full_flash::{FullFlashParams, full_flash};
+use crate::driver_fuzz::{FuzzParams, fuzz};
+use crate::driver_long::{LongParams, long_walk};
 use crate::driver_measure::{measure, min_sectors};
 use crate::driver_random::{RandomParams, random_walk};
 use crate::{CandidateConfig, CorpusSet, Scoreboard, WorkloadKind, WorkloadSpec};
@@ -26,6 +29,16 @@ pub struct OvernightParams {
     pub sectors: u32,
     /// Shrink everything (smoke): fewer cut points, days, dial settings.
     pub quick: bool,
+    /// Tear models every cut sweep runs (the race ran `TearModel::ALL`).
+    pub tears: Vec<TearModel>,
+    /// Stop after this round (`None`: rounds repeat until the deadline).
+    pub max_round: Option<u32>,
+    /// Units already done (round, name), skipped — a run in foreground
+    /// pieces (`overnight --resume`). With any, units run whole: the
+    /// deadline only stops new units from starting.
+    pub done: std::collections::BTreeSet<(u32, String)>,
+    /// Units run whole (no deadline inside a unit).
+    pub whole_units: bool,
 }
 
 #[derive(Serialize)]
@@ -62,6 +75,9 @@ pub fn run_overnight(p: &OvernightParams, corpora: &CorpusSet, sink: &Scoreboard
         }
         let mut iter = units.into_iter();
         for (prio, name, job) in iter.by_ref() {
+            if p.done.contains(&(round, name.clone())) {
+                continue;
+            }
             if Instant::now() >= p.deadline {
                 not_run.push(format!("round {round} P{prio} {name}"));
                 break;
@@ -90,8 +106,11 @@ pub fn run_overnight(p: &OvernightParams, corpora: &CorpusSet, sink: &Scoreboard
                 },
             );
         }
-        not_run.extend(iter.map(|(prio, name, _)| format!("round {round} P{prio} {name}")));
-        if Instant::now() >= p.deadline {
+        not_run.extend(
+            iter.filter(|(_, name, _)| !p.done.contains(&(round, name.clone())))
+                .map(|(prio, name, _)| format!("round {round} P{prio} {name}")),
+        );
+        if Instant::now() >= p.deadline || p.max_round.is_some_and(|m| round >= m) {
             break;
         }
         round += 1;
@@ -120,6 +139,8 @@ fn round_units<'a>(
     let mut units: Vec<Unit<'a>> = Vec::new();
     let cands = &p.candidates;
     let deadline = p.deadline;
+    // Inside a unit (sweeps stop between steps): none when units run whole.
+    let unit_deadline = (!p.whole_units).then_some(deadline);
     let seeds = vec![2 * round as u64 - 1, 2 * round as u64];
     // Round 1 samples at most ROUND1_CUTS cut points a step so every
     // priority gets a turn (one candidate's exhaustive sweep can take hours);
@@ -169,7 +190,7 @@ fn round_units<'a>(
         for kind in WorkloadKind::ALL {
             for c in cands {
                 let spec = workload_for(kind, c, round as u64);
-                for tear in TearModel::ALL {
+                for &tear in &p.tears {
                     let (c, spec, seeds) = (c.clone(), spec.clone(), seeds.clone());
                     let max_cuts = max_cuts(&c);
                     units.push((
@@ -185,7 +206,7 @@ fn round_units<'a>(
                                 seeds,
                                 max_cuts_per_step: max_cuts,
                                 steps: steps_for(&wl),
-                                deadline: Some(deadline),
+                                deadline: unit_deadline,
                                 ..Default::default()
                             };
                             sweep_exhaustive(cand.as_ref(), &cfg, &wl, &params, sink);
@@ -201,7 +222,7 @@ fn round_units<'a>(
                     continue;
                 };
                 let spec = workload_for(kind, c, round as u64);
-                for tear in TearModel::ALL {
+                for &tear in &p.tears {
                     let (c, spec, seeds) = (c.clone(), spec.clone(), seeds.clone());
                     let max_cuts = max_cuts(&c);
                     units.push((
@@ -217,7 +238,7 @@ fn round_units<'a>(
                                 seeds,
                                 max_cuts_per_step: max_cuts,
                                 steps: steps_for(&wl),
-                                deadline: Some(deadline),
+                                deadline: unit_deadline,
                                 ..Default::default()
                             };
                             sweep_exhaustive(cand.as_ref(), &cfg, &wl, &params, sink);
@@ -244,7 +265,8 @@ fn round_units<'a>(
                         let params = SweepParams {
                             seeds: vec![seed],
                             steps: double_steps(p, &wl),
-                            deadline: Some(deadline),
+                            tears: p.tears.clone(),
+                            deadline: unit_deadline,
                             ..Default::default()
                         };
                         let dc = if p.quick {
@@ -271,14 +293,31 @@ fn round_units<'a>(
                 Box::new(move || dial_sweep(p, corpora, sink)),
             ));
         }
-        // P5: endurance, every candidate at once (one can take an hour).
-        let all = cands.clone();
-        units.push((
-            5,
-            format!("endurance {}", all.join(",")),
-            Box::new(move || {
-                all.par_iter().for_each(|c| {
-                    let Ok((cand, cfg)) = parse_candidate_spec(c, p.sectors) else {
+        // P4b: T1's GC dials where GC runs (M3).
+        if cands.iter().any(|c| c.starts_with("t1")) {
+            units.push((
+                4,
+                "t1 gc dials".into(),
+                Box::new(move || {
+                    let settings = crate::driver_gc_dials::gc_dial_settings(p.quick);
+                    crate::driver_gc_dials::gc_dial_sweep(
+                        corpora,
+                        sink,
+                        &settings,
+                        &p.tears,
+                        if p.quick { 8 } else { 32 },
+                    );
+                }),
+            ));
+        }
+        // P5: endurance, one unit per candidate (one can take an hour).
+        for c in cands {
+            let c = c.clone();
+            units.push((
+                5,
+                format!("endurance {c}"),
+                Box::new(move || {
+                    let Ok((cand, cfg)) = parse_candidate_spec(&c, p.sectors) else {
                         return;
                     };
                     let Ok(corpus) = corpora.get(big_corpus(cand.name())) else {
@@ -299,10 +338,9 @@ fn round_units<'a>(
                         "endurance",
                         &serde_json::json!({"days": days, "corpus": corpus.name, "result": m}),
                     );
-                    log(&format!("  endurance {c} done"));
-                });
-            }),
-        ));
+                }),
+            ));
+        }
         // P6: fill to full, every candidate at once.
         let all = cands.clone();
         units.push((
@@ -350,14 +388,97 @@ fn round_units<'a>(
                         steps: if p.quick { 30 } else { 300 },
                         cut_one_in: 3,
                         stop_at_cut: None,
-                        tears: vec![],
+                        tears: tear_names(&p.tears),
                     };
                     random_walk(cand.as_ref(), &rp, corpora, sink);
                 });
             }),
         ));
     }
+    // P8–P10 (M3): long walks, full flash, mount fuzz, every round.
+    for c in cands {
+        let c = c.clone();
+        let base = (round as u64) * 1000;
+        units.push((
+            8,
+            format!("long {c} seeds {base}+"),
+            Box::new(move || {
+                let Ok((cand, cfg)) = parse_candidate_spec(&c, p.sectors) else {
+                    return;
+                };
+                let n = if p.quick { 2 } else { 4 };
+                (0..n).into_par_iter().for_each(|i| {
+                    let lp = LongParams {
+                        candidate: cand.name().into(),
+                        config: cfg.clone(),
+                        corpora: vec!["c40".into(), "c20".into(), "c13".into(), "c40reuse".into()],
+                        seed: base + i,
+                        steps: if p.quick { 60 } else { 10_000 },
+                        cut_every: 10,
+                        check_every: 1000,
+                        tears: tear_names(&p.tears),
+                        wear: vec![],
+                        edit_mix: i % 2 == 1,
+                        piece_steps: 0,
+                    };
+                    long_walk(cand.as_ref(), &lp, corpora, sink);
+                });
+            }),
+        ));
+    }
+    for c in cands {
+        let c = c.clone();
+        let seed = round as u64;
+        units.push((
+            9,
+            format!("full-flash {c} seed {seed}"),
+            Box::new(move || {
+                let Ok((cand, cfg)) = parse_candidate_spec(&c, p.sectors) else {
+                    return;
+                };
+                let fp = FullFlashParams {
+                    candidate: cand.name().into(),
+                    config: cfg,
+                    corpus: if p.quick { "c13".into() } else { "c20".into() },
+                    seed,
+                    edge_steps: if p.quick { 4 } else { 40 },
+                    cuts_per_step: if p.quick { 4 } else { 16 },
+                    tears: tear_names(&p.tears),
+                };
+                full_flash(cand.as_ref(), &fp, corpora, sink);
+            }),
+        ));
+    }
+    for c in cands {
+        let c = c.clone();
+        let seed = round as u64;
+        units.push((
+            10,
+            format!("fuzz {c} seed {seed}"),
+            Box::new(move || {
+                let Ok((cand, cfg)) = parse_candidate_spec(&c, p.sectors) else {
+                    return;
+                };
+                let fp = FuzzParams {
+                    candidate: cand.name().into(),
+                    config: cfg,
+                    corpora: vec!["c13".into(), "c20".into()],
+                    seed,
+                    cases: if p.quick { 40 } else { 2000 },
+                    histories: if p.quick { 2 } else { 8 },
+                    history_steps: if p.quick { 6 } else { 30 },
+                    tears: tear_names(&p.tears),
+                    only_case: None,
+                };
+                fuzz(cand.as_ref(), &fp, corpora, sink);
+            }),
+        ));
+    }
     units
+}
+
+fn tear_names(t: &[TearModel]) -> Vec<String> {
+    t.iter().map(|t| t.name().to_string()).collect()
 }
 
 /// Cut points a step in round 1 (see `round_units`).
@@ -380,10 +501,11 @@ fn round1_steps(wl: &crate::Workload) -> Option<Vec<usize>> {
 
 /// Sweep order for the uncapped rounds: cheapest cut case first.
 fn speed_rank(cand: &str) -> u32 {
-    match cand {
+    match cand.split('@').next().unwrap_or(cand) {
         "t1" => 0,
         "f2" => 1,
-        "f1" => 2,
+        "f3" => 2,
+        "f1" => 3,
         "s1" => 9,
         _ => 5,
     }
@@ -393,11 +515,17 @@ fn speed_rank(cand: &str) -> u32 {
 /// the store's garbage collection (or compaction) under the cuts: a little
 /// above each candidate's measured editable minimum. `None` where the
 /// candidate has no headroom to tighten (F1 cannot hold c40 at all).
+///
+/// T1 by codec (v1, M3): host-deflated c40 fits from 23–26 sectors, stored
+/// from 57–70 (the race's prototype T1 fitted c40 in 22, hence its 28); F3
+/// from 64–74 (M3 P1).
 pub fn tight_sectors(cand: &str) -> Option<u32> {
     match cand {
         "f2" => Some(48),
         "s1" => Some(96),
-        "t1" => Some(28),
+        "t1@codec=host_deflate" => Some(28),
+        "t1" | "t1@codec=stored" => Some(76),
+        "f3" => Some(80),
         _ => None,
     }
 }
@@ -490,9 +618,9 @@ fn dial_sweep(p: &OvernightParams, corpora: &CorpusSet, sink: &Scoreboard) {
     let Ok((cand, _)) = parse_candidate_spec("t1", p.sectors) else {
         return;
     };
-    let deadline = p.deadline;
+    let deadline = (!p.whole_units).then_some(p.deadline);
     settings.par_iter().for_each(|cfg| {
-        if Instant::now() >= deadline {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
             return;
         }
         for spec in [
@@ -511,7 +639,8 @@ fn dial_sweep(p: &OvernightParams, corpora: &CorpusSet, sink: &Scoreboard) {
             seeds: vec![1],
             max_cuts_per_step: Some(if p.quick { 8 } else { 32 }),
             steps: Some(vec![2, 3]),
-            deadline: Some(deadline),
+            tears: p.tears.clone(),
+            deadline,
             ..Default::default()
         };
         // Written as `sweep_summary` with the setting's config: the report
@@ -594,6 +723,10 @@ mod tests {
             candidates: vec!["mem".into()],
             sectors: 16,
             quick: true,
+            tears: TearModel::ALL.to_vec(),
+            max_round: None,
+            done: Default::default(),
+            whole_units: false,
         };
         run_overnight(&p, &CorpusSet::new(None), &sink);
         let recs = sink.records();
