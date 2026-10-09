@@ -74,3 +74,12 @@ and `browser-worker` instead of being carried forward as permanent aliases.
 - Add `browser-serial-esp32` when Web Serial hardware support is implemented.
 - Add `host-websocket` and `browser-websocket` separately when websocket
   discovery and connection behavior is ready.
+
+## Amendment (2026-10-08): one id, two endpoint kinds
+
+`browser-websocket` (added by Wi‑Fi M6) is one provider id serving two
+endpoint kinds, `lan:<ws url>` and `relay:<mac>`
+(`2026-10-08-studio-network-links.md`). The endpoint prefix says which. The
+two share discovery (none), permissions (the page's origin) and the wire.
+What differs, the key policy and the socket's origin, belongs to the
+endpoint kind, not to a second provider id.

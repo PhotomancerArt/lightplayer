@@ -32,13 +32,34 @@ crate may depend on an AGPL workspace crate (`just lint-emu-fence`).
   - `BytePrefix` — the first *n* bytes land, byte *n* gets a random subset
     of its intended 1→0 clears, the rest nothing;
   - `RandomBits` — a random subset of the page's intended clears lands.
-- **Torn erases** (every model except `Clean`), in one of three seeded
+- **Torn erases** (`BytePrefix` and `RandomBits`), in one of three seeded
   shapes: a byte-wise mix of old bytes, `0xFF` and weak bits; a sector that
   **reads all `0xFF` but carries weak bits**; erased up to a point, old
   after it, weak around the edge. A **weak** bit reads as a fresh random
   value on every read until the sector is erased in full. This is the
   realistic nasty case: a sector that "reads erased" may not be, so a store
   must only trust a sector it finished erasing *and then marked*.
+- **`Calibrated`** (`calibrated_tear.rs`) — tears shaped and weighted the
+  way a real part tore: 200 power cuts on CX1, a generic C6 board with flash
+  JEDEC `0x464016` (`docs/reports/2026-10-08-c6-nor-tear-calibration.md`;
+  calibrated on 200 cuts, re-checked at 500). A torn **program** lands a
+  prefix of exactly what was asked, ending on the mask ROM's 32-byte command
+  (26 of 33) or on a 4-byte word inside one (7 of 33) — no partial byte, no
+  scatter. A torn **erase** is one of five states the part passes through
+  (it pre-programs the sector to `0x00`, then lifts it): a word-aligned
+  `0x00` run from the front with the old data after it (10 of 166), all
+  `0x00` (26), a residue of zeros spread over the sector with weak bits
+  (28, drawn from the observed table), reads `0xFF` with a couple of weak
+  bits (1), and reads `0xFF` with **no** weak bit (101). The weights are
+  `TearMix::CX1`; `NorFlashSim::set_tear_mix` replaces them (e.g.
+  `TearMix::CX1.erase_only(EraseShape::AllZero)` makes every torn erase read
+  `0x00`). `CalibratedZeroing` … `CalibratedReadsFf` — named `calibrated_zeroing`,
+  `calibrated_all_zero`, `calibrated_erasing`, `calibrated_reads_ff_weak`,
+  `calibrated_reads_ff` — forces every torn erase to one shape, so a sweep
+  meets that state at every erase cut instead of at about one in five. None
+  of these is in `TearModel::ALL` (the drivers' default list); name one
+  (`TearModel::from_name("calibrated")`, `TearModel::NAMED`) to run it. The
+  three guessed models are unchanged.
 - **Counters** (`NorStats`): ops, program calls/pages/bytes, erases per
   sector, read calls/bytes, violations, torn ops.
 - **Cheap clones:** cells live in one `Arc` buffer per sector, so a sweep

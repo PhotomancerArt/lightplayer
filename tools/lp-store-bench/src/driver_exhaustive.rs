@@ -53,6 +53,10 @@ pub struct SweepSummary {
     pub failures: u64,
     pub non_atomic: u64,
     pub landed: u64,
+    /// Cases whose cut tore a sector erase (the rest tore a program page,
+    /// or did not land).
+    #[serde(default)]
+    pub torn_erases: u64,
     pub kinds: BTreeMap<String, u64>,
     pub steps_swept: u64,
     pub steps_skipped: Vec<String>,
@@ -211,6 +215,7 @@ pub fn sweep_with(
                 let mut s = summary.lock().unwrap();
                 s.cases += 1;
                 s.landed += o.landed as u64;
+                s.torn_erases += o.torn_erase as u64;
                 if let Some(f) = &o.failure {
                     s.failures += 1;
                     *s.kinds.entry(f.kind.clone()).or_default() += 1;
@@ -289,6 +294,47 @@ mod tests {
         assert!(!failures.is_empty());
         // A reproducer replays to the same verdict.
         let rec: FailureRecord = serde_json::from_value(failures[0].clone()).unwrap();
+        let replayed = crate::replay(&rec.reproducer, &set).unwrap();
+        assert_eq!(replayed.as_ref().map(|f| &f.kind), Some(&rec.failure.kind));
+    }
+
+    #[test]
+    fn the_calibrated_tear_model_sweeps_by_name_and_replays() {
+        let set = CorpusSet::new(None);
+        let wl = set
+            .build(&WorkloadSpec::new(WorkloadKind::Repush, "syn:3:300", 1))
+            .unwrap();
+        let cfg = CandidateConfig::new(16);
+        let params = SweepParams {
+            tears: vec![TearModel::from_name("calibrated").unwrap()],
+            ..SweepParams::default()
+        };
+        let sink = Scoreboard::memory();
+        let good = sweep_exhaustive(
+            &MemCandidate::new(MemLayout::PingPong),
+            &cfg,
+            &wl,
+            &params,
+            &sink,
+        );
+        assert_eq!(good.len(), 1);
+        assert_eq!(good[0].tear, "calibrated");
+        assert!(good[0].failures == 0 && good[0].cases > 0, "{good:?}");
+        let bad = sweep_exhaustive(
+            &MemCandidate::new(MemLayout::InPlace),
+            &cfg,
+            &wl,
+            &params,
+            &sink,
+        );
+        assert!(bad[0].failures > 0, "{bad:?}");
+        let rec: FailureRecord = sink
+            .records()
+            .into_iter()
+            .filter(|r| r["type"] == "failure")
+            .map(|r| serde_json::from_value(r).unwrap())
+            .next()
+            .unwrap();
         let replayed = crate::replay(&rec.reproducer, &set).unwrap();
         assert_eq!(replayed.as_ref().map(|f| &f.kind), Some(&rec.failure.kind));
     }

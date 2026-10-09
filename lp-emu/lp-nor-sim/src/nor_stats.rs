@@ -18,6 +18,8 @@ pub struct NorStats {
     pub violations_0_to_1: u64,
     /// Operations torn by a power cut.
     pub torn_ops: u64,
+    /// Of those, sector erases (the rest are program pages).
+    pub torn_erases: u64,
 }
 
 impl NorStats {

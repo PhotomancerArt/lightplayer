@@ -258,14 +258,12 @@ pub(crate) fn DeviceRosterCard(
     // with the reason under them ("Firmware updates need USB") — never
     // hidden, so the question is answered where it is asked (M5 S6).
     let firmware_blocked = card.firmware_blocked.is_some();
-    // How the board is reached, for the words that depend on it: a LAN
-    // board is network-blocked for firmware like a Bluetooth one, but only
-    // a Bluetooth board's picture comes at the gentler pace its pill names.
-    let over = match (lan.is_some(), card.is_over_bluetooth()) {
-        (true, _) => UiLinkKind::Wifi,
-        (false, true) => UiLinkKind::Bluetooth,
-        (false, false) => UiLinkKind::Usb,
-    };
+    // How the board is reached, for the words that depend on it: a board
+    // on the LAN or through lightplayer.app is network-blocked for firmware
+    // like a Bluetooth one, but only a Bluetooth board's picture comes at
+    // the gentler pace its pill names (core's line says which network link
+    // it is).
+    let over = card_link_kind(lan.as_ref(), &card);
     // Update draws as one chip when it is one click, or when it is refused
     // for the link (Bluetooth: drawn disabled, reason under it). With
     // nothing to pick and nothing to press — this Studio serves no build
@@ -490,6 +488,9 @@ pub(crate) fn DeviceRosterCard(
     let on_access = super::access_ui_context::access_handler();
     let on_network = super::access_ui_context::network_handler();
     let unlock = access.as_ref().and_then(|access| access.unlock);
+    let account_key_refused = access
+        .as_ref()
+        .and_then(|access| access.account_key_refused.clone());
     // The fault takes the project line only when no project work is
     // running: the push's own narration outranks it (the terminal keeps the
     // fault either way).
@@ -895,8 +896,10 @@ pub(crate) fn DeviceRosterCard(
                 // Connections (spike §1): USB, the Bluetooth switch, and
                 // "Access" where this link may see it. Only a board
                 // Studio talks to as LightPlayer has one — and not yet one
-                // reached on the LAN: its USB and Bluetooth rows would
-                // describe links it is not on (the network card is M8's).
+                // reached on the LAN or through lightplayer.app: its USB and
+                // Bluetooth rows would describe links it is not on ("USB
+                // connected" on a relay card, PR C). Which rows a network
+                // card wears is the device-UX rework's.
                 if let Some(access) = access.clone().filter(|_| linked && lan.is_none()) {
                     super::connections_group::ConnectionsGroup {
                         device,
@@ -923,6 +926,13 @@ pub(crate) fn DeviceRosterCard(
                             "Enter a password"
                         }
                     }
+                }
+                // The account's key did not go on over USB (a full device
+                // nothing can make room on): said on the card, not only in
+                // the Access panel, because it is what keeps the board off
+                // lightplayer.app. Core's sentence, with its reason.
+                if let Some(refused) = account_key_refused.clone().filter(|_| linked) {
+                    p { class: ACCOUNT_KEY_REFUSED_CLASS, role: "status", "{refused}" }
                 }
                 // The info line, with "Unlock" at its end when the device
                 // needs a password (it opens the sheet). On the LINE rather
@@ -1167,6 +1177,10 @@ pub(crate) fn DeviceRenameSection(
 /// A verb that rides the Device zone's 17px info line ("Unlock", when a
 /// device needs a password): text with a dotted underline, no chrome, so it fits
 /// the line's height and reads as something to press.
+/// The card's "your account's key couldn't be added" box: the play-only
+/// sentence's warning voice, one paragraph.
+const ACCOUNT_KEY_REFUSED_CLASS: &str = "tw:m-0 tw:min-w-0 tw:rounded tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2.5 tw:py-2 tw:text-xs tw:leading-snug tw:text-status-warning-foreground";
+
 pub(super) const LINE_VERB_CLASS: &str = "tw:flex-none tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-xs tw:font-semibold tw:leading-[17px] tw:text-strong-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:decoration-solid ux-focus-ring";
 
 const HEADER_MENU_TRIGGER_CLASS: &str = "tw:grid tw:h-5 tw:w-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:place-items-center tw:rounded tw:border-0 tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/10 tw:hover:text-strong-foreground";
@@ -1695,6 +1709,17 @@ fn activity_line_text(activity: &DeviceActivityView) -> String {
         text.push_str(&format!(" · {}%", u32::from(percent).min(100)));
     }
     text
+}
+
+/// How the card's board is reached, for every word that depends on it: the
+/// network line's kind when core gave one (the LAN, or lightplayer.app's
+/// relay), else Bluetooth when firmware is refused for the link, else USB.
+fn card_link_kind(lan: Option<&lpa_studio_core::UiLanLink>, card: &DeviceView) -> UiLinkKind {
+    match (lan, card.is_over_bluetooth()) {
+        (Some(lan), _) => lan.kind,
+        (None, true) => UiLinkKind::Bluetooth,
+        (None, false) => UiLinkKind::Usb,
+    }
 }
 
 /// The preview slot's sentence for a Bluetooth card nothing has unlocked:
@@ -2939,6 +2964,32 @@ mod tests {
             preview_sentence(&card),
             "No picture yet — the live feed is coming."
         );
+    }
+
+    /// A board through lightplayer.app is refused firmware like a Bluetooth
+    /// one, but it is on Wi‑Fi: the card says "Wi‑Fi via lightplayer.app",
+    /// and its live pill is a USB board's, not Bluetooth's slower one (PR C;
+    /// behind `?relay=1` it once wore Bluetooth's words).
+    #[test]
+    fn a_relay_card_says_wifi_via_lightplayer_app_and_never_bluetooth() {
+        let mut card = card_fixture();
+        card.firmware_blocked = Some(lpa_studio_core::FIRMWARE_NEEDS_USB.to_string());
+        let relay = lpa_studio_core::lan_link_for_endpoint("relay:a0f26287b48c");
+        let over = card_link_kind(relay.as_ref(), &card);
+        assert_eq!(over, UiLinkKind::Relay);
+        assert_eq!(
+            preview_sentence(&card),
+            "No picture yet — the live feed is coming."
+        );
+        assert_eq!(
+            feed_pill(&card, Some(&feed_fixture(FeedLiveness::Live, true)), over),
+            Some(("ux-play-pill-live", "live · 43 fps".to_string()))
+        );
+        assert_eq!(
+            info_line(relay.as_ref(), None, "ready"),
+            "Wi\u{2011}Fi via lightplayer.app · ready"
+        );
+        assert_eq!(card_link_kind(None, &card), UiLinkKind::Bluetooth);
     }
 
     fn update_words(kind: UpdateRowKind, light: Option<UpdateLight>) -> UiDeviceUpdate {

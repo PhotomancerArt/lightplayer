@@ -15,8 +15,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
     OfferPath, PendingLinkView, ResetReach, UiExampleCard, UiLensCard, UiOfferTree, UiPackageCard,
-    UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_wifi_offer,
-    device_offers, new_sim_offer, pending_link_offers,
+    UiUnlockOffer, UpdateOfferFacts, WifiAddressReach, add_device_offers, connect_relay_offer,
+    connect_wifi_offer, device_offers, new_sim_offer, pending_link_offers,
 };
 
 use crate::app::home::DevicesPage;
@@ -29,13 +29,16 @@ use crate::core::OffersProvider;
 /// pending link's and device's verbs — each device placed by its handle.
 /// `wifi_addresses`: the remembered boards this browser knows a Wi‑Fi
 /// address for (core's address book, as the story says it), each offered
-/// "Connect over Wi‑Fi".
+/// "Connect over Wi‑Fi". `relay_boards`: the remembered boards offered
+/// "Connect through lightplayer.app" (core: signed in, the board said its
+/// MAC).
 pub(crate) fn roster_tree(
     devices: &DeviceRosterView,
     projects: &[UiPackageCard],
     examples: &[UiExampleCard],
     bluetooth: BluetoothReach,
     wifi_addresses: &[(lpa_studio_core::DeviceId, String)],
+    relay_boards: &[lpa_studio_core::DeviceId],
 ) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
     for offer in add_device_offers(devices.usb_available, bluetooth, wifi_reach(devices)) {
@@ -66,9 +69,17 @@ pub(crate) fn roster_tree(
             let connecting = devices
                 .wifi_connects
                 .get(&card.id)
-                .is_some_and(|connect| connect.connecting);
+                .is_some_and(|connect| !connect.through_relay && connect.connecting);
             let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
             tree.publish(connect_wifi_offer(&prefix, card.id, ip, connecting));
+        }
+        if relay_boards.contains(&card.id) {
+            let connecting = devices
+                .wifi_connects
+                .get(&card.id)
+                .is_some_and(|connect| connect.through_relay && connect.connecting);
+            let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
+            tree.publish(connect_relay_offer(&prefix, card.id, connecting));
         }
     }
     tree
@@ -224,11 +235,21 @@ pub(crate) fn RosterOffers(
     /// Remembered boards this browser knows a Wi‑Fi address for.
     #[props(default)]
     wifi_addresses: Vec<(lpa_studio_core::DeviceId, String)>,
+    /// Remembered boards offered "Connect through lightplayer.app".
+    #[props(default)]
+    relay_boards: Vec<lpa_studio_core::DeviceId>,
     children: Element,
 ) -> Element {
     let asked = use_ble_reach();
     let reach = ble_reach.unwrap_or_else(|| asked());
-    let offers = roster_tree(&devices, &projects, &examples, reach, &wifi_addresses);
+    let offers = roster_tree(
+        &devices,
+        &projects,
+        &examples,
+        reach,
+        &wifi_addresses,
+        &relay_boards,
+    );
     rsx! {
         OffersProvider { offers, {children} }
     }
@@ -338,6 +359,9 @@ pub(crate) fn StoryDevicesPage(
     /// Remembered boards this browser knows a Wi‑Fi address for.
     #[props(default)]
     wifi_addresses: Vec<(lpa_studio_core::DeviceId, String)>,
+    /// Remembered boards offered "Connect through lightplayer.app".
+    #[props(default)]
+    relay_boards: Vec<lpa_studio_core::DeviceId>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
     rsx! {
@@ -346,6 +370,7 @@ pub(crate) fn StoryDevicesPage(
             projects: home.projects.clone(),
             examples: home.examples.clone(),
             wifi_addresses,
+            relay_boards,
             DevicesPage { home, remembered_open, target_pick_open, on_action }
         }
     }

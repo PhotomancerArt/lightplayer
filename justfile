@@ -2791,7 +2791,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     for feature in test_rmt test_rmt_rx test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental \
-                   test_cycle_probe test_gpio_input; do
+                   test_cycle_probe test_gpio_input test_flash_tears; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -4411,6 +4411,35 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
+# The flash-tears calibration: every committed `flash-tears` transcript
+# (lp-emu/transcripts/esp32c6/flash-tears/) sorted into tear shapes, written
+# into the report's generated block. Host only — reads transcripts, never a
+# port. Re-run after every batch of the CX1 sitting. `--json` for one line
+# per cut; with any argument the tables go to stdout instead.
+flash-tears-analyze *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "{{ args }}" ]; then
+        scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.md
+    else
+        scripts/emu/flash-tears-analyze.py {{ args }}
+    fi
+
+# The flash-tears payload's own flow run on lp-nor-sim under every tear model
+# (fw-checks' `flash_tears_on_nor_sim` example), sorted by the same analysis
+# as the silicon transcripts: does a model reproduce CX1's tear histogram?
+# Simulator numbers, written under target/, never committed. Then
+# `just flash-tears-analyze --check-model` says whether lp-nor-sim's
+# calibrated weights still match every committed silicon cut.
+flash-tears-sim cuts="200" seed="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tear in clean byte_prefix random_bits calibrated; do
+        cargo run -q -p fw-checks --features check-flash-tears --example flash_tears_on_nor_sim -- \
+            --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --out "target/flash-tears-sim/$tear-{{ seed }}.txt"
+    done
+    scripts/emu/flash-tears-analyze.py target/flash-tears-sim/*-{{ seed }}.txt
+
 # The classic ESP32 (v3) machine's speed probe: three pinned reference images
 # at t1 — the only grade this machine has — both cores at the default
 # quantum, best of two runs, reported as user seconds, instructions/second in
@@ -4896,6 +4925,17 @@ walk-ble-emu *args:
 # restart, it rejoins, a new secure session opens from the page's own
 # redial, and the card is Ready again with no click. Same prerequisites as
 # `studio-lan`. Not CI.
+#
+# `studio-relay` (network-transport plan PR C,
+# scripts/emu/walk-wifi-emu-studio-relay.mjs): one board on the virtual LAN
+# whose uplink carries `lightplayer.app` to a local lp-cloud-server, Studio
+# with NO flag — signed in over USB its connect puts the account's key on
+# the board (`relay noAccount` → `connected`); signed out its remembered
+# tile offers no relay connect; signed in, "Connect through lightplayer.app"
+# brings the same board back as a "Wi‑Fi via lightplayer.app" card; off the
+# relay, the tile says "The board isn't online.". Needs `cargo build -p
+# lp-cli -p lp-cloud-server`, `just studio-web-story-build` and `just
+# studio-firmware-package-esp32c6`. Not CI.
 walk-wifi-emu lane *args:
     node scripts/emu/walk-wifi-emu.mjs {{ lane }} {{ args }}
 

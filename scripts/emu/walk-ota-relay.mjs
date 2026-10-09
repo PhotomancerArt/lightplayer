@@ -65,7 +65,13 @@ export async function startRelayCloud({
     });
   }
   const deviceLegs = new Set();
+  /// `refuseDeviceLeg(true)`: every new device leg is dropped on arrival.
+  let refusing = false;
   const forward = createNetServer((socket) => {
+    if (refusing) {
+      socket.destroy();
+      return;
+    }
     const upstream = netConnect(port, "127.0.0.1");
     const pair = { socket, upstream };
     deviceLegs.add(pair);
@@ -127,6 +133,12 @@ export async function startRelayCloud({
       }
       deviceLegs.clear();
       return count;
+    },
+    /// While `on`, the board cannot reach the relay at all (each new device
+    /// leg is dropped as it arrives): with `cutDeviceLeg`, the board is
+    /// offline to lightplayer.app until this is turned off again.
+    refuseDeviceLeg(on) {
+      refusing = on;
     },
     stop,
   };

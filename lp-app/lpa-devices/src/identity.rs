@@ -51,7 +51,7 @@ pub const BLE_ENDPOINT_PREFIX: &str = "ble:";
 pub const LAN_ENDPOINT_PREFIX: &str = "lan:";
 
 /// The endpoint scheme a board reached THROUGH lightplayer.app's relay is at
-/// (Studio's network transport, `?relay=1`): `relay:<board mac, 12 hex>`.
+/// (Studio's network transport): `relay:<board mac, 12 hex>`.
 /// The same secure lp-link as `lan:`, carried by the cloud relay instead of
 /// the LAN — so, like it, no reset lines and no ROM downloader.
 pub const RELAY_ENDPOINT_PREFIX: &str = "relay:";

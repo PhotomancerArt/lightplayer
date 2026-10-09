@@ -38,6 +38,13 @@ pub enum NetworkCommand {
         host: String,
         result: Result<(), crate::app::devices::WifiConnectFailure>,
     },
+    /// A connect through lightplayer.app someone asked for ended (a card's
+    /// "Connect through lightplayer.app"): the board answered, or why not.
+    /// The studio controller's, like [`Self::WifiConnected`].
+    RelayConnected {
+        board: lpa_devices::BoardKey,
+        result: Result<(), crate::app::devices::RelayConnectFailure>,
+    },
 }
 
 /// Whether a finished conversation read or wrote.

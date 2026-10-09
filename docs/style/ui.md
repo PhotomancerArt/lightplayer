@@ -232,3 +232,56 @@ Acceptable layout changes are mostly tied to explicit local user action, such as
 switching a tab, expanding a details panel, or opening a popup. Remote changes,
 like another user editing a project or a device changing state, should preserve
 the current reading surface as much as possible.
+
+## The board card
+
+A board is one card: on the home page, in its list view as a row, and
+wherever else a board appears. Yona: "these cards are the most important
+in the whole app." The converged spike is `spikes/board-card-stack/index.html`
+(the page is the card as decided, with its rulings at the foot); the
+decision is `docs/adr/2026-10-08-the-board-card-and-one-home-page.md`.
+
+From the top:
+
+- **The picture.** The board's lights. Nothing covers it: no overlay, no
+  badge, no progress, no button.
+- **The status corner,** cut out of the picture's corner, not laid over it.
+  It shows the worst notice's icon (a blue dot when all is fine), then the
+  frame rate, or the picture's age when the picture isn't live. It opens its
+  own details; the board's terminal lives there.
+- **The name bar.** The board's name, its group or owner under it, and one
+  primary action. The action is a plain, flush section of the bar with an
+  icon leading the word: the link's icon before Connect, a lock before
+  Unlock, ✓ before Done. The spectrum ring lights it on hover, like any
+  action.
+- **The bars,** always in this order: project · connection · access ·
+  firmware · hardware. Each is one line: an icon, a summary, an aside, and
+  at most one action.
+
+The rules:
+
+- **The card is a fixed height.** A board's events never change it (see
+  Stable Layout). Offline, locked, blank, updating and connected cards all
+  measure the same.
+- **No boxes in boxes.** The bars are full-bleed rows of one card,
+  separated by hairlines. Nothing inside a bar draws its own frame.
+- **A notice tints its bar,** in its status family, with its icon (never
+  colour alone). The rest of the card stays neutral.
+- **A bar's action sits flush at its end,** as a section of the bar, not a
+  chip floating inside it.
+- **Details open as Studio's detail card, merged with the bar that opened
+  it** (the merged-outline popover). Every fact the bar's summary leaves
+  out lives there; nothing on the card is lost, only moved.
+- **Work in progress shows in the bar doing it.** The bar goes neutral, with
+  the conic spinner, the step and the percent, and the iridescent fill
+  along its foot. When it's done, the bar is green for a few seconds; when
+  it fails, the bar is striped and offers Retry. The picture and the corner
+  don't change.
+- **Connected, the bars become the panel.** Connect turns the card's bars
+  into the board's panel, drawn with Studio's existing panel widgets: as
+  many controls as fit at the card's height, then All controls. Done turns
+  them back. The card does not grow to fit more controls.
+
+The card is built in core, as a name bar and bars, and drawn by a few
+generic pieces. The web decides how a bar looks, never what it says or
+which action it carries (`docs/adr/2026-10-01-agentic-control-offers-in-core.md`).

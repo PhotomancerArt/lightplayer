@@ -1,5 +1,5 @@
 //! A board reached through lightplayer.app's relay, end to end (the network
-//! transport's P05, behind `?relay=1`): the `relay:` endpoint routes to the
+//! transport's P05; on for everyone since PR C): the `relay:` endpoint routes to the
 //! relay half, the board identifies over it like a LAN board, its card says
 //! firmware needs USB, the access layer never adds a key over it (the
 //! internet is not a cable), and
@@ -82,7 +82,7 @@ fn a_board_through_the_relay_identifies_refuses_firmware_and_comes_back_after_a_
         ))));
     assert!(
         !bench.controller.reaches_relay(),
-        "no relay half without ?relay=1"
+        "no relay half until the page installs one"
     );
     bench
         .controller

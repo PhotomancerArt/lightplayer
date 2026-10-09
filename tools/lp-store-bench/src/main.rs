@@ -60,6 +60,13 @@ enum Cmd {
         seeds: String,
         #[arg(long)]
         max_cuts: Option<u64>,
+        /// Tear models, comma-separated, by name: `clean`, `byte_prefix`,
+        /// `random_bits` (the default list), `calibrated` (CX1's measured
+        /// tears, `lp-nor-sim`'s `calibrated_tear.rs`) and
+        /// `calibrated_<zeroing|all_zero|erasing|reads_ff_weak|reads_ff>`
+        /// (every torn erase forced to that measured shape).
+        #[arg(long, default_value = "clean,byte_prefix,random_bits")]
+        tears: String,
     },
     /// Double-cut sweep (sampled first cuts).
     Double {
@@ -69,6 +76,13 @@ enum Cmd {
         workloads: String,
         #[arg(long, default_value = "1")]
         seeds: String,
+        /// Tear models, comma-separated, by name: `clean`, `byte_prefix`,
+        /// `random_bits` (the default list), `calibrated` (CX1's measured
+        /// tears, `lp-nor-sim`'s `calibrated_tear.rs`) and
+        /// `calibrated_<zeroing|all_zero|erasing|reads_ff_weak|reads_ff>`
+        /// (every torn erase forced to that measured shape).
+        #[arg(long, default_value = "clean,byte_prefix,random_bits")]
+        tears: String,
     },
     /// Model-based random walks with random cuts.
     Random {
@@ -153,11 +167,13 @@ fn main() {
             workloads,
             seeds,
             max_cuts,
+            tears,
         } => {
             let ctx = Ctx::new(&common, "sweep");
             let params = SweepParams {
                 seeds: parse_list(&seeds),
                 max_cuts_per_step: max_cuts,
+                tears: parse_tears(&tears),
                 ..Default::default()
             };
             for (cand, cfg) in ctx.candidates() {
@@ -177,10 +193,12 @@ fn main() {
             common,
             workloads,
             seeds,
+            tears,
         } => {
             let ctx = Ctx::new(&common, "double");
             let params = SweepParams {
                 seeds: parse_list(&seeds),
+                tears: parse_tears(&tears),
                 ..Default::default()
             };
             for (cand, cfg) in ctx.candidates() {
@@ -558,13 +576,14 @@ fn print_measure(m: &MeasureResult) {
 fn print_sweeps(out: &[SweepSummary]) {
     for s in out {
         println!(
-            "  {:<10} {:<10} {:<30} {:<11} cases {:>6} landed {:>6} failures {:>5} non-atomic {:>5} {:?}{}{}",
+            "  {:<10} {:<10} {:<30} {:<11} cases {:>6} landed {:>6} torn erases {:>5} failures {:>5} non-atomic {:>5} {:?}{}{}",
             s.driver,
             s.candidate,
             s.workload.as_ref().map(|w| w.label()).unwrap_or_default(),
             s.tear,
             s.cases,
             s.landed,
+            s.torn_erases,
             s.failures,
             s.non_atomic,
             s.kinds,
@@ -583,6 +602,16 @@ fn print_sweeps(out: &[SweepSummary]) {
 
 fn parse_list(s: &str) -> Vec<u64> {
     s.split(',').filter_map(|v| v.trim().parse().ok()).collect()
+}
+
+fn parse_tears(s: &str) -> Vec<TearModel> {
+    s.split(',')
+        .filter(|t| !t.trim().is_empty())
+        .map(|t| {
+            TearModel::from_name(t.trim())
+                .unwrap_or_else(|| die(&format!("unknown tear model {t:?}")))
+        })
+        .collect()
 }
 
 fn parse_workloads(s: &str) -> Vec<WorkloadSpec> {

@@ -1,6 +1,6 @@
 //! [`DeviceTransport`] through lightplayer.app's relay: a board on Wi‑Fi
 //! reached from anywhere, as a CONTROL-ONLY, secure link (the network
-//! transport's P05, behind `?relay=1`).
+//! transport's P05; on for everyone, no flag, since PR C).
 //!
 //! The relay's browser leg carries bare lp-link frames, one per WebSocket
 //! message — what a board serves on its LAN `/link` — so this is the LAN
