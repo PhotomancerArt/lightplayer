@@ -3016,6 +3016,7 @@ mod tests {
             )
             .display(),
             progress: None,
+            standing: lpa_studio_core::UpdateStanding::Nothing,
         }
     }
 

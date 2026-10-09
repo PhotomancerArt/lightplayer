@@ -8,6 +8,7 @@ use lpa_devices::evidence::TerminalLine;
 use super::ui_bluetooth_switch::UiBluetoothSwitch;
 use crate::OfferPath;
 use crate::app::access::UiAccessPanel;
+use crate::app::devices::device_layout_view::UiLayoutPanel;
 use crate::app::network::UiDeviceWifi;
 
 /// One panel inside a bar's (or the status corner's) details.
@@ -33,13 +34,37 @@ pub enum UiDetailPanel {
     Rename { offer: OfferPath, title: String },
     /// How the link is doing: the board's link counters off its heartbeat.
     LinkCounters(LinkCounterFacts),
+    /// The layout question (or its refusal) before a board's files move:
+    /// its words and the paths of its Download, Continue and Cancel.
+    Layout(UiLayoutPanel),
+    /// "Other version…": the install offer's version choice, inline, with
+    /// "From a file…" inside it when a custom build can be picked.
+    OtherVersion {
+        install: OfferPath,
+        from_file: Option<OfferPath>,
+    },
+    /// "Restore from a backup file…": the file picker, and the board's own
+    /// base MAC so a mismatched backup can name both boards.
+    RestoreFromFile {
+        offer: OfferPath,
+        current_base_mac: Option<String>,
+    },
 }
 
 impl UiDetailPanel {
     /// The offers this panel's controls press.
     pub fn offer_paths(&self) -> Vec<&OfferPath> {
         match self {
-            UiDetailPanel::Rename { offer, .. } => vec![offer],
+            UiDetailPanel::Rename { offer, .. } | UiDetailPanel::RestoreFromFile { offer, .. } => {
+                vec![offer]
+            }
+            UiDetailPanel::OtherVersion { install, from_file } => {
+                std::iter::once(install).chain(from_file).collect()
+            }
+            UiDetailPanel::Layout(panel) => std::iter::once(&panel.download)
+                .chain(&panel.continue_action)
+                .chain(&panel.cancel)
+                .collect(),
             UiDetailPanel::Terminal { .. }
             | UiDetailPanel::Access(_)
             | UiDetailPanel::Bluetooth(_)

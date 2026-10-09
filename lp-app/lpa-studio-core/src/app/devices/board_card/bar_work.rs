@@ -17,6 +17,7 @@ use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_stack_bar::BarLayer;
 use crate::app::devices::device_identity::device_chip;
+use crate::app::devices::device_update_words::UpdateRowKind;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 
 /// The bar an activity of `kind` narrates in.
@@ -55,9 +56,17 @@ pub(crate) fn bar_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<Ui
     if let Some(activity) = &input.view.activity
         && activity_bar(activity.kind) == layer
     {
+        // An update says its story's short words ("Updating · 1 of 2 ·
+        // 40%"), the same the Reconnecting curtain shows.
+        let story = input.update.filter(|update| {
+            activity.kind == ActivityKind::Update && update.kind == UpdateRowKind::Progress
+        });
         return Some(UiBarWork {
-            words: activity_words(activity),
-            percent: activity.percent,
+            words: story.map_or_else(|| activity_words(activity), |update| update.line.clone()),
+            percent: story
+                .and_then(|update| update.progress)
+                .and_then(|progress| progress.percent)
+                .or(activity.percent),
             state: BarWorkState::Running,
             cancel: input
                 .offer("cancel")

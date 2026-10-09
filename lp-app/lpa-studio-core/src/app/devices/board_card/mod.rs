@@ -15,7 +15,8 @@
 //! - Building: [`board_card_input`], [`board_card_builder`], and one file
 //!   per decision: [`board_picture`], [`status_corner`], [`primary_action`],
 //!   [`bar_work`], and one per bar — [`project_bar`], [`connection_bar`],
-//!   [`access_bar`], [`hardware_bar`] — with [`ui_bluetooth_switch`].
+//!   [`access_bar`], [`firmware_bar`], [`hardware_bar`] — with
+//!   [`ui_bluetooth_switch`].
 
 pub mod access_bar;
 pub mod bar_work;
@@ -26,6 +27,7 @@ pub mod board_picture;
 pub(crate) mod card_fixtures;
 pub mod connection_bar;
 pub(crate) mod detail_sections;
+pub mod firmware_bar;
 pub mod hardware_bar;
 pub mod primary_action;
 pub mod project_bar;

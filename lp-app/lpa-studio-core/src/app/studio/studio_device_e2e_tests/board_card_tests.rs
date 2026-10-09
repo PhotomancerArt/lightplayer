@@ -436,6 +436,144 @@ fn the_hardware_details_reset_says_why_it_waits_and_forget_is_lasting() {
     );
 }
 
+/// The layout question rides the firmware bar: while it is open the bar's
+/// details are raised (the web opens them) and hold the Layout panel, its
+/// work is the flash's own step, and Continue — Lasting — is pressed by
+/// path from the panel and finishes the update.
+#[test]
+fn the_layout_question_raises_the_firmware_details_and_continue_runs_by_path() {
+    let device = legacy_light_player(Vec::new());
+    let (mut bench, tasks) = identified(&device, "usb-card-layout-1");
+    let target = bench.view().devices[0].id;
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+
+    let bar = card_of(&bench, target)
+        .bar(crate::BarLayer::Firmware)
+        .clone();
+    assert!(bar.details.raised, "the question rises on its own");
+    assert!(
+        bar.details
+            .panels
+            .iter()
+            .any(|shown| matches!(shown, crate::UiDetailPanel::Layout(shown) if *shown == panel)),
+        "{:?}",
+        bar.details.panels
+    );
+    assert_eq!(
+        bar.work.as_ref().map(|work| work.words.as_str()),
+        Some("Waiting for your answer…"),
+        "the running flash names its step"
+    );
+    assert_eq!(
+        bar.details
+            .notice()
+            .and_then(|notice| notice.sentence.as_deref()),
+        Some(panel.title.as_str())
+    );
+    every_card_action_is_offered(&mut bench);
+
+    let continue_path = panel.continue_action.expect("a migration can continue");
+    assert_eq!(continue_path, bench.device_verb(target, "continue-update"));
+    bench
+        .press_lasting(&continue_path, OfferArgs::new())
+        .expect("Continue, after the arm");
+    settle(&mut bench, &tasks);
+    assert!(bench.view().devices[0].last_outcome.clone().unwrap().ok);
+    assert!(
+        !card_of(&bench, target)
+            .bar(crate::BarLayer::Firmware)
+            .details
+            .raised,
+        "nothing left to answer"
+    );
+}
+
+/// A board holding its files for a layout change: the firmware bar says so
+/// and its action is Finish update, at `…/finish-update`.
+#[test]
+fn a_board_holding_its_files_offers_finish_update_as_the_firmware_action() {
+    let device = legacy_light_player(Vec::new());
+    let (mut bench, tasks) = identified(&device, "usb-card-layout-2");
+    let target = bench.view().devices[0].id;
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    device.interrupt_next_plan_after(1);
+    press(&mut bench, &panel.continue_action.unwrap());
+    settle(&mut bench, &tasks);
+    bench.run_until(&tasks, "the held board to say so", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.finish_update.is_some())
+    });
+
+    let bar = card_of(&bench, target)
+        .bar(crate::BarLayer::Firmware)
+        .clone();
+    assert_eq!(bar.summary, "Files waiting");
+    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    let finish = bar.action.clone().expect("Finish update");
+    assert_eq!(finish.word, "Finish update");
+    assert_eq!(finish.offer, bench.device_verb(target, "finish-update"));
+    assert!(
+        bar.details
+            .notice()
+            .and_then(|notice| notice.sentence.as_deref())
+            .is_some_and(|line| line.contains("waiting")),
+        "the waiting-files line is the notice"
+    );
+    every_card_action_is_offered(&mut bench);
+}
+
+/// The cable pulled mid filesystem write: the board boots formatted, and
+/// the firmware bar's action puts the stored backup back, at
+/// `…/restore-files`.
+#[test]
+fn a_formatted_boards_firmware_action_restores_its_files() {
+    let device = legacy_light_player(Vec::new());
+    let (mut bench, tasks) = identified(&device, "usb-card-layout-3");
+    let target = bench.view().devices[0].id;
+    update(&mut bench, target);
+    let panel = layout_panel(&mut bench, &tasks, target);
+    device.interrupt_next_plan_after(4);
+    press(&mut bench, &panel.continue_action.unwrap());
+    settle(&mut bench, &tasks);
+    bench.run_until(&tasks, "the card to offer the backup", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.restore.is_some())
+    });
+
+    let bar = card_of(&bench, target)
+        .bar(crate::BarLayer::Firmware)
+        .clone();
+    assert_eq!(bar.summary, "Its files need restoring");
+    let restore = bar.action.clone().expect("Restore files");
+    assert_eq!(restore.word, "Restore files");
+    assert_eq!(restore.offer, bench.device_verb(target, RESTORE_FILES));
+    assert!(
+        bar.details
+            .panels
+            .iter()
+            .any(|panel| matches!(panel, crate::UiDetailPanel::RestoreFromFile { .. })),
+        "Restore from a backup file… beside it"
+    );
+    let verbs: Vec<String> = bar
+        .details
+        .sections
+        .iter()
+        .flat_map(|section| section.affordances.iter().map(|action| action.word.clone()))
+        .collect();
+    assert!(verbs.contains(&"Download backup".to_string()), "{verbs:?}");
+    every_card_action_is_offered(&mut bench);
+}
+
 /// The card the home view publishes for `device`.
 fn card_of(bench: &DeviceBench, device: crate::DeviceId) -> UiBoardCard {
     bench

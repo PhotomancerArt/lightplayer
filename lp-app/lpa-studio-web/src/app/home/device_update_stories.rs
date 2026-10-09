@@ -59,56 +59,56 @@ fn device_card_update_available_dev_board() -> Element {
 }
 
 #[story(
-    description = "Backing up (progress): the current firmware is read back before a byte is written. The firmware bar is lit at 18%, the chip says Backing up, and Cancel is offered — nothing on the board has changed yet."
+    description = "Backing up (progress): the current firmware is read back before a byte is written. The firmware line reads \"Backing up · 18%\" with its bar lit at 18%, the chip says Backing up, and Cancel is offered — nothing on the board has changed yet."
 )]
 fn device_card_update_backing_up() -> Element {
     update_card(UpdateFixtureRow::BackingUp, Link::Usb)
 }
 
 #[story(
-    description = "Updating over USB (progress, the show stopped): the firmware bar lit at 40%, the chip Updating, no verbs (no Cancel once writing starts), and the picture slot shows what the board's own lights show — solid dark yellow — with the whole sentence: \"…Keep the board powered.\""
+    description = "Updating over USB (progress, the show stopped): \"Updating · 1 of 2 · 40%\", the firmware bar lit at 40%, the chip Updating, no verbs (no Cancel once writing starts), and the picture slot shows what the board's own lights show — solid dark yellow — with the whole sentence, which names the link: \"Updating to 2026.10.05-2 over USB: the new firmware first. Keep the board powered.\""
 )]
 fn device_card_update_updating_usb() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Usb)
 }
 
 #[story(
-    description = "Updating over Bluetooth: the same row, its line and sentence naming the link (\"Updating over Bluetooth… 40%\")."
+    description = "Updating over Bluetooth: the same row (\"Updating · 1 of 2 · 40%\"), its sentence naming the link (\"…over Bluetooth: the new firmware first.\")."
 )]
 fn device_card_update_updating_bluetooth() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Bluetooth)
 }
 
 #[story(
-    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same row, its line and sentence naming the link (\"Updating over Wi‑Fi… 40%\"), the device line \"Wi‑Fi · 192.168.1.40\". The board resets three times on the way; each time the page redials it by itself and the card keeps this row."
+    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same row (\"Updating · 1 of 2 · 40%\"), its sentence naming the link (\"…over Wi‑Fi: the new firmware first.\"), the device line \"Wi‑Fi · 192.168.1.40\". The board resets three times on the way; each time the page redials it by itself and the card keeps this row."
 )]
 fn device_card_update_updating_wifi() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Wifi)
 }
 
 #[story(
-    description = "The last step of an update this Studio is running (progress): \"Finishing the update… 70%\", the dark-yellow slot saying \"Installing the rest of the firmware… 70%. Keep the board powered.\" Not called interrupted: nothing was."
+    description = "The last step of an update this Studio is running (progress): \"Updating · 2 of 2 · 70%\", the dark-yellow slot saying \"Installing the rest of the firmware. Keep the board powered.\" Not called interrupted: nothing was."
 )]
 fn device_card_update_finishing() -> Element {
     update_card(UpdateFixtureRow::Finishing, Link::Bluetooth)
 }
 
 #[story(
-    description = "Finishing an interrupted update this Studio found half-way on connect (progress, started with no click): \"Finishing the update… 70%\", the dark-yellow slot saying it was interrupted and this Studio is completing it."
+    description = "Finishing an interrupted update this Studio found half-way on connect (progress, started with no click): \"Resuming · 2 of 2 · 70%\", naming the piece it is on, and the dark-yellow slot saying it was interrupted and this Studio is installing the rest of the firmware."
 )]
 fn device_card_update_finishing_resumed() -> Element {
     update_card(UpdateFixtureRow::FinishingResumed, Link::Bluetooth)
 }
 
 #[story(
-    description = "Restoring missing firmware (progress, no click): \"Restoring firmware… 35%\", the chip Restoring firmware, the dark-yellow slot: part of it was missing and this Studio had a copy."
+    description = "Restoring missing firmware (progress, no click): \"Restoring · 35%\", the chip Restoring firmware, the dark-yellow slot: part of it was missing and this Studio had a copy."
 )]
 fn device_card_update_restoring() -> Element {
     update_card(UpdateFixtureRow::Restoring, Link::Usb)
 }
 
 #[story(
-    description = "Another device is updating it (progress, someone else's): the bar at 40% in the quieter fill, no verbs, and the dark-yellow slot saying this Studio finishes it if it stops."
+    description = "Another device is updating it (progress, someone else's): \"Another device is updating it · 40%\", the bar at 40% in the quieter fill, no verbs, and the dark-yellow slot saying this Studio finishes it if it stops."
 )]
 fn device_card_update_another_device() -> Element {
     update_card(UpdateFixtureRow::AnotherDevice, Link::Bluetooth)
@@ -313,7 +313,7 @@ fn device_curtain_update_updating() -> Element {
 }
 
 #[story(
-    description = "The same Reconnecting card while its board updates over Wi‑Fi: each reset closes the board's socket and the page redials it by itself, so the card's detail is the update's line, \"Updating over Wi‑Fi… 40%\"."
+    description = "The same Reconnecting card while its board updates over Wi‑Fi: each reset closes the board's socket and the page redials it by itself, so the card's detail is the update's line, \"Updating · 1 of 2 · 40%\"."
 )]
 fn device_curtain_update_updating_wifi() -> Element {
     let fixture =

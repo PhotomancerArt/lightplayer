@@ -353,12 +353,13 @@ mod tests {
     fn update_words(light: Option<UpdateLight>) -> crate::UiDeviceUpdate {
         crate::UiDeviceUpdate {
             kind: UpdateRowKind::Progress,
-            line: "Updating over USB… 40%".to_string(),
+            line: "Updating · 1 of 2 · 40%".to_string(),
             sentence: "Updating to 2026.10.05-2 over USB… 40%. Keep the board powered.".to_string(),
             light,
             chip: "Updating".to_string(),
             version: UpdateVersion::new("2026.10.03-1").display(),
             progress: None,
+            standing: crate::UpdateStanding::Nothing,
         }
     }
 }

@@ -9,10 +9,10 @@
 use lpa_devices::view::PendingLinkView;
 
 use super::access_bar::{access_bar, pending_access_bar};
-use super::bar_work::bar_work;
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
 use super::connection_bar::{connection_bar, pending_connection_bar};
+use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
 use super::primary_action::{pending_primary, primary_action};
 use super::project_bar::{pending_project_bar, project_bar};
@@ -21,7 +21,6 @@ use super::ui_board_card::{UiBoardCard, UiBoardPresence};
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
-use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind};
@@ -32,7 +31,7 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
         project_bar(input),
         connection_bar(input),
         access_bar(input),
-        placeholder_bar(input, BarLayer::Firmware),
+        firmware_bar(input),
         hardware_bar(input),
     ];
     let running_work = bars
@@ -111,47 +110,12 @@ pub fn pending_board_card(
             pending_project_bar(),
             pending_connection_bar(pending, link),
             pending_access_bar(),
-            empty_bar(BarLayer::Firmware, "Not known yet"),
+            pending_firmware_bar(pending),
             pending_hardware_bar(pending, board, offers),
         ],
     };
     debug_assert_offered(&card, offers);
     card
-}
-
-/// A bar with its layer, its icon, the placeholder words the bar builders
-/// replace, and its work.
-fn placeholder_bar(input: &BoardCardInput<'_>, layer: BarLayer) -> UiStackBar {
-    UiStackBar {
-        work: bar_work(input, layer),
-        ..empty_bar(layer, layer.as_str())
-    }
-}
-
-/// A bar saying `summary` and nothing else.
-fn empty_bar(layer: BarLayer, summary: &str) -> UiStackBar {
-    UiStackBar {
-        layer,
-        icon: layer_icon(layer).to_string(),
-        summary: summary.to_string(),
-        aside: None,
-        aside_icon: None,
-        tone: UiStatusKind::Neutral,
-        action: None,
-        work: None,
-        details: UiBarDetails::default(),
-    }
-}
-
-/// Each bar's icon token.
-fn layer_icon(layer: BarLayer) -> &'static str {
-    match layer {
-        BarLayer::Project => "project",
-        BarLayer::Connection => "usb",
-        BarLayer::Access => "lock",
-        BarLayer::Firmware => "firmware",
-        BarLayer::Hardware => "chip",
-    }
 }
 
 /// Every offer path the card points at must be one `offers` publishes.
@@ -177,6 +141,7 @@ mod tests {
 
     use super::super::card_fixtures::{CardFixture, activity, board};
     use super::super::primary_action::tests::pending_view;
+    use super::super::ui_stack_bar::BarLayer;
     use super::*;
     use crate::app::devices::activity_ends::ActivityEnd;
 
