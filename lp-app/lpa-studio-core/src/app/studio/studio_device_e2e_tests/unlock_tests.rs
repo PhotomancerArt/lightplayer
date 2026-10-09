@@ -198,6 +198,43 @@ fn a_play_only_board_offers_unlock_to_edit() {
     assert_no_password_anywhere(&mut bench);
 }
 
+/// The app agent never handles a password: a value for the secret is
+/// refused, and an `act` without one — which would only raise the sheet —
+/// becomes the user's card instead (an offer that takes a secret is always
+/// the user's to press). Nothing was unlocked and no sheet was raised on
+/// the agent's say-so.
+#[test]
+fn the_agent_hands_unlock_to_the_user() {
+    let device = locked_board("dev000000unlock06");
+    let (mut bench, tasks, _present) = bench_over_bluetooth(&device, |_| {});
+    let (card, unlock) = locked_and_asking(&mut bench, &tasks);
+    bench
+        .controller
+        .apply_access_command(crate::AccessCommand::Dismiss { device: card });
+    assert!(bench.controller.view().login_prompt.is_none());
+    let unlock = unlock.to_string();
+
+    let refused = act(&mut bench, &unlock, &[("password", BENCH_PASSWORD)]);
+    assert!(
+        matches!(&refused, lpa_agent::ActOutcome::Refused { reason, .. }
+            if reason.contains("never handles passwords") && !reason.contains(BENCH_PASSWORD)),
+        "{refused:?}"
+    );
+    assert!(app_cards(&mut bench).is_empty(), "nothing was handed over");
+
+    let carded = act(&mut bench, &unlock, &[]);
+    assert!(
+        matches!(carded, lpa_agent::ActOutcome::NeedsUser { .. }),
+        "{carded:?}"
+    );
+    assert_eq!(app_cards(&mut bench).len(), 1);
+    assert!(
+        bench.controller.view().login_prompt.is_none(),
+        "the agent raised no sheet itself"
+    );
+    assert_no_password_anywhere(&mut bench);
+}
+
 /// A board whose link already holds edit (a USB cable is trusted) has
 /// nothing to unlock: no offer.
 #[test]
