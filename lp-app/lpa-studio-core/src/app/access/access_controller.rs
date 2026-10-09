@@ -68,7 +68,7 @@ use super::remembered_passwords::RememberedPasswords;
 use super::two_passwords::{device_password_salts, password_lines, plan_password};
 use super::ui_access_view::{
     UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiPasswordLine, UiUnlockOffer, access_line,
-    dropped_sentence, prompt_sentence,
+    account_key_refused_sentence, dropped_sentence, prompt_sentence,
 };
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture};
 
@@ -130,6 +130,10 @@ pub struct AccessController {
     pending: BTreeMap<DeviceId, PendingChange>,
     /// What each device's last change did on its own, for the panel.
     notices: BTreeMap<DeviceId, String>,
+    /// Devices whose last USB sync could not add the signed-in account's
+    /// key, with the board's (or the room rule's) reason: without that key
+    /// the board never reaches lightplayer.app, so the card says so.
+    account_refused: BTreeMap<DeviceId, String>,
     /// Devices a restart was asked of, with the hello window at the time: a
     /// newer hello is the restart having happened.
     restarts: BTreeMap<DeviceId, Option<Millis>>,
@@ -170,6 +174,7 @@ impl AccessController {
             writes: BTreeMap::new(),
             pending: BTreeMap::new(),
             notices: BTreeMap::new(),
+            account_refused: BTreeMap::new(),
             restarts: BTreeMap::new(),
             synced: BTreeMap::new(),
             undo: BTreeMap::new(),
@@ -320,6 +325,8 @@ impl AccessController {
         let live: BTreeSet<DeviceId> = roster.devices().iter().map(|device| device.id).collect();
         self.sessions.retain(|device, _| live.contains(device));
         self.synced.retain(|device, _| live.contains(device));
+        self.account_refused
+            .retain(|device, _| live.contains(device));
     }
 
     /// `address`: the board's socket URL when its link is a KEYED one (a
@@ -667,6 +674,16 @@ impl AccessController {
                 result,
             } => match result {
                 Ok(synced) => {
+                    // When an add that did not happen is the account's key,
+                    // the card says what that costs: the board cannot be
+                    // reached through lightplayer.app.
+                    let account_missing = self.account.as_ref().is_some_and(|account| {
+                        !synced
+                            .listing
+                            .entries
+                            .iter()
+                            .any(|entry| entry.salt == account.key_salt)
+                    });
                     if let Some(key) = roster
                         .device(device)
                         .and_then(|found| record_key(&found.identity))
@@ -678,6 +695,14 @@ impl AccessController {
                     // is said in the panel, under the list the board did
                     // answer; a sync that went through clears what an
                     // earlier one said.
+                    match (&synced.refused, account_missing) {
+                        (Some(why), true) => {
+                            self.account_refused.insert(device, why.clone());
+                        }
+                        _ => {
+                            self.account_refused.remove(&device);
+                        }
+                    }
                     match &synced.refused {
                         Some(why) => {
                             if !matches!(self.writes.get(&device), Some(WriteStatus::Writing)) {
@@ -986,7 +1011,10 @@ impl AccessController {
                 {
                     return Some("Open — no password".to_string());
                 }
-                access_line(&phase)
+                access_line(
+                    &phase,
+                    crate::UiLinkKind::of_endpoint(device.identity.endpoint.as_ref()),
+                )
             });
         let unlock = session.and_then(|session| match &session.phase {
             AccessPhase::Locked => Some(UiUnlockOffer::Locked),
@@ -1004,6 +1032,10 @@ impl AccessController {
             line,
             unlock: unlock.filter(|_| untrusted),
             panel,
+            account_key_refused: self
+                .account_refused
+                .get(&device.id)
+                .map(|why| account_key_refused_sentence(why)),
         })
     }
 
@@ -1718,6 +1750,80 @@ mod tests {
         assert_eq!(board_labels(&board), ["friends", "Yona's account"]);
         assert!(access.access_added().is_none());
         assert!(access.undo_step(device, 301.0).is_none(), "taken once");
+    }
+
+    /// The relay's auto-queue ticket (`full-access-file-blocks-relay`): a
+    /// board full of other browsers' keys still takes the account's key
+    /// (the oldest browsers make room), so it can reach lightplayer.app; a
+    /// board full of passwords cannot, and the card says so — in words that
+    /// name what it costs — instead of the add failing where only the
+    /// Access panel shows it. A later sync with room clears it.
+    #[test]
+    fn a_usb_connect_that_cannot_add_the_account_key_says_so_on_the_card() {
+        let account_key = account(None).held_keys()[0].key.clone();
+
+        // Sixteen other browsers: room is made, the account's key goes on.
+        let browsers: Vec<SecretEntry> = (0..MAX_SECRETS_PER_FILE as u8)
+            .map(|n| {
+                BrowserKey::mint(
+                    &counter_from(n.wrapping_mul(2).wrapping_add(40)),
+                    "Brave on Mac",
+                )
+                .installable()
+                .entry(u64::from(n) + 1)
+            })
+            .collect();
+        let board = FakeBoard::with_entries(browsers);
+        let mut access = controller();
+        access.account = Some(account(None));
+        sync(&mut access, &board, DeviceId(1), 1, 100.0);
+        assert!(
+            board
+                .store()
+                .secrets
+                .iter()
+                .any(|entry| entry.salt == account_key.salt),
+            "the account's key made it on"
+        );
+        assert!(access.account_refused.is_empty());
+
+        // Sixteen passwords: nothing may be dropped, and the card says why.
+        let passwords: Vec<SecretEntry> = (0..MAX_SECRETS_PER_FILE as u8)
+            .map(|n| password_entry("friends", n))
+            .collect();
+        let full = FakeBoard::with_entries(passwords);
+        let mut access = controller();
+        access.account = Some(account(None));
+        sync(&mut access, &full, DeviceId(2), 1, 100.0);
+        let said = access
+            .account_refused
+            .get(&DeviceId(2))
+            .map(|why| account_key_refused_sentence(why))
+            .expect("the card says the account's key did not go on");
+        assert_eq!(
+            said,
+            "Your account's key couldn't be added, so this board can't be reached through \
+             lightplayer.app. This device is full, and nothing on it can make room on its own \
+             — remove something from its list."
+        );
+
+        // Signed out, the same board says nothing about an account.
+        let mut signed_out = controller();
+        sync(&mut signed_out, &full, DeviceId(2), 1, 100.0);
+        assert!(signed_out.account_refused.is_empty());
+
+        // Room made by hand: the next sync puts the key on and clears it.
+        let two: Vec<AccessOp> = full.store().secrets[..2]
+            .iter()
+            .map(|entry| AccessOp::Remove(entry.salt))
+            .collect();
+        block_on(run_access_ops(&mut full.usb(), &two, 0, &[])).expect("two removed");
+        sync(&mut access, &full, DeviceId(2), 2, 200.0);
+        assert!(
+            access.account_refused.is_empty(),
+            "{:?}",
+            access.account_refused
+        );
     }
 
     #[test]

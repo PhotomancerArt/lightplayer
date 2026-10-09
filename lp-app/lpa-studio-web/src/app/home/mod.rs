@@ -55,6 +55,10 @@ pub mod project_opening_frame;
 pub(crate) mod project_opening_frame_stories;
 pub mod projects_page;
 pub(crate) mod reach_note;
+#[cfg(feature = "stories")]
+pub(crate) mod relay_connect_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod relay_link_stories;
 pub(crate) mod share_words;
 pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render

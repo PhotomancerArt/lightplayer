@@ -491,6 +491,10 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
     // "Connect over Wi‑Fi": a board this browser remembers an address for
     // (core offers it only then), reached with no cable.
     let wifi = verb_named(&verbs, "connect-wifi");
+    // "Connect through lightplayer.app": a board Studio has met, while
+    // someone is signed in (core offers it only then), reached from
+    // anywhere. Its answer shares the Wi‑Fi line below.
+    let relay = verb_named(&verbs, "connect-relay");
     let wifi_line = entry.wifi_connect.as_ref().map(connect_line);
     let wifi_failed = entry
         .wifi_connect
@@ -547,6 +551,15 @@ fn RememberedTile(entry: RememberedView, on_action: EventHandler<UiAction>) -> E
                     ActionButton {
                         key: "{\"connect-wifi\"}",
                         action: wifi.action,
+                        running: false,
+                        variant: ActionButtonVariant::Outline,
+                        on_action,
+                    }
+                }
+                if let Some(relay) = relay {
+                    ActionButton {
+                        key: "{\"connect-relay\"}",
+                        action: relay.action,
                         running: false,
                         variant: ActionButtonVariant::Outline,
                         on_action,

@@ -33,6 +33,7 @@ fn wifi_remembered_board_offers_connect() -> Element {
 fn wifi_remembered_board_connecting() -> Element {
     remembered_tile(Some(UiWifiConnect {
         host: "192.168.1.40".to_string(),
+        through_relay: false,
         connecting: true,
         error: None,
     }))
@@ -84,6 +85,7 @@ fn wifi_add_slot_connecting() -> Element {
         Some("192.168.1.40"),
         Some(UiWifiConnect {
             host: "192.168.1.40".to_string(),
+            through_relay: false,
             connecting: true,
             error: None,
         }),
@@ -191,6 +193,7 @@ fn add_slot(typed: Option<&str>, connect: Option<UiWifiConnect>, connecting: boo
 fn failed(host: &str, failure: WifiConnectFailure) -> UiWifiConnect {
     UiWifiConnect {
         host: host.to_string(),
+        through_relay: false,
         connecting: false,
         error: Some(failure.words()),
     }

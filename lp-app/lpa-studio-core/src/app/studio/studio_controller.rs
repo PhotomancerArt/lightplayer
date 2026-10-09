@@ -62,6 +62,9 @@ use crate::{
 /// stream can force a full-view rebuild.
 const LOG_ONLY_PUBLISH_MIN_GAP_SECS: f64 = 0.25;
 
+/// Who a connect through the relay reaches, as a card's line names it.
+const RELAY_HOST: &str = "lightplayer.app";
+
 /// The address a docs page's anonymous sim answers to inside its own
 /// leased controller.
 ///
@@ -149,7 +152,8 @@ pub struct StudioController {
     /// a WebSocket (Wi-Fi M6 P07; no flag since M8).
     lan_transport: Option<Rc<crate::LanDeviceTransport>>,
     /// The transport that reaches boards through lightplayer.app's relay
-    /// (the network transport's P05): installed behind `?relay=1` only.
+    /// (the network transport's P05): installed in every browser with a
+    /// WebSocket since PR C.
     relay_transport: Option<Rc<crate::RelayDeviceTransport>>,
     /// Where each board Studio has met is on Wi‑Fi, by MAC: learned from
     /// its status on any link, kept in this browser by the web edge
@@ -670,15 +674,17 @@ impl StudioController {
 
     /// Install the transport that reaches boards through lightplayer.app's
     /// relay (the network transport's P05), beside the others. The web edge
-    /// installs it behind `?relay=1` only, so a page without the flag holds
-    /// no relay half and a `relay:` endpoint is refused by name. Its links
-    /// present [`Self::network_link_keys`]: held keys only.
+    /// installs it in every browser with a WebSocket (PR C: no flag); a page
+    /// without it holds no relay half, and a `relay:` endpoint is refused by
+    /// name. Its links present [`Self::network_link_keys`]: held keys only.
+    /// With it installed, a remembered board is offered "Connect through
+    /// lightplayer.app" while someone is signed in.
     pub fn set_relay_transport(&mut self, transport: Rc<crate::RelayDeviceTransport>) {
         self.relay_transport = Some(transport);
         self.install_device_transport();
     }
 
-    /// Whether this page reaches boards through lightplayer.app (`?relay=1`).
+    /// Whether this page reaches boards through lightplayer.app.
     pub fn reaches_relay(&self) -> bool {
         self.relay_transport.is_some()
     }
@@ -775,6 +781,9 @@ impl StudioController {
                 self.access
                     .network_link_keys()
                     .alias(&url, &key.to_string());
+                // One answer per card: what the relay said goes.
+                self.wifi_connects
+                    .forget(crate::WifiConnectTarget::Relay(key));
                 (crate::WifiConnectTarget::Board(key), url)
             }
             crate::WifiConnectOp::Address { url } => (crate::WifiConnectTarget::Address, url),
@@ -817,6 +826,66 @@ impl StudioController {
         }
         let connected = result.is_ok();
         self.wifi_connects.finish(target, host, result);
+        if connected {
+            self.device_sweep_pending = true;
+            self.run_due_device_sweep();
+        }
+        self.mark_dirty();
+    }
+
+    /// Start the connect through lightplayer.app `op` asks for: open the
+    /// board's relay session (`relay:<mac>`), presenting the keys this
+    /// browser holds, and hear how it went on the actor's queue
+    /// ([`Self::finish_relay_connect`]).
+    fn start_relay_connect(&mut self, op: crate::RelayConnectOp) -> UiResult {
+        let Some(transport) = self.relay_transport.clone() else {
+            return Err(UiError::UnsupportedAction(
+                crate::WIFI_NEEDS_WEBSOCKET.to_string(),
+            ));
+        };
+        let Some(key) = self.board_key(op.device) else {
+            return Err(UiError::UnsupportedAction(
+                "this board has not said who it is yet".to_string(),
+            ));
+        };
+        let target = crate::WifiConnectTarget::Relay(key);
+        if self.wifi_connects.connecting(target) {
+            return Ok(UiNotices::new());
+        }
+        let (Some(spawner), Some(tx)) = (self.wifi_spawner.clone(), self.wifi_tx.clone()) else {
+            return Err(UiError::UnsupportedAction(
+                "this page cannot open a connection".to_string(),
+            ));
+        };
+        // One answer per card: what the LAN said goes.
+        self.wifi_connects
+            .forget(crate::WifiConnectTarget::Board(key));
+        self.wifi_connects.start(target, RELAY_HOST);
+        self.mark_dirty();
+        let attempt = transport.connect(&key.to_string());
+        spawner(Box::pin(async move {
+            let result = attempt.await;
+            tx.send(crate::StudioCommand::Network(
+                crate::app::network::NetworkCommand::RelayConnected { board: key, result },
+            ));
+        }));
+        Ok(UiNotices::new())
+    }
+
+    /// A connect through lightplayer.app ended. On success the board is
+    /// present: the sweep links it now, and its hello merges it with its
+    /// card by MAC.
+    fn finish_relay_connect(
+        &mut self,
+        board: lpa_devices::BoardKey,
+        result: Result<(), crate::RelayConnectFailure>,
+    ) {
+        if let Err(failure) = &result {
+            log::info!("relay: {board}: {}", failure.words());
+        }
+        let connected = result.is_ok();
+        self.wifi_connects
+            .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
         if connected {
             self.device_sweep_pending = true;
             self.run_due_device_sweep();
@@ -1409,6 +1478,10 @@ impl StudioController {
         } = command
         {
             self.finish_wifi_connect(target, &host, result);
+            return;
+        }
+        if let crate::app::network::NetworkCommand::RelayConnected { board, result } = command {
+            self.finish_relay_connect(board, result);
             return;
         }
         self.learn_wifi_address(&command);
@@ -2084,9 +2157,7 @@ impl StudioController {
             .iter()
             .filter_map(|device| {
                 let key = self.board_key(device.id)?;
-                let connect = self
-                    .wifi_connects
-                    .view(crate::WifiConnectTarget::Board(key))?;
+                let connect = self.wifi_connects.view_board(key)?;
                 Some((device.id, connect))
             })
             .collect();
@@ -3241,6 +3312,9 @@ impl StudioController {
             if let Some(offer) = self.connect_wifi_offer(view, &facts) {
                 offers.publish(offer);
             }
+            if let Some(offer) = self.connect_relay_offer(view, &facts) {
+                offers.publish(offer);
+            }
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
             if let Some(wifi) = roster.wifi.get(&view.id) {
                 for offer in crate::app::network::wifi_offers(&facts.prefix, wifi) {
@@ -3291,6 +3365,36 @@ impl StudioController {
             &address.ip,
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Board(key)),
+        ))
+    }
+
+    /// `devices/<board>/connect-relay`: "Connect through lightplayer.app"
+    /// on the card of a board Studio has met (it said its MAC), while
+    /// nothing reaches it, on a page that reaches the relay, while someone
+    /// is signed in (the account's keys are what open a board through the
+    /// relay). Not on a runtime. Disabled while it is being reached.
+    ///
+    /// No list of the account's boards stands behind it, and nothing asks
+    /// lightplayer.app whether the board is online first: the press finds
+    /// out, and an offline board says so on its tile.
+    fn connect_relay_offer(
+        &self,
+        view: &crate::DeviceView,
+        facts: &crate::DeviceOfferFacts<'_>,
+    ) -> Option<crate::UiOffer> {
+        if self.relay_transport.is_none()
+            || self.access.account_keys().is_none()
+            || facts.face != crate::DeviceFace::Wire
+            || view.status != crate::DeviceStatus::Offline
+        {
+            return None;
+        }
+        let key = self.board_key(view.id)?;
+        Some(crate::connect_relay_offer(
+            &facts.prefix,
+            view.id,
+            self.wifi_connects
+                .connecting(crate::WifiConnectTarget::Relay(key)),
         ))
     }
 
@@ -4003,6 +4107,10 @@ impl StudioController {
         if node_id.as_str() == crate::WifiConnectOp::NODE_ID {
             let op = action.into_op::<crate::WifiConnectOp>()?;
             return self.start_wifi_connect(op);
+        }
+        if node_id.as_str() == crate::RelayConnectOp::NODE_ID {
+            let op = action.into_op::<crate::RelayConnectOp>()?;
+            return self.start_relay_connect(op);
         }
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;
@@ -5955,8 +6063,7 @@ impl StudioController {
         };
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
         if let Some(key) = forgotten_board {
-            self.wifi_connects
-                .forget(crate::WifiConnectTarget::Board(key));
+            self.wifi_connects.forget_board(key);
             if self.wifi_addresses.forget(&key) {
                 self.wifi_addresses_changed();
             }
