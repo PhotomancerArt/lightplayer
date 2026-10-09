@@ -4907,8 +4907,18 @@ walk-ble-emu *args:
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
 # `lightplayer.app` through the LAN's uplink to an in-process relay), keeps
 # its log, and checks each step against the board's own `[relay]` words
-# (target/walk-wifi-emu/relay/). Studio's relay walk is M8's. Not CI (the
-# cell is, in `test-emu-serve`).
+# (target/walk-wifi-emu/relay/) — relay protocol 2's pictures among them: one
+# right after registering, the project's name and colours, watched then idle
+# by itself, lost at a deploy, kept while offline. Not CI (the cell is, in
+# `test-emu-serve`).
+#
+# `relay-p1` (pictures-through-the-cloud plan P6, the same script with
+# `--protocol-1`): a core built at the last relay protocol 1 commit (pinned
+# in the script) at this hub — registered, listed at protocol 1, routed,
+# never sent a protocol 2 frame (one leg across a minute of watching), back
+# after a deploy. The image: `LP_RELAY_P1_ELF`, else CI's artifact of that
+# commit (7 days), else a throwaway-worktree build
+# (target/walk-wifi-emu/relay-p1/). Not CI.
 #
 # `studio-lan` (network-transport plan P04,
 # scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
