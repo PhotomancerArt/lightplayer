@@ -336,12 +336,25 @@ against the prototype's ≈ 39 KB. The largest functions: `RecordLog::append`
 division for the cost-benefit score (0.95 KB), `rebuild_dir` (0.9 KB),
 `decode_dir` (0.9 KB, owned `String`s and UTF-8 checks).
 
+**The extension room (format version 3, P9) costs +420 B of `.text` and
++36 B of `.rodata`** — measured with the C6's own flags (`-Zbuild-std` with
+`optimize_for_size`, frame pointers, `location-detail=none`,
+`fmt-debug=none`; the size study's method), probe `.text` 50,320 → 50,740 B
+(`459a3b34d` → this phase): +290 B in mount (inlined into the probe's
+`_start`), +104 B in `RecordLog::append` (the header's size byte),
++26 B in `RootRecord::decode` (the tail), the rest outlining noise. RAM does
+not move: resident, transient and mount peaks are byte-identical in
+`ram_budget_tests.rs`; mount reads 4 B more per sector header (+504 B at
+128 sectors).
+
 ### Power cuts
 
 - In-crate sweeps at every cut point (`LP_TREE_STORE_SWEEP_CUTS=1000000
-  LP_TREE_STORE_SWEEP_STEPS=12`, release): **9,819 cuts, 0 failures**
-  (per-call 387 + 303, transaction 825, append 1,176, deflated push 75, GC
-  churn 4,491 + 2,562). The default run samples them in < 20 s.
-- `lp-store-bench smoke`: T1 stored 853 cases + 25 random-walk cuts, T1
-  host_deflate 856 + 25, **0 failures, 0 non-atomic** (F2 alongside: 0
-  failures, 153 non-atomic, as before).
+  LP_TREE_STORE_SWEEP_STEPS=12`, release), format version 3: **9,759 cuts,
+  0 failures** (per-call 387 + 303, transaction 825, append 1,176, deflated
+  push 75, GC churn 4,464 + 2,529; version 2 was 9,819 — the 4-byte-longer
+  header moves when GC runs). The default run samples them in < 20 s.
+- `lp-store-bench smoke`, format version 3: T1 stored 862 cases + 25
+  random-walk cuts, T1 host_deflate 859 + 25, **0 failures, 0 non-atomic**
+  (version 2: 853 + 25 and 856 + 25; F2, which this format does not touch,
+  was 0 failures, 153 non-atomic at P7 and was not re-run).
