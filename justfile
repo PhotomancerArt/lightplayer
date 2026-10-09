@@ -4425,6 +4425,21 @@ flash-tears-analyze *args:
         scripts/emu/flash-tears-analyze.py {{ args }}
     fi
 
+# The flash-tears payload's own flow run on lp-nor-sim under every tear model
+# (fw-checks' `flash_tears_on_nor_sim` example), sorted by the same analysis
+# as the silicon transcripts: does a model reproduce CX1's tear histogram?
+# Simulator numbers, written under target/, never committed. Then
+# `just flash-tears-analyze --check-model` says whether lp-nor-sim's
+# calibrated weights still match every committed silicon cut.
+flash-tears-sim cuts="200" seed="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tear in clean byte_prefix random_bits calibrated; do
+        cargo run -q -p fw-checks --features check-flash-tears --example flash_tears_on_nor_sim -- \
+            --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --out "target/flash-tears-sim/$tear-{{ seed }}.txt"
+    done
+    scripts/emu/flash-tears-analyze.py target/flash-tears-sim/*-{{ seed }}.txt
+
 # The classic ESP32 (v3) machine's speed probe: three pinned reference images
 # at t1 — the only grade this machine has — both cores at the default
 # quantum, best of two runs, reported as user seconds, instructions/second in

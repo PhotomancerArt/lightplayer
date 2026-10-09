@@ -68,5 +68,14 @@ log = { workspace = true, default-features = false }
 # build, just newly linked into this crate.
 lps-builtins = { path = "../../lp-shader/lps-builtins", default-features = false, optional = true }
 
+[dev-dependencies]
+# `examples/flash_tears_on_nor_sim.rs` only: the payload's flow on the
+# simulated part (MIT, `lp-emu/`; AGPL may depend on MIT, never the reverse).
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+
+[[example]]
+name = "flash_tears_on_nor_sim"
+required-features = ["check-flash-tears"]
+
 [lints]
 workspace = true

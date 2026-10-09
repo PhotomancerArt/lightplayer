@@ -5,6 +5,8 @@
     scripts/emu/flash-tears-analyze.py <transcript.txt>...  # just these
     scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.md
     scripts/emu/flash-tears-analyze.py --json               # one JSON object per cut, for a notebook-free pipe
+    scripts/emu/flash-tears-analyze.py --model-table        # lp-nor-sim's calibrated model, as Rust
+    scripts/emu/flash-tears-analyze.py --check-model        # does lp-nor-sim hold those numbers?
 
 The `flash-tears` payload (`lp-fw/fw-checks/src/checks/flash_tears/`) prints,
 on every boot, one `[fw-check-json]` record per region sector. This reads
@@ -689,6 +691,76 @@ def self_test() -> int:
     return 0
 
 
+MODEL_RS = "lp-emu/lp-nor-sim/src/calibrated_tear.rs"
+
+
+def model_table(rows: list[dict]) -> str:
+    """`lp-nor-sim`'s calibrated model (`TearMix::CX1`, `CX1_ERASING`,
+    `CX1_READS_FF_WEAK`) as these silicon cuts give it, in the Rust the
+    model file holds."""
+    rows = [r for r in rows if r["configuration"].startswith("silicon")]
+    n = Counter(r["class"] for r in rows)
+    erasing = sorted(
+        ((r["residual_zero_bits"], r["weak_bits"]) for r in rows if r["class"] == "erase:erasing"),
+        key=lambda t: t,
+    )
+    ff_weak = sorted(r["weak_bits"] for r in rows if r["class"] == "erase:reads-ff-weak")
+    out = [
+        f"// {len(rows)} silicon cuts.",
+        "pub const CX1: TearMix = TearMix {",
+        f"    erase_zeroing: {n['erase:zeroing']},",
+        f"    erase_all_zero: {n['erase:all-zero']},",
+        f"    erase_erasing: {n['erase:erasing']},",
+        f"    erase_reads_ff_weak: {n['erase:reads-ff-weak']},",
+        f"    erase_reads_ff: {n['erased']},",
+        f"    program_command_boundary: {n['program:command-boundary']},",
+        f"    program_mid_command: {n['program:mid-command']},",
+        "};",
+        f"pub const CX1_ERASING: [(u32, u32); {len(erasing)}] = [",
+        *[f"    ({z}, {w})," for z, w in erasing],
+        "];",
+        f"pub const CX1_READS_FF_WEAK: [u32; {len(ff_weak)}] = [{', '.join(map(str, ff_weak))}];",
+    ]
+    for shape in ("untouched", "erase:old-left", "program:scattered", "unknown"):
+        if n[shape]:
+            out.append(f"// NOT MODELLED: {n[shape]} cut(s) of shape `{shape}`; the model has no such shape")
+    return "\n".join(out) + "\n"
+
+
+def check_model(table: str, rs_path: str) -> int:
+    """Does the model file hold the numbers these transcripts give?"""
+    import re
+
+    with open(rs_path) as f:
+        rs = f.read()
+
+    def numbers(text: str, start: str, end: str) -> list[int]:
+        at = text.index(start)
+        body = text[at + len(start) : text.index(end, at + len(start))]
+        body = re.sub(r"//[^\n]*", "", body)
+        return [int(x.replace("_", "")) for x in re.findall(r"\b\d[\d_]*\b", body)]
+
+    ok = True
+    for start, end in (
+        ("pub const CX1: TearMix = TearMix {", "};"),
+        ("pub const CX1_ERASING: [(u32, u32);", "];"),
+        ("pub const CX1_READS_FF_WEAK: [u32;", ";"),
+    ):
+        want, have = numbers(table, start, end), numbers(rs, start, end)
+        if want != have:
+            ok = False
+            print(f"MODEL DIFFERS: `{start.split(':')[0]}` holds {have}, the transcripts give {want}")
+    for line in table.splitlines():
+        if line.startswith("// NOT MODELLED"):
+            ok = False
+            print(line)
+    if ok:
+        print(f"{rs_path} matches the transcripts ({table.splitlines()[0][3:]})")
+        return 0
+    print(f"re-run with --model-table and update {rs_path} (and its doc comment's counts)")
+    return 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("transcripts", nargs="*", help=f"default: {DEFAULT_GLOB}")
@@ -696,6 +768,10 @@ def main() -> int:
                     help=f"replace the block between {BEGIN} and {END} in PATH")
     ap.add_argument("--json", action="store_true", help="print one JSON object per cut instead")
     ap.add_argument("--self-test", action="store_true", help="check the zero-run reconstruction, then exit")
+    ap.add_argument("--model-table", action="store_true",
+                    help="print lp-nor-sim's calibrated model as the silicon cuts give it (Rust)")
+    ap.add_argument("--check-model", action="store_true",
+                    help=f"exit 1 unless {MODEL_RS} holds what --model-table prints")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
@@ -707,6 +783,13 @@ def main() -> int:
         print("no transcripts found", file=sys.stderr)
         return 1
     text, rows = analyze(paths)
+    if args.model_table or args.check_model:
+        table = model_table(rows)
+        if args.model_table:
+            sys.stdout.write(table)
+            return 0
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return check_model(table, os.path.join(root, MODEL_RS))
     if args.json:
         for r in rows:
             print(json.dumps(r, sort_keys=True))

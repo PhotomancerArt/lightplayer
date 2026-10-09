@@ -142,16 +142,16 @@ impl Default for TearMix {
 }
 
 /// The 28 *erasing* cuts on CX1, as (stable zero bits left, weak bits),
-/// sorted by the first. A 4 KiB sector has 32,768 bits. The model draws a
+/// sorted. A 4 KiB sector has 32,768 bits. The model draws a
 /// point of this empirical distribution, linearly interpolated between
 /// neighbours, so every draw lies inside what was observed.
 pub const CX1_ERASING: [(u32, u32); 28] = [
     (1, 0),
-    (1, 6),
     (1, 1),
     (1, 2),
-    (3, 3),
+    (1, 6),
     (3, 0),
+    (3, 3),
     (4, 2),
     (6, 8),
     (18, 14),
