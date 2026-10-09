@@ -454,6 +454,33 @@ pub struct RecordProvenance<'a> {
     /// payload whose subject is one machine, which is every payload but
     /// `espnow-broadcast`. See [`crate::header::TranscriptHeader::machine`].
     pub machine: Option<&'a str>,
+    /// The board this capture was taken on, as the sitting names it (its
+    /// desk mark and slug, and what it is): the sidecar's `board`. Silicon
+    /// cannot read it, so a sitting states it; refused when the
+    /// configuration already pins a different one.
+    pub board: Option<&'a str>,
+    /// The board's MAC, as the sitting states it: the sidecar's `mac`.
+    /// Refused when the configuration already pins a different one.
+    pub mac: Option<&'a str>,
+    /// Anything else the sitting knows that a reader needs (a flash part's
+    /// JEDEC id, say): appended to the sidecar's `note`.
+    pub note: Option<&'a str>,
+}
+
+/// A board identity the sitting stated, or the configuration's own; refused
+/// when the two disagree.
+fn stated_identity(
+    field: &str,
+    pinned: Option<&str>,
+    stated: Option<&str>,
+) -> Result<Option<String>> {
+    match (pinned, stated) {
+        (Some(p), Some(s)) if p != s => bail!(
+            "the configuration pins {field} `{p}`, and the sitting says `{s}`: \
+             a transcript has one {field}"
+        ),
+        (p, s) => Ok(s.or(p).map(str::to_string)),
+    }
 }
 
 /// `validate record <set> --config <name>` — run, then write each capture into
@@ -598,6 +625,8 @@ pub fn record_set(
     let entry = cfg.configuration(configuration)?;
     refuse_unrunnable_seams(&entry, "record")?;
     refuse_a_pace(&entry, "record")?;
+    let board = stated_identity("board", entry.board.as_deref(), provenance.board)?;
+    let mac = stated_identity("mac", entry.mac.as_deref(), provenance.mac)?;
     let config = entry.parsed()?;
     check_link_override(opts, &config)?;
     let payloads = cfg.payloads_in(set)?;
@@ -626,8 +655,8 @@ pub fn record_set(
             firmware_dirty: provenance.firmware_dirty,
             firmware_sha256: None,
             silicon_rev: entry.silicon_rev.clone(),
-            board: entry.board.clone(),
-            mac: entry.mac.clone(),
+            board: board.clone(),
+            mac: mac.clone(),
             // What ran it. The driver fills this: silicon's tools are
             // espflash's, an emulator's are its own commit and the ROM it
             // loaded, and only the driver knows which.
@@ -642,10 +671,18 @@ pub fn record_set(
             capture: Some(format!(
                 "lp-cli validate record {set} --config {configuration}"
             )),
-            note: if plan.notes.is_empty() {
-                None
-            } else {
-                Some(plan.notes.join(" "))
+            note: {
+                let notes: Vec<&str> = plan
+                    .notes
+                    .iter()
+                    .map(String::as_str)
+                    .chain(provenance.note)
+                    .collect();
+                if notes.is_empty() {
+                    None
+                } else {
+                    Some(notes.join(" "))
+                }
             },
             // The companion file's name, when this configuration can observe
             // a pad and this payload makes a claim about one. A file name,
@@ -704,6 +741,14 @@ pub fn record_set(
         }
         let _ = writeln!(s, "  would write {}", dest.display());
         let _ = writeln!(s, "           + {}", sidecar_path(&dest).display());
+        if header.board.is_some() || header.mac.is_some() {
+            let _ = writeln!(
+                s,
+                "             board {} · mac {}",
+                header.board.as_deref().unwrap_or("—"),
+                header.mac.as_deref().unwrap_or("—")
+            );
+        }
         if let Some(p) = &pins_dest {
             let _ = writeln!(s, "           + {}", p.display());
         }
@@ -979,6 +1024,9 @@ mod tests {
                 firmware_commit: "d6cfaa2051ae",
                 firmware_dirty: Some(true),
                 machine: None,
+                board: None,
+                mac: None,
+                note: None,
             },
             true,
         )
@@ -1017,6 +1065,9 @@ mod tests {
                 firmware_commit: "d6cfaa2051ae",
                 firmware_dirty: None,
                 machine: None,
+                board: None,
+                mac: None,
+                note: None,
             },
             true,
         )
@@ -1062,6 +1113,9 @@ mod tests {
             firmware_commit: "d6cfaa2051ae",
             firmware_dirty: None,
             machine: None,
+            board: None,
+            mac: None,
+            note: None,
         };
         let err = format!(
             "{:#}",
@@ -1110,6 +1164,9 @@ mod tests {
             firmware_commit: "733d6886a",
             firmware_dirty: None,
             machine: None,
+            board: None,
+            mac: None,
+            note: None,
         };
         let record = |name: &str| {
             format!(
@@ -1173,6 +1230,9 @@ mod tests {
             firmware_commit: "d6cfaa2051ae",
             firmware_dirty: None,
             machine: None,
+            board: None,
+            mac: None,
+            note: None,
         };
         let record = |config: &str| {
             record_set(
@@ -1225,5 +1285,26 @@ mod tests {
         assert!(err.contains("compile-parity"), "{err}");
         let err = cfg.configuration("nope").unwrap_err().to_string();
         assert!(err.contains("esp-emu:0.42.0"), "{err}");
+    }
+
+    #[test]
+    fn a_sitting_states_the_board_silicon_cannot_read_but_never_overrides_a_pin() {
+        assert_eq!(
+            stated_identity("mac", None, Some("14:c1:9f:e6:54:90")).unwrap(),
+            Some("14:c1:9f:e6:54:90".to_string())
+        );
+        assert_eq!(
+            stated_identity("mac", Some("a0:f2"), None).unwrap(),
+            Some("a0:f2".to_string())
+        );
+        assert_eq!(
+            stated_identity("mac", Some("a0"), Some("a0")).unwrap(),
+            Some("a0".to_string())
+        );
+        assert_eq!(stated_identity("board", None, None).unwrap(), None);
+        let err = stated_identity("mac", Some("a0"), Some("14"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("pins mac `a0`"), "{err}");
     }
 }

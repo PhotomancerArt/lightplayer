@@ -141,6 +141,22 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::FlashTears,
+        display_name: "Power cuts on a sacrificial board: what real NOR tears look like",
+        firmware_features: &["test_flash_tears"],
+        // The payload never finishes: each boot scans the region, prints the
+        // scan-done line and goes back to its work loop for the host to cut.
+        // So no done marker; lp-emu-validate's registry carries
+        // `[flash-tears] === SCAN DONE ===` as `Sentinel::Ready`, and
+        // `the_flash_tears_scan_marker_is_the_modules` below pins the module's
+        // constant to that spelling.
+        done_marker: None,
+        trace_slug: "flash-tears",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -507,6 +523,16 @@ mod tests {
         assert_eq!(
             check.done_marker,
             Some(crate::checks::espnow_broadcast::DONE_MARKER)
+        );
+    }
+
+    #[test]
+    fn the_flash_tears_scan_marker_is_the_modules() {
+        let check = find_check("flash-tears").expect("registered");
+        assert_eq!(check.done_marker, None, "it never finishes");
+        assert_eq!(
+            crate::checks::flash_tears::SCAN_DONE_MARKER,
+            "[flash-tears] === SCAN DONE ==="
         );
     }
 }

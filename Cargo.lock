@@ -4126,6 +4126,7 @@ name = "fw-checks"
 version = "40.0.0"
 dependencies = [
  "log",
+ "lp-nor-sim",
  "lps-builtins",
  "serde",
  "serde_json",

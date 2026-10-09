@@ -5,7 +5,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::wear_out::{WearOut, WearState, on_erase, on_program};
-use crate::{FaultPlan, NorError, NorGeometry, NorSectorState, NorStats, SimRng, TearModel};
+use crate::{
+    FaultPlan, NorError, NorGeometry, NorSectorState, NorStats, SimRng, TearMix, TearModel,
+    calibrated_tear,
+};
 
 /// A NOR part that can lose power after any operation.
 ///
@@ -32,6 +35,8 @@ pub struct NorFlashSim {
     peak_nonblank: u32,
     /// Injected wear-out (`wear_out.rs`); empty = nothing ever wears out.
     wear: Vec<WearState>,
+    /// The shape weights [`TearModel::Calibrated`] draws from.
+    tear_mix: TearMix,
 }
 
 /// What `begin_op` decided about the operation about to run.
@@ -66,6 +71,7 @@ impl NorFlashSim {
             nonblank_count: if byte != 0xFF { geom.sector_count } else { 0 },
             peak_nonblank: if byte != 0xFF { geom.sector_count } else { 0 },
             wear: Vec::new(),
+            tear_mix: TearMix::CX1,
         }
     }
 
@@ -108,6 +114,16 @@ impl NorFlashSim {
         self.ops_since_plan = 0;
         self.tear_rng = SimRng::new(plan.seed ^ 0x7EA2_7EA2_7EA2_7EA2);
         self.read_rng = SimRng::new(plan.seed ^ 0x4EAD_4EAD_4EAD_4EAD);
+    }
+
+    /// The weights [`TearModel::Calibrated`] draws its shapes from
+    /// (default [`TearMix::CX1`], the observed ones).
+    pub fn set_tear_mix(&mut self, mix: TearMix) {
+        self.tear_mix = mix;
+    }
+
+    pub fn tear_mix(&self) -> TearMix {
+        self.tear_mix
     }
 
     /// Operations completed (or torn) since the plan was installed.
@@ -272,6 +288,7 @@ impl NorFlashSim {
                 Ok(())
             }
             OpFate::Tear => {
+                self.stats.torn_erases += 1;
                 if self.plan.tear != TearModel::Clean {
                     self.mark_nonblank(sector as usize);
                 }
@@ -367,6 +384,14 @@ impl NorFlashSim {
         let cells = Arc::make_mut(&mut self.sectors[sector]);
         match tear {
             TearModel::Clean => {}
+            TearModel::Calibrated
+            | TearModel::CalibratedZeroing
+            | TearModel::CalibratedAllZero
+            | TearModel::CalibratedErasing
+            | TearModel::CalibratedReadsFfWeak
+            | TearModel::CalibratedReadsFf => {
+                calibrated_tear::tear_program(&self.tear_mix, rng, cells, off, data)
+            }
             TearModel::BytePrefix => {
                 let n = rng.below(data.len() as u64) as usize;
                 for (i, &d) in data.iter().enumerate().take(n) {
@@ -395,6 +420,7 @@ impl NorFlashSim {
     /// A torn erase, in one of three seeded shapes: (0) a byte-wise mix of
     /// old, `0xFF` and weak; (1) reads erased but carries a sprinkling of weak
     /// bits; (2) erased up to a point, old after it, weak around the edge.
+    /// Under [`TearModel::Calibrated`], the shapes `calibrated_tear` draws.
     fn tear_erase(&mut self, sector: usize) {
         if self.plan.tear == TearModel::Clean {
             return;
@@ -405,8 +431,19 @@ impl NorFlashSim {
         let state = &mut self.damage[sector];
         state.tainted = true;
         let weak = state.weak_mask(ss);
-        match rng.below(3) {
-            0 => {
+        let tear = self.plan.tear;
+        let mix = match tear.forced_erase_shape() {
+            Some(shape) => Some(self.tear_mix.erase_only(shape)),
+            None if tear.is_calibrated() => Some(self.tear_mix),
+            None => None,
+        };
+        let shape = match mix {
+            Some(_) => None,
+            None => Some(rng.below(3)),
+        };
+        match shape {
+            None => calibrated_tear::tear_erase(&mix.unwrap_or_default(), rng, cells, weak),
+            Some(0) => {
                 for i in 0..ss {
                     match rng.below(10) {
                         0..=3 => {}
@@ -419,7 +456,7 @@ impl NorFlashSim {
                     }
                 }
             }
-            1 => {
+            Some(1) => {
                 cells.fill(0xFF);
                 for w in weak.iter_mut() {
                     if rng.chance(1, 32) {
@@ -427,7 +464,7 @@ impl NorFlashSim {
                     }
                 }
             }
-            _ => {
+            Some(_) => {
                 let p = rng.below(ss as u64) as usize;
                 cells[..p].fill(0xFF);
                 let lo = p.saturating_sub(16);
