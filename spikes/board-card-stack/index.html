@@ -48,7 +48,7 @@
   --shell-bd:#262a31; --shell-bd-strong:#3a3f48; --shell-tx:#e8e6e1;
 }
 * { box-sizing:border-box; }
-body { margin:0; padding:28px 32px 160px; background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
+body { margin:0; padding-block:28px 160px; padding-inline:clamp(16px, 3vw, 32px); background:var(--shell-bg); color:var(--shell-tx); font:14px/1.45 var(--font); }
 h1 { font-size:13px; letter-spacing:.12em; color:var(--shell-mut); text-transform:uppercase; margin:0 0 6px; }
 p.hint { color:var(--shell-dim); font-size:12px; margin:0 0 8px; max-width:940px; }
 p.hint b { color:var(--shell-mut); font-weight:600; }
@@ -661,6 +661,40 @@ pre.shape { max-width:1180px; margin:12px 0 0; padding:12px 14px; border:1px sol
 .levels .lv { border:1px solid var(--shell-bd); border-radius:10px; padding:12px 14px; background:var(--bg); font-size:12.5px; color:var(--shell-mut); }
 .levels .lv b { color:var(--shell-tx); display:block; margin-bottom:4px; font-size:13px; }
 .levels .lv code { font-size:11px; }
+/* =====================================================================
+   The gate kit: pick an option, leave a note, comment anywhere. On
+   claude.ai the answers go to the page's own store (Claude reads them);
+   opened as a local file they stay in this browser, with a Copy button.
+   ===================================================================== */
+.gatebar { position:sticky; top:env(safe-area-inset-top, 0px); z-index:90; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px;
+  margin:14px 0 0; padding:9px 12px; border:1px solid var(--shell-bd-strong); border-radius:10px; background:rgba(14,15,18,.94); backdrop-filter:blur(8px); font-size:12.5px; color:var(--shell-mut); }
+.gatebar b { color:var(--shell-tx); }
+.gatebar .picks { display:flex; flex-wrap:wrap; gap:6px; flex:1; min-width:0; }
+.gatebar .pk { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:6px; border:1px solid var(--shell-bd-strong); font:700 11.5px var(--mono); color:var(--shell-dim); text-decoration:none; }
+.gatebar .pk.set { color:#0b0c0e; background:#7be0b2; border-color:#7be0b2; }
+.gatebar .pk.noted::after { content:"✎"; font-family:var(--font); font-weight:400; margin-left:2px; }
+.gatebar .save { font-size:11.5px; color:var(--shell-dim); white-space:nowrap; }
+.gatebar .save.ok { color:#7be0b2; }
+.gatebar button, .qtools button { appearance:none; font:inherit; cursor:pointer; background:#16181c; color:var(--shell-tx); border:1px solid var(--shell-bd-strong); border-radius:6px; padding:4px 10px; font-size:12px; }
+.gatebar button:hover, .qtools button:hover { background:#1e2126; }
+.pickbtn { appearance:none; font:inherit; cursor:pointer; margin-left:auto; display:inline-flex; align-items:center; gap:6px; padding:4px 11px; border-radius:7px; border:1px solid var(--shell-bd-strong); background:#16181c; color:var(--shell-tx); font-size:12px; font-weight:700; }
+.pickbtn:hover { border-color:#7be0b2; }
+.opt.picked { border-color:#7be0b2; box-shadow:0 0 0 2px rgba(123,224,178,.35); }
+.opt.picked .pickbtn { background:#7be0b2; border-color:#7be0b2; color:#0b0c0e; }
+.qtools { display:grid; gap:6px; margin-top:12px; max-width:1180px; }
+.qtools label { font-size:11.5px; font-weight:700; color:var(--shell-dim); letter-spacing:.04em; }
+.qtools .row { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+.qtools textarea { flex:1; min-width:0; min-height:44px; resize:vertical; border-radius:8px; border:1px solid var(--shell-bd-strong); background:#0e0f12; color:var(--shell-tx); padding:8px 10px; font:13px/1.45 var(--font); }
+.qtools textarea:focus-visible, .pickbtn:focus-visible, .gatebar button:focus-visible { outline:2px solid #a5b8ff; outline-offset:2px; }
+.gatebar .cmt-hint { font-size:11.5px; color:var(--shell-dim); }
+
+/* phone width: one column, no sideways scroll */
+@media (max-width: 760px) {
+  .opts.c2, .opts.c3, .duo, .duo.phoneduo, .anatomy2, .levels, .refrow { grid-template-columns:1fr !important; }
+  .app.phone { width:100%; }
+  table.v { display:block; overflow-x:auto; }
+  pre.shape { font-size:10.5px; }
+}
 </style>
 </head>
 <body>
@@ -670,6 +704,8 @@ pre.shape { max-width:1180px; margin:12px 0 0; padding:12px 14px; border:1px sol
 Two rules for every option: <b>a card never changes height</b> (rows never appear or disappear; a notice only tints its row), and <b>no boxes in boxes</b> (a notice is its row, edge to edge).
 The card is <b>two components</b>: one special <b>name bar</b> with the primary action, then a standard stack of <b>bars</b> that hold info and actions (below). The primary action connects to a board or opens it, across the three levels of connection.
 The page uses the leans; the questions are lettered to match the chat. Click a picture or name to open; click a firmware or hardware row for details.</p>
+
+<div class="gatebar" id="gatebar"></div>
 
 <section class="qsec" id="levels">
   <h2>The three levels of connection (vision D23–D26)</h2>
@@ -926,7 +962,7 @@ function popHtml(b, which){
       <div class="acts"><button class="btn sm outline">Rename</button><button class="btn sm outline">Move to a group</button><button class="btn sm outline">Reset</button><button class="btn sm outline lasting">Forget…</button></div></div>`;
 }
 function card(b, c=LEAN, open=null){
-  return `<div class="sc"><div class="pic" data-open="${b.id}">${canvasOf(b)}${statusNotch(b)}</div>${nameBar(b, c)}
+  return `<div class="sc" data-comment-target><div class="pic" data-open="${b.id}">${canvasOf(b)}${statusNotch(b)}</div>${nameBar(b, c)}
     ${projRow(b, c)}${connRow(b, c)}${fwRow(b, c)}${hwRow(b, c)}${open && open[0]===b.id ? popHtml(b, open[1]) : ''}</div>`;
 }
 function grid(ids, c=LEAN, open=null){
@@ -1054,7 +1090,87 @@ function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of 
 
 setInterval(() => { const t = performance.now()/1000; for (const e of canvases) if (e.c.dataset.rate==='slow') draw(e, t + e.seed); }, 700);
 
-build(); renderPage();
+window.GATE = { round:'stack-card-r3', leans:{ q3:'A', q6:'A', q7:'A', q8:'A', q9:'A' } };
+/* =====================================================================
+   The gate kit (see the CSS above). Works in three places:
+   - on claude.ai with `db`: answers saved to the store (Claude reads
+     them with ArtifactData), restored on load;
+   - anywhere else: answers saved in this browser, plus Copy answers;
+   - with `comments`: a Comment button per question opens the shell's
+     composer there (and every option is a comment target).
+   ===================================================================== */
+const GATE = window.GATE || { round:'round', leans:{} };
+const gate = { picks:{}, notes:{}, mode:'local', doc:null, timer:null };
+const LS_KEY = 'lp-spike-gate:' + GATE.round;
+function gateLoadLocal(){ try { const v = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); if (v) { gate.picks = v.picks || {}; gate.notes = v.notes || {}; } } catch {} }
+function gateSaveLocal(){ try { localStorage.setItem(LS_KEY, JSON.stringify({ picks:gate.picks, notes:gate.notes })); } catch {} }
+function gateQuestions(){ return [...document.querySelectorAll('section.qsec[id^="q"]')].filter(s => s.querySelector('.opts')); }
+function gateSummary(){
+  return gateQuestions().map(s => { const q = s.id; const p = gate.picks[q]; return `${q.toUpperCase()} ${p || '—'}`; }).join(', ')
+    + (Object.entries(gate.notes).filter(([,n]) => n && n.trim()).map(([q,n]) => `\n${q.toUpperCase()}: ${n.trim()}`).join(''));
+}
+function gateRenderBar(status){
+  const bar = document.getElementById('gatebar'); if (!bar) return;
+  const chips = gateQuestions().map(s => { const q = s.id, p = gate.picks[q], n = gate.notes[q] && gate.notes[q].trim();
+    return `<a class="pk ${p?'set':''} ${n?'noted':''}" href="#${q}">${q.toUpperCase()} ${p || '—'}</a>`; }).join('');
+  const where = gate.mode==='db' ? 'Saved for Claude' : 'Saved in this browser';
+  bar.innerHTML = `<b>Your answers</b><span class="picks">${chips}</span>
+    <span class="save ${status==='saved'?'ok':''}">${status==='saving' ? 'Saving…' : status==='error' ? 'Not saved — try again' : where}</span>
+    <button type="button" data-gate="leans">Take every lean</button>
+    ${gate.mode==='db' ? '' : '<button type="button" data-gate="copy">Copy answers</button>'}`;
+}
+function gateMarkPicks(){
+  gateQuestions().forEach(s => s.querySelectorAll('.opt').forEach(o => {
+    const letter = o.dataset.letter; o.classList.toggle('picked', gate.picks[s.id] === letter);
+    const b = o.querySelector('.pickbtn'); if (b) b.textContent = gate.picks[s.id] === letter ? `✓ ${s.id.toUpperCase()}-${letter} picked` : `Pick ${s.id.toUpperCase()}-${letter}`;
+  }));
+}
+function gateSave(){
+  gateSaveLocal(); gateRenderBar('saving');
+  clearTimeout(gate.timer);
+  gate.timer = setTimeout(async () => {
+    if (gate.mode !== 'db') { gateRenderBar('saved'); return; }
+    try { await gate.doc.set({ picks:gate.picks, notes:gate.notes, summary:gateSummary(), updatedAt:new Date().toISOString() }); gateRenderBar('saved'); }
+    catch { gateRenderBar('error'); }
+  }, 500);
+}
+function gateDecorate(){
+  // a Pick button in every option's header, a note box and a Comment button under every question
+  gateQuestions().forEach(s => {
+    s.querySelectorAll('.opt').forEach(o => {
+      const label = o.querySelector('.olabel'); if (!label) return;
+      const letter = label.textContent.trim().split('-').pop(); o.dataset.letter = letter;
+      o.setAttribute('data-comment-target', '');
+      if (!o.querySelector('.pickbtn')) o.querySelector('.ohead').insertAdjacentHTML('beforeend', `<button type="button" class="pickbtn" data-pick="${s.id}:${letter}">Pick</button>`);
+    });
+    if (!s.querySelector('.qtools')) s.insertAdjacentHTML('beforeend', `<div class="qtools"><label for="note-${s.id}">Note on ${s.id.toUpperCase()} (optional)</label>
+      <div class="row"><textarea id="note-${s.id}" data-note="${s.id}" placeholder="Anything to add, change or ask"></textarea><button type="button" class="cmtbtn" data-comment="${s.id}" hidden>Comment here</button></div></div>`);
+    const ta = s.querySelector('textarea[data-note]'); if (ta && gate.notes[s.id] != null) ta.value = gate.notes[s.id];
+  });
+  gateMarkPicks();
+}
+document.addEventListener('click', async e => {
+  const pick = e.target.closest('[data-pick]');
+  if (pick){ e.stopPropagation(); const [q, l] = pick.dataset.pick.split(':'); gate.picks[q] = gate.picks[q] === l ? undefined : l; if (!gate.picks[q]) delete gate.picks[q]; gateMarkPicks(); gateSave(); return; }
+  const g = e.target.closest('[data-gate]');
+  if (g && g.dataset.gate === 'leans'){ Object.assign(gate.picks, GATE.leans); gateMarkPicks(); gateSave(); return; }
+  if (g && g.dataset.gate === 'copy'){ const text = gateSummary(); try { await navigator.clipboard.writeText(text); g.textContent = 'Copied'; } catch { prompt && window.getSelection && (g.textContent = 'Select the summary to copy'); } setTimeout(() => g.textContent = 'Copy answers', 1500); return; }
+  const c = e.target.closest('[data-comment]');
+  if (c && gate.comments){ try { await gate.comments.openComposer({ element: document.getElementById(c.dataset.comment) }); } catch { c.hidden = true; } }
+}, true);
+document.addEventListener('input', e => { const t = e.target.closest('[data-note]'); if (!t) return; gate.notes[t.dataset.note] = t.value; gateRenderBar('saving'); clearTimeout(gate.noteTimer); gate.noteTimer = setTimeout(gateSave, 700); });
+async function gateStart(){
+  gateLoadLocal(); gateDecorate(); gateRenderBar();
+  const cl = window.claude;
+  if (!cl || !cl.use) return;
+  cl.use('comments').then(cm => { if (!cm) return; gate.comments = cm; document.querySelectorAll('.cmtbtn').forEach(b => b.hidden = false); });
+  const db = await cl.use('db'); if (!db) return;
+  gate.mode = 'db'; gate.doc = db.doc('gate/' + GATE.round);
+  try { const snap = await gate.doc.get(); if (snap.exists){ const v = snap.data() || {}; gate.picks = v.picks || {}; gate.notes = v.notes || {}; } } catch {}
+  gateDecorate(); document.querySelectorAll('textarea[data-note]').forEach(t => t.value = gate.notes[t.dataset.note] || ''); gateRenderBar();
+}
+
+build(); renderPage(); gateStart();
 const qs = new URLSearchParams(location.search);
 if (qs.get('open')) { OPEN = qs.get('open').split(':'); renderPage(); }
 if (qs.get('shot')) { document.body.classList.add('shot'); document.getElementById(qs.get('shot')).classList.add('shot-keep'); }
