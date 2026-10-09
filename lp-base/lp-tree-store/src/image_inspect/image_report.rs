@@ -92,7 +92,9 @@ pub enum RecordKindReport {
     Root,
     /// A kind (or kind and codec pair) this version does not define:
     /// garbage by rule, skipped (FORMAT.md "Unknown records").
-    Unknown { kind: u8 },
+    Unknown {
+        kind: u8,
+    },
 }
 
 impl RecordKindReport {

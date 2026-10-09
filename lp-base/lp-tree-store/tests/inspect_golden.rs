@@ -3,9 +3,7 @@
 //! clean `check` (every id hashes, every chunk inflates) — the second
 //! reader the golden exists to keep honest.
 
-use lp_tree_store::{
-    EntryKindReport, MountVerdict, RecordKindReport, SoftSha256, StoreImage,
-};
+use lp_tree_store::{EntryKindReport, MountVerdict, RecordKindReport, SoftSha256, StoreImage};
 
 const GOLDEN: &str = include_str!("format_golden.hex");
 const SECTOR: usize = 4096;
@@ -64,7 +62,12 @@ fn the_golden_image_reads_and_checks_clean() {
     ] {
         assert!(kinds.contains(&k), "{k:?}");
     }
-    assert!(r.sectors.iter().flat_map(|s| &s.records).any(|r| r.codec == 1));
+    assert!(
+        r.sectors
+            .iter()
+            .flat_map(|s| &s.records)
+            .any(|r| r.codec == 1)
+    );
     let check = img.check(&mut SoftSha256, None);
     assert!(check.is_consistent(), "{:#?}", check.findings);
     assert_eq!(check.files_verified as usize, files.len());

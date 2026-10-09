@@ -51,7 +51,13 @@ fn an_empty_store_has_a_root_and_no_files() {
         .collect();
     assert_eq!(valid.len(), 2);
     assert_eq!(valid[0].state.label(), "valid");
-    assert!(r.sectors.iter().filter(|s| s.state == SectorState::Blank).count() == 14);
+    assert!(
+        r.sectors
+            .iter()
+            .filter(|s| s.state == SectorState::Blank)
+            .count()
+            == 14
+    );
     let check = img.check(&mut SoftSha256, None);
     assert!(check.is_consistent(), "{:#?}", check.findings);
     assert_eq!(img.extract().unwrap().files, vec![]);
@@ -88,9 +94,11 @@ fn a_c40_store_after_gc_matches_the_real_mount_exactly() {
     // Churn until the writer has collected garbage at least a few times.
     for round in 0..80u64 {
         st.put("/churn.bin", &noise(round, 6000)).unwrap();
-        st.put("/projects/a/.lp/panel.json", &text(round, 300)).unwrap();
+        st.put("/projects/a/.lp/panel.json", &text(round, 300))
+            .unwrap();
         // Live records land between the garbage, so GC has to copy some.
-        st.put(&format!("/keep/k{round:02}.json"), &text(round, 200)).unwrap();
+        st.put(&format!("/keep/k{round:02}.json"), &text(round, 200))
+            .unwrap();
     }
     assert!(st.stats().gc_copies > 3, "{:?}", st.stats());
     let want = snapshot(&mut st);
@@ -123,7 +131,11 @@ fn a_c40_store_after_gc_matches_the_real_mount_exactly() {
         .unwrap();
     assert_eq!(big.size, 18_000);
     assert!(!big.hot);
-    assert!(r.tree.iter().any(|e| e.path == "/projects/a/.lp/panel.json" && e.hot));
+    assert!(
+        r.tree
+            .iter()
+            .any(|e| e.path == "/projects/a/.lp/panel.json" && e.hot)
+    );
 
     agrees_with_the_real_mount(&image, &c, geom);
     let check = img.check(&mut SoftSha256, None);
@@ -212,7 +224,8 @@ fn a_sector_at_a_newer_version_refuses_the_mount_but_the_rest_extracts() {
     let c = cfg();
     let geom = NorGeometry::c6(16);
     let mut st = mount(formatted(geom, &c), &c);
-    st.put("/projects/a/project.json", b"{\"name\": \"a\"}").unwrap();
+    st.put("/projects/a/project.json", b"{\"name\": \"a\"}")
+        .unwrap();
     st.put("/hardware.json", &text(1, 500)).unwrap();
     let want = snapshot(&mut st);
     let mut image = image_of(st.flash());
@@ -239,7 +252,10 @@ fn a_sector_at_a_newer_version_refuses_the_mount_but_the_rest_extracts() {
 
     let img = StoreImage::open(&image, None).unwrap();
     let r = img.report();
-    assert_eq!(r.sectors[blank as usize].state, SectorState::Newer { version: 4 });
+    assert_eq!(
+        r.sectors[blank as usize].state,
+        SectorState::Newer { version: 4 }
+    );
     assert_eq!(r.sectors[blank as usize].state.label(), "NEWER");
     assert_eq!(
         r.mount,
@@ -311,7 +327,7 @@ fn directory_names_that_break_the_writers_rules_are_flagged_everywhere() {
     forge_root(
         &mut image,
         vec![
-            entry(b"",EntryKind::File, file_id, file_size),
+            entry(b"", EntryKind::File, file_id, file_size),
             entry(b"a/b", EntryKind::File, file_id, file_size),
             entry(&[0xFF, b'x'], EntryKind::File, file_id, file_size),
             entry(b"ok.json", EntryKind::File, file_id, file_size),
@@ -389,7 +405,10 @@ fn a_chunk_that_does_not_hash_to_its_id_is_an_error_though_mount_accepts_it() {
     let check = img.check(&mut SoftSha256, None);
     assert!(!check.is_consistent());
     let codes: Vec<_> = check.findings.iter().map(|f| f.code).collect();
-    assert!(codes.contains(&"id-mismatch") && codes.contains(&"file-node"), "{codes:?}");
+    assert!(
+        codes.contains(&"id-mismatch") && codes.contains(&"file-node"),
+        "{codes:?}"
+    );
 }
 
 #[test]
@@ -428,7 +447,10 @@ fn the_sector_size_comes_from_the_headers_or_the_caller() {
         StoreImage::open(&image, Some(3000)).err(),
         Some(ImageError::BadSectorSize(3000))
     );
-    assert_eq!(StoreImage::open(&[0; 100], None).err(), Some(ImageError::TooSmall));
+    assert_eq!(
+        StoreImage::open(&[0; 100], None).err(),
+        Some(ImageError::TooSmall)
+    );
     // A wrong size given: every header names another sector size.
     let wrong = StoreImage::open(&image, Some(4096)).unwrap();
     assert!(wrong.report().refusing_sectors().len() >= 1);
@@ -489,7 +511,13 @@ fn agrees_with_the_real_mount(image: &[u8], c: &StoreConfig, geom: NorGeometry) 
     assert_eq!(chosen.id, committed.id.0);
     assert_eq!(chosen.retired, committed.root.retired);
     let live: Vec<u32> = r.sectors.iter().map(|s| s.live_bytes).collect();
-    let want: Vec<u32> = real.log.sectors.live.iter().map(|&l| u32::from(l)).collect();
+    let want: Vec<u32> = real
+        .log
+        .sectors
+        .live
+        .iter()
+        .map(|&l| u32::from(l))
+        .collect();
     assert_eq!(live, want, "live bytes per sector");
     let files: Vec<String> = r
         .tree
@@ -544,5 +572,8 @@ fn forge_root(image: &mut Vec<u8>, mut cold: Vec<DirEntry>, mut hot: Vec<DirEntr
     .encode();
     let root_id = ObjectId::of(h, IdTag::Root, &[&root]);
     put(image, &mut at, RecordKind::Root, root_id, &root);
-    assert!(at <= (sector + 1) * 4096, "the forged records fit the sector");
+    assert!(
+        at <= (sector + 1) * 4096,
+        "the forged records fit the sector"
+    );
 }

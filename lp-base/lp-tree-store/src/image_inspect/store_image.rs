@@ -88,10 +88,7 @@ impl<'a> StoreImage<'a> {
         let mut kept: BTreeMap<u64, Loc> = BTreeMap::new();
         for &(_, s) in &order {
             for (i, r) in sectors[s as usize].records.iter().enumerate() {
-                if matches!(
-                    r.status,
-                    RecordStatus::Untrusted | RecordStatus::Unknown
-                ) {
+                if matches!(r.status, RecordStatus::Untrusted | RecordStatus::Unknown) {
                     continue;
                 }
                 let here = Loc { sector: s, rec: i };
@@ -444,7 +441,9 @@ impl<'a> StoreImage<'a> {
         }
         let start = out.len();
         for i in 0..m.count {
-            let (rec, p) = self.get(multi_child(payload, i).0).ok_or("missing record")?;
+            let (rec, p) = self
+                .get(multi_child(payload, i).0)
+                .ok_or("missing record")?;
             match (m.level, rec.kind) {
                 (0, RecordKindReport::Blob) => self.decode_chunk(rec.codec, p, out)?,
                 (l, RecordKindReport::Multi) if l > 0 => {

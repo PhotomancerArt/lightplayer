@@ -14,9 +14,7 @@ use alloc::vec::Vec;
 
 use serde::Serialize;
 
-use super::image_report::{
-    MountVerdict, RecordKindReport, RecordStatus, RootOutcome, SectorState,
-};
+use super::image_report::{MountVerdict, RecordKindReport, RecordStatus, RootOutcome, SectorState};
 use super::store_image::{Loc, StoreImage, name_problem};
 use crate::dir_node::{DirEntry, EntryKind};
 use crate::multi_node::{multi_child, parse_multi};
@@ -103,7 +101,13 @@ struct Checker<'i, 'a, H> {
 }
 
 impl<H: ObjectHasher> Checker<'_, '_, H> {
-    fn add(&mut self, severity: Severity, code: &'static str, sector: Option<u32>, message: String) {
+    fn add(
+        &mut self,
+        severity: Severity,
+        code: &'static str,
+        sector: Option<u32>,
+        message: String,
+    ) {
         match severity {
             Severity::Error => self.out.errors += 1,
             Severity::Warning => self.out.warnings += 1,
@@ -240,8 +244,7 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
                     Severity::Note,
                     "retired-sector",
                     Some(s.index),
-                    "retired by the committed root: never opened, erased or collected again"
-                        .into(),
+                    "retired by the committed root: never opened, erased or collected again".into(),
                 );
             }
         }
@@ -280,9 +283,12 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
                     );
                 }
             }
-            MountVerdict::NoStore { why } => {
-                self.add(Severity::Error, "no-store", None, format!("no store: {why}"))
-            }
+            MountVerdict::NoStore { why } => self.add(
+                Severity::Error,
+                "no-store",
+                None,
+                format!("no store: {why}"),
+            ),
         }
         // The newest root being unusable means the committed state fell back.
         for r in roots {
@@ -314,7 +320,12 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
         let Some(root) = self.img.root.clone() else {
             return;
         };
-        let chosen = self.img.report.chosen_root().expect("a root was chosen").clone();
+        let chosen = self
+            .img
+            .report
+            .chosen_root()
+            .expect("a root was chosen")
+            .clone();
         // The root record: its id hashes its payload; retired sectors exist.
         if let Some((_, payload)) = self.img.get(chosen.id) {
             self.id_matches(chosen.id, IdTag::Root, payload, "root");
@@ -422,8 +433,7 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
         if hot {
             // The hot directory: flat, every entry a file at a full hot path.
             let hot_ok = e.kind == EntryKind::File
-                && core::str::from_utf8(&e.name)
-                    .is_ok_and(|p| valid_path(p) && is_hot(p));
+                && core::str::from_utf8(&e.name).is_ok_and(|p| valid_path(p) && is_hot(p));
             if !hot_ok {
                 self.add(
                     Severity::Error,
@@ -454,7 +464,10 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
                         Severity::Error,
                         "file-size",
                         sector,
-                        format!("{shown}: the entry says {} bytes, the node holds {n}", e.size),
+                        format!(
+                            "{shown}: the entry says {} bytes, the node holds {n}",
+                            e.size
+                        ),
                     ),
                     Err(why) => self.add(
                         Severity::Error,
@@ -479,12 +492,13 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
     /// A directory node: a one-record `Dir` or a directory multi; its id
     /// hashes what it holds and its entries decode.
     fn verify_dir(&mut self, id: u64) -> Result<Vec<DirEntry>, String> {
-        let (rec, payload) = self.img.get(id).ok_or_else(|| String::from("missing record"))?;
+        let (rec, payload) = self
+            .img
+            .get(id)
+            .ok_or_else(|| String::from("missing record"))?;
         match rec.kind {
             RecordKindReport::Dir => {
-                if !self.id_matches(id, IdTag::Dir, payload, "directory") {
-                    return Err("the record's id is not the hash of its bytes".into());
-                }
+                self.verify_node(id)?;
             }
             RecordKindReport::Multi => {
                 let m = parse_multi(payload).ok_or_else(|| String::from("multi does not parse"))?;
@@ -523,13 +537,18 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
     }
 
     fn verify_node_uncached(&mut self, id: u64) -> Result<u32, String> {
-        let (rec, payload) = self.img.get(id).ok_or_else(|| String::from("missing record"))?;
+        let (rec, payload) = self
+            .img
+            .get(id)
+            .ok_or_else(|| String::from("missing record"))?;
         match rec.kind {
             RecordKindReport::Blob => {
                 let mut bytes = Vec::new();
                 self.img
                     .decode_chunk(rec.codec, payload, &mut bytes)
-                    .map_err(|_| format!("chunk {id:016x} does not inflate to its stated length"))?;
+                    .map_err(|_| {
+                        format!("chunk {id:016x} does not inflate to its stated length")
+                    })?;
                 if !self.id_matches(id, IdTag::Blob, &bytes, "chunk") {
                     return Err(format!("chunk {id:016x} does not hash to its id"));
                 }
@@ -654,7 +673,9 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
                 Severity::Note,
                 "older-copies",
                 None,
-                format!("{copies} record(s) are on flash more than once (GC copies); the copies agree"),
+                format!(
+                    "{copies} record(s) are on flash more than once (GC copies); the copies agree"
+                ),
             );
         }
         if orphan_records > 0 {

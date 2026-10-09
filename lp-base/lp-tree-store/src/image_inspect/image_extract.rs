@@ -87,8 +87,9 @@ impl<'a> StoreImage<'a> {
                 continue;
             }
             if !seen.insert(f.path.as_str()) {
-                out.skipped
-                    .push(skip("the path is already extracted from another entry".into()));
+                out.skipped.push(skip(
+                    "the path is already extracted from another entry".into(),
+                ));
                 continue;
             }
             match self.node_bytes(f.id) {

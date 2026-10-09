@@ -23,8 +23,8 @@ pub use image_check::{CheckReport, Finding, Severity};
 pub use image_extract::{ExtractedFile, Extraction, SkippedEntry};
 pub use image_report::{
     EntryKindReport, HeadReport, HeaderReport, ImageReport, MountVerdict, RecordKindReport,
-    RecordReport, RecordStatus, RootOutcome, RootReport, SectorReport, SectorSizeFrom,
-    SectorState, TreeEntryReport,
+    RecordReport, RecordStatus, RootOutcome, RootReport, SectorReport, SectorSizeFrom, SectorState,
+    TreeEntryReport,
 };
 pub use image_scan::detect_sector_size;
 pub use store_image::{ImageError, StoreImage};
