@@ -82,7 +82,7 @@ pub(super) fn run_relay(
         label: relay.label,
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
         max_routes: 1,
-        firmware: String::from("host-harness"),
+        firmware: "host-harness",
     };
     let index = RADIO_LINK_SLOTS;
     let mut driver = RelayDriver::new(config, harness_entropy, port.port(), index);

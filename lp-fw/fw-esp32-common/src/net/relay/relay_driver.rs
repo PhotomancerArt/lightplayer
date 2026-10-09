@@ -587,7 +587,7 @@ mod tests {
                 label: String::from("test"),
                 wire_proto: 1,
                 max_routes: 1,
-                firmware: String::from("test-1"),
+                firmware: "test-1",
             },
             entropy,
             RadioLinkPort::leak(),

@@ -396,7 +396,7 @@ impl RelayClient {
             self.lan,
             salts.clone(),
         )
-        .with_firmware(&self.config.firmware);
+        .with_firmware(self.config.firmware);
         self.registered_with = salts;
         self.phase = Phase::Registering {
             until: now + HANDSHAKE_TIMEOUT_MS,

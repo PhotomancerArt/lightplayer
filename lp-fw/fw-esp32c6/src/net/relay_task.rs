@@ -262,7 +262,7 @@ pub fn relay_config(board_mac: [u8; 6], name: Option<String>) -> RelayClientConf
         label: name.unwrap_or_else(|| fw_esp32_common::net::mdns::mdns_label(board_mac)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
         max_routes: 1,
-        firmware: String::from(crate::manifest_version()),
+        firmware: crate::manifest_version(),
     }
 }
 

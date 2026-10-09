@@ -22,6 +22,9 @@ pub struct RelayClientConfig {
     /// The version of the image the client runs in (on a split C6, the
     /// core's): the protocol 2 hello's firmware, cut to
     /// [`MAX_FIRMWARE_BYTES`](crate::MAX_FIRMWARE_BYTES) of ASCII. Empty
-    /// means "unknown".
-    pub firmware: String,
+    /// means "unknown". Static: every board's version is its image's (the
+    /// C6's manifest slot, lp-cli's `LP_APP_VERSION`), so a board holds no
+    /// heap for it, and its boot heap does not move with the version's
+    /// length.
+    pub firmware: &'static str,
 }
