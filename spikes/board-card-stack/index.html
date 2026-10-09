@@ -566,6 +566,15 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .lab .txt { flex:1; min-width:0; display:grid; gap:1px; }
 .go { height:28px; padding:0 12px; border-radius:7px; font-size:12px; font-weight:800; flex:none; }
 .go[disabled] { opacity:.45; cursor:not-allowed; }
+/* Q11-B: the primary action as a section of the name bar, flush like a bar's action, the
+   primary voice kept as a thin spectrum line along its foot */
+.gosec { appearance:none; font:inherit; cursor:pointer; position:relative; align-self:stretch; margin:0 -8px 0 0; padding:0 16px; border:0; border-left:1px solid var(--bd);
+  background:rgba(255,255,255,.035); color:var(--strong); font-size:12.5px; font-weight:800; white-space:nowrap; flex:none; }
+.gosec::after { content:""; position:absolute; left:10px; right:10px; bottom:7px; height:2px; border-radius:2px; background:linear-gradient(90deg,var(--spectrum)); opacity:.75; transition:opacity .2s, left .2s, right .2s; }
+.gosec:hover { background:rgba(255,255,255,.08); }
+.gosec:hover::after { opacity:1; left:6px; right:6px; }
+.gosec[disabled] { color:var(--subtle); cursor:not-allowed; background:transparent; }
+.gosec[disabled]::after { display:none; }
 .go.split-go { padding:0 0 0 12px; display:inline-flex; align-items:stretch; overflow:hidden; }
 .go.split-go span.car { display:inline-grid; place-items:center; width:24px; margin-left:10px; border-left:1px solid var(--bd-strong); }
 .lab .l1 { display:flex; align-items:center; gap:6px; min-width:0; height:18px; }
@@ -726,7 +735,7 @@ pre.shape { max-width:1180px; margin:12px 0 0; padding:12px 14px; border:1px sol
 </head>
 <body>
 
-<h1>The stack card — round 3</h1>
+<h1>The stack card — round 4</h1>
 <p class="hint"><b>Round 3</b> (Yona, round 2: “very close”): don’t cover the picture, give the project its own bar, and give the status an icon that carries errors and warnings and opens a popover. <b>Round 1</b> settled the direction (“much better, I really like the overall idea”). <b>This round, one section per part of the card</b>, top to bottom in Yona’s order: <b>project and status · where and connection · firmware · hardware</b>.
 Two rules for every option: <b>a card never changes height</b> (rows never appear or disappear; a notice only tints its row), and <b>no boxes in boxes</b> (a notice is its row, edge to edge).
 The card is <b>two components</b>: one special <b>name bar</b> with the primary action, then a standard stack of <b>bars</b> that hold info and actions (below). The primary action connects to a board or opens it, across the three levels of connection.
@@ -765,22 +774,14 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
 
 <section class="qsec" id="page">
   <h2>The card so far</h2>
-  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Uses the leans: Q6-D (the group under the name), Q7-A, Q8-A (version only, Update when older), Q9-A, Q10-A (an access bar), and Q3-A (Studio’s detail card, merged with its bar). Click any bar. Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
+  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Round 4: the hardware bar says only the board (the LED count belongs to the project, in its details); no “open in another tab” on the card (that’s found out, and taken over, when you connect). Uses the leans for the two open questions: Q10-A (an access bar) and Q11-B (the primary action as a section of the name bar). Click any bar. Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
   <div class="duo phoneduo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
 </section>
 
-<section class="qsec" id="q6"><h2><span class="qn">Q6</span>What does the where-and-connection row say?</h2>
-  <p class="ask">Where the board belongs, and how Studio reaches it right now. This row also carries connection notices: someone else has it, it’s offline, it’s locked.</p><div class="opts" id="q6o"></div></section>
-<section class="qsec" id="q7"><h2><span class="qn">Q7</span>How does the name bar carry the primary action?</h2>
-  <p class="ask">Watching is automatic where it can be; connecting a nearby board may need a tap (Bluetooth asks for one); opening starts a Studio session. The primary action is whatever gets you in next.</p><div class="opts" id="q7o"></div></section>
-<section class="qsec" id="q8"><h2><span class="qn">Q8</span>What does the firmware row say?</h2>
-  <p class="ask">Porch is current; Fyeah Sign’s board is a release behind. Updating and “no firmware” tint the bar either way.</p><div class="opts c3" id="q8o"></div></section>
-<section class="qsec" id="q9"><h2><span class="qn">Q9</span>What does the hardware row say?</h2>
-  <p class="ask">The real thing: grounding, not detail. The rest is in its popover.</p><div class="opts c3" id="q9o"></div></section>
 <section class="qsec" id="q10"><h2><span class="qn">Q10</span>Where does access live?</h2>
   <p class="ask">From your note: “the access control needs a bar too, probably, or it lives in the connection spot.” Access is what you can do with this board (play, edit, nothing yet) and the key that lets you.</p><div class="opts c2" id="q10o"></div></section>
-<section class="qsec" id="q3"><h2><span class="qn">Q3</span>How do the details open? <span style="font:500 12px var(--font);color:var(--shell-dim)">(carried from round 1)</span></h2>
-  <p class="ask">A: a popover from the row (lean, drawn open below). B: a side panel with the whole stack (round 1 drew it). An accordion would push the grid around.</p><div class="opts c2" id="q3o"></div></section>
+<section class="qsec" id="q11"><h2><span class="qn">Q11</span>The primary action: a button, or a section of the name bar?</h2>
+  <p class="ask">From your note: every other action sits flush at the end of its bar, but Open / Connect is a rounded button. A section of the name bar is consistent; the button keeps the spectrum outline, the primary voice everywhere else in Studio.</p><div class="opts c2" id="q11o"></div></section>
 
 <section class="qsec" id="ref">
   <div class="decided"><b>Decided so far</b>
@@ -792,6 +793,12 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
       <li><b>Round 2, Q4 → none of them:</b> never cover the picture; let it be taller. The name bar sits under it, one line: the name and the primary action.</li>
       <li><b>Round 2, Q5 → A, with an icon:</b> the status is cut out of the corner and shows an icon (blue dot when fine, an orange or red sign for the worst warning or error on the card) and the frame rate; clicking it opens the status popover, which lists every notice.</li>
       <li><b>Round 2:</b> the project gets its own bar, first in the stack (“might be redundant, but I wanna see”).</li>
+      <li><b>Q3 → A:</b> details open as Studio’s detail card, its outline merged with the bar that opened it.</li>
+      <li><b>Q6 → D:</b> the group sits under the name (the board’s place); the connection gets a bar to itself.</li>
+      <li><b>Q7 → A:</b> one primary action at the end of the name bar, always the way in (Open, Connect, Unlock, Install); its form is Q11.</li>
+      <li><b>Q8 → A, revised:</b> the firmware bar says the version (it carries its date) and nothing else; older than the newest, it turns blue and offers Update.</li>
+      <li><b>Q9 → the board only:</b> the hardware bar says the board model; the LED count is the project’s, in its details.</li>
+      <li><b>Round 3:</b> no “open in another tab / take over” on the card. Studio finds out when you connect, and offers to take over then (vision D25 still holds there).</li>
       <li>The vocabulary (glossary, colours, actions by consequence) is <code>spikes/board-card</code> round 2; its open questions fold into this spike next round.</li>
     </ul></div>
 </section>
@@ -854,7 +861,7 @@ const BOARDS = [
   { id:'kitchen', acc:'edit', title:'Kitchen shelf', plays:null, pat:'rainbow2', layout:'strip', fps:59, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-9', fwAge:'today', model:'ESP32-C6 mini', leds:72, mac:'a7d1', free:'219 KB',
     fwNote:{ tone:'up', icon:'up', text:'Updating · 42%', prog:42 } },
   { id:'living', acc:'play', title:'Living room',   plays:'Aurora Drift', pat:'aurora', layout:'roof', fps:57, cloud:true, conn:'held', who:'Sean is editing', owner:'Sean Connell', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:150, mac:'19e0', free:'188 KB' },
-  { id:'shelf', acc:'browser',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', age:'just now', cloud:false, link:'wifi', conn:'othertab', group:'Studio', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
+  { id:'shelf', acc:'browser',  title:'Slow Rainbow',  plays:null, pat:'rainbow2', layout:'strip', fps:60, cloud:false, link:'wifi', conn:'watch', group:'Studio', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 mini', leds:48, mac:'4f02', free:'—', still:true },
   { id:'choker', acc:'anyone', title:'Maya’s choker', plays:null, pat:'pulse', layout:'ring', age:'5 h ago', cloud:false, link:'ble', conn:'idle', group:'Gifts', fw:'2026.09.21-1', fwAge:'2½ weeks', fwOld:true, model:'XIAO ESP32-C6', leds:73, mac:'8e30', free:'—', dim:true },
   { id:'truck', acc:'edit',  title:'Truck',         plays:'Rocaille, truck cut', pat:'rocaille', layout:'strip', age:'2 wk ago', cloud:true, conn:'offline', offlineFor:'2 weeks', group:'Studio', fw:'2026.09.02-4', fwAge:'5 weeks', fwOld:true, model:'ESP32-C6 DevKit', leds:120, mac:'777f', free:'—', dim:true },
   { id:'window', acc:'edit', title:'Window',        plays:'Sparkle Grid', pat:'comet', layout:'matrix', fps:0, cloud:true, conn:'watch', group:'House', fw:'2026.10.08-16', fwAge:'today', model:'ESP32-C6 DevKit', leds:256, mac:'c2b4', free:'164 KB',
@@ -865,7 +872,7 @@ const BOARDS = [
 ];
 const LINK_ICON = { usb:'usb', ble:'ble', wifi:'net' };
 const LINK_WORD = { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' };
-const LEAN = { label:'glass', status:'notch', conn:'own', action:'rowbtn', fw:'A', hw:'A', detail:'pop', access:'bar' };
+const LEAN = { label:'glass', status:'notch', conn:'own', action:'rowbtn', fw:'A', hw:'A', detail:'pop', access:'bar', cta:'section' };
 /* access: what YOU can do with this board, and with which key */
 const ACC = {
   edit:   { you:'play and edit', via:'your account key', short:'You can edit' },
@@ -932,6 +939,7 @@ function mainAction(b, c){
   if (c.action==='card') return '';
   const p = primaryOf(b);
   if (c.action==='split' && p.act==='Open' && !p.disabled) return `<button class="btn cta go split-go" data-act="Open">Open<span class="car" data-act="links">▾</span></button>`;
+  if (c.cta==='section') return `<button class="gosec" data-act="${p.act}" ${p.disabled ? `disabled title="${p.why}"` : ''}>${p.act}</button>`;
   return `<button class="btn cta go" data-act="${p.act}" ${p.disabled ? `disabled title="${p.why}"` : ''}>${p.act}</button>`;
 }
 /* where + connection */
@@ -988,7 +996,7 @@ function fwRow(b, c){
 function hwRow(b, c){
   const body = c.hw==='B' ? `${ic('chip')}<span class="mono ell">ESP32-C6</span><span class="nh mono" style="color:var(--subtle)">· …${b.mac}</span>`
     : c.hw==='C' ? `${ic('chip')}<span class="mono ell">${b.model}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.free==='—' ? '' : b.free+' free'}</span>`
-    : `${ic('chip')}<span class="mono ell">${b.model}</span><span class="spring"></span><span class="nh" style="color:var(--subtle)">${b.leds ? b.leds+' LEDs' : 'no LEDs set'}</span>`;
+    : `${ic('chip')}<span class="mono ell">${b.model}</span>`;
   const where = c.conn==='wordsLeft' ? `<span class="nh" style="margin-left:6px">${whereHtml(b)}</span>` : '';
   return `<div class="srow layer" data-detail="hw" data-id="${b.id}">${body}${where}<span class="spring"></span><span class="chev">›</span></div>`;
 }
@@ -1008,7 +1016,7 @@ function popHtml(b, which){
   }
   if (which==='proj') return `<div class="dpop">${
     (b.projNote ? sec(b.projNote.tone==='err' ? 'Error' : 'Out of date', `<p>${b.projNote.tone==='err' ? 'Shader error in sparkle.glsl, line 12.' : 'This board has v11; the project is at v12, saved 2 h ago.'}</p>`, b.projNote.tone==='err' ? 'err' : 'att') : '')
-    + sec('Project', kvl('Playing', b.plays || b.title) + kvl('Version', b.projNote && b.projNote.icon==='history' ? 'v11' : 'v12') + kvl('Saved', '2 h ago'))
+    + sec('Project', kvl('Playing', b.plays || b.title) + kvl('Version', b.projNote && b.projNote.icon==='history' ? 'v11' : 'v12') + kvl('Saved', '2 h ago') + kvl('LEDs', b.leds ? b.leds+' · WS2812 · pin 10' : '—'))
     + sec('In sync', kvl('With', b.synced ? 'Porch · Garage · Back fence' : 'only this board') + kvl('Copied from', b.id==='choker' ? 'PLAYFUL Choker' : '—'))
     + sec('Actions', acts([`<button class="btn sm">Open</button>`, `<button class="btn sm outline">Share</button>`, `<button class="btn sm outline">Put another project on it</button>`]))}</div>`;
   if (which==='fw') return `<div class="dpop">${
@@ -1024,7 +1032,7 @@ function popHtml(b, which){
     sec('Reach', kvl('Now', connState(b).words) + kvl('Cloud', b.cloud ? 'connected · online' : 'off') + kvl('Wi‑Fi', b.link==='ble' ? '—' : '192.168.1.40') + kvl('Last seen', b.age || 'now'))
     + sec('Actions', acts([`<button class="btn sm outline">Connect another way…</button>`, `<button class="btn sm outline">Disconnect</button>`]))}</div>`;
   return `<div class="dpop">${
-    sec('Board', kvl('Model', b.model) + kvl('LEDs', b.leds ? b.leds+' · WS2812 · pin 10' : '—') + kvl('Id', 'a0:f2:62:b4:'+b.mac.slice(0,2)+':'+b.mac.slice(2)))
+    sec('Board', kvl('Model', b.model) + kvl('Chip', 'ESP32-C6 · 4 MB flash') + kvl('Id', 'a0:f2:62:b4:'+b.mac.slice(0,2)+':'+b.mac.slice(2)))
     + sec('Running', kvl('Memory', b.free+' free') + kvl('Up', '3 days'))
     + sec('Actions', acts([`<button class="btn sm outline">Rename</button>`, `<button class="btn sm outline">Move to a group</button>`, `<button class="btn sm outline">Reset</button>`, `<button class="btn sm outline lasting">Forget…</button>`]))}</div>`;
 }
@@ -1050,36 +1058,14 @@ function option(q, letter, o, body){
 function q(id, ids, opts){ document.getElementById(`${id}o`).innerHTML = Object.entries(opts).map(([l,o]) => option(id, l, o, `<div class="app">${grid(ids, o.c)}</div>`)).join(''); }
 
 function build(){
-  const conn4 = ['desk','porch','choker','shelf','living','truck'];
-  q('q6', conn4, {
-    D:{ name:'Group under the name; the connection gets the whole bar', lean:true, what:'From your comment: the group (or the owner’s face) sits under the name, as the board’s place; the connection bar is all connection (“USB · live”, “also cloud”, “Bluetooth · not connected”).', pro:'place reads with the name it belongs to; the connection has room for its words on a phone too.', con:'the name bar grows to two lines (still one fixed height).', c:{ conn:'own' } },
-    A:{ name:'Where on the left, link on the right', what:'The group (or the owner’s face) on the left; the link in use and its level on the right (“USB · live”, “Cloud · live”, “Bluetooth · not connected”), then the action.', pro:'one row answers both “where is it” and “how do I reach it”, in your order.', con:'tight on a phone (the words hide there; the icon stays).', c:{ conn:'words' } },
-    B:{ name:'Link in words; where moves to the hardware row', what:'The whole row is the connection; the group sits at the end of the hardware row.', pro:'the most room for the connection words.', con:'“where” and “what it is” share a row, which mixes two kinds of fact.', c:{ conn:'wordsLeft' } },
-    C:{ name:'Icons only', what:'Where on the left, link icons and a live dot on the right.', pro:'the most compact.', con:'icons must be learned; the newcomer test fails for “not connected”.', c:{ conn:'icons' } },
-  });
   q('q10', ['desk','choker','living','lamp'], {
     A:{ name:'Its own bar', lean:true, what:'An access bar: what you can do (“You can edit”, “You can play”, “Locked”) and with which key (your account key, this browser, USB, shared by Sean). Its details hold the board’s play and edit settings.', pro:'access gets a home for its notice (Locked) and its settings; it reads per person, which shared boards need.', con:'a fifth bar on every card.', c:{ access:'bar' } },
     B:{ name:'At the end of the connection bar', what:'The connection bar ends with a lock and your tier (“edit”, “play”, “locked”); its details include access.', pro:'one bar shorter; the tier comes from the key you connected with, so they belong together.', con:'two facts share a bar, and “Locked” gets no room for words on a phone.', c:{ access:'conn' } },
   });
-  q('q7', ['desk','choker','shelf','living'], {
-    A:{ name:'One button at the end of the name bar', lean:true, what:'Always there, always the way in: “Open” when it’s watched or offline, “Connect” when it needs a tap (Bluetooth), “Take over” when your other tab has it, “Unlock” when it’s locked, “Install” on a blank board. Greyed when it can’t be done (“Sean has it open”, updating).', pro:'one obvious next step in one place; the bar below it says why the word changed.', con:'the word changes, so you learn its place rather than its word.', c:{ action:'rowbtn' } },
-    B:{ name:'The whole card is the action', what:'No button: clicking the card connects if it must, then opens.', pro:'the cleanest card.', con:'nothing says a click will ask for Bluetooth, take over a tab, or that it can’t open now.', c:{ action:'card' } },
-    C:{ name:'Open, with a link choice', what:'“Open ▾”, where ▾ picks the link (USB, Bluetooth, Wi‑Fi, cloud).', pro:'power users choose the link.', con:'a choice most people never need, on every card.', c:{ action:'split' } },
+  q('q11', ['desk','choker','living','lamp'], {
+    A:{ name:'A rounded button', what:'Today’s look: a small outlined button with the spectrum ring, inside the name bar.', pro:'reads as the primary action at a glance; the spectrum ring is Studio’s primary voice.', con:'the one rounded button in a card where every other action is flush with its bar.', c:{ cta:'button' } },
+    B:{ name:'A section of the name bar', lean:true, what:'Flush at the end of the name bar, full height, divided off like a bar’s action; a thin spectrum line along its foot keeps the primary voice.', pro:'one action grammar across the card; a bigger target.', con:'quieter than the button; the spectrum shrinks to a line.', c:{ cta:'section' } },
   });
-  document.getElementById('q8o').innerHTML = Object.entries({
-    A:{ name:'The version, and an update when it’s older', lean:true, what:'Your pick, revised from your comment: “LightPlayer 2026.10.08-16” and nothing else when it’s current (the version already carries its date). Older than the newest, the bar turns blue and offers Update; an offline board gets it when it’s back.', pro:'quiet when fine; the one useful action when not.', con:'a newcomer reads a date-like number with no “up to date” to confirm it’s fine (the status icon covers that).', c:{ fw:'A' } },
-    B:{ name:'Version and a tick', what:'“2026.10.08-16 ✓”.', pro:'compact.', con:'a green tick reaches for the “good” family for something that’s merely normal.', c:{ fw:'B' } },
-    C:{ name:'Version and its age', what:'“LightPlayer 2026.09.02-4 · 5 weeks old”.', pro:'staleness at a glance.', con:'the version already says its date; an age on every card is noise.', c:{ fw:'C' } },
-  }).map(([l,o]) => option('q8', l, o, `<div class="app">${grid(['porch','desk'], o.c)}</div>`)).join('');
-  document.getElementById('q9o').innerHTML = Object.entries({
-    A:{ name:'Board and LED count', lean:true, what:'“ESP32-C6 mini · 60 LEDs”.', pro:'what it is and how big it is, the two facts that ground it.', con:'the LED count comes from the project’s layout, not the chip.', c:{ hw:'A' } },
-    B:{ name:'Chip and short id', what:'“ESP32-C6 · …8c3e”.', pro:'tells two identical boards apart.', con:'an id means nothing to a newcomer.', c:{ hw:'B' } },
-    C:{ name:'Board and memory', what:'“ESP32-C6 mini · 230 KB free”.', pro:'a live health number.', con:'memory worries nobody until it’s low (then it’s a notice).', c:{ hw:'C' } },
-  }).map(([l,o]) => option('q9', l, o, `<div class="app">${grid(['porch','truck'], o.c)}</div>`)).join('');
-  document.getElementById('q3o').innerHTML = [
-    option('q3','A',{ name:'A popover from the row', lean:true, what:'Studio’s own detail card, its outline merged with the bar that opened it (from your comment): titled sections, a tinted section for what needs you, then that layer’s actions.', pro:'nothing moves, and it’s the popover the rest of Studio already uses.', con:'one layer at a time.' }, `<div class="app" style="padding-bottom:250px">${grid(['desk','porch'], LEAN, ['desk','fw'])}</div>`),
-    option('q3','B',{ name:'A side panel with the whole stack', what:'Every layer at once, scrolled to the one you clicked (drawn in round 1).', pro:'all the real data together.', con:'covers part of the page.' }, `<p class="ask" style="margin:0">See round 1 of this spike (git history), section Q3-B.</p>`),
-  ].join('');
 }
 
 /* the live page */
@@ -1169,7 +1155,7 @@ function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of 
 
 setInterval(() => { const t = performance.now()/1000; for (const e of canvases) if (e.c.dataset.rate==='slow') draw(e, t + e.seed); }, 700);
 
-window.GATE = { round:'stack-card-r3', leans:{ q3:'A', q6:'D', q7:'A', q8:'A', q9:'A', q10:'A' } };
+window.GATE = { round:'stack-card-r4', leans:{ q10:'A', q11:'B' } };
 /* =====================================================================
    The gate kit (see the CSS above). Works in three places:
    - on claude.ai with `db`: answers saved to the store (Claude reads
