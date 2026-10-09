@@ -375,9 +375,9 @@ fn fixture_card(
 ) -> Element {
     let update = fixture.words();
     let update_facts = fixture.offer_facts();
-    // A USB or Wi‑Fi board streams its picture to the card; over Bluetooth
-    // there is none (the slot says so).
-    let feed = (link != Link::Bluetooth).then(|| DeviceCardFeedView {
+    // Every board streams its picture to the card: over Bluetooth at a
+    // gentler pace, which its pill says.
+    let feed = Some(DeviceCardFeedView {
         frame: Some(live_card_lamp_frame()),
         frame_age_secs: Some(0.2),
         engine_fps: Some(43),
