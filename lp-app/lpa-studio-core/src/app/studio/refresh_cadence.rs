@@ -205,8 +205,10 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 /// read's own time on the air, so a bigger frame self-throttles. At the
 /// Mac's measured 5–12 KB/s of notifications a 512-lamp reply is a few
 /// hundred milliseconds, which still lands near a picture a second; a small
-/// one near two. Not yet measured on silicon. The feed still pulls only
-/// while its card is mounted and the page is visible.
+/// one near two. On silicon (2026-10-09, a XIAO C6 running 241 lamps, Brave on
+/// a Mac as the central) the card got 0.94–1.24 pictures a second and the
+/// board ran 29 fps against 30 with the card off screen. The feed still pulls
+/// only while its card is mounted and the page is visible.
 pub const DEVICE_CARD_FEED_BLE_INTERVAL: Duration = Duration::from_millis(500);
 
 /// The card feed's completion gap for a board, by the link it is reached

@@ -680,9 +680,34 @@ get the data rates down". Reversed for the card; Play keeps its minute.
   surface puts the controls first and the picture in a slim banner. The
   2026-09-24 re-ruling weakens S4's "Play is the steady state", so it is worth
   revisiting, but with the card's desk measurement in hand, not by analogy.
-- **Owed: a desk measurement on silicon.** Board fps with the card watched
-  against the same connection with the card off screen, link stability over
-  a few minutes, Mac Chrome as the central; optionally ESP-NOW loss with
-  `desk_espnow_meter`. The steps are in PR #1062. Until then the pace is a
-  judgement from the wire sizes and the earlier desk rates (Mac 5–12 KB/s of
-  notifications), not a measurement.
+- **Measured on silicon (2026-10-09).** Board `loose-c6` (a XIAO ESP32-C6,
+  release 2026.10.08-23), running a copy of Logo Sign (241 lamps, on D10 and
+  D9: the catalog's IO13 is a USB data line on the C6), on the desk next to
+  the Mac. The central was a background Brave (Chromium 155, macOS 26.5)
+  driven over CDP by `spikes/ble-lab/scripts/cdp-central.mjs`; Mac Chrome saw
+  no Bluetooth devices at all that night. Fps and frame times are the board's
+  own `[perf]` lines over its USB console (`lp-cli link capture`); the bytes
+  and reads are counted at the page's GATT characteristics. Windows
+  alternated the card off screen (Studio on Projects, still connected) and on
+  screen: 2 × 2 minutes each, then 3 × 5 minutes each.
+
+  | | card off screen | card on screen |
+  |---|---|---|
+  | board fps (median of `[perf]`) | 30 in every window | 29 in every window |
+  | p99 frame time | ≤ 50 ms | ≤ 50 ms |
+  | slowest frame | 48–50 ms | 51–62 ms |
+  | frames over 100 ms | 0 | 0 |
+  | card reads | 0 | 0.94–1.24 a second |
+  | Bluetooth, page → board / board → page | ~9 / ~45 B/s | ~210–280 / ~800–1,060 B/s |
+  | link drops | 0 in ~19 min | 1 in ~19 min |
+
+  The cost is one frame a second of thirty, about 3 % — inside even the
+  radio budget's idle row (≤ 10 %), let alone the connected row (≤ 50 %).
+  The one drop was a supervision timeout (`0x08`) in a 2-minute window; Studio
+  reconnected by itself in about 5 s and the card came back live. The
+  15-minute soak that followed (card on and off, 5-minute windows) had none.
+  The 2026-09-24 Amendment's desk runs saw the same drop with nothing being
+  read (2 in Run J, 0 in ~15 min over K+L), so one drop does not say whether
+  the card makes them likelier. Still owed: the same on a phone (Bluefy is a
+  different stack and MTU), a 512-lamp board, and ESP-NOW loss beside a
+  watched card (`desk_espnow_meter`).
