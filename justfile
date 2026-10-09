@@ -4884,10 +4884,12 @@ walk-migration-emu *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
-# The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, setting,
-# reading back (after a reload) and forgetting an emulated C6's Wi‑Fi over
-# the USB shim (`usb`) or `?ble=emu` (`ble`). Transport, UI and the board's
-# store — not access (the emulated link is trusted). Serves the RELEASE
+# The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, joining
+# a network the board heard on its virtual LAN, adding one by name, reading
+# both back (after a reload) and forgetting one, on an emulated C6 over the
+# USB shim (`usb`) or `?ble=emu` (`ble`). Every claim is the board's status
+# over its LAN forward. Transport, UI, the board's store and its station —
+# not access (the emulated link is trusted), not the radio. Serves the RELEASE
 # bundle itself; needs `just studio-web-story-build`,
 # `just studio-firmware-package-esp32c6` and `cargo build -p lp-cli`. Not CI.
 #
