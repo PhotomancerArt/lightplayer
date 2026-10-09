@@ -61,6 +61,8 @@ mod tree_walk;
 mod vec_growth;
 
 #[cfg(test)]
+mod counter_wrap_tests;
+#[cfg(test)]
 mod cut_sweep_tests;
 #[cfg(test)]
 mod format_extension_tests;
