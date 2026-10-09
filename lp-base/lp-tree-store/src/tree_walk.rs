@@ -1,97 +1,99 @@
 //! Walking the directories on flash (the working tree), with the delta laid
-//! over them: one file by path (a collided path-table row, or a write
-//! confirming a row), and every file under a prefix (listings, deletes).
+//! over them: one file by path (every lookup, and a write that needs the
+//! file it replaces), and every file under a prefix (listings). Paths are
+//! handled as bytes.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::dir_node::EntryKind;
+use crate::dir_node::{DirEntry, EntryKind};
 use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
 use crate::node_read::read_dir;
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::ObjectId;
+use crate::store_error::StoreError;
 use crate::tree_delta::{Change, FileEntry};
 use crate::tree_store::{Res, TreeStore, is_hot};
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
-    /// The file at `path` by walking.
+    /// The file at `path` (a valid path) by walking.
     pub(crate) fn walk_file(&mut self, path: &str) -> Res<Option<FileEntry>, F> {
         if let Some(r) = self.delta.lookup(path) {
             return Ok(r);
         }
+        let file = |e: DirEntry| FileEntry {
+            id: e.id,
+            size: e.size,
+        };
         if is_hot(path) {
             let entries = read_dir(&mut self.log, self.work.hot)?;
-            return Ok(entries
-                .into_iter()
-                .find(|e| e.kind == EntryKind::File && e.name == path)
-                .map(|e| FileEntry {
-                    id: e.id,
-                    size: e.size,
-                }));
+            return Ok(find(entries, path.as_bytes(), EntryKind::File).map(file));
         }
         let mut dir = self.work.cold;
-        let mut parts = path[1..].split('/').peekable();
-        while let Some(name) = parts.next() {
-            let last = parts.peek().is_none();
-            let want = if last {
-                EntryKind::File
-            } else {
+        let mut rest = &path.as_bytes()[1..];
+        loop {
+            let slash = rest.iter().position(|&c| c == b'/');
+            let name = &rest[..slash.unwrap_or(rest.len())];
+            let want = if slash.is_some() {
                 EntryKind::Dir
+            } else {
+                EntryKind::File
             };
             let entries = read_dir(&mut self.log, dir)?;
-            let Some(e) = entries
-                .into_iter()
-                .find(|e| e.kind == want && e.name == name)
-            else {
+            let Some(e) = find(entries, name, want) else {
                 return Ok(None);
             };
-            if last {
-                return Ok(Some(FileEntry {
-                    id: e.id,
-                    size: e.size,
-                }));
-            }
+            let Some(k) = slash else {
+                return Ok(Some(file(e)));
+            };
             dir = e.id;
+            rest = &rest[k + 1..];
         }
-        Ok(None)
     }
 
     /// Every file path starting with `prefix`, sorted (the caller's list).
     pub(crate) fn list_files(&mut self, prefix: &str) -> Res<Vec<String>, F> {
-        let mut out = Vec::new();
-        let mut path = String::new();
+        let prefix = prefix.as_bytes();
+        let mut out: Vec<Vec<u8>> = Vec::new();
+        let mut path = Vec::new();
         self.list_cold(self.work.cold, &mut path, prefix, 0, &mut out)?;
         for e in read_dir(&mut self.log, self.work.hot)? {
             if e.name.starts_with(prefix) {
                 out.push(e.name);
             }
         }
-        // The delta over it: deleted paths out, written paths in.
-        let delta = &self.delta;
-        out.retain(|p| delta.lookup(p).is_none_or(|r| r.is_some()));
-        for e in delta.entries() {
-            if matches!(e.change, Change::Set(_)) && e.path.starts_with(prefix) {
-                out.push(e.path.clone());
+        // Names leave the store as strings here (UTF-8 is a writer's rule);
+        // the delta over them: deleted paths out, written paths in.
+        let mut names = Vec::with_capacity(out.len());
+        for p in out {
+            let p = String::from_utf8(p).map_err(|_| StoreError::Corrupt("dir entry name"))?;
+            if self.delta.lookup(&p).is_none_or(|r| r.is_some()) {
+                names.push(p);
             }
         }
-        heap_sort_by(&mut out, |a, b| a.as_bytes() < b.as_bytes());
-        out.dedup();
-        Ok(out)
+        for e in self.delta.entries() {
+            if matches!(e.change, Change::Set(_)) && e.path.as_bytes().starts_with(prefix) {
+                names.push(e.path.clone());
+            }
+        }
+        heap_sort_by(&mut names, |a, b| a.as_bytes() < b.as_bytes());
+        names.dedup();
+        Ok(names)
     }
 
     fn list_cold(
         &mut self,
         id: ObjectId,
-        path: &mut String,
-        prefix: &str,
+        path: &mut Vec<u8>,
+        prefix: &[u8],
         depth: usize,
-        out: &mut Vec<String>,
+        out: &mut Vec<Vec<u8>>,
     ) -> Res<(), F> {
         for e in read_dir(&mut self.log, id)? {
             let len = path.len();
-            path.push('/');
-            path.push_str(&e.name);
+            path.push(b'/');
+            path.extend_from_slice(&e.name);
             match e.kind {
                 EntryKind::File if path.starts_with(prefix) => out.push(path.clone()),
                 EntryKind::Dir
@@ -107,11 +109,16 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     }
 }
 
+/// The entry named `name` of `kind`, taken out of `entries`.
+fn find(entries: Vec<DirEntry>, name: &[u8], kind: EntryKind) -> Option<DirEntry> {
+    entries
+        .into_iter()
+        .find(|e| e.kind == kind && e.name == name)
+}
+
 /// Whether directory `dir` can hold a path starting with `prefix`.
-fn may_hold(dir: &str, prefix: &str) -> bool {
+fn may_hold(d: &[u8], p: &[u8]) -> bool {
     // `dir/` starts with `prefix`, or `prefix` starts with `dir/`.
-    let d = dir.as_bytes();
-    let p = prefix.as_bytes();
     let n = p.len().min(d.len());
     if d[..n] != p[..n] {
         return false;
@@ -125,11 +132,11 @@ mod tests {
 
     #[test]
     fn prefix_pruning() {
-        assert!(may_hold("/projects", "/"));
-        assert!(may_hold("/projects", "/proj"));
-        assert!(may_hold("/projects", "/projects/a/"));
-        assert!(may_hold("/projects", "/projects"));
-        assert!(!may_hold("/projects", "/projectsX"));
-        assert!(!may_hold("/hardware", "/projects/"));
+        assert!(may_hold(b"/projects", b"/"));
+        assert!(may_hold(b"/projects", b"/proj"));
+        assert!(may_hold(b"/projects", b"/projects/a/"));
+        assert!(may_hold(b"/projects", b"/projects"));
+        assert!(!may_hold(b"/projects", b"/projectsX"));
+        assert!(!may_hold(b"/hardware", b"/projects/"));
     }
 }

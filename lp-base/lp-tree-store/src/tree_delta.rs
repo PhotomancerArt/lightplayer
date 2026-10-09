@@ -66,14 +66,14 @@ impl TreeDelta {
         self.entries = entries;
     }
 
-    fn find(&self, path: &str, tree: bool) -> Result<usize, usize> {
-        let key = (path.as_bytes(), tree);
+    fn find(&self, path: &[u8], tree: bool) -> Result<usize, usize> {
+        let key = (path, tree);
         self.entries.binary_search_by(|e| e.key().cmp(&key))
     }
 
     fn upsert(&mut self, path: &str, change: Change) {
         let tree = change == Change::DeleteTree;
-        match self.find(path, tree) {
+        match self.find(path.as_bytes(), tree) {
             Ok(i) => self.entries[i].change = change,
             Err(i) => self.entries.insert(
                 i,
@@ -95,14 +95,15 @@ impl TreeDelta {
 
     /// `dir` and everything under it: earlier changes under it are dropped.
     pub fn delete_tree(&mut self, dir: &str) {
-        self.entries.retain(|e| !under(&e.path, dir));
+        self.entries
+            .retain(|e| !under(e.path.as_bytes(), dir.as_bytes()));
         self.upsert(dir, Change::DeleteTree);
     }
 
     /// What the delta says about the file at `path`: `Some(Some)` written,
     /// `Some(None)` deleted (or under a deleted tree), `None` untouched.
     pub fn lookup(&self, path: &str) -> Option<Option<FileEntry>> {
-        if let Ok(i) = self.find(path, false) {
+        if let Ok(i) = self.find(path.as_bytes(), false) {
             return Some(match self.entries[i].change {
                 Change::Set(fe) => Some(fe),
                 _ => None,
@@ -113,8 +114,8 @@ impl TreeDelta {
 
     /// Whether a deleted tree covers `path`.
     pub fn covered(&self, path: &str) -> bool {
-        let mut p = path;
-        while let Some(i) = p.rfind('/') {
+        let mut p = path.as_bytes();
+        while let Some(i) = p.iter().rposition(|&c| c == b'/') {
             p = &p[..i];
             if !p.is_empty() && self.find(p, true).is_ok() {
                 return true;
@@ -143,8 +144,8 @@ impl TreeDelta {
 }
 
 /// `path` is strictly inside directory `dir`.
-pub fn under(path: &str, dir: &str) -> bool {
-    path.len() > dir.len() + 1 && path.starts_with(dir) && path.as_bytes()[dir.len()] == b'/'
+pub fn under(path: &[u8], dir: &[u8]) -> bool {
+    path.len() > dir.len() + 1 && path.starts_with(dir) && path[dir.len()] == b'/'
 }
 
 #[cfg(test)]
@@ -174,6 +175,6 @@ mod tests {
         d.set("/a", fe(5));
         assert_eq!(d.entries().len(), 4, "file /a and tree /a are two entries");
         assert_eq!(d.set_ids().count(), 3);
-        assert!(under("/a/b", "/a") && !under("/ab", "/a") && !under("/a", "/a"));
+        assert!(under(b"/a/b", b"/a") && !under(b"/ab", b"/a") && !under(b"/a", b"/a"));
     }
 }

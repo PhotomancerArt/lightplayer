@@ -5,7 +5,6 @@
 //! again). An emptied directory disappears from its parent (directories are
 //! implicit); the root's cold directory always exists.
 
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::dir_node::{DirEntry, EntryKind, encode_dir};
@@ -54,7 +53,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     }
 
     fn rebuild_all(&mut self, changes: &[DeltaEntry]) -> Res<WorkDirs, F> {
-        let cold = match self.rebuild_dir(Some(self.work.cold), "", changes, false)? {
+        let cold = match self.rebuild_dir(Some(self.work.cold), b"", changes, false)? {
             Some(id) => id,
             None => self.write_dir_bytes(HeadKind::Cold, &[0, 0])?,
         };
@@ -67,7 +66,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     fn rebuild_dir(
         &mut self,
         old: Option<ObjectId>,
-        dir: &str,
+        dir: &[u8],
         changes: &[DeltaEntry],
         reset: bool,
     ) -> Res<Option<ObjectId>, F> {
@@ -79,21 +78,21 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut i = 0;
         while i < changes.len() {
             let e = &changes[i];
-            let rel = &e.path[base..];
-            let Some(k) = rel.find('/') else {
+            let path = e.path.as_bytes();
+            let rel = &path[base..];
+            let Some(k) = rel.iter().position(|&c| c == b'/') else {
+                let hot = is_hot(&e.path);
                 match e.change {
-                    Change::Set(fe) if !is_hot(&e.path) => {
+                    Change::Set(fe) if !hot => {
                         remove(&mut entries, rel, EntryKind::File);
                         entries.push(DirEntry {
-                            name: String::from(rel),
+                            name: rel.to_vec(),
                             kind: EntryKind::File,
                             size: fe.size,
                             id: fe.id,
                         });
                     }
-                    Change::Delete if !is_hot(&e.path) => {
-                        remove(&mut entries, rel, EntryKind::File)
-                    }
+                    Change::Delete if !hot => remove(&mut entries, rel, EntryKind::File),
                     Change::DeleteTree => remove(&mut entries, rel, EntryKind::Dir),
                     _ => {}
                 }
@@ -101,15 +100,15 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 continue;
             };
             let name = &rel[..k];
-            let sub_dir = &e.path[..base + k];
+            let sub_dir = &path[..base + k];
             let mut j = i;
-            while j < changes.len() && under(&changes[j].path, sub_dir) {
+            while j < changes.len() && under(changes[j].path.as_bytes(), sub_dir) {
                 j += 1;
             }
             let child_reset = reset
                 || changes[..i]
                     .iter()
-                    .any(|c| c.path == sub_dir && c.change == Change::DeleteTree);
+                    .any(|c| c.path.as_bytes() == sub_dir && c.change == Change::DeleteTree);
             let old_child = if child_reset {
                 None
             } else {
@@ -122,7 +121,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             remove(&mut entries, name, EntryKind::Dir);
             if let Some(id) = new_child {
                 entries.push(DirEntry {
-                    name: String::from(name),
+                    name: name.to_vec(),
                     kind: EntryKind::Dir,
                     size: 0,
                     id,
@@ -141,10 +140,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
 
     /// The hot directory after `changes` (unchanged = not rewritten).
     fn rebuild_hot(&mut self, changes: &[DeltaEntry]) -> Res<ObjectId, F> {
-        let trees: Vec<&str> = changes
+        let trees: Vec<&[u8]> = changes
             .iter()
             .filter(|c| c.change == Change::DeleteTree)
-            .map(|c| c.path.as_str())
+            .map(|c| c.path.as_bytes())
             .collect();
         let mut entries = read_dir(&mut self.log, self.work.hot)?;
         let before = entries.len();
@@ -152,10 +151,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut changed = entries.len() != before;
         for c in changes.iter().filter(|c| is_hot(&c.path)) {
             changed = true;
-            remove(&mut entries, &c.path, EntryKind::File);
+            remove(&mut entries, c.path.as_bytes(), EntryKind::File);
             if let Change::Set(fe) = c.change {
                 entries.push(DirEntry {
-                    name: c.path.clone(),
+                    name: c.path.as_bytes().to_vec(),
                     kind: EntryKind::File,
                     size: fe.size,
                     id: fe.id,
@@ -172,6 +171,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     }
 }
 
-fn remove(entries: &mut Vec<DirEntry>, name: &str, kind: EntryKind) {
+fn remove(entries: &mut Vec<DirEntry>, name: &[u8], kind: EntryKind) {
     entries.retain(|e| !(e.kind == kind && e.name == name));
 }

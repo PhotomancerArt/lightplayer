@@ -62,6 +62,24 @@ fn round_trip_list_delete_and_remount() {
     assert_eq!(st.put("/a/", b"x"), Err(StoreError::InvalidPath));
 }
 
+#[test]
+fn valid_paths() {
+    use crate::{MAX_DEPTH, valid_path};
+    for ok in ["/a", "/a/b.json", "/.lp/panel.json", "/é/ü"] {
+        assert!(valid_path(ok), "{ok:?}");
+    }
+    for bad in ["", "/", "a", "a/b", "/a/", "//a", "/a//b", "/a/b/"] {
+        assert!(!valid_path(bad), "{bad:?}");
+    }
+    let deep = |n: usize| "/d".repeat(n);
+    assert!(valid_path(&deep(MAX_DEPTH)));
+    assert!(!valid_path(&deep(MAX_DEPTH + 1)));
+    assert!(!valid_path(&alloc::format!(
+        "/{}",
+        "x".repeat(usize::from(u16::MAX))
+    )));
+}
+
 /// `delete_prefix` takes a whole directory (`"<dir>/"`) and nothing else; a
 /// directory that is not there is a no-op that writes nothing.
 #[test]

@@ -444,12 +444,24 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
 /// Absolute, no trailing `/`, no empty component, at most [`MAX_DEPTH`]
 /// components and `u16::MAX` bytes.
 pub fn valid_path(path: &str) -> bool {
-    path.len() > 1
-        && path.len() <= usize::from(u16::MAX)
-        && path.starts_with('/')
-        && !path.ends_with('/')
-        && !path[1..].split('/').any(str::is_empty)
-        && path.split('/').count() <= MAX_DEPTH + 1
+    let b = path.as_bytes();
+    if b.len() < 2 || b.len() > usize::from(u16::MAX) || b[0] != b'/' {
+        return false;
+    }
+    // Every `/` starts a component: none may be empty, and there are at
+    // most MAX_DEPTH of them.
+    let mut slashes = 0;
+    let mut prev = 0u8;
+    for &c in b {
+        if c == b'/' {
+            if prev == b'/' {
+                return false;
+            }
+            slashes += 1;
+        }
+        prev = c;
+    }
+    prev != b'/' && slashes <= MAX_DEPTH
 }
 
 /// The hot path: last two components are `.lp/panel.json`.
