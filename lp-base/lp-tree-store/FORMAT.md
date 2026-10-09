@@ -373,9 +373,16 @@ there:
   erase) and moves bits towards 1. To read as the magic, exactly its 13
   one-bits must have come up and its 19 zero-bits stayed down — one
   particular 32-bit pattern, about 2⁻³² of torn erases, and a torn erase
-  needs a power cut inside the erase itself. (`lp-nor-sim`'s tear shapes
-  are stricter still: a byte-wise mix always sets bit 0, which `0x4C` lacks,
-  so only an erase edge at byte 0 with four random bytes can do it.)
+  needs a power cut inside the erase itself. (`lp-nor-sim`'s guessed tear
+  shapes are stricter still: a byte-wise mix always sets bit 0, which
+  `0x4C` lacks, so only an erase edge at byte 0 with four random bytes can
+  do it. A real C6's erase, as calibrated —
+  `docs/reports/2026-10-08-c6-nor-tear-calibration.md`, `lp-nor-sim`'s
+  `calibrated` model — first programs the whole sector to `00…` and then
+  lifts every cell at once, so a cut leaves `00…` from the front or
+  throughout (no magic), `FF…` (no magic), or a residue of zeros at random
+  positions over `FF…`: the same one pattern in 32 bits, at best about
+  2⁻³¹ when the residue holds near the magic's own share of zero bits.)
 - *A torn or worn header program* cannot: the magic goes last, after the
   rest reads back ("Writing and killing").
 - *Records* start at byte 24 and never cover bytes 0..6.
@@ -386,9 +393,10 @@ there:
   intact on flash and visible; a silently untrusted sector is data loss.
 
 `format_extension_tests.rs` cuts a format over a live store at every
-operation, under every tear model and many seeds, and checks that no
-header ever reads as a newer version; the power-cut sweeps would fail on
-one (they did, before the magic went last).
+operation, under every tear model and many seeds (the calibrated ones with
+`LP_TREE_STORE_SWEEP_TEARS`; none did, P10), and checks that no header ever
+reads as a newer version; the power-cut sweeps would fail on one (they did,
+before the magic went last).
 
 **Why additive room (option B, G1, 2026-10-08).** The only executor that
 re-packs a filesystem is the layout migration
