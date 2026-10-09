@@ -53,6 +53,13 @@ pub const MAX_PICTURE_OUTPUTS: usize = 16;
 /// firmware can send more with no protocol change. The board keeps to it.
 pub const DEFAULT_PICTURE_SAMPLES: usize = 256;
 
+/// The largest picture frame a board makes today: sixteen outputs and
+/// [`DEFAULT_PICTURE_SAMPLES`] colours, `1 + 1 + 16·4 + 2 + 256·3` = 836
+/// bytes. An edge reserves its picture buffer at this size once
+/// ([`crate::write_picture_header`] fills it in place).
+pub const MAX_BOARD_PICTURE_FRAME: usize =
+    1 + 1 + 4 * MAX_PICTURE_OUTPUTS + 2 + 3 * DEFAULT_PICTURE_SAMPLES;
+
 /// The board's floor on [`PictureRate::watched_ms`](crate::PictureRate):
 /// a hub bug can never push a board past four pictures a second. Enforced
 /// by the board ([`PictureRate::clamped`](crate::PictureRate::clamped)).

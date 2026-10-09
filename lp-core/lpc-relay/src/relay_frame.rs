@@ -57,7 +57,7 @@ const TAG_FRAME: u8 = 0x07;
 const TAG_CLOSE: u8 = 0x08;
 const TAG_LAN_CHANGED: u8 = 0x09;
 const TAG_PROJECT: u8 = 0x0a;
-const TAG_PICTURE: u8 = 0x0b;
+pub(crate) const TAG_PICTURE: u8 = 0x0b;
 const TAG_PICTURE_RATE: u8 = 0x0c;
 
 /// The bytes a [`RelayFrame::Frame`] adds to the lp-link frame it carries.

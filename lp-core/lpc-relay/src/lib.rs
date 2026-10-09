@@ -73,12 +73,12 @@ pub use relay_frame::{
 };
 pub use relay_hello::RelayHello;
 pub use relay_limits::{
-    DEFAULT_PICTURE_SAMPLES, MAX_FIRMWARE_BYTES, MAX_HELLO_ACCOUNTS, MAX_IDLE_S, MAX_LABEL_BYTES,
-    MAX_PICTURE_OUTPUTS, MAX_PROJECT_NAME_BYTES, MAX_RELAY_FRAME, MAX_ROUTES_PER_BOARD,
-    MAX_WATCHED_FOR_S, MIN_IDLE_S, MIN_WATCHED_MS, PING_INTERVAL_S, PROJECT_TAG_BYTES,
-    SILENT_CLOSE_S,
+    DEFAULT_PICTURE_SAMPLES, MAX_BOARD_PICTURE_FRAME, MAX_FIRMWARE_BYTES, MAX_HELLO_ACCOUNTS,
+    MAX_IDLE_S, MAX_LABEL_BYTES, MAX_PICTURE_OUTPUTS, MAX_PROJECT_NAME_BYTES, MAX_RELAY_FRAME,
+    MAX_ROUTES_PER_BOARD, MAX_WATCHED_FOR_S, MIN_IDLE_S, MIN_WATCHED_MS, PING_INTERVAL_S,
+    PROJECT_TAG_BYTES, SILENT_CLOSE_S,
 };
-pub use relay_picture::RelayPicture;
+pub use relay_picture::{RelayPicture, picture_sample_count, write_picture_header};
 pub use relay_project::{
     RELAY_PROJECT_LABEL, RelayProject, project_content_tag, project_tag_key, project_uid_tag,
 };

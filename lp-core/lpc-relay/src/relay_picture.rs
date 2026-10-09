@@ -1,11 +1,64 @@
 //! A board's picture: what its lamps show, sampled, as it sends it to the
 //! hub ([`RelayFrame::Picture`](crate::RelayFrame::Picture), protocol 2).
+//!
+//! Two ways to make the frame: [`RelayFrame::encode`](crate::RelayFrame::encode)
+//! of a [`RelayPicture`] (the hub, tests), or in place on a board
+//! ([`write_picture_header`], then the colours appended behind it), so an
+//! edge fills one buffer it keeps and never builds a `RelayPicture`. Both
+//! write the same bytes.
 
 use alloc::vec::Vec;
 
 use crate::frame_reader::FrameReader;
-use crate::relay_frame::RelayFrameError;
+use crate::relay_frame::{RelayFrameError, TAG_PICTURE};
 use crate::relay_limits::{MAX_PICTURE_OUTPUTS, MAX_RELAY_FRAME};
+
+/// How many samples a board sends for `lamps_total` lamps, at most `max`:
+/// `min(T, max)` (and never more than a frame's `u16` count), so 0 exactly
+/// when `T` is 0. A board passes
+/// [`DEFAULT_PICTURE_SAMPLES`](crate::DEFAULT_PICTURE_SAMPLES).
+#[must_use]
+pub fn picture_sample_count(lamps_total: u64, max: usize) -> u16 {
+    let max = u64::try_from(max).unwrap_or(u64::MAX);
+    u16::try_from(lamps_total.min(max)).unwrap_or(u16::MAX)
+}
+
+/// Write a [`RelayFrame::Picture`](crate::RelayFrame::Picture) frame's tag,
+/// outputs and count into `out` (cleared first, its capacity kept); the
+/// caller then appends `count × 3` colour bytes, R, G, B per sample, in the
+/// meaning [`RelayPicture`] gives them. The finished buffer is
+/// byte-identical to `RelayFrame::Picture(..).encode()` of the same
+/// picture.
+///
+/// Refuses what the hub's decoder would: more than
+/// [`MAX_PICTURE_OUTPUTS`] outputs, or a `count` the lamps contradict
+/// ([`RelayFrameError::BadField`]); a frame past [`MAX_RELAY_FRAME`] once
+/// its colours are in ([`RelayFrameError::TooLong`]). On a refusal `out`
+/// is left empty.
+pub fn write_picture_header(
+    out: &mut Vec<u8>,
+    lamps: &[u32],
+    count: u16,
+) -> Result<(), RelayFrameError> {
+    out.clear();
+    check_shape(lamps, usize::from(count))?;
+    if 1 + 1 + 4 * lamps.len() + 2 + 3 * usize::from(count) > MAX_RELAY_FRAME {
+        return Err(RelayFrameError::TooLong);
+    }
+    out.push(TAG_PICTURE);
+    put_header(out, lamps, count);
+    Ok(())
+}
+
+/// `n u8`, `n × lamps u32`, `count u16`: a picture's fields before its
+/// colours. `lamps` holds at most [`MAX_PICTURE_OUTPUTS`] entries.
+fn put_header(out: &mut Vec<u8>, lamps: &[u32], count: u16) {
+    out.push(lamps.len() as u8);
+    for lamps in lamps {
+        out.extend_from_slice(&lamps.to_le_bytes());
+    }
+    out.extend_from_slice(&count.to_le_bytes());
+}
 
 /// The colours a board's lamps show, point-sampled.
 ///
@@ -87,12 +140,8 @@ impl RelayPicture {
     /// rule still encodes, and the hub refuses it ([`Self::validate`]).
     pub(crate) fn put(&self, out: &mut Vec<u8>) {
         let outputs = &self.outputs[..self.outputs.len().min(MAX_PICTURE_OUTPUTS)];
-        out.push(outputs.len() as u8);
-        for lamps in outputs {
-            out.extend_from_slice(&lamps.to_le_bytes());
-        }
         let count = self.samples().min(usize::from(u16::MAX));
-        out.extend_from_slice(&(count as u16).to_le_bytes());
+        put_header(out, outputs, count as u16);
         out.extend_from_slice(&self.colors[..count * 3]);
     }
 
@@ -239,5 +288,98 @@ mod tests {
             colors: vec![0; 3 * 660],
         };
         assert_eq!(at_limit.validate(), Ok(()));
+    }
+
+    /// The header written in place, then the colours behind it, is each
+    /// `Picture` golden of `tests/relay_frame_golden_v2.rs` (the hex copied
+    /// here as literals), and decodes back.
+    #[test]
+    fn the_header_written_in_place_makes_the_golden_frames() {
+        let cases: [(&[u32], &[u8], &str); 3] = [
+            (&[], &[], "0b 00 0000"),
+            (
+                &[3],
+                &[0xff, 0, 0, 0, 0xff, 0, 0, 0, 0xff],
+                "0b 01 03000000 0300 ff0000 00ff00 0000ff",
+            ),
+            (
+                &[5, 3],
+                &[
+                    0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xa0, 0xb0, 0xc0,
+                ],
+                "0b 02 05000000 03000000 0400 102030 405060 708090 a0b0c0",
+            ),
+        ];
+        // A reused buffer: whatever it held is cleared.
+        let mut out = vec![0xaa; 7];
+        for (lamps, colors, golden) in cases {
+            let count = (colors.len() / 3) as u16;
+            write_picture_header(&mut out, lamps, count).expect("a valid picture");
+            out.extend_from_slice(colors);
+            assert_eq!(out, unhex(golden), "{golden}");
+            assert_eq!(
+                crate::RelayFrame::decode(&out),
+                Ok(crate::RelayFrame::Picture(RelayPicture {
+                    outputs: lamps.to_vec(),
+                    colors: colors.to_vec(),
+                })),
+                "{golden}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_header_writer_refuses_what_the_decoder_would() {
+        let mut out = vec![1, 2, 3];
+        assert_eq!(
+            write_picture_header(&mut out, &[1; 17], 1),
+            Err(RelayFrameError::BadField),
+            "seventeen outputs"
+        );
+        assert!(out.is_empty(), "a refusal leaves the buffer empty");
+        assert_eq!(
+            write_picture_header(&mut out, &[3], 0),
+            Err(RelayFrameError::BadField),
+            "no samples of three lamps"
+        );
+        assert_eq!(
+            write_picture_header(&mut out, &[], 1),
+            Err(RelayFrameError::BadField),
+            "a sample of no lamps"
+        );
+        assert_eq!(
+            write_picture_header(&mut out, &[2], 3),
+            Err(RelayFrameError::BadField),
+            "more samples than lamps"
+        );
+        assert_eq!(
+            write_picture_header(&mut out, &[1000; 16], 661),
+            Err(RelayFrameError::TooLong)
+        );
+        assert_eq!(write_picture_header(&mut out, &[1000; 16], 660), Ok(()));
+    }
+
+    #[test]
+    fn a_board_sends_at_most_its_cap_and_none_for_no_lamps() {
+        use crate::relay_limits::{DEFAULT_PICTURE_SAMPLES, MAX_BOARD_PICTURE_FRAME};
+        assert_eq!(picture_sample_count(0, DEFAULT_PICTURE_SAMPLES), 0);
+        assert_eq!(picture_sample_count(73, DEFAULT_PICTURE_SAMPLES), 73);
+        assert_eq!(picture_sample_count(256, DEFAULT_PICTURE_SAMPLES), 256);
+        assert_eq!(picture_sample_count(1000, DEFAULT_PICTURE_SAMPLES), 256);
+        assert_eq!(picture_sample_count(u64::MAX, usize::MAX), u16::MAX);
+        // The biggest frame a board makes fits the buffer it reserves.
+        let mut out = Vec::new();
+        let count = picture_sample_count(16 * 1000, DEFAULT_PICTURE_SAMPLES);
+        write_picture_header(&mut out, &[1000; 16], count).unwrap();
+        out.resize(out.len() + 3 * usize::from(count), 0);
+        assert_eq!(out.len(), MAX_BOARD_PICTURE_FRAME);
+        assert_eq!(MAX_BOARD_PICTURE_FRAME, 836);
+    }
+
+    fn unhex(text: &str) -> Vec<u8> {
+        let text: Vec<u8> = text.bytes().filter(|b| *b != b' ').collect();
+        text.chunks(2)
+            .map(|pair| u8::from_str_radix(core::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect()
     }
 }
