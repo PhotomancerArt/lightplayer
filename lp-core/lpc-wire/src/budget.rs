@@ -133,3 +133,35 @@ pub const FILE_SYNC_PAGE_RAW_BYTES: usize = 7 * 1024;
 /// Maximum entries per ChangesSince page (bounds per-entry path/scaffold
 /// overhead for pages full of tiny files).
 pub const FILE_SYNC_PAGE_MAX_ENTRIES: usize = 12;
+
+/// Reserve for a shader edit's request around its body: the client
+/// envelope, the project command, the one-command `SetArtifactBody` batch
+/// and the artifact's path
+/// (`{"id":…,"msg":{"projectCommand":{"handle":…,"command":{"mutateOverlay":
+/// {"request":{"batch":{"commands":[{"id":…,"mutation":{"set_artifact_body":
+/// {"artifact":{"path":"…"},"edit":{"replace_body":` … `}}}}]}}}}}}}`, ~190 B
+/// before the path). A kibibyte leaves the path ~800 B.
+pub const ASSET_BODY_REQUEST_ENVELOPE_RESERVE_BYTES: usize = 1024;
+
+/// The largest asset body one edit carries, **as encoded on the wire**
+/// (`lpc_model::body_bytes::encoded_len`: text with its escapes and quotes,
+/// or a binary body's base64 object). Studio parks a longer edit as failed
+/// and never sends it (`lpa_studio_core::MAX_ASSET_BODY_BYTES`).
+///
+/// ```text
+///   PROJECT_READ_FRAME_MAX_BYTES                       16,384
+///   − ASSET_BODY_REQUEST_ENVELOPE_RESERVE_BYTES        − 1,024
+///   = MAX_ASSET_BODY_ENCODED_BYTES                     15,360
+/// ```
+///
+/// The cap is the wire's one message budget, not the board's request buffer
+/// (`fw-esp32-common`'s `SERVER_MSG_JSON_BUFFER_SIZE`, 16,656 B: that budget
+/// plus 272 B of margin; a longer request is dropped unanswered), because the
+/// same body comes back in the board's reply to an overlay read, which must
+/// fit the frame budget. A shader is its own size plus a byte a line (the
+/// newline's escape), so ~15 KB of source fits. Before wire 41 a body went
+/// as an array of numbers, ~3.5 characters a byte, and past ~4.7 KB of
+/// source outgrew the board's buffer while Studio's 10 KB raw limit let it
+/// through.
+pub const MAX_ASSET_BODY_ENCODED_BYTES: usize =
+    PROJECT_READ_FRAME_MAX_BYTES - ASSET_BODY_REQUEST_ENVELOPE_RESERVE_BYTES;

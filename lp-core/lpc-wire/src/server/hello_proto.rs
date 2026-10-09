@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn a_wire_32_hello_does_not_decode_at_this_wire_version_but_names_its_proto() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 40,
+            WIRE_PROTO_VERSION, 41,
             "re-read this test when the version moves"
         );
         assert!(
@@ -136,14 +136,14 @@ mod tests {
 
     /// Main's wire 34 (`hardware.fs`, the C6 repartition) still lacks the
     /// build's `version`, which wire 35 requires (36 and 37 left the hello
-    /// as it was, 38 only added the optional `firmware`, and 39 and 40 changed only
-    /// network shapes): such a hello does not
+    /// as it was, 38 only added the optional `firmware`, 39 and 40 changed only
+    /// network shapes, and 41 only edit bodies): such a hello does not
     /// decode, and names its proto and board all the same. The same hello
     /// with a version decodes — the one field is the whole difference.
     #[test]
     fn a_wire_34_hello_lacks_only_the_version() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 40,
+            WIRE_PROTO_VERSION, 41,
             "re-read this test when the version moves"
         );
         let wire_34 = HELLO_PROTO_32

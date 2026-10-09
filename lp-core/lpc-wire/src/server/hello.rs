@@ -37,7 +37,18 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
-/// - 40: the cloud relay's state (plan `lp2025/2026-10-06-0815-wifi-relay`,
+/// - 41: file bodies on the edit path go as text — `AssetBodyOverlay::
+///   ReplaceBody` (Studio's shader edit, `SetArtifactBody`, and the bodies an
+///   overlay read returns) and `WireCreateNodeRequest`'s `body` and
+///   `assets` are a JSON string of the body when it is UTF-8, else
+///   `{"base64":"…"}` (`lpc_model::body_bytes`), no longer serde's array of
+///   numbers (~3.5 characters a byte: a 1,971 B shader was a ~7.1 KB
+///   request, and past ~4.7 KB of source an edit outgrew the board's
+///   message cap and was dropped unanswered,
+///   `docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+///   An old peer cannot decode either form. `PACK_FORMAT_VERSION` is
+///   unchanged.
+/// - 40:the cloud relay's state (plan `lp2025/2026-10-06-0815-wifi-relay`,
 ///   Wi-Fi roadmap M7, PR B) — `NetworkStatus` gains the required `relay`
 ///   (`RelayState`: `off | noAccount | waitingForInternet | connecting |
 ///   connected | refused { reason: unknownAccount | updateFirmware | busy }`),
@@ -414,7 +425,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 40;
+pub const WIRE_PROTO_VERSION: u32 = 41;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -845,7 +856,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 40,
+            WIRE_PROTO_VERSION, 41,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

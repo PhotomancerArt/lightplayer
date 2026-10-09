@@ -126,12 +126,13 @@ const REQUEST_FREE_MARGIN_BYTES: usize = 16 * 1024;
 /// reply to send for it (a small JSON message, ready for the link's send
 /// ring) and the reason for the log. Decoding a request allocates its
 /// largest value in one block — a file write's blob (base64 is 3/4 of its
-/// text), a shader edit's byte array (one byte an element, grown by
-/// doubling) — and that, not the reassembly, is where a 10 KB write reset
+/// text), a shader edit's text (unescaped through `serde_json`'s scratch
+/// buffer) — and that, not the reassembly, is where a 10 KB write reset
 /// the silicon C6 with three links open (PR B's desk walk: `alloc 10242
 /// bytes failed`). The block is read off the request's shape
 /// ([`super::request_decode_block`]): measured as 3/4 of the whole message,
-/// Studio's shader edits were refused on a board that could decode them
+/// Studio's shader edits (then byte arrays) were refused on a board that
+/// could decode them
 /// (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
 /// The read gate's posture: refusal ("board memory busy"), never a reset.
 /// `None`: decode it (short, or the heap has room, or nothing probes the
@@ -219,26 +220,48 @@ mod request_gate_tests {
         assert_eq!(request_id(br#" { "id" : 7 , "msg":"#), Some(7));
     }
 
-    /// Studio's shader edit of the 1,971 B choker shader, ~7.1 KB as a byte
-    /// array, at the figures the board refused it with on 2026-10-08
-    /// (largest block 5,216 B): it decodes into a 2,048 B block, so it is
-    /// taken; with no block that size it is still refused.
+    /// Studio's shader edit of the 1,971 B choker shader as it goes on the
+    /// wire since wire 41 — the text, 2,239 B, not the ~7.1 KB byte array
+    /// it was — at the figures the board refused it with on 2026-10-08
+    /// (largest block 5,216 B): its unescape needs under twice its text, so
+    /// it is taken and decodes; with no block that size it is refused.
     #[test]
-    fn a_shader_edit_is_measured_by_its_bytes_not_its_text() {
-        let body = alloc::vec![b'v'; 1_971];
-        let numbers: alloc::vec::Vec<alloc::string::String> =
-            body.iter().map(|b| alloc::format!("{b}")).collect();
-        let edit = alloc::format!(
-            r#"{{"id":31,"msg":{{"projectCommand":{{"handle":1,"command":{{"mutateOverlay":{{"request":{{"batch":{{"commands":[{{"id":7,"mutation":{{"set_artifact_body":{{"artifact":{{"path":"/shader.glsl"}},"edit":{{"replace_body":[{}]}}}}}}}}]}}}}}}}}}}}}}}"#,
-            numbers.join(",")
-        );
-        assert!(edit.len() > 7_000, "{}", edit.len());
+    fn a_shader_edit_is_measured_by_its_text() {
+        use lpc_model::{
+            ArtifactLocation, AssetBodyOverlay, MutationCmd, MutationCmdBatch, MutationCmdId,
+            MutationOp,
+        };
+        let shader = include_str!("../../../../catalog/projects/playful-choker/shader.glsl");
+        let edit = lpc_wire::json::to_string(&lpc_wire::ClientMessage {
+            id: 31,
+            msg: lpc_wire::ClientRequest::ProjectCommand {
+                handle: lpc_wire::WireProjectHandle::new(1),
+                command: lpc_wire::WireProjectCommand::MutateOverlay {
+                    request: lpc_wire::WireOverlayMutationRequest::new(MutationCmdBatch::new(
+                        alloc::vec![MutationCmd {
+                            id: MutationCmdId::new(7),
+                            mutation: MutationOp::SetArtifactBody {
+                                artifact: ArtifactLocation::file("/shader.glsl"),
+                                edit: AssetBodyOverlay::ReplaceBody(shader.as_bytes().to_vec()),
+                            },
+                        }],
+                    )),
+                },
+            },
+        })
+        .unwrap();
+        assert_eq!((shader.len(), edit.len()), (1_971, 2_239));
         assert!(
             refusal_given(edit.as_bytes(), (41_724, 5_216)).is_none(),
-            "a 2 KB decode on a 5 KB block is taken"
+            "a 4 KB unescape on a 5 KB block is taken"
         );
-        let (_, reason) = refusal_given(edit.as_bytes(), (41_724, 2_500)).expect("refused");
-        assert!(reason.contains("a 3072 B block"), "{reason}");
+        let decoded = decode_client_payload(edit.as_bytes()).expect("decodes");
+        assert!(matches!(
+            decoded.msg,
+            lpc_wire::ClientRequest::ProjectCommand { .. }
+        ));
+        let (_, reason) = refusal_given(edit.as_bytes(), (41_724, 4_000)).expect("refused");
+        assert!(reason.contains("a 2239 B request"), "{reason}");
     }
 }
 

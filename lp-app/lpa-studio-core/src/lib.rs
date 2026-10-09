@@ -221,9 +221,9 @@ pub use app::project::{
     UiPatchSurfaceOutput, UiPatchTarget, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
     UiPreviewSpaces, UiProductSpaceRequest, UiProjectHistory, UiProjectHistoryEntry,
     UiProjectManifest, UiSelection, UiShaderError, UiTimebaseRead, arrange_batch,
-    arrange_history_path, chase_preview, editor_meta_artifact, is_header_verb, patch_history_path,
-    preview_phase, publish_arrange_offers, publish_patch_verb_offers, revert_edit_offer,
-    visual_probe_request,
+    arrange_history_path, asset_body_too_large, chase_preview, editor_meta_artifact,
+    is_header_verb, patch_history_path, preview_phase, publish_arrange_offers,
+    publish_patch_verb_offers, revert_edit_offer, visual_probe_request,
 };
 pub use app::rich_object::{
     RichChip, RichLine, RichObjectView, RichRollup, RichSection, RichWeight,
