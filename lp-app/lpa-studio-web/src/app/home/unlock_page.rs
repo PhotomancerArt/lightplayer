@@ -136,7 +136,7 @@ pub(crate) fn UnlockPage(
                         on_action: move |action| {
                             on_action.call(action);
                             crate::route_recording::note_route_reason("unlock-connect");
-                            crate::router::navigate_push(&crate::router::StudioRoute::Devices);
+                            crate::router::navigate_push(&crate::router::StudioRoute::Home);
                         },
                     }
                 }

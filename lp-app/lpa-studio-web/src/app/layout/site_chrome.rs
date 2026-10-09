@@ -1,37 +1,36 @@
 //! [`SiteChrome`]: the one top bar shared by every section of the app.
 //!
-//! Home, Devices, Projects, Boards, and Docs are sections of a
-//! single cohesive app; this bar is their common navigation — "chrome C"
-//! (vision D1/D11, gate-judged spike `spikes/gallery-rework/index.html`;
-//! the original three-tab bar was spike PR #269, `spikes/top-bar/`):
+//! Home, Boards and Docs are sections of a single cohesive app; this bar
+//! is their common navigation — "chrome C" (vision D1/D11, gate-judged
+//! spike `spikes/gallery-rework/index.html`; the original three-tab bar was
+//! spike PR #269, `spikes/top-bar/`):
 //!
-//! - **Split weights.** The primary family (Devices, Projects — your
-//!   things) sits by the brand at full weight; the secondary family
-//!   (Boards, Docs — the world's things) rides the right cluster,
-//!   lighter, with no divider between the families. (Explore was a
-//!   secondary tab too, hidden with the landing round 2026-08-29: until
-//!   a real content system exists it only repeated the landing's
+//! - **Your things are the home page.** The boards and the projects live
+//!   on one page at `/` (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`),
+//!   so the bar carries no tab for them: the Devices and Projects tabs
+//!   retired with the pages they named (their old addresses heal to `/`).
+//!   The world's things (Boards, Docs) ride the right cluster, lighter.
+//!   (Explore was a tab too, hidden with the landing round 2026-08-29:
+//!   until a real content system exists it only repeated the landing's
 //!   example grid. `/explore` still renders for typed URLs.)
-//! - **The brand lockup is the way to Home.** The logo links to `/` —
-//!   Home is the root landing (Yona 2026-08-06) — and there is
+//! - **The brand lockup is the way to Home.** The logo links to `/` and
+//!   is Home's tab: at Home it wears the you're-here underline. There is
 //!   deliberately no Home tab, and no Studio tab either (the sections
 //!   replaced it).
 //! - **One overflow menu** (G3 ruling, 2026-08-05: a row of separate
 //!   menus read as clutter — merge them ALL). The single ⋯ at the bar's
-//!   end always holds the tools, and grows the secondary sections at
-//!   narrow widths when the inline tabs collapse (the bar is a
-//!   container; the cut is where the secondary tabs stop fitting, not
-//!   a viewport magic number). The brand word yields at narrow too — the
-//!   mark stays.
+//!   end always holds the tools, and grows the sections at narrow widths
+//!   when the inline tabs collapse (the bar is a container; the cut is
+//!   where the tabs stop fitting, not a viewport magic number). The brand
+//!   word yields at narrow too — the mark stays.
 //! - **The narrow ladder is conditional on load.** A bar carrying the
 //!   session control and its Play toggle stops fitting ~220px sooner
 //!   than a plain one, so the crowded bar folds earlier (G1 of the
 //!   session·project control, 2026-08-19 — the squished phone bar):
 //!   <900 the world nav retreats to ⋯, the toggle goes icon-only, the
 //!   project segment's relationship word folds to its glyph, and the
-//!   version chip hides (the device name already
-//!   folds there); <680 the brand word yields; <560 the phone
-//!   bar — Devices/Projects become ⋯ rows and gaps tighten. What never
+//!   version chip hides (the device name already folds there); <680 the
+//!   brand word yields; <560 the phone bar's gaps tighten. What never
 //!   folds: the control, Save, Play, settings, the account slot, and ⋯ —
 //!   the phone bar is the session, the one action on it, and the doors.
 //!   (Patch stopped being a chrome mode in R5 — the workbench band tab
@@ -111,8 +110,6 @@ pub struct ChromeProjectMenu {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteSection {
     Home,
-    Devices,
-    Projects,
     Explore,
     Boards,
     Docs,
@@ -164,19 +161,13 @@ pub fn SiteChrome(
     // nav's cut is CONDITIONAL on that load, not a second magic number:
     //   crowded <900 — the world's tabs retreat to ⋯ where the device
     //     name already folds; the brand word yields at <680.
-    //   crowded <560 — the phone bar: Devices/Projects join the ⋯ menu's
-    //     sections (all five), Patch becomes a menu row, gaps tighten.
+    //   crowded <560 — the phone bar: gaps tighten.
     //   plain  <680 — the original ladder, unchanged.
     let crowded = session_control.is_some();
     let bar_gap = if crowded {
         "tw:gap-4 tw:@max-[560px]:gap-2"
     } else {
         "tw:gap-4"
-    };
-    let primary_nav = if crowded {
-        "tw:hidden tw:items-center tw:gap-1 tw:@min-[560px]:flex"
-    } else {
-        "tw:flex tw:items-center tw:gap-1"
     };
     let secondary_nav = if crowded {
         "tw:hidden tw:items-center tw:gap-1 tw:@min-[900px]:flex"
@@ -189,25 +180,19 @@ pub fn SiteChrome(
         "tw:ml-auto tw:flex tw:min-w-0 tw:items-center tw:gap-2"
     };
     // The ⋯ mount ladder (a top-layer popup cannot answer the header's
-    // container query, so each rung is its own mount — Q10): the widest
-    // carries no section rows, the middle mirrors the folded secondary
-    // family, and the crowded bar's phone mount adds the primary family
-    // and the Patch row. `overflow_menu_open` (stories) rides the
-    // narrowest mount, matching the narrow captures it exists for.
-    let menu_mounts: &[(&'static str, bool, bool)] = if crowded {
+    // container query, so each rung is its own mount — Q10): the wide one
+    // carries no section rows, the narrow one mirrors the folded tabs.
+    // `overflow_menu_open` (stories) rides the narrow mount, matching the
+    // narrow captures it exists for.
+    let menu_mounts: &[(&'static str, bool)] = if crowded {
         &[
-            ("tw:hidden tw:@min-[900px]:block", false, false),
-            (
-                "tw:hidden tw:@min-[560px]:block tw:@min-[900px]:hidden",
-                true,
-                false,
-            ),
-            ("tw:block tw:@min-[560px]:hidden", true, true),
+            ("tw:hidden tw:@min-[900px]:block", false),
+            ("tw:block tw:@min-[900px]:hidden", true),
         ]
     } else {
         &[
-            ("tw:hidden tw:@min-[680px]:block", false, false),
-            ("tw:block tw:@min-[680px]:hidden", true, false),
+            ("tw:hidden tw:@min-[680px]:block", false),
+            ("tw:block tw:@min-[680px]:hidden", true),
         ]
     };
     rsx! {
@@ -221,31 +206,17 @@ pub fn SiteChrome(
                 class: if section == SiteSection::Home { LOGO_HOME_ACTIVE_WRAP } else { "tw:flex tw:flex-none" },
                 LogoLockup { href: "/".to_string(), early_word_yield: crowded }
             }
-            // Primary family: your things, by the brand, full weight —
-            // inline while they fit; rows in the phone bar's ⋯ menu.
-            nav { class: "{primary_nav}",
-                NavTab {
-                    label: "Devices",
-                    href: "/devices",
-                    active: section == SiteSection::Devices,
-                }
-                NavTab {
-                    label: "Projects",
-                    href: "/projects",
-                    active: section == SiteSection::Projects,
-                }
-            }
             if let Some(control) = session_control {
-                // THE control: after the primary family — this tab's
-                // session and the project on it are the most local things
-                // in the bar. It is the ONE piece of session UI the chrome
-                // carries (single-session policy).
+                // THE control: by the brand — this tab's session and the
+                // project on it are the most local things in the bar. It
+                // is the ONE piece of session UI the chrome carries
+                // (single-session policy).
                 SessionProjectControl { control }
             }
             div { class: "{cluster_gap}",
-                // Secondary family: lighter, right cluster, no divider —
-                // inline while three tabs fit the bar; in the ⋯ below
-                // when they don't.
+                // The world's things: lighter, right cluster — inline
+                // while the tabs fit the bar; in the ⋯ below when they
+                // don't.
                 nav { class: "{secondary_nav}",
                     NavTab {
                         label: "Boards",
@@ -268,12 +239,11 @@ pub fn SiteChrome(
                 {children}
                 // THE overflow menu — one ⋯ at every width (G3 ruling),
                 // one mount per rung (see `menu_mounts`).
-                for (index , (wrap , sections , primary)) in menu_mounts.iter().enumerate() {
+                for (index , (wrap , sections)) in menu_mounts.iter().enumerate() {
                     div { key: "{wrap}", class: "{wrap}",
                         ChromeOverflowMenu {
                             section,
                             include_sections: *sections,
-                            include_primary: *primary,
                             initially_open: overflow_menu_open && index == menu_mounts.len() - 1,
                             project_menu: project_menu.clone(),
                         }
@@ -288,15 +258,11 @@ pub fn SiteChrome(
 /// inline tabs while they fit) and the tools, in one place. Groups wear
 /// mini-headers; rows keep their own grammars — section rows navigate
 /// this tab and close the menu, tool cards open a new one.
-///
-/// `include_primary` is the phone rung (crowded bars <560): Devices and
-/// Projects join the Sections group ahead of the world's three.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ChromeOverflowMenu(
     section: SiteSection,
     include_sections: bool,
-    #[props(default = false)] include_primary: bool,
     #[props(default = false)] initially_open: bool,
     #[props(default)] project_menu: Option<ChromeProjectMenu>,
 ) -> Element {
@@ -324,10 +290,6 @@ fn ChromeOverflowMenu(
                 }
                 if include_sections {
                     span { class: GROUP_HEADER_CLASS, "Sections" }
-                    if include_primary {
-                        NavMenuItem { label: "Devices", href: "/devices", active: section == SiteSection::Devices }
-                        NavMenuItem { label: "Projects", href: "/projects", active: section == SiteSection::Projects }
-                    }
                     NavMenuItem {
                         label: "Boards",
                         href: "/boards",
@@ -407,7 +369,7 @@ fn NavMenuItem(
 /// the project stops resolving for everyone but its members and nothing is
 /// thrown away — and dressing a reversible act as a destructive one teaches
 /// people to fear the wrong control. There is no Delete forever here at
-/// all; the archive drawer on the Projects page is where such a thing would
+/// all; the archive drawer on the home page is where such a thing would
 /// eventually have to live, spelled like what it is.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -470,7 +432,7 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
 /// hover/active — the spike's `.secondary`).
 ///
 /// Tabs are PLAIN links on purpose (P12): no tab dispatches a lens
-/// detach anymore — navigation to a gallery route ENDS the tab's session
+/// detach anymore — navigation to a site route ENDS the tab's session
 /// through the route listener, the same path as the back button.
 ///
 /// `new_tab` is the studio-mode exit (ruling R8-3, amended 8.1): see

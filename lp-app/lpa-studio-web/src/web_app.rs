@@ -166,7 +166,15 @@ pub fn App() -> Element {
         move || boot_route
     });
     use_hook(move || {
-        router::replace(&route.peek().clone());
+        // An alias of Home (`/devices`, `/projects`, `/home`, junk under
+        // `/device`) heals to `/` carrying the whole query the page read at
+        // load — `?lan=`, `?relay=` and `?firmware-store=` as much as
+        // `?emu=` — less `?on=` (`router::canonical_address`). No history
+        // entry, no reload. Every other address is written back as parsed.
+        match router::boot_canonical_address() {
+            Some(_) => router::replace(&StudioRoute::Home),
+            None => router::replace(&route.peek().clone()),
+        }
     });
     // The session recorder's route feed: every change of `route`, with the
     // reason the programmatic sites below note before they set it.
@@ -627,19 +635,18 @@ pub fn App() -> Element {
                 // lp2025/2026-10-08-2330-connected-in-the-card).
                 let current = route.peek().clone();
                 // A STEADY lens follows the URL only while a shell route
-                // is what's rendered (the gallery routes, where a card
-                // open resolves into the lens URL, and the lens routes,
-                // where boot/slug/identity resolution lands). In any
-                // other section — Home, Explore, Boards, Docs — the user
-                // deliberately left the editor surface; yanking the URL
-                // back would make those sections unreachable while a
-                // lens is attached (seen live with `#/home` bouncing).
-                // A lens CHANGE (`bound_changed`) rewrites from anywhere.
+                // is what's rendered: the lens routes, where boot/slug/
+                // identity resolution lands. In any other section — Home,
+                // Explore, Boards, Docs — the user deliberately left the
+                // editor surface; yanking the URL back would make those
+                // sections unreachable while a lens is attached (seen live
+                // with `#/home` bouncing). Home stays out of the set for
+                // that reason, though the shell draws the home page too. A
+                // lens CHANGE (`bound_changed`) rewrites from anywhere: a
+                // card opened on the home page lands in the editor.
                 let on_shell_route = matches!(
                     current,
-                    StudioRoute::Devices
-                        | StudioRoute::Projects
-                        | StudioRoute::Project { .. }
+                    StudioRoute::Project { .. }
                         | StudioRoute::Example { .. }
                         | StudioRoute::Device { .. }
                 );
@@ -648,9 +655,9 @@ pub fn App() -> Element {
                 // (single-session policy), so between the dispatch and
                 // the session actually ending there is an emission whose
                 // lens still says "editor", on a route the user chose
-                // deliberately — `/projects` is a shell route, so without
-                // this the loop would push the user straight back into
-                // the editor they just left.
+                // deliberately; without this a new lens in that window
+                // would push the user straight back into the editor they
+                // just left.
                 if editor_showing && !loop_leaving.get() && (on_shell_route || bound_changed) {
                     // Where the address goes is `router::lens_sync_target`'s
                     // (`same_session`, so `/…/play` stays play; a
@@ -688,28 +695,26 @@ pub fn App() -> Element {
                 ) {
                     // the editor went away: home without an in-flight open
                     // (after one started) means the open ended — the URL
-                    // goes back to the gallery the cards live on
-                    // (`/devices`, not the `/` landing: the core is
-                    // showing the gallery view, so the landing stub would
-                    // be the wrong body). The boot-time home flash (nothing started
-                    // yet) keeps the route so the startup re-derivation
-                    // can use it; a route-dispatched open still connecting
-                    // (pending) keeps it too — the gallery's connect
-                    // evidence renders the window honestly in place.
+                    // goes back to `/`, the home page the cards live on.
+                    // The boot-time home flash (nothing started yet) keeps
+                    // the route so the startup re-derivation can use it; a
+                    // route-dispatched open still connecting (pending)
+                    // keeps it too — the shell draws the home page there,
+                    // whose cards render the window honestly in place.
                     //
                     // An open that stopped at the MISMATCH PAGE keeps its
                     // route too, and for the plainest reason: the page is
-                    // rendered BY that address, so sending the URL to
-                    // `/devices` would close the question before it was
-                    // read. It is not an open that ended, it is an open
-                    // waiting for an answer.
+                    // rendered BY that address, so sending the URL to `/`
+                    // would close the question before it was read. It is
+                    // not an open that ended, it is an open waiting for an
+                    // answer.
                     //
                     // A FAILED open keeps it for the same reason: the
                     // opening frame's failure notice (the step it stopped
                     // on, Retry, Reset the board) is rendered by that
-                    // address. Sending it to `/devices` is what made a
-                    // board that rebooted mid-open read as a page that
-                    // silently gave up (2026-09-24).
+                    // address. Sending it away is what made a board that
+                    // rebooted mid-open read as a page that silently gave
+                    // up (2026-09-24).
                     let open_failed = matches!(
                         lpa_studio_core::open_stage(),
                         lpa_studio_core::OpenStage::Failed(_)
@@ -729,8 +734,8 @@ pub fn App() -> Element {
                              open pending",
                             lpa_studio_core::open_stage_label(&lpa_studio_core::open_stage())
                         ));
-                        router::replace(&StudioRoute::Devices);
-                        route.set(StudioRoute::Devices);
+                        router::replace(&StudioRoute::Home);
+                        route.set(StudioRoute::Home);
                     }
                 }
 
@@ -1066,9 +1071,7 @@ pub fn App() -> Element {
                         )));
                     }
                 }
-                StudioRoute::Devices
-                | StudioRoute::Projects
-                | StudioRoute::Home
+                StudioRoute::Home
                 | StudioRoute::Explore
                 | StudioRoute::Account
                 | StudioRoute::Unlock
@@ -1214,8 +1217,6 @@ pub fn App() -> Element {
                 }
                 StudioRoute::Home
                 | StudioRoute::Project { .. }
-                | StudioRoute::Devices
-                | StudioRoute::Projects
                 | StudioRoute::Explore
                 | StudioRoute::Account
                 | StudioRoute::Unlock
@@ -1332,9 +1333,9 @@ pub fn App() -> Element {
         session_panel_place,
     );
     // Bluetooth access: the Unlock sheet, the card's Connections group and
-    // "Who has access", and the Devices page's access settings all sit
-    // under the shell; their callback and the view slice they read ride
-    // one context instead of every layer.
+    // "Who has access", and the home page's "Unlocking your boards" all
+    // sit under this; their callback and the view slice they read ride one
+    // context instead of every layer.
     let access_bridge = bridge.clone();
     let on_access_command = use_hook(move || {
         Callback::new(move |command| {
@@ -1538,19 +1539,15 @@ pub fn App() -> Element {
     let section = match &current_route {
         // `/` is Home: no tab lights — the logo wears the underline.
         StudioRoute::Home => SiteSection::Home,
-        // Explicit, not the catch-all: `/devices` must light the Devices
-        // tab (a catch-all once carried it and silently stopped when lens
-        // routes moved to Session — G3 finding).
-        StudioRoute::Devices => SiteSection::Devices,
-        StudioRoute::Projects => SiteSection::Projects,
         StudioRoute::Explore => SiteSection::Explore,
         StudioRoute::Boards { .. } => SiteSection::Boards,
         StudioRoute::Docs { .. } => SiteSection::Docs,
         // Like Session: no tab lights. The avatar in the right cluster is
         // the account page's current-place marker.
         StudioRoute::Account => SiteSection::Account,
-        // A shared device password is about devices.
-        StudioRoute::Unlock => SiteSection::Devices,
+        // A shared board password is about boards, which live on the home
+        // page: the logo wears the underline.
+        StudioRoute::Unlock => SiteSection::Home,
         // Lens routes light NO tab — the header session·project control is
         // the current-place marker (single-session policy). The other
         // catch-all routes (stories, the standalone editors) never render
@@ -1671,8 +1668,8 @@ pub fn App() -> Element {
                     // are leased controllers of their own (D2).
                     crate::app::DocsPage { page, anchor, on_studio_action: on_action }
                 },
-                // `/devices`, `/projects` and the lens routes: the shell,
-                // whose no-editor arm draws the home page.
+                // The lens routes: the shell, whose no-editor arm draws the
+                // home page.
                 _ => rsx! {
                     StudioShell {
                         view: current_view,
@@ -2640,7 +2637,7 @@ mod tests {
     /// never a detach (PD8/Q15). The record stays behind (D46).
     #[test]
     fn leaving_the_studio_powers_the_tabs_sim_off() {
-        let plan = nav_session_plan(Some(&session()), &StudioRoute::Projects, false);
+        let plan = nav_session_plan(Some(&session()), &StudioRoute::Home, false);
 
         let NavSessionPlan::Leave { teardown, said } = plan else {
             panic!("a site route must end the session");
@@ -2667,7 +2664,7 @@ mod tests {
             ..session()
         };
         let NavSessionPlan::Leave { said, .. } =
-            nav_session_plan(Some(&wire), &StudioRoute::Projects, false)
+            nav_session_plan(Some(&wire), &StudioRoute::Home, false)
         else {
             panic!("a site route must end the session");
         };
@@ -2679,13 +2676,14 @@ mod tests {
 
     /// Every site section, not just the galleries the old detach arm
     /// covered — a session running behind a docs page is exactly the
-    /// thing the single-session policy is for.
+    /// thing the single-session policy is for. The home page's old
+    /// addresses (`/devices`, `/projects`) are Home and end it as Home does.
     #[test]
     fn every_site_route_ends_the_session() {
         for target in [
             StudioRoute::Home,
-            StudioRoute::Devices,
-            StudioRoute::Projects,
+            StudioRoute::parse("/devices"),
+            StudioRoute::parse("/projects"),
             StudioRoute::Explore,
             StudioRoute::Account,
             StudioRoute::Unlock,
@@ -2912,7 +2910,7 @@ mod tests {
     fn a_tab_with_no_session_navigates_silently() {
         for target in [
             StudioRoute::Home,
-            StudioRoute::Projects,
+            StudioRoute::Explore,
             StudioRoute::Docs {
                 page: Some("intro".to_string()),
                 anchor: None,

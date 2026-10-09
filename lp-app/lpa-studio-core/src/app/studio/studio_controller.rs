@@ -10457,6 +10457,24 @@ mod tests {
         assert!(!home.examples.is_empty(), "examples always show");
     }
 
+    /// On the home page — the place the web reports for `/`, and for its
+    /// old addresses `/devices` and `/projects` — the boards' verbs and
+    /// Home's own project verbs (new, open) rank together, as they did on
+    /// the pages it replaced.
+    #[test]
+    fn the_home_page_ranks_the_boards_and_the_project_verbs_together() {
+        let mut studio = StudioController::new(|| 0.0);
+        studio.set_place(crate::UiPlace::new(crate::UiPage::Home));
+
+        let view = studio.view();
+
+        assert!(view.home.is_some(), "an idle studio shows home");
+        assert_eq!(
+            view.offers.focus().areas,
+            [crate::OfferPath::devices(), crate::OfferPath::project()]
+        );
+    }
+
     /// The New menu's optional name: a typed name is what the library dates
     /// and slugs; blank falls back to the template's label. The follow-on
     /// open errs on host (no sim runtime), exactly as the create test below

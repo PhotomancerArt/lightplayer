@@ -123,8 +123,8 @@ fn wifi_add_slot_failures() -> Element {
     }
 }
 
-/// The devices page with one remembered board, its line open, the board's
-/// remembered Wi‑Fi address known to this browser.
+/// The home page's Boards tab with one board under Offline boards, the
+/// board's remembered Wi‑Fi address known to this browser.
 fn remembered_tile(connect: Option<UiWifiConnect>) -> Element {
     let mut card = usb_card();
     card.status = DeviceStatus::Offline;

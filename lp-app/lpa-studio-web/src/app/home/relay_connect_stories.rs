@@ -67,7 +67,7 @@ fn relay_remembered_board_busy() -> Element {
     remembered_tile(Some(failed(&RelayConnectFailure::Busy.words())), true)
 }
 
-/// The devices page with one remembered board, its line open, offered
+/// The home page's Boards tab with one board under Offline boards, offered
 /// "Connect through lightplayer.app" — and "Connect over Wi‑Fi" too when
 /// this browser remembers its address (`with_address`).
 fn remembered_tile(connect: Option<UiWifiConnect>, with_address: bool) -> Element {

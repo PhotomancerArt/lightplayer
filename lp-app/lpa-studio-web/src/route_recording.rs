@@ -5,7 +5,7 @@
 //! reason, when the change was the app's own idea. A programmatic site says
 //! why just before its `route.set` ([`note_route_reason`]); the effect
 //! consumes that reason with the change it explains. The one that matters
-//! most is the kick back to `/devices` when an open ends
+//! most is the kick back to `/` when an open ends
 //! (`web_app.rs`, `open_ended`), whose reason names the evidence that
 //! fired it.
 //!

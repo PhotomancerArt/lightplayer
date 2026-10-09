@@ -179,8 +179,8 @@ pub fn MismatchPage(
                 }
                 a {
                     class: "tw:text-sm tw:text-muted-foreground tw:no-underline tw:hover:text-strong-foreground",
-                    href: "/devices",
-                    "Devices"
+                    href: "/",
+                    "Home"
                 }
             }
         }

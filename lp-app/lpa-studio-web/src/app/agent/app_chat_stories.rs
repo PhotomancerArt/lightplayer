@@ -193,7 +193,7 @@ fn PageFrame(view: UiAppAgentView) -> Element {
     let draft = use_signal(String::new);
     rsx! {
         div { class: "tw:relative tw:h-[760px] tw:w-[1100px] tw:max-w-full tw:overflow-hidden tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
-            SiteChrome { section: SiteSection::Projects,
+            SiteChrome { section: SiteSection::Home,
                 AppChatButton { open }
             }
             p { class: "tw:m-0 tw:mt-24 tw:max-w-md tw:text-sm tw:text-dim-foreground",
