@@ -350,6 +350,7 @@ fn round_units<'a>(
                         steps: if p.quick { 30 } else { 300 },
                         cut_one_in: 3,
                         stop_at_cut: None,
+                        tears: vec![],
                     };
                     random_walk(cand.as_ref(), &rp, corpora, sink);
                 });
