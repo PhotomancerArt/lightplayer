@@ -212,7 +212,11 @@ count u16, then per entry:
 ```
 
 Entries are sorted by (name bytes, kind); a file and a directory may share
-a name. A directory whose bytes fit one record (`≤ R − 16`) is one `Dir`
+a name. The name rules (UTF-8, non-empty, no `/`; full hot paths, below)
+are the **writer's**: a directory *decodes* (mount step 3) when its count,
+kinds, lengths and ids parse and its bytes end exactly. This reader checks
+UTF-8 only where a name leaves the store as a string (a listing), and
+reports such a name as corrupt there. A directory whose bytes fit one record (`≤ R − 16`) is one `Dir`
 record with those bytes as its payload; a bigger one is a `Multi` with the
 **directory bit** set (at every level) over stored Blob chunks of those
 bytes. An empty directory exists only as the root's cold directory
@@ -276,7 +280,7 @@ as a u64; the value 0 is replaced by 1. Tags:
 | 2 | Dir (one record) | the payload |
 | 3 | Multi | the payload (a Merkle hash of its children, the flags byte included) |
 | 4 | Root | the payload |
-| 5 | (path hash, RAM only) | the full path's UTF-8 bytes; never written |
+| 5 | reserved | never written (v1's RAM path table hashed paths with it; that table is gone) |
 
 A file's node id is its one Blob's id (a file of at most `R − 16` stored
 bytes, or one chunk) or its top Multi's id. Ids are 64 bits and **not**

@@ -66,12 +66,18 @@ change has to be readable, or cleanly refused, by the core before it.
   newest root's closure (falling back one step): level by level, one scan of
   record headers over the trusted sectors, newest sector first, so the first
   copy seen is the one FORMAT.md keeps; each record found is visited with
-  the mark's own step. Last, it hashes every path into the path table. Its
-  RAM is the live set's, whatever the garbage on flash.
+  the mark's own step. Its RAM is the live set's, whatever the garbage on
+  flash.
+- **Lookups walk.** No path is kept in RAM: `get`, `file_size` and
+  `exists` read one directory record per path level from the working tree
+  (the delta laid over it), as writes do. A lookup costs flash reads, not
+  resident RAM (see "Future options" for the table this replaced).
 - **GC** runs only when free space is short, at the start of a write phase
   (when everything written is reachable from the committed root, the working
   tree, the delta and the in-flight directories of a flush): a full mark
-  makes the live bytes exact, the packing bound refuses before any write,
+  makes the live bytes exact, the packing bound (a byte sum of the live
+  records and the write's, against the usable sectors) refuses before any
+  write,
   then victims are collected — sectors with garbage first (greedy or
   LFS cost-benefit), then sectors whose only waste is a tail, and GC stops
   when collections stop freeing sectors.
@@ -98,7 +104,6 @@ What the store keeps between operations (`TreeStoreStats.resident_ram_bytes`
 | structure | per item |
 |---|---|
 | index: sorted `(id u64, sector u16 \| offset u16)` | 12 B per record |
-| path table: sorted `(path hash u64, file id u64, size u32)` | 20 B per file |
 | sector table: end u16, live u16, erase count u32, seq u32 | 12 B per sector |
 | retired list | 2 B per retired sector |
 
@@ -110,8 +115,7 @@ Transient (heap a call allocates and frees, the caller's file buffer
 excluded): a record's payload (≤ `record_max`), a directory's bytes and
 entries along the path, a file's leaf list (16 B per chunk), the mark's
 bitset and stack, a 4 KiB inflate buffer (`put_chunk_deflated`), and — for a
-transaction — its delta (≤ `txn_delta_max` + one call) and undo log (24 B
-per path touched). **Mount** holds the live index as it builds it, the two
+transaction — its delta (≤ `txn_delta_max` + one call). **Mount** holds the live index as it builds it, the two
 widest adjacent tree levels (16 B per id), 12 B per sector of sorted
 headers, and a record's payload; nothing that grows with the garbage on
 flash. In exchange it scans record headers once per tree level (16 B per
@@ -131,7 +135,10 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`
 as the transaction), `host-deflate` (`host_deflate_chunks`, miniz_oxide —
-host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`).
+host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`), `stats`
+(`TreeStore::stats`, `TreeStoreStats`, `reset_transient_peak`: the counters
+and the RAM-peak accounting, ~1.2 KB of RV32 code; off in firmware, on for
+the crate's tests and `lp-store-bench`).
 
 ## API
 
@@ -139,19 +146,12 @@ host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`).
 `TreeStore::mount(flash, hasher, cfg)` (never panics; `Err((error, flash,
 hasher))` when no complete root), `get`, `file_size`, `exists`, `list`
 (sorted, plain string prefix), `put`, `append`, `put_chunk_deflated`,
-`delete`, `delete_prefix` (a `"<dir>/"` prefix is one change),
+`delete`, `delete_prefix` (`"<dir>/"` only: the directory and everything
+under it, one change; any other prefix is `InvalidPath`),
 `delete_file_and_tree`, `begin`, `commit`, `abort`, `in_transaction`,
-`stats`, `reset_transient_peak`, `free_sectors`, `flash`/`flash_mut`,
-`into_flash`, `into_parts`. After `StoreError::Flash` the store must be
-dropped.
-
-**Path-hash collisions.** Two live paths with one 64-bit hash share a row
-marked collided, and lookups of that hash walk the directories; mount finds
-every such pair, and a write finds one when its walk says the path did not
-exist under an occupied row. A path that does not exist but hashes like one
-that does reads as that file — the same 64-bit risk content ids take
-(spike U9). `txn_tests::colliding_path_hashes_fall_back_to_the_walk` forces
-collisions with a test hasher.
+`stats` and `reset_transient_peak` (feature `stats`), `free_sectors`,
+`flash`/`flash_mut`, `into_flash`, `into_parts`. After `StoreError::Flash`
+the store must be dropped.
 
 ## Tests
 
@@ -163,8 +163,8 @@ retiring a worn sector (both wear modes; the retirement survives remount);
 transactions (commit once, read your writes, abort, a bounded delta over
 120 files), appends (only new chunks written; same node as a single put),
 deflated chunks (verified, refused, stored coded, incompressible stored
-plain), forced path-hash collisions; RAM against the budget on a c40-shaped
-tree and on a full store (mount's peak ≤ 16 KB at 128 sectors in both),
+plain); `delete_prefix` taking whole directories only; RAM against the budget on a c40-shaped
+tree (and what reading every file once costs in flash reads) and on a full store (mount's peak ≤ 16 KB at 128 sectors in both),
 cross-checked with a counting allocator; mount's index and live bytes equal
 to a full mark's after GC copies and a level-1 directory multi, and the
 newest of two copies indexed; the `LpFs` adapter against `LpFsMemory`; the
@@ -186,13 +186,49 @@ test --release -p lp-tree-store cut_sweep` runs every cut point.
 
 `size-probe/` is a standalone `no_std`/`no_main` binary (its own workspace):
 a RAM flash and every entry point the firmware calls, `default-features =
-false`, `opt-level = "z"`, LTO, `codegen-units = 1`, `panic = "abort"`, a
-bump allocator, and a stand-in hasher (the C6's SHA is hardware;
-`--features soft-sha` links `sha2` instead, +3.8 KB). From `size-probe/`:
-`cargo build --release --target riscv32imac-unknown-none-elf`, then
-`rust-size -A` and `rust-nm --demangle --print-size --size-sort`.
+false` (so no `stats`), `opt-level = "z"`, LTO, `codegen-units = 1`, a bump
+allocator, and a stand-in hasher (the C6's SHA is hardware; `--features
+soft-sha` links `sha2` instead). It builds **with the C6's own flags**
+(`size-probe/.cargo/config.toml`, the same as `lp-fw/fw-esp32c6`'s:
+`-Zbuild-std=core,alloc` with `optimize_for_size` and
+`compiler-builtins-mem`, `-C force-frame-pointers`, `-Z
+location-detail=none`, `-Z fmt-debug=none`, `panic=abort`): with the plain
+release profile core's sort and formatting look kilobytes bigger and the
+store ~4.5 KB smaller than they are on the C6. `--features lpfs` makes the
+same calls through `LpFsTree` as a `dyn lpfs::LpFs` (every trait method
+linked), for the store plus its adapter. Format and mount go through
+`&mut` both, so they share one monomorph (a by-value mount links the store
+twice, +8 KB). From `size-probe/`: `cargo build --release --target
+riscv32imac-unknown-none-elf [--features lpfs]`, then `rust-size -A` and
+`rust-nm --demangle --print-size --size-sort`.
+
+"New to the C6" (the size study's method, plan
+`2026-10-08-1017-tree-store-device-round/size-study.md`): the probe's
+`.text` symbols, hash suffixes dropped, minus every name a shipped C6 image
+already has (the split image `p2.elf` of CI's newest green `main` run,
+`71817042569f`), minus ROM routines (`memcpy`, `memmove`, `memset`,
+`__udivdi3`, …), `lp_deflate`/`lp_crc32` (linked for OTA) and the probe's
+own flash, hasher and allocator; `_start` (format, mount and the calls,
+inlined) counts as new.
 
 See "G1 figures" for the numbers.
+
+## Future options
+
+**A RAM path table** (removed in the size pass, `5db02b3d0`): a sorted
+table of `(path hash u64, file id u64, size u32)` rows, 20 B per file, built
+at mount by hashing every path (id tag 5, never written), so `get`,
+`file_size` and `exists` found a file with no flash read; two live paths
+with one hash shared a row marked collided and fell back to the walk, and a
+transaction kept an undo log of the rows it changed (≈ 24 B per path). It
+cost **3,328 B of new C6 code** (3,538 B `.text`; with its collision
+handling, the undo log and mount's path walk) and **20 B per file of
+resident RAM** (2,660 B at the synthetic c40, a third of the budget). What
+it bought: `file_size` of every c40 file in 0 reads instead of 146 KB in
+1,376 reads, and `get` of every file in 243 KB / 656 reads instead of
+390 KB / 2,032. Worth bringing back (behind a feature, the walk staying the
+default) on a part with RAM to spare; the format does not change either
+way.
 
 ## What changed from the prototype
 
@@ -200,8 +236,9 @@ Cut (plan D7): JSON-tree mode, the trained dictionary (`Dict` kind,
 deflate+dict codec, the sampler), the device-side encoder and its `flate2`
 dependency, root fallback past one step.
 
-Changed: B-trees → sorted arrays (index, path table, delta, undo); the RAM
-path map of every path string → a path-hash table; whole-commit staging in
+Changed: B-trees → sorted arrays (index, delta); the RAM path map of every
+path string → no path in RAM (lookups walk; v1's path-hash table was
+removed in the size pass, "Future options"); whole-commit staging in
 RAM → per-call commits, transactions and streaming appends; whole-content
 multi ids → Merkle multi ids; dedup against "indexed and closure-complete"
 (a mark per check) → dedup against the index, whose closure rule makes it
@@ -263,23 +300,28 @@ real c40 corpus (132 documents, 216 KB, plus board files) and from
 `ram_budget_tests.rs` on a c40-shaped synthetic tree (a counting allocator
 the ground truth); code from `size-probe/`.
 
-### RAM, c40, `record_max` 1024 (resident = index + path table + sector table)
+### RAM, c40, `record_max` 1024 (resident = index + sector table)
 
 | | 128 sectors | 176 sectors |
 |---|---:|---:|
-| c40 pushed, `host_deflate` (push / save / panel) | 6,516 / 6,720 / 6,548 B | 7,092 / 7,296 / 7,124 B |
-| c40 pushed, `stored` (push / save / panel) | 8,076 / 8,472 / 8,108 B | 8,652 / 9,048 / 8,684 B |
-| full store, synthetic c40 then 2,174 writes (400 erases, ~3× the flash), deflated: held after a remount / max during the run | 6,644 / 7,572 B | — |
-| full store, the same stored (1,873 writes): held after a remount / max during the run | 8,744 / 10,212 B | — |
+| c40 pushed, `host_deflate` (push / save / panel) | 3,756 / 3,960 / 3,768 B | 4,332 / 4,536 / 4,344 B |
+| c40 pushed, `stored` (push / save / panel) | 5,316 / 5,712 / 5,328 B | 5,892 / 6,288 / 5,904 B |
+| full store, synthetic c40 then 2,174 writes (400 erases, ~3× the flash), deflated: held after a remount / max during the run | 3,984 / 4,692 B | — |
+| full store, the same stored (1,873 writes): held after a remount / max during the run | 6,084 / 7,332 B | — |
 
-(Index 185–202 records host-deflated, 315–348 stored; 138–139 files;
-sector table 1,536 B at 128, 2,112 B at 176.)
+(Index 185–202 records host-deflated, 315–348 stored; sector table 1,536 B
+at 128, 2,112 B at 176. At G1 each also held a 20 B row per file, 138–139
+files: 8,076 B stored push at 128 then; see "The size pass" below. Both
+columns re-measured after the size pass; mount reads on the real c40 fell
+~5.5 KB and 92 calls with the path walk gone.)
 
 Transient per call (counting allocator, synthetic c40, stored, 128
-sectors): `put` a 2.9 KB shader 3,854 B · `put` the panel 897 B · `append`
+sectors): `put` a 2.9 KB shader 3,758 B · `put` the panel 801 B · `append`
 4 KiB to an 18 KB file 2,240 B · `get` an 18 KB file 1,159 B beyond the
-returned buffer · `file_size` 0 B. A whole-project **push transaction**
-holds up to ~6.7 KB (24 B undo per path × 138 paths, plus a ≤ 2 KB delta).
+returned buffer · `file_size` 302 B (a directory read; 0 B with the path
+table). A whole-project **push transaction** holds its delta (≤ 2 KB
+before it flushes, plus one call); the largest buffer over the full-store
+run is 4,294 B (6,736 B at G1, with the transaction's undo log).
 
 ### Mount (P8: bounded after G1)
 
@@ -321,38 +363,58 @@ stored / host_deflate): 10,236 / 7,764 B at 512, 8,076 / 6,516 B at 1024,
 6,720 / 5,964 B at 2048 — 512 doubles the index and goes over the budget
 stored; 2048 saves ~1.4 KB of index for 7–13 more sectors stored.
 
-### Code (RV32, `size-probe`, opt-level z, LTO, stand-in hasher)
+### Code (RV32, `size-probe`, the C6's flags, stand-in hasher)
 
-| part | `.text` bytes |
-|---|---:|
-| **whole ELF** | **44,582** |
-| `lp_tree_store` functions | 25,750 |
-| store code inlined into `_start` (format, mount, the calls) | ~5,000 |
-| `alloc`/`core` instantiations and outlined helpers | ~6,080 |
-| `lp_deflate` (already in the C6 image for OTA) | 4,562 |
-| `compiler_builtins` (shared with any firmware) | 2,350 |
-| `lp_crc32` (already in the image) | 98 |
-| the probe itself (RAM flash, hasher, allocator) | 722 |
+At this commit: core probe `.text` **42,210 B**, of which **31,262 B new to
+the C6**; through `LpFsTree` (`--features lpfs`) `.text` 57,268 B, **39,908 B
+new to the C6** (the adapter and its glue ≈ 8.6 KB). Of the core probe's
+new code, `_start` (format, mount and the calls, inlined) is 5,918 B, of
+which the probe's own glue is about 0.6 KB (the study's estimate), so the
+store alone is ≈ 30.7 KB against the ≈ 30 KB target (Yona, after G1). The
+largest functions: `RecordLog::append` (2.1 KB, verify and retire inlined),
+`ensure_room` (1.5 KB), `flush` (1.2 KB), `mark_and_prune` (1.0 KB),
+`rebuild_dir` (1.0 KB).
 
-So the store costs **≈ 36.8 KB** of new code (≈ 40.6 KB with `sha2` instead
-of the hardware SHA) against littlefs's ~25 KB that it would replace, and
-against the prototype's ≈ 39 KB. The largest functions: `RecordLog::append`
-(1.9 KB), `ensure_room` (1.7 KB), `flush` (1.3 KB), `mark` (1.1 KB), `u64`
-division for the cost-benefit score (0.95 KB), `rebuild_dir` (0.9 KB),
-`decode_dir` (0.9 KB, owned `String`s and UTF-8 checks).
+On the study's own C6 image (another branch's build, fewer shared names)
+the same probe measured ~1.6 KB more new code: at the study's commit
+`938df14aa` this method gives 36,546 B where the study gave 38,132 B. The
+format room and the bounded mount (P8–P9b, after the study) added ≈ 1.6 KB
+of it back, so on the study's scale the store alone is ≈ 32.2 KB, against
+its predicted ≈ 30.6 KB for the same cuts.
 
-**The extension room (format version 3, P9) costs +420 B of `.text` and
-+36 B of `.rodata`** — measured with the C6's own flags (`-Zbuild-std` with
-`optimize_for_size`, frame pointers, `location-detail=none`,
-`fmt-debug=none`; the size study's method), probe `.text` 50,320 → 50,740 B
-(`459a3b34d` → this phase): +290 B in mount (inlined into the probe's
-`_start`), +104 B in `RecordLog::append` (the header's size byte),
-+26 B in `RootRecord::decode` (the tail), the rest outlining noise. RAM does
-not move: resident, transient and mount peaks are byte-identical in
-`ram_budget_tests.rs`; mount reads 4 B more per sector header (+504 B at
-128 sectors). Refusing a newer version and programming the magic last
-(P9b) add **+52 B of `.text`** (50,740 → 50,792 B, same flags, `.rodata`
-unchanged) and one program and one 20-byte read per sector opened.
+### The size pass (P11)
+
+Each cut in its own commit, measured on that commit with the C6's flags
+(`.text` of the core probe, then new to the C6, then the same through
+`LpFsTree`); lp-nor-sim simulator for RAM and reads:
+
+| cut | core `.text` | new to the C6 | via `LpFsTree` |
+|---|---:|---:|---:|
+| start (`4158daa76`, the C6 flags) | 50,792 | 38,184 | 46,258 |
+| one shared heap-sort body | −830 | −762 | −636 |
+| counters and RAM-peak accounting behind `stats` (the probe stops calling `stats()`) | −1,222 | −1,212 | −994 |
+| byte-sum packing bound | −412 | −346 | −348 |
+| **no path table** (lookups walk; `delete_prefix` whole directories) | −3,538 | −3,328 | −3,462 |
+| paths and entry names as bytes | −1,868 | −592 | −386 |
+| one non-generic `op` body | −382 | −356 | −256 |
+| `LpFsTree` on the store's sort | +26 | +30 | −280 |
+| one writer for put / append / deflated chunks | −342 | −342 | +26 |
+| bounds-check tidy (one paid; two tried made it bigger) | −14 | −14 | −14 |
+| **end** | **42,210** | **31,262** | **39,908** |
+
+Kept: both write heads and the hot directory, verify-after-write, the
+host-deflate verify, append, no file-size cap, and **both GC policies**
+(measured: `Greedy` alone saves 162 B new to the C6 — the cost-benefit
+score's u64 division is a ROM routine there — and `CostBenefit` alone
+saves nothing; neither is free to drop, so the dial stays).
+
+RAM and reads, before → after (synthetic c40, stored, 128 sectors):
+resident 8,744 → 6,084 B; full store held after a remount 8,744 → 6,084 B
+stored, 6,644 → 3,984 B deflated; mount peak 14,187 B (12,992 B deflated)
+before and after, mount reads 325,500 → 320,482 B. **Reading every file
+once:** 243,173 B in 656 reads → 389,588 B in 2,032 reads (each lookup now
+reads its directories first). **Every file's size once:** 0 reads → 146,415
+B in 1,376 reads.
 
 ### Power cuts
 
