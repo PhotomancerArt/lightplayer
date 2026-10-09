@@ -22,7 +22,7 @@ use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpa_server::{HeartbeatStatus, LpGraphics, LpServer, Required};
 use lpc_access::{
     CHALLENGE_TTL_MS, DeviceAccessFile, LoginMac, LoginOutcome, OpenTo, ProjectAccessFile,
-    SecretEntry, Tier, derive_login_key,
+    SecretEntry, SecretKind, Tier, derive_login_key,
 };
 use lpc_model::{AsLpPath, AsLpPathBuf, LpValue, NodeAttachSite, NodeId};
 use lpc_shared::output::MemoryOutputProvider;
@@ -641,6 +641,59 @@ fn open_at_edit_grants_edit_to_anyone_nearby() {
             WireServerMsgBody::StopAllProjects
         ));
     }
+}
+
+/// A board whose key list is full of browser keys still takes an account
+/// key (the relay's), by dropping the oldest browser key; a browser key
+/// arriving at the full list is refused.
+#[test]
+fn a_full_key_list_makes_room_for_an_account_key_over_the_wire() {
+    let mut rig = Rig::for_state(LinkState::UntrustedNone);
+    let kinded = |label: &str, kind: SecretKind, salt: u8| {
+        secret(label, Tier::Edit, b"k", salt).with_kind(kind)
+    };
+    // The store holds two passwords; fourteen browser keys fill it.
+    for salt in 0xb0..0xbe {
+        let reply = rig.request(
+            USB,
+            ClientRequest::AccessAdd {
+                entry: kinded(&format!("browser {salt}"), SecretKind::Browser, salt),
+            },
+        );
+        assert!(
+            matches!(reply, WireServerMsgBody::AccessList { .. }),
+            "{reply:?}"
+        );
+    }
+    let refused = rig.request(
+        USB,
+        ClientRequest::AccessAdd {
+            entry: kinded("one too many", SecretKind::Browser, 0xc0),
+        },
+    );
+    assert!(
+        matches!(refused, WireServerMsgBody::Error { .. }),
+        "{refused:?}"
+    );
+
+    let reply = rig.request(
+        USB,
+        ClientRequest::AccessAdd {
+            entry: kinded("relay", SecretKind::Account, 0xc1),
+        },
+    );
+    let WireServerMsgBody::AccessList { entries, .. } = reply else {
+        panic!("an account key should be taken: {reply:?}");
+    };
+    assert_eq!(entries.len(), lpc_access::MAX_SECRETS_PER_FILE);
+    assert!(entries.iter().any(|e| e.label == "relay"));
+    assert!(
+        !entries.iter().any(|e| e.label == "browser 176"),
+        "the oldest browser key is dropped"
+    );
+    assert!(entries.iter().any(|e| e.label == "browser 177"));
+    assert!(entries.iter().any(|e| e.label == "camp"));
+    assert!(entries.iter().any(|e| e.label == "mine"));
 }
 
 // --- channel 3 over a radio link --------------------------------------------
