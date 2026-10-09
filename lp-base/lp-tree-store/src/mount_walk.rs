@@ -136,8 +136,14 @@ fn locate<F: Flash, K>(
         while off + RECORD_HEADER_LEN <= end {
             let mut raw = [0u8; RECORD_HEADER_LEN as usize];
             log.read(log.addr(s, off), &mut raw)?;
-            let HeaderRead::Record(h) = RecordHeader::parse(&raw) else {
-                break;
+            let h = match RecordHeader::parse(&raw) {
+                HeaderRead::Record(h) => h,
+                // Garbage the first pass checked: step over it.
+                HeaderRead::Unknown { len } => {
+                    off += RECORD_HEADER_LEN + u32::from(len);
+                    continue;
+                }
+                HeaderRead::End | HeaderRead::Bad => break,
             };
             if off + h.total_len() > end {
                 break;
@@ -193,7 +199,7 @@ mod tests {
     use lp_nor_sim::{NorFlashSim, NorGeometry};
 
     use crate::StoreConfig;
-    use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader};
+    use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader, SectorRead};
     use crate::test_support::{Store, formatted, mount, noise, snapshot, text};
 
     /// After mount the index and the live bytes are exactly what a full
@@ -289,7 +295,7 @@ mod tests {
         for s in 0..f.geometry().sector_count {
             let mut h = [0u8; SECTOR_HEADER_LEN as usize];
             f.read(s * size, &mut h).unwrap();
-            if let Some(hd) = SectorHeader::decode(&h) {
+            if let SectorRead::Trusted { header: hd, .. } = SectorHeader::decode(&h, size) {
                 newest = newest.max(hd.seq);
                 if s == from {
                     kind = hd.kind;
@@ -303,7 +309,7 @@ mod tests {
             erase_count: 1,
             kind,
         };
-        f.program(to * size, &header.encode()).unwrap();
+        f.program(to * size, &header.encode(size)).unwrap();
         f.program(to * size + SECTOR_HEADER_LEN, &body).unwrap();
     }
 }

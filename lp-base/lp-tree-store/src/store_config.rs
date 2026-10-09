@@ -13,7 +13,7 @@ pub enum GcPolicy {
 /// The store's dials.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoreConfig {
-    /// Largest record on flash, header included (128 ..= sector − 20).
+    /// Largest record on flash, header included (128 ..= sector − 24).
     pub record_max: u32,
     pub gc_policy: GcPolicy,
     /// Sectors every write must leave free for GC.

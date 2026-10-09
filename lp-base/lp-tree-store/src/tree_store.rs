@@ -537,15 +537,18 @@ fn check_config<E>(
     sector_size: u32,
     cfg: &StoreConfig,
 ) -> Result<(), StoreError<E>> {
-    if !(512..=32768).contains(&sector_size) {
-        return Err(StoreError::BadConfig("sector size must be 512..=32768"));
+    // A power of two: the sector header records its log2 (FORMAT.md).
+    if !(512..=32768).contains(&sector_size) || !sector_size.is_power_of_two() {
+        return Err(StoreError::BadConfig(
+            "sector size must be a power of two in 512..=32768",
+        ));
     }
     if !(4..=u32::from(u16::MAX)).contains(&sector_count) {
         return Err(StoreError::BadConfig("sector count must be 4..=65535"));
     }
     if cfg.record_max < 128 || cfg.record_max > sector_size - SECTOR_HEADER_LEN {
         return Err(StoreError::BadConfig(
-            "record_max must be 128..=sector size - 20",
+            "record_max must be 128..=sector size - 24",
         ));
     }
     if cfg.reserve + 2 >= sector_count {

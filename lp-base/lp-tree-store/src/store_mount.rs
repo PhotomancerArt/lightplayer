@@ -1,4 +1,6 @@
-//! Mount: read every sector header; check every trusted sector's records in
+//! Mount: read every sector header (a good header with an unknown incompat
+//! flag or head kind, or another sector size, refuses the mount:
+//! `Unsupported`); check every trusted sector's records in
 //! sector-sequence order (pass 1, `record_scan.rs`: where each sector's
 //! trusted records end, and the newest two roots — nothing indexed); pick
 //! the root by I1 (the newest CRC-good root whose closure is complete, else
@@ -20,7 +22,7 @@ use crate::object_hasher::ObjectHasher;
 use crate::object_id::{ObjectId, path_hash};
 use crate::record_scan::{RootCandidates, scan_sector};
 use crate::root_record::RootRecord;
-use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader};
+use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader, SectorRead};
 use crate::store_error::StoreError;
 use crate::tree_store::{Committed, MAX_DEPTH, Res, TreeStore, WorkDirs, is_hot, valid_path};
 
@@ -28,23 +30,29 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub(crate) fn load(&mut self) -> Res<(), F> {
         let n = self.log.sector_count;
         let mut valid: Vec<(u32, u32, HeadKind)> = Vec::new();
+        // Closed to appends: a record failed to check, or an unknown compat flag.
+        let mut closed = alloc::vec![false; n as usize];
         for s in 0..n {
             let mut h = [0u8; SECTOR_HEADER_LEN as usize];
             self.log.read(self.log.addr(s, 0), &mut h)?;
-            if let Some(hd) = SectorHeader::decode(&h) {
-                valid.push((hd.seq, s, hd.kind));
-                self.log.sectors.erase_count[s as usize] = hd.erase_count;
-                self.log.sectors.seq[s as usize] = hd.seq;
+            match SectorHeader::decode(&h, self.log.sector_size) {
+                SectorRead::Untrusted => {}
+                SectorRead::Unsupported(why) => return Err(StoreError::Unsupported(why)),
+                SectorRead::Trusted { header, appendable } => {
+                    valid.push((header.seq, s, header.kind));
+                    self.log.sectors.erase_count[s as usize] = header.erase_count;
+                    self.log.sectors.seq[s as usize] = header.seq;
+                    closed[s as usize] = !appendable;
+                }
             }
         }
         heap_sort_by(&mut valid, |a, b| (a.0, a.1) < (b.0, b.1));
         // Pass 1: every trusted record, CRC-checked; roots kept apart.
         let mut roots = RootCandidates::default();
-        let mut closed = alloc::vec![false; n as usize];
         for &(_, s, _) in &valid {
             let scan = scan_sector(&mut self.log, s, &mut roots)?;
             self.log.sectors.end[s as usize] = scan.end as u16;
-            closed[s as usize] = scan.closed;
+            closed[s as usize] |= scan.closed;
         }
         self.max_root_seq = roots.max_seq;
         self.log.next_sector_seq = valid.last().map_or(1, |v| v.0.wrapping_add(1));

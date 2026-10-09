@@ -2,8 +2,11 @@
 //! retired-sector list is persisted.
 //!
 //! Payload (little-endian): seq u64 | cold dir id u64 | hot dir id u64 |
-//! retired count u16 | retired sector u16 × count (ascending). The record's
-//! id is `H(Root ++ payload)`.
+//! retired count u16 | retired sector u16 × count (ascending) | a tail of
+//! TLV entries (tag u8 | length u16 | value) to the payload's end. This
+//! version defines no tag: a reader skips every one, and a writer does not
+//! carry them into its next root (FORMAT.md "Root tail"). The record's id is
+//! `H(Root ++ payload)`.
 
 use alloc::vec::Vec;
 
@@ -45,10 +48,22 @@ impl RootRecord {
             u64::from_le_bytes(x)
         };
         let n = usize::from(u16::from_le_bytes([b[24], b[25]]));
-        if b.len() != ROOT_FIXED_LEN + 2 * n {
+        let tail_at = ROOT_FIXED_LEN + 2 * n;
+        if b.len() < tail_at {
             return None;
         }
-        let retired: Vec<u16> = b[ROOT_FIXED_LEN..]
+        // The tail: well-formed entries to the end, every tag skipped.
+        let mut t = tail_at;
+        while t < b.len() {
+            if t + 3 > b.len() {
+                return None;
+            }
+            t += 3 + usize::from(u16::from_le_bytes([b[t + 1], b[t + 2]]));
+        }
+        if t != b.len() {
+            return None;
+        }
+        let retired: Vec<u16> = b[ROOT_FIXED_LEN..tail_at]
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
@@ -88,8 +103,28 @@ mod tests {
         assert_eq!(RootRecord::decode(&[0; 3]), None);
         let unsorted = RootRecord {
             retired: vec![5, 5],
-            ..r
+            ..r.clone()
         };
         assert_eq!(RootRecord::decode(&unsorted.encode()), None);
+    }
+
+    #[test]
+    fn the_tail_is_skipped_when_well_formed() {
+        let r = RootRecord {
+            seq: 9,
+            cold_dir: ObjectId(1),
+            hot_dir: ObjectId(2),
+            retired: vec![3],
+        };
+        let mut e = r.encode();
+        e.extend_from_slice(&[0x40, 3, 0, b'a', b'b', b'c', 0x41, 0, 0]);
+        assert_eq!(RootRecord::decode(&e), Some(r.clone()));
+        for cut in 1..9 {
+            let short = &e[..e.len() - cut];
+            assert_eq!(RootRecord::decode(short).is_some(), cut == 3, "cut {cut}");
+        }
+        let mut odd = r.encode();
+        odd.push(0);
+        assert_eq!(RootRecord::decode(&odd), None, "half an entry");
     }
 }

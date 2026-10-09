@@ -7,9 +7,19 @@ device-grade rework of the storage race's prototype T1 (plan
 `ObjectHasher`. Not linked into any firmware yet: M5 wires it behind the C6's
 non-default `fs-tree` feature.
 
-**Every on-flash byte is in [`FORMAT.md`](FORMAT.md)** (format version 2),
+**Every on-flash byte is in [`FORMAT.md`](FORMAT.md)** (format version 3),
 pinned by `tests/format_golden.rs`. This README is the design, the dials,
 the RAM and code figures, and what changed from the prototype.
+
+The format has **room to grow without a version bump** (G1, option B;
+FORMAT.md "Versioning and extension"): compat and incompat flags and the
+sector size in every sector header, a skippable TLV tail on the root, and
+record kinds this version does not know skipped as garbage. A good header
+with an unknown incompat flag, an unknown head kind or another sector size
+refuses the mount with `StoreError::Unsupported` (never a misread, and not
+"no store": do not format over it without asking). The reason: a board
+updated over Wi-Fi or Bluetooth cannot be re-packed, so a later core's
+change has to be readable, or cleanly refused, by the core before it.
 
 ## The design in brief
 
@@ -108,7 +118,7 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 
 | dial | default | meaning |
 |---|---|---|
-| `record_max` | 1024 | largest record, header included (128 ..= sector − 20); see "Record size" |
+| `record_max` | 1024 | largest record, header included (128 ..= sector − 24); see "Record size" |
 | `gc_policy` | `CostBenefit` | `Greedy` (most garbage) or `CostBenefit` (LFS: `(1−u)·age/(1+u)`) |
 | `reserve` | 3 | sectors every write must leave free |
 | `txn_delta_max` | 2048 | RAM a transaction's directory delta may hold before it is written as pending directories |
@@ -191,7 +201,8 @@ RAM → per-call commits, transactions and streaming appends; whole-content
 multi ids → Merkle multi ids; dedup against "indexed and closure-complete"
 (a mark per check) → dedup against the index, whose closure rule makes it
 safe; SHA-256 hard-wired → injected hasher; the root's dictionary and key
-fields → the retired list; format version 1 → 2.
+fields → the retired list; format version 1 → 3 (2 was this round's first
+layout, before the extension room).
 
 Added: verify-after-write and sector retirement (and `lp-nor-sim`'s
 injected wear-out), host-deflated chunks, the `LpFs` adapter and the trait's

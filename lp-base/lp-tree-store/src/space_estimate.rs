@@ -66,7 +66,7 @@ mod tests {
         ];
         assert_eq!(sectors_needed([1000, 0], recs.into_iter(), 1000), 2);
         assert_eq!(sectors_needed([1200, 100], recs.into_iter(), 1000), 0);
-        assert!(fits_after_compaction(alloc::vec![1000; 20], 4076, 10, 3));
-        assert!(!fits_after_compaction(alloc::vec![1000; 40], 4076, 10, 3));
+        assert!(fits_after_compaction(alloc::vec![1000; 20], 4072, 10, 3));
+        assert!(!fits_after_compaction(alloc::vec![1000; 40], 4072, 10, 3));
     }
 }

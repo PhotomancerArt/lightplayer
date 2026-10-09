@@ -227,7 +227,7 @@ impl<F: Flash> RecordLog<F> {
                 kind,
             };
             self.next_sector_seq = self.next_sector_seq.wrapping_add(1);
-            let bytes = header.encode();
+            let bytes = header.encode(self.sector_size);
             let addr = self.addr(pick, 0);
             self.program(addr, &bytes)?;
             if !self.verify(addr, &bytes, &[])? {

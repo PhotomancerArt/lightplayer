@@ -15,6 +15,11 @@ pub enum StoreError<E> {
     /// record that fails its CRC or does not parse), or a deflated chunk
     /// that does not inflate to its length or its id.
     Corrupt(&'static str),
+    /// Flash this code must not read: a sector header with an incompat flag
+    /// or head kind a newer format added, or written for another sector
+    /// size (FORMAT.md "Sector"). Nothing was read past the headers; do not
+    /// format over it without asking.
+    Unsupported(&'static str),
     /// A path or file too large for the format.
     TooLarge,
     /// A path that is not absolute, ends in `/`, or has an empty component.

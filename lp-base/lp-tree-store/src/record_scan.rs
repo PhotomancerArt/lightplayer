@@ -1,7 +1,8 @@
 //! Mount's first pass over one sector: every record header and payload,
 //! CRC-checked (a torn program can leave a good header over a short payload
 //! — README defect 1), stopping at the end or at the first record that does
-//! not check. Nothing is indexed here (that would cost RAM for every record
+//! not check; a record of an unknown kind is checked the same way and
+//! skipped. Nothing is indexed here (that would cost RAM for every record
 //! on flash, garbage included): the pass finds where each sector's trusted
 //! records end and keeps the roots, two at most (I1 falls back one step and
 //! no further). `mount_walk.rs` then indexes only the chosen root's closure.
@@ -82,20 +83,24 @@ pub fn scan_sector<F: Flash>(
     while off + RECORD_HEADER_LEN <= size {
         let mut h = [0u8; RECORD_HEADER_LEN as usize];
         log.read(log.addr(s, off), &mut h)?;
-        let r = match RecordHeader::parse(&h) {
+        let (len, root) = match RecordHeader::parse(&h) {
             HeaderRead::End => break,
             HeaderRead::Bad => {
                 out.closed = true;
                 break;
             }
-            HeaderRead::Record(r) => r,
+            // Checked like any record, then skipped: garbage (FORMAT.md
+            // "Unknown records").
+            HeaderRead::Unknown { len } => (len, None),
+            HeaderRead::Record(r) => (r.len, Some(r).filter(|r| r.kind == RecordKind::Root)),
         };
-        if off + r.total_len() > size {
+        let total = RECORD_HEADER_LEN + u32::from(len);
+        if off + total > size {
             out.closed = true;
             break;
         }
         payload.clear();
-        payload.resize(usize::from(r.len), 0);
+        payload.resize(usize::from(len), 0);
         log.read(log.addr(s, off + RECORD_HEADER_LEN), &mut payload)?;
         if !RecordHeader::crc_ok(&h, &payload) {
             out.closed = true;
@@ -105,7 +110,7 @@ pub fn scan_sector<F: Flash>(
             sector: s,
             offset: off,
         };
-        if r.kind == RecordKind::Root {
+        if let Some(r) = root {
             match RootRecord::decode(&payload) {
                 Some(root) => roots.offer(RootCandidate {
                     seq: root.seq,
@@ -118,7 +123,7 @@ pub fn scan_sector<F: Flash>(
                 }
             }
         }
-        off += r.total_len();
+        off += total;
         out.end = off;
     }
     log.note(payload.capacity());
@@ -135,7 +140,7 @@ mod tests {
             id: ObjectId(id),
             loc: RecordLoc {
                 sector: 0,
-                offset: 20,
+                offset: 24,
             },
         }
     }
