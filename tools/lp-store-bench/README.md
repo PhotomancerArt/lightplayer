@@ -15,11 +15,16 @@ number — not an emulator or silicon measurement.
   `into_flash`, `flash_snapshot`, `report`). Object-safe, so drivers fan out
   over a list. Dials ride in `CandidateConfig.dials` as strings; on the
   command line a candidate is `name[@dial=v+dial=v]`, e.g.
-  `t1@record_max=512+codec=stored` (`sectors=N` sets the partition).
+  `t1@record_max=512+codec=stored` (`sectors=N` sets the partition). The
+  littlefs candidates (`f1`, `f2`, `f3`) take `block_cycles=N` (littlefs's
+  metadata-pair wear levelling; unset is −1, off, as the firmware ships —
+  except `f3`, whose unset is 100; `f3@block_cycles=-1` turns it off).
 - **Candidates** (`candidates/`): `mem` (the reference: whole store as one
   blob, ping-pong slots, CRC + sequence — correct under every cut) and
   `mem-broken` (its twin, erase-then-rewrite in place — fails), plus the
-  real candidates as they land.
+  real candidates as they land; `f3` (the control: littlefs, one deflated
+  package per pattern, `/projects/<slot>/modules/<p>.pkg`) is in
+  `littlefs_pattern_package.rs`.
 - **T1** (`candidates/tree_store_candidate.rs`): `lp-tree-store` v1. A
   workload step is one store transaction (`begin` at its first write,
   `commit` at its end), so T1 is scored step-atomic. Dials: `record_max`
@@ -67,6 +72,7 @@ cargo run --release -p lp-store-bench -- sweep --candidates t1 --workloads 'push
 cargo run --release -p lp-store-bench -- double --candidates f2 --workloads save:c13
 cargo run --release -p lp-store-bench -- random --candidates s1 --seeds 8 --steps 300
 cargo run --release -p lp-store-bench -- measure --candidates f1,f2,s1,t1 --workloads 'push:c40;save:c40' --min-sectors
+cargo run --release -p lp-store-bench -- endurance --candidates 'f1,f1@block_cycles=100' --corpus-name c20 --sectors 176 --pushes 0
 cargo run --release -p lp-store-bench -- replay failure.json      # one scoreboard line
 ```
 
@@ -115,6 +121,7 @@ which:
 | type | fields |
 |---|---|
 | `measure` | `candidate`, `config {sectors, dials}`, `workload {kind, corpus, seed}`, `ok`, `error`, `failed_step`, `logical_bytes`, `program_bytes`, `write_amp`, `erases_{total,min,median,max}`, `sectors_nonblank_{end,peak}` (the flash's view), `used_sectors_{end,max}` (the store's own), `mount_{read_bytes,read_calls,ops}`, `report {ram_bytes, used_sectors, step_atomic, extra}`, `violations_0_to_1`, `live_logical_bytes` |
+| `endurance` | `days`, `corpus`, `spec` (the `endurance` command; the overnight run's has no `spec`), `result` (a `measure` object) |
 | `min_sectors` | `candidate`, `config`, `workload`, `min_sectors` (null = does not fit in 512) |
 | `sweep_summary` | `driver` (`exhaustive` / `double_cut`), `candidate`, `config`, `workload`, `tear`, `cases`, `landed`, `failures`, `non_atomic`, `kinds {failure kind: count}`, `steps_swept`, `steps_skipped`, `max_cuts_per_step`, `error` |
 | `random_summary` | `candidate`, `config`, `seed`, `steps_run`, `steps_no_space`, `cuts`, `failures`, `non_atomic`, `kinds`, `first_failure`, `error` |

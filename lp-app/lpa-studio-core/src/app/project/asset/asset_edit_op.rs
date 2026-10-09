@@ -8,15 +8,25 @@ use crate::{
     ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_EDITOR_ACTION_DEADLINE,
 };
 
-/// Client-side limit on one applied asset body, in raw bytes.
+/// Client-side limit on one applied asset body, **as encoded on the wire**
+/// (`lpc_model::body_bytes::encoded_len`: UTF-8 text with its escapes —
+/// a shader is its own size plus a byte a line — or a binary body's base64).
 ///
-/// Overlay mutations are single-frame on the wire, bounded by
-/// `lpc_wire::budget::PROJECT_READ_FRAME_MAX_BYTES` (16 KB encoded JSON per
-/// server message; see `lpc-wire/src/budget.rs`). 10 KB raw leaves headroom
-/// for base64 expansion (·4/3) plus the command envelope, so an accepted
-/// apply can never produce an over-budget frame. Chunked mutations for
-/// larger bodies are future work.
-pub const MAX_ASSET_BODY_BYTES: usize = 10 * 1024;
+/// Overlay mutations are single-frame on the wire. The arithmetic lives
+/// with the budget (`lpc_wire::budget::MAX_ASSET_BODY_ENCODED_BYTES`): the
+/// 16,384 B message budget less a 1,024 B envelope reserve, 15,360 B, under
+/// the board's 16,656 B request buffer and inside one overlay-read reply.
+/// Before wire 41 the limit was 10 KB raw "for base64", while the body
+/// actually went as an array of numbers, so past ~4.7 KB of source a
+/// request outgrew the board's buffer and was dropped unanswered. Chunked
+/// mutations for larger bodies are future work.
+pub const MAX_ASSET_BODY_BYTES: usize = lpc_wire::budget::MAX_ASSET_BODY_ENCODED_BYTES;
+
+/// Whether `bytes`, encoded as an edit carries them, exceed
+/// [`MAX_ASSET_BODY_BYTES`]: the one test every sender of a body applies.
+pub fn asset_body_too_large(bytes: &[u8]) -> bool {
+    lpc_model::body_bytes::encoded_len(bytes) > MAX_ASSET_BODY_BYTES
+}
 
 /// An asset body edit targeting one artifact.
 ///
@@ -125,11 +135,17 @@ mod tests {
 
     #[test]
     fn size_limit_leaves_headroom_under_the_wire_frame_budget() {
-        // Raw body expanded by base64 must fit the single-frame budget with
-        // room for the command envelope.
-        assert!(
-            MAX_ASSET_BODY_BYTES * 4 / 3 < lpc_wire::budget::PROJECT_READ_FRAME_MAX_BYTES,
-            "10 KB raw + base64 expansion must stay under the 16 KB frame budget"
+        // The limit is on the encoded body, so the body plus the command
+        // envelope's reserve is the frame budget (lpc-wire's
+        // `the_largest_body_studio_sends_fits_one_request_and_one_reply`
+        // serializes it).
+        assert_eq!(
+            MAX_ASSET_BODY_BYTES + lpc_wire::budget::ASSET_BODY_REQUEST_ENVELOPE_RESERVE_BYTES,
+            lpc_wire::budget::PROJECT_READ_FRAME_MAX_BYTES
         );
+        // A body at the limit is not too large; one character more is.
+        let body = "x".repeat(MAX_ASSET_BODY_BYTES - 2);
+        assert!(!asset_body_too_large(body.as_bytes()));
+        assert!(asset_body_too_large(format!("{body}y").as_bytes()));
     }
 }
