@@ -41,8 +41,9 @@ use super::relay_picture_slot::RelayPictureSlot;
 /// relay's proof and are never logged (`RelayAccount`'s `Debug` prints
 /// none). The project's facts hold its uid, a read capability: never
 /// logged either (`RelayProjectFacts`' `Debug` prints none). Static RAM
-/// comes out of the C6's main stack, so the facts wait here boxed (one
-/// word), not inline.
+/// comes out of the C6's main stack, so the facts wait here boxed (two
+/// words), not inline; "nothing loaded" needs no box at all, so an idle
+/// board allocates nothing for it.
 pub struct RelayBoard {
     inner: Mutex<RefCell<Inner>>,
     wake: Signal<CriticalSectionRawMutex, ()>,
@@ -56,7 +57,7 @@ struct Inner {
     accounts: Option<Vec<RelayAccount>>,
     /// The project's facts handed over since the last take (`Some(None)`:
     /// nothing is loaded now).
-    project: Option<Box<Option<RelayProjectFacts>>>,
+    project: Option<Option<Box<RelayProjectFacts>>>,
     state: RelayState,
     counters: RelayCounters,
     routes: usize,
@@ -112,7 +113,7 @@ impl RelayBoard {
     /// time, whatever the relay is doing: a name and a uid, the project's
     /// identity (the board reports it after every registration).
     pub fn project_changed(&self, facts: Option<RelayProjectFacts>) {
-        let facts = Box::new(facts);
+        let facts = facts.map(Box::new);
         let replaced =
             critical_section::with(|cs| self.inner.borrow_ref_mut(cs).project.replace(facts));
         drop(replaced);
@@ -162,8 +163,8 @@ impl RelayBoard {
 
     /// The project's facts handed over since the last take.
     pub fn take_project(&self) -> Option<Option<RelayProjectFacts>> {
-        let boxed = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).project.take());
-        boxed.map(|facts| *facts)
+        let taken = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).project.take());
+        taken.map(|facts| facts.map(|facts| *facts))
     }
 
     /// Publish the driver's state, counters and picture mode at `now_us`.
