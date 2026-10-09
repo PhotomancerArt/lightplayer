@@ -33,6 +33,8 @@
 //! drawn here. The silicon cut was uniform in time and 83 % of cuts landed in
 //! an erase; a sweep cuts at every op instead.
 
+use alloc::vec::Vec;
+
 use crate::SimRng;
 
 /// One erase command's pre-program unit, and a program's: a 32-bit word.
@@ -195,21 +197,23 @@ pub fn tear_erase(mix: &TearMix, rng: &mut SimRng, cells: &mut [u8], weak: &mut 
         EraseShape::AllZero => cells.fill(0x00),
         EraseShape::Erasing => {
             let (zeros, weaks) = interpolate(rng, &CX1_ERASING);
-            // Each bit independently: stays 0 with p = zeros/bits, weak with
-            // p = weaks/bits, else lifted to 1.
-            for (c, w) in cells.iter_mut().zip(weak.iter_mut()) {
-                let mut byte = 0u8;
-                for bit in 0..8 {
-                    let x = rng.below(bits);
-                    if x < zeros as u64 {
-                        continue;
-                    }
-                    byte |= 1 << bit;
-                    if x < (zeros + weaks) as u64 {
-                        *w |= 1 << bit;
-                    }
+            // Exactly `zeros` stable zeros and `weaks` weak bits, at distinct
+            // uniform positions (a partial Fisher-Yates over the bits); every
+            // other bit lifted to 1. Exact counts, not per-bit chances: a
+            // residue of one bit stays one bit, as it was on the part.
+            cells.fill(0xFF);
+            let n = bits as usize;
+            let pick = (zeros + weaks).min(bits as u32) as usize;
+            let mut order: Vec<u32> = (0..bits as u32).collect();
+            for i in 0..pick {
+                let j = i + rng.below((n - i) as u64) as usize;
+                order.swap(i, j);
+                let b = order[i] as usize;
+                if i < zeros as usize {
+                    cells[b / 8] &= !(1 << (b % 8));
+                } else {
+                    weak[b / 8] |= 1 << (b % 8);
                 }
-                *c = byte;
             }
         }
         EraseShape::ReadsFfWeak => {
