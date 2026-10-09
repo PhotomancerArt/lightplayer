@@ -10,10 +10,16 @@
 //!    leaves the gate, the board's own link (when one was merged onto its
 //!    card) connects, and each nameless held port re-identifies. Only the
 //!    freed port can open, and its hello says which board it is, so no
-//!    pairing of ports to boards is ever needed.
+//!    pairing of ports to boards is ever needed. A board held by its
+//!    network slot is reached by the board's ordinary connect instead: its
+//!    own network link here (one this tab let go reopens), else over Wi‑Fi
+//!    at the address this browser remembers, else through lightplayer.app
+//!    when someone is signed in ([`NetworkRoad`]); with none of them the
+//!    offer says "No way to reach it from here".
 //! 4. A busy holder's refusal, "not held" while another tab has it, no
-//!    answer, or a board that does not open in ten seconds end the
-//!    take-over with the reason ([`crate::UiTakeOver`]).
+//!    answer, a network connect that fails (in its own words), or a board
+//!    that does not open in time end the take-over with the reason
+//!    ([`crate::UiTakeOver`]).
 //!
 //! The offer's words and level are `take_over_offer`'s; WHEN it is offered
 //! is decided here ([`StudioController::take_over_offer_for`]).
@@ -25,9 +31,12 @@ use lpa_devices::link::LinkId;
 use lpa_devices::{BoardKey, DeviceStatus, HoldVia};
 
 use super::StudioController;
-use crate::app::devices::board_hold::{AskOutcome, AskRefusal, HoldKey, usb_pair_of};
+use crate::app::devices::board_hold::{
+    AskOutcome, AskRefusal, HoldKey, is_network_road, usb_pair_of,
+};
 use crate::app::devices::take_over_state::{
-    ASK_PATIENCE_SECS, OPEN_PATIENCE_SECS, TAKE_OVER_ANOTHER_TAB, TakeOverTimeout,
+    ASK_PATIENCE_SECS, NETWORK_OPEN_PATIENCE_SECS, OPEN_PATIENCE_SECS, TAKE_OVER_ANOTHER_TAB,
+    TAKE_OVER_NO_WAY, TakeOverTimeout,
 };
 use crate::core::notice::UiNotices;
 use crate::{DeviceAction, DeviceInput, UiError, UiResult};
@@ -46,11 +55,15 @@ impl StudioController {
         if self.board_hold_edge.is_none() || facts.face != crate::DeviceFace::Wire {
             return None;
         }
+        // Held by its USB port, the board opens on a port this tab has; held
+        // by its network slot, it needs a road from here.
+        let reachable = held.via == HoldVia::Usb || self.network_road_from_here(view.id).is_some();
         Some(crate::take_over_offer(
             &facts.prefix,
             view.id,
             &held.level,
             self.take_overs.asking(view.id),
+            reachable,
         ))
     }
 
@@ -170,6 +183,25 @@ impl StudioController {
         }
     }
 
+    /// A connect over Wi‑Fi or through lightplayer.app to the board with
+    /// `mac` ended (`failure`: its words, when it failed). A take-over that
+    /// ran it ends with them; a success is done once the board is ready.
+    pub(super) fn take_over_reach_ended(&mut self, mac: BoardKey, failure: Option<String>) {
+        let Some(failure) = failure else {
+            return;
+        };
+        let opening: Vec<crate::DeviceId> = self
+            .take_overs
+            .devices()
+            .filter(|device| {
+                self.take_overs.is_opening(*device) && self.board_key(*device) == Some(mac)
+            })
+            .collect();
+        for device in opening {
+            self.take_overs.fail(device, failure.clone());
+        }
+    }
+
     /// The holder let go of `device`'s board (`mac`): open it here.
     ///
     /// For a USB hold, every port of its kind the hold kept shut leaves the
@@ -177,9 +209,29 @@ impl StudioController {
     /// nameless held port re-identifies. The OS lets only the freed one
     /// open. With no hold named (it came free before the ask), the board's
     /// own link connects, and the ports of its link's kind are freed the
-    /// same way.
+    /// same way. A board held by its network slot is reached by its
+    /// ordinary connect ([`Self::reach_taken_board_over_network`]).
     fn open_taken_board(&mut self, device: crate::DeviceId, mac: BoardKey, key: Option<HoldKey>) {
         let now = (self.now_secs)();
+        // The road the hold was on: the key asked about, or (when it came
+        // free before the ask) the fact the card wears.
+        let via = key.map(|key| key.via()).or_else(|| {
+            self.devices
+                .roster()
+                .device(device)?
+                .evidence
+                .held_elsewhere
+                .as_ref()
+                .map(|held| held.via)
+        });
+        if via == Some(HoldVia::Network) {
+            self.take_overs
+                .opening_within(device, now, NETWORK_OPEN_PATIENCE_SECS);
+            self.wake_board_holds_after(NETWORK_OPEN_PATIENCE_SECS);
+            self.journal_hold(format!("hold: reaching {mac} here over the network"));
+            self.reach_taken_board_over_network(device);
+            return;
+        }
         self.take_overs.opening(device, now);
         self.wake_board_holds_after(OPEN_PATIENCE_SECS);
         self.journal_hold(format!("hold: opening {mac} here"));
@@ -229,4 +281,70 @@ impl StudioController {
             }));
         }
     }
+
+    /// The board's ordinary connect, once its holder let go of its network
+    /// slot: by the first road this tab has ([`NetworkRoad`]); with none,
+    /// the take-over ends "No way to reach it from here".
+    fn reach_taken_board_over_network(&mut self, device: crate::DeviceId) {
+        let started = match self.network_road_from_here(device) {
+            Some(NetworkRoad::Link) => {
+                self.fold_device_input(crate::DeviceInput::Action(DeviceAction::Connect {
+                    device,
+                }));
+                Ok(UiNotices::new())
+            }
+            Some(NetworkRoad::Wifi) => {
+                self.start_wifi_connect(crate::WifiConnectOp::Board { device })
+            }
+            Some(NetworkRoad::Relay) => self.start_relay_connect(crate::RelayConnectOp { device }),
+            None => Err(UiError::UnsupportedAction(TAKE_OVER_NO_WAY.to_string())),
+        };
+        if let Err(error) = started {
+            let words = match error {
+                UiError::UnsupportedAction(words) => words,
+                other => other.to_string(),
+            };
+            self.take_overs.fail(device, words);
+        }
+    }
+
+    /// How this tab would reach `device`'s board over its network slot,
+    /// first road first; `None` when it has none.
+    fn network_road_from_here(&self, device: crate::DeviceId) -> Option<NetworkRoad> {
+        let roster = self.devices.roster();
+        let entry = roster.device(device)?;
+        if entry
+            .link()
+            .and_then(|link| roster.link_info(link))
+            .is_some_and(is_network_road)
+        {
+            return Some(NetworkRoad::Link);
+        }
+        let mac = self.board_key(device)?;
+        if self.lan_transport.is_some()
+            && self
+                .wifi_addresses
+                .get(&mac)
+                .and_then(crate::WifiAddress::url)
+                .is_some()
+        {
+            return Some(NetworkRoad::Wifi);
+        }
+        if self.relay_transport.is_some() && self.access.account_keys().is_some() {
+            return Some(NetworkRoad::Relay);
+        }
+        None
+    }
+}
+
+/// The roads this tab has to a board's network slot, first first.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NetworkRoad {
+    /// A network link the roster has for the board here (a session this
+    /// tab closed by request when it let the board go): it reopens.
+    Link,
+    /// The address this browser remembers for the board on Wi‑Fi.
+    Wifi,
+    /// lightplayer.app's relay, with someone signed in.
+    Relay,
 }

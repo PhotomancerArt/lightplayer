@@ -122,7 +122,8 @@ pub use app::devices::{
 };
 /// Connect on a board another tab holds: the offer, its op and its words.
 pub use app::devices::{
-    TAKE_OVER_ASKING, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab, take_over_offer,
+    TAKE_OVER_ASKING, TAKE_OVER_NO_WAY, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab,
+    take_over_offer,
 };
 pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,

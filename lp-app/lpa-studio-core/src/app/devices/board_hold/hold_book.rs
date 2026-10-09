@@ -7,7 +7,7 @@
 //! nothing about ports, links or offers. It reads no clock and makes no
 //! randomness (the tab id is the edge's).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_devices::{BoardKey, HoldLevel, HoldVia};
 
@@ -20,6 +20,9 @@ use super::tab_id::TabId;
 pub struct BoardHoldBook {
     tab: TabId,
     mine: BTreeMap<HoldKey, HoldLevel>,
+    /// This tab's holds whose lock is still another tab's (see
+    /// [`HoldNote::Holds`]'s `locked`).
+    unlocked: BTreeSet<HoldKey>,
     others: BTreeMap<HoldKey, OtherHold>,
     asks: BTreeMap<u64, PendingAsk>,
 }
@@ -34,6 +37,9 @@ pub struct OtherHold {
     /// said (a primed hold); read it as the cautious `Open`
     /// ([`Self::level_or_cautious`]).
     pub level: Option<HoldLevel>,
+    /// Its lock is its own: a primed hold (read off the lock manager), or
+    /// one whose holder said so. Only a locked hold is watched.
+    pub locked: bool,
 }
 
 /// One of this tab's asks that has not been answered.
@@ -54,6 +60,12 @@ pub enum BookChange {
         key: HoldKey,
         holder: Option<TabId>,
         level: Option<HoldLevel>,
+        /// A tab the book did not know to hold `key` says it does: nobody
+        /// was listed, or another tab was. Not a level change, not a holder
+        /// read off the lock manager naming itself (its answer to `Who`).
+        /// For a board's network slot this is the news that another tab
+        /// took it: the board gave the slot to the newest client.
+        new_holder: bool,
     },
     /// No other tab holds `key` any more.
     Freed { key: HoldKey },
@@ -82,6 +94,7 @@ impl BoardHoldBook {
         Self {
             tab,
             mine: BTreeMap::new(),
+            unlocked: BTreeSet::new(),
             others: BTreeMap::new(),
             asks: BTreeMap::new(),
         }
@@ -100,19 +113,26 @@ impl BoardHoldBook {
             return Vec::new();
         }
         match note {
-            HoldNote::Holds { key, level } => {
+            HoldNote::Holds { key, level, locked } => {
                 let hold = OtherHold {
                     tab: Some(from.clone()),
                     level: Some(level.clone()),
+                    locked: *locked,
                 };
-                if self.others.get(key) == Some(&hold) {
+                let before = self.others.get(key);
+                if before == Some(&hold) {
                     return Vec::new();
                 }
+                // Absent, or another tab's: a new holder. A hold read off
+                // the lock manager (no tab yet) naming itself is not.
+                let new_holder =
+                    before.is_none_or(|known| known.tab.as_ref().is_some_and(|tab| tab != from));
                 self.others.insert(*key, hold);
                 vec![BookChange::HeldElsewhere {
                     key: *key,
                     holder: Some(from.clone()),
                     level: Some(level.clone()),
+                    new_holder,
                 }]
             }
             HoldNote::Gone { key } => {
@@ -185,12 +205,14 @@ impl BoardHoldBook {
                 OtherHold {
                     tab: None,
                     level: None,
+                    locked: true,
                 },
             );
             changes.push(BookChange::HeldElsewhere {
                 key,
                 holder: None,
                 level: None,
+                new_holder: false,
             });
         }
         changes
@@ -212,17 +234,46 @@ impl BoardHoldBook {
 
     /// This tab let go of `key`. `true` when it held it.
     pub fn let_go(&mut self, key: &HoldKey) -> bool {
+        self.unlocked.remove(key);
         self.mine.remove(key).is_some()
+    }
+
+    /// Whether this tab has `key`'s lock (`locked`), for a hold it has.
+    /// `true` when that is news to announce.
+    pub fn set_locked(&mut self, key: &HoldKey, locked: bool) -> bool {
+        if !self.mine.contains_key(key) {
+            return false;
+        }
+        match locked {
+            true => self.unlocked.remove(key),
+            false => self.unlocked.insert(*key),
+        }
+    }
+
+    /// Whether this tab has the lock of its hold `key`.
+    pub fn is_locked(&self, key: &HoldKey) -> bool {
+        self.mine.contains_key(key) && !self.unlocked.contains(key)
+    }
+
+    /// This tab's holds whose lock is still another tab's.
+    pub fn unlocked(&self) -> impl Iterator<Item = &HoldKey> {
+        self.unlocked.iter()
+    }
+
+    /// The `Holds` note for this tab's hold `key`, as it stands now.
+    pub fn announcement(&self, key: &HoldKey) -> Option<HoldNote> {
+        Some(HoldNote::Holds {
+            key: *key,
+            level: self.mine.get(key)?.clone(),
+            locked: !self.unlocked.contains(key),
+        })
     }
 
     /// The `Holds` notes for everything this tab holds: its answer to `Who`.
     pub fn announcements(&self) -> Vec<HoldNote> {
         self.mine
-            .iter()
-            .map(|(key, level)| HoldNote::Holds {
-                key: *key,
-                level: level.clone(),
-            })
+            .keys()
+            .filter_map(|key| self.announcement(key))
             .collect()
     }
 
@@ -324,6 +375,7 @@ mod tests {
                 key: usb(1),
                 holder: Some(tab("a")),
                 level: Some(HoldLevel::Watching),
+                new_holder: true,
             }]
         );
         assert_eq!(book.level_of(&usb(1)), Some(&HoldLevel::Watching));
@@ -334,9 +386,55 @@ mod tests {
                 .is_empty()
         );
 
+        // A new level from the same holder is news, but not a new holder.
         let changes = book.apply(&tab("a"), &holds(usb(1), HoldLevel::Open));
-        assert_eq!(changes.len(), 1);
+        assert!(
+            matches!(
+                changes.as_slice(),
+                [BookChange::HeldElsewhere {
+                    new_holder: false,
+                    ..
+                }]
+            ),
+            "{changes:?}"
+        );
         assert_eq!(book.level_of(&usb(1)), Some(&HoldLevel::Open));
+
+        // Another tab saying it holds the same board is a new holder.
+        let changes = book.apply(&tab("b"), &holds(usb(1), HoldLevel::Watching));
+        assert!(
+            matches!(
+                changes.as_slice(),
+                [BookChange::HeldElsewhere {
+                    new_holder: true,
+                    ..
+                }]
+            ),
+            "{changes:?}"
+        );
+    }
+
+    /// A hold this tab read off the lock manager at load naming itself (its
+    /// answer to `Who`) is the same hold, not a new holder.
+    #[test]
+    fn a_primed_hold_naming_itself_is_not_a_new_holder() {
+        let mut book = BoardHoldBook::new(tab("me"));
+        book.prime([HoldKey::network(mac(1))]);
+
+        let changes = book.apply(
+            &tab("a"),
+            &holds(HoldKey::network(mac(1)), HoldLevel::Watching),
+        );
+
+        assert_eq!(
+            changes,
+            vec![BookChange::HeldElsewhere {
+                key: HoldKey::network(mac(1)),
+                holder: Some(tab("a")),
+                level: Some(HoldLevel::Watching),
+                new_holder: false,
+            }]
+        );
     }
 
     #[test]
@@ -372,6 +470,7 @@ mod tests {
                 key: usb(1),
                 holder: None,
                 level: None,
+                new_holder: false,
             }],
             "this tab's own hold is not another tab's"
         );
@@ -556,7 +655,11 @@ mod tests {
     }
 
     fn holds(key: HoldKey, level: HoldLevel) -> HoldNote {
-        HoldNote::Holds { key, level }
+        HoldNote::Holds {
+            key,
+            level,
+            locked: true,
+        }
     }
 
     fn tab(id: &str) -> TabId {

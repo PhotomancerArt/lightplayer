@@ -12,6 +12,7 @@
 
 use core::fmt;
 
+use lpa_devices::link::LinkInfo;
 use lpa_devices::{BoardKey, HoldVia, MacAddress};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -59,6 +60,17 @@ impl HoldKey {
             mac,
             usb: None,
         }
+    }
+
+    /// The hold a link to the board with `mac` is: its USB port's, or its
+    /// network slot's (the LAN or the relay: one slot, whichever road took
+    /// it). `None` for a link no tab holds by this protocol: Bluetooth, a
+    /// sim, an in-tab emulated board, a port with no vendor and product.
+    pub fn of_link(mac: BoardKey, info: &LinkInfo) -> Option<Self> {
+        if let Some(pair) = super::hold_gate::usb_pair_of(info) {
+            return Some(Self::usb(mac, pair));
+        }
+        is_network_road(info).then(|| Self::network(mac))
     }
 
     pub fn via(&self) -> HoldVia {
@@ -144,6 +156,12 @@ impl<'de> Deserialize<'de> for HoldKey {
     }
 }
 
+/// Whether `info`'s link reaches its board through the board's one network
+/// slot: the LAN (`lan:`) or lightplayer.app's relay (`relay:`).
+pub fn is_network_road(info: &LinkInfo) -> bool {
+    info.endpoint.is_lan() || info.endpoint.is_relay()
+}
+
 /// Four lowercase hex digits (one USB id, as the lock name writes it).
 fn parse_id(text: &str) -> Option<u16> {
     if text.len() != 4 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -215,6 +233,40 @@ mod tests {
         let back: HoldKey = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, usb_key());
         assert!(serde_json::from_str::<HoldKey>("\"lp-catalog\"").is_err());
+    }
+
+    #[test]
+    fn a_link_is_held_by_its_port_or_by_the_boards_network_slot() {
+        let usb = LinkInfo {
+            label: "/dev/cu.usbmodem2101".to_string(),
+            endpoint: lpa_devices::EndpointKey("browser-serial-esp32-port-1".to_string()),
+            usb: Some(lpa_devices::link::UsbIds {
+                vendor: 0x303a,
+                product: 0x1001,
+            }),
+            serial_number: None,
+            carries_update_channel: true,
+        };
+        assert_eq!(HoldKey::of_link(mac(), &usb), Some(usb_key()));
+        let lan = lpa_link::providers::network_link::lan_link_info("ws://10.0.0.5/link");
+        assert_eq!(HoldKey::of_link(mac(), &lan), Some(HoldKey::network(mac())));
+        let relay = lpa_link::providers::network_link::relay_link_info(
+            &lpa_link::providers::network_link::relay_socket_url(
+                "https://lightplayer.app",
+                "a0f26287b48c",
+            ),
+        )
+        .expect("a relay leg");
+        assert_eq!(
+            HoldKey::of_link(mac(), &relay),
+            Some(HoldKey::network(mac())),
+            "the LAN and the relay are one slot"
+        );
+        let ble = LinkInfo {
+            endpoint: lpa_devices::EndpointKey("ble:abc".to_string()),
+            ..lan
+        };
+        assert_eq!(HoldKey::of_link(mac(), &ble), None);
     }
 
     #[test]

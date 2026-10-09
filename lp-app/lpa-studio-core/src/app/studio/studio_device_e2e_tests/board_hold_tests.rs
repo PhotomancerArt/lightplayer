@@ -17,6 +17,10 @@ use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo};
 
 use super::*;
 use crate::app::studio::studio_actor::StudioActor;
+
+/// The same over a board's one network slot (P5): network holds, the
+/// take-over through Wi‑Fi or the relay, the yield, a stranger's busy.
+mod network_hold_tests;
 use crate::app::studio::studio_command::StudioCommand;
 use crate::{
     BoardHoldEdge, BookChange, DeviceStatus, HoldKey, HoldLevel, HoldNote, MemoryBoardHold,
@@ -39,6 +43,7 @@ fn a_note_another_tab_posts_reaches_this_tabs_book_through_the_queue() {
     tab_a.post(&HoldNote::Holds {
         key: board(),
         level: HoldLevel::Open,
+        locked: true,
     });
     for (from, note) in tab_b.take_inbox() {
         handle.tx.send(StudioCommand::BoardHold { from, note });
@@ -65,6 +70,7 @@ fn the_door_reports_what_a_note_changed_and_ignores_the_tabs_own_name() {
     let note = HoldNote::Holds {
         key: board(),
         level: HoldLevel::Watching,
+        locked: true,
     };
 
     assert!(
@@ -79,6 +85,7 @@ fn the_door_reports_what_a_note_changed_and_ignores_the_tabs_own_name() {
             key: board(),
             holder: Some(TabId::new("other")),
             level: Some(HoldLevel::Watching),
+            new_holder: true,
         }]
     );
 }

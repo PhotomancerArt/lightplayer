@@ -8,9 +8,12 @@
 //!    tab of an older build never answers, since the channel ignores notes
 //!    of another version).
 //! 2. **Opening** — the holder let go; this tab opens the ports the hold
-//!    kept shut, and the board's own hello says which one is the board. It
-//!    ends when the board is ready, or after [`OPEN_PATIENCE_SECS`] with
-//!    "Still in use".
+//!    kept shut, and the board's own hello says which one is the board (or,
+//!    for a board held by its network slot, runs the board's ordinary
+//!    connect over Wi‑Fi or through lightplayer.app). It ends when the board
+//!    is ready, or after [`OPEN_PATIENCE_SECS`] ([`NETWORK_OPEN_PATIENCE_SECS`]
+//!    over the network) with "Still in use"; a network connect that fails
+//!    ends it with the connect's own words.
 //! 3. **Failed** — the reason, until the next press or the board is ready.
 //!
 //! Like `WifiConnects`, a side map beside the roster: the card reads words
@@ -28,6 +31,12 @@ use super::take_over_offer::TAKE_OVER_ASKING;
 pub const ASK_PATIENCE_SECS: f64 = 5.0;
 /// How long the freed board has to open here and say hello.
 pub const OPEN_PATIENCE_SECS: f64 = 10.0;
+/// How long a board freed from another tab's network slot has to be
+/// reached here and say hello: a connect over Wi‑Fi is bounded at 10 s
+/// (`browser_websocket.js`, rule 1), then waits up to 4 s for the board's
+/// first frame (`browser_lan_source.rs`, `SETTLE_MS`), then the hello
+/// takes what it takes over USB ([`OPEN_PATIENCE_SECS`]).
+pub const NETWORK_OPEN_PATIENCE_SECS: f64 = 10.0 + 4.0 + OPEN_PATIENCE_SECS;
 
 /// The card's words while opening the freed board.
 pub const TAKE_OVER_OPENING_WORDS: &str = "Opening\u{2026}";
@@ -37,6 +46,9 @@ pub const TAKE_OVER_NO_ANSWER: &str = "That tab didn't answer";
 pub const TAKE_OVER_STILL_IN_USE: &str = "Still in use";
 /// The holder said it does not have the board, and another tab does.
 pub const TAKE_OVER_ANOTHER_TAB: &str = "Another tab has it now";
+/// The board is held by its network slot, and this tab has no road to it:
+/// no Wi‑Fi address remembered for it, and nobody signed in for the relay.
+pub const TAKE_OVER_NO_WAY: &str = "No way to reach it from here";
 
 /// What a card says about its take-over.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -131,10 +143,16 @@ impl TakeOvers {
 
     /// The holder let go of `device`'s board: it opens here now.
     pub fn opening(&mut self, device: DeviceId, now: f64) {
+        self.opening_within(device, now, OPEN_PATIENCE_SECS);
+    }
+
+    /// The holder let go of `device`'s board: it is reached here now, and
+    /// has `patience` seconds to be ready.
+    pub fn opening_within(&mut self, device: DeviceId, now: f64, patience: f64) {
         self.by_device.insert(
             device,
             TakeOverStage::Opening {
-                deadline: now + OPEN_PATIENCE_SECS,
+                deadline: now + patience,
             },
         );
     }

@@ -5,14 +5,15 @@
 //!
 //! | note | said by | means |
 //! |---|---|---|
-//! | `Holds { key, level }` | the holder | I hold this board (re-said when the level changes, and in answer to `Who`) |
+//! | `Holds { key, level, locked }` | the holder | I hold this board (re-said when the level changes, when its lock becomes mine, and in answer to `Who`) |
 //! | `Gone { key }` | the holder | I let it go |
 //! | `Ask { request, key, holder }` | a tab that wants the board | please let go of it |
 //! | `Answer { request, asker, outcome }` | the asked tab | `Released`, or refused and why |
 //! | `Who` | a new tab | everyone, say what you hold |
 //!
 //! Every note rides in a JSON envelope `{"v":1,"tab":"<id>","note":…}`,
-//! the note externally tagged (`{"holds":{"key":…,"level":…}}`, `"who"`):
+//! the note externally tagged (`{"holds":{"key":…,"level":…,"locked":true}}`,
+//! `"who"`):
 //! no internally tagged or flattened serde, which the repo's
 //! `lint-serde-content` keeps out (`docs/adr/2026-07-04-json-only-artifacts.md`).
 //! [`HoldNote::decode`] ignores a note of another version, malformed text,
@@ -37,7 +38,20 @@ pub const HOLD_PROTO_VERSION: u32 = 1;
 pub enum HoldNote {
     /// I hold this board, at this level. Said after the claim, again on a
     /// level change, and in answer to [`Self::Who`].
-    Holds { key: HoldKey, level: HoldLevel },
+    ///
+    /// `locked`: the holder has the board's Web Lock. A tab can hold a
+    /// board before its lock is free — its link is open here, and the lock
+    /// is still another tab's (a board's network slot goes to the newest
+    /// client, and the tab it left has not let the lock go yet; or a stale
+    /// lock stands) — and then says `false`, and says `Holds` again with
+    /// `true` once the lock is its own. Other tabs watch only a locked
+    /// hold's lock (the sentinel): an unlocked hold's lock coming free says
+    /// nothing about its holder.
+    Holds {
+        key: HoldKey,
+        level: HoldLevel,
+        locked: bool,
+    },
     /// I let this board go (the port is closed and the lock released).
     Gone { key: HoldKey },
     /// Please let go of this board. `holder` names the tab asked, when the
@@ -149,11 +163,12 @@ mod tests {
         let text = HoldNote::Holds {
             key: key(),
             level: HoldLevel::Watching,
+            locked: true,
         }
         .encode(&tab("a"));
         assert_eq!(
             text,
-            r#"{"v":1,"tab":"a","note":{"holds":{"key":"lp-board:usb:303a:1001:a0f26287b48c","level":"Watching"}}}"#
+            r#"{"v":1,"tab":"a","note":{"holds":{"key":"lp-board:usb:303a:1001:a0f26287b48c","level":"Watching","locked":true}}}"#
         );
         assert_eq!(
             HoldNote::Who.encode(&tab("a")),
@@ -187,7 +202,7 @@ mod tests {
             r#"{"v":1}"#,
             r#"{"v":1,"tab":"a"}"#,
             r#"{"v":1,"tab":"a","note":"shout"}"#,
-            r#"{"v":1,"tab":"a","note":{"holds":{"key":"lp-catalog","level":"Watching"}}}"#,
+            r#"{"v":1,"tab":"a","note":{"holds":{"key":"lp-catalog","level":"Watching","locked":true}}}"#,
             r#"{"v":1,"tab":"a","note":{"gone":{}}}"#,
             r#"{"v":"1","tab":"a","note":"who"}"#,
         ] {
@@ -217,10 +232,12 @@ mod tests {
             HoldNote::Holds {
                 key: key(),
                 level: HoldLevel::Watching,
+                locked: true,
             },
             HoldNote::Holds {
                 key: HoldKey::network(mac()),
                 level: HoldLevel::Busy("Updating · 42%".to_string()),
+                locked: false,
             },
             HoldNote::Gone { key: key() },
             HoldNote::Ask {

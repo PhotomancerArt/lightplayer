@@ -851,6 +851,9 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("wi-fi: {host}: {}", failure.words());
         }
+        if let crate::WifiConnectTarget::Board(board) = target {
+            self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
+        }
         let connected = result.is_ok();
         self.wifi_connects.finish(target, host, result);
         if connected {
@@ -910,6 +913,7 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("relay: {board}: {}", failure.words());
         }
+        self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         let connected = result.is_ok();
         self.wifi_connects
             .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
@@ -3516,7 +3520,9 @@ impl StudioController {
     /// board this browser remembers a Wi‑Fi address for, while nothing
     /// reaches it (it is offline — unplugged, or its last link went), on a
     /// page that reaches the LAN. Not on a runtime (a sim or an in-tab emu
-    /// has no radio). Disabled while it is being reached.
+    /// has no radio), and not while another tab of this browser holds the
+    /// board's network slot: Connect is then `take-over`, which asks that
+    /// tab first. Disabled while it is being reached.
     fn connect_wifi_offer(
         &self,
         view: &crate::DeviceView,
@@ -3529,6 +3535,9 @@ impl StudioController {
             return None;
         }
         let key = self.board_key(view.id)?;
+        if self.network_slot_held_elsewhere(key) {
+            return None;
+        }
         let address = self.wifi_addresses.get(&key)?;
         Some(crate::connect_wifi_offer(
             &facts.prefix,
@@ -3547,7 +3556,9 @@ impl StudioController {
     ///
     /// No list of the account's boards stands behind it, and nothing asks
     /// lightplayer.app whether the board is online first: the press finds
-    /// out, and an offline board says so on its tile.
+    /// out, and an offline board says so on its tile. Not while another tab
+    /// of this browser holds the board's network slot (Connect is then
+    /// `take-over`).
     fn connect_relay_offer(
         &self,
         view: &crate::DeviceView,
@@ -3561,12 +3572,27 @@ impl StudioController {
             return None;
         }
         let key = self.board_key(view.id)?;
+        if self.network_slot_held_elsewhere(key) {
+            return None;
+        }
         Some(crate::connect_relay_offer(
             &facts.prefix,
             view.id,
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Relay(key)),
         ))
+    }
+
+    /// Whether another tab of this browser holds the network slot of the
+    /// board with `mac` (a board the person reached on the LAN or through
+    /// the relay in that tab). A connect from here would take the slot from
+    /// under it — or, on an open board, be turned away — so the board's
+    /// Connect is `take-over`, which asks that tab first.
+    fn network_slot_held_elsewhere(&self, mac: lpa_devices::BoardKey) -> bool {
+        self.board_hold_book.as_ref().is_some_and(|book| {
+            let key = crate::HoldKey::network(mac);
+            book.held_elsewhere(&key).is_some() && book.holds(&key).is_none()
+        })
     }
 
     /// Whether what `device` runs is a project this library holds (Q4): its

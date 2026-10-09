@@ -3,12 +3,15 @@
 //! diff, so running it after every fold and every note is idempotent.
 //!
 //! **Claim order: open, hello, then lock, then announce.** A board becomes a
-//! hold this tab wants ([`desired_holds`]) once its USB port is open and its
-//! hello has named its MAC; the lock is claimed then, and announced once the
-//! claim answers. **Release order: close the port, release the lock, then
-//! announce** — by the time a board is no longer wanted its port is already
-//! closed (the link went, or was closed), so the plan's releases can let the
-//! lock go at once, and a tab that gets the lock finds the port free.
+//! hold this tab wants ([`desired_holds`]) once its link is open and its
+//! hello has named its MAC: its USB port (`lp-board:usb:…`), or its one
+//! network slot (`lp-board:net:…`), whether the LAN or the relay took it;
+//! the lock is claimed then, and announced once the claim answers.
+//! **Release order: close the port, release the lock, then announce** — by
+//! the time a board is no longer wanted its port (or its network session)
+//! is already closed (the link went, or was closed), so the plan's releases
+//! can let the lock go at once, and a tab that gets the lock finds the port
+//! free.
 //!
 //! The level a holder announces is what taking the board over would cost
 //! ([`hold_level`]): `Busy` while it works on the board (any activity but
@@ -19,17 +22,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use lpa_devices::{BoardKey, HeldElsewhere, HoldLevel, HoldVia};
 
 use super::hold_book::OtherHold;
-use super::hold_key::{HoldKey, UsbPair};
+use super::hold_key::HoldKey;
 
 /// What the reconcile reads of one roster board.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HoldCandidate {
-    /// The board's MAC, once something has said it.
-    pub mac: Option<BoardKey>,
-    /// Its link's port kind, when the link is a USB serial port
-    /// ([`super::usb_pair_of`]).
-    pub usb: Option<UsbPair>,
-    /// The port is open here.
+    /// The hold its link would be ([`HoldKey::of_link`]): `None` until its
+    /// MAC is known, and for a link no tab holds (Bluetooth, a sim).
+    pub key: Option<HoldKey>,
+    /// The link is open here.
     pub open: bool,
     /// The running activity's label, unless that activity is Identify.
     pub busy: Option<String>,
@@ -57,18 +58,15 @@ pub fn hold_level(busy: Option<&str>, lens: bool) -> HoldLevel {
     }
 }
 
-/// The USB holds this tab should have: one per board whose USB port is open
-/// here and whose MAC is known, at its level.
+/// The holds this tab should have: one per board whose link (its USB port,
+/// or its network slot) is open here and whose MAC is known, at its level.
 pub fn desired_holds(
     boards: impl IntoIterator<Item = HoldCandidate>,
 ) -> BTreeMap<HoldKey, HoldLevel> {
     boards
         .into_iter()
         .filter(|board| board.open)
-        .filter_map(|board| {
-            let key = HoldKey::usb(board.mac?, board.usb?);
-            Some((key, hold_level(board.busy.as_deref(), board.lens)))
-        })
+        .filter_map(|board| Some((board.key?, hold_level(board.busy.as_deref(), board.lens))))
         .collect()
 }
 
@@ -177,22 +175,24 @@ pub fn fact_changes(
 mod tests {
     use super::*;
     use crate::TabId;
+    use crate::app::devices::board_hold::hold_key::UsbPair;
 
     #[test]
-    fn an_open_usb_board_that_named_itself_is_held_at_its_level() {
+    fn an_open_board_that_named_itself_is_held_at_its_level() {
         let held = desired_holds([
             candidate(1, true, None, false),
             candidate(2, true, None, true),
             candidate(3, true, Some("Pushing\u{2026}"), true),
-            // Closed, nameless, or not a USB port: nothing to hold.
+            // Closed, or nameless (or a link no tab holds): nothing to hold.
             candidate(4, false, None, false),
             HoldCandidate {
-                mac: None,
+                key: None,
                 ..candidate(5, true, None, false)
             },
+            // Over the network: the board's one slot, at its level too.
             HoldCandidate {
-                usb: None,
-                ..candidate(6, true, None, false)
+                key: Some(HoldKey::network(mac(6))),
+                ..candidate(6, true, None, true)
             },
         ]);
 
@@ -202,6 +202,7 @@ mod tests {
                 (key(1), HoldLevel::Watching),
                 (key(2), HoldLevel::Open),
                 (key(3), HoldLevel::Busy("Pushing\u{2026}".to_string())),
+                (HoldKey::network(mac(6)), HoldLevel::Open),
             ])
         );
     }
@@ -316,8 +317,7 @@ mod tests {
 
     fn candidate(n: u8, open: bool, busy: Option<&str>, lens: bool) -> HoldCandidate {
         HoldCandidate {
-            mac: Some(mac(n)),
-            usb: Some(C6),
+            key: Some(key(n)),
             open,
             busy: busy.map(str::to_string),
             lens,
@@ -328,6 +328,7 @@ mod tests {
         OtherHold {
             tab: Some(TabId::new("a")),
             level,
+            locked: true,
         }
     }
 

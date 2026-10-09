@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lpa_devices::link::LinkInfo;
 use lpa_devices::{BoardKey, HeldElsewhere, HoldVia};
 
 use super::hold_answer::PendingRelease;
@@ -26,6 +27,10 @@ pub struct BoardHoldFlow {
     /// Holds the edge could not lock (no Web Locks): wanted, never re-asked
     /// while the board stays open.
     pub unguarded: BTreeSet<HoldKey>,
+    /// Network holds this tab gave up because another tab took the board's
+    /// slot (the yield), while their links are still closing: not wanted
+    /// again until the link has closed.
+    pub yielded: BTreeSet<HoldKey>,
     /// One sentinel per key another tab holds, by its watch number.
     pub watching: BTreeMap<HoldKey, u64>,
     next_watch: u64,
@@ -37,6 +42,12 @@ pub struct BoardHoldFlow {
     pub taken_from_here: BTreeMap<BoardKey, HoldVia>,
     /// Boards being let go in answer to an ask, by hold.
     pub releases: BTreeMap<HoldKey, PendingRelease>,
+    /// The network session each board this tab held over the network came
+    /// by (its LAN or relay link, as it was when held). A dropped session
+    /// redials on its own with no link in the roster to close; when another
+    /// tab takes the board, this is what is told to stop
+    /// (`studio_controller/board_hold_flow.rs`, the yield).
+    pub network_roads: BTreeMap<BoardKey, LinkInfo>,
 }
 
 impl BoardHoldFlow {

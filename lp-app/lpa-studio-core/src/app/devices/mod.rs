@@ -295,9 +295,9 @@ pub use store_lookups::{StoreLookup, StoreLookups};
 pub use take_over_offer::{TAKE_OVER_ASKING, busy_in_the_other_tab, take_over_offer};
 pub use take_over_op::TakeOverOp;
 pub use take_over_state::{
-    ASK_PATIENCE_SECS, OPEN_PATIENCE_SECS, TAKE_OVER_ANOTHER_TAB, TAKE_OVER_NO_ANSWER,
-    TAKE_OVER_OPENING_WORDS, TAKE_OVER_STILL_IN_USE, TakeOverStage, TakeOverTimeout, TakeOvers,
-    UiTakeOver,
+    ASK_PATIENCE_SECS, NETWORK_OPEN_PATIENCE_SECS, OPEN_PATIENCE_SECS, TAKE_OVER_ANOTHER_TAB,
+    TAKE_OVER_NO_ANSWER, TAKE_OVER_NO_WAY, TAKE_OVER_OPENING_WORDS, TAKE_OVER_STILL_IN_USE,
+    TakeOverStage, TakeOverTimeout, TakeOvers, UiTakeOver,
 };
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
 pub use ui_link_kind::UiLinkKind;

@@ -320,6 +320,7 @@ mod tests {
         let note = HoldNote::Holds {
             key: key(1),
             level: HoldLevel::Watching,
+            locked: true,
         };
 
         a.post(&note);

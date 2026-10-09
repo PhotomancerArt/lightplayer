@@ -9,10 +9,11 @@
 //!
 //! - **Priming.** The first sweep waits for one look at the lock manager:
 //!   what other tabs hold goes into the book before any port is opened.
-//! - **Claims.** A USB board whose port is open here and whose hello named
-//!   its MAC is claimed (open, hello, then lock, then announce) and
-//!   announced at its level; a board whose port closed is let go (the port
-//!   is closed already, then the lock, then the announcement).
+//! - **Claims.** A board whose link is open here and whose hello named its
+//!   MAC is claimed (open, hello, then lock, then announce) and announced
+//!   at its level — its USB port, or its one network slot (the LAN or the
+//!   relay); a board whose link closed is let go (the link is closed
+//!   already, then the lock, then the announcement).
 //! - **The gate.** The claims of other tabs keep the effects layer's gate
 //!   current, and a port whose open the OS refused is read against them.
 //! - **The answer.** An ask is refused while busy; otherwise the lens
@@ -20,6 +21,12 @@
 //!   is awaited, the lock goes, and `Released` and `Gone` are said.
 //! - **The sentinel.** One watch per hold elsewhere: when it fires the
 //!   holder let go or died, the fact clears — and nothing opens the port.
+//! - **The yield.** A board's network slot goes to the newest client that
+//!   proves the holder's key (every tab of one browser presents the same
+//!   keys), and the client it leaves would redial and take it back. A tab
+//!   that hears another tab say it holds a board whose network slot this tab
+//!   had closes its own session BY REQUEST (no redial), and its board wears
+//!   "taken by another tab". Connect is then the person's.
 //! - **The facts.** Every board another tab holds wears the fact
 //!   (`Event::BoardHeld`), folded only when it changed.
 //!
@@ -31,16 +38,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use lpa_devices::activity::{ActivityKind, ActivityOutcome};
-use lpa_devices::link::LinkId;
-use lpa_devices::{BoardKey, HoldLevel};
+use lpa_devices::link::{LinkId, LinkInfo};
+use lpa_devices::{BoardKey, ConnectionIntent, HoldLevel, HoldVia};
 
 use super::StudioController;
 use crate::app::devices::board_hold::{
     AnswerPlan, AskOutcome, BookChange, ClaimAnswer, HoldCandidate, HoldEdgeEvent, HoldKey,
     HoldNote, HoldPriming, PRIMING_PATIENCE_SECS, PendingRelease, RELEASE_CLOSE_PATIENCE_SECS,
     ReleaseStage, TabId, UsbPair, answer_plan, desired_facts, desired_holds, fact_changes,
-    plan_holds, reads_as_held, usb_pair_of,
+    is_network_road, plan_holds, reads_as_held, usb_pair_of,
 };
+use crate::app::devices::device_transport::DeviceTransport;
 use crate::core::log::DeviceEventKind;
 use crate::{DeviceAction, DeviceEvent, DeviceInput, StudioCommand};
 
@@ -101,7 +109,12 @@ impl StudioController {
     pub(super) fn react_to_hold_changes(&mut self, changes: &[BookChange]) {
         for change in changes {
             match change {
-                BookChange::HeldElsewhere { key, level, .. } => {
+                BookChange::HeldElsewhere {
+                    key,
+                    level,
+                    new_holder,
+                    ..
+                } => {
                     self.journal_hold(format!(
                         "hold: {key} is held by another tab ({})",
                         level
@@ -110,6 +123,9 @@ impl StudioController {
                                 "{level:?}"
                             ))
                     ));
+                    if *new_holder && key.via() == HoldVia::Network {
+                        self.yield_network_board(*key);
+                    }
                 }
                 BookChange::Freed { key } => self.hold_freed(*key, false),
                 BookChange::AskReceived {
@@ -168,8 +184,13 @@ impl StudioController {
         let now = (self.now_secs)();
         self.finish_due_hold_releases(now);
 
-        // This tab's own holds.
-        let desired = self.desired_board_holds();
+        // This tab's own holds — not the ones it gave up to another tab
+        // while their links close.
+        let mut desired = self.desired_board_holds();
+        self.board_hold_flow
+            .yielded
+            .retain(|key| desired.contains_key(key));
+        desired.retain(|key, _| !self.board_hold_flow.yielded.contains(key));
         let answering: BTreeSet<HoldKey> = self.board_hold_flow.releases.keys().copied().collect();
         let plan = {
             let book = self.board_hold_book.as_ref().expect("checked above");
@@ -191,16 +212,38 @@ impl StudioController {
         for (key, level) in plan.levels {
             if let Some(book) = self.board_hold_book.as_mut()
                 && book.hold(key, level.clone())
+                && let Some(note) = book.announcement(&key)
             {
-                edge.post(&HoldNote::Holds {
-                    key,
-                    level: level.clone(),
-                });
+                edge.post(&note);
                 self.journal_hold(format!("hold: {key} now {level:?}"));
             }
         }
         for key in plan.claim {
             self.claim_board_hold(key);
+        }
+        // Holds announced while another tab still had the lock: claim
+        // again, one claim at a time, until the lock is this tab's.
+        let unlocked: Vec<HoldKey> = self
+            .board_hold_book
+            .as_ref()
+            .map(|book| {
+                book.unlocked()
+                    .filter(|key| {
+                        !self.board_hold_flow.claiming.contains_key(key)
+                            && !self.board_hold_flow.unguarded.contains(key)
+                    })
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default();
+        for key in unlocked {
+            self.claim_board_hold(key);
+        }
+        // Where each board held over the network came from, for the yield.
+        for key in desired.keys().filter(|key| key.via() == HoldVia::Network) {
+            if let Some(info) = self.network_link_of(key.mac()) {
+                self.board_hold_flow.network_roads.insert(key.mac(), info);
+            }
         }
         // A board this tab holds again is not "taken by another tab".
         let held_macs: BTreeSet<BoardKey> = self
@@ -330,8 +373,9 @@ impl StudioController {
         self.react_to_hold_changes(&changes);
     }
 
-    /// The holds this tab should have now: every roster board whose USB
-    /// port is open here and whose MAC is known, at its level.
+    /// The holds this tab should have now: every roster board whose link
+    /// (its USB port, or its network slot) is open here and whose MAC is
+    /// known, at its level.
     fn desired_board_holds(&self) -> BTreeMap<HoldKey, HoldLevel> {
         let now = self.device_now();
         let lens = self
@@ -341,12 +385,11 @@ impl StudioController {
         let roster = self.devices.roster();
         desired_holds(roster.devices().iter().map(|device| {
             let view = lpa_devices::view::device_view(device, now);
+            let mac = device.identity.mac.as_ref().and_then(BoardKey::from_mac);
             HoldCandidate {
-                mac: device.identity.mac.as_ref().and_then(BoardKey::from_mac),
-                usb: device
-                    .link()
-                    .and_then(|link| roster.link_info(link))
-                    .and_then(usb_pair_of),
+                key: mac
+                    .zip(device.link().and_then(|link| roster.link_info(link)))
+                    .and_then(|(mac, info)| HoldKey::of_link(mac, info)),
                 open: device.evidence.presence.is_open(),
                 busy: view
                     .activity
@@ -398,25 +441,52 @@ impl StudioController {
             }
             return;
         };
-        match answer {
-            ClaimAnswer::Held => {}
-            // The port is open here, so the OS already says this tab has
-            // the board; a lock someone else holds is a stale one.
-            ClaimAnswer::Taken => {
-                self.journal_hold(format!("hold: {key} lock busy; continuing unguarded"))
+        let Some(book) = self.board_hold_book.as_mut() else {
+            return;
+        };
+        // A claim again, for a hold announced while another tab still had
+        // its lock.
+        let announced = book.holds(&key).is_some();
+        match (answer, announced) {
+            // The lock is ours now: say so, and other tabs watch it.
+            (ClaimAnswer::Held, true) => {
+                if book.set_locked(&key, true)
+                    && let Some(note) = book.announcement(&key)
+                {
+                    edge.post(&note);
+                    self.journal_hold(format!("hold: {key} lock is this tab's now"));
+                }
+                return;
             }
-            ClaimAnswer::Unavailable => {
+            (ClaimAnswer::Taken, true) => return,
+            (ClaimAnswer::Held, false) => {
+                book.hold(key, level.clone());
+            }
+            // The link is open here: over USB the OS already says this tab
+            // has the board, and the network slot went to this tab, the
+            // newest client. A lock someone else holds is one being let go
+            // (the tab this one took the slot from yields) or a stale one:
+            // announce the hold all the same, unlocked, and claim again
+            // until it is ours.
+            (ClaimAnswer::Taken, false) => {
+                book.hold(key, level.clone());
+                book.set_locked(&key, false);
+                self.journal_hold(format!(
+                    "hold: {key} lock busy; holding it unlocked and asking again"
+                ));
+            }
+            (ClaimAnswer::Unavailable, _) => {
                 self.board_hold_flow.unguarded.insert(key);
                 return;
             }
         }
-        if let Some(book) = self.board_hold_book.as_mut() {
-            book.hold(key, level.clone());
+        if let Some(note) = self
+            .board_hold_book
+            .as_ref()
+            .and_then(|book| book.announcement(&key))
+        {
+            edge.post(&note);
         }
-        edge.post(&HoldNote::Holds {
-            key,
-            level: level.clone(),
-        });
         self.journal_hold(format!("hold: holding {key} ({level:?})"));
     }
 
@@ -539,21 +609,132 @@ impl StudioController {
         }
     }
 
-    /// The roster device whose open port `key` names.
+    /// The roster device whose link `key` names: the board's USB port, or
+    /// its network session.
     fn device_holding(&self, key: &HoldKey) -> Option<crate::DeviceId> {
         let roster = self.devices.roster();
         roster
             .devices()
             .iter()
             .find(|device| {
-                device.identity.mac.as_ref().and_then(BoardKey::from_mac) == Some(key.mac())
-                    && device
-                        .link()
-                        .and_then(|link| roster.link_info(link))
-                        .and_then(usb_pair_of)
-                        == key.usb_pair()
+                device
+                    .link()
+                    .and_then(|link| roster.link_info(link))
+                    .is_some_and(|info| {
+                        HoldKey::of_link(key.mac(), info) == Some(*key)
+                            && device.identity.mac.as_ref().and_then(BoardKey::from_mac)
+                                == Some(key.mac())
+                    })
             })
             .map(|device| device.id)
+    }
+
+    /// The link this tab reaches the board with `mac` by over its network
+    /// slot (the LAN or the relay), when it has one in the roster.
+    fn network_link_of(&self, mac: BoardKey) -> Option<LinkInfo> {
+        let roster = self.devices.roster();
+        roster.devices().iter().find_map(|device| {
+            if device.identity.mac.as_ref().and_then(BoardKey::from_mac) != Some(mac) {
+                return None;
+            }
+            let info = roster.link_info(device.link()?)?;
+            is_network_road(info).then(|| info.clone())
+        })
+    }
+
+    /// Another tab says it holds the board `key` names by its network slot,
+    /// and it is new to say so: the board gave the slot to that tab (the
+    /// newest client that proves the holder's key) and closed this tab's
+    /// session, or is about to. Yield it: close this tab's session BY
+    /// REQUEST — so `browser_websocket.js` does not redial and take the
+    /// slot back — and the board wears "taken by another tab". This tab
+    /// holds nothing and reopens nothing; Connect is the person's.
+    ///
+    /// The session is closed through its link when the roster still has one
+    /// that is open, or opening (`Action::Disconnect`, intent Disconnected).
+    /// A session the board already dropped has no link here, and redials on
+    /// its own: the transport is told to stop reaching the board there (the
+    /// road it came by, [`BoardHoldFlow::network_roads`]). A link closed by
+    /// request already needs nothing.
+    ///
+    /// [`BoardHoldFlow::network_roads`]: crate::app::devices::board_hold::BoardHoldFlow::network_roads
+    fn yield_network_board(&mut self, key: HoldKey) {
+        if self.board_hold_flow.releases.contains_key(&key) {
+            // Already letting it go to an ask; that flow says the rest.
+            return;
+        }
+        let mac = key.mac();
+        let roster = self.devices.roster();
+        let on_network: Vec<(crate::DeviceId, bool)> = roster
+            .devices()
+            .iter()
+            .filter(|device| device.identity.mac.as_ref().and_then(BoardKey::from_mac) == Some(mac))
+            .filter_map(|device| {
+                let info = roster.link_info(device.link()?)?;
+                let live = device.evidence.presence.is_open()
+                    || device.intent.connection != ConnectionIntent::Disconnected;
+                is_network_road(info).then_some((device.id, live))
+            })
+            .collect();
+        let road = self.board_hold_flow.network_roads.remove(&mac);
+        let mut closed = false;
+        for (device, live) in &on_network {
+            if *live {
+                self.fold_device_input(DeviceInput::Action(DeviceAction::Disconnect {
+                    device: *device,
+                }));
+                closed = true;
+            }
+        }
+        if on_network.is_empty()
+            && let Some(info) = road
+        {
+            self.stop_network_session(info);
+            closed = true;
+        }
+        // The hold is over now: the lock goes and `Gone` is said (the tab
+        // that took the slot claims the lock as it frees), and nothing
+        // claims it again while the link closes.
+        let held = self
+            .board_hold_book
+            .as_ref()
+            .is_some_and(|book| book.holds(&key).is_some())
+            || self.board_hold_flow.claiming.contains_key(&key);
+        if held {
+            self.let_go_of_hold(key);
+            self.board_hold_flow.yielded.insert(key);
+        }
+        if closed || held {
+            self.board_hold_flow
+                .taken_from_here
+                .insert(mac, HoldVia::Network);
+            self.journal_hold(format!(
+                "hold: another tab took {key}; this tab's session closes by request (no redial)"
+            ));
+        }
+    }
+
+    /// Stop reaching a board on the network road `info` names: its session
+    /// closes by request and is not redialled (the transport's forget, the
+    /// same one the card's Forget uses for the session).
+    fn stop_network_session(&self, info: LinkInfo) {
+        let stop = match info.endpoint.is_relay() {
+            true => self
+                .relay_transport
+                .as_ref()
+                .map(|transport| transport.revoke_grant(info)),
+            false => self
+                .lan_transport
+                .as_ref()
+                .map(|transport| transport.revoke_grant(info)),
+        };
+        if let (Some(stop), Some(spawner)) = (stop, self.wifi_spawner.clone()) {
+            spawner(Box::pin(async move {
+                if let Err(error) = stop.await {
+                    log::warn!("hold: a network session did not stop: {error}");
+                }
+            }));
+        }
     }
 
     /// Another tab's hold on `key` ended: the ports of its kind leave the
@@ -665,10 +846,20 @@ impl StudioController {
         ) else {
             return;
         };
+        // Only a locked hold: an unlocked one's lock coming free says nothing
+        // about its holder (it is the lock of the tab it took the board
+        // from). And not a hold this tab has itself: its own lock is no other
+        // tab's to let go (a board's network slot changes hands before the
+        // tab it left has said `Gone`).
         let others: BTreeSet<HoldKey> = self
             .board_hold_book
             .as_ref()
-            .map(|book| book.others().map(|(key, _)| *key).collect())
+            .map(|book| {
+                book.others()
+                    .filter(|(key, hold)| hold.locked && book.holds(key).is_none())
+                    .map(|(key, _)| *key)
+                    .collect()
+            })
             .unwrap_or_default();
         let stale: Vec<HoldKey> = self
             .board_hold_flow
@@ -794,7 +985,11 @@ impl StudioController {
         let Some(book) = self.board_hold_book.as_ref() else {
             return;
         };
-        let desired = desired_facts(book.others(), &self.board_hold_flow.taken_from_here);
+        // A hold this tab has itself is not another tab's, whatever the book
+        // still lists for it (the tab it took the network slot from has not
+        // said `Gone` yet).
+        let others = book.others().filter(|(key, _)| book.holds(key).is_none());
+        let desired = desired_facts(others, &self.board_hold_flow.taken_from_here);
         let changes = fact_changes(&desired, &self.board_hold_flow.facts_sent);
         for (mac, held) in changes {
             match &held {

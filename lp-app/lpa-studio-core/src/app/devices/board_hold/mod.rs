@@ -42,7 +42,7 @@ pub use hold_flow::BoardHoldFlow;
 pub use hold_gate::{
     SharedUsbHoldGate, UsbHoldGate, associate, gate_group, reads_as_held, usb_pair_of,
 };
-pub use hold_key::{HoldKey, LOCK_PREFIX, UsbPair};
+pub use hold_key::{HoldKey, LOCK_PREFIX, UsbPair, is_network_road};
 pub use hold_note::{AskOutcome, AskRefusal, HOLD_PROTO_VERSION, HoldNote};
 pub use hold_priming::{HoldPriming, PRIMING_PATIENCE_SECS};
 pub use hold_reconcile::{
