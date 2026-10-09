@@ -51,10 +51,11 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
-    BarLayer, BarWorkState, BoardCardInput, CornerMark, LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT,
-    PictureSource, UiActionDraw, UiBarDetails, UiBarWork, UiBoardCard, UiBoardPicture,
-    UiBoardPresence, UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary,
-    UiStackBar, UiStatusCorner, activity_bar, activity_words, board_card, link_icon,
+    ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput, CornerMark,
+    LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT, PictureSource, SOMEONE_ELSE_SENTENCE, UiActionDraw,
+    UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard, UiBoardPicture, UiBoardPresence,
+    UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar, UiStatusCorner,
+    activity_bar, activity_words, bluetooth_switch, board_card, chip_words, link_icon,
     pending_board_card,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
@@ -142,9 +143,10 @@ pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
     DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
     OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM,
-    UNLOCK_VERB, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,
-    UiUnlockOffer, UnlockOp, UnlockPassword, account_key_refused_sentence, device_unlock_offer,
-    dropped_sentence, not_permitted_sentence, open_summary, tier_word, unlock_offer,
+    UNLOCK_VERB, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, UnlockOp, UnlockPassword,
+    account_key_refused_sentence, device_unlock_offer, dropped_sentence, not_permitted_sentence,
+    open_summary, tier_word, unlock_offer,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

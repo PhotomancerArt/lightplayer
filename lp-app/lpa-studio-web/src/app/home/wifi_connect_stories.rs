@@ -36,6 +36,7 @@ fn wifi_remembered_board_connecting() -> Element {
         through_relay: false,
         connecting: true,
         error: None,
+        busy: false,
     }))
 }
 
@@ -88,6 +89,7 @@ fn wifi_add_slot_connecting() -> Element {
             through_relay: false,
             connecting: true,
             error: None,
+            busy: false,
         }),
         true,
     )
@@ -196,5 +198,6 @@ fn failed(host: &str, failure: WifiConnectFailure) -> UiWifiConnect {
         through_relay: false,
         connecting: false,
         error: Some(failure.words()),
+        busy: matches!(failure, WifiConnectFailure::Busy),
     }
 }

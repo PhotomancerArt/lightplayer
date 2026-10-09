@@ -8,10 +8,14 @@
 
 use lpa_devices::view::PendingLinkView;
 
+use super::access_bar::{access_bar, pending_access_bar};
 use super::bar_work::bar_work;
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
+use super::connection_bar::{connection_bar, pending_connection_bar};
+use super::hardware_bar::{hardware_bar, pending_hardware_bar};
 use super::primary_action::{pending_primary, primary_action};
+use super::project_bar::{pending_project_bar, project_bar};
 use super::status_corner::status_corner;
 use super::ui_board_card::{UiBoardCard, UiBoardPresence};
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
@@ -24,10 +28,13 @@ use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind}
 
 /// A board's card, built from `input`.
 pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
-    let bars: Vec<UiStackBar> = BarLayer::ALL
-        .into_iter()
-        .map(|layer| placeholder_bar(input, layer))
-        .collect();
+    let bars = vec![
+        project_bar(input),
+        connection_bar(input),
+        access_bar(input),
+        placeholder_bar(input, BarLayer::Firmware),
+        hardware_bar(input),
+    ];
     let running_work = bars
         .iter()
         .filter_map(|bar| bar.work.as_ref())
@@ -100,10 +107,13 @@ pub fn pending_board_card(
             place: None,
             primary: Some(pending_primary(pending, board, offers, link)),
         },
-        bars: BarLayer::ALL
-            .into_iter()
-            .map(|layer| empty_bar(layer, "Not known yet"))
-            .collect(),
+        bars: vec![
+            pending_project_bar(),
+            pending_connection_bar(pending, link),
+            pending_access_bar(),
+            empty_bar(BarLayer::Firmware, "Not known yet"),
+            pending_hardware_bar(pending, board, offers),
+        ],
     };
     debug_assert_offered(&card, offers);
     card

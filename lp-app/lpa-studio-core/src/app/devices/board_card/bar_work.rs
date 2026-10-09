@@ -87,6 +87,10 @@ pub(crate) fn bar_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<Ui
 /// How this bar's last work ended: Done for a few seconds after it went
 /// well, Failed while the model keeps its failed outcome (until the next
 /// activity clears it).
+///
+/// A failed identify is not striped: how it ended is the board's own state
+/// now (not responding, needs firmware), and the connection bar's row for
+/// that state says it, with Retry.
 fn ended_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<UiBarWork> {
     let end = input.ended.filter(|end| activity_bar(end.kind) == layer)?;
     let outcome = input.view.last_outcome.as_ref();
@@ -101,7 +105,9 @@ fn ended_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<UiBarWork> 
             other_device: false,
         });
     }
-    let failed = outcome.filter(|outcome| !outcome.ok && !end.ok)?;
+    let failed = outcome
+        .filter(|outcome| !outcome.ok && !end.ok)
+        .filter(|_| end.kind != ActivityKind::Identify)?;
     input.idle().then(|| UiBarWork {
         words: failed.summary.clone(),
         percent: None,
@@ -268,6 +274,7 @@ mod tests {
             through_relay: false,
             connecting: true,
             error: None,
+            busy: false,
         });
         let work = bar_work(&fixture.input(), BarLayer::Connection).expect("connecting");
         assert_eq!(work.words, "Connecting over Wi\u{2011}Fi…");

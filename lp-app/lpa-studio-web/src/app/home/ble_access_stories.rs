@@ -97,6 +97,8 @@ fn ble_connections_over_bluetooth() -> Element {
         unlock: None,
         panel: Some(panel),
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -269,6 +271,8 @@ fn ble_access_popover_open_many_keys() -> Element {
         unlock: None,
         panel: Some(panel),
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -334,6 +338,8 @@ fn ble_play_only_prompt() -> Element {
         unlock: Some(UiUnlockOffer::PlayOnly),
         panel: None,
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -359,6 +365,8 @@ fn ble_card_locked() -> Element {
         unlock: Some(UiUnlockOffer::Locked),
         panel: None,
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     };
     rsx! {
         div { class: CARD_FRAME,
@@ -952,6 +960,8 @@ pub(crate) fn usb_access(ble_enabled: Option<bool>, restart_pending: bool) -> Ui
         unlock: None,
         panel: Some(panel),
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     }
 }
 

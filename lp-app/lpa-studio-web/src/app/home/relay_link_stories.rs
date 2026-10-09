@@ -35,6 +35,8 @@ fn relay_card_connected() -> Element {
                     unlock: None,
                     panel: None,
                     account_key_refused: None,
+                    grant: None,
+                    waiting: None,
                 }),
                 lan: lan_link_for_endpoint("relay:a0f26287b48c"),
                 on_action: |_| {},

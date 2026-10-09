@@ -57,6 +57,9 @@ pub struct BoardCardInput<'a> {
     pub sharing: usize,
     /// The library project `plays` names.
     pub project: Option<&'a UiPackageCard>,
+    /// The other boards playing the same library project, by title, in
+    /// roster order.
+    pub shared_with: &'a [String],
     /// The registry row's `last_seen_at`, epoch seconds.
     pub last_seen_at: Option<f64>,
     /// How the board's last activity ended, and when.

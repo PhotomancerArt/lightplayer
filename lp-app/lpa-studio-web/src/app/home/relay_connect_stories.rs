@@ -41,6 +41,7 @@ fn relay_remembered_board_connecting() -> Element {
             through_relay: true,
             connecting: true,
             error: None,
+            busy: false,
         }),
         true,
     )
@@ -119,5 +120,6 @@ fn failed(words: &str) -> UiWifiConnect {
         through_relay: true,
         connecting: false,
         error: Some(words.to_string()),
+        busy: false,
     }
 }

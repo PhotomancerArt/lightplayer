@@ -14,17 +14,24 @@
 //!   [`ui_detail_panel`].
 //! - Building: [`board_card_input`], [`board_card_builder`], and one file
 //!   per decision: [`board_picture`], [`status_corner`], [`primary_action`],
-//!   [`bar_work`].
+//!   [`bar_work`], and one per bar — [`project_bar`], [`connection_bar`],
+//!   [`access_bar`], [`hardware_bar`] — with [`ui_bluetooth_switch`].
 
+pub mod access_bar;
 pub mod bar_work;
 pub mod board_card_builder;
 pub mod board_card_input;
 pub mod board_picture;
 #[cfg(test)]
 pub(crate) mod card_fixtures;
+pub mod connection_bar;
+pub(crate) mod detail_sections;
+pub mod hardware_bar;
 pub mod primary_action;
+pub mod project_bar;
 pub mod status_corner;
 pub mod ui_bar_work;
+pub mod ui_bluetooth_switch;
 pub mod ui_board_card;
 pub mod ui_board_picture;
 pub mod ui_card_action;
@@ -33,12 +40,16 @@ pub mod ui_name_bar;
 pub mod ui_stack_bar;
 pub mod ui_status_corner;
 
+pub use access_bar::ANYONE_CAN_EDIT_SENTENCE;
 pub use bar_work::{activity_bar, activity_words};
 pub use board_card_builder::{board_card, pending_board_card};
 pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_picture::LOCKED_PREVIEW_SENTENCE;
+pub use connection_bar::SOMEONE_ELSE_SENTENCE;
+pub use hardware_bar::chip_words;
 pub use primary_action::NOTHING_TO_EDIT;
 pub use ui_bar_work::{BarWorkState, UiBarWork};
+pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
 pub use ui_board_picture::{PictureSource, UiBoardPicture};
 pub use ui_card_action::{UiActionDraw, UiCardAction};

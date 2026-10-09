@@ -89,5 +89,7 @@ fn unlocked() -> UiDeviceAccess {
         unlock: None,
         panel: None,
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     }
 }

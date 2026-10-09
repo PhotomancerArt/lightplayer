@@ -75,8 +75,9 @@ pub use login_key_cache::{DEFAULT_KDF_ITERATIONS, LoginKeyCache};
 pub use network_link_keys::{NetworkLinkKeys, link_key};
 pub use remembered_passwords::{MAX_REMEMBERED_PASSWORDS, RememberedPasswords};
 pub use ui_access_view::{
-    PLAY_ONLY_SENTENCE, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,
-    UiUnlockOffer, account_key_refused_sentence, dropped_sentence, open_summary,
+    PLAY_ONLY_SENTENCE, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, account_key_refused_sentence, dropped_sentence,
+    open_summary,
 };
 pub use unlock_offer::{
     UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM, UNLOCK_VERB, device_unlock_offer, unlock_offer,

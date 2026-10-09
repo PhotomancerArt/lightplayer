@@ -49,6 +49,7 @@ pub(crate) struct CardFixture {
     pub plays: BoardPlays,
     pub sharing: usize,
     pub project: Option<UiPackageCard>,
+    pub shared_with: Vec<String>,
     pub last_seen_at: Option<f64>,
     pub ended: Option<ActivityEnd>,
     pub editor_holds_it: bool,
@@ -91,6 +92,7 @@ impl CardFixture {
             },
             sharing: 0,
             project: None,
+            shared_with: Vec::new(),
             last_seen_at: None,
             ended: None,
             editor_holds_it: false,
@@ -170,6 +172,7 @@ impl CardFixture {
             plays: &self.plays,
             sharing: self.sharing,
             project: self.project.as_ref(),
+            shared_with: &self.shared_with,
             last_seen_at: self.last_seen_at,
             ended: self.ended.as_ref(),
             editor_holds_it: self.editor_holds_it,
@@ -258,9 +261,6 @@ fn examples() -> Vec<UiExampleCard> {
 
 /// A Ready LightPlayer on an open USB port, idle, running `porch`.
 fn ready_view() -> DeviceView {
-    let board = crate::flash_offer(Some("esp32c6")).candidates[0]
-        .board_id
-        .clone();
     DeviceView {
         id: DeviceId(7),
         title: "Porch".to_string(),
@@ -270,7 +270,7 @@ fn ready_view() -> DeviceView {
         freshness_label: None,
         identity_label: Some("a0:f2:62:87:b4:8c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
-        board_id: Some(board),
+        board_id: Some("seeed/xiao-esp32-c6".to_string()),
         firmware_face: FirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 2026.10.05-2".to_string()),
             wire: WireVersion::Match,
@@ -316,5 +316,23 @@ pub(crate) fn feed(liveness: FeedLiveness, with_layout: bool) -> DeviceCardFeedV
         frame_age_secs: Some(12.0),
         engine_fps: Some(43),
         liveness,
+    }
+}
+
+/// A library project, last saved two hours before [`CardFixture::ready`]'s
+/// now.
+pub(crate) fn library_project(uid: &str, slug: &str) -> UiPackageCard {
+    UiPackageCard {
+        uid: uid.to_string(),
+        kind: "Module".to_string(),
+        project_kind: "General".to_string(),
+        exports: Vec::new(),
+        slug: slug.to_string(),
+        last_saved_at: Some(1_000_000.0 - 7_200.0),
+        provenance: None,
+        on_device: None,
+        open_elsewhere: false,
+        target: None,
+        health: crate::app::library::PackageHealth::Ready,
     }
 }

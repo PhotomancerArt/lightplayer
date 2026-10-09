@@ -390,6 +390,8 @@ fn fixture_card(
         unlock: Some(UiUnlockOffer::PlayOnly),
         panel: None,
         account_key_refused: None,
+        grant: None,
+        waiting: None,
     });
     rsx! {
         div { class: CARD_FRAME,

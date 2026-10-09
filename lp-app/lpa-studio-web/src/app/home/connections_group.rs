@@ -89,7 +89,7 @@ pub(crate) fn ConnectionsGroup(
         }
     });
     let over_bluetooth = access.over_bluetooth;
-    let bluetooth = bluetooth_row(&access);
+    let bluetooth = lpa_studio_core::bluetooth_switch(&access);
     rsx! {
         div { class: "tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card-subtle",
             div { class: ROW_CLASS,
@@ -194,49 +194,6 @@ pub(crate) fn ConnectionsGroup(
     }
 }
 
-/// What the Bluetooth row shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BluetoothRow {
-    pub on: bool,
-    pub locked: bool,
-    /// Under the name: why it is locked.
-    pub sub: Option<&'static str>,
-    /// Under the row: the restart that applies a change.
-    pub restart_note: Option<String>,
-}
-
-/// Decided apart from the component, so it is testable.
-pub(crate) fn bluetooth_row(access: &UiDeviceAccess) -> BluetoothRow {
-    if access.over_bluetooth {
-        return BluetoothRow {
-            on: true,
-            locked: true,
-            sub: Some("connected this way — turn off by USB"),
-            restart_note: None,
-        };
-    }
-    let Some(panel) = access.panel.as_ref() else {
-        return BluetoothRow {
-            on: false,
-            locked: true,
-            sub: None,
-            restart_note: None,
-        };
-    };
-    let on = panel.ble_enabled.unwrap_or(false);
-    let word = if on { "on" } else { "off" };
-    let restart_note = panel.restart_pending.then(|| match panel.can_restart {
-        true => format!("Restarting to turn Bluetooth {word}…"),
-        false => format!("Bluetooth turns {word} when the device restarts."),
-    });
-    BluetoothRow {
-        on,
-        locked: panel.ble_enabled.is_none() || panel.writing || panel.restart_pending,
-        sub: None,
-        restart_note,
-    }
-}
-
 const ROW_CLASS: &str = "tw:flex tw:min-h-11 tw:min-w-0 tw:items-center tw:gap-2.5 tw:border-t tw:border-border-muted tw:px-3 tw:py-2 tw:text-[13.5px] tw:font-semibold tw:text-strong-foreground tw:first:border-t-0";
 
 /// The Who row is the popover's trigger: a full-width button that reads as
@@ -259,51 +216,3 @@ const VALUE_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:gap-1.
 
 /// The access row's value while anyone nearby can author: warning-tinted.
 const OPEN_VALUE_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:gap-1.5 tw:text-xs tw:font-semibold tw:text-status-warning-foreground";
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lpa_studio_core::UiAccessPanel;
-
-    #[test]
-    fn over_bluetooth_the_switch_is_locked_on_and_says_how() {
-        let row = bluetooth_row(&UiDeviceAccess {
-            over_bluetooth: true,
-            ..UiDeviceAccess::default()
-        });
-        assert!(row.on && row.locked);
-        assert_eq!(row.sub, Some("connected this way — turn off by USB"));
-    }
-
-    #[test]
-    fn a_switch_over_usb_says_the_restart_until_the_device_is_back() {
-        let mut access = usb(Some(true));
-        assert_eq!(bluetooth_row(&access).restart_note, None);
-        assert!(!bluetooth_row(&access).locked);
-        access.panel.as_mut().unwrap().restart_pending = true;
-        let row = bluetooth_row(&access);
-        assert_eq!(
-            row.restart_note.as_deref(),
-            Some("Restarting to turn Bluetooth on…")
-        );
-        assert!(row.locked, "no second flip while the first applies");
-    }
-
-    #[test]
-    fn before_the_list_arrives_the_switch_waits() {
-        assert!(bluetooth_row(&usb(None)).locked);
-    }
-
-    fn usb(ble_enabled: Option<bool>) -> UiDeviceAccess {
-        UiDeviceAccess {
-            over_bluetooth: false,
-            line: None,
-            unlock: None,
-            panel: Some(UiAccessPanel {
-                ble_enabled,
-                ..UiAccessPanel::reading(DeviceId(1))
-            }),
-            account_key_refused: None,
-        }
-    }
-}

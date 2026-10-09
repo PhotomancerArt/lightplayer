@@ -64,6 +64,7 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         },
         sharing: 0,
         project: None,
+        shared_with: &[],
         last_seen_at: None,
         ended: None,
         editor_holds_it: true,

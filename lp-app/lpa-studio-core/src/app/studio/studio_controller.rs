@@ -2251,6 +2251,23 @@ impl StudioController {
         let project = plays
             .project_uid()
             .and_then(|uid| projects.iter().find(|project| project.uid == uid));
+        // The other boards playing the same project, by title, in roster
+        // order.
+        let shared_with: Vec<String> = plays
+            .project_uid()
+            .map(|uid| roster.board_projects.boards_playing(uid))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|board| *board != view.id)
+            .filter_map(|board| {
+                roster
+                    .roster
+                    .devices
+                    .iter()
+                    .find(|device| device.id == board)
+                    .map(|device| device.title.clone())
+            })
+            .collect();
         let input = crate::BoardCardInput {
             view,
             board,
@@ -2267,6 +2284,7 @@ impl StudioController {
             plays,
             sharing: roster.board_projects.sharing(view.id),
             project,
+            shared_with: &shared_with,
             last_seen_at: roster.last_seen.get(&view.id).copied(),
             ended: roster.ends.get(&view.id),
             editor_holds_it,
