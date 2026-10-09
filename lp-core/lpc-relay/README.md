@@ -23,7 +23,7 @@ route ids and frame lengths, never their contents.
 
 | Module | What |
 |---|---|
-| `relay_frame` | `RelayFrame` and its codec: one byte of tag, fixed little-endian fields, length-checked, ≤ `MAX_RELAY_FRAME` (2 KiB). The table of tags is the module doc. |
+| `relay_frame` | `RelayFrame` and its codec: one byte of tag, fixed little-endian fields, length-checked, ≤ `MAX_RELAY_FRAME` (2 KiB). The table of tags is the module doc. A board uses its direction's half (`decode_from_hub`, `encode_to_hub`: the same bytes, only the frames that travel that way), so the C6's core links none of the hub's readers and writers. |
 | `relay_hello` | `RelayHello`: the board's MAC, name, wire version, LAN address and account salts. `RelayHello::new` is the protocol 1 hello; `.with_firmware(…)` makes it protocol 2, with the firmware version as its tail. |
 | `relay_project` | Protocol 2. `RelayProject` (the project's name, its uid tag, its content tag) and the tags: `project_tag_key(K) = HMAC(K, "lp-relay project/1")`, `project_uid_tag`, `project_content_tag`. A uid and a package hash are read capabilities and never cross the leg; only their tags do. |
 | `relay_picture` | Protocol 2. `RelayPicture`: lamps per output and point-sampled sRGB8 colours; its doc is the picture's meaning. `write_picture_header` writes the frame's head into a buffer a board keeps (its colours appended behind it, at most `MAX_BOARD_PICTURE_FRAME` bytes), byte-identical to encoding a `RelayPicture`; `picture_sample_count` is how many colours a board sends. |

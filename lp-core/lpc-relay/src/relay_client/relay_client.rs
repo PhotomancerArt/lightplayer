@@ -185,7 +185,9 @@ impl RelayClient {
                 if lan != self.lan {
                     self.lan = lan;
                     if matches!(self.phase, Phase::Registered { .. }) {
-                        actions.push(RelayAction::Send(RelayFrame::LanChanged { lan }.encode()));
+                        actions.push(RelayAction::Send(
+                            RelayFrame::LanChanged { lan }.encode_to_hub(),
+                        ));
                     }
                 }
             }
@@ -216,7 +218,7 @@ impl RelayClient {
             RelayEvent::RouteClose { route, reason } => {
                 if self.routes.close(route) && matches!(self.phase, Phase::Registered { .. }) {
                     actions.push(RelayAction::Send(
-                        RelayFrame::Close { route, reason }.encode(),
+                        RelayFrame::Close { route, reason }.encode_to_hub(),
                     ));
                 }
             }
@@ -400,7 +402,7 @@ impl RelayClient {
             until: now + HANDSHAKE_TIMEOUT_MS,
         };
         self.state = RelayState::Connecting;
-        actions.push(RelayAction::Send(RelayFrame::Hello(hello).encode()));
+        actions.push(RelayAction::Send(RelayFrame::Hello(hello).encode_to_hub()));
     }
 
     fn closed(&mut self, now: u64, going_away: bool, actions: &mut Vec<RelayAction>) {
@@ -421,7 +423,7 @@ impl RelayClient {
     }
 
     fn message(&mut self, now: u64, bytes: &[u8], actions: &mut Vec<RelayAction>) {
-        let frame = match RelayFrame::decode(bytes) {
+        let frame = match RelayFrame::decode_from_hub(bytes) {
             Ok(frame) => frame,
             Err(_) if self.phase.has_socket() => {
                 self.protocol_error(now, actions);
@@ -431,7 +433,7 @@ impl RelayClient {
         };
         match (self.phase, frame) {
             (Phase::Registering { .. }, RelayFrame::Challenge { nonce }) => {
-                actions.push(RelayAction::Send(self.proof(&nonce).encode()));
+                actions.push(RelayAction::Send(self.proof(&nonce).encode_to_hub()));
             }
             (Phase::Registering { .. }, RelayFrame::Registered { accounts_ok, .. }) => {
                 self.accounts_ok = accounts_ok;
@@ -469,7 +471,7 @@ impl RelayClient {
                             route,
                             reason: RouteCloseReason::Busy,
                         }
-                        .encode(),
+                        .encode_to_hub(),
                     ));
                 }
             }
@@ -535,7 +537,7 @@ impl RelayClient {
                     route,
                     reason: RouteCloseReason::Normal,
                 }
-                .encode(),
+                .encode_to_hub(),
             ));
             actions.push(RelayAction::RouteClosed(route));
         }
@@ -617,7 +619,9 @@ impl RelayClient {
             return;
         };
         let project = facts.as_ref().map(|facts| self.project_frame(facts));
-        actions.push(RelayAction::Send(RelayFrame::Project(project).encode()));
+        actions.push(RelayAction::Send(
+            RelayFrame::Project(project).encode_to_hub(),
+        ));
     }
 
     /// The facts as the hub may see them: the name, and the uid and the

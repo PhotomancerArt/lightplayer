@@ -144,6 +144,26 @@ impl RelayFrame {
     /// its rules; senders check [`RelayPicture::validate`].
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
+        self.encode_as::<false>()
+    }
+
+    /// The board's encoder: [`Self::encode`] for the frames a board sends a
+    /// hub (`Hello`, `Proof`, `Frame`, `Close`, `LanChanged`, `Project`),
+    /// byte for byte; nothing (an empty vector) for any other. A board
+    /// writes its `Picture` in place ([`crate::write_picture_header`]), and
+    /// never sends the hub's own frames.
+    ///
+    /// Why it exists: the relay client runs in the C6's core, the scarce
+    /// flash, and a call to [`Self::encode`] links every frame's writer,
+    /// the hub's too. This one links only what a board sends.
+    #[must_use]
+    pub fn encode_to_hub(&self) -> Vec<u8> {
+        self.encode_as::<true>()
+    }
+
+    /// One writer for both encoders: `TO_HUB` leaves out the frames a board
+    /// never sends (a constant, so they compile out of the board's).
+    fn encode_as<const TO_HUB: bool>(&self) -> Vec<u8> {
         let mut out = Vec::new();
         match self {
             Self::Hello(hello) => {
@@ -166,10 +186,6 @@ impl RelayFrame {
                     out.extend_from_slice(firmware.as_bytes());
                 }
             }
-            Self::Challenge { nonce } => {
-                out.push(TAG_CHALLENGE);
-                out.extend_from_slice(nonce);
-            }
             Self::Proof { proofs } => {
                 out.push(TAG_PROOF);
                 let proofs = &proofs[..proofs.len().min(MAX_HELLO_ACCOUNTS)];
@@ -177,26 +193,6 @@ impl RelayFrame {
                 for proof in proofs {
                     out.extend_from_slice(proof);
                 }
-            }
-            Self::Registered {
-                accounts_ok,
-                ping_s,
-            } => {
-                out.push(TAG_REGISTERED);
-                out.push(*accounts_ok);
-                out.extend_from_slice(&ping_s.to_le_bytes());
-            }
-            Self::Refused {
-                reason,
-                retry_after_s,
-            } => {
-                out.push(TAG_REFUSED);
-                out.push(reason.code());
-                out.extend_from_slice(&retry_after_s.to_le_bytes());
-            }
-            Self::Open { route } => {
-                out.push(TAG_OPEN);
-                out.extend_from_slice(&route.to_le_bytes());
             }
             Self::Frame { route, bytes } => return encode_route_frame(*route, bytes),
             Self::Close { route, reason } => {
@@ -218,6 +214,32 @@ impl RelayFrame {
                     }
                 }
             }
+            // The board's encoder: nothing past here is a board's to send.
+            _ if TO_HUB => {}
+            Self::Challenge { nonce } => {
+                out.push(TAG_CHALLENGE);
+                out.extend_from_slice(nonce);
+            }
+            Self::Registered {
+                accounts_ok,
+                ping_s,
+            } => {
+                out.push(TAG_REGISTERED);
+                out.push(*accounts_ok);
+                out.extend_from_slice(&ping_s.to_le_bytes());
+            }
+            Self::Refused {
+                reason,
+                retry_after_s,
+            } => {
+                out.push(TAG_REFUSED);
+                out.push(reason.code());
+                out.extend_from_slice(&retry_after_s.to_le_bytes());
+            }
+            Self::Open { route } => {
+                out.push(TAG_OPEN);
+                out.extend_from_slice(&route.to_le_bytes());
+            }
             Self::Picture(picture) => {
                 out.push(TAG_PICTURE);
                 picture.put(&mut out);
@@ -232,12 +254,57 @@ impl RelayFrame {
 
     /// Read one frame. Never panics.
     pub fn decode(bytes: &[u8]) -> Result<Self, RelayFrameError> {
+        Self::decode_as::<false>(bytes)
+    }
+
+    /// The board's decoder: [`Self::decode`] for the frames a hub sends a
+    /// board (`Challenge`, `Registered`, `Refused`, `Open`, `Frame`,
+    /// `Close`, `PictureRate`), the same reads and the same errors; any
+    /// other tag is [`RelayFrameError::UnknownTag`], which a board treats
+    /// exactly as it treats a frame it was not expecting (a protocol error
+    /// while its leg is open). Never panics.
+    ///
+    /// Why it exists: the relay client runs in the C6's core, the scarce
+    /// flash, and [`Self::decode`] links every frame's reader, the hub's
+    /// too (the hello's, the proof's, the project's, the picture's). This
+    /// one links only what a board reads.
+    pub fn decode_from_hub(bytes: &[u8]) -> Result<Self, RelayFrameError> {
+        Self::decode_as::<true>(bytes)
+    }
+
+    /// One reader for both decoders: `FROM_HUB` refuses the frames a board
+    /// is never sent (a constant, so their readers compile out of the
+    /// board's).
+    fn decode_as<const FROM_HUB: bool>(bytes: &[u8]) -> Result<Self, RelayFrameError> {
         if bytes.len() > MAX_RELAY_FRAME {
             return Err(RelayFrameError::TooLong);
         }
         let (&tag, body) = bytes.split_first().ok_or(RelayFrameError::Empty)?;
         let mut r = FrameReader::new(body);
         let frame = match tag {
+            TAG_CHALLENGE => Self::Challenge { nonce: r.array()? },
+            TAG_REGISTERED => Self::Registered {
+                accounts_ok: r.u8()?,
+                ping_s: r.u16()?,
+            },
+            TAG_REFUSED => Self::Refused {
+                reason: RefuseReason::from_code(r.u8()?).ok_or(RelayFrameError::BadField)?,
+                retry_after_s: r.u16()?,
+            },
+            TAG_OPEN => Self::Open { route: r.u16()? },
+            TAG_FRAME => {
+                let route = r.u16()?;
+                let bytes = r.rest.to_vec();
+                r.rest = &[];
+                Self::Frame { route, bytes }
+            }
+            TAG_CLOSE => Self::Close {
+                route: r.u16()?,
+                reason: RouteCloseReason::from_code(r.u8()?).ok_or(RelayFrameError::BadField)?,
+            },
+            TAG_PICTURE_RATE => Self::PictureRate(PictureRate::read(&mut r)?),
+            // The board's decoder: nothing past here is sent to a board.
+            other if FROM_HUB => return Err(RelayFrameError::UnknownTag(other)),
             TAG_HELLO => {
                 let relay_proto = r.u16()?;
                 let board_mac = r.array::<6>()?;
@@ -271,7 +338,6 @@ impl RelayFrame {
                     firmware,
                 })
             }
-            TAG_CHALLENGE => Self::Challenge { nonce: r.array()? },
             TAG_PROOF => {
                 let count = usize::from(r.u8()?);
                 if count > MAX_HELLO_ACCOUNTS {
@@ -283,25 +349,6 @@ impl RelayFrame {
                 }
                 Self::Proof { proofs }
             }
-            TAG_REGISTERED => Self::Registered {
-                accounts_ok: r.u8()?,
-                ping_s: r.u16()?,
-            },
-            TAG_REFUSED => Self::Refused {
-                reason: RefuseReason::from_code(r.u8()?).ok_or(RelayFrameError::BadField)?,
-                retry_after_s: r.u16()?,
-            },
-            TAG_OPEN => Self::Open { route: r.u16()? },
-            TAG_FRAME => {
-                let route = r.u16()?;
-                let bytes = r.rest.to_vec();
-                r.rest = &[];
-                Self::Frame { route, bytes }
-            }
-            TAG_CLOSE => Self::Close {
-                route: r.u16()?,
-                reason: RouteCloseReason::from_code(r.u8()?).ok_or(RelayFrameError::BadField)?,
-            },
             TAG_LAN_CHANGED => Self::LanChanged { lan: r.lan()? },
             TAG_PROJECT => {
                 if r.flag()? {
@@ -311,7 +358,6 @@ impl RelayFrame {
                 }
             }
             TAG_PICTURE => Self::Picture(RelayPicture::read(&mut r)?),
-            TAG_PICTURE_RATE => Self::PictureRate(PictureRate::read(&mut r)?),
             other => return Err(RelayFrameError::UnknownTag(other)),
         };
         if !r.rest.is_empty() {
@@ -455,6 +501,61 @@ mod tests {
                 RelayFrame::decode(&frame.encode()),
                 Ok(frame.clone()),
                 "{frame}"
+            );
+        }
+    }
+
+    /// The board's codec is the full one, cut by direction: the same bytes
+    /// for what a board sends, the same frames for what a hub sends it, and
+    /// "unknown" for the rest (which a board treats as unexpected anyway).
+    #[test]
+    fn the_boards_codec_is_the_full_one_cut_by_direction() {
+        for frame in sample_frames() {
+            let bytes = frame.encode();
+            let to_board = matches!(
+                frame,
+                RelayFrame::Challenge { .. }
+                    | RelayFrame::Registered { .. }
+                    | RelayFrame::Refused { .. }
+                    | RelayFrame::Open { .. }
+                    | RelayFrame::Frame { .. }
+                    | RelayFrame::Close { .. }
+                    | RelayFrame::PictureRate(_)
+            );
+            let from_board = matches!(
+                frame,
+                RelayFrame::Hello(_)
+                    | RelayFrame::Proof { .. }
+                    | RelayFrame::Frame { .. }
+                    | RelayFrame::Close { .. }
+                    | RelayFrame::LanChanged { .. }
+                    | RelayFrame::Project(_)
+            );
+            if to_board {
+                assert_eq!(
+                    RelayFrame::decode_from_hub(&bytes),
+                    RelayFrame::decode(&bytes),
+                    "{frame}"
+                );
+            } else {
+                assert_eq!(
+                    RelayFrame::decode_from_hub(&bytes),
+                    Err(RelayFrameError::UnknownTag(bytes[0])),
+                    "{frame}"
+                );
+            }
+            if from_board {
+                assert_eq!(frame.encode_to_hub(), bytes, "{frame}");
+            } else {
+                assert!(frame.encode_to_hub().is_empty(), "{frame}");
+            }
+        }
+        // Errors read the same on both for a hub's frame.
+        for bad in [&[][..], &[TAG_OPEN, 1], &[TAG_REFUSED, 0xee, 0, 0], &[0x7f]] {
+            assert_eq!(
+                RelayFrame::decode_from_hub(bad),
+                RelayFrame::decode(bad),
+                "{bad:02x?}"
             );
         }
     }
