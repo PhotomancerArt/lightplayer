@@ -13,24 +13,23 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, ControllerId, DeviceRosterView, HOME_NODE_ID, HomeOp, UiAction, UiHomeView,
-    build_home_sections,
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::home::HomePage;
 use crate::app::home::connect_board::connect_board_section::ConnectStoryPins;
-use crate::app::home::device_offer_story_fixtures::add_slot_tree;
+use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 use crate::app::home::project_opening_frame::OpenFailureNotice;
-use crate::core::OffersProvider;
 
 #[story(
-    description = "The home page for a first visit: nothing to filter, so no tab strip and no cards/list switch. Connect a board comes first — USB, Bluetooth and Network squares and \"start a board here\" under them, with one hint line after the squares (\"No board? Try an example ↓\") — then the examples (Example projects, Example patterns; cards render their poster/seeded thumbs, stories lease no previews) and the quiet footer. No hero, no doors, no chat box: the top bar's chat button and ⌘K are how the assistant is reached. The shared-`/p/` line and the sign-in line render nothing without their context."
+    description = "The home page for a first visit: nothing to filter, so no tab strip and no cards/list switch. Connect a board comes first — USB, Bluetooth and Network squares and \"start a board here\" under them, with one hint line after the squares (\"No board? Try an example ↓\") — then Other projects, which is only its add row (New · Import · Paste) with nothing in the library yet, then the examples (Example projects, Example patterns; cards render their poster/seeded thumbs, stories lease no previews) and the quiet footer. No hero, no doors, no chat box: the top bar's chat button and ⌘K are how the assistant is reached. The shared-`/p/` line and the sign-in line render nothing without their context."
 )]
 fn landing() -> Element {
     rsx! {
         section { class: "tw:p-4",
-            OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
-                HomePage { home: Some(newcomer_home()), connect_pins: pins() }
+            StoryHomePage {
+                home: newcomer_home(),
+                connect_pins: pins(),
+                on_action: |_| {},
             }
         }
     }
@@ -51,25 +50,29 @@ fn landing_failed_view_link() -> Element {
                 ),
                 on_action: None,
             }
-            OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
-                HomePage { home: Some(newcomer_home()), connect_pins: pins() }
+            StoryHomePage {
+                home: newcomer_home(),
+                connect_pins: pins(),
+                on_action: |_| {},
             }
         }
     }
 }
 
 /// A first visit: a browser that can reach a port, no board, no project.
-fn newcomer_home() -> UiHomeView {
-    let devices = DeviceRosterView {
-        transport_available: true,
-        usb_available: true,
-        ..DeviceRosterView::default()
-    };
+///
+/// The sections are core's: `StoryHomePage` builds them from this roster and
+/// library, and a first visit is what core makes of nothing.
+pub(crate) fn newcomer_home() -> UiHomeView {
     UiHomeView {
         projects: Vec::new(),
         examples: Vec::new(),
-        sections: build_home_sections(&[], &devices),
-        devices,
+        devices: DeviceRosterView {
+            transport_available: true,
+            usb_available: true,
+            ..DeviceRosterView::default()
+        },
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -77,7 +80,7 @@ fn newcomer_home() -> UiHomeView {
 }
 
 /// Chrome on a computer, with the product's own address in any copy line.
-fn pins() -> ConnectStoryPins {
+pub(crate) fn pins() -> ConnectStoryPins {
     ConnectStoryPins {
         ble_reach: Some(BluetoothReach::Ready),
         page_url: Some("https://lightplayer.app/".to_string()),

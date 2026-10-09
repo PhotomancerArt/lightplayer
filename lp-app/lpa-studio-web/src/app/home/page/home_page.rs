@@ -41,7 +41,9 @@
 //! draws the examples and the footer, as the landing did.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiHomeSection, UiHomeTab, UiHomeView, example_groups};
+use lpa_studio_core::{
+    UiAction, UiDeviceSettingsView, UiHomeSection, UiHomeTab, UiHomeView, example_groups,
+};
 
 use super::example_groups::{ExampleGroups, ExampleHeading};
 use super::filter_tabs::{FilterTabs, home_filter_tabs, home_tab_for_key};
@@ -89,6 +91,11 @@ pub fn HomePage(
     /// Stories only: the Connect a board section's pins.
     #[props(default)]
     connect_pins: ConnectStoryPins,
+    /// Stories only: the settings the "Unlocking your boards" fold shows.
+    /// The app reads them from its access context; a page with neither
+    /// draws no fold.
+    #[props(default)]
+    keys_settings: Option<UiDeviceSettingsView>,
 ) -> Element {
     let mut tab = use_signal(|| initial_tab.unwrap_or_default());
     let mut mode = use_signal(|| initial_mode.unwrap_or_else(HomeViewMode::load));
@@ -225,7 +232,7 @@ pub fn HomePage(
                             }
                         },
                         HomePart::Section(UiHomeSection::UnlockingYourBoards) => rsx! {
-                            KeysFold { key: "{part:?}" }
+                            KeysFold { key: "{part:?}", settings: keys_settings.clone() }
                         },
                         HomePart::Section(UiHomeSection::OtherProjects) => rsx! {
                             OtherProjects {

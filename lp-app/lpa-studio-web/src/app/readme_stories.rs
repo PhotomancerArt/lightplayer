@@ -10,14 +10,14 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ProjectController, ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeView,
-    ProjectSyncPhase, UiAgentStatus, UiExampleCard, UiHomeView, UiNodeFace, UiNodeHeader,
-    UiNodeTab, UiNodeView, UiPackageCard, UiPaneView, UiStatus, UiStudioView, UiViewContent,
+    ProjectSyncPhase, UiAgentStatus, UiNodeFace, UiNodeHeader, UiNodeTab, UiNodeView, UiPaneView,
+    UiStatus, UiStudioView, UiViewContent,
 };
 
 use crate::app::home::device_offer_story_fixtures::StoryHomePage;
+use crate::app::home::home_page_stories::one_sim_home;
 use crate::app::node::NodePane;
 use crate::app::node::face_story_fixtures::{
     fixture_node_view, playlist_node_face_view, shader_face, shader_sections,
@@ -51,13 +51,13 @@ fn studio_hero() -> Element {
 
 #[story(
     screenshot,
-    description = "README home shot: the home page with a sim running a project, the project library, and examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
+    description = "README home shot: the home page with a sim running a project under Online boards, Connect a board, a small library (the project the sim plays is on it, the others are Other projects), and the examples. Single-state, fixed clock, seeded thumbs; the repo README embeds the lg capture."
 )]
 fn home_gallery() -> Element {
     rsx! {
         section { class: "tw:p-4",
             StoryHomePage {
-                home: readme_home_view(),
+                home: one_sim_home(),
                 now_secs: Some(STORY_NOW),
                 on_action: |_| {},
             }
@@ -186,69 +186,4 @@ fn readme_playlist_node() -> UiNodeView {
     let mut view = playlist_node_face_view();
     view.children.clear();
     view
-}
-
-/// Home gallery content for the README shot: a small library and the
-/// example row. The DEVICE half is the roster's own projection, joined by
-/// the controller in the app — a story that faked one would be inventing
-/// devices, so the README's gallery shows the library.
-fn readme_home_view() -> UiHomeView {
-    let projects = vec![
-        UiPackageCard {
-            uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
-            kind: "Module".to_string(),
-            project_kind: "General".to_string(),
-            exports: Vec::new(),
-            slug: "2026-07-02-0930-porch-sign".to_string(),
-            last_saved_at: Some(STORY_NOW - 2.0 * 3600.0),
-            provenance: None,
-            on_boards: Vec::new(),
-            open_elsewhere: false,
-            target: None,
-            health: PackageHealth::Ready,
-        },
-        UiPackageCard {
-            uid: "prj9sLm2Xc44dQnUv7BgWkEyt".to_string(),
-            kind: "Module".to_string(),
-            project_kind: "General".to_string(),
-            exports: Vec::new(),
-            slug: "2026-07-04-1102-evening-glow".to_string(),
-            last_saved_at: Some(STORY_NOW - 5.0 * 86_400.0),
-            provenance: Some("Remixed from Basic".to_string()),
-            on_boards: Vec::new(),
-            open_elsewhere: false,
-            target: None,
-            health: PackageHealth::Ready,
-        },
-        UiPackageCard {
-            uid: "prj1aBc3De56fGhIj8KlMnOpq".to_string(),
-            kind: "Module".to_string(),
-            project_kind: "General".to_string(),
-            exports: Vec::new(),
-            slug: "2026-05-28-1740-porch-sign".to_string(),
-            last_saved_at: Some(STORY_NOW - 40.0 * 86_400.0),
-            provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
-            on_boards: Vec::new(),
-            open_elsewhere: false,
-            target: None,
-            health: PackageHealth::Ready,
-        },
-    ];
-    UiHomeView {
-        projects,
-        examples: vec![UiExampleCard {
-            id: "catalog/plasma".to_string(),
-            name: "Plasma".to_string(),
-            kind: lpc_model::ProjectKind::Pattern {
-                exports: vec!["effect".to_string()],
-            },
-            description: "The smallest non-empty panel: one plasma shader with three bound knobs."
-                .to_string(),
-        }],
-        devices: Default::default(),
-        sections: Default::default(),
-        library_available: true,
-        opening: None,
-        issue: None,
-    }
 }

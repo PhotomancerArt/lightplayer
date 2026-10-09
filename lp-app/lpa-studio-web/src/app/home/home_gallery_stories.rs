@@ -1,8 +1,11 @@
-//! Gallery-page stories: first run, populated, opening, and no-store.
-//! The P09 split divided the combined gallery into Devices / Projects /
-//! Explore pages, and the home page (2026-10-08) folded all three back into
-//! one: these stories draw that page from one fixture, so the old coverage
-//! stays in frame under the old names.
+//! Home page stories on the old gallery's fixtures: first run, populated,
+//! opening, no-store, no transport, the roster. The home page (2026-10-08)
+//! replaced the Devices, Projects and Explore pages with one page, and these
+//! stories draw that page from one fixture. They keep their old names on
+//! purpose: a story's id is its file path plus function name, so the
+//! stories comment on a PR reads the change as a before/after rather than
+//! a delete and an add. The page's own states (signed out, guest, the full
+//! library, the list view, each tab) are in `home_page_stories.rs`.
 //!
 //! ⚠️ The DEVICE-roster rows (the connected/offline/blank/safe-mode cards,
 //! the empty-device push buttons, the section-label candidates over a
@@ -44,10 +47,10 @@ use crate::core::OffersProvider;
 use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
 /// A fixed "now" so relative times in baselines never drift.
-const STORY_NOW: f64 = 1_800_000_000.0;
+pub(crate) const STORY_NOW: f64 = 1_800_000_000.0;
 
 /// One of each kind, so the grouped surfaces show both sections.
-fn examples() -> Vec<UiExampleCard> {
+pub(crate) fn examples() -> Vec<UiExampleCard> {
     vec![
         UiExampleCard {
             id: "catalog/fyeah-sign".to_string(),
@@ -68,7 +71,7 @@ fn examples() -> Vec<UiExampleCard> {
     ]
 }
 
-fn packages() -> Vec<UiPackageCard> {
+pub(crate) fn packages() -> Vec<UiPackageCard> {
     vec![
         UiPackageCard {
             uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
@@ -113,11 +116,10 @@ fn packages() -> Vec<UiPackageCard> {
 }
 
 #[story(
-    description = "First run, create-first since the D17 deviation (2026-07-27): the empty Projects section header carries the New chip beside Import — a pure-blank create-and-open — and the empty-library copy leads with creating a project before pointing at the examples."
+    description = "First run with an empty library, in a browser that has no transport (the default roster: no Web Serial, so Connect a board says why instead of drawing squares that can only fail). A first visit, so no tabs and no cards/list switch. Create-first (the D17 deviation, 2026-07-27): Other projects is only its add row — New (a pure-blank create-and-open), Import, Paste — and the empty library has no paragraph of its own; the add row is the empty state. Then the examples and the footer. The same first visit in Chrome is home_landing's `landing`."
 )]
 fn first_run() -> Element {
-    // no devices ever granted: the Connected section collapses to a slim
-    // affordance; the library holds nothing yet
+    // no boards, no transport; the library holds nothing yet
     let home = UiHomeView {
         projects: Vec::new(),
         examples: examples(),
@@ -188,7 +190,9 @@ fn project_format_states() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A full library and no boards: three projects under Other projects (newest saved first, each with its age and where it came from), then the add row. Compare with home_page_full_library, which has boards, patterns and a project that boards play."
+)]
 fn populated() -> Element {
     let home = UiHomeView {
         projects: packages(),
@@ -206,7 +210,9 @@ fn populated() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A project another tab holds open: its card wears the neutral \"open in another tab\" badge and stays fully rendered and clickable (the refusal notice explains)."
+)]
 fn project_open_in_another_tab() -> Element {
     // M4b: a project another tab holds open — neutral badge, card stays
     // fully rendered and clickable (the refusal notice explains)
@@ -228,7 +234,9 @@ fn project_open_in_another_tab() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A project opening: its card shows busy, and every other card and the examples wait until it has opened."
+)]
 fn opening_a_project() -> Element {
     let mut home = UiHomeView {
         projects: packages(),
@@ -377,7 +385,7 @@ fn poster_states() -> Element {
 /// because these baselines are CI-canonical. The bytes are LINEAR unorm16,
 /// which is what the wire carries and what `LampView` decodes; feeding it
 /// display-sRGB here would make the story disagree with the real card.
-fn thumb_lamp_frame() -> UiControlProductPreview {
+pub(crate) fn thumb_lamp_frame() -> UiControlProductPreview {
     const COLS: u32 = 24;
     const ROWS: u32 = 3;
     const LAMPS: u32 = COLS * ROWS;
@@ -462,22 +470,11 @@ fn devices_page_without_a_transport() -> Element {
 }
 
 #[story(
-    description = "The home page's boards (the Devices page's roster, folded in), with the cards in their four-zone reading (P9): each card is header · PROJECT (preview, the project name or \"Nothing loaded\", its verbs) · FIRMWARE (\"<firmware> · <board>\", Flash firmware … Factory reset, with the terminal flush edge to edge underneath as the same zone's second half) · DEVICE (freshness, Reset · Disconnect … Forget), with no labels anywhere — a zone is known by what it says and what it offers. The pending link wears the same grammar minus the project zone, which it has nothing to fill. Online boards holds the boards that are THERE — the pending link first, then the two connected cards — then Connect a board, then Offline boards: the board Studio remembers and cannot see is a card of its own there (the 2026-10-08 ADR reverses the old \"disconnect → disappear\" line), carrying Reconnect and Forget, so an unplugged board can still be removed without plugging it back in. \"Unlocking your boards\" is the closed fold under them. Compare with devices_page_remembered_open."
+    description = "The home page's boards (the Devices page's roster, folded in), with the cards in their four-zone reading (P9): each card is header · PROJECT (preview, the project name or \"Nothing loaded\", its verbs) · FIRMWARE (\"<firmware> · <board>\", Flash firmware … Factory reset, with the terminal flush edge to edge underneath as the same zone's second half) · DEVICE (freshness, Reset · Disconnect … Forget), with no labels anywhere — a zone is known by what it says and what it offers. The pending link wears the same grammar minus the project zone, which it has nothing to fill. Online boards holds the boards that are THERE — the pending link first, then the two connected cards — then Connect a board, then Offline boards: the board Studio remembers and cannot see is a card of its own there (the 2026-10-08 ADR reverses the old \"disconnect → disappear\" line), carrying Reconnect and Forget, so an unplugged board can still be removed without plugging it back in. \"Unlocking your boards\" is the closed fold under them."
 )]
 fn devices_page_roster() -> Element {
-    devices_page_story(UiHomeTab::All)
-}
-
-#[story(
-    description = "The same boards on the Boards tab: Online boards, Connect a board, Offline boards and the \"Unlocking your boards\" fold, with nothing of the library or the catalog under them. Each offline board is a dashed, dimmed card at card width: its name, the 120px preview slot saying WHY there is no picture (not connected, and when it was last heard — never a stale frame passed off as current), the board id · last-seen meta, and the verbs an absent board can honestly offer — Reconnect in the outline voice (some bridges' port grants do not survive a replug) and Forget as a reserve-width inline confirm."
-)]
-fn devices_page_remembered_open() -> Element {
-    devices_page_story(UiHomeTab::Boards)
-}
-
-/// The page stories' one body: the roster with a pending link, two
-/// connected boards and one remembered board, on `tab`.
-fn devices_page_story(tab: UiHomeTab) -> Element {
+    // The roster with a pending link, two connected boards and one
+    // remembered board, on the All tab.
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),
@@ -489,12 +486,7 @@ fn devices_page_story(tab: UiHomeTab) -> Element {
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryHomePage {
-                home,
-                now_secs: Some(STORY_NOW),
-                initial_tab: Some(tab),
-                on_action: |_| {},
-            }
+            StoryHomePage { home, now_secs: Some(STORY_NOW), on_action: |_| {} }
         }
     }
 }
@@ -582,7 +574,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
 }
 
 #[story(
-    description = "An offline board with its LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open` (the Boards tab), but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. Its card's 120px slot under Offline boards draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+    description = "An offline board with its LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_roster` (here on the Boards tab), but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. Its card's 120px slot under Offline boards draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_roster`, whose remembered board has no sidecar and keeps its sentence."
 )]
 fn devices_page_remembered_last_frame() -> Element {
     let mut devices = roster_page_fixture();
@@ -1253,23 +1245,40 @@ fn devices_card_armed() -> Element {
 }
 
 #[story(
-    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and the PROJECT zone's info line takes the attention tone to name the node and the runtime's own reason, in the row that otherwise holds the project name (one line, the full text on hover). The running face is deliberately kept: a degraded board is still running, which is why Open stays and the fault reads as a line rather than as a new state. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb, in the same zone as the fault it answers — Clear faults, beside Open — which forgets the board's crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
+    description = "Running vs Degraded, side by side under Online boards on the Boards tab (a fault is never black, 2026-09-02). First: the healthy running card. Second: a board in the SAME state reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and the PROJECT zone's info line takes the attention tone to name the node and the runtime's own reason, in the row that otherwise holds the project name (one line, the full text on hover). The running face is deliberately kept: a degraded board is still running, which is why Open stays and the fault reads as a line rather than as a new state. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb, in the same zone as the fault it answers — Clear faults, beside Open — which forgets the board's crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
 )]
 fn devices_page_degraded_card() -> Element {
+    // Two boards, not one board twice: the page lists a board once. The
+    // second is the first's state with a faulted node, under its own handle.
     let healthy = roster_fixture().roster.devices.remove(0);
-    let degraded = degraded_card_fixture();
+    let mut degraded = degraded_card_fixture();
+    degraded.id = DeviceId(11);
+    degraded.title = "Roof sign".to_string();
+    let base = roster_fixture();
+    let mut open_addresses = base.open_addresses.clone();
+    open_addresses.insert(11, "dev000000daqf6dvvqy".to_string());
+    let home = UiHomeView {
+        projects: Vec::new(),
+        examples: examples(),
+        devices: DeviceRosterView {
+            open_addresses,
+            roster: RosterView {
+                pending: Vec::new(),
+                devices: vec![healthy, degraded],
+            },
+            ..base
+        },
+        sections: Default::default(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
     rsx! {
-        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            StoryDeviceCard {
-                card: healthy,
-                projects: vec![],
-                examples: vec![],
-                on_action: |_| {},
-            }
-            StoryDeviceCard {
-                card: degraded,
-                projects: vec![],
-                examples: vec![],
+        section { class: "tw:p-4",
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
                 on_action: |_| {},
             }
         }
@@ -1329,7 +1338,7 @@ fn degraded_card_fixture() -> DeviceView {
 /// A roster covering the four states this milestone can reach: a fresh plug
 /// still identifying, a settled LightPlayer, one mid-activity, and a blank
 /// chip whose only honest verb is round 2\'s.
-fn roster_fixture() -> DeviceRosterView {
+pub(crate) fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
@@ -1678,7 +1687,7 @@ fn story_repeat(kind: DeviceTerminalKind, text: &str, repeats: u32) -> DeviceTer
 ///
 /// Cut from [`roster_fixture`] rather than written again, so the cards in
 /// the page stories are the same cards the state stories measure.
-fn roster_page_fixture() -> DeviceRosterView {
+pub(crate) fn roster_page_fixture() -> DeviceRosterView {
     let full = roster_fixture();
     let mut devices = full.roster.devices;
     // 0 = running · 3 = empty · 4 = the remembered board.
@@ -2018,7 +2027,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
 /// A sim-backed device card: the SAME `DeviceView` a board gets, plus the
 /// record's own title and board, so the only difference the sheet shows is
 /// the band.
-fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
+pub(crate) fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
     let running = roster_fixture().roster.devices.remove(0);
     DeviceView {
         id: DeviceId(id),
@@ -2092,10 +2101,9 @@ fn devices_card_sim_faces() -> Element {
                     }
                 }
             }
-            // Powered off: an offline sim is not a card at all — its
-            // record sits on the Devices page's remembered line with
-            // Power on in the Reconnect slot (Q5), which
-            // `devices_page_remembered_open` already captures.
+            // Powered off: an offline sim is not a live card — its record
+            // sits under Offline boards with Power on in the Reconnect slot
+            // (Q5), which `devices_card_sim_powered_off` captures.
         }
     }
 }
