@@ -116,7 +116,7 @@ fn board_card_every_state() -> Element {
 // --- Each part's details, open ---------------------------------------------
 
 #[story(
-    description = "The project bar's details, open: Studio's detail card merged with the bar that opened it (the same shared popover, its trigger the bar's whole width). What the board plays, then its verbs as menu rows — Edit, Put another project on it (the project pick, opening the gallery over the details) — and Remove project apart, behind the danger zone's red line, arming in place on two clicks."
+    description = "The project bar's details, open: Studio's detail card merged with the bar that opened it (the same shared popover, its trigger the bar's whole width). What the board plays, then its verbs as menu rows — Edit, Put another project on it (the project pick: one popover at a time, so it closes the details and opens the gallery over the bar) — and Remove project apart, behind the danger zone's red line, arming in place on two clicks."
 )]
 fn board_card_project_details_open() -> Element {
     details_open(BarLayer::Project)
@@ -521,6 +521,14 @@ pub(crate) fn relay_card(open: Option<CardPart>) -> Element {
             feed: live_feed(),
             link: Some(UiLinkKind::Relay),
             lan: lan_link_for_endpoint("relay:a0f26287b48c"),
+            // A relay link presents the account's key: it holds edit with it.
+            access: Some(UiDeviceAccess {
+                grant: Some(lpa_studio_core::UiAccessGrant {
+                    tier: lpa_studio_core::AccessTier::Edit,
+                    key: Some("your account key".to_string()),
+                }),
+                ..UiDeviceAccess::default()
+            }),
             open_uid: Some(PORCH_UID.to_string()),
             plays: running(),
             details_open: open,
