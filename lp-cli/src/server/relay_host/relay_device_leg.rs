@@ -2,10 +2,18 @@
 //! state machine the C6 runs — driven by a tokio task over a plain
 //! WebSocket to `<relay>/relay/device`.
 //!
-//! The task owns the socket; the server loop owns the routes. They talk
-//! over two channels: [`LegEvent`]s out (a route opened, a frame for a
-//! route, a route closed, the relay's state), [`LegCommand`]s in (a frame
-//! for the browser, close a route).
+//! The task owns the socket; the server loop owns the routes and the
+//! server. They talk over two channels: [`LegEvent`]s out (a route opened,
+//! a frame for a route, a route closed, the relay's state, a picture
+//! wanted), [`LegCommand`]s in (a frame for the browser, close a route, the
+//! picture taken, the project's facts).
+//!
+//! **Pictures** (relay protocol 2): the client's `TakePicture` becomes
+//! [`LegEvent::TakePicture`]; the loop answers with the whole `Picture`
+//! frame ([`LegCommand::Picture`]), which the leg holds and reports as
+//! `PictureReady`; the client then says `SendPicture` (one binary message)
+//! or `DropPicture`. A picture never answered is asked for again at the
+//! client's next due time, so a repeated `TakePicture` is normal.
 
 use std::time::{Duration, Instant};
 
@@ -13,7 +21,7 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use lpa_client::transport_lan::os_entropy;
 use lpc_relay::{
     RELAY_DEVICE_PATH, RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent,
-    RelayState,
+    RelayProjectFacts, RelayState,
 };
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -27,16 +35,32 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LegEvent {
     RouteOpened(u16),
-    RouteFrame { route: u16, bytes: Vec<u8> },
+    RouteFrame {
+        route: u16,
+        bytes: Vec<u8>,
+    },
     RouteClosed(u16),
     State(RelayState),
+    /// The hub wants a picture: answer with [`LegCommand::Picture`].
+    TakePicture,
 }
 
 /// What the server loop asks of the leg.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LegCommand {
-    RouteSend { route: u16, bytes: Vec<u8> },
-    RouteClose { route: u16 },
+    RouteSend {
+        route: u16,
+        bytes: Vec<u8>,
+    },
+    RouteClose {
+        route: u16,
+    },
+    /// The picture [`LegEvent::TakePicture`] asked for: one whole
+    /// `RelayFrame::Picture` message, sent as it is if the client still
+    /// wants it.
+    Picture(Vec<u8>),
+    /// The server's project as it now stands (`None`: nothing loaded).
+    Project(Option<RelayProjectFacts>),
 }
 
 /// Run the leg until the server loop goes away (its command channel
@@ -52,6 +76,8 @@ pub async fn run_device_leg(
     let host = config.host.clone();
     let mut client = RelayClient::new(config, os_entropy);
     let mut ws: Option<Ws> = None;
+    // The picture the loop made, until the client says send or drop it.
+    let mut picture: Option<Vec<u8>> = None;
     let mut pending = Vec::new();
     pending.extend(client.handle(now(), RelayEvent::Network { joined: true }));
     pending.extend(client.handle(now(), RelayEvent::CloudRelay(true)));
@@ -97,11 +123,20 @@ pub async fn run_device_leg(
                     RelayAction::RouteClosed(route) => {
                         let _ = events.send(LegEvent::RouteClosed(route));
                     }
-                    // No picture source here yet: a `TakePicture` is never
-                    // answered, so the client never asks to send one.
-                    RelayAction::TakePicture
-                    | RelayAction::SendPicture
-                    | RelayAction::DropPicture => {}
+                    RelayAction::TakePicture => {
+                        let _ = events.send(LegEvent::TakePicture);
+                    }
+                    RelayAction::SendPicture => {
+                        if let (Some(bytes), Some(socket)) = (picture.take(), ws.as_mut())
+                            && socket.send(Message::Binary(bytes)).await.is_err()
+                        {
+                            ws = None;
+                            pending.extend(
+                                client.handle(now(), RelayEvent::Closed { going_away: false }),
+                            );
+                        }
+                    }
+                    RelayAction::DropPicture => picture = None,
                 }
             }
         }
@@ -144,6 +179,13 @@ pub async fn run_device_leg(
                 Some(LegCommand::RouteSend { route, bytes }) => pending.extend(
                     client.handle(now(), RelayEvent::RouteSend { route, bytes: &bytes }),
                 ),
+                Some(LegCommand::Picture(bytes)) => {
+                    picture = Some(bytes);
+                    pending.extend(client.handle(now(), RelayEvent::PictureReady));
+                }
+                Some(LegCommand::Project(facts)) => {
+                    pending.extend(client.handle(now(), RelayEvent::Project(facts)));
+                }
                 Some(LegCommand::RouteClose { route }) => {
                     pending.extend(client.handle(
                         now(),
