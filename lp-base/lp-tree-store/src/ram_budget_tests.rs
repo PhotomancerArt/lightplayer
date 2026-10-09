@@ -105,9 +105,27 @@ fn c40_budget_on(sectors: u32) {
         "mount peak {mount_peak}"
     );
 
+    // A whole-project load: every file read once, and every file's size
+    // asked once (what the flash reads cost, simulator counters).
+    let mut st = st;
+    st.flash_mut().reset_stats();
+    for (p, b) in &files {
+        assert_eq!(st.get(p).unwrap().as_deref(), Some(&b[..]));
+    }
+    let (get_bytes, get_calls) = (st.flash().stats().read_bytes, st.flash().stats().read_calls);
+    st.flash_mut().reset_stats();
+    for (p, b) in &files {
+        assert_eq!(st.file_size(p).unwrap(), Some(b.len() as u32));
+    }
+    std::println!(
+        "c40/{sectors}: get every file once: {get_bytes} B in {get_calls} reads; file_size of \
+         every file: {} B in {} reads",
+        st.flash().stats().read_bytes,
+        st.flash().stats().read_calls
+    );
+
     // Per-operation transient, by the allocator (the caller's buffer — the
     // bytes passed in, or `get`'s result — excluded).
-    let mut st = st;
     let shader = text(999, 2900);
     let panel = text(998, 450);
     let piece = text(5, 4096);
