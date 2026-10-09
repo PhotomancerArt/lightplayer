@@ -236,7 +236,7 @@ mod tests {
         let mut st = mount(st.into_flash(), &c);
         assert!(st.stats().mount_scans >= 4, "{:?}", st.stats());
         let (index, live) = index_and_live(&st);
-        st.mark_and_prune(false).unwrap();
+        st.mark_and_prune().unwrap();
         assert_eq!(index_and_live(&st), (index, live));
         assert_eq!(snapshot(&mut st), want);
     }

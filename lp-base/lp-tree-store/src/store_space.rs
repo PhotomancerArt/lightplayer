@@ -27,20 +27,20 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     pub(crate) fn ensure_room(&mut self, need: &[(HeadKind, u32)]) -> Res<(), F> {
         let live = self.live_after_mark;
         if self.log.index.len() > live + live / 8 + 16 {
-            self.mark_and_prune(false)?;
+            self.mark_and_prune()?;
         }
         if self.enough(need) {
             return Ok(());
         }
-        let lens = self.mark_and_prune(true)?;
+        self.mark_and_prune()?;
         if self.enough(need) {
             return Ok(());
         }
         let usable = self.log.sector_count - self.log.sectors.retired.len() as u32;
-        let mut sizes = lens;
-        sizes.extend(need.iter().map(|n| n.1 as u16));
-        self.log.note(sizes.capacity() * 2);
-        if !fits_after_compaction(sizes, self.log.sector_capacity(), usable, self.cfg.reserve) {
+        // Exact live bytes (the mark just made them so) plus the new records.
+        let live: u64 = self.log.sectors.live.iter().map(|&l| u64::from(l)).sum();
+        let bytes = live + need.iter().map(|n| u64::from(n.1)).sum::<u64>();
+        if !fits_after_compaction(bytes, self.log.sector_capacity(), usable, self.cfg.reserve) {
             return Err(StoreError::NoSpace);
         }
         // Stop when collections stop freeing sectors (tail-only compaction
@@ -83,8 +83,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     }
 
     /// Mark from everything that must survive and keep only that in the
-    /// index; returns the live records' lengths when asked.
-    pub(crate) fn mark_and_prune(&mut self, want_lens: bool) -> Res<Vec<u16>, F> {
+    /// index (and make the sectors' live bytes exact).
+    pub(crate) fn mark_and_prune(&mut self) -> Res<(), F> {
         let mut roots: Vec<(ObjectId, MarkRole)> = Vec::new();
         if let Some(c) = &self.committed {
             roots.push((c.id, MarkRole::Root));
@@ -93,11 +93,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         roots.push((self.work.hot, MarkRole::Dir));
         roots.extend(self.delta.set_ids().map(|id| (id, MarkRole::Node)));
         roots.extend(self.inflight.iter().copied());
-        let mut m = mark(&mut self.log, &roots, want_lens)?;
+        let m = mark(&mut self.log, &roots)?;
         stat!(self.stats.marks += 1);
-        let lens = core::mem::take(&mut m.lens);
         prune(&mut self.log, m);
         self.live_after_mark = self.log.index.len();
-        Ok(lens)
+        Ok(())
     }
 }

@@ -1,8 +1,5 @@
 //! Will a write fit? Decided before anything of it is written.
 
-use alloc::vec::Vec;
-
-use crate::heap_sort::heap_sort_by;
 use crate::sector_header::HeadKind;
 
 /// New sectors the heads must open to append `records` in order — the exact
@@ -24,33 +21,15 @@ pub fn sectors_needed(
     opened
 }
 
-/// The pre-write bound: could every live record plus the new ones, packed
-/// first-fit-decreasing into `usable` sectors, leave one sector for the
-/// other head and the reserve free? Optimistic about packing on purpose (GC
-/// copies in victim order, not size order): a write this rejects cannot
-/// fit; one it accepts may still end in `NoSpace` after GC, before any of
-/// its records.
-pub fn fits_after_compaction(
-    mut sizes: Vec<u16>,
-    capacity: u32,
-    usable: u32,
-    reserve: u32,
-) -> bool {
-    heap_sort_by(&mut sizes, |a, b| a > b);
-    let budget = usable.saturating_sub(reserve + 1) as usize;
-    let mut bins: Vec<u32> = Vec::new();
-    for len in sizes.into_iter().map(u32::from) {
-        match bins.iter_mut().find(|room| **room >= len) {
-            Some(room) => *room -= len,
-            None => {
-                if bins.len() == budget || len > capacity {
-                    return false;
-                }
-                bins.push(capacity - len);
-            }
-        }
-    }
-    true
+/// The pre-write bound: do the live records plus the new ones (`bytes`, all
+/// of them) fit `usable` sectors less the reserve and one sector for the
+/// other head? A byte sum, optimistic on purpose (records never span a
+/// sector, so real packing leaves a tail in each, and GC copies in victim
+/// order): a write this rejects cannot fit; one it accepts may still end in
+/// `NoSpace` after GC, before any of its records.
+pub fn fits_after_compaction(bytes: u64, capacity: u32, usable: u32, reserve: u32) -> bool {
+    let budget = usable.saturating_sub(reserve + 1);
+    bytes <= u64::from(budget) * u64::from(capacity)
 }
 
 #[cfg(test)]
@@ -66,7 +45,10 @@ mod tests {
         ];
         assert_eq!(sectors_needed([1000, 0], recs.into_iter(), 1000), 2);
         assert_eq!(sectors_needed([1200, 100], recs.into_iter(), 1000), 0);
-        assert!(fits_after_compaction(alloc::vec![1000; 20], 4072, 10, 3));
-        assert!(!fits_after_compaction(alloc::vec![1000; 40], 4072, 10, 3));
+        // 6 sectors of 4,072 B after the reserve and the other head.
+        assert!(fits_after_compaction(20 * 1000, 4072, 10, 3));
+        assert!(fits_after_compaction(6 * 4072, 4072, 10, 3));
+        assert!(!fits_after_compaction(6 * 4072 + 1, 4072, 10, 3));
+        assert!(!fits_after_compaction(40 * 1000, 4072, 10, 3));
     }
 }

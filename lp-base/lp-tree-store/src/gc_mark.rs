@@ -42,8 +42,6 @@ pub struct Marked {
     pub bits: Vec<u32>,
     /// Exact live bytes per sector.
     pub live: Vec<u16>,
-    /// Every live record's total length, when asked for (the packing bound).
-    pub lens: Vec<u16>,
 }
 
 impl Marked {
@@ -56,13 +54,11 @@ impl Marked {
 pub fn mark<F: Flash>(
     log: &mut RecordLog<F>,
     roots: &[(ObjectId, MarkRole)],
-    want_lens: bool,
 ) -> Result<Marked, StoreError<F::Error>> {
     let n = log.index.len();
     let mut m = Marked {
         bits: vec![0u32; n.div_ceil(32)],
         live: vec![0u16; log.sector_count as usize],
-        lens: Vec::new(),
     };
     let mut stack: Vec<(ObjectId, MarkRole)> =
         roots.iter().copied().filter(|r| !r.0.is_none()).collect();
@@ -81,9 +77,6 @@ pub fn mark<F: Flash>(
         let h = visit(log, id, role, loc, &mut stack, &mut dir_bytes, None)?;
         let l = &mut m.live[loc.sector as usize];
         *l = l.saturating_add(h.total_len() as u16);
-        if want_lens {
-            m.lens.push(h.total_len() as u16);
-        }
         peak = peak.max(stack.capacity());
     }
     log.note(
