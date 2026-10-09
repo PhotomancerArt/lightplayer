@@ -21,6 +21,8 @@ pub mod driver_double_cut;
 pub mod driver_endurance;
 pub mod driver_exhaustive;
 pub mod driver_fill;
+pub mod driver_full_flash;
+pub mod driver_fuzz;
 pub mod driver_long;
 pub mod driver_measure;
 pub mod driver_random;

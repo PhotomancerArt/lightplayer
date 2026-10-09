@@ -10,6 +10,8 @@ use lp_store_bench::driver_endurance::{DayShape, endurance};
 use lp_store_bench::driver_exhaustive::{
     FailureRecord, SweepParams, SweepSummary, sweep_exhaustive,
 };
+use lp_store_bench::driver_full_flash::{FullFlashParams, FullFlashSummary, full_flash};
+use lp_store_bench::driver_fuzz::{FuzzParams, FuzzSummary, fuzz};
 use lp_store_bench::driver_long::{LongParams, LongSummary, long_walk};
 use lp_store_bench::driver_measure::{MeasureResult, measure, min_sectors};
 use lp_store_bench::driver_random::{RandomParams, random_walk};
@@ -137,6 +139,44 @@ enum Cmd {
         /// writes and re-pushes (keeps the flash near full: GC copies).
         #[arg(long)]
         edit_mix: bool,
+    },
+    /// Fill the store with unique copies of a project until it refuses, work
+    /// at the edge with cuts in every step, then free space and recover.
+    FullFlash {
+        #[command(flatten)]
+        common: Common,
+        /// Runs, seeds 1..=N (in parallel).
+        #[arg(long, default_value_t = 2)]
+        seeds: u64,
+        #[arg(long, default_value = "c20")]
+        corpus_name: String,
+        #[arg(long, default_value_t = 60)]
+        edge_steps: u64,
+        #[arg(long, default_value_t = 16)]
+        cuts_per_step: u64,
+        /// Tear models, used in turn (see `sweep --tears`); default the
+        /// three guessed ones.
+        #[arg(long, default_value = "")]
+        tears: String,
+    },
+    /// Mount fuzzing: garbage, mutated, cut and (T1) newer-version images.
+    Fuzz {
+        #[command(flatten)]
+        common: Common,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        #[arg(long, default_value_t = 4000)]
+        cases: u64,
+        #[arg(long, default_value_t = 8)]
+        histories: u64,
+        #[arg(long, default_value_t = 30)]
+        history_steps: u64,
+        #[arg(long, default_value = "c13,c20")]
+        corpora: String,
+        /// Tear models a cut image draws from; default the three guessed
+        /// ones and `calibrated`.
+        #[arg(long, default_value = "")]
+        tears: String,
     },
     /// Fault-free measures (and the smallest partition each workload fits).
     Measure {
@@ -333,6 +373,62 @@ fn main() {
                 for s in out {
                     print_long(&s);
                 }
+            }
+        }
+        Cmd::FullFlash {
+            common,
+            seeds,
+            corpus_name,
+            edge_steps,
+            cuts_per_step,
+            tears,
+        } => {
+            let ctx = Ctx::new(&common, "full-flash");
+            for (cand, cfg) in ctx.candidates() {
+                use rayon::prelude::*;
+                let out: Vec<_> = (1..=seeds)
+                    .into_par_iter()
+                    .map(|seed| {
+                        let p = FullFlashParams {
+                            candidate: cand.name().into(),
+                            config: cfg.clone(),
+                            corpus: corpus_name.clone(),
+                            seed,
+                            edge_steps,
+                            cuts_per_step,
+                            tears: tear_names(&tears),
+                        };
+                        full_flash(cand.as_ref(), &p, &ctx.corpora, &ctx.sink)
+                    })
+                    .collect();
+                for s in out {
+                    print_full_flash(&s);
+                }
+            }
+        }
+        Cmd::Fuzz {
+            common,
+            seed,
+            cases,
+            histories,
+            history_steps,
+            corpora,
+            tears,
+        } => {
+            let ctx = Ctx::new(&common, "fuzz");
+            for (cand, cfg) in ctx.candidates() {
+                let p = FuzzParams {
+                    candidate: cand.name().into(),
+                    config: cfg.clone(),
+                    corpora: corpora.split(',').map(String::from).collect(),
+                    seed,
+                    cases,
+                    histories,
+                    history_steps,
+                    tears: tear_names(&tears),
+                    only_case: None,
+                };
+                print_fuzz(&fuzz(cand.as_ref(), &p, &ctx.corpora, &ctx.sink));
             }
         }
         Cmd::Measure {
@@ -695,6 +791,71 @@ fn print_long(s: &LongSummary) {
             .or(s.error.as_ref().map(|e| format!(" ERROR {e}")))
             .unwrap_or_default()
     );
+}
+
+fn label_of(cand: &str, cfg: &Option<lp_store_bench::CandidateConfig>) -> String {
+    let dials = cfg
+        .as_ref()
+        .map(|c| c.dials_label())
+        .filter(|d| !d.is_empty())
+        .map(|d| format!("@{d}"))
+        .unwrap_or_default();
+    format!(
+        "{cand}{dials}[{}]",
+        cfg.as_ref().map(|c| c.sectors).unwrap_or(0)
+    )
+}
+
+fn print_full_flash(s: &FullFlashSummary) {
+    let opt = |v: Option<u64>| v.map(|v| v.to_string()).unwrap_or("-".into());
+    println!(
+        "full-flash {:<24} {} seed {}: fill {} copies, refusals {}, edge {} ({} refused), cut cases {} ({} in refused steps) landed {} torn erases {} failures {} non-atomic {} recovered {} gc runs {} erases {} {:?}{}",
+        label_of(&s.candidate, &s.config),
+        s.corpus,
+        s.seed,
+        s.fill_slots,
+        s.refusals,
+        s.edge_steps,
+        s.edge_refused,
+        s.cases,
+        s.refused_cases,
+        s.landed,
+        s.torn_erases,
+        s.failures,
+        s.non_atomic,
+        s.recovered,
+        opt(s.gc.gc_runs),
+        s.gc.erases_total,
+        s.kinds,
+        s.first_failure
+            .as_ref()
+            .map(|f| format!(" FIRST {}: {}", f.kind, f.detail))
+            .or(s.error.as_ref().map(|e| format!(" ERROR {e}")))
+            .unwrap_or_default()
+    );
+}
+
+fn print_fuzz(s: &FuzzSummary) {
+    println!(
+        "fuzz {} seed {}: cases {} failures {} {:?}{}",
+        label_of(&s.candidate, &s.config),
+        s.seed,
+        s.cases,
+        s.failures,
+        s.kinds,
+        s.first_failure
+            .as_ref()
+            .map(|f| format!(" FIRST {}: {}", f.kind, f.detail))
+            .or(s.error.as_ref().map(|e| format!(" ERROR {e}")))
+            .unwrap_or_default()
+    );
+    for (k, c) in &s.by_kind {
+        println!(
+            "  {k:<14} cases {:>6} mounted {:>6} refused {:>6} failures {}",
+            c.cases, c.mounted, c.refused, c.failures
+        );
+    }
+    println!("  mutations {:?}", s.mutations);
 }
 
 fn print_sweeps(out: &[SweepSummary]) {
