@@ -15,6 +15,9 @@ use super::super::args::TreeInspectArgs;
 use super::super::lpfs::lpfs_target::kb;
 use super::tree_source::{load, open_image};
 
+/// Roots the text report lists without `--records`.
+const ROOTS_SHOWN: usize = 4;
+
 pub fn handle_inspect(args: TreeInspectArgs) -> Result<()> {
     let (loaded, _) = load(&args.source, false)?;
     let image = open_image(&loaded.bytes, &args.source)?;
@@ -169,7 +172,10 @@ pub fn render(r: &ImageReport, label: &str, records: bool) -> String {
     if r.roots.is_empty() {
         let _ = writeln!(out, "  none");
     }
-    for root in &r.roots {
+    // Every commit leaves a root behind until GC takes it: the newest few
+    // are the interesting ones (`--records` and `--json` list them all).
+    let shown = if records { r.roots.len() } else { ROOTS_SHOWN };
+    for root in r.roots.iter().take(shown) {
         let outcome = match root.outcome {
             RootOutcome::Chosen => "CHOSEN".to_string(),
             RootOutcome::Unusable { why } => format!("unusable: {why}"),
@@ -181,6 +187,13 @@ pub fn render(r: &ImageReport, label: &str, records: bool) -> String {
             out,
             "  seq {:<6} id {:016x}  sector {} @{}  retired {:?}  {outcome}",
             root.seq, root.id, root.sector, root.offset, root.retired
+        );
+    }
+    if r.roots.len() > shown {
+        let _ = writeln!(
+            out,
+            "  … and {} older roots (--records or --json lists them)",
+            r.roots.len() - shown
         );
     }
 
