@@ -9,6 +9,7 @@
 //! each; the web only lays them out. Data only — the buttons are offers
 //! ([`super::device_update_offers`]).
 
+use super::device_update_route::UpdateLink;
 use super::device_update_standing::UpdateStanding;
 use super::device_update_version::{UpdateVersion, UpdateVersionDisplay};
 
@@ -274,6 +275,16 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
                 board.short(),
                 own.short()
             ),
+            None,
+            "Ready",
+        ),
+        UpdateStanding::NotOverWifiYet {
+            link: UpdateLink::Relay,
+            ..
+        } => words(
+            NeedsYou,
+            "Update nearby once".to_string(),
+            "This board updates via lightplayer.app after one update nearby.".to_string(),
             None,
             "Ready",
         ),

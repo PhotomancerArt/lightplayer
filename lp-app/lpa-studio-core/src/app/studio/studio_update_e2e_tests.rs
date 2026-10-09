@@ -62,6 +62,9 @@ const STEP_SECS: f64 = 0.005;
 /// A bound on any one wait, in steps (fake minutes, never wall time).
 const MAX_STEPS: usize = 120_000;
 
+/// A board reached through lightplayer.app's relay, by its MAC.
+const RELAY_ENDPOINT: &str = "relay:6055f90a0b01";
+
 /// X: what the board runs. Y: this Studio's own build.
 fn x() -> ModelBuild {
     ModelBuild::synthetic("2026.10.05-1", 1, 5 * 4096 + 300, 8 * 4096 + 77)
@@ -69,6 +72,22 @@ fn x() -> ModelBuild {
 
 fn y() -> ModelBuild {
     ModelBuild::synthetic("2026.10.06-1", 2, 6 * 4096 + 11, 9 * 4096 + 1000)
+}
+
+/// X after every link's first update release (`2026.10.08-9`): a board that
+/// answers on the update channel over Wi‑Fi and through the relay.
+fn x_late() -> ModelBuild {
+    ModelBuild::synthetic("2026.10.09-1", 1, 5 * 4096 + 300, 8 * 4096 + 77)
+}
+
+fn y_late() -> ModelBuild {
+    ModelBuild::synthetic("2026.10.09-2", 2, 6 * 4096 + 11, 9 * 4096 + 1000)
+}
+
+/// A dev build: no order against a release, so only silence on the update
+/// channel says it predates a link's updates.
+fn dev_x() -> ModelBuild {
+    ModelBuild::synthetic("5eb70a7c2", 1, 5 * 4096 + 300, 8 * 4096 + 77)
 }
 
 /// W: a release older than any the store's index lists.
@@ -192,11 +211,11 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
 /// say Wi‑Fi, and the terminal times each reconnect.
 #[test]
 fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
-    let mut board = Board::running_x();
+    let mut board = Board::with_catalog(vec![x_late(), y_late()]);
     board.endpoint = "lan:ws://192.168.1.40/link".to_string();
     board.reconnects_itself = true;
-    let mut bench = Bench::new(board, Some(y()));
-    bench.cache_engine(&x());
+    let mut bench = Bench::new(board, Some(y_late()));
+    bench.cache_engine(&x_late());
     let device = bench.connect_device();
     bench.press_update(device);
 
@@ -215,10 +234,10 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
         }
     }
     bench.run_until_update_ends(device);
-    bench.assert_runs(&y());
+    bench.assert_runs(&y_late());
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
     assert!(over_wifi, "the card said Wi‑Fi");
-    assert!(bench.said("update 2026.10.05-1 → 2026.10.06-1 over Wi\u{2011}Fi"));
+    assert!(bench.said("update 2026.10.09-1 → 2026.10.09-2 over Wi\u{2011}Fi"));
     assert!(bench.said_starting("board reset · reconnected in "));
     assert!(
         bench.board().opens_asked >= 3,
@@ -232,6 +251,154 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
     );
 }
 
+/// Through lightplayer.app's relay (OTA M8, PR C): the same update, held to
+/// the relayed key's tier. Every reset ends the relay route (the board's
+/// leg drops, `4410`); the page's session redials by itself, so the
+/// activity waits for each new link and never knocks on a dropped one.
+#[test]
+fn an_update_through_the_relay_comes_back_by_itself_across_each_reset_and_ends_on_y() {
+    let mut board = Board::with_catalog(vec![x_late(), y_late()]);
+    board.endpoint = RELAY_ENDPOINT.to_string();
+    board.reconnects_itself = true;
+    board.trust = LinkTrust::Relayed(Some(lpc_access::Tier::Edit));
+    let mut bench = Bench::new(board, Some(y_late()));
+    bench.cache_engine(&x_late());
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    let mut through_relay = false;
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        through_relay |= matches!(
+            bench.standing(device),
+            UpdateStanding::Updating {
+                link: UpdateLink::Relay,
+                ..
+            }
+        );
+        if bench.outcome(device).is_some() {
+            break;
+        }
+    }
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y_late());
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::UpToDate));
+    assert!(through_relay, "the card's update rode the relay");
+    assert!(bench.said("update 2026.10.09-1 → 2026.10.09-2 over Wi\u{2011}Fi"));
+    assert!(bench.said_starting("board reset · reconnected in "));
+    assert!(
+        bench.board().opens_asked >= 3,
+        "{}",
+        bench.board().opens_asked
+    );
+    assert_eq!(
+        bench.board().opens_while_dropped,
+        0,
+        "no Open while the page's own redial was bringing the board back"
+    );
+}
+
+/// A board whose firmware predates updates through the relay announces the
+/// update channel and then ignores it there: the update ends in words after
+/// five seconds, nothing changed, and the card says to update it nearby
+/// once — not "USB or Bluetooth", since its own Wi‑Fi may do.
+#[test]
+fn through_the_relay_a_board_that_never_answers_is_told_to_update_nearby_once() {
+    let mut board = Board::with_catalog(vec![dev_x(), y()]);
+    board.endpoint = RELAY_ENDPOINT.to_string();
+    board.reconnects_itself = true;
+    board.ignores_updates = true;
+    let mut bench = Bench::new(board, Some(y()));
+    let device = bench.connect_device();
+    bench.press_update(device);
+
+    bench.run_until_update_ends(device);
+    assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::NotOverWifi));
+    bench.assert_runs(&dev_x());
+    // The journal's line says "nearby once" too, not "over Wi‑Fi".
+    assert!(bench.said("no answer through lightplayer.app; update it nearby once"));
+    assert!(matches!(
+        bench.standing(device),
+        UpdateStanding::NotOverWifiYet {
+            link: UpdateLink::Relay,
+            ..
+        }
+    ));
+    let words = crate::update_words(&bench.standing(device)).expect("the card says why");
+    assert_eq!(words.line, "Update nearby once");
+    assert_eq!(
+        words.sentence,
+        "This board updates via lightplayer.app after one update nearby."
+    );
+    for verb in ["update-firmware", "install-firmware"] {
+        let path = bench.controller.device_verb(device, verb);
+        bench.controller.not_offered(&path);
+    }
+}
+
+/// A known release from before a link's updates is told "nearby once"
+/// before any press, with no Update offered over that link: `2026.10.05-1`
+/// predates both Wi‑Fi and the relay.
+#[test]
+fn a_release_before_the_first_wifi_or_relay_update_release_is_offered_no_update_there() {
+    for (endpoint, link, line) in [
+        (RELAY_ENDPOINT, UpdateLink::Relay, "Update nearby once"),
+        (
+            "lan:ws://192.168.1.40/link",
+            UpdateLink::Wifi,
+            "Update over USB or Bluetooth once",
+        ),
+    ] {
+        let mut board = Board::running_x();
+        board.endpoint = endpoint.to_string();
+        board.reconnects_itself = true;
+        let mut bench = Bench::new(board, Some(y()));
+        let device = bench.connect_device();
+        assert!(
+            matches!(bench.standing(device), UpdateStanding::NotOverWifiYet { link: l, .. } if l == link),
+            "{endpoint}: {:?}",
+            bench.standing(device)
+        );
+        let words = crate::update_words(&bench.standing(device)).expect("the card says why");
+        assert_eq!(words.line, line);
+        for verb in ["update-firmware", "install-firmware"] {
+            let path = bench.controller.device_verb(device, verb);
+            bench.controller.not_offered(&path);
+        }
+    }
+}
+
+/// A release between the two: it updates over the LAN (`2026.10.08-2`) but
+/// not yet through the relay (`2026.10.08-9`), so the same board is offered
+/// Update on the LAN and told "nearby once" through the relay.
+#[test]
+fn a_release_between_the_wifi_and_relay_releases_updates_on_the_lan_only() {
+    let between = || ModelBuild::synthetic("2026.10.08-5", 1, 5 * 4096 + 300, 8 * 4096 + 77);
+    let newer = || ModelBuild::synthetic("2026.10.09-2", 2, 6 * 4096 + 11, 9 * 4096 + 1000);
+    for (endpoint, offered) in [
+        ("lan:ws://192.168.1.40/link", true),
+        (RELAY_ENDPOINT, false),
+    ] {
+        let mut board = Board::with_catalog(vec![between(), newer()]);
+        board.endpoint = endpoint.to_string();
+        board.reconnects_itself = true;
+        let mut bench = Bench::new(board, Some(newer()));
+        let device = bench.connect_device();
+        let path = bench.controller.device_verb(device, "update-firmware");
+        if offered {
+            bench.controller.offered(&path);
+            assert!(matches!(
+                bench.standing(device),
+                UpdateStanding::Available { .. }
+            ));
+        } else {
+            bench.controller.not_offered(&path);
+            let words = crate::update_words(&bench.standing(device)).expect("words");
+            assert_eq!(words.line, "Update nearby once");
+        }
+    }
+}
+
 /// W6: a release from before updates over Wi‑Fi announces the update
 /// channel in its hello, but its LAN link ignores the channel. The update's
 /// first `Q` hears nothing; after five seconds the update ends in words,
@@ -240,7 +407,7 @@ fn an_update_over_wifi_comes_back_by_itself_across_each_reset_and_ends_on_y() {
 /// it has been updated once.
 #[test]
 fn over_wifi_a_board_that_never_answers_the_update_channel_is_named_and_offered_nothing() {
-    let mut board = Board::running_x();
+    let mut board = Board::with_catalog(vec![dev_x(), y()]);
     board.endpoint = "lan:ws://192.168.1.40/link".to_string();
     board.reconnects_itself = true;
     board.ignores_updates = true;
@@ -250,7 +417,7 @@ fn over_wifi_a_board_that_never_answers_the_update_channel_is_named_and_offered_
 
     bench.run_until_update_ends(device);
     assert_eq!(bench.outcome(device), Some(UpdateOutcomeFacts::NotOverWifi));
-    bench.assert_runs(&x());
+    bench.assert_runs(&dev_x());
     assert!(bench.said("no answer on the update channel over Wi\u{2011}Fi"));
     assert!(matches!(
         bench.standing(device),
@@ -1271,7 +1438,9 @@ impl Board {
     }
 
     fn info(&self) -> LinkInfo {
-        let network = self.endpoint.starts_with("ble:") || self.endpoint.starts_with("lan:");
+        let network = ["ble:", "lan:", "relay:"]
+            .iter()
+            .any(|prefix| self.endpoint.starts_with(prefix));
         LinkInfo {
             label: "model board".to_string(),
             endpoint: EndpointKey(self.endpoint.clone()),
@@ -1443,10 +1612,16 @@ impl Board {
                 return self.session_reset();
             }
             let lan = self.endpoint.starts_with("lan:");
-            self.close(match (self.reconnects_itself, lan) {
-                (true, true) => "wi-fi link lost: the board closed the link (code 1006)",
-                (true, false) => "bluetooth link lost: the board or the radio ended the connection",
-                (false, _) => "board reset",
+            let relay = self.endpoint.starts_with("relay:");
+            self.close(match (self.reconnects_itself, lan, relay) {
+                (true, true, _) => "wi-fi link lost: the board closed the link (code 1006)",
+                (true, _, true) => {
+                    "relay link lost: the board closed the link (code 4410: board-gone)"
+                }
+                (true, false, false) => {
+                    "bluetooth link lost: the board or the radio ended the connection"
+                }
+                (false, _, _) => "board reset",
             });
             match self.rig.reboot() {
                 Ok(()) => {}

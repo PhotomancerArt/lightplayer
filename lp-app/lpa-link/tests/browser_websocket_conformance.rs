@@ -556,7 +556,7 @@ async fn a_relay_session_presents_held_keys_only_and_settles_when_up() {
         url,
         BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Play)]),
     );
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     assert!(session.is_relay());
     // The model's link services the session from its first connection.
     let wire = WsWire::new(session.session);
@@ -594,7 +594,7 @@ async fn a_relay_session_no_held_key_opens_is_given_up_in_words() {
     let url = "ws://127.0.0.1:2812/relay/board/a0f26287b402";
     TestKeys::install(vec![key(0x51)]);
     let bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     let _wire = WsWire::new(session.session);
     let pump = bench.spawn_board_loop();
     let refused = settled(&spawn_until_up(session.session))
@@ -636,7 +636,7 @@ async fn a_relay_session_out_of_keys_comes_up_when_a_key_arrives() {
         url,
         BoardDouble::secure(Opens::Edit, vec![(key(0xED), Tier::Edit)]),
     );
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     let wire = WsWire::new(session.session);
     let pump = bench.spawn_board_loop();
     let up = spawn_until_up(session.session);
@@ -676,7 +676,7 @@ async fn a_relay_refusal_ends_the_session_and_another_drop_redials() {
         url,
         BoardDouble::secure(Opens::Nobody, vec![(key(0xED), Tier::Edit)]),
     );
-    let session = lan::open_relay_session(url, &[4404, 4429]).expect("a session");
+    let session = lan::open_relay_session(url, &[4404, 4429], &[]).expect("a session");
     for _ in 0..200 {
         if lan::present_sessions()
             .iter()
@@ -726,6 +726,69 @@ async fn a_relay_refusal_ends_the_session_and_another_drop_redials() {
             .iter()
             .any(|present| present.url == url)
     );
+    assert!(lan::forget(session.session).await);
+}
+
+/// OTA M8 through the relay: while an update holds the session (the board
+/// resets three times, and the relay says "board offline" until it is
+/// back), a 4404 is a drop redialled after its own delay, not the end; once
+/// the hold lapses, a 4404 ends the session again.
+#[wasm_bindgen_test]
+async fn a_held_relay_session_redials_through_board_offline() {
+    let url = "ws://127.0.0.1:2812/relay/board/a0f26287b405";
+    TestKeys::install(vec![key(0xED)]);
+    let mut bench = Bench::new(
+        url,
+        BoardDouble::secure(Opens::Nobody, vec![(key(0xED), Tier::Edit)]),
+    );
+    let session = lan::open_relay_session(url, &[4404, 4429], &[(4404, 40)]).expect("a session");
+    for _ in 0..200 {
+        if lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url && present.connected)
+        {
+            break;
+        }
+        tick(10).await;
+    }
+    let wire = WsWire::new(session.session);
+    bench
+        .exchange_until(&wire, |reads| hello_count(reads) >= 1)
+        .await;
+    js_accept_connects(url, true);
+
+    // Held: two "board offline" closes in a row, each redialled.
+    wire.hold(400);
+    for opened in [2, 3] {
+        for _ in 0..200 {
+            if js_drop_socket(url, 4404, "board-offline") {
+                break;
+            }
+            tick(10).await;
+        }
+        for _ in 0..200 {
+            if js_sockets_opened(url) >= opened {
+                break;
+            }
+            tick(10).await;
+        }
+        assert_eq!(js_sockets_opened(url), opened, "a held 4404 is redialled");
+    }
+
+    // The hold lapsed: the next 4404 ends the session.
+    for _ in 0..30 {
+        tick(20).await;
+    }
+    for _ in 0..200 {
+        if js_drop_socket(url, 4404, "board-offline") {
+            break;
+        }
+        tick(10).await;
+    }
+    for _ in 0..20 {
+        tick(20).await;
+    }
+    assert_eq!(js_sockets_opened(url), 3, "an unheld 4404 is not redialled");
     assert!(lan::forget(session.session).await);
 }
 

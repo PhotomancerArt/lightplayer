@@ -110,6 +110,25 @@
 //                 away busy, and a second Studio typing the address is told
 //                 "Busy with another connection"; the update finishes
 //
+// `--relay` (`just walk-ota-emu --relay`, OTA M8 PR C) walks the update
+// through lightplayer.app's relay, played by a REAL lp-cloud-server on this
+// machine (mem store, a made-up account signed in by dev sign-in): each
+// board is on the door's virtual LAN with an uplink that carries
+// `lightplayer.app:80` to that server, the account's key installed on its
+// chip as Studio installs it over USB, so it registers by itself; Studio
+// is served on the walk's own origin with `/api`, `/auth` and `/relay`
+// forwarded to the server (one origin, as on lightplayer.app, so the
+// session cookie rides the relay's browser leg) and opened with
+// `?relay=<board>` — no `?emu=`, no `?lan=`. The card must say "Wi‑Fi":
+//
+//   update        X → Y with one press through the relay, every reset the
+//                 board's relay leg dropping and the page riding through
+//                 "board offline" until it is back
+//   relay-drop    the relay drops the board mid-core (the walk cuts its
+//                 device leg): the board dials again, the page redials, and
+//                 the update finishes with no click
+//   cut-engine    the board's power cut mid-engine, as on --lan
+//
 // ⚠️ TRUST: over `?ble=emu` the emulated board sees its trusted USB link, so
 // every request — the update's login included — is answered at the edit
 // tier: this proves the transport, the card and the reconnects, NOT access
@@ -122,7 +141,7 @@
 // itself (no dev server): `just studio-web-story-build`, the images and a
 // debug lp-cli first — `just walk-ota-emu` builds what is missing.
 //
-//   node scripts/emu/walk-ota-emu.mjs [--fresh] [--tab | --ble | --lan] [--steps update,cut-core,...]
+//   node scripts/emu/walk-ota-emu.mjs [--fresh] [--tab | --ble | --lan | --relay] [--steps update,cut-core,...]
 //
 // The browser profile (target/walk-ota-emu/chrome-profile) outlives a run, so
 // `engine-less` finds the engine `update` backed up even when the steps run
@@ -137,6 +156,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
 import { boardRegistry, serveStudioBundle, startDoor, startRecordSink, stopDoor, walkPort } from "./emulated-lane.mjs";
+import { WALK_EMAIL, forwardHttp, forwardUpgrade, relayId, startRelayCloud } from "./walk-ota-relay.mjs";
 import {
   FIXTURE,
   LAN,
@@ -156,18 +176,35 @@ const TAB = ARGS.includes("--tab");
 const BLE = ARGS.includes("--ble");
 /// Studio reaches the door's boards over their Wi‑Fi (`?lan=`, OTA M8).
 const LAN_LANE = ARGS.includes("--lan");
+/// Studio reaches them through a local relay (`?relay=`, OTA M8 PR C).
+const RELAY_LANE = ARGS.includes("--relay");
+/// The boards are on the door's virtual LAN (both Wi‑Fi lanes).
+const ON_LAN = LAN_LANE || RELAY_LANE;
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
 const LAN_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "renumber", "second-client"];
-const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_STEPS : DOOR_STEPS);
+const RELAY_STEPS = ["update", "relay-drop", "cut-engine"];
+const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_STEPS : RELAY_LANE ? RELAY_STEPS : DOOR_STEPS);
 /// The steps that stand r1 and r2 behind a real lp-cloud-server.
 const RELEASE_STEPS = ["install-older", "install-lookup", "install-file"].some((step) => STEPS.includes(step));
 /// The link the card must name.
-const LINK_WORD = BLE ? "Bluetooth" : LAN_LANE ? "Wi\u2011Fi" : "USB";
+const LINK_WORD = BLE ? "Bluetooth" : ON_LAN ? "Wi\u2011Fi" : "USB";
+if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
+  console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
+  process.exit(2);
+}
+if (RELAY_LANE && STEPS.some((step) => !RELAY_STEPS.includes(step))) {
+  console.error(`walk-ota-emu: --relay walks ${RELAY_STEPS.join(", ")}`);
+  process.exit(2);
+}
+if (!RELAY_LANE && STEPS.includes("relay-drop")) {
+  console.error("walk-ota-emu: relay-drop is a relay step (--relay)");
+  process.exit(2);
+}
 if (LAN_LANE && (TAB || BLE)) {
   console.error("walk-ota-emu: --lan walks the door's boards over Wi-Fi; it does not combine with --tab or --ble");
   process.exit(2);
@@ -259,6 +296,7 @@ async function main() {
           ["a debug lp-cloud-server (cargo build -p lp-cloud-server)", LP_CLOUD_SERVER],
         ]
       : []),
+    ...(RELAY_LANE ? [["a debug lp-cloud-server (cargo build -p lp-cloud-server)", LP_CLOUD_SERVER]] : []),
   ]) {
     if (!existsSync(at)) {
       console.error(`walk-ota-emu: missing ${what}: ${at}\n  run: just walk-ota-emu (it builds what is missing)`);
@@ -267,7 +305,7 @@ async function main() {
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const out = path.join(ROOT, "target/walk-ota-emu", `${TAB ? "tab-" : BLE ? "ble-" : LAN_LANE ? "lan-" : ""}${stamp}`);
+  const out = path.join(ROOT, "target/walk-ota-emu", `${TAB ? "tab-" : BLE ? "ble-" : LAN_LANE ? "lan-" : RELAY_LANE ? "relay-" : ""}${stamp}`);
   const shots = path.join(out, "shots");
   mkdirSync(shots, { recursive: true });
   const trail = path.join(out, "card-trail.log");
@@ -310,6 +348,9 @@ async function main() {
   }
   const fixturePath = path.join(out, "virtual_lan.toml");
   if (LAN_LANE) writeFileSync(fixturePath, FIXTURE);
+  // The relay lane's boards: seeded once the relay's cloud is up (their
+  // chips carry its account's key), below.
+  const xRelayChip = path.join(chips, "x-relay.bin");
   const chipFiles = { x: xChip, "x-engine-less": xEngineLess };
   const xrChip = path.join(chips, "x-release.bin");
   if (xr && STEPS.includes("store-backup")) seedChip(path.join(XR, "merged.bin"), xrChip);
@@ -319,7 +360,14 @@ async function main() {
   const head = git(["rev-parse", "--short=12", "HEAD"]);
 
   const served = stagedY;
+  /// The relay lane's cloud, once started (below).
+  let cloud = null;
   const route = (request, response, url) => {
+    // One origin, as on lightplayer.app: the relay's cloud answers these.
+    if (cloud && /^\/(api|auth|relay)(\/|$)/.test(url.pathname)) {
+      forwardHttp(request, response, cloud.port);
+      return true;
+    }
     // An empty page on Studio's origin: where the walk empties the engine
     // cache with no Studio running.
     if (url.pathname === "/walk-blank") {
@@ -347,6 +395,27 @@ async function main() {
   };
   const bundle = await serveStudioBundle({ root: ROOT, port: walkPort(ROOT, "walk-ota-emu"), route });
   const studioPort = bundle.address().port;
+  if (RELAY_LANE) {
+    cloud = await startRelayCloud({
+      root: ROOT,
+      binary: LP_CLOUD_SERVER,
+      studioOrigin: `http://localhost:${studioPort}`,
+      log: path.join(out, "lp-cloud-server.log"),
+    });
+    bundle.on("upgrade", (request, socket, head) => {
+      if (new URL(request.url, "http://x").pathname.startsWith("/relay/")) forwardUpgrade(request, socket, head, cloud.port);
+      else socket.destroy();
+    });
+    // The fixture's uplink: `lightplayer.app` is the walk's cut-able
+    // forward in front of the cloud.
+    writeFileSync(fixturePath, `${FIXTURE}\n[[uplink]]\nname = "lightplayer.app"\nto = "127.0.0.1:${cloud.devicePort}"\n`);
+    // A new account each run (mem store), so a new key: always seeded anew.
+    rmSync(xRelayChip, { force: true });
+    seedChip(path.join(X, "merged.bin"), xRelayChip, "60s", [
+      JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
+      cloud.accessAdd,
+    ]);
+  }
   // A firmware store that holds nothing (every lookup 404s): X is a dev
   // build no store would have, and the walk never touches the internet. The
   // one exception is XR, the release `store-backup` stands its board on:
@@ -383,7 +452,12 @@ async function main() {
   const recorder = process.env.WALK_RECORD ? startRecordSink() : null;
   const recordUrl = recorder ? await recorder.listen() : null;
 
-  console.log(`\nTHE OVER-THE-AIR UPDATE WALK WITH NO BOARD${BLE ? " — OVER ?ble=emu" : LAN_LANE ? " — OVER WI-FI (?lan=, the emulated LAN)" : ""}`);
+  console.log(`\nTHE OVER-THE-AIR UPDATE WALK WITH NO BOARD${BLE ? " — OVER ?ble=emu" : LAN_LANE ? " — OVER WI-FI (?lan=, the emulated LAN)" : RELAY_LANE ? " — THROUGH THE RELAY (?relay=, a local lp-cloud-server)" : ""}`);
+  if (RELAY_LANE) {
+    console.log("  ⚠️  a local lp-cloud-server stands in for lightplayer.app: no internet, no fly proxy, no");
+    console.log("     NAT, no real round trips; the board's leg crosses the emulated LAN's uplink.");
+    console.log(`  relay           ${cloud.origin} (device leg via 127.0.0.1:${cloud.devicePort}); account ${WALK_EMAIL}`);
+  }
   if (LAN_LANE) {
     console.log("  ⚠️  the emulated LAN proves the IP stack, the link and the board's rules — not the radio,");
     console.log("     not Chrome's Local Network prompt; Studio dials each board's 127.0.0.1 forward.");
@@ -392,23 +466,25 @@ async function main() {
     console.log("  ⚠️  ?ble=emu proves the transport, the card and the reconnects — not access (the");
     console.log("     emulated board answers at the edit tier), and no number here is a Bluetooth number.");
   }
-  console.log(`  this tree       ${head} (lp-emu ${lpEmu}, lp-emu:esp32c6:t1${LAN_LANE ? "+net=lan" : ""})`);
+  console.log(`  this tree       ${head} (lp-emu ${lpEmu}, lp-emu:esp32c6:t1${ON_LAN ? "+net=lan" : ""})`);
   console.log(`  X (the boards)  ${x.version}+${x.commit.slice(0, 12)}`);
   console.log(`  Y (this Studio) ${y.version}+${y.commit.slice(0, 12)}`);
   console.log(`  Studio          http://127.0.0.1:${studioPort}/ (the release bundle, served by this walk)`);
   console.log(`  host tty        ${EMU_TTY ?? "the page's default (a Mac's model on a Mac)"}`);
-  console.log(`  steps           ${STEPS.join(", ")}${TAB ? " (?emu=tab)" : BLE ? " (?ble=emu)" : LAN_LANE ? " (?lan=)" : ""}\n`);
+  console.log(`  steps           ${STEPS.join(", ")}${TAB ? " (?emu=tab)" : BLE ? " (?ble=emu)" : LAN_LANE ? " (?lan=)" : RELAY_LANE ? " (?relay=)" : ""}\n`);
 
   const report = {
     tree: head,
     lpEmu,
-    configuration: LAN_LANE ? "lp-emu:esp32c6:t1+net=lan" : "lp-emu:esp32c6:t1",
+    configuration: ON_LAN ? "lp-emu:esp32c6:t1+net=lan" : "lp-emu:esp32c6:t1",
     backing: TAB ? "tab" : "door",
     link: BLE
       ? "?ble=emu (the polyfill over the door's USB link; not a radio)"
       : LAN_LANE
         ? "?lan= (Studio's LAN link through the board's port forward, on the emulated LAN; not a radio)"
-        : "?emu= (Web Serial over the door)",
+        : RELAY_LANE
+          ? "?relay= (Studio through a local lp-cloud-server's relay; the board's leg through the emulated LAN's uplink; not the internet)"
+          : "?emu= (Web Serial over the door)",
     emuTty: EMU_TTY,
     x: `${x.version}+${x.commit.slice(0, 12)}`,
     y: `${y.version}+${y.commit.slice(0, 12)}`,
@@ -425,6 +501,14 @@ async function main() {
     height: 1100,
     profileDir: path.join(ROOT, "target/walk-ota-emu/chrome-profile"),
   });
+  // Signed in to the relay's made-up account, on Studio's origin.
+  if (RELAY_LANE) {
+    await driver.cdp.send(
+      "Network.setCookie",
+      { name: "lp_session", value: cloud.cookie, url: `http://localhost:${studioPort}`, path: "/", httpOnly: true },
+      driver.sessionId,
+    );
+  }
   let door = null;
   /// The Wi‑Fi lane's console capture on the board's USB link.
   let hold = null;
@@ -433,6 +517,8 @@ async function main() {
     (LAN_LANE
       ? `http://localhost:${studioPort}/devices?lan=${encodeURIComponent(`ws://${door.forward}/link`)}` +
         `&firmware-store=${encodeURIComponent(firmwareStore)}`
+      : RELAY_LANE
+      ? `http://localhost:${studioPort}/devices?relay=${door.relayId}&firmware-store=${encodeURIComponent(firmwareStore)}`
       : `http://localhost:${studioPort}/devices?emu=${doorAddr ? encodeURIComponent(`ws://${doorAddr}`) : "tab"}` +
         `&firmware-store=${encodeURIComponent(firmwareStore)}` +
         (EMU_TTY ? `&emu-tty=${EMU_TTY}` : "") +
@@ -575,14 +661,14 @@ async function main() {
     door = await startDoor({
       root: ROOT,
       id,
-      boards: LAN_LANE ? boards.map((board) => `${board},lan=${LAN}`) : boards,
+      boards: ON_LAN ? boards.map((board) => `${board},lan=${LAN}`) : boards,
       stateDir: path.join(out, "state", id),
       consoleDir: path.join(out, "console", id),
       logFile: path.join(out, `serve-${id}.log`),
       fresh: true,
-      extraArgs: LAN_LANE ? ["--lan", `${LAN}=${fixturePath}`] : [],
+      extraArgs: ON_LAN ? ["--lan", `${LAN}=${fixturePath}`] : [],
     });
-    if (LAN_LANE) {
+    if (ON_LAN) {
       // The board's forward: what Studio dials for it on the host.
       const board = boards[0].split("=")[0];
       const entry = (await boardRegistry(door.addr)).find((b) => b.id === board);
@@ -598,11 +684,18 @@ async function main() {
       // emulated scenario (`test-emu-c6-ota-lan`), not this walk's.
       hold = await holdConsole({ doorAddr: door.addr, board, file: path.join(out, "console", id, `${board}.link.log`) });
     }
+    if (RELAY_LANE) {
+      // The page dials the relay for the board at load, and a board the
+      // relay does not hold yet is "offline" (which ends a session nothing
+      // holds): load it once the board has registered by itself.
+      door.relayId = relayId(boards[0].match(/mac=([0-9a-f:]+)/i)[1]);
+      await waitBoard(door.board, /\[relay\] state=connected/, "it reached the relay", JOIN_MS);
+    }
     await loadPage(door.addr, firmwareStore);
   };
   const loadPage = async (doorAddr, firmwareStore = storeOrigin) => {
     await driver.navigate(pageUrl(doorAddr, firmwareStore));
-    if (!LAN_LANE) await driver.awaitShim();
+    if (!ON_LAN) await driver.awaitShim();
     if (BLE) await driver.waitFor("Boolean(window.__lpEmuBluetooth)", { timeoutMs: LOAD_MS, what: "the Bluetooth polyfill" });
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: LOAD_MS, what: "Studio to finish loading" });
   };
@@ -631,6 +724,11 @@ async function main() {
     return bytes;
   };
   const connect = async (board) => {
+    if (RELAY_LANE) {
+      // No chooser: the board registered before the page loaded, and the
+      // page dialled it through the relay at load.
+      return;
+    }
     if (LAN_LANE) {
       // No chooser: the page dialled the board's forward at load. The board
       // boots, joins the virtual LAN and serves its link; the page's
@@ -644,7 +742,7 @@ async function main() {
   /// Over Wi‑Fi, every reset closes the board's socket and the page redials
   /// it: Studio's terminal must time at least `atLeast` reconnects.
   const checkWifiReconnects = (terminal, atLeast) => {
-    if (!LAN_LANE) return null;
+    if (!ON_LAN) return null;
     const lines = reconnectLines(terminal);
     if (lines.length < atLeast) {
       throw new Error(`over Wi-Fi the terminal timed ${lines.length} reconnects, fewer than ${atLeast}: ${JSON.stringify(lines)}`);
@@ -822,7 +920,7 @@ async function main() {
           cutAt = `${line} (phantom drop; the page re-checked at once)`;
           return;
         }
-        if (LAN_LANE) {
+        if (ON_LAN) {
           // The board's power, not a cable: there is none. It reboots,
           // rejoins the LAN, and the page redials it by itself.
           await doorControl(door.addr, board, "power-cycle");
@@ -1041,9 +1139,9 @@ async function main() {
       const board = TAB ? "tab-c6" : `c6-${name}`;
       // Every step's board is its own board: its own MAC, so no step's
       // card is a board Studio remembers from another.
-      const lane = TAB ? 1 : LAN_LANE ? 2 : 0;
+      const lane = TAB ? 1 : LAN_LANE ? 2 : RELAY_LANE ? 3 : 0;
       const mac = `mac=02:4c:50:00:${(ALL_STEPS.indexOf(name) + 1).toString(16).padStart(2, "0")}:0${lane}`;
-      const xBoard = `${board}=${LAN_LANE ? xLanChip : xChip},kind=rom-up,${mac}`;
+      const xBoard = `${board}=${LAN_LANE ? xLanChip : RELAY_LANE ? xRelayChip : xChip},kind=rom-up,${mac}`;
       switch (name) {
         case "update":
           // An empty cache, so the update must back the board up first.
@@ -1066,7 +1164,7 @@ async function main() {
             }
             if (!ran.order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up current firmware");
             checkLinkWord(ran.order);
-            const reconnects = LAN_LANE
+            const reconnects = ON_LAN
               ? checkWifiReconnects(await terminalLines(), 2)
               : checkReconnects(await terminalLines(), air0, air1, 0);
             // E14: the project survived — the card still runs it.
@@ -1169,7 +1267,7 @@ async function main() {
           }
           const describe = phantom
             ? "Bluefy's phantom drop mid-core, found when the page is shown again: the update finishes with no click"
-            : LAN_LANE
+            : ON_LAN
               ? `the board's power is cut mid-${engine ? "engine" : "core"}: it reboots, rejoins, and the update finishes with no click`
               : BLE
               ? `the board goes out of range mid-${engine ? "engine" : "core"} and comes back: the update finishes with no click`
@@ -1193,7 +1291,7 @@ async function main() {
             if (!said.resumed) throw new Error("the board never said it resumed the transfer");
             checkLinkWord(ran.order);
             if (!BLE && !ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Finishing the update");
-            const reconnects = LAN_LANE
+            const reconnects = ON_LAN
               ? checkWifiReconnects(await terminalLines(), 2)
               : checkReconnects(await terminalLines(), air0, air1, 1);
             return {
@@ -1449,6 +1547,45 @@ async function main() {
           }
           break;
         }
+        case "relay-drop": {
+          await openDoor(name, [xBoard]);
+          await step(name, "the relay drops the board mid-core: it dials again, the page redials, and the update finishes with no click", async () => {
+            await connect(board);
+            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            let legs = 0;
+            let cutFrom = 0;
+            const ran = await runUpdate(board, {
+              cut: {
+                stage: "updating",
+                boardSays: /\[OTA\] offer \S+ → core/,
+                atPercent: 40,
+                act: async () => {
+                  cutFrom = boardWords(board).length;
+                  legs = cloud.cutDeviceLeg();
+                  if (!legs) throw new Error("no device leg to cut: the board was not on the relay");
+                  return `${legs} device leg${legs === 1 ? "" : "s"} cut`;
+                },
+              },
+            });
+            if (!ran.cutAt) throw new Error("the walk never found the moment to cut");
+            await settle(board, ran.from);
+            const said = boardSaid(board, ran.from, OTA_WORDS);
+            for (const need of ["core offer", "core confirmed", "engine committed"]) {
+              if (!said[need]) throw new Error(`the board never said ${need}`);
+            }
+            if (!said.resumed) throw new Error("the board never said it resumed the transfer");
+            // Core-only says no heartbeat: its leg's own line is the proof.
+            const back = boardWords(board).slice(cutFrom).match(/\[relay\] leg open to \S+/)?.[0] ?? null;
+            if (!back) throw new Error("the board never said it reached the relay again after the cut");
+            checkLinkWord(ran.order);
+            const reconnects = checkWifiReconnects(await terminalLines(), 3);
+            return {
+              summary: `cut at ${ran.cutAt}; the board back on the relay; ${said.resumed}; up to date; ${reconnects.timed.length} reconnects timed`,
+              card: ran.order, board: said, reconnects,
+            };
+          });
+          break;
+        }
         case "renumber": {
           await openDoor(name, [xBoard]);
           await step(name, "the board's next lease is a new address: the update's resets put it there, and the update finishes", async () => {
@@ -1581,13 +1718,17 @@ async function main() {
   for (const s of report.steps) {
     console.log(`  ${s.skipped ? "–" : s.ok ? "✓" : "✗"} ${s.name.padEnd(22)} ${s.skipped ?? s.summary ?? s.error ?? ""}`);
   }
-  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : LAN_LANE ? "+net=lan: emulated times, not a radio's" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
+  console.log(`\n  lp-emu ${lpEmu} (lp-emu:esp32c6:t1${BLE ? ", over ?ble=emu: emulated times, not Bluetooth ones" : LAN_LANE ? "+net=lan: emulated times, not a radio's" : RELAY_LANE ? "+net=lan through a local relay: emulated times, not the internet's" : ""}); report → ${path.relative(ROOT, path.join(out, "walk-ota-emu.json"))}`);
 
   await driver.close();
   if (hold) await releaseConsole(hold);
   if (door) await stopDoor(door);
   bundle.close();
   store.close();
+  if (cloud) {
+    writeFileSync(path.join(out, "relay-cloud.log"), cloud.log());
+    cloud.stop();
+  }
 
   const failed = report.steps.filter((s) => !s.ok);
   if (fatal || failed.length || report.panics) {

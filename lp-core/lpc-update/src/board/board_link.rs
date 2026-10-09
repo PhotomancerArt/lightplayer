@@ -23,6 +23,20 @@ pub enum LinkTrust {
     /// A secure link whose key match granted this tier (M8's links; the
     /// firmware's key lookup decides it).
     Keyed(Tier),
+    /// A secure link through the cloud relay: its key's tier when core-only
+    /// looked the key up itself (`None` while the engine runs, whose server
+    /// passes the grant with each message). The device's `open` never
+    /// applies over the relay — the relay's second lock — and neither does a
+    /// channel-3 `L` login: the key is the only way in.
+    Relayed(Option<Tier>),
+}
+
+/// Which way a secure network link reached the board: its own LAN
+/// endpoint, or a cloud relay route. The relay refuses the anonymous key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetworkPath {
+    Lan,
+    Relay,
 }
 
 /// One link's state inside the session.

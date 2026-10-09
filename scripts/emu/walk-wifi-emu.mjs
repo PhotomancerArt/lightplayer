@@ -65,7 +65,7 @@ const WIFI_ROW = `[...document.querySelectorAll('button')].find((b) => (b.innerT
 function args() {
   const lane = process.argv[2];
   if (lane !== "usb" && lane !== "ble") {
-    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|studio-lan> (lan, studio-lan: [--out <dir>] [--keep-open] [--dry-run])");
+    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|studio-lan|studio-lan-reset> (lan, studio-lan, studio-lan-reset: [--out <dir>] [--keep-open] [--dry-run])");
     process.exit(2);
   }
   return { lane, out: path.join(ROOT, "target/walk-wifi-emu", lane) };
@@ -369,4 +369,6 @@ else if (process.argv[2] === "relay") await import("./walk-wifi-emu-relay.mjs");
 // `studio-lan` (network-transport plan P04): Studio with no flag reaching
 // boards on the virtual LAN — its own walk too.
 else if (process.argv[2] === "studio-lan") await import("./walk-wifi-emu-studio-lan.mjs");
+// `studio-lan-reset`: the card's Reset on a board reached over Wi‑Fi.
+else if (process.argv[2] === "studio-lan-reset") await import("./walk-wifi-emu-studio-lan-reset.mjs");
 else await main();

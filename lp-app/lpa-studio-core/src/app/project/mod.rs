@@ -80,7 +80,7 @@ pub use arrange_offers::{
 };
 pub use asset::{
     AssetContentFetchOp, AssetEditOp, MAX_ASSET_BODY_BYTES, PendingAssetEdit, UiAssetContent,
-    UiAssetContentBody, UiShaderError,
+    UiAssetContentBody, UiShaderError, asset_body_too_large,
 };
 pub use dirty_summary::DirtySummary;
 pub use edit_journal::{EDIT_JOURNAL_CAP, UiEditJournalEntry, UiEditJournalEvent, UiEditorMode};

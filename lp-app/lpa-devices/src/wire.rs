@@ -479,6 +479,13 @@ impl ClientFrame {
             body: ClientFrameBody::ClearFaults,
         }
     }
+
+    pub fn reboot(request_id: u32) -> Self {
+        Self {
+            request_id,
+            body: ClientFrameBody::Reboot,
+        }
+    }
 }
 
 /// The client requests the model itself issues. Deliberately tiny: the model
@@ -490,8 +497,9 @@ pub enum ClientFrameBody {
     /// device that is already running (a connect cannot assume the power to
     /// cause a boot, so the unsolicited boot hello may never come).
     Hello,
-    /// `ClientRequest::Reboot` (vision R4) — bridge-independent restart,
-    /// used by activity recovery in round 2.
+    /// `ClientRequest::Reboot` (vision R4) — bridge-independent restart:
+    /// the card's Reset over a link with no reset lines (Bluetooth, the LAN,
+    /// the relay; see `Device::resets_by_request`).
     Reboot,
     /// `ClientRequest::ListLoadedProjects` — "what have you got on you?".
     ///

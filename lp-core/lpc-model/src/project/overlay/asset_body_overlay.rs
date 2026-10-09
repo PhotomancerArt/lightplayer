@@ -10,5 +10,10 @@ pub enum AssetBodyOverlay {
     /// Delete the artifact body from the effective project.
     Delete,
     /// Replace the effective artifact body with these bytes.
-    ReplaceBody(Vec<u8>),
+    ///
+    /// On the wire the body is text when it is UTF-8 (every editor's body),
+    /// else `{"base64":"…"}` ([`crate::body_bytes`]) — never serde's array
+    /// of numbers, ~3.5 characters a byte, which outgrew the board's message
+    /// cap past ~4.7 KB of shader (wire 41).
+    ReplaceBody(#[serde(with = "crate::body_bytes")] Vec<u8>),
 }

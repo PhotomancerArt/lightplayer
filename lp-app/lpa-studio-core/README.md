@@ -327,7 +327,7 @@ sibling buffer with the identical ack lifecycle, joined into the same dirty
 summaries and save-panel rows (`UiPendingEditKind::AssetBody`; a `.glsl`
 that maps to no synced node still counts via
 `unmapped_asset_dirty_summary`). `ApplyBody` enforces the client-side
-`MAX_ASSET_BODY_BYTES` (10 KB) guard under the 16 KB wire frame budget.
+`MAX_ASSET_BODY_BYTES` guard (15 KB as the wire carries the body: text with its escapes) under the 16 KB wire frame budget.
 Effective editor content resolves buffer → overlay mirror → cached base
 body (`asset_content`, fetched via `StudioFsRead` on demand and invalidated
 by save/revert); the per-slot editor DTO is `UiAssetEditor`, embedded on

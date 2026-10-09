@@ -22,7 +22,7 @@
 //! | `ContinueUpdate` | — | `Finishing` (starts itself) |
 //! | `Busy` | — | `AnotherDevice` |
 //! | `NeedsUsb` | — | `NeedsUsbOnce` |
-//! | over Wi‑Fi, the last update heard nothing on the update channel | — | `NotOverWifiYet` |
+//! | over Wi‑Fi, a release older than the link's first, or the last update heard nothing on the update channel | — | `NotOverWifiYet` |
 //! | `ReportCrashing` | — | `KeepsCrashing` |
 //! | `RefusedBuild` | — | `RolledBack` |
 //! | `BoardIsNewer` | — | `Newer` |
@@ -177,7 +177,11 @@ pub enum UpdateStanding {
     /// it announced the update channel, then said nothing on it when asked
     /// (the last update ended [`UpdateOutcomeFacts::NotOverWifi`]). It
     /// updates over USB or Bluetooth until it has been updated once.
-    NotOverWifiYet { board: UpdateVersion },
+    NotOverWifiYet {
+        board: UpdateVersion,
+        /// Wi‑Fi on its network, or through the relay.
+        link: UpdateLink,
+    },
 }
 
 impl UpdateStanding {
@@ -199,7 +203,7 @@ impl UpdateStanding {
             | Self::Newer { board, .. }
             | Self::PlayOnly { board, .. }
             | Self::NoWirelessBuild { board, .. }
-            | Self::NotOverWifiYet { board } => Some(board),
+            | Self::NotOverWifiYet { board, .. } => Some(board),
         }
     }
 
@@ -311,12 +315,18 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
     }
 
     // Over Wi‑Fi, a board that announced the update channel and then said
-    // nothing on it: nothing more is offered there that would only hang.
-    if inputs.link == UpdateLink::Wifi
-        && inputs.view.last_update_outcome == Some(UpdateOutcomeFacts::NotOverWifi)
+    // nothing on it (or a known release from before the link's first one,
+    // which would): nothing more is offered there that would only hang. A
+    // dev build has no order, so for it only the silence tells.
+    if inputs.link.is_wifi()
         && let Some(board) = board_version.clone()
+        && (inputs.view.last_update_outcome == Some(UpdateOutcomeFacts::NotOverWifi)
+            || predates_link(inputs.link, &board))
     {
-        return UpdateStanding::NotOverWifiYet { board };
+        return UpdateStanding::NotOverWifiYet {
+            board,
+            link: inputs.link,
+        };
     }
 
     let (Some(decision), Some(board), Some(own), Some(board_view)) =
@@ -388,6 +398,13 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
         // is never decided by the table, only by a person's intent.
         Decision::OtherTarget { .. } | Decision::Reinstall { .. } => UpdateStanding::Nothing,
     }
+}
+
+/// Whether `board` is a release older than the first one that serves the
+/// update channel over `link`; a dev build or an unnamed first release is not.
+fn predates_link(link: UpdateLink, board: &UpdateVersion) -> bool {
+    link.first_update_release()
+        .is_some_and(|first| board.age_against(&UpdateVersion::new(first)) == FirmwareAge::Older)
 }
 
 /// The board's version, from its facts.
@@ -466,6 +483,44 @@ pub(crate) mod tests {
         garbled.manifest_json = "not a manifest".to_string();
         inputs.facts = Some(&garbled);
         assert_eq!(update_standing(&inputs), UpdateStanding::Nothing);
+    }
+
+    /// Over Wi‑Fi and the relay a known release older than the link's first
+    /// is `NotOverWifiYet` before any update is tried; a release from it on,
+    /// or a dev build (no order), is not.
+    #[test]
+    fn a_release_before_a_links_first_update_release_stands_not_over_wifi_yet() {
+        let view = ready_view();
+        let y = studio_y();
+        let standing_of = |version: &str, link: UpdateLink| {
+            let facts = facts_of(&manifest(version, [0xAA; 32], [0xAE; 32]));
+            let mut inputs = inputs(&view, Some(&facts), Some(&y));
+            inputs.link = link;
+            update_standing(&inputs)
+        };
+        let not_yet = |s: &UpdateStanding, want: UpdateLink| matches!(s, UpdateStanding::NotOverWifiYet { link, .. } if *link == want);
+        let (wifi, relay) = (UpdateLink::Wifi, UpdateLink::Relay);
+        // Before both; between them; from the relay's on.
+        assert!(not_yet(&standing_of("2026.10.08-1", wifi), wifi));
+        assert!(not_yet(&standing_of("2026.10.08-1", relay), relay));
+        assert!(matches!(
+            standing_of("2026.10.08-2", wifi),
+            UpdateStanding::Newer { .. }
+        ));
+        assert!(not_yet(&standing_of("2026.10.08-2", relay), relay));
+        assert!(matches!(
+            standing_of("2026.10.08-9", relay),
+            UpdateStanding::Newer { .. }
+        ));
+        // A dev build has no order; USB and Bluetooth are not Wi‑Fi links.
+        assert!(matches!(
+            standing_of("5eb70a7c2", relay),
+            UpdateStanding::Available { .. }
+        ));
+        assert!(matches!(
+            standing_of("2026.10.08-1", UpdateLink::Usb),
+            UpdateStanding::Newer { .. }
+        ));
     }
 
     #[test]

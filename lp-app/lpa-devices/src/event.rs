@@ -146,13 +146,20 @@ pub enum Action {
     ConfirmFlashLayout {
         device: DeviceId,
     },
-    /// Reset the board's hardware (DTR/RTS pulse — `ResetKind::Normal`) and
-    /// identify what boots. The direct-control verb for a board wedged in a
-    /// state that produces no evidence: a chip parked in ROM download-wait
-    /// prints NOTHING (G1 2026-08-31 — the erased C6 sat silent, no verdict,
-    /// no flash face, no way forward), and a hardware reset is the one
-    /// gesture that reboots it into honest boot output. Bridge-level, so it
-    /// works on firmware that answers nothing — unlike the wire Reboot.
+    /// Restart the board and read what boots.
+    ///
+    /// On a USB or serial link it is the hardware reset (DTR/RTS pulse —
+    /// `ResetKind::Normal`), then identify. The direct-control verb for a
+    /// board wedged in a state that produces no evidence: a chip parked in
+    /// ROM download-wait prints NOTHING (G1 2026-08-31 — the erased C6 sat
+    /// silent, no verdict, no flash face, no way forward), and a hardware
+    /// reset is the one gesture that reboots it into honest boot output.
+    /// Bridge-level, so it works on firmware that answers nothing.
+    ///
+    /// On a network link (Bluetooth, the LAN, the relay), which has no reset
+    /// lines, it is the wire's `Reboot` request instead: the board answers,
+    /// resets, and comes back on a new link that identifies as any does
+    /// (`Device::resets_by_request`).
     ResetBoard {
         device: DeviceId,
     },

@@ -62,6 +62,13 @@
 // relay's refusals: not signed in, board offline, too many tries, busy) ends
 // the session instead of redialling — a redial would only be refused again,
 // and each one spends the page's tries at the relay.
+//
+// A HELD SESSION RIDES THROUGH A REBOOT. While an update runs through the
+// relay the board resets three times, and each time the relay says "board
+// offline" until it is back. The Rust side holds such a session (`hold`) for
+// a while after each update message it sends; while it is held, a close with
+// one of its `holdCodes` is a drop redialled after that code's own delay
+// (slow enough to spare the page's tries at the relay), not the end.
 
 /// Rule 1.
 export const CONNECT_TIMEOUT_MS = 10_000;
@@ -138,6 +145,10 @@ class LanSession {
     this.kind = kind === "relay" ? "relay" : "wi-fi";
     // Close codes after which the session is not redialled.
     this.finalCodes = new Set(finalCodes ?? []);
+    // code → redial delay (ms) for a final code while the session is held.
+    this.holdCodes = new Map();
+    // Until when (Date.now() ms) the session is held (`hold`).
+    this.holdUntil = 0;
     // idle | connecting | connected | lost | closed
     this.state = "idle";
     this.generation = 0;
@@ -193,7 +204,8 @@ class LanSession {
 /// The session wants its link from now on, so it connects at once and keeps
 /// reconnecting; it is present (listed) once it is connected. Answers its
 /// descriptor `{ id, url, kind, connected }`. `options` (optional, read when
-/// the session is made): `{ kind: "wi-fi" | "relay", finalCodes: [code…] }`.
+/// the session is made): `{ kind: "wi-fi" | "relay", finalCodes: [code…],
+/// holdCodes: [[code, delayMs]…] }`.
 export function openSession(url, options) {
   for (const session of sessions.values()) {
     if (session.url === url) {
@@ -205,6 +217,9 @@ export function openSession(url, options) {
     }
   }
   const session = new LanSession(nextSessionId++, url, options?.kind, options?.finalCodes);
+  for (const [code, delayMs] of options?.holdCodes ?? []) {
+    session.holdCodes.set(code, delayMs);
+  }
   sessions.set(session.id, session);
   session.wanted = true;
   startReconnect(session, 0);
@@ -402,6 +417,16 @@ export function setFallback(id, url) {
   }
 }
 
+/// Hold the session for `ms` from now: until then a close with one of its
+/// `holdCodes` is redialled after that code's delay instead of ending the
+/// session (an update through the relay, across the board's resets).
+export function hold(id, ms) {
+  const session = sessions.get(id);
+  if (session) {
+    session.holdUntil = Math.max(session.holdUntil, Date.now() + ms);
+  }
+}
+
 /// End the session for good, saying why: the link above the socket has
 /// nothing left to try (a relay session out of keys). Heard as a drop —
 /// `<kind> link lost: <why>` — but never redialled, and no longer listed.
@@ -553,8 +578,14 @@ function openSocket(session, generation, target) {
         return;
       }
       if (session.socket === socket && session.generation === generation) {
-        // A refusal that would only be repeated ends the session here.
+        // A refusal that would only be repeated ends the session here —
+        // unless the session is held and the code is one it rides through.
         if (session.finalCodes.has(event?.code)) {
+          const held = heldDelay(session, event?.code);
+          if (held !== null && session.wanted) {
+            handleDrop(session, `the board closed the link (${closeWords(event)})`, held);
+            return;
+          }
           session.wanted = false;
         }
         if (event?.code === BUSY_CLOSE_CODE && session.wanted) {
@@ -644,6 +675,15 @@ function handleDrop(session, why, reconnectDelayMs) {
   if (session.wanted) {
     startReconnect(session, reconnectDelayMs ?? null);
   }
+}
+
+/// The redial delay for a close with `code` on a held session, or `null`
+/// when the session is not held or the code is not one it rides through.
+function heldDelay(session, code) {
+  if (Date.now() >= session.holdUntil) {
+    return null;
+  }
+  return session.holdCodes.get(code) ?? null;
 }
 
 function closeSocket(session) {

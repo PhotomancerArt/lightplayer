@@ -268,6 +268,14 @@ test_cycle_probe = ["dep:fw-checks", "fw-checks/check-cycle-probe", "lpc-shared"
 # and `test_cycle_probe` (M5 P1, DD37).
 test_gpio_input = ["dep:fw-checks", "fw-checks/check-gpio-input", "lpc-hardware", "lpc-model", "lpc-shared"]
 test_rmt_rx = ["dep:fw-checks", "fw-checks/check-rmt-rx", "fw-checks/check-rmt"]
+# The `flash-tears` payload's harness (tree-store M4): power cuts on a
+# SACRIFICIAL board, to measure what real NOR tears look like. It owns the
+# first 18 sectors of `lpfs` and destroys the filesystem there; the feature is
+# the build-side gate, and the desk driver (`scripts/emu/flash-tears-soak.sh`)
+# refuses any board not tagged `sacrificial`. The layout, patterns, journal,
+# classifier and boot flow live in fw-checks as `checks::flash_tears`; what
+# stays here is esp-storage, the clock, the USB link and the reset reason.
+test_flash_tears = ["dep:fw-checks", "fw-checks/check-flash-tears"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,

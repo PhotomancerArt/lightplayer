@@ -43,6 +43,9 @@ extern "C" {
     #[wasm_bindgen(js_name = giveUp)]
     fn js_give_up(id: u32, why: &str);
 
+    #[wasm_bindgen(js_name = hold)]
+    fn js_hold(id: u32, ms: u32);
+
     #[wasm_bindgen(js_name = setFallback)]
     fn js_set_fallback(id: u32, url: &str);
 
@@ -115,12 +118,26 @@ pub fn open_session(url: &str) -> Result<LanSession, String> {
 /// Start (or keep) the session through the relay's browser leg at `url`.
 /// Everything it says starts `relay …` (its drop is `relay link lost: …`),
 /// and a close with one of `final_codes` (the relay's refusals) ends it
-/// rather than redialling.
-pub fn open_relay_session(url: &str, final_codes: &[u16]) -> Result<LanSession, String> {
+/// rather than redialling — except, while the session is held ([`hold`]),
+/// a code in `hold_codes`, which is redialled after its delay (ms).
+pub fn open_relay_session(
+    url: &str,
+    final_codes: &[u16],
+    hold_codes: &[(u16, u32)],
+) -> Result<LanSession, String> {
     let options = js_sys::Object::new();
     let codes: Array = final_codes
         .iter()
         .map(|code| JsValue::from(*code))
+        .collect();
+    let held: Array = hold_codes
+        .iter()
+        .map(|(code, delay_ms)| {
+            let pair = Array::new();
+            pair.push(&JsValue::from(*code));
+            pair.push(&JsValue::from(*delay_ms));
+            JsValue::from(pair)
+        })
         .collect();
     let _ = Reflect::set(
         &options,
@@ -128,7 +145,15 @@ pub fn open_relay_session(url: &str, final_codes: &[u16]) -> Result<LanSession, 
         &JsValue::from_str("relay"),
     );
     let _ = Reflect::set(&options, &JsValue::from_str("finalCodes"), &codes);
+    let _ = Reflect::set(&options, &JsValue::from_str("holdCodes"), &held);
     session_from(&js_open_session(url, &options))
+}
+
+/// Hold `session` for `ms` from now: a close with one of its hold codes is
+/// redialled meanwhile (see [`open_relay_session`]). A session with none
+/// is unchanged.
+pub fn hold(session: u32, ms: u32) {
+    js_hold(session, ms);
 }
 
 /// The sessions Studio should hold a link for right now.

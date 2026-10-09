@@ -579,6 +579,7 @@ fn warning(choice: &InstallChoice) -> Option<&'static str> {
     if let Some(link) = choice.stranded_over {
         Some(match link {
             UpdateLink::Wifi => "needs USB or Bluetooth after, over Wi\u{2011}Fi",
+            UpdateLink::Relay => "needs a nearby update after, via lightplayer.app",
             _ => "needs a USB cable after, over Bluetooth",
         })
     } else if choice.speaks_older_wire() {
@@ -664,6 +665,10 @@ fn install_confirmation(
             UpdateLink::Wifi => {
                 "Over Wi\u{2011}Fi, this version can't be updated again until it has been \
                  updated over USB or Bluetooth once."
+            }
+            UpdateLink::Relay => {
+                "Via lightplayer.app, this version can't be updated again until it has been \
+                 updated nearby once."
             }
             _ => {
                 "Over Bluetooth, this version can't be updated again until it has been connected \
@@ -1458,7 +1463,9 @@ mod tests {
     /// update is there, and offered nothing the board would refuse.
     #[test]
     fn over_wifi_a_play_only_user_is_offered_no_update() {
-        let fixture = fixture(UpdateFixtureRow::PlayOnly).over_wifi();
+        let fixture = fixture(UpdateFixtureRow::PlayOnly)
+            .on_recent_firmware()
+            .over_wifi();
         let facts = fixture.offer_facts();
         assert!(matches!(facts.standing, UpdateStanding::PlayOnly { .. }));
         assert_eq!(set_of(&fixture.view, &facts), (vec![], false, true));

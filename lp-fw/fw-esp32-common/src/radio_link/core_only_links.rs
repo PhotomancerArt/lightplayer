@@ -15,9 +15,13 @@
 //!   brings the link up [`LinkTrust::Keyed`] at its tier — or untrusted on
 //!   the anonymous key, where the device's `open` decides. Its key is its
 //!   login: the session refuses `L` on it.
-//! - **A relayed link** (a cloud relay route) and a **challenger** for the
-//!   held network slot are turned away: updates through the relay are their
-//!   own change.
+//! - **A relayed link** (a cloud relay route) is served the same way, with
+//!   the relay's second lock: the session refuses the anonymous key's
+//!   lookup, and the key that verifies brings the link up
+//!   [`LinkTrust::Relayed`], held to that key's tier (the device's `open`
+//!   never applies over the relay).
+//! - A **challenger** for the held network slot is turned away (the holder
+//!   is updating).
 //!
 //! Channel 3 goes to the session; channel 1 (the wire) has no server to
 //! answer it here, and is dropped. A session that resets is the link going
@@ -31,7 +35,7 @@ use alloc::vec::Vec;
 use lp_link::{CH_UPDATE, LinkEvent};
 use lpc_shared::transport::LinkId as PortLinkId;
 #[cfg(feature = "wifi")]
-use lpc_update::board::CoreKeyAnswer;
+use lpc_update::board::{CoreKeyAnswer, NetworkPath};
 use lpc_update::board::{LinkId, LinkTrust};
 
 use super::radio_link_port::{RADIO_LINK_SLOTS, RadioLinkEvent, RadioLinkPort};
@@ -46,15 +50,17 @@ pub trait CoreOnlySession {
     fn link_down(&mut self, link: LinkId);
     /// One channel-3 message from `link`.
     fn on_message(&mut self, link: LinkId, bytes: &[u8]);
-    /// `link`'s handshake named the entry with `salt`.
+    /// `link`'s handshake, which reached the board by `path`, named the
+    /// entry with `salt`.
     #[cfg(feature = "wifi")]
-    fn key_lookup(&mut self, link: LinkId, salt: &[u8; 16]) -> CoreKeyAnswer;
+    fn key_lookup(&mut self, link: LinkId, path: NetworkPath, salt: &[u8; 16]) -> CoreKeyAnswer;
     /// `link`'s handshake matched no candidate of a known salt.
     #[cfg(feature = "wifi")]
     fn key_wrong(&mut self, link: LinkId);
-    /// `link` came up on `candidate` of its lookup: how to trust it.
+    /// `link` (which reached the board by `path`) came up on `candidate` of
+    /// its lookup: how to trust it.
     #[cfg(feature = "wifi")]
-    fn key_authenticated(&mut self, link: LinkId, candidate: u8) -> LinkTrust;
+    fn key_authenticated(&mut self, link: LinkId, path: NetworkPath, candidate: u8) -> LinkTrust;
 }
 
 /// A port link as the session names it.
@@ -67,10 +73,10 @@ pub fn session_link(link: PortLinkId) -> LinkId {
 struct OpenLink {
     id: PortLinkId,
     slot: usize,
-    /// A secure LAN link: its handshake asks for keys, and its key decides
-    /// its trust.
+    /// A secure network link, and which way it came: its handshake asks for
+    /// keys, and its key decides its trust. `None` on Bluetooth.
     #[cfg(feature = "wifi")]
-    keyed: bool,
+    path: Option<NetworkPath>,
 }
 
 /// See the module docs.
@@ -139,26 +145,29 @@ impl CoreOnlyLinks {
                 id: link,
                 slot,
                 #[cfg(feature = "wifi")]
-                keyed: false,
+                path: None,
             });
             return;
         }
-        match port.link_on(slot, link).trust {
-            #[cfg(feature = "wifi")]
-            lpc_shared::transport::LinkTrust::Keyed => {
-                log::info!("[OTA] core-only: LAN link {link} opened (slot {slot})");
-                self.open.push(OpenLink {
-                    id: link,
-                    slot,
-                    keyed: true,
-                });
-            }
-            _ => {
-                log::info!("[OTA] core-only: relayed link {link} refused (slot {slot})");
-                port.slot(slot)
-                    .revoke(link, "core-only serves no relayed link yet");
-            }
+        #[cfg(feature = "wifi")]
+        {
+            let path = match port.link_on(slot, link).trust {
+                lpc_shared::transport::LinkTrust::Relayed => NetworkPath::Relay,
+                _ => NetworkPath::Lan,
+            };
+            log::info!(
+                "[OTA] core-only: {} link {link} opened (slot {slot})",
+                path_word(path)
+            );
+            self.open.push(OpenLink {
+                id: link,
+                slot,
+                path: Some(path),
+            });
         }
+        #[cfg(not(feature = "wifi"))]
+        port.slot(slot)
+            .revoke(link, "no network links without wifi");
     }
 }
 
@@ -173,8 +182,8 @@ fn pump_link(
     let id = session_link(link.id);
     let mut touched = false;
     #[cfg(feature = "wifi")]
-    if link.keyed {
-        touched |= answer_keys(slot, link.id, session);
+    if let Some(path) = link.path {
+        touched |= answer_keys(slot, link.id, path, session);
     }
     while let Some(event) = slot.recv(link.id) {
         touched = true;
@@ -204,6 +213,7 @@ fn pump_link(
 fn answer_keys(
     slot: &super::RadioLinkSlot,
     id: PortLinkId,
+    path: NetworkPath,
     session: &mut impl CoreOnlySession,
 ) -> bool {
     use lp_link::secure_channel::SecureEvent;
@@ -214,11 +224,12 @@ fn answer_keys(
         touched = true;
         match event {
             SecureEvent::KeyLookup { key_id } => {
-                let answer = match session.key_lookup(session_link(id), &key_id.0) {
+                let answer = match session.key_lookup(session_link(id), path, &key_id.0) {
                     CoreKeyAnswer::Keys(psks) => KeyAnswer::Keys(psks),
                     CoreKeyAnswer::Unknown => {
                         log::info!(
-                            "[OTA] core-only: link {id} named a key this board does not hold"
+                            "[OTA] core-only: {} link {id} named a key this board does not hold",
+                            path_word(path)
                         );
                         KeyAnswer::Unknown
                     }
@@ -249,9 +260,10 @@ fn trust_at_up(
     session: &mut impl CoreOnlySession,
 ) -> LinkTrust {
     #[cfg(feature = "wifi")]
-    if link.keyed {
+    if let Some(path) = link.path {
         return match slot.session_auth(link.id) {
-            Some(auth) => session.key_authenticated(session_link(link.id), auth.candidate),
+            Some(auth) => session.key_authenticated(session_link(link.id), path, auth.candidate),
+            None if path == NetworkPath::Relay => LinkTrust::Relayed(None),
             None => LinkTrust::Untrusted,
         };
     }
@@ -267,6 +279,18 @@ fn trust_word(trust: LinkTrust) -> &'static str {
         LinkTrust::Untrusted => "untrusted",
         LinkTrust::Keyed(lpc_access::Tier::Play) => "key at play",
         LinkTrust::Keyed(lpc_access::Tier::Edit) => "key at edit",
+        LinkTrust::Relayed(Some(lpc_access::Tier::Play)) => "relayed, key at play",
+        LinkTrust::Relayed(Some(lpc_access::Tier::Edit)) => "relayed, key at edit",
+        LinkTrust::Relayed(None) => "relayed, no key",
+    }
+}
+
+/// Which way a network link came, in words, for the log.
+#[cfg(feature = "wifi")]
+fn path_word(path: NetworkPath) -> &'static str {
+    match path {
+        NetworkPath::Lan => "LAN",
+        NetworkPath::Relay => "relayed",
     }
 }
 
@@ -392,27 +416,55 @@ mod tests {
         assert!(wait > 0);
     }
 
-    /// A relayed link is turned away in core-only (updates through the
-    /// relay are their own change).
+    /// Through the relay, on a board open at edit: a play key comes up
+    /// relayed at play and is refused a core install (`open` never applies
+    /// over the relay); an edit key's offer is taken.
     #[test]
-    fn a_relayed_link_is_turned_away() {
+    fn a_relayed_link_comes_up_with_its_keys_tier_and_open_never_applies() {
         let _turn = frame_buf_turn();
         let (x, y) = builds();
         let mut board = Board::engineless(OpenTo::Edit, &x, &y);
-        let index = RADIO_LINK_SLOTS;
-        let id = board.port.mint_link();
-        board
-            .port
-            .slot(index)
-            .open_network(id, 1, fill, PortTrust::Relayed, SlotEdge::Relay)
-            .unwrap();
-        block(board.port.announce(RadioLinkEvent::Opened {
-            link: id,
-            slot: index,
-        }));
-        board.links.pump(&mut board.session);
-        assert_eq!(board.links.open_count(), 0);
-        assert_eq!(board.port.slot(index).link_id(), None, "revoked");
+
+        let mut play = board.connect_relayed(&key(Tier::Play, PLAY_SALT));
+        board.settle(&mut play);
+        assert_eq!(
+            board.session.ups,
+            vec![(session_link(play.id), LinkTrust::Relayed(Some(Tier::Play)))]
+        );
+        assert_eq!(play.next_board_message().unwrap()[0], b'M', "M on up");
+        play.send(&offer_of(&y).encode());
+        board.settle(&mut play);
+        assert_eq!(play.refusal(), Some(Refusal::Access));
+        board.disconnect(&play);
+
+        let mut edit = board.connect_relayed(&key(Tier::Edit, EDIT_SALT));
+        board.settle(&mut edit);
+        let _manifest = edit.next_board_message();
+        edit.send(&offer_of(&y).encode());
+        board.settle(&mut edit);
+        let answer = edit.next_board_message().expect("an answer");
+        assert!(
+            matches!(BoardMessage::decode(&answer), Ok(BoardMessage::Request(_))),
+            "a relayed edit key's offer is taken: the board asks for chunks"
+        );
+    }
+
+    /// The relay's second lock: the anonymous key's handshake is refused
+    /// through the relay, even on a board open at edit, and never comes up.
+    #[test]
+    fn the_anonymous_key_is_refused_through_the_relay() {
+        let _turn = frame_buf_turn();
+        let (x, y) = builds();
+        let mut board = Board::engineless(OpenTo::Edit, &x, &y);
+        let mut anyone = board.connect_relayed(&anonymous());
+        board.settle(&mut anyone);
+        assert!(board.session.ups.is_empty(), "never up");
+        let refused =
+            core::iter::from_fn(|| anyone.link.poll_secure_event()).find_map(|e| match e {
+                SecureEvent::Refused { reason, .. } => Some(reason),
+                _ => None,
+            });
+        assert_eq!(refused, Some(RefusalReason::UnknownKey));
     }
 
     // ---- helpers ----
@@ -445,14 +497,19 @@ mod tests {
             self.out.extend(out);
         }
 
-        fn key_lookup(&mut self, link: LinkId, salt: &[u8; 16]) -> CoreKeyAnswer {
+        fn key_lookup(
+            &mut self,
+            link: LinkId,
+            path: NetworkPath,
+            salt: &[u8; 16],
+        ) -> CoreKeyAnswer {
             self.now += 1;
             let now = self.now;
             self.rig
                 .session
                 .as_mut()
                 .unwrap()
-                .key_lookup(now, link, salt)
+                .key_lookup(now, link, path, salt)
         }
 
         fn key_wrong(&mut self, link: LinkId) {
@@ -461,12 +518,17 @@ mod tests {
             self.rig.session.as_mut().unwrap().key_wrong(now, link);
         }
 
-        fn key_authenticated(&mut self, link: LinkId, candidate: u8) -> LinkTrust {
+        fn key_authenticated(
+            &mut self,
+            link: LinkId,
+            path: NetworkPath,
+            candidate: u8,
+        ) -> LinkTrust {
             self.rig
                 .session
                 .as_mut()
                 .unwrap()
-                .key_authenticated(link, candidate)
+                .key_authenticated(link, path, candidate)
         }
     }
 
@@ -514,11 +576,20 @@ mod tests {
         /// What the LAN endpoint does with a new socket, and the client's
         /// end holding `key`.
         fn connect(&mut self, key: &SecretEntry) -> Client {
+            self.connect_by(key, PortTrust::Keyed, SlotEdge::Local)
+        }
+
+        /// What the relay driver does with a new route.
+        fn connect_relayed(&mut self, key: &SecretEntry) -> Client {
+            self.connect_by(key, PortTrust::Relayed, SlotEdge::Relay)
+        }
+
+        fn connect_by(&mut self, key: &SecretEntry, trust: PortTrust, edge: SlotEdge) -> Client {
             let index = RADIO_LINK_SLOTS;
             let id = self.port.mint_link();
             self.port
                 .slot(index)
-                .open_network(id, 0x5eed, fill, PortTrust::Keyed, SlotEdge::Local)
+                .open_network(id, 0x5eed, fill, trust, edge)
                 .expect("the slot is free");
             block(self.port.announce(RadioLinkEvent::Opened {
                 link: id,
