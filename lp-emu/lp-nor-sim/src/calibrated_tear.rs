@@ -465,6 +465,26 @@ mod tests {
     }
 
     #[test]
+    fn every_named_model_round_trips_and_a_forced_shape_is_forced() {
+        use crate::{FaultPlan, NorFlashSim, NorGeometry, TearModel};
+        for t in TearModel::NAMED {
+            assert_eq!(TearModel::from_name(t.name()), Some(t), "{}", t.name());
+        }
+        assert!(TearModel::ALL.iter().all(|t| TearModel::NAMED.contains(t)));
+        for seed in 0..20 {
+            let mut f = NorFlashSim::new(NorGeometry::new(1, SS as u32, 256));
+            f.program(0, &old()).unwrap();
+            let tear = TearModel::from_name("calibrated_all_zero").unwrap();
+            f.set_plan(FaultPlan::cut(0, tear, seed));
+            let _ = f.erase_sector(0);
+            f.power_cycle(FaultPlan::none());
+            let mut b = vec![0xAAu8; SS];
+            f.read(0, &mut b).unwrap();
+            assert!(b.iter().all(|&x| x == 0), "seed {seed}");
+        }
+    }
+
+    #[test]
     fn interpolation_stays_inside_the_observed_range() {
         let mut rng = SimRng::new(3);
         for _ in 0..10_000 {

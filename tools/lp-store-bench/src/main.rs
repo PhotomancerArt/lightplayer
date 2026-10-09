@@ -61,8 +61,10 @@ enum Cmd {
         #[arg(long)]
         max_cuts: Option<u64>,
         /// Tear models, comma-separated, by name: `clean`, `byte_prefix`,
-        /// `random_bits` (the default list) and `calibrated` (CX1's measured
-        /// tears, `lp-nor-sim`'s `calibrated_tear.rs`).
+        /// `random_bits` (the default list), `calibrated` (CX1's measured
+        /// tears, `lp-nor-sim`'s `calibrated_tear.rs`) and
+        /// `calibrated_<zeroing|all_zero|erasing|reads_ff_weak|reads_ff>`
+        /// (every torn erase forced to that measured shape).
         #[arg(long, default_value = "clean,byte_prefix,random_bits")]
         tears: String,
     },
@@ -75,8 +77,10 @@ enum Cmd {
         #[arg(long, default_value = "1")]
         seeds: String,
         /// Tear models, comma-separated, by name: `clean`, `byte_prefix`,
-        /// `random_bits` (the default list) and `calibrated` (CX1's measured
-        /// tears, `lp-nor-sim`'s `calibrated_tear.rs`).
+        /// `random_bits` (the default list), `calibrated` (CX1's measured
+        /// tears, `lp-nor-sim`'s `calibrated_tear.rs`) and
+        /// `calibrated_<zeroing|all_zero|erasing|reads_ff_weak|reads_ff>`
+        /// (every torn erase forced to that measured shape).
         #[arg(long, default_value = "clean,byte_prefix,random_bits")]
         tears: String,
     },
@@ -572,13 +576,14 @@ fn print_measure(m: &MeasureResult) {
 fn print_sweeps(out: &[SweepSummary]) {
     for s in out {
         println!(
-            "  {:<10} {:<10} {:<30} {:<11} cases {:>6} landed {:>6} failures {:>5} non-atomic {:>5} {:?}{}{}",
+            "  {:<10} {:<10} {:<30} {:<11} cases {:>6} landed {:>6} torn erases {:>5} failures {:>5} non-atomic {:>5} {:?}{}{}",
             s.driver,
             s.candidate,
             s.workload.as_ref().map(|w| w.label()).unwrap_or_default(),
             s.tear,
             s.cases,
             s.landed,
+            s.torn_erases,
             s.failures,
             s.non_atomic,
             s.kinds,

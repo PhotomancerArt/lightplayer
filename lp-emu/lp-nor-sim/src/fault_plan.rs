@@ -1,5 +1,7 @@
 //! When to cut power and how the in-flight operation tears.
 
+use crate::calibrated_tear::EraseShape;
+
 /// How the operation in flight when power goes is left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TearModel {
@@ -17,6 +19,10 @@ pub enum TearModel {
     /// or a sector reading `0xFF` (see [`crate::calibrated_tear`]). Not in
     /// [`TearModel::ALL`]: name it to run it.
     Calibrated,
+    /// [`TearModel::Calibrated`] with every torn erase forced to one shape
+    /// (programs keep the calibrated mix): a sweep in which every erase cut
+    /// meets that state, rather than about one in five.
+    CalibratedErase(EraseShape),
 }
 
 impl TearModel {
@@ -29,11 +35,16 @@ impl TearModel {
 
     /// Every model a name can select: [`TearModel::ALL`] and the calibrated
     /// one.
-    pub const NAMED: [TearModel; 4] = [
+    pub const NAMED: [TearModel; 9] = [
         TearModel::Clean,
         TearModel::BytePrefix,
         TearModel::RandomBits,
         TearModel::Calibrated,
+        TearModel::CalibratedErase(EraseShape::Zeroing),
+        TearModel::CalibratedErase(EraseShape::AllZero),
+        TearModel::CalibratedErase(EraseShape::Erasing),
+        TearModel::CalibratedErase(EraseShape::ReadsFfWeak),
+        TearModel::CalibratedErase(EraseShape::ReadsFf),
     ];
 
     pub fn name(&self) -> &'static str {
@@ -42,6 +53,11 @@ impl TearModel {
             TearModel::BytePrefix => "byte_prefix",
             TearModel::RandomBits => "random_bits",
             TearModel::Calibrated => "calibrated",
+            TearModel::CalibratedErase(EraseShape::Zeroing) => "calibrated_zeroing",
+            TearModel::CalibratedErase(EraseShape::AllZero) => "calibrated_all_zero",
+            TearModel::CalibratedErase(EraseShape::Erasing) => "calibrated_erasing",
+            TearModel::CalibratedErase(EraseShape::ReadsFfWeak) => "calibrated_reads_ff_weak",
+            TearModel::CalibratedErase(EraseShape::ReadsFf) => "calibrated_reads_ff",
         }
     }
 

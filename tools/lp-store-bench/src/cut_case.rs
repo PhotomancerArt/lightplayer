@@ -57,6 +57,8 @@ pub struct CaseOutcome {
     pub atomic: bool,
     /// The cut fired (k < the step's op count).
     pub landed: bool,
+    /// The op the cut tore was a sector erase (not a program page).
+    pub torn_erase: bool,
     /// The flash after recovery, re-run, next step and remount (for the random
     /// driver to continue from).
     pub final_flash: Option<NorFlashSim>,
@@ -170,6 +172,7 @@ pub fn run_case(
             failure: Some(Failure::new("panic", msg)),
             atomic: false,
             landed: true,
+            torn_erase: false,
             final_flash: None,
         },
     }
@@ -192,11 +195,13 @@ fn run_case_inner(
     case: &CutCase,
 ) -> CaseOutcome {
     let mut landed = false;
+    let mut torn_erase = false;
     let mut atomic = false;
     let r = (|| -> Result<NorFlashSim, Failure> {
         let tear = case.tear_model();
         let seed = case.seed;
         let mut flash = fx.pre.clone();
+        let torn_erases_before = flash.stats().torn_erases;
         flash.set_read_budget(Some(READ_BUDGET));
         flash.set_panic_on_violation(true);
         flash.power_cycle(FaultPlan {
@@ -208,6 +213,7 @@ fn run_case_inner(
         let r = run_step(store.as_mut(), &fx.step);
         let mut flash = store.into_flash();
         landed = !flash.is_powered();
+        torn_erase = flash.stats().torn_erases > torn_erases_before;
         if let Err(e) = r
             && !landed
         {
@@ -293,12 +299,14 @@ fn run_case_inner(
             failure: None,
             atomic,
             landed,
+            torn_erase,
             final_flash: Some(f),
         },
         Err(failure) => CaseOutcome {
             failure: Some(failure),
             atomic,
             landed,
+            torn_erase,
             final_flash: None,
         },
     }

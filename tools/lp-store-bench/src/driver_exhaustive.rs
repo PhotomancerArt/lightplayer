@@ -53,6 +53,10 @@ pub struct SweepSummary {
     pub failures: u64,
     pub non_atomic: u64,
     pub landed: u64,
+    /// Cases whose cut tore a sector erase (the rest tore a program page,
+    /// or did not land).
+    #[serde(default)]
+    pub torn_erases: u64,
     pub kinds: BTreeMap<String, u64>,
     pub steps_swept: u64,
     pub steps_skipped: Vec<String>,
@@ -211,6 +215,7 @@ pub fn sweep_with(
                 let mut s = summary.lock().unwrap();
                 s.cases += 1;
                 s.landed += o.landed as u64;
+                s.torn_erases += o.torn_erase as u64;
                 if let Some(f) = &o.failure {
                     s.failures += 1;
                     *s.kinds.entry(f.kind.clone()).or_default() += 1;

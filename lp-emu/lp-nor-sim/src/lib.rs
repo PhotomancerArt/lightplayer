@@ -25,7 +25,7 @@ mod nor_sector_state;
 mod nor_stats;
 mod sim_rng;
 
-pub use calibrated_tear::TearMix;
+pub use calibrated_tear::{EraseShape, TearMix};
 pub use embedded_storage_impl::NorSimFlashError;
 pub use fault_plan::{FaultPlan, TearModel};
 pub use nor_error::NorError;

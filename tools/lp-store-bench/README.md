@@ -104,6 +104,10 @@ default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s `TearModel::ALL`).
 `docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
 read `0x00` from the front or throughout, or silently read erased; it runs
 only when named, and a reproducer that names it replays under it.
+`calibrated_zeroing`, `calibrated_all_zero`, `calibrated_erasing`,
+`calibrated_reads_ff_weak` and `calibrated_reads_ff` force every torn erase
+to that one measured state (programs keep the calibrated mix). A sweep
+summary's `torn_erases` counts the cases whose cut tore an erase.
 
 `--corpus` defaults to the spike's `measurements/corpus`; `--out` to
 `target/lp-store-bench/<cmd>`; `--threads` 8; `--sectors` 128.
@@ -118,7 +122,7 @@ which:
 | `measure` | `candidate`, `config {sectors, dials}`, `workload {kind, corpus, seed}`, `ok`, `error`, `failed_step`, `logical_bytes`, `program_bytes`, `write_amp`, `erases_{total,min,median,max}`, `sectors_nonblank_{end,peak}` (the flash's view), `used_sectors_{end,max}` (the store's own), `mount_{read_bytes,read_calls,ops}`, `report {ram_bytes, used_sectors, step_atomic, extra}`, `violations_0_to_1`, `live_logical_bytes` |
 | `endurance` | `days`, `corpus`, `spec` (the `endurance` command; the overnight run's has no `spec`), `result` (a `measure` object) |
 | `min_sectors` | `candidate`, `config`, `workload`, `min_sectors` (null = does not fit in 512) |
-| `sweep_summary` | `driver` (`exhaustive` / `double_cut`), `candidate`, `config`, `workload`, `tear`, `cases`, `landed`, `failures`, `non_atomic`, `kinds {failure kind: count}`, `steps_swept`, `steps_skipped`, `max_cuts_per_step`, `error` |
+| `sweep_summary` | `driver` (`exhaustive` / `double_cut`), `candidate`, `config`, `workload`, `tear`, `cases`, `landed`, `torn_erases`, `failures`, `non_atomic`, `kinds {failure kind: count}`, `steps_swept`, `steps_skipped`, `max_cuts_per_step`, `error` |
 | `random_summary` | `candidate`, `config`, `seed`, `steps_run`, `steps_no_space`, `cuts`, `failures`, `non_atomic`, `kinds`, `first_failure`, `error` |
 | `failure` | `driver`, `failure {kind, detail}`, `reproducer` (`{"case": {candidate, config, workload, step, cut_after, tear, seed, second}}` or `{"random": {…, stop_at_cut}}`) — feed the line to `replay` |
 
