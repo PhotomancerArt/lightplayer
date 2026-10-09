@@ -400,7 +400,7 @@ impl PackageStore {
     }
 }
 
-fn read_exact(f: &LfsFile<'_>, buf: &mut [u8]) -> Result<(), LfsError> {
+pub(super) fn read_exact(f: &LfsFile<'_>, buf: &mut [u8]) -> Result<(), LfsError> {
     let mut got = 0;
     while got < buf.len() {
         let n = f.read(&mut buf[got..])? as usize;
@@ -412,7 +412,7 @@ fn read_exact(f: &LfsFile<'_>, buf: &mut [u8]) -> Result<(), LfsError> {
     Ok(())
 }
 
-fn write_all(f: &LfsFile<'_>, data: &[u8]) -> Result<(), LfsError> {
+pub(super) fn write_all(f: &LfsFile<'_>, data: &[u8]) -> Result<(), LfsError> {
     let mut off = 0;
     while off < data.len() {
         off += f.write(&data[off..])? as usize;

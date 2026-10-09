@@ -17,9 +17,14 @@ use lpc_model::{ArtifactChangeSummary, LpPathBuf, MutationRejection, NodeAttachS
 pub struct WireCreateNodeRequest {
     /// Project-relative def file path, e.g. `"./shader-2.json"`.
     pub file: LpPathBuf,
-    /// Node def JSON bytes (canonical `write_json` output).
+    /// Node def JSON bytes (canonical `write_json` output). On the wire,
+    /// text as itself, other bytes as `{"base64":"…"}`
+    /// ([`lpc_model::body_bytes`]).
+    #[serde(with = "lpc_model::body_bytes")]
     pub body: Vec<u8>,
-    /// Sibling asset files to create, e.g. `[("./shader-2.glsl", …)]`.
+    /// Sibling asset files to create, e.g. `[("./shader-2.glsl", …)]`, each
+    /// body encoded as [`Self::body`] is.
+    #[serde(with = "asset_bodies")]
     pub assets: Vec<(LpPathBuf, Vec<u8>)>,
     /// Where the new node attaches.
     pub attach: NodeAttachSite,
@@ -38,6 +43,38 @@ impl WireCreateNodeRequest {
             assets,
             attach,
         }
+    }
+}
+
+/// `(path, body)` pairs with each body as [`lpc_model::body_bytes`] writes
+/// it.
+mod asset_bodies {
+    use alloc::vec::Vec;
+
+    use lpc_model::LpPathBuf;
+    use lpc_model::body_bytes::{BodyBuf, BodyRef};
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        assets: &[(LpPathBuf, Vec<u8>)],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(assets.len()))?;
+        for (path, bytes) in assets {
+            seq.serialize_element(&(path, BodyRef(bytes)))?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<(LpPathBuf, Vec<u8>)>, D::Error> {
+        let assets = Vec::<(LpPathBuf, BodyBuf)>::deserialize(deserializer)?;
+        Ok(assets
+            .into_iter()
+            .map(|(path, BodyBuf(bytes))| (path, bytes))
+            .collect())
     }
 }
 
@@ -81,6 +118,15 @@ mod tests {
         let decoded: WireCreateNodeRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, request);
         assert!(json.contains("project_nodes"));
+        // The def and the shader go as their own text, not as byte arrays.
+        assert!(
+            json.contains(r#""body":"{\n  \"kind\": \"Shader\"\n}\n""#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""assets":[["shader-2.glsl","void main() {}"]]"#),
+            "{json}"
+        );
 
         let request = WireCreateNodeRequest::new(
             LpPathBuf::from("./visual.json"),
@@ -96,6 +142,28 @@ mod tests {
         let decoded: WireCreateNodeRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, request);
         assert!(json.contains("entries[2].node"));
+    }
+
+    #[test]
+    fn a_binary_asset_goes_as_base64() {
+        let request = WireCreateNodeRequest::new(
+            LpPathBuf::from("./image.json"),
+            b"{}".to_vec(),
+            alloc::vec![(
+                LpPathBuf::from("./image.png"),
+                alloc::vec![0x89, b'P', 0xff]
+            )],
+            NodeAttachSite::ProjectNodes {
+                key: "image".into(),
+            },
+        );
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(
+            json.contains(r#""assets":[["image.png",{"base64":"iVD/"}]]"#),
+            "{json}"
+        );
+        let decoded: WireCreateNodeRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, request);
     }
 
     #[test]
