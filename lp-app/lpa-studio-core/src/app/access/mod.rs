@@ -23,6 +23,7 @@
 //! | what a USB connect added on its own | [`access_added`] |
 //! | the controller that runs all of it | [`access_controller`] |
 //! | its inputs, and what the UI reads | [`access_command`], [`ui_access_view`] |
+//! | Unlock as an offer, `devices/<board>/unlock` | [`unlock_offer`], [`unlock_op`], [`unlock_password`] |
 //!
 //! Decision records: `docs/adr/2026-09-23-ble-access-model.md` (the model),
 //! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport),
@@ -47,6 +48,9 @@ pub mod network_link_keys;
 pub mod remembered_passwords;
 pub mod two_passwords;
 pub mod ui_access_view;
+pub mod unlock_offer;
+pub mod unlock_op;
+pub mod unlock_password;
 
 #[cfg(test)]
 pub(crate) mod test_board;
@@ -74,6 +78,11 @@ pub use ui_access_view::{
     PLAY_ONLY_SENTENCE, UiAccessPanel, UiDeviceAccess, UiKeyGroup, UiLoginPrompt, UiPasswordLine,
     UiUnlockOffer, account_key_refused_sentence, dropped_sentence, open_summary,
 };
+pub use unlock_offer::{
+    UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM, UNLOCK_VERB, device_unlock_offer, unlock_offer,
+};
+pub use unlock_op::UnlockOp;
+pub use unlock_password::UnlockPassword;
 
 /// Who nearby gets in with no password.
 pub use lpc_access::OpenTo;

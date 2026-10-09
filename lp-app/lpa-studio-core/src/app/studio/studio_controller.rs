@@ -3233,6 +3233,8 @@ impl StudioController {
     ///   ([`crate::device_offers`]). `<board>` is the card's
     ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
+    /// - `devices/<board>/unlock`: a board whose link holds nothing (or only
+    ///   play), while it is linked and idle ([`crate::device_unlock_offer`]).
     /// - `devices/<board>/{continue-update,cancel-update,download-backup,
     ///   restore-files,finish-update}`: each card's layout verbs across the
     ///   C6 repartition, under the same `<board>` prefix
@@ -3313,6 +3315,12 @@ impl StudioController {
                 offers.publish(offer);
             }
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
+                offers.publish(offer);
+            }
+            // `<board>/unlock`: while the board's link holds nothing (or
+            // only play), linked and idle.
+            let unlock = roster.access.get(&view.id).and_then(|access| access.unlock);
+            if let Some(offer) = crate::device_unlock_offer(&facts.prefix, view, unlock) {
                 offers.publish(offer);
             }
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
@@ -4103,6 +4111,11 @@ impl StudioController {
                 )
                 .map(|()| UiNotices::new())
                 .map_err(UiError::Link);
+        }
+        if node_id.as_str() == crate::UnlockOp::NODE_ID {
+            let op = action.into_op::<crate::UnlockOp>()?;
+            self.apply_access_command(op.into_access_command());
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::WifiConnectOp::NODE_ID {
             let op = action.into_op::<crate::WifiConnectOp>()?;
