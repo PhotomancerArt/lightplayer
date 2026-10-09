@@ -506,7 +506,12 @@ holds. Its level is what it closes over there, by the holder's last word:
 `Watching` is Routine, `Open` (and a level not said yet) is Undoable, and
 `Busy` is disabled with "Busy in the other tab: <label>". It asks the
 holder, waits five seconds, and on `Released` opens the ports the hold kept
-shut; the progress is `DeviceRosterView.take_overs` (`UiTakeOver`).
+shut — or, for a board held by its network slot, runs the board's ordinary
+connect (its own network link here, else `connect-wifi`, else
+`connect-relay`; with none of them it is disabled, "No way to reach it from
+here"). `connect-wifi` and `connect-relay` are not offered while another tab
+holds the board's network slot. The progress is
+`DeviceRosterView.take_overs` (`UiTakeOver`).
 
 ### Which board plays which project
 
@@ -579,6 +584,23 @@ shut loses its "held by another tab" mark (`Event::LinkFreed`) once no claim
 of its kind stands. No verb on a held board hands its port or its record
 away: no Forget, and over USB no Flash, Erase or Reset; a held pending port
 offers no Reset or dismiss.
+
+A board's one network slot (the LAN or the relay; one slot whichever road
+took it) is held the same way, as `lp-board:net:<mac>`, with no gate: there
+is nothing to refuse before the dial. A board held both ways shows its USB
+hold first. The board gives its slot to the newest client that proves the
+holder's key, and closes the holder with an ordinary close that its page
+would redial; every tab of one browser presents the same keys, so a tab
+that hears another tab newly say it holds a slot this tab had **yields**: it
+closes its own session by request (an open link through `Disconnect`, a
+dropped one through the transport's forget), lets the hold go, and its board
+says it was taken. A holder whose link took the slot before the tab it left
+let the lock go announces `Holds { locked: false }` and claims again until
+the lock is its own; other tabs watch only a locked hold. A refusal from
+anyone else (1013, 4429) is a stranger's busy: no fact, no `take-over`, and
+the connect stays offered. See
+`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md`
+for what stays open (another browser, lp-cli).
 
 ## Device Management UX
 

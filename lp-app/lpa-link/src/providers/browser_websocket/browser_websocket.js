@@ -34,14 +34,22 @@
 //     2026-10-02 lesson, kept here so no browser can send a view's whole
 //     buffer).
 //
-// A BUSY BOARD IS NOT A CONNECTION. A C6 has one LAN slot; a second client
-// (Studio in another tab, lp-cli) gets its socket upgraded and then closed at
-// once with 1013, "try again later". That is said once, in words — `wi-fi
-// link lost: busy with another Wi‑Fi connection …` — and redialled on its
-// own slow schedule (2 s, 5 s, 15 s, then every 30 s), never the drop
-// loop's 250 ms. Until the board answers again, a redial that opens is not
-// announced as present (its link is serviced through `onActivity` all the
-// same), so a busy board does not flap in and out of Studio's roster.
+// A BUSY BOARD IS NOT A CONNECTION. A C6 has one network slot, which the LAN
+// and the relay share. A second client that proves the holder's own key takes
+// it: the board closes the holder with an ordinary close, which the holder's
+// page hears as a drop (rule 2) and would redial, taking the slot back (a
+// known loop, `docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-
+// network-slot-from-each-other.md`; Studio's tabs of one browser, which all
+// present the same keys, avoid it through their hold channel: the tab that was
+// left closes its session by request). Any other second client — anonymous,
+// as every Studio is on an open board, or holding another key — gets its
+// socket upgraded and then closed at once with 1013, "try again later". That
+// is said once, in words — `wi-fi link lost: busy with another Wi‑Fi
+// connection …` — and redialled on its own slow schedule (2 s, 5 s, 15 s,
+// then every 30 s), never the drop loop's 250 ms. Until the board answers
+// again, a redial that opens is not announced as present (its link is
+// serviced through `onActivity` all the same), so a busy board does not flap
+// in and out of Studio's roster.
 //
 // A BOARD WHOSE ADDRESS MOVED IS FOUND BY NAME. A session keeps its URL (its
 // identity), but once the Rust side knows the board's `.local` socket
