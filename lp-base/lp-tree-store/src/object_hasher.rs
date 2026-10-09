@@ -1,4 +1,4 @@
-//! The hasher seam: every id and every path hash is SHA-256, computed by
+//! The hasher seam: every record id is SHA-256, computed by
 //! whoever mounts the store. The firmware passes the C6's hardware SHA; host
 //! and tests pass [`SoftSha256`] (feature `soft-sha`, the `sha2` crate).
 

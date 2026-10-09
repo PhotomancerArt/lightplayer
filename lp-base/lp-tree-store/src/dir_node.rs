@@ -116,5 +116,14 @@ mod tests {
         assert_eq!(decode_dir(&bytes[..bytes.len() - 1]), None);
         assert_eq!(decode_dir(&[]), None);
         assert_eq!(decode_dir(&[0, 0]), Some(vec![]));
+        // Names are bytes: one that is not UTF-8 decodes (the writer's rule;
+        // `list` refuses it where it would become a String).
+        let mut odd = vec![DirEntry {
+            name: vec![0xFF, b'x'],
+            kind: EntryKind::File,
+            size: 1,
+            id: ObjectId(7),
+        }];
+        assert_eq!(decode_dir(&encode_dir(&mut odd)), Some(odd));
     }
 }
