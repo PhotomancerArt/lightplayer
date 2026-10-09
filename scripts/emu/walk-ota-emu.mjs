@@ -652,11 +652,17 @@ async function main() {
   /// `snapshotExpr` picks it: its path, which the card helpers take, kept in
   /// `here.path`. A page-side wait.
   const liveCardPath = async (timeoutMs = STEP_MS) => {
-    here.path = await driver.waitFor(
-      `(() => { const card = JSON.parse(${snapshotExpr()}).board;
-                return card && card.corner !== 'quiet' && card.corner !== 'blank' ? card.path : false; })()`,
-      { timeoutMs, what: `the card of ${here.mac} (live, and kept)` },
-    );
+    try {
+      here.path = await driver.waitFor(
+        `(() => { const card = JSON.parse(${snapshotExpr()}).board;
+                  return card && card.corner !== 'quiet' && card.corner !== 'blank' ? card.path : false; })()`,
+        { timeoutMs, what: `the card of ${here.mac} (live, and kept)` },
+      );
+    } catch (error) {
+      // Say what the page held instead, so a miss reads as which card.
+      const seen = await driver.evaluate(snapshotExpr()).catch((e) => `(unreadable: ${e.message})`);
+      throw new Error(`${error.message.split("\n")[0]} — the page held: ${seen}`);
+    }
     return here.path;
   };
   /// Page-side: the step's board as its card reads now, as JSON — local to
@@ -684,7 +690,12 @@ async function main() {
     const fresh = (card) => /^devices\\/new-\\d+$/.test(pathOf(card));
     const cards = [...document.querySelectorAll('[data-board-card]')];
     const named = cards.filter((card) => hex !== '' && pathOf(card).endsWith('-' + hex) && !fresh(card));
-    const card = named.find(live) ?? cards.find((card) => fresh(card) && live(card)) ?? named[0] ?? null;
+    // Last, the page's one live card: an in-tab board's bus lists the tab's
+    // own MAC, while its card is keyed by the MAC the guest's hello says
+    // (the seeded image's), so a tab step's board can be named by neither.
+    const onlyLive = cards.filter(live);
+    const card = named.find(live) ?? cards.find((card) => fresh(card) && live(card)) ?? named[0]
+      ?? (onlyLive.length === 1 ? onlyLive[0] : null);
     if (!card) return JSON.stringify({ board: null, cards: cards.map(pathOf) });
     const bar = (layer, name) => {
       const el = card.querySelector('[data-bar="' + layer + '"]');
