@@ -4981,13 +4981,17 @@ walk-drop-emu *args:
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
-# `records.jsonl` beside the report.
+# `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
+# image directory (not built here): the crossing walk's X built at the last
+# relay protocol 1 commit, updated through the relay to this build, which
+# then sends pictures (`WALK_OTA_X=target/walk-ota-emu/images/x-p1 just
+# walk-ota-emu --relay --steps update`; pictures-through-the-cloud plan P6).
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
     images=target/walk-ota-emu/images
-    if [[ ! -f "${images}/x/merged.bin" ]]; then
+    if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
     fi
     if [[ ! -f "${images}/mono/package/manifest.json" ]]; then

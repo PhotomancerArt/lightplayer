@@ -123,7 +123,9 @@
 //
 //   update        X → Y with one press through the relay, every reset the
 //                 board's relay leg dropping and the page riding through
-//                 "board offline" until it is back
+//                 "board offline" until it is back; then Y sends its picture
+//                 (relay protocol 2): the board's heartbeat says `pictures
+//                 N`, and the page's own `BoardPictures` read holds it
 //   relay-drop    the relay drops the board mid-core (the walk cuts its
 //                 device leg): the board dials again, the page redials, and
 //                 the update finishes with no click
@@ -143,6 +145,16 @@
 //
 //   node scripts/emu/walk-ota-emu.mjs [--fresh] [--tab | --ble | --lan | --relay] [--steps update,cut-core,...]
 //
+// `WALK_OTA_X=<dir>` boards X from another image directory than images/x
+// (its merged.bin, split.json and ota/ota-manifest.json, as build-image.sh
+// writes them) — the crossing walk's X built at the last relay protocol 1
+// commit (pictures-through-the-cloud plan P6):
+//
+//   WALK_OTA_X=target/walk-ota-emu/images/x-p1 just walk-ota-emu --relay --steps update
+//
+// updates a protocol 1 core THROUGH THE RELAY to this build, which then
+// sends pictures. The recipe does not build X when it is set.
+//
 // The browser profile (target/walk-ota-emu/chrome-profile) outlives a run, so
 // `engine-less` finds the engine `update` backed up even when the steps run
 // as separate invocations; `--fresh` starts from a browser that has never
@@ -156,7 +168,7 @@ import { execFileSync, spawn } from "node:child_process";
 
 import { StudioDriver } from "./studio-driver.mjs";
 import { boardRegistry, serveStudioBundle, startDoor, startRecordSink, stopDoor, walkPort } from "./emulated-lane.mjs";
-import { WALK_EMAIL, forwardHttp, forwardUpgrade, relayId, startRelayCloud } from "./walk-ota-relay.mjs";
+import { CLOUD_API_VERSION, WALK_EMAIL, forwardHttp, forwardUpgrade, relayId, startRelayCloud } from "./walk-ota-relay.mjs";
 import {
   FIXTURE,
   LAN,
@@ -229,7 +241,8 @@ for (const name of STEPS) {
 }
 
 const IMAGES = path.join(ROOT, "target/walk-ota-emu/images");
-const X = path.join(IMAGES, "x");
+/// X: images/x, or `WALK_OTA_X` (the header says what for).
+const X = process.env.WALK_OTA_X ? path.resolve(ROOT, process.env.WALK_OTA_X) : path.join(IMAGES, "x");
 /// X at a release version, for `store-backup` (built by hand, see the header).
 const XR = path.join(IMAGES, "x-release");
 const xr = existsSync(path.join(XR, "ota/ota-manifest.json"))
@@ -285,7 +298,7 @@ const CARD_LINES = [
 async function main() {
   for (const [what, at] of [
     ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, "target/dx/lpa-studio-web/release/web/public")],
-    ["X's split image (scripts/ota/build-image.sh target/walk-ota-emu/images/x a0a0a0a0)", path.join(X, "merged.bin")],
+    [`X's split image (scripts/ota/build-image.sh ${path.relative(ROOT, X)} a0a0a0a0)`, path.join(X, "merged.bin")],
     ["the pre-update single image (lp-cli firmware package esp32c6-4mb --single-image --out …/mono/package)", path.join(MONO, "package/manifest.json")],
     ["Y, this Studio's split package (lp-cli firmware package esp32c6-4mb)", path.join(PACKAGES, "esp32c6-4mb/manifest.json")],
     ["a debug lp-cli (cargo build -p lp-cli)", LP_CLI],
@@ -967,6 +980,34 @@ async function main() {
     return { label, order, cutAt, cutShot, from, peakAfterCut, lowAfterCut };
   };
 
+  /// Through the relay, once Y is confirmed: Y sends its picture (relay
+  /// protocol 2, whatever X spoke). The board's heartbeat says `pictures N`
+  /// (N ≥ 1), the page's own `BoardPictures` read — its session cookie is
+  /// the walk's account — holds a picture for it, online, and `ListBoards`
+  /// lists it at relay protocol 2 with Y's version.
+  const picturesOnY = async (board) => {
+    const from = boardWords(board).length;
+    const words = await waitBoard(board, /\[relay\] state=connected [^\n]*pictures [1-9]\d* (idle|watched)/, "a picture on Y", STEP_MS, from);
+    const call = (request) =>
+      driver.evaluate(
+        `fetch('/api', { method: 'POST', headers: { 'content-type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ version: CLOUD_API_VERSION, request }))} }).then((r) => r.json())`,
+        { awaitPromise: true },
+      );
+    const read = await call({ boardPictures: { boards: [{ id: door.relayId, seq: null }], watch: false } });
+    const picture = read?.result?.Ok?.boardPictureList?.pictures?.[0];
+    if (!picture?.online) throw new Error(`the relay holds no online picture of ${door.relayId} after the update: ${JSON.stringify(read).slice(0, 300)}`);
+    const listed = await call("listBoards");
+    const presence = listed?.result?.Ok?.boardList?.boards?.find((entry) => entry.id === door.relayId);
+    if (presence?.relayProto !== 2) throw new Error(`the relay lists ${door.relayId} at protocol ${presence?.relayProto}, not 2: ${JSON.stringify(listed).slice(0, 300)}`);
+    const samples = picture.colors ? Buffer.from(picture.colors, "base64").length / 3 : 0;
+    return {
+      summary: `the board says "${words.replace(/^.*\[relay\]/, "[relay]")}"; the relay holds seq ${picture.seq} (outputs [${picture.outputs.join(", ")}], ${samples} samples), relayProto 2, firmware ${presence.firmware}`,
+      heartbeat: words,
+      picture: { seq: picture.seq, online: picture.online, outputs: picture.outputs, samples },
+      presence: { relayProto: presence.relayProto, firmware: presence.firmware, project: presence.project ?? null },
+    };
+  };
+
   // The door writes a board's console file every 2 s (`emu serve`'s
   // FLUSH_EVERY), so the card can say "up to date" before the file holds the
   // engine's commit line: give the file one flush to catch up before reading
@@ -1172,9 +1213,10 @@ async function main() {
             const cache = await engineCache();
             const backup = cache.some((entry) => entry.includes(x.engine.sha256));
             if (!backup) throw new Error(`the engine cache does not hold X's engine (${x.engine.sha256.slice(0, 12)}…): ${JSON.stringify(cache)}`);
+            const pictures = RELAY_LANE ? await picturesOnY(board) : null;
             return {
-              summary: `${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; project kept; X's engine cached${reconnects ? (reconnects.resets === undefined ? `; ${reconnects.timed.length} reconnects timed` : `; ${reconnects.resets} resets → ${reconnects.timed.length} reconnects timed`) : ""}`,
-              pushed, card: ran.order, board: said, cache, air: air1, reconnects,
+              summary: `${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; project kept; X's engine cached${reconnects ? (reconnects.resets === undefined ? `; ${reconnects.timed.length} reconnects timed` : `; ${reconnects.resets} resets → ${reconnects.timed.length} reconnects timed`) : ""}${pictures ? `; then pictures: ${pictures.summary}` : ""}`,
+              pushed, card: ran.order, board: said, cache, air: air1, reconnects, pictures,
             };
           });
           break;
