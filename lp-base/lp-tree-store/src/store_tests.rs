@@ -166,7 +166,11 @@ fn torn_root_falls_back_and_torn_sector_is_closed() {
     st.flash_mut().set_plan(FaultPlan::none());
     st.put("/a.json", b"two").unwrap();
     let n = st.flash().ops_since_plan();
-    for tear in [TearModel::BytePrefix, TearModel::RandomBits] {
+    for tear in [
+        TearModel::BytePrefix,
+        TearModel::RandomBits,
+        TearModel::Calibrated,
+    ] {
         let mut st = mount(pre.clone(), &c);
         st.flash_mut().set_plan(FaultPlan::cut(n - 1, tear, 7));
         assert!(matches!(

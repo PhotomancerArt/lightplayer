@@ -1,7 +1,9 @@
 //! The power-cut sweeps: every sampled cut point × every tear model of each
 //! step, the whole state old or new after each (`test_support::sweep`).
 //! `LP_TREE_STORE_SWEEP_CUTS=1000000 LP_TREE_STORE_SWEEP_STEPS=12 cargo test
-//! --release -p lp-tree-store cut_sweep` runs them at every cut point.
+//! --release -p lp-tree-store cut_sweep` runs them at every cut point;
+//! `LP_TREE_STORE_SWEEP_TEARS=calibrated,…` picks the tear models and
+//! `LP_TREE_STORE_SWEEP_SECTORS=128` the geometry (all but the GC sweep).
 
 use alloc::boxed::Box;
 use alloc::vec;
@@ -12,7 +14,7 @@ use lp_nor_sim::NorGeometry;
 extern crate std;
 
 use crate::StoreConfig;
-use crate::test_support::{Step, deflate, dial, noise, sweep, text};
+use crate::test_support::{Step, deflate, dial, noise, sweep, sweep_geometry, text};
 
 fn cfg(record_max: u32) -> StoreConfig {
     StoreConfig {
@@ -37,7 +39,7 @@ fn per_call_workload() -> Vec<Step> {
 #[test]
 fn cut_sweep_per_call_commits() {
     for rm in [256, 1024] {
-        let r = sweep(NorGeometry::c6(16), &cfg(rm), &per_call_workload(), 24);
+        let r = sweep(sweep_geometry(16), &cfg(rm), &per_call_workload(), 24);
         std::println!("{}: {r:?}", line!());
         assert!(
             r.cuts > 100 && r.landed_old > 0 && r.landed_new > 0,
@@ -81,7 +83,7 @@ fn cut_sweep_transaction_of_ten_puts() {
         txn_delta_max: 400,
         ..cfg(512)
     };
-    let r = sweep(NorGeometry::c6(24), &c, &txn_workload(), 40);
+    let r = sweep(sweep_geometry(24), &c, &txn_workload(), 40);
     std::println!("{}: {r:?}", line!());
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }
@@ -100,7 +102,7 @@ fn append_workload() -> Vec<Step> {
 
 #[test]
 fn cut_sweep_append_in_4k_chunks() {
-    let r = sweep(NorGeometry::c6(32), &cfg(1024), &append_workload(), 12);
+    let r = sweep(sweep_geometry(32), &cfg(1024), &append_workload(), 12);
     std::println!("{}: {r:?}", line!());
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }
@@ -120,7 +122,7 @@ fn deflated_workload() -> Vec<Step> {
 
 #[test]
 fn cut_sweep_deflated_push() {
-    let r = sweep(NorGeometry::c6(16), &cfg(1024), &deflated_workload(), 48);
+    let r = sweep(sweep_geometry(16), &cfg(1024), &deflated_workload(), 48);
     std::println!("{}: {r:?}", line!());
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }

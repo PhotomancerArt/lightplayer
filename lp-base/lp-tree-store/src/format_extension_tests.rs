@@ -6,7 +6,7 @@
 use alloc::vec::Vec;
 
 use lp_crc32::crc32;
-use lp_nor_sim::{FaultPlan, NorFlashSim, NorGeometry, TearModel};
+use lp_nor_sim::{FaultPlan, NorFlashSim, NorGeometry};
 
 use crate::object_id::{IdTag, ObjectId};
 use crate::record_header::{RECORD_HEADER_LEN, encode_header};
@@ -132,9 +132,10 @@ fn a_sector_at_an_older_version_is_untrusted_and_the_rest_mounts() {
 
 /// Power cut anywhere in a format over a live store — a torn kill of a good
 /// header, a torn erase of a killed one, a torn header program — under
-/// every tear model and many seeds: no sector ever reads as a newer format
-/// (on any of several reads, so weak bits get their chances), and the
-/// mount never refuses.
+/// every tear model of the sweeps (`test_support::sweep_tears`; set
+/// `LP_TREE_STORE_SWEEP_TEARS` for the calibrated ones) and many seeds: no
+/// sector ever reads as a newer format (on any of several reads, so weak
+/// bits get their chances), and the mount never refuses.
 #[test]
 fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
     let (c, f, _) = small_store();
@@ -144,7 +145,7 @@ fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
     let ops = probe.ops_since_plan();
     let mut runs = 0u32;
     for k in 0..ops {
-        for tear in TearModel::ALL {
+        for tear in crate::test_support::sweep_tears() {
             for seed in 0..24u64 {
                 let mut g = f.clone();
                 g.set_plan(FaultPlan::cut(k, tear, seed << 8 | k));

@@ -102,11 +102,17 @@ pub struct SweepReport {
     pub landed_old: u64,
     pub landed_new: u64,
     pub gc_runs: u64,
+    /// Cuts that tore a sector erase (the rest tore a program page, or
+    /// landed after the step's last op).
+    pub torn_erases: u64,
+    /// Recovery runs cut a second time.
+    pub double_cuts: u64,
 }
 
 /// For each step: run it fault-free to count its ops `n`, then for sampled
 /// `k in 0..=n` (`LP_TREE_STORE_SWEEP_CUTS` overrides `max_cuts`) and every
-/// tear model, fork the pre-step flash, cut at `k`, power-cycle, mount, and
+/// tear model ([`sweep_tears`]: the three guessed ones unless
+/// `LP_TREE_STORE_SWEEP_TEARS` names others), fork the pre-step flash, cut at `k`, power-cycle, mount, and
 /// require the **whole state** to be the old or the new one; every third
 /// cut tears the recovery run too (a double cut); then re-run the step and
 /// require the new state, also after a remount.
@@ -125,11 +131,13 @@ pub fn sweep(geom: NorGeometry, cfg: &StoreConfig, steps: &[Step], max_cuts: u64
         flash = st.into_flash();
         report.ops_total += n;
         for k in sample(n, dial("LP_TREE_STORE_SWEEP_CUTS", max_cuts)) {
-            for tear in TearModel::ALL {
+            for tear in sweep_tears() {
                 let seed = (si as u64) << 32 | k << 2 | tear as u64;
                 let mut st = mount(pre.clone(), cfg);
                 st.flash_mut().set_plan(FaultPlan::cut(k, tear, seed));
+                let torn_before = st.flash().stats().torn_erases;
                 let cut_result = step(&mut st);
+                report.torn_erases += st.flash().stats().torn_erases - torn_before;
                 let mut f = st.into_flash();
                 let ctx = || format!("step {si} cut {k}/{n} {tear:?}");
                 if k < n {
@@ -152,6 +160,7 @@ pub fn sweep(geom: NorGeometry, cfg: &StoreConfig, steps: &[Step], max_cuts: u64
                     st.flash_mut()
                         .set_plan(FaultPlan::cut(k2, tear, seed ^ 0xD0B1E));
                     let _ = step(&mut st);
+                    report.double_cuts += 1;
                     let mut f = st.into_flash();
                     f.power_cycle(FaultPlan::none());
                     st = mount(f, cfg);
@@ -179,6 +188,31 @@ pub fn dial(name: &str, default: u64) -> u64 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
+}
+
+/// The tear models a sweep runs: [`TearModel::ALL`] (the three guessed
+/// ones), or the comma-separated names in `LP_TREE_STORE_SWEEP_TEARS`
+/// (`calibrated`, `calibrated_zeroing`, … — `lp-nor-sim`'s
+/// [`TearModel::NAMED`]). An unknown name panics rather than running less.
+pub fn sweep_tears() -> Vec<TearModel> {
+    match std::env::var("LP_TREE_STORE_SWEEP_TEARS") {
+        Ok(v) if !v.trim().is_empty() => v
+            .split(',')
+            .map(|t| {
+                TearModel::from_name(t.trim()).unwrap_or_else(|| {
+                    panic!("LP_TREE_STORE_SWEEP_TEARS: unknown tear model {t:?}")
+                })
+            })
+            .collect(),
+        _ => TearModel::ALL.to_vec(),
+    }
+}
+
+/// A sweep's geometry: `sectors` 4 KiB sectors, or
+/// `LP_TREE_STORE_SWEEP_SECTORS` when set (the device's 128 or 176). The
+/// GC sweep keeps its own small flash: GC inside the cut range is its point.
+pub fn sweep_geometry(sectors: u32) -> NorGeometry {
+    NorGeometry::c6(dial("LP_TREE_STORE_SWEEP_SECTORS", sectors as u64) as u32)
 }
 
 fn sample(n: u64, max: u64) -> Vec<u64> {
