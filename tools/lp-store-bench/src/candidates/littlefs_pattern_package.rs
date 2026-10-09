@@ -31,6 +31,11 @@
 //!   leave unmountable
 //!   (`docs/defects/2026-10-08-littlefs-rust-relocation-cut-leaves-lpfs-unmountable.md`):
 //!   a cut failure there is a result about littlefs-rust, not this adapter.
+//!   With overflow checks on (a debug build) littlefs-rust 0.1.0 panics on
+//!   any `block_cycles > 0` — its `lfs_dir_alloc` overflows where C wraps
+//!   (`docs/defects/2026-10-08-littlefs-rust-block-cycles-overflows-under-overflow-checks.md`)
+//!   — so run F3 at its default from a release build (the bench's own
+//!   commands are); the unit tests run it at −1 there.
 //! - **Stale temporaries** (a cut mid-commit or mid-put) are removed at the
 //!   first commit after a mount, or overwritten first.
 //! - Plain files directly in a `modules/` directory named `*.pkg` /
@@ -639,15 +644,48 @@ mod tests {
 
     #[test]
     fn round_trips_fault_free() {
+        round_trip(&F3BlockCyclesOff);
+    }
+
+    /// At F3's default `block_cycles` (100). Overflow checks off only, as the
+    /// firmware's `release-esp32` profile builds littlefs-rust — see
+    /// `littlefs_format_overflows_with_block_cycles_under_overflow_checks`.
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn round_trips_fault_free_at_the_default_block_cycles() {
         round_trip(&LittlefsPatternPackage);
+    }
+
+    /// A library defect, pinned (found building F3, 2026-10-08):
+    /// littlefs-rust 0.1.0's `lfs_dir_alloc` aligns a fresh block's revision
+    /// up to `(block_cycles + 1) | 1` with a plain `+`
+    /// (`lfs_alignup(0xffff_ffff, 101)` on an erased block, util.rs). C's
+    /// unsigned arithmetic wraps there by definition (to 0); Rust's overflow
+    /// checks panic. So with `block_cycles > 0`, a build with overflow checks
+    /// on (`cargo test`'s dev profile) cannot even format an erased
+    /// partition; a build with them off (release, the firmware) wraps as C
+    /// does. If this starts failing, littlefs-rust was fixed: drop the pin
+    /// and the `not(debug_assertions)` gates in this module.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn littlefs_format_overflows_with_block_cycles_under_overflow_checks() {
+        let cfg = CandidateConfig::new(32);
+        let r = crate::catch_quiet(|| {
+            let mut flash = NorFlashSim::new(cfg.geometry());
+            LittlefsPatternPackage.format(&mut flash, &cfg)
+        });
+        let e = r.expect_err("littlefs-rust no longer overflows in lfs_dir_alloc");
+        assert!(e.contains("overflow"), "{e}");
+        let mut flash = NorFlashSim::new(cfg.geometry());
+        F3BlockCyclesOff.format(&mut flash, &cfg).unwrap();
     }
 
     #[test]
     fn a_save_rewrites_only_its_own_pattern_package() {
         let cfg = CandidateConfig::new(64);
         let mut flash = NorFlashSim::new(cfg.geometry());
-        LittlefsPatternPackage.format(&mut flash, &cfg).unwrap();
-        let mut s = LittlefsPatternPackage
+        F3BlockCyclesOff.format(&mut flash, &cfg).unwrap();
+        let mut s = F3BlockCyclesOff
             .mount(flash, &cfg)
             .map_err(|(e, _)| e)
             .unwrap();
@@ -688,8 +726,42 @@ mod tests {
 
     #[test]
     fn small_exhaustive_sweep_runs() {
+        let s = small_sweep(&F3BlockCyclesOff);
+        eprintln!("f3@block_cycles=-1 small sweep: {s:?}");
+        assert!(s.cases > 0);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn small_exhaustive_sweep_runs_at_the_default_block_cycles() {
         let s = small_sweep(&LittlefsPatternPackage);
         eprintln!("f3 small sweep: {s:?}");
         assert!(s.cases > 0);
+    }
+
+    /// F3 with `block_cycles` off (−1): what the unit tests run under
+    /// overflow checks, where the default (100) panics inside littlefs-rust.
+    struct F3BlockCyclesOff;
+
+    impl Candidate for F3BlockCyclesOff {
+        fn name(&self) -> &str {
+            "f3"
+        }
+
+        fn format(&self, flash: &mut NorFlashSim, cfg: &CandidateConfig) -> Result<(), StoreError> {
+            LittlefsPatternPackage.format(flash, &off(cfg))
+        }
+
+        fn mount(
+            &self,
+            flash: NorFlashSim,
+            cfg: &CandidateConfig,
+        ) -> Result<Box<dyn CandidateStore>, (StoreError, NorFlashSim)> {
+            LittlefsPatternPackage.mount(flash, &off(cfg))
+        }
+    }
+
+    fn off(cfg: &CandidateConfig) -> CandidateConfig {
+        cfg.clone().with_dial("block_cycles", "-1")
     }
 }
