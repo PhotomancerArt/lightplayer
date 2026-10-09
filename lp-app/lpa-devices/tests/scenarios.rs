@@ -9,6 +9,7 @@
 use lpa_devices::journal::EvictionReason;
 use lpa_devices::replay::{Expect, Fixture, Replay, Script, Step, replay_inputs};
 use lpa_devices::view::{LoadedProject, roster_view};
+use lpa_devices::wire::ClientFrameBody;
 use lpa_devices::{
     Action, ActivityKind, Classification, Command, DeviceId, DeviceRecord, DeviceStatus, DeviceUid,
     Escape, IdentityChain, Input, LinkCommand, LinkId, Liveness, Millis, ResetKind, Roster,
@@ -2156,5 +2157,82 @@ fn reset_board_pulses_the_hardware_and_identify_reads_the_boot() {
     assert!(
         view.pending[0].needs_firmware(),
         "the verdict survives us hanging up: {view:?}"
+    );
+}
+
+/// A board reached over a network link has no reset lines, so its Reset is
+/// the wire's restart request: the board answers, then resets, and the link
+/// it drops comes back through the transport's own reconnect. Nothing waits
+/// for a boot here — not an identify on a link about to drop, and not a
+/// line pulse the socket cannot carry — so a board that refuses the request
+/// leaves nothing waiting. Every network kind (Bluetooth, the LAN, the
+/// relay) takes the same route.
+#[test]
+fn reset_over_a_network_link_asks_the_board_to_restart_itself() {
+    for endpoint in [
+        "lan:ws://127.0.0.1:5600/link",
+        "ble:QkxFLWlk",
+        "relay:a0f26287b48c",
+    ] {
+        let mut replay = Replay::new(RosterConfig::default());
+        replay.step(Millis(0), Step::attach(1, endpoint));
+        replay.step(Millis(10), Step::opened(1));
+        replay.step(Millis(100), Step::hello(1).uid("dev_net"));
+        let device = replay.view().devices[0].id;
+        assert!(replay.view().devices[0].activity.is_none(), "{endpoint}");
+
+        let commands = replay.feed(Millis(200), Input::Action(Action::ResetBoard { device }));
+        let [Command::Link { link, command }] = commands.as_slice() else {
+            panic!("{endpoint}: one command, the request: {commands:?}");
+        };
+        assert_eq!(*link, LinkId(1), "{endpoint}");
+        let LinkCommand::SendFrame(frame) = command else {
+            panic!("{endpoint}: a frame, never a line pulse: {command:?}");
+        };
+        assert_eq!(frame.body, ClientFrameBody::Reboot, "{endpoint}");
+        assert!(
+            replay.view().devices[0].activity.is_none(),
+            "{endpoint}: a direct gesture, nothing left waiting"
+        );
+
+        // The board resets and its link drops; the card goes offline, not
+        // busy, and the next link identifies as any does.
+        replay.step(Millis(300), Step::detach(1));
+        let card = &replay.view().devices[0];
+        assert!(card.activity.is_none(), "{endpoint}: {card:?}");
+        assert_eq!(card.status, DeviceStatus::Offline, "{endpoint}");
+    }
+}
+
+/// The USB route is untouched: a reset there still pulses the lines and
+/// identifies what boots, and the restart request is never sent.
+#[test]
+fn reset_over_usb_still_pulses_the_lines() {
+    let mut replay = Replay::new(RosterConfig::default());
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(10), Step::opened(1));
+    replay.step(Millis(100), Step::hello(1).uid("dev_usb"));
+    let device = replay.view().devices[0].id;
+
+    let commands = replay.feed(Millis(200), Input::Action(Action::ResetBoard { device }));
+    assert!(
+        matches!(
+            commands.first(),
+            Some(Command::Link {
+                command: LinkCommand::RunReset(ResetKind::Normal),
+                ..
+            })
+        ),
+        "{commands:?}"
+    );
+    assert!(
+        !commands.iter().any(|command| matches!(
+            command,
+            Command::Link {
+                command: LinkCommand::SendFrame(frame),
+                ..
+            } if frame.body == ClientFrameBody::Reboot
+        )),
+        "{commands:?}"
     );
 }

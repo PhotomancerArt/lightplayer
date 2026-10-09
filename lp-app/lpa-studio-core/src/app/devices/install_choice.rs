@@ -28,9 +28,7 @@ use lpa_devices::{FirmwareAge, WireVersion};
 use lpa_update::HostBuildFacts;
 use lpc_firmware_release::{ReleaseIndex, ReleaseIndexEntry};
 
-use super::device_update_route::{
-    FIRST_BLUETOOTH_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE, UpdateLink,
-};
+use super::device_update_route::UpdateLink;
 use super::device_update_version::UpdateVersion;
 use super::store_lookups::StoreLookups;
 use super::update_build_facts::{StoreLatest, StoreReleases};
@@ -277,16 +275,11 @@ fn same_build(a: &UpdateVersion, b: &UpdateVersion) -> bool {
 }
 
 /// Over a wireless link, `link` when `choice` predates updates over it
-/// ([`FIRST_BLUETOOTH_UPDATE_RELEASE`], [`FIRST_WIFI_UPDATE_RELEASE`]);
+/// ([`UpdateLink::first_update_release`]);
 /// while no release is named, any choice older than the board's (`age` is
 /// the board against it).
 fn stranded_over(link: UpdateLink, choice: &UpdateVersion, age: FirmwareAge) -> Option<UpdateLink> {
-    let first = match link {
-        UpdateLink::Usb => return None,
-        UpdateLink::Bluetooth => FIRST_BLUETOOTH_UPDATE_RELEASE,
-        UpdateLink::Wifi => FIRST_WIFI_UPDATE_RELEASE,
-    };
-    needs_usb_after_with(first, link, choice, age).then_some(link)
+    needs_usb_after_with(link.first_update_release(), link, choice, age).then_some(link)
 }
 
 /// Whether [`stranded_over`] holds, with the first release as a parameter,
@@ -312,6 +305,9 @@ mod tests {
 
     use super::*;
     use crate::app::devices::device_update_fixtures::{build, studio_y};
+    use crate::app::devices::device_update_route::{
+        FIRST_RELAY_UPDATE_RELEASE, FIRST_WIFI_UPDATE_RELEASE,
+    };
     use crate::app::devices::store_lookups::StoreLookup;
 
     const PROTO: u32 = 40;
@@ -437,24 +433,29 @@ mod tests {
         }
     }
 
-    /// Over Wi‑Fi no release is named yet: every choice older than the
-    /// board's warns, and a newer one does not.
+    /// Over Wi‑Fi and the relay the first releases are named: a choice is
+    /// stranded exactly when it is older than that release, whatever the
+    /// board runs.
     #[test]
-    fn over_wifi_every_older_version_is_stranded_until_a_release_is_named() {
-        let any = UpdateVersion::new("2026.10.06-9");
-        assert_eq!(FIRST_WIFI_UPDATE_RELEASE, None);
-        assert_eq!(
-            stranded_over(UpdateLink::Wifi, &any, FirmwareAge::Newer),
-            Some(UpdateLink::Wifi)
-        );
-        assert_eq!(
-            stranded_over(UpdateLink::Wifi, &any, FirmwareAge::Older),
-            None
-        );
-        assert_eq!(
-            stranded_over(UpdateLink::Usb, &any, FirmwareAge::Newer),
-            None
-        );
+    fn over_wifi_and_the_relay_only_releases_before_theirs_are_stranded() {
+        assert_eq!(FIRST_WIFI_UPDATE_RELEASE, Some("2026.10.08-2"));
+        assert_eq!(FIRST_RELAY_UPDATE_RELEASE, Some("2026.10.08-9"));
+        let before_wifi = UpdateVersion::new("2026.10.08-1");
+        let wifi_only = UpdateVersion::new("2026.10.08-2");
+        let relay_first = UpdateVersion::new("2026.10.08-9");
+        let newer = UpdateVersion::new("2026.10.09-1");
+        let age = FirmwareAge::Newer;
+        let wifi = UpdateLink::Wifi;
+        let relay = UpdateLink::Relay;
+        assert_eq!(stranded_over(wifi, &before_wifi, age), Some(wifi));
+        assert_eq!(stranded_over(wifi, &wifi_only, age), None);
+        assert_eq!(stranded_over(wifi, &relay_first, age), None);
+        // Through the relay the Wi‑Fi-only release is still too old.
+        assert_eq!(stranded_over(relay, &before_wifi, age), Some(relay));
+        assert_eq!(stranded_over(relay, &wifi_only, age), Some(relay));
+        assert_eq!(stranded_over(relay, &relay_first, age), None);
+        assert_eq!(stranded_over(relay, &newer, age), None);
+        assert_eq!(stranded_over(UpdateLink::Usb, &before_wifi, age), None);
     }
 
     #[test]

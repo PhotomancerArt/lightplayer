@@ -1,0 +1,313 @@
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (40) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (41) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (43) boot: chip revision: v0.2[0m
+[0;32mI (51) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (61) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (70) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (79) boot: Enabling RNG early entropy source...[0m
+[0;32mI (90) boot: Partition Table:[0m
+[0;32mI (97) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (112) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (127) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (142) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (157) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (172) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (187) boot: End of partition table[0m
+[0;32mI (196) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=0217ch (  8572) map[0m
+[0;32mI (214) esp_image: segment 1: paddr=000121a4 vaddr=40800000 size=01df0h (  7664) load[0m
+[0;32mI (231) esp_image: segment 2: paddr=00013f9c vaddr=00000000 size=0c07ch ( 49276) [0m
+[0;32mI (250) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=0a10ch ( 41228) map[0m
+[0;32mI (266) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (275) boot: Disabling RNG early entropy source...[0m
+[flash-tears] READY send any byte to start the scan
+[fw-checks-header] {"schema":1,"payload":"flash-tears","chip":"esp32c6","firmware_commit":"51e2c5fed6d0","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_tears,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":null,"state":"fresh"}
+[fw-check-json] {"kind":"ft-journal","copy":0,"valid":0,"damaged":0,"latest":null,"torn_next":null}
+[fw-check-json] {"kind":"ft-journal","copy":1,"valid":0,"damaged":0,"latest":null,"torn_next":null}
+[fw-check-json] {"kind":"ft-repair","sectors":0,"journal_copies":0,"init_cycles":16,"next":16}
+[fw-check-json] {"kind":"ft-timing","cycle":16,"journal_us":18,"erase_us":4,"program_us":783,"page_us_min":26,"page_us_max":26}
+[flash-tears] === SCAN DONE === next=17
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (40) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (41) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (43) boot: chip revision: v0.2[0m
+[0;32mI (51) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (61) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (70) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (79) boot: Enabling RNG early entropy source...[0m
+[0;32mI (90) boot: Partition Table:[0m
+[0;32mI (97) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (112) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (127) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (142) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (157) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (172) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (187) boot: End of partition table[0m
+[0;32mI (196) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=0217ch (  8572) map[0m
+[0;32mI (214) esp_image: segment 1: paddr=000121a4 vaddr=40800000 size=01df0h (  7664) load[0m
+[0;32mI (231) esp_image: segment 2: paddr=00013f9c vaddr=00000000 size=0c07ch ( 49276) [0m
+[0;32mI (250) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=0a10ch ( 41228) map[0m
+[0;32mI (266) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (275) boot: Disabling RNG early entropy source...[0m
+[flash-tears] READY send any byte to start the scan
+[fw-checks-header] {"schema":1,"payload":"flash-tears","chip":"esp32c6","firmware_commit":"51e2c5fed6d0","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_tears,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":321,"state":"resume"}
+[fw-check-json] {"kind":"ft-journal","copy":0,"valid":66,"damaged":0,"latest":321,"torn_next":null}
+[fw-check-json] {"kind":"ft-journal","copy":1,"valid":194,"damaged":0,"latest":321,"torn_next":null}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":0,"role":"settled","wrote":320,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":1,"role":"in-flight","wrote":321,"verdict":"erased","weak_bits":0,"weak_bytes":0,"old_zero_bits":16525,"remaining_old_zeros":0,"weak_at_old_zeros":0,"new_zero_bits":16243,"landed_new_zeros":0,"weak_at_new_zeros":0,"ff_bytes":4096,"leading_ff_bytes":4096,"trailing_ff_bytes":4096,"page_remaining":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_landed":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_weak":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"program":null}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":2,"role":"settled","wrote":306,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":3,"role":"settled","wrote":307,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":4,"role":"settled","wrote":308,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":5,"role":"settled","wrote":309,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":6,"role":"settled","wrote":310,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":7,"role":"settled","wrote":311,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":8,"role":"settled","wrote":312,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":9,"role":"settled","wrote":313,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":10,"role":"settled","wrote":314,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":11,"role":"settled","wrote":315,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":12,"role":"settled","wrote":316,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":13,"role":"settled","wrote":317,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":14,"role":"settled","wrote":318,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":321,"sector":15,"role":"settled","wrote":319,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-summary","latest":321,"in_flight_sector":1,"in_flight":"erased","settled_complete":15,"settled_unexpected":0,"weak_sectors":0}
+[fw-check-json] {"kind":"ft-repair","sectors":1,"journal_copies":0,"init_cycles":0,"next":322}
+[fw-check-json] {"kind":"ft-timing","cycle":322,"journal_us":17,"erase_us":5,"program_us":782,"page_us_min":26,"page_us_max":26}
+[flash-tears] === SCAN DONE === next=323
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (40) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (41) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (43) boot: chip revision: v0.2[0m
+[0;32mI (51) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (61) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (70) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (79) boot: Enabling RNG early entropy source...[0m
+[0;32mI (90) boot: Partition Table:[0m
+[0;32mI (97) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (112) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (127) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (142) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (157) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (172) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (187) boot: End of partition table[0m
+[0;32mI (196) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=0217ch (  8572) map[0m
+[0;32mI (214) esp_image: segment 1: paddr=000121a4 vaddr=40800000 size=01df0h (  7664) load[0m
+[0;32mI (231) esp_image: segment 2: paddr=00013f9c vaddr=00000000 size=0c07ch ( 49276) [0m
+[0;32mI (250) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=0a10ch ( 41228) map[0m
+[0;32mI (266) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (275) boot: Disabling RNG early entropy source...[0m
+[flash-tears] READY send any byte to start the scan
+[fw-checks-header] {"schema":1,"payload":"flash-tears","chip":"esp32c6","firmware_commit":"51e2c5fed6d0","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_tears,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":580,"state":"resume"}
+[fw-check-json] {"kind":"ft-journal","copy":0,"valid":69,"damaged":0,"latest":580,"torn_next":null}
+[fw-check-json] {"kind":"ft-journal","copy":1,"valid":197,"damaged":0,"latest":580,"torn_next":null}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":0,"role":"settled","wrote":576,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":1,"role":"settled","wrote":577,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":2,"role":"settled","wrote":578,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":3,"role":"settled","wrote":579,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":4,"role":"in-flight","wrote":580,"verdict":"erased","weak_bits":0,"weak_bytes":0,"old_zero_bits":16237,"remaining_old_zeros":0,"weak_at_old_zeros":0,"new_zero_bits":16531,"landed_new_zeros":0,"weak_at_new_zeros":0,"ff_bytes":4096,"leading_ff_bytes":4096,"trailing_ff_bytes":4096,"page_remaining":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_landed":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_weak":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"program":null}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":5,"role":"settled","wrote":565,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":6,"role":"settled","wrote":566,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":7,"role":"settled","wrote":567,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":8,"role":"settled","wrote":568,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":9,"role":"settled","wrote":569,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":10,"role":"settled","wrote":570,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":11,"role":"settled","wrote":571,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":12,"role":"settled","wrote":572,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":13,"role":"settled","wrote":573,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":14,"role":"settled","wrote":574,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":580,"sector":15,"role":"settled","wrote":575,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-summary","latest":580,"in_flight_sector":4,"in_flight":"erased","settled_complete":15,"settled_unexpected":0,"weak_sectors":0}
+[fw-check-json] {"kind":"ft-repair","sectors":1,"journal_copies":0,"init_cycles":0,"next":581}
+[fw-check-json] {"kind":"ft-timing","cycle":581,"journal_us":17,"erase_us":5,"program_us":782,"page_us_min":26,"page_us_max":26}
+[flash-tears] === SCAN DONE === next=582
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (40) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (41) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (43) boot: chip revision: v0.2[0m
+[0;32mI (51) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (61) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (70) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (79) boot: Enabling RNG early entropy source...[0m
+[0;32mI (90) boot: Partition Table:[0m
+[0;32mI (97) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (112) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (127) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (142) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (157) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (172) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (187) boot: End of partition table[0m
+[0;32mI (196) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=0217ch (  8572) map[0m
+[0;32mI (214) esp_image: segment 1: paddr=000121a4 vaddr=40800000 size=01df0h (  7664) load[0m
+[0;32mI (231) esp_image: segment 2: paddr=00013f9c vaddr=00000000 size=0c07ch ( 49276) [0m
+[0;32mI (250) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=0a10ch ( 41228) map[0m
+[0;32mI (266) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (275) boot: Disabling RNG early entropy source...[0m
+[flash-tears] READY send any byte to start the scan
+[fw-checks-header] {"schema":1,"payload":"flash-tears","chip":"esp32c6","firmware_commit":"51e2c5fed6d0","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_tears,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":1066,"state":"resume"}
+[fw-check-json] {"kind":"ft-journal","copy":0,"valid":43,"damaged":0,"latest":1066,"torn_next":null}
+[fw-check-json] {"kind":"ft-journal","copy":1,"valid":171,"damaged":0,"latest":1066,"torn_next":null}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":0,"role":"settled","wrote":1056,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":1,"role":"settled","wrote":1057,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":2,"role":"settled","wrote":1058,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":3,"role":"settled","wrote":1059,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":4,"role":"settled","wrote":1060,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":5,"role":"settled","wrote":1061,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":6,"role":"settled","wrote":1062,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":7,"role":"settled","wrote":1063,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":8,"role":"settled","wrote":1064,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":9,"role":"settled","wrote":1065,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":10,"role":"in-flight","wrote":1066,"verdict":"erased","weak_bits":0,"weak_bytes":0,"old_zero_bits":16419,"remaining_old_zeros":0,"weak_at_old_zeros":0,"new_zero_bits":16349,"landed_new_zeros":0,"weak_at_new_zeros":0,"ff_bytes":4096,"leading_ff_bytes":4096,"trailing_ff_bytes":4096,"page_remaining":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_landed":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_weak":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"program":null}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":11,"role":"settled","wrote":1051,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":12,"role":"settled","wrote":1052,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":13,"role":"settled","wrote":1053,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":14,"role":"settled","wrote":1054,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1066,"sector":15,"role":"settled","wrote":1055,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-summary","latest":1066,"in_flight_sector":10,"in_flight":"erased","settled_complete":15,"settled_unexpected":0,"weak_sectors":0}
+[fw-check-json] {"kind":"ft-repair","sectors":1,"journal_copies":0,"init_cycles":0,"next":1067}
+[fw-check-json] {"kind":"ft-timing","cycle":1067,"journal_us":18,"erase_us":4,"program_us":782,"page_us_min":26,"page_us_max":26}
+[flash-tears] === SCAN DONE === next=1068
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (40) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (41) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (43) boot: chip revision: v0.2[0m
+[0;32mI (51) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (61) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (70) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (79) boot: Enabling RNG early entropy source...[0m
+[0;32mI (90) boot: Partition Table:[0m
+[0;32mI (97) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (112) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (127) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (142) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (157) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (172) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (187) boot: End of partition table[0m
+[0;32mI (196) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=0217ch (  8572) map[0m
+[0;32mI (214) esp_image: segment 1: paddr=000121a4 vaddr=40800000 size=01df0h (  7664) load[0m
+[0;32mI (231) esp_image: segment 2: paddr=00013f9c vaddr=00000000 size=0c07ch ( 49276) [0m
+[0;32mI (250) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=0a10ch ( 41228) map[0m
+[0;32mI (266) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (275) boot: Disabling RNG early entropy source...[0m
+[flash-tears] READY send any byte to start the scan
+[fw-checks-header] {"schema":1,"payload":"flash-tears","chip":"esp32c6","firmware_commit":"51e2c5fed6d0","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_tears,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":1931,"state":"resume"}
+[fw-check-json] {"kind":"ft-journal","copy":0,"valid":140,"damaged":0,"latest":1931,"torn_next":null}
+[fw-check-json] {"kind":"ft-journal","copy":1,"valid":12,"damaged":0,"latest":1931,"torn_next":null}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":0,"role":"settled","wrote":1920,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":1,"role":"settled","wrote":1921,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":2,"role":"settled","wrote":1922,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":3,"role":"settled","wrote":1923,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":4,"role":"settled","wrote":1924,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":5,"role":"settled","wrote":1925,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":6,"role":"settled","wrote":1926,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":7,"role":"settled","wrote":1927,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":8,"role":"settled","wrote":1928,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":9,"role":"settled","wrote":1929,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":10,"role":"settled","wrote":1930,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":11,"role":"in-flight","wrote":1931,"verdict":"erased","weak_bits":0,"weak_bytes":0,"old_zero_bits":16365,"remaining_old_zeros":0,"weak_at_old_zeros":0,"new_zero_bits":16403,"landed_new_zeros":0,"weak_at_new_zeros":0,"ff_bytes":4096,"leading_ff_bytes":4096,"trailing_ff_bytes":4096,"page_remaining":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_landed":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_weak":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"program":null}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":12,"role":"settled","wrote":1916,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":13,"role":"settled","wrote":1917,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":14,"role":"settled","wrote":1918,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":1931,"sector":15,"role":"settled","wrote":1919,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-summary","latest":1931,"in_flight_sector":11,"in_flight":"erased","settled_complete":15,"settled_unexpected":0,"weak_sectors":0}
+[fw-check-json] {"kind":"ft-repair","sectors":1,"journal_copies":0,"init_cycles":0,"next":1932}
+[fw-check-json] {"kind":"ft-timing","cycle":1932,"journal_us":18,"erase_us":4,"program_us":782,"page_us_min":25,"page_us_max":26}
+[flash-tears] === SCAN DONE === next=1933
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x1 (POWERON),boot:0x1e (SPI_FAST_FLASH_BOOT)
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (40) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (41) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (43) boot: chip revision: v0.2[0m
+[0;32mI (51) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (61) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (70) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (79) boot: Enabling RNG early entropy source...[0m
+[0;32mI (90) boot: Partition Table:[0m
+[0;32mI (97) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (112) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (127) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (142) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (157) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (172) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (187) boot: End of partition table[0m
+[0;32mI (196) esp_image: segment 0: paddr=00010020 vaddr=42000020 size=0217ch (  8572) map[0m
+[0;32mI (214) esp_image: segment 1: paddr=000121a4 vaddr=40800000 size=01df0h (  7664) load[0m
+[0;32mI (231) esp_image: segment 2: paddr=00013f9c vaddr=00000000 size=0c07ch ( 49276) [0m
+[0;32mI (250) esp_image: segment 3: paddr=00020020 vaddr=42010020 size=0a10ch ( 41228) map[0m
+[0;32mI (266) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (275) boot: Disabling RNG early entropy source...[0m
+[flash-tears] READY send any byte to start the scan
+[fw-checks-header] {"schema":1,"payload":"flash-tears","chip":"esp32c6","firmware_commit":"51e2c5fed6d0","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_tears,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"ft-boot","reset":"poweron","base":"0x350000","region_sectors":16,"latest":3427,"state":"resume"}
+[fw-check-json] {"kind":"ft-journal","copy":0,"valid":100,"damaged":0,"latest":3427,"torn_next":null}
+[fw-check-json] {"kind":"ft-journal","copy":1,"valid":228,"damaged":0,"latest":3427,"torn_next":null}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":0,"role":"settled","wrote":3424,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":1,"role":"settled","wrote":3425,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":2,"role":"settled","wrote":3426,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":3,"role":"in-flight","wrote":3427,"verdict":"torn-program","weak_bits":0,"weak_bytes":0,"old_zero_bits":16243,"remaining_old_zeros":0,"weak_at_old_zeros":0,"new_zero_bits":16525,"landed_new_zeros":10077,"weak_at_new_zeros":0,"ff_bytes":1606,"leading_ff_bytes":0,"trailing_ff_bytes":1600,"page_remaining":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"page_landed":[994,1017,1031,1026,1056,1049,1048,1031,1029,796,0,0,0,0,0,0],"page_weak":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"program":{"shape":"op-boundary","intended_bits":16525,"landed_bits":10077,"stray_bits":0,"prefix_bytes":2496,"partial_bytes":0,"landed_extent":2496}}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":4,"role":"settled","wrote":3412,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":5,"role":"settled","wrote":3413,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":6,"role":"settled","wrote":3414,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":7,"role":"settled","wrote":3415,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":8,"role":"settled","wrote":3416,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":9,"role":"settled","wrote":3417,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":10,"role":"settled","wrote":3418,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":11,"role":"settled","wrote":3419,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":12,"role":"settled","wrote":3420,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":13,"role":"settled","wrote":3421,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":14,"role":"settled","wrote":3422,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-sector","latest":3427,"sector":15,"role":"settled","wrote":3423,"verdict":"complete","diff_bits":0,"weak_bits":0}
+[fw-check-json] {"kind":"ft-summary","latest":3427,"in_flight_sector":3,"in_flight":"torn-program","settled_complete":15,"settled_unexpected":0,"weak_sectors":0}
+[fw-check-json] {"kind":"ft-repair","sectors":1,"journal_copies":0,"init_cycles":0,"next":3428}
+[fw-check-json] {"kind":"ft-timing","cycle":3428,"journal_us":17,"erase_us":5,"program_us":782,"page_us_min":26,"page_us_max":26}
+[flash-tears] === SCAN DONE === next=3429

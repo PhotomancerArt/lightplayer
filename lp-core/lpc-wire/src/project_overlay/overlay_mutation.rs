@@ -68,6 +68,139 @@ mod tests {
         assert!(json.contains("set_artifact_body"));
     }
 
+    /// The PLAYFUL choker's shader (1,971 B), the edit Yona's board refused
+    /// on 2026-10-08.
+    const CHOKER_SHADER: &str =
+        include_str!("../../../../catalog/projects/playful-choker/shader.glsl");
+    /// `projects/test/basic`'s shader (4,365 B).
+    const BASIC_SHADER: &str = include_str!("../../../../projects/test/basic/shader.glsl");
+
+    /// Studio's edit of a known shader is the shader's size plus its
+    /// envelope and a byte a line (wire 41), not ~3.5 characters a byte as
+    /// the array of numbers it was. Pinned, so a change to the encoding or
+    /// the envelope shows up here first.
+    #[test]
+    fn a_shader_edit_request_is_about_the_size_of_its_source() {
+        for (name, shader, before, after) in [
+            ("playful-choker", CHOKER_SHADER, 7_134, 2_239),
+            ("test/basic", BASIC_SHADER, 15_183, 4_709),
+        ] {
+            let source = shader.len();
+            let text = shader_edit_request(shader.as_bytes()).len();
+            let array = shader_edit_request_as_byte_array(shader.as_bytes()).len();
+            assert_eq!((array, text), (before, after), "{name}: {source} B source");
+            // The envelope (~200 B) and the newlines' escapes are all it adds.
+            let lines = shader.matches('\n').count();
+            assert!(
+                text <= source + lines + 300,
+                "{name}: {text} B for {source} B of source"
+            );
+            assert!(text * 3 < array, "{name}: {text} B against {array} B");
+        }
+    }
+
+    /// The body Studio stops at fits one request on the board, with a long
+    /// path, and comes back in an overlay read inside one frame.
+    #[test]
+    fn the_largest_body_studio_sends_fits_one_request_and_one_reply() {
+        use crate::budget::{MAX_ASSET_BODY_ENCODED_BYTES, PROJECT_READ_FRAME_MAX_BYTES};
+        // Two characters to an escaped newline: the encoded body is exactly
+        // the limit.
+        let line = "vec3 c = vec3(0.5);\n";
+        let mut body = line.repeat(MAX_ASSET_BODY_ENCODED_BYTES / (line.len() + 1));
+        while lpc_model::body_bytes::encoded_len(body.as_bytes()) < MAX_ASSET_BODY_ENCODED_BYTES {
+            body.push('x');
+        }
+        assert_eq!(
+            lpc_model::body_bytes::encoded_len(body.as_bytes()),
+            MAX_ASSET_BODY_ENCODED_BYTES
+        );
+        let path = alloc::format!("/{}.glsl", "deep/".repeat(150));
+        let request = crate::json::to_string(&crate::ClientMessage {
+            id: u64::from(u32::MAX),
+            msg: crate::ClientRequest::ProjectCommand {
+                handle: crate::WireProjectHandle::new(u32::MAX),
+                command: crate::WireProjectCommand::MutateOverlay {
+                    request: edit_of(&path, body.as_bytes()),
+                },
+            },
+        })
+        .unwrap();
+        assert!(
+            request.len() <= PROJECT_READ_FRAME_MAX_BYTES,
+            "{} B request",
+            request.len()
+        );
+
+        let mut overlay = lpc_model::ProjectOverlay::new();
+        overlay.set_artifact_body(
+            ArtifactLocation::file(path.as_str()),
+            AssetBodyOverlay::ReplaceBody(body.into_bytes()),
+        );
+        let reply = crate::json::to_string(&crate::WireServerMessage::new(
+            u64::from(u32::MAX),
+            crate::server::ServerMsgBody::ProjectCommand {
+                response: crate::WireProjectCommandResponse::ReadOverlay {
+                    response: crate::WireOverlayReadResponse::new(
+                        overlay,
+                        Revision::new(i64::from(u32::MAX)),
+                    ),
+                },
+            },
+        ))
+        .unwrap();
+        assert!(
+            reply.len() <= PROJECT_READ_FRAME_MAX_BYTES,
+            "{} B reply",
+            reply.len()
+        );
+    }
+
+    #[test]
+    fn a_body_round_trips_as_text_and_as_base64() {
+        for body in [
+            CHOKER_SHADER.as_bytes().to_vec(),
+            b"abcd".to_vec(),
+            alloc::vec![0x00, 0xff, 0x80, b'"', b'\\'],
+        ] {
+            let request = edit_of("/shader.glsl", &body);
+            let json = crate::json::to_string(&request).unwrap();
+            let decoded: WireOverlayMutationRequest = crate::json::from_str(&json).unwrap();
+            assert_eq!(decoded, request, "{json}");
+        }
+        let json = crate::json::to_string(&edit_of("/a.bin", &[0xff, 0xfe])).unwrap();
+        assert!(
+            json.contains(r#""edit":{"replace_body":{"base64":"//4="}}"#),
+            "{json}"
+        );
+        let json = crate::json::to_string(&edit_of("/a.glsl", b"void main() {}\n")).unwrap();
+        assert!(
+            json.contains(r#""edit":{"replace_body":"void main() {}\n"}"#),
+            "{json}"
+        );
+    }
+
+    /// The board writes bodies back (an overlay read) with `ser-write-json`:
+    /// the same text as `serde_json`, for text and for a binary body.
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn the_device_serializer_writes_bodies_as_serde_json_does() {
+        for body in [CHOKER_SHADER.as_bytes(), &[0x00, 0xff, b'"', 0x80][..]] {
+            let mut overlay = lpc_model::ProjectOverlay::new();
+            overlay.set_artifact_body(
+                ArtifactLocation::file("/shader.glsl"),
+                AssetBodyOverlay::ReplaceBody(body.to_vec()),
+            );
+            let read = crate::WireOverlayReadResponse::new(overlay, Revision::new(3));
+            let mut device = alloc::vec::Vec::new();
+            ser_write_json::ser::to_writer(&mut device, &read).unwrap();
+            assert_eq!(
+                core::str::from_utf8(&device).unwrap(),
+                crate::json::to_string(&read).unwrap()
+            );
+        }
+    }
+
     #[test]
     fn overlay_mutation_response_round_trips() {
         let response = WireOverlayMutationResponse::new(
@@ -256,5 +389,47 @@ mod tests {
 
         assert_eq!(decoded, response);
         assert!(json.contains("not_a_value_leaf"));
+    }
+
+    /// A one-command `SetArtifactBody` batch replacing `path`'s body.
+    fn edit_of(path: &str, body: &[u8]) -> WireOverlayMutationRequest {
+        WireOverlayMutationRequest::new(MutationCmdBatch::new(vec![MutationCmd {
+            id: MutationCmdId::new(7),
+            mutation: MutationOp::SetArtifactBody {
+                artifact: ArtifactLocation::file(path),
+                edit: AssetBodyOverlay::ReplaceBody(body.to_vec()),
+            },
+        }]))
+    }
+
+    /// Studio's edit of `body`, the whole client message as the board
+    /// receives it.
+    fn shader_edit_request(body: &[u8]) -> alloc::string::String {
+        crate::json::to_string(&crate::ClientMessage {
+            id: 31,
+            msg: crate::ClientRequest::ProjectCommand {
+                handle: crate::WireProjectHandle::new(1),
+                command: crate::WireProjectCommand::MutateOverlay {
+                    request: edit_of("/shader.glsl", body),
+                },
+            },
+        })
+        .unwrap()
+    }
+
+    /// [`shader_edit_request`] with the body as the array of numbers it was
+    /// before wire 41, for the comparison.
+    fn shader_edit_request_as_byte_array(body: &[u8]) -> alloc::string::String {
+        let text = shader_edit_request(body);
+        let as_text = alloc::format!(
+            r#""replace_body":{}"#,
+            serde_json::to_string(core::str::from_utf8(body).unwrap()).unwrap()
+        );
+        let as_array = alloc::format!(
+            r#""replace_body":{}"#,
+            serde_json::to_string(&body.to_vec()).unwrap()
+        );
+        assert!(text.contains(&as_text));
+        text.replacen(&as_text, &as_array, 1)
     }
 }

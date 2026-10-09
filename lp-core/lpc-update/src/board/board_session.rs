@@ -253,17 +253,20 @@ impl BoardSession {
     /// own login holds the link's tier, and the firmware passes the tier a
     /// **login or a key** granted (never one `OpenTo` alone gave: the
     /// session adds `OpenTo` itself, so QY2's switch applies the same way in
-    /// both modes).
+    /// both modes). `trust` is how a link the session has not heard yet is
+    /// taken: [`LinkTrust::Untrusted`] nearby, `LinkTrust::Relayed(None)`
+    /// through the relay (where `OpenTo` never applies).
     pub fn on_message_with_tier<T: UpdateTarget>(
         &mut self,
         target: &mut T,
         now_ms: u64,
         link: LinkId,
+        trust: LinkTrust,
         tier: Option<Tier>,
         bytes: &[u8],
     ) {
         if !self.links.iter().any(|l| l.id == link) {
-            self.link_up(now_ms, link, LinkTrust::Untrusted);
+            self.link_up(now_ms, link, trust);
         }
         if let Some(l) = self.links.iter_mut().find(|l| l.id == link) {
             l.granted = tier;

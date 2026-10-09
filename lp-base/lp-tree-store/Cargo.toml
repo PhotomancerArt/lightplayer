@@ -1,0 +1,30 @@
+[package]
+name = "lp-tree-store"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Prototype content-addressed copy-on-write tree store for NOR flash (the storage testbed's T1 candidate): no_std + alloc, sans-IO"
+
+[features]
+default = ["encode"]
+# The host-side encoder: raw deflate (with a preset dictionary) via flate2 on
+# the zlib-rs backend, and the dictionary sampler. Off on a device image, which
+# then writes every chunk stored and decodes everything with lp-deflate.
+encode = ["dep:flate2"]
+# `impl Flash for lp_nor_sim::NorFlashSim`.
+nor-sim = ["dep:lp-nor-sim"]
+
+[dependencies]
+lp-crc32 = { path = "../lp-crc32" }
+lp-deflate = { path = "../lp-deflate" }
+sha2 = { workspace = true }
+flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"], optional = true }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim", optional = true }
+
+[dev-dependencies]
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+
+[lints]
+workspace = true

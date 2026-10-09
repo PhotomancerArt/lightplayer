@@ -233,9 +233,10 @@ pub fn radio_update_hook(call: fw_esp32_common::radio_link::RadioUpdate<'_>) {
             link,
             granted,
             open,
+            relayed,
             bytes,
         } => with_session(
-            |edge| edge.on_message_with_tier(session_link(link), granted, bytes),
+            |edge| edge.on_message_with_tier(session_link(link), relayed, granted, bytes),
             false,
             Some(open),
         ),
