@@ -2542,6 +2542,10 @@ fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i
 fn a_running_board_feeds_its_card_over_the_shared_link() {
     let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt1", "usb-feed-1");
     let device = bench.view().devices[0].id;
+    assert_eq!(
+        feed_gap(&bench, device),
+        Some(crate::DEVICE_CARD_FEED_INTERVAL)
+    );
 
     let mut pulls = 0;
     while feed_frame_revision(&bench, device).is_none() {
@@ -2608,6 +2612,83 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
         !journal.iter().any(|line| line.contains("Passthrough")),
         "{journal:#?}"
     );
+}
+
+/// Over Bluetooth the card gets a picture too (2026-10-08; until then it
+/// had none), at the gentler Bluetooth gap: once a frame has landed, a
+/// pull that USB's 150 ms would have made by now waits for Bluetooth's
+/// 500 ms, and then it comes.
+#[test]
+fn a_bluetooth_board_feeds_its_card_at_the_gentle_gap() {
+    let (mut bench, tasks) =
+        running_board_wanting_a_picture("dev000000daqf6dvvt8", "ble:QkxFLWZlZWQ");
+    let device = bench.view().devices[0].id;
+    assert!(
+        bench.view().devices[0].is_over_bluetooth(),
+        "{:?}",
+        bench.view().devices[0]
+    );
+    assert_eq!(
+        feed_gap(&bench, device),
+        Some(crate::DEVICE_CARD_FEED_BLE_INTERVAL),
+        "a Bluetooth card feeds, at its own gap"
+    );
+
+    let steps_for = |gap: Duration| (gap.as_secs_f64() / STEP_MS).ceil() as usize + 1;
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL) {
+            bench.step(&tasks);
+        }
+    }
+    let pulled_at = |bench: &DeviceBench| {
+        bench
+            .controller
+            .device_feeds()
+            .get(device)
+            .and_then(|feed| feed.last_pull_completed_at())
+    };
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp = pulled_at(&bench);
+    assert!(stamp.is_some(), "the gap had elapsed: a pull ran");
+
+    // Past USB's gap, short of Bluetooth's: nothing is asked.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_INTERVAL) {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert_eq!(pulled_at(&bench), stamp, "not due yet over Bluetooth");
+
+    // Past Bluetooth's gap: the next pull runs.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL) {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        pulled_at(&bench) > stamp,
+        "due again after the Bluetooth gap"
+    );
+
+    let feeds = bench.controller.device_roster_view().feeds;
+    let feed_view = feeds.get(&device).expect("the fed card has a feed view");
+    assert_eq!(
+        feed_view.liveness,
+        crate::FeedLiveness::Live,
+        "{feed_view:?}"
+    );
+    assert!(feed_view.frame.is_some());
+}
+
+/// The gap `device`'s card feed pulls at, when it is feeding.
+fn feed_gap(bench: &DeviceBench, device: crate::DeviceId) -> Option<Duration> {
+    let devices = bench.controller.devices_for_test();
+    bench
+        .controller
+        .device_feeds()
+        .active_gap_for_test(device, devices.roster(), devices.effects())
 }
 
 /// The persisted last frame (honest-device-preview follow-up): a fed

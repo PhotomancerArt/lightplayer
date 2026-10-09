@@ -2728,12 +2728,8 @@ impl StudioController {
     /// feeding — the common case, where the UI timer keeps its calm
     /// heartbeat pace.
     fn device_feed_due_in(&self, now: f64) -> Option<Duration> {
-        self.device_feeds.due_in(
-            now,
-            crate::DEVICE_CARD_FEED_INTERVAL,
-            self.devices.roster(),
-            self.devices.effects(),
-        )
+        self.device_feeds
+            .due_in(now, self.devices.roster(), self.devices.effects())
     }
 
     /// Pull one published frame per feeding DEVICE card whose completion
@@ -2756,7 +2752,6 @@ impl StudioController {
             .device_feeds
             .run_due(
                 &*now_secs,
-                crate::DEVICE_CARD_FEED_INTERVAL,
                 crate::DEVICE_CARD_FEED_CLASS
                     .deadline()
                     .unwrap_or(crate::PASSIVE_REFRESH_DEADLINE),
