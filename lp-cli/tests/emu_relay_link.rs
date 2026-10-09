@@ -431,8 +431,15 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
     );
 
     // 4. The same key moves the session to the LAN; anyone else is busy.
+    // The board says the takeover on its console, which reaches this test
+    // only over a USB link: with none open, its 4 KB console ring has
+    // overwritten the line (under Bob's busy routes and its heartbeats) by
+    // the time the next one opens. So a USB link is held through the
+    // takeover and closed before the heap is read over the LAN.
     let lan = board.forward();
     let port: u16 = lan.rsplit(':').next().unwrap().parse().unwrap();
+    let console = UsbConsole::open(&usb, &board, None);
+    let mark = board.said_len();
     run(async {
         let relayed = connect_relay(cloud.target(board_id), Some(alice.session.clone()), None)
             .await
@@ -468,6 +475,8 @@ fn an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink() {
             ),
             "{refused}"
         );
+        wait_said(&board, mark, "closed (taken over by the same key)").await;
+        console.closed().await;
         // The heap is read over the LAN session itself (no USB link open).
         let mut over_lan = LpClient::new(TokioClientIo::new(Box::new(local)));
         heap(
@@ -1033,6 +1042,20 @@ fn wait_heartbeat(
     }
 }
 
+/// Wait until the board's console, heard after `mark`, holds `words`, or
+/// fail after `RELAY_NET`; for async code holding a [`UsbConsole`].
+async fn wait_said(board: &EmulatedBoard, mark: usize, words: &str) {
+    let started = Instant::now();
+    while !board.said_since(mark).contains(words) {
+        assert!(
+            started.elapsed() < RELAY_NET,
+            "the board never said {words:?} within {RELAY_NET:?}; its console:\n{}",
+            board.heard_tail()
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
 /// A USB link held open on its own thread, asking the board's status every
 /// `STATUS_POLL`, so the board's console reaches this test (with no link
 /// open, its log lines are dropped) while the test does other things. Its
@@ -1144,6 +1167,20 @@ impl UsbConsole {
     fn check_alive(&self) {
         let finished = self.thread.as_ref().is_none_or(|t| t.is_finished());
         assert!(!finished, "the USB console link ended early");
+    }
+
+    /// [`Self::close`] from async code, without blocking its runtime while
+    /// the link's thread finishes (a session on that runtime stays served).
+    async fn closed(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            while !thread.is_finished() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            if let Err(panic) = thread.join() {
+                std::panic::resume_unwind(panic);
+            }
+        }
     }
 
     /// Close the link; every relay state it was answered.
