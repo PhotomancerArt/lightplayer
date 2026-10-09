@@ -24,6 +24,7 @@ mod nor_geometry;
 mod nor_sector_state;
 mod nor_stats;
 mod sim_rng;
+mod wear_out;
 
 pub use calibrated_tear::{EraseShape, TearMix};
 pub use embedded_storage_impl::NorSimFlashError;
@@ -34,3 +35,4 @@ pub use nor_geometry::NorGeometry;
 pub use nor_sector_state::NorSectorState;
 pub use nor_stats::NorStats;
 pub use sim_rng::SimRng;
+pub use wear_out::{WearMode, WearOut};

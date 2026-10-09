@@ -14,6 +14,7 @@ pub fn handle_hardware(cli: HardwareCli) -> Result<()> {
         Some(HardwareSubcommand::Calibrate(args)) => calibrate::handle_calibrate(args),
         Some(HardwareSubcommand::Stamp(args)) => stamp::handle_stamp(args),
         Some(HardwareSubcommand::Lpfs(args)) => super::lpfs::handle_lpfs(args),
+        Some(HardwareSubcommand::Tree(args)) => super::tree::handle_tree(args),
         Some(HardwareSubcommand::DeskImages(args)) => desk_images::handle_desk_images(args),
         None => manifest::handle_manifest(ManifestArgs {
             repo: None,

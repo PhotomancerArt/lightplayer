@@ -744,6 +744,7 @@ mod tests {
             runtime_bands: Default::default(),
             layout: Default::default(),
             backup_download: None,
+            board_projects: Default::default(),
         }
     }
 

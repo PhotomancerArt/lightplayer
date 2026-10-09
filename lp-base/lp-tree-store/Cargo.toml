@@ -5,26 +5,43 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Prototype content-addressed copy-on-write tree store for NOR flash (the storage testbed's T1 candidate): no_std + alloc, sans-IO"
+description = "Content-addressed copy-on-write tree store for NOR flash: RAM-bounded, transactional, verify-after-write; no_std + alloc, sans-IO"
 
 [features]
-default = ["encode"]
-# The host-side encoder: raw deflate (with a preset dictionary) via flate2 on
-# the zlib-rs backend, and the dictionary sampler. Off on a device image, which
-# then writes every chunk stored and decodes everything with lp-deflate.
-encode = ["dep:flate2"]
+default = ["soft-sha"]
+# `SoftSha256`: the `sha2` crate behind the hasher seam (host, tests). The
+# firmware passes the C6's hardware SHA instead and leaves this off.
+soft-sha = ["dep:sha2"]
+# `host_deflate_chunks`: raw deflate (miniz_oxide) producing
+# `put_chunk_deflated` input — the host's side of a push. Never on a device.
+host-deflate = ["dep:miniz_oxide", "soft-sha"]
+# `LpFsTree`: `lpfs::LpFs` over the store.
+lpfs = ["dep:lpfs"]
 # `impl Flash for lp_nor_sim::NorFlashSim`.
 nor-sim = ["dep:lp-nor-sim"]
+# `TreeStore::stats`: counters and RAM-peak accounting (tests, the bench).
+# Off in firmware: ~0.7 KB of RV32 code for numbers nothing on a device reads.
+stats = []
+# `StoreImage`: the read-only inspector over a raw image of the partition
+# (`lp-cli hardware tree inspect|check|extract`). Host tooling; never on a
+# device. Reports derive `serde::Serialize` for `--json`.
+inspect = ["dep:serde"]
 
 [dependencies]
 lp-crc32 = { path = "../lp-crc32" }
 lp-deflate = { path = "../lp-deflate" }
-sha2 = { workspace = true }
-flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"], optional = true }
+sha2 = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"], optional = true }
+lpfs = { path = "../lpfs", optional = true }
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim", optional = true }
 
 [dev-dependencies]
+# The crate's own optional parts, on for its tests (the LpFs conformance
+# test, the host deflater, the stats the RAM and sweep tests read).
+lp-tree-store = { path = ".", features = ["lpfs", "host-deflate", "nor-sim", "stats", "inspect"] }
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 
 [lints]
 workspace = true
