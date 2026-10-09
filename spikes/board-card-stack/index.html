@@ -595,6 +595,10 @@ body.shot > *:not(.shot-keep):not(script) { display:none !important; }
 .sicon.warn { color:var(--st-attention-tx); }
 .sicon.err { color:var(--st-error-tx); }
 .nb { display:flex; align-items:center; gap:8px; height:44px; padding:0 8px 0 11px; border-top:1px solid var(--bd-mut); min-width:0; cursor:pointer; }
+.nb.two { height:50px; }
+.nb .nbt { flex:1; min-width:0; display:grid; gap:1px; }
+.nb .nbt .grp { font-size:11.5px; }
+.nb .nbt .grp svg.i { width:12px; height:12px; }
 .nb b { font-size:13.5px; color:var(--strong); }
 .pop.top { top:28px; left:auto; right:-1px; width:300px; }
 .pop ul { margin:0; padding:0; list-style:none; display:grid; gap:4px; }
@@ -738,7 +742,7 @@ The page uses the leans; the questions are lettered to match the chat. Click a p
 
 <section class="qsec" id="page">
   <h2>The card so far</h2>
-  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Uses the leans: Q6-A, Q7-A, Q8-A, Q9-A (and Q3-A). Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
+  <p class="usinglean">Round 3: the picture is uncovered and taller; the project has its own bar; the status in the corner has an icon (the worst problem on the card) and opens a popover. Uses the leans: Q6-D (the group under the name, from your comment), Q7-A, Q8-A, Q9-A (and Q3-A). Eleven boards: watched over USB with an update available, watched through the cloud, out of date, a firmware update running, Sean editing, open in your other tab, Bluetooth not connected, offline, a shader error, locked, and a blank board.</p>
   <div class="duo phoneduo"><div><p class="vlabel">Desktop</p><div class="app" id="pg"></div></div><div><p class="vlabel">Phone</p><div class="app phone narrow" id="pgp"></div></div></div>
 </section>
 
@@ -833,7 +837,7 @@ const BOARDS = [
 ];
 const LINK_ICON = { usb:'usb', ble:'ble', wifi:'net' };
 const LINK_WORD = { usb:'USB', ble:'Bluetooth', wifi:'Wi‑Fi' };
-const LEAN = { label:'glass', status:'notch', conn:'words', action:'rowbtn', fw:'A', hw:'A', detail:'pop' };
+const LEAN = { label:'glass', status:'notch', conn:'own', action:'rowbtn', fw:'A', hw:'A', detail:'pop' };
 
 function watched(b){ return b.conn==='watch' || b.conn==='held' || (b.conn==='connected' && !b.off); }
 function canvasOf(b){
@@ -848,6 +852,7 @@ function statusText(b){
 }
 /* the name bar: the name and the primary action, one line */
 function nameBar(b, c){
+  if (c.conn==='own') return `<div class="nb two" data-open="${b.id}"><div class="nbt"><b class="ell">${b.title}</b>${whereHtml(b)}</div>${mainAction(b, c)}</div>`;
   return `<div class="nb" data-open="${b.id}"><b class="ell">${b.title}</b><span style="flex:1"></span>${mainAction(b, c)}</div>`;
 }
 /* the project bar: what it plays, or what's wrong with the project */
@@ -918,6 +923,7 @@ function connRow(b, c){
   const live = s.words.includes('live');
   const words = s.words.replace('live', '<b>live</b>');
   if (c.conn==='icons') return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl" title="${s.words}">${ic(s.icon)}${b.cloud && b.link ? ic('cloud') : ''}${live ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--st-live-tx)"></span>' : ''}</span>${btn}</div>`;
+  if (c.conn==='own') return `<div class="srow conn"><span class="lvl">${ic(s.icon)}<span class="ell">${words}${hint}</span></span><span class="spring"></span>${b.cloud && b.link ? `<span class="lvl" title="Also reachable from anywhere">${ic('cloud')}<span class="nh">also cloud</span></span>` : (!b.cloud ? '<span class="nh" style="color:var(--faint)">direct only</span>' : '')}</div>`;
   if (c.conn==='wordsLeft') return `<div class="srow conn"><span class="lvl">${ic(s.icon)}<span>${words}${hint}</span></span><span class="spring"></span>${btn}</div>`;
   return `<div class="srow conn">${whereHtml(b)}<span class="spring"></span><span class="lvl">${ic(s.icon)}<span class="nh">${words}${hint}</span>${b.cloud && b.link ? `<span title="Also cloud connected">${ic('cloud')}</span>` : ''}</span><span class="chev" style="visibility:hidden">›</span></div>`;
 }
@@ -978,7 +984,8 @@ function q(id, ids, opts){ document.getElementById(`${id}o`).innerHTML = Object.
 function build(){
   const conn4 = ['desk','porch','choker','shelf','living','truck'];
   q('q6', conn4, {
-    A:{ name:'Where on the left, link on the right', lean:true, what:'The group (or the owner’s face) on the left; the link in use and its level on the right (“USB · live”, “Cloud · live”, “Bluetooth · not connected”), then the action.', pro:'one row answers both “where is it” and “how do I reach it”, in your order.', con:'tight on a phone (the words hide there; the icon stays).', c:{ conn:'words' } },
+    D:{ name:'Group under the name; the connection gets the whole bar', lean:true, what:'From your comment: the group (or the owner’s face) sits under the name, as the board’s place; the connection bar is all connection (“USB · live”, “also cloud”, “Bluetooth · not connected”).', pro:'place reads with the name it belongs to; the connection has room for its words on a phone too.', con:'the name bar grows to two lines (still one fixed height).', c:{ conn:'own' } },
+    A:{ name:'Where on the left, link on the right', what:'The group (or the owner’s face) on the left; the link in use and its level on the right (“USB · live”, “Cloud · live”, “Bluetooth · not connected”), then the action.', pro:'one row answers both “where is it” and “how do I reach it”, in your order.', con:'tight on a phone (the words hide there; the icon stays).', c:{ conn:'words' } },
     B:{ name:'Link in words; where moves to the hardware row', what:'The whole row is the connection; the group sits at the end of the hardware row.', pro:'the most room for the connection words.', con:'“where” and “what it is” share a row, which mixes two kinds of fact.', c:{ conn:'wordsLeft' } },
     C:{ name:'Icons only', what:'Where on the left, link icons and a live dot on the right.', pro:'the most compact.', con:'icons must be learned; the newcomer test fails for “not connected”.', c:{ conn:'icons' } },
   });
@@ -1090,7 +1097,7 @@ function loop(ts){ if (ts-last > 33){ last=ts; const t=ts/1000; for (const e of 
 
 setInterval(() => { const t = performance.now()/1000; for (const e of canvases) if (e.c.dataset.rate==='slow') draw(e, t + e.seed); }, 700);
 
-window.GATE = { round:'stack-card-r3', leans:{ q3:'A', q6:'A', q7:'A', q8:'A', q9:'A' } };
+window.GATE = { round:'stack-card-r3', leans:{ q3:'A', q6:'D', q7:'A', q8:'A', q9:'A' } };
 /* =====================================================================
    The gate kit (see the CSS above). Works in three places:
    - on claude.ai with `db`: answers saved to the store (Claude reads
