@@ -69,12 +69,24 @@ pub(crate) fn roster_tree(
             examples,
             Default::default(),
         ));
+        // Edit, where the board has an editor address (its registry uid),
+        // as the controller publishes it.
+        let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
+        let uid = devices.open_addresses.get(&card.id.0).map(String::as_str);
+        if let Some(edit) = lpa_studio_core::device_edit_offer(&prefix, card, uid) {
+            tree.publish(edit);
+        }
+        // The Wi‑Fi verbs, under the same prefix.
+        if let Some(wifi) = devices.wifi.get(&card.id) {
+            for offer in lpa_studio_core::app::network::wifi_offers(&prefix, wifi) {
+                tree.publish(offer);
+            }
+        }
         if let Some((_, ip)) = wifi_addresses.iter().find(|(device, _)| *device == card.id) {
             let connecting = devices
                 .wifi_connects
                 .get(&card.id)
                 .is_some_and(|connect| !connect.through_relay && connect.connecting);
-            let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
             tree.publish(connect_wifi_offer(&prefix, card.id, ip, connecting));
         }
         if relay_boards.contains(&card.id) {
@@ -82,7 +94,6 @@ pub(crate) fn roster_tree(
                 .wifi_connects
                 .get(&card.id)
                 .is_some_and(|connect| connect.through_relay && connect.connecting);
-            let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
             tree.publish(connect_relay_offer(&prefix, card.id, connecting));
         }
     }
@@ -473,6 +484,14 @@ pub(crate) fn StoryBoardCard(
         tree.append(extra);
     }
     let verbs: Vec<lpa_studio_core::UiOffer> = tree.own_verbs_of(&prefix).cloned().collect();
+    // How it is reached, when the story does not say: what the controller
+    // reads off the board's endpoint — a LAN or relay link names itself, a
+    // card carrying the network reason is over Bluetooth, else USB.
+    let link = link.or_else(|| match (&lan, card.is_over_bluetooth()) {
+        (Some(lan), _) => Some(lan.kind),
+        (None, true) => Some(lpa_studio_core::UiLinkKind::Bluetooth),
+        (None, false) => None,
+    });
     let plays = match plays {
         lpa_studio_core::BoardPlays::Unknown => {
             own_report_plays(std::slice::from_ref(&card), &projects)
@@ -552,14 +571,19 @@ pub(crate) fn StoryNewBoardCard(
 }
 
 /// A new board's card for a pending-card story: [`StoryNewBoardCard`],
-/// arrived over `link` (USB when unsaid).
+/// arrived over `link` — when unsaid, Bluetooth for a link carrying the
+/// network reason, else USB, as the link's endpoint would say.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn StoryPendingCard(
     pending: PendingLinkView,
-    #[props(default)] link: lpa_studio_core::UiLinkKind,
+    #[props(default)] link: Option<lpa_studio_core::UiLinkKind>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
+    let link = link.unwrap_or(match pending.firmware_blocked.is_some() {
+        true => lpa_studio_core::UiLinkKind::Bluetooth,
+        false => lpa_studio_core::UiLinkKind::Usb,
+    });
     rsx! {
         StoryNewBoardCard { pending, link, on_action }
     }
