@@ -20,8 +20,9 @@
 //! and a 16-aligned pool capped by a one-granule sentinel. Its tests check it
 //! address for address against the real crate at this host's width (`W = 8`),
 //! the one width the real crate can run at here; the replay uses `W = 4`. The
-//! same model, in Python (`scripts/ram/tlsf_model.py`), reproduced every
-//! placement of a TLSF C6 image's own allocation trace (RAM research E6).
+//! same model, in Python (`scripts/ram/tlsf_model.py` on the `research/ram`
+//! branch), reproduced every placement of a TLSF C6 image's own allocation
+//! trace (RAM research E6, `lp2025/2026-10-09-1203-ram-research`).
 //!
 //! Two figures per region, because they differ under TLSF: the largest free
 //! block's payload (what esp-alloc's `free()` walk sees) and the largest
