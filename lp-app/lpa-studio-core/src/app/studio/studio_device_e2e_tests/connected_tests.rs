@@ -8,12 +8,19 @@
 //! it. Where the user is decides which surface the open session shows on,
 //! and nothing else. Connect reaches a board Studio is not talking to yet
 //! first — a closed port, a board offline on its cable or on Wi‑Fi — then
-//! opens its session, holding the intent for a minute at most. Every verb
-//! is pressed by its offer path, as the card and the app agent press it.
+//! opens its session, holding the intent for a minute at most. Connected,
+//! the card carries the board's panel, Done, the session's own moving
+//! picture, and the session's state in its connection bar. Every verb is
+//! pressed by its offer path, as the card and the app agent press it.
 
-use super::ble_drop_tests::{bench_over_bluetooth, bluetooth_board, locked_store_file};
+use super::ble_drop_tests::{
+    bench_over_bluetooth, bluetooth_board, bundled_example_files, locked_store_file,
+    wait_for_access_line,
+};
+use super::unlock_tests::{PLAY_PASSWORD, two_password_store_file};
 use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
+use crate::app::studio::studio_edit_e2e_tests::project_editor;
 use crate::{BoardPlays, ConnectPhase, UiPage, UiPlace, UiProjectView};
 
 /// Connect on a running board: the session opens, and the home page stays —
@@ -163,15 +170,21 @@ fn edit_on_a_board_not_connected_connects_first() {
     );
 }
 
-/// Where the user is decides the surface, and nothing else: on the
-/// session's own page the editor shows (and a waiting Edit is over); at home
-/// the card does, with the session still open; back on the session's page
-/// the editor shows again with no Edit.
+/// Where the user is decides the surface, and nothing else. A waiting Edit
+/// ends at the first place report that moves the user (the director's
+/// ruling on P2–P3): Edit, then Home straight away, shows home, with the
+/// session still open. On the session's own page the editor shows; back
+/// home the card does; on the session's page again the editor shows with no
+/// Edit pressed.
 #[test]
 fn going_home_shows_the_card_again() {
     let (mut bench, _tasks, _device, id, _uid) =
         running_library_board("dev000000cnct000005", "usb-conn-5");
     bench.press_device(id, "edit", OfferArgs::new());
+    assert!(
+        !bench.controller.view().panes.is_empty(),
+        "the editor shows for the waiting Edit"
+    );
     let project_uid = bench
         .controller
         .view()
@@ -183,20 +196,27 @@ fn going_home_shows_the_card_again() {
         view: UiProjectView::Nodes,
     });
 
-    // The web's lens sync takes the user to the session's page.
-    bench.controller.set_place(its_page.clone());
+    // Home, straight after Edit: the wait is over and home shows.
+    bench.controller.set_place(UiPlace::new(UiPage::Home));
     assert!(
         !bench.controller.connected().unwrap().editor_waiting,
-        "the Edit has arrived"
+        "the first move ends the wait"
     );
+    let view = bench.controller.view();
+    assert!(view.home.is_some(), "the home page");
+    assert!(view.panes.is_empty());
+    assert!(view.lens.is_some(), "the session is still open");
+    assert_eq!(bench.lens_session_id(), session);
+
+    // The session's page: the editor.
+    bench.controller.set_place(its_page.clone());
     assert!(!bench.controller.view().panes.is_empty());
 
-    // Home.
+    // Home again: the card, the session open.
     bench.controller.set_place(UiPlace::new(UiPage::Home));
     let view = bench.controller.view();
     assert!(view.home.is_some(), "the home page is back");
     assert!(view.panes.is_empty());
-    assert!(view.lens.is_some(), "the session is still open");
     assert_eq!(bench.lens_session_id(), session);
     assert!(bench.controller.connected().is_some());
 
@@ -589,6 +609,522 @@ fn the_opening_frames_connect_keeps_the_editor_open() {
 }
 
 // ---------------------------------------------------------------------
+// The card's connected face
+// ---------------------------------------------------------------------
+
+/// CD6, CD7: Connect on a running board whose project has a root panel.
+/// The card carries the panel in the bars' place: the root panel's own
+/// picks — the master brightness fader, then the shader's knob — with the
+/// clock's transport, the pattern picker and the palette left to All
+/// controls. Done is the primary, and auto-save rides along on USB (the
+/// edit tier). The editor's view is built to pick them, and none of its
+/// verbs are published on the home page.
+#[test]
+fn the_connected_card_carries_the_panel() {
+    let (mut bench, _tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct000010", "usb-conn-16");
+    bench.press_device(id, "connect", OfferArgs::new());
+
+    let card = the_card(&bench, id);
+    let panel = card.panel.clone().expect("the panel in the bars' place");
+    assert_eq!(channels(&panel), [crate::MASTER_CHANNEL, "glow"]);
+    assert!(
+        matches!(
+            panel.controls[0].view.control.widget,
+            crate::UiPanelWidget::Fader { .. }
+        ),
+        "the master leads"
+    );
+    assert_eq!(
+        panel.more, 3,
+        "the transport, the pattern picker and the palette"
+    );
+    assert!(panel.target.is_some(), "the root panel's scope");
+    assert!(panel.auto_save.is_some(), "USB holds the edit tier");
+    let edit = panel.edit.clone().expect("Edit on the All controls row");
+    assert_eq!(edit.offer, bench.device_verb(id, "edit"));
+    assert_eq!(edit.icon.as_deref(), Some("edit"));
+    assert_eq!(
+        card.name_bar.primary.as_ref().map(|primary| primary.word()),
+        Some("Done")
+    );
+    assert_eq!(card.bars.len(), 5, "the bars are still built");
+    assert_card_offers(&bench, id);
+    bench.not_offered("project/add-node");
+
+    // They are the editor's own root panel, picked.
+    bench.press_device(id, "edit", OfferArgs::new());
+    bench.offered("project/add-node");
+    let view = bench.controller.view();
+    let face = project_editor(&view)
+        .root_module_face()
+        .expect("the root wears the module face");
+    let picks = crate::board_panel_picks(&face.panel, face.auto_save);
+    assert_eq!(panel.controls, picks.controls);
+    assert_eq!(panel.more, picks.more);
+    assert_eq!(panel.target, picks.target);
+    assert_eq!(panel.auto_save, picks.auto_save);
+}
+
+/// CD8 (#571's test, redone on Connect): while the session holds the wire
+/// the card is not a dimmed last frame. It draws the session's own
+/// composed picture, current and named as the session's, and that
+/// picture's revision advances with the session's reads — while the card
+/// feed's own pull never runs under the borrow. After Done the feed pulls
+/// again.
+#[test]
+fn the_card_shows_the_lens_sessions_frames() {
+    let (mut bench, tasks) = running_board_wanting_a_picture("dev000000cnct000011", "usb-conn-17");
+    let device = bench.view().devices[0].id;
+    feed_tick(&mut bench, &tasks, 5.0);
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    let own_revision = feed_frame_revision(&bench, device).expect("the feed pulled once");
+    let stamp_before = feed_stamp(&bench, device).expect("the feed has pulled");
+
+    bench.press_device(device, "connect", OfferArgs::new());
+    let link = lens_link(&bench);
+    assert!(
+        bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .lens_holds_wire(link)
+    );
+
+    // The session reads at its own cadence; each read carries the
+    // published frame. Drive it until the card's picture is the session's
+    // and has moved past the feed's last one, then until it moves again.
+    let mut lens_revisions: Vec<i64> = Vec::new();
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    while lens_revisions.len() < 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the card's picture never advanced under the session: {lens_revisions:?}"
+        );
+        bench.clock.set(bench.clock.get() + 0.2);
+        let _ = bench.tick();
+        for _ in 0..40 {
+            bench.step(&tasks);
+        }
+        feed_tick(&mut bench, &tasks, 5.0);
+        let feeds = bench.controller.device_roster_view().feeds;
+        let Some(feed) = feeds.get(&device) else {
+            continue;
+        };
+        if !feed.from_lens {
+            assert_eq!(
+                feed.liveness,
+                crate::FeedLiveness::Lens,
+                "before the session has a frame the card keeps the dimmed last one: {feed:?}"
+            );
+            continue;
+        }
+        assert_eq!(feed.liveness, crate::FeedLiveness::Live, "{feed:?}");
+        let revision = feed
+            .frame
+            .as_ref()
+            .map(|frame| frame.revision)
+            .expect("the session's picture");
+        if revision > own_revision && lens_revisions.last() != Some(&revision) {
+            lens_revisions.push(revision);
+        }
+    }
+    assert!(
+        lens_revisions[1] > lens_revisions[0],
+        "the card's frame revision advances while connected: {lens_revisions:?}"
+    );
+    let card = the_card(&bench, device);
+    assert_eq!(card.picture.source, crate::PictureSource::Lens);
+    assert!(!card.picture.dim, "current, not last known");
+    let picture = card
+        .status
+        .details
+        .sections
+        .iter()
+        .flat_map(|section| section.lines.iter())
+        .find(|line| line.label == "Picture")
+        .map(|line| line.value.clone())
+        .expect("the picture line");
+    assert!(
+        picture.ends_with(crate::LENS_SOURCE_WORDS),
+        "the details name where it comes from: {picture}"
+    );
+
+    // The feed itself never asked: the frames came from the session's reads.
+    assert_eq!(
+        feed_stamp(&bench, device),
+        Some(stamp_before),
+        "no second pull"
+    );
+    assert_eq!(
+        feed_frame_revision(&bench, device),
+        Some(own_revision),
+        "the feed's own last frame is untouched by the session's"
+    );
+
+    // Done: the wire comes back, and the feed is the card's again.
+    bench.press_device(device, "done", OfferArgs::new());
+    bench.run_until(&tasks, "the wire to come back", |bench| {
+        !bench
+            .controller
+            .devices_for_test()
+            .effects()
+            .wire_borrowed(link)
+    });
+    for _ in 0..40 {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        feed_stamp(&bench, device) > Some(stamp_before),
+        "the feed resumed once the session let go"
+    );
+}
+
+/// AC7: a link that holds play only connects — the play password is
+/// enough — and its panel plays: a panel write (the playlist's `cycle`,
+/// pressed by path where the editor shows the session) is accepted at the
+/// play tier. Auto-save is hidden below the edit tier, and Edit wears the
+/// lock: the All controls row presses `unlock`, and after Done so does the
+/// project bar.
+#[test]
+fn a_play_only_link_connects_and_plays() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        bluetooth_board("dev000000cnct000012")
+            .with_project_files(bundled_example_files())
+            .with_loaded_project()
+            .with_untrusted_link()
+            .with_root_files(vec![two_password_store_file()]),
+    )));
+    let (mut bench, tasks, _present) = bench_over_bluetooth(&device, |bench| {
+        let mut remembered =
+            crate::app::access::remembered_passwords::RememberedPasswords::default();
+        remembered.remember(PLAY_PASSWORD, 1.0);
+        bench
+            .controller
+            .apply_access_command(crate::AccessCommand::MemoryLoaded {
+                passwords_json: Some(remembered.to_json()),
+                devices_json: None,
+                browser_json: None,
+                account_json: None,
+            });
+    });
+    bench.run_until(&tasks, "the board to identify over Bluetooth", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    bench.run_until(&tasks, "the link to hold play only", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .access
+            .get(&id)
+            .and_then(|access| access.unlock)
+            == Some(crate::UiUnlockOffer::PlayOnly)
+    });
+    // The fake's heartbeat names only the projects its server has been
+    // asked about (real firmware's names the one its boot resumed), so one
+    // look by the board's address teaches it; Done lets that session go.
+    let uid = bench.registry()[0].uid.clone();
+    bench
+        .open_lens(&uid)
+        .expect("the address opens at the play tier");
+    bench.press_device(id, crate::DONE_VERB, OfferArgs::new());
+    wait_running(&mut bench, &tasks, id);
+    bench.wait_for_verb(&tasks, id, crate::CONNECT_VERB);
+    let connect = bench.device_verb(id, crate::CONNECT_VERB);
+    assert!(
+        bench.offered(&connect).is_enabled(),
+        "the play password is enough to connect"
+    );
+    bench
+        .press(&connect, OfferArgs::new())
+        .expect("Connect opens the session at the play tier");
+    assert!(
+        bench.controller.connected().is_some_and(
+            |connected| connected.device == id && connected.phase == ConnectPhase::Open
+        )
+    );
+    let panel = the_card(&bench, id).panel.expect("the panel");
+    assert_eq!(panel.auto_save, None, "auto-save is the edit tier's");
+    let edit = panel.edit.expect("Edit, locked");
+    assert_eq!(edit.offer, bench.device_verb(id, crate::UNLOCK_VERB));
+    assert_eq!(edit.icon.as_deref(), Some("lock"));
+    assert_eq!(edit.draw, crate::UiActionDraw::Sheet);
+
+    // A panel write at the play tier.
+    let uid = bench.controller.connected().unwrap().uid.clone();
+    bench.controller.set_place(UiPlace::new(UiPage::Device {
+        uid,
+        view: UiProjectView::Play,
+    }));
+    let cycle = crate::OfferPath::project_node(
+        &crate::ProjectNodeAddress::parse("/studio.show/playlist.playlist")
+            .expect("the bundled example's playlist"),
+    )
+    .child(crate::PLAYLIST_CYCLE_VERB);
+    let notices = bench
+        .press(
+            &cycle,
+            OfferArgs::new().with(crate::PLAYLIST_CYCLING_PARAM, "true"),
+        )
+        .expect("the board takes the write at the play tier");
+    assert!(
+        notices.notices.is_empty(),
+        "accepted, not refused: {notices:?}"
+    );
+    bench.controller.set_place(UiPlace::new(UiPage::Home));
+
+    // Done: the project bar's Edit wears the lock too.
+    bench.press_device(id, "done", OfferArgs::new());
+    let edit = the_card(&bench, id)
+        .bar(crate::BarLayer::Project)
+        .action
+        .clone()
+        .expect("Edit, locked");
+    assert_eq!(edit.offer, bench.device_verb(id, crate::UNLOCK_VERB));
+    assert_eq!(edit.icon.as_deref(), Some("lock"));
+}
+
+/// CD15 (Q19): while connected, Edit sits at the end of the All controls
+/// row. `panel.edit` presses `devices/<board>/edit` by path, and the editor
+/// shows on the open session, with no new session installed.
+#[test]
+fn edit_while_connected_is_on_the_all_controls_row() {
+    let (mut bench, _tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct000013", "usb-conn-19");
+    bench.press_device(id, "connect", OfferArgs::new());
+    let installs = pool_installs(&bench);
+    let session = bench.lens_session_id();
+    let edit = the_card(&bench, id)
+        .panel
+        .expect("the panel")
+        .edit
+        .expect("Edit on the All controls row");
+    assert_eq!(edit.offer, bench.device_verb(id, crate::EDIT_VERB));
+    assert_eq!(edit.word, "Edit");
+
+    bench
+        .press(&edit.offer, edit.args.clone())
+        .expect("Edit shows the editor");
+    let view = bench.controller.view();
+    assert!(!view.panes.is_empty(), "the editor shows");
+    assert!(view.home.is_none());
+    assert_eq!(pool_installs(&bench), installs, "no Pool install");
+    assert_eq!(bench.lens_session_id(), session, "the same session");
+}
+
+/// Q4, as ruled: connecting never makes a card's picture slower than
+/// watching it. Over Bluetooth the connected card's picture is the
+/// session's reads, and a session on its card keeps its own cadence — at
+/// least as often as a watched card's feed reads — not the Play page's
+/// once-a-minute budget.
+#[test]
+fn a_bluetooth_card_reads_at_least_as_often_as_a_watched_one() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        bluetooth_board("dev000000cnct000014"),
+    )));
+    let (mut bench, tasks, _present) = bench_over_bluetooth(&device, |_| {});
+    bench.run_until(&tasks, "the board to identify over Bluetooth", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    let id = bench.view().devices[0].id;
+    wait_for_access_line(&mut bench, &tasks, id, "Unlocked");
+    bench.wait_for_verb(&tasks, id, "push");
+    bench.push_gesture(id, bundled_example());
+    wait_running(&mut bench, &tasks, id);
+    bench.wait_for_verb(&tasks, id, crate::CONNECT_VERB);
+    bench.press_device(id, crate::CONNECT_VERB, OfferArgs::new());
+    on_its_card(&bench);
+
+    let gap = bench
+        .controller
+        .lens_refresh_gap_for_test()
+        .expect("the session reads");
+    assert!(
+        gap <= crate::app::studio::DEVICE_CARD_FEED_BLE_INTERVAL,
+        "at least as often as a watched card: {gap:?}"
+    );
+    assert!(
+        gap < crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL,
+        "the Play budget is the play page's: {gap:?}"
+    );
+}
+
+/// CD7: the connected session's link drops (the cable out) and the lens
+/// holds on for the board. The home page stays; the card says
+/// "Reconnecting…" as its connection bar's work, with Done its primary.
+/// When the hold runs out the session ends and the card is back to its
+/// facts.
+#[test]
+fn a_dropped_link_reads_reconnecting_on_the_card() {
+    let (mut bench, tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct000015", "usb-conn-20");
+    bench.press_device(id, "connect", OfferArgs::new());
+
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the lens to be held on the departure", |bench| {
+        bench.controller.lens_is_held()
+    });
+    assert!(
+        bench.controller.view().home.is_some(),
+        "the card, not the editor"
+    );
+    let card = the_card(&bench, id);
+    let work = card
+        .bar(crate::BarLayer::Connection)
+        .work
+        .clone()
+        .expect("the session's work");
+    assert_eq!(work.words, crate::RECONNECTING);
+    assert_eq!(work.state, crate::BarWorkState::Running);
+    assert_eq!(
+        card.name_bar.primary.as_ref().map(|primary| primary.word()),
+        Some("Done")
+    );
+    assert_eq!(card.panel, None, "the panel waits for the board");
+
+    // The board stays away: awake time runs the hold's grace out.
+    let grace = crate::app::studio::lens_hold::LENS_HOLD_GRACE.as_secs_f64();
+    let start = bench.clock.get();
+    while bench.clock.get() < start + grace + 1.0 {
+        bench.clock.set(bench.clock.get() + 1.0);
+        let _ = bench.tick();
+        if bench.lens_device_uid().is_none() {
+            break;
+        }
+    }
+    assert!(bench.controller.connected().is_none(), "the session ended");
+    bench.step(&tasks);
+    let card = the_card(&bench, id);
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).work,
+        None,
+        "back to its facts"
+    );
+    assert_eq!(
+        card.name_bar.primary.as_ref().map(|primary| primary.word()),
+        Some("Connect")
+    );
+}
+
+/// The director's ruling on P2–P3: Done with unsaved edits stays Routine.
+/// The edits live on the board as its overlay, and the next Connect
+/// rebuilds them as unsaved (the runtime-pool ADR, "Lens moves quiesce,
+/// then rebuild").
+#[test]
+fn done_with_unsaved_edits_is_routine_and_connect_reads_them_unsaved() {
+    let (mut bench, tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct000016", "usb-conn-21");
+    bench.press_device(id, crate::EDIT_VERB, OfferArgs::new());
+    // An edit in the editor: the shader's `glow` default, the slot its
+    // panel knob falls back to (a def slot, saved with the project).
+    let view = bench.controller.view();
+    let glow = project_editor(&view)
+        .root_module_face()
+        .expect("the root wears the module face")
+        .panel
+        .groups
+        .iter()
+        .flat_map(|group| group.groups.iter().chain(core::iter::once(group)))
+        .flat_map(|group| group.controls.iter())
+        .find(|control| control.channel == "glow")
+        .and_then(|control| control.control.address.clone())
+        .expect("the glow knob's slot");
+    set_slot_value(&mut bench, glow, lpc_model::LpValue::F32(0.25)).expect("the edit lands");
+    assert!(unsaved(&bench), "the edit is unsaved work");
+
+    // Done, from the editor's docked card.
+    let done = bench.device_verb(id, crate::DONE_VERB);
+    assert!(
+        bench.offered(&done).consequence().is_routine(),
+        "Done stays Routine with unsaved edits"
+    );
+    bench.press(&done, OfferArgs::new()).expect("Done");
+    assert!(bench.controller.connected().is_none());
+    bench.run_until(&tasks, "the pump to hear the board again", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.state_label == "Ready")
+    });
+
+    bench.press_device(id, crate::CONNECT_VERB, OfferArgs::new());
+    on_its_card(&bench);
+    assert!(
+        unsaved(&bench),
+        "the next Connect reads the edit back from the board, unsaved"
+    );
+}
+
+/// A Connect that cannot open says so: the card's connection bar says
+/// "Couldn't connect" with the reason in its details, and the console line
+/// is a Connect's, in plain words — not "could not open the board in the
+/// editor".
+#[test]
+fn a_failed_connect_says_so_on_the_card_in_plain_words() {
+    let (mut bench, _tasks, device, id, _uid) =
+        running_library_board("dev000000cnct000017", "usb-conn-22");
+    // The wire dies at the next byte: the session's own hello is the first
+    // thing to meet it.
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    let connect = bench.device_verb(id, crate::CONNECT_VERB);
+    let error = bench
+        .press(&connect, OfferArgs::new())
+        .expect_err("the session's hello dies on the cut wire");
+    let failure = bench
+        .controller
+        .connect_failure()
+        .expect("the card's reason")
+        .clone();
+    assert_eq!(failure.device, id);
+    assert_eq!(failure.reason, error.to_string());
+    let logged = bench
+        .console_line_containing("could not connect to the board")
+        .expect("the console says the Connect failed");
+    assert!(logged.contains(&failure.reason), "{logged}");
+    assert!(
+        bench
+            .console_line_containing("could not open the board in the editor")
+            .is_none(),
+        "a Connect is not an editor open"
+    );
+
+    let bar = the_card(&bench, id)
+        .bar(crate::BarLayer::Connection)
+        .clone();
+    let work = bar.work.expect("the failure");
+    assert_eq!(work.words, crate::COULDNT_CONNECT);
+    assert!(matches!(work.state, crate::BarWorkState::Failed { .. }));
+    let reason = bar
+        .details
+        .sections
+        .iter()
+        .flat_map(|section| section.lines.iter())
+        .find(|line| line.label == crate::COULDNT_CONNECT)
+        .map(|line| line.value.clone());
+    assert_eq!(reason.as_deref(), Some(failure.reason.as_str()));
+}
+
+// ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
 
@@ -769,4 +1305,55 @@ fn mirror_revision(bench: &DeviceBench) -> Option<i64> {
         .snapshot()
         .sync
         .map(|sync| sync.revision)
+}
+
+/// The card the home view publishes for `device`.
+fn the_card(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiBoardCard {
+    bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .into_iter()
+        .find(|card| card.device == device)
+        .unwrap_or_else(|| panic!("no card for {device:?}"))
+}
+
+/// Every action on `device`'s card names an offer the view's tree
+/// publishes, the panel's Edit among them.
+#[track_caller]
+fn assert_card_offers(bench: &DeviceBench, device: crate::DeviceId) {
+    let view = bench.controller.view();
+    let card = the_card(bench, device);
+    for path in card.offer_paths() {
+        assert!(
+            view.offers.get(path).is_some(),
+            "{path} is on the card and not offered"
+        );
+    }
+}
+
+/// The channels the card's panel draws, in order.
+fn channels(panel: &crate::UiBoardPanel) -> Vec<&str> {
+    panel
+        .controls
+        .iter()
+        .map(|control| control.view.channel.as_str())
+        .collect()
+}
+
+/// When `device`'s card feed last finished a pull of its own.
+fn feed_stamp(bench: &DeviceBench, device: crate::DeviceId) -> Option<f64> {
+    bench
+        .controller
+        .device_feeds()
+        .get(device)
+        .and_then(|feed| feed.last_pull_completed_at())
+}
+
+/// The session's project holds unsaved work.
+fn unsaved(bench: &DeviceBench) -> bool {
+    crate::has_unsaved_work(&bench.controller.project_for_test().dirty_summary())
 }

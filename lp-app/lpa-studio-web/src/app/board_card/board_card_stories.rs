@@ -697,6 +697,7 @@ pub(crate) fn saved_by_another_tab() -> Option<DeviceCardFeedView> {
         frame_age_secs: Some(5.0 * 60.0),
         engine_fps: None,
         liveness: FeedLiveness::Offline,
+        from_lens: false,
     })
 }
 
@@ -864,6 +865,7 @@ pub(crate) fn live_feed() -> Option<DeviceCardFeedView> {
         frame_age_secs: Some(0.2),
         engine_fps: Some(58),
         liveness: FeedLiveness::Live,
+        from_lens: false,
     })
 }
 
@@ -874,6 +876,7 @@ pub(crate) fn last_picture() -> Option<DeviceCardFeedView> {
         frame_age_secs: Some(5.0 * 3600.0),
         engine_fps: None,
         liveness: FeedLiveness::Offline,
+        from_lens: false,
     })
 }
 

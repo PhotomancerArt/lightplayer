@@ -30,10 +30,13 @@ pub const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it r
 /// The card's picture.
 pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
     let feed = picture_feed(input);
+    let lens_live = feed.is_some_and(lens_is_live);
     let source = match feed.map(|feed| feed.liveness) {
         // A board another tab holds has no link here: whatever the feed
         // says, the picture is the one that tab saved.
         Some(_) if input.held().is_some() => PictureSource::Saved,
+        // The open session's own frames (CD8): the lens's, current.
+        Some(_) if lens_live => PictureSource::Lens,
         Some(FeedLiveness::Live | FeedLiveness::Stale | FeedLiveness::Waiting) => {
             PictureSource::Link
         }
@@ -46,9 +49,22 @@ pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
         frame: feed
             .and_then(|feed| feed.frame.clone())
             .filter(|frame| frame.display_layout.is_some()),
-        dim: matches!(source, PictureSource::Saved | PictureSource::Lens),
+        // Last known rather than current: a saved picture, or the frame the
+        // feed left when the lens took the wire. The lens's own frames are
+        // current, and drawn so.
+        dim: match source {
+            PictureSource::Saved => true,
+            PictureSource::Lens => !lens_live,
+            PictureSource::Link | PictureSource::None => false,
+        },
         light: input.update.and_then(|update| update.light),
     }
+}
+
+/// The picture is the lens session's own and current: live, or stale on a
+/// board that stopped publishing, read by the open session (CD8).
+pub(crate) fn lens_is_live(feed: &DeviceCardFeedView) -> bool {
+    feed.from_lens && matches!(feed.liveness, FeedLiveness::Live | FeedLiveness::Stale)
 }
 
 /// The status corner's "Picture" line: the sentence that says why there is
@@ -105,6 +121,17 @@ pub(crate) fn source_words(
     }
     feed.frame.as_ref()?;
     let age = || age_words(feed.frame_age_secs.unwrap_or_default());
+    // The open session's frames, named as its (the ADR's §4: the details
+    // say where the picture comes from), at its own engine rate. Its pace
+    // is the session's reads, not the card feed's, so a Bluetooth link adds
+    // no pace words here.
+    if lens_is_live(feed) {
+        return Some(match (feed.liveness, feed.engine_fps) {
+            (FeedLiveness::Live, Some(fps)) => format!("live · {fps} fps · {LENS_SOURCE_WORDS}"),
+            (FeedLiveness::Live, None) => format!("live · {LENS_SOURCE_WORDS}"),
+            _ => format!("last frame · {} · {LENS_SOURCE_WORDS}", age()),
+        });
+    }
     Some(match feed.liveness {
         FeedLiveness::Waiting => return None,
         // The board's engine rate off its heartbeat; a board that has not
@@ -123,6 +150,11 @@ pub(crate) fn source_words(
 /// How often a Bluetooth card's picture moves, in the live words (see
 /// [`source_words`]).
 const BLUETOOTH_PICTURE_PACE: &str = "shown 1–2/s";
+
+/// Where the connected card's picture comes from, in the picture line: the
+/// editor's session, which reads the board's frames while it holds the
+/// wire (CD8).
+pub const LENS_SOURCE_WORDS: &str = "from the editor's session";
 
 /// The sentence when the picture is not the whole story.
 fn preview_slot_sentence(
@@ -186,7 +218,7 @@ mod tests {
     use lpa_devices::ActivityKind;
     use lpa_devices::view::FirmwareFace;
 
-    use super::super::card_fixtures::{CardFixture, activity, feed};
+    use super::super::card_fixtures::{CardFixture, activity, feed, lens_feed};
     use super::*;
     use crate::{UpdateLight, UpdateRowKind, UpdateVersion};
 
@@ -213,6 +245,51 @@ mod tests {
         let picture = board_picture(&CardFixture::ready().input());
         assert_eq!(picture.source, PictureSource::None);
         assert_eq!(picture.frame, None);
+    }
+
+    /// CD8: the open session's own frames are the lens's picture, current —
+    /// not dimmed — and the corner reads the session's rate and names where
+    /// the picture comes from. A board that stops publishing goes amber
+    /// under the lens as it does under the feed, still the lens's.
+    #[test]
+    fn the_lens_sessions_frames_are_the_lens_picture_not_dimmed() {
+        let mut fixture = CardFixture::ready();
+        fixture.feed = Some(lens_feed());
+        let picture = board_picture(&fixture.input());
+        assert_eq!(picture.source, PictureSource::Lens);
+        assert!(!picture.dim, "current, not last known");
+        assert!(picture.frame.is_some());
+        assert_eq!(
+            picture_line(&fixture.input()).as_deref(),
+            Some("live · 57 fps · from the editor's session")
+        );
+        let corner = super::super::status_corner::status_corner(&fixture.input(), &[]);
+        assert_eq!(
+            corner.reading.as_deref(),
+            Some("57 fps"),
+            "the session's rate, not the board's last word (58)"
+        );
+
+        let mut stale = lens_feed();
+        stale.liveness = FeedLiveness::Stale;
+        stale.frame_age_secs = Some(12.0);
+        fixture.feed = Some(stale);
+        let picture = board_picture(&fixture.input());
+        assert_eq!(picture.source, PictureSource::Lens);
+        assert!(!picture.dim);
+        assert_eq!(
+            picture_line(&fixture.input()).as_deref(),
+            Some("last frame · 12 s ago · from the editor's session")
+        );
+
+        // Over Bluetooth the session's reads set the pace: no card-feed
+        // pace words.
+        let mut over_ble = CardFixture::ready().over(UiLinkKind::Bluetooth);
+        over_ble.feed = Some(lens_feed());
+        assert_eq!(
+            picture_line(&over_ble.input()).as_deref(),
+            Some("live · 57 fps · from the editor's session")
+        );
     }
 
     #[test]
@@ -299,6 +376,7 @@ mod tests {
             liveness: FeedLiveness::Lens,
             frame_age_secs: None,
             engine_fps: None,
+            from_lens: false,
         };
         assert_eq!(
             preview_slot_sentence(&card, None, Some(&lens_no_frame)),

@@ -79,17 +79,80 @@ impl StudioController {
         })
     }
 
-    /// The web reported `place`: an Edit waiting for the editor ends once
-    /// the user is on the session's page, where the place itself shows it.
+    /// The web reported `place`, the user having been at the place this
+    /// controller last heard: a waiting Edit ends at the first report that
+    /// moves the user to another page ([`ConnectedBoard::note_page_moved`]).
     /// Read-only, like every use of the place: nothing opens or closes.
     pub(super) fn note_place_for_connected(&mut self, place: &crate::UiPlace) {
-        let lens_project = self.project.active_library_uid();
-        if let Some(connected) = self.connected_mut()
-            && connected.editor_waiting
-            && connected.is_its_page(&place.page, lens_project.as_deref())
-        {
-            connected.editor_waiting = false;
+        let before = self.place.as_ref().map(|place| place.page.clone());
+        if let Some(connected) = self.connected_mut() {
+            connected.note_page_moved(before.as_ref(), &place.page);
         }
+    }
+
+    /// Where this tab's session stands on each board it is about, for the
+    /// cards (`DeviceRosterView.connections`): the last Connect's failure,
+    /// a Connect held for its board, and the connected session —
+    /// Connecting while it opens, Reconnecting while its dropped link is
+    /// held, else Connected. Every other board is watched (absent).
+    pub(super) fn board_connections(
+        &self,
+    ) -> std::collections::BTreeMap<DeviceId, crate::BoardConnection> {
+        let mut connections = std::collections::BTreeMap::new();
+        if let Some(failure) = &self.connect_failure {
+            connections.insert(
+                failure.device,
+                crate::BoardConnection::Failed {
+                    reason: failure.reason.clone(),
+                },
+            );
+        }
+        if let Some(board) = self
+            .pending_device_lens
+            .as_ref()
+            .filter(|pending| pending.connect.is_some())
+            .and_then(|pending| self.device_at_address(&pending.uid))
+        {
+            connections.insert(board.id, crate::BoardConnection::Connecting);
+        }
+        if let Some(connected) = self.connected() {
+            let held = self
+                .lens_hold
+                .as_ref()
+                .is_some_and(|hold| hold.uid == connected.uid);
+            let state = match (held, connected.phase) {
+                (true, _) => crate::BoardConnection::Reconnecting,
+                (false, ConnectPhase::Opening) => crate::BoardConnection::Connecting,
+                (false, ConnectPhase::Open) => crate::BoardConnection::Connected,
+            };
+            connections.insert(connected.device, state);
+        }
+        connections
+    }
+
+    /// The connected board's panel at card size, while its session shows
+    /// on its card and its project is ready: the project's root panel
+    /// ([`crate::ProjectEditorView::root_module_face`]) picked by
+    /// [`crate::board_panel_picks`]. The editor's view is built into a
+    /// scratch offer tree, so none of the editor's node verbs are published
+    /// on the home page; the editor's own view is untouched.
+    pub(super) fn connected_board_panel(&self) -> Option<(DeviceId, crate::UiBoardPanel)> {
+        let connected = self.connected()?;
+        if connected.phase != ConnectPhase::Open || !self.connected_shows_on_its_card() {
+            return None;
+        }
+        let mut scratch = crate::UiOfferTree::new();
+        let pane = self
+            .project
+            .view(self.has_lightplayer_state(), &mut scratch);
+        let crate::UiViewContent::ProjectEditor(editor) = &pane.body else {
+            return None;
+        };
+        let face = editor.root_module_face()?;
+        Some((
+            connected.device,
+            crate::board_panel_picks(&face.panel, face.auto_save),
+        ))
     }
 
     /// The lens on session `id` attached: a connect's open is over.
@@ -455,8 +518,15 @@ impl StudioController {
         if self.connect_relay_offer(view, facts).is_some() {
             return Some(crate::ConnectReach::Relay);
         }
-        view.escapes
-            .contains(&lpa_devices::view::Escape::Reconnect)
+        // A board another tab holds over USB: its port is that tab's, and
+        // the take-over is the way in (the "one tab" gate on the cable's
+        // reach, as on a closed port's). The network reaches above carry
+        // their own gate (the slot).
+        let port_elsewhere = view
+            .held_elsewhere
+            .as_ref()
+            .is_some_and(|held| held.via == lpa_devices::HoldVia::Usb);
+        (view.escapes.contains(&lpa_devices::view::Escape::Reconnect) && !port_elsewhere)
             .then_some(crate::ConnectReach::Usb)
     }
 

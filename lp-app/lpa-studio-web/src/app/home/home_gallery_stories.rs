@@ -576,6 +576,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
             pending: Vec::new(),
             devices: vec![card],
         },
+        connections: Default::default(),
     }
 }
 
@@ -598,6 +599,7 @@ fn devices_page_remembered_last_frame() -> Element {
             frame_age_secs: Some(3.0 * 3_600.0),
             engine_fps: None,
             liveness: FeedLiveness::Offline,
+            from_lens: false,
         },
     );
     let home = UiHomeView {
@@ -712,6 +714,7 @@ fn devices_card_live_feed() -> Element {
         frame_age_secs: Some(12.0),
         engine_fps: Some(43),
         liveness,
+        from_lens: false,
     };
     let looks = [
         ("Live", feed(FeedLiveness::Live, true)),
@@ -1709,6 +1712,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                 },
             ],
         },
+        connections: Default::default(),
     }
 }
 
@@ -1771,6 +1775,7 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
             pending: vec![full.roster.pending[1].clone()],
             devices: vec![running, empty, remembered],
         },
+        connections: Default::default(),
     }
 }
 
@@ -2113,6 +2118,7 @@ fn devices_card_sim_faces() -> Element {
         liveness: FeedLiveness::Lens,
         frame_age_secs: Some(2.0),
         engine_fps: None,
+        from_lens: false,
     };
     let faces: Vec<(
         &str,

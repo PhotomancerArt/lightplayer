@@ -196,7 +196,8 @@ pub use device_backup_store::{
 };
 pub use device_by_base_mac::{DeviceByBaseMac, device_by_base_mac};
 pub use device_card_feed_view::{
-    DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
+    DeviceCardFeedView, FeedLiveness, LensFrameSource, device_card_feed_view,
+    device_card_feed_views, feed_liveness, lens_feed_view,
 };
 pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,

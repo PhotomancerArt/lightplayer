@@ -15,9 +15,10 @@ use super::connection_bar::{connection_bar, pending_connection_bar};
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
 use super::primary_action::{pending_primary, primary_action};
-use super::project_bar::{pending_project_bar, project_bar};
+use super::project_bar::{edit_action, pending_project_bar, project_bar};
 use super::status_corner::status_corner;
 use super::ui_board_card::{UiBoardCard, UiBoardPresence};
+use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
@@ -55,9 +56,23 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
             primary: primary_action(input, running_work),
         },
         bars,
+        panel: connected_panel(input),
     };
     debug_assert_offered(&card, input.offers);
     card
+}
+
+/// The board's panel on its card: the controller's picks, while the session
+/// is connected here and its project is ready (CD7), with Edit (or its lock)
+/// at the end of the All controls row — the project bar's own action, built
+/// by the same function (CD15) — and auto-save only at the edit tier (Q12).
+fn connected_panel(input: &BoardCardInput<'_>) -> Option<UiBoardPanel> {
+    let picks = input.panel.filter(|_| input.connection.is_connected())?;
+    Some(UiBoardPanel {
+        auto_save: picks.auto_save.filter(|_| input.can_edit()),
+        edit: edit_action(input),
+        ..picks.clone()
+    })
 }
 
 /// A new board's card: a link the roster is still identifying. `link` is
@@ -115,6 +130,7 @@ pub fn pending_board_card(
             pending_firmware_bar(pending),
             pending_hardware_bar(pending, board, offers),
         ],
+        panel: None,
     };
     debug_assert_offered(&card, offers);
     card
@@ -142,6 +158,7 @@ mod tests {
     use lpa_devices::view::OutcomeView;
     use lpa_devices::{ActivityKind, HoldLevel};
 
+    use super::super::board_connection::BoardConnection;
     use super::super::card_fixtures::{CardFixture, activity, board, feed};
     use super::super::primary_action::tests::pending_view;
     use super::super::ui_stack_bar::BarLayer;
@@ -199,6 +216,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// CD7 and CD15: connected with its project ready, the card carries the
+    /// panel (the bars are still built), its primary is Done, and Edit sits
+    /// at the end of the All controls row — the project bar's own action.
+    /// Auto-save rides along at the edit tier.
+    #[test]
+    fn a_connected_card_carries_the_panel_with_edit_at_its_end() {
+        let mut fixture = connected(CardFixture::ready());
+        let card = board_card(&fixture.input());
+        let panel = card.panel.clone().expect("the panel");
+        assert_eq!(panel.controls.len(), 1);
+        assert_eq!(panel.more, 2);
+        assert_eq!(panel.auto_save, Some(true), "USB is the edit tier");
+        let edit = panel.edit.clone().expect("Edit on the All controls row");
+        assert_eq!(edit.word, "Edit");
+        assert_eq!(edit.icon.as_deref(), Some("edit"));
+        assert_eq!(
+            Some(&edit),
+            card.bar(BarLayer::Project).action.as_ref(),
+            "one function builds both"
+        );
+        assert_eq!(card.bars.len(), 5, "the bars are still built");
+        assert_eq!(
+            card.name_bar.primary.as_ref().map(|primary| primary.word()),
+            Some("Done")
+        );
+        assert!(card.offer_paths().contains(&&edit.offer));
+
+        // Not connected (opening, reconnecting, watched): no panel.
+        for connection in [
+            BoardConnection::Watched,
+            BoardConnection::Connecting,
+            BoardConnection::Reconnecting,
+        ] {
+            fixture.connection = connection.clone();
+            assert_eq!(board_card(&fixture.input()).panel, None, "{connection:?}");
+        }
+        // Connected, but the project not ready (the controller has no
+        // picks yet): no panel.
+        let mut opening = connected(CardFixture::ready());
+        opening.panel = None;
+        assert_eq!(board_card(&opening.input()).panel, None);
+    }
+
+    /// AC7: a play-only link's panel hides auto-save, and its Edit wears
+    /// the lock (`unlock`, the password sheet).
+    #[test]
+    fn a_play_only_connected_card_hides_auto_save_and_locks_edit() {
+        let mut fixture = connected(CardFixture::ready().over(crate::UiLinkKind::Bluetooth));
+        fixture.access = Some(crate::UiDeviceAccess {
+            unlock: Some(crate::UiUnlockOffer::PlayOnly),
+            grant: Some(crate::UiAccessGrant {
+                tier: lpc_access::Tier::Play,
+                key: Some("friends".to_string()),
+            }),
+            ..crate::UiDeviceAccess::default()
+        });
+        let panel = board_card(&fixture.input()).panel.expect("the panel");
+        assert_eq!(panel.auto_save, None, "below the edit tier");
+        let edit = panel.edit.expect("Edit, locked");
+        assert_eq!(edit.icon.as_deref(), Some("lock"));
+        assert!(edit.offer.to_string().ends_with("/unlock"));
+        assert_eq!(edit.draw, crate::UiActionDraw::Sheet);
     }
 
     #[test]
@@ -282,5 +363,45 @@ mod tests {
             card.name_bar.primary.as_ref().map(|primary| primary.word()),
             Some("Connect")
         );
+        assert_eq!(card.panel, None);
+    }
+
+    /// `fixture`, connected on its card with its project's picks: one
+    /// master fader, and two controls the card does not draw.
+    fn connected(mut fixture: CardFixture) -> CardFixture {
+        fixture.editor_holds_it = true;
+        fixture.connection = BoardConnection::Connected;
+        fixture.feed = Some(super::super::card_fixtures::lens_feed());
+        let control = |channel: &str, widget| {
+            crate::UiPanelControlView::new(
+                channel,
+                crate::UiPanelControl {
+                    label: channel.to_string(),
+                    address: None,
+                    widget,
+                    value: crate::UiSlotValue::f32(0.5),
+                    emit: crate::UiPanelEmit::Value,
+                    live_value: None,
+                    live_gradient: None,
+                    panel_target: None,
+                    unit: None,
+                    state: crate::UiSlotFieldState::editable(),
+                    aspects: Vec::new(),
+                    wires: Vec::new(),
+                },
+            )
+        };
+        let fader = || crate::UiPanelWidget::Fader {
+            min: 0.0,
+            max: 1.0,
+            step: None,
+        };
+        let root = crate::UiPanelGroup::new("Porch", "/").with_controls(vec![
+            control(super::super::MASTER_CHANNEL, fader()),
+            control("level", fader()),
+            control("palette", crate::UiPanelWidget::PaletteSwatch),
+        ]);
+        fixture.panel = Some(super::super::board_panel_picks(&root, Some(true)));
+        fixture
     }
 }

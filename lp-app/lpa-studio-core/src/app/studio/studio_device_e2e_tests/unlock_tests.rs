@@ -14,7 +14,7 @@ use super::*;
 
 /// The play password a friend was given, on the board's store beside the
 /// author one.
-const PLAY_PASSWORD: &str = "friends-play-2";
+pub(super) const PLAY_PASSWORD: &str = "friends-play-2";
 
 /// A locked board nothing this browser holds unlocks → the sheet rises and
 /// the card offers Unlock → a press with the password runs the login
@@ -278,7 +278,7 @@ fn locked_board(uid: &str) -> FakeEsp32Device {
 
 /// A store with a play password ([`PLAY_PASSWORD`]) and the author one
 /// ([`BENCH_PASSWORD`]).
-fn two_password_store_file() -> (String, Vec<u8>) {
+pub(super) fn two_password_store_file() -> (String, Vec<u8>) {
     let author = lpc_access::SecretEntry::from_password(
         "bench password",
         lpc_access::Tier::Edit,

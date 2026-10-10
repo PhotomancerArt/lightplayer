@@ -552,6 +552,8 @@ pub(crate) fn StoryBoardCard(
         ended: ended.as_ref(),
         editor_holds_it,
         now,
+        connection: &lpa_studio_core::BoardConnection::Watched,
+        panel: None,
     });
     // A story that opens a part's details (or whose layout question raises
     // them) keeps the room they float in, so a capture holds the whole
@@ -762,6 +764,7 @@ pub(crate) fn with_core_cards(mut home: UiHomeView, offers: &UiOfferTree, now: f
             projects: &home.projects,
             lens: None,
             now,
+            panel: None,
         });
         home.devices.cards = cards;
     }

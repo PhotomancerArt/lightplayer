@@ -97,6 +97,12 @@ pub struct DeviceRosterView {
     /// it failed (`devices/<board>/take-over`). Joined by the controller,
     /// which holds the asks; absent = nothing to say.
     pub take_overs: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiTakeOver>,
+    /// Where this tab's session stands on each board it is about —
+    /// connecting, connected, reconnecting, or why the last Connect failed
+    /// ([`super::board_card::BoardConnection`]). Joined by the controller,
+    /// which holds the session; absent = watched.
+    pub connections:
+        std::collections::BTreeMap<lpa_devices::DeviceId, super::board_card::BoardConnection>,
     /// Each device's firmware-update words (the update-states spike,
     /// direction C): the firmware zone's line and bar, the picture slot's
     /// sentence and light, the header chip and version. Joined by the
@@ -152,6 +158,7 @@ impl Default for DeviceRosterView {
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
             take_overs: std::collections::BTreeMap::new(),
+            connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
@@ -508,6 +515,7 @@ impl DeviceRoster {
             wifi_address_connect: None,
             // Joined by the controller, which holds the asks.
             take_overs: std::collections::BTreeMap::new(),
+            connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
@@ -992,6 +1000,7 @@ mod tests {
             wifi_connects: Default::default(),
             wifi_address_connect: None,
             take_overs: Default::default(),
+            connections: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![
@@ -1012,6 +1021,7 @@ mod tests {
                     frame_age_secs: Some(3_600.0),
                     engine_fps: None,
                     liveness: super::super::FeedLiveness::Offline,
+                    from_lens: false,
                 },
             )]),
             runtime_bands: std::collections::BTreeMap::new(),
@@ -1061,6 +1071,7 @@ mod tests {
             wifi_connects: Default::default(),
             wifi_address_connect: None,
             take_overs: Default::default(),
+            connections: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],

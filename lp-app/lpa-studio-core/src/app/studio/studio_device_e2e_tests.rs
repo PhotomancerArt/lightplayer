@@ -2551,6 +2551,21 @@ fn running_board_wanting_a_picture(uid: &str, endpoint: &str) -> (DeviceBench, T
     (bench, tasks)
 }
 
+/// One edit to one slot, as the editor's field sends it
+/// (`SlotEditOp::SetValue`). No offer carries a slot edit — the field
+/// builds it (`slot_edit_actions.rs`, the web's) — so this is the device
+/// tests' one place to build it.
+fn set_slot_value(
+    bench: &mut DeviceBench,
+    address: crate::ProjectSlotAddress,
+    value: lpc_model::LpValue,
+) -> crate::UiResult {
+    drive(bench.controller.dispatch(UiAction::from_op(
+        ProjectController::NODE_ID,
+        crate::SlotEditOp::SetValue { address, value },
+    )))
+}
+
 fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i64> {
     bench
         .controller
@@ -7802,13 +7817,11 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
     bench.controller.request_library_refresh();
     drive(bench.controller.settle_library());
 
-    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
-        crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::OpenPackage {
-            key: key.clone(),
-            prefer: None,
-        },
-    )));
+    // The gallery's open, pressed by path as the card and the agent press it.
+    let outcome = bench.press(
+        "project/open",
+        OfferArgs::new().with(crate::OPEN_PROJECT_PARAM, &key),
+    );
     assert!(
         outcome.is_ok(),
         "the open is held, never refused: {outcome:?}"

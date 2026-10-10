@@ -194,17 +194,15 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
         card.bar(BarLayer::Connection).summary,
         "USB \u{b7} connected"
     );
-    assert!(
-        matches!(
-            card.name_bar.primary.as_ref().map(UiPrimary::word),
-            Some("Edit") | Some("Connect")
-        ),
-        "an ordinary live card: {:?}",
-        card.name_bar.primary
-    );
-    assert_ne!(
-        card.name_bar.primary.as_ref().map(UiPrimary::word),
-        Some("Connect"),
+    // An ordinary live card: its Connect opens its panel here (`connect`),
+    // with nothing left to take over.
+    let Some(UiPrimary::Offer(connect)) = card.name_bar.primary.as_ref() else {
+        panic!("an ordinary live card: {:?}", card.name_bar.primary);
+    };
+    assert_eq!(connect.word, "Connect");
+    assert_eq!(
+        connect.offer,
+        b.verb(MAC_A, "connect"),
         "nothing left to take over"
     );
 }

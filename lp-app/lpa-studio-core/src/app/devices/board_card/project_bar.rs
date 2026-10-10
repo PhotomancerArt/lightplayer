@@ -9,8 +9,8 @@
 //! | Degraded | the fault, without its "Degraded: " lead | — | Attention | — |
 //! | Given an older version than the project's newest | "Out of date" | the project | Attention | "Send latest" (`push`, the project preset) |
 //! | Says it runs nothing | "Nothing on it yet", or what starts at its next power-up | — | Neutral | "Add a project" (`push`, the picker) |
-//! | Open in the editor, or given the newest | the project | "N boards" when shared | Neutral | — (Edit is the primary until "connected") |
-//! | Runs something this library cannot name | its label | — | Neutral | — |
+//! | Open in the editor, or given the newest | the project | "N boards" when shared | Neutral | Edit |
+//! | Runs something this library cannot name | its label | — | Neutral | Edit |
 //! | Has not said | "Not known yet" | — | Neutral | — |
 //!
 //! The order is the order of what a person needs to know first: what is
@@ -18,6 +18,16 @@
 //! what it is. `push` is offered only when the board can take a project and
 //! has said what it runs; without it there is no action, and the words
 //! stay.
+//!
+//! **Edit** (D32) takes the slot whenever no project notice does: Edit
+//! (`edit`, pencil) on a board you can edit, Edit with a lock (`unlock`, the
+//! password sheet) on a play-only one ([`edit_action`]). When "Send latest"
+//! or "Add a project" holds the slot, Edit is in the project's details. It
+//! is where `edit` is offered, so never on the editor's docked card (the
+//! editor already shows the board). While the board is connected the bars
+//! give way to its panel, and the same action rides the panel's All
+//! controls row ([`super::UiBoardPanel::edit`]): one function builds both,
+//! so they cannot disagree.
 
 use lpa_devices::view::LoadedProject;
 
@@ -124,10 +134,21 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let running = work
         .as_ref()
         .is_some_and(|work| work.state == BarWorkState::Running);
+    // A notice's action keeps the slot; Edit takes it otherwise, and goes
+    // to the details when a notice holds it.
+    let edit = edit_action(input);
+    let edit_in_details = action.is_some();
+    let action = action.or_else(|| edit.clone());
     UiStackBar {
         layer: BarLayer::Project,
         icon: "project".to_string(),
-        details: details(input, &summary, tone, note.map(|note| note.detail.as_str())),
+        details: details(
+            input,
+            &summary,
+            tone,
+            note.map(|note| note.detail.as_str()),
+            edit.filter(|_| edit_in_details),
+        ),
         summary,
         aside,
         aside_icon: None,
@@ -136,6 +157,26 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         action: if running { None } else { action },
         work,
     }
+}
+
+/// Edit, as the project bar and the connected panel's All controls row
+/// draw it (D32, CD15): `edit` with the pencil on a board you can edit, or
+/// Edit with a lock — the `unlock` sheet — on a board whose link holds play
+/// only (an editor there could not edit). `None` where `edit` is not
+/// offered: a board running nothing, one not idle, and the board the editor
+/// already shows.
+pub(crate) fn edit_action(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
+    let edit = input.offer("edit")?;
+    if input.play_only()
+        && let Some(unlock) = input.offer("unlock")
+    {
+        return Some(
+            UiCardAction::press(unlock, "Edit")
+                .with_icon("lock")
+                .drawn(UiActionDraw::Sheet),
+        );
+    }
+    Some(UiCardAction::press(edit, "Edit").with_icon("edit"))
 }
 
 /// A new board's project bar: it has not said what it runs.
@@ -159,13 +200,15 @@ pub(crate) fn pending_project_bar() -> UiStackBar {
     }
 }
 
-/// The project bar's details: the notice, what it plays, its verbs, and
-/// Remove project apart.
+/// The project bar's details: the notice, what it plays, its verbs (Edit
+/// among them when a notice holds the bar's slot), and Remove project
+/// apart.
 fn details(
     input: &BoardCardInput<'_>,
     summary: &str,
     tone: UiStatusKind,
     note: Option<&str>,
+    edit: Option<UiCardAction>,
 ) -> UiBarDetails {
     let view = input.view;
     let mut sections = Vec::new();
@@ -211,10 +254,7 @@ fn details(
     sections.push(project);
 
     let running_something = matches!(view.loaded_project, LoadedProject::Running { .. });
-    let mut actions = Vec::new();
-    if let Some(edit) = input.offer("edit") {
-        actions.push(UiCardAction::press(edit, "Edit").with_icon("edit"));
-    }
+    let mut actions: Vec<UiCardAction> = edit.into_iter().collect();
     if let Some(push) = input
         .offer("push")
         .filter(|push| running_something && input.idle() && !push.params().is_empty())
@@ -379,7 +419,11 @@ mod tests {
         let bar = project_bar(&fixture.input());
         assert_eq!(bar.summary, "porch-glow");
         assert_eq!(bar.aside.as_deref(), Some("3 boards"));
-        assert_eq!(bar.action, None, "Edit is the primary until connected");
+        assert_eq!(
+            bar.action.as_ref().map(|action| action.word.as_str()),
+            Some("Edit"),
+            "no notice holds the slot"
+        );
         assert_eq!(
             line(&bar, "In sync with").as_deref(),
             Some("Garage · Back fence")
@@ -465,10 +509,94 @@ mod tests {
         assert_eq!(bar.summary, "node /studio.show/s faulted");
     }
 
+    /// D32: Edit is the bar's action on a board you can edit — the `edit`
+    /// offer, with the pencil.
     #[test]
-    fn its_details_hold_edit_replace_and_remove_apart() {
-        let bar = project_bar(&CardFixture::ready().input());
+    fn edit_is_the_bars_action_at_the_edit_tier() {
+        let mut fixture = CardFixture::ready();
+        let edit = project_bar(&fixture.input()).action.expect("Edit");
+        assert_eq!(edit.word, "Edit");
+        assert_eq!(edit.icon.as_deref(), Some("edit"));
+        assert!(edit.offer.to_string().ends_with("/edit"));
+        assert_eq!(edit.draw, UiActionDraw::Press);
+        // Unlocked at edit over Bluetooth: the same.
+        let mut granted = CardFixture::ready().over(crate::UiLinkKind::Bluetooth);
+        granted.access = Some(crate::UiDeviceAccess {
+            grant: Some(crate::UiAccessGrant {
+                tier: lpc_access::Tier::Edit,
+                key: Some("Yona's MacBook".to_string()),
+            }),
+            ..crate::UiDeviceAccess::default()
+        });
+        let edit = project_bar(&granted.input()).action.expect("Edit");
+        assert!(edit.offer.to_string().ends_with("/edit"));
+        assert_eq!(edit.icon.as_deref(), Some("edit"));
+    }
+
+    /// D32: on a board whose link holds play only, Edit wears a lock and
+    /// presses `unlock` (the password sheet): an editor there could not
+    /// edit.
+    #[test]
+    fn edit_wears_a_lock_at_the_play_tier() {
+        let mut fixture = CardFixture::ready().over(crate::UiLinkKind::Bluetooth);
+        fixture.access = Some(crate::UiDeviceAccess {
+            unlock: Some(crate::UiUnlockOffer::PlayOnly),
+            ..crate::UiDeviceAccess::default()
+        });
+        let edit = project_bar(&fixture.input()).action.expect("Edit, locked");
+        assert_eq!(edit.word, "Edit");
+        assert_eq!(edit.icon.as_deref(), Some("lock"));
+        assert!(edit.offer.to_string().ends_with("/unlock"));
+        assert_eq!(edit.draw, UiActionDraw::Sheet);
+    }
+
+    /// When "Send latest" holds the slot, Edit is in the project's details.
+    #[test]
+    fn edit_is_in_the_details_when_send_latest_takes_the_slot() {
+        let mut fixture = CardFixture::ready();
+        let project = library_project("prjaaaa", "holiday-eaves");
+        fixture.plays = BoardPlays::Given {
+            project_uid: project.uid.clone(),
+            at_head: false,
+        };
+        fixture.project = Some(project);
+        let bar = project_bar(&fixture.input());
+        assert_eq!(
+            bar.action.as_ref().map(|action| action.word.as_str()),
+            Some("Send latest")
+        );
         assert_eq!(verb_words(&bar), ["Edit", "Put another project on it"]);
+    }
+
+    /// The editor's docked card: the editor already shows the board, so
+    /// `edit` is not offered there and no Edit is drawn, locked or not.
+    #[test]
+    fn no_edit_on_the_editors_docked_card() {
+        let mut fixture = CardFixture::ready();
+        fixture.editor_holds_it = true;
+        fixture.docked = true;
+        let bar = project_bar(&fixture.input());
+        assert_eq!(bar.action, None);
+        assert!(!verb_words(&bar).contains(&"Edit".to_string()));
+
+        let mut play_only = CardFixture::ready().over(crate::UiLinkKind::Bluetooth);
+        play_only.access = Some(crate::UiDeviceAccess {
+            unlock: Some(crate::UiUnlockOffer::PlayOnly),
+            ..crate::UiDeviceAccess::default()
+        });
+        play_only.editor_holds_it = true;
+        play_only.docked = true;
+        assert_eq!(project_bar(&play_only.input()).action, None);
+    }
+
+    #[test]
+    fn its_details_hold_replace_and_remove_apart() {
+        let bar = project_bar(&CardFixture::ready().input());
+        assert_eq!(
+            verb_words(&bar),
+            ["Put another project on it"],
+            "Edit is the bar's own action"
+        );
         let danger = bar.details.sections.last().expect("the danger section");
         assert_eq!(danger.weight, crate::RichWeight::Danger);
         assert_eq!(danger.affordances[0].word, "Remove project");

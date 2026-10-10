@@ -1,5 +1,6 @@
 //! [`UiBoardCard`]: one board, as the card draws it — the picture, the
-//! status corner, the name bar and its primary, then the five bars. Built in
+//! status corner, the name bar and its primary, then the five bars (or,
+//! connected, the board's panel in their place). Built in
 //! core ([`super::board_card`], [`super::pending_board_card`]) from the
 //! roster's facts and the board's own offers, so the web decides how a bar
 //! looks and never what it says or which offer it carries
@@ -10,6 +11,7 @@ use lpa_devices::DeviceId;
 use crate::OfferPath;
 
 use super::ui_bar_work::{BarWorkState, UiBarWork};
+use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::UiBoardPicture;
 use super::ui_card_action::UiCardAction;
 use super::ui_name_bar::{UiNameBar, UiPrimary};
@@ -28,8 +30,15 @@ pub struct UiBoardCard {
     pub picture: UiBoardPicture,
     pub status: UiStatusCorner,
     pub name_bar: UiNameBar,
-    /// Always five, in [`BarLayer::ALL`]'s order.
+    /// Always five, in [`BarLayer::ALL`]'s order. Built while the board is
+    /// connected too (tests and the app agent read them); the web draws
+    /// [`Self::panel`] in their place then.
     pub bars: Vec<UiStackBar>,
+    /// The board's panel at card size: `Some` exactly while this tab's
+    /// session is connected on the card and its project is ready (the
+    /// ADR's §4, CD7). The web draws it in the five bars' place, at their
+    /// height.
+    pub panel: Option<UiBoardPanel>,
 }
 
 /// Which section of the home page a board belongs in.
@@ -52,12 +61,16 @@ impl UiBoardCard {
             .expect("a card always has its five bars")
     }
 
-    /// Every action anywhere on the card: the primary, each bar's action,
-    /// its work's Retry, and every verb in every details section.
+    /// Every action anywhere on the card: the primary, the panel's All
+    /// controls row's, each bar's action, its work's Retry, and every verb
+    /// in every details section.
     pub fn actions(&self) -> Vec<&UiCardAction> {
         let mut actions = Vec::new();
         if let Some(UiPrimary::Offer(action)) = &self.name_bar.primary {
             actions.push(action);
+        }
+        if let Some(edit) = self.panel.as_ref().and_then(|panel| panel.edit.as_ref()) {
+            actions.push(edit);
         }
         for section in &self.status.details.sections {
             actions.extend(section.affordances.iter());

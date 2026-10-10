@@ -382,6 +382,7 @@ fn fixture_card(
         frame_age_secs: Some(0.2),
         engine_fps: Some(43),
         liveness: FeedLiveness::Live,
+        from_lens: false,
     });
     // Only the play row tells its access: unlocked with friends, for play.
     let access = (row == UpdateFixtureRow::PlayOnly).then(|| UiDeviceAccess {

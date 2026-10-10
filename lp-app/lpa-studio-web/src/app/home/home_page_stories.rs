@@ -330,6 +330,7 @@ fn live_feed() -> DeviceCardFeedView {
         frame_age_secs: Some(1.0),
         engine_fps: Some(43),
         liveness: FeedLiveness::Live,
+        from_lens: false,
     }
 }
 
@@ -340,6 +341,7 @@ fn last_picture(age_secs: f64) -> DeviceCardFeedView {
         frame_age_secs: Some(age_secs),
         engine_fps: None,
         liveness: FeedLiveness::Offline,
+        from_lens: false,
     }
 }
 

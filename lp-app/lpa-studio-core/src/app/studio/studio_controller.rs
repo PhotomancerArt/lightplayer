@@ -2208,13 +2208,16 @@ impl StudioController {
     /// The devices surface's projection.
     pub fn device_roster_view(&self) -> crate::DeviceRosterView {
         let mut view = self.devices.view(self.device_now());
+        let lens_frame = self.lens_frame_source();
         view.feeds = crate::device_card_feed_views(
             self.devices.roster(),
             &view.roster.devices,
             &self.device_feeds,
             self.devices.effects(),
+            lens_frame.as_ref(),
             (self.now_secs)(),
         );
+        view.connections = self.board_connections();
         view.runtime_bands = self.runtime_bands(&view);
         view.usb_available = self.usb_available();
         view.access = self
@@ -2274,6 +2277,33 @@ impl StudioController {
         view
     }
 
+    /// The lens session's picture for the card of the device it is open on
+    /// ([`crate::LensFrameSource`], CD8): the session's own passive pull
+    /// already carries the board's published frame, so the card draws that
+    /// while the feed cannot pull under the borrow — no second pull, no
+    /// change to the lens's cadence. `None` without a device lens holding a
+    /// wire, or before its first frame (the card then keeps the dimmed last
+    /// one, "editor has the wire"). Closed PR #571, redone.
+    fn lens_frame_source(&self) -> Option<crate::LensFrameSource> {
+        let session = self.pool.lens_session()?;
+        let attachment = session.attachment();
+        if !self.devices.effects().lens_holds_wire(attachment.link) {
+            return None;
+        }
+        let (frame, frames_seen) = self.project.lens_published_frame()?;
+        let age =
+            self.device_feeds
+                .observe_lens_frames(session.id(), frames_seen, (self.now_secs)());
+        Some(crate::LensFrameSource {
+            device: attachment.device,
+            frame,
+            frame_age_secs: Some(age),
+            engine_fps: session
+                .engine_fps()
+                .map(|fps| fps.round().clamp(0.0, f32::from(u16::MAX)) as u16),
+        })
+    }
+
     /// When the registry last saw each board on the roster: its row's
     /// `last_seen_at`, found by the row key the roster loaded it under (or
     /// its identity's key). How long an offline board has been away.
@@ -2299,11 +2329,13 @@ impl StudioController {
     }
 
     /// The inputs every card on the roster is built from: the view's
-    /// published tree, the library, the board the editor is open on, now.
+    /// published tree, the library, the board the editor is open on, the
+    /// connected board's panel picks (`panel`, the home view's), now.
     fn roster_cards_input<'a>(
         &'a self,
         roster: &'a crate::DeviceRosterView,
         offers: &'a crate::UiOfferTree,
+        panel: Option<(crate::DeviceId, &'a crate::UiBoardPanel)>,
     ) -> crate::RosterCardsInput<'a> {
         crate::RosterCardsInput {
             roster,
@@ -2317,6 +2349,7 @@ impl StudioController {
                 .pool
                 .attached_session()
                 .map(|session| session.attachment().device),
+            panel,
             now: (self.now_secs)(),
         }
     }
@@ -2712,6 +2745,14 @@ impl StudioController {
     /// A Bluetooth lens held in Play mode is the one idle-budgeted case
     /// (M5): see [`BLE_PLAY_IDLE_REFRESH_INTERVAL`](crate::app::studio::BLE_PLAY_IDLE_REFRESH_INTERVAL).
     fn lens_refresh_gap(&self, session: &crate::RuntimeSession) -> Duration {
+        // `play_views` counts the play PAGE only. A connected board's card
+        // is not a play view, though it shows the same panel: connecting
+        // must never make a card's picture slower than watching it (Q4), and
+        // the card's picture IS the lens's reads while the lens holds the
+        // wire (CD8). So a Bluetooth lens on its card keeps the session's
+        // own cadence, which reads at least as often as a watched card's
+        // feed (`DEVICE_CARD_FEED_BLE_INTERVAL`); the Play budget stays the
+        // play page's.
         let ble_play = session.transport() == crate::LinkTransport::Ble && self.play_views > 0;
         crate::app::studio::lens_refresh_gap_policy(
             session.cadence_interval(),
@@ -3207,9 +3248,14 @@ impl StudioController {
                 offers.publish(offer);
             }
             self.publish_device_offers(&mut offers);
-            // Each board's card points at the verbs just published.
-            home.devices.cards =
-                crate::roster_board_cards(&self.roster_cards_input(&home.devices, &offers));
+            // Each board's card points at the verbs just published; the
+            // connected board's carries its panel.
+            let panel = self.connected_board_panel();
+            home.devices.cards = crate::roster_board_cards(&self.roster_cards_input(
+                &home.devices,
+                &offers,
+                panel.as_ref().map(|(device, panel)| (*device, panel)),
+            ));
             offers.set_focus(self.offer_focus(true));
             let app_agent = self.app_agent_view_placed(&mut offers);
             // A connected session on its card still has an address: the
@@ -3787,7 +3833,9 @@ impl StudioController {
             .iter()
             .find(|card| card.id == attachment.device)?
             .clone();
-        let card = crate::roster_board_card(&self.roster_cards_input(&roster, offers), &view)?;
+        // No panel on the docked card: the editor is the session's surface.
+        let card =
+            crate::roster_board_card(&self.roster_cards_input(&roster, offers, None), &view)?;
         Some(crate::UiLensCard::Board(Box::new(card)))
     }
 
@@ -6987,11 +7035,13 @@ impl StudioController {
                 // session, the wire goes back — the card says the rest.
                 // (A cancelled open unwinds through here too, quietly.)
                 if !crate::app::open_progress::open_superseded() {
-                    self.push_log(UiLogDraft::new(
-                        UiLogLevel::Warn,
-                        UiLogOrigin::Studio,
-                        format!("could not open the {open_noun} in the editor: {error}"),
-                    ));
+                    // A Connect opens the board on its card, not in the
+                    // editor: its line says so in its own words.
+                    let line = match connect {
+                        Some(_) => format!("could not connect to the {open_noun}: {error}"),
+                        None => format!("could not open the {open_noun} in the editor: {error}"),
+                    };
+                    self.push_log(UiLogDraft::new(UiLogLevel::Warn, UiLogOrigin::Studio, line));
                 }
                 self.close_device_lens();
                 Err(error)

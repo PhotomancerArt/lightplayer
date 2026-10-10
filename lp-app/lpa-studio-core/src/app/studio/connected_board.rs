@@ -77,11 +77,27 @@ impl ConnectedBoard {
     /// lens holds (`/p/<its uid>`). With no place reported (the headless
     /// tests and evals), only a waiting Edit shows the editor.
     ///
+    /// A waiting Edit lasts until the first place report that moves the
+    /// user to another page ([`Self::note_page_moved`]): to the session's
+    /// page, where the place itself goes on showing the editor, or
+    /// anywhere else — Edit, then Home, shows home.
+    ///
     /// It reads the place; it opens, closes and navigates nothing because
     /// of it (AGENTS.md, "Place is a read-only fact in core").
     pub fn shows_editor(&self, place: Option<&UiPlace>, lens_project: Option<&str>) -> bool {
         self.editor_waiting
             || place.is_some_and(|place| self.is_its_page(&place.page, lens_project))
+    }
+
+    /// The web reported the user on `now`, having been on `before` (`None`
+    /// before any report): a waiting Edit ends when the page moved. A report
+    /// that only opens or closes a panel over the same page (⌘K closing as
+    /// it runs Edit, the chat opening) is not a move, so it leaves the Edit
+    /// waiting for the lens sync to take the user to the session's page.
+    pub fn note_page_moved(&mut self, before: Option<&UiPage>, now: &UiPage) {
+        if before != Some(now) {
+            self.editor_waiting = false;
+        }
     }
 
     /// Whether `page` is this session's own page: its project's
@@ -177,6 +193,40 @@ mod tests {
             "an unbound lens has no project page"
         );
         assert!(!board(false).shows_editor(Some(&at), Some("prjother")));
+    }
+
+    /// The director's ruling on P2–P3: a waiting Edit ends at the first
+    /// place report that moves the user to another page — to the session's
+    /// page, or anywhere else (Edit, then Home, shows home). A panel opening
+    /// or closing over the same page is not a move.
+    #[test]
+    fn a_waiting_edit_ends_at_the_first_page_move() {
+        let home = UiPage::Home;
+        let its_page = UiPage::Project {
+            uid: PROJECT.to_string(),
+            view: UiProjectView::Nodes,
+        };
+        for (before, now) in [
+            (None, &home),
+            (Some(&home), &its_page),
+            (Some(&home), &UiPage::Explore),
+            (Some(&its_page), &home),
+        ] {
+            let mut connected = board(true);
+            connected.note_page_moved(before, now);
+            assert!(!connected.editor_waiting, "{before:?} → {now:?}");
+            assert_eq!(
+                connected.shows_editor(Some(&place(now.clone())), Some(PROJECT)),
+                *now == its_page,
+                "the place alone decides, after {before:?} → {now:?}"
+            );
+        }
+        let mut connected = board(true);
+        connected.note_page_moved(Some(&home), &home);
+        assert!(
+            connected.editor_waiting,
+            "a panel over the same page: still waiting"
+        );
     }
 
     #[test]

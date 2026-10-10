@@ -1,11 +1,13 @@
-//! The name bar's one primary action (`plan.md`, "The primary action").
+//! The name bar's one primary action (`plan.md`, "The primary action"; the
+//! connected plan's P4 table).
 //!
 //! In order, first match wins:
 //!
 //! | Board | Primary | Offer | Icon |
 //! |---|---|---|---|
-//! | The editor holds it (the docked lens card) | none, until Done lands | — | — |
-//! | Busy | the word it would be, disabled: "Busy: <the work>" | — | — |
+//! | Connecting (the session opening, or a Connect held for the board) | "Connecting…", disabled | — | the link's |
+//! | The session is on it (its card, or the editor's docked card) | Done | `done` | check |
+//! | Busy | Connect, disabled: "Busy: <the work>" | — | the link's |
 //! | Another tab holds it | Connect (it is the take-over) | `take-over` | the held link's |
 //! | …and is busy with it | Connect, disabled: "Busy in the other tab: <label>" | — | the same |
 //! | …a take-over is under way | Connect, disabled: its words ("Asking the other tab…") | — | the same |
@@ -13,57 +15,66 @@
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
 //! | Attached (the port is there, closed) | Connect | `connect` | the link's |
 //! | Offline stand-in (a sim, an in-tab board) | Power on | `reconnect` | play |
-//! | Offline, reachable | Connect: Wi‑Fi first, then the cloud, then the cable | `connect-wifi` / `connect-relay` / `reconnect` | wifi / cloud / the link's |
+//! | Offline, reachable | Connect: Wi‑Fi first, then the cloud, then the cable | `connect` | wifi / cloud / the link's, by the road |
 //! | Offline, nothing reaches it | Connect, disabled: "Offline · 2 weeks" | — | the last link's |
-//! | Ready, play-only | Edit, with a lock | `unlock` (the sheet) | lock |
-//! | Ready, running, the editor not on it | Edit | `edit` | edit |
-//! | Ready, nothing on it or not said | Edit, disabled: "Nothing on it to edit yet" | — | edit |
+//! | Ready, running, granted at any tier | Connect | `connect` | the link's |
+//! | Ready, nothing on it or not said | Connect, disabled: "Nothing on it yet" | `connect` (disabled) | the link's |
 //!
 //! A new board's primary is [`pending_primary`]: Install once it has
 //! settled on needing firmware, else Connect, disabled, saying how far it
 //! has got ("Identifying…").
 //!
-//! "Connect" in this milestone means reach the board, never the editor; the
-//! editor is Edit (director ruling Q1). The play-only row sits ahead of the
-//! plain Edit row: a link that holds play only would open an editor that
-//! cannot edit, so its Edit asks for the password first.
+//! Connect means one thing (the board card ADR, §4): this board's panel,
+//! here, on its card, reaching the board first when it must. Edit is the
+//! project bar's action ([`super::project_bar::edit_action`]), and while the
+//! board is connected, the panel's All controls row's.
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{LoadedProject, PendingLinkView};
 
-use super::bar_work::{activity_bar, board_pick};
+use super::bar_work::board_pick;
 use super::board_card_input::{BoardCardInput, link_icon, offer_at};
+use super::board_connection::BoardConnection;
 use super::held_board::held_primary;
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
-use super::ui_stack_bar::BarLayer;
 use crate::app::devices::age_words::duration_words;
+use crate::app::devices::connect_offer::NOTHING_ON_IT_YET;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, UiOffer};
 
-/// Why Edit waits on a board that runs nothing (or has not said).
-pub const NOTHING_TO_EDIT: &str = "Nothing on it to edit yet";
+/// The primary's word, and the connection bar's work, while a Connect is
+/// under way.
+pub const CONNECTING: &str = "Connecting\u{2026}";
 
 /// A board's primary. `work` is the running work's bar, for Busy's words.
 pub(crate) fn primary_action(
     input: &BoardCardInput<'_>,
     work: Option<&UiBarWork>,
 ) -> Option<UiPrimary> {
-    if input.editor_holds_it {
-        return None;
-    }
     let view = input.view;
     let link = input.link_kind();
+    // No Cancel while connecting (Q10): the open is bounded by the device
+    // request deadline, a held Connect by its grace.
+    if *input.connection == BoardConnection::Connecting {
+        return Some(UiPrimary::Unavailable {
+            word: CONNECTING.to_string(),
+            icon: link_icon(link).to_string(),
+            reason: CONNECTING.to_string(),
+        });
+    }
+    // The session is on the board: on its card, or docked in the editor.
+    if input.editor_holds_it {
+        return input
+            .offer("done")
+            .map(|done| offer(UiCardAction::press(done, "Done").with_icon("check")));
+    }
     if let Some(activity) = &view.activity {
-        let (word, icon) = match activity_bar(activity.kind) {
-            BarLayer::Connection => ("Connect", link_icon(link)),
-            _ => ("Edit", "edit"),
-        };
         let words = work.map_or_else(|| activity.label.clone(), |work| work.words.clone());
         return Some(UiPrimary::Unavailable {
-            word: word.to_string(),
-            icon: icon.to_string(),
+            word: "Connect".to_string(),
+            icon: link_icon(link).to_string(),
             reason: format!("Busy: {words}"),
         });
     }
@@ -96,38 +107,40 @@ pub(crate) fn primary_action(
     if view.status == DeviceStatus::Offline {
         return Some(offline_primary(input, link));
     }
-    if input.play_only()
-        && let Some(unlock) = input.offer("unlock")
-    {
+    // Ready: Connect, granted at any tier; disabled with the offer's own
+    // reason while the board runs nothing.
+    if let Some(connect) = input.offer("connect") {
         return Some(offer(
-            UiCardAction::press(unlock, "Edit")
-                .with_icon("lock")
-                .drawn(UiActionDraw::Sheet),
+            UiCardAction::press(connect, "Connect").with_icon(link_icon(link)),
         ));
     }
-    if let Some(edit) = input.offer("edit") {
-        return Some(offer(UiCardAction::press(edit, "Edit").with_icon("edit")));
-    }
     let reason = match view.loaded_project {
-        LoadedProject::Empty | LoadedProject::Unknown => NOTHING_TO_EDIT.to_string(),
+        LoadedProject::Empty | LoadedProject::Unknown => NOTHING_ON_IT_YET.to_string(),
         LoadedProject::Running { .. } => view.state_label.clone(),
     };
     Some(UiPrimary::Unavailable {
-        word: "Edit".to_string(),
-        icon: "edit".to_string(),
+        word: "Connect".to_string(),
+        icon: link_icon(link).to_string(),
         reason,
     })
 }
 
-/// An offline board's primary: a stand-in powers on; a board reconnects
-/// over Wi‑Fi first, then through lightplayer.app, then by its cable; with
-/// none of those, Connect is disabled and says how long it has been away.
+/// An offline board's primary: a stand-in powers on; a board Studio can
+/// reach connects, reaching it over Wi‑Fi first, then through
+/// lightplayer.app, then by its cable (`connect`, whose icon is the road it
+/// takes); with none of those, Connect is disabled and says how long it has
+/// been away.
 fn offline_primary(input: &BoardCardInput<'_>, link: UiLinkKind) -> UiPrimary {
     if input.stand_in()
         && let Some(reconnect) = input.offer("reconnect")
     {
         return offer(UiCardAction::press(reconnect, "Power on").with_icon("play"));
     }
+    if let Some(connect) = input.offer("connect") {
+        return offer(UiCardAction::press(connect, "Connect").with_icon(connect.icon.clone()));
+    }
+    // A board with no registry row has no session to open; its roads' own
+    // offers still reach it.
     for (verb, icon) in [
         ("connect-wifi", "wifi"),
         ("connect-relay", "cloud"),
@@ -195,10 +208,51 @@ pub(crate) mod tests {
     use crate::app::devices::take_over_state::UiTakeOver;
 
     #[test]
-    fn the_editor_holding_the_board_leaves_no_primary() {
-        let mut fixture = CardFixture::ready();
-        fixture.editor_holds_it = true;
-        assert_eq!(primary_action(&fixture.input(), None), None);
+    fn a_connecting_board_says_connecting_disabled_with_its_links_icon() {
+        // The session opening (the connected record, opening), and a Connect
+        // held for the board: the same row.
+        for session_on_it in [true, false] {
+            let mut fixture = CardFixture::ready().over(UiLinkKind::Bluetooth);
+            fixture.editor_holds_it = session_on_it;
+            fixture.connection = BoardConnection::Connecting;
+            assert_eq!(
+                primary_action(&fixture.input(), None),
+                Some(UiPrimary::Unavailable {
+                    word: CONNECTING.to_string(),
+                    icon: "bluetooth".to_string(),
+                    reason: CONNECTING.to_string(),
+                }),
+                "session on it: {session_on_it}"
+            );
+            assert!(
+                fixture
+                    .offers()
+                    .iter()
+                    .all(|offer| !offer.path.to_string().ends_with("/connect")),
+                "no second Connect while one waits"
+            );
+        }
+    }
+
+    #[test]
+    fn the_session_on_the_board_is_done() {
+        // On its card (connected), and docked in the editor.
+        for docked in [false, true] {
+            let mut fixture = CardFixture::ready();
+            fixture.editor_holds_it = true;
+            fixture.docked = docked;
+            fixture.connection = BoardConnection::Connected;
+            let action = offered(&mut fixture);
+            assert_eq!(action.word, "Done", "docked: {docked}");
+            assert_eq!(action.icon.as_deref(), Some("check"));
+            assert_eq!(path(&action), "done");
+            assert_eq!(action.draw, UiActionDraw::Press);
+        }
+        // A dropped link held for the board: still the session's, still Done.
+        let mut held = CardFixture::offline();
+        held.editor_holds_it = true;
+        held.connection = BoardConnection::Reconnecting;
+        assert_eq!(path(&offered(&mut held)), "done");
     }
 
     #[test]
@@ -218,8 +272,8 @@ pub(crate) mod tests {
         assert_eq!(
             primary_action(&fixture.input(), Some(&work)),
             Some(UiPrimary::Unavailable {
-                word: "Edit".to_string(),
-                icon: "edit".to_string(),
+                word: "Connect".to_string(),
+                icon: "usb".to_string(),
                 reason: "Busy: Updating · 42%".to_string(),
             })
         );
@@ -269,27 +323,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn an_offline_board_reconnects_wifi_first_then_the_cloud_then_its_cable() {
+    fn an_offline_board_connects_by_its_road_wifi_first_then_the_cloud_then_its_cable() {
         let mut fixture = CardFixture::offline();
         fixture.wifi_address = true;
         fixture.relay = true;
         let action = offered(&mut fixture);
         assert_eq!(
             (action.word.as_str(), action.icon.as_deref(), path(&action)),
-            ("Connect", Some("wifi"), "connect-wifi".to_string())
+            ("Connect", Some("wifi"), "connect".to_string())
         );
         fixture.wifi_address = false;
         let action = offered(&mut fixture);
         assert_eq!(
             (action.icon.as_deref(), path(&action)),
-            (Some("cloud"), "connect-relay".to_string())
+            (Some("cloud"), "connect".to_string())
         );
         fixture.relay = false;
         let action = offered(&mut fixture);
         assert_eq!(
             (action.icon.as_deref(), path(&action)),
-            (Some("usb"), "reconnect".to_string())
+            (Some("usb"), "connect".to_string())
         );
+        // A board with no registry row has no session to open: its road's
+        // own offer reaches it.
+        fixture.uid = None;
+        assert_eq!(path(&offered(&mut fixture)), "reconnect");
     }
 
     #[test]
@@ -323,41 +381,54 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_ready_running_board_edits() {
+    fn a_ready_running_board_connects() {
         let mut fixture = CardFixture::ready();
         let action = offered(&mut fixture);
-        assert_eq!(action.word, "Edit");
-        assert_eq!(action.icon.as_deref(), Some("edit"));
-        assert_eq!(path(&action), "edit");
+        assert_eq!(action.word, "Connect");
+        assert_eq!(action.icon.as_deref(), Some("usb"));
+        assert_eq!(path(&action), "connect");
         assert_eq!(action.draw, UiActionDraw::Press);
+        assert_eq!(action.refused, None);
     }
 
     #[test]
-    fn a_play_only_board_edits_with_a_lock_through_unlock() {
+    fn a_play_only_board_connects_the_play_password_is_enough() {
         let mut fixture = CardFixture::ready().over(UiLinkKind::Bluetooth);
         fixture.access = Some(UiDeviceAccess {
             unlock: Some(UiUnlockOffer::PlayOnly),
             ..UiDeviceAccess::default()
         });
         let action = offered(&mut fixture);
-        assert_eq!(action.word, "Edit");
-        assert_eq!(action.icon.as_deref(), Some("lock"));
-        assert_eq!(path(&action), "unlock");
-        assert_eq!(action.draw, UiActionDraw::Sheet);
+        assert_eq!(action.word, "Connect");
+        assert_eq!(action.icon.as_deref(), Some("bluetooth"));
+        assert_eq!(path(&action), "connect");
     }
 
     #[test]
-    fn a_ready_board_with_nothing_on_it_cannot_edit_yet() {
+    fn a_ready_board_with_nothing_on_it_cannot_connect_yet() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.view.can_remove_project = false;
+        let action = offered(&mut fixture);
+        assert_eq!(action.word, "Connect");
+        assert_eq!(path(&action), "connect");
         assert_eq!(
-            primary_action(&fixture.input(), None),
-            Some(UiPrimary::Unavailable {
-                word: "Edit".to_string(),
-                icon: "edit".to_string(),
-                reason: NOTHING_TO_EDIT.to_string(),
-            })
+            action.refused.as_deref(),
+            Some(NOTHING_ON_IT_YET),
+            "drawn disabled with the offer's own reason"
+        );
+    }
+
+    #[test]
+    fn a_failed_connect_leaves_connect_to_press_again() {
+        let mut fixture = CardFixture::ready();
+        fixture.connection = BoardConnection::Failed {
+            reason: "the board did not answer".to_string(),
+        };
+        let action = offered(&mut fixture);
+        assert_eq!(
+            (action.word.as_str(), path(&action)),
+            ("Connect", "connect".to_string())
         );
     }
 
@@ -495,14 +566,18 @@ pub(crate) mod tests {
 
     #[test]
     fn a_board_this_tab_has_open_is_not_held_from_here() {
-        // Held on the network, read over this tab's own USB cable.
+        // Held on the network, read over this tab's own USB cable: Connect
+        // here is not gated on the other tab's hold (the ruling on P2–P3),
+        // because the link it would use is this tab's own.
         let mut fixture = CardFixture::ready();
         fixture.view.held_elsewhere = Some(lpa_devices::HeldElsewhere {
             via: HoldVia::Network,
             level: HoldLevel::Watching,
             taken_from_here: false,
         });
-        assert_eq!(path(&offered(&mut fixture)), "edit");
+        let action = offered(&mut fixture);
+        assert_eq!(path(&action), "connect");
+        assert_eq!(action.refused, None);
     }
 
     fn offered(fixture: &mut CardFixture) -> UiCardAction {
