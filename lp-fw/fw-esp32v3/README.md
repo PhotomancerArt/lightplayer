@@ -293,8 +293,9 @@ Two changes followed, and neither is the "trade stack for heap" lever above:
   is off and `rwdata_hook.x` names what stays: the interrupt-handler tables,
   the merged `.rodata.cst*` pools (until 2026-10-10: the guard below showed no
   RAM-resident function loads an address inside them, so they went to flash too,
-  `.data` 12,612 → 7,092 B, +5,520 B of stack), and the jump tables of the
-  crates with code in IRAM. `.stack` takes the residual automatically, so all 10,000 B became
+  `.data` 12,612 → 7,092 B, +5,520 B of stack), and the lookup tables RAM
+  functions read (until then five broad crate globs; narrowed to the three that
+  the guard shows are read, `.data` → 4,644 B, +2,448 B of stack more). `.stack` takes the residual automatically, so all 10,000 B became
   stack headroom rather than arena. `just iram-flash-literals-esp32v3` is the
   guard that no interrupt-path function started reading a constant out of
   flash — run it after touching either config key, and see `rwdata_hook.x` for
