@@ -218,22 +218,26 @@ CHIP_S3 = Chip(
             f"{MEMORY_X_S3}: RESERVE_ICACHE; vectors_seg starts at 0x40370000 + RESERVE_ICACHE"),
         Seg(0x3FC88000, 0x3FCDB700, "SRAM1 dram_seg (image-owned)", "elf",
             src=f"{MEMORY_X_S3}: dram_seg 0x3FC88000..dram2_seg; .vectors/.rwtext appear here via the +0x6F0000 alias"),
-        Seg(0x3FCDB700, 0x3FCED710, "SRAM1 dram2_seg (bootloader's, unregistered)", "fixed", "idle",
-            "idle bootloader segment",
-            "72 KB the bootloader used and the firmware never registers; fw-esp32s3 has ONE heap arena. "
-            f"{S3_MAIN} L172: 'the next lever ... is dram2_seg as a second esp_alloc region'",
-            f"{MEMORY_X_S3}: dram2_seg 0x3FCDB700..0x3FCED710; {S3_MAIN}: only heap_allocator!(size: HEAP_SIZE)"),
+        # An ELF window, not a fixed row: an image built with `heap-dram2` places its
+        # `HEAP_DRAM2` there (`.dram2_uninit`), and one built without it leaves the
+        # whole span idle, as every image before RAM research E14 did.
+        Seg(0x3FCDB700, 0x3FCED710, "SRAM1 dram2_seg (bootloader's)", "elf", fill="idle",
+            src=f"{MEMORY_X_S3}: dram2_seg 0x3FCDB700..0x3FCED710; the ROM ELF's .bss_shared_bufs/.stack_pro/"
+            ".stack_app end at 0x3FCED710; fw-esp32s3 heap-dram2: src/dram2_heap.rs"),
         Seg(0x3FCED710, 0x3FCF0000, "SRAM1 top: ROM data", "fixed", "rom", "ROM",
             "10,480 B above dram2_seg; the ROM's own data symbols (e.g. phy_param_rom @0x3FCEF81C) live here",
             f"{MEMORY_X_S3}: dram2_seg end 0x3FCED710, SRAM1 end 0x3FCF0000; the ELF's absolute ROM symbols 0x3FCEF81C.."),
         Seg(0x3FCF0000, 0x3FCF8000, "SRAM2 low half (unregistered)", "fixed", "idle", "idle SRAM2",
-            "esp-hal leaves it 'to the heap' but fw-esp32s3 registers no region here (single .bss arena)",
-            f"{MEMORY_X_S3}: comment on D-cache; {S3_MAIN}: only heap_allocator!(size: HEAP_SIZE)"),
-        Seg(0x3FCF8000, 0x3FD00000, "SRAM2 top half: data cache (ASSUMED 32 KiB)", "fixed", "cache",
+            "esp-hal leaves it 'to the heap', but fw-esp32s3 JITs shaders into the heap and SRAM2 has no "
+            "I-bus view, so a JIT buffer landing here could not run; no region is registered (RAM research E14)",
+            f"{MEMORY_X_S3}: comment on D-cache; lp-shader/lpvm-native/src/exec_addr.rs: the executable window "
+            "is 0x3FC88000..0x3FCF0000"),
+        Seg(0x3FCF8000, 0x3FD00000, "SRAM2 top half: data cache (32 KiB)", "fixed", "cache",
             "data cache",
-            "ASSUMED 32 KiB: the D-cache size is set by the bootloader image, not by this ELF; "
-            "if it is 16 KiB, 16 KiB of this row is idle",
-            f"{MEMORY_X_S3}: 'D cache use the memory from high address ... 16K/32K'"),
+            "32 KiB: the APP sets it at startup (esp-hal configure_cpu_caches -> rom_config_data_cache_mode, "
+            "from esp-hal's `data-cache-size`, default 32KB; fw-esp32s3 does not override it)",
+            f"{MEMORY_X_S3}: 'D cache use the memory from high address ... 16K/32K'; "
+            "third_party/esp-hal/src/soc/esp32s3/mod.rs configure_cpu_caches; third_party/esp-hal/esp_config.yml data-cache-size"),
     ],
     rtc=[
         Seg(0x600FE000, 0x60100000, "RTC fast RAM", "elf", fill="idle",
@@ -820,11 +824,17 @@ def build_ledger(elf: Elf32, elf_path: str, chip: Chip, blob: Optional[BlobIndex
                 c = Claim(cat, "(compiler-merged statics)", sec.name, y.name, y.size, ylo)
             else:
                 c = _claim_for(y, sec, cat, ylo, name_of(y), blob, rtc)
-                hm = HEAP_RE.search(name_of(y).pretty) if not rtc else None
+                hm = HEAP_RE.search(name_of(y).pretty)
                 if hm and y.size >= 4096 and y.kind == STT_OBJECT:
-                    label = (f"{chip.arena_label} ({hm.group(1)} in {sec.name})" if chip.arena_label
+                    # The chip's one `.bss` arena takes the chip's arena label; any other
+                    # heap array (a reclaimed segment, an RTC region) is named by itself.
+                    arena = sec.name == ".bss" and chip.arena_label
+                    label = (f"{chip.arena_label} ({hm.group(1)} in {sec.name})" if arena
                              else f"{hm.group(1)} (arena in {sec.name})")
-                    c = Claim("heap", label, sec.name, name_of(y).pretty, y.size, ylo)
+                    # In RTC RAM the claim stays an RTC one (that table is separate from the
+                    # chip's), but the region still counts toward the heap the firmware reaches.
+                    if not rtc:
+                        c = Claim("heap", label, sec.name, name_of(y).pretty, y.size, ylo)
                     heap_regions.append({"name": label, "start": ylo, "size": y.size, "section": sec.name,
                                          "symbol": name_of(y).pretty, "source": "ELF symbol"})
             p.paint(ylo, yhi, p.intern(c))

@@ -37,7 +37,14 @@ path = "src/main.rs"
 workspace = true
 
 [features]
-default = ["esp32", "server", "float-f32", "json-pack"]
+default = ["esp32", "server", "float-f32", "json-pack", "heap-rtc-slow"]
+# RTC slow memory (8 KiB at 0x5000_0000, idle until now) as the allocator's
+# fifth and last region, so it takes only the SRAM regions' overflow. On by
+# default; without it the span is idle, as before. RTC slow and not the RTC
+# fast tail because RTC fast is PRO-core only and the APP core reads heap
+# frames. See `src/rtc_slow_heap.rs` and RAM research E14.
+heap-rtc-slow = []
+
 # Chip selection, mirroring fw-esp32s3's `esp32s3` feature: crates whose chip
 # feature is not named on their dependency line get it here, so there is one
 # place to change. `esp-rtos?/esp32` is a weak dependency feature — it must not

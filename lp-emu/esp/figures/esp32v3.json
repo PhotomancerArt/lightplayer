@@ -12,7 +12,7 @@
     "[ERROR] no `lpfs` partition in the flashed table — reflash with --partition-table lp-fw/fw-esp32v3/partitions.csv; using memory FS",
     "[INIT] RMT ISR on APP core",
     "[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)",
-    "[INIT] JIT code region: sram0 ibus 0x4008"
+    "[INIT] heap region 4 live: 0x50000000+819"
   ],
   "boot.init_chain.merged": [
     "[INIT] fw-esp32v3 boot",
@@ -26,12 +26,12 @@
     "[INIT] flash filesystem mounted",
     "[INIT] RMT ISR on APP core",
     "[INIT] heap region 3 live: 0x3ffe4350+15536 (ROM APP stack)",
-    "[INIT] JIT code region: sram0 ibus 0x4008"
+    "[INIT] heap region 4 live: 0x50000000+819"
   ],
   "boot_idle.path_high_water_gap": 0,
-  "determinism.single_core_prefix.cycles": 3250498,
+  "determinism.single_core_prefix.cycles": 3256644,
   "determinism.single_core_prefix.idle_skips": 0,
-  "determinism.single_core_prefix.instructions": 3250474,
+  "determinism.single_core_prefix.instructions": 3256620,
   "init_chain.prefix": [
     "[INIT] fw-esp32v3 boot",
     "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",
