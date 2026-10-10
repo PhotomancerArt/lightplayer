@@ -126,6 +126,20 @@ compile_error!(
 compile_error!("`e11_lender` and `alloc_watch_diag` both own lp-perf's hook: pick one");
 #[cfg(all(feature = "alloc_watch_diag", feature = "alloc_trace_emu"))]
 compile_error!("`alloc_watch_diag` and `alloc_trace_emu` both define esp-alloc's hooks: pick one");
+// RESEARCH (research/ram-e17): the radio tasks' stack high-water on silicon.
+#[cfg(all(feature = "radio_stack_diag", not(fw_harness)))]
+mod radio_stack_diag;
+#[cfg(all(
+    feature = "radio_stack_diag",
+    any(
+        feature = "alloc_watch_diag",
+        feature = "alloc_trace_emu",
+        feature = "heap_track_diag"
+    )
+))]
+compile_error!(
+    "`radio_stack_diag` defines esp-alloc's hooks, as the other alloc diagnostics do: pick one"
+);
 #[cfg(any(
     not(fw_harness),
     feature = "test_button",
@@ -351,6 +365,8 @@ fn log_heartbeat_stack_lines() {
         io_thread_stack_diag::log_if_grown();
         #[cfg(feature = "net_thread_stack_diag")]
         net::net_thread_stack_diag::log_if_grown();
+        #[cfg(feature = "radio_stack_diag")]
+        radio_stack_diag::log_if_grown();
         #[cfg(lp_net)]
         net::net_heartbeat::log_line();
     }
