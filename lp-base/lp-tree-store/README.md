@@ -80,7 +80,8 @@ change has to be readable, or cleanly refused, by the core before it.
   write,
   then victims are collected — sectors with garbage first (greedy or
   LFS cost-benefit), every one of them if need be, then sectors whose only
-  waste is a tail, until those stop freeing sectors; last, a head whose own
+  waste is a tail (the largest record that fits the head's tail copied
+  first), until those stop freeing sectors; last, a head whose own
   garbage would let the write open fewer sectors is renewed (its live
   records copied to a new head of its kind).
 
@@ -356,7 +357,7 @@ logical bytes, stored or deflated.)
 `docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`:
 on a nearly full flash, a step that fitted was refused `NoSpace` when run
 again after a power cut. Nothing committed was lost; the store refused a
-write it could hold. Four causes, each pinned by `edge_gc_tests.rs`:
+write it could hold. Five causes, each pinned by `edge_gc_tests.rs`:
 
 1. **GC gave up early.** It stopped after `reserve + 2` collections that
    freed no sector, although garbage spread thin over many sectors frees
@@ -377,12 +378,17 @@ write it could hold. Four causes, each pinned by `edge_gc_tests.rs`:
    roots and hot directories, and no victim rule reaches a head; GC now
    renews a head (its live records to a new head of its kind) when that
    lets the write open fewer sectors.
+5. **Compaction could cycle without gaining a byte.** Copying a tail-only
+   sector in record order, a first record that did not fit the head's tail
+   opened a head at once and left that tail unused, so near full GC went
+   round the same few sectors. Compaction now copies the largest record
+   that fits the head's tail first, and opens a sector only when none does.
 
 Still open (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`):
-on a 16-sector store at the reserve, GC's in-order copies of near-1 KB
-records cannot always pack the cold sectors as tight as the layout a cut
-replaced, so a few re-runs are still refused (8 of 756 of `lp-store-bench
-mutants`' full-flash cases, lp-nor-sim).
+packed to the reserve, a re-run after a cut can still be refused where the
+step fitted, by a few bytes of layout (11 of 792 re-runs of an in-crate cut
+walk near full, lp-nor-sim; M3's drivers run clean). Pinned by
+`a_rerun_near_full_can_still_be_refused`.
 
 ## G1 figures (2026-10-08)
 

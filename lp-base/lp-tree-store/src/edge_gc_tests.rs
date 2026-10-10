@@ -144,41 +144,42 @@ fn compaction_near_full_wins_the_tails_back() {
     let cfg = StoreConfig::default();
     let mut fitted = 0;
     for seed in 0..2u64 {
-        let mut st = mount(formatted(NorGeometry::c6(16), &cfg), &cfg);
-        let mut copies = 0;
-        while push(
-            &mut st,
-            &project(&format!("f{copies}"), seed * 100 + copies),
-        )
-        .is_ok()
-        {
-            copies += 1;
-        }
+        let (mut st, copies) = copies_until_refused(&cfg, seed);
         for i in 0..6u64 {
-            let slot = format!("f{}", (i * 7 + seed) % copies);
-            let edit: Files = match (i + seed) % 3 {
-                0 => project(&slot, seed * 7777 + i),
-                1 => vec![(
-                    format!("/projects/{slot}/m1/shader.glsl"),
-                    text(seed * 91 + i, 900),
-                )],
-                _ => vec![
-                    (
-                        format!("/projects/{slot}/m0/shader.glsl"),
-                        text(seed * 93 + i, 900),
-                    ),
-                    (
-                        format!("/projects/{slot}/m2/shader.glsl"),
-                        text(seed * 97 + i, 900),
-                    ),
-                ],
-            };
-            fitted += push(&mut st, &edit).is_ok() as u32;
+            fitted += push(&mut st, &edit_near_full(seed, i, copies)).is_ok() as u32;
         }
         let mut st = mount(st.into_flash(), &cfg);
         assert_eq!(snapshot(&mut st).len(), 12 * copies as usize);
     }
     assert!(fitted >= 6, "{fitted} of 12 edits fitted");
+}
+
+/// Pins the open defect
+/// `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`:
+/// on [`compaction_near_full_wins_the_tails_back`]'s store (seed 1), the
+/// second edit (two shaders saved) fits, but cut at op 197 of its 474 and
+/// run again it is refused: GC packs every sector to within 40 B of full
+/// and the re-run's last record is 41 B. When this fails, the defect's
+/// re-runs fit: close it.
+#[test]
+fn a_rerun_near_full_can_still_be_refused() {
+    let cfg = StoreConfig::default();
+    let (mut st, copies) = copies_until_refused(&cfg, 1);
+    push(&mut st, &edit_near_full(1, 0, copies)).unwrap();
+    let pre = st.into_flash();
+    let edit = edit_near_full(1, 1, copies);
+    let mut st = mount(pre.clone(), &cfg);
+    let old = snapshot(&mut st);
+    push(&mut st, &edit).unwrap();
+    let mut st = mount(pre, &cfg);
+    st.flash_mut()
+        .set_plan(FaultPlan::cut(197, TearModel::Clean, 197));
+    assert!(push(&mut st, &edit).is_err());
+    let mut f = st.into_flash();
+    f.power_cycle(FaultPlan::none());
+    let mut st = mount(f, &cfg);
+    assert!(snapshot(&mut st) == old);
+    assert!(matches!(push(&mut st, &edit), Err(StoreError::NoSpace)));
 }
 
 type Files = Vec<(String, Vec<u8>)>;
@@ -209,6 +210,34 @@ fn spread_garbage(cfg: &StoreConfig, big: usize, small: usize, files: u64) -> Op
     }
     st.commit().ok()?;
     Some(mount(st.into_flash(), cfg))
+}
+
+/// 16 sectors of [`project`] copies `f0`, `f1`, … until one is refused, and
+/// how many fitted.
+fn copies_until_refused(cfg: &StoreConfig, seed: u64) -> (Store, u64) {
+    let mut st = mount(formatted(NorGeometry::c6(16), cfg), cfg);
+    let mut copies = 0;
+    while push(
+        &mut st,
+        &project(&format!("f{copies}"), seed * 100 + copies),
+    )
+    .is_ok()
+    {
+        copies += 1;
+    }
+    (st, copies)
+}
+
+/// Edit `i` on a store of `copies` copies: a re-push, one shader saved, or
+/// two.
+fn edit_near_full(seed: u64, i: u64, copies: u64) -> Files {
+    let slot = format!("f{}", (i * 7 + seed) % copies);
+    let shader = |m: u64, s: u64| (format!("/projects/{slot}/m{m}/shader.glsl"), text(s, 900));
+    match (i + seed) % 3 {
+        0 => project(&slot, seed * 7777 + i),
+        1 => vec![shader(1, seed * 91 + i)],
+        _ => vec![shader(0, seed * 93 + i), shader(2, seed * 97 + i)],
+    }
 }
 
 /// [`a_rerun_after_a_cut_fits_where_the_step_fitted`]'s store, 16 sectors,
