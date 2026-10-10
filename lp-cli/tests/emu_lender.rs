@@ -7,6 +7,7 @@
 //!
 //! 1. Load the choker; Studio's staged first sync; four lens rounds (each
 //!    the four focuses and a card read).
+//!    (`LP_E11_ROUNDS` sets how many, default 4.)
 //! 2. `LP_E11_EDITS` growing shader edits (default 10), each followed by a
 //!    render-lens read and a card read. The link stand-in (a ~18 KB,
 //!    link-shaped allocation from a task of its own) goes off after the
@@ -44,6 +45,7 @@ fn e11_the_choker_under_the_fragmenting_sequence() {
         return;
     };
     let edits = env_u32("LP_E11_EDITS", 10);
+    let warm_rounds = env_u32("LP_E11_ROUNDS", 4);
     let choker_dir = repo_root().join("catalog/projects/playful-choker");
     let basic_dir = repo_root().join("projects/test/basic");
 
@@ -63,7 +65,7 @@ fn e11_the_choker_under_the_fragmenting_sequence() {
         editor.idle(2_000_000);
         println!("E11PHASE sync");
         editor.initial_sync();
-        rounds(&mut editor, 4);
+        rounds(&mut editor, warm_rounds);
         println!("E11PHASE edits");
         let original = editor.fs_read(&shader);
         for edit in 1..=edits {
@@ -75,8 +77,10 @@ fn e11_the_choker_under_the_fragmenting_sequence() {
         println!("E11PHASE whole-file");
         files.push(whole_file(&mut editor, &svg));
         rounds(&mut editor, 2);
-        editor.fs_write(&shader, original);
-        editor.idle(1_000_000);
+        if edits > 0 {
+            editor.fs_write(&shader, original);
+            editor.idle(1_000_000);
+        }
         reads.append(&mut editor.reads);
     }
 
