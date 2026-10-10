@@ -195,7 +195,8 @@ it enqueues commands and renders change-gated snapshots. The pieces:
 - **The device card's frame feed is the second pull class.** While a card's ▶
   Play tab is up on a **Ready** device, that session pulls the frame the board
   has already published (`ProjectProbeRequest::OutputFrame` — a read, never a
-  re-render) at its own `DEVICE_CARD_FEED_INTERVAL` completion gap, held in the
+  re-render) at its own `DEVICE_CARD_FEED_INTERVAL` completion gap (over
+  Bluetooth the gentler `DEVICE_CARD_FEED_BLE_INTERVAL`), held in the
   session's `CardFeedState` and surfaced on `UiDeviceCard`
   (`frame_preview` / `frame_age_secs` / `frame_fps`). It runs on **non-lens**
   sessions, which otherwise issue no wire op between heartbeats, and it declares
