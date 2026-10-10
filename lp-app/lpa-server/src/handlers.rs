@@ -117,7 +117,11 @@ pub fn handle_client_message(
         lpc_wire::ClientRequest::Filesystem(fs_request) => {
             match fs_read_refusal(&*base_fs, &fs_request, read_headroom_probe) {
                 Some(response) => ServerMessagePayload::Filesystem(response),
-                None => ServerMessagePayload::Filesystem(handle_fs_request(base_fs, fs_request)?),
+                None => ServerMessagePayload::Filesystem(handle_fs_request_with_headroom(
+                    base_fs,
+                    fs_request,
+                    read_headroom_probe,
+                )?),
             }
         }
         lpc_wire::ClientRequest::LoadProject { path } => handle_load_project(
@@ -295,11 +299,6 @@ fn handle_project_command(
 pub const WRITE_ONLY_FILE_REFUSED: &str =
     "write-only file: no link at any tier reads .lp/access.json or .lp/network.json";
 
-/// Bytes past a file's own size a read needs in one block: its `Vec`'s
-/// slack and the reply's other fields. The reply's base64 is written into the
-/// static frame buffer, not the heap.
-const FS_READ_SLACK_BYTES: u64 = 512;
-
 /// A file read the heap cannot hold, refused before the file is read: its
 /// `FsResponse::Read` with the reason ("board memory busy"), the read gate's
 /// posture — refusal, not reset. A whole-file read is one contiguous
@@ -307,6 +306,9 @@ const FS_READ_SLACK_BYTES: u64 = 512;
 /// a radio link open that is often more than the largest free block (a
 /// 10,240 B read reset the silicon C6, PR B's desk walk). `None`: the read
 /// may go ahead (or it is not a read, or nothing probes the heap).
+///
+/// The rule is [`crate::whole_file_gate::whole_file_refusal`], shared with
+/// Studio's pull (`FsRequest::ChangesSince`), which reads whole files too.
 fn fs_read_refusal(
     fs: &dyn LpFs,
     request: &FsRequest,
@@ -315,16 +317,7 @@ fn fs_read_refusal(
     let FsRequest::Read { path } = request else {
         return None;
     };
-    let largest = u64::from(probe.and_then(|probe| probe())?);
-    let size = fs.file_size(path.as_path()).ok()?;
-    let needs = size + FS_READ_SLACK_BYTES;
-    if largest >= needs {
-        return None;
-    }
-    let error = format!(
-        "read refused: board memory busy (largest block {largest} B; a {size} B file needs \
-         {needs} B); retry shortly"
-    );
+    let error = crate::whole_file_gate::whole_file_refusal(fs, path.as_path(), probe)?;
     log::warn!("fs gate: {} — {error}", path.as_str());
     Some(FsResponse::Read {
         path: path.clone(),
@@ -343,6 +336,18 @@ fn fs_read_refusal(
 /// (`file_sync`). Writes and deletes pass: whether the link may make them
 /// is the tier check's call, and it has already made it.
 pub fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResponse, ServerError> {
+    handle_fs_request_with_headroom(fs, request, None)
+}
+
+/// [`handle_fs_request`] on a board that can say how much heap is left in
+/// one block. A pull (`ChangesSince`) reads each file whole, so it applies
+/// the same whole-file gate as `FsRequest::Read` before every file it reads
+/// (`file_sync::handle_changes_since_with_headroom`). `None`: no gate.
+pub fn handle_fs_request_with_headroom(
+    fs: &mut dyn LpFs,
+    request: FsRequest,
+    headroom: Option<ReadHeadroomProbe>,
+) -> Result<FsResponse, ServerError> {
     match request {
         FsRequest::Read { path } if lpc_access::is_write_only_file_path(path.as_str()) => {
             log::warn!(
@@ -419,11 +424,12 @@ pub fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResp
             prefix,
             since,
             cursor,
-        } => Ok(crate::file_sync::handle_changes_since(
+        } => Ok(crate::file_sync::handle_changes_since_with_headroom(
             fs,
             prefix.as_path(),
             since,
             cursor,
+            headroom,
         )),
         FsRequest::WriteChunk { path, offset, data } => Ok(crate::file_sync::handle_write_chunk(
             fs, path, offset, &data,
