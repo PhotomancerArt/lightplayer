@@ -12,6 +12,7 @@ pub mod error;
 pub(crate) mod executor;
 pub mod fp_regs;
 pub mod logging;
+pub mod lr_reservation;
 
 #[cfg(feature = "std")]
 pub use emulator::FrameOutcome;
@@ -25,3 +26,4 @@ pub use error::{EmulatorError, trap_code_from_cranelift};
 pub(crate) use executor::{LoggingDisabled, decode_execute};
 pub use fp_regs::{FpRegs, RoundingMode};
 pub use logging::InstLog;
+pub use lr_reservation::LrReservation;

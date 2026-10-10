@@ -44,7 +44,7 @@ use lpa_devices::{BoardKey, ConnectionIntent, HoldLevel, HoldVia};
 use super::StudioController;
 use crate::app::devices::board_hold::{
     AnswerPlan, AskOutcome, BookChange, ClaimAnswer, HoldCandidate, HoldEdgeEvent, HoldKey,
-    HoldNote, HoldPriming, PRIMING_PATIENCE_SECS, PendingRelease, RELEASE_CLOSE_PATIENCE_SECS,
+    HoldNote, HoldPriming, PRIMING_PATIENCE_SECS, PendingRelease, RELEASE_PATIENCE_SECS,
     ReleaseStage, TabId, UsbPair, answer_plan, desired_facts, desired_holds, fact_changes,
     is_network_road, plan_holds, reads_as_held, usb_pair_of,
 };
@@ -265,7 +265,9 @@ impl StudioController {
 
     /// The boards being let go on request whose picture is next: write it,
     /// then disconnect the link (intent Disconnected: nothing reopens it),
-    /// and wait for the port to close. Async because the write is.
+    /// and wait for the port to close — within what is left of the
+    /// release's budget, armed when the ask was heard. Async because the
+    /// write is.
     pub(crate) async fn run_due_hold_releases(&mut self) {
         let due: Vec<(HoldKey, Option<crate::DeviceId>)> = self
             .board_hold_flow
@@ -285,11 +287,9 @@ impl StudioController {
                     "hold: {key} last picture written and port closing, for another tab"
                 ));
             }
-            let deadline = (self.now_secs)() + RELEASE_CLOSE_PATIENCE_SECS;
             if let Some(release) = self.board_hold_flow.releases.get_mut(&key) {
-                release.stage = ReleaseStage::WaitClose { deadline };
+                release.stage = ReleaseStage::WaitClose;
             }
-            self.wake_board_holds_after(RELEASE_CLOSE_PATIENCE_SECS);
         }
     }
 
@@ -554,16 +554,13 @@ impl StudioController {
                     self.close_device_lens();
                 }
                 self.journal_hold(format!("hold: asked for {key}; letting it go"));
-                self.board_hold_flow.releases.insert(
-                    key,
-                    PendingRelease {
-                        request,
-                        asker,
-                        key,
-                        device,
-                        stage: ReleaseStage::WriteFrame,
-                    },
-                );
+                let now = (self.now_secs)();
+                self.board_hold_flow
+                    .releases
+                    .insert(key, PendingRelease::new(request, asker, key, device, now));
+                // The release's whole budget runs from here: the lock goes
+                // by then, closed or not.
+                self.wake_board_holds_after(RELEASE_PATIENCE_SECS);
             }
         }
     }
