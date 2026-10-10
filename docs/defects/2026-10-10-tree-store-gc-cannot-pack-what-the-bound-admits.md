@@ -54,10 +54,10 @@ layout a few bytes worse.
 **Future idea (for the adoption round)** — mount can see a torn commit:
 CRC-good records after the newest root. The first commit after such a mount
 could be allowed a one-record margin past the reserve that ordinary writes
-are not — (b) without moving the edge for every write. It changes no format
-(the margin is a rule in `ensure_room`/`fits_after_compaction`, keyed off
-what mount saw), but the margin must come out of the reserve's slack, and the
-test above is the first to turn.
+are not — (b) without moving the edge for every write. It would change no format
+(the margin is a rule in the store, keyed off what mount saw); not built or
+measured. `a_rerun_near_full_can_still_be_refused` is the first test it
+would turn.
 
 **Regression coverage** — `a_rerun_near_full_can_still_be_refused` pins the
 current behaviour (it asserts the refusal; when a fix makes it fail, the fix
