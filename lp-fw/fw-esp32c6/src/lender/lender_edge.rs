@@ -22,6 +22,14 @@ use super::{LEND_BYTES, borrower, lend_region};
 
 /// How much of a job's working set may overflow to the general heap.
 const OVERFLOW_ALLOWANCE: u32 = 8 * 1024;
+/// A compile's ask, until compiles estimate their own: E7's largest single
+/// compile ask in the catalog (fire2012, 15,924 B) and the choker's compile
+/// working set (20.6–29.5 KB above its start). Not the whole block: once
+/// anything lives in it (a read's 172 B kept, a spilled allocation), the
+/// whole block is never free again, and the first run asked for it and was
+/// refused every time.
+const COMPILE_LARGEST: u32 = 16 * 1024;
+const COMPILE_TOTAL: u32 = 30 * 1024;
 /// The read after which the link stand-in allocates.
 #[cfg(feature = "e11_link_standin")]
 const LINK_AT_READ: u32 = 30;
@@ -174,7 +182,7 @@ fn release() {
 /// Check the tenant out after a read; rebuild it into the block if it was
 /// purged. Returns the rebuild's loan line, if one was asked for.
 fn checkout_tenant(edge: &mut Edge) -> Option<LoanLine> {
-    if edge.tenant.checkout() {
+    if cfg!(feature = "e11_no_tenant") || edge.tenant.checkout() {
         return None;
     }
     let ask = Ask::new(
@@ -219,7 +227,7 @@ fn on_marker(name: &'static str, kind: lp_perf::PerfEventKind) {
             });
         }
         (lp_perf::EVENT_SHADER_COMPILE, lp_perf::PerfEventKind::Begin) => {
-            let ask = Ask::whole(LoanKind::Compile, LEND_BYTES as u32);
+            let ask = Ask::new(LoanKind::Compile, COMPILE_LARGEST, COMPILE_TOTAL);
             let lent = lend(ask).is_ok();
             critical_section::with(|cs| {
                 if let Some(edge) = EDGE.borrow_ref_mut(cs).as_mut() {

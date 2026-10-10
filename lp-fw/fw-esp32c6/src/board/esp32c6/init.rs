@@ -135,11 +135,11 @@ pub fn init_board() -> (
 
 /// The main heap region's size (see the RAM-split note in [`init_board`]):
 /// the 236,000 B main RAM gives the heap, less the radio's region.
-#[cfg(not(feature = "e11_lender"))]
+#[cfg(any(not(feature = "e11_lender"), feature = "e11_lend_dram2"))]
 const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE;
 /// RESEARCH (research/ram-e11): the lender's block comes out of the main
 /// region, so the heap's total is unchanged.
-#[cfg(feature = "e11_lender")]
+#[cfg(all(feature = "e11_lender", not(feature = "e11_lend_dram2")))]
 const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE - crate::lender::LEND_BYTES;
 /// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
 /// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth

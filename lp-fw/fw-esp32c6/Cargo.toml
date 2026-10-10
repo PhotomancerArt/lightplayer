@@ -227,6 +227,11 @@ e11_lender = ["esp-alloc/lend-region", "embassy-executor/trace", "lp-perf/hook",
 # central connecting mid-project. Also builds without `e11_lender`, for the
 # baseline image.
 e11_link_standin = ["lp-perf/hook"]
+# RESEARCH (research/ram-e11) variants of `e11_lender`: no card-picture
+# tenant; and the lend region is `dram2_seg` itself (no carve: the general
+# heap reaches dram2 after main AND the radio region, a borrower first).
+e11_no_tenant = []
+e11_lend_dram2 = []
 # Every heap alloc/free handed to the EMULATOR (`src/alloc_trace_emu.rs`) —
 # OFF by default, never shipped, never flashed: each hook is `ebreak; ret`, so
 # silicon traps on the first allocation. `lp-cli emu run --alloc-trace` claims

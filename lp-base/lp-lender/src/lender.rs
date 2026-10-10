@@ -177,7 +177,21 @@ impl Lender {
             });
         }
         let mut purged_any = false;
-        if !self.fits(ask, block) && ask.kind.may_purge() {
+        // Count before scan (the Linux shrinker's order): purge only when
+        // the tenants could free enough for the working set. A purge that
+        // cannot make room only costs a rebuild.
+        let purgeable: u32 = tenants
+            .iter()
+            .filter(|tenant| !tenant.pinned())
+            .map(|tenant| tenant.resident())
+            .sum();
+        let could_fit = block
+            .free()
+            .saturating_add(purgeable)
+            .saturating_add(self.overflow_allowance)
+            >= ask.total
+            && block.free().saturating_add(purgeable) >= ask.largest;
+        if !self.fits(ask, block) && ask.kind.may_purge() && could_fit {
             for tenant in tenants.iter_mut() {
                 if tenant.pinned() || tenant.resident() == 0 {
                     continue;
@@ -424,6 +438,26 @@ mod tests {
             .unwrap_err();
         assert!(matches!(refusal, Refusal::NoRoom { .. }));
         assert!(refusal.is_transient());
+        assert_eq!(lender.stats().purges, 0);
+    }
+
+    #[test]
+    fn a_purge_that_could_not_make_room_is_not_made() {
+        let tenants = Cell::new(0);
+        let mut tenant = FakeTenant::new(4_096, &tenants);
+        let mut block = FakeBlock::new(32_768, &tenants);
+        // Something the lender cannot drop holds 20 KiB of the block.
+        block.used_by_holder = 20_480;
+        let mut lender = Lender::new(32_768, 0);
+        let refusal = lender
+            .try_lend(
+                Ask::new(LoanKind::Compile, 16_384, 16_384),
+                &mut block,
+                &mut [&mut tenant],
+            )
+            .unwrap_err();
+        assert!(matches!(refusal, Refusal::NoRoom { .. }));
+        assert_eq!(tenant.resident(), 4_096, "not purged for nothing");
         assert_eq!(lender.stats().purges, 0);
     }
 

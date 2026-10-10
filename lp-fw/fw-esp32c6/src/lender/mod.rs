@@ -51,5 +51,8 @@ pub fn block_region() -> (usize, usize) {
 /// read whole is 27,091 B. 32 KiB holds every choker job and the SVG; a
 /// 512-lamp editor read (50 KB) overflows, and a 36 KiB OTA window would
 /// not fit (OTA is design-only here).
-#[cfg(feature = "e11_lender")]
+#[cfg(all(feature = "e11_lender", not(feature = "e11_lend_dram2")))]
 pub const LEND_BYTES: usize = 32 * 1024;
+/// Variant `e11_lend_dram2`: the block is `dram2_seg`, 64 KiB.
+#[cfg(all(feature = "e11_lender", feature = "e11_lend_dram2"))]
+pub const LEND_BYTES: usize = 64 * 1024;
