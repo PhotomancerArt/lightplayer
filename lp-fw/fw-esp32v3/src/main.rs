@@ -209,6 +209,13 @@ mod output;
 mod bench;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod recovery;
+#[cfg(all(
+    feature = "heap-rtc-slow",
+    feature = "server",
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
+mod rtc_slow_heap;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod serial;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
@@ -1064,6 +1071,16 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         "[INIT] heap region 3 live: {:#010x}+{rom_app_heap} (ROM APP stack)",
         lpvm_native::codemem_esp32::SRAM1_ROM_APP_STACK_BASE
     );
+    // RTC slow memory, after every SRAM region: it takes only their overflow.
+    // See `rtc_slow_heap`.
+    #[cfg(feature = "heap-rtc-slow")]
+    {
+        let (rtc_base, rtc_heap) = rtc_slow_heap::add_region();
+        esp_println::println!(
+            "[INIT] heap region 4 live: {rtc_base:#010x}+{rtc_heap} (RTC slow); heap {}",
+            esp_alloc::HEAP.free() + esp_alloc::HEAP.used()
+        );
+    }
 
     // The RMT peripheral becomes the WS281x driver's, clock and all. The
     // classic's RMT runs off APB and esp-hal's `validate_clock` for this chip
