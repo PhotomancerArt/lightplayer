@@ -87,6 +87,12 @@ wifi = [
 # `[netstack]` at the heartbeat — OFF by default, never shipped (the same
 # private-record scan as `io_thread_stack_diag`).
 net_thread_stack_diag = ["wifi"]
+# RESEARCH (RAM research E17), never shipped: paint the heap blocks esp-rtos
+# allocates for the BLE controller, timer and Wi-Fi task stacks (from
+# esp-alloc's alloc hooks) and log their high-water as `[radiostack]` at the
+# heartbeat (`src/radio_stack_diag.rs`). Brings `net_thread_stack_diag`, whose
+# range line tells the `lp-net` thread from the same-sized timer task.
+radio_stack_diag = ["esp-alloc/alloc-hooks", "net_thread_stack_diag", "io_thread_stack_diag"]
 # Where the radio's DMA buffers are, with the station joined (plan P08, the
 # desk walk's W10): every live radio C block by address, and the Rust heap's
 # map, flagging anything in `dram2_seg` — the bootloader's load region.

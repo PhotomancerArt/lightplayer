@@ -415,42 +415,44 @@ def scenario_pipe(args, out):
     i, _ = Console(out / "ble.txt").wait(r"\[host-ble\].*(connection \d+ up|link up)|M!\{\"id\":0,\"msg\":\{\"hello\"", 40, 0,
                                           "the host's first link")
     marks.mark("link-up" if i is not None else "link-up-unseen")
+    during = None
     if args.during:
-        # A foreground command run while the central holds the link (resets,
-        # USB requests); bounded by the run's own --secs.
+        # A command run while the central holds the link (resets, USB
+        # requests): a child of this process, bounded by the run's --secs.
         marks.mark("during-start")
-        t = max(10, int(args.secs - (time.monotonic() - T0) - args.settle - 15))
-        log(f"during (≤ {t}s): {args.during}")
-        with open(out / "during.log", "ab") as f:
-            try:
-                rc = subprocess.run(["zsh", "-c", args.during], stdout=f, stderr=subprocess.STDOUT, timeout=t).returncode
-            except subprocess.TimeoutExpired:
-                rc = "timeout"
-        marks.mark(f"during-end rc={rc}")
+        log(f"during: {args.during}")
+        during = spawn(["zsh", "-c", args.during], out / "during.log")
+    end = T0 + args.secs - (args.settle + 15 if during else 0)
+    ble = Console(out / "ble.txt")
+    since = ble.count()
+    restarts = 0
+    while time.monotonic() < end and host.poll() is None and (during is None or during.poll() is None):
+        time.sleep(1)
+        # Mac Chrome's wedge (spikes/ble-lab README, "When Mac Chrome
+        # wedges"): the page's connect() keeps timing out though the board
+        # advertises. Quit THAT Chrome, open it again, join again; the host
+        # takes the new page as the new connection.
+        tail = ble.lines()[since:]
+        ups = [i for i, ln in enumerate(tail) if "[pipe]" in ln and " ble up " in ln]
+        fails = sum(1 for ln in tail[(ups[-1] + 1 if ups else 0):] if "connect failed" in ln)
+        if fails >= args.wedge_after and restarts < args.max_restarts:
+            restarts += 1
+            marks.mark(f"chrome-restart {restarts} (after {fails} failed connects)")
+            kill_chrome(Path(args.profile))
+            time.sleep(3)
+            port = launch_chrome(args, out, url)
+            wait_page(port, page)
+            res, err = cdp(port, page, "join", "--id", dev, "--timeout-ms", "45000", timeout=80, out=out / "cdp.log")
+            marks.mark("rejoined" if res else "rejoin-failed")
+            since = ble.count()
+    if during is not None:
+        if during.poll() is None:
+            stop(during)
+            marks.mark("during-end timeout")
+        else:
+            marks.mark(f"during-end rc={during.returncode}")
         time.sleep(args.settle)
         stop(host)
-    else:
-        end = time.monotonic() + args.secs
-        ble = Console(out / "ble.txt")
-        since = ble.count()
-        restarts = 0
-        while time.monotonic() < end and host.poll() is None:
-            time.sleep(1)
-            # Mac Chrome's wedge (spikes/ble-lab README, "When Mac Chrome
-            # wedges"): the page's connect() keeps timing out though the
-            # board advertises. Quit THAT Chrome, open it again, join again;
-            # the host takes the new page as the new connection.
-            fails = sum(1 for ln in ble.lines()[since:] if "connect failed" in ln)
-            if fails >= args.wedge_after and restarts < args.max_restarts:
-                restarts += 1
-                marks.mark(f"chrome-restart {restarts} (after {fails} failed connects)")
-                kill_chrome(Path(args.profile))
-                time.sleep(3)
-                port = launch_chrome(args, out, url)
-                wait_page(port, page)
-                res, err = cdp(port, page, "join", "--id", dev, "--timeout-ms", "45000", timeout=80, out=out / "cdp.log")
-                marks.mark("rejoined" if res else "rejoin-failed")
-                since = ble.count()
     marks.mark(f"host-exit rc={host.poll()}")
     v, _ = cdp(port, page, "js", "pipe.S", timeout=20, out=out / "cdp.log")
     (out / "pipe-S.json").write_text(json.dumps(v, indent=1))
