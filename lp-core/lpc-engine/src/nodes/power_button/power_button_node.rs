@@ -14,6 +14,7 @@
 
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::string::String;
 use lp_collection::VecMap;
 
 use lpc_hardware::{ButtonActive, ButtonConfig, ButtonEventKind, ButtonInput, ButtonPull};
@@ -34,12 +35,26 @@ use crate::node::{
 /// sleep before its first debounced press has had a chance to arrive.
 const SWITCH_BOOT_SETTLE_MS: u64 = 250;
 
+/// A failed open is retried after this long, then after twice that, and so on
+/// up to [`OPEN_RETRY_MAX_MS`]. Short enough that a driver that binds a moment
+/// late is found within a heartbeat or two; the cap is long enough that a
+/// project naming a button the board does not have costs one failed open every
+/// few seconds instead of one per frame. The board's endpoint set is fixed at
+/// boot, so a button that is missing now is almost always missing for good.
+const OPEN_RETRY_INITIAL_MS: u64 = 500;
+
+/// The longest the node waits between attempts to open its button.
+const OPEN_RETRY_MAX_MS: u64 = 4_000;
+
 /// Runtime node for `kind = "PowerButton"` artifacts.
 pub struct PowerButtonNode {
     state: PowerButtonState,
     def_view: Option<PowerButtonDefView>,
     input: Option<Box<dyn ButtonInput>>,
     opened: Option<OpenedPowerButton>,
+    /// The last open that failed: what was asked, what went wrong, and when to
+    /// ask again. Cleared by a successful open and by a change of config.
+    open_failure: Option<OpenFailure>,
     opened_at_ms: u64,
     /// Hold mode: the press in progress.
     press: Option<PressState>,
@@ -63,6 +78,7 @@ impl PowerButtonNode {
             def_view: None,
             input: None,
             opened: None,
+            open_failure: None,
             opened_at_ms: 0,
             press: None,
             switch_on: false,
@@ -209,19 +225,31 @@ impl PowerButtonNode {
         })
     }
 
+    /// Make sure the button is open for this config. `Ok(false)` means there
+    /// is nothing to poll this frame: no button service, or a failed open that
+    /// is waiting out its backoff.
+    ///
+    /// A failed open is tried again after [`OPEN_RETRY_INITIAL_MS`], doubling
+    /// to [`OPEN_RETRY_MAX_MS`], or at once when the config changes. Each
+    /// attempt walks every button endpoint the board has and formats an error,
+    /// which is too much to do sixty times a second. The failure is returned
+    /// as an error once per distinct message (the same ruling as
+    /// `docs/defects/2026-07-28-tick-error-restated-every-frame.md`): a
+    /// retry that fails the same way is silent.
     fn ensure_input(
         &mut self,
         config: &PowerButtonRuntimeConfig,
         ctx: &TickContext<'_>,
         now_ms: u64,
     ) -> Result<bool, NodeError> {
-        let opened = OpenedPowerButton {
-            endpoint: config.endpoint.clone(),
-            mode: config.mode,
-            stable_ms: config.stable_ms,
-        };
-        if self.opened.as_ref() == Some(&opened) && self.input.is_some() {
+        if self.input.is_some() && self.opened.as_ref().is_some_and(|o| o.matches(config)) {
             return Ok(true);
+        }
+        if let Some(failure) = &self.open_failure
+            && failure.key.matches(config)
+            && now_ms < failure.retry_at_ms
+        {
+            return Ok(false);
         }
 
         let Some(service) = ctx.button_service() else {
@@ -233,11 +261,15 @@ impl PowerButtonNode {
                 .with_pull(ButtonPull::Down)
                 .with_active(ButtonActive::High),
         };
-        let input = service
-            .open_button_by_spec(&config.endpoint, button_config)
-            .map_err(|error| {
-                NodeError::msg(format!("open power button {}: {error}", config.endpoint))
-            })?;
+        let input = match service.open_button_by_spec(&config.endpoint, button_config) {
+            Ok(input) => input,
+            Err(error) => {
+                return match self.open_failed(config, &error, now_ms) {
+                    Some(report) => Err(report),
+                    None => Ok(false),
+                };
+            }
+        };
         log::info!(
             "PowerButton: opened endpoint={} mode={} stable_ms={} hold_ms={}",
             config.endpoint,
@@ -246,13 +278,37 @@ impl PowerButtonNode {
             config.hold_ms
         );
         self.input = Some(input);
-        self.opened = Some(opened);
+        self.opened = Some(OpenedPowerButton::of(config));
+        self.open_failure = None;
         self.opened_at_ms = now_ms;
         self.press = None;
         self.switch_on = false;
         self.host_hold_logged = false;
         self.power_requested = false;
         Ok(true)
+    }
+
+    /// Record a failed open and schedule the next attempt. Returns the error
+    /// to raise, or `None` when this is the failure the node already reported.
+    fn open_failed(
+        &mut self,
+        config: &PowerButtonRuntimeConfig,
+        error: &lpc_hardware::HardwareEndpointError,
+        now_ms: u64,
+    ) -> Option<NodeError> {
+        let message = format!("open power button {}: {error}", config.endpoint);
+        let previous = self.open_failure.take().filter(|f| f.key.matches(config));
+        let backoff_ms = previous.as_ref().map_or(OPEN_RETRY_INITIAL_MS, |f| {
+            f.backoff_ms.saturating_mul(2).min(OPEN_RETRY_MAX_MS)
+        });
+        let repeat = previous.is_some_and(|f| f.message == message);
+        self.open_failure = Some(OpenFailure {
+            key: OpenedPowerButton::of(config),
+            message: message.clone(),
+            backoff_ms,
+            retry_at_ms: now_ms.saturating_add(backoff_ms),
+        });
+        (!repeat).then(|| NodeError::msg(message))
     }
 
     fn next_now_ms(&mut self, ctx: &TickContext<'_>) -> u64 {
@@ -287,6 +343,37 @@ struct OpenedPowerButton {
     stable_ms: u64,
 }
 
+impl OpenedPowerButton {
+    fn of(config: &PowerButtonRuntimeConfig) -> Self {
+        Self {
+            endpoint: config.endpoint.clone(),
+            mode: config.mode,
+            stable_ms: config.stable_ms,
+        }
+    }
+
+    /// Whether a button opened this way serves `config`, without cloning the
+    /// endpoint to ask.
+    fn matches(&self, config: &PowerButtonRuntimeConfig) -> bool {
+        self.endpoint == config.endpoint
+            && self.mode == config.mode
+            && self.stable_ms == config.stable_ms
+    }
+}
+
+/// A failed attempt to open the button.
+#[derive(Clone, Debug)]
+struct OpenFailure {
+    /// What was being opened.
+    key: OpenedPowerButton,
+    /// The error text last raised for it.
+    message: String,
+    /// How long this failure waits before the next attempt.
+    backoff_ms: u64,
+    /// The first `now_ms` at which the next attempt is made.
+    retry_at_ms: u64,
+}
+
 #[derive(Clone, Debug)]
 struct PressState {
     since_ms: u64,
@@ -309,6 +396,7 @@ impl NodeRuntime for PowerButtonNode {
     fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         self.input = None;
         self.opened = None;
+        self.open_failure = None;
         self.press = None;
         self.last_tick_revision = None;
         Ok(())
@@ -379,10 +467,14 @@ mod tests {
     use core::cell::{Cell, RefCell};
 
     use lpc_hardware::{
-        HardwareSystem, HwAddress, HwRegistry, VirtualButtonDriver,
+        HardwareEndpointError, HardwareSystem, HwAddress, HwRegistry, VirtualButtonDriver,
         default_esp32c6_hardware_manifest,
     };
-    use lpc_model::{NodeId, NodeName, SlotData, SlotMapKey, TreePath};
+    use lpc_model::{
+        ArtifactLocation, LpValue, MutationOp, NodeId, NodeName, SlotData, SlotEdit, SlotMapKey,
+        TreePath, current_revision,
+    };
+    use lpc_registry::ParseCtx;
     use lpc_shared::time::TimeProvider;
     use lpfs::lp_path::AsLpPath;
     use lpfs::{LpFs, LpFsMemory};
@@ -523,6 +615,66 @@ mod tests {
         assert!(h.tick_errors.is_empty(), "{:?}", h.tick_errors);
     }
 
+    /// A button the board does not have is asked for once, again after the
+    /// backoff (doubling), and at once when the config changes. It is
+    /// reported once, not every frame.
+    #[test]
+    fn a_failing_open_is_retried_on_a_backoff_and_at_once_on_a_config_change() {
+        let mut h = Harness::load(r#""endpoint": "button:local:D99", "stable_ms": 1"#);
+
+        h.run(1, 100); // t = 100
+        assert_eq!(h.opens.opens.get(), 1, "tried at once");
+        assert_eq!(h.tick_errors.len(), 1, "and reported: {:?}", h.tick_errors);
+        assert!(h.tick_errors[0].contains("D99"), "{:?}", h.tick_errors);
+
+        h.run(4, 100); // t = 200..500, inside the first 500 ms
+        assert_eq!(h.opens.opens.get(), 1, "not again inside the backoff");
+
+        h.run(1, 100); // t = 600
+        assert_eq!(h.opens.opens.get(), 2, "again after it");
+        assert_eq!(h.tick_errors.len(), 1, "the same failure is not restated");
+
+        h.run(9, 100); // t = 700..1500, inside the doubled backoff
+        assert_eq!(h.opens.opens.get(), 2, "the backoff doubled");
+        h.run(1, 100); // t = 1600
+        assert_eq!(h.opens.opens.get(), 3);
+        assert_eq!(h.tick_errors.len(), 1);
+
+        // A new endpoint is tried at once, mid-backoff, and a new failure is
+        // a new thing to say.
+        h.run(1, 100);
+        h.set_endpoint("button:local:D98");
+        h.run(1, 100);
+        assert_eq!(h.opens.opens.get(), 4, "a config change retries at once");
+        assert_eq!(h.tick_errors.len(), 2, "{:?}", h.tick_errors);
+        assert!(h.tick_errors[1].contains("D98"), "{:?}", h.tick_errors);
+
+        // A real one opens, works, and is never asked for again.
+        h.set_endpoint("button:local:D1");
+        h.run(1, 100);
+        assert_eq!(h.opens.opens.get(), 5);
+        h.set_pin(true);
+        h.run(5, 10);
+        h.set_pin(false);
+        h.run(5, 10);
+        assert!(h.saw_click, "the node works once the open succeeds");
+        h.run(100, 100);
+        assert_eq!(h.opens.opens.get(), 5, "an open button is not reopened");
+        assert_eq!(h.tick_errors.len(), 2, "{:?}", h.tick_errors);
+    }
+
+    #[test]
+    fn the_backoff_stops_doubling_at_its_cap() {
+        let mut h = Harness::load(r#""endpoint": "button:local:D99", "stable_ms": 1"#);
+
+        // 100 s of 100 ms frames. Attempts at 0.1, 0.6, 1.6, 3.6, 7.6 s, then
+        // one every OPEN_RETRY_MAX_MS: (100 - 7.6) / 4 = 23 more.
+        h.run(1000, 100);
+        let attempts = h.opens.opens.get();
+        assert!((27..=29).contains(&attempts), "{attempts} attempts");
+        assert_eq!(h.tick_errors.len(), 1, "{:?}", h.tick_errors);
+    }
+
     #[derive(Clone, Copy, PartialEq)]
     enum Services {
         All,
@@ -531,8 +683,10 @@ mod tests {
     }
 
     struct Harness {
+        fs: LpFsMemory,
         rt: LoadedProjectRuntime,
         node: NodeId,
+        opens: Rc<CountingButtons>,
         button: VirtualButtonDriver,
         power: Rc<FakePower>,
         time: Rc<TestTime>,
@@ -572,7 +726,11 @@ mod tests {
             let mut hardware = HardwareSystem::new(registry);
             hardware.add_button_driver(Box::new(button.clone()));
             let hardware = Rc::new(hardware);
-            let button_service: Rc<dyn ButtonService> = hardware;
+            let opens = Rc::new(CountingButtons {
+                inner: hardware,
+                opens: Cell::new(0),
+            });
+            let button_service: Rc<dyn ButtonService> = opens.clone();
             let power = Rc::new(FakePower::default());
             let power_service: Rc<dyn PowerService> = power.clone();
             let time = Rc::new(TestTime::default());
@@ -592,14 +750,39 @@ mod tests {
                 .lookup_sibling(rt.tree().root(), NodeName::parse("power").unwrap())
                 .expect("power node");
             Self {
+                fs,
                 rt,
                 node,
+                opens,
                 button,
                 power,
                 time,
                 saw_click: false,
                 tick_errors: Vec::new(),
             }
+        }
+
+        /// Edit the node's `endpoint` the way an authoring edit does.
+        fn set_endpoint(&mut self, endpoint: &str) {
+            let shapes = self.rt.engine().slot_shapes().clone();
+            let (engine, registry) = self.rt.split_mut();
+            let result = registry
+                .mutate(
+                    &self.fs,
+                    MutationOp::PutSlotEdit {
+                        artifact: ArtifactLocation::file("/power.json"),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("endpoint").unwrap(),
+                            LpValue::String(endpoint.into()),
+                        ),
+                    },
+                    current_revision(),
+                    &ParseCtx { shapes: &shapes },
+                )
+                .expect("edit the endpoint");
+            engine
+                .apply_project_changes(&self.fs, registry, &result.changes)
+                .expect("apply the edit");
         }
 
         fn set_pin(&self, active: bool) {
@@ -636,6 +819,23 @@ mod tests {
                 panic!("click should be a map");
             };
             map.entries.contains_key(&SlotMapKey::U32(1))
+        }
+    }
+
+    /// The hardware's button service, counting how often a button is opened.
+    struct CountingButtons {
+        inner: Rc<HardwareSystem>,
+        opens: Cell<u32>,
+    }
+
+    impl ButtonService for CountingButtons {
+        fn open_button_by_spec(
+            &self,
+            spec: &HwEndpointSpec,
+            config: ButtonConfig,
+        ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
+            self.opens.set(self.opens.get() + 1);
+            self.inner.open_button_by_spec(spec, config)
         }
     }
 
