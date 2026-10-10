@@ -308,7 +308,8 @@ pub const WRITE_ONLY_FILE_REFUSED: &str =
 /// may go ahead (or it is not a read, or nothing probes the heap).
 ///
 /// The rule is [`crate::whole_file_gate::whole_file_refusal`], shared with
-/// Studio's pull (`FsRequest::ChangesSince`), which reads whole files too.
+/// Studio's pull (`FsRequest::ChangesSince`) and the package hash
+/// (`FsRequest::HashPackage`), which read whole files too.
 fn fs_read_refusal(
     fs: &dyn LpFs,
     request: &FsRequest,
@@ -340,9 +341,11 @@ pub fn handle_fs_request(fs: &mut dyn LpFs, request: FsRequest) -> Result<FsResp
 }
 
 /// [`handle_fs_request`] on a board that can say how much heap is left in
-/// one block. A pull (`ChangesSince`) reads each file whole, so it applies
-/// the same whole-file gate as `FsRequest::Read` before every file it reads
-/// (`file_sync::handle_changes_since_with_headroom`). `None`: no gate.
+/// one block. A pull (`ChangesSince`) and a package hash (`HashPackage`)
+/// each read files whole, so they apply the same whole-file gate as
+/// `FsRequest::Read` before every file they read
+/// (`file_sync::handle_changes_since_with_headroom`,
+/// `file_sync::handle_hash_package_with_headroom`). `None`: no gate.
 pub fn handle_fs_request_with_headroom(
     fs: &mut dyn LpFs,
     request: FsRequest,
@@ -434,7 +437,9 @@ pub fn handle_fs_request_with_headroom(
         FsRequest::WriteChunk { path, offset, data } => Ok(crate::file_sync::handle_write_chunk(
             fs, path, offset, &data,
         )),
-        FsRequest::HashPackage { prefix } => Ok(crate::file_sync::handle_hash_package(fs, prefix)),
+        FsRequest::HashPackage { prefix } => Ok(
+            crate::file_sync::handle_hash_package_with_headroom(fs, prefix, headroom),
+        ),
     }
 }
 
@@ -780,6 +785,63 @@ mod tests {
             fs_read_refusal(&fs, &read, None).is_none(),
             "no probe, no gate"
         );
+    }
+
+    /// The editor's Edit press asks the board for its package hash
+    /// (`read_running_package`, the library bind) before anything else, and
+    /// the hash reads every file of the project whole. With the choker's
+    /// 27,091 B mapping SVG on a heap whose largest block cannot hold it
+    /// (LC6, 2026-10-10: ~23.5–24.0 KB), the dispatch must refuse the hash in
+    /// the read gate's words, as it refuses a `Read` of that same file — not
+    /// read it and reset the board out of memory.
+    #[test]
+    fn the_edit_press_hash_is_gated_like_a_read_of_its_biggest_file() {
+        use lpc_model::{AsLpPath, AsLpPathBuf};
+        let mut fs = lpfs::LpFsMemory::new();
+        fs.write_file("/projects/choker/project.json".as_path(), b"{}")
+            .unwrap();
+        fs.write_file(
+            "/projects/choker/playful-mapping.svg".as_path(),
+            &[b'<'; 27_091],
+        )
+        .unwrap();
+        let tight: ReadHeadroomProbe = || Some(23_820);
+
+        // A Read of the SVG is refused by this heap...
+        let read = FsRequest::Read {
+            path: "/projects/choker/playful-mapping.svg".as_path_buf(),
+        };
+        assert!(fs_read_refusal(&fs, &read, Some(tight)).is_some());
+
+        // ...and so is the hash that would read it whole.
+        let hash = FsRequest::HashPackage {
+            prefix: "/projects/choker".as_path_buf(),
+        };
+        match handle_fs_request_with_headroom(&mut fs, hash.clone(), Some(tight)).unwrap() {
+            FsResponse::PackageHash { hash, error, .. } => {
+                assert!(hash.is_empty(), "the hash was computed: {hash}");
+                let error = error.expect("refusal in words");
+                assert!(
+                    error.starts_with("read refused: board memory busy"),
+                    "{error}"
+                );
+                assert!(error.contains("27091 B file needs 27603 B"), "{error}");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // A heap that holds it hashes as ever, the same hash as ungated.
+        let roomy: ReadHeadroomProbe = || Some(27_091 + 512);
+        let gated = handle_fs_request_with_headroom(&mut fs, hash.clone(), Some(roomy)).unwrap();
+        let ungated = handle_fs_request(&mut fs, hash).unwrap();
+        match &gated {
+            FsResponse::PackageHash { hash, error, .. } => {
+                assert_eq!(error, &None);
+                assert_eq!(hash.len(), 64);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(format!("{gated:?}"), format!("{ungated:?}"));
     }
 
     /// Writes and deletes pass the fs gate (the tier check decides them),
