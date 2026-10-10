@@ -1,6 +1,7 @@
 //! [`BoardHoldFlow`]: what a tab keeps beside its hold book while it holds
 //! boards and watches other tabs' — the claims in flight, the sentinels,
-//! the facts it has put on its boards, and the boards it is letting go.
+//! the facts it has put on its boards, the boards it is letting go, the
+//! refused opens it has not read yet, and the ports its take-overs free.
 //!
 //! The book ([`super::BoardHoldBook`]) is what the notes said; this is what
 //! this tab is doing about it. The controller owns both and drives them
@@ -8,11 +9,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lpa_devices::link::LinkInfo;
-use lpa_devices::{BoardKey, HeldElsewhere, HoldVia};
+use lpa_devices::link::{LinkId, LinkInfo};
+use lpa_devices::{BoardKey, DeviceId, HeldElsewhere, HoldVia};
 
 use super::hold_answer::PendingRelease;
-use super::hold_key::HoldKey;
+use super::hold_key::{HoldKey, UsbPair};
 use super::hold_priming::HoldPriming;
 
 /// The hold flows' state for one tab.
@@ -48,9 +49,47 @@ pub struct BoardHoldFlow {
     /// tab takes the board, this is what is told to stop
     /// (`studio_controller/board_hold_flow.rs`, the yield).
     pub network_roads: BTreeMap<BoardKey, LinkInfo>,
+    /// Pending USB ports whose open the OS refused while their identify
+    /// still runs, by kind: read against the claims standing when the
+    /// refusal is heard, not when the identify gives up five seconds later
+    /// and the claims that explain it may be gone. A port leaves when its
+    /// identify settles, it opens, or it goes.
+    pub refused: BTreeMap<LinkId, UsbPair>,
+    /// The USB take-overs whose holder let go, by the device each is for:
+    /// the ports they open here ([`FreedPorts`]).
+    pub freeing: BTreeMap<DeviceId, FreedPorts>,
+}
+
+/// A USB take-over's ports, once the holder let go: every pending port of
+/// `pair` that this tab could not open (kept shut, refused, or refused
+/// after the release) is opened again, each once (`opened`), until the
+/// take-over ends. The OS lets only the freed one open.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FreedPorts {
+    pub pair: UsbPair,
+    pub opened: BTreeSet<LinkId>,
+}
+
+impl FreedPorts {
+    /// A take-over freeing ports of `pair`, none opened yet.
+    pub fn new(pair: UsbPair) -> Self {
+        Self {
+            pair,
+            opened: BTreeSet::new(),
+        }
+    }
 }
 
 impl BoardHoldFlow {
+    /// Whether a take-over here frees ports of `pair` and has not opened
+    /// `link` again yet: a refusal of it heard now came after the holder
+    /// let go, and is that hold's.
+    pub fn frees_unopened(&self, pair: UsbPair, link: LinkId) -> bool {
+        self.freeing
+            .values()
+            .any(|freed| freed.pair == pair && !freed.opened.contains(&link))
+    }
+
     /// The next sentinel's number.
     pub fn mint_watch(&mut self) -> u64 {
         self.next_watch += 1;
@@ -102,5 +141,31 @@ mod tests {
         flow.claiming.insert(key, false);
         assert!(flow.wanted_claims().is_empty());
         assert_eq!(flow.claims_in_flight(), BTreeSet::from([key]));
+    }
+
+    #[test]
+    fn a_take_over_frees_each_port_of_its_kind_once() {
+        let c6 = UsbPair {
+            vendor: 0x303a,
+            product: 0x1001,
+        };
+        let bridge = UsbPair {
+            vendor: 0x1a86,
+            product: 0x7523,
+        };
+        let mut flow = BoardHoldFlow::default();
+        assert!(!flow.frees_unopened(c6, LinkId(1)), "no take-over");
+
+        flow.freeing.insert(DeviceId(4), FreedPorts::new(c6));
+        assert!(flow.frees_unopened(c6, LinkId(1)));
+        assert!(!flow.frees_unopened(bridge, LinkId(1)), "another kind");
+
+        flow.freeing
+            .get_mut(&DeviceId(4))
+            .expect("the take-over")
+            .opened
+            .insert(LinkId(1));
+        assert!(!flow.frees_unopened(c6, LinkId(1)), "opened once already");
+        assert!(flow.frees_unopened(c6, LinkId(2)));
     }
 }

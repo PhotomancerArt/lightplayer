@@ -15,7 +15,13 @@
 //!   relay); a board whose link closed is let go (the link is closed
 //!   already, then the lock, then the announcement).
 //! - **The gate.** The claims of other tabs keep the effects layer's gate
-//!   current, and a port whose open the OS refused is read against them.
+//!   current, and a port whose open the OS refused is read against them
+//!   when the refusal is heard — a port picked in the chooser is not gated
+//!   (it may be another board of the kind), so its refusal is how this tab
+//!   learns it is another tab's.
+//! - **The freed ports.** A take-over whose holder let go opens the ports
+//!   of its kind this tab could not, once each; a refusal heard after the
+//!   release is the released hold's, and opens again too.
 //! - **The answer.** An ask is refused while busy; otherwise the lens
 //!   closes, the last picture is written, the link disconnects, its close
 //!   is awaited, the lock goes, and `Released` and `Gone` are said.
@@ -258,6 +264,7 @@ impl StudioController {
         self.sync_hold_sentinels();
         self.sync_hold_gate_claims();
         self.read_refused_ports();
+        self.open_ports_take_overs_free();
         self.name_held_ports();
         self.put_hold_facts_on_boards();
         self.reconcile_take_overs(now);
@@ -908,51 +915,163 @@ impl StudioController {
             .set_claims(claims);
     }
 
+    /// The OS refused (or failed) an open of `link`: when it is a pending USB
+    /// port whose identify asked for that open (still identifying, not
+    /// open), the refusal is kept for this batch's reconcile, which reads it
+    /// against the claims standing now ([`Self::read_refused_ports`]). The
+    /// identify itself would wait out its five seconds first, and by then
+    /// the claims that explain the refusal may be gone.
+    pub(super) fn note_refused_open(&mut self, link: LinkId) {
+        if self.board_hold_edge.is_none() {
+            return;
+        }
+        let refused = self
+            .devices
+            .roster()
+            .pending()
+            .iter()
+            .find(|pending| pending.link == link)
+            .filter(|pending| pending.is_identifying() && !pending.evidence().presence.is_open())
+            .and_then(|pending| usb_pair_of(&pending.info));
+        if let Some(pair) = refused {
+            self.board_hold_flow.refused.insert(link, pair);
+        }
+    }
+
     /// Read every refused open against the claims: a pending USB link whose
-    /// identify settled Failed with its port never open, where this tab's
-    /// held ports of its kind number no more than the claims, is another
-    /// tab's — `Event::LinkHeld`, naming the board when exactly one claim
-    /// and one port of the kind are in play. Otherwise the model's own
+    /// open the OS refused — heard while its identify still runs
+    /// ([`Self::note_refused_open`]), or an identify that settled Failed
+    /// with its port never open — where this tab's held ports of its kind
+    /// number no more than the claims, is another tab's: `Event::LinkHeld`,
+    /// which settles its identify at once and names the board when exactly
+    /// one claim and one port of the kind are in play. A port picked in the
+    /// chooser is read here, since nothing gated it.
+    ///
+    /// A refusal no claim accounts for, heard while a take-over here frees
+    /// ports of its kind it has not opened yet, came after the holder let
+    /// go: it was that hold's, so it is held too (no board named; the hello
+    /// will say), and the take-over opens it again
+    /// ([`Self::open_ports_take_overs_free`]). Otherwise the model's own
     /// words stand ("in use by another app or another Studio tab").
     fn read_refused_ports(&mut self) {
         let gate = Rc::clone(self.devices.effects().hold_gate());
-        let mut refused: BTreeMap<UsbPair, Vec<LinkId>> = BTreeMap::new();
-        for pending in self.devices.roster().pending() {
+        let roster = self.devices.roster();
+        // A refusal waits only while its identify runs; a settled one is
+        // read by its outcome.
+        self.board_hold_flow.refused.retain(|link, _| {
+            roster.pending().iter().any(|pending| {
+                pending.link == *link
+                    && pending.is_identifying()
+                    && !pending.evidence().presence.is_open()
+            })
+        });
+        let mut refused: BTreeMap<UsbPair, Vec<(LinkId, bool)>> = BTreeMap::new();
+        for pending in roster.pending() {
             let Some(pair) = usb_pair_of(&pending.info) else {
                 continue;
             };
             let evidence = pending.evidence();
-            let settled_failed =
-                matches!(evidence.last_outcome, Some(ActivityOutcome::Failed { .. }));
-            if pending.is_identifying()
-                || !settled_failed
+            let heard = self.board_hold_flow.refused.contains_key(&pending.link);
+            let settled_failed = !pending.is_identifying()
+                && matches!(evidence.last_outcome, Some(ActivityOutcome::Failed { .. }));
+            if !(heard || settled_failed)
                 || evidence.presence.is_open()
                 || evidence.link_held_by_tab()
                 || gate.borrow().holds(pending.link)
             {
                 continue;
             }
-            refused.entry(pair).or_default().push(pending.link);
+            refused.entry(pair).or_default().push((pending.link, heard));
         }
         for (pair, links) in refused {
             let (claims, held) = {
                 let gate = gate.borrow();
                 (gate.claims_for(pair), gate.held_count(pair))
             };
-            if !reads_as_held(held + links.len(), claims) {
+            if reads_as_held(held + links.len(), claims) {
+                for (link, _) in &links {
+                    gate.borrow_mut().mark_read_held(*link, pair);
+                }
+                for (link, _) in links {
+                    self.board_hold_flow.refused.remove(&link);
+                    let mac = gate.borrow().association(link);
+                    self.journal_hold(format!(
+                        "hold: port {} was refused: another tab holds it",
+                        link.0
+                    ));
+                    self.fold_device_input(DeviceInput::Event(DeviceEvent::LinkHeld { link, mac }));
+                }
                 continue;
             }
-            for link in &links {
-                gate.borrow_mut().mark_read_held(*link, pair);
-            }
-            for link in links {
-                let mac = gate.borrow().association(link);
+            for (link, heard) in links {
+                if !heard || !self.board_hold_flow.frees_unopened(pair, link) {
+                    continue;
+                }
+                self.board_hold_flow.refused.remove(&link);
                 self.journal_hold(format!(
-                    "hold: port {} was refused: another tab holds it",
+                    "hold: port {} was refused before its holder let go to this tab",
                     link.0
                 ));
-                self.fold_device_input(DeviceInput::Event(DeviceEvent::LinkHeld { link, mac }));
+                self.fold_device_input(DeviceInput::Event(DeviceEvent::LinkHeld {
+                    link,
+                    mac: None,
+                }));
             }
+        }
+    }
+
+    /// The take-overs whose holder let go open the ports of its kind this
+    /// tab could not ([`crate::app::devices::board_hold::FreedPorts`]):
+    /// every pending port of the kind that is not open and not identifying,
+    /// and that was kept shut, read as held or failed to open, identifies
+    /// again — once per take-over. The OS lets only the freed port open,
+    /// and its hello says which board it is. A port whose identify still
+    /// runs is waited for: its refusal, when it comes, is read as the
+    /// released hold's ([`Self::read_refused_ports`]), which settles it.
+    pub(super) fn open_ports_take_overs_free(&mut self) {
+        let take_overs = &self.take_overs;
+        self.board_hold_flow
+            .freeing
+            .retain(|device, _| take_overs.is_opening(*device));
+        if self.board_hold_flow.freeing.is_empty() {
+            return;
+        }
+        let roster = self.devices.roster();
+        let mut to_open: BTreeMap<LinkId, (crate::DeviceId, Vec<crate::DeviceId>)> =
+            BTreeMap::new();
+        for (take_over, freed) in &self.board_hold_flow.freeing {
+            for pending in roster.pending() {
+                let evidence = pending.evidence();
+                let could_not_open = evidence.link_held_by_tab()
+                    || matches!(evidence.last_outcome, Some(ActivityOutcome::Failed { .. }));
+                if usb_pair_of(&pending.info) != Some(freed.pair)
+                    || freed.opened.contains(&pending.link)
+                    || pending.is_identifying()
+                    || evidence.presence.is_open()
+                    || !could_not_open
+                {
+                    continue;
+                }
+                to_open
+                    .entry(pending.link)
+                    .or_insert_with(|| (pending.device_id(), Vec::new()))
+                    .1
+                    .push(*take_over);
+            }
+        }
+        let gate = Rc::clone(self.devices.effects().hold_gate());
+        for (link, (device, take_overs)) in to_open {
+            for take_over in take_overs {
+                if let Some(freed) = self.board_hold_flow.freeing.get_mut(&take_over) {
+                    freed.opened.insert(link);
+                }
+            }
+            gate.borrow_mut().let_out(link);
+            self.journal_hold(format!(
+                "hold: opening port {} again: its holder let go",
+                link.0
+            ));
+            self.fold_device_input(DeviceInput::Action(DeviceAction::Identify { device }));
         }
     }
 

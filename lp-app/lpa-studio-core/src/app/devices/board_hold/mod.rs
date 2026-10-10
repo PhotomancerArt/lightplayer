@@ -38,7 +38,7 @@ pub use hold_answer::{
 };
 pub use hold_book::{BoardHoldBook, BookChange, OtherHold, PendingAsk};
 pub use hold_edge_event::HoldEdgeEvent;
-pub use hold_flow::BoardHoldFlow;
+pub use hold_flow::{BoardHoldFlow, FreedPorts};
 pub use hold_gate::{
     SharedUsbHoldGate, UsbHoldGate, associate, gate_group, reads_as_held, usb_pair_of,
 };

@@ -1902,6 +1902,13 @@ impl StudioController {
             }
             _ => None,
         };
+        let link_error = match &input {
+            crate::DeviceInput::Event(crate::DeviceEvent::Link {
+                link,
+                event: lpa_devices::link::LinkEvent::Error(_),
+            }) => Some(*link),
+            _ => None,
+        };
         for line in self.devices.handle(now, input) {
             self.record_device_event(
                 None,
@@ -1911,6 +1918,11 @@ impl StudioController {
                     entry: line.entry,
                 },
             );
+        }
+        // One tab holds a board: a refused open is read against the claims
+        // standing now, at this batch's reconcile.
+        if let Some(link) = link_error {
+            self.note_refused_open(link);
         }
         self.drop_device_lens_if_wireless();
         self.link_health
