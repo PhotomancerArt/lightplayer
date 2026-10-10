@@ -248,6 +248,23 @@ impl Resolver {
         self.cache.set_retain_payloads(retain);
     }
 
+    /// Keep only payloads of at most `cap` heap bytes — see
+    /// [`ResolverCache::set_payload_cap`].
+    pub fn set_payload_cap(&mut self, cap: Option<usize>) {
+        self.cache.set_payload_cap(cap);
+    }
+
+    /// Every payload the cache holds, by query: `(key, structural, bytes)`.
+    /// For memory censuses; see [`ResolverCache::payload_census`].
+    pub fn payload_census(&self) -> Vec<(Option<Rc<QueryKey>>, bool, usize)> {
+        let keys = self.intern.keys_by_index();
+        self.cache
+            .payload_census()
+            .into_iter()
+            .map(|(index, structural, bytes)| (keys.get(index).cloned(), structural, bytes))
+            .collect()
+    }
+
     /// How many times the graph has changed shape. Only equality across two
     /// observations is meaningful; the absolute value is not.
     pub fn structure_epoch(&self) -> u64 {

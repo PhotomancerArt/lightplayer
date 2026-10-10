@@ -67,6 +67,8 @@ node-shader = ["lpc-engine/node-shader"]
 # `lpc-engine/resolver-payload-cache`, defaults on, and a firmware taking
 # `default-features = false` simply omits it to trade frame time for heap.
 resolver-payload-cache = ["lpc-engine/resolver-payload-cache"]
+# Cap what the payload cache keeps by size — see `lpc-engine`'s feature.
+resolver-payload-cap = ["lpc-engine/resolver-payload-cap"]
 
 # Removal-only, same contract again: forwards to `lpc-engine/scrub-log`, the
 # per-phasor breakpoint log that makes clock scrubbing exact on a host. It

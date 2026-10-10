@@ -72,6 +72,14 @@ node-shader = []
 # 110 KB arena 8,368 B is roughly 90 LEDs of capacity.
 resolver-payload-cache = []
 
+# --- Resolver payload cap (research: E16 of the 2026-10 RAM program) --------
+#
+# With `resolver-payload-cache` on, keep only payloads of at most
+# `RESOLVER_PAYLOAD_CAP_BYTES` heap bytes; larger ones (an engaged palette's
+# value) are recomputed on every read. Off: no cap. See
+# `ResolverCache::set_payload_cap`.
+resolver-payload-cap = []
+
 # --- Phasor breakpoint log (removal-only, same contract as the gates above) --
 #
 # On: every phasor on a timebase keeps an event-sparse log of the breakpoints
