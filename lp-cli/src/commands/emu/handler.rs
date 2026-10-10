@@ -697,6 +697,18 @@ fn install_alloc_trace(
         &header,
     );
     lp_emu_esp32c6::alloc_trace::install(machine, alloc_at, dealloc_at, trace);
+    // Optional: an image whose logger marks its records (`alloc-trace-marks`).
+    let marks = elf.symbol("_lp_alloc_trace_mark").map(|s| s.address);
+    if let Some(mark_at) = marks {
+        lp_emu_esp32c6::alloc_trace::install_marks(machine, mark_at);
+    }
+    eprintln!(
+        "emu: alloc trace: log-record marks {}",
+        match marks {
+            Some(at) => format!("at {at:#010x} (exact points)"),
+            None => "absent (points are console arrival)".to_string(),
+        }
+    );
     eprintln!(
         "emu: alloc trace -> {} (hooks {alloc_at:#010x} / {dealloc_at:#010x} from {})",
         out.display(),

@@ -5537,6 +5537,12 @@ impl Esp32C6Machine {
                         cause.rom_code(),
                         cause.rom_name()
                     );
+                    // The heap the trace describes is gone: the reader drops
+                    // every live allocation here. Written at the reset
+                    // request's cycle; the cycle count restarts after it.
+                    if let Some(trace) = self.alloc_trace.as_mut() {
+                        trace.marker(at, &format!("@reboot {source} strap {strap}"));
+                    }
                     if let Some(remaining) = remaining {
                         stop_cycle = self.cycles().saturating_add(remaining);
                     }

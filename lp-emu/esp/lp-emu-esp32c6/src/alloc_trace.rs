@@ -18,7 +18,14 @@
 //! A <cycle> <ptr hex> <size> <caps> <ret hex>,<ret hex>,…   an allocation (ptr 0: it failed)
 //! F <cycle> <ptr hex> <size>                                a free
 //! M <cycle> <text>                                          a host marker (a console line)
+//! L <cycle> <text>                                          a guest log record, as logged
 //! ```
+//!
+//! `L` lines come from a third hook, `_lp_alloc_trace_mark(text, len)`, which
+//! the firmware calls with every log record it formats (fw-esp32-common's
+//! `alloc-trace-marks`): their cycle is the instant of the log call, so a
+//! point taken at one is exact. `M` lines (and the `@reboot` marker the
+//! machine writes when the chip resets) are what the host saw.
 //!
 //! `<ret>` are RETURN addresses, innermost first: the hook's own `ra` (inside
 //! the allocator), then the saved `ra` of each frame on the `s0` chain.
@@ -135,6 +142,40 @@ pub fn install(
     machine
         .hooks_mut()
         .claim(dealloc_at, "_esp_alloc_dealloc (alloc trace)", on_dealloc);
+}
+
+/// Claim the log-record hook (`_lp_alloc_trace_mark`) as well: an `L` line
+/// per record, at the instant it is logged.
+pub fn install_marks(machine: &mut Esp32C6Machine, mark_at: u32) {
+    machine
+        .hooks_mut()
+        .claim(mark_at, "_lp_alloc_trace_mark (alloc trace)", on_mark);
+}
+
+/// The longest record text read (the firmware cuts records shorter).
+const MAX_MARK: u32 = 512;
+
+fn on_mark(m: &mut Esp32C6Machine) -> HookResult {
+    let r = m.registers();
+    let (ptr, len) = (r[10], r[11].min(MAX_MARK));
+    let mut bytes = Vec::with_capacity(len as usize);
+    let mut word_at = u32::MAX;
+    let mut word = 0u32;
+    for i in 0..len {
+        let a = ptr.wrapping_add(i);
+        if a & !3 != word_at {
+            word_at = a & !3;
+            word = m.peek_word(word_at).unwrap_or(0);
+        }
+        bytes.push((word >> (8 * (a & 3))) as u8);
+    }
+    let text = String::from_utf8_lossy(&bytes).replace(['\n', '\r'], " ");
+    let cycle = m.cycles();
+    if let Some(t) = m.alloc_trace_mut() {
+        t.markers += 1;
+        t.write(format_args!("L {cycle} {text}"));
+    }
+    HookResult::Ret
 }
 
 fn on_alloc(m: &mut Esp32C6Machine) -> HookResult {

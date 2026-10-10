@@ -30,8 +30,10 @@ compile_error!("`alloc_trace_emu` and `heap_track_diag` both define esp-alloc's 
 //
 // `_esp_alloc_alloc(heap: &EspHeap, caps: EnumSet<MemoryCapability>, ptr:
 // usize, size: usize)`: `a0..a3`. `_esp_alloc_dealloc(heap: &EspHeap, ptr:
-// usize, size: usize)`: `a0..a2`. Under the emulator the `ret` is never
-// reached.
+// usize, size: usize)`: `a0..a2`. `_lp_alloc_trace_mark(text: *const u8,
+// len: usize)` is fw-esp32-common's `alloc-trace-marks`: every log record, at
+// the instant it is logged, so a trace's points are exact rather than "when
+// the host saw the line". Under the emulator the `ret` is never reached.
 core::arch::global_asm!(
     ".pushsection .rwtext, \"ax\", @progbits",
     ".p2align 2",
@@ -48,5 +50,12 @@ core::arch::global_asm!(
     "ebreak",
     "ret",
     ".size _esp_alloc_dealloc, . - _esp_alloc_dealloc",
+    ".p2align 2",
+    ".globl _lp_alloc_trace_mark",
+    ".type _lp_alloc_trace_mark, @function",
+    "_lp_alloc_trace_mark:",
+    "ebreak",
+    "ret",
+    ".size _lp_alloc_trace_mark, . - _lp_alloc_trace_mark",
     ".popsection",
 );
