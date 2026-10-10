@@ -6963,6 +6963,8 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
+ "lp-deflate",
+ "miniz_oxide",
  "serde",
  "tempfile",
 ]
