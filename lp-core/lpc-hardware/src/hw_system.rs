@@ -223,11 +223,17 @@ impl HardwareSystem {
 
 trait EndpointDriver {
     fn endpoints(&self) -> Vec<HwEndpoint>;
+
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint>;
 }
 
 impl EndpointDriver for Box<dyn Ws281xDriver> {
     fn endpoints(&self) -> Vec<HwEndpoint> {
         (**self).endpoints()
+    }
+
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+        (**self).find_endpoint(matches)
     }
 }
 
@@ -235,11 +241,19 @@ impl EndpointDriver for Box<dyn ButtonDriver> {
     fn endpoints(&self) -> Vec<HwEndpoint> {
         (**self).endpoints()
     }
+
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+        (**self).find_endpoint(matches)
+    }
 }
 
 impl EndpointDriver for Box<dyn RadioDriver> {
     fn endpoints(&self) -> Vec<HwEndpoint> {
         (**self).endpoints()
+    }
+
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+        (**self).find_endpoint(matches)
     }
 }
 
@@ -262,10 +276,13 @@ where
 /// that driver's own account of why.
 ///
 /// Enumerating a driver costs a formatted spec and a live status lookup *per
-/// endpoint it offers* — on a board declaring every GPIO, hundreds of them. So
-/// the walk stops at the first available match and the caller opens on the
-/// driver found here, rather than enumerating once to pick an endpoint and
-/// again to discover which driver owns it.
+/// endpoint it offers* — on a board declaring every GPIO, hundreds of them, and
+/// a list of them held at once is some 20 KB. So each driver answers the lookup
+/// itself ([`EndpointDriver::find_endpoint`]), a driver that can streams its
+/// endpoints instead of listing them, and the walk stops at the first driver
+/// with an available match. The caller opens on the driver found here, rather
+/// than enumerating once to pick an endpoint and again to discover which driver
+/// owns it.
 fn find_endpoint<D>(
     drivers: &[D],
     matches: impl Fn(&HwEndpoint) -> bool,
@@ -275,16 +292,14 @@ where
 {
     let mut first_match: Option<(usize, HwEndpointId)> = None;
     for (index, driver) in drivers.iter().enumerate() {
-        for endpoint in driver.endpoints() {
-            if !matches(&endpoint) {
-                continue;
-            }
-            if endpoint.is_available() {
-                return Some((index, endpoint.id().clone()));
-            }
-            if first_match.is_none() {
-                first_match = Some((index, endpoint.id().clone()));
-            }
+        let Some(endpoint) = driver.find_endpoint(&matches) else {
+            continue;
+        };
+        if endpoint.is_available() {
+            return Some((index, endpoint.id().clone()));
+        }
+        if first_match.is_none() {
+            first_match = Some((index, endpoint.id().clone()));
         }
     }
     first_match
@@ -518,6 +533,187 @@ mod tests {
             "one open should survey the board once"
         );
         drop(output);
+    }
+
+    /// The lookup as it was written when it listed every driver's endpoints.
+    /// Kept as the oracle for [`find_endpoint`], which must give the same
+    /// answer without building those lists.
+    fn find_by_listing<D: EndpointDriver>(
+        drivers: &[D],
+        matches: impl Fn(&HwEndpoint) -> bool,
+    ) -> Option<(usize, HwEndpointId)> {
+        let mut first_match = None;
+        for (index, driver) in drivers.iter().enumerate() {
+            for endpoint in driver.endpoints() {
+                if !matches(&endpoint) {
+                    continue;
+                }
+                if endpoint.is_available() {
+                    return Some((index, endpoint.id().clone()));
+                }
+                if first_match.is_none() {
+                    first_match = Some((index, endpoint.id().clone()));
+                }
+            }
+        }
+        first_match
+    }
+
+    /// A button driver that counts how often anyone asks it for its whole
+    /// list. Its lookups go to the wrapped driver's own.
+    struct ListCountingButtonDriver {
+        inner: VirtualButtonDriver,
+        listed: Rc<core::cell::Cell<usize>>,
+    }
+
+    impl crate::HwDriver for ListCountingButtonDriver {
+        fn driver_id(&self) -> &str {
+            self.inner.driver_id()
+        }
+
+        fn display_label(&self) -> &str {
+            self.inner.display_label()
+        }
+    }
+
+    impl ButtonDriver for ListCountingButtonDriver {
+        fn endpoints(&self) -> Vec<HwEndpoint> {
+            self.listed.set(self.listed.get() + 1);
+            self.inner.endpoints()
+        }
+
+        fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+            self.inner.find_endpoint(matches)
+        }
+
+        fn open(
+            &self,
+            endpoint_id: &HwEndpointId,
+            config: ButtonConfig,
+        ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
+            self.inner.open(endpoint_id, config)
+        }
+    }
+
+    /// Two button drivers over two boards, so one spec matches in both and the
+    /// claim state of each decides which driver the lookup should land on.
+    #[test]
+    fn find_endpoint_gives_the_listed_answer_without_listing() {
+        let manifest = HwManifest::virtual_single_rmt_gpio_board;
+        let (spec, address) = {
+            let probe = VirtualButtonDriver::new(Rc::new(HwRegistry::new(manifest())));
+            let endpoints = probe.endpoints();
+            assert!(endpoints.len() > 100, "a board declaring every GPIO");
+            (endpoints[3].spec().clone(), endpoints[3].address().clone())
+        };
+        let wanted = |endpoint: &HwEndpoint| endpoint.spec() == &spec;
+
+        // (claim in driver 0's board, claim in driver 1's board, expected driver)
+        let cases = [
+            (false, false, 0),
+            (true, false, 1),
+            (false, true, 0),
+            (true, true, 0),
+        ];
+        for (claim_a, claim_b, expected) in cases {
+            let registries = [
+                Rc::new(HwRegistry::new(manifest())),
+                Rc::new(HwRegistry::new(manifest())),
+            ];
+            let listed = Rc::new(core::cell::Cell::new(0));
+            let drivers: Vec<Box<dyn ButtonDriver>> = registries
+                .iter()
+                .map(|registry| {
+                    Box::new(ListCountingButtonDriver {
+                        inner: VirtualButtonDriver::new(Rc::clone(registry)),
+                        listed: Rc::clone(&listed),
+                    }) as Box<dyn ButtonDriver>
+                })
+                .collect();
+
+            let mut leases = Vec::new();
+            for (registry, claim) in registries.iter().zip([claim_a, claim_b]) {
+                if claim {
+                    leases.push(
+                        registry
+                            .claim_bundle(crate::HwClaim::new(
+                                "other",
+                                alloc::vec![address.clone()],
+                            ))
+                            .expect("claim"),
+                    );
+                }
+            }
+
+            let found = find_endpoint(&drivers, wanted);
+            let listed_by_lookup = listed.get();
+            let oracle = find_by_listing(&drivers, wanted);
+
+            assert_eq!(found, oracle, "claims ({claim_a}, {claim_b})");
+            assert_eq!(found.as_ref().map(|(index, _)| *index), Some(expected));
+            assert_eq!(
+                listed_by_lookup, 0,
+                "the lookup must not ask any driver for its whole list"
+            );
+            assert!(listed.get() > 0, "the oracle does list");
+        }
+
+        // No match anywhere: no answer, from either reading.
+        let drivers: [Box<dyn ButtonDriver>; 1] = [Box::new(VirtualButtonDriver::new(Rc::new(
+            HwRegistry::new(manifest()),
+        )))];
+        let nothing = |endpoint: &HwEndpoint| endpoint.spec().as_str() == "button:local:NOPE";
+        assert_eq!(find_endpoint(&drivers, nothing), None);
+        assert_eq!(find_by_listing(&drivers, nothing), None);
+    }
+
+    /// The same equivalence for the WS281x driver, whose status depends on the
+    /// shared timing channel as well as the pin.
+    #[test]
+    fn find_endpoint_matches_the_listed_answer_for_ws281x() {
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
+        let drivers: [Box<dyn Ws281xDriver>; 1] =
+            [Box::new(VirtualWs281xDriver::new(Rc::clone(&registry)))];
+        let by_spec =
+            |spec: &'static str| move |endpoint: &HwEndpoint| endpoint.spec().as_str() == spec;
+
+        let free = find_endpoint(&drivers, by_spec("ws281x:local:D10"));
+        assert_eq!(free, find_by_listing(&drivers, by_spec("ws281x:local:D10")));
+        assert!(free.is_some());
+
+        // Take the only timing channel: every endpoint is now unavailable, and
+        // a lookup still reports the first match so the driver can say why.
+        let _channel = registry
+            .claim_bundle(crate::HwClaim::new(
+                "other",
+                alloc::vec![HwAddress::rmt_ws281x(0)],
+            ))
+            .expect("claim timing");
+        let blocked = find_endpoint(&drivers, by_spec("ws281x:local:D10"));
+        assert_eq!(
+            blocked,
+            find_by_listing(&drivers, by_spec("ws281x:local:D10"))
+        );
+        assert!(blocked.is_some());
+        assert_eq!(find_endpoint(&drivers, by_spec("ws281x:local:NOPE")), None);
+    }
+
+    /// The walk stops at the first available match, so a driver that streams
+    /// its endpoints never builds the ones after it.
+    #[test]
+    fn preferred_endpoint_stops_at_the_first_available_match() {
+        let driver = VirtualButtonDriver::new(Rc::new(HwRegistry::new(
+            HwManifest::virtual_single_rmt_gpio_board(),
+        )));
+        let all = driver.endpoints();
+        let third = all[2].clone();
+        let built = core::cell::Cell::new(0usize);
+        let stream = all.into_iter().inspect(|_| built.set(built.get() + 1));
+
+        let found = crate::preferred_endpoint(stream, &|endpoint| endpoint.id() == third.id());
+
+        assert_eq!(found.as_ref(), Some(&third));
+        assert_eq!(built.get(), 3, "endpoints after the match are never built");
     }
 
     fn test_manifest() -> HwManifest {

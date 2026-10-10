@@ -97,6 +97,15 @@ look for cargo's `Finished … in` lines (build) and libtest's `test result:
   one is consistent with the jobs still growing, not a script defect
   (hand-checked against the cached raw job records). Left for the
   director to weigh, not re-scoped or tuned toward the older number.
+- **2026-10-09** — the cost of a narrow gate. `C6 layout migration (x64)`
+  (35 min, gated by `c6_layout` and deliberately not forced on main) was
+  skipped on main for days while the single image grew past the legacy
+  layout's `0x310000`; held PR #1092 (run 38023028133) was the first to touch
+  a gated path and found 3 of 4 tests dead in their fixture, on `origin/main`
+  too. Filed as
+  `docs/defects/2026-10-09-the-layout-migration-fixture-outgrew-the-old-layout.md`.
+  A job trimmed for queue time stops watching main; a premise it depends on
+  needs a cheap check that does run there.
 
 **Exit criteria** — every job's p95 is under half its `timeout-minutes`;
 queue p90 for a pre-merge job is under 2 minutes; and adding a test to an

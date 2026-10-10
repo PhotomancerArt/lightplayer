@@ -1,0 +1,42 @@
+{
+  "name": "held by another tab: a port the other tab holds is never opened, and its board says so",
+  "steps": [
+    {
+      "at_ms": 0,
+      "do": {
+        "board_held": {
+          "mac": "a0:f2:62:87:b4:8c",
+          "held": { "via": "Usb", "level": "Open", "taken_from_here": false }
+        }
+      }
+    },
+    {
+      "at_ms": 10,
+      "do": { "attach": { "link": 1, "endpoint": "usb-1", "label": "/dev/cu.usbmodem2101" } },
+      "expect": {
+        "devices": 0,
+        "pending": 1,
+        "pending_state": "New device found — identifying…"
+      }
+    },
+    {
+      "at_ms": 20,
+      "do": { "link_held": { "link": 1 } },
+      "expect": {
+        "devices": 0,
+        "pending": 1,
+        "pending_state": "New device found — open in another Studio tab",
+        "pending_escapes": ["Forget"],
+        "journal_notes": ["ActivityEnded"]
+      }
+    },
+    {
+      "at_ms": 20000,
+      "do": "advance",
+      "expect": {
+        "pending": 1,
+        "pending_state": "New device found — open in another Studio tab"
+      }
+    }
+  ]
+}

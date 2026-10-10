@@ -8,6 +8,8 @@ pub mod account;
 pub(crate) mod affordance;
 /// The agent chats' shared parts and the app chat's window.
 pub(crate) mod agent;
+/// The board card's pieces, drawn from core's `UiBoardCard`.
+pub(crate) mod board_card;
 #[cfg(feature = "stories")]
 pub(crate) mod board_diagram_stories;
 #[cfg(feature = "stories")]
@@ -39,7 +41,7 @@ pub mod workbench;
 
 pub use account::AccountPage;
 pub use docs::DocsPage;
-pub use home::{DevicesPage, ExplorePage, HomePage, ProjectOpeningFrame, ProjectsPage};
+pub use home::{ExplorePage, HomePage, ProjectOpeningFrame};
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectPane};

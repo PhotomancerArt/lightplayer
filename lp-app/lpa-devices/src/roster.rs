@@ -31,9 +31,10 @@ use crate::board_key::BoardKey;
 use crate::device::Device;
 use crate::event::{Action, Command, Event, Input};
 use crate::evidence::{Classification, Evidence};
-use crate::identity::{DeviceId, IdentityChain, IdentityMatch};
+use crate::held_elsewhere::HeldElsewhere;
+use crate::identity::{DeviceId, IdentityChain, IdentityMatch, MacAddress, PeerIdentity};
 use crate::journal::{EvictionReason, Journal, JournalNote, Scope};
-use crate::link::{LinkCommand, LinkId, LinkInfo};
+use crate::link::{LinkCommand, LinkEvent, LinkId, LinkInfo};
 use crate::record::DeviceRecord;
 use crate::time::{Millis, TimerAllocator, TimerId};
 
@@ -256,6 +257,22 @@ pub struct Roster {
     /// They follow the merge, as a link's route does.
     #[serde(default)]
     merged: BTreeMap<DeviceId, DeviceId>,
+    /// The boards another tab of this browser holds, by MAC (normalized to
+    /// the hello's `a0:f2:…` spelling), from [`Event::BoardHeld`].
+    ///
+    /// Kept here, not only on the devices, because the fact and the device
+    /// arrive in either order: a record that loads after the claim, a
+    /// pending link promoted or merged after it, or a hello that names the
+    /// MAC later all pick it up from this book (see
+    /// [`Self::apply_held_book`]).
+    #[serde(default)]
+    held_book: BTreeMap<MacAddress, HeldElsewhere>,
+    /// Links whose MAC was presumed from another tab's claim
+    /// ([`Event::LinkHeld`] with a MAC), not heard from the board. The board
+    /// gets the last word: a frame whose identity contradicts the
+    /// presumption re-routes the link ([`Self::reroute_presumed_link`]).
+    #[serde(default)]
+    presumed_macs: BTreeMap<LinkId, MacAddress>,
 }
 
 impl Roster {
@@ -273,6 +290,8 @@ impl Roster {
             links: BTreeMap::new(),
             routes: BTreeMap::new(),
             merged: BTreeMap::new(),
+            held_book: BTreeMap::new(),
+            presumed_macs: BTreeMap::new(),
         }
     }
 
@@ -322,6 +341,9 @@ impl Roster {
             loaded.push(record.device);
             self.devices.push(Device::from_record(record));
         }
+        // A record that loads after another tab announced its board wears
+        // the fact at once (arrival order must not matter).
+        self.apply_held_book();
         loaded
     }
 
@@ -403,7 +425,34 @@ impl Roster {
         };
         commands.extend(self.settle_pending(now));
         commands.extend(self.reconcile_identities(now));
+        let links = &self.links;
+        self.presumed_macs
+            .retain(|link, _| links.contains_key(link));
+        self.apply_held_book();
         commands
+    }
+
+    /// The fact "another tab holds this board", if one stands for `mac`.
+    pub fn held_elsewhere(&self, mac: &MacAddress) -> Option<&HeldElsewhere> {
+        self.held_book.get(&held_book_key(mac))
+    }
+
+    /// Put the held book on every device: a device whose identity names a
+    /// held MAC wears the fact, and one whose MAC is not (or no longer) in
+    /// the book does not. Idempotent, so it runs after every input, which
+    /// is what makes the order of a claim, a record load, a promotion, a
+    /// merge and a hello irrelevant.
+    fn apply_held_book(&mut self) {
+        for device in &mut self.devices {
+            let wanted = device
+                .identity
+                .mac
+                .as_ref()
+                .and_then(|mac| self.held_book.get(&held_book_key(mac)));
+            if device.evidence.held_elsewhere.as_ref() != wanted {
+                device.evidence.fold_board_held(wanted);
+            }
+        }
     }
 
     fn handle_action(&mut self, now: Millis, action: &Action, input: &Input) -> Vec<Command> {
@@ -508,6 +557,48 @@ impl Roster {
         match event {
             Event::LinkAttached { link, info } => self.attach_link(now, *link, info, input),
             Event::LinkDetached { link } => self.detach_link(now, *link, input),
+            // A frame through a link whose MAC was only presumed from another
+            // tab's claim: the board's own word decides where it belongs.
+            Event::Link {
+                link,
+                event: LinkEvent::Frame(frame),
+            } if self.presumed_macs.contains_key(link) => {
+                match frame
+                    .identity()
+                    .and_then(|observed| self.contradicts_presumption(*link, observed))
+                {
+                    Some(true) => self.reroute_presumed_link(now, *link, input),
+                    confirmed => {
+                        if confirmed == Some(false) {
+                            self.presumed_macs.remove(link);
+                        }
+                        self.dispatch_to_owner(now, *link, input)
+                    }
+                }
+            }
+            Event::BoardHeld { mac, held } => {
+                self.state.journal.record_input(now, Scope::Roster, input);
+                let key = held_book_key(mac);
+                match held {
+                    Some(held) => {
+                        self.held_book.insert(key, held.clone());
+                    }
+                    None => {
+                        self.held_book.remove(&key);
+                    }
+                }
+                // `handle` puts the book on the devices after every input.
+                Vec::new()
+            }
+            Event::LinkFreed { link } => self.dispatch_to_owner(now, *link, input),
+            Event::LinkHeld { link, mac } => {
+                let owned = self.owner_of(*link).is_some();
+                let commands = self.dispatch_to_owner(now, *link, input);
+                if owned && let Some(mac) = mac {
+                    self.presumed_macs.insert(*link, mac.clone());
+                }
+                commands
+            }
             Event::Link { link, .. } | Event::LinkBorrow { link, .. } => match self.owner_of(*link)
             {
                 Some(Owner::Device(device)) => self.dispatch_to_device(now, device, input),
@@ -738,6 +829,129 @@ impl Roster {
                 Vec::new()
             }
         }
+    }
+
+    /// Route a link-addressed input to whoever owns the link (a device or a
+    /// pending link), or journal it at the roster when nobody does.
+    fn dispatch_to_owner(&mut self, now: Millis, link: LinkId, input: &Input) -> Vec<Command> {
+        match self.owner_of(link) {
+            Some(Owner::Device(device)) => self.dispatch_to_device(now, device, input),
+            Some(Owner::Pending(index)) => self.dispatch_to_pending(now, index, input),
+            None => {
+                self.state.journal.record_input(now, Scope::Roster, input);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Whether what the board said about itself contradicts the MAC this
+    /// link was presumed to have: `Some(true)` contradicts, `Some(false)`
+    /// confirms, `None` says nothing either way.
+    fn contradicts_presumption(&self, link: LinkId, observed: &PeerIdentity) -> Option<bool> {
+        let presumed = self.presumed_macs.get(&link)?;
+        if let Some(mac) = &observed.mac {
+            return Some(held_book_key(mac) != held_book_key(presumed));
+        }
+        let owner_uid = match self.owner_of(link)? {
+            Owner::Device(device) => self.device(device)?.identity.uid.as_ref(),
+            Owner::Pending(index) => self.pending[index].identity().uid.as_ref(),
+        };
+        match (&observed.uid, owner_uid) {
+            (Some(said), Some(assumed)) => Some(said != assumed),
+            _ => None,
+        }
+    }
+
+    /// The board on a presumed link said it is someone else: take the link
+    /// off the entry the presumption put it on, and let it identify afresh
+    /// as a pending link, which the board's own hello then settles and
+    /// merges where it really belongs (a uid conflict's re-route, made real
+    /// for this one case). The frame that said so is folded into the fresh
+    /// entry, so nothing the board said is lost.
+    fn reroute_presumed_link(&mut self, now: Millis, link: LinkId, input: &Input) -> Vec<Command> {
+        self.presumed_macs.remove(&link);
+        let Some(info) = self.links.get(&link).cloned() else {
+            return self.dispatch_to_owner(now, link, input);
+        };
+        let mut commands = Vec::new();
+        let from = match self.owner_of(link) {
+            Some(Owner::Device(device)) => {
+                self.routes.remove(&link);
+                let Some(index) = self.index_of(device) else {
+                    return commands;
+                };
+                let Self { devices, state, .. } = self;
+                let entry = &mut devices[index];
+                commands.extend(entry.lose_link(now, &mut state.ctx()));
+                commands.extend(entry.fold_only(
+                    now,
+                    &Event::LinkDetached { link },
+                    &mut state.ctx(),
+                ));
+                // The presumption bound this port's endpoint to the board;
+                // it is this port's, not the board's.
+                if entry.identity.endpoint.as_ref() == Some(&info.endpoint) {
+                    entry.identity.endpoint = None;
+                    commands.push(Command::PersistRecord(entry.record_snapshot()));
+                }
+                device
+            }
+            Some(Owner::Pending(index)) => {
+                let mut entry = self.pending.remove(index);
+                commands.extend(entry.provisional.evict(
+                    now,
+                    EvictionReason::LinkLost,
+                    &mut self.state.ctx(),
+                ));
+                entry.provisional.id
+            }
+            None => return self.dispatch_to_owner(now, link, input),
+        };
+        commands.retain(|command| !addresses_link(command, link));
+
+        let device_id = self.mint_unheld_device_id();
+        self.state.journal.note(
+            now,
+            Scope::Roster,
+            JournalNote::LinkRerouted {
+                link,
+                from,
+                to: device_id,
+            },
+        );
+        self.state
+            .journal
+            .note(now, Scope::Roster, JournalNote::PendingLinkOpened { link });
+        let mut provisional = Device::new(device_id, IdentityChain::default());
+        {
+            let Self { state, .. } = self;
+            // The port is open: a frame just came through it.
+            commands.extend(provisional.fold_only(
+                now,
+                &Event::LinkAttached {
+                    link,
+                    info: info.clone(),
+                },
+                &mut state.ctx(),
+            ));
+            commands.extend(provisional.fold_only(
+                now,
+                &Event::Link {
+                    link,
+                    event: LinkEvent::Opened { info: info.clone() },
+                },
+                &mut state.ctx(),
+            ));
+            commands.extend(provisional.spawn_identify(now, &mut state.ctx()));
+            commands.extend(provisional.handle(now, input, &mut state.ctx()));
+        }
+        self.pending.push(PendingLink {
+            link,
+            info,
+            since: now,
+            provisional,
+        });
+        commands
     }
 
     fn dispatch_timer(&mut self, now: Millis, timer: TimerId, input: &Input) -> Vec<Command> {
@@ -1138,6 +1352,15 @@ fn discard_record(device: &Device) -> Vec<Command> {
 
 fn addresses_link(command: &Command, link: LinkId) -> bool {
     matches!(command, Command::Link { link: addressed, .. } if *addressed == link)
+}
+
+/// The held book's key for a MAC: the hello's own spelling
+/// (`a0:f2:62:87:b4:8c`) whatever spelling it arrived in, so a claim named
+/// `A0-F2-…` and a record holding `a0:f2:…` are the same board.
+fn held_book_key(mac: &MacAddress) -> MacAddress {
+    BoardKey::from_mac(mac)
+        .map(|key| key.to_mac_address())
+        .unwrap_or_else(|| MacAddress(mac.0.trim().to_ascii_lowercase()))
 }
 
 #[cfg(test)]

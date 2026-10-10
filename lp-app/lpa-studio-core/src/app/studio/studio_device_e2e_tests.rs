@@ -174,6 +174,15 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// The board card, built in core, on real boards: its primary pressed by
+/// path, and every action it draws an offer the tree publishes.
+mod board_card_tests;
+/// One tab holds a board: two tabs on one in-memory hold bus.
+mod board_hold_tests;
+/// The home page's sections over this bench: a board plugged in is
+/// online, a detached one is offline, and the Connect a board section's
+/// offers are all published.
+mod home_sections_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
@@ -186,8 +195,11 @@ mod relay_connect_tests;
 /// identifies, refuses firmware, is never given keys, and comes back after
 /// its leg drops.
 mod relay_link_tests;
+/// Unlock as an offer, `devices/<board>/unlock`, on boards reached over
+/// Bluetooth that hold nothing, or only play.
+mod unlock_tests;
 /// Reaching a board over Wi‑Fi without a flag: its remembered address, an
-/// address typed into the add slot.
+/// address typed into Connect a board's Network row.
 mod wifi_connect_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
@@ -1136,6 +1148,10 @@ impl DeviceBench {
                     }
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
+                    }
+                    // The hold edge's answers (one tab holds a board).
+                    crate::StudioCommand::HoldEdge(event) => {
+                        self.controller.on_hold_edge_event(event);
                     }
                     _ => {}
                 }
@@ -3875,7 +3891,7 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the empty face's primary verb is live: {card:?}"
     );
     // The picker really is built from the gallery's two lists.
-    let offer = crate::push_offer(&card, &[], &[]);
+    let offer = crate::push_offer(card.board_id.as_deref(), &[], &[]);
     assert!(
         offer.new_project_unavailable.is_some(),
         "a board that has not named itself cannot have a starter generated: {offer:?}"
@@ -5848,7 +5864,7 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
         view.offers
             .get(&crate::OfferPath::devices().child("new-sim"))
             .is_some(),
-        "the add slot's sim verb is published beside the roster"
+        "Connect a board's sim verb is published beside the roster"
     );
 }
 
@@ -6000,7 +6016,7 @@ fn rename_binds_its_text_and_the_card_wears_it() {
 
 /// New sim through its offer: it lists the runnable targets, and a press
 /// with a board and a runtime mints that sim and powers it on — the same
-/// creation the add slot's row dispatches. The sim's verbs then live at its
+/// creation Connect a board's row dispatches. The sim's verbs then live at its
 /// `sim-` ref.
 #[test]
 fn new_sim_lists_targets_and_a_press_starts_one() {
@@ -6023,7 +6039,7 @@ fn new_sim_lists_targets_and_a_press_starts_one() {
     let offer = view
         .offers
         .get(&crate::OfferPath::devices().child("new-sim"))
-        .expect("the add slot's sim verb");
+        .expect("Connect a board's sim verb");
     let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
         panic!("board is a choice: {:?}", offer.params());
     };
@@ -6982,7 +6998,7 @@ fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
     (bench, tasks, uid, device)
 }
 
-/// AC7, the picker's half (D44): picking a board in the add slot's dropdown
+/// AC7, the picker's half (D44): picking a board in Connect a board's dropdown
 /// mints a sim of THAT target, names it after the board, and powers it on —
 /// one gesture, ending in a card in the grid rather than a record on the
 /// remembered line. The device is an ordinary registry row; the picker

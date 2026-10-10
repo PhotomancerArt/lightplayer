@@ -32,7 +32,7 @@
 //! - nobody holds the wire — a coarse effect or the editor lens pauses the
 //!   pump, and a pull then could never be answered (design pin: never pull
 //!   under a borrow);
-//! - the card is WANTED (mounted on the devices page) and the page is
+//! - the card is WANTED (mounted on the home page) and the page is
 //!   visible — a picture nobody can see is serial time the board would
 //!   rather spend on the wire's other traffic;
 //! - the feed is not PARKED: three consecutive pulls that timed out or
@@ -257,10 +257,17 @@ impl DeviceFrameFeed {
         self.snapshot_write_at = Some(now);
     }
 
-    /// Seed this feed from the board's sidecar (see the module doc). A
-    /// seed counts as already written — it came FROM the store.
-    fn seed_snapshot(&mut self, frame: UiControlProductPreview, captured_at: f64) -> bool {
-        if !self.state.seed(frame, captured_at) {
+    /// Seed this feed from the board's sidecar (see the module doc), when
+    /// the sidecar is newer than a frame that is not `live`
+    /// ([`CardFeedState::seed_if_newer`]). A seed counts as already
+    /// written — it came FROM the store.
+    fn seed_snapshot(
+        &mut self,
+        frame: UiControlProductPreview,
+        captured_at: f64,
+        live: bool,
+    ) -> bool {
+        if !self.state.seed_if_newer(frame, captured_at, live) {
             return false;
         }
         self.snapshot_written_at = Some(captured_at);
@@ -324,7 +331,7 @@ impl DeviceFrameFeeds {
         self.page_visible
     }
 
-    /// The card's mount lease: `true` when a `DeviceRosterCard` for this
+    /// The card's mount lease: `true` when a board card for this
     /// device is on screen, `false` when it unmounts.
     pub fn set_wanted(&mut self, device: DeviceId, wanted: bool) {
         match self.by_device.get_mut(&device) {
@@ -349,20 +356,28 @@ impl DeviceFrameFeeds {
             .is_some_and(|feed| feed.frame().is_some())
     }
 
+    /// Whether `device`'s sidecar is worth reading: its feed has no
+    /// picture, or its picture is not `live` (the board's link is not open
+    /// here — another tab may hold it and write a newer one).
+    pub fn wants_snapshot(&self, device: DeviceId, live: bool) -> bool {
+        !live || !self.has_frame(device)
+    }
+
     /// Seed `device`'s feed from its persisted last frame, creating the
     /// feed if the card was never mounted (a remembered board's tile is
     /// not a card, and wants no pull). Returns whether it seeded — `false`
-    /// when the feed already has a picture.
+    /// when the feed's picture is live, or not older than the sidecar's.
     pub fn seed_snapshot(
         &mut self,
         device: DeviceId,
         frame: UiControlProductPreview,
         captured_at: f64,
+        live: bool,
     ) -> bool {
         self.by_device
             .entry(device)
             .or_insert_with(DeviceFrameFeed::new)
-            .seed_snapshot(frame, captured_at)
+            .seed_snapshot(frame, captured_at, live)
     }
 
     /// Every feed with a frame worth writing to its sidecar at `now`
@@ -729,7 +744,7 @@ mod tests {
         let mut feed = DeviceFrameFeed::new();
         assert!(feed.snapshot_due(100.0).is_none(), "no frame, nothing due");
 
-        assert!(feed.state.seed(frame(1), 100.0));
+        assert!(feed.state.seed_if_newer(frame(1), 100.0, false));
         // (`seed` on the state alone is the "a pull landed" stand-in here;
         // the feeds-level seed marks itself written, tested below.)
         assert_eq!(feed.snapshot_due(100.0).map(|(_, at)| at), Some(100.0));
@@ -738,7 +753,7 @@ mod tests {
 
         // A newer frame inside the window waits for the window.
         feed.state = CardFeedState::default();
-        feed.state.seed(frame(2), 103.0);
+        feed.state.seed_if_newer(frame(2), 103.0, false);
         assert!(feed.snapshot_due(105.0).is_none(), "inside the window");
         assert_eq!(
             feed.snapshot_due(100.0 + DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS)
@@ -753,8 +768,11 @@ mod tests {
         let device = DeviceId(9);
         assert!(!feeds.has_frame(device));
 
-        assert!(feeds.seed_snapshot(device, frame(4), 50.0));
+        assert!(feeds.wants_snapshot(device, true), "no picture yet");
+        assert!(feeds.seed_snapshot(device, frame(4), 50.0, false));
         assert!(feeds.has_frame(device));
+        assert!(!feeds.wants_snapshot(device, true), "a live picture stands");
+        assert!(feeds.wants_snapshot(device, false));
         assert!(
             feeds.get(device).is_some_and(|feed| !feed.is_wanted()),
             "a seeded feed wants no pull"
@@ -763,7 +781,14 @@ mod tests {
             feeds.snapshots_due(1_000.0).is_empty(),
             "what came from the store is not written back"
         );
-        assert!(!feeds.seed_snapshot(device, frame(5), 60.0), "seeded once");
+        assert!(
+            !feeds.seed_snapshot(device, frame(5), 50.0, false),
+            "the same sidecar again is not newer"
+        );
+        assert!(
+            !feeds.seed_snapshot(device, frame(5), 60.0, true),
+            "a live picture is never displaced"
+        );
         assert_eq!(
             feeds
                 .get(device)

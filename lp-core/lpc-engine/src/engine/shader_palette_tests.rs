@@ -31,10 +31,10 @@ use alloc::vec::Vec;
 use crate::products::visual::{ConsumerPolicy, VisualSpace};
 use lpc_model::{
     ChannelName, Colorspace, Gradient, GradientConfig, GradientStop, InterpMethod, Kind, LpValue,
-    NodeId, ProductRef, TimeProduct, ToLpValue, TreePath,
+    NodeId, ProductRef, Revision, TimeProduct, ToLpValue, TreePath,
 };
-use lpc_registry::ProjectRegistry;
-use lpfs::{AsLpPath, LpFs, LpFsMemory};
+use lpc_registry::{ParseCtx, ProjectRegistry};
+use lpfs::{AsLpPath, FsEvent, FsEventKind, LpFs, LpFsMemory, LpPathBuf};
 
 use crate::color::sample_gradient;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -51,6 +51,7 @@ const OUT_WIDTH: u32 = 8;
 struct Project {
     engine: Engine,
     registry: ProjectRegistry,
+    fs: LpFsMemory,
 }
 
 impl Project {
@@ -156,6 +157,23 @@ impl Project {
         self.add_literal(config.to_lp_value(), channel, Kind::Gradient);
     }
 
+    /// Re-read one artifact and apply it, the way an authoring edit does.
+    fn apply_edit(&mut self, path: &str, revision: i64) {
+        let shapes = self.engine.slot_shapes().clone();
+        let changes = self.registry.refresh_artifacts(
+            &self.fs,
+            &[FsEvent {
+                path: LpPathBuf::from(path),
+                kind: FsEventKind::Modify,
+            }],
+            Revision::new(revision),
+            &ParseCtx { shapes: &shapes },
+        );
+        self.engine
+            .apply_project_changes(&self.fs, &mut self.registry, &changes)
+            .expect("apply project changes");
+    }
+
     fn add_literal(&mut self, value: LpValue, channel: &str, kind: Kind) {
         let owner = self.engine.tree().root();
         let revision = self.engine.revision();
@@ -254,7 +272,11 @@ fn load_with_frontend(fs: LpFsMemory, frontend: lp_shader::ShaderFrontend) -> Pr
     engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
         frontend,
     ))));
-    Project { engine, registry }
+    Project {
+        engine,
+        registry,
+        fs,
+    }
 }
 
 // --- Palette fixtures ------------------------------------------------------
@@ -563,4 +585,96 @@ fn a_channel_carrying_the_wrong_value_falls_back_to_the_slot_local_palette() {
 /// The first gradient of a config — the one an unbound slot bakes.
 fn gradient_of(config: &GradientConfig) -> &Gradient {
     config.gradients().first().expect("a config has a gradient")
+}
+
+// --- The authored gradient is parsed when it changes, not every frame -------
+
+/// `a.json` with its palette authored inline as a cycle of `colors`.
+fn authored_cycle_shader_json(colors: &[&str]) -> String {
+    let set = colors
+        .iter()
+        .map(|stops| {
+            alloc::format!(r#"{{ "space": "oklab", "method": "linear", "stops": "{stops}" }}"#)
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    alloc::format!(
+        r#"
+{{
+  "kind": "Shader",
+  "source": {{ "path": "palette.glsl" }},
+  "consumed": {{
+    "palette": {{
+      "kind": "palette", "value": "sampler2D", "label": "Palette", "description": "",
+      "gradient": {{
+        "kind": "cycle", "step_seconds": 2.0, "fade_seconds": 0.5, "pinned": -1,
+        "set": [ {set} ]
+      }}
+    }}
+  }}
+}}
+"#
+    )
+}
+
+const CYCLE_COLORS: [&str; 4] = [
+    "(0.30,0.10,0.10) (0.70,0.10,0.10)",
+    "(0.30,0.10,0.20) (0.70,0.10,0.20)",
+    "(0.30,0.10,0.30) (0.70,0.10,0.30)",
+    "(0.30,0.10,0.40) (0.70,0.10,0.40)",
+];
+
+/// Allocation requests one steady frame of the authored-cycle project may
+/// make. A ratchet, like `STEADY_FRAME_ALLOC_BUDGET`: lower it when the count
+/// drops, never raise it to pass.
+///
+/// Measured 2026-10-10 (F05, host): 41 requests / 2,347 B with the parse
+/// skipped on an unchanged authored value, 63 / 3,068 B with
+/// `GradientConfig::from_lp_value` run every frame. What is left is the
+/// bake path (`slot.gradient_config()` clones the set), not the parse.
+const AUTHORED_PALETTE_STEADY_FRAME_ALLOC_BUDGET: u64 = 41;
+
+#[test]
+fn a_steady_frame_does_not_reparse_an_authored_gradient() {
+    let fs = palette_fs(false, false);
+    write(&fs, "/a.json", &authored_cycle_shader_json(&CYCLE_COLORS));
+    let mut project = load(fs);
+    let clock = project.node("clock.clock");
+    let shader = project.node("a.shader");
+    project.publish_time_product(clock);
+    project.warm_up(&[shader]);
+    project.tick(&[shader]);
+
+    let (_, churn) = crate::test_alloc_counter::measure(|| project.tick(&[shader]));
+
+    std::eprintln!("steady authored-palette frame: {churn:?}");
+    assert!(
+        churn.allocs <= AUTHORED_PALETTE_STEADY_FRAME_ALLOC_BUDGET,
+        "a steady frame made {} allocation requests ({} B); budget {}",
+        churn.allocs,
+        churn.bytes,
+        AUTHORED_PALETTE_STEADY_FRAME_ALLOC_BUDGET
+    );
+}
+
+/// The cache keys on the authored value's revision, so an authoring edit --
+/// which stamps a new one -- must still reach the baked strip on the next
+/// frame, through the real registry and resolver.
+#[test]
+fn an_authored_gradient_edit_still_reaches_the_baked_strip() {
+    let fs = palette_fs(false, false);
+    write(&fs, "/a.json", &authored_cycle_shader_json(&CYCLE_COLORS));
+    let mut project = load(fs);
+    let shader = project.node("a.shader");
+    project.warm_up(&[shader]);
+    let before = project.render_row(shader);
+
+    let mut edited = CYCLE_COLORS;
+    edited[0] = "(0.80,0.10,0.10) (0.95,0.10,0.10)";
+    write(&project.fs, "/a.json", &authored_cycle_shader_json(&edited));
+    project.apply_edit("/a.json", 50);
+    project.warm_up(&[shader]);
+    let after = project.render_row(shader);
+
+    assert_ne!(before, after, "the edited gradient must change the strip");
 }

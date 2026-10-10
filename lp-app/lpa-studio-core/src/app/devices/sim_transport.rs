@@ -248,7 +248,7 @@ impl DeviceTransport for SimDeviceTransport {
         // chooser) but a refusal with the way in: a sim is created, and the
         // browser's port chooser has nothing to say about one.
         Box::pin(core::future::ready(Err(
-            "a sim is created from the Devices page, not from the browser's port chooser"
+            "a sim is created from Connect a board (start a board here), not from the browser's port chooser"
                 .to_string(),
         )))
     }
@@ -568,7 +568,7 @@ mod tests {
             Ok(_) => panic!("the chooser has nothing to say about a sim"),
         };
 
-        assert!(error.contains("Devices page"), "{error}");
+        assert!(error.contains("Connect a board"), "{error}");
     }
 
     /// Flash on a sim writes nothing, restarts the runtime, and reports no

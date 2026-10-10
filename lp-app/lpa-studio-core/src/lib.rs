@@ -50,6 +50,14 @@ pub use app::devices::BrowserRelaySource;
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+pub use app::devices::board_card::{
+    ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput, CornerMark,
+    LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT, PictureSource, RosterCardsInput,
+    SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard,
+    UiBoardPicture, UiBoardPresence, UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar,
+    UiPrimary, UiStackBar, UiStatusCorner, activity_bar, activity_words, bluetooth_switch,
+    board_card, chip_words, link_icon, pending_board_card, roster_board_card, roster_board_cards,
+};
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
     UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
@@ -87,6 +95,16 @@ pub use app::devices::{
     update_firmware_offer, write_sim_record,
 };
 pub use app::devices::{
+    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
+    duration_words,
+};
+/// One tab holds a board: the hold vocabulary and the edge the web installs.
+pub use app::devices::{
+    AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
+    HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
+    OtherHold, PendingAsk, TabId, UsbPair,
+};
+pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
     DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
     MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
@@ -114,6 +132,11 @@ pub use app::devices::{
     RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
     connect_relay_offer,
 };
+/// Connect on a board another tab holds: the offer, its op and its words.
+pub use app::devices::{
+    TAKE_OVER_ASKING, TAKE_OVER_NO_WAY, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab,
+    take_over_offer,
+};
 pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
     WIFI_BUSY_WORDS, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET, WifiAddress, WifiAddressBook,
@@ -125,24 +148,30 @@ pub use app::studio::PlayViewOp;
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;
+/// The device model's fact about a board another tab holds.
+pub use lpa_devices::{HeldElsewhere, HoldLevel, HoldVia};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
     DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
-    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup,
-    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, account_key_refused_sentence, dropped_sentence,
-    not_permitted_sentence, open_summary, tier_word,
+    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM,
+    UNLOCK_VERB, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, UnlockOp, UnlockPassword,
+    account_key_refused_sentence, device_unlock_offer, dropped_sentence, not_permitted_sentence,
+    open_summary, tier_word, unlock_offer,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
 };
 pub use app::home::{
-    DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
-    NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM, OPEN_PROJECT_PARAM, ProjectTemplate,
-    UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard, UiRunningProject,
-    ZipBytes, example_groups, generate_board_project, home_offers, new_project_offer,
-    open_project_offer, template_project_files,
+    DEFAULT_STRIP_PIXELS, EXAMPLE_PATTERNS_LABEL, EXAMPLE_PROJECTS_LABEL, GenerateProjectError,
+    GeneratedProject, HOME_NODE_ID, HomeOp, NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM,
+    OPEN_PROJECT_PARAM, ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeBoard,
+    UiHomeBoardKind, UiHomeConnect, UiHomeSection, UiHomeSections, UiHomeTab, UiHomeView,
+    UiOpenMismatch, UiPackageCard, UiRunningProject, ZipBytes, build_home_sections, example_groups,
+    example_page_label, generate_board_project, home_offers, new_project_offer, open_project_offer,
+    stamp_on_boards, template_project_files,
 };
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::network::{

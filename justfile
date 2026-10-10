@@ -4854,7 +4854,9 @@ fixture-fw variant port="":
 # TWO LANES since emulator plan two M6. `run <id> --emu` runs the same
 # scenario with NO BOARD, against an `lp-cli emu serve` the runner starts
 # itself, in headless Chrome; `check-guard` proves the emulated lane cannot
-# write a silicon fixture's name.
+# write a silicon fixture's name. `--emu --serve-release` serves the release
+# bundle itself (after `just studio-web-story-build`): no dev server, no
+# prompt, one foreground command.
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
@@ -4903,6 +4905,21 @@ walk-migration-emu *args:
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
+
+# One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
+# profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
+# emulated C6 over `?emu=`. Tab A holds the board; tab B (`?emu-second-tab=1`:
+# the board's bytes, not its cable) shows its picture and "Open in another
+# tab"; Connect there takes it over; A takes it back; A's tab closes and B
+# opens the board only when asked. Every wait is the board's own words or the
+# page's. Serves the RELEASE bundle itself with `--serve-release` (after
+# `just studio-web-story-build`, `just studio-firmware-package-served` and
+# `cargo build -p lp-cli`); `--steps 1-3` / `--steps 4-6` run part. Proves the
+# hold protocol, the card and the take-over — not Chrome's real exclusive
+# open() across tabs, a hidden tab, or a taker with a cable. Not CI.
+# Report: target/walk-two-tabs-emu/report.md.
+walk-two-tabs-emu *args:
+    node scripts/emu/walk-two-tabs-emu.mjs {{ args }}
 
 # The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, setting,
 # reading back (after a reload) and forgetting an emulated C6's Wi‑Fi over
@@ -4962,7 +4979,8 @@ walk-wifi-emu lane *args:
 # and re-seated under the editor and under Play — the page must stay put
 # behind "Reconnecting…" and resume the same session (defect
 # 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
-# this worktree's port; never a CI job.
+# this worktree's port, or `--serve-release` (after `just studio-web-story-build`),
+# which serves the release bundle itself; never a CI job.
 walk-drop-emu *args:
     node scripts/emu/walk-drop-emu.mjs {{ args }}
 
