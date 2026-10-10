@@ -153,11 +153,12 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
             "structural: no reserved code region; JIT residency is inside [MEM] used"
         );
     }
-    // The one boot line P04b's note fixes: a single-number heap, where the
-    // classic prints a four-region sum.
+    // The one boot line P04b's note fixes: the `.bss` arena (HEAP_SIZE =
+    // 240 * 1024) plus `dram2_seg` (73,744 B, RAM research E14), a two-region
+    // sum where the classic prints a four-region one.
     assert!(
-        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=245760"),
-        "HEAP_SIZE = 240 * 1024, one number: {text}"
+        text.contains("[INIT] chip=esp32s3 arch=xtensa heap=245760+73744=319504"),
+        "HEAP_SIZE + dram2_seg: {text}"
     );
     assert!(
         !text.contains("[INIT] main stack"),
