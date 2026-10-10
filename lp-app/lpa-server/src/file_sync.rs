@@ -466,7 +466,8 @@ mod tests {
     #[test]
     fn a_pull_page_whose_file_does_not_fit_is_refused_not_attempted() {
         let fs = lpfs::LpFsMemory::new();
-        fs.write_file("/projects/x/a.json".as_path(), b"{}").unwrap();
+        fs.write_file("/projects/x/a.json".as_path(), b"{}")
+            .unwrap();
         fs.write_file("/projects/x/big.svg".as_path(), &[7u8; 27_091])
             .unwrap();
         let prefix = "/projects/x".as_path();
@@ -518,7 +519,8 @@ mod tests {
     #[test]
     fn a_refusal_names_the_file_it_reached_not_the_whole_project() {
         let fs = lpfs::LpFsMemory::new();
-        fs.write_file("/projects/x/a.json".as_path(), b"{}").unwrap();
+        fs.write_file("/projects/x/a.json".as_path(), b"{}")
+            .unwrap();
         fs.write_file("/projects/x/z-big.bin".as_path(), &[1u8; 5_000])
             .unwrap();
         let prefix = "/projects/x".as_path();
@@ -528,13 +530,9 @@ mod tests {
             path: LpPathBuf::from("/z-big.bin"),
             offset: 0,
         });
-        let FsResponse::Changes { error, .. } = handle_changes_since_with_headroom(
-            &fs,
-            prefix,
-            FsVersion::new(0),
-            cursor,
-            Some(tight),
-        ) else {
+        let FsResponse::Changes { error, .. } =
+            handle_changes_since_with_headroom(&fs, prefix, FsVersion::new(0), cursor, Some(tight))
+        else {
             panic!("not a changes page");
         };
         assert!(error.unwrap().contains("5000 B file"));
