@@ -18,9 +18,14 @@
  * hence the `*<crate>*` shapes below.
  *
  * ⚠️ `.rodata.cst*` are MERGED pools: one section holds constants from every
- * crate at a given alignment, so they can only move as a whole. They stay in
- * RAM (5,080 B) because some of the code that reads them is on the ISR path
- * and there is no way to split them.
+ * crate at a given alignment, so they can only move as a whole. They stayed in
+ * RAM (5,080 B) on the 2026-09-06 build because some of the code that reads
+ * them was believed to be on the ISR path. 2026-10-10 (E5 of the RAM research
+ * program): `just iram-flash-literals-esp32v3` — the check — says no
+ * RAM-resident function loads an address inside them (99 functions, 82 flash
+ * literals, both before and after), so the pools went to flash too and the
+ * stack got 5,520 B. If a RAM function ever does read one, the check goes red
+ * naming it; put `*(.rodata.cst*)` back below and say why.
  *
  * Included from esp-hal's `ld/sections/rwdata.x` inside the `.data` output
  * section, which the linker script reaches before `.rodata` — so anything
@@ -31,10 +36,9 @@
  * check, not this comment.
  */
 
-/* Interrupt dispatch tables and the merged constant pools. */
+/* Interrupt dispatch tables. (The merged constant pools used to be here too.) */
 *(.rodata.*_esp_hal_internal_handler*)
 *(.rodata.*INTERRUPT_EDGE*)
-*(.rodata.cst*)
 
 /* Jump tables belonging to crates with code in IRAM: the WS281x refill ISR,
  * the firmware's own ISR plumbing and wire pusher, esp-hal's and esp-rtos's
