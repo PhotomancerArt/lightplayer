@@ -19,9 +19,13 @@
  * hence the `*<crate>*` shapes below.
  *
  * ⚠️ `.rodata.cst*` are MERGED pools: one section holds constants from every
- * object at a given alignment — including the Wi‑Fi and BLE blobs', whose
- * IRAM code (`pm_beacon_offset_get_average`, …) reads them — so they can only
- * move as a whole and they stay in RAM (4.7 KB).
+ * object at a given alignment, so they can only move as a whole, and they stay
+ * in RAM (4.7 KB) because RAM-resident code reads entries of them: the blobs'
+ * `pm_beacon_offset_get_average` / `_get_expect`, esp-radio's `semphr_give` /
+ * `semphr_take`, esp-hal's default GPIO interrupt handler (`.LCPI…`). The
+ * blobs themselves contribute only 84 B of the 4,752 B (their archives' own
+ * `.rodata.cst*`, measured with E5's `ram-e05-blob-cst.py`); the rest is
+ * Rust's, one LTO object, which cannot be split by file.
  *
  * Included from esp-hal's `ld/sections/rwdata.x` inside the `.data` output
  * section, which the linker script reaches before `.rodata`: anything matched
