@@ -1036,7 +1036,7 @@ async function main() {
     }
   };
   /// Put the walk's project on the board, by its card's offers: a board
-  /// running a project already (its primary Edit can be pressed) is left as
+  /// running a project already (its project bar's Edit can be pressed) is left as
   /// it is; an empty one is given `push` — the project bar's "Add a
   /// project", drawn as the project pick — then the project in the picker,
   /// "Put it on the board", and the board's own "Project loaded" in its
@@ -1475,7 +1475,7 @@ async function main() {
   /// The board runs `release` and the card has finished: the board's core
   /// booted that build and committed its engine, and the board's card names
   /// the version — its firmware bar's summary, with no update work left on
-  /// it — and runs its project: its primary Edit can be pressed, and the
+  /// it — and runs its project: its project bar's Edit can be pressed, and the
   /// project details offer `remove-project`.
   const awaitRelease = async (board, release, from) => {
     const id = `${release.version}+${release.commit.slice(0, 12)}`;
@@ -1716,7 +1716,7 @@ async function main() {
               // says no hello, so it is not kept): its connection details'
               // State says "Restoring firmware… N%" (`watchCard` keeps them
               // open). X running again: the board said who it is — its card
-              // kept and live — and runs its project (its primary Edit can be
+              // kept and live — and runs its project (its project bar's Edit can be
               // pressed) or is offered the update to Y over the air.
               const order = await watchCard(async (snap) => {
                 const card = snap.board;

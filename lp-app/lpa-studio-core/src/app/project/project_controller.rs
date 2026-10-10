@@ -1164,6 +1164,16 @@ impl ProjectController {
     /// Whether the server is saving panel state for this project
     /// (panel.md P11), as of the last runtime read.
     ///
+    /// The lens session's newest composed picture across every output the
+    /// board has published, with the lens's own frame clock
+    /// ([`ProjectSync::frames_seen`]): what the device card draws while the
+    /// editor's session holds the wire (CD8). `None` until a read has
+    /// carried a frame.
+    pub fn lens_published_frame(&self) -> Option<(crate::UiControlProductPreview, u64)> {
+        let sync = self.sync.as_ref()?;
+        Some((sync.composed_published_frame()?, sync.frames_seen()))
+    }
+
     /// The P11 switch's READ path. It rides `ServerRuntimeStatus` on the
     /// ordinary project read Studio makes every refresh rather than a
     /// message of its own, so the toggle converges exactly the way engaged

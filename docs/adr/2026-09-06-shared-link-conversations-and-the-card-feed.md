@@ -131,7 +131,17 @@ and fold borrow churn straight into freshness.
   gate; a push monopolizes the mode-exclusive wire.
 - **Joining the lens session's own frames into the card while the
   editor is open:** a later nicety; the dimmed last frame is honest
-  meanwhile.
+  meanwhile. *Landed 2026-10-10* (closed PR #571, redone for
+  "connected", plan `2026-10-08-2330-connected-in-the-card` P4): while the
+  lens holds a device's wire, the card draws the lens mirror's composed
+  frame (`LensFrameSource`, joined at `device_card_feed_view`), judged as
+  a live feed's would be and aged by the lens's own frame clock
+  (`DeviceFrameFeeds::observe_lens_frames`), marked as the lens's
+  (`DeviceCardFeedView::from_lens`), so the card's picture is
+  `PictureSource::Lens`, not dimmed, and its details name the editor's
+  session as the source. `FeedLiveness::Lens` (the dimmed last frame,
+  "editor has the wire") remains only until the lens has a frame. No
+  second pull: the feed's own pull still never runs under the borrow.
 
 ## References
 

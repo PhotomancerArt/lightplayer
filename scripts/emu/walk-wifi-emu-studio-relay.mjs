@@ -288,21 +288,24 @@ async function main() {
     for (const layer of BARS) lines[layer] = await driver.barText(layer, { board: mac });
     return lines;
   };
-  /// Press `connect-relay` where core put it on the offline card: its
-  /// primary when the cloud is its first way back, else in the connection
-  /// details — Wi‑Fi first, then the cloud, then the cable
-  /// (`primary_action.rs`), and a board met over USB is remembered with its
-  /// Wi‑Fi address, so `connect-wifi` may lead. A failed connect's Retry, on
-  /// the connection bar's face, is the same offer. Waits for the card to
-  /// show one of the two; returns the pressed button's words.
+  /// Press `connect-relay` where core put it on the offline card: on its
+  /// face when it is the card's way back (a failed connect's Retry, on the
+  /// connection bar's face, is the same offer), else in the connection
+  /// details — the primary is Connect (`connect`, one meaning since the
+  /// connected card: it reaches the board Wi‑Fi first, then the cloud, then
+  /// the cable, and opens its panel), or, for a board with no registry row,
+  /// the first of the roads' own offers (`primary_action.rs`). This walk
+  /// takes the cloud's road by its own offer, which reaches the board and
+  /// opens nothing. Waits for the card to show its way back; returns the
+  /// pressed button's words.
   const pressConnectRelay = async () => {
     const scope = await driver.card({ board: mac });
     const where = await driver.waitFor(
       `(() => { const card = ${scope}; if (!card) return false;
                 const face = (verb) => [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')]
                   .some((mark) => !mark.closest('.ux-popover-layer'));
-                return face('connect-relay') ? 'face' : face('connect-wifi') ? 'connection' : false; })()`,
-      { timeoutMs: STEP_MS, what: "the card to offer `connect-relay` (or `connect-wifi` ahead of it)" },
+                return face('connect-relay') ? 'face' : face('connect') || face('connect-wifi') ? 'connection' : false; })()`,
+      { timeoutMs: STEP_MS, what: "the card to offer `connect-relay` (or `connect` / `connect-wifi` ahead of it)" },
     );
     const bar = where === "face" ? null : "connection";
     const pressed = await driver.pressOffer("connect-relay", { board: mac, bar, timeoutMs: STEP_MS });

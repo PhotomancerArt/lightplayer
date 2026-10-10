@@ -104,6 +104,12 @@ fn reading(input: &BoardCardInput<'_>) -> Option<String> {
             .map(|fps| format!("{fps} fps"))
     };
     match input.feed.map(|feed| (feed, feed.liveness)) {
+        // The open session's frames: the rate its own heartbeat reported
+        // (under the borrow the roster's pump, and so the board's last
+        // word, stands still).
+        Some((feed, FeedLiveness::Live)) if feed.from_lens => {
+            feed.engine_fps.map(|fps| format!("{fps} fps")).or_else(fps)
+        }
         Some((_, FeedLiveness::Live)) => fps(),
         Some((feed, FeedLiveness::Stale | FeedLiveness::Offline | FeedLiveness::Lens)) => {
             feed.frame.as_ref().and(feed.frame_age_secs).map(age_words)

@@ -70,6 +70,8 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         ended: None,
         editor_holds_it: true,
         now: 0.0,
+        connection: &lpa_studio_core::BoardConnection::Watched,
+        panel: None,
     });
     UiLensCard::Board(Box::new(card))
 }

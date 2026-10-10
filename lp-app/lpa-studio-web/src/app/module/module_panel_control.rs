@@ -40,6 +40,19 @@
 //!
 //! Values render in **tabular numerals inside a reserved slot**, because a
 //! panel whose row reflows while you drag a fader is not a control panel.
+//!
+//! **Walk hooks**, on the control wherever a panel draws it (the editor,
+//! the play page, the board card): `data-panel-scope` and
+//! `data-panel-channel` (its identity, panel.md P1) and `data-panel-state`
+//! (`read-default`, `read-following`, `engaged`). A walk reads a control
+//! written in one session as held in the next — the board's own word, since
+//! a fresh session has no local echo.
+//!
+//! **At card size** (`compact`, the connected board card's panel — the
+//! card's five 28 px bars give way to it, at their height) the same
+//! control lays out tighter, never as another widget: a fader is one row
+//! across the card, label · fader · value; a knob or a toggle keeps its
+//! column with its label and value close under it.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -78,6 +91,20 @@ const INSTRUMENT_CLASS: &str = "tw:grid tw:min-w-0 tw:basis-full tw:gap-1.5";
 /// all occupy the same width and nothing moves during a drag.
 const READOUT_CLASS: &str = "tw:inline-flex tw:min-w-[4.5ch] tw:flex-none tw:items-baseline tw:justify-center tw:gap-1 tw:font-mono tw:text-[0.7rem] tw:tabular-nums";
 
+/// A fader at card size: one row across the card — label, fader, value —
+/// so the master fits a strip of the card's height. The label takes at
+/// most 38% of the row and truncates there (its trigger button may not
+/// outgrow the popover wrapper that centres it), so the fader keeps its
+/// reach on a phone's narrow card.
+const COMPACT_FADER_CLASS: &str = "tw:grid tw:w-full tw:min-w-0 tw:grid-cols-[fit-content(38%)_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:[&_button]:max-w-full";
+
+/// A knob or a toggle at card size: an equal share of the row, the label
+/// and value close under the widget, the label truncating to the share.
+const COMPACT_COLUMN_CLASS: &str = "tw:flex tw:min-w-0 tw:flex-1 tw:basis-0 tw:flex-col tw:items-center tw:gap-0.5 tw:[&>span]:max-w-full tw:[&_button]:max-w-full";
+
+/// The value slot at card size sits on its own line box: no leading.
+const COMPACT_READOUT_CLASS: &str = "tw:leading-none";
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ModulePanelControl(
@@ -90,6 +117,10 @@ pub fn ModulePanelControl(
     /// Play mode renders the same control at a roomier size.
     #[props(default = false)]
     play: bool,
+    /// The board card renders the same control at card size (the module
+    /// doc's "At card size").
+    #[props(default = false)]
+    compact: bool,
     /// Panel gestures (reset). Absent = the control is display-only.
     #[props(default = None)]
     on_panel: Option<EventHandler<PanelGesture>>,
@@ -105,12 +136,13 @@ pub fn ModulePanelControl(
     let aspects = view.detail_aspects(&scope);
     let UiPanelControlView {
         // The channel rides inside `control.panel_target` for dispatch;
-        // the bare name is only the map key upstream.
-        channel: _,
+        // the bare name is the map key upstream, and the walk hook here.
+        channel,
         control,
         state,
         source: _,
     } = view;
+    let state_hook = panel_state_hook(state);
     let engaged = state.engaged();
     let label_class = panel_state_label_class(state);
     let readout_class = panel_state_readout_class(state);
@@ -135,10 +167,15 @@ pub fn ModulePanelControl(
         control.widget,
         UiPanelWidget::Transport { .. } | UiPanelWidget::PatternPicker { .. }
     );
+    let compact_fader = compact && matches!(control.widget, UiPanelWidget::Fader { .. });
     let column_class = if is_instrument {
         INSTRUMENT_CLASS
+    } else if compact_fader {
+        COMPACT_FADER_CLASS
     } else if is_wide {
         FADER_CLASS
+    } else if compact {
+        COMPACT_COLUMN_CLASS
     } else if play {
         "tw:flex tw:min-w-[76px] tw:flex-none tw:flex-col tw:items-center tw:gap-1.5"
     } else {
@@ -146,6 +183,10 @@ pub fn ModulePanelControl(
     };
     let anchor_class = if is_instrument {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1.5"
+    } else if compact_fader {
+        COMPACT_FADER_CLASS
+    } else if compact {
+        "tw:flex tw:h-full tw:w-full tw:flex-col tw:items-center tw:gap-0.5"
     } else if is_wide {
         "tw:grid tw:h-full tw:w-full tw:content-start tw:gap-1"
     } else {
@@ -198,6 +239,7 @@ pub fn ModulePanelControl(
                             state,
                             readout_class,
                             label: anchor_label,
+                            compact,
                             on_action,
                         }
                     }
@@ -212,12 +254,18 @@ pub fn ModulePanelControl(
     };
 
     rsx! {
-        div { id: "{anchor_id}", class: column_class,
+        div {
+            id: "{anchor_id}",
+            class: column_class,
+            "data-panel-scope": "{scope}",
+            "data-panel-channel": "{channel}",
+            "data-panel-state": state_hook,
             ModulePanelControlBody {
                 control,
                 state,
                 readout_class,
                 label,
+                compact,
                 on_action,
                 on_panel,
             }
@@ -237,6 +285,9 @@ fn ModulePanelControlBody(
     /// The label element: the interactive trigger in flow, a static copy in
     /// the top-layer visual.
     label: Element,
+    /// At card size: a fader is one row, the value slot has no leading.
+    #[props(default)]
+    compact: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     /// Panel gestures (reset) for an instrument that carries its own resets
     /// (the Pattern instrument); `None` on the popup's top-layer copy.
@@ -273,8 +324,9 @@ fn ModulePanelControlBody(
             .unwrap_or_else(|| control.value.display.clone()),
         None => String::new(),
     };
+    let readout_size = if compact { COMPACT_READOUT_CLASS } else { "" };
     let readout = rsx! {
-        span { class: "{READOUT_CLASS} {readout_class}",
+        span { class: "{READOUT_CLASS} {readout_class} {readout_size}",
             span { title: readout_title, "{shown_value}" }
             SlotUnitSuffix { unit: control.unit.clone(), reserve: false }
         }
@@ -309,11 +361,7 @@ fn ModulePanelControlBody(
             let Some((value, emit)) = PanelEmit::for_control(&control) else {
                 return mismatch(&control.label, &control.value.display);
             };
-            rsx! {
-                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
-                    {label}
-                    {readout}
-                }
+            let fader = rsx! {
                 HFaderField {
                     value,
                     live_value: control.live_numeric(),
@@ -328,6 +376,22 @@ fn ModulePanelControlBody(
                     emit,
                     on_action,
                 }
+            };
+            // At card size the fader is one row: the column's grid places
+            // label, fader and value side by side.
+            if compact {
+                return rsx! {
+                    {label}
+                    {fader}
+                    {readout}
+                };
+            }
+            rsx! {
+                div { class: "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-2",
+                    {label}
+                    {readout}
+                }
+                {fader}
             }
         }
         UiPanelWidget::PaletteSwatch => {
@@ -410,6 +474,16 @@ fn label_visual(label: &str, color_class: &'static str) -> Element {
                 StudioIcon { name: StudioIconName::InfoBare, size: 9 }
             }
         }
+    }
+}
+
+/// The walk hook's name for a panel state (`data-panel-state`): what a walk
+/// reads to tell the board's held control from one it only follows.
+pub(crate) fn panel_state_hook(state: UiPanelControlState) -> &'static str {
+    match state {
+        UiPanelControlState::ReadDefault => "read-default",
+        UiPanelControlState::ReadFollowing => "read-following",
+        UiPanelControlState::Engaged => "engaged",
     }
 }
 

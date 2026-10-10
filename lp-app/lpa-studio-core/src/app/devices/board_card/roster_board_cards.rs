@@ -9,7 +9,9 @@
 
 use lpa_devices::DeviceId;
 
-use super::{BoardCardInput, UiBoardCard, board_card, pending_board_card};
+use super::{
+    BoardCardInput, BoardConnection, UiBoardCard, UiBoardPanel, board_card, pending_board_card,
+};
 use crate::{DeviceRosterView, DeviceView, UiOffer, UiOfferTree, UiPackageCard};
 
 /// What every card on a roster is built from.
@@ -24,12 +26,20 @@ pub struct RosterCardsInput<'a> {
     pub offers: &'a UiOfferTree,
     /// The library: the project bar names the project a board plays.
     pub projects: &'a [UiPackageCard],
-    /// The board the editor is open on: its card has no primary until
-    /// Done lands.
+    /// The board this tab's session (the editor's lens) is on, on its card
+    /// or docked in the editor: its primary is Done.
     pub lens: Option<DeviceId>,
+    /// The connected board's panel, picked from its project's root panel
+    /// ([`super::board_panel_picks`]) while its project is ready; drawn on
+    /// that board's card while it is connected
+    /// (`DeviceRosterView.connections`).
+    pub panel: Option<(DeviceId, &'a UiBoardPanel)>,
     /// Now, in epoch seconds (ages and a Done bar's few seconds).
     pub now: f64,
 }
+
+/// The connection of a board the roster says nothing about.
+static WATCHED: BoardConnection = BoardConnection::Watched;
 
 /// Every card on the roster: new boards first, then the roster's boards. A
 /// board the tree places nowhere has no card.
@@ -66,6 +76,7 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
         offers,
         projects,
         lens,
+        panel,
         now,
     } = *input;
     let board = offers.device_prefix(view.id)?;
@@ -112,6 +123,10 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
         last_seen_at: roster.last_seen.get(&view.id).copied(),
         ended: roster.ends.get(&view.id),
         editor_holds_it: lens == Some(view.id),
+        connection: roster.connections.get(&view.id).unwrap_or(&WATCHED),
+        panel: panel
+            .filter(|(device, _)| *device == view.id)
+            .map(|(_, panel)| panel),
         now,
     }))
 }

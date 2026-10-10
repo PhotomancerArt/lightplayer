@@ -35,7 +35,8 @@ use crate::core::OffersProvider;
 /// address for (core's address book, as the story says it), each offered
 /// "Connect over Wi‑Fi". `relay_boards`: the remembered boards offered
 /// "Connect through lightplayer.app" (core: signed in, the board said its
-/// MAC).
+/// MAC). `session`: the board this tab's session is connected to on its
+/// card (Done, no Connect), if any.
 pub(crate) fn roster_tree(
     devices: &DeviceRosterView,
     projects: &[UiPackageCard],
@@ -43,6 +44,7 @@ pub(crate) fn roster_tree(
     bluetooth: BluetoothReach,
     wifi_addresses: &[(lpa_studio_core::DeviceId, String)],
     relay_boards: &[lpa_studio_core::DeviceId],
+    session: Option<lpa_studio_core::DeviceId>,
 ) -> UiOfferTree {
     let mut tree = UiOfferTree::new();
     for offer in add_device_offers(devices.usb_available, bluetooth, wifi_reach(devices)) {
@@ -69,12 +71,33 @@ pub(crate) fn roster_tree(
             examples,
             Default::default(),
         ));
-        // Edit, where the board has an editor address (its registry uid),
-        // as the controller publishes it.
+        // Connect, Edit and Done, where the board has an editor address
+        // (its registry uid), as the controller publishes them: Done on the
+        // board the session is connected to, and a Connect under way
+        // (`connections`) not offered again.
         let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
         let uid = devices.open_addresses.get(&card.id.0).map(String::as_str);
-        if let Some(edit) = lpa_studio_core::device_edit_offer(&prefix, card, uid) {
-            tree.publish(edit);
+        let link = devices
+            .link_kinds
+            .get(&card.id)
+            .copied()
+            .unwrap_or_default();
+        let session = StorySession {
+            on_it: session == Some(card.id),
+            editor_shows_it: false,
+            waiting: devices.connections.get(&card.id)
+                == Some(&lpa_studio_core::BoardConnection::Connecting),
+        };
+        for offer in story_session_offers(
+            &prefix,
+            card,
+            uid,
+            unlock,
+            lpa_studio_core::link_icon(link),
+            None,
+            session,
+        ) {
+            tree.publish(offer);
         }
         // Connect on a board another tab holds is its take-over.
         if let Some(offer) = story_take_over_offer(card, devices.take_overs.get(&card.id)) {
@@ -277,6 +300,7 @@ pub(crate) fn RosterOffers(
         reach,
         &wifi_addresses,
         &relay_boards,
+        None,
     );
     rsx! {
         OffersProvider { offers, {children} }
@@ -411,6 +435,63 @@ pub(crate) fn story_board_prefix(device: lpa_studio_core::DeviceId) -> OfferPath
     OfferPath::board(&BoardRef::New(device.0 as u32))
 }
 
+/// The play page a connected story card's All controls links: the porch
+/// board's project, played (the router's `play_address` for a bound lens).
+pub(crate) const STORY_PLAY_ADDRESS: &str =
+    "/p/aurora-drift-prjh7kq9xy2mq4tb8wz/play?on=mac:60:55:f9:0a:0b:0c";
+
+/// What the controller knows about a story board's session, for
+/// [`story_session_offers`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StorySession {
+    /// This tab's session is on the board: connected on its card, or
+    /// docked in the editor.
+    pub on_it: bool,
+    /// …and the editor shows it (the docked card): there is nowhere
+    /// further for Edit to go.
+    pub editor_shows_it: bool,
+    /// A Connect already waits for the board.
+    pub waiting: bool,
+}
+
+/// The session's verbs on a story board, as the controller publishes them
+/// (`session_offers`): `connect` on a board Studio talks to or can reach,
+/// `edit` unless the editor already shows the board, `done` on the board
+/// the session is on — core's own offers over the story's facts. `uid` is
+/// the board's registry uid (no Connect, no Edit without one); `icon` the
+/// link's.
+pub(crate) fn story_session_offers(
+    prefix: &OfferPath,
+    card: &DeviceView,
+    uid: Option<&str>,
+    unlock: Option<UiUnlockOffer>,
+    icon: &'static str,
+    reach: Option<lpa_studio_core::ConnectReach>,
+    session: StorySession,
+) -> Vec<lpa_studio_core::UiOffer> {
+    let connect = lpa_studio_core::ConnectFacts {
+        registered: uid.is_some(),
+        session_on_it: session.on_it,
+        // The play password is enough to connect; a link that holds
+        // nothing is the Unlock's.
+        granted: unlock != Some(UiUnlockOffer::Locked),
+        icon,
+        reach,
+        waiting: session.waiting,
+    };
+    let mut offers = Vec::new();
+    offers.extend(lpa_studio_core::device_connect_offer(
+        prefix, card, &connect,
+    ));
+    if !session.editor_shows_it {
+        offers.extend(lpa_studio_core::device_edit_offer(prefix, card, uid));
+    }
+    if session.on_it {
+        offers.push(lpa_studio_core::device_done_offer(prefix));
+    }
+    offers
+}
+
 /// [`BoardCard`] for a story board: the tree core would publish for it
 /// (its device verbs, Unlock, Edit, the Wi‑Fi verbs, the reconnects an
 /// offline board is offered, and any `extra_offers` — the layout verbs a
@@ -472,7 +553,23 @@ pub(crate) fn StoryBoardCard(
     #[props(default)] ended: Option<lpa_studio_core::ActivityEnd>,
     #[props(default)] last_seen_at: Option<f64>,
     #[props(default = STORY_BOARD_NOW)] now: f64,
-    #[props(default)] editor_holds_it: bool,
+    /// This tab's session is on the board: connected on its card, or
+    /// docked in the editor. Done is its primary.
+    #[props(default)]
+    editor_holds_it: bool,
+    /// The editor shows the board (its docked card): Edit is not offered
+    /// there. Implies `editor_holds_it`.
+    #[props(default)]
+    docked: bool,
+    /// Where this tab's session stands on the board (watched, connecting,
+    /// connected, reconnecting, or why the last Connect failed).
+    #[props(default)]
+    connection: lpa_studio_core::BoardConnection,
+    /// The board's panel picks ([`lpa_studio_core::board_panel_picks`] over
+    /// the story's root panel): drawn in the bars' place while
+    /// `connection` is Connected.
+    #[props(default)]
+    panel: Option<lpa_studio_core::UiBoardPanel>,
     #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
     #[props(default)] armed_preview: Option<OfferPath>,
     #[props(default)] previews: crate::app::board_card::CardPreviews,
@@ -498,7 +595,39 @@ pub(crate) fn StoryBoardCard(
     if relay && offline_wire {
         tree.publish(connect_relay_offer(&prefix, card.id, connecting(true)));
     }
-    if let Some(offer) = lpa_studio_core::device_edit_offer(&prefix, &card, open_uid.as_deref()) {
+    // How it is reached, when the story does not say: what the controller
+    // reads off the board's endpoint — a LAN or relay link names itself, a
+    // card carrying the network reason is over Bluetooth, else USB.
+    let link = link.or_else(|| match (&lan, card.is_over_bluetooth()) {
+        (Some(lan), _) => Some(lan.kind),
+        (None, true) => Some(lpa_studio_core::UiLinkKind::Bluetooth),
+        (None, false) => None,
+    });
+    // Connect, Edit and Done, as the controller publishes them for the
+    // board's session.
+    let reach = match (offline_wire, wifi_address.is_some(), relay) {
+        (true, true, _) => Some(lpa_studio_core::ConnectReach::Wifi),
+        (true, false, true) => Some(lpa_studio_core::ConnectReach::Relay),
+        (true, false, false) => card
+            .escapes
+            .contains(&lpa_studio_core::DeviceEscape::Reconnect)
+            .then_some(lpa_studio_core::ConnectReach::Usb),
+        (false, ..) => None,
+    };
+    let session = StorySession {
+        on_it: editor_holds_it || docked,
+        editor_shows_it: docked,
+        waiting: connection == lpa_studio_core::BoardConnection::Connecting,
+    };
+    for offer in story_session_offers(
+        &prefix,
+        &card,
+        open_uid.as_deref(),
+        unlock,
+        lpa_studio_core::link_icon(link.unwrap_or_default()),
+        reach,
+        session,
+    ) {
         tree.publish(offer);
     }
     // The controller's `take-over`, on a board another tab holds.
@@ -514,14 +643,6 @@ pub(crate) fn StoryBoardCard(
         tree.append(extra);
     }
     let verbs: Vec<lpa_studio_core::UiOffer> = tree.own_verbs_of(&prefix).cloned().collect();
-    // How it is reached, when the story does not say: what the controller
-    // reads off the board's endpoint — a LAN or relay link names itself, a
-    // card carrying the network reason is over Bluetooth, else USB.
-    let link = link.or_else(|| match (&lan, card.is_over_bluetooth()) {
-        (Some(lan), _) => Some(lan.kind),
-        (None, true) => Some(lpa_studio_core::UiLinkKind::Bluetooth),
-        (None, false) => None,
-    });
     let plays = match plays {
         lpa_studio_core::BoardPlays::Unknown => {
             own_report_plays(std::slice::from_ref(&card), &projects)
@@ -550,9 +671,16 @@ pub(crate) fn StoryBoardCard(
         shared_with: &shared_with,
         last_seen_at,
         ended: ended.as_ref(),
-        editor_holds_it,
+        editor_holds_it: editor_holds_it || docked,
         now,
+        connection: &connection,
+        panel: panel.as_ref(),
     });
+    // A connected card's All controls goes to the session's play page; a
+    // story's session is the porch board's project.
+    crate::app::board_card::card_play_address::use_provide_card_play_address(
+        built.panel.as_ref().map(|_| STORY_PLAY_ADDRESS.to_string()),
+    );
     // A story that opens a part's details (or whose layout question raises
     // them) keeps the room they float in, so a capture holds the whole
     // details card and a grid of such cards never stacks one over the next.
@@ -665,6 +793,10 @@ pub(crate) fn StoryHomePage(
     /// Remembered boards offered "Connect through lightplayer.app".
     #[props(default)]
     relay_boards: Vec<lpa_studio_core::DeviceId>,
+    /// The board this tab's session is connected to on its card, and its
+    /// panel picks (its `home.devices.connections` entry says Connected).
+    #[props(default)]
+    connected: Option<(lpa_studio_core::DeviceId, lpa_studio_core::UiBoardPanel)>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
     let home = with_core_sections(home);
@@ -680,11 +812,21 @@ pub(crate) fn StoryHomePage(
         reach,
         &wifi_addresses,
         &relay_boards,
+        connected.as_ref().map(|(device, _)| *device),
     );
     for offer in home_offers(&home) {
         offers.publish(offer);
     }
-    let home = with_core_cards(home, &offers, now_secs.unwrap_or(STORY_BOARD_NOW));
+    let home = with_core_cards(
+        home,
+        &offers,
+        now_secs.unwrap_or(STORY_BOARD_NOW),
+        connected.as_ref().map(|(device, panel)| (*device, panel)),
+    );
+    // The connected card's All controls.
+    crate::app::board_card::card_play_address::use_provide_card_play_address(
+        connected.as_ref().map(|_| STORY_PLAY_ADDRESS.to_string()),
+    );
     rsx! {
         OffersProvider { offers,
             HomePage {
@@ -753,15 +895,22 @@ fn own_report_plays(
 /// `offers` ([`roster_board_cards`]), as `StudioController::view` does once
 /// the view's offers are published — so a story's page draws exactly the
 /// cards core would, and never hand-builds one. A story that pins its own
-/// cards keeps them.
-pub(crate) fn with_core_cards(mut home: UiHomeView, offers: &UiOfferTree, now: f64) -> UiHomeView {
+/// cards keeps them. `connected`: the board this tab's session is on, on
+/// its card, with its panel picks (the controller's lens and panel).
+pub(crate) fn with_core_cards(
+    mut home: UiHomeView,
+    offers: &UiOfferTree,
+    now: f64,
+    connected: Option<(lpa_studio_core::DeviceId, &lpa_studio_core::UiBoardPanel)>,
+) -> UiHomeView {
     if home.devices.cards.is_empty() {
         let cards = roster_board_cards(&RosterCardsInput {
             roster: &home.devices,
             offers,
             projects: &home.projects,
-            lens: None,
+            lens: connected.map(|(device, _)| device),
             now,
+            panel: connected,
         });
         home.devices.cards = cards;
     }

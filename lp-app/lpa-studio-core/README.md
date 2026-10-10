@@ -502,12 +502,49 @@ is published disabled with its reason. Unlock takes `password` (secret) and
 (`access/unlock_offer.rs`, `unlock_op.rs`: the op holds the password in an
 `UnlockPassword` whose `Debug` writes `<redacted>`, so the session recorder
 never carries it). It is published while a board's link holds nothing, or
-only play, and the board is linked and idle. `edit` opens the board's
-project in the editor (`devices/edit_offer.rs`, `RuntimeOp::OpenDeviceLens`;
-the web's lens sync then writes `/device/<uid>`). It is published on a
-board that is Ready (or Degraded), running a project, linked, idle and
-registered, and it is the board card's primary there until the card's own
-Connect lands. See
+only play, and the board is linked and idle.
+
+Three verbs open, show and close the board's session (the editor's lens),
+which the home page can hold (`app/studio/connected_board.rs`,
+`studio_controller/connect_flow.rs`; the board card ADR, §4):
+
+- `connect` means one thing: this board's session, on its card, with the
+  home page still up (`devices/connect_offer.rs`,
+  `RuntimeOp::ConnectDevice`). The lens opens the way an address opens it,
+  and the session is recorded as a `ConnectedBoard`: going home keeps it,
+  and it shows on the board's card unless an Edit is waiting or the user is
+  on the session's own page (`ConnectedBoard::shows_editor`, which reads the
+  place and acts on nothing). It is published on a board that is Ready (or
+  Degraded), linked, idle, holds a tier (any: the play password is enough),
+  registered, and not the board this tab's session is on; disabled,
+  "Nothing on it yet", on a board running nothing. A session on another
+  board closes first: one board is connected at a time. Connect reaches the
+  board if it must, then opens its panel, in one press: on a closed port
+  (`device_offers.rs`) it opens the port; on an offline board it takes the
+  road the card's own verbs would — Wi‑Fi address, then lightplayer.app,
+  then the cable (`ConnectReach`, the same code `connect-wifi`,
+  `connect-relay` and `reconnect` run). Then it holds the intent
+  (`app/studio/pending_lens.rs`): the tick attaches it on the card once the
+  board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
+  "The board didn't answer in time" (`StudioController::connect_failure`),
+  and it lets go at once when the board turns out locked or needing
+  firmware (Unlock, Install take over), on Done, another Connect, an Edit
+  elsewhere, or an address's open. While an editor open is held for the
+  board (the opening frame's exit), it opens the port only. Not published
+  again while it waits, nor on an offline stand-in (Power on is its way
+  back).
+- `edit` shows the editor on the board (`devices/edit_offer.rs`,
+  `RuntimeOp::EditDevice`): on the connected board, the session already
+  open, with nothing reattached or read again; on any other ready, running,
+  registered board, a connect first. It is not published while the editor
+  already shows the board.
+- `done` closes the session on the board this tab's session is on, whoever
+  holds it (`devices/done_offer.rs`, `RuntimeOp::CloseDeviceLens`; Routine).
+
+An address's open (`RuntimeOp::OpenDeviceLens`, `/device/<uid>`, a project
+card) is not connected, and on the board a connected session already holds
+it does nothing: the user being on the session's address is what shows it
+in the editor. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 A board another tab of this browser holds offers `devices/<board

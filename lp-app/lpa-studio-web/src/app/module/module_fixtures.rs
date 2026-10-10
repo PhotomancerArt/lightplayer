@@ -1209,6 +1209,100 @@ pub(crate) fn entry_held_panel(entry: u32) -> UiPanelGroup {
     panel
 }
 
+// ------------------------------------------------- the board card's panel
+
+/// The root panel a connected board card picks from
+/// (`lpa_studio_core::board_panel_picks`): the master (brightness), three
+/// knobs, then a toggle and a second fader the card leaves to the play
+/// page — "· 2 more".
+pub(crate) fn card_root_panel() -> UiPanelGroup {
+    UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(card_root_controls())
+}
+
+/// [`card_root_panel`]'s controls.
+fn card_root_controls() -> Vec<UiPanelControlView> {
+    vec![
+        at_default(
+            fader(ROOT_SCOPE, "brightness", "brightness", 200.0, 255.0),
+            "authored 200",
+        ),
+        following(
+            knob(ROOT_SCOPE, "speed", "speed", 0.62, 0.0, 1.0, None),
+            "0.62",
+            "control · Master speed",
+        ),
+        following(
+            knob(ROOT_SCOPE, "hue", "hue", 0.41, 0.0, 1.0, None),
+            "0.41",
+            "lfo · hue",
+        ),
+        at_default(
+            knob(ROOT_SCOPE, "palette", "palette", 2.0, 1.0, 4.0, Some(1.0)),
+            "authored default",
+        ),
+        at_default(
+            toggle(ROOT_SCOPE, "mirror", "mirror", false),
+            "no writer yet",
+        ),
+        at_default(
+            fader(ROOT_SCOPE, "level", "level", 180.0, 255.0),
+            "authored 180",
+        ),
+    ]
+}
+
+/// [`card_root_panel`] with `channel` held at `value` (gold, its let-go):
+/// the held value is what the channel reads now, so the face shows it.
+pub(crate) fn card_root_panel_held(channel: &str, value: f32) -> UiPanelGroup {
+    let mut panel = card_root_panel();
+    engage_group(&mut panel, ROOT_SCOPE, channel, value);
+    visit_group_controls(&mut panel, &mut |_, view| {
+        if view.channel == channel {
+            view.control.live_value = None;
+        }
+    });
+    panel
+}
+
+/// A big project's root panel: [`card_root_panel`] and four effects'
+/// groups — fifteen controls, so the card says "· 11 more".
+pub(crate) fn card_many_controls_panel() -> UiPanelGroup {
+    let effect = |scope: &str, channels: &[&str]| {
+        UiPanelGroup::new(instance_label(scope), scope)
+            .with_target(scope_target(scope))
+            .with_controls(
+                channels
+                    .iter()
+                    .map(|channel| {
+                        at_default(
+                            knob(scope, channel, channel, 0.5, 0.0, 1.0, None),
+                            "authored default",
+                        )
+                    })
+                    .collect(),
+            )
+    };
+    card_root_panel().with_groups(vec![
+        plasma_read_panel(PLASMA_1_SCOPE),
+        plasma_read_panel(PLASMA_2_SCOPE),
+        effect(FIRE_SCOPE, &["heat", "sparks", "wind"]),
+        effect(NOISE_PARTY_SCOPE, &["scale", "drift"]),
+    ])
+}
+
+/// A small project's root panel: one knob, no master.
+pub(crate) fn card_few_controls_panel() -> UiPanelGroup {
+    UiPanelGroup::new("Aurora Sign", ROOT_SCOPE)
+        .with_target(scope_target(ROOT_SCOPE))
+        .with_controls(vec![following(
+            knob(ROOT_SCOPE, "speed", "speed", 0.62, 0.0, 1.0, None),
+            "0.62",
+            "control · Master speed",
+        )])
+}
+
 // ---------------------------------------------------- three-state fixture
 
 /// One panel holding exactly the three states, side by side, for the

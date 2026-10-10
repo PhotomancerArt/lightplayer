@@ -226,6 +226,18 @@ impl ProjectEditorView {
         self.nodes.is_empty()
     }
 
+    /// The workspace root's face, when it is a module face: the face whose
+    /// panel the play page renders alone, the docs embed shows, and the
+    /// board card picks its controls from (`docs/design/modules.md` §5,
+    /// R8). `None` before the tree has synced, and for a root that wears
+    /// another face.
+    pub fn root_module_face(&self) -> Option<&crate::UiModuleFace> {
+        match self.nodes.first()?.face.as_ref()? {
+            crate::UiNodeFace::Module(face) => Some(face),
+            _ => None,
+        }
+    }
+
     /// The project pane's one chrome affordance: the priority merge of the
     /// controller's pane status, the project-level dirty summary, and Busy
     /// while buffered edits await their acknowledgement (genuine activity).

@@ -7,12 +7,13 @@ use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
 use crate::{UiBoardCard, UiCardAction, UiPrimary};
 
-/// A board with nothing on it cannot be edited yet; once a project runs,
-/// the card's primary is Edit, and pressing it by path opens the editor on
-/// the board once — and the docked lens card has no primary while the
-/// editor holds it.
+/// A board with nothing on it cannot connect yet (Connect, disabled, with
+/// the offer's own reason); once a project runs, the card's primary is
+/// Connect, and pressing it by path opens the session on the card once —
+/// its primary Done. Edit, the project bar's action, shows the editor on
+/// that same session, and the docked card's primary is Done too.
 #[test]
-fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
+fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
     let device = empty_light_player("dev000000card000001");
     let (mut bench, tasks) = identified(&device, "usb-card-1");
     bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
@@ -23,13 +24,13 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let id = bench.view().devices[0].id;
+    let waiting = primary_offer(&card_of(&bench, id));
+    assert_eq!(waiting.offer, bench.device_verb(id, "connect"));
+    assert_eq!(waiting.word, "Connect");
     assert_eq!(
-        card_of(&bench, id).name_bar.primary,
-        Some(UiPrimary::Unavailable {
-            word: "Edit".to_string(),
-            icon: "edit".to_string(),
-            reason: crate::NOTHING_TO_EDIT.to_string(),
-        })
+        waiting.refused.as_deref(),
+        Some(crate::NOTHING_ON_IT_YET),
+        "drawn disabled, with the offer's own reason"
     );
     every_card_action_is_offered(&mut bench);
 
@@ -43,15 +44,16 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
                 )
         })
     });
-    let edit = primary_offer(&card_of(&bench, id));
-    assert_eq!(edit.offer, bench.device_verb(id, "edit"));
-    assert_eq!(edit.word, "Edit");
-    assert_eq!(edit.icon.as_deref(), Some("edit"));
+    let connect = primary_offer(&card_of(&bench, id));
+    assert_eq!(connect.offer, bench.device_verb(id, "connect"));
+    assert_eq!(connect.word, "Connect");
+    assert_eq!(connect.icon.as_deref(), Some("usb"));
+    assert_eq!(connect.refused, None);
     every_card_action_is_offered(&mut bench);
 
     bench
-        .press(&edit.offer, edit.args.clone())
-        .expect("Edit opens the editor");
+        .press(&connect.offer, connect.args.clone())
+        .expect("Connect opens the session");
     let uid = bench.registry()[0].uid.clone();
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
     let session = bench.lens_session_id();
@@ -63,14 +65,43 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
         session,
         "one open: the same session, never a second"
     );
+    let card = card_of(&bench, id);
+    let done = primary_offer(&card);
+    assert_eq!(done.offer, bench.device_verb(id, "done"));
+    assert_eq!(done.word, "Done");
+    assert_eq!(done.icon.as_deref(), Some("check"));
+    every_card_action_is_offered(&mut bench);
+
+    // Edit: the project bar's action (the panel's All controls row's too).
+    let edit = card
+        .bar(crate::BarLayer::Project)
+        .action
+        .clone()
+        .expect("Edit on the project bar");
+    assert_eq!(edit.offer, bench.device_verb(id, "edit"));
+    bench
+        .press(&edit.offer, edit.args.clone())
+        .expect("Edit shows the editor");
+    assert_eq!(bench.lens_session_id(), session, "on the same session");
     let view = bench.controller.view();
-    let crate::UiLensCard::Board(card) =
+    let crate::UiLensCard::Board(docked) =
         *view.lens_card.expect("the editor docks the board's card");
-    assert_eq!(card.device, id);
+    assert_eq!(docked.device, id);
     assert_eq!(
-        card.name_bar.primary, None,
-        "no primary while the editor holds it"
+        docked
+            .name_bar
+            .primary
+            .as_ref()
+            .map(|primary| primary.word()),
+        Some("Done"),
+        "Done on the docked card"
     );
+    assert_eq!(
+        docked.bar(crate::BarLayer::Project).action,
+        None,
+        "no Edit on the docked card: the editor shows the board"
+    );
+    assert_eq!(docked.panel, None, "the editor is the session's surface");
 }
 
 /// A push that ends well leaves its bar green for a few seconds, read off
@@ -158,8 +189,9 @@ fn an_attached_boards_card_connects_by_path() {
     });
 }
 
-/// Unplugged, a board is an offline card: its primary reconnects by its
-/// cable, or over Wi‑Fi first when this browser remembers where it is.
+/// Unplugged, a board is an offline card: its primary is Connect, which
+/// reaches it by its cable, or over Wi‑Fi first when this browser remembers
+/// where it is, then opens its panel (one press).
 #[test]
 fn an_offline_boards_card_reconnects_wifi_first() {
     let device = joined_light_player("dev000000card000004");
@@ -183,8 +215,9 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     assert_eq!(card.presence, crate::UiBoardPresence::Offline);
     assert_eq!(card.status.mark, crate::CornerMark::Quiet);
     let reconnect = primary_offer(&card);
-    assert_eq!(reconnect.offer, bench.device_verb(id, "reconnect"));
+    assert_eq!(reconnect.offer, bench.device_verb(id, "connect"));
     assert_eq!(reconnect.word, "Connect");
+    assert_eq!(reconnect.icon.as_deref(), Some("usb"), "by its cable");
     every_card_action_is_offered(&mut bench);
 
     // Back on its cable, the board says where it is on Wi‑Fi; unplugged
@@ -209,9 +242,9 @@ fn an_offline_boards_card_reconnects_wifi_first() {
             .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
     });
     let wifi = primary_offer(&card_of(&bench, id));
-    assert_eq!(wifi.offer, bench.device_verb(id, "connect-wifi"));
+    assert_eq!(wifi.offer, bench.device_verb(id, "connect"));
     assert_eq!(wifi.word, "Connect");
-    assert_eq!(wifi.icon.as_deref(), Some("wifi"));
+    assert_eq!(wifi.icon.as_deref(), Some("wifi"), "over Wi‑Fi first");
     every_card_action_is_offered(&mut bench);
 }
 

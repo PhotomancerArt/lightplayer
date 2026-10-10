@@ -102,6 +102,11 @@ pub struct UiChromeSessionControl {
     pub update: Option<crate::UiSessionUpdate>,
     /// How the board is reached right now: the header's glyph.
     pub link: crate::UiLinkKind,
+    /// The home page holds this session (Connect, or Edit from a board's
+    /// card — [`ConnectedBoard`](crate::ConnectedBoard)): going home keeps
+    /// it, and it shows on the board's card there. `false` for a session
+    /// an address opened, which going home ends.
+    pub connected: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

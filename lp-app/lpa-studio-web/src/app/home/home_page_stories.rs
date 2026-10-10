@@ -23,9 +23,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
-    BoardPlays, BoardProjects, DeviceCardFeedView, DeviceId, DeviceLoadedProject, DeviceRosterView,
-    DeviceView, FeedLiveness, RosterView, UiHomeTab, UiHomeView, UiPackageCard, UiRuntimeBand,
-    stamp_on_boards,
+    BoardConnection, BoardPlays, BoardProjects, DeviceCardFeedView, DeviceId, DeviceLoadedProject,
+    DeviceRosterView, DeviceView, FeedLiveness, RosterView, UiHomeTab, UiHomeView, UiPackageCard,
+    UiRuntimeBand, board_panel_picks, stamp_on_boards,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_cloud_api::{LoginOptionsInfo, MeInfo, OidcOption};
@@ -37,6 +37,7 @@ use crate::app::home::home_gallery_stories::{
 };
 use crate::app::home::home_landing_stories::{newcomer_home, pins};
 use crate::app::home::page::home_view_mode::HomeViewMode;
+use crate::app::module::module_fixtures::card_root_panel;
 use crate::cloud::CloudSession;
 
 #[story(
@@ -116,6 +117,54 @@ fn home_page_tab_patterns() -> Element {
 fn home_page_only_offline_boards() -> Element {
     page(home(&[Board::Garage, Board::Truck], 0, 0), None, None, None)
 }
+
+#[story(
+    description = "Connect on a second board hands the session over: one board is connected at a time. BEFORE, on the Boards tab: Luna's porch sign is connected — its bars are its panel (the master brightness, then speed, hue and palette, \"All controls · 2 more\" with Edit at the row's end) and Done is its primary; the Desk sim offers Connect. AFTER pressing Connect on the Desk sim: Luna's card is back to its facts at once (its five bars, Connect), and the Desk sim's connection bar says \"Connecting…\", its primary \"Connecting…\", disabled. Every card keeps its height."
+)]
+fn home_page_hand_over() -> Element {
+    let luna = DeviceId(1);
+    let sim = DeviceId(21);
+    let mut before = home(&[Board::Luna, Board::Sim], 3, 0);
+    before
+        .devices
+        .connections
+        .insert(luna, BoardConnection::Connected);
+    // Connected, the card draws the session's own frames.
+    if let Some(feed) = before.devices.feeds.get_mut(&luna) {
+        feed.from_lens = true;
+    }
+    let panel = board_panel_picks(&card_root_panel(), Some(true));
+    let mut after = home(&[Board::Luna, Board::Sim], 3, 0);
+    after
+        .devices
+        .connections
+        .insert(sim, BoardConnection::Connecting);
+    rsx! {
+        section { class: "tw:grid tw:gap-4 tw:p-4",
+            p { class: HAND_OVER_CAPTION_CLASS, "Before: Luna's porch sign is connected" }
+            StoryHomePage {
+                home: before,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                connect_pins: pins(),
+                connected: Some((luna, panel)),
+                on_action: |_| {},
+            }
+            p { class: HAND_OVER_CAPTION_CLASS, "After: Connect on the Desk sim" }
+            StoryHomePage {
+                home: after,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                connect_pins: pins(),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+/// The hand-over story's two captions.
+const HAND_OVER_CAPTION_CLASS: &str =
+    "tw:m-0 tw:text-[10.5px] tw:font-bold tw:uppercase tw:tracking-[0.06em] tw:text-dim-foreground";
 
 /// The page, under the cloud session a story asks for (`None`: no context,
 /// as in the app's earlier stories).
@@ -330,6 +379,7 @@ fn live_feed() -> DeviceCardFeedView {
         frame_age_secs: Some(1.0),
         engine_fps: Some(43),
         liveness: FeedLiveness::Live,
+        from_lens: false,
     }
 }
 
@@ -340,6 +390,7 @@ fn last_picture(age_secs: f64) -> DeviceCardFeedView {
         frame_age_secs: Some(age_secs),
         engine_fps: None,
         liveness: FeedLiveness::Offline,
+        from_lens: false,
     }
 }
 
