@@ -110,8 +110,12 @@ impl<'a> AssetRefreshContext<'a> {
         location: &AssetLocation,
         since: Revision,
     ) -> Result<Option<AssetText>, AssetReadError> {
-        self.registry
-            .read_asset_text_if_changed(self.fs, location, since)
+        lp_perf::emit_begin!(lp_perf::EVENT_ASSET_TEXT);
+        let text = self
+            .registry
+            .read_asset_text_if_changed(self.fs, location, since);
+        lp_perf::emit_end!(lp_perf::EVENT_ASSET_TEXT);
+        text
     }
 }
 
