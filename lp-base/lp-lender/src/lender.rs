@@ -294,13 +294,21 @@ mod tests {
         assert!(!refusal.is_transient());
         // A working set over block + allowance is too big as well.
         let refusal = lender
-            .try_lend(Ask::new(LoanKind::Read, 10_240, 50_168), &mut block, &mut [])
+            .try_lend(
+                Ask::new(LoanKind::Read, 10_240, 50_168),
+                &mut block,
+                &mut [],
+            )
             .unwrap_err();
         assert!(matches!(refusal, Refusal::TooBig { .. }));
         // Within block + allowance it is lent: the rest overflows.
         assert!(
             lender
-                .try_lend(Ask::new(LoanKind::Read, 10_240, 39_000), &mut block, &mut [])
+                .try_lend(
+                    Ask::new(LoanKind::Read, 10_240, 39_000),
+                    &mut block,
+                    &mut []
+                )
                 .is_ok()
         );
     }

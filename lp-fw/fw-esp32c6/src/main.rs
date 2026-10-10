@@ -107,7 +107,10 @@ use fw_esp32_common::boot;
 mod alloc_trace_emu;
 #[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
 mod alloc_watch;
-#[cfg(all(any(feature = "e11_lender", feature = "e11_link_standin"), not(fw_harness)))]
+#[cfg(all(
+    any(feature = "e11_lender", feature = "e11_link_standin"),
+    not(fw_harness)
+))]
 mod lender;
 #[cfg(all(feature = "e11_lender", feature = "alloc_watch_diag"))]
 compile_error!("`e11_lender` and `alloc_watch_diag` both own lp-perf's hook: pick one");

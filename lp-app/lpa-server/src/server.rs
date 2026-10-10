@@ -1250,8 +1250,10 @@ impl LpServer {
                     // written; a refused one answers in words, unread.
                     let mut whole_file_lent = None;
                     let mut whole_file_refused = None;
-                    if let (Some(hook), ClientRequest::Filesystem(lpc_wire::FsRequest::Read { path })) =
-                        (self.big_block, &msg)
+                    if let (
+                        Some(hook),
+                        ClientRequest::Filesystem(lpc_wire::FsRequest::Read { path }),
+                    ) = (self.big_block, &msg)
                         && let Ok(size) = self.base_fs.file_size(path.as_path())
                     {
                         let size = u32::try_from(size).unwrap_or(u32::MAX);
@@ -1286,20 +1288,20 @@ impl LpServer {
                             lpc_wire::server::ServerMsgBody::Filesystem(refused),
                         )),
                         None => handlers::handle_client_message(
-                        &mut self.project_manager,
-                        &mut *self.base_fs,
-                        &self.output_provider,
-                        self.memory_stats.as_ref(),
-                        self.read_headroom_probe,
-                        self.reboot_hook.is_some(),
-                        self.time_provider.clone(),
-                        self.button_service.clone(),
-                        self.radio_service.clone(),
-                        self.graphics.clone(),
-                        link_hello.as_ref().unwrap_or(&self.hello),
-                        link_state,
-                        lpc_wire::ClientMessage { id: msg_id, msg },
-                    ),
+                            &mut self.project_manager,
+                            &mut *self.base_fs,
+                            &self.output_provider,
+                            self.memory_stats.as_ref(),
+                            self.read_headroom_probe,
+                            self.reboot_hook.is_some(),
+                            self.time_provider.clone(),
+                            self.button_service.clone(),
+                            self.radio_service.clone(),
+                            self.graphics.clone(),
+                            link_hello.as_ref().unwrap_or(&self.hello),
+                            link_state,
+                            lpc_wire::ClientMessage { id: msg_id, msg },
+                        ),
                     };
                     let response = match handled {
                         Ok(response) => response,

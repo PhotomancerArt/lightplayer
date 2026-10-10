@@ -67,7 +67,9 @@ pub fn install(server: &mut lpa_server::LpServer) {
     server.set_big_block(Some(lpa_server::big_block::BigBlockHook { lend, release }));
     lp_perf::set_hook(on_marker);
     let (start, size) = lend_region::region();
-    log::info!("[e11] lender installed: block {size} B at {start:#x}, overflow allowance {OVERFLOW_ALLOWANCE} B");
+    log::info!(
+        "[e11] lender installed: block {size} B at {start:#x}, overflow allowance {OVERFLOW_ALLOWANCE} B"
+    );
 }
 
 /// One loan's line, logged outside the critical section.

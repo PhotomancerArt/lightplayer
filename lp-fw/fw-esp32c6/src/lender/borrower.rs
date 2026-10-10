@@ -15,9 +15,15 @@ use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 /// Executors tracked (main, the link thread, the net thread, spare).
 const SLOTS: usize = 6;
 
-#[allow(clippy::declare_interior_mutable_const, reason = "array initializers of atomics")]
+#[allow(
+    clippy::declare_interior_mutable_const,
+    reason = "array initializers of atomics"
+)]
 const ZERO_U32: AtomicU32 = AtomicU32::new(0);
-#[allow(clippy::declare_interior_mutable_const, reason = "array initializers of atomics")]
+#[allow(
+    clippy::declare_interior_mutable_const,
+    reason = "array initializers of atomics"
+)]
 const ZERO_USIZE: AtomicUsize = AtomicUsize::new(0);
 
 static EXECUTOR: [AtomicU32; SLOTS] = [ZERO_U32; SLOTS];
