@@ -1024,6 +1024,9 @@ fn lp_engine_entry(core: CoreBoot) {
         ))
     });
     server.set_read_gate(Some(READ_GATE));
+    // TEST ONLY — never merged. PR #1126's proof: 64 B held for the board's
+    // life, so the C6's heap figures move and CI's figure patch is exercised.
+    core::mem::forget(alloc::vec![0u8; 64]);
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`).
