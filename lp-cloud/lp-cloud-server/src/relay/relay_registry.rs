@@ -21,15 +21,17 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use lpc_cloud_api::BoardPresence;
+use lpc_cloud_api::{BoardPicture, BoardPresence, KnownPicture};
 use lpc_history::PrefixedUid;
 use lpc_relay::{RefuseReason, RelayBoardId, RelayCloseCode, RelayFrame};
 use tokio::sync::{mpsc, watch};
 
+use super::device_leg::epoch_seconds;
 use super::relay_hub::{BoardRegistration, HubAction, LegId, OpenRefusal, RelayHub};
 use super::route_admission::{
     Admission, InterimRouteAdmission, RouteAdmissionPolicy, RouteRequest,
 };
+use crate::config::RelayPictureSettings;
 
 /// How many messages a leg's queue holds before the leg is dropped as
 /// overloaded. A lp-link window is two frames; this is generous.
@@ -96,18 +98,37 @@ impl Drop for LegHandle {
 }
 
 impl RelayRegistry {
-    /// A registry deciding admission by the interim rule.
+    /// A registry deciding admission by the interim rule, asking boards for
+    /// pictures at the default cadence.
     #[must_use]
     pub fn new() -> Arc<Self> {
-        Self::with_admission(Box::new(InterimRouteAdmission::new()))
+        Self::with_pictures(RelayPictureSettings::default())
+    }
+
+    /// A registry deciding admission by the interim rule, asking boards for
+    /// pictures at `pictures` (`LP_CLOUD_RELAY_PICTURE_*`).
+    #[must_use]
+    pub fn with_pictures(pictures: RelayPictureSettings) -> Arc<Self> {
+        Self::with_parts(Box::new(InterimRouteAdmission::new()), pictures)
     }
 
     /// A registry deciding admission by `admission`.
     #[must_use]
     pub fn with_admission(admission: Box<dyn RouteAdmissionPolicy>) -> Arc<Self> {
+        Self::with_parts(admission, RelayPictureSettings::default())
+    }
+
+    fn with_parts(
+        admission: Box<dyn RouteAdmissionPolicy>,
+        pictures: RelayPictureSettings,
+    ) -> Arc<Self> {
+        // Pictures are numbered from the start time in microseconds, so a
+        // reader holding a `seq` from before a deploy never takes a new
+        // picture for the one it has.
+        let first_seq = (epoch_seconds() * 1e6) as u64;
         Arc::new(Self {
             inner: Mutex::new(Inner {
-                hub: RelayHub::new(),
+                hub: RelayHub::with_settings(pictures, first_seq),
                 outboxes: HashMap::new(),
                 admission,
             }),
@@ -146,8 +167,9 @@ impl RelayRegistry {
 
     /// A frame from a registered board.
     pub fn board_message(&self, leg: LegId, frame: RelayFrame) {
+        let now = epoch_seconds();
         let mut inner = self.lock();
-        let actions = inner.hub.from_board(leg, frame);
+        let actions = inner.hub.from_board(leg, frame, now);
         inner.apply(actions);
     }
 
@@ -208,6 +230,22 @@ impl RelayRegistry {
     /// `ListBoards` for `user`, calling from `ip`.
     pub fn boards_for(&self, user: PrefixedUid, ip: Option<IpAddr>) -> Vec<BoardPresence> {
         self.lock().hub.boards_for(user, ip)
+    }
+
+    /// `BoardPictures` for `user`: the pictures of the boards asked about
+    /// that `user` may read, each of them watched when `watch` (the boards
+    /// told so through their queues).
+    pub fn pictures_for(
+        &self,
+        user: PrefixedUid,
+        asked: &[KnownPicture],
+        watch: bool,
+    ) -> Vec<BoardPicture> {
+        let now = epoch_seconds();
+        let mut inner = self.lock();
+        let (pictures, actions) = inner.hub.pictures_for(user, asked, watch, now);
+        inner.apply(actions);
+        pictures
     }
 
     /// How many boards are online.

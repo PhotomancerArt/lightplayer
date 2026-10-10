@@ -17,6 +17,7 @@
 
 use crate::account_access_info::AccountAccessInfo;
 use crate::ack::Ack;
+use crate::board_picture::{BoardPictureList, BoardPictures};
 use crate::board_presence::BoardList;
 use crate::login_options::LoginOptionsInfo;
 use crate::me_info::MeInfo;
@@ -287,6 +288,17 @@ impl CloudCallSpec for ListBoards {
     fn extract(response: CloudResponse) -> Option<BoardList> {
         match response {
             CloudResponse::BoardList(list) => Some(list),
+            _ => None,
+        }
+    }
+}
+
+impl CloudCallSpec for BoardPictures {
+    type Response = BoardPictureList;
+
+    fn extract(response: CloudResponse) -> Option<BoardPictureList> {
+        match response {
+            CloudResponse::BoardPictureList(list) => Some(list),
             _ => None,
         }
     }

@@ -65,9 +65,12 @@ pub fn handle_serve(args: ServeArgs) -> Result<()> {
     println!("relay: board {board} on {origin} (connect with relay:{board}@{origin})");
     println!("Press Ctrl+C to stop");
     runtime.block_on(async {
-        let transport = start_relay_host(transport, &origin, board, host_board_label(), accounts)?;
+        let mut transport =
+            start_relay_host(transport, &origin, board, host_board_label(), accounts)?;
+        // The project's facts before the leg's first registration.
+        transport.report_project(&server);
         run_server_loop_with(server, transport, |server, transport| {
-            transport.send_hellos(server);
+            transport.after_tick(server);
         })
         .await
     })

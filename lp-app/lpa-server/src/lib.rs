@@ -20,6 +20,7 @@ pub mod file_sync;
 pub mod handlers;
 pub mod heartbeat_status;
 pub mod link_session;
+pub mod loaded_project_facts;
 pub mod network_store;
 pub mod panel_state;
 #[cfg(feature = "node-power-button")]
@@ -39,6 +40,7 @@ pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
 pub use error::ServerError;
 pub use heartbeat_status::HeartbeatStatus;
 pub use link_session::LinkSession;
+pub use loaded_project_facts::LoadedProjectFacts;
 pub use lpc_engine::products::visual::{
     ConsumerPolicy, RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSpace,
 };

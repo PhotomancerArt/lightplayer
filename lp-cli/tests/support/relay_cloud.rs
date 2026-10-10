@@ -21,8 +21,8 @@ use lp_cloud_store_mem::{MemBlobStore, MemMetaStore};
 use lpa_client::transport_relay::RelayTarget;
 use lpc_access::{SecretEntry, SecretKind, Tier};
 use lpc_cloud_api::{
-    AccountAccessInfo, Actor, BoardList, CLOUD_API_VERSION, CloudCall, CloudReply, CloudRequest,
-    CloudResponse,
+    AccountAccessInfo, Actor, BoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION,
+    CloudCall, CloudReply, CloudRequest, CloudResponse, KnownPicture,
 };
 use lpc_history::PrefixedUid;
 use lpc_relay::RelayBoardId;
@@ -214,6 +214,42 @@ impl Cloud {
         });
         match reply.result.unwrap() {
             CloudResponse::BoardList(list) => list,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// `BoardPictures` as `session`: the cached pictures of `boards` (each
+    /// with the `seq` the caller holds), and with `watch` the boards kept
+    /// fast for a lease. Panics on an error reply.
+    pub fn board_pictures(
+        &self,
+        session: &str,
+        boards: &[KnownPicture],
+        watch: bool,
+    ) -> BoardPictureList {
+        let url = format!("{}/api", self.origin());
+        let cookie = format!("lp_session={session}");
+        let request = CloudRequest::BoardPictures(BoardPictures {
+            boards: boards.to_vec(),
+            watch,
+        });
+        let reply: CloudReply = self.runtime.block_on(async move {
+            reqwest::Client::new()
+                .post(url)
+                .header("cookie", cookie)
+                .json(&CloudCall {
+                    version: CLOUD_API_VERSION,
+                    request,
+                })
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap()
+        });
+        match reply.result.unwrap() {
+            CloudResponse::BoardPictureList(list) => list,
             other => panic!("{other:?}"),
         }
     }
