@@ -4,6 +4,7 @@ extern crate alloc;
 
 use super::super::executor::ExecutionResult;
 use super::super::fp_regs::FpRegs;
+use super::super::lr_reservation::LrReservation;
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
@@ -65,6 +66,8 @@ pub struct Riscv32Emulator {
     /// Always present, not feature-gated: the emulator decodes RV32F
     /// unconditionally, and 132 bytes of state is not worth a cfg.
     pub(super) fp: FpRegs,
+    /// The `lr.w` reservation `sc.w` checks (see [`LrReservation`]).
+    pub(super) reservation: LrReservation,
     pub(super) pc: u32,
     pub(super) memory: Memory,
     pub(super) instruction_count: u64,
@@ -110,6 +113,7 @@ impl Riscv32Emulator {
         Self {
             regs: [0; 32],
             fp: FpRegs::new(),
+            reservation: LrReservation::new(),
             pc: 0,
             memory: Memory::with_default_addresses(code, ram),
             instruction_count: 0,
@@ -149,6 +153,7 @@ impl Riscv32Emulator {
         Self {
             regs: [0; 32],
             fp: FpRegs::new(),
+            reservation: LrReservation::new(),
             pc: 0,
             memory,
             instruction_count: 0,

@@ -72,6 +72,7 @@ impl Riscv32Emulator {
                 &mut self.regs,
                 &mut self.memory,
                 &mut self.fp,
+                &mut self.reservation,
             )?,
             _ => decode_execute::<LoggingEnabled, _>(
                 inst_word,
@@ -79,6 +80,7 @@ impl Riscv32Emulator {
                 &mut self.regs,
                 &mut self.memory,
                 &mut self.fp,
+                &mut self.reservation,
             )?,
         };
         self.after_execute(pc, &exec_result);
