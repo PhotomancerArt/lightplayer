@@ -1137,6 +1137,21 @@ async function main() {
 
     await step("W4", `${B}'s card while ${A} stays connected: both links stay up`, async (marks, seen) => {
       const how = await page.toHome(url);
+      // Going home keeps the session W3's Edit opened from ${A}'s card (the
+      // connected card: its panel in its bars' place). Done gives the card
+      // its facts back; only the session closes, ${A}'s LAN link stays up
+      // (`noneClosed` below says so in the board's words).
+      const cardA = await driver.card({ board: mac[A] });
+      const face = await driver.waitFor(
+        `(() => { const c = ${cardA}; if (!c) return false;
+                  if (c.querySelector('[data-board-panel]')) return 'connected';
+                  return c.querySelector('[data-bar="connection"]') ? 'watched' : false; })()`,
+        { timeoutMs: STEP_MS, what: `${A}'s card, connected or watched` },
+      );
+      if (face === "connected") {
+        await driver.pressOffer("done", { board: mac[A], timeoutMs: STEP_MS });
+        seen.done = `Done on ${A}'s connected card`;
+      }
       // Both cards ready, each keyed by ITS board's MAC: the hello each link
       // carried (the page only says where to look; the MAC is the board's),
       // and each reached at its own forward (`Page.cardMac`).
