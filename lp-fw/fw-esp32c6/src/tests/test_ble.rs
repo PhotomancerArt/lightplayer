@@ -94,9 +94,12 @@ struct UartService {
 pub async fn run_ble_test(_: embassy_executor::Spawner) -> ! {
     let _ = esp_println::logger::init_logger(log::LevelFilter::Info);
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    // The product's heap, region for region (`board::esp32c6::init`).
-    esp_alloc::heap_allocator!(size: 260_000);
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65_536);
+    // The product's heap, region for region (`board::esp32c6::init`), so a
+    // BLE build's controller finds the memory it finds in the product. The
+    // main stack fills `dram2_seg`, so nothing here may ask for
+    // `#[ram(reclaimed)]` any more.
+    // SAFETY: once, before anything allocates.
+    unsafe { crate::board::esp32c6::init::add_heap_regions() };
     heap("heap-init");
 
     // XIAO ESP32C6 RF switch (Seeed wiki): GPIO3 LOW powers the switch in

@@ -23,7 +23,11 @@
 //! (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
 //! The region is now `HEAP_RADIO` in main RAM's `.bss`, which no bootloader
 //! loads into; when it is full a block falls back to the main region —
-//! never to `dram2_seg`.
+//! never to the reclaimed tail. Since RAM research E4 the main stack fills
+//! `dram2_seg`, and the bootloader's load range that is left to the heap is
+//! main RAM's last 11,520 B (0x4086B910..0x4086E610, the lowest address a
+//! bootloader we ship loads into up to the end of `RAM`): the reclaimed
+//! tail, below, which the main region stops short of.
 //!
 //! The regions are picked by capability, and the C6 has no SPI RAM, so
 //! `MemoryCapability::External` is borrowed as a tag nothing else asks for:
@@ -31,13 +35,13 @@
 //! | region | tag | who lands there |
 //! |---|---|---|
 //! | main | `Internal` | Rust first; C when the radio region is full |
-//! | `dram2_seg` | none ([`BOOTLOADER_RECLAIMED`]) | Rust only (capability-free requests) |
+//! | reclaimed tail | none ([`BOOTLOADER_RECLAIMED`]) | Rust only (capability-free requests) |
 //! | radio | `Internal` and `External` ([`RADIO`]) | C first; Rust last of all |
 //!
 //! A request carrying `Internal` (the C fallback, esp-radio's own
-//! `InternalMemory`) therefore never reaches `dram2_seg`. Rust's global
+//! `InternalMemory`) therefore never reaches the reclaimed tail. Rust's global
 //! allocator asks for nothing and tries the regions in registration order:
-//! main, `dram2_seg`, radio.
+//! main, the reclaimed tail, radio.
 //!
 //! Semantics are esp-alloc 0.10's `compat` ones (`malloc.rs`): a 4-byte size
 //! header in front of each block, 4-byte alignment.
@@ -51,7 +55,8 @@ use esp_alloc::MemoryCapability;
 pub const RADIO: EnumSet<MemoryCapability> =
     enumset::enum_set!(MemoryCapability::Internal | MemoryCapability::External);
 
-/// The capability set `dram2_seg` is registered with: none, so only a request
+/// The capability set the reclaimed tail (the part of the bootloader's load
+/// range the heap still holds) is registered with: none, so only a request
 /// that asks for nothing can land there.
 pub const BOOTLOADER_RECLAIMED: EnumSet<MemoryCapability> = EnumSet::empty();
 
@@ -68,7 +73,7 @@ static LOGGED_HIGH_WATER: AtomicUsize = AtomicUsize::new(0);
 const HEADER: usize = 4;
 
 /// Allocate `size` bytes for C: the radio's region first, then the main
-/// region — never `dram2_seg`.
+/// region — never the reclaimed tail.
 unsafe fn c_alloc(size: usize) -> *mut u8 {
     let total = size + HEADER;
     // SAFETY: HEADER > 0, so the layout is non-zero; align 4 is valid.

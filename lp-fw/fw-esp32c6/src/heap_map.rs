@@ -18,7 +18,7 @@
 //! than [`MIN_HOLE`]).
 //!
 //! With `heap_track_diag` as well, every allocation in the main region or
-//! `dram2_seg` made after [`arm_tracking`] (the station arms it when it
+//! the reclaimed tail made after [`arm_tracking`] (the station arms it when it
 //! joins) is remembered with its frame-pointer backtrace while it is live,
 //! and the map prints the live ones once they are few (after a project
 //! stops) — `addr2line` on the ELF names the allocator. The table lives in
@@ -178,7 +178,7 @@ fn largest_fit() -> usize {
 
 /// Arm allocation tracking (`heap_track_diag`) from now on: forget what was
 /// recorded and record every heap allocation made after this call, in the
-/// main region and `dram2_seg`, while it lives. A no-op without the feature.
+/// main region and the reclaimed tail, while it lives. A no-op without the feature.
 /// The station calls it when it joins, so what the network allocates while a
 /// project runs (and what outlives the project) is what the table holds.
 pub fn arm_tracking(why: &str) {
@@ -200,7 +200,7 @@ pub fn untracked<R>(probe: impl FnOnce() -> R) -> R {
 }
 
 /// Allocation tracking (`heap_track_diag`): once [`arm_tracking`] has run,
-/// every allocation in the main region or `dram2_seg` is remembered with its
+/// every allocation in the main region or the reclaimed tail is remembered with its
 /// backtrace while it lives. The table sits in LP SRAM (`rtc_fast`), which the
 /// firmware barely uses, so the build's heap layout is the shipped one: the
 /// regions keep their sizes and their addresses.

@@ -3,22 +3,24 @@
 //!
 //! The question it answers for the Wi-Fi desk walk (plan P08, step W10):
 //! does anything a radio DMA engine can write live in the second-stage
-//! bootloader's load region, `dram2_seg` (`0x4086E610..0x4087E610`), with
+//! bootloader's load range (`0x4086B910..0x4087E610`: main RAM's last
+//! 11,520 B and all of `dram2_seg`), with
 //! the station joined and traffic flowing? The bootloader loads there after
 //! an HP-only warm reset while the radio keeps running, and a stray DMA
 //! write crashed it on 11 of 22 resets before #985
 //! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`).
 //! With #985 every radio C block goes to `HEAP_RADIO` first and the main
-//! region when that is full, never to `dram2_seg`; this checks it on the
+//! region when that is full, never to the reclaimed tail (and since RAM
+//! research E4 `dram2_seg` is the main stack); this checks it on the
 //! board under Wi-Fi's load.
 //!
 //! - **The radio's C blocks.** [`crate::c_heap`] records every live block
 //!   the blobs hold (address and size, the blobs' DMA descriptors and
 //!   buffers among them) in a fixed table, and [`log`] prints them grouped
-//!   by region, flagging any inside `dram2_seg`.
+//!   by region, flagging any inside the bootloader's load range.
 //! - **esp-radio's Rust-side allocations.** The Rust heap's map
 //!   (`heap_map_diag`, which this feature turns on) is printed beside it,
-//!   so a live span in `dram2_seg` after joining and after an upload can be
+//!   so a live span in that range after joining and after an upload can be
 //!   read off; esp-radio's Rust side holds packet *pointers* to blob
 //!   buffers, so a Rust span there is not by itself a DMA target, but it is
 //!   listed for the walk to judge.
@@ -31,8 +33,9 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use critical_section::Mutex;
 
-/// The bootloader's load region: the reclaimed `dram2_seg`.
-pub const DRAM2_SEG: core::ops::Range<usize> = 0x4086_E610..0x4087_E610;
+/// The bootloader's load range: from the lowest address a bootloader we ship
+/// loads into (`build.rs`'s `BOOTLOADER_LOW`) to the top of `dram2_seg`.
+pub const BOOTLOADER_RANGE: core::ops::Range<usize> = 0x4086_B910..0x4087_E610;
 
 /// Live C blocks the table holds; a block past it is counted, not listed.
 const TABLE: usize = 256;
@@ -89,11 +92,11 @@ pub fn log(tag: &str) {
     let (radio_start, radio_size) = crate::board::esp32c6::init::radio_region();
     let radio = radio_start..radio_start + radio_size;
     let mut in_radio = (0usize, 0usize);
-    let mut in_dram2 = (0usize, 0usize);
+    let mut in_boot = (0usize, 0usize);
     let mut elsewhere = (0usize, 0usize);
     for &(addr, size) in &live[..len] {
-        let bucket = if DRAM2_SEG.contains(&addr) {
-            &mut in_dram2
+        let bucket = if BOOTLOADER_RANGE.contains(&addr) {
+            &mut in_boot
         } else if radio.contains(&addr) {
             &mut in_radio
         } else {
@@ -104,14 +107,14 @@ pub fn log(tag: &str) {
     }
     log::info!(
         "[radio-dma] {tag}: {len} live C blocks ({untracked} untracked) · HEAP_RADIO {} ({} B) · \
-         main {} ({} B) · dram2_seg {} ({} B){}",
+         main {} ({} B) · bootloader range {} ({} B){}",
         in_radio.0,
         in_radio.1,
         elsewhere.0,
         elsewhere.1,
-        in_dram2.0,
-        in_dram2.1,
-        if in_dram2.0 == 0 {
+        in_boot.0,
+        in_boot.1,
+        if in_boot.0 == 0 {
             ""
         } else {
             " — IN THE BOOTLOADER'S REGION"
@@ -119,12 +122,12 @@ pub fn log(tag: &str) {
     );
     let first = !LISTED.swap(true, Ordering::Relaxed);
     for &(addr, size) in &live[..len] {
-        let flagged = DRAM2_SEG.contains(&addr);
+        let flagged = BOOTLOADER_RANGE.contains(&addr);
         if first || flagged {
             log::info!(
                 "[radio-dma]   {addr:#010x}..{:#010x} {size} B{}",
                 addr + size,
-                if flagged { " DRAM2_SEG" } else { "" }
+                if flagged { " BOOTLOADER_RANGE" } else { "" }
             );
         }
     }
