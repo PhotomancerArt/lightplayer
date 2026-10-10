@@ -68,9 +68,9 @@ impl ReadCost {
         if !request.queries.is_empty() {
             if request.since.is_none() {
                 working_set += SYNC_QUERIES;
-                let slots = request.queries.iter().any(|query| {
-                    matches!(query, ProjectReadQuery::Nodes(nodes) if nodes.include_slots)
-                });
+                let slots = request.queries.iter().any(
+                    |query| matches!(query, ProjectReadQuery::Nodes(nodes) if nodes.include_slots),
+                );
                 if slots {
                     largest_ask = largest_ask.max(SLOT_VALUE_ASK);
                 }
@@ -173,14 +173,19 @@ mod tests {
             (control, 512, 50_168),
         ] {
             let cost = ReadCost::estimate(&request(&lens(probe)), lamps);
-            assert!(cost.working_set >= measured, "{lamps} lamps {probe}: {cost:?} < {measured}");
+            assert!(
+                cost.working_set >= measured,
+                "{lamps} lamps {probe}: {cost:?} < {measured}"
+            );
         }
     }
 
     #[test]
     fn a_first_sync_with_slots_asks_for_the_largest_slot_value() {
         let cost = ReadCost::estimate(
-            &request(r#"{"since":null,"queries":[{"nodes":{"level":"detail","nodes":"all","include_slots":true}}]}"#),
+            &request(
+                r#"{"since":null,"queries":[{"nodes":{"level":"detail","nodes":"all","include_slots":true}}]}"#,
+            ),
             73,
         );
         assert!(cost.working_set >= 25_072, "{cost:?}");

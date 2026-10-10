@@ -568,7 +568,8 @@ impl Engine {
             let Some(buffer) = self.runtime_buffers().get(buffer_id) else {
                 continue;
             };
-            if let RuntimeBufferMetadata::OutputChannels { channels, .. } = buffer.value().metadata {
+            if let RuntimeBufferMetadata::OutputChannels { channels, .. } = buffer.value().metadata
+            {
                 total = total.saturating_add(channels);
             }
         }
