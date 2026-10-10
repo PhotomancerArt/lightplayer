@@ -53,8 +53,15 @@ const LOOP_CODE: [u32; 3] = [0xfff5_0513, 0xfe05_1ee3, 0x0000_8067];
 
 /// The kernels, in print order.
 const KERNELS: [&str; 9] = [
-    "read32", "write32", "read8", "memcpy", "memcpy_hp_to_lp", "memcpy_lp_to_hp", "exec",
-    "exec_rwtext", "exec_ran",
+    "read32",
+    "write32",
+    "read8",
+    "memcpy",
+    "memcpy_hp_to_lp",
+    "memcpy_lp_to_hp",
+    "exec",
+    "exec_rwtext",
+    "exec_ran",
 ];
 
 /// Cycles per kernel for HP SRAM and LP SRAM (`exec_rwtext` uses the HP
