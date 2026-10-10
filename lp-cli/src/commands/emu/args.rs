@@ -250,8 +250,9 @@ pub struct RunArgs {
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
     /// keep hosting the link (and writing the console) to the deadline.
+    /// Repeatable: each is uploaded in order, the last one left running.
     #[arg(long, requires = "host_link")]
-    pub upload: Option<PathBuf>,
+    pub upload: Vec<PathBuf>,
 
     /// With `--host-link`: do not ask the board to pack its replies (JSON
     /// Pack), so the run measures a board that has no learned table — the
@@ -266,6 +267,13 @@ pub struct RunArgs {
     /// answer to the one before (after any `--upload`).
     #[arg(long, requires = "host_link")]
     pub request: Vec<String>,
+
+    /// With `--request`: run this many EMULATED milliseconds after each
+    /// request's answer before sending the next — a settle, so a project a
+    /// `loadProject` started runs its first frames (and compiles) before the
+    /// next request switches it away.
+    #[arg(long = "request-gap", value_name = "MS", default_value_t = 0, requires = "request")]
+    pub request_gap_ms: u64,
 
     /// With `--host-link`: an over-the-air update on the link's channel 3.
     #[command(flatten)]

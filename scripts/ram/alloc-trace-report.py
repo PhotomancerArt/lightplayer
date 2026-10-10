@@ -136,6 +136,37 @@ def load_symbols(elf: str):
     return addrs, names, ends
 
 
+def heap_regions(elf: str):
+    """`(name, start, size)` of fw-esp32c6's heap regions, from their statics."""
+    out = subprocess.run(
+        ["rust-nm", "-S", "-C", elf], capture_output=True, text=True, check=True
+    ).stdout
+    regions = []
+    for line in out.splitlines():
+        m = re.match(r"^([0-9a-f]+) ([0-9a-f]+) [bBdD] .*init::HEAP_([A-Z0-9]+)$", line)
+        if m:
+            regions.append((m.group(3).lower(), int(m.group(1), 16), int(m.group(2), 16)))
+    return sorted(regions, key=lambda r: r[1])
+
+
+def region_figures(regions, live, recs_size):
+    """Per region: requested bytes live, and the largest gap between live
+    blocks (an upper bound on the largest free block: the allocator rounds
+    each block up a few bytes)."""
+    out = []
+    for name, start, size in regions:
+        end = start + size
+        blocks = sorted((ptr, recs_size[r]) for ptr, r in live.items() if start <= ptr < end)
+        used = sum(b for _, b in blocks)
+        cursor, largest = start, 0
+        for ptr, b in blocks:
+            largest = max(largest, ptr - cursor)
+            cursor = max(cursor, ptr + b)
+        largest = max(largest, end - cursor)
+        out.append((name, used, largest))
+    return out
+
+
 class Symbolizer:
     def __init__(self, elf: str):
         self.addrs, self.names, self.ends = load_symbols(elf)
@@ -189,6 +220,9 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--inline", type=int, default=0)
     ap.add_argument("--depth", type=int, default=3, help="owner frames shown per site")
+    ap.add_argument("--dump-live", action="append", default=[], metavar="POINT=FILE",
+                    help="write the live set at POINT, by subsystem and owner, as TSV "
+                         "(compare two traces with scripts/ram/alloc-live-diff.py)")
     ap.add_argument("--marks", choices=("L", "M"), default="L",
                     help="points from guest log records (L, exact; needs an image with "
                          "alloc-trace-marks) or console arrival (M)")
@@ -297,6 +331,22 @@ def main() -> int:
             owner_cache[fr] = hit
         return hit
 
+    for spec in args.dump_live:
+        name, path = spec.split("=", 1)
+        p = next((q for q in points if q.name == name), None)
+        if p is None:
+            print(f"--dump-live: no point named {name}", file=sys.stderr)
+            return 1
+        rows = defaultdict(lambda: [0, 0])
+        for r in p.live.values():
+            key = f"{subsystem_of(r)}\t{owner_of(r)[0]}"
+            rows[key][0] += recs_size[r]
+            rows[key][1] += 1
+        with open(path, "w") as out:
+            out.write("bytes\tblocks\tsubsystem\towner\n")
+            for key, (byt, cnt) in sorted(rows.items(), key=lambda kv: -kv[1][0]):
+                out.write(f"{byt}\t{cnt}\t{key}\n")
+
     print(f"# alloc-trace-report: {args.trace}")
     print(f"# elf {args.elf}; {totals['allocs']} allocations, {totals['frees']} frees, "
           f"{boot} reboot(s), {len(failed)} failed allocation(s)")
@@ -310,6 +360,17 @@ def main() -> int:
         mem = f"{p.mem[0]}: used {p.mem[2]} {p.mem[3]}" if p.mem else "-"
         print(f"| {p.name} | {lb:,} | {len(p.live):,} | {mem} | {p.marker[:90]} |")
     print()
+    regions = heap_regions(args.elf)
+    if regions:
+        print("Per heap region: live (requested) bytes / largest gap between live blocks "
+              "(≈ the region's largest free block):")
+        print()
+        print("| point | " + " | ".join(f"{n} ({sz:,} B)" for n, _, sz in regions) + " |")
+        print("|---|" + "---:|" * len(regions))
+        for p in points:
+            figs = region_figures(regions, p.live, recs_size)
+            print(f"| {p.name} | " + " | ".join(f"{u:,} / {g:,}" for _, u, g in figs) + " |")
+        print()
 
     inline_sites: list[int] = []
     for a, b in zip(points, points[1:]):
