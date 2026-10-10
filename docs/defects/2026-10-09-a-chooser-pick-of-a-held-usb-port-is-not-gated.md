@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-10-09      # how: e2e (`just walk-two-tabs-emu`, its first runs)
+fixed: this change     # PR #1121
 area: lpa-studio-core `device_effects.rs` (`request_grant`) × `studio_controller/board_hold_flow.rs` (`read_refused_ports`) × `take_over_flow.rs`
 class: partial-knowledge-loss
 related:
@@ -39,24 +40,47 @@ link, which is neither, is neither re-identified nor ever read as held. The
 claims were known when the port was picked, and again when the open was
 refused; the reading waits for a deadline and loses them.
 
-**Fix** — none yet (reported, not fixed here: M5's last phase is docs and
-walks). Candidates, smallest first:
+**Fix** — the first two candidates this entry listed, in the product;
+the chooser stays ungated, and the shim does not share the grant under
+`?emu-second-tab=1` (that would have hidden the product path from the
+walk):
 
-- read the refusal when the open is refused (`LinkEvent::Error` with the
-  OS's `NetworkError`), not at the identify deadline, so the claims are the
-  ones in force;
-- have a take-over's release also re-identify pending links of the pair
-  that settled Failed with their port not open;
-- in the shim, share the grant with the first page under
-  `?emu-second-tab=1` (real Chrome lists a granted port in both tabs), so the
-  walk's second tab meets the sweep and not the chooser. That models Chrome
-  and leaves the product path as it is.
+- **The refusal is read when it is heard.** `fold_device_input` notes a
+  `LinkEvent::Error` on a pending USB port whose identify asked for the
+  open and that did not open (`note_refused_open`), and the batch's
+  reconcile reads it against the claims standing then
+  (`read_refused_ports`, `BoardHoldFlow.refused`): one claim and one port
+  of the kind name the board, `Event::LinkHeld` settles the identify at
+  once, and the port sits on the board's own card. The deadline reading
+  stays for a port that never answered at all.
+- **A take-over's release opens the refused ports of its kind.** When a
+  USB take-over's holder lets go, every pending port of the kind that this
+  tab could not open — kept shut by the gate, read as held, or settled
+  Failed with its port not open — re-identifies, once per take-over
+  (`open_ports_take_overs_free`, `FreedPorts`). A refusal heard after the
+  release (the open went out before the holder closed; the walk's order
+  makes that likely, since the browser retries a refused open after
+  250 ms) is that hold's: it is read as held and opens again too.
+- A holder that lets go by itself (no take-over) still opens nothing here
+  (R3): the fact clears, the port loses its mark, and the card offers
+  Connect.
 
-**Regression coverage** — none for the unread order. The walk waits for the
-reading (one card for the board) before pressing Connect, and asserts that
-none of B's opens succeeded while A held the board
-(`walk-two-tabs-emu`, steps 2 and 3). Core's T1 and T3 cover the sweep's
-gate (zero opens).
+**Regression coverage** — core's two-tab rows
+(`studio_device_e2e_tests/board_hold_tests.rs`), each failing before the
+fix:
+
+- `g1_a_picked_port_another_tab_holds_reads_as_held_at_once`: the pick is
+  read within half a second of fake time (it took 5.02 s, the identify
+  deadline), one card, "Open in another tab"; when the holder disconnects
+  the card offers Connect, nothing opens until it is pressed, and it opens.
+- `g2_connect_right_after_the_pick_takes_the_board_over`: Connect pressed
+  the moment the open is refused ends Ready on the board's card (it hung).
+- `g3_a_refusal_heard_after_the_release_opens_again`: the release heard
+  before the refusal ends Ready too (it hung).
+
+`just walk-two-tabs-emu --serve-release` no longer waits for the reading
+before step 3 presses Connect; it checks one card for the board after the
+take-over instead.
 
 **Lesson** — A refusal is evidence that expires: read against the claims
 when it arrives, not when a timer says it has settled, or the claims that

@@ -492,3 +492,10 @@ The acceptance, in Yona's words of 2026-10-09:
   it once, is refused, and reads the refusal against the claims after the
   identify deadline. The card shows a second "new device" card for the
   board until then. Filed in `docs/defects/`; no behaviour changed here.
+  *Fixed 2026-10-10:* the refusal is read against the claims when it
+  arrives, so the port sits on the board's card at once; and a take-over
+  whose holder let go opens every port of its kind the tab could not open,
+  once each, including a port whose refusal is heard after the release. A
+  holder that lets go by itself still opens nothing here. The pick still
+  asks for the port (the chooser stays ungated); see
+  `docs/defects/2026-10-09-a-chooser-pick-of-a-held-usb-port-is-not-gated.md`.
