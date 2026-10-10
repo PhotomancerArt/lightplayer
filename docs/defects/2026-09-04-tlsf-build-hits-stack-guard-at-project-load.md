@@ -54,3 +54,37 @@ block before any allocation. Worth carrying into the TLSF decision.
 
 **Why it matters** — the report's TLSF row is unranked; this defect is the
 reason a "one-line config flip" is not a lever until it boots a project.
+
+## Root cause (2026-10-10, RAM research E6)
+
+**Neither hypothesis as stated: the TLSF control block is a static, and it
+comes out of the stack.** esp-alloc's `EspHeap` holds `MAX_REGIONS` (5 in
+the fork, `third_party/esp-alloc`) `Option<HeapRegion>` slots, and under
+`TLSF` each slot holds a whole `rlsf::Tlsf<'static, usize, usize, 32, 32>`:
+32 × 32 list heads of 4 B plus the bitmaps, 4,228 B, so `esp_alloc::HEAP`
+grows from 192 B to 21,256 B (`rust-nm -S`). On the classic and the S3 that
+static lands in `.data`, on the C6 in `.bss`; on all three the main stack is
+what is left above the statics, so it loses the same 21,064 B:
+
+| image (research/ram @ `8733eb97b`) | `esp_alloc::HEAP` | main stack |
+|---|---:|---:|
+| fw-esp32v3, first fit | 192 B | 37,056 B |
+| fw-esp32v3, TLSF | 21,256 B | **16,000 B** |
+| fw-esp32v3, TLSF with `FLLEN` 14 | 9,376 B | 27,872 B |
+| fw-esp32s3, first fit / TLSF | 192 / 21,256 B | 32,416 / **11,352 B** |
+| fw-esp32c6 split, first fit / TLSF | 192 / 21,256 B | 48,984 / **27,920 B** |
+
+The first-fit classic's own load peaks at 30,336 B on that stack
+(`projects/test/basic`, `lp-emu:esp32v3:t1`), so both TLSF classic images
+hit the guard at the upload's `loadProject`, after the last file write and
+before the load logs anything; the stock S3 hits it at boot; the stock C6 (`lp-emu:esp32c6:t1`) at its first
+project load (`Detected a write to the main stack's guard value`). No
+evidence of deeper recursion: the panics come from interrupt entry with the
+stack pointer 16 B above `_stack_end`. Printing the arena and the guard, as
+proposed above, is not needed; `rust-nm -S` on the two ELFs is the check.
+
+**Status** — open, because the TLSF build is still not a lever: with the
+stack kept (the main heap shrunk by the control block) TLSF measured worse
+than first fit on every C6 workload replayed, and its 8 B header and 16 B
+granule cost 23–28 KB of live set (E6's report in the planning folder,
+`lp2025/2026-10-09-1203-ram-research/experiments/e06-tlsf-vs-first-fit/`).
