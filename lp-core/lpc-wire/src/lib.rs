@@ -117,7 +117,7 @@ pub use ser_write::{
     ser_write_json_len, ser_write_json_to,
 };
 pub use server::{
-    AccessEntryInfo, AvailableProject, BuildFacts, ConnectStep, FAULT_MESSAGE_CAP_BYTES,
+    AccessEntryInfo, AvailableProject, BatchOp, BuildFacts, ConnectStep, FAULT_MESSAGE_CAP_BYTES,
     FAULT_NODES_CAP, FaultedNodeWire, FsBootState, FsRequest, FsResponse, HardwareFacts,
     HardwareIdentity, HeardNetwork, HeartbeatIdentity, HelloAuth, HelloIdentity, LastAttempt,
     LinkCounters, LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus,

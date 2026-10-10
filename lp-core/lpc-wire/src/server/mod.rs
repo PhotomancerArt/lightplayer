@@ -27,7 +27,7 @@ pub use api::{
 pub use config::ServerConfig;
 pub use connect_step::ConnectStep;
 pub use file_chunk::{FileChangeKind, FileChunk, FileCursor};
-pub use fs_api::{FsRequest, FsResponse};
+pub use fs_api::{BatchOp, FsRequest, FsResponse};
 pub use fs_boot_state::FsBootState;
 pub use hello::{
     BuildFacts, HardwareFacts, HardwareIdentity, HelloIdentity, ServerHello, WIRE_PROTO_VERSION,

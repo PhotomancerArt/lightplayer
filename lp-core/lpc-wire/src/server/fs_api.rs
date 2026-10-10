@@ -62,6 +62,64 @@ pub enum FsRequest {
     /// Canonical package hash (lpc-history `lph1` spec) of the directory at
     /// `prefix` — end-to-end verification for pushes and pulls.
     HashPackage { prefix: LpPathBuf },
+    /// Start a batch: until [`FsRequest::CommitBatch`], the fs writes and
+    /// deletes on this board (this link's, and the server's own — a loaded
+    /// project's saves included) land together or not at all.
+    ///
+    /// The batch is the first piece of fs state a server holds between
+    /// requests (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`):
+    /// at most one is open per server, owned by the link that began it, and
+    /// every other link's fs mutations are refused while it is open. It
+    /// ends on a commit, an abort, the owner link closing or resetting, a
+    /// second `BeginBatch` from the owner (which starts a fresh one), or
+    /// 60 s with no request from the owner; every ending but a commit drops
+    /// it.
+    ///
+    /// Answered by [`FsResponse::Batch`]: `atomic: false` means the board's
+    /// filesystem has no transactions — nothing was opened, and every write
+    /// commits by itself (the two-slot push).
+    BeginBatch,
+    /// Land the open batch (see [`FsRequest::BeginBatch`]).
+    CommitBatch,
+    /// Drop the open batch: every file is as it was before it. Harmless
+    /// with none open.
+    AbortBatch,
+    /// One chunk of a file as raw deflate (RFC 1951, no zlib header).
+    ///
+    /// The deflated sibling of [`FsRequest::WriteChunk`], with its rules on
+    /// **logical** offsets: `offset == 0` creates or truncates, `offset > 0`
+    /// must equal the file's current (logical) length. `logical_len` (at
+    /// most [`crate::budget::FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL`]) is what
+    /// `data` inflates to; the board checks it and the offset before it
+    /// inflates, and writes nothing when the stream does not inflate to
+    /// exactly that many bytes. No content id travels: the end-to-end proof
+    /// is [`FsRequest::HashPackage`] (over logical content) and the link's
+    /// CRC. Answered by [`FsResponse::WriteChunk`], `written` = logical
+    /// bytes.
+    WriteChunkDeflated {
+        path: LpPathBuf,
+        offset: u32,
+        #[serde(rename = "logicalLen")]
+        logical_len: u32,
+        /// Always base64, never the smart text form: a deflate stream is
+        /// binary, and one that happened to be valid UTF-8 would go as text
+        /// the smart reader could take for base64.
+        #[serde(
+            serialize_with = "serde_base64::serialize",
+            deserialize_with = "serde_base64::deserialize"
+        )]
+        data: Vec<u8>,
+    },
+}
+
+/// Which batch verb a [`FsResponse::Batch`] answers, so a stale answer is
+/// recognisable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BatchOp {
+    Begin,
+    Commit,
+    Abort,
 }
 
 /// Filesystem operation response
@@ -129,6 +187,17 @@ pub enum FsResponse {
     PackageHash {
         prefix: LpPathBuf,
         hash: String,
+        error: Option<String>,
+    },
+    /// Response to a batch verb ([`FsRequest::BeginBatch`],
+    /// [`FsRequest::CommitBatch`], [`FsRequest::AbortBatch`]).
+    ///
+    /// `atomic` is whether the board's filesystem commits a batch as one
+    /// (`lpfs::LpFs::batches_are_atomic`); a `Begin` answered `false`
+    /// opened nothing.
+    Batch {
+        op: BatchOp,
+        atomic: bool,
         error: Option<String>,
     },
 }
@@ -248,6 +317,94 @@ mod tests {
         };
         let json = crate::json::to_string(&req).unwrap();
         assert_eq!(json, "{\"hashPackage\":{\"prefix\":\"/projects/x\"}}");
+    }
+
+    #[test]
+    fn test_batch_verbs_committed_samples() {
+        // committed wire samples — changing these breaks peers; must be deliberate
+        for (req, sample) in [
+            (FsRequest::BeginBatch, "\"beginBatch\""),
+            (FsRequest::CommitBatch, "\"commitBatch\""),
+            (FsRequest::AbortBatch, "\"abortBatch\""),
+        ] {
+            let json = crate::json::to_string(&req).unwrap();
+            assert_eq!(json, sample);
+            let back: FsRequest = crate::json::from_str(&json).unwrap();
+            assert_eq!(crate::json::to_string(&back).unwrap(), sample);
+        }
+
+        let resp = FsResponse::Batch {
+            op: BatchOp::Begin,
+            atomic: true,
+            error: None,
+        };
+        let json = crate::json::to_string(&resp).unwrap();
+        assert_eq!(
+            json,
+            "{\"batch\":{\"op\":\"begin\",\"atomic\":true,\"error\":null}}"
+        );
+        let back: FsResponse = crate::json::from_str(&json).unwrap();
+        match back {
+            FsResponse::Batch { op, atomic, error } => {
+                assert_eq!(op, BatchOp::Begin);
+                assert!(atomic);
+                assert_eq!(error, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        let resp = FsResponse::Batch {
+            op: BatchOp::Commit,
+            atomic: false,
+            error: Some("batch busy".to_string()),
+        };
+        let json = crate::json::to_string(&resp).unwrap();
+        assert_eq!(
+            json,
+            "{\"batch\":{\"op\":\"commit\",\"atomic\":false,\"error\":\"batch busy\"}}"
+        );
+        let back: FsResponse = crate::json::from_str(&json).unwrap();
+        assert!(matches!(
+            back,
+            FsResponse::Batch {
+                op: BatchOp::Commit,
+                atomic: false,
+                error: Some(_)
+            }
+        ));
+    }
+
+    #[test]
+    fn test_write_chunk_deflated_committed_sample() {
+        // A raw deflate stream is binary, so it travels as base64.
+        let req = FsRequest::WriteChunkDeflated {
+            path: "/projects/x/main.glsl".as_path_buf(),
+            offset: 0,
+            logical_len: 12,
+            data: vec![0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00],
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        // committed wire sample — changing this breaks peers; must be deliberate
+        assert_eq!(
+            json,
+            "{\"writeChunkDeflated\":{\"path\":\"/projects/x/main.glsl\",\"offset\":0,\
+             \"logicalLen\":12,\"data\":\"y0jNyckHAA==\"}}"
+        );
+        let back: FsRequest = crate::json::from_str(&json).unwrap();
+        match back {
+            FsRequest::WriteChunkDeflated {
+                path,
+                offset,
+                logical_len,
+                data,
+            } => {
+                assert_eq!(path.as_str(), "/projects/x/main.glsl");
+                assert_eq!(offset, 0);
+                assert_eq!(logical_len, 12);
+                assert_eq!(data, vec![0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00]);
+            }
+            _ => panic!("Wrong variant"),
+        }
     }
 
     #[test]

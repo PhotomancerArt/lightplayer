@@ -127,6 +127,12 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::Filesystem(FsRequest::ChangesSince { .. }) => "fs.changes_since",
         ClientRequest::Filesystem(FsRequest::WriteChunk { .. }) => "fs.write_chunk",
         ClientRequest::Filesystem(FsRequest::HashPackage { .. }) => "fs.hash_package",
+        ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { .. }) => {
+            "fs.write_chunk_deflated"
+        }
+        ClientRequest::Filesystem(FsRequest::BeginBatch) => "fs.begin_batch",
+        ClientRequest::Filesystem(FsRequest::CommitBatch) => "fs.commit_batch",
+        ClientRequest::Filesystem(FsRequest::AbortBatch) => "fs.abort_batch",
         ClientRequest::LoadProject { .. } => "project.load",
         ClientRequest::UnloadProject { .. } => "project.unload",
         ClientRequest::ProjectRead { .. } => "project.read",

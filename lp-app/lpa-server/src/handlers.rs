@@ -435,6 +435,19 @@ pub fn handle_fs_request_with_headroom(
             fs, path, offset, &data,
         )),
         FsRequest::HashPackage { prefix } => Ok(crate::file_sync::handle_hash_package(fs, prefix)),
+        // Placeholder until the server's batch state lands (same PR): the
+        // deflated write and the batch verbs are refused in words.
+        FsRequest::WriteChunkDeflated { path, offset, .. } => Ok(FsResponse::WriteChunk {
+            path,
+            offset,
+            written: 0,
+            error: Some(alloc::string::String::from(
+                "deflated writes are not supported yet",
+            )),
+        }),
+        FsRequest::BeginBatch | FsRequest::CommitBatch | FsRequest::AbortBatch => Err(
+            ServerError::Core("batches are not supported yet".into()),
+        ),
     }
 }
 

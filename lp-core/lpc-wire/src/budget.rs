@@ -121,6 +121,47 @@ const FILE_SYNC_CHUNK_ASSERT: () = assert!(
     "file-sync chunk (base64 + envelope reserve) must fit one frame"
 );
 
+/// The most logical bytes one `FsRequest::WriteChunkDeflated` may inflate
+/// to: the tree store's largest logical chunk (`lp_tree_store::
+/// MAX_LOGICAL_CHUNK`), and the size of the buffer a board without at-rest
+/// compression (littlefs) inflates one chunk into before it writes it. The
+/// board checks a request's `logical_len` against this before it allocates
+/// or inflates anything.
+pub const FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL: usize = 4 * 1024;
+
+/// The record size a deflated push plans its chunks for: each chunk's
+/// logical length is shrunk until its raw deflate fits one tree-store record
+/// of this many bytes, so a wire chunk is one stored chunk on a tree-store
+/// board (and chunk boundaries are a function of the bytes alone, which is
+/// what dedup between pushes needs).
+///
+/// A constant hint, not negotiated: it is the tree store's default
+/// `record_max`. A board whose records differ still stores every chunk
+/// correctly — as plain bytes where the deflate does not fit — and only
+/// loses at-rest compression.
+pub const FILE_SYNC_RECORD_MAX_HINT: u32 = 1024;
+
+/// The largest raw deflate of [`FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL`]
+/// bytes a compressor may emit: an incompressible chunk goes as stored
+/// blocks, 5 bytes of header per (at most 65,535-byte) block — one block
+/// here — plus slack for a compressor that tries a fixed or dynamic block
+/// first and closes with an empty final one.
+const FILE_SYNC_DEFLATED_CHUNK_WORST_BYTES: usize = FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL + 64;
+
+/// Compile-time proof that the worst deflated chunk (base64, since a deflate
+/// stream is binary) plus its scaffolding fits one frame, as
+/// `FILE_SYNC_CHUNK_ASSERT` proves for a raw one. The `logicalLen` field adds
+/// a few bytes, well inside the reserve.
+#[allow(
+    dead_code,
+    reason = "compile-time assertion; evaluated for its panic, never read"
+)]
+const FILE_SYNC_DEFLATED_CHUNK_ASSERT: () = assert!(
+    base64_len(FILE_SYNC_DEFLATED_CHUNK_WORST_BYTES) + FILE_SYNC_CHUNK_ENVELOPE_RESERVE_BYTES
+        <= PROJECT_READ_FRAME_MAX_BYTES,
+    "deflated file-sync chunk (worst case, base64 + envelope reserve) must fit one frame"
+);
+
 /// Maximum raw payload bytes per ChangesSince page (sum of entry `data`).
 ///
 /// A page is one ordinary response frame; together with
