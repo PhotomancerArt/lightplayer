@@ -250,8 +250,9 @@ pub struct RunArgs {
     /// With `--host-link`: upload this project directory over the link once
     /// the board's hello arrives, exactly as `lp-cli upload` deploys it, and
     /// keep hosting the link (and writing the console) to the deadline.
+    /// Repeatable: each is uploaded in order, the last one left running.
     #[arg(long, requires = "host_link")]
-    pub upload: Option<PathBuf>,
+    pub upload: Vec<PathBuf>,
 
     /// With `--host-link`: do not ask the board to pack its replies (JSON
     /// Pack), so the run measures a board that has no learned table — the
@@ -266,6 +267,18 @@ pub struct RunArgs {
     /// answer to the one before (after any `--upload`).
     #[arg(long, requires = "host_link")]
     pub request: Vec<String>,
+
+    /// With `--request`: run this many EMULATED milliseconds after each
+    /// request's answer before sending the next — a settle, so a project a
+    /// `loadProject` started runs its first frames (and compiles) before the
+    /// next request switches it away.
+    #[arg(
+        long = "request-gap",
+        value_name = "MS",
+        default_value_t = 0,
+        requires = "request"
+    )]
+    pub request_gap_ms: u64,
 
     /// With `--host-link`: an over-the-air update on the link's channel 3.
     #[command(flatten)]
@@ -435,6 +448,21 @@ pub struct RunArgs {
     /// "did the board ever hand the LAN a frame?". The C6 only.
     #[arg(long = "seam-trace", value_name = "FILE")]
     pub seam_trace: Option<PathBuf>,
+
+    /// Write the allocation trace here: one line per heap allocation and free
+    /// the guest makes, with its backtrace, and one marker line per console
+    /// line (`lp_emu_esp32c6::alloc_trace` has the format). Needs an image
+    /// built with fw-esp32c6's `alloc_trace_emu` feature, whose hooks are an
+    /// `ebreak` the emulator answers — a DIAGNOSTIC image, never flashed. The
+    /// C6 only.
+    #[arg(long = "alloc-trace", value_name = "FILE")]
+    pub alloc_trace: Option<PathBuf>,
+
+    /// The ELF that names the allocation trace's hooks (`_esp_alloc_alloc`,
+    /// `_esp_alloc_dealloc`), when `--elf` does not: a split image's
+    /// `p2.elf`, beside the `loader.elf` that boots it.
+    #[arg(long = "alloc-trace-elf", value_name = "ELF", requires = "alloc_trace")]
+    pub alloc_trace_elf: Option<PathBuf>,
 
     /// The run's pace: `realtime` (1×, never ahead of wall time) or `max` (as
     /// fast as possible, never paced). Left out, the board runs at 1× only

@@ -369,6 +369,7 @@ fn run(args: RunArgs) -> Result<()> {
         let mut machine = builder
             .build()
             .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
+        install_alloc_trace(&mut machine, &args)?;
         print_seam_lines(&mut machine);
         announce_lan(&machine, lan.as_ref())?;
         let boot = format!(
@@ -383,6 +384,7 @@ fn run(args: RunArgs) -> Result<()> {
     let mut machine = builder
         .build()
         .map_err(|e| anyhow::anyhow!("building the machine: {e}"))?;
+    install_alloc_trace(&mut machine, &args)?;
     print_seam_lines(&mut machine);
     announce_lan(&machine, lan.as_ref())?;
 
@@ -654,6 +656,65 @@ pub(super) fn parse_duration_us(text: &str) -> Result<u64> {
         .parse()
         .with_context(|| format!("--timeout `{text}`"))?;
     Ok(n * scale)
+}
+
+/// `--alloc-trace`: resolve the two hooks in the image's ELF (or
+/// `--alloc-trace-elf`) and claim them. An ELF without them is refused by
+/// name — a trace that silently recorded nothing would read as "no heap".
+fn install_alloc_trace(
+    machine: &mut lp_emu_esp32c6::machine::Esp32C6Machine,
+    args: &RunArgs,
+) -> Result<()> {
+    let Some(out) = &args.alloc_trace else {
+        return Ok(());
+    };
+    let Some(elf_path) = args.alloc_trace_elf.as_ref().or(args.elf.as_ref()) else {
+        bail!("--alloc-trace needs the ELF that names its hooks: --alloc-trace-elf <p2.elf>");
+    };
+    let bytes =
+        std::fs::read(elf_path).with_context(|| format!("reading {}", elf_path.display()))?;
+    let elf = lp_emu_esp_common::elf::ElfImage::parse(&bytes)
+        .map_err(|e| anyhow::anyhow!("{}: {e:?}", elf_path.display()))?;
+    let find = |name: &str| -> Result<u32> {
+        elf.symbol(name).map(|s| s.address).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{} has no `{name}`: build the image with fw-esp32c6's `alloc_trace_emu` feature",
+                elf_path.display()
+            )
+        })
+    };
+    let (alloc_at, dealloc_at) = (find("_esp_alloc_alloc")?, find("_esp_alloc_dealloc")?);
+    let file = std::fs::File::create(out)
+        .with_context(|| format!("--alloc-trace: creating {}", out.display()))?;
+    let header = vec![
+        format!("elf {}", elf_path.display()),
+        format!("hooks alloc {alloc_at:#010x} dealloc {dealloc_at:#010x}"),
+        format!("configuration {}", machine.configuration_label()),
+        "cycles_per_us 160".to_string(),
+    ];
+    let trace = lp_emu_esp32c6::alloc_trace::AllocTrace::new(
+        Box::new(std::io::BufWriter::with_capacity(1 << 20, file)),
+        &header,
+    );
+    lp_emu_esp32c6::alloc_trace::install(machine, alloc_at, dealloc_at, trace);
+    // Optional: an image whose logger marks its records (`alloc-trace-marks`).
+    let marks = elf.symbol("_lp_alloc_trace_mark").map(|s| s.address);
+    if let Some(mark_at) = marks {
+        lp_emu_esp32c6::alloc_trace::install_marks(machine, mark_at);
+    }
+    eprintln!(
+        "emu: alloc trace: log-record marks {}",
+        match marks {
+            Some(at) => format!("at {at:#010x} (exact points)"),
+            None => "absent (points are console arrival)".to_string(),
+        }
+    );
+    eprintln!(
+        "emu: alloc trace -> {} (hooks {alloc_at:#010x} / {dealloc_at:#010x} from {})",
+        out.display(),
+        elf_path.display()
+    );
+    Ok(())
 }
 
 #[cfg(test)]

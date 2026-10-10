@@ -154,6 +154,16 @@ impl log::Log for RingLogger {
         // it. Only the copy into the ring holds the lock.
         let mut line = RecordText::new();
         let _ = write!(line, "{}: {}", module_path, record.args());
+        #[cfg(feature = "alloc-trace-marks")]
+        {
+            unsafe extern "C" {
+                fn _lp_alloc_trace_mark(text: *const u8, len: usize);
+            }
+            let text = line.as_bytes();
+            // SAFETY: the chip crate's `ebreak; ret`, answered by the
+            // emulator, which only reads `len` bytes at `text`.
+            unsafe { _lp_alloc_trace_mark(text.as_ptr(), text.len()) };
+        }
         let level = lp_link::log_ring::level_of(record.level());
         critical_section::with(|cs| {
             LOG_RING.borrow_ref_mut(cs).push(level, line.as_bytes());

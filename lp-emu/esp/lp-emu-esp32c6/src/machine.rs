@@ -2496,6 +2496,7 @@ impl Esp32C6Builder {
             next_host_poll: 0,
             control_lines: 0,
             hook_calls: 0,
+            alloc_trace: None,
             idle_skips: 0,
             seams: crate::seams::SeamState {
                 pacer_config: seam_pacing,
@@ -2956,6 +2957,8 @@ pub struct Esp32C6Machine {
     /// Control lines applied so far, for the exit report.
     control_lines: u64,
     hook_calls: u64,
+    /// The allocation trace (`--alloc-trace`), when a run asked for one.
+    alloc_trace: Option<crate::alloc_trace::AllocTrace>,
     idle_skips: u64,
     /// Emulator seams: what was asked for, this chip start's resolution, the
     /// arm sites, endpoints and counters. Empty unless a run asked
@@ -4155,6 +4158,16 @@ impl Esp32C6Machine {
 
     pub fn hooks_mut(&mut self) -> &mut HookTable {
         &mut self.hooks
+    }
+
+    /// Start the allocation trace (see [`crate::alloc_trace::install`]).
+    pub fn set_alloc_trace(&mut self, trace: crate::alloc_trace::AllocTrace) {
+        self.alloc_trace = Some(trace);
+    }
+
+    /// The allocation trace, if one is running: a host marker, a flush.
+    pub fn alloc_trace_mut(&mut self) -> Option<&mut crate::alloc_trace::AllocTrace> {
+        self.alloc_trace.as_mut()
     }
 
     /// Stop the run when `symbol` (app first, then ROM; resolved like a
@@ -5524,6 +5537,12 @@ impl Esp32C6Machine {
                         cause.rom_code(),
                         cause.rom_name()
                     );
+                    // The heap the trace describes is gone: the reader drops
+                    // every live allocation here. Written at the reset
+                    // request's cycle; the cycle count restarts after it.
+                    if let Some(trace) = self.alloc_trace.as_mut() {
+                        trace.marker(at, &format!("@reboot {source} strap {strap}"));
+                    }
                     if let Some(remaining) = remaining {
                         stop_cycle = self.cycles().saturating_add(remaining);
                     }

@@ -103,8 +103,12 @@ mod c_heap;
 mod desk_espnow_meter;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
+#[cfg(feature = "alloc_trace_emu")]
+mod alloc_trace_emu;
 #[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
 mod alloc_watch;
+#[cfg(all(feature = "alloc_watch_diag", feature = "alloc_trace_emu"))]
+compile_error!("`alloc_watch_diag` and `alloc_trace_emu` both define esp-alloc's hooks: pick one");
 #[cfg(any(
     not(fw_harness),
     feature = "test_button",
