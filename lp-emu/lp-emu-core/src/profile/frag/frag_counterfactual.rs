@@ -34,9 +34,7 @@ use super::frag_replay::{
     DiscountRow, FragOptions, RegionSpec, analyze_events, build_regions, guest_heap_from_meta,
     load_trace,
 };
-use super::tlsf_heap::{
-    TLSF_DEVICE_GRANULARITY, TLSF_DEVICE_HEADER_BYTES, TLSF_HEADER_BYTES, replay_tlsf,
-};
+use super::tlsf_heap::{TLSF_GRANULARITY, TLSF_HEADER_BYTES, replay_tlsf};
 
 /// Replay `trace_path` once per counterfactual and tabulate the free space at
 /// the markers that matter, against a baseline replay of the untransformed
@@ -104,14 +102,11 @@ pub fn analyze_counterfactuals(
                 &spec.label,
             );
             notes.push(format!(
-                "TLSF geometry: {} B header, {} B granule (host `usize`); the device's are {} B \
-                 and {} B. That surcharge peaks at {} B of live set in this run — read the row \
-                 as a pessimistic bound on the device's TLSF, not as its number",
-                result.header_bytes,
-                result.granularity,
-                TLSF_DEVICE_HEADER_BYTES,
-                TLSF_DEVICE_GRANULARITY,
-                result.peak_geometry_surcharge(),
+                "TLSF at the device's geometry ({} B header, {} B granule, rlsf 0.2.2's \
+                 32 x 32 lists): a model of rlsf checked against the real crate, not the \
+                 host's 64-bit instantiation. Its `largest` is the largest request a region \
+                 would serve, which under good fit is below the largest free block",
+                result.header_bytes, result.granularity,
             ));
             let cells: Vec<CounterfactualCell> = columns
                 .iter()
@@ -119,7 +114,7 @@ pub fn analyze_counterfactuals(
                     let shape = &result.markers[column.marker_index];
                     CounterfactualCell {
                         column: column.label.clone(),
-                        largest: shape.largest,
+                        largest: shape.largest_request,
                         region_largest: shape.region_largest.clone(),
                         holes: shape.holes,
                         free: shape.free,
@@ -255,9 +250,10 @@ impl CounterfactualSpec {
                         .to_string()
                 }
                 CounterfactualTerm::Tlsf => format!(
-                    "64-bit host headers are {TLSF_HEADER_BYTES} B; the device's are \
-                     {TLSF_DEVICE_HEADER_BYTES} B; free-list bookkeeping (the FL/SL bitmaps) is \
-                     static and not in the pool"
+                    "device geometry ({TLSF_HEADER_BYTES} B header, {TLSF_GRANULARITY} B \
+                     granule); the control block (FL/SL bitmaps and list heads, 4,228 B a \
+                     region on rv32 at 32 x 32, x esp-alloc's region slots) is static, not in \
+                     the pool, and comes out of the stack or the heap on the device"
                 ),
             })
             .collect()
