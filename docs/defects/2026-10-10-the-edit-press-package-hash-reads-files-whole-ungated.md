@@ -72,6 +72,17 @@ cannot be bound to the library until the block grows.
 `tests/project_read_refusal.rs::a_package_hash_the_heap_cannot_hold_is_refused_and_the_server_stays_alive`
 (through `LpServer::tick_and_send`).
 
+**Studio's side, checked** — a refused hash comes back through
+`validate_hash_package_response` as `ClientError::Server("hash package failed:
+<the refusal's words>")`, then `UiError::Protocol`. `bind_running_project_to_library`
+logs it once as a warning ("could not read what the board is running: …") and
+returns `NotApplicable`: the editor opens connected and unnamed, and nothing
+asks the hash again until the next open or save. The pull that follows is
+the already-gated one (a refused sync is recorded as "project sync needs
+attention", no retry loop). Pinned for the client half by
+`file_sync_ops::tests::a_refused_package_hash_is_an_error_with_the_boards_words`;
+the controller's bind has no test of its own for this path.
+
 **Lesson** — the pull's own lesson came true one request later: a gate
 added per request kind leaves the next whole-file reader ungated. The three
 gated readers are now `Read`, `ChangesSince` and `HashPackage`; anything
