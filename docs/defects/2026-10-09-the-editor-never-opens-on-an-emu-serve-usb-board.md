@@ -55,3 +55,17 @@ WebSocket byte channel, not the tab's Worker or the Bluetooth polyfill.
 **Lesson** — the walks that open the editor over the door (`walk-drop-emu`)
 had not been run since the lanes moved to `--serve-release`; a lane nobody
 runs hides a failure until a change that has to run it finds one.
+
+**Re-checked 2026-10-10** (the connected plan's P7, branch
+`claude/connected-in-the-card` at `0c1ede359`, `main` at `0e505dd26` merged
+in, so the emulated `sc.w` fix is in; `lp-emu:esp32c6:t1`). `just
+walk-drop-emu --serve-release` over the door **passed**: the editor step
+opened `/p/playful-choker-prj…` with the board's panel (brightness, palette,
+scale, clock.rate), and both cable pulls were ridden out. The tab backing
+passed too. The same error text did appear once, and recovered: in `just
+walk-two-tabs-emu --serve-release`, tab B's Connect (step 5, which on that
+branch opens the board's session on its card) logged `project sync failed:
+protocol error: expected project read frame seq 1, got 0` twice, right
+after the board's `dropped stale response … for a request abandoned by
+client` lines, then the sync started over and the walk passed. Not
+re-run on `main` here. Status left open: one passing run is not a cause.

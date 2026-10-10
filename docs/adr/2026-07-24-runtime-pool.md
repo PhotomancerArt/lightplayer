@@ -330,3 +330,19 @@ and Edit moves to the editor on the same session with nothing rebuilt.
 Capacity stays one: Connect on a second board hands the one session over.
 A direction, built by the "connected" milestone of
 `lp2025/2026-10-06-1530-boards-and-projects-model`.
+
+**2026-10-10, how "connected" was built (`lp2025/2026-10-08-2330-connected-in-the-card`):**
+the note above names the wrong op. The web's route→Home policy
+(`nav_session_plan` in `lpa-studio-web`'s `web_app.rs`) never dispatched
+`DetachLens`: it ended a board's session with `RuntimeOp::CloseDeviceLens`,
+and a sim's by powering it off (`session_teardown`). It still does, for
+every site route except one: going **home** keeps a session the home page
+holds (Connect, or Edit from a card), which core reports as
+`UiChromeSessionControl.connected`. A session opened by its address (a
+`/p/…?on=` link, `/device/<uid>`, a project's open on a sim) still ends on
+going home, as before. "Connected" is a record beside the pool
+(`ConnectedBoard`, `app/studio/connected_board.rs`), not a pool change: no
+pool type, install or eviction rule moved, the lens id and the borrow are
+the same, and capacity stays one, so Connect on a second board hands the one
+session over through `open_device_lens`'s existing rule. Done
+(`devices/<board>/done`) is `CloseDeviceLens`, the same one road.

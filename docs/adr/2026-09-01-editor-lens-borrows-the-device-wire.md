@@ -182,3 +182,15 @@ needs the wire while the lens holds it closes the lens first. The card's
 picture keeps moving from the lens's session while the borrow is held. A
 direction, built by the "connected" milestone of
 `lp2025/2026-10-06-1530-boards-and-projects-model`.
+
+**2026-10-10, how it was built (`lp2025/2026-10-08-2330-connected-in-the-card`):**
+Connect on a card opens the lens with the same exclusive borrow, and the
+card's picture is the lens session's own frames while the borrow is held:
+`LensFrameSource`, joined at `device_card_feed_view`, aged by the lens's
+frame count (`DeviceFrameFeeds::observe_lens_frames`) and drawn undimmed as
+`PictureSource::Lens` (closed PR #571, redone). The roster's feed still
+never pulls under a borrow; a card with no lens frame yet keeps the dimmed
+last one ("editor has the wire"). Over Bluetooth the lens on its card keeps
+the session's own cadence rather than the Play budget, so a connected card
+reads at least as often as a watched one. Decision 3 is unchanged: a card
+verb that needs the wire while the lens holds it closes the session first.

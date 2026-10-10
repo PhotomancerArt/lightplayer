@@ -285,7 +285,24 @@ The rules:
 - **Connected, the bars become the panel.** Connect turns the card's bars
   into the board's panel, drawn with Studio's existing panel widgets: as
   many controls as fit at the card's height, then All controls. Done turns
-  them back. The card does not grow to fit more controls.
+  them back. The card does not grow to fit more controls. The connected
+  face, top to bottom, in exactly the five bars' height (140 px, their grid
+  rows, with the same hairlines):
+  - **the master fader** (the project's brightness), one row across the
+    card: its label, the fader, its value;
+  - **one row of controls**, knobs and toggles, each an equal share of the
+    row, at most four controls on the card with the master;
+  - **All controls**, the last row: a link to the board's play page, "· N
+    more" after it when the card leaves controls out, and **Edit** (or
+    Edit with a lock, on a board you can only play) flush at its end as
+    the row's action.
+
+  The controls keep the panel's own look and gestures: the gold held state,
+  the let-go glyph, the detail popover. The card draws no panel-wide reset
+  and no auto-save switch; the play page has them. The name bar's primary
+  is Done (✓) while connected. A card that is connecting, reconnecting or
+  failed to connect keeps its bars, and the connection bar carries the
+  work.
 
 The card is built in core, as a name bar and bars, and drawn by a few
 generic pieces. The web decides how a bar looks, never what it says or

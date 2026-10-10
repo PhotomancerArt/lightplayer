@@ -600,9 +600,9 @@ builds a roster board's card and `pending_board_card(..)` a new board's;
 boards first. `StudioController::view()` publishes them on
 `DeviceRosterView.cards` once the view's offers are published, and the
 editor's docked card is `UiLensCard::Board`, built with the editor holding
-the board (no primary until the card's Done lands). A builder reads only the
-board's own offers from the published tree, so a card can point at nothing
-core did not offer.
+the board (Done is its primary, and it carries no panel: the editor is the
+session's surface). A builder reads only the board's own offers from the
+published tree, so a card can point at nothing core did not offer.
 
 A card (`UiBoardCard`) is:
 
@@ -613,13 +613,30 @@ A card (`UiBoardCard`) is:
   watching), a reading ("58 fps", "5 h ago"), and details holding the
   notices, how the board is running, the picture's words and its terminal;
 - the **name bar** (`UiNameBar`): the board's name and its **one primary**
-  (`UiPrimary`): Install, Unlock, Connect, Power on or Edit, or a disabled
-  word saying why (`primary_action.rs` has the order);
+  (`UiPrimary`): Install, Unlock, Connect, Power on or Done, or a disabled
+  word saying why ("Connecting…", "Nothing on it yet";
+  `primary_action.rs` has the order);
 - **five bars** (`UiStackBar`), always project · connection · access ·
   firmware · hardware, each one line: a summary, an aside, a tone (blue is
   Update, orange is attention or someone else has it), at most one action,
   and the bar's work while an activity runs in it. Each bar has its own file
   (`project_bar.rs` …), whose doc is the table of what it says.
+
+**Connected**, the card carries the board's **panel** in the five bars'
+place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while the
+session is connected with its project ready): a pick of the project's root
+panel (`board_panel_picks.rs`: the master brightness fader, then knobs and
+toggles in panel order, `BOARD_PANEL_CONTROLS` = 4 at most, the rest
+counted in `more`), each control the root panel's own
+`UiPanelControlView` with its scope, so its writes are the panel's own.
+`auto_save` is `Some` only at the edit tier, and `edit` is the All controls
+row's action: Edit, or Edit with a lock (`unlock`) on a play-only board.
+The root face is `ProjectEditorView::root_module_face`, which the play page
+and the docs embed read too. The session's state while it is not open is
+the connection bar's work (`BoardConnection`, per board on
+`DeviceRosterView.connections`): "Connecting…", "Reconnecting…", or
+"Couldn't connect" striped with Retry (`connect`). The picture is the
+lens's own frames (`PictureSource::Lens`, `LensFrameSource`).
 
 A bar's **details** (`UiBarDetails`) are `RichSection<UiCardAction>`
 sections (a notice first, facts, verbs, a Danger section last) and today's

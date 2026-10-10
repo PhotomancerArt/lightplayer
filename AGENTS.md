@@ -210,8 +210,11 @@ the app through the same view model and presses the same actions. See
   core reads it: the agent's readout leads with it and lists only the
   focused node's verbs in full, ⌘K ranks by it. Core never navigates,
   routes or opens anything because of it; navigation stays in
-  `router.rs`. Don't report what core already owns (node focus, card
-  sections, `UiSelection`): read it.
+  `router.rs`. It may pick which surface of an already-open session it
+  builds (a connected board's card, or the editor) from the place, and it
+  still opens, closes and navigates nothing because of it
+  (`ConnectedBoard::shows_editor`). Don't report what core already owns
+  (node focus, card sections, `UiSelection`): read it.
 - **View state is not an offer.** The home page's tabs, its cards/list
   switch and a fold are page-local state, not user verbs: no `UiAction`, not
   in the offer tree. The agent reads every section of the page through

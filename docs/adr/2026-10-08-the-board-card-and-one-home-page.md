@@ -492,3 +492,91 @@ The acceptance, in Yona's words of 2026-10-09:
   it once, is refused, and reads the refusal against the claims after the
   identify deadline. The card shows a second "new device" card for the
   board until then. Filed in `docs/defects/`; no behaviour changed here.
+
+## Amendment 2026-10-10: how connected is built (M4)
+
+Section 4 stands. This is how it was built (plan
+`lp2025/2026-10-08-2330-connected-in-the-card`), with the director's
+rulings where the build had to choose. It is not a new decision.
+
+- **"Connected" is a fact beside the runtime pool, not a change to it.**
+  `ConnectedBoard` (`lpa-studio-core`, `app/studio/connected_board.rs`)
+  records which pool session the home page holds, on which board, whether
+  an Edit is waiting for the editor, and how far the open has got. Connect,
+  and Edit from a card, set it; every road that ends the session clears it,
+  and a session that left the pool by any road reads as not connected
+  (`ConnectedBoard::rides`). The pool keeps one session, one lens id, its
+  install and eviction rules and its borrow of the wire: this is wiring, not
+  the pool's model.
+- **Which surface the open session shows follows where the user is.** The
+  editor shows while an Edit is waiting or while the reported place is the
+  session's own page (`/p/<its uid>` or `/device/<its uid>`, any view, play
+  included); otherwise the session shows on its card, and the home view
+  stays (`ConnectedBoard::shows_editor`). A waiting Edit ends at the first
+  report that changes the page. Core reads the place to pick a surface and
+  nothing else: it opens, closes and navigates nothing because of it.
+- **Three verbs, each at `devices/<board ref>/…`.**
+  - `connect` has one meaning: this board's session, held by the home page,
+    on its card (`RuntimeOp::ConnectDevice`, `app/devices/connect_offer.rs`).
+    On a ready board it opens the session. On a closed port it opens the
+    port first; on an offline board Studio can reach, it reaches it first
+    (Wi‑Fi, then lightplayer.app, then the cable). Either way it is one
+    press: the intent is held (`PendingLens::connect`) and gives up after
+    `CONNECT_INTENT_GRACE` (60 s) with "The board didn't answer in time"
+    and Retry, or at once when the board turns out locked or needs
+    firmware (its own primary takes over). On a ready board running
+    nothing it is disabled: "Nothing on it yet".
+  - `done` closes the session (`RuntimeOp::CloseDeviceLens`,
+    `app/devices/done_offer.rs`), on the card and on the editor's docked
+    card. It is Routine even with unsaved edits: they live on the board as
+    its overlay, and the next Connect or Edit rebuilds them as unsaved.
+  - `edit` (`RuntimeOp::EditDevice`) shows the editor on the session
+    already open, with nothing reopened; on a board that is not connected
+    it connects first.
+- **Hand-over** is the lens's existing rule: Connect on a second board
+  closes the first session, then opens the second. The first card shows its
+  facts at once; the second says "Connecting…".
+- **While connected, Edit sits at the end of the All controls row** (Q19).
+  The project bar gives way to the panel with the other bars, so the row
+  that leads to the board's play page carries Edit, or its lock (`unlock`)
+  on a play-only board, flush at its end. All controls itself is a plain
+  link to the session's play address (`router::play_address` in the web).
+- **The card's panel is a pick of the project's root panel**
+  (`UiBoardPanel`, `board_panel_picks.rs`): the master (a `brightness`
+  fader, the root's first, else the first nested group's), then knobs and
+  toggles in panel order, four controls at most; every other control counts
+  toward "· N more". The auto-save switch and the panel-wide reset are not
+  on the card, and auto-save is offered only at the edit tier. The play
+  page and the docs embed read the same root face
+  (`ProjectEditorView::root_module_face`). The web draws the picks with the
+  panel's own widgets at the five bars' height (`CompactPanel`), so the
+  card keeps one height.
+- **The picture is the session's own.** While the lens holds the wire the
+  card draws the lens's published frames (`LensFrameSource`,
+  `PictureSource::Lens`), closed PR #571 redone.
+- **Over Bluetooth, connecting never makes the picture slower than
+  watching it** (Q4, ruled). A connected card is not a play view: the lens
+  on its card keeps the session's own cadence (`DEVICE_REFRESH_INTERVAL`,
+  the editor's), which reads at least as often as a watched card's feed
+  (`DEVICE_CARD_FEED_BLE_INTERVAL`). The Play budget stays the play page's.
+  The airtime is the editor's.
+- **Going home keeps a session the home page holds** (the web's
+  `nav_session_plan`); every other site route still ends it. The "open
+  ended" kick never fires while a session is connected, and following a
+  link to the open session's own address (All controls, Forward) opens
+  nothing twice (`already_bound` reads the connected session's project).
+- **The editor always has a page.** When Edit shows the editor from a
+  non-lens route and the session has no project address, the lens sync
+  emits `/device/<uid>` (Q3, the 2026-09-22 record's amendment of the same
+  date). A board's `/device/<uid>/play` keeps play when it heals to
+  `/p/…/play` (`docs/defects/2026-10-08-the-device-play-address-loses-play.md`).
+- **The play password is enough to connect, not to adopt** (R3). A
+  play-only link opens the session and writes the panel, but adoption's uid
+  stamp is a file write, which the board refuses below the edit tier. A
+  play-only board running an identity-free project stays unbound: its
+  address is `/device/<uid>`, and All controls goes to
+  `/device/<uid>/play`. The emulator answers at the edit tier, so the play
+  tier is proven by core tests and stories; a desk check is queued.
+- **No connected session survives a reload,** and nothing new is
+  persisted: no wire, persisted-format, firmware, `lpa-devices` or
+  `localStorage` change.

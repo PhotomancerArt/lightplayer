@@ -103,16 +103,33 @@ The rest of the page's words:
 The board card's verbs:
 
 - **Connect** — open the board here and show its panel on the card. The
-  link's icon says how (USB, Bluetooth, Wi‑Fi, the cloud). On a board
-  another tab holds, Connect takes it over.
-- **Done** — close it; the card shows its facts again.
+  link's icon says how (USB, Bluetooth, Wi‑Fi, the cloud). It means that
+  one thing on every board you can reach: on a closed port or an offline
+  board it reaches the board first, then shows the panel, in one press. On
+  a board another tab holds, Connect takes it over. On a board running
+  nothing it waits, disabled: **Nothing on it yet**.
+- **Done** — close it; the card shows its facts again. It is the
+  connected card's primary, and the editor's docked card's.
 - **Edit** — open the board's project in the editor. It's the project
-  bar's action, for people who can edit. Until Connect lands, Edit is the
-  card's primary on a ready board that runs a project.
+  bar's action, for people who can edit; on a board that isn't connected
+  it connects first. While the board is connected, Edit sits at the end of
+  the All controls row. On a board you can only play, Edit wears a lock
+  and asks for the edit password (`unlock`).
+- **All controls** — the connected card's last row, a link to the board's
+  play page: **All controls · 2 more** when the page has controls the card
+  leaves out.
 - **Unlock** — enter a password for a locked board.
 - **Install** — put Lightplayer on a blank board.
 - **Update** — the firmware bar's action when a newer version exists
   ("when it's back" if the board is offline).
+
+While Connect works, the connection bar carries it: **Connecting…** (the
+primary reads the same, disabled), **Reconnecting…** when the connected
+board's link dropped and Studio is holding on for it, and **Couldn't
+connect**, striped, with Retry, when it failed (the reason is in the
+details; a board that never answered is "The board didn't answer in
+time"). Connect on a second board hands over: the first card shows its
+facts at once.
 
 What each bar says:
 
