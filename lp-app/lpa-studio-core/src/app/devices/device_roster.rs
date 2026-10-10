@@ -111,6 +111,23 @@ pub struct DeviceRosterView {
     /// project bar and the home page's "Other projects" both read it.
     /// Joined by the controller, which holds the library and the lens.
     pub board_projects: super::BoardProjects,
+    /// How each board is reached — the open link's kind, else the last
+    /// one's; for a new board, its pending link's — read off the endpoint
+    /// ([`super::UiLinkKind::of_endpoint`]), never off
+    /// `DeviceView::is_over_bluetooth` (true on every network link). Absent
+    /// for a board no link has named (a row rehydrated cold).
+    pub link_kinds: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLinkKind>,
+    /// When the registry last saw each board (its row's `last_seen_at`,
+    /// epoch seconds): how long an offline board has been away.
+    pub last_seen: std::collections::BTreeMap<lpa_devices::DeviceId, f64>,
+    /// How each board's last activity ended, and when
+    /// ([`super::ActivityEnds`]): a bar's Done and Failed.
+    pub ends: std::collections::BTreeMap<lpa_devices::DeviceId, super::ActivityEnd>,
+    /// Every board's card, built in core: new boards first, then the
+    /// roster's boards in order. Filled by the controller once the view's
+    /// offers are published (a card points only at offered verbs); empty in
+    /// any view built before that.
+    pub cards: Vec<super::board_card::UiBoardCard>,
 }
 
 impl Default for DeviceRosterView {
@@ -134,6 +151,10 @@ impl Default for DeviceRosterView {
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: super::BoardProjects::default(),
+            link_kinds: std::collections::BTreeMap::new(),
+            last_seen: std::collections::BTreeMap::new(),
+            ends: std::collections::BTreeMap::new(),
+            cards: Vec::new(),
         }
     }
 }
@@ -225,6 +246,9 @@ pub struct DeviceRoster {
     /// Which registry row each device's record lives in, by the model's
     /// handle. See [`Self::remember_key`].
     keys: std::collections::BTreeMap<u64, String>,
+    /// How each board's last activity ended, read off the journal as it is
+    /// drained (the board card's Done and Failed).
+    ends: super::ActivityEnds,
 }
 
 impl DeviceRoster {
@@ -241,7 +265,18 @@ impl DeviceRoster {
             effects: DeviceEffects::new(),
             keys: std::collections::BTreeMap::new(),
             mirrored_through: 0,
+            ends: super::ActivityEnds::default(),
         }
+    }
+
+    /// How each board's last activity ended ([`super::ActivityEnds`]).
+    pub fn activity_ends(&self) -> &super::ActivityEnds {
+        &self.ends
+    }
+
+    /// The same, for the controller's once-per-view lapse check.
+    pub fn activity_ends_mut(&mut self) -> &mut super::ActivityEnds {
+        &mut self.ends
     }
 
     pub fn effects_mut(&mut self) -> &mut DeviceEffects {
@@ -414,7 +449,10 @@ impl DeviceRoster {
         // An update leg whose link went ends; a driver whose activity ended
         // goes.
         self.effects.reconcile_updates(&self.roster);
-        self.drain_journal()
+        let lines = self.drain_journal();
+        let roster = &self.roster;
+        self.ends.retain(|device| roster.device(device).is_some());
+        lines
     }
 
     /// Record writes the effects layer collected, for the controller to run
@@ -464,6 +502,27 @@ impl DeviceRoster {
             backup_download: self.effects.layout().download(),
             // Joined by the controller, which holds the library and the lens.
             board_projects: super::BoardProjects::default(),
+            // A new board's kind is its pending link's endpoint.
+            link_kinds: self
+                .roster
+                .devices()
+                .iter()
+                .filter_map(|device| {
+                    let endpoint = device.identity.endpoint.as_ref()?;
+                    Some((device.id, super::UiLinkKind::of_endpoint(Some(endpoint))))
+                })
+                .chain(self.roster.pending().iter().map(|entry| {
+                    (
+                        entry.device_id(),
+                        super::UiLinkKind::of_endpoint(Some(&entry.info.endpoint)),
+                    )
+                }))
+                .collect(),
+            // Joined by the controller, which holds the registry rows.
+            last_seen: std::collections::BTreeMap::new(),
+            ends: self.ends.all().clone(),
+            // Built by the controller once the view's offers are published.
+            cards: Vec::new(),
         }
     }
 
@@ -573,6 +632,11 @@ impl DeviceRoster {
                 continue;
             }
             highest = highest.max(entry.seq);
+            if let (Scope::Device(device), lpa_devices::journal::JournalRecord::Note(note)) =
+                (entry.scope, &entry.record)
+            {
+                self.ends.note(device, note, entry.at);
+            }
             lines.push(JournalLine {
                 scope: scope_label(entry.scope),
                 entry: format!("{:?}", entry.record),
@@ -938,6 +1002,10 @@ mod tests {
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: Default::default(),
+            link_kinds: Default::default(),
+            last_seen: Default::default(),
+            ends: Default::default(),
+            cards: Vec::new(),
         };
 
         let split = split_roster(&view);
@@ -989,6 +1057,10 @@ mod tests {
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: Default::default(),
+            link_kinds: Default::default(),
+            last_seen: Default::default(),
+            ends: Default::default(),
+            cards: Vec::new(),
         };
 
         let split = split_roster(&view);

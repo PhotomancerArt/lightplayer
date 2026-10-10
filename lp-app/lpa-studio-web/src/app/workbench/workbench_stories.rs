@@ -10,12 +10,12 @@ use lpa_studio_web_story_macros::story;
 use super::panels::{FixturesPanel, OutputsPanel, PropsPanel, TreeGrain};
 use super::{DockState, PanelMemory, WorkbenchFrame, WorkbenchHrefs, WorkbenchView};
 use crate::app::StudioShell;
-use crate::app::home::device_offer_story_fixtures;
 use crate::app::patch::patch_story_fixtures::{
     peach_surface, small_dome_surface, small_dome_walkup_surface,
 };
 use crate::app::story_fixtures::{
     project_editor_fixture, project_ready_view, project_synced_pane_view, simulator_lens_card,
+    simulator_lens_offers,
 };
 use crate::router::ProjectView;
 use lpa_studio_core::{
@@ -108,11 +108,10 @@ fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
         }
     }
     // `StudioShell` always re-publishes the offer context from
-    // `view.offers` (never an ancestor's), so the lens card's Device panel
-    // needs its verbs folded in here (devices-as-offers) or it draws with
-    // none.
-    if let Some(card) = &view.lens_card {
-        view.offers = device_offer_story_fixtures::lens_card_offer_tree(card);
+    // `view.offers` (never an ancestor's), so the docked lens card needs
+    // its verbs folded in here (devices-as-offers) or it draws with none.
+    if view.lens_card.is_some() {
+        view.offers = simulator_lens_offers();
     }
     view
 }
@@ -120,13 +119,13 @@ fn view_with_surface(selection: Option<UiPatchTarget>) -> UiStudioView {
 /// The lens device's offer tree, the way `web_app.rs` provides it in
 /// production (devices-as-offers): every bare `WorkbenchFrame` mount in
 /// this file docks `simulator_lens_card()` as its runtime surface, so a
-/// Device panel drawn inside `body` needs the same tree — without it the
-/// panel renders with no buttons. (A `StudioShell` mount instead folds
+/// card drawn inside `body` needs the same tree — without it the card
+/// draws no buttons. (A `StudioShell` mount instead folds
 /// this into its `UiStudioView::offers`, in [`view_with_surface`]: wrapping
 /// the shell from outside has no effect, since it always re-publishes its
 /// own.)
 fn with_lens_offers(body: Element) -> Element {
-    let offers = device_offer_story_fixtures::lens_card_offer_tree(&simulator_lens_card());
+    let offers = simulator_lens_offers();
     rsx! {
         crate::core::OffersProvider { offers, {body} }
     }
