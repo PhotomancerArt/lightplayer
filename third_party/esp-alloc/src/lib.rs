@@ -423,6 +423,44 @@ struct EspHeapInner {
     heap: [Option<HeapRegion>; MAX_REGIONS],
     #[cfg(feature = "internal-heap-stats")]
     internal_heap_stats: InternalHeapStats,
+    #[cfg(feature = "lend-region")]
+    lend: LendState,
+}
+
+/// ⚠️ **LP fork, RESEARCH (E11, `research/ram-e11`; never for main as
+/// written).** One region is the big block's: the general heap reaches it
+/// LAST (only when every other region is out), and a borrower's
+/// allocations reach it FIRST. Who is a borrower is the firmware's call,
+/// asked on every allocation through `_esp_alloc_lend_borrower`, from inside
+/// the heap's lock: it must be a few atomic loads, never an allocation.
+#[cfg(feature = "lend-region")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LendStats {
+    /// Borrower bytes that did not fit in the block and went elsewhere.
+    pub overflow_bytes: u32,
+    /// How many borrower allocations did that.
+    pub overflow_count: u32,
+    /// Non-borrower bytes that landed in the block (every other region full).
+    pub spill_bytes: u32,
+    /// How many non-borrower allocations did that.
+    pub spill_count: u32,
+    /// Borrower allocations served from the block.
+    pub borrower_count: u32,
+    /// The block's peak used bytes since the last [`EspHeap::lend_reset_peak`].
+    pub peak_used: u32,
+}
+
+#[cfg(feature = "lend-region")]
+struct LendState {
+    region: Option<usize>,
+    stats: LendStats,
+}
+
+#[cfg(feature = "lend-region")]
+unsafe extern "Rust" {
+    /// Whether the allocation being made now is the borrower's. Called with
+    /// the heap's lock held: no allocation, no lock, no logging.
+    fn _esp_alloc_lend_borrower() -> bool;
 }
 
 impl EspHeapInner {
@@ -436,7 +474,108 @@ impl EspHeapInner {
                 total_allocated: 0,
                 total_freed: 0,
             },
+            #[cfg(feature = "lend-region")]
+            lend: LendState {
+                region: None,
+                stats: LendStats {
+                    overflow_bytes: 0,
+                    overflow_count: 0,
+                    spill_bytes: 0,
+                    spill_count: 0,
+                    borrower_count: 0,
+                    peak_used: 0,
+                },
+            },
         }
+    }
+
+    /// The lend-region allocation path (see [`LendStats`]).
+    #[cfg(feature = "lend-region")]
+    fn allocate_lend(
+        &mut self,
+        lend: usize,
+        capabilities: EnumSet<MemoryCapability>,
+        layout: Layout,
+    ) -> Option<NonNull<u8>> {
+        let lend_matches = self.heap[lend]
+            .as_ref()
+            .is_some_and(|region| region.capabilities.is_superset(capabilities));
+        // SAFETY: the firmware's predicate takes no lock and allocates nothing.
+        let borrower = lend_matches && unsafe { _esp_alloc_lend_borrower() };
+        let size = layout.size() as u32;
+        if borrower {
+            if let Some(allocation) = self.heap[lend].as_mut().and_then(|r| r.allocate(layout)) {
+                self.lend.stats.borrower_count += 1;
+                self.note_lend_peak(lend);
+                return Some(allocation);
+            }
+        }
+        for (index, region) in self.heap.iter_mut().enumerate() {
+            if index == lend {
+                continue;
+            }
+            let Some(region) = region.as_mut() else {
+                continue;
+            };
+            if !region.capabilities.is_superset(capabilities) {
+                continue;
+            }
+            if let Some(allocation) = region.allocate(layout) {
+                if borrower {
+                    self.lend.stats.overflow_bytes = self.lend.stats.overflow_bytes.saturating_add(size);
+                    self.lend.stats.overflow_count += 1;
+                }
+                return Some(allocation);
+            }
+        }
+        if lend_matches && !borrower {
+            if let Some(allocation) = self.heap[lend].as_mut().and_then(|r| r.allocate(layout)) {
+                self.lend.stats.spill_bytes = self.lend.stats.spill_bytes.saturating_add(size);
+                self.lend.stats.spill_count += 1;
+                self.note_lend_peak(lend);
+                return Some(allocation);
+            }
+        }
+        None
+    }
+
+    #[cfg(feature = "lend-region")]
+    fn note_lend_peak(&mut self, lend: usize) {
+        if let Some(region) = self.heap[lend].as_ref() {
+            let used = region.used() as u32;
+            if used > self.lend.stats.peak_used {
+                self.lend.stats.peak_used = used;
+            }
+        }
+    }
+
+    /// The lend region's longest free run, by binary search with real
+    /// allocations in that region alone (the lock is held throughout, so
+    /// nothing else sees the probes).
+    #[cfg(feature = "lend-region")]
+    fn lend_largest_free(&mut self) -> usize {
+        let Some(lend) = self.lend.region else {
+            return 0;
+        };
+        let Some(region) = self.heap[lend].as_mut() else {
+            return 0;
+        };
+        let (mut low, mut high) = (0usize, region.free());
+        while low < high {
+            let mid = (low + high + 1) / 2;
+            let Ok(layout) = Layout::from_size_align(mid.max(1), 4) else {
+                break;
+            };
+            match region.allocate(layout) {
+                Some(ptr) => {
+                    // SAFETY: just allocated in this region with this layout.
+                    unsafe { region.try_deallocate(ptr, layout) };
+                    low = mid;
+                }
+                None => high = mid - 1,
+            }
+        }
+        low
     }
 
     pub unsafe fn add_region(&mut self, region: HeapRegion) {
@@ -549,19 +688,33 @@ impl EspHeapInner {
     ) -> *mut u8 {
         #[cfg(feature = "internal-heap-stats")]
         let before = self.used();
-        let mut iter = self
-            .heap
-            .iter_mut()
-            .filter_map(|region| region.as_mut())
-            .filter(|region| region.capabilities.is_superset(capabilities));
-
-        let allocation = loop {
-            let Some(region) = iter.next() else {
+        #[cfg(feature = "lend-region")]
+        let lent = self
+            .lend
+            .region
+            .map(|lend| self.allocate_lend(lend, capabilities, layout));
+        #[cfg(not(feature = "lend-region"))]
+        let lent: Option<Option<NonNull<u8>>> = None;
+        let allocation = if let Some(lent) = lent {
+            let Some(allocation) = lent else {
                 return ptr::null_mut();
             };
+            allocation
+        } else {
+            let mut iter = self
+                .heap
+                .iter_mut()
+                .filter_map(|region| region.as_mut())
+                .filter(|region| region.capabilities.is_superset(capabilities));
 
-            if let Some(res) = region.allocate(layout) {
-                break res;
+            loop {
+                let Some(region) = iter.next() else {
+                    return ptr::null_mut();
+                };
+
+                if let Some(res) = region.allocate(layout) {
+                    break res;
+                }
             }
         };
 
@@ -630,6 +783,49 @@ impl EspHeap {
     /// Returns an estimate of the amount of bytes in use in all memory regions.
     pub fn used(&self) -> usize {
         self.inner.with(|heap| heap.used())
+    }
+
+    /// RESEARCH (E11): make the region registered `index`-th (0-based, in
+    /// [`Self::add_region`] order) the lend region. See [`LendStats`].
+    #[cfg(feature = "lend-region")]
+    pub fn set_lend_region(&self, index: usize) {
+        self.inner.with(|heap| heap.lend.region = Some(index));
+    }
+
+    /// RESEARCH (E11): the lend region's counters.
+    #[cfg(feature = "lend-region")]
+    pub fn lend_stats(&self) -> LendStats {
+        self.inner.with(|heap| heap.lend.stats)
+    }
+
+    /// RESEARCH (E11): the lend region's `(used, free)` bytes.
+    #[cfg(feature = "lend-region")]
+    pub fn lend_used_free(&self) -> (usize, usize) {
+        self.inner.with(|heap| {
+            heap.lend
+                .region
+                .and_then(|index| heap.heap[index].as_ref())
+                .map_or((0, 0), |region| (region.used(), region.free()))
+        })
+    }
+
+    /// RESEARCH (E11): restart the lend region's peak from its use now.
+    #[cfg(feature = "lend-region")]
+    pub fn lend_reset_peak(&self) {
+        self.inner.with(|heap| {
+            let used = heap
+                .lend
+                .region
+                .and_then(|index| heap.heap[index].as_ref())
+                .map_or(0, |region| region.used() as u32);
+            heap.lend.stats.peak_used = used;
+        })
+    }
+
+    /// RESEARCH (E11): the lend region's longest free run.
+    #[cfg(feature = "lend-region")]
+    pub fn lend_largest_free(&self) -> usize {
+        self.inner.with(|heap| heap.lend_largest_free())
     }
 
     /// Return usage stats for the [EspHeap].

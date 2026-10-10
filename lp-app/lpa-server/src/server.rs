@@ -198,6 +198,8 @@ pub struct LpServer {
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
     read_cost_margin: Option<u32>,
+    /// RESEARCH (research/ram-e11): the embedder's lender of the big block.
+    big_block: Option<crate::big_block::BigBlockHook>,
     /// Answer a tick's requests before rendering its frame (see
     /// [`Self::set_messages_first`]). Off = render first, then answer.
     messages_first: bool,
@@ -402,6 +404,7 @@ impl LpServer {
             access_changed: None,
             read_gate: None,
             read_cost_margin: None,
+            big_block: None,
             messages_first: false,
             reboot_hook: None,
             firmware_manifest: None,
@@ -1090,18 +1093,55 @@ impl LpServer {
                             min_largest_block_bytes: cost.largest_ask.saturating_add(512),
                         }
                     });
-                    if let Some(refusal) = request_gate.or(self.read_gate).and_then(|gate| {
-                        let memory = server_status.memory.as_ref();
-                        gate.check(memory.map(|memory| memory.free_bytes), largest_block)
-                            .err()
-                    }) {
+                    // RESEARCH (research/ram-e11): with a lender installed,
+                    // the read asks it for the big block with its own
+                    // estimated cost, and the fixed gate is not consulted.
+                    let lent = match self.big_block {
+                        Some(hook) => {
+                            let lamps = self
+                                .project_manager
+                                .get_project(handle)
+                                .map(|project| project.engine().published_output_lamps())
+                                .unwrap_or(0);
+                            let cost = crate::read_cost::ReadCost::estimate(&request, lamps);
+                            let ask = lp_lender::Ask::new(
+                                lp_lender::LoanKind::Read,
+                                cost.largest_ask,
+                                cost.working_set,
+                            );
+                            Some((hook, (hook.lend)(ask)))
+                        }
+                        None => None,
+                    };
+                    let lender_refusal = match &lent {
+                        Some((_, Err(refusal))) => Some(crate::big_block::refusal_message(
+                            lp_lender::LoanKind::Read,
+                            refusal,
+                        )),
+                        _ => None,
+                    };
+                    let lent_hook = match lent {
+                        Some((hook, Ok(()))) => Some(hook),
+                        _ => None,
+                    };
+                    let gate_refusal = if self.big_block.is_some() {
+                        None
+                    } else {
+                        request_gate.or(self.read_gate).and_then(|gate| {
+                            let memory = server_status.memory.as_ref();
+                            gate.check(memory.map(|memory| memory.free_bytes), largest_block)
+                                .err()
+                        })
+                    };
+                    if let Some(message) =
+                        lender_refusal.or_else(|| gate_refusal.map(|refusal| refusal.message()))
+                    {
                         let mut sink = ProjectReadStreamSink::with_max_bytes(
                             transport,
                             link.id,
                             msg_id,
                             sink_frame_budget,
                         );
-                        let message = refusal.message();
                         log::warn!("tick_and_send: {message}");
                         if let Err(send_error) = sink.send_terminal_error(message).await {
                             log::warn!(
@@ -1113,6 +1153,9 @@ impl LpServer {
                         continue;
                     }
                     let Some(project) = self.project_manager.get_project_mut(handle) else {
+                        if let Some(hook) = lent_hook {
+                            (hook.release)();
+                        }
                         transport
                             .send(
                                 link.id,
@@ -1187,6 +1230,9 @@ impl LpServer {
                         }
                     };
                     lp_perf::emit_end!(lp_perf::EVENT_PROJECT_READ);
+                    if let Some(hook) = lent_hook {
+                        (hook.release)();
+                    }
                     finish_result?;
                     response_count += 1;
                 }
@@ -1199,11 +1245,47 @@ impl LpServer {
                     // A hello answers with THIS link's auth.
                     let link_hello =
                         matches!(msg, ClientRequest::Hello).then(|| self.hello_for_link(link));
+                    // RESEARCH (research/ram-e11): a whole-file read borrows
+                    // the big block for the file's size, until its reply is
+                    // written; a refused one answers in words, unread.
+                    let mut whole_file_lent = None;
+                    let mut whole_file_refused = None;
+                    if let (Some(hook), ClientRequest::Filesystem(lpc_wire::FsRequest::Read { path })) =
+                        (self.big_block, &msg)
+                        && let Ok(size) = self.base_fs.file_size(path.as_path())
+                    {
+                        let size = u32::try_from(size).unwrap_or(u32::MAX);
+                        let ask = lp_lender::Ask::new(
+                            lp_lender::LoanKind::WholeFile,
+                            size.saturating_add(512),
+                            size.saturating_add(4 * 1024),
+                        );
+                        match (hook.lend)(ask) {
+                            Ok(()) => whole_file_lent = Some(hook),
+                            Err(refusal) => {
+                                let error = crate::big_block::refusal_message(
+                                    lp_lender::LoanKind::WholeFile,
+                                    &refusal,
+                                );
+                                log::warn!("fs lender: {} — {error}", path.as_str());
+                                whole_file_refused = Some(lpc_wire::FsResponse::Read {
+                                    path: path.clone(),
+                                    data: None,
+                                    error: Some(error),
+                                });
+                            }
+                        }
+                    }
                     let link_state = handlers::EngineLinkState {
                         display_layout_budget: self.engine_display_layout_budget(),
                         safe_output_clamp: self.safe_output_clamp,
                     };
-                    let response = match handlers::handle_client_message(
+                    let handled = match whole_file_refused {
+                        Some(refused) => Ok(WireServerMessage::new(
+                            msg_id,
+                            lpc_wire::server::ServerMsgBody::Filesystem(refused),
+                        )),
+                        None => handlers::handle_client_message(
                         &mut self.project_manager,
                         &mut *self.base_fs,
                         &self.output_provider,
@@ -1217,7 +1299,9 @@ impl LpServer {
                         link_hello.as_ref().unwrap_or(&self.hello),
                         link_state,
                         lpc_wire::ClientMessage { id: msg_id, msg },
-                    ) {
+                    ),
+                    };
+                    let response = match handled {
                         Ok(response) => response,
                         Err(error) => {
                             log::warn!("tick_and_send: request id={msg_id} failed: {error}");
@@ -1234,10 +1318,14 @@ impl LpServer {
                     // produced it only if a hook exists.
                     let acked_reboot =
                         matches!(response.msg, lpc_wire::server::ServerMsgBody::Reboot);
-                    transport
+                    let sent = transport
                         .send(link.id, response)
                         .await
-                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                        .map_err(|error| ServerError::Core(format!("{error}")));
+                    if let Some(hook) = whole_file_lent {
+                        (hook.release)();
+                    }
+                    sent?;
                     response_count += 1;
                     if acked_reboot && let Some(reboot) = self.reboot_hook.clone() {
                         // Answer, THEN reset. `send` returns once the
@@ -1453,6 +1541,13 @@ impl LpServer {
     /// `None` (the default) keeps [`Self::set_read_gate`]'s fixed floors.
     pub fn set_read_cost_margin(&mut self, margin: Option<u32>) {
         self.read_cost_margin = margin;
+    }
+
+    /// RESEARCH (`research/ram-e11`): reads and whole-file reads borrow the
+    /// big block from the embedder's lender instead of passing the read gate
+    /// (see [`crate::big_block`]). `None` (the default) keeps the gate.
+    pub fn set_big_block(&mut self, hook: Option<crate::big_block::BigBlockHook>) {
+        self.big_block = hook;
     }
 
     /// Choose the order [`Self::tick_and_send`] works in. Default off.
