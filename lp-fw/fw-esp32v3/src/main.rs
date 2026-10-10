@@ -209,7 +209,12 @@ mod output;
 mod bench;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod recovery;
-#[cfg(all(feature = "heap-rtc-slow", feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
+#[cfg(all(
+    feature = "heap-rtc-slow",
+    feature = "server",
+    not(feature = "radio_ram_probe"),
+    not(fw_harness)
+))]
 mod rtc_slow_heap;
 #[cfg(all(feature = "server", not(feature = "radio_ram_probe"), not(fw_harness)))]
 mod serial;
