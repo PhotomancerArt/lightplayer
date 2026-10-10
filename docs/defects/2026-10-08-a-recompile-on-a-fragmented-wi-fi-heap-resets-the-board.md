@@ -58,3 +58,15 @@ LP_EDIT_FRAG_HOST_LINK=1` on `lp-cli/tests/emu_edit_frag.rs` reproduces it
 **Lesson** — the request gate and the reassembly guard protect the bytes
 on their way in; the compile that follows is the larger ask, and it is
 still an abort.
+
+**2026-10-10 — reproduced on silicon over Wi-Fi.** RAM research V1 ran the
+same shape on CX1 (ESP32-C6, 14:C1:9F:E6:54:90) joined to a home Wi-Fi
+network: "grow" shader edits, each a line longer (`emu_edit_frag`'s edit),
+sent back to back by `lp-cli link capture lan:`. The shipped release image
+(2026.10.10-7, `a52b5e0b485e`) reset 2 of 2 runs, each with `alloc 12960
+bytes failed` in shader compile. The PR image under test (#1092) reset 2 of
+2 as well; one of them was at a different allocation, 2,352 B in `<unset>`
+after 5 edits, and no cause has been assigned to that one. The PR does not
+cause the reset, so this is the release's. Evidence:
+`experiments/v1-1092-joined-wifi/evidence/edit/` (`A1`/`A2` release,
+`B1`/`B2` PR image) in `lp2025/2026-10-09-1203-ram-research`.
