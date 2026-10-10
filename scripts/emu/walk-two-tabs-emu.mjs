@@ -424,14 +424,12 @@ async function main() {
       await driverB.waitCard({ board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       await driverB.waitBar("connection", "Open in another tab", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       // The port B picked was a chooser grant, which registers it without
-      // the sweep's gate: B asked the door for it once, was refused, and —
-      // when that identify settles — reads the refusal against A's claim and
-      // folds the port onto the board's own card. Until it has, the page
-      // holds a second, "new device" card for the same board.
-      await driverB.waitFor(`document.querySelectorAll('[data-board-card]').length === 1`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "B's refused port to be read as another tab's (one card for the board, not two)",
-      });
+      // the sweep's gate (it may be another board of the kind): B asks the
+      // door for it and is refused, and reads that refusal against A's claim
+      // the moment it arrives, folding the port onto the board's own card.
+      // Nothing here waits for that reading: step 3 presses Connect at once,
+      // the order a person in a hurry presses it in (defect
+      // 2026-10-09-a-chooser-pick-of-a-held-usb-port-is-not-gated).
       const section = await driverB.boardSection({ board: state.mac });
       if (section !== "online") throw new Error(`tab B's card is under ${section ?? "no section"}, not Online boards`);
       await driverB.waitOffer("take-over", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
@@ -443,8 +441,9 @@ async function main() {
       }
       // What B's pick cost: the chooser registers the port it picks without
       // the sweep's gate (`request_grant` in `device_effects.rs`), so B may
-      // have asked the door for the held port once and been refused. Step 3
-      // checks that none of its opens SUCCEEDED while A held the board.
+      // have asked the door for the held port and been refused (or may still
+      // be asking). Step 3 checks that none of its opens SUCCEEDED while A
+      // held the board.
       const attempts = await openAttempts(driverB);
       report.bAttemptsAfterPick = attempts;
       return `B: Online boards, "Open in another tab", Connect = take-over, picture ${picture.source}${picture.dim ? " (dimmed)" : ""}; B's open() ran ${untouched} time(s) before the pick and ${attempts} after it; B reads A's lock`;
@@ -460,6 +459,9 @@ async function main() {
       const hello = await driverB.boardSaid(/hello/, { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       const paths = await driverB.cardPaths();
       if (!paths.includes(state.path)) throw new Error(`tab B's cards ${paths.join(", ")} do not include ${state.path}`);
+      // The port B picked ended on the board's own card: no second, "new
+      // device" card for the same board.
+      if (paths.length !== 1) throw new Error(`tab B shows ${paths.length} cards for one board: ${paths.join(", ")}`);
 
       // The order, from the pages' own logs: A closed its port, then the
       // release was said on the channel, then B opened.
