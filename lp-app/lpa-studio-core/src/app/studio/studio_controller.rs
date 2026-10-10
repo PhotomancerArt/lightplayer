@@ -57,6 +57,13 @@ use crate::{
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
+/// One tab holds a board: the holder's flows (priming, claims, the gate's
+/// claims, the answer to an ask, the sentinels, the facts on the boards).
+mod board_hold_flow;
+/// One tab holds a board: Connect on a board another tab holds
+/// (`devices/<board>/take-over`), the asker's side.
+mod take_over_flow;
+
 /// Minimum gap between view publishes that carry *only* streamed log lines
 /// (session console tails, drained producer batches). Anything structural —
 /// a revision advance or a local mutation — publishes immediately and takes
@@ -178,6 +185,22 @@ pub struct StudioController {
     /// reports back (the actor's queue). `None` in a rig that wires neither.
     wifi_spawner: Option<Rc<dyn Fn(crate::DeviceTaskFuture)>>,
     wifi_tx: Option<crate::app::studio::studio_view_channel::CommandSender>,
+    /// The hold edge: the browser's Web Locks and hold channel
+    /// ([`Self::set_board_hold_edge`]). `None` where the browser has
+    /// neither, and in a rig that installs none: then this tab names no
+    /// holds and every device flow is as it was before holds existed.
+    board_hold_edge: Option<Rc<dyn crate::BoardHoldEdge>>,
+    /// What this tab and the other tabs of this browser hold, kept beside
+    /// the edge (there is a book exactly when there is an edge).
+    board_hold_book: Option<crate::BoardHoldBook>,
+    /// What this tab is doing about the holds: claims in flight, sentinels,
+    /// the facts on its boards, boards being let go
+    /// (`studio_controller/board_hold_flow.rs`). Idle without an edge.
+    board_hold_flow: crate::app::devices::board_hold::BoardHoldFlow,
+    /// Every Connect on a board another tab holds under way here, and how
+    /// each ended (`devices/<board>/take-over`;
+    /// `studio_controller/take_over_flow.rs`).
+    take_overs: crate::TakeOvers,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -497,6 +520,10 @@ impl StudioController {
             wifi_connects: crate::WifiConnects::default(),
             wifi_spawner: None,
             wifi_tx: None,
+            board_hold_edge: None,
+            board_hold_book: None,
+            board_hold_flow: Default::default(),
+            take_overs: crate::TakeOvers::default(),
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -845,6 +872,9 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("wi-fi: {host}: {}", failure.words());
         }
+        if let crate::WifiConnectTarget::Board(board) = target {
+            self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
+        }
         let connected = result.is_ok();
         self.wifi_connects.finish(target, host, result);
         if connected {
@@ -904,6 +934,7 @@ impl StudioController {
         if let Err(failure) = &result {
             log::info!("relay: {board}: {}", failure.words());
         }
+        self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         let connected = result.is_ok();
         self.wifi_connects
             .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
@@ -1589,6 +1620,39 @@ impl StudioController {
         self.devices.effects_mut().set_backup_store(store);
     }
 
+    /// Install the hold edge (Web Locks and the hold channel in the
+    /// browser; a [`crate::MemoryBoardHoldBus`] tab in tests), with an empty
+    /// book for the tab it names. Without one, this tab names no holds.
+    pub fn set_board_hold_edge(&mut self, edge: Rc<dyn crate::BoardHoldEdge>) {
+        self.board_hold_book = Some(crate::BoardHoldBook::new(edge.tab_id()));
+        self.board_hold_edge = Some(edge);
+    }
+
+    /// The hold book, when a hold edge is installed.
+    pub fn board_hold_book(&self) -> Option<&crate::BoardHoldBook> {
+        self.board_hold_book.as_ref()
+    }
+
+    /// A note another tab said on the hold channel
+    /// ([`StudioCommand::BoardHold`](crate::StudioCommand::BoardHold)):
+    /// folded into the book. Returns what it changed; reacting to it (the
+    /// fact on the board, the answer to an ask) is the hold flow's.
+    /// Without an edge there is no book, and a note changes nothing.
+    pub fn on_hold_note(
+        &mut self,
+        from: crate::TabId,
+        note: crate::HoldNote,
+    ) -> Vec<crate::BookChange> {
+        let changes = match self.board_hold_book.as_mut() {
+            Some(book) => book.apply(&from, &note),
+            None => return Vec::new(),
+        };
+        self.react_to_hold_changes(&changes);
+        self.reconcile_board_holds();
+        self.mark_dirty();
+        changes
+    }
+
     /// Install the engine cache (OPFS `firmware-cache/` in the browser).
     /// Without one, Studio keeps engines in memory for the page's life.
     pub fn set_engine_cache(&mut self, cache: Rc<dyn lpa_firmware_store::EngineCache>) {
@@ -1910,9 +1974,15 @@ impl StudioController {
     /// Run the granted-port sweep when one is due (boot, transport install,
     /// hotplug connect). Coalesced: a storm of connect events costs one sweep.
     fn run_due_device_sweep(&mut self) {
-        if !core::mem::take(&mut self.device_sweep_pending) {
+        if !self.device_sweep_pending {
             return;
         }
+        // With a hold edge, the first sweep waits for one look at what the
+        // other tabs hold, so it never opens a port they hold.
+        if !self.hold_priming_lets_sweep_run() {
+            return;
+        }
+        self.device_sweep_pending = false;
         self.devices.sweep_granted_ports();
     }
 
@@ -1931,6 +2001,11 @@ impl StudioController {
         for action in self.auto_name_actions() {
             self.fold_device_input(crate::DeviceInput::Action(action));
         }
+        // One tab holds a board: boards let go on request write their last
+        // picture and disconnect, then every hold is reconciled against
+        // what the folds left.
+        self.run_due_hold_releases().await;
+        self.reconcile_board_holds();
         let writes = self.devices.take_writes();
         if writes.is_empty() {
             return;
@@ -2186,6 +2261,14 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        view.take_overs = self
+            .take_overs
+            .devices()
+            .filter_map(|device| Some((device, self.take_overs.view(device)?)))
+            .collect();
+        // A port another tab's claims account for is that tab's board, not
+        // a new device found here.
+        self.hide_accounted_held_links(&mut view);
         view.board_projects = self.board_projects(&view);
         view.last_seen = self.registry_last_seen(&view);
         view
@@ -2996,11 +3079,49 @@ impl StudioController {
         }
     }
 
+    /// Write `device`'s newest frame to its sidecar NOW, past the ten-second
+    /// limit, stamped with the frame's own capture time: the holder's last
+    /// picture as it lets the board go to another tab, so that tab shows
+    /// the newest one. The same writer as [`Self::persist_due_device_frames`];
+    /// a failed write is a log line, like theirs.
+    async fn persist_device_frame_now(&mut self, device: crate::DeviceId) {
+        let now = (self.now_secs)();
+        let Some((frame, captured_at)) = self.device_feeds.get(device).and_then(|feed| {
+            let frame = feed.frame()?.clone();
+            let age = feed.frame_age_secs(now)?;
+            Some((frame, now - age))
+        }) else {
+            return;
+        };
+        let Ok(host) = self.library_host() else {
+            return;
+        };
+        let Some(uid) = self.device_registry_key(device).or_else(|| {
+            self.devices
+                .roster()
+                .device(device)
+                .and_then(|device| device.identity.uid.as_ref())
+                .map(|uid| uid.0.clone())
+        }) else {
+            return;
+        };
+        let bytes = crate::app::devices::device_frame_snapshot::encode(&frame, captured_at);
+        if let Err(error) = host
+            .catalog(CatalogOp::StoreDeviceFrame { uid, bytes })
+            .await
+        {
+            log::warn!("device last frame not persisted: {error}");
+        }
+        self.device_feeds
+            .mark_snapshot_written(device, captured_at, now);
+    }
+
     /// Seed the feeds of remembered boards from their persisted last frames
     /// (`device_frame_snapshot`), read off the library snapshot `fs` at
-    /// settle. Only a board whose feed has NO picture reads its sidecar, so
-    /// after the first settle nothing is read again, and a frame this
-    /// session pulled is never displaced by an older one on disk.
+    /// settle. A board whose link is open here keeps its own picture once
+    /// it has one; any other reads its sidecar and takes it when it is
+    /// newer, so a board another tab holds follows that tab's picture, and
+    /// a frame is never displaced by an older one on disk.
     fn seed_device_frame_snapshots(&mut self, fs: &Rc<std::cell::RefCell<dyn lpfs::LpFs>>) {
         let Some(inputs) = self.home_inputs.as_ref() else {
             return;
@@ -3029,7 +3150,16 @@ impl StudioController {
             let Some(device) = device else {
                 continue;
             };
-            if self.device_feeds.has_frame(device) {
+            // A picture pulled over a link open here is the newest there
+            // is; any other (a seed, the last pull on a closed link) gives
+            // way to a newer sidecar — another tab holding the board writes
+            // one every ten seconds, and every write re-settles this tab.
+            let live = self
+                .devices
+                .roster()
+                .device(device)
+                .is_some_and(|device| device.evidence.presence.is_open());
+            if !self.device_feeds.wants_snapshot(device, live) {
                 continue;
             }
             let snapshot = {
@@ -3037,7 +3167,9 @@ impl StudioController {
                 crate::app::devices::device_frame_snapshot::read_snapshot(&*fs, &uid)
             };
             if let Some((frame, captured_at)) = snapshot {
-                seeded |= self.device_feeds.seed_snapshot(device, frame, captured_at);
+                seeded |= self
+                    .device_feeds
+                    .seed_snapshot(device, frame, captured_at, live);
             }
         }
         if seeded {
@@ -3443,6 +3575,9 @@ impl StudioController {
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
                 offers.publish(offer);
             }
+            if let Some(offer) = self.take_over_offer_for(view, &facts) {
+                offers.publish(offer);
+            }
             // `<board>/unlock`: while the board's link holds nothing (or
             // only play), linked and idle.
             let unlock = roster.access.get(&view.id).and_then(|access| access.unlock);
@@ -3484,7 +3619,9 @@ impl StudioController {
     /// board this browser remembers a Wi‑Fi address for, while nothing
     /// reaches it (it is offline — unplugged, or its last link went), on a
     /// page that reaches the LAN. Not on a runtime (a sim or an in-tab emu
-    /// has no radio). Disabled while it is being reached.
+    /// has no radio), and not while another tab of this browser holds the
+    /// board's network slot: Connect is then `take-over`, which asks that
+    /// tab first. Disabled while it is being reached.
     fn connect_wifi_offer(
         &self,
         view: &crate::DeviceView,
@@ -3497,6 +3634,9 @@ impl StudioController {
             return None;
         }
         let key = self.board_key(view.id)?;
+        if self.network_slot_held_elsewhere(key) {
+            return None;
+        }
         let address = self.wifi_addresses.get(&key)?;
         Some(crate::connect_wifi_offer(
             &facts.prefix,
@@ -3515,7 +3655,9 @@ impl StudioController {
     ///
     /// No list of the account's boards stands behind it, and nothing asks
     /// lightplayer.app whether the board is online first: the press finds
-    /// out, and an offline board says so on its tile.
+    /// out, and an offline board says so on its tile. Not while another tab
+    /// of this browser holds the board's network slot (Connect is then
+    /// `take-over`).
     fn connect_relay_offer(
         &self,
         view: &crate::DeviceView,
@@ -3529,12 +3671,27 @@ impl StudioController {
             return None;
         }
         let key = self.board_key(view.id)?;
+        if self.network_slot_held_elsewhere(key) {
+            return None;
+        }
         Some(crate::connect_relay_offer(
             &facts.prefix,
             view.id,
             self.wifi_connects
                 .connecting(crate::WifiConnectTarget::Relay(key)),
         ))
+    }
+
+    /// Whether another tab of this browser holds the network slot of the
+    /// board with `mac` (a board the person reached on the LAN or through
+    /// the relay in that tab). A connect from here would take the slot from
+    /// under it — or, on an open board, be turned away — so the board's
+    /// Connect is `take-over`, which asks that tab first.
+    fn network_slot_held_elsewhere(&self, mac: lpa_devices::BoardKey) -> bool {
+        self.board_hold_book.as_ref().is_some_and(|book| {
+            let key = crate::HoldKey::network(mac);
+            book.held_elsewhere(&key).is_some() && book.holds(&key).is_none()
+        })
     }
 
     /// Whether what `device` runs is a project this library holds (Q4): its
@@ -4269,6 +4426,10 @@ impl StudioController {
         if node_id.as_str() == crate::RelayConnectOp::NODE_ID {
             let op = action.into_op::<crate::RelayConnectOp>()?;
             return self.start_relay_connect(op);
+        }
+        if node_id.as_str() == crate::TakeOverOp::NODE_ID {
+            let op = action.into_op::<crate::TakeOverOp>()?;
+            return self.begin_take_over(op);
         }
         if node_id.as_str() == crate::DevicePushOp::NODE_ID {
             let op = action.into_op::<crate::DevicePushOp>()?;

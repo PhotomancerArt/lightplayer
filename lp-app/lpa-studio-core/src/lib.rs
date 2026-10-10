@@ -98,6 +98,12 @@ pub use app::devices::{
     ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
     duration_words,
 };
+/// One tab holds a board: the hold vocabulary and the edge the web installs.
+pub use app::devices::{
+    AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
+    HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
+    OtherHold, PendingAsk, TabId, UsbPair,
+};
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
     DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
@@ -130,6 +136,11 @@ pub use app::devices::{
     RelayConnectFailure, RelayConnectOp, RelayDeviceTransport, RelayLinkSource,
     connect_relay_offer,
 };
+/// Connect on a board another tab holds: the offer, its op and its words.
+pub use app::devices::{
+    TAKE_OVER_ASKING, TAKE_OVER_NO_WAY, TakeOverOp, TakeOvers, UiTakeOver, busy_in_the_other_tab,
+    take_over_offer,
+};
 pub use app::devices::{
     UiWifiConnect, WIFI_ADDRESS_PARAM, WIFI_ADDRESSES_STORAGE_KEY, WIFI_BLOCKED_WORDS,
     WIFI_BUSY_WORDS, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET, WifiAddress, WifiAddressBook,
@@ -143,6 +154,8 @@ pub use app::studio::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;
+/// The device model's fact about a board another tab holds.
+pub use lpa_devices::{HeldElsewhere, HoldLevel, HoldVia};
 // The project's declared hardware (D41): the web shell's Hardware row and
 // the gallery card's "for <board>" badge both read it.
 pub use app::access::{

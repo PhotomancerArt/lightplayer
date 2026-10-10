@@ -267,6 +267,11 @@ The rules:
   separated by hairlines. Nothing inside a bar draws its own frame.
 - **A notice tints its bar,** in its status family, with its icon (never
   colour alone). The rest of the card stays neutral.
+- **"Someone has it" is orange.** The connection bar says **Open in another
+  tab**, **Taken by another tab** or **Someone else connected** in the
+  orange (Attention) family, and nothing else tints for it; blue stays
+  Update. A take-over under way is the bar's work, and one that failed is
+  striped with Retry.
 - **A bar's action sits flush at its end,** as a section of the bar, not a
   chip floating inside it.
 - **Details open as Studio's detail card, merged with the bar that opened

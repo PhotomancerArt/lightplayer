@@ -44,6 +44,9 @@ pub mod age_words;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_card;
+/// One tab holds a board: the hold vocabulary, the book, the edge trait and
+/// its in-memory double.
+pub mod board_hold;
 pub mod board_plays;
 pub mod board_projects;
 pub mod board_ref;
@@ -130,6 +133,9 @@ pub mod sim_create_op;
 pub mod sim_record;
 pub mod sim_transport;
 pub mod store_lookups;
+pub mod take_over_offer;
+pub mod take_over_op;
+pub mod take_over_state;
 pub mod target_offer;
 pub mod ui_link_kind;
 pub(crate) mod update_auto_start;
@@ -153,6 +159,11 @@ pub use add_device_offers::{
 pub use age_words::{age_words, duration_words};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
+pub use board_hold::{
+    AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
+    HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
+    OtherHold, PendingAsk, TabId, UsbPair,
+};
 pub use board_plays::BoardPlays;
 pub use board_projects::{BoardProjectInputs, BoardProjects, board_projects};
 pub use board_ref::{BoardRef, BoardRefError};
@@ -292,6 +303,13 @@ pub use sim_transport::{
     SimBacking, SimDeviceTransport, SimLinkSource, SimRuntimeControl, SimSession, SimTier,
 };
 pub use store_lookups::{StoreLookup, StoreLookups};
+pub use take_over_offer::{TAKE_OVER_ASKING, busy_in_the_other_tab, take_over_offer};
+pub use take_over_op::TakeOverOp;
+pub use take_over_state::{
+    ASK_PATIENCE_SECS, NETWORK_OPEN_PATIENCE_SECS, OPEN_PATIENCE_SECS, TAKE_OVER_ANOTHER_TAB,
+    TAKE_OVER_NO_ANSWER, TAKE_OVER_NO_WAY, TAKE_OVER_OPENING_WORDS, TAKE_OVER_STILL_IN_USE,
+    TakeOverStage, TakeOverTimeout, TakeOvers, UiTakeOver,
+};
 pub use target_offer::{TargetChoice, TargetGroup, TargetOffer, TargetScope, target_offer};
 pub use ui_link_kind::UiLinkKind;
 pub use update_build_facts::{StoreLatest, StoreReleases, UpdateBuildFacts};
