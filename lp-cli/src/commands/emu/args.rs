@@ -272,7 +272,12 @@ pub struct RunArgs {
     /// request's answer before sending the next — a settle, so a project a
     /// `loadProject` started runs its first frames (and compiles) before the
     /// next request switches it away.
-    #[arg(long = "request-gap", value_name = "MS", default_value_t = 0, requires = "request")]
+    #[arg(
+        long = "request-gap",
+        value_name = "MS",
+        default_value_t = 0,
+        requires = "request"
+    )]
     pub request_gap_ms: u64,
 
     /// With `--host-link`: an over-the-air update on the link's channel 3.

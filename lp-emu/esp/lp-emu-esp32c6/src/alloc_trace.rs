@@ -67,7 +67,9 @@ pub struct AllocTrace {
 impl AllocTrace {
     /// A trace into `out`, its header already written.
     pub fn new(mut out: Box<dyn Write + Send>, header: &[String]) -> Self {
-        let mut error = writeln!(out, "# lp-alloc-trace 1").err().map(|e| e.to_string());
+        let mut error = writeln!(out, "# lp-alloc-trace 1")
+            .err()
+            .map(|e| e.to_string());
         for line in header {
             if error.is_none() {
                 error = writeln!(out, "# {line}").err().map(|e| e.to_string());
@@ -129,12 +131,7 @@ impl AllocTrace {
 /// and nothing is checked here — a split image's core is not in RAM until its
 /// loader has copied it — because the firmware's own `ebreak` there is what
 /// runs a hook at all: an image without it never reaches one.
-pub fn install(
-    machine: &mut Esp32C6Machine,
-    alloc_at: u32,
-    dealloc_at: u32,
-    trace: AllocTrace,
-) {
+pub fn install(machine: &mut Esp32C6Machine, alloc_at: u32, dealloc_at: u32, trace: AllocTrace) {
     machine.set_alloc_trace(trace);
     machine
         .hooks_mut()
