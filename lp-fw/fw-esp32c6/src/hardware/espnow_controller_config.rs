@@ -39,9 +39,42 @@ const RX_BA_WIN: u8 = 3;
 
 /// The `ControllerConfig` the product's ESP-NOW radio is brought up with.
 pub fn espnow_controller_config() -> ControllerConfig {
-    ControllerConfig::default()
+    let config = ControllerConfig::default()
         .with_static_rx_buf_num(STATIC_RX_BUF_NUM)
         .with_dynamic_rx_buf_num(DYNAMIC_RX_BUF_NUM)
         .with_dynamic_tx_buf_num(DYNAMIC_TX_BUF_NUM)
-        .with_rx_ba_win(RX_BA_WIN)
+        .with_rx_ba_win(RX_BA_WIN);
+    #[cfg(feature = "radio_cfg_probe")]
+    let config = probe::apply(config, option_env!("LP_WIFI_CFG").unwrap_or(""));
+    config
+}
+
+/// RESEARCH (`radio_cfg_probe`, never shipped): `LP_WIFI_CFG` as
+/// `key=value,key=value` over the driver's fields, so one tree can be built
+/// at several configurations and measured on the emulator (RAM experiment
+/// E13). An unknown key panics the probe image.
+#[cfg(feature = "radio_cfg_probe")]
+mod probe {
+    use esp_radio::wifi::ControllerConfig;
+
+    pub fn apply(mut config: ControllerConfig, spec: &str) -> ControllerConfig {
+        for pair in spec.split(',').filter(|p| !p.is_empty()) {
+            let (key, value) = pair.split_once('=').expect("LP_WIFI_CFG: key=value");
+            let n: u32 = value.parse().expect("LP_WIFI_CFG: integer value");
+            config = match key {
+                "static_rx_buf_num" => config.with_static_rx_buf_num(n as u8),
+                "dynamic_rx_buf_num" => config.with_dynamic_rx_buf_num(n as u16),
+                "static_tx_buf_num" => config.with_static_tx_buf_num(n as u8),
+                "dynamic_tx_buf_num" => config.with_dynamic_tx_buf_num(n as u16),
+                "rx_ba_win" => config.with_rx_ba_win(n as u8),
+                "ampdu_rx_enable" => config.with_ampdu_rx_enable(n != 0),
+                "ampdu_tx_enable" => config.with_ampdu_tx_enable(n != 0),
+                "amsdu_tx_enable" => config.with_amsdu_tx_enable(n != 0),
+                "rx_queue_size" => config.with_rx_queue_size(n as usize),
+                "tx_queue_size" => config.with_tx_queue_size(n as usize),
+                _ => panic!("LP_WIFI_CFG: unknown key"),
+            };
+        }
+        config
+    }
 }
