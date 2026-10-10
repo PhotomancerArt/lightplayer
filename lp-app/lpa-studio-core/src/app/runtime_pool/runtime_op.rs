@@ -36,7 +36,16 @@ pub enum RuntimeOp {
     /// ([`ConnectedBoard`](crate::ConnectedBoard)): going home keeps it, and
     /// it shows on the board's card. A session on another board closes
     /// first (one board connected at a time).
-    ConnectDevice { device: DeviceId },
+    ///
+    /// A board Studio is not talking to yet is reached first, then the
+    /// session opens once it is ready ([`PendingLens`](crate::PendingLens)):
+    /// a closed port is opened, and an offline board is reached by `reach`.
+    /// While an editor open is already held for the board, Connect opens
+    /// its port only, and the held open goes on to the editor.
+    ConnectDevice {
+        device: DeviceId,
+        reach: Option<ConnectReach>,
+    },
     /// Show the editor on a board (`devices/<board>/edit`): on the
     /// connected board, the session already open, with nothing reattached
     /// or read again; on any other board, connect it first, then show the
@@ -52,6 +61,22 @@ pub enum RuntimeOp {
     /// waking the request the open is parked on — is
     /// [`cancel_open`](crate::cancel_open), which runs first.
     CancelOpen,
+}
+
+/// How a Connect reaches an offline board, in the order the card's primary
+/// tries them: its Wi‑Fi address, then lightplayer.app, then its cable.
+/// Each is the road its own offer takes (`connect-wifi`, `connect-relay`,
+/// `reconnect`), run by the same code.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectReach {
+    /// The address this browser remembers for it on Wi‑Fi
+    /// (`WifiConnectOp::Board`).
+    Wifi,
+    /// Through lightplayer.app's relay (`RelayConnectOp`).
+    Relay,
+    /// Its link again: the browser's port (or Bluetooth) chooser
+    /// (`Action::Reconnect`), which needs the user's click.
+    Usb,
 }
 
 impl RuntimeOp {
@@ -169,6 +194,11 @@ mod tests {
         for op in [
             RuntimeOp::ConnectDevice {
                 device: DeviceId(7),
+                reach: None,
+            },
+            RuntimeOp::ConnectDevice {
+                device: DeviceId(7),
+                reach: Some(ConnectReach::Wifi),
             },
             RuntimeOp::EditDevice {
                 device: DeviceId(7),

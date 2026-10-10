@@ -10,6 +10,7 @@ pub(crate) mod offer_press_test_api;
 /// registry) and the incoming lamp extent (the upstream node's produced
 /// control product) — the facts the project walk cannot see.
 mod output_face_decoration;
+pub mod pending_lens;
 pub mod place;
 pub mod play_view_op;
 pub mod refresh_cadence;
@@ -87,6 +88,7 @@ pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
 pub use connected_board::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use console_command::ConsoleCommand;
+pub use pending_lens::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE, ConnectHold, PendingLens};
 pub use place::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 pub use play_view_op::PlayViewOp;
 pub use refresh_cadence::{

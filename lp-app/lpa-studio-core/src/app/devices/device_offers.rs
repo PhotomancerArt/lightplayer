@@ -31,8 +31,12 @@
 //! Flash (Q3), Push (Q4) and the over-the-air install (an older version is
 //! Lasting).
 //!
-//! `connect` on a board Studio is talking to — its session, on its card —
-//! is the controller's, beside `edit` and `done`
+//! `connect` reaches the board if it must, then opens its panel
+//! ([`RuntimeOp::ConnectDevice`](crate::RuntimeOp::ConnectDevice)): on a
+//! closed port (the row above) it opens the port, then the board's session
+//! — and while an editor open is held for the board, it opens the port
+//! only. On a ready board, and on an offline one Studio can reach, it is
+//! the controller's, beside `edit` and `done`
 //! ([`device_connect_offer`](super::connect_offer::device_connect_offer)).
 
 use lpa_devices::Action;
@@ -52,7 +56,7 @@ use super::device_push_offer::push_device_offer;
 use super::device_update_offers::{UpdateOfferFacts, update_offers};
 use super::devices_op::{DeviceFace, DevicesOp};
 use crate::app::home::{UiExampleCard, UiPackageCard};
-use crate::{OfferArgs, OfferBinder, OfferParam, OfferPath, UiAction, UiOffer};
+use crate::{OfferArgs, OfferBinder, OfferParam, OfferPath, UiOffer};
 
 /// The Rename offer's text parameter.
 pub const RENAME_NAME_PARAM: &str = "name";
@@ -171,7 +175,8 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
         offers.push(UiOffer::new(
             at("connect"),
             "connect",
-            face_action(facts.face, Action::Connect { device }),
+            // Open the port, then the board's session: one press.
+            super::connect_offer::connect_port_action(device),
         ));
     }
     // Reset is offered on any linked board, busy or not, so the way out of
@@ -274,14 +279,6 @@ fn autoconnect_offer(view: &DeviceView, path: OfferPath, enabled: bool) -> UiOff
         }),
         set(enabled),
     )
-}
-
-/// `action` with the words its face gives it.
-fn face_action(face: DeviceFace, action: Action) -> UiAction {
-    match face {
-        DeviceFace::Sim => DevicesOp::sim_action_for(action),
-        DeviceFace::Wire => DevicesOp::action_for(action),
-    }
 }
 
 /// The icon token an escape is drawn with.

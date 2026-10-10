@@ -138,6 +138,7 @@ pub use app::devices::{
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE, ConnectHold, PendingLens};
 pub use app::studio::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
@@ -253,8 +254,8 @@ pub use app::rich_object::{
 };
 pub use app::roster::board_display_name;
 pub use app::runtime_pool::{
-    DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload, RuntimePool,
-    RuntimeSession, SESSION_CAPACITY,
+    ConnectReach, DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload,
+    RuntimePool, RuntimeSession, SESSION_CAPACITY,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,

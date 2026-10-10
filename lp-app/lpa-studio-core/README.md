@@ -518,8 +518,21 @@ which the home page can hold (`app/studio/connected_board.rs`,
   Degraded), linked, idle, holds a tier (any: the play password is enough),
   registered, and not the board this tab's session is on; disabled,
   "Nothing on it yet", on a board running nothing. A session on another
-  board closes first: one board is connected at a time. On a board whose
-  port is there but closed, `connect` opens the port (`device_offers.rs`).
+  board closes first: one board is connected at a time. Connect reaches the
+  board if it must, then opens its panel, in one press: on a closed port
+  (`device_offers.rs`) it opens the port; on an offline board it takes the
+  road the card's own verbs would — Wi‑Fi address, then lightplayer.app,
+  then the cable (`ConnectReach`, the same code `connect-wifi`,
+  `connect-relay` and `reconnect` run). Then it holds the intent
+  (`app/studio/pending_lens.rs`): the tick attaches it on the card once the
+  board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
+  "The board didn't answer in time" (`StudioController::connect_failure`),
+  and it lets go at once when the board turns out locked or needing
+  firmware (Unlock, Install take over), on Done, another Connect, an Edit
+  elsewhere, or an address's open. While an editor open is held for the
+  board (the opening frame's exit), it opens the port only. Not published
+  again while it waits, nor on an offline stand-in (Power on is its way
+  back).
 - `edit` shows the editor on the board (`devices/edit_offer.rs`,
   `RuntimeOp::EditDevice`): on the connected board, the session already
   open, with nothing reattached or read again; on any other ready, running,

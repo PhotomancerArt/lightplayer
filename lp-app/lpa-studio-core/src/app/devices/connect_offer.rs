@@ -1,24 +1,31 @@
-//! `devices/<board>/connect` on a board Studio is talking to: its panel,
-//! here, on its card.
+//! `devices/<board>/connect`: the board's panel, here, on its card.
 //!
 //! Connect has one meaning (the board card ADR, §4): this board's session,
-//! held by the home page, on the board's card. On a ready board that is
-//! [`RuntimeOp::ConnectDevice`]: the lens opens the way an address opens
-//! it, and the card's bars become the board's panel. A board running
-//! nothing has no panel to show, so its Connect is published disabled,
-//! "Nothing on it yet", and the project bar's "Add a project" leads.
+//! held by the home page, on the board's card —
+//! [`RuntimeOp::ConnectDevice`]. The lens opens the way an address opens
+//! it, and the card's bars become the board's panel. Connect reaches the
+//! board first when it must, then opens the panel, in one press:
 //!
-//! On a board whose port is there but closed, `connect` is the card's own
-//! verb ([`device_offers`](super::device_offers)), the same op.
+//! | Board | Connect |
+//! |---|---|
+//! | Ready (or Degraded), linked, idle, holds a tier, registered | opens the session; disabled, "Nothing on it yet", while it runs nothing |
+//! | the port is there but closed | opens the port, then the session ([`device_offers`](super::device_offers) publishes it, [`connect_port_action`]) |
+//! | offline, Studio can reach it | reaches it — Wi‑Fi first, then lightplayer.app, then its cable — then opens the session |
 //!
-//! WHEN it is offered on a ready board is the studio controller's to
-//! decide (it holds the pool, the access sessions and the registry), and it
+//! Never on the board this tab's session is on (Done is its verb), while a
+//! Connect already waits for the board (the card says "Connecting…"), nor
+//! on an offline stand-in (a sim, an in-tab board), whose primary is Power
+//! on.
+//!
+//! WHEN it is offered is the studio controller's to decide (it holds the
+//! pool, the access sessions, the registry and the held intent), and it
 //! hands the answers over as [`ConnectFacts`]; WHAT it is is decided here.
 
+use lpa_devices::DeviceId;
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{DeviceView, Escape, LoadedProject};
 
-use crate::{OfferPath, RuntimeOp, UiAction, UiOffer};
+use crate::{ConnectReach, OfferPath, RuntimeOp, UiAction, UiOffer};
 
 /// The verb's path segment.
 pub const CONNECT_VERB: &str = "connect";
@@ -42,41 +49,62 @@ pub struct ConnectFacts {
     /// The icon the board's link is drawn with (`usb`, `bluetooth`,
     /// `wifi`, `cloud`), as the card's primary draws it.
     pub icon: &'static str,
+    /// How an offline board is reached, when Studio can reach it: the first
+    /// of its Wi‑Fi address, lightplayer.app and its cable whose own offer
+    /// (`connect-wifi`, `connect-relay`, `reconnect`) is published.
+    pub reach: Option<ConnectReach>,
+    /// A Connect is already waiting for this board.
+    pub waiting: bool,
 }
 
-/// `devices/<board>/connect` under `prefix` for a board Studio is talking
-/// to, when it is Ready (or Degraded: a faulted show still has its panel),
-/// linked, idle, granted, registered and not the board this tab's session
-/// is on. Enabled while it runs a project; disabled, "Nothing on it yet",
-/// while it runs nothing or has not said.
+/// `devices/<board>/connect` under `prefix`, for a board that is ready or
+/// offline and reachable (see the module's table); `None` otherwise. A
+/// closed port's Connect is [`device_offers`](super::device_offers)'.
 pub fn device_connect_offer(
     prefix: &OfferPath,
     view: &DeviceView,
     facts: &ConnectFacts,
 ) -> Option<UiOffer> {
+    if facts.session_on_it || facts.waiting || !facts.registered {
+        return None;
+    }
+    let path = prefix.clone().child(CONNECT_VERB);
+    if view.status == DeviceStatus::Offline {
+        let reach = facts.reach?;
+        let action = connect_action(view.id, Some(reach));
+        return Some(match reach {
+            ConnectReach::Wifi => UiOffer::new(path, "wifi", action),
+            ConnectReach::Relay => UiOffer::new(path, "cloud", action),
+            // The browser's chooser: a real click or nothing.
+            ConnectReach::Usb => UiOffer::new(path, facts.icon, action.needs_user_activation()),
+        });
+    }
     let ready = matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded);
     let linked = view.escapes.contains(&Escape::Disconnect);
     let idle = view.activity.is_none();
-    if !(ready && linked && idle && facts.granted && facts.registered) || facts.session_on_it {
+    if !(ready && linked && idle && facts.granted) {
         return None;
     }
-    let action = connect_action(view);
+    let action = connect_action(view.id, None);
     let action = match view.loaded_project {
         LoadedProject::Running { .. } => action,
         LoadedProject::Empty | LoadedProject::Unknown => action.disabled(NOTHING_ON_IT_YET),
     };
-    Some(UiOffer::new(
-        prefix.clone().child(CONNECT_VERB),
-        facts.icon,
-        action,
-    ))
+    Some(UiOffer::new(path, facts.icon, action))
 }
 
-/// [`RuntimeOp::ConnectDevice`] for `view`'s board.
-fn connect_action(view: &DeviceView) -> UiAction {
+/// What a closed port's Connect presses (the card's own `connect`): open
+/// the port, then the board's session — or, while an editor open is held
+/// for the board, the port only.
+pub fn connect_port_action(device: DeviceId) -> UiAction {
+    connect_action(device, None)
+}
+
+/// [`RuntimeOp::ConnectDevice`] for `device`.
+fn connect_action(device: DeviceId, reach: Option<ConnectReach>) -> UiAction {
     UiAction::from_op(
         RuntimeOp::NODE_ID,
-        RuntimeOp::ConnectDevice { device: view.id },
+        RuntimeOp::ConnectDevice { device, reach },
     )
 }
 
@@ -98,9 +126,11 @@ mod tests {
         assert_eq!(
             offer.action.op_as::<RuntimeOp>(),
             Some(&RuntimeOp::ConnectDevice {
-                device: DeviceId(7)
+                device: DeviceId(7),
+                reach: None
             })
         );
+        assert!(!offer.action.meta().needs_user_activation);
         let mut degraded = running();
         degraded.status = DeviceStatus::Degraded;
         assert!(
@@ -127,8 +157,67 @@ mod tests {
     }
 
     #[test]
+    fn an_offline_board_is_reached_by_the_road_the_controller_found() {
+        let mut view = running();
+        view.status = DeviceStatus::Offline;
+        view.escapes = vec![Escape::Reconnect, Escape::Forget];
+        let reached = |reach| {
+            let facts = ConnectFacts { reach, ..facts() };
+            device_connect_offer(&prefix(), &view, &facts)
+        };
+        assert!(reached(None).is_none(), "nothing reaches it");
+        for (reach, icon, click) in [
+            (ConnectReach::Wifi, "wifi", false),
+            (ConnectReach::Relay, "cloud", false),
+            (ConnectReach::Usb, "usb", true),
+        ] {
+            let offer = reached(Some(reach)).expect("reachable");
+            assert_eq!(offer.icon, icon, "{reach:?}");
+            assert!(offer.is_enabled(), "{reach:?}");
+            assert_eq!(
+                offer.action.meta().needs_user_activation,
+                click,
+                "{reach:?}: the chooser needs a real click"
+            );
+            assert_eq!(
+                offer.action.op_as::<RuntimeOp>(),
+                Some(&RuntimeOp::ConnectDevice {
+                    device: DeviceId(7),
+                    reach: Some(reach)
+                })
+            );
+        }
+        let waiting = ConnectFacts {
+            reach: Some(ConnectReach::Wifi),
+            waiting: true,
+            ..facts()
+        };
+        assert!(
+            device_connect_offer(&prefix(), &view, &waiting).is_none(),
+            "a Connect already waits for it"
+        );
+    }
+
+    #[test]
+    fn a_closed_ports_connect_opens_the_port_then_the_session() {
+        assert_eq!(
+            connect_port_action(DeviceId(7)).op_as::<RuntimeOp>(),
+            Some(&RuntimeOp::ConnectDevice {
+                device: DeviceId(7),
+                reach: None
+            })
+        );
+        let mut closed = running();
+        closed.status = DeviceStatus::Attached;
+        assert!(
+            device_connect_offer(&prefix(), &closed, &facts()).is_none(),
+            "the card's own verb, not published twice"
+        );
+    }
+
+    #[test]
     fn connect_waits_for_a_ready_idle_granted_registered_board_not_already_open() {
-        let cases: [(&str, fn(&mut DeviceView, &mut ConnectFacts)); 6] = [
+        let cases: [(&str, fn(&mut DeviceView, &mut ConnectFacts)); 7] = [
             ("not ready", |view, _| view.status = DeviceStatus::Attached),
             ("not linked", |view, _| view.escapes = vec![Escape::Forget]),
             ("busy", |view, _| {
@@ -147,6 +236,7 @@ mod tests {
             ("the session is on it", |_, facts| {
                 facts.session_on_it = true
             }),
+            ("a Connect waits for it", |_, facts| facts.waiting = true),
         ];
         for (why, change) in cases {
             let mut view = running();
@@ -165,6 +255,8 @@ mod tests {
             session_on_it: false,
             granted: true,
             icon: "usb",
+            reach: None,
+            waiting: false,
         }
     }
 

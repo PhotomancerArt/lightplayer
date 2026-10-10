@@ -6,9 +6,13 @@
 //! Edit (`devices/<board>/edit`) shows the editor on that same session with
 //! nothing reopened, or connects first; Done (`devices/<board>/done`) closes
 //! it. Where the user is decides which surface the open session shows on,
-//! and nothing else. Every verb is pressed by its offer path, as the card
-//! and the app agent press it.
+//! and nothing else. Connect reaches a board Studio is not talking to yet
+//! first — a closed port, a board offline on its cable or on Wi‑Fi — then
+//! opens its session, holding the intent for a minute at most. Every verb
+//! is pressed by its offer path, as the card and the app agent press it.
 
+use super::ble_drop_tests::{bench_over_bluetooth, bluetooth_board, locked_store_file};
+use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
 use crate::{BoardPlays, ConnectPhase, UiPage, UiPlace, UiProjectView};
 
@@ -315,9 +319,324 @@ fn the_offers_follow_the_session() {
     assert_eq!(empty.offer_reason(empty_connect), crate::NOTHING_ON_IT_YET);
 }
 
+/// A closed port: Connect opens it, the board identifies, and the session
+/// opens on the card — one press.
+#[test]
+fn connect_on_an_attached_board_opens_the_port_then_the_panel() {
+    let (mut bench, tasks, _device, id, uid) =
+        running_library_board("dev000000cnct00000a", "usb-conn-10");
+    bench.press_device(id, "disconnect", OfferArgs::new());
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.status == crate::DeviceStatus::Attached)
+    });
+
+    bench.press_device(id, "connect", OfferArgs::new());
+    assert!(
+        bench
+            .controller
+            .pending_lens()
+            .is_some_and(|pending| pending.is_connect_for(&uid)),
+        "the Connect holds while the port opens"
+    );
+    let connect = bench.device_verb(id, "connect");
+    bench.not_offered(&connect);
+
+    tick_until(&mut bench, &tasks, "the session to open", |bench| {
+        bench.controller.connected().is_some()
+    });
+    assert_eq!(bench.controller.connected().unwrap().device, id);
+    assert!(bench.controller.pending_lens().is_none());
+    on_its_card(&bench);
+}
+
+/// An offline board Studio reaches by its cable: Connect asks for its port
+/// back (the browser's chooser, which needs the user's click), then opens
+/// the session when it is back.
+#[test]
+fn connect_on_an_offline_usb_board_reaches_then_connects() {
+    let (mut bench, tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct00000b", "usb-conn-11");
+    unplug(&mut bench, &tasks, id);
+
+    let connect = bench.device_verb(id, "connect");
+    let offer = bench.offered(&connect);
+    assert_eq!(
+        offer.action.op_as::<crate::RuntimeOp>(),
+        Some(&crate::RuntimeOp::ConnectDevice {
+            device: id,
+            reach: Some(crate::ConnectReach::Usb)
+        })
+    );
+    assert!(
+        offer.action.meta().needs_user_activation,
+        "the chooser is the user's"
+    );
+
+    bench.press(&connect, OfferArgs::new()).expect("Connect");
+    assert!(
+        bench
+            .controller
+            .pending_lens()
+            .is_some_and(|pending| pending.connect.is_some()),
+        "the Connect holds while the board comes back"
+    );
+    tick_until(
+        &mut bench,
+        &tasks,
+        "the board back and connected",
+        |bench| bench.controller.connected().is_some(),
+    );
+    assert_eq!(bench.controller.connected().unwrap().device, id);
+    on_its_card(&bench);
+}
+
+/// An offline board this browser remembers on Wi‑Fi: Connect reaches it
+/// there (Wi‑Fi first, as the card's primary orders it), then opens the
+/// session.
+#[test]
+fn connect_over_wifi_reaches_then_connects() {
+    let device = joined_light_player("dev000000cnct00000c");
+    let (mut bench, tasks) = identified(&device, "usb-conn-12");
+    let _rig = with_lan(&mut bench, &device);
+    let id = bench.view().devices[0].id;
+    let key = lpa_devices::BoardKey::parse(KEY).unwrap();
+    bench.run_until(&tasks, "the board's address to be learned", |bench| {
+        bench.controller.wifi_addresses().get(&key).is_some()
+    });
+    bench.settle_library();
+    unplug(&mut bench, &tasks, id);
+
+    let connect = bench.device_verb(id, "connect");
+    let offer = bench.offered(&connect);
+    assert_eq!(offer.icon, "wifi");
+    assert_eq!(
+        offer.action.op_as::<crate::RuntimeOp>(),
+        Some(&crate::RuntimeOp::ConnectDevice {
+            device: id,
+            reach: Some(crate::ConnectReach::Wifi)
+        })
+    );
+    bench.press(&connect, OfferArgs::new()).expect("Connect");
+    assert!(
+        bench
+            .controller
+            .pending_lens()
+            .is_some_and(|pending| pending.connect.is_some()),
+        "the Connect holds while Wi‑Fi reaches the board"
+    );
+    tick_until(
+        &mut bench,
+        &tasks,
+        "the board connected over Wi‑Fi",
+        |bench| bench.controller.connected().is_some(),
+    );
+    assert_eq!(bench.controller.connected().unwrap().device, id);
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .lan_links
+            .contains_key(&id),
+        "reached on Wi‑Fi"
+    );
+    assert!(bench.controller.view().home.is_some());
+}
+
+/// A board that never comes back: after the grace the hold is gone, the
+/// card's words say why, and Connect is offered again.
+#[test]
+fn a_connect_that_never_lands_gives_up_after_the_grace() {
+    let (mut bench, tasks, _device, id, uid) =
+        running_library_board("dev000000cnct00000d", "usb-conn-13");
+    unplug(&mut bench, &tasks, id);
+    // The chooser comes back empty: the board is nowhere to be found.
+    bench.chooser_grants.set(false);
+    let connect = bench.device_verb(id, "connect");
+    bench.press(&connect, OfferArgs::new()).expect("Connect");
+    for _ in 0..20 {
+        bench.step(&tasks);
+        drive(bench.controller.try_pending_device_lens());
+    }
+    assert!(
+        bench
+            .controller
+            .pending_lens()
+            .is_some_and(|pending| pending.is_connect_for(&uid)),
+        "still waiting inside the grace"
+    );
+    bench.not_offered(&connect);
+
+    bench
+        .clock
+        .set(bench.clock.get() + crate::CONNECT_INTENT_GRACE.as_secs_f64() + 1.0);
+    drive(bench.controller.try_pending_device_lens());
+    assert!(bench.controller.pending_lens().is_none(), "given up");
+    let failure = bench
+        .controller
+        .connect_failure()
+        .expect("the card says why");
+    assert_eq!(failure.device, id);
+    assert_eq!(failure.reason, crate::CONNECT_GAVE_UP);
+    assert!(bench.offered(&connect).is_enabled(), "Retry is Connect");
+    assert!(bench.controller.connected().is_none());
+}
+
+/// A board reached over Bluetooth that comes back locked: the hold lets go
+/// at once, and Unlock is the way in.
+#[test]
+fn a_locked_board_drops_the_hold_and_offers_unlock() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        bluetooth_board("dev000000cnct00000e")
+            .with_untrusted_link()
+            .with_root_files(vec![locked_store_file()]),
+    )));
+    let (mut bench, tasks, present) = bench_over_bluetooth(&device, |_| {});
+    bench.run_until(&tasks, "the board to ask for its password", |bench| {
+        bench.controller.view().login_prompt.is_some()
+    });
+    let id = bench.view().devices[0].id;
+    bench.settle_library();
+
+    // Out of range: the board is remembered, offline.
+    present.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to go offline", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
+    });
+    let connect = bench.device_verb(id, "connect");
+    bench.press(&connect, OfferArgs::new()).expect("Connect");
+    assert!(
+        bench.controller.pending_lens().is_some(),
+        "the Connect holds"
+    );
+
+    // Back in range, and still locked.
+    present.set(true);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    tick_until(&mut bench, &tasks, "the hold to let go", |bench| {
+        bench.controller.pending_lens().is_none()
+    });
+    assert!(bench.controller.connected().is_none());
+    assert_eq!(
+        bench.controller.connect_failure(),
+        None,
+        "not a failure: Unlock takes over"
+    );
+    let said = bench
+        .console_line_containing("the connect is let go")
+        .expect("the console says why the hold went");
+    assert!(said.contains("is locked"), "{said}");
+    bench.wait_for_verb(&tasks, id, crate::UNLOCK_VERB);
+    let unlock = bench.device_verb(id, crate::UNLOCK_VERB);
+    bench.offered(unlock);
+}
+
+/// The opening frame's exit presses a closed port's Connect while an
+/// editor open is held for the board: the port opens, and the held open goes
+/// on to the EDITOR, not the card.
+#[test]
+fn the_opening_frames_connect_keeps_the_editor_open() {
+    let (mut bench, tasks, _device, id, uid) =
+        running_library_board("dev000000cnct00000f", "usb-conn-15");
+    bench.press_device(id, "disconnect", OfferArgs::new());
+    bench.run_until(&tasks, "the port to close", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.status == crate::DeviceStatus::Attached)
+    });
+    // The address asks for the board: held, the port being closed.
+    bench.open_lens(&uid).expect("the address is held");
+    assert!(
+        bench
+            .controller
+            .pending_lens()
+            .is_some_and(|pending| pending.is_address_for(&uid))
+    );
+
+    bench.press_device(id, "connect", OfferArgs::new());
+    assert!(
+        bench
+            .controller
+            .pending_lens()
+            .is_some_and(|pending| pending.is_address_for(&uid)),
+        "the held open is still the address's"
+    );
+    tick_until(&mut bench, &tasks, "the held open to land", |bench| {
+        bench.lens_device_uid().is_some()
+    });
+    assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
+    assert!(
+        bench.controller.connected().is_none(),
+        "an address holds it"
+    );
+    let view = bench.controller.view();
+    assert!(view.home.is_none(), "the editor");
+    assert!(view.session.is_some_and(|session| !session.connected));
+}
+
 // ---------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------
+
+/// Step the bench and run the refresh tick's held-lens look, until `ready`.
+fn tick_until(
+    bench: &mut DeviceBench,
+    tasks: &TaskPool,
+    what: &str,
+    ready: impl Fn(&DeviceBench) -> bool,
+) {
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    loop {
+        bench.step(tasks);
+        drive(bench.controller.try_pending_device_lens());
+        if ready(bench) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {what}; roster now: {:?}",
+            bench.view()
+        );
+    }
+}
+
+/// Unplug the bench's USB board and wait for its card to go offline.
+fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, id: crate::DeviceId) {
+    bench.granted.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(tasks, "the board to go offline", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
+    });
+}
+
+/// The connected session shows on its card: the home page is up, no
+/// editor panes, and the session control says the home page holds it.
+fn on_its_card(bench: &DeviceBench) {
+    let view = bench.controller.view();
+    assert!(view.home.is_some(), "the home page");
+    assert!(view.panes.is_empty(), "no editor");
+    assert!(view.session.is_some_and(|session| session.connected));
+}
 
 /// A board running a library project at its head, its card Ready and
 /// running, watched (no session).

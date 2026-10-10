@@ -133,7 +133,11 @@ pub struct StudioController {
     /// The hold, not a wait: the fold that produces the hello runs on the
     /// actor's own queue, so an open that awaited the hello inside its
     /// dispatch would wait for a fold that cannot run until it returns.
-    pending_device_lens: Option<String>,
+    ///
+    /// A Connect that had to reach its board first holds here too
+    /// ([`crate::PendingLens::connect`]), with a grace and its own ends
+    /// (`connect_flow.rs`); an address's hold keeps the rule above.
+    pending_device_lens: Option<crate::PendingLens>,
     /// A granted-port sweep is due (boot, or a `navigator.serial` connect).
     /// Drained by the actor's device step so a hotplug storm costs one sweep.
     device_sweep_pending: bool,
@@ -6653,8 +6657,8 @@ impl StudioController {
         match op {
             crate::RuntimeOp::SetLogLevel { level } => self.set_runtime_log_level(level).await,
             crate::RuntimeOp::OpenDeviceLens { uid } => self.open_address_lens(&uid, updates).await,
-            crate::RuntimeOp::ConnectDevice { device } => {
-                self.connect_device(device, false, updates).await
+            crate::RuntimeOp::ConnectDevice { device, reach } => {
+                self.connect_device(device, reach, false, updates).await
             }
             crate::RuntimeOp::EditDevice { device } => self.edit_device(device, updates).await,
             crate::RuntimeOp::CloseDeviceLens => {
@@ -6729,10 +6733,13 @@ impl StudioController {
             // renders the board's honest state meanwhile, and the tick
             // attaches the lens the moment the board says hello. Only a
             // gesture on the gallery (close, another open) lets it go.
-            // A connect is not an address: it says why on the card.
-            Err(error) if connect.is_some() => return Err(error),
+            // A Connect holds too, on its own terms (its grace, its ends).
             Err(error) => {
-                self.pending_device_lens = Some(uid.to_string());
+                if let Some(intent) = connect {
+                    self.hold_connect(uid, intent, &error);
+                    return Ok(UiNotices::new());
+                }
+                self.pending_device_lens = Some(crate::PendingLens::address(uid));
                 self.push_log(UiLogDraft::new(
                     UiLogLevel::Info,
                     UiLogOrigin::Studio,
@@ -7282,9 +7289,15 @@ impl StudioController {
     }
 
     async fn try_pending_device_lens_inner(&mut self) {
-        let Some(uid) = self.pending_device_lens.clone() else {
+        let Some(pending) = self.pending_device_lens.clone() else {
             return;
         };
+        // A Connect's hold ends on its own terms (`connect_flow.rs`).
+        if let Some(hold) = pending.connect {
+            self.try_connect_hold(pending.uid, hold).await;
+            return;
+        }
+        let uid = pending.uid;
         // THE WAKE-UP. A hold waits for a device to become ready; a sim
         // only ever becomes ready because this tab started it. Nothing else
         // will, so if the sim under a held lens is off — the open's own
@@ -9648,7 +9661,9 @@ impl StudioController {
     }
 
     pub(crate) fn pending_device_lens_for_test(&self) -> Option<String> {
-        self.pending_device_lens.clone()
+        self.pending_device_lens
+            .as_ref()
+            .map(|pending| pending.uid.clone())
     }
 
     pub(crate) fn devices_for_test(&self) -> &crate::DeviceRoster {
