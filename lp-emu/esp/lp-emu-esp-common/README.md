@@ -97,6 +97,27 @@ extracting a struct two chips happen to share — the argument has to be that
 *this* algorithm has an external standard three views must agree with, not
 that two views have similar fields.
 
+### `engine::flash_cut` — a power cut at a flash command
+
+The flash chip can lose its supply in the middle of one program or erase
+command (`engine/flash_cut.rs`, plan
+`lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, P1). A
+`FlashCut { range, at, tear, seed }` armed on the `FlashImage` counts the
+program and erase commands the part executes whose target touches `range`
+(never reads, WREN or status polls), and tears the `at`-th (0-based) with one
+of `lp-nor-sim`'s tear models: the calibrated CX1 mix and its five forced
+erase shapes called directly on the chip's bytes, the guessed models through
+a scratch `NorFlashSim`. The chip then latches **powered off** and refuses
+every later program and erase until `restore_power`; the engine posts
+`MachineRequest::PowerCut` and yields, so the guest runs no further
+instruction. Weak bits a torn erase leaves (`engine/flash_weak_bits.rs`)
+read seeded noise until the sector is erased, survive a power cycle, and
+stay in the process (a `File` flush warns once and writes the stored cells).
+`engine/flash_op_census.rs` counts, and optionally traces, the same commands
+for a dry run. With no plan armed nothing is counted and every command runs
+exactly as before. The module docs carry the mapping from nor-sim's terms;
+the C6 wires it (`--flash-cut`), the S3 and the classic do not yet.
+
 ### `ip/` — a layout two chips genuinely share
 
 M2 recorded the USB-Serial-JTAG finding: the C6's `usb_sj` block is
