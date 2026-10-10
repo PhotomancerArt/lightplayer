@@ -258,7 +258,11 @@ mod tests {
         let (card, tree) = card_and_tree(&view);
         let html = render_card(card, tree, None);
         assert_eq!(attribute_values(&html, "data-bar-work"), vec!["running"]);
-        assert_eq!(attribute_values(&html, "data-work-track").len(), 1, "{html}");
+        assert_eq!(
+            attribute_values(&html, "data-work-track").len(),
+            1,
+            "{html}"
+        );
         // The track sits in the connection bar, after the bar's trigger and
         // action, with the fill as its only child and nothing around it that
         // clips.
@@ -274,7 +278,10 @@ mod tests {
         assert!(tag.contains("tw:overflow-hidden"), "{tag}");
         assert!(tag.contains("tw:inset-x-0"), "{tag}");
         let bar_tag = &html[html[..bar_at].rfind("<div").expect("its tag")..bar_at];
-        assert!(!bar_tag.contains("overflow"), "the bar does not clip: {bar_tag}");
+        assert!(
+            !bar_tag.contains("overflow"),
+            "the bar does not clip: {bar_tag}"
+        );
         assert!(!CARD_CLASS.contains("overflow"));
     }
 

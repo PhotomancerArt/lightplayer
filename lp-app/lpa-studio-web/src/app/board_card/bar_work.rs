@@ -120,10 +120,12 @@ pub(crate) fn foot_style(percent: Option<u8>, parked: Option<i16>) -> String {
 /// The track: along the row's foot, 2 px, the row's width, under everything
 /// the row holds, and the clip for the fill inside it. Positioned, so the
 /// fill is placed against it and not against the bar.
-const TRACK_CLASS: &str = "tw:pointer-events-none tw:absolute tw:inset-x-0 tw:bottom-0 tw:h-0.5 tw:overflow-hidden";
+const TRACK_CLASS: &str =
+    "tw:pointer-events-none tw:absolute tw:inset-x-0 tw:bottom-0 tw:h-0.5 tw:overflow-hidden";
 
 /// The fill in its track, the track's full height.
-const FOOT_CLASS: &str = "tw:pointer-events-none tw:absolute tw:inset-y-0 tw:left-0 tw:rounded-r-xs";
+const FOOT_CLASS: &str =
+    "tw:pointer-events-none tw:absolute tw:inset-y-0 tw:left-0 tw:rounded-r-xs";
 
 /// The sweep: the paint shuttling across while it shifts.
 const FOOT_SWEEP_CLASS: &str = "tw:[animation:ux-iri-sweep_4s_linear_infinite,ux-card-op-sweep_1.1s_ease-in-out_infinite] tw:motion-reduce:[animation:none]";
