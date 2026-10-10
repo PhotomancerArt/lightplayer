@@ -18,6 +18,9 @@ use lpa_devices::link::{Link, LinkCommand, LinkEvent, LinkInfo};
 use super::*;
 use crate::app::studio::studio_actor::StudioActor;
 
+/// The card's words for a board another tab holds (P6): the primary, the
+/// connection bar, the picture, pressed by path.
+mod card_words_tests;
 /// The same over a board's one network slot (P5): network holds, the
 /// take-over through Wi‑Fi or the relay, the yield, a stranger's busy.
 mod network_hold_tests;
@@ -1572,6 +1575,23 @@ impl Tab {
     /// This tab's card for the board with `mac`.
     fn card(&self, mac: &str) -> Option<lpa_devices::view::DeviceView> {
         card_for_mac(&self.bench, mac)
+    }
+
+    /// The board card core publishes for the board with `mac`: what the
+    /// web draws, built in core.
+    #[track_caller]
+    fn ui_card(&self, mac: &str) -> crate::UiBoardCard {
+        let id = self.device_id(mac);
+        self.bench
+            .controller
+            .view()
+            .home
+            .expect("the home view")
+            .devices
+            .cards
+            .into_iter()
+            .find(|card| card.device == id)
+            .unwrap_or_else(|| panic!("no board card for {mac}"))
     }
 }
 

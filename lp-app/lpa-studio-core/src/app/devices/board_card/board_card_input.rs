@@ -4,9 +4,9 @@
 //! the controller (`StudioController::view`) and by stories, so the builder
 //! is a pure function of this.
 
-use lpa_devices::DeviceView;
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::Escape;
+use lpa_devices::{DeviceView, HeldElsewhere, HoldVia};
 
 use crate::app::access::{UiDeviceAccess, UiUnlockOffer};
 use crate::app::devices::activity_ends::ActivityEnd;
@@ -16,6 +16,7 @@ use crate::app::devices::device_layout_view::UiDeviceLayout;
 use crate::app::devices::device_update_words::UiDeviceUpdate;
 use crate::app::devices::lan_link_view::UiLanLink;
 use crate::app::devices::runtime_band::UiRuntimeBand;
+use crate::app::devices::take_over_state::UiTakeOver;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::devices::wifi_connects::UiWifiConnect;
 use crate::app::home::UiPackageCard;
@@ -48,6 +49,9 @@ pub struct BoardCardInput<'a> {
     pub lan: Option<&'a UiLanLink>,
     /// A Wi‑Fi or relay connect under way, or why it failed.
     pub wifi_connect: Option<&'a UiWifiConnect>,
+    /// A take-over of this board from another tab under way, or why it
+    /// failed (`DeviceRosterView.take_overs`).
+    pub take_over: Option<&'a UiTakeOver>,
     /// The board's update story.
     pub update: Option<&'a UiDeviceUpdate>,
     /// The board's files across a layout change, and the project note.
@@ -114,6 +118,43 @@ impl<'a> BoardCardInput<'a> {
     /// The link's kind, USB when nothing has named one.
     pub fn link_kind(&self) -> UiLinkKind {
         self.link.unwrap_or_default()
+    }
+
+    /// This tab has no open link to the board: it is offline, or its port
+    /// is there and closed (a port the hold kept shut is the second).
+    ///
+    /// Not [`Self::linked`]: that is true for a gated port too, since the
+    /// model holds the link though nothing opened it.
+    pub fn no_open_link(&self) -> bool {
+        matches!(
+            self.view.status,
+            DeviceStatus::Offline | DeviceStatus::Attached
+        )
+    }
+
+    /// Another tab of this browser holds the board and this tab has no
+    /// open link to it: the card's held states. A board held by its network
+    /// slot that this tab reaches over its own USB cable is not held from
+    /// here.
+    pub fn held(&self) -> Option<&'a HeldElsewhere> {
+        self.view
+            .held_elsewhere
+            .as_ref()
+            .filter(|_| self.no_open_link())
+    }
+
+    /// The link a held card names: the hold's own way in (USB, or the
+    /// network: the cloud when the board was last reached through
+    /// lightplayer.app, else Wi‑Fi), else how the board is reached.
+    pub fn held_link(&self) -> UiLinkKind {
+        match self.view.held_elsewhere.as_ref().map(|held| held.via) {
+            Some(HoldVia::Usb) => UiLinkKind::Usb,
+            Some(HoldVia::Network) => match self.link {
+                Some(UiLinkKind::Relay) => UiLinkKind::Relay,
+                _ => UiLinkKind::Wifi,
+            },
+            None => self.link_kind(),
+        }
     }
 }
 

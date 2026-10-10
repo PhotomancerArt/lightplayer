@@ -16,6 +16,7 @@ use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{ActivityView, DeviceView, LoadedProject};
 
 use super::board_card_input::BoardCardInput;
+use super::held_board::{HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE};
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
 use crate::app::devices::age_words::age_words;
 use crate::app::devices::device_card_feed_view::{DeviceCardFeedView, FeedLiveness};
@@ -30,6 +31,9 @@ pub const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it r
 pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
     let feed = picture_feed(input);
     let source = match feed.map(|feed| feed.liveness) {
+        // A board another tab holds has no link here: whatever the feed
+        // says, the picture is the one that tab saved.
+        Some(_) if input.held().is_some() => PictureSource::Saved,
         Some(FeedLiveness::Live | FeedLiveness::Stale | FeedLiveness::Waiting) => {
             PictureSource::Link
         }
@@ -67,6 +71,13 @@ pub(crate) fn picture_line(input: &BoardCardInput<'_>) -> Option<String> {
         return Some(LOCKED_PREVIEW_SENTENCE.to_string());
     }
     let feed = picture_feed(input);
+    // The picture of a board another tab holds is the one that tab saved.
+    if input.held().is_some() {
+        return Some(match feed.and_then(|feed| feed.frame.as_ref()) {
+            Some(_) => HELD_PICTURE_LINE.to_string(),
+            None => HELD_NO_PICTURE_LINE.to_string(),
+        });
+    }
     preview_slot_sentence(input.view, activity, feed)
         .or_else(|| feed.and_then(|feed| source_words(feed, activity, input.link_kind())))
 }

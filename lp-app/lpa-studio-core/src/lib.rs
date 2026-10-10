@@ -94,15 +94,15 @@ pub use app::devices::{
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
+pub use app::devices::{
+    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
+    duration_words,
+};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
 pub use app::devices::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
     HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
     OtherHold, PendingAsk, TabId, UsbPair,
-};
-pub use app::devices::{
-    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
-    duration_words,
 };
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,

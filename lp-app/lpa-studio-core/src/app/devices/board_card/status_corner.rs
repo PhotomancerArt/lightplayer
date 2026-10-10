@@ -10,6 +10,7 @@
 
 use super::board_card_input::BoardCardInput;
 use super::board_picture::picture_line;
+use super::held_board::held_summary;
 use super::ui_bar_work::BarWorkState;
 use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
@@ -115,7 +116,13 @@ fn reading(input: &BoardCardInput<'_>) -> Option<String> {
 /// picture's line.
 fn running_section(input: &BoardCardInput<'_>) -> RichSection<UiCardAction> {
     let view = input.view;
-    let mut lines = vec![RichLine::new("State", view.state_label.clone())];
+    // A board another tab holds is not "Offline" or "Attached": it is
+    // running, in that tab.
+    let state = match input.held() {
+        Some(held) => held_summary(held).to_string(),
+        None => view.state_label.clone(),
+    };
+    let mut lines = vec![RichLine::new("State", state)];
     if let Some(fps) = view.engine_fps.filter(|_| input.linked()) {
         lines.push(RichLine::new("Frame rate", format!("{fps} fps")));
     }

@@ -6,6 +6,9 @@
 //! |---|---|---|---|
 //! | The editor holds it (the docked lens card) | none, until Done lands | — | — |
 //! | Busy | the word it would be, disabled: "Busy: <the work>" | — | — |
+//! | Another tab holds it | Connect (it is the take-over) | `take-over` | the held link's |
+//! | …and is busy with it | Connect, disabled: "Busy in the other tab: <label>" | — | the same |
+//! | …a take-over is under way | Connect, disabled: its words ("Asking the other tab…") | — | the same |
 //! | Needs firmware, `flash` offered | Install (the board pick) | `flash` | firmware |
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
 //! | Attached (the port is there, closed) | Connect | `connect` | the link's |
@@ -30,6 +33,7 @@ use lpa_devices::view::{LoadedProject, PendingLinkView};
 
 use super::bar_work::{activity_bar, board_pick};
 use super::board_card_input::{BoardCardInput, link_icon, offer_at};
+use super::held_board::held_primary;
 use super::ui_bar_work::UiBarWork;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
@@ -62,6 +66,11 @@ pub(crate) fn primary_action(
             icon: icon.to_string(),
             reason: format!("Busy: {words}"),
         });
+    }
+    // A board another tab holds is neither attached nor offline from here:
+    // Connect is the take-over.
+    if let Some(primary) = held_primary(input) {
+        return Some(primary);
     }
     if view.needs_firmware()
         && let Some(flash) = input.offer("flash")
@@ -177,12 +186,13 @@ fn offer(action: UiCardAction) -> UiPrimary {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use lpa_devices::ActivityKind;
     use lpa_devices::view::{Escape, FirmwareFace};
+    use lpa_devices::{ActivityKind, HoldLevel, HoldVia};
 
     use super::super::card_fixtures::{CardFixture, activity};
     use super::*;
     use crate::app::access::{UiDeviceAccess, UiUnlockOffer};
+    use crate::app::devices::take_over_state::UiTakeOver;
 
     #[test]
     fn the_editor_holding_the_board_leaves_no_primary() {
@@ -375,6 +385,124 @@ pub(crate) mod tests {
         };
         assert_eq!(action.word, "Install");
         assert_eq!(path(&action), "flash");
+    }
+
+    #[test]
+    fn a_board_another_tab_holds_connects_by_taking_it_over() {
+        let mut fixture = CardFixture::held(HoldLevel::Watching);
+        let action = offered(&mut fixture);
+        assert_eq!(action.word, "Connect");
+        assert_eq!(action.icon.as_deref(), Some("usb"));
+        assert_eq!(path(&action), "take-over");
+        assert_eq!(action.draw, UiActionDraw::Press);
+        assert_eq!(action.refused, None);
+        let take_over = fixture.offers_at("take-over");
+        assert!(
+            take_over.consequence().is_routine(),
+            "nothing is open there"
+        );
+
+        // An editor open over there makes it Undoable: the error tint is
+        // the warning, and the card draws the same Connect.
+        fixture.view.held_elsewhere.as_mut().unwrap().level = HoldLevel::Open;
+        assert_eq!(path(&offered(&mut fixture)), "take-over");
+        let take_over = fixture.offers_at("take-over");
+        assert!(!take_over.consequence().is_routine() && !take_over.consequence().arms());
+    }
+
+    #[test]
+    fn a_held_board_sits_above_attached_and_offline() {
+        // Status Attached would be Connect over `connect`; held, `connect`
+        // is not offered and the take-over is the primary.
+        let mut attached = CardFixture::held(HoldLevel::Watching);
+        assert_eq!(attached.view.status, DeviceStatus::Attached);
+        assert_eq!(path(&offered(&mut attached)), "take-over");
+        // Offline (no port here at all) reads the same.
+        let mut offline = CardFixture::held(HoldLevel::Watching);
+        offline.view.status = DeviceStatus::Offline;
+        assert_eq!(path(&offered(&mut offline)), "take-over");
+    }
+
+    #[test]
+    fn a_board_the_holder_is_busy_with_connects_disabled_saying_why() {
+        let mut fixture = CardFixture::held(HoldLevel::Busy("Updating \u{b7} 42%".to_string()));
+        assert_eq!(
+            primary_action(&fixture.input(), None),
+            Some(UiPrimary::Unavailable {
+                word: "Connect".to_string(),
+                icon: "usb".to_string(),
+                reason: "Busy in the other tab: Updating \u{b7} 42%".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_take_over_under_way_connects_disabled_with_its_words() {
+        for words in ["Asking the other tab\u{2026}", "Opening\u{2026}"] {
+            let mut fixture = CardFixture::held(HoldLevel::Watching);
+            fixture.take_over = Some(UiTakeOver {
+                words: words.to_string(),
+                failed: false,
+            });
+            assert_eq!(
+                primary_action(&fixture.input(), None),
+                Some(UiPrimary::Unavailable {
+                    word: "Connect".to_string(),
+                    icon: "usb".to_string(),
+                    reason: words.to_string(),
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn a_take_over_that_failed_leaves_connect_to_press_again() {
+        let mut fixture = CardFixture::held(HoldLevel::Watching);
+        fixture.take_over = Some(UiTakeOver {
+            words: "That tab didn't answer".to_string(),
+            failed: true,
+        });
+        assert_eq!(path(&offered(&mut fixture)), "take-over");
+    }
+
+    #[test]
+    fn a_board_held_on_the_network_names_the_network_link() {
+        let mut fixture = CardFixture::held(HoldLevel::Watching).over(UiLinkKind::Wifi);
+        fixture.view.held_elsewhere.as_mut().unwrap().via = HoldVia::Network;
+        let action = offered(&mut fixture);
+        assert_eq!(action.icon.as_deref(), Some("wifi"));
+        assert_eq!(path(&action), "take-over");
+        let mut relay = CardFixture::held(HoldLevel::Watching).over(UiLinkKind::Relay);
+        relay.view.held_elsewhere.as_mut().unwrap().via = HoldVia::Network;
+        assert_eq!(offered(&mut relay).icon.as_deref(), Some("cloud"));
+    }
+
+    #[test]
+    fn a_held_board_with_nobody_to_ask_still_says_why_it_cannot_connect() {
+        // The controller offers `take-over` only with a hold edge; without
+        // one the card has nothing to press, and says who has the board.
+        let mut fixture = CardFixture::held(HoldLevel::Watching);
+        fixture.without_offer("take-over");
+        assert_eq!(
+            primary_action(&fixture.input(), None),
+            Some(UiPrimary::Unavailable {
+                word: "Connect".to_string(),
+                icon: "usb".to_string(),
+                reason: "Open in another tab".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_board_this_tab_has_open_is_not_held_from_here() {
+        // Held on the network, read over this tab's own USB cable.
+        let mut fixture = CardFixture::ready();
+        fixture.view.held_elsewhere = Some(lpa_devices::HeldElsewhere {
+            via: HoldVia::Network,
+            level: HoldLevel::Watching,
+            taken_from_here: false,
+        });
+        assert_eq!(path(&offered(&mut fixture)), "edit");
     }
 
     fn offered(fixture: &mut CardFixture) -> UiCardAction {

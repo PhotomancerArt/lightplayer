@@ -368,9 +368,8 @@ fn n5_a_usb_hold_shows_before_a_network_hold_of_the_same_board() {
 /// N6, a stranger's busy: the board's one slot is someone else's — lp-cli,
 /// or Studio in another browser, which no tab here hears. B's connect over
 /// Wi‑Fi is turned away (1013), and through the relay (4429): no hold fact,
-/// no `take-over`, the card says the board is busy, and the connect stays
-/// offered, so Retry is a press. (The card plan's `UiWifiConnect.busy` is
-/// not on main: the busy is read as `WifiConnectFailure::Busy`'s words.)
+/// no `take-over`, the card says "Someone else connected" and offers Retry
+/// on the connect that was turned away, and nothing more.
 #[test]
 fn n6_a_strangers_busy_offers_retry_and_no_take_over() {
     let desk = Desk::new(&[("dev000000holdn6aa", MAC_A)]);
@@ -1006,8 +1005,9 @@ impl Tab {
             .clone()
     }
 
-    /// A stranger's busy: no hold fact, no `take-over`, and the connect
-    /// that was turned away is offered again, enabled (Retry is a press).
+    /// A stranger's busy: no hold fact, no `take-over`, the connect that
+    /// was turned away is offered again, enabled, and the card's connection
+    /// bar says "Someone else connected" with Retry on that same connect.
     #[track_caller]
     fn assert_a_strangers_busy(&mut self, mac: &str, connect: &crate::OfferPath) {
         assert_eq!(self.fact(mac), None, "nobody here holds it");
@@ -1016,6 +1016,13 @@ impl Tab {
             self.bench.offered(connect.clone()).is_enabled(),
             "Retry is a press"
         );
+        let card = self.ui_card(mac);
+        let bar = card.bar(crate::BarLayer::Connection);
+        assert_eq!(bar.summary, "Someone else connected");
+        assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+        let retry = bar.action.as_ref().expect("Retry on the bar");
+        assert_eq!((retry.word.as_str(), &retry.offer), ("Retry", connect));
+        assert_eq!(bar.work, None);
     }
 }
 
