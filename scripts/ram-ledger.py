@@ -3,6 +3,7 @@
 
     scripts/ram-ledger.py <elf> [--chip esp32c6|esp32v3|esp32s3]
                           [--json out.json] [--top N] [--blobs DIR]...
+                          [--max-unknown-pct P]
     just ram-ledger <elf> [args]
 
 Prints a Markdown ledger on stdout: the chip's whole SRAM by category, summing
@@ -1312,6 +1313,9 @@ def main() -> None:
     ap.add_argument("--blobs", action="append", default=[], metavar="DIR",
                     help="a directory of lib*.a radio blob archives (repeatable; default: the registry copy Cargo.lock pins)")
     ap.add_argument("--no-blobs", action="store_true", help="skip the blob archive join")
+    ap.add_argument("--max-unknown-pct", type=float, default=1.0,
+                    help="exit 3 when more of the RAM than this is UNKNOWN (default 1.0; an image this map does "
+                         "not describe, such as the C6 loader, trips it)")
     args = ap.parse_args()
 
     try:
@@ -1339,10 +1343,17 @@ def main() -> None:
         with open(args.json, "w") as f:
             json.dump(render_json(led, args.top, args.min_symbol), f, indent=1)
             f.write("\n")
-    total = sum(summarize(led)[c]["bytes"] for c in summarize(led))
+    cats = summarize(led)
+    total = sum(c["bytes"] for c in cats.values())
     if total != chip.ram_bytes:
         print(f"ram-ledger: ERROR ledger sums to {total}, chip is {chip.ram_bytes}", file=sys.stderr)
         raise SystemExit(2)
+    unknown = cats.get("unknown", {"bytes": 0})["bytes"]
+    if 100.0 * unknown / chip.ram_bytes > args.max_unknown_pct:
+        print(f"ram-ledger: ERROR {unknown} B ({100.0 * unknown / chip.ram_bytes:.2f}%) of RAM is UNKNOWN, over "
+              f"--max-unknown-pct {args.max_unknown_pct}: this image is not one the chip map describes",
+              file=sys.stderr)
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

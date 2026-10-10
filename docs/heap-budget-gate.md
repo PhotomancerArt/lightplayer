@@ -365,7 +365,9 @@ just test-ram-ledger                                   # its self-test (syntheti
 
 It prints a Markdown ledger whose rows (ROM reserve, cache, code in RAM, radio
 code by blob library, `.data`, `.bss` by crate, each heap region, the stack,
-idle bytes) **sum to the chip's SRAM or the script exits 2**, then the owners
+idle bytes) **sum to the chip's SRAM or the script exits 2** (and exits 3 when
+more than `--max-unknown-pct`, default 1 %, is unknown — an image the map does
+not describe, such as the C6 loader), then the owners
 and top symbols per row and an "attribution" table saying how many bytes are
 named by a sized symbol, inferred from neighbours, held only by their section,
 or **unknown**. `--json` adds every address extent and every symbol over
