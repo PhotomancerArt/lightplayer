@@ -103,6 +103,8 @@ mod c_heap;
 mod desk_espnow_meter;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
+#[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
+mod alloc_watch;
 #[cfg(any(
     not(fw_harness),
     feature = "test_button",
@@ -114,8 +116,6 @@ use fw_esp32_common::boot;
 mod hardware;
 #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
 mod heap_map;
-#[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
-mod alloc_watch;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.

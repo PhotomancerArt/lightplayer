@@ -57,7 +57,13 @@ struct Win {
 }
 
 #[allow(dead_code)]
-const KINDS: [&str; 5] = ["?", "project-read", "shader-compile", "project-load", "frame"];
+const KINDS: [&str; 5] = [
+    "?",
+    "project-read",
+    "shader-compile",
+    "project-load",
+    "frame",
+];
 
 struct State {
     open: [Option<Win>; OPEN],
@@ -209,9 +215,7 @@ fn on_marker(name: &'static str, kind: lp_perf::PerfEventKind) {
             critical_section::with(|cs| {
                 let mut st = STATE.borrow_ref_mut(cs);
                 st.frames += 1;
-                let heavier = st
-                    .worst_frame
-                    .is_none_or(|w| win.peak_above > w.peak_above);
+                let heavier = st.worst_frame.is_none_or(|w| win.peak_above > w.peak_above);
                 if heavier {
                     st.worst_frame = Some(win);
                 }
@@ -343,7 +347,11 @@ fn log_retained(k: u8, seq: u32, print: bool) {
             line.clear();
             let _ = write!(line, "[aw]  {}#{} kept+", SHORT[k as usize], seq);
         }
-        let _ = write!(line, " r{ri}+{off}:{}@{:x}/{:x}", r.size, r.frames[0], r.frames[1]);
+        let _ = write!(
+            line,
+            " r{ri}+{off}:{}@{:x}/{:x}",
+            r.size, r.frames[0], r.frames[1]
+        );
     }
     if print && any {
         log::info!("{line}");
@@ -374,7 +382,8 @@ pub fn drain() {
         };
         log_window(&w, frames);
     }
-    let dropped = critical_section::with(|cs| core::mem::take(&mut STATE.borrow_ref_mut(cs).dropped));
+    let dropped =
+        critical_section::with(|cs| core::mem::take(&mut STATE.borrow_ref_mut(cs).dropped));
     if dropped > 0 {
         log::info!("[aw] {dropped} window records dropped (ring full)");
     }

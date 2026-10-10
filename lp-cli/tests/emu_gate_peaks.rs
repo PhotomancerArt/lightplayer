@@ -129,8 +129,8 @@ fn edited_shader(original: &[u8], edits: u32) -> Vec<u8> {
 }
 
 fn hosted(elf: &Path) -> EmuLinkHost<C6Board> {
-    let pins = lp_emu_esp32c6::pinscript::parse_pin_script("0 pin 0 1\n")
-        .expect("the D0 pin script");
+    let pins =
+        lp_emu_esp32c6::pinscript::parse_pin_script("0 pin 0 1\n").expect("the D0 pin script");
     let machine = Esp32C6Builder::new()
         .app(AppSource::Path(elf.to_path_buf()))
         .flash(FlashBacking::Blank)
