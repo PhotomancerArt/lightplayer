@@ -18,23 +18,27 @@
 //   engine-less  E1 · a board whose engine header is erased restores itself on
 //                connect with no click, from the cache `update` filled
 //   cant-get     E13 · the same board with the cache cleared and no store that
-//                has X: "Needs …, which Studio can't get" → Install Y
+//                has X: the new board's card is set up (`adopt`), its firmware
+//                bar says "Needs …, which Studio can't get" → Install Y
 //   crashing     E10 · NOT walked: no image makes an engine keep crashing yet
 //                (Part B's U7 skip, for the same reason) — said so in the report
 //   needs-usb    E9 · a pre-update board (today's single image): no update over
-//                the air, today's USB flash (Lasting) on the card
+//                the air, today's USB flash (Lasting, `update-firmware`) on the
+//                card
 //   store-backup R5 · a board on a PUBLISHED release (XR, `build-image.sh …
 //                2026.10.07-77` into images/x-release, not built by the
 //                recipe): with an empty cache the update takes the board's
 //                engine from the release store — the walk's store serves XR —
 //                and never reads it back. Not in the default steps
-//   install-older "Other version…" over the release index (OTA M10): a board
+//   install-older "Other version…" over the release index (OTA M10), inline in
+//                the firmware bar's details: a board
 //                on release r2 (`2026.10.02-1`) and a REAL lp-cloud-server in
 //                front of a GitHub-shaped upstream holding r1 and r2 (their
 //                assets, a REST releases list, `latest`). The list shows r2
 //                as the board's own, r1 and this Studio's build; r1, typed
 //                whole into the list's box (which narrows the list to it),
-//                arms (older: Lasting) and installs on the second click; then r2
+//                arms (older: Lasting) and installs on the second press of
+//                `install-firmware`; then r2
 //                installs at one click (newer: Routine). Both images are
 //                built by the recipe (`build-image.sh` into images/r1,
 //                images/r2), and differ only in their version. Not in the
@@ -43,8 +47,9 @@
 //                assets still served): r1 typed whole into the box finds
 //                nothing in the list, so the press reads "Look up r1"; the
 //                store finds it by version, it joins the list, arms (older)
-//                and installs on the second click. `--steps install-lookup`
-//   install-file  "From a file…": only r2 in the store; r1's `ota/` folder
+//                and installs on the second press. `--steps install-lookup`
+//   install-file  "From a file…" (`install-firmware-file`, in the same
+//                details): only r2 in the store; r1's `ota/` folder
 //                (its manifest, core, engine and .z files) is put into the
 //                card's file input as the file dialog would hand it over;
 //                core checks it, r1 joins the list "from your files", arms
@@ -52,10 +57,18 @@
 //                store for r1. `--steps install-file`
 //
 // Every assertion waits for the BOARD's words (its console, `[OTA]`,
-// `[LOADER]`, `[CORE]` lines) as well as the card's; a card line alone proves
-// nothing about the board. Each step gets its own door (a fresh board) and a
-// page load; the page's origin is the walk's own server, so the browser's
-// engine cache (OPFS) carries from one step to the next.
+// `[LOADER]`, `[CORE]` lines) as well as its card's. The card is the board
+// card (`lp-app/lpa-studio-web/src/app/board_card/`, built in core,
+// `lpa-studio-core/src/app/devices/board_card/`), read by its hooks only: its
+// bars (`data-bar`, their work `data-bar-work`), its status corner
+// (`data-board-corner`, whose details hold the board's terminal) and the
+// offers core publishes on it (`data-offer-path`), pressed by path — never
+// `#main`'s text, which Studio can satisfy by itself. A card line alone
+// proves nothing about the board. The browser profile remembers earlier
+// boards as offline cards, so every step names its board's card by the MAC
+// the door (or the tab's bus) gave it. Each step gets its own door (a fresh
+// board) and a page load; the page's origin is the walk's own server, so the
+// browser's engine cache (OPFS) carries from one step to the next.
 //
 // `--tab` runs update / cut-core / engine-less against `?emu=tab` (the board a
 // Worker in the page, no door): the tab board's chip is written with the same
@@ -68,8 +81,9 @@
 // `?ble=emu` — Studio's real Bluetooth stack (`browser_ble.js`, its lp-link
 // end and channel 3) against the `navigator.bluetooth` polyfill, which
 // translates its datagrams to the board's USB stream and models every reset
-// of the board as a GATT drop (the board's radio goes with its CPU). The card
-// must say "Bluetooth", and Studio's terminal must time every reconnect:
+// of the board as a GATT drop (the board's radio goes with its CPU). The
+// card's connection bar must say "Bluetooth" while it updates, and Studio's
+// lines in the board's terminal must time every reconnect:
 //
 //   cut-backup    the board goes out of range mid-BACKUP (an empty engine
 //                 cache, so the update reads X's engine back first) and comes
@@ -89,7 +103,8 @@
 // NO `?emu=` at all — `?lan=ws://<its forward>/link`, Studio's real LAN
 // stack (`browser_websocket.js`, its secure lp-link and channel 3) against
 // the board's own LAN endpoint, through core-only and its three resets. The
-// card must say "Wi‑Fi", and Studio's terminal must time the reconnects:
+// card's connection bar must say "Wi‑Fi" while it updates, and Studio's lines
+// in the board's terminal must time the reconnects:
 //
 //   update        X → Y with one press, as on USB, every reset a socket close
 //                 the page redials by itself
@@ -119,7 +134,8 @@
 // is served on the walk's own origin with `/api`, `/auth` and `/relay`
 // forwarded to the server (one origin, as on lightplayer.app, so the
 // session cookie rides the relay's browser leg) and opened with
-// `?relay=<board>` — no `?emu=`, no `?lan=`. The card must say "Wi‑Fi":
+// `?relay=<board>` — no `?emu=`, no `?lan=`. The card's connection bar must
+// say "Wi‑Fi via lightplayer.app" while it updates:
 //
 //   update        X → Y with one press through the relay, every reset the
 //                 board's relay leg dropping and the page riding through
@@ -154,7 +170,7 @@ import path from "node:path";
 import process from "node:process";
 import { execFileSync, spawn } from "node:child_process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { PANEL, StudioDriver, boardPath } from "./studio-driver.mjs";
 import {
   boardRegistry,
   openNetworkRow,
@@ -199,8 +215,14 @@ const RELAY_STEPS = ["update", "relay-drop", "cut-engine"];
 const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_STEPS : RELAY_LANE ? RELAY_STEPS : DOOR_STEPS);
 /// The steps that stand r1 and r2 behind a real lp-cloud-server.
 const RELEASE_STEPS = ["install-older", "install-lookup", "install-file"].some((step) => STEPS.includes(step));
-/// The link the card must name.
+/// The link this lane updates over, in the steps' words.
 const LINK_WORD = BLE ? "Bluetooth" : ON_LAN ? "Wi\u2011Fi" : "USB";
+/// The link the card must name: its connection bar's summary leads with the
+/// link's label (`UiLinkKind::label`, `ui_link_kind.rs`), then " · " and how
+/// it is going ("USB · live", "Bluetooth · connected", a new board's "USB ·
+/// new" — `connection_bar.rs`). Through the relay it is "Wi‑Fi via
+/// lightplayer.app".
+const LINK_LABEL = BLE ? "Bluetooth" : RELAY_LANE ? "Wi\u2011Fi via lightplayer.app" : LAN_LANE ? "Wi\u2011Fi" : "USB";
 if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
   console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
   process.exit(2);
@@ -273,22 +295,53 @@ const DETACHED_MS = Number(process.env.WALK_DETACHED_MS ?? 3_000);
 /// lossless pipe, to measure what the model costs.
 const EMU_TTY = process.env.WALK_EMU_TTY ?? null;
 
+/// The page's own text, for one thing only: that Studio has loaded at all.
+/// Never a card's verb or state: those are read by the card's hooks.
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 
 // --- what the update shows -------------------------------------------------
 
-/// The card's update lines (the update-states spike's words, P4), for the
-/// record: the first time each kind showed.
+/// The card's update lines, for the record: the first time each kind showed.
+/// Each is matched against the step's board's firmware bar as it reads (its
+/// work while the update runs, else its summary) and, on a new board's card,
+/// against its connection details' `State`.
+///
+/// - The firmware bar's work while an update runs is the update's short line
+///   (the board card's copy pass, `device_update_words.rs`; `firmware_bar.rs`
+///   `firmware_work`, tested by `the_header_chip_takes_the_updates_word_
+///   while_it_owns_the_board`): "Backing up · 18%", "Updating · 1 of 2 ·
+///   40%" (the new core), "Updating · 2 of 2 · 70%" (its engine: the old
+///   "Finishing the update"), "Resuming · 2 of 2 · 70%" (the same, found
+///   half-way), "Restoring · 35%", "Another device is updating it · 40%".
+///   The link is no longer in the line: the connection bar says it.
+/// - A new board's card (`pending_board_card`: a core-only board says no
+///   hello, so it is not kept) tells no update story: its connection
+///   details' `State` carries the model's own stage words
+///   (`pending_link_view`, `lpa-devices/src/view.rs`; the labels are
+///   `UpdateStageFacts::label`): "Backing up current firmware… 40%",
+///   "Updating firmware… 40%", "Restoring firmware… 35%", "Finishing the
+///   update… 70%", "Another device is updating it… 40%".
+/// - What needs a person is the bar's summary (the update's line, NeedsYou):
+///   "Needs <v>, which Studio can't get", "Needs one update over USB".
+///
+/// Two kinds are not lines: "available" is the firmware bar's action, the
+/// over-the-air `update-firmware`, offered (`cardLines`); "up to date" is
+/// the firmware details' sentence (`upToDate`), since the bar shows the
+/// version alone.
 const CARD_LINES = [
-  ["backing up", /Backing up current firmware…[^\n]*/],
-  ["updating", /Updating over (USB|Bluetooth|Wi\u2011Fi)…[^\n]*/],
-  ["finishing", /Finishing the update…[^\n]*/],
-  ["restoring", /Restoring firmware…[^\n]*/],
-  ["up to date", /[^\n]*(up to date|same as this Studio)[^\n]*/],
-  ["available", /[^\n]* available[^\n]*/],
-  ["cant get", /Needs [^\n]*, which Studio can't get/],
-  ["needs usb", /Needs one update over USB/],
+  ["backing up", /^Backing up\b[^\n]*/],
+  ["updating", /^(?:Updating · 1 of 2|Updating firmware…)[^\n]*/],
+  ["finishing", /^(?:(?:Updating|Resuming) · 2 of 2|Finishing the update…)[^\n]*/],
+  ["resuming", /^Resuming · [^\n]*/],
+  ["restoring", /^Restoring\b[^\n]*/],
+  ["another device", /^Another device is updating it[^\n]*/],
+  ["cant get", /^Needs [^\n]*, which Studio can't get/],
+  ["needs usb", /^Needs one update over USB/],
 ];
+
+/// A MAC's 12 lowercase hex, the way a card's path carries it
+/// (`devices/mac-<12 hex>`, `BoardRef`).
+const macHex = (mac) => (mac ? String(mac).replace(/:/g, "").toLowerCase() : "");
 
 async function main() {
   for (const [what, at] of [
@@ -566,23 +619,166 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   };
-  const cardLines = async () => {
-    const text = await driver.evaluate(MAIN_TEXT);
-    const seen = {};
-    for (const [kind, pattern] of CARD_LINES) {
-      const match = text.match(pattern);
-      if (match) seen[kind] = match[0].trim();
+  // --- the step's board, as its card reads ---------------------------------
+  //
+  // Every board is drawn by the board card, and the walk reads it by its
+  // hooks (`lp-app/lpa-studio-web/src/app/board_card/mod.rs`, "Walk hooks")
+  // through the driver's card helpers, or the snapshot below where it reads
+  // several at once. The browser profile remembers earlier boards as offline
+  // cards, so the walk NAMES its board, by the MAC its door gave it.
+
+  /// The step's board: its door (or tab) id, its MAC, and its card's path
+  /// (`devices/mac-<12 hex>`: core keys a board by its MAC once it has said
+  /// who it is). Set by `nameBoard` before each step.
+  let here = null;
+  /// Name the step's board by its MAC: the door's registry (`GET /boards`
+  /// lists each board's `mac`), or the tab's bus (`describeBoards()`), else
+  /// `fallback` (the `mac=` the walk gave the door).
+  const nameBoard = async (board, fallback = null) => {
+    let mac = null;
+    try {
+      if (TAB) mac = (await driver.boards())?.find((row) => row.boardId === board)?.mac ?? null;
+      else if (door) mac = (await boardRegistry(door.addr)).find((row) => row.id === board)?.mac ?? null;
+    } catch {
+      /* the fallback stands */
     }
+    mac = mac ?? fallback;
+    if (!mac) throw new Error(`no MAC for ${board}: the walk cannot name its card`);
+    here = { board, mac, path: boardPath(mac) };
+    return here;
+  };
+  /// The step's board's card once Studio watches it and has kept it — live
+  /// (`data-board-corner` not `quiet`), not a new board's (`blank`) — as
+  /// `snapshotExpr` picks it: its path, which the card helpers take, kept in
+  /// `here.path`. A page-side wait.
+  const liveCardPath = async (timeoutMs = STEP_MS) => {
+    try {
+      here.path = await driver.waitFor(
+        `(() => { const card = JSON.parse(${snapshotExpr()}).board;
+                  return card && card.corner !== 'quiet' && card.corner !== 'blank' ? card.path : false; })()`,
+        { timeoutMs, what: `the card of ${here.mac} (live, and kept)` },
+      );
+    } catch (error) {
+      // Say what the page held instead, so a miss reads as which card.
+      const seen = await driver.evaluate(snapshotExpr()).catch((e) => `(unreadable: ${e.message})`);
+      throw new Error(`${error.message.split("\n")[0]} — the page held: ${seen}`);
+    }
+    return here.path;
+  };
+  /// Page-side: the step's board as its card reads now, as JSON — local to
+  /// this walk (the driver's helpers read one bar at a time; a watch reads
+  /// them all at one instant). WHICH card: the one whose path ends with the
+  /// board's MAC while Studio watches it; else a live `new-<n>` card — a
+  /// board that has not said who it is (a core-only board says no hello),
+  /// which in a step can only be this one (each step's door holds one board,
+  /// and an earlier step's are offline: `data-board-corner="quiet"`); else
+  /// its own card offline. For that card: its path; the corner's mark
+  /// (`blank`: a new board's card, `pending_board_card`); whether it sits in
+  /// the home page's Offline boards (`#home-offline-boards`); the firmware and
+  /// connection bars' lines (a bar's pieces joined, as the driver's
+  /// `barText`) and work (`data-bar-work`); the verbs on its face this walk
+  /// reads (`data-offer-path`: enabled, and whether a press arms — a
+  /// Lasting button carries `.ux-armed-label-armed`); and, while its
+  /// connection details are open, their `State` fact.
+  const snapshotExpr = () => `(() => {
+    const hex = ${JSON.stringify(macHex(here?.mac))};
+    const words = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim();
+    const lineOf = (el) => (el ? [...el.children].map(words).filter(Boolean).join(' ') : null);
+    const pathOf = (card) => card.getAttribute('data-board-card') || '';
+    const cornerOf = (card) => card.querySelector('[data-board-corner]')?.getAttribute('data-board-corner') ?? null;
+    const live = (card) => cornerOf(card) !== 'quiet';
+    const fresh = (card) => /^devices\\/new-\\d+$/.test(pathOf(card));
+    const cards = [...document.querySelectorAll('[data-board-card]')];
+    const named = cards.filter((card) => hex !== '' && pathOf(card).endsWith('-' + hex) && !fresh(card));
+    // Last, the page's one live card: an in-tab board's bus lists the tab's
+    // own MAC, while its card is keyed by the MAC the guest's hello says
+    // (the seeded image's), so a tab step's board can be named by neither.
+    const onlyLive = cards.filter(live);
+    const card = named.find(live) ?? cards.find((card) => fresh(card) && live(card)) ?? named[0]
+      ?? (onlyLive.length === 1 ? onlyLive[0] : null);
+    if (!card) return JSON.stringify({ board: null, cards: cards.map(pathOf) });
+    const bar = (layer, name) => {
+      const el = card.querySelector('[data-bar="' + layer + '"]');
+      if (!el) return null;
+      return { line: lineOf(el.querySelector('button[aria-label="' + name + ' details"]')), work: el.getAttribute('data-bar-work') || 'none' };
+    };
+    const face = (verb) => {
+      const mark = [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')].find((m) => !m.closest('.ux-popover-layer'));
+      const buttons = mark ? mark.querySelectorAll('button') : [];
+      const button = buttons.length ? buttons[buttons.length - 1] : null;
+      return button ? { enabled: !button.disabled, arms: Boolean(button.querySelector('.ux-armed-label-armed')) } : null;
+    };
+    const fact = (layer, label) => {
+      const dt = [...card.querySelectorAll('[data-bar="' + layer + '"] [id^="ux-popover-panel"] dt')]
+        .find((el) => words(el).toLowerCase() === label.toLowerCase());
+      return dt?.nextElementSibling ? words(dt.nextElementSibling) : null;
+    };
+    return JSON.stringify({
+      board: {
+        path: pathOf(card),
+        corner: cornerOf(card),
+        offlineBoards: Boolean(card.closest('#home-offline-boards')),
+        firmware: bar('firmware', 'Firmware'),
+        connection: bar('connection', 'Connection'),
+        offers: { 'update-firmware': face('update-firmware'), 'install-firmware': face('install-firmware'), edit: face('edit') },
+        state: fact('connection', 'State'),
+      },
+      cards: cards.map(pathOf),
+    });
+  })()`;
+  const cardSnapshot = async () => {
+    try {
+      return JSON.parse(await driver.evaluate(snapshotExpr()));
+    } catch {
+      return { board: null, cards: [] }; // mid-navigation
+    }
+  };
+  /// The path of the card the step's board is on right now (see
+  /// `snapshotExpr`), else its own.
+  const boardPathNow = async () => (await cardSnapshot()).board?.path ?? here.path;
+  /// The update lines the snapshot's card shows (`CARD_LINES`): its firmware
+  /// bar, and a new board's connection details' `State`; and "available"
+  /// while the firmware bar's action is the over-the-air `update-firmware`
+  /// (Routine: it does not arm — the USB flash at the same path does).
+  const cardLines = (snap) => {
+    const seen = {};
+    const card = snap.board;
+    if (!card) return seen;
+    for (const text of [card.firmware?.line, card.state]) {
+      if (!text) continue;
+      for (const [kind, pattern] of CARD_LINES) {
+        const match = text.match(pattern);
+        if (match && !seen[kind]) seen[kind] = match[0].trim();
+      }
+    }
+    const update = card.offers["update-firmware"];
+    if (update?.enabled && !update.arms && card.firmware?.work !== "running") seen.available = card.firmware?.line ?? "update-firmware";
     return seen;
   };
-  /// Studio's own terminal lines on the page now (they start with `▸`).
-  const terminalLines = async () =>
-    (await driver.evaluate("document.body.innerText"))
-      .split("\n")
-      .filter((line) => line.startsWith("▸ "))
-      .map((line) => line.slice(2));
-  /// Watch the card until `done` holds, noting every update line it shows on
-  /// the way (the order they first appeared in).
+  /// Studio's own lines in the board's terminal — the status corner's
+  /// details (`data-board-terminal`), where `DeviceTerminal` starts each of
+  /// Studio's rows with `▸ `: the update's narration, rates and reconnect
+  /// times.
+  const terminalLines = async () => {
+    const rows = await driver.terminalLines({ board: await boardPathNow(), timeoutMs: STEP_MS });
+    return rows.filter((line) => line.startsWith("▸ ")).map((line) => line.slice(2));
+  };
+  /// The firmware details' text (opened for the read, then closed).
+  const firmwareDetails = async (cardPath) => {
+    await driver.openBar("firmware", { board: cardPath, timeoutMs: 10_000 });
+    try {
+      return await driver.evaluate(
+        `(document.querySelector(${JSON.stringify(`[data-board-card="${cardPath}"] [data-bar="firmware"] [id^="ux-popover-panel"]`)})?.innerText || '')`,
+      );
+    } finally {
+      await driver.closeDetails({ board: cardPath }).catch(() => {});
+    }
+  };
+  /// Watch the step's board's card until `done(snapshot, lines, order)`
+  /// holds, noting every update line it shows on the way (the order they
+  /// first appeared in). While the board is on a new board's card, its
+  /// connection details stay open: their `State` is where that card says how
+  /// its update goes.
   const watchCard = async (done, what, timeoutMs = UPDATE_MS, onTick = null) => {
     const order = [];
     const began = Date.now();
@@ -591,27 +787,57 @@ async function main() {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       await refreshTab();
-      const lines = await cardLines();
+      const snap = await cardSnapshot();
+      if (snap.board?.corner === "blank") {
+        await driver.openBar("connection", { board: snap.board.path, timeoutMs: 3_000 }).catch(() => {});
+      }
+      const lines = cardLines(snap);
       for (const [kind, line] of Object.entries(lines)) {
         if (!order.some((entry) => entry.kind === kind)) order.push({ kind, line, atMs: Date.now() });
       }
-      if (onTick) await onTick(lines);
+      if (onTick) await onTick(lines, snap);
       // A live trail for whoever watches the walk: the card's lines as they
-      // change, with the time since the watch began.
+      // change (and which card, and its link), with the time since the watch
+      // began.
       const pageLines = driver.consoleLines();
       if (pageLines.length !== pageSeen) {
         pageSeen = pageLines.length;
         writeFileSync(path.join(out, "page-console.log"), pageLines.join("\n"));
       }
-      const now = JSON.stringify(lines);
+      const now = JSON.stringify({ card: snap.board?.path ?? null, link: snap.board?.connection?.line ?? null, lines });
       if (now !== lastTrail) {
         lastTrail = now;
         appendFileSync(trail, `${((Date.now() - began) / 1000).toFixed(1)} s ${now}\n`);
       }
-      if (await driver.evaluate(done)) return order;
-      if (Date.now() > deadline) throw new Error(`the card never reached ${what}; it showed ${JSON.stringify(order)}`);
+      if (await done(snap, lines, order)) return order;
+      if (Date.now() > deadline) {
+        throw new Error(`the card never reached ${what}; it showed ${JSON.stringify(order)}; it reads ${JSON.stringify(snap.board)}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+  };
+  /// Done once the board runs this Studio's build: its card kept and live
+  /// (not a new board's, not offline), its firmware bar carrying no running
+  /// work, and its firmware details saying so — "…, the same as this
+  /// Studio." (the update's UpToDate sentence, `device_update_words.rs`,
+  /// which the details' facts carry: `firmware_bar.rs` `details`; the bar
+  /// itself shows the version alone). The details open at most every 2 s,
+  /// and only while the bar is idle. A fresh one per watch.
+  const upToDate = () => {
+    let lookedAt = 0;
+    return async (snap, lines, order) => {
+      const card = snap.board;
+      if (!card || card.corner === "blank" || card.corner === "quiet") return false;
+      if (!card.firmware || card.firmware.work === "running") return false;
+      if (Date.now() - lookedAt < 2_000) return false;
+      lookedAt = Date.now();
+      const said = (await firmwareDetails(card.path).catch(() => ""))
+        .split("\n")
+        .find((line) => line.includes("the same as this Studio"));
+      if (!said) return false;
+      order.push({ kind: "up to date", line: said.trim(), atMs: Date.now() });
+      return true;
+    };
   };
   const shot = async (name) => {
     const file = path.join(shots, `${String(report.steps.length + 1).padStart(2, "0")}-${name}.png`);
@@ -633,16 +859,26 @@ async function main() {
       error = failure;
     }
     const file = await shot(name);
-    // The page as it stood (the card, its terminal's lines): what a person
-    // reading the record would have seen. Studio's own terminal lines (the
-    // update's narration: rates, reconnect times) start with `▸`.
+    // The page as it stood: what a person reading the record would have
+    // seen. The board's terminal is in its status corner's details, closed
+    // on the page, so it is read there and kept beside the page's text;
+    // Studio's own rows in it (the update's narration: rates, reconnect
+    // times) start with `▸`.
     let terminal = [];
     try {
       const page = await driver.evaluate("document.body.innerText");
       writeFileSync(path.join(out, `${name}-page.txt`), page);
-      terminal = page.split("\n").filter((line) => line.startsWith("▸ ")).map((line) => line.slice(2));
     } catch {
       /* the page may be gone */
+    }
+    try {
+      if (here) {
+        const rows = await driver.terminalLines({ board: await boardPathNow(), timeoutMs: 10_000 });
+        writeFileSync(path.join(out, `${name}-terminal.txt`), rows.join("\n"));
+        terminal = rows.filter((line) => line.startsWith("▸ ")).map((line) => line.slice(2));
+      }
+    } catch {
+      /* no card, or no terminal on it (an offline card draws none) */
     }
     const record = {
       name,
@@ -651,6 +887,7 @@ async function main() {
       error: error?.message ?? null,
       wallSeconds: Math.round((Date.now() - started) / 1000),
       ...(note ?? {}),
+      cardPath: here?.path ?? null,
       terminal,
       shot: file,
     };
@@ -787,54 +1024,120 @@ async function main() {
     }
     return { resets, drops, timed: lines };
   };
-  /// The card's update line must name this lane's link.
-  const checkLinkWord = (order) => {
-    const updating = order.find((entry) => entry.kind === "updating");
-    if (!updating) throw new Error(`the card never said Updating over ${LINK_WORD}`);
-    if (!updating.line.includes(`over ${LINK_WORD}`)) throw new Error(`the card said "${updating.line}", not over ${LINK_WORD}`);
+  /// The card must name this lane's link while the board updates. The
+  /// update's line no longer carries it (`device_update_words.rs`: the link
+  /// is in the sentence); the connection bar does — its summary, read on
+  /// every tick the firmware bar said "Updating · 1 of 2", leads with the
+  /// link's label (`LINK_LABEL`).
+  const checkLinkWord = (ran) => {
+    if (!ran.order.some((entry) => entry.kind === "updating")) throw new Error("the card never said Updating · 1 of 2");
+    if (!ran.links.some((line) => line.startsWith(`${LINK_LABEL} · `))) {
+      throw new Error(`while it updated, the card's connection bar said ${JSON.stringify(ran.links)}, never ${LINK_LABEL}`);
+    }
   };
+  /// Put the walk's project on the board, by its card's offers: a board
+  /// running a project already (its primary Edit can be pressed) is left as
+  /// it is; an empty one is given `push` — the project bar's "Add a
+  /// project", drawn as the project pick — then the project in the picker,
+  /// "Put it on the board", and the board's own "Project loaded" in its
+  /// terminal.
   const pushProject = async () => {
-    const face = await driver.waitFor(
-      `(() => { const t = ${MAIN_TEXT};
-                return t.includes('Remove project') ? 'running' : t.includes('to choose from') ? 'empty' : false; })()`,
-      { timeoutMs: STEP_MS, what: "the board to say what it runs" },
-    );
+    const board = here.path;
+    const face = await driver.boardRuns({ board, timeoutMs: STEP_MS });
     if (face === "running") return "already running a project";
-    await driver.clickWhenReady("to choose from", { timeoutMs: STEP_MS });
-    await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, { what: "the project popover" });
-    await driver.click(PROJECT, { scope: `document.querySelector('[id^="ux-popover-panel"]')`, exact: true });
-    await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_MS });
-    await driver.waitFor(`${MAIN_TEXT}.includes('Project loaded')`, { timeoutMs: STEP_MS, what: "`Project loaded`" });
+    await driver.pressOffer("push", { board, timeoutMs: STEP_MS });
+    await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_MS, what: "the project picker" });
+    await driver.click(PROJECT, { scope: PANEL, exact: true });
+    await driver.clickWhenReady("Put it on the board", { scope: PANEL, timeoutMs: STEP_MS });
+    await driver.boardSaid("Project loaded", { board, timeoutMs: STEP_MS });
     return `${PROJECT} loaded`;
   };
-  /// The card's over-the-air install: `update-firmware`'s button ("Update",
-  /// or "Install <Y>" between two dev builds). Never today's "Update
-  /// firmware" flash, which is a different offer.
-  const pressUpdate = async () => {
-    const label = await driver.waitFor(
-      `(() => {
-         const button = [...document.querySelectorAll('#main button')].find((el) => {
-           const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
-           return !el.disabled && (t === 'Update' || t.startsWith('Install '));
-         });
-         return button ? (button.textContent || '').replace(/\\s+/g, ' ').trim() : false;
-       })()`,
-      { timeoutMs: STEP_MS, what: "the card's over-the-air Update" },
-    );
-    // An install that is not known newer arms first (Lasting, since "Other
-    // version…"): two dev builds have no order, so "Install <Y>" on the
-    // E13 row arms, and its button carries the arm's "Confirm install".
-    const armed = label.endsWith("Confirm install");
-    const shown = armed ? label.slice(0, -"Confirm install".length).trim() : label;
-    await driver.click(shown, { scope: `document.querySelector('#main')`, exact: true });
-    if (armed) {
-      await driver.waitFor(`Boolean(document.querySelector('#main .ux-armed'))`, { timeoutMs: STEP_MS, what: "the install to arm" });
-      await driver.click("Confirm install", { scope: `document.querySelector('#main')` });
-      return `${shown} (armed, confirmed)`;
+  /// Page-side read of the button an offer's mark carries on the card at
+  /// `cardPath` — on its face, or in its open details (`inDetails`): its
+  /// words (the resting label of a Lasting button, which carries its armed
+  /// label too), whether a press arms it (Lasting: `.ux-armed-label-armed`,
+  /// `ActionButton`), and whether it opens a pick.
+  const offerButton = (cardPath, verb, inDetails = false) =>
+    driver.evaluate(`(() => {
+      const card = document.querySelector(${JSON.stringify(`[data-board-card="${cardPath}"]`)});
+      const mark = card && [...card.querySelectorAll(${JSON.stringify(`[data-offer-path$="/${verb}"]`)})]
+        .find((m) => Boolean(m.closest('.ux-popover-layer')) === ${Boolean(inDetails)});
+      const buttons = mark ? mark.querySelectorAll('button') : [];
+      const button = buttons.length ? buttons[buttons.length - 1] : null;
+      if (!button) return null;
+      const words = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim();
+      return {
+        words: words(button.querySelector('.ux-armed-label-rest') ?? button),
+        arms: Boolean(button.querySelector('.ux-armed-label-armed')),
+        // A pick is a popover's trigger (aria-expanded), or a details row
+        // that hands one to its bar (aria-haspopup).
+        pick: button.hasAttribute('aria-expanded') || button.hasAttribute('aria-haspopup'),
+      };
+    })()`);
+  /// Every verb the step's board's card draws on its face and in its
+  /// firmware details (opened for the read, then closed): each mark's last
+  /// path segment, where it is, its words, whether a press arms it
+  /// (Lasting), whether it opens a pick.
+  const cardOffers = async () => {
+    const board = here.path;
+    const read = (inDetails) =>
+      driver.evaluate(`(() => {
+        const card = document.querySelector(${JSON.stringify(`[data-board-card="${board}"]`)});
+        if (!card) return [];
+        const words = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim();
+        return [...card.querySelectorAll('[data-offer-path]')]
+          .filter((mark) => Boolean(mark.closest('.ux-popover-layer')) === ${inDetails})
+          .map((mark) => {
+            const buttons = mark.querySelectorAll('button');
+            const button = buttons.length ? buttons[buttons.length - 1] : null;
+            return {
+              verb: (mark.getAttribute('data-offer-path') || '').split('/').pop(),
+              where: ${JSON.stringify(inDetails ? "firmware details" : "face")},
+              words: words(button?.querySelector('.ux-armed-label-rest') ?? button),
+              arms: Boolean(button?.querySelector('.ux-armed-label-armed')),
+              pick: Boolean(button) && (button.hasAttribute('aria-expanded') || button.hasAttribute('aria-haspopup')),
+            };
+          });
+      })()`);
+    const face = await read(false);
+    await driver.openBar("firmware", { board, timeoutMs: STEP_MS });
+    try {
+      return [...face, ...(await read(true))];
+    } finally {
+      await driver.closeDetails({ board }).catch(() => {});
     }
-    return label;
   };
-  const upToDate = `/(up to date|same as this Studio)/.test(${MAIN_TEXT})`;
+  /// Press an update verb where the card draws it: on its face (the
+  /// firmware bar's action, `firmware_bar.rs`), or — an install with a list
+  /// to choose from — in the firmware details. A Lasting press (an install
+  /// not known newer: two dev builds have no order, so "Install <Y>" on the
+  /// E13 row arms) arms on its first click and presses on its second
+  /// (`pressOffer`'s `confirm`). `overTheAir`: the verb must be the Routine
+  /// over-the-air update ("Update", or "Install <Y>" between two builds,
+  /// `device_update_offers.rs`) — never the USB flash, which is published
+  /// at the same `update-firmware` and is Lasting (or a board pick).
+  const pressUpdate = async (verb, { overTheAir = false } = {}) => {
+    const board = await boardPathNow();
+    let bar = null;
+    if (verb === "update-firmware") {
+      await driver.waitOffer(verb, { board, timeoutMs: STEP_MS });
+    } else {
+      try {
+        await driver.waitOffer(verb, { board, timeoutMs: 30_000 });
+      } catch {
+        bar = "firmware";
+        await driver.waitOffer(verb, { board, bar, timeoutMs: STEP_MS });
+      }
+    }
+    const button = await offerButton(board, verb, Boolean(bar));
+    if (!button) throw new Error(`the card's \`${verb}\` went away before it could be pressed`);
+    if (overTheAir && (button.arms || button.pick)) {
+      throw new Error(`the card's \`${verb}\` reads "${button.words}" and is the USB flash (Lasting), not the over-the-air update`);
+    }
+    await driver.pressOffer(verb, { board, bar, confirm: button.arms, timeoutMs: STEP_MS });
+    if (bar) await driver.closeDetails({ board }).catch(() => {});
+    return button.arms ? `${button.words} (armed, confirmed)` : button.words;
+  };
   const engineCache = () =>
     driver.evaluate(
       `(async () => {
@@ -867,7 +1170,7 @@ async function main() {
   /// `cut` says so.
   const runUpdate = async (board, { cut = null } = {}) => {
     const from = boardWords(board).length;
-    const label = await pressUpdate();
+    const label = await pressUpdate("update-firmware", { overTheAir: true });
     let cutAt = null;
     let cutShot = null;
     /// The cut stage's highest and lowest percent the card showed after the
@@ -876,7 +1179,12 @@ async function main() {
     let lowAfterCut = Infinity;
     let lastAir = "";
     let lastAirAt = 0;
-    const order = await watchCard(upToDate, "up to date on Y", UPDATE_MS, async (lines) => {
+    /// The connection bar's lines while the firmware bar said "Updating · 1
+    /// of 2": what `checkLinkWord` reads the link from.
+    const links = [];
+    const order = await watchCard(upToDate(), "up to date on Y", UPDATE_MS, async (lines, snap) => {
+      const link = snap.board?.connection?.line;
+      if (lines.updating && link && !links.includes(link)) links.push(link);
       // Over `?ble=emu`, the air as the polyfill counts it, beside the
       // card's lines: connects, the board's side opening, reset drops.
       if (BLE) {
@@ -956,16 +1264,23 @@ async function main() {
           cutAt = `${line} (out of range for ${Date.now() - back} ms)`;
           return;
         }
-        // The cable stays out until Studio has seen it go — its own terminal
-        // line — then goes back in, as a person re-seating it would.
-        // (The card keeps the update's line and offers "Reconnect…" while
-        // its link is gone; a core-only board's card may instead leave
-        // Online boards for Offline boards, which is a section of its own
-        // on the home page.)
-        await driver.waitFor(`Boolean(document.querySelector('#home-offline-boards')) || /Reconnect…/.test(document.body.innerText)`, {
-          timeoutMs: STEP_MS,
-          what: "Studio to see the cable go",
-        });
+        // The cable stays out until Studio has seen it go — the board's card
+        // stops saying its link is up — then goes back in, as a person
+        // re-seating it would. The card's connection bar leaves "<link> ·
+        // live" / "<link> · connected" ("USB · not connected", "Offline · …",
+        // or its work: `connection_bar.rs`), or the card goes quiet
+        // (`data-board-corner="quiet"`: a board Studio is not watching), or
+        // it moves to Offline boards (`#home-offline-boards`, the home
+        // page's own section — where a core-only board's card may go).
+        await driver.waitFor(
+          `(() => { const card = JSON.parse(${snapshotExpr()}).board;
+                    if (!card) return 'no card';
+                    if (card.offlineBoards) return 'offline boards';
+                    if (card.corner === 'quiet') return 'quiet';
+                    const line = card.connection?.line ?? '';
+                    return /· (live|connected)\\b/.test(line) ? false : line || 'no link'; })()`,
+          { timeoutMs: STEP_MS, what: "Studio to see the cable go (the card's link no longer up)" },
+        );
         // The one deliberate duration in this walk: a person re-seating a
         // cable takes seconds, not the instant the walk would otherwise take.
         await new Promise((resolve) => setTimeout(resolve, DETACHED_MS));
@@ -973,13 +1288,13 @@ async function main() {
         cutAt = `${line} (out for ${Date.now() - back} ms)`;
       }
     });
-    return { label, order, cutAt, cutShot, from, peakAfterCut, lowAfterCut };
+    return { label, order, links, cutAt, cutShot, from, peakAfterCut, lowAfterCut };
   };
 
   // The door writes a board's console file every 2 s (`emu serve`'s
-  // FLUSH_EVERY), so the card can say "up to date" before the file holds the
-  // engine's commit line: give the file one flush to catch up before reading
-  // the board's words.
+  // FLUSH_EVERY), so the card can say the board is on its new build before
+  // the file holds the engine's commit line: give the file one flush to catch
+  // up before reading the board's words.
   const settle = async (board, from) => {
     try {
       await waitBoard(board, /\[OTA\] engine verified, committing/, "the engine's commit", 5_000, from);
@@ -1107,33 +1422,76 @@ async function main() {
   };
   /// A build id, as a regular expression's literal.
   const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
-  /// Open the card's "Other version…" list and wait for it to hold `version`.
+  /// Page-side: "Other version…", inline in the firmware details
+  /// (`UiDetailPanel::OtherVersion`, drawn by `other_version_form.rs` as one
+  /// section of the details card titled in the offer's own words): the
+  /// install offer's find box ("Type a version") over its version list (each
+  /// version a button; the board's own drawn disabled, "On this board now";
+  /// "this Studio's build", "from your files" beside a version), the copy of
+  /// a Lasting pick, "From a file…" (`install-firmware-file`) and the press
+  /// ("Install", or "Look up <v>"), marked `install-firmware`. The section is
+  /// the one holding that mark inside the step's board's open details; null
+  /// while they are closed.
+  const otherVersion = () => `((() => {
+    const card = document.querySelector(${JSON.stringify(`[data-board-card="${here.path}"]`)});
+    const mark = card && [...card.querySelectorAll('[data-offer-path$="/install-firmware"]')].find((m) => Boolean(m.closest('.ux-popover-layer')));
+    return mark ? mark.closest('section') : null; })())`;
+  /// Open the firmware details, where "Other version…" is (the install offer
+  /// with its list, `install-firmware`), and wait for the list to hold
+  /// `version`. Returns the section's text.
   const openOtherVersion = async (version) => {
-    await driver.clickWhenReady("Other version…", { timeoutMs: STEP_MS });
+    await driver.waitOffer("install-firmware", { board: here.path, bar: "firmware", enabled: false, timeoutMs: STEP_MS });
     return driver.waitFor(
-      `(() => { const t = ${PANEL}?.innerText ?? ''; return t.includes(${JSON.stringify(version)}) ? t : false; })()`,
+      `(() => { const t = ${otherVersion()}?.innerText ?? ''; return t.includes(${JSON.stringify(version)}) ? t : false; })()`,
       { timeoutMs: STEP_MS, what: `the version list to hold ${version}` },
     );
   };
   /// Whether the list's option for `version` is drawn disabled.
   const optionDisabled = (version) =>
     driver.evaluate(
-      `[...(${PANEL}?.querySelectorAll('button') ?? [])].some((el) => el.disabled && (el.textContent || '').includes(${JSON.stringify(version)}))`,
+      `[...(${otherVersion()}?.querySelectorAll('button') ?? [])].some((el) => el.disabled && (el.textContent || '').includes(${JSON.stringify(version)}))`,
     );
+  /// Page-side: the Other version press armed (`.ux-armed`), its label swap
+  /// (a 0.16 s fade) done, so a shot shows the armed reading alone.
+  const installArmed = () => `(() => { const rest = ${otherVersion()}?.querySelector('.ux-armed .ux-armed-label-rest');
+                                        return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`;
+  /// Install the version the Other version list holds picked, where the
+  /// install is Lasting: the first press of `install-firmware` ARMS it (the
+  /// walk waits for the arm — that it arms is the claim), `check` reads the
+  /// section's text armed (the copy says what changes), `shotName` takes
+  /// its picture, and the second press installs — `pressOffer`'s two clicks
+  /// for `confirm`, with the armed reading caught between them. The details
+  /// close after.
+  const installAfterArming = async (version, { check = null, shotName = null } = {}) => {
+    await driver.pressOffer("install-firmware", { board: here.path, bar: "firmware", timeoutMs: STEP_MS });
+    await driver.waitFor(installArmed(), { timeoutMs: STEP_MS, what: `the press on ${version} to arm` });
+    const copy = await driver.evaluate(`${otherVersion()}?.innerText ?? ''`);
+    if (check) check(copy);
+    const armedShot = shotName ? await shot(shotName) : null;
+    await driver.pressOffer("install-firmware", { board: here.path, bar: "firmware", timeoutMs: STEP_MS });
+    await driver.closeDetails({ board: here.path }).catch(() => {});
+    return { copy, armedShot };
+  };
   /// The board runs `release` and the card has finished: the board's core
-  /// booted that build and committed its engine, and the card's identity row
-  /// names the version with no update line left and the project running.
+  /// booted that build and committed its engine, and the board's card names
+  /// the version — its firmware bar's summary, with no update work left on
+  /// it — and runs its project: its primary Edit can be pressed, and the
+  /// project details offer `remove-project`.
   const awaitRelease = async (board, release, from) => {
     const id = `${release.version}+${release.commit.slice(0, 12)}`;
     await waitBoard(board, new RegExp(`\\[OTA\\] offer ${literal(id)} → core`), `${id}'s core offer`, UPDATE_MS, from);
     const core = await waitBoard(board, new RegExp(`\\[CORE\\] [^\\n]*build ${literal(id)}`), `booting ${id}'s core`, UPDATE_MS, from);
     const order = await watchCard(
-      `(() => { const t = ${MAIN_TEXT};
-                return t.includes(${JSON.stringify(`· ${release.version}`)}) && t.includes('Remove project')
-                  && !/(Backing up current firmware|Updating over|Finishing the update|Restoring firmware)/.test(t); })()`,
+      async (snap) => {
+        const card = snap.board;
+        return Boolean(card) && card.corner !== "blank" && card.corner !== "quiet" && card.firmware?.work !== "running"
+          && (card.firmware?.line ?? "").includes(release.version) && Boolean(card.offers.edit?.enabled);
+      },
       `the card on ${release.version}, its project running`,
     );
+    const cardPath = await liveCardPath();
+    await driver.waitOffer("remove-project", { board: cardPath, bar: "project", timeoutMs: STEP_MS });
+    await driver.closeDetails({ board: cardPath });
     await settle(board, from);
     const said = boardSaid(board, from, OTA_WORDS);
     for (const need of ["core offer", "core confirmed", "engine committed"]) {
@@ -1151,6 +1509,11 @@ async function main() {
       const lane = TAB ? 1 : LAN_LANE ? 2 : RELAY_LANE ? 3 : 0;
       const mac = `mac=02:4c:50:00:${(ALL_STEPS.indexOf(name) + 1).toString(16).padStart(2, "0")}:0${lane}`;
       const xBoard = `${board}=${LAN_LANE ? xLanChip : RELAY_LANE ? xRelayChip : xChip},kind=rom-up,${mac}`;
+      // The step's board is named by its MAC (`nameBoard`, at the top of
+      // each step): the door's registry says it, or the tab's bus; the `mac=`
+      // the walk gave the door stands in when the registry does not.
+      here = null;
+      const nameThisBoard = () => nameBoard(board, TAB ? null : mac.slice("mac=".length));
       switch (name) {
         case "update":
           // An empty cache, so the update must back the board up first.
@@ -1161,7 +1524,9 @@ async function main() {
             await seedTab("x");
           }
           await step("update", `X → Y with one press: back up, update over ${LINK_WORD}, finish; the project still runs`, async () => {
+            await nameThisBoard();
             await connect(board);
+            await liveCardPath();
             const pushed = await pushProject();
             const air0 = await bleStats(board);
             const ran = await runUpdate(board);
@@ -1171,13 +1536,16 @@ async function main() {
             for (const need of ["core offer", "core on trial", "core confirmed", "engine offer", "engine committed"]) {
               if (!said[need]) throw new Error(`the board never said ${need}`);
             }
-            if (!ran.order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up current firmware");
-            checkLinkWord(ran.order);
+            if (!ran.order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up");
+            checkLinkWord(ran);
             const reconnects = ON_LAN
               ? checkWifiReconnects(await terminalLines(), 2)
               : checkReconnects(await terminalLines(), air0, air1, 0);
-            // E14: the project survived — the card still runs it.
-            await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: "the board running its project on Y" });
+            // E14: the project survived — the card still runs it: its project
+            // details offer `remove-project`.
+            const kept = await liveCardPath();
+            await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
+            await driver.closeDetails({ board: kept });
             const cache = await engineCache();
             const backup = cache.some((entry) => entry.includes(x.engine.sha256));
             if (!backup) throw new Error(`the engine cache does not hold X's engine (${x.engine.sha256.slice(0, 12)}…): ${JSON.stringify(cache)}`);
@@ -1192,8 +1560,11 @@ async function main() {
           await clearEngineCache();
           await openDoor(name, [`${board}=${xrChip},kind=rom-up,${mac}`]);
           await step(name, `a board on release ${xr.version}: its engine comes from the release store, never read back`, async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: `Ready on ${xr.version}` });
+            // Ready, as core reads it: the card offers the board a project,
+            // or the editor on the one it runs.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
             const hitsBefore = storeHits.length;
             const ran = await runUpdate(board);
             await settle(board, ran.from);
@@ -1204,7 +1575,7 @@ async function main() {
             const hits = storeHits.slice(hitsBefore);
             if (!hits.includes("engine.bin")) throw new Error(`the store was never asked for XR's engine: ${JSON.stringify(hits)}`);
             if (ran.order.some((entry) => entry.kind === "backing up")) {
-              throw new Error("the card said Backing up current firmware: the engine was read back, not fetched");
+              throw new Error("the card said Backing up: the engine was read back, not fetched");
             }
             const cache = await engineCache();
             if (!cache.some((entry) => entry.includes(xr.engine.sha256))) {
@@ -1230,8 +1601,10 @@ async function main() {
             ? "the board goes out of range mid-backup and comes back: the backup resumes, the update finishes with no click"
             : "the cable comes out mid-backup and goes back in: the backup resumes, the update finishes with no click";
           await step(name, describe, async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            // Ready on X, as core reads it.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
             const air0 = await bleStats(board);
             const ran = await runUpdate(board, { cut: { stage: "backing up", boardSays: null, atPercent: 40 } });
             const air1 = await bleStats(board);
@@ -1241,7 +1614,7 @@ async function main() {
             for (const need of ["core offer", "core confirmed", "engine committed"]) {
               if (!said[need]) throw new Error(`the board never said ${need}`);
             }
-            checkLinkWord(ran.order);
+            checkLinkWord(ran);
             // The backup went on after the cut: a "Backing up" line past the
             // percent it was cut at, and the read-back kept in the cache.
             const cutPercent = Number(ran.cutAt.match(/(\d+)%/)?.[1] ?? 0);
@@ -1282,8 +1655,10 @@ async function main() {
               ? `the board goes out of range mid-${engine ? "engine" : "core"} and comes back: the update finishes with no click`
               : `the cable comes out mid-${engine ? "engine" : "core"} and goes back in: the update finishes with no click`;
           await step(name, describe, async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            // Ready on X, as core reads it.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
             const air0 = await bleStats(board);
             const ran = await runUpdate(board, {
               cut: engine
@@ -1298,8 +1673,11 @@ async function main() {
             // tears it down), but the board keeps running: it resumes only if
             // its transfer was cut short, which the walk's own drop is.
             if (!said.resumed) throw new Error("the board never said it resumed the transfer");
-            checkLinkWord(ran.order);
-            if (!BLE && !ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Finishing the update");
+            checkLinkWord(ran);
+            // The engine, the update's second piece: "Updating · 2 of 2"
+            // (or "Resuming · 2 of 2"; a new board's card: "Finishing the
+            // update…").
+            if (!BLE && !ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Updating · 2 of 2");
             const reconnects = ON_LAN
               ? checkWifiReconnects(await terminalLines(), 2)
               : checkReconnects(await terminalLines(), air0, air1, 1);
@@ -1328,14 +1706,26 @@ async function main() {
           if (!clear) {
             await step(name, `the engine-less board${LAN_LANE ? ", reached over Wi‑Fi in core-only," : ""} restores itself on connect, with no click, from the cache`, async () => {
               const from = 0;
+              await nameThisBoard();
               await connect(board);
               await waitBoard(board, /\[OTA\] offer \S+ → engine/, "the restore's engine offer");
               await shot("restoring");
               writeFileSync(path.join(out, "restoring-page.txt"), await driver.evaluate("document.body.innerText"));
               const air0 = await bleStats(board);
-              const order = await watchCard(`${MAIN_TEXT}.includes('Remove project') || /a0a0a0a0[^\\n]*available/.test(${MAIN_TEXT})`, "X running again");
+              // The restore runs on the new board's card (a core-only board
+              // says no hello, so it is not kept): its connection details'
+              // State says "Restoring firmware… N%" (`watchCard` keeps them
+              // open). X running again: the board said who it is — its card
+              // kept and live — and runs its project (its primary Edit can be
+              // pressed) or is offered the update to Y over the air.
+              const order = await watchCard(async (snap) => {
+                const card = snap.board;
+                if (!card || card.corner === "blank" || card.corner === "quiet") return false;
+                const update = card.offers["update-firmware"];
+                return Boolean(card.offers.edit?.enabled) || Boolean(update?.enabled && !update.arms);
+              }, "X running again");
               const air1 = await bleStats(board);
-              if (!order.some((entry) => entry.kind === "restoring")) throw new Error("the card never said Restoring firmware");
+              if (!order.some((entry) => entry.kind === "restoring")) throw new Error("the card never said Restoring");
               const reconnects = BLE ? checkReconnects(await terminalLines(), { resetDrops: 0 }, air1, 0, { timed: false }) : null;
               if (BLE && air0 === null) throw new Error("the Bluetooth polyfill holds no connection to the board");
               await settle(board, from);
@@ -1350,20 +1740,35 @@ async function main() {
           } else {
             await step(name, "the same board, the cache cleared and no store that has X: Studio says it can't get it; Install Y", async () => {
               const from = boardWords(board).length;
+              await nameThisBoard();
               await connect(board);
-              // A core-only board says no hello, so it stays a pending link
-              // until it is kept: its no-click restore runs (and misses)
+              // A core-only board says no hello, so it stays a new board's
+              // card until it is kept: its no-click restore runs (and misses)
               // there, and the row that needs a person is on the kept card.
-              await driver.waitFor(`/core only — waiting for its engine/.test(${MAIN_TEXT})`, {
-                timeoutMs: STEP_MS,
-                what: "the pending card to settle on core-only",
-              });
+              // The new board's card (`data-board-corner="blank"`,
+              // `pending_board_card`) settled on core-only: its firmware bar
+              // says "<version> · waiting for its firmware"
+              // (`device_firmware_face.rs` `core_only_line`, the pending
+              // firmware bar's summary).
+              const pending = await driver.waitFor(
+                `(() => { const card = JSON.parse(${snapshotExpr()}).board;
+                          return card && card.corner === 'blank' && /waiting for its firmware/.test(card.firmware?.line ?? '') ? card.path : false; })()`,
+                { timeoutMs: STEP_MS, what: "the new board's card to settle on core-only (… · waiting for its firmware)" },
+              );
               await shot("cant-get-pending");
-              const kept = await driver.clickWhenReady("Set up this device", { timeoutMs: STEP_MS });
-              const order = await watchCard(`/which Studio can't get/.test(${MAIN_TEXT})`, "Needs …, which Studio can't get", STEP_MS * 2);
+              // Set up this device: `adopt`, in the new board's hardware
+              // details (`hardware_bar.rs` `pending_hardware_bar`).
+              const kept = await driver.pressOffer("adopt", { board: pending, bar: "hardware", timeoutMs: STEP_MS });
+              await driver.closeDetails({ board: pending }).catch(() => {});
+              // The kept card's firmware bar: "Needs <X>, which Studio can't
+              // get" (the update's NeedsYou line, `device_update_words.rs`).
+              const order = await watchCard(async (snap, lines) => Boolean(lines["cant get"]), "Needs …, which Studio can't get", STEP_MS * 2);
               await shot("cant-get-row");
-              const label = await pressUpdate();
-              const rest = await watchCard(upToDate, "up to date on Y");
+              // Install <Y>: the firmware bar's action (`install-firmware`,
+              // one press with only this Studio's build to get; it arms,
+              // since two dev builds have no order).
+              const label = await pressUpdate("install-firmware");
+              const rest = await watchCard(upToDate(), "up to date on Y");
               await settle(board, from);
               const said = boardSaid(board, from, OTA_WORDS);
               if (!said["engine committed"]) throw new Error("the board never committed Y's engine");
@@ -1383,8 +1788,12 @@ async function main() {
           try {
             await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
             await step(name, `on ${r2.version}: Other version… lists the store's releases; ${r1.version}, typed in the box, arms and installs, then ${r2.version} installs at one click`, async () => {
+              await nameThisBoard();
               await connect(board);
-              await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
+              // The board running its project: its project details offer
+              // `remove-project`.
+              await driver.waitOffer("remove-project", { board: await liveCardPath(), bar: "project", timeoutMs: STEP_MS });
+              await driver.closeDetails({ board: here.path });
 
               // The list: the board's own drawn disabled, r1, this Studio's build.
               const list = await openOtherVersion(r1.version);
@@ -1396,25 +1805,21 @@ async function main() {
               // r1, typed whole into the box: the list narrows to it, picked;
               // older than the board's, so the press arms (Lasting).
               const from1 = boardWords(board).length;
-              await driver.type("Type a version", r1.version, { scope: PANEL });
+              await driver.type("Type a version", r1.version, { scope: otherVersion() });
               const narrowed = await driver.waitFor(
-                `(() => { const t = ${PANEL}?.innerText ?? '';
+                `(() => { const t = ${otherVersion()}?.innerText ?? '';
                           return t.includes(${JSON.stringify(r1.version)}) && !t.includes(${JSON.stringify(r2.version)}) ? t : false; })()`,
                 { timeoutMs: STEP_MS, what: `the box to narrow the list to ${r1.version}` },
               );
               const typedShot = await shot("install-older-typed");
-              await driver.click("Install", { scope: PANEL, exact: true });
-              // Armed, and its label swap (a 0.16 s fade) done, so the shot
-              // shows the armed reading alone.
-              await driver.waitFor(
-                `(() => { const rest = ${PANEL}?.querySelector('.ux-armed .ux-armed-label-rest');
-                          return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`,
-                { timeoutMs: STEP_MS, what: `the press on ${r1.version} to arm` },
-              );
-              const copy = await driver.evaluate(`${PANEL}?.innerText ?? ''`);
-              if (!copy.includes("Install an older version?")) throw new Error(`the armed press does not say what changes: ${copy}`);
-              const armedShot = await shot("install-older-armed");
-              await driver.click("Confirm install", { scope: PANEL });
+              // `install-firmware`, pressed: it arms; armed, the copy says what
+              // changes; pressed again, it installs.
+              const { armedShot } = await installAfterArming(r1.version, {
+                shotName: "install-older-armed",
+                check: (copy) => {
+                  if (!copy.includes("Install an older version?")) throw new Error(`the armed press does not say what changes: ${copy}`);
+                },
+              });
               const toR1 = await awaitRelease(board, r1, from1);
               const r1Shot = await shot("install-older-on-r1");
 
@@ -1423,9 +1828,10 @@ async function main() {
               const again = await openOtherVersion(r2.version);
               if (!again.includes("On this board now")) throw new Error(`the list does not mark ${r1.version} as the board's own: ${again}`);
               if (!(await optionDisabled(r1.version))) throw new Error(`${r1.version} is pickable, though the board runs it`);
-              await driver.click(r2.version, { scope: PANEL });
-              await driver.click("Install", { scope: PANEL, exact: true });
-              const armed = await driver.evaluate(`Boolean(${PANEL}?.querySelector('.ux-armed'))`);
+              await driver.click(r2.version, { scope: otherVersion() });
+              await driver.pressOffer("install-firmware", { board: here.path, bar: "firmware", timeoutMs: STEP_MS });
+              const armed = await driver.evaluate(`Boolean(${otherVersion()}?.querySelector('.ux-armed'))`);
+              await driver.closeDetails({ board: here.path }).catch(() => {});
               if (armed) throw new Error(`the press on ${r2.version} armed: a newer version is one click`);
               const toR2 = await awaitRelease(board, r2, from2);
               const r2Shot = await shot("install-older-on-r2");
@@ -1457,26 +1863,34 @@ async function main() {
           try {
             await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
             await step(name, `on ${r2.version}: ${r1.version} is not in the store's list; typed in the box, it is looked up by version, then arms and installs`, async () => {
+              await nameThisBoard();
               await connect(board);
-              await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
+              // The board running its project: `remove-project` offered.
+              await driver.waitOffer("remove-project", { board: await liveCardPath(), bar: "project", timeoutMs: STEP_MS });
+              await driver.closeDetails({ board: here.path });
 
               // The list holds the board's own and this Studio's build, not r1.
               const list = await openOtherVersion(r2.version);
               if (list.includes(r1.version)) throw new Error(`${r1.version} is listed, though the store's list leaves it out: ${list}`);
 
-              // r1, typed whole: nothing in the list matches, so the press looks it up.
+              // r1, typed whole: nothing in the list matches, so the press
+              // (`install-firmware`) looks it up.
               const from = boardWords(board).length;
-              await driver.type("Type a version", r1.version, { scope: PANEL });
+              await driver.type("Type a version", r1.version, { scope: otherVersion() });
               await driver.waitFor(
-                `[...(${PANEL}?.querySelectorAll('button') ?? [])].some((el) => !el.disabled && (el.textContent || '').includes(${JSON.stringify(`Look up ${r1.version}`)}))`,
+                `(() => { const mark = ${otherVersion()}?.querySelector('[data-offer-path$="/install-firmware"]');
+                          const buttons = mark ? mark.querySelectorAll('button') : [];
+                          const press = buttons.length ? buttons[buttons.length - 1] : null;
+                          return Boolean(press) && !press.disabled
+                            && (press.textContent || '').includes(${JSON.stringify(`Look up ${r1.version}`)}); })()`,
                 { timeoutMs: STEP_MS, what: `the press to read Look up ${r1.version}` },
               );
               const lookupShot = await shot("install-lookup-press");
-              await driver.click(`Look up ${r1.version}`, { scope: PANEL });
+              await driver.pressOffer("install-firmware", { board: here.path, bar: "firmware", timeoutMs: STEP_MS });
 
               // Found by the store's lookup: r1 joins the list, picked; older, so it arms.
               const found = await driver.waitFor(
-                `(() => { const t = ${PANEL}?.innerText ?? ''; return t.includes('Install an older version?') ? t : false; })()`,
+                `(() => { const t = ${otherVersion()}?.innerText ?? ''; return t.includes('Install an older version?') ? t : false; })()`,
                 { timeoutMs: STEP_MS, what: `the store to find ${r1.version} and the press to install it` },
               );
               const foundShot = await shot("install-lookup-found");
@@ -1485,13 +1899,7 @@ async function main() {
               // would read "Oct 1, 12:00 UTC"). The upstream may not be asked at
               // all: the browser keeps an immutable manifest it read before.
               if (!found.includes(r1.version) || found.includes("12:00 UTC")) throw new Error(`${r1.version} is not the looked-up choice: ${found}`);
-              await driver.click("Install", { scope: PANEL, exact: true });
-              await driver.waitFor(
-                `(() => { const rest = ${PANEL}?.querySelector('.ux-armed .ux-armed-label-rest');
-                          return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`,
-                { timeoutMs: STEP_MS, what: `the press on ${r1.version} to arm` },
-              );
-              await driver.click("Confirm install", { scope: PANEL });
+              await installAfterArming(r1.version);
               const toR1 = await awaitRelease(board, r1, from);
               const r1Shot = await shot("install-lookup-on-r1");
               return {
@@ -1515,32 +1923,33 @@ async function main() {
           try {
             await openDoor(name, [`${board}=${r2Chip},kind=rom-up,${mac}`], store.origin);
             await step(name, `on ${r2.version}: ${r1.version}'s ota files, picked with From a file…, are checked, listed and installed (armed)`, async () => {
+              await nameThisBoard();
               await connect(board);
-              await driver.waitFor(`${MAIN_TEXT}.includes('Remove project')`, { timeoutMs: STEP_MS, what: `the board running its project on ${r2.version}` });
+              // The board running its project: `remove-project` offered.
+              await driver.waitOffer("remove-project", { board: await liveCardPath(), bar: "project", timeoutMs: STEP_MS });
+              await driver.closeDetails({ board: here.path });
               const list = await openOtherVersion(r2.version);
               if (list.includes(r1.version)) throw new Error(`${r1.version} is listed before its files were picked: ${list}`);
-              if (!list.includes("From a file…")) throw new Error(`the list's panel offers no From a file…: ${list}`);
+              // From a file… (`install-firmware-file`), beside the press in
+              // the same details.
+              if (!(await driver.offered("install-firmware-file", { board: here.path, inDetails: true }))) {
+                throw new Error(`the firmware details offer no From a file… (\`install-firmware-file\`): ${list}`);
+              }
 
-              // Pick r1's ota folder, as the file dialog would hand it over.
+              // Pick r1's ota folder, as the file dialog would hand it over:
+              // From a file…'s file input, in this board's card.
               const ota = path.join(R1, "ota");
               const picked = readdirSync(ota).map((file) => path.join(ota, file));
               const from = boardWords(board).length;
-              await driver.setFiles('input[id^="firmware-file-"]', picked);
+              await driver.setFiles(`[data-board-card="${here.path}"] input[id^="firmware-file-"]`, picked);
               const found = await driver.waitFor(
-                `(() => { const t = ${PANEL}?.innerText ?? '';
+                `(() => { const t = ${otherVersion()}?.innerText ?? '';
                           return t.includes(${JSON.stringify(r1.version)}) && t.includes('from your files') ? t : false; })()`,
                 { timeoutMs: STEP_MS, what: `${r1.version} from the files to join the list` },
               );
               if (!found.includes("Install a custom build?")) throw new Error(`the build from files does not say it is a custom build: ${found}`);
               const foundShot = await shot("install-file-listed");
-              await driver.click("Install", { scope: PANEL, exact: true });
-              await driver.waitFor(
-                `(() => { const rest = ${PANEL}?.querySelector('.ux-armed .ux-armed-label-rest');
-                          return Boolean(rest) && getComputedStyle(rest).opacity === '0'; })()`,
-                { timeoutMs: STEP_MS, what: `the press on ${r1.version} to arm` },
-              );
-              const armedShot = await shot("install-file-armed");
-              await driver.click("Confirm install", { scope: PANEL });
+              const { armedShot } = await installAfterArming(r1.version, { shotName: "install-file-armed" });
               const toR1 = await awaitRelease(board, r1, from);
               const r1Shot = await shot("install-file-on-r1");
               const fetched = store.upstreamHits.filter((url) => url.includes(`v${r1.version}/`)).length;
@@ -1559,8 +1968,10 @@ async function main() {
         case "relay-drop": {
           await openDoor(name, [xBoard]);
           await step(name, "the relay drops the board mid-core: it dials again, the page redials, and the update finishes with no click", async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            // Ready on X, as core reads it.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
             let legs = 0;
             let cutFrom = 0;
             const ran = await runUpdate(board, {
@@ -1586,7 +1997,7 @@ async function main() {
             // Core-only says no heartbeat: its leg's own line is the proof.
             const back = boardWords(board).slice(cutFrom).match(/\[relay\] leg open to \S+/)?.[0] ?? null;
             if (!back) throw new Error("the board never said it reached the relay again after the cut");
-            checkLinkWord(ran.order);
+            checkLinkWord(ran);
             const reconnects = checkWifiReconnects(await terminalLines(), 3);
             return {
               summary: `cut at ${ran.cutAt}; the board back on the relay; ${said.resumed}; up to date; ${reconnects.timed.length} reconnects timed`,
@@ -1598,8 +2009,10 @@ async function main() {
         case "renumber": {
           await openDoor(name, [xBoard]);
           await step(name, "the board's next lease is a new address: the update's resets put it there, and the update finishes", async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            // Ready on X, as core reads it.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
             const before = boardAddresses(board);
             const renumbered = await doorControl(door.addr, board, "renumber");
             const ran = await runUpdate(board);
@@ -1608,7 +2021,7 @@ async function main() {
             for (const need of ["core offer", "core confirmed", "engine committed"]) {
               if (!said[need]) throw new Error(`the board never said ${need}`);
             }
-            checkLinkWord(ran.order);
+            checkLinkWord(ran);
             const after = boardAddresses(board, ran.from);
             const first = before[before.length - 1];
             const moved = after.filter((ip) => ip !== first);
@@ -1626,8 +2039,10 @@ async function main() {
         case "second-client": {
           await openDoor(name, [xBoard]);
           await step(name, "mid-update, lp-cli and a second Studio are turned away busy; the update finishes", async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready on X" });
+            // Ready on X, as core reads it.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
             let lpCliRefusal = null;
             let studioSaid = null;
             let boardSaidBusy = null;
@@ -1674,7 +2089,7 @@ async function main() {
             for (const need of ["core offer", "core confirmed", "engine committed"]) {
               if (!said[need]) throw new Error(`the board never said ${need}`);
             }
-            checkLinkWord(ran.order);
+            checkLinkWord(ran);
             return {
               summary: `at ${ran.cutAt}: lp-cli "${lpCliRefusal}"; the second Studio "${studioSaid}"; the board "${boardSaidBusy}"; up to date`,
               lpCliRefusal, studioSaid, boardSaidBusy, card: ran.order, board: said,
@@ -1695,15 +2110,28 @@ async function main() {
           if (TAB) continue;
           await openDoor(name, [`${board}=${monoChip},kind=rom-up,${mac}`]);
           await step("needs-usb", "a pre-update board (today's single image): no update over the air; the USB flash as today", async () => {
+            await nameThisBoard();
             await connect(board);
-            await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: "Ready" });
-            const controls = (await driver.controls()).map((control) => control.text);
-            const overTheAir = controls.filter((text) => text === "Update" || text.startsWith("Install "));
-            if (overTheAir.length) throw new Error(`a pre-update board was offered ${overTheAir.join(", ")}`);
+            // Ready, as core reads it.
+            await driver.boardRuns({ board: await liveCardPath(), timeoutMs: STEP_MS });
+            // Every verb the card draws for it, on its face and in its
+            // firmware details. Over the air is `install-firmware` (Other
+            // version…), `reinstall-firmware`, `install-firmware-file`, or
+            // an `update-firmware` that is Routine; today's USB flash is
+            // published at the same `update-firmware` and is Lasting (or a
+            // board pick) — `device_update_offers.rs`, `firmware_bar.rs`
+            // `usb_update`.
+            const offers = await cardOffers();
+            const OVER_THE_AIR = ["install-firmware", "reinstall-firmware", "install-firmware-file"];
+            const overTheAir = offers.filter((offer) => OVER_THE_AIR.includes(offer.verb) || (offer.verb === "update-firmware" && !offer.arms && !offer.pick));
+            const controls = offers.map((offer) => `${offer.words} (${offer.verb}${offer.arms ? ", Lasting" : ""}${offer.pick ? ", a pick" : ""}, ${offer.where})`);
+            if (overTheAir.length) {
+              throw new Error(`a pre-update board was offered ${overTheAir.map((offer) => `"${offer.words}" (\`${offer.verb}\`, ${offer.where})`).join(", ")}`);
+            }
             const words = boardWords(board);
             if (/\[OTA\]/.test(words)) throw new Error("a single image spoke the update protocol");
-            const flash = controls.find((text) => text.includes("Update firmware") || text.includes("Flash firmware")) ?? null;
-            return { summary: `no over-the-air offer; ${flash ? `today's "${flash}"` : "no flash offered (this Studio's version)"}`, controls };
+            const flash = offers.find((offer) => offer.verb === "flash" || (offer.verb === "update-firmware" && (offer.arms || offer.pick))) ?? null;
+            return { summary: `no over-the-air offer; ${flash ? `today's "${flash.words}" (\`${flash.verb}\`, the USB flash)` : "no flash offered (this Studio's version)"}`, controls };
           });
           break;
         default:

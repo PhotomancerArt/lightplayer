@@ -351,3 +351,50 @@ the spike. It is not a new decision.
 - the sign-in line reads "Sign in to unlock your boards from any browser."
   because what an account keeps today is the key that unlocks a board in any
   browser; the account's own board list is step 2.
+
+## Amendment 2026-10-09: how the card is built
+
+Sections 2 and 3 stand. This is how the card was built (plan
+`lp2025/2026-10-08-2050-the-board-card`), with the director's rulings on
+where this record and the build disagreed. It is not a new decision.
+
+- **Unlock is not a drop in `lint-web-actions`** (§3 said it was). That
+  ratchet does not count access commands, and today's card was not in it.
+  The proof that the web no longer builds `AccessCommand::LogIn` is a core
+  test that presses `devices/<board ref>/unlock` by path, and
+  `git grep "AccessCommand::LogIn" lp-app/lpa-studio-web/src` coming back
+  empty. Widening the ratchet to access commands is separate work.
+- **Edit is the interim primary.** Until Connect (the lens in the card) and
+  Done land, the primary on a ready board that runs a project is **Edit**,
+  a new offer, `devices/<board ref>/edit` (`RuntimeOp::OpenDeviceLens`). It
+  is never "Connect" meaning the editor. When Connect lands it becomes the
+  primary and Edit moves to the project bar, as §2 says. Today's "Open in
+  editor" was a link, so a cmd-click to a new tab is lost with it.
+- **The project bar's empty words are "Nothing on it yet",** with "Add a
+  project" as its action, not "Nothing loaded".
+- **A board reached through lightplayer.app reads "Wi‑Fi via
+  lightplayer.app"** on its connection bar, the link's own label, with the
+  cloud icon (not "Cloud · live").
+- **"also cloud" / "direct only" show only once the board has said** its
+  Cloud relay setting. Before that the connection bar says nothing about
+  the cloud, so an unread board is never called "also cloud".
+- **The hardware bar of a stand-in reads "Emulated XIAO ESP32-C6"** (or
+  "Simulated …") with "in this tab" as its aside; its speed or tier is in
+  the details.
+- **The LED count is left out.** Nothing the card reads knows a project's
+  LED count (and today's card never showed it), so the hardware details do
+  not carry it yet.
+- **The firmware bar says the version alone, whatever it is:** a release's
+  `2026.10.08-9`, a dev build's `dev 5eb70a7`, or the label the board said
+  hello with.
+- **The layout question is the firmware bar's details,** opened by core
+  (`raised`) while the question is open, holding the question, its
+  Download backup, Cancel and Continue. The page-level overlay is gone.
+  Continue acts on one press there: the details are the question.
+- **A bar's Done and Failed are watched in studio core** (`ActivityEnds`,
+  read off the device journal), with no change to the device model: Done
+  shows for about three seconds, Failed until the next activity replaces
+  it.
+- **One popover at a time.** A pick in a bar's details (the project pick,
+  the board pick) is a row there; pressing it closes the details and opens
+  the picker over the same bar.

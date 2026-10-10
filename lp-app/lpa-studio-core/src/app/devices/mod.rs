@@ -36,11 +36,14 @@
 //! the miniature of this module; the discipline (drain the wire, then the due
 //! timers, generation-stamped) is the same.
 
+pub mod activity_ends;
 /// The Bluetooth transport (M5): a control-only link, host-tested through
 /// its source seam.
 pub mod add_device_offers;
+pub mod age_words;
 pub mod ble_transport;
 pub mod bluetooth_reach;
+pub mod board_card;
 pub mod board_plays;
 pub mod board_projects;
 pub mod board_ref;
@@ -101,6 +104,7 @@ pub mod device_update_standing;
 pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
+pub mod edit_offer;
 pub mod emu_transport;
 pub mod firmware_file_build;
 pub mod firmware_lookup_op;
@@ -139,10 +143,12 @@ pub mod wifi_connect_op;
 pub mod wifi_connects;
 pub mod wire_conversation;
 
+pub use activity_ends::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS};
 pub use add_device_offers::{
     USB_NEEDS_WEB_SERIAL, WIFI_ADDRESS_PARAM, WIFI_CONNECTING, WIFI_NEEDS_WEBSOCKET,
     WifiAddressReach, add_device_offers,
 };
+pub use age_words::{age_words, duration_words};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
 pub use board_plays::BoardPlays;
@@ -242,6 +248,7 @@ pub use device_update_words::{
     UpdateRunWord, update_session_words, update_words,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
+pub use edit_offer::{EDIT_VERB, device_edit_offer};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
 };

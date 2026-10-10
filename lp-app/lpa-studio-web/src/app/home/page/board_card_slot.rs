@@ -2,129 +2,77 @@
 //!
 //! Online boards and Offline boards draw every board through
 //! [`BoardCardSlot`], keyed by the section entry core listed
-//! ([`UiHomeBoard`]). Today the slot hosts the cards the Devices page drew:
-//! the pending link's card, the roster card and the offline tile. The board
-//! card (M2) replaces this body, for all three kinds, and touches nothing
-//! else on the page.
+//! ([`UiHomeBoard`]). The slot draws the board's [`BoardCard`]: the card
+//! core built for it ([`DeviceRosterView::cards`]), for all three kinds —
+//! a new board, a board online, a board offline. The page decides where a
+//! card sits, never what it says.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DeviceRosterView, DeviceView, PendingLinkView, RememberedView, UiAction, UiExampleCard,
-    UiHomeBoard, UiHomeBoardKind, UiPackageCard, split_roster,
+    DeviceRosterView, UiAction, UiBoardCard, UiBoardPresence, UiExampleCard, UiHomeBoard,
+    UiHomeBoardKind, UiPackageCard,
 };
 
-use super::offline_board_tile::OfflineBoardTile;
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
+use crate::app::board_card::BoardCard;
 
-/// A board's card, by the kind of entry core listed. A key with no matching
-/// view in the roster draws nothing.
+/// A board's card, found by the entry core listed. An entry with no card
+/// of its kind draws nothing.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn BoardCardSlot(
     /// The section's entry: which board, and where it stands.
     entry: UiHomeBoard,
-    /// The roster and the side maps the card reads (feeds, bands, access,
-    /// Wi‑Fi, LAN, layout, updates, editor addresses).
+    /// The roster, whose `cards` core built for this view.
     devices: DeviceRosterView,
-    /// The empty face's picker reads the page's own lists: there is no
-    /// separate device-side project source.
+    /// The project pick reads the page's own lists: there is no separate
+    /// device-side project source.
     projects: Vec<UiPackageCard>,
     examples: Vec<UiExampleCard>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    match slot_view(&entry, &devices) {
-        Some(SlotView::Pending(pending)) => rsx! {
-            PendingLinkCard { pending, on_action }
-        },
-        Some(SlotView::Connected(card)) => {
-            let id = card.id;
-            rsx! {
-                DeviceRosterCard {
-                    // The running face's Open needs the device's editor
-                    // address (its registry uid); a board still
-                    // identifying has none.
-                    open_uid: devices.open_addresses.get(&id.0).cloned(),
-                    // The board's own picture, joined at the app view;
-                    // absent = the slot's sentence.
-                    feed: devices.feeds.get(&id).cloned(),
-                    // The runtime band, for a device that is not silicon;
-                    // absent = a real board.
-                    runtime: devices.runtime_bands.get(&id).cloned(),
-                    // Its login line and access panel (BLE M6).
-                    access: devices.access.get(&id).cloned(),
-                    // Its Wi‑Fi row (Wi‑Fi roadmap M5).
-                    wifi: devices.wifi.get(&id).cloned(),
-                    // How a board on the LAN is reached (Wi-Fi M6 P07).
-                    lan: devices.lan_links.get(&id).cloned(),
-                    // Its files across a layout change (the C6
-                    // repartition).
-                    layout: devices.layout.get(&id).cloned(),
-                    // Its firmware-update words (direction C).
-                    update: devices.updates.get(&id).cloned(),
-                    card: *card,
-                    projects,
-                    examples,
-                    on_action,
-                }
-            }
-        }
-        Some(SlotView::Remembered(remembered)) => rsx! {
-            OfflineBoardTile { entry: remembered, on_action }
+    match slot_card(&entry, &devices) {
+        Some(card) => rsx! {
+            BoardCard { card, projects, examples, on_action }
         },
         None => rsx! {},
     }
 }
 
-/// The roster view a section entry names, by its kind.
-#[derive(Debug, PartialEq)]
-enum SlotView {
-    Pending(PendingLinkView),
-    Connected(Box<DeviceView>),
-    Remembered(RememberedView),
-}
-
-/// Find the entry's view: a pending link by its device handle, a connected
-/// board in the roster, a remembered board in the roster's own split. `None`
-/// when the roster no longer holds it (a view between two emissions), or
-/// holds it under another kind.
-fn slot_view(entry: &UiHomeBoard, devices: &DeviceRosterView) -> Option<SlotView> {
-    match entry.kind {
-        UiHomeBoardKind::Pending => devices
-            .roster
-            .pending
-            .iter()
-            .find(|pending| pending.device == entry.id)
-            .cloned()
-            .map(SlotView::Pending),
-        UiHomeBoardKind::Connected => split_roster(devices)
-            .connected
-            .into_iter()
-            .find(|card| card.id == entry.id)
-            .map(|card| SlotView::Connected(Box::new(card))),
-        UiHomeBoardKind::Remembered => split_roster(devices)
-            .remembered
-            .into_iter()
-            .find(|remembered| remembered.id == entry.id)
-            .map(SlotView::Remembered),
-    }
+/// The card core built for the entry's board, when its presence is the
+/// entry's kind: a new board is a pending link, an online board a connected
+/// one, an offline board a remembered one. `None` when the roster no longer
+/// holds it (a view between two emissions), or holds it under another
+/// kind.
+fn slot_card(entry: &UiHomeBoard, devices: &DeviceRosterView) -> Option<UiBoardCard> {
+    let presence = match entry.kind {
+        UiHomeBoardKind::Pending => UiBoardPresence::New,
+        UiHomeBoardKind::Connected => UiBoardPresence::Online,
+        UiHomeBoardKind::Remembered => UiBoardPresence::Offline,
+    };
+    devices
+        .cards
+        .iter()
+        .find(|card| card.device == entry.id && card.presence == presence)
+        .cloned()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use lpa_studio_core::{
-        DeviceEscape, DeviceId, DeviceStatus, RosterView, UiHomeBoard, build_home_sections,
+        BoardRef, DeviceEscape, DeviceId, DeviceStatus, DeviceView, OfferPath, RosterCardsInput,
+        RosterView, UiOfferTree, build_home_sections, roster_board_cards,
     };
 
     #[test]
-    fn a_key_with_no_matching_view_draws_nothing() {
+    fn a_key_with_no_matching_card_draws_nothing() {
         let devices = roster(vec![device(1, DeviceStatus::Ready)]);
         for kind in [
             UiHomeBoardKind::Pending,
             UiHomeBoardKind::Connected,
             UiHomeBoardKind::Remembered,
         ] {
-            assert_eq!(slot_view(&entry(9, kind), &devices), None, "{kind:?}");
+            assert_eq!(slot_card(&entry(9, kind), &devices), None, "{kind:?}");
         }
     }
 
@@ -132,18 +80,18 @@ mod tests {
     fn a_board_listed_under_another_kind_draws_nothing() {
         let devices = roster(vec![device(1, DeviceStatus::Ready)]);
         assert_eq!(
-            slot_view(&entry(1, UiHomeBoardKind::Remembered), &devices),
+            slot_card(&entry(1, UiHomeBoardKind::Remembered), &devices),
             None,
-            "a connected board is not an offline tile"
+            "an online board is not an offline card"
         );
         assert!(matches!(
-            slot_view(&entry(1, UiHomeBoardKind::Connected), &devices),
-            Some(SlotView::Connected(card)) if card.id == DeviceId(1)
+            slot_card(&entry(1, UiHomeBoardKind::Connected), &devices),
+            Some(card) if card.device == DeviceId(1)
         ));
     }
 
     #[test]
-    fn every_entry_core_lists_finds_its_view() {
+    fn every_entry_core_lists_finds_its_card() {
         let devices = roster(vec![
             device(1, DeviceStatus::Ready),
             device(2, DeviceStatus::Offline),
@@ -152,12 +100,52 @@ mod tests {
         let entries: Vec<&UiHomeBoard> = sections.online.iter().chain(&sections.offline).collect();
         assert_eq!(entries.len(), 2);
         for entry in entries {
-            assert!(slot_view(entry, &devices).is_some(), "{entry:?}");
+            assert!(slot_card(entry, &devices).is_some(), "{entry:?}");
         }
         assert!(matches!(
-            slot_view(&sections.offline[0], &devices),
-            Some(SlotView::Remembered(remembered)) if remembered.id == DeviceId(2)
+            slot_card(&sections.offline[0], &devices),
+            Some(card) if card.device == DeviceId(2) && card.presence == UiBoardPresence::Offline
         ));
+    }
+
+    /// The remembered board keeps its NAME — the whole point of
+    /// remembering one (AC9: replugging brings the card back with its
+    /// name): a registry row Studio has not heard this session is an
+    /// offline card under its own title.
+    #[test]
+    fn a_cold_registry_row_keeps_its_name_on_its_offline_card() {
+        let mut model = lpa_studio_core::DeviceRoster::new(Default::default());
+        model.load_records(&[lpa_studio_core::app::places::RegisteredDevice {
+            uid: "dev0000000000000001".to_string(),
+            name: "Porch sign".to_string(),
+            ..Default::default()
+        }]);
+        let devices = roster(model.view(lpa_studio_core::DeviceMillis(0)).roster.devices);
+        let sections = build_home_sections(&[], &devices);
+        assert!(sections.online.is_empty(), "{sections:?}");
+        let card = slot_card(&sections.offline[0], &devices).expect("its card");
+        assert_eq!(card.presence, UiBoardPresence::Offline);
+        assert_eq!(card.name_bar.title, "Porch sign");
+    }
+
+    /// The home page reverses D7: an offline board is not folded away
+    /// under a line, it is a card under Offline boards — and that card
+    /// draws the board's last picture, dimmed, with its age in the corner.
+    #[test]
+    fn an_offline_board_is_a_card_with_its_last_picture_and_its_age() {
+        let mut devices = roster(vec![
+            device(1, DeviceStatus::Ready),
+            device(2, DeviceStatus::Offline),
+        ]);
+        devices.feeds.insert(DeviceId(2), remembered_feed());
+        devices.cards = cards(&devices);
+
+        let sections = build_home_sections(&[], &devices);
+        assert_eq!(sections.offline.len(), 1, "{sections:?}");
+        let card = slot_card(&sections.offline[0], &devices).expect("its card");
+        assert!(card.picture.frame.is_some(), "{:?}", card.picture);
+        assert!(card.picture.dim, "a last picture is dimmed");
+        assert_eq!(card.status.reading.as_deref(), Some("3 h ago"));
     }
 
     fn entry(id: u64, kind: UiHomeBoardKind) -> UiHomeBoard {
@@ -171,8 +159,9 @@ mod tests {
         }
     }
 
+    /// A roster of `devices`, with the cards core builds for them.
     fn roster(devices: Vec<DeviceView>) -> DeviceRosterView {
-        DeviceRosterView {
+        let mut roster = DeviceRosterView {
             roster: RosterView {
                 devices,
                 pending: Vec::new(),
@@ -180,6 +169,54 @@ mod tests {
             transport_available: true,
             usb_available: true,
             ..DeviceRosterView::default()
+        };
+        roster.cards = cards(&roster);
+        roster
+    }
+
+    /// The cards core builds for `roster`, each board placed at
+    /// `devices/new-<id>`.
+    fn cards(roster: &DeviceRosterView) -> Vec<UiBoardCard> {
+        let mut tree = UiOfferTree::new();
+        for device in &roster.roster.devices {
+            tree.place_device(
+                device.id,
+                OfferPath::board(&BoardRef::New(device.id.0 as u32)),
+            );
+        }
+        roster_board_cards(&RosterCardsInput {
+            roster,
+            offers: &tree,
+            projects: &[],
+            lens: None,
+            now: 0.0,
+        })
+    }
+
+    /// A last picture with geometry, three hours old, from a board that is
+    /// gone.
+    fn remembered_feed() -> lpa_studio_core::DeviceCardFeedView {
+        use std::rc::Rc;
+        let layout = Rc::new(lpa_studio_core::ControlDisplayLayout::Layout2d(
+            lpa_studio_core::ControlLayout2d::new(
+                lpa_studio_core::Revision::new(7),
+                4,
+                1,
+                Vec::new(),
+            ),
+        ));
+        lpa_studio_core::DeviceCardFeedView {
+            frame: Some(lpa_studio_core::UiControlProductPreview {
+                revision: 3,
+                extent: lpa_studio_core::ControlExtent::new(1, 12),
+                sample_format: lpa_studio_core::UiControlSampleFormat::U16,
+                sample_layout: lpa_studio_core::ControlSampleLayout { spans: Vec::new() },
+                display_layout: Some(layout),
+                bytes: Rc::from(vec![0u8; 24]),
+            }),
+            frame_age_secs: Some(3.0 * 3_600.0),
+            engine_fps: None,
+            liveness: lpa_studio_core::FeedLiveness::Offline,
         }
     }
 

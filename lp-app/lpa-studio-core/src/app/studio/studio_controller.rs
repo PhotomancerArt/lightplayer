@@ -2165,7 +2165,55 @@ impl StudioController {
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
         view.board_projects = self.board_projects(&view);
+        view.last_seen = self.registry_last_seen(&view);
         view
+    }
+
+    /// When the registry last saw each board on the roster: its row's
+    /// `last_seen_at`, found by the row key the roster loaded it under (or
+    /// its identity's key). How long an offline board has been away.
+    fn registry_last_seen(
+        &self,
+        view: &crate::DeviceRosterView,
+    ) -> std::collections::BTreeMap<crate::DeviceId, f64> {
+        let Some(inputs) = self.home_inputs.as_ref() else {
+            return std::collections::BTreeMap::new();
+        };
+        view.roster
+            .devices
+            .iter()
+            .filter_map(|board| {
+                let key = view.open_addresses.get(&board.id.0).cloned().or_else(|| {
+                    let device = self.devices.roster().device(board.id)?;
+                    crate::app::devices::device_records::registry_key(&device.identity)
+                })?;
+                let row = inputs.registered.iter().find(|row| row.uid == key)?;
+                Some((board.id, row.last_seen_at))
+            })
+            .collect()
+    }
+
+    /// The inputs every card on the roster is built from: the view's
+    /// published tree, the library, the board the editor is open on, now.
+    fn roster_cards_input<'a>(
+        &'a self,
+        roster: &'a crate::DeviceRosterView,
+        offers: &'a crate::UiOfferTree,
+    ) -> crate::RosterCardsInput<'a> {
+        crate::RosterCardsInput {
+            roster,
+            offers,
+            projects: self
+                .home_inputs
+                .as_ref()
+                .map(|inputs| inputs.projects.as_slice())
+                .unwrap_or_default(),
+            lens: self
+                .pool
+                .attached_session()
+                .map(|session| session.attachment().device),
+            now: (self.now_secs)(),
+        }
     }
 
     /// Which board plays which project: the roster joined to the library
@@ -2976,7 +3024,7 @@ impl StudioController {
     }
 
     /// The card's mount lease for its live frame feed: a mounted
-    /// `DeviceRosterCard` wants its device fed; an unmounted one does not.
+    /// board card wants its device fed; an unmounted one does not.
     pub fn set_device_feed_wanted(&mut self, device: crate::DeviceId, wanted: bool) {
         self.device_feeds.set_wanted(device, wanted);
         self.mark_dirty();
@@ -2998,13 +3046,16 @@ impl StudioController {
 
     pub fn view(&self) -> UiStudioView {
         let mut offers = crate::UiOfferTree::new();
-        if let Some(home) = self.home_view() {
+        if let Some(mut home) = self.home_view() {
             // Home's own verbs first: with no project open, starting or
             // opening one is what the page is for.
             for offer in crate::home_offers(&home) {
                 offers.publish(offer);
             }
             self.publish_device_offers(&mut offers);
+            // Each board's card points at the verbs just published.
+            home.devices.cards =
+                crate::roster_board_cards(&self.roster_cards_input(&home.devices, &offers));
             offers.set_focus(self.offer_focus(true));
             let app_agent = self.app_agent_view_placed(&mut offers);
             return UiStudioView::new(Vec::new(), self.console_view())
@@ -3068,7 +3119,7 @@ impl StudioController {
                 self.project.active_transient_example(),
                 self.project.transient_fork_generation(),
             )
-            .with_lens_card(self.lens_card())
+            .with_lens_card(self.lens_card(&offers))
             .with_session(self.session_control())
             .with_settings(self.settings_view())
             .with_access(
@@ -3270,6 +3321,10 @@ impl StudioController {
     ///   ([`crate::device_offers`]). `<board>` is the card's
     ///   [`crate::BoardRef`]: `mac-`, `sim-` or `emu-` and its MAC, or
     ///   `new-<n>` while it has none.
+    /// - `devices/<board>/unlock`: a board whose link holds nothing (or only
+    ///   play), while it is linked and idle ([`crate::device_unlock_offer`]).
+    /// - `devices/<board>/edit`: the editor as a lens on a ready, running,
+    ///   registered board ([`crate::device_edit_offer`]).
     /// - `devices/<board>/{continue-update,cancel-update,download-backup,
     ///   restore-files,finish-update}`: each card's layout verbs across the
     ///   C6 repartition, under the same `<board>` prefix
@@ -3350,6 +3405,21 @@ impl StudioController {
                 offers.publish(offer);
             }
             if let Some(offer) = self.connect_relay_offer(view, &facts) {
+                offers.publish(offer);
+            }
+            // `<board>/unlock`: while the board's link holds nothing (or
+            // only play), linked and idle.
+            let unlock = roster.access.get(&view.id).and_then(|access| access.unlock);
+            if let Some(offer) = crate::device_unlock_offer(&facts.prefix, view, unlock) {
+                offers.publish(offer);
+            }
+            // `<board>/edit`: the editor as a lens on a ready, running,
+            // registered board (the card's primary until "connected").
+            if let Some(offer) = crate::device_edit_offer(
+                &facts.prefix,
+                view,
+                roster.open_addresses.get(&view.id.0).map(String::as_str),
+            ) {
                 offers.publish(offer);
             }
             // The Wi‑Fi verbs, under the same prefix (`<board>/wifi/…`).
@@ -3516,18 +3586,20 @@ impl StudioController {
     }
 
     /// The LENS session's docked card (D43): the device the editor is open
-    /// on, projected by the roster exactly as the gallery projects it —
-    /// never a second card, and for a sim the same card the Devices grid
-    /// draws, band and all (PD11).
-    fn lens_card(&self) -> Option<crate::UiLensCard> {
+    /// on, built as the home page builds its card, with the editor holding
+    /// it — never a second card, and for a sim the same card the grid draws
+    /// (PD11). `offers` is the view's published tree.
+    fn lens_card(&self, offers: &crate::UiOfferTree) -> Option<crate::UiLensCard> {
         let attachment = self.pool.attached_session()?.attachment();
-        let view = self.device_roster_view();
-        let runtime = view.runtime_bands.get(&attachment.device).cloned();
-        view.roster
+        let roster = self.device_roster_view();
+        let view = roster
+            .roster
             .devices
-            .into_iter()
-            .find(|card| card.id == attachment.device)
-            .map(|card| crate::UiLensCard::Device { card, runtime })
+            .iter()
+            .find(|card| card.id == attachment.device)?
+            .clone();
+        let card = crate::roster_board_card(&self.roster_cards_input(&roster, offers), &view)?;
+        Some(crate::UiLensCard::Board(Box::new(card)))
     }
 
     /// The header session·project control's ONE session (single-session
@@ -3738,6 +3810,11 @@ impl StudioController {
         // A light the last view showed went out: publish without it.
         let now = (self.now_secs)();
         if self.agent.app_session_mut().activity.went_dark(now) {
+            self.mark_dirty();
+        }
+        // A board card's bar was green for work that ended well: when its
+        // few seconds are up, publish without it.
+        if self.devices.activity_ends_mut().done_lapsed(now) {
             self.mark_dirty();
         }
         let revision = self.current_revision();
@@ -4145,6 +4222,11 @@ impl StudioController {
                 )
                 .map(|()| UiNotices::new())
                 .map_err(UiError::Link);
+        }
+        if node_id.as_str() == crate::UnlockOp::NODE_ID {
+            let op = action.into_op::<crate::UnlockOp>()?;
+            self.apply_access_command(op.into_access_command());
+            return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::WifiConnectOp::NODE_ID {
             let op = action.into_op::<crate::WifiConnectOp>()?;

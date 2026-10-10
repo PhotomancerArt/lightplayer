@@ -63,7 +63,7 @@ impl UiAffordance {
     /// warn/error distinction.
     pub fn from_status(status: UiStatusKind) -> Self {
         match status {
-            UiStatusKind::Neutral | UiStatusKind::Good => Self::Info,
+            UiStatusKind::Neutral | UiStatusKind::Good | UiStatusKind::Live => Self::Info,
             UiStatusKind::Working => Self::Busy,
             UiStatusKind::Warning | UiStatusKind::Attention | UiStatusKind::Error => Self::Error,
         }

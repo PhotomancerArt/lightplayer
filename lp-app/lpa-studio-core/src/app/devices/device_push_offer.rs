@@ -118,7 +118,7 @@ pub fn push_device_offer(
         None,
         &consequence,
     );
-    let offer = push_offer(view, projects, examples);
+    let offer = push_offer(view.board_id.as_deref(), projects, examples);
     if let Some(reason) = offer.unavailable {
         return Some(UiOffer::new(path, "upload", template.disabled(reason)));
     }

@@ -19,7 +19,7 @@
     ],
     "steps": [
       { "do": "connect", "board": "c6-a", "describe": "Connect to the board normally." },
-      { "do": "settle", "words": ["Ready"] },
+      { "do": "settle", "offers": ["push|edit"] },
       { "do": "shot", "name": "s8-first-connect" },
       { "do": "mark" },
       { "do": "connect", "board": "c6-a", "describe": "Open the chooser again and pick the SAME board." },

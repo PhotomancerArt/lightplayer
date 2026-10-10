@@ -14,17 +14,17 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     BluetoothReach, BoardRef, DeviceFace, DeviceOfferFacts, DeviceRosterView, DeviceView,
-    OfferPath, PendingLinkView, ResetReach, UiDeviceSettingsView, UiExampleCard, UiHomeSections,
-    UiHomeView, UiLensCard, UiOfferTree, UiPackageCard, UiUnlockOffer, UpdateOfferFacts,
+    OfferPath, PendingLinkView, ResetReach, RosterCardsInput, UiDeviceSettingsView, UiExampleCard,
+    UiHomeSections, UiHomeView, UiOfferTree, UiPackageCard, UiUnlockOffer, UpdateOfferFacts,
     WifiAddressReach, add_device_offers, build_home_sections, connect_relay_offer,
-    connect_wifi_offer, device_offers, home_offers, new_sim_offer, pending_link_offers,
-    stamp_on_boards,
+    connect_wifi_offer, device_offers, device_unlock_offer, home_offers, new_sim_offer,
+    pending_link_offers, roster_board_cards, stamp_on_boards, unlock_offer,
 };
 
+use crate::app::board_card::BoardCard;
 use crate::app::home::HomePage;
 use crate::app::home::ble_reach::use_ble_reach;
 use crate::app::home::connect_board::connect_board_section::ConnectStoryPins;
-use crate::app::home::device_roster_card::{DeviceRosterCard, PendingLinkCard};
 use crate::app::home::page::home_view_mode::HomeViewMode;
 use crate::core::OffersProvider;
 
@@ -69,12 +69,24 @@ pub(crate) fn roster_tree(
             examples,
             Default::default(),
         ));
+        // Edit, where the board has an editor address (its registry uid),
+        // as the controller publishes it.
+        let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
+        let uid = devices.open_addresses.get(&card.id.0).map(String::as_str);
+        if let Some(edit) = lpa_studio_core::device_edit_offer(&prefix, card, uid) {
+            tree.publish(edit);
+        }
+        // The Wi‑Fi verbs, under the same prefix.
+        if let Some(wifi) = devices.wifi.get(&card.id) {
+            for offer in lpa_studio_core::app::network::wifi_offers(&prefix, wifi) {
+                tree.publish(offer);
+            }
+        }
         if let Some((_, ip)) = wifi_addresses.iter().find(|(device, _)| *device == card.id) {
             let connecting = devices
                 .wifi_connects
                 .get(&card.id)
                 .is_some_and(|connect| !connect.through_relay && connect.connecting);
-            let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
             tree.publish(connect_wifi_offer(&prefix, card.id, ip, connecting));
         }
         if relay_boards.contains(&card.id) {
@@ -82,7 +94,6 @@ pub(crate) fn roster_tree(
                 .wifi_connects
                 .get(&card.id)
                 .is_some_and(|connect| connect.through_relay && connect.connecting);
-            let prefix = OfferPath::board(&BoardRef::New(card.id.0 as u32));
             tree.publish(connect_relay_offer(&prefix, card.id, connecting));
         }
     }
@@ -162,7 +173,26 @@ fn card_tree_unlocked(
     for offer in device_offers(card, &facts) {
         tree.publish(offer);
     }
+    // `<board>/unlock`, offered the way the controller offers it: while the
+    // board is linked and idle.
+    if let Some(offer) = device_unlock_offer(&prefix, card, unlock) {
+        tree.publish(offer);
+    }
     tree.place_device(card.id, prefix);
+    tree
+}
+
+/// The tree core would publish for a board that needs unlocking, when a
+/// story has the Unlock sheet and no card (the sheet finds its board's
+/// `unlock` offer by the prompt's device).
+pub(crate) fn unlock_sheet_tree(
+    device: lpa_studio_core::DeviceId,
+    unlock: UiUnlockOffer,
+) -> UiOfferTree {
+    let prefix = OfferPath::board(&BoardRef::New(device.0 as u32));
+    let mut tree = UiOfferTree::new();
+    tree.publish(unlock_offer(&prefix, device, unlock));
+    tree.place_device(device, prefix);
     tree
 }
 
@@ -215,16 +245,6 @@ pub(crate) fn CardOffers(
     }
 }
 
-/// `children` under the tree core would publish for these pending links.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub(crate) fn PendingOffers(pending: Vec<PendingLinkView>, children: Element) -> Element {
-    let offers = pending_tree(&pending);
-    rsx! {
-        OffersProvider { offers, {children} }
-    }
-}
-
 /// `children` under the tree core would publish for a whole roster. The
 /// Bluetooth half is `ble_reach` when a story pins it, else what this
 /// browser answers — the same answer the Connect a board section's notes read, so the
@@ -259,10 +279,17 @@ pub(crate) fn RosterOffers(
     }
 }
 
-/// [`DeviceRosterCard`] under the tree core would publish for its card —
-/// the card's own props, passed straight through. A runtime band makes it
-/// a sim (the power verbs' words); a Locked access makes it locked (no
-/// push), exactly as core reads the roster.
+/// A device-card story's props, drawn as the board card: core's card over
+/// the tree core would publish for it ([`StoryBoardCard`]). A runtime band
+/// makes it a sim (the power verbs' words); a Locked access makes it locked
+/// (no push), exactly as core reads the roster.
+///
+/// The props that opened a part of today's card open the details that
+/// hold it now: `menu_initially_open` (Rename) the hardware details,
+/// `access_panel_open` the access details, `install_picker_preview` the
+/// firmware details with the Other version form, `armed_preview` the
+/// hardware details with Forget armed, `armed_remove_preview` the project
+/// details with Remove project armed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn StoryDeviceCard(
@@ -277,63 +304,288 @@ pub(crate) fn StoryDeviceCard(
     #[props(default)] access: Option<lpa_studio_core::UiDeviceAccess>,
     #[props(default)] wifi: Option<lpa_studio_core::UiDeviceWifi>,
     #[props(default)] lan: Option<lpa_studio_core::UiLanLink>,
+    /// How the board is reached; USB when unsaid.
+    #[props(default)]
+    link: Option<lpa_studio_core::UiLinkKind>,
     #[props(default)] access_panel_open: bool,
     #[props(default)] keys_open_preview: bool,
     #[props(default)] menu_initially_open: bool,
     /// The install verb's version list, mounted open (and picked/armed).
     #[props(default)]
-    install_picker_preview: Option<crate::app::home::device_roster_card::OfferPickerPreview>,
+    install_picker_preview: Option<
+        crate::app::board_card::other_version_form::OfferPickerPreview,
+    >,
     /// The card's update words (core's, from the story's update fixture).
     #[props(default)]
     update: Option<lpa_studio_core::UiDeviceUpdate>,
     /// The board's update standing and route, for its offers.
     #[props(default)]
     update_facts: UpdateOfferFacts,
+    /// The board's files across a layout change (its verbs in
+    /// `extra_offers`).
+    #[props(default)]
+    layout: Option<lpa_studio_core::UiDeviceLayout>,
+    /// More verbs the controller publishes under the board's prefix.
+    #[props(default)]
+    extra_offers: Option<UiOfferTree>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
-    let unlock = access.as_ref().and_then(|access| access.unlock);
+    use crate::app::board_card::CardPart;
+    use lpa_studio_core::BarLayer;
+    let prefix = story_board_prefix(card.id);
+    let (details_open, armed) = if armed_remove_preview {
+        (
+            Some(CardPart::Bar(BarLayer::Project)),
+            Some(prefix.child("remove-project")),
+        )
+    } else if armed_preview {
+        (
+            Some(CardPart::Bar(BarLayer::Hardware)),
+            Some(prefix.child("forget")),
+        )
+    } else if install_picker_preview.is_some() {
+        (Some(CardPart::Bar(BarLayer::Firmware)), None)
+    } else if access_panel_open {
+        (Some(CardPart::Bar(BarLayer::Access)), None)
+    } else if menu_initially_open {
+        (Some(CardPart::Bar(BarLayer::Hardware)), None)
+    } else {
+        (None, None)
+    };
+    let previews = crate::app::board_card::CardPreviews {
+        access_keys_open: keys_open_preview,
+        other_version: install_picker_preview,
+    };
     rsx! {
-        CardOffers {
-            card: card.clone(),
-            sim: runtime.is_some(),
-            unlock,
-            projects: projects.clone(),
-            examples: examples.clone(),
-            update: update_facts,
-            DeviceRosterCard {
-                update,
-                card,
-                projects,
-                examples,
-                armed_preview,
-                armed_remove_preview,
-                open_uid,
-                feed,
-                runtime,
-                access,
-                wifi,
-                lan,
-                access_panel_open,
-                keys_open_preview,
-                menu_initially_open,
-                install_picker_preview,
-                on_action,
+        StoryBoardCard {
+            card,
+            projects,
+            examples,
+            open_uid,
+            feed,
+            runtime,
+            access,
+            wifi,
+            lan,
+            link,
+            update,
+            update_facts,
+            layout,
+            extra_offers,
+            details_open,
+            armed_preview: armed,
+            previews,
+            on_action,
+        }
+    }
+}
+
+/// The time every board-card story is told at (epoch seconds): a card's
+/// ages ("Offline · 2 weeks", a done bar's few seconds) read against it.
+pub(crate) const STORY_BOARD_NOW: f64 = 1_791_000_000.0;
+
+/// `devices/new-<handle>`: where a story board's verbs live.
+pub(crate) fn story_board_prefix(device: lpa_studio_core::DeviceId) -> OfferPath {
+    OfferPath::board(&BoardRef::New(device.0 as u32))
+}
+
+/// [`BoardCard`] for a story board: the tree core would publish for it
+/// (its device verbs, Unlock, Edit, the Wi‑Fi verbs, the reconnects an
+/// offline board is offered, and any `extra_offers` — the layout verbs a
+/// story built with `device_layout_view`), and the card core's own
+/// [`board_card`] builds from the story's facts over that tree. So a story
+/// card says and offers exactly what core decides; nothing here invents a
+/// word or a verb. `StoryDeviceCard`'s props, plus the card's own facts:
+/// `plays`, `ended`, `last_seen_at`, `now`.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn StoryBoardCard(
+    card: DeviceView,
+    #[props(default)] projects: Vec<UiPackageCard>,
+    #[props(default)] examples: Vec<UiExampleCard>,
+    #[props(default)] feed: Option<lpa_studio_core::DeviceCardFeedView>,
+    #[props(default)] runtime: Option<lpa_studio_core::UiRuntimeBand>,
+    #[props(default)] access: Option<lpa_studio_core::UiDeviceAccess>,
+    #[props(default)] wifi: Option<lpa_studio_core::UiDeviceWifi>,
+    #[props(default)] lan: Option<lpa_studio_core::UiLanLink>,
+    /// A Wi‑Fi or relay connect under way, or why it failed.
+    #[props(default)]
+    wifi_connect: Option<lpa_studio_core::UiWifiConnect>,
+    #[props(default)] update: Option<lpa_studio_core::UiDeviceUpdate>,
+    #[props(default)] update_facts: UpdateOfferFacts,
+    /// The board's files across a layout change (its verbs in
+    /// `extra_offers`).
+    #[props(default)]
+    layout: Option<lpa_studio_core::UiDeviceLayout>,
+    /// More verbs the controller publishes under the board's prefix.
+    #[props(default)]
+    extra_offers: Option<UiOfferTree>,
+    /// How the board is reached; USB when unsaid.
+    #[props(default)]
+    link: Option<lpa_studio_core::UiLinkKind>,
+    /// The board's registry uid: Edit on a ready, running board.
+    #[props(default)]
+    open_uid: Option<String>,
+    /// This browser remembers the board's Wi‑Fi address: "Connect over
+    /// Wi‑Fi" while it is offline.
+    #[props(default)]
+    wifi_address: Option<String>,
+    /// Someone is signed in: "Connect through lightplayer.app" while it is
+    /// offline.
+    #[props(default)]
+    relay: bool,
+    /// Which project it plays. Left `Unknown`, it is core's join over the
+    /// board's own report ([`lpa_studio_core::board_projects`] with no
+    /// registry and no lens): "Nothing on it yet" for an empty board, the
+    /// running label for a running one, as the controller would say.
+    #[props(default = lpa_studio_core::BoardPlays::Unknown)]
+    plays: lpa_studio_core::BoardPlays,
+    #[props(default)] sharing: usize,
+    #[props(default)] project: Option<UiPackageCard>,
+    #[props(default)] shared_with: Vec<String>,
+    #[props(default)] ended: Option<lpa_studio_core::ActivityEnd>,
+    #[props(default)] last_seen_at: Option<f64>,
+    #[props(default = STORY_BOARD_NOW)] now: f64,
+    #[props(default)] editor_holds_it: bool,
+    #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
+    #[props(default)] armed_preview: Option<OfferPath>,
+    #[props(default)] previews: crate::app::board_card::CardPreviews,
+    on_action: EventHandler<lpa_studio_core::UiAction>,
+) -> Element {
+    let face = match runtime.is_some() {
+        true => DeviceFace::Sim,
+        false => DeviceFace::Wire,
+    };
+    let unlock = access.as_ref().and_then(|access| access.unlock);
+    let mut tree = card_tree_unlocked(&card, face, unlock, &projects, &examples, update_facts);
+    let prefix = story_board_prefix(card.id);
+    let offline_wire =
+        face == DeviceFace::Wire && card.status == lpa_studio_core::DeviceStatus::Offline;
+    let connecting = |through_relay: bool| {
+        wifi_connect
+            .as_ref()
+            .is_some_and(|connect| connect.through_relay == through_relay && connect.connecting)
+    };
+    if let Some(ip) = wifi_address.as_deref().filter(|_| offline_wire) {
+        tree.publish(connect_wifi_offer(&prefix, card.id, ip, connecting(false)));
+    }
+    if relay && offline_wire {
+        tree.publish(connect_relay_offer(&prefix, card.id, connecting(true)));
+    }
+    if let Some(offer) = lpa_studio_core::device_edit_offer(&prefix, &card, open_uid.as_deref()) {
+        tree.publish(offer);
+    }
+    if let Some(wifi) = wifi.as_ref() {
+        for offer in lpa_studio_core::app::network::wifi_offers(&prefix, wifi) {
+            tree.publish(offer);
+        }
+    }
+    if let Some(extra) = extra_offers {
+        tree.append(extra);
+    }
+    let verbs: Vec<lpa_studio_core::UiOffer> = tree.own_verbs_of(&prefix).cloned().collect();
+    // How it is reached, when the story does not say: what the controller
+    // reads off the board's endpoint — a LAN or relay link names itself, a
+    // card carrying the network reason is over Bluetooth, else USB.
+    let link = link.or_else(|| match (&lan, card.is_over_bluetooth()) {
+        (Some(lan), _) => Some(lan.kind),
+        (None, true) => Some(lpa_studio_core::UiLinkKind::Bluetooth),
+        (None, false) => None,
+    });
+    let plays = match plays {
+        lpa_studio_core::BoardPlays::Unknown => {
+            own_report_plays(std::slice::from_ref(&card), &projects)
+                .plays(card.id)
+                .clone()
+        }
+        told => told,
+    };
+    let built = lpa_studio_core::board_card(&lpa_studio_core::BoardCardInput {
+        view: &card,
+        board: &prefix,
+        offers: &verbs,
+        link,
+        feed: feed.as_ref(),
+        runtime: runtime.as_ref(),
+        access: access.as_ref(),
+        wifi: wifi.as_ref(),
+        lan: lan.as_ref(),
+        wifi_connect: wifi_connect.as_ref(),
+        update: update.as_ref(),
+        layout: layout.as_ref(),
+        plays: &plays,
+        sharing,
+        project: project.as_ref(),
+        shared_with: &shared_with,
+        last_seen_at,
+        ended: ended.as_ref(),
+        editor_holds_it,
+        now,
+    });
+    // A story that opens a part's details (or whose layout question raises
+    // them) keeps the room they float in, so a capture holds the whole
+    // details card and a grid of such cards never stacks one over the next.
+    let opens = details_open.is_some() || built.bars.iter().any(|bar| bar.details.raised);
+    rsx! {
+        OffersProvider { offers: tree,
+            div { class: if opens { DETAILS_ROOM_CLASS } else { "tw:contents" },
+                BoardCard {
+                    card: built,
+                    projects,
+                    examples,
+                    details_open,
+                    armed_preview,
+                    previews,
+                    on_action,
+                }
             }
         }
     }
 }
 
-/// [`PendingLinkCard`] under the tree core would publish for its link.
+/// The room a story card's open details float in: the card, and the
+/// tallest details card below its lowest bar.
+const DETAILS_ROOM_CLASS: &str = "tw:grid tw:min-h-[900px] tw:content-start";
+
+/// [`BoardCard`] for a new board: core's [`pending_board_card`] over the
+/// verbs core publishes for the link (`link`: how it arrived).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub(crate) fn StoryNewBoardCard(
+    pending: PendingLinkView,
+    #[props(default)] link: lpa_studio_core::UiLinkKind,
+    #[props(default)] details_open: Option<crate::app::board_card::CardPart>,
+    on_action: EventHandler<lpa_studio_core::UiAction>,
+) -> Element {
+    let tree = pending_tree(std::slice::from_ref(&pending));
+    let prefix = story_board_prefix(pending.device);
+    let verbs: Vec<lpa_studio_core::UiOffer> = tree.own_verbs_of(&prefix).cloned().collect();
+    let built = lpa_studio_core::pending_board_card(&pending, &prefix, &verbs, link);
+    rsx! {
+        OffersProvider { offers: tree,
+            div { class: if details_open.is_some() { DETAILS_ROOM_CLASS } else { "tw:contents" },
+                BoardCard { card: built, details_open, on_action }
+            }
+        }
+    }
+}
+
+/// A new board's card for a pending-card story: [`StoryNewBoardCard`],
+/// arrived over `link` — when unsaid, Bluetooth for a link carrying the
+/// network reason, else USB, as the link's endpoint would say.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn StoryPendingCard(
     pending: PendingLinkView,
+    #[props(default)] link: Option<lpa_studio_core::UiLinkKind>,
     on_action: EventHandler<lpa_studio_core::UiAction>,
 ) -> Element {
+    let link = link.unwrap_or(match pending.firmware_blocked.is_some() {
+        true => lpa_studio_core::UiLinkKind::Bluetooth,
+        false => lpa_studio_core::UiLinkKind::Usb,
+    });
     rsx! {
-        PendingOffers { pending: vec![pending.clone()],
-            PendingLinkCard { pending, on_action }
-        }
+        StoryNewBoardCard { pending, link, on_action }
     }
 }
 
@@ -401,6 +653,7 @@ pub(crate) fn StoryHomePage(
     for offer in home_offers(&home) {
         offers.publish(offer);
     }
+    let home = with_core_cards(home, &offers, now_secs.unwrap_or(STORY_BOARD_NOW));
     rsx! {
         OffersProvider { offers,
             HomePage {
@@ -425,14 +678,21 @@ pub(crate) fn StoryHomePage(
 
 /// `home` with the sections core would build for its library and roster.
 ///
-/// `StudioController::home_view` writes each project's boards onto its card
-/// ([`stamp_on_boards`]) and fills [`UiHomeView::sections`] with
+/// `StudioController::home_view` joins boards to projects, writes each
+/// project's boards onto its card ([`stamp_on_boards`]) and fills
+/// [`UiHomeView::sections`] with
 /// [`build_home_sections`]; a story that left the sections at their default
 /// gets the same two calls, so a story never hand-builds which board or
 /// project sits in which section, or which boards a project says it is on,
 /// and cannot show a page core would not produce. A story that pins sections
 /// keeps its own (a test of the page's drawing, not of core's membership).
 pub(crate) fn with_core_sections(mut home: UiHomeView) -> UiHomeView {
+    // The join every section and card reads: core's, over the boards' own
+    // reports, unless the story pins its own.
+    if home.devices.board_projects == lpa_studio_core::BoardProjects::default() {
+        home.devices.board_projects =
+            own_report_plays(&home.devices.roster.devices, &home.projects);
+    }
     if home.sections == UiHomeSections::default() {
         stamp_on_boards(&mut home.projects, &home.devices);
         home.sections = build_home_sections(&home.projects, &home.devices);
@@ -440,25 +700,41 @@ pub(crate) fn with_core_sections(mut home: UiHomeView) -> UiHomeView {
     home
 }
 
-/// The tree core would publish for a docked lens card (D43): the gallery's
-/// own `card_tree`, read off the `UiLensCard` the view already carries, so
-/// a `StudioShell`/`WorkbenchFrame` story needs only `simulator_lens_card()`
-/// (or whatever lens it docks) to build both the card and its offers.
-///
-/// `StudioShell` always re-publishes the offer context from `view.offers`
-/// (never an ancestor's — see its `use_provide_offers` call), so a story
-/// that docks a lens card must fold this into `UiStudioView::offers`
-/// itself; wrapping the shell in [`OffersProvider`] from outside has no
-/// effect on anything under it. A bare `WorkbenchFrame` story (no
-/// `StudioShell`) has no such shadowing and may use this with
-/// [`OffersProvider`] directly.
-pub(crate) fn lens_card_offer_tree(card: &UiLensCard) -> UiOfferTree {
-    let UiLensCard::Device { card, runtime } = card;
-    let face = match runtime.is_some() {
-        true => DeviceFace::Sim,
-        false => DeviceFace::Wire,
-    };
-    card_tree(card, face, false, &[], &[])
+/// Which project each board plays, by core's join over the boards' own
+/// reports alone ([`lpa_studio_core::board_projects`] with no registry
+/// rows and no lens) — what the controller answers before the library has
+/// a record of what it gave a board.
+fn own_report_plays(
+    boards: &[DeviceView],
+    projects: &[UiPackageCard],
+) -> lpa_studio_core::BoardProjects {
+    lpa_studio_core::board_projects(&lpa_studio_core::BoardProjectInputs {
+        boards,
+        registry_keys: &Default::default(),
+        registry: &[],
+        projects,
+        project_heads: &Default::default(),
+        lens: None,
+    })
+}
+
+/// `home` with the board cards core would build for its roster over
+/// `offers` ([`roster_board_cards`]), as `StudioController::view` does once
+/// the view's offers are published — so a story's page draws exactly the
+/// cards core would, and never hand-builds one. A story that pins its own
+/// cards keeps them.
+pub(crate) fn with_core_cards(mut home: UiHomeView, offers: &UiOfferTree, now: f64) -> UiHomeView {
+    if home.devices.cards.is_empty() {
+        let cards = roster_board_cards(&RosterCardsInput {
+            roster: &home.devices,
+            offers,
+            projects: &home.projects,
+            lens: None,
+            now,
+        });
+        home.devices.cards = cards;
+    }
+    home
 }
 
 /// The tree a session's device lens is offered under: the device's own
@@ -522,9 +798,19 @@ mod tests {
     fn a_story_that_leaves_the_sections_default_gets_the_ones_core_builds() {
         let home = story_home(UiHomeSections::default());
         let filled = with_core_sections(home.clone());
+        // The join is core's, over the boards' own reports.
+        assert_eq!(
+            filled.devices.board_projects,
+            own_report_plays(&home.devices.roster.devices, &home.projects)
+        );
+        assert_ne!(
+            filled.devices.board_projects,
+            BoardProjects::default(),
+            "the roster's boards say what they play"
+        );
         assert_eq!(
             filled.sections,
-            build_home_sections(&home.projects, &home.devices)
+            build_home_sections(&home.projects, &filled.devices)
         );
         // Not the default by accident: the roster is on the page.
         assert!(!filled.sections.online.is_empty());
