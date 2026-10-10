@@ -105,6 +105,10 @@ mod desk_espnow_meter;
 use fw_esp32_common::boot;
 #[cfg(feature = "alloc_trace_emu")]
 mod alloc_trace_emu;
+#[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
+mod alloc_watch;
+#[cfg(all(feature = "alloc_watch_diag", feature = "alloc_trace_emu"))]
+compile_error!("`alloc_watch_diag` and `alloc_trace_emu` both define esp-alloc's hooks: pick one");
 #[cfg(any(
     not(fw_harness),
     feature = "test_button",
@@ -283,6 +287,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     // The heartbeat's stack lines are due; [`log_heartbeat_stack_lines`]
     // writes them once the heartbeat itself has gone out.
     HEARTBEAT_STACK_LINES_DUE.store(true, core::sync::atomic::Ordering::Relaxed);
+    #[cfg(feature = "alloc_watch_diag")]
+    alloc_watch::drain();
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -1012,6 +1018,22 @@ fn lp_engine_entry(core: CoreBoot) {
         ))
     });
     server.set_read_gate(Some(READ_GATE));
+    // RESEARCH (research/ram-e07): the gate sized per request — a read's own
+    // estimated cost plus 16 KiB for the link and radio tasks meanwhile.
+    #[cfg(feature = "e07_read_cost")]
+    server.set_read_cost_margin(Some(16 * 1024));
+    // RESEARCH (research/ram-e07): hold back `LP_E7_BALLAST_BYTES` of heap
+    // for the life of the boot, standing in for the ~3 KB a runtime project
+    // switch left behind on the defect's walk, so a desk board sits where
+    // the defect's did. Never in a product image.
+    #[cfg(feature = "e07_ballast")]
+    {
+        let bytes: usize = option_env!("LP_E7_BALLAST_BYTES")
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(0);
+        let ballast = alloc::boxed::Box::leak(alloc::vec![0x5au8; bytes].into_boxed_slice());
+        log::info!("[e07] ballast {} B held", ballast.len());
+    }
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`).
@@ -1029,6 +1051,8 @@ fn lp_engine_entry(core: CoreBoot) {
     // render: the replies then go out while the frame renders (`io_thread`).
     #[cfg(feature = "io-thread")]
     server.set_messages_first(true);
+    #[cfg(feature = "alloc_watch_diag")]
+    alloc_watch::install();
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The

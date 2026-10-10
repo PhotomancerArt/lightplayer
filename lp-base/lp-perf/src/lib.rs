@@ -2,6 +2,9 @@
 
 mod sinks;
 
+#[cfg(all(feature = "hook", not(any(feature = "syscall", feature = "log"))))]
+pub use sinks::set_hook;
+
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Copy, Clone, Debug)]
