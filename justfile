@@ -4906,6 +4906,21 @@ walk-migration-emu *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
+# One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
+# profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
+# emulated C6 over `?emu=`. Tab A holds the board; tab B (`?emu-second-tab=1`:
+# the board's bytes, not its cable) shows its picture and "Open in another
+# tab"; Connect there takes it over; A takes it back; A's tab closes and B
+# opens the board only when asked. Every wait is the board's own words or the
+# page's. Serves the RELEASE bundle itself with `--serve-release` (after
+# `just studio-web-story-build`, `just studio-firmware-package-served` and
+# `cargo build -p lp-cli`); `--steps 1-3` / `--steps 4-6` run part. Proves the
+# hold protocol, the card and the take-over — not Chrome's real exclusive
+# open() across tabs, a hidden tab, or a taker with a cable. Not CI.
+# Report: target/walk-two-tabs-emu/report.md.
+walk-two-tabs-emu *args:
+    node scripts/emu/walk-two-tabs-emu.mjs {{ args }}
+
 # The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, setting,
 # reading back (after a reload) and forgetting an emulated C6's Wi‑Fi over
 # the USB shim (`usb`) or `?ble=emu` (`ble`). Transport, UI and the board's
