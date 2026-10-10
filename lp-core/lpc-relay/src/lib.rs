@@ -16,11 +16,18 @@
 //!   little-endian fields, length-checked, never serde, at most
 //!   [`MAX_RELAY_FRAME`] bytes. One WebSocket binary message is one frame.
 //! - **The board's hello** ([`RelayHello`]): its MAC, name, wire version,
-//!   LAN address, and the salts of the account keys it holds.
+//!   LAN address, the salts of the account keys it holds, and (protocol 2)
+//!   its firmware version.
+//! - **What the board reports** (protocol 2): its project ([`RelayProject`],
+//!   the name in the clear and the uid and content hash only as keyed tags,
+//!   [`relay_project`]) and its picture ([`RelayPicture`]), at the cadence
+//!   the hub asks ([`PictureRate`]).
 //! - **The proof** ([`relay_proof`]): how a board shows it holds an
 //!   account's key without sending it.
 //! - **The version** ([`RELAY_PROTO_VERSION`]): version-and-refuse, like the
-//!   cloud API, because fielded boards outlive cloud deploys.
+//!   cloud API, because fielded boards outlive cloud deploys. The hub
+//!   accepts protocols 1 and 2, and never sends a board a frame of a later
+//!   protocol than its own ([`RelayFrame::protocol`]).
 //! - **The board's client** ([`relay_client::RelayClient`]): a sans-IO state
 //!   machine that decides when to dial, backs off, answers the challenge and
 //!   keeps the route table. The firmware and lp-cli drive the same one.
@@ -35,7 +42,9 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+mod frame_reader;
 pub mod lan_address;
+pub mod picture_rate;
 pub mod refuse_reason;
 pub mod relay_board_id;
 pub mod relay_client;
@@ -43,30 +52,42 @@ pub mod relay_close_code;
 pub mod relay_frame;
 pub mod relay_hello;
 pub mod relay_limits;
+pub mod relay_picture;
+pub mod relay_project;
 pub mod relay_proof;
 pub mod relay_version;
 pub mod route_close_reason;
 
 pub use lan_address::LanAddress;
+pub use picture_rate::PictureRate;
 pub use refuse_reason::RefuseReason;
 pub use relay_board_id::{BadRelayBoardId, RelayBoardId};
 pub use relay_client::{
-    RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent, RelayState,
+    RelayAccount, RelayAction, RelayClient, RelayClientConfig, RelayEvent, RelayProjectFacts,
+    RelayState,
 };
 pub use relay_close_code::RelayCloseCode;
 pub use relay_frame::{
-    ROUTE_FRAME_OVERHEAD, RelayFrame, RelayFrameError, encode_route_frame, route_frame_header,
+    ROUTE_FRAME_OVERHEAD, RelayFrame, RelayFrameError, encode_route_frame, frame_protocol,
+    route_frame_header,
 };
 pub use relay_hello::RelayHello;
 pub use relay_limits::{
-    MAX_HELLO_ACCOUNTS, MAX_LABEL_BYTES, MAX_RELAY_FRAME, MAX_ROUTES_PER_BOARD, PING_INTERVAL_S,
-    SILENT_CLOSE_S,
+    DEFAULT_PICTURE_SAMPLES, MAX_BOARD_PICTURE_FRAME, MAX_FIRMWARE_BYTES, MAX_HELLO_ACCOUNTS,
+    MAX_IDLE_S, MAX_LABEL_BYTES, MAX_PICTURE_OUTPUTS, MAX_PROJECT_NAME_BYTES, MAX_RELAY_FRAME,
+    MAX_ROUTES_PER_BOARD, MAX_WATCHED_FOR_S, MIN_IDLE_S, MIN_WATCHED_MS, PING_INTERVAL_S,
+    PROJECT_TAG_BYTES, SILENT_CLOSE_S,
+};
+pub use relay_picture::{RelayPicture, picture_sample_count, write_picture_header};
+pub use relay_project::{
+    RELAY_PROJECT_LABEL, RelayProject, project_content_tag, project_tag_key, project_uid_tag,
 };
 pub use relay_proof::{
     RELAY_AUTH_LABEL, RELAY_NONCE_BYTES, RELAY_PROOF_BYTES, relay_auth_key, relay_proof,
     verify_relay_proof,
 };
 pub use relay_version::{
-    RELAY_DEVICE_PATH, RELAY_PROTO_VERSION, SUPPORTED_RELAY_PROTO_VERSIONS, check_relay_version,
+    RELAY_DEVICE_PATH, RELAY_PROTO_1, RELAY_PROTO_2, RELAY_PROTO_VERSION,
+    SUPPORTED_RELAY_PROTO_VERSIONS, check_relay_version,
 };
 pub use route_close_reason::RouteCloseReason;

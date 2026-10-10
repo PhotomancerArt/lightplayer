@@ -137,9 +137,12 @@ its handshake proves the holder's own key, which takes the slot. The leg's
 TCP and WebSocket buffers (5,830 B) exist only while the board may dial and
 the route's outgoing frame only while a route holds the slot, so a board with
 no account key holds no relay memory. Status: `NetworkStatus.relay`; the
-heartbeat says `[relay] state=… routes=… rx=… tx=…` (there is no line on a
-state change: a 688 B line crossed a flash page, see the budget ADR's
-ledger). Costs and what is not yet measured on silicon:
+heartbeat says `[relay] state=… routes=… rx=… tx=… · … · pictures N
+idle|watched|off` (there is no line on a state change: a 688 B line crossed
+a flash page, see the budget ADR's ledger). The board speaks relay protocol
+2: its hello carries the build's version, and it sends the relay its
+project's name and, when asked, a picture of its lamps (the frame hook
+makes it, `src/net/relay_probes.rs`). Costs and what is not yet measured on silicon:
 `docs/adr/2026-10-06-cloud-relay.md` ("Device side").
 
 `LP_RELAY_HOST=<host>[:port]` at build time (`build.rs`) makes a **desk

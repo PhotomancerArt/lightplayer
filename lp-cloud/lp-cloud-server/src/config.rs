@@ -22,6 +22,8 @@
 //! | `LP_CLOUD_FIRMWARE_UPSTREAM` | Releases base the `/firmware/` lookup proxies (an `http(s)` URL) | [`DEFAULT_FIRMWARE_UPSTREAM`] |
 //! | `LP_CLOUD_FIRMWARE_RELEASES_LIST` | The releases list `/api/v1/firmware/<target>/releases` is built from (an `http(s)` URL answering GitHub's REST releases JSON) | [`DEFAULT_FIRMWARE_RELEASES_LIST`] |
 //! | `LP_CLOUD_GITHUB_TOKEN` | Optional bearer token sent to the releases list URL **only** (raises GitHub's rate limit; no scopes needed for a public repo). Never logged | unset |
+//! | `LP_CLOUD_RELAY_PICTURE_IDLE_S` | Seconds between a relay board's pictures while nobody watches; `0` = none | `60` |
+//! | `LP_CLOUD_RELAY_PICTURE_WATCHED_MS` | Milliseconds between a relay board's pictures while one of its accounts watches; `0` = never fast | `500` |
 
 use std::fmt;
 use std::net::IpAddr;
@@ -103,6 +105,38 @@ pub struct ServerConfig {
     pub firmware_releases_list: String,
     /// The optional token for the releases list (`LP_CLOUD_GITHUB_TOKEN`).
     pub github_token: Option<GithubToken>,
+    /// How often the relay asks boards for pictures
+    /// (`LP_CLOUD_RELAY_PICTURE_IDLE_S`, `LP_CLOUD_RELAY_PICTURE_WATCHED_MS`).
+    pub relay_pictures: RelayPictureSettings,
+}
+
+/// How long a member's watch keeps a relay board fast, in seconds: renewed
+/// by every read that asks to watch, re-sent to the board when less than
+/// half is left. A constant, not a knob.
+pub const RELAY_PICTURE_LEASE_S: u16 = 15;
+
+/// The relay's picture cadence: what it asks boards for in a
+/// `PictureRate`. The board clamps it (`lpc_relay::PictureRate::clamped`);
+/// a `0` here means "none" and the hub never asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelayPictureSettings {
+    /// Seconds between a board's pictures while nobody watches; 0 = none.
+    pub idle_s: u16,
+    /// Milliseconds between pictures while a member watches; 0 = never
+    /// fast.
+    pub watched_ms: u16,
+    /// How long one watch keeps a board fast ([`RELAY_PICTURE_LEASE_S`]).
+    pub lease_s: u16,
+}
+
+impl Default for RelayPictureSettings {
+    fn default() -> Self {
+        Self {
+            idle_s: 60,
+            watched_ms: 500,
+            lease_s: RELAY_PICTURE_LEASE_S,
+        }
+    }
 }
 
 /// A GitHub token. Sent to the releases list URL only, and never printed:
@@ -166,6 +200,20 @@ impl ServerConfig {
             "LP_CLOUD_FIRMWARE_RELEASES_LIST",
         )?;
         let github_token = nonempty(get("LP_CLOUD_GITHUB_TOKEN")).map(GithubToken);
+        let defaults = RelayPictureSettings::default();
+        let relay_pictures = RelayPictureSettings {
+            idle_s: parse_var(
+                &get,
+                "LP_CLOUD_RELAY_PICTURE_IDLE_S",
+                &defaults.idle_s.to_string(),
+            )?,
+            watched_ms: parse_var(
+                &get,
+                "LP_CLOUD_RELAY_PICTURE_WATCHED_MS",
+                &defaults.watched_ms.to_string(),
+            )?,
+            lease_s: defaults.lease_s,
+        };
 
         if blobs == BlobBackend::S3 && get("LP_CLOUD_S3_BUCKET").is_none() {
             return Err(ConfigError::Missing("LP_CLOUD_S3_BUCKET"));
@@ -220,6 +268,7 @@ impl ServerConfig {
             firmware_upstream,
             firmware_releases_list,
             github_token,
+            relay_pictures,
         })
     }
 
@@ -577,6 +626,40 @@ mod tests {
             Some("ghp_secret123")
         );
         assert!(!format!("{config:?}").contains("ghp_secret123"));
+    }
+
+    #[test]
+    fn the_relay_picture_cadence_defaults_to_a_minute_and_half_a_second() {
+        assert_eq!(
+            from(&[]).relay_pictures,
+            RelayPictureSettings {
+                idle_s: 60,
+                watched_ms: 500,
+                lease_s: 15,
+            }
+        );
+        let off = from(&[
+            ("LP_CLOUD_RELAY_PICTURE_IDLE_S", "0"),
+            ("LP_CLOUD_RELAY_PICTURE_WATCHED_MS", "0"),
+        ]);
+        assert_eq!(off.relay_pictures.idle_s, 0);
+        assert_eq!(off.relay_pictures.watched_ms, 0);
+        assert_eq!(off.relay_pictures.lease_s, 15, "the lease is no knob");
+        for (name, bad) in [
+            ("LP_CLOUD_RELAY_PICTURE_IDLE_S", "-1"),
+            ("LP_CLOUD_RELAY_PICTURE_WATCHED_MS", "70000"),
+            ("LP_CLOUD_RELAY_PICTURE_IDLE_S", "soon"),
+        ] {
+            assert_eq!(
+                ServerConfig::from_vars(|asked| (asked == name).then(|| bad.to_string()))
+                    .err()
+                    .map(
+                        |error| matches!(error, ConfigError::Invalid { name: n, .. } if n == name)
+                    ),
+                Some(true),
+                "{name}={bad}"
+            );
+        }
     }
 
     #[test]

@@ -4944,8 +4944,18 @@ walk-two-tabs-emu *args:
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
 # `lightplayer.app` through the LAN's uplink to an in-process relay), keeps
 # its log, and checks each step against the board's own `[relay]` words
-# (target/walk-wifi-emu/relay/). Studio's relay walk is M8's. Not CI (the
-# cell is, in `test-emu-serve`).
+# (target/walk-wifi-emu/relay/) — relay protocol 2's pictures among them: one
+# right after registering, the project's name and colours, watched then idle
+# by itself, lost at a deploy, kept while offline. Not CI (the cell is, in
+# `test-emu-serve`).
+#
+# `relay-p1` (pictures-through-the-cloud plan P6, the same script with
+# `--protocol-1`): a core built at the last relay protocol 1 commit (pinned
+# in the script) at this hub — registered, listed at protocol 1, routed,
+# never sent a protocol 2 frame (one leg across a minute of watching), back
+# after a deploy. The image: `LP_RELAY_P1_ELF`, else CI's artifact of that
+# commit (7 days), else a throwaway-worktree build
+# (target/walk-wifi-emu/relay-p1/). Not CI.
 #
 # `studio-lan` (network-transport plan P04,
 # scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
@@ -5009,13 +5019,17 @@ walk-drop-emu *args:
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
-# `records.jsonl` beside the report.
+# `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
+# image directory (not built here): the crossing walk's X built at the last
+# relay protocol 1 commit, updated through the relay to this build, which
+# then sends pictures (`WALK_OTA_X=target/walk-ota-emu/images/x-p1 just
+# walk-ota-emu --relay --steps update`; pictures-through-the-cloud plan P6).
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
     images=target/walk-ota-emu/images
-    if [[ ! -f "${images}/x/merged.bin" ]]; then
+    if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
     fi
     if [[ ! -f "${images}/mono/package/manifest.json" ]]; then

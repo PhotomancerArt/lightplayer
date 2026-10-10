@@ -134,6 +134,12 @@ impl UsbHoldGate {
         links
     }
 
+    /// Take `link` alone out of the gate: a take-over here opens it again.
+    pub fn let_out(&mut self, link: LinkId) {
+        self.gated.remove(&link);
+        self.read_held.remove(&link);
+    }
+
     /// Forget ports the model no longer routes.
     pub fn retain_links(&mut self, keep: impl Fn(LinkId) -> bool) {
         self.gated.retain(|link, _| keep(*link));
@@ -245,6 +251,14 @@ mod tests {
 
         gate.retain_links(|link| link != LinkId(3));
         assert!(!gate.gates(LinkId(3)));
+
+        gate.gate(LinkId(4), C6);
+        gate.mark_read_held(LinkId(5), C6);
+        gate.let_out(LinkId(4));
+        assert!(
+            !gate.holds(LinkId(4)) && gate.holds(LinkId(5)),
+            "one port, not its kind"
+        );
     }
 
     #[test]

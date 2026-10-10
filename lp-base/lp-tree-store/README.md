@@ -98,6 +98,17 @@ change has to be readable, or cleanly refused, by the core before it.
   those plus every record written since; nothing it names is erased before
   the next mark prunes it.
 
+## Limits
+
+- **At the reserve, a re-run after a power cut may be refused `NoSpace`.**
+  A step that fitted fault-free can be refused when run again after a cut,
+  because the cut leaves the same live set in a layout a few bytes worse,
+  and the packing bound (a byte sum) admits what GC cannot always place.
+  Nothing committed is lost; the store mounts at the old or the new state
+  and accepts the write once space is freed. Accepted for the device round,
+  to be revisited in the adoption round
+  (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`).
+
 ## RAM
 
 What the store keeps between operations (`TreeStoreStats.resident_ram_bytes`
@@ -384,11 +395,12 @@ write it could hold. Five causes, each pinned by `edge_gc_tests.rs`:
    round the same few sectors. Compaction now copies the largest record
    that fits the head's tail first, and opens a sector only when none does.
 
-Still open (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`):
+Still open, accepted for the device round
+(`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`):
 packed to the reserve, a re-run after a cut can still be refused where the
 step fitted, by a few bytes of layout (11 of 792 re-runs of an in-crate cut
 walk near full, lp-nor-sim; M3's drivers run clean). Pinned by
-`a_rerun_near_full_can_still_be_refused`.
+`a_rerun_near_full_can_still_be_refused`. See "Limits".
 
 ## G1 figures (2026-10-08)
 

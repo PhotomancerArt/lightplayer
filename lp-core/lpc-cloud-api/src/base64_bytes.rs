@@ -8,11 +8,33 @@
 //! deserialize into a zero-padded one.
 //!
 //! Use as `#[serde(with = "crate::base64_bytes")]` on a `[u8; N]`, or
-//! `#[serde(with = "crate::base64_bytes::list")]` on a `Vec<[u8; N]>`.
+//! `#[serde(with = "crate::base64_bytes::list")]` on a `Vec<[u8; N]>`. Bytes
+//! of any length are a [`Base64Bytes`].
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use base64::Engine;
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// Bytes of any length, as one base64 string (STANDARD, padded) in JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Base64Bytes(pub Vec<u8>);
+
+impl Serialize for Base64Bytes {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&encode(&self.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for Base64Bytes {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map(Self)
+            .map_err(|error| serde::de::Error::custom(alloc::format!("invalid base64: {error}")))
+    }
+}
 
 /// Serialize `[u8; N]` as a base64 string.
 pub fn serialize<S, const N: usize>(bytes: &[u8; N], serializer: S) -> Result<S::Ok, S::Error>
@@ -99,6 +121,22 @@ mod tests {
         assert_eq!(json, r#"{"bytes":"3q2+7w==","list":["/wA=","AQI="]}"#);
         let back: Holder = serde_json::from_str(&json).unwrap();
         assert_eq!(back, holder);
+    }
+
+    #[test]
+    fn bytes_of_any_length_round_trip_as_one_string() {
+        let bytes = super::Base64Bytes(vec![0xff, 0x00, 0x80, 0x01, 0x02]);
+        let json = serde_json::to_string(&bytes).unwrap();
+        assert_eq!(json, r#""/wCAAQI=""#);
+        assert_eq!(
+            serde_json::from_str::<super::Base64Bytes>(&json).unwrap(),
+            bytes
+        );
+        assert_eq!(
+            serde_json::to_string(&super::Base64Bytes(Vec::new())).unwrap(),
+            r#""""#
+        );
+        assert!(serde_json::from_str::<super::Base64Bytes>(r#""not base64!""#).is_err());
     }
 
     #[test]

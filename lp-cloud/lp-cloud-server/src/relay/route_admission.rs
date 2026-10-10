@@ -192,6 +192,9 @@ mod tests {
             lan: None,
             public_ip: None,
             since: 1.0,
+            relay_proto: lpc_relay::RELAY_PROTO_1,
+            firmware: None,
+            project: None,
         })
         .unwrap();
         hub

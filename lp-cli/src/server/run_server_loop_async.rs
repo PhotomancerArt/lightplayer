@@ -30,7 +30,8 @@ pub async fn run_server_loop_async<T: ServerTransport>(
 
 /// [`run_server_loop_async`], calling `after_tick` after every tick with the
 /// server and the transport — where a transport with secure links sends a
-/// session that came up its hello (`RelayHostTransport::send_hellos`).
+/// session that came up its hello and answers the hub's picture and project
+/// asks (`RelayHostTransport::after_tick`).
 pub async fn run_server_loop_with<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
