@@ -207,6 +207,12 @@ heap_diag_ble_standin = ["heap_map_diag"]
 # RESEARCH (research/frag-reads; never shipped): per-window allocation census
 # (`src/alloc_watch.rs`). Exclusive with `heap_track_diag` (both own the hooks).
 alloc_watch_diag = ["esp-alloc/alloc-hooks", "lpc-shared", "lp-perf/hook", "dep:heapless"]
+# RESEARCH (research/ram-e07; never shipped): the read gate sized per request
+# (`lpa_server::read_cost`), and a boot-time heap ballast
+# (`LP_E7_BALLAST_BYTES` at build time) that puts a desk board where the
+# 2026-10-09 defect's board was.
+e07_read_cost = []
+e07_ballast = []
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
 # per frame. The pattern, the checksum and the record live in fw-checks as

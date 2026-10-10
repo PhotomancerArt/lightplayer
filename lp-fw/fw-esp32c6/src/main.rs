@@ -1014,6 +1014,22 @@ fn lp_engine_entry(core: CoreBoot) {
         ))
     });
     server.set_read_gate(Some(READ_GATE));
+    // RESEARCH (research/ram-e07): the gate sized per request — a read's own
+    // estimated cost plus 16 KiB for the link and radio tasks meanwhile.
+    #[cfg(feature = "e07_read_cost")]
+    server.set_read_cost_margin(Some(16 * 1024));
+    // RESEARCH (research/ram-e07): hold back `LP_E7_BALLAST_BYTES` of heap
+    // for the life of the boot, standing in for the ~3 KB a runtime project
+    // switch left behind on the defect's walk, so a desk board sits where
+    // the defect's did. Never in a product image.
+    #[cfg(feature = "e07_ballast")]
+    {
+        let bytes: usize = option_env!("LP_E7_BALLAST_BYTES")
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(0);
+        let ballast = alloc::boxed::Box::leak(alloc::vec![0x5au8; bytes].into_boxed_slice());
+        log::info!("[e07] ballast {} B held", ballast.len());
+    }
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`).
