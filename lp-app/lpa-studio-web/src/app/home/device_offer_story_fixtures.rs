@@ -359,6 +359,7 @@ pub(crate) fn StoryDeviceCard(
     let previews = crate::app::board_card::CardPreviews {
         access_keys_open: keys_open_preview,
         other_version: install_picker_preview,
+        ..Default::default()
     };
     rsx! {
         StoryBoardCard {
