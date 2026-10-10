@@ -38,16 +38,20 @@ extra = sys.argv[5:]
 import os
 reboot_first = os.environ.get("E08_REBOOT_FIRST") == "1"
 reqs = ["--request", json.dumps("reboot")] if reboot_first else []
+# `E08_CHOKER=<dir>`: the choker copy to upload and switch to (default the
+# catalog's); its project.json name is the path the switches load.
+choker_dir = os.environ.get("E08_CHOKER", "catalog/projects/playful-choker")
+choker_name = json.load(open(f"{choker_dir}/project.json"))["name"]
 for _ in range(pairs):
     reqs += ["--request", json.dumps({"loadProject": {"path": "projects/Logo Sign"}})]
-    reqs += ["--request", json.dumps({"loadProject": {"path": "projects/PLAYFUL Choker"}})]
+    reqs += ["--request", json.dumps({"loadProject": {"path": f"projects/{choker_name}"}})]
 emulated_s = 6 + pairs * 2 * (int(gap) / 1000 + 0.6) + 5 + (8 if reboot_first else 0)
 cmd = [
     "target/release/lp-cli", "emu", "run",
     "--elf", f"{image}/loader.elf", "--over", f"{image}/merged.bin", "--mmu-page", "32k",
     "--host-link", "--link-nonce", "0e080002",
     "--upload", str(LOGO),
-    "--upload", "catalog/projects/playful-choker",
+    "--upload", choker_dir,
     *reqs,
     "--request-gap", gap,
     "--pin-script", "target/e08/d0-high.pins",
