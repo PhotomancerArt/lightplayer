@@ -246,6 +246,12 @@ e11_lend_big_only = []
 radio_cfg_probe = ["radio"]
 # trouble-host's packet pool at 8 packets (default 16), for the same measurement.
 radio_cfg_probe_pool8 = ["radio_cfg_probe", "trouble-host?/default-packet-pool-size-8"]
+# RESEARCH (research/ram-e03; never shipped): LP SRAM above the recovery
+# region as the heap's last region, untagged (`src/board/esp32c6/lp_sram_heap.rs`),
+# and a one-shot boot probe of HP-CPU access speed to it beside HP SRAM
+# (`lp_sram_probe.rs`).
+e03_lp_heap = []
+e03_lp_sram_probe = ["e03_lp_heap"]
 alloc_trace_emu = ["esp-alloc/alloc-hooks", "fw-esp32-common/alloc-trace-marks"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record

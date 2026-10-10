@@ -329,6 +329,10 @@ fn log_heartbeat_stack_lines() {
     if HEARTBEAT_STACK_LINES_DUE.swap(false, core::sync::atomic::Ordering::Relaxed) {
         stack_probe::log_if_grown("heartbeat");
         c_heap::log_if_grown("heartbeat");
+        #[cfg(feature = "e03_lp_heap")]
+        board::esp32c6::lp_sram_heap::log_if_changed("heartbeat");
+        #[cfg(feature = "e03_lp_sram_probe")]
+        board::esp32c6::lp_sram_probe::heartbeat();
         #[cfg(feature = "io_thread_stack_diag")]
         io_thread_stack_diag::log_if_grown();
         #[cfg(feature = "net_thread_stack_diag")]

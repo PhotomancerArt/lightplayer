@@ -15,9 +15,14 @@ pub mod constants;
     feature = "test_shader_compile_incremental",
     feature = "bench_render_loop",
     feature = "diag_secure_link",
+    feature = "e03_lp_sram_probe",
 ))]
 pub mod cycle_counter;
 pub mod init;
+#[cfg(feature = "e03_lp_heap")]
+pub mod lp_sram_heap;
+#[cfg(feature = "e03_lp_sram_probe")]
+pub mod lp_sram_probe;
 pub mod restart;
 // The product boot's only, like the quirks.
 #[cfg(not(fw_harness))]

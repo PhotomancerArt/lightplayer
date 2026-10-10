@@ -105,6 +105,13 @@ pub fn init_board() -> (
     // RESEARCH (research/ram-e11): the lender's block, fourth and last.
     #[cfg(feature = "e11_lender")]
     crate::lender::lend_region::install();
+    // RESEARCH (research/ram-e03): LP SRAM above the recovery region, the
+    // region Rust's allocator tries last of all (`lp_sram_heap`). The speed
+    // probe measures that span first, while nothing else uses it.
+    #[cfg(feature = "e03_lp_sram_probe")]
+    super::lp_sram_probe::run(super::lp_sram_heap::free_span());
+    #[cfg(feature = "e03_lp_heap")]
+    super::lp_sram_heap::install();
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
