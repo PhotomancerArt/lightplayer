@@ -234,6 +234,57 @@ mod tests {
         }
     }
 
+    /// A bar at work draws its fill in a clipped track that is the bar's own
+    /// child, a sibling of the details' trigger: the fill cannot leave the
+    /// bar (the 2026-10-10 defect), and nothing that clips wraps the details
+    /// that float over it. Only the bar doing the work has a track.
+    #[test]
+    fn a_bar_at_work_draws_its_fill_in_a_clipped_track() {
+        use lpa_studio_core::{DeviceActivityKind, DeviceActivityView, DeviceStatus, DeviceView};
+        let view = DeviceView {
+            status: DeviceStatus::Busy,
+            state_label: "Identifying".to_string(),
+            activity: Some(DeviceActivityView {
+                kind: DeviceActivityKind::Identify,
+                label: "Identifying…".to_string(),
+                percent: None,
+                cancellable: true,
+                cancel_requested: false,
+                layout: None,
+                update: None,
+            }),
+            ..porch_view()
+        };
+        let (card, tree) = card_and_tree(&view);
+        let html = render_card(card, tree, None);
+        assert_eq!(attribute_values(&html, "data-bar-work"), vec!["running"]);
+        assert_eq!(
+            attribute_values(&html, "data-work-track").len(),
+            1,
+            "{html}"
+        );
+        // The track sits in the connection bar, after the bar's trigger and
+        // action, with the fill as its only child and nothing around it that
+        // clips.
+        let bar_at = html
+            .find("data-bar=\"connection\"")
+            .expect("the connection bar");
+        let track_at = html.find("data-work-track").expect("a track");
+        assert!(track_at > bar_at, "the track is the connection bar's");
+        let next_bar = html.find("data-bar=\"access\"").expect("the next bar");
+        assert!(track_at < next_bar, "the track is the connection bar's");
+        let track = &html[html[..track_at].rfind("<div").expect("its tag")..];
+        let tag = &track[..track.find('>').expect("the track's tag closes")];
+        assert!(tag.contains("tw:overflow-hidden"), "{tag}");
+        assert!(tag.contains("tw:inset-x-0"), "{tag}");
+        let bar_tag = &html[html[..bar_at].rfind("<div").expect("its tag")..bar_at];
+        assert!(
+            !bar_tag.contains("overflow"),
+            "the bar does not clip: {bar_tag}"
+        );
+        assert!(!CARD_CLASS.contains("overflow"));
+    }
+
     /// Every verb in an open details card is drawn from its offer and
     /// marked with its path — the danger zone's among them.
     #[test]
