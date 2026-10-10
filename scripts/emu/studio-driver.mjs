@@ -796,7 +796,7 @@ export class StudioDriver {
 
   /// What the board says it runs, as core reads it: `"empty"` once its
   /// project bar offers `push` ("Add a project"), `"running"` once its
-  /// primary Edit can be pressed. Waits for one of the two — the card is
+  /// project bar's Edit can be pressed. Waits for one of the two — the card is
   /// ready either way.
   async boardRuns({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
     const scope = await this.card({ board });

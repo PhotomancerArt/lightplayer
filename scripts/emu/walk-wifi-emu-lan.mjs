@@ -767,8 +767,11 @@ export class Page {
     })()`);
   }
 
-  /// The first editor slider, moved to its other end; its value comes back
-  /// from the board's panel state, so the change is the board's echo.
+  /// The first editor slider, moved to its other end. Its value moves at
+  /// once from the widget's own gesture hold and Studio's echo of the write,
+  /// before any read, so the change proves the knob took the turn, not that
+  /// the board kept it (a board's word for a write is the next session's
+  /// read: `walk-no-board`'s `card-edit`).
   async turnFirstKnob() {
     const knob = `document.querySelector('#main [role="slider"]')`;
     await this.driver.waitFor(`Boolean(${knob})`, { timeoutMs: STEP_MS, what: "the editor's first knob" });
@@ -781,7 +784,7 @@ export class Page {
     })()`);
     await this.driver.waitFor(`${knob}.getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`, {
       timeoutMs: STEP_MS,
-      what: "the board's panel state to come back with the new value",
+      what: "the knob to take the turn",
     });
     return `${before} → ${await this.driver.evaluate(`${knob}.getAttribute('aria-valuenow')`)}`;
   }
@@ -1125,12 +1128,17 @@ async function main() {
       const loaded = holds[A].console.loadedProjects(marks[A]);
       seen.frameCounts = counts;
       seen.loaded = loaded;
-      // Edit, the card's primary on a ready board running a project.
+      // Edit, the project bar's action on a board running a project: it
+      // connects first, then shows the editor. The editor's own read of the
+      // board, not a page string: the session's address, and the panel
+      // controls of the project read off the board.
       await driver.pressOffer("edit", { board: mac[A], timeoutMs: STEP_MS });
-      await driver.waitFor(`!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`, {
-        timeoutMs: STEP_MS,
-        what: "the project to open on the board",
-      });
+      await driver.waitFor(
+        `(location.pathname.startsWith('/p/') || location.pathname.startsWith('/device/'))
+          && Boolean(document.querySelector('#main [data-panel-channel]'))
+          && Boolean(document.querySelector('#main [role="slider"]'))`,
+        { timeoutMs: STEP_MS, what: "the board's project open in the editor (its address and its panel's controls)" },
+      );
       const knob = await page.turnFirstKnob();
       return { loaded, frameCounts: counts, knob };
     });
@@ -1354,7 +1362,7 @@ async function main() {
       const radioOnPage = `(document.body.innerText || '').includes(${JSON.stringify(RADIO_OFF_FOR_WIFI)})`;
       const onPage = await (async () => {
         seen.relinked = await pageOn(A);
-        // Edit, the card's primary: a degraded board is opened in the
+        // Edit, on the project bar: a degraded board is opened in the
         // editor too (`edit_offer.rs`: "a faulted show is exactly what the
         // editor is for").
         await driver.pressOffer("edit", { board: mac[A], timeoutMs: STEP_MS });

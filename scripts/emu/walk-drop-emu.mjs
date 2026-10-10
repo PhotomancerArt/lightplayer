@@ -207,7 +207,7 @@ async function main() {
         await driver.flashBlank(BOARD_MODEL, { timeoutMs: STEP_DEADLINE_MS, flashTimeoutMs: FLASH_DEADLINE_MS });
       }
       // Ready, as core reads it: the card offers the board a project, or
-      // the editor on the one it runs.
+      // Edit on the one it runs.
       return `ready (${await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS })})`;
     });
 
@@ -235,13 +235,23 @@ async function main() {
     });
 
     await step("editor", "open the board in the editor", async () => {
-      // Edit, the card's primary on a ready, running board (`edit`).
+      // Edit, the project bar's action on a watched board (`edit`): it
+      // connects first, then shows the editor.
       await driver.pressOffer("edit", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(
-        `!${MAIN_TEXT}.includes('Connecting project') && Boolean(document.querySelector('#main [role="slider"]'))`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the project to open on the board" },
+      // THE BOARD'S WORDS, not a page string ("Connecting project" going
+      // away is satisfied before anything has been read): the address is the
+      // session's own (`/p/…`, the id in the board's project file, or
+      // `/device/<uid>` for a project Studio has no address for), and the
+      // editor draws that project's panel controls, which exist only once
+      // the board's project has been read off it.
+      const controls = await driver.waitFor(
+        `(() => { if (!location.pathname.startsWith('/p/') && !location.pathname.startsWith('/device/')) return false;
+                  const els = [...document.querySelectorAll('#main [data-panel-channel]')];
+                  return els.length > 0 && Boolean(document.querySelector('#main [role="slider"]'))
+                    ? els.map((el) => el.getAttribute('data-panel-channel')).join(', ') : false; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the board's project open in the editor (its address and its panel's controls)" },
       );
-      return `at ${await driver.evaluate(ROUTE)}`;
+      return `at ${await driver.evaluate(ROUTE)}; the board's panel: ${controls}`;
     });
 
     await pullTheCable("editor-drop", "the editor", `Boolean(document.querySelector('#main [role="slider"]'))`);
@@ -261,7 +271,7 @@ async function main() {
 
     await pullTheCable("play-drop", "Play", `Boolean(document.querySelector('#main [role="slider"]'))`);
 
-    await step("knob", "turn the first knob on the resumed session; the board's state comes back", async () => {
+    await step("knob", "turn the first knob on the resumed session: it takes the turn", async () => {
       const before = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
       );
@@ -271,11 +281,16 @@ async function main() {
         const key = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
         knob.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
       })()`);
-      // The knob shows what the BOARD holds: it moves only when a read
-      // after the write brings the board's panel state back.
+      // The knob follows the hand: its value moves at once from the
+      // widget's own gesture hold and Studio's echo of the write, before any
+      // read (`KnobField`'s `hold.write`, `note_panel_write`). So this proves
+      // the resumed page takes the turn, NOT that the board kept it: a
+      // board's word for a write is the next session's read, which has no
+      // echo (write, Done, Edit, then the control reads held —
+      // `walk-no-board`'s `card-edit`).
       await driver.waitFor(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+        { timeoutMs: STEP_DEADLINE_MS, what: "the knob to take the turn" },
       );
       const after = await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,

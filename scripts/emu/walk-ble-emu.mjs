@@ -421,9 +421,12 @@ async function main() {
         `(() => { const s = window.__lpEmuBluetooth.stats(${JSON.stringify(BOARD)}); return s.writes > ${s0.writes}; })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the panel write to go out over Bluetooth" },
       );
+      // The knob takes the turn at once (its gesture hold and Studio's
+      // echo), so this is the page answering, not the board's word; the
+      // write going out is the stats line above (see the `knob` step).
       await driver.waitFor(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board's panel state to come back with the new value" },
+        { timeoutMs: STEP_DEADLINE_MS, what: "the knob to take the turn" },
       );
       return `${before} → ${await driver.evaluate(
         `document.querySelector('#main [role="slider"]').getAttribute('aria-valuenow')`,
@@ -552,7 +555,7 @@ async function main() {
       return JSON.stringify(report.idle);
     });
 
-    await step("knob", "turn the first knob to its end; the board takes it and says so", async () => {
+    await step("knob", "turn the first knob to its end: the write goes out over Bluetooth and the reads after it come back", async () => {
       const s0 = await stats();
       await driver.evaluate(`window.__lpBleCensus = {}`);
       const before = await driver.evaluate(
