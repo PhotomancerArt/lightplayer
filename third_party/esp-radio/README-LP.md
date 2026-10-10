@@ -41,9 +41,24 @@ garbled one.
 See `docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md`.
 Both changes are upstream candidates.
 
+### 3. A research switch: the BLE controller's flash-only parameters (`esp_config.yml`, `src/ble/npl.rs`)
+
+`ble_controller_flash_only_params` (C6 only, **default `false`**): when on,
+`ble_init` calls the controller blob's own
+`esp_ble_controller_flash_only_param_config()` just before
+`r_ble_controller_enable(1)`. It is an exported function of `libble_app.a`
+that makes three calls (`r_priv_sdk_config_max_aux_offset_set(2000)`,
+`r_priv_sdk_config_insert_proc_time_set(500)`,
+`r_ble_ll_scan_start_time_init_compensation(500)`), which is what ESP-IDF
+5.5.3's `BT_CTRL_RUN_IN_FLASH_ONLY` adds to linking the controller's
+`.iram1` into flash. It is the runtime half of esp-hal's
+`place_ble_controller_iram_in_flash` (that fork's fifth diff). Off, the
+build is byte-for-byte the code above. RAM research experiment E2
+(`lp2025/2026-10-09-1203-ram-research`); nothing turns it on.
+
 ## Re-syncing with upstream
 
 Copy the new version out of the cargo registry, delete `.cargo-ok`,
 `.cargo_vcs_info.json`, `Cargo.lock` and `Cargo.toml.orig`, then re-apply the
-two hunks (`grep -n "LP fork" -r src` finds them) — or drop the fork if
+hunks (`grep -n "LP fork" -r src esp_config.yml` finds them) — or drop the fork if
 upstream copies chained mbufs itself.
