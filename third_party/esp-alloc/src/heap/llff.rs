@@ -30,7 +30,11 @@ impl LlffHeap {
     }
 
     pub(crate) unsafe fn try_deallocate(&mut self, ptr: NonNull<u8>, layout: Layout) -> bool {
-        if self.heap.bottom() <= ptr.as_ptr() && self.heap.top() >= ptr.as_ptr() {
+        // LP fork: `top` is exclusive (upstream compared `top >= ptr`). No
+        // block of this heap starts at its top, but the first block of a
+        // region registered right after it does, and regions are tried in
+        // registration order — see `README-LP.md`, "The second diff".
+        if self.heap.bottom() <= ptr.as_ptr() && ptr.as_ptr() < self.heap.top() {
             unsafe { self.heap.deallocate(ptr, layout) };
             true
         } else {
