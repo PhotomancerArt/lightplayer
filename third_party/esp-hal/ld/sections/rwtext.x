@@ -38,7 +38,9 @@
   #ENDIF
   *( .phyiram  .phyiram.*)
   #IF ESP_HAL_CONFIG_PLACE_BLE_CONTROLLER_IRAM_IN_FLASH
-  EXCLUDE_FILE(*libble_app.a:*) *( .iram1  .iram1.*)
+  /* EXCLUDE_FILE inside the list, once per pattern: lld reads a leading
+     `EXCLUDE_FILE(...) *(...)` as a file pattern named EXCLUDE_FILE. */
+  *( EXCLUDE_FILE(*libble_app.a:*) .iram1  EXCLUDE_FILE(*libble_app.a:*) .iram1.*)
   #ELSE
   *( .iram1  .iram1.*)
   #ENDIF
