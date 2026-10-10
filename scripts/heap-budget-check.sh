@@ -294,6 +294,41 @@ chip_facts() {
     esac
 }
 
+# The app version every ratchet build is stamped with: the HEAD commit's
+# 9-character sha, clean even when the tree is dirty and even when HEAD
+# carries a release tag.
+#
+# Why: the C6 keeps the over-the-air manifest resident, and the manifest owns
+# the version string, so the C6's resident heap grows with the string's
+# length (measured on one commit: used 90,200 / 90,208 / 90,216 / 90,232 B at
+# 7 / 9 / 13 / 22 characters). Each build path stamps a different length — a
+# CI shallow clone 7, a desk 9, a tagged main commit 13, a dirty tree 22+
+# (`<sha>-dirty-<HHMMSS>PT`) — so, unpinned, the figure depended on who
+# built it, and CI's bless step (which writes the record and so dirties the
+# tree) re-checked a longer string than it had blessed and could never pass
+# its own patch. The variable is `APP_VERSION`, which
+# `tools/lp-app-version` prefers over `scripts/print-app-version.sh`;
+# `LP_APP_VERSION` is what it emits for the compiler, and setting that does
+# nothing. All three chips honour it (each firmware's build.rs calls
+# `lp_app_version::emit`, and the C6's `lp-fw-split` resolves it once and
+# hands it to both link passes). See
+# docs/debt/heap-budget-record-churns-on-routine-changes.md.
+#
+# If git cannot name a commit the build is left to resolve its own version.
+pin_app_version() {
+    # The first 9 characters of the full sha, not `--short=9`: git lengthens a
+    # short sha it finds ambiguous, and the length is the whole point.
+    local sha
+    sha="$(git rev-parse HEAD 2>/dev/null || true)"
+    sha="${sha:0:9}"
+    if [ "${#sha}" -ne 9 ]; then
+        echo "heap-budget: warning: no 9-character commit to pin APP_VERSION to; the build resolves its own version, so its stamp length (and the C6's heap figure) is the build path's, not fixed." >&2
+        return 0
+    fi
+    export APP_VERSION="$sha"
+    echo "heap-budget: building with APP_VERSION=${APP_VERSION} (a fixed 9-character clean sha, so the stamp's length is not a figure)" >&2
+}
+
 # The shipped ELF, by the emulator's own resolution rules (its `test_support`
 # module is the authority): an explicit path, then — only with
 # `LP_EMU_BUILD_FW=1` — a build. Prints the path, or nothing and a reason on
@@ -337,6 +372,7 @@ LP_EMU_BUILD_FW=1 to build it. Not built automatically: a workspace gate must no
 cross-target firmware build." >&2
         return 1
     fi
+    pin_app_version
     case "$CHIP_ID" in
     esp32c6)
         # The split image, exactly as the size check and the packager build
@@ -661,6 +697,15 @@ that already have the Xtensa toolchain)."
     run_cfg="$(jq -r '.configuration' <<<"$meas")"
     rec_cfg="$(jq -r '.configuration // empty' "$rec_file")"
     echo "  configuration: ${run_cfg}"
+    # What the placement figure is, said where the figures are read. The app
+    # version is pinned (pin_app_version), so the stamp's length no longer
+    # moves usedBytes between build paths; what is left of largestFreeBlock's
+    # spread is the emulated run's, and it is graded EXACT on purpose — no
+    # margin, no band — because a margin would hide real fragmentation.
+    # CI is the one writer: the record carries the figures of CI's own clean
+    # build (the 'Figure moves' patch, 'just apply-ci-figures <pr>'), and a
+    # desk bless of this figure can read a few bytes different from CI's.
+    echo "  note: largestFreeBlock is graded exact (margin 0). CI is its one writer: record CI's figure ('just apply-ci-figures <pr>'), not a desk bless's. The build's app version is pinned to a 9-character clean sha, so its length is not a figure."
     if [ -n "$rec_cfg" ] && [ "$rec_cfg" != "$run_cfg" ]; then
         echo "  note: the record was taken on ${rec_cfg}; this run is ${run_cfg}. The figures \
 compare regardless; the next re-baseline that moves a figure stamps the run's label."

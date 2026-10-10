@@ -1630,6 +1630,22 @@ jobs:
           repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
 
+      # The app version is a heap figure on the C6: the over-the-air manifest
+      # keeps it resident, so each character of it is a byte of `usedBytes`.
+      # A shallow checkout stamps 7 characters, a full one 9, and a tree that
+      # CI's own bless step has dirtied 22+ (`<sha>-dirty-<HHMMSS>PT`). Pin the
+      # same 9-character clean sha for every build in this job (the ratchet
+      # pins it itself too, `scripts/heap-budget-check.sh`; this covers the
+      # boot suite's builds and the `LP_CI_IMAGES` this job produces), so the
+      # two figure jobs and a desk check against their images agree.
+      - name: Pin the app version (9-character clean sha)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git -C lp2025 rev-parse HEAD)"
+          echo "APP_VERSION=${sha:0:9}" >> "$GITHUB_ENV"
+          echo "Pinned app version: ${sha:0:9}"
+
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
       # rust-src is required: fw-esp32c6 builds core/alloc from source
       # (build-std) for its release-esp32 profile, same as firmware-size.
@@ -2673,6 +2689,22 @@ jobs:
         with:
           repository: PhotomancerArt/lp-regalloc2
           path: lp-regalloc2
+
+      # The app version is a heap figure on the C6: the over-the-air manifest
+      # keeps it resident, so each character of it is a byte of `usedBytes`.
+      # A shallow checkout stamps 7 characters, a full one 9, and a tree that
+      # CI's own bless step has dirtied 22+ (`<sha>-dirty-<HHMMSS>PT`). Pin the
+      # same 9-character clean sha for every build in this job (the ratchet
+      # pins it itself too, `scripts/heap-budget-check.sh`; this covers the
+      # boot suite's builds and the `LP_CI_IMAGES` this job produces), so the
+      # two figure jobs and a desk check against their images agree.
+      - name: Pin the app version (9-character clean sha)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git -C lp2025 rev-parse HEAD)"
+          echo "APP_VERSION=${sha:0:9}" >> "$GITHUB_ENV"
+          echo "Pinned app version: ${sha:0:9}"
 
       # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
       # rust-src is required: fw-esp32c6 builds core/alloc from source
