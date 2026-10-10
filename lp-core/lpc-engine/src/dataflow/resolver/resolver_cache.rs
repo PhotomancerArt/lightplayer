@@ -83,6 +83,15 @@ impl ResolverCache {
         }
     }
 
+    /// An empty cache in `alloc` with this one's settings and frame stamp
+    /// (E10's epoch arena: the tables move to a fresh arena per epoch).
+    pub fn fresh_in(&self, alloc: ProjectAlloc) -> Self {
+        let mut fresh = Self::new_in(alloc);
+        fresh.frame = self.frame;
+        fresh.retain_payloads = self.retain_payloads;
+        fresh
+    }
+
     /// Whether resolved *payloads* — the two value tables — are stored at all.
     ///
     /// The route table and the intern table are not affected: those hold

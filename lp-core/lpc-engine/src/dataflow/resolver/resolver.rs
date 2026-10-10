@@ -225,6 +225,15 @@ impl Resolver {
             self.structure_epoch,
         );
         self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        #[cfg(feature = "project-arena-epoch")]
+        if self.intern.allocator().stats().is_some() {
+            // E10 epoch arena: the tables start over in a fresh arena and
+            // the old one drops with its last handle — which may be a key a
+            // node still holds (`AuthoredFieldKeys`), and then it is pinned.
+            let fresh = crate::engine::project_arena::ProjectArena::new();
+            self.cache = self.cache.fresh_in(fresh.clone());
+            self.intern = QueryInternTable::new_in(fresh);
+        }
         self.cache.invalidate_structure();
         self.intern.clear();
         self.static_paths.clear();

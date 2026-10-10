@@ -69,6 +69,7 @@ node-shader = ["lpc-engine/node-shader"]
 resolver-payload-cache = ["lpc-engine/resolver-payload-cache"]
 # E10 spike: see lpc-engine's `project-arena`.
 project-arena = ["lpc-engine/project-arena"]
+project-arena-epoch = ["lpc-engine/project-arena-epoch"]
 
 # Removal-only, same contract again: forwards to `lpc-engine/scrub-log`, the
 # per-phasor breakpoint log that makes clock scrubbing exact on a host. It

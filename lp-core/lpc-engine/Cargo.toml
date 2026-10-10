@@ -77,6 +77,8 @@ resolver-payload-cache = []
 # keys and routes) allocate in a per-project bump arena with byte counters
 # (`engine::project_arena`). Off: the same types over `Global`.
 project-arena = []
+# E10 variant: a fresh arena per structural epoch instead of per engine.
+project-arena-epoch = ["project-arena"]
 
 # --- Phasor breakpoint log (removal-only, same contract as the gates above) --
 #
