@@ -3,7 +3,30 @@ use core::{alloc::Layout, ptr::NonNull};
 use rlsf::Tlsf;
 
 // TODO: make this configurable
-type Heap = Tlsf<'static, usize, usize, { usize::BITS as usize }, { usize::BITS as usize }>;
+//
+// LP fork, RAM research E6 (throwaway): `LP_E06_TLSF_FLLEN=<n>` at build time
+// shrinks the first-level count. The control block is `FLLEN × SLLEN` list
+// heads (4 KiB per region at 32 × 32 on rv32, ×`MAX_REGIONS` slots in
+// `.bss`); a pool below `2^(4 + FLLEN)` bytes places every block exactly as
+// at 32, since no size maps to a first level ≥ `FLLEN`. Unset, it is 32.
+type Heap = Tlsf<'static, usize, usize, E06_FLLEN, { usize::BITS as usize }>;
+
+const E06_FLLEN: usize = parse_fllen(option_env!("LP_E06_TLSF_FLLEN"));
+
+const fn parse_fllen(text: Option<&str>) -> usize {
+    let Some(text) = text else {
+        return usize::BITS as usize;
+    };
+    let bytes = text.as_bytes();
+    let mut value = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        assert!(bytes[i].is_ascii_digit(), "LP_E06_TLSF_FLLEN must be decimal");
+        value = value * 10 + (bytes[i] - b'0') as usize;
+        i += 1;
+    }
+    value
+}
 
 pub(crate) struct TlsfHeap {
     heap: Heap,
