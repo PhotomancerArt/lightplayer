@@ -63,7 +63,8 @@ fn on_marker(name: &'static str, kind: PerfEventKind) {
                 DEPTH.fetch_add(1, Ordering::Release);
             }
             PerfEventKind::End => {
-                let _ = DEPTH.fetch_update(Ordering::Release, Ordering::Relaxed, |d| d.checked_sub(1));
+                let _ =
+                    DEPTH.fetch_update(Ordering::Release, Ordering::Relaxed, |d| d.checked_sub(1));
             }
             PerfEventKind::Instant => {}
         }
@@ -75,8 +76,8 @@ fn on_marker(name: &'static str, kind: PerfEventKind) {
                 SUPPRESS.fetch_add(1, Ordering::Release);
             }
             PerfEventKind::End => {
-                let _ =
-                    SUPPRESS.fetch_update(Ordering::Release, Ordering::Relaxed, |d| d.checked_sub(1));
+                let _ = SUPPRESS
+                    .fetch_update(Ordering::Release, Ordering::Relaxed, |d| d.checked_sub(1));
             }
             PerfEventKind::Instant => {}
         }

@@ -115,8 +115,13 @@ mod lender;
 // RESEARCH (research/ram-e15): the per-edit results reach dram2_seg last.
 #[cfg(all(feature = "e15_results_out", not(fw_harness)))]
 mod results_out;
-#[cfg(all(feature = "e15_results_out", any(feature = "e11_lender", feature = "alloc_watch_diag")))]
-compile_error!("`e15_results_out` owns lp-perf's hook, as `e11_lender` and `alloc_watch_diag` do: pick one");
+#[cfg(all(
+    feature = "e15_results_out",
+    any(feature = "e11_lender", feature = "alloc_watch_diag")
+))]
+compile_error!(
+    "`e15_results_out` owns lp-perf's hook, as `e11_lender` and `alloc_watch_diag` do: pick one"
+);
 #[cfg(all(feature = "e11_lender", feature = "alloc_watch_diag"))]
 compile_error!("`e11_lender` and `alloc_watch_diag` both own lp-perf's hook: pick one");
 #[cfg(all(feature = "alloc_watch_diag", feature = "alloc_trace_emu"))]
