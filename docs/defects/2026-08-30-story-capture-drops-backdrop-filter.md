@@ -1,3 +1,10 @@
+---
+status: fixed
+found: 2026-08-30      # the design-language refresh (PR #467)
+fixed: 63b791d51       # PR #479, conditional captureBeyondViewport
+area: lpa-studio-web scripts/studio-story-pngs.mjs (CDP captureBeyondViewport)
+class: stand-in-divergence
+---
 # Story capture bakes glass surfaces without their blur
 
 **Status:** fixed (2026-08-30, PR #479 — conditional `captureBeyondViewport`)
