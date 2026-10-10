@@ -78,6 +78,22 @@ too early, and no gate in front of a write can see it. A reliable link atop
 a bug like this one turns a stall into a resend, but it does not make the
 stall free — the two are complementary, not substitutes.
 
+**Checked against the emulator's LR/SC bug (2026-10-09).** Until #1080 the
+emulated `sc.w` ignored `lr.w`'s reservation
+(`2026-10-09-the-emulated-sc-w-ignored-its-reservation.md`). That bug also
+fails on some CI images and not others depending on the commit stamp, so it
+was a candidate for these reds. It is not their cause. The count here is a
+frame write whose 250 ms timeout *fired* while the send buffer was free, so
+the waiting task ran again. When that bug drops a task from the run queue,
+the task's header stays marked scheduled, and embassy-executor's `wake_task`
+never enqueues it again: no wake runs it, and no timer does either. That
+failure is a silent stall ending in a watchdog reset, not a counted timeout.
+The silicon runs above, stock esp-hal 1.1.1 against the back-port, stand on
+their own as well. The 2026-09-27 red below cannot be replayed on CI's own
+bytes (CI keeps images for 7 days). Its log line,
+`write timed out at chunk 1/3 … after 250 ms`, is a timeout that fired, so it
+belongs here.
+
 **Incidents.**
 
 - 2026-09-27 — main went red at a10ef3c8c (#853, a Studio-only change): CI's C6 image hit the lost wake deterministically in three emulator tests (a 250 ms first-write stall dropped the hello). Main went green again at c5f973664 by timing luck.
