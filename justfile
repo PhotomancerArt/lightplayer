@@ -2417,6 +2417,25 @@ heap-budget-check margin_pct="0": install-rv32-target
 heap-budget-baseline project="": install-rv32-target
     scripts/heap-budget-check.sh baseline {{ project }}
 
+# Where every byte of a chip's SRAM goes, read off a linked firmware ELF: ROM
+# reserve, cache, code in RAM, the radio blobs by library, .data/.bss by crate,
+# each heap region, the stack, idle bytes. The rows sum to the chip's RAM or the
+# script exits non-zero. Pure Python, no build: point it at a CI image
+# (`just fetch-ci-images`, then target/ci-images/<sha>/<chip>/…) or your own ELF.
+#
+#   just ram-ledger target/ci-images/<sha>/esp32c6/tree/ESP32C6_SERVER_RADIO_SPLIT/p2.elf
+#   just ram-ledger <elf> --chip esp32s3 --json out.json
+#
+# Flags: scripts/ram-ledger.py --help; method and limits: docs/heap-budget-gate.md
+# ("The whole-RAM ledger"). `just test-ram-ledger` is its self-test.
+ram-ledger *args:
+    python3 scripts/ram-ledger.py {{ args }}
+
+# The ledger's own tests: a synthetic ELF always, and a smoke run on the newest
+# fetched CI image when there is one (it says so loudly when there is not).
+test-ram-ledger:
+    python3 scripts/test_ram_ledger.py
+
 # The heap-budget record's OTHER source: a shipped firmware image booted whole
 # on its own SoC emulator, read from the allocator figures its own first
 # heartbeat reports.
