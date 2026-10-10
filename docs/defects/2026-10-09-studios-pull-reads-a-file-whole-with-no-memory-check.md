@@ -46,12 +46,18 @@ reported a 26,224–26,232 B largest block in every heartbeat, already under
 the SVG's 27,091 B (the research census image saw 28.3–30.4 KB). Pressing
 Open in editor on the shipped image was not tried.
 
-**Fix** — none yet. The obvious one: read a file into a page chunk by
-chunk, so a pull never asks for more than a chunk; or, at least, refuse the page with
-`fs_read_refusal`'s rule before `read_file`.
+**Fix** — candidate: PR #1091 (open; this entry closes when it merges).
+The pull asks `whole_file_gate::whole_file_refusal` — the rule `fs_read_refusal`
+now shares — before each `read_file`, and a file that would not fit refuses
+the page in `Read`'s words (`error` set, no entries; no wire change). It
+refuses rather than reading in chunks because `LpFs` has no ranged read.
+So a board whose largest block stays under the project's biggest file (the
+shipped release with a central connected: ~26.2 KB against the 27,091 B SVG)
+cannot pull that project until the block grows or the central leaves; a
+ranged `LpFs` read would remove that, and is not in the candidate.
 
-**Regression coverage** — none. No test pulls a project on a heap whose
-largest block is under its largest file.
+**Regression coverage** — candidate: `file_sync::tests::a_pull_page_whose_file_does_not_fit_is_refused_not_attempted`
+and `a_refusal_names_the_file_it_reached_not_the_whole_project` (PR #1091).
 
 **Lesson** — a gate added for one request kind does not guard the job:
 every path that reads a whole file needs the same rule, or none should

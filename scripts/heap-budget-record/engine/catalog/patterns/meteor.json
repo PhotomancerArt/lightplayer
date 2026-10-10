@@ -1,7 +1,7 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.",
-  "recorded": "2026-10-07",
-  "commit": "7fa64fd84",
+  "recorded": "2026-10-10",
+  "commit": "492eb884d",
   "modes": {
     "startup": {
       "windows": {
@@ -24,13 +24,13 @@
           "holes_at_close": 41
         },
         "frame": {
-          "transient": 96867,
-          "retained": 44038,
-          "largest_alloc": 20480,
+          "transient": 44198,
+          "retained": 44198,
+          "largest_alloc": 8148,
           "alloc_count": 6443,
           "alloc_bytes": 356120,
-          "largest_free_at_close": 170544,
-          "holes_at_close": 10
+          "largest_free_at_close": 170304,
+          "holes_at_close": 11
         },
         "shader-compile": {
           "transient": 32274,
@@ -38,8 +38,8 @@
           "largest_alloc": 8148,
           "alloc_count": 3686,
           "alloc_bytes": 188589,
-          "largest_free_at_close": 130600,
-          "holes_at_close": 37
+          "largest_free_at_close": 142000,
+          "holes_at_close": 39
         },
         "shader-link": {
           "transient": 3282,
@@ -47,8 +47,8 @@
           "largest_alloc": 3192,
           "alloc_count": 7,
           "alloc_bytes": 3337,
-          "largest_free_at_close": 130600,
-          "holes_at_close": 38
+          "largest_free_at_close": 142000,
+          "holes_at_close": 41
         }
       }
     },
@@ -60,8 +60,8 @@
           "largest_alloc": 560,
           "alloc_count": 616,
           "alloc_bytes": 29251,
-          "largest_free_at_close": 130600,
-          "holes_at_close": 51
+          "largest_free_at_close": 140880,
+          "holes_at_close": 55
         }
       }
     }
