@@ -29,9 +29,10 @@ pub const INCOMPAT_KNOWN: u16 = 0;
 /// Which write head a sector was opened for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadKind {
-    /// File content, directories, GC copies.
+    /// File content, directories (and GC copies of them).
     Cold,
-    /// `.lp/panel.json` files, the hot directory, roots.
+    /// `.lp/panel.json` files, the hot directory, roots (and GC copies of
+    /// them).
     Hot,
 }
 

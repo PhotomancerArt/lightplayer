@@ -35,8 +35,8 @@ change has to be readable, or cleanly refused, by the core before it.
 - The tree is a **cold** directory tree (path-copied on change) and a flat
   **hot** directory of every `…/.lp/panel.json` by full path; the **root**
   names both and carries the retired-sector list. Two write heads: hot
-  (panel files, the hot directory, roots) and cold (everything else, GC
-  copies).
+  (panel files, the hot directory, roots) and cold (everything else); GC
+  copies a sector's live records to the head of its own kind.
 - **Per-call commits.** `put`, `append`, `put_chunk_deflated`, `delete`,
   `delete_prefix` each write their records, path-copy their directories and
   write a root before returning.
@@ -79,8 +79,10 @@ change has to be readable, or cleanly refused, by the core before it.
   records and the write's, against the usable sectors) refuses before any
   write,
   then victims are collected — sectors with garbage first (greedy or
-  LFS cost-benefit), then sectors whose only waste is a tail, and GC stops
-  when collections stop freeing sectors.
+  LFS cost-benefit), every one of them if need be, then sectors whose only
+  waste is a tail, until those stop freeing sectors; last, a head whose own
+  garbage would let the write open fewer sectors is renewed (its live
+  records copied to a new head of its kind).
 
 ## Invariants (hold after every operation and every cut)
 
@@ -348,6 +350,33 @@ logical bytes, stored or deflated.)
    ~33 KB. Mount now indexes only the chosen root's closure, found by
    header scans (`mount_walk.rs`): ~14 KB, garbage or not, for ~30 % more
    bytes read (see "Mount" under the G1 figures).
+
+### Found by M3's long walks (fixed after G1)
+
+`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`:
+on a nearly full flash, a step that fitted was refused `NoSpace` when run
+again after a power cut. Nothing committed was lost; the store refused a
+write it could hold. Four causes, each pinned by `edge_gc_tests.rs`:
+
+1. **GC gave up early.** It stopped after `reserve + 2` collections that
+   freed no sector, although garbage spread thin over many sectors frees
+   one only once enough of it is collected. It now collects every victim
+   with garbage (each wins its garbage back, so the run ends) and applies
+   the stall rule to tail-only compaction alone.
+2. **A cut closes the head it was programming** (a record that fails its
+   CRC ends what mount trusts in that sector), so the re-run needs a new
+   sector for that head. Collecting the closed hot sector copied its live
+   records — the root, the hot directory, panels — into the full cold head,
+   opening a sector for the one it freed. GC now copies to the head of the
+   victim's own kind, which gives the hot head its room back.
+3. **The packing bound refused what a layout held.** It took a sector off
+   for the second head, so a write the heads' room took fault-free was
+   refused after a cut by the bound on the same live set. The bound is now
+   the reserve alone (what it always claimed: a write it rejects cannot fit).
+4. **A head's garbage was never collected.** A full hot head is mostly old
+   roots and hot directories, and no victim rule reaches a head; GC now
+   renews a head (its live records to a new head of its kind) when that
+   lets the write open fewer sectors.
 
 ## G1 figures (2026-10-08)
 

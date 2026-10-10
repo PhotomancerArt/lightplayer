@@ -22,13 +22,19 @@ pub fn sectors_needed(
 }
 
 /// The pre-write bound: do the live records plus the new ones (`bytes`, all
-/// of them) fit `usable` sectors less the reserve and one sector for the
-/// other head? A byte sum, optimistic on purpose (records never span a
-/// sector, so real packing leaves a tail in each, and GC copies in victim
-/// order): a write this rejects cannot fit; one it accepts may still end in
-/// `NoSpace` after GC, before any of its records.
+/// of them) fit `usable` sectors less the reserve? A byte sum, optimistic
+/// on purpose (records never span a sector, so real packing leaves a tail in
+/// each, and GC copies in victim order): a write this rejects cannot fit;
+/// one it accepts may still end in `NoSpace` after GC, before any of its
+/// records.
+///
+/// It must never reject what a layout holds: a write that fits leaves the
+/// reserve free, so all its bytes sit in the other sectors. (It once also
+/// took a sector off for the second head, so after a power cut it refused
+/// re-runs of steps the layout had held — a cut leaves the live set, and so
+/// this bound, as it was; the 2026-10-09 defect.)
 pub fn fits_after_compaction(bytes: u64, capacity: u32, usable: u32, reserve: u32) -> bool {
-    let budget = usable.saturating_sub(reserve + 1);
+    let budget = usable.saturating_sub(reserve);
     bytes <= u64::from(budget) * u64::from(capacity)
 }
 
@@ -45,10 +51,10 @@ mod tests {
         ];
         assert_eq!(sectors_needed([1000, 0], recs.into_iter(), 1000), 2);
         assert_eq!(sectors_needed([1200, 100], recs.into_iter(), 1000), 0);
-        // 6 sectors of 4,072 B after the reserve and the other head.
+        // 7 sectors of 4,072 B after the reserve.
         assert!(fits_after_compaction(20 * 1000, 4072, 10, 3));
-        assert!(fits_after_compaction(6 * 4072, 4072, 10, 3));
-        assert!(!fits_after_compaction(6 * 4072 + 1, 4072, 10, 3));
+        assert!(fits_after_compaction(7 * 4072, 4072, 10, 3));
+        assert!(!fits_after_compaction(7 * 4072 + 1, 4072, 10, 3));
         assert!(!fits_after_compaction(40 * 1000, 4072, 10, 3));
     }
 }

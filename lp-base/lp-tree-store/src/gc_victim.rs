@@ -15,10 +15,10 @@ use crate::store_config::GcPolicy;
 /// opening one), else the smallest of all (it opens a head, whose room the
 /// next one can use). Copying tail-only sectors can gain nothing when
 /// records are near `record_max` — every sector ends with the same tail —
-/// so the caller stops GC when collections stop freeing sectors.
+/// so the caller stops GC when those stop freeing sectors.
 ///
 /// Needs exact live bytes (right after a mark, or GC's own copies since).
-pub fn choose_victim<F: Flash>(log: &RecordLog<F>, policy: GcPolicy) -> Option<u32> {
+pub fn choose_victim<F: Flash>(log: &RecordLog<F>, policy: GcPolicy) -> Option<Victim> {
     let cap = u64::from(log.sector_capacity());
     let now = u64::from(log.next_sector_seq);
     let head_room = u64::from(log.head_remaining(HeadKind::Cold));
@@ -55,5 +55,23 @@ pub fn choose_victim<F: Flash>(log: &RecordLog<F>, policy: GcPolicy) -> Option<u
             best = Some((score, s));
         }
     }
-    best.or(best_tail).or(smallest).map(|(_, s)| s)
+    match best {
+        Some((_, sector)) => Some(Victim {
+            sector,
+            has_garbage: true,
+        }),
+        None => best_tail.or(smallest).map(|(_, sector)| Victim {
+            sector,
+            has_garbage: false,
+        }),
+    }
+}
+
+/// A sector to collect, and whether it holds garbage: collecting one that
+/// does always wins its garbage back; one whose only waste is its tail may
+/// gain nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Victim {
+    pub sector: u32,
+    pub has_garbage: bool,
 }
