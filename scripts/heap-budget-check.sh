@@ -652,6 +652,19 @@ that already have the Xtensa toolchain)."
     # `stackTop` rides with the measured figures so the one table below grades
     # it; it comes from the ELF, not the console.
     meas="$(jq -c --argjson l "$layout" '. + {stackTop: $l.stackTop}' <<<"$meas")"
+    # A heap-residual layout (the C6 since RAM research E4: the stack is a
+    # fixed span in dram2_seg and the statics' residual is the main HEAP
+    # region) moves `totalBytes` by every byte of statics, as the stack used
+    # to move. So there the residual is derived from the ELF and what is
+    # recorded exact is everything else: `heapFixedBytes` (the heap less its
+    # main region: the reclaimed tail and the radio's region, fixed spans) and
+    # `heapMainEnd` (the main region's linker-script end).
+    local lay_kind
+    lay_kind="$(jq -r '.layout // "stack-residual"' <<<"$layout")"
+    if [ "$lay_kind" = "heap-residual" ]; then
+        meas="$(jq -c --argjson l "$layout" \
+            '. + {heapFixedBytes: (.totalBytes - $l.heapMainBytes), heapMainEnd: $l.heapMainEnd}' <<<"$meas")"
+    fi
 
     # Which configuration the figures came from — the run's label, seams and
     # all — beside the one the record was taken on. Reported, never gated:
@@ -671,10 +684,15 @@ compare regardless; the next re-baseline that moves a figure stamps the run's la
     #   shrink— smaller is worse (freeBytes, largestFreeBlock)
     #   exact — any difference is a finding (totalBytes, stackTop)
     #   band  — inside the recorded range (stackHighWater, below)
+    #   (heap-residual: heapFixedBytes and heapMainEnd exact in totalBytes' place)
     local rows
-    rows="$(jq -rn --argjson rec "$recorded" --argjson m "$meas" '
-        [ ["totalBytes", "exact"], ["usedBytes", "grow"], ["freeBytes", "shrink"],
-          ["largestFreeBlock", "shrink"], ["stackTop", "exact"] ][]
+    rows="$(jq -rn --argjson rec "$recorded" --argjson m "$meas" --arg kind "$lay_kind" '
+        (if $kind == "heap-residual"
+         then [ ["heapFixedBytes", "exact"], ["heapMainEnd", "exact"] ]
+         else [ ["totalBytes", "exact"] ] end)
+        + [ ["usedBytes", "grow"], ["freeBytes", "shrink"],
+            ["largestFreeBlock", "shrink"], ["stackTop", "exact"] ]
+        | .[]
         | . as [$f, $dir] | [$f, ($rec[$f] // "null"), ($m[$f] // "null"), $dir] | @tsv')"
     while IFS=$'\t' read -r f rec meas_v dir; do
         [ -n "$f" ] || continue
@@ -755,6 +773,31 @@ lands on the main task."
 the ELF's _stack_start - _stack_end is ${st_lay} B. The probe no longer reports the layout it \
 runs on — a finding, not a re-baseline."
         fail=1
+    elif [ "$lay_kind" = "heap-residual" ]; then
+        # The residual is the main heap region, so the premise moves with it:
+        # nothing between the statics and `_heap_main_start` (`.heap_main` is
+        # `ALIGN(8)`, so 0..7 B), and main → reclaimed tail → stack end to
+        # start. The stack itself is then a linker-script span: rule 3 still
+        # holds it above the idle band.
+        if [ "$gap" -lt 0 ] || [ "$gap" -ge 8 ]; then
+            echo "::error::heap-budget: ${CHIP_ID} heapMain: ${gap} B lie between the end of \
+${sect} and _heap_main_start. The main heap region is no longer exactly the residual of RWDATA \
+after the statics — read fw-esp32c6/build.rs's patched_stack_x before anything else."
+            fail=1
+        elif [ "$(jq -r '.contiguous' <<<"$layout")" != "true" ]; then
+            echo "::error::heap-budget: ${CHIP_ID} heapMain: the main region, the reclaimed tail \
+and the stack are not end to start ($(jq -c '{heapMainEnd, reclaimedStart, reclaimedEnd, stackBottom}' <<<"$layout")) — \
+something sits between them."
+            fail=1
+        elif [ "$st_rep" -le "$hi" ]; then
+            echo "::error::heap-budget: ${CHIP_ID} stackTotal ${st_rep} B no longer exceeds the top \
+of the recorded high-water band (${hi} B)."
+            fail=1
+        else
+            echo "  ok: stackTotal: ${st_rep} B, a fixed span in its own segment (derived from \
+the ELF; $(( st_rep - hi )) B above the high-water band); heapMain: $(jq -r '.heapMainBytes' <<<"$layout") B \
+= the residual after ${sect}, up to 0x$(printf '%08x' "$(jq -r '.heapMainEnd' <<<"$layout")")"
+        fi
     elif [ "$gap" -lt 0 ] || [ "$gap" -ge 4 ]; then
         echo "::error::heap-budget: ${CHIP_ID} stackTotal: ${gap} B lie between the end of \
 ${sect} and _stack_end. The main stack is no longer exactly the residual of RWDATA after the \
@@ -835,9 +878,14 @@ chip_baseline() {
     hi=$(( (hw + 599) / 100 * 100 ))
     # `stackTotal` is not recorded: it is derived from the ELF on every check.
     local measured
+    # A heap-residual layout (see chip_check) also records the heap's fixed
+    # part and the main region's end, which it grades in totalBytes' place.
     measured="$(jq -c --argjson l "$layout" --argjson lo "$lo" --argjson hi "$hi" '
         {freeBytes, usedBytes, totalBytes, largestFreeBlock, stackHighWater,
-         stackTop: $l.stackTop, stackHighWaterBand: [$lo, $hi]}' <<<"$meas")"
+         stackTop: $l.stackTop, stackHighWaterBand: [$lo, $hi]}
+        + (if ($l.layout // "") == "heap-residual"
+           then {heapFixedBytes: (.totalBytes - $l.heapMainBytes), heapMainEnd: $l.heapMainEnd}
+           else {} end)' <<<"$meas")"
     local existing='{}'
     [ -f "$rec_file" ] && existing="$(jq -c . "$rec_file")"
     if [ "$(jq -n --argjson e "$existing" --argjson m "$measured" '$e.measured == $m')" = "true" ]; then
