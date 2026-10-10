@@ -520,7 +520,7 @@ mod tests {
     /// carries TWO C6 boards, so a C6 with no registered board gets the
     /// picker, not a pick.
     ///
-    /// Moved from `lpa-studio-web`'s `device_roster_card.rs` (#500) — same
+    /// Moved from `lpa-studio-web`'s retired device card (#500) — same
     /// semantics, same test — per the device-card-v2 plan's P2 amendment.
     #[test]
     fn the_reflash_pick_is_the_registered_board_or_the_chips_only_fit() {
@@ -594,6 +594,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,
@@ -647,6 +648,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,

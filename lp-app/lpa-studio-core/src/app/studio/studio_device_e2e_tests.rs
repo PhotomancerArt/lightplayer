@@ -174,6 +174,15 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// The board card, built in core, on real boards: its primary pressed by
+/// path, and every action it draws an offer the tree publishes.
+mod board_card_tests;
+/// One tab holds a board: two tabs on one in-memory hold bus.
+mod board_hold_tests;
+/// The home page's sections over this bench: a board plugged in is
+/// online, a detached one is offline, and the Connect a board section's
+/// offers are all published.
+mod home_sections_tests;
 /// A LAN link that closes and redials.
 mod lan_drop_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
@@ -186,8 +195,11 @@ mod relay_connect_tests;
 /// identifies, refuses firmware, is never given keys, and comes back after
 /// its leg drops.
 mod relay_link_tests;
+/// Unlock as an offer, `devices/<board>/unlock`, on boards reached over
+/// Bluetooth that hold nothing, or only play.
+mod unlock_tests;
 /// Reaching a board over Wi‑Fi without a flag: its remembered address, an
-/// address typed into the add slot.
+/// address typed into Connect a board's Network row.
 mod wifi_connect_tests;
 /// Wi‑Fi settings over the bench's USB link (Wi‑Fi roadmap M5).
 mod wifi_device_tests;
@@ -1136,6 +1148,10 @@ impl DeviceBench {
                     }
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
+                    }
+                    // The hold edge's answers (one tab holds a board).
+                    crate::StudioCommand::HoldEdge(event) => {
+                        self.controller.on_hold_edge_event(event);
                     }
                     _ => {}
                 }
@@ -2549,6 +2565,10 @@ fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i
 fn a_running_board_feeds_its_card_over_the_shared_link() {
     let (mut bench, tasks) = running_board_wanting_a_picture("dev000000daqf6dvvt1", "usb-feed-1");
     let device = bench.view().devices[0].id;
+    assert_eq!(
+        feed_gap(&bench, device),
+        Some(crate::DEVICE_CARD_FEED_INTERVAL)
+    );
 
     let mut pulls = 0;
     while feed_frame_revision(&bench, device).is_none() {
@@ -2615,6 +2635,83 @@ fn a_running_board_feeds_its_card_over_the_shared_link() {
         !journal.iter().any(|line| line.contains("Passthrough")),
         "{journal:#?}"
     );
+}
+
+/// Over Bluetooth the card gets a picture too (2026-10-08; until then it
+/// had none), at the gentler Bluetooth gap: once a frame has landed, a
+/// pull that USB's 150 ms would have made by now waits for Bluetooth's
+/// 500 ms, and then it comes.
+#[test]
+fn a_bluetooth_board_feeds_its_card_at_the_gentle_gap() {
+    let (mut bench, tasks) =
+        running_board_wanting_a_picture("dev000000daqf6dvvt8", "ble:QkxFLWZlZWQ");
+    let device = bench.view().devices[0].id;
+    assert!(
+        bench.view().devices[0].is_over_bluetooth(),
+        "{:?}",
+        bench.view().devices[0]
+    );
+    assert_eq!(
+        feed_gap(&bench, device),
+        Some(crate::DEVICE_CARD_FEED_BLE_INTERVAL),
+        "a Bluetooth card feeds, at its own gap"
+    );
+
+    let steps_for = |gap: Duration| (gap.as_secs_f64() / STEP_MS).ceil() as usize + 1;
+    let mut pulls = 0;
+    while feed_frame_revision(&bench, device).is_none() {
+        feed_tick(&mut bench, &tasks, 5.0);
+        pulls += 1;
+        assert!(pulls <= 2, "no frame after two pulls");
+        for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL) {
+            bench.step(&tasks);
+        }
+    }
+    let pulled_at = |bench: &DeviceBench| {
+        bench
+            .controller
+            .device_feeds()
+            .get(device)
+            .and_then(|feed| feed.last_pull_completed_at())
+    };
+    feed_tick(&mut bench, &tasks, 5.0);
+    let stamp = pulled_at(&bench);
+    assert!(stamp.is_some(), "the gap had elapsed: a pull ran");
+
+    // Past USB's gap, short of Bluetooth's: nothing is asked.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_INTERVAL) {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert_eq!(pulled_at(&bench), stamp, "not due yet over Bluetooth");
+
+    // Past Bluetooth's gap: the next pull runs.
+    for _ in 0..steps_for(crate::DEVICE_CARD_FEED_BLE_INTERVAL) {
+        bench.step(&tasks);
+    }
+    feed_tick(&mut bench, &tasks, 5.0);
+    assert!(
+        pulled_at(&bench) > stamp,
+        "due again after the Bluetooth gap"
+    );
+
+    let feeds = bench.controller.device_roster_view().feeds;
+    let feed_view = feeds.get(&device).expect("the fed card has a feed view");
+    assert_eq!(
+        feed_view.liveness,
+        crate::FeedLiveness::Live,
+        "{feed_view:?}"
+    );
+    assert!(feed_view.frame.is_some());
+}
+
+/// The gap `device`'s card feed pulls at, when it is feeding.
+fn feed_gap(bench: &DeviceBench, device: crate::DeviceId) -> Option<Duration> {
+    let devices = bench.controller.devices_for_test();
+    bench
+        .controller
+        .device_feeds()
+        .active_gap_for_test(device, devices.roster(), devices.effects())
 }
 
 /// The persisted last frame (honest-device-preview follow-up): a fed
@@ -3794,7 +3891,7 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the empty face's primary verb is live: {card:?}"
     );
     // The picker really is built from the gallery's two lists.
-    let offer = crate::push_offer(&card, &[], &[]);
+    let offer = crate::push_offer(card.board_id.as_deref(), &[], &[]);
     assert!(
         offer.new_project_unavailable.is_some(),
         "a board that has not named itself cannot have a starter generated: {offer:?}"
@@ -5767,7 +5864,7 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
         view.offers
             .get(&crate::OfferPath::devices().child("new-sim"))
             .is_some(),
-        "the add slot's sim verb is published beside the roster"
+        "Connect a board's sim verb is published beside the roster"
     );
 }
 
@@ -5919,7 +6016,7 @@ fn rename_binds_its_text_and_the_card_wears_it() {
 
 /// New sim through its offer: it lists the runnable targets, and a press
 /// with a board and a runtime mints that sim and powers it on — the same
-/// creation the add slot's row dispatches. The sim's verbs then live at its
+/// creation Connect a board's row dispatches. The sim's verbs then live at its
 /// `sim-` ref.
 #[test]
 fn new_sim_lists_targets_and_a_press_starts_one() {
@@ -5942,7 +6039,7 @@ fn new_sim_lists_targets_and_a_press_starts_one() {
     let offer = view
         .offers
         .get(&crate::OfferPath::devices().child("new-sim"))
-        .expect("the add slot's sim verb");
+        .expect("Connect a board's sim verb");
     let crate::OfferParamKind::Choice { options, .. } = &offer.params()[0].kind else {
         panic!("board is a choice: {:?}", offer.params());
     };
@@ -6901,7 +6998,7 @@ fn powered_on_sim() -> (DeviceBench, TaskPool, String, FakeEsp32Device) {
     (bench, tasks, uid, device)
 }
 
-/// AC7, the picker's half (D44): picking a board in the add slot's dropdown
+/// AC7, the picker's half (D44): picking a board in Connect a board's dropdown
 /// mints a sim of THAT target, names it after the board, and powers it on —
 /// one gesture, ending in a card in the grid rather than a record on the
 /// remembered line. The device is an ordinary registry row; the picker

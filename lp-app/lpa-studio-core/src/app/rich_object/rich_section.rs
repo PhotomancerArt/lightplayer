@@ -6,10 +6,10 @@ use crate::UiStatusKind;
 /// label→value facts, an optional advisory chip, and the section's
 /// affordance identities.
 ///
-/// Generic over the consumer's affordance identity `A` (device sections
-/// carry `DeviceDetailAffordance`; other rich objects bring their own
-/// vocabulary) — the model stays renderer- and wiring-independent, exactly
-/// like [`RosterAffordance`](crate::app::roster::RosterAffordance).
+/// Generic over the consumer's affordance identity `A` (the board card's
+/// details carry [`UiCardAction`](crate::UiCardAction): an offer path, its
+/// word and how it is drawn; other rich objects bring their own vocabulary)
+/// — the model stays renderer- and wiring-independent.
 ///
 /// Affordance cardinality: an [`Advisory`](RichWeight::Advisory) or
 /// [`Actionable`](RichWeight::Actionable) section carries **at most one**
@@ -26,6 +26,10 @@ pub struct RichSection<A> {
     /// The section's health family. Only [`RichWeight::Actionable`]
     /// sections may color the object's rollup.
     pub tone: UiStatusKind,
+    /// A plain sentence above the lines: a notice's words, or a fact the
+    /// label→value rows cannot carry ("Anyone nearby can change this
+    /// board."). `None` for a section of facts alone.
+    pub sentence: Option<String>,
     /// Small label→value facts.
     pub lines: Vec<RichLine>,
     /// A standing advisory chip (e.g. "Firmware update available"): tones
@@ -56,6 +60,10 @@ pub enum RichWeight {
 pub struct RichLine {
     pub label: String,
     pub value: String,
+    /// How the value reads: [`UiStatusKind::Neutral`] for a plain fact, a
+    /// status family for one that says how something stands (a Wi‑Fi
+    /// row's "wrong password", in Warning).
+    pub tone: UiStatusKind,
 }
 
 impl RichLine {
@@ -63,7 +71,14 @@ impl RichLine {
         Self {
             label: label.into(),
             value: value.into(),
+            tone: UiStatusKind::Neutral,
         }
+    }
+
+    /// This line, its value read in `tone`.
+    pub fn toned(mut self, tone: UiStatusKind) -> Self {
+        self.tone = tone;
+        self
     }
 }
 

@@ -714,6 +714,92 @@ label:has(> input:not(:disabled)) {
     overflow: hidden;
 }
 
+/* ---- the board card (`app/board_card/`, docs/style/ui.md "The board
+   card"; the look as decided: spikes/board-card-stack) ------------------
+   The card's rows are Tailwind on the pieces; this is only what Tailwind
+   cannot say: the picture's row height (a RULE — it is what keeps the card
+   one height in every state — and narrow when the CARD is, a container
+   query), the status corner's notch cut out of the picture, the flush
+   sections' leading edge in their row's tone, and the work spinner's size
+   in a 28px bar. */
+.ux-board-card {
+    container: board-card / inline-size;
+}
+
+.ux-board-picture-slot {
+    height: 138px;
+}
+
+/* A card in a phone's two-column grid is narrow: a shorter picture. */
+@container board-card (max-width: 239px) {
+    .ux-board-picture-slot {
+        height: 108px;
+    }
+}
+
+/* The update's light strip, centred in the picture (no sentence under it:
+   the firmware bar's details say it). */
+.ux-board-picture .ux-update-leds {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* The status corner: a notch cut out of the picture's top-right corner, in
+   the card's own ground, its two inner corners rounded off by a radial
+   mask so the picture curves around it. */
+.ux-board-corner {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    display: flex;
+    height: 24px;
+    background: var(--studio-color-panel-primary);
+    border-bottom-left-radius: 9px;
+}
+
+.ux-board-corner::before,
+.ux-board-corner::after {
+    content: "";
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    pointer-events: none;
+    background: radial-gradient(
+        circle at 0 100%,
+        transparent 8.5px,
+        var(--studio-color-panel-primary) 9px
+    );
+}
+
+.ux-board-corner::before {
+    left: -9px;
+    top: 0;
+}
+
+.ux-board-corner::after {
+    right: 0;
+    bottom: -9px;
+}
+
+/* A flush row section's leading hairline (`ActionButtonVariant::RowEnd` /
+   `RowPrimary`), in its row's edge colour: a tinted bar sets
+   `--ux-row-flush-edge` to its family's border. */
+.ux-row-flush {
+    border-left-color: var(--ux-row-flush-edge, var(--studio-color-border));
+}
+
+/* The last bar's flush action follows the card's rounded corner. */
+.ux-board-bar:last-child .ux-row-flush {
+    border-bottom-right-radius: 7px;
+}
+
+/* Studio's conic spinner at a 28px bar's size. */
+.ux-board-bar .ux-board-spinner {
+    width: 11px;
+    height: 11px;
+}
+
 /* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the
    page, never in its flow. Off, it is invisible and lets clicks through;
    on, it fades in after a short beat (a blip that recovers at once never
@@ -6555,6 +6641,13 @@ select:focus-visible {
     gap: 6px;
     white-space: nowrap;
     transition: opacity 0.16s ease;
+}
+
+/* A menu row reads from its leading edge: both labels sit left in the
+   reserved cell, so arming swaps the words in place without centring the
+   resting one in the armed reading's width. */
+.ux-armed-labels.ux-armed-labels-start > span {
+    justify-content: flex-start;
 }
 
 /* `visibility` (not `display`) keeps the armed label in the layout so it

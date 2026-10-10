@@ -178,9 +178,19 @@ fn choker() -> OpenDevice {
 /// (its exits are the board's own verbs).
 fn frame(state: OpeningState) -> Element {
     let board = story_board(&state);
+    // A refusal of the link's tier is a board unlocked for play only: core
+    // offers it `unlock`, which the frame's Unlock presses.
+    let unlock = matches!(
+        &state,
+        OpeningState::Failed {
+            needs_unlock: true,
+            ..
+        }
+    )
+    .then_some(lpa_studio_core::UiUnlockOffer::PlayOnly);
     rsx! {
         section { class: "tw:p-4",
-            CardOffers { card: board,
+            CardOffers { card: board, unlock,
                 ProjectOpeningFrame { state }
             }
         }
@@ -235,6 +245,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,

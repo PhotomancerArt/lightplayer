@@ -399,6 +399,102 @@ fn control_product_probe_encodes_srgb8_when_asked() {
     assert_eq!(display, encoded);
 }
 
+/// The reply a card gets for geometry it holds, geometry it holds an older
+/// revision of, and geometry it never had — at card scale, with the lamps the
+/// gate must send or withhold. Pinned so the gate can learn a revision without
+/// building the layout and still answer exactly what building it first did.
+#[test]
+fn held_stale_and_absent_geometry_answer_what_they_always_did() {
+    let mut harness = Harness::build_with_lamps([0, u16::MAX, 0, u16::MAX], 73);
+    harness.tick();
+
+    // Never held: the whole bundle, at its revision.
+    let first = harness.read_samples(RevisionGateRead::Always, None);
+    let bundle = changed(&first[0]).clone();
+    let GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(layout)) =
+        &bundle.display_layout
+    else {
+        panic!("expected a layout, got {:?}", bundle.display_layout);
+    };
+    assert_eq!(layout.lamps.len(), 73);
+    assert_eq!(layout.revision, bundle.revision);
+    assert_eq!(bundle.placements.len(), 1);
+
+    // Held: nothing but the revision.
+    assert_eq!(
+        harness.read_samples(harness.known(bundle.revision), None)[0].geometry,
+        RevisionGateResult::Unchanged {
+            revision: bundle.revision
+        }
+    );
+
+    // Held, and then the render size moves: the old revision is stale and the
+    // bundle comes back whole, under a newer revision; the new one is held.
+    harness.set_fixture_literal(
+        "render_size",
+        Dim2u {
+            width: 8,
+            height: 8,
+        }
+        .to_lp_value(),
+    );
+    harness.tick();
+    let moved = harness.read_samples(harness.known(bundle.revision), None);
+    let moved = changed(&moved[0]);
+    assert!(moved.revision > bundle.revision);
+    let GeometryDisplayLayout::Layout(ControlDisplayLayout::Layout2d(layout)) =
+        &moved.display_layout
+    else {
+        panic!("expected a layout, got {:?}", moved.display_layout);
+    };
+    assert_eq!(layout.lamps.len(), 73);
+    assert_eq!((layout.width_hint, layout.height_hint), (8, 8));
+    assert_eq!(
+        harness.read_samples(harness.known(moved.revision), None)[0].geometry,
+        RevisionGateResult::Unchanged {
+            revision: moved.revision
+        }
+    );
+
+    // The same bundle is what a client that never held anything is sent.
+    let fresh = harness.read_samples(RevisionGateRead::Always, None);
+    assert_eq!(changed(&fresh[0]), moved);
+}
+
+/// A held read does not build the layout. The card's steady read asks with the
+/// revision it already holds; the lamps (and their mapping points) are an
+/// allocation per lamp that only a send needs, so what a held read allocates
+/// must not depend on how many lamps the fixture has.
+#[test]
+fn a_held_read_allocates_nothing_per_lamp() {
+    let mut allocated = Vec::new();
+    for lamps in [1, 73, 512] {
+        let mut harness = Harness::build_with_lamps([0, u16::MAX, 0, u16::MAX], lamps);
+        harness.tick();
+        let known = harness.geometry_revision();
+        // A first held read settles every lazily built cache.
+        harness.read_samples(harness.known(known), None);
+        let gate = harness.known(known);
+
+        let (entries, churn) =
+            crate::test_alloc_counter::measure(|| harness.read_samples(gate, None));
+        assert_eq!(
+            entries[0].geometry,
+            RevisionGateResult::Unchanged { revision: known }
+        );
+        allocated.push((lamps, churn.allocs, churn.bytes));
+    }
+
+    let (_, allocs, bytes) = allocated[0];
+    for &(lamps, lamp_allocs, lamp_bytes) in &allocated {
+        assert_eq!(
+            (lamp_allocs, lamp_bytes),
+            (allocs, bytes),
+            "a held read at {lamps} lamps allocates differently from one lamp: {allocated:?}"
+        );
+    }
+}
+
 /// The display layout's OWN revision inside a changed bundle.
 fn display_layout_revision(entry: &OutputFrameEntry) -> Revision {
     match &changed(entry).display_layout {
@@ -429,6 +525,11 @@ struct Harness {
 
 impl Harness {
     fn build(color: [u16; 4]) -> Self {
+        Self::build_with_lamps(color, 1)
+    }
+
+    /// The same chain with a fixture of `lamps` point lamps in a row.
+    fn build_with_lamps(color: [u16; 4], lamps: u32) -> Self {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("root path"));
         let registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
@@ -483,7 +584,10 @@ impl Harness {
                 Box::new(FixtureNode::new(
                     fix_id,
                     MappingConfig::path_points_vec(
-                        vec![PathSpec::point_list(0, [[0.5, 0.5]])],
+                        vec![PathSpec::point_list(
+                            0,
+                            (0..lamps).map(|lamp| [(lamp as f32 + 0.5) / lamps as f32, 0.5]),
+                        )],
                         2.0,
                     ),
                     lpc_model::FixtureSamplingConfig::TextureArea,

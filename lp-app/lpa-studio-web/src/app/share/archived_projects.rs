@@ -1,4 +1,5 @@
-//! The Projects page's archive drawer (spike `project-share` §5, Q12).
+//! The home page's archive drawer (spike `project-share` §5, Q12): after
+//! Your patterns on the All tab, after Projects on the Projects tab.
 //!
 //! Archiving is the removal verb (D8): nothing is deleted, the link keeps
 //! resolving for the project's members and stops resolving for everybody
@@ -147,7 +148,7 @@ pub fn archive_project(
             Ok(_) => {
                 on_archived();
                 if let Some(mut toasts) = toasts {
-                    toasts.say("Archived — Restore from the Projects page.");
+                    toasts.say("Archived — Restore it from Archived projects.");
                 }
             }
             Err(error) => {

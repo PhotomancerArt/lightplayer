@@ -136,7 +136,7 @@ const SITE_ROOT_FALLBACK = "http://tab.emu.invalid/";
  * file and the worker's own `new URL(image.path, manifestUrl)` then have an
  * absolute base, and a relative one throws `Invalid base URL` in neither.
  *
- * Against the site ROOT, not the current page: `/devices` and `/p/<slug>`
+ * Against the site ROOT, not the current page: `/device/<uid>` and `/p/<slug>`
  * would disagree about where `./firmware` is, and the firmware tree is
  * published at the site root by `lp-cli firmware package`. An input that is
  * already absolute passes through unchanged, so a caller on either side of

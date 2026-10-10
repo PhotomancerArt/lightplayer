@@ -1210,6 +1210,6 @@ mod tests {
 
     #[test]
     fn hrefs_only_on_a_lens() {
-        assert!(WorkbenchHrefs::for_lens(&crate::router::StudioRoute::Devices).is_none());
+        assert!(WorkbenchHrefs::for_lens(&crate::router::StudioRoute::Home).is_none());
     }
 }

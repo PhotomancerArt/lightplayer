@@ -62,13 +62,10 @@ struct PublishedOutputCandidate {
 }
 
 /// What an output's producers answered about their display layouts — asked
-/// once per product, before the gate decides whether any of it is sent.
+/// once per product, and only once the gate has decided the geometry is sent.
 struct OutputDisplayParts {
     /// One entry per distinct product on the wire: its layout, or why not.
     probed: Vec<(ControlProduct, Result<ControlLayout2d, String>)>,
-    /// `max(placement revision, every answering producer's layout revision)`
-    /// — the display-layout component of the output's geometry revision.
-    revision: Revision,
 }
 
 impl Engine {
@@ -675,9 +672,11 @@ impl Engine {
     /// Any piece moving therefore moves the max. The buffer's per-tick
     /// `revision` is never part of it.
     ///
-    /// The producers are asked for their layouts every read — their revisions
-    /// are part of the answer — but merging, measuring and sending happen
-    /// only when the client's revision is stale.
+    /// The producers are asked for their layout REVISIONS every read — they
+    /// are part of the answer — but their layouts (an allocation per lamp),
+    /// the merge, the measuring and the sending happen only when the client's
+    /// revision is stale. A client that holds the geometry costs a revision
+    /// lookup per producer and nothing proportional to the lamp count.
     ///
     /// An output that has not planned its placements yet answers `Omitted`,
     /// not a refusal: "nothing to say this tick", and the client keeps asking
@@ -694,15 +693,15 @@ impl Engine {
         if matches!(read, RevisionGateRead::None) || candidate.fragments.is_empty() {
             return RevisionGateResult::Omitted;
         }
-        let parts = self.output_frame_display_parts(registry, candidate);
-        let revision = parts
-            .revision
+        let revision = self
+            .output_frame_display_revision(registry, candidate)
             .max(candidate.placement_revision)
             .max(candidate.sample_layout_revision);
         if read.holds(Some(candidate.node), revision) {
             return RevisionGateResult::Unchanged { revision };
         }
 
+        let parts = self.output_frame_display_parts(registry, candidate);
         let display_layout = self.output_frame_display_layout(candidate, parts);
         if let GeometryDisplayLayout::Layout(layout) = &display_layout
             && let Some(budget) = self.display_layout_budget()
@@ -726,6 +725,33 @@ impl Engine {
         })
     }
 
+    /// `max(placement revision, every answering producer's layout revision)` —
+    /// the display-layout component of one output's geometry revision —
+    /// learned without building any layout. Once per PRODUCT, not per
+    /// fragment, like [`Self::output_frame_display_parts`], and a producer
+    /// that answers nothing (no layout, or a refusal) contributes nothing, as
+    /// it does there.
+    fn output_frame_display_revision(
+        &mut self,
+        registry: &ProjectRegistry,
+        candidate: &PublishedOutputCandidate,
+    ) -> Revision {
+        let mut asked: Vec<ControlProduct> = Vec::new();
+        let mut revision = candidate.placement_revision;
+        for fragment in &candidate.fragments {
+            if asked.contains(&fragment.product) {
+                continue;
+            }
+            asked.push(fragment.product);
+            if let Ok(Some(layout_revision)) =
+                self.control_display_layout_revision_probe(registry, fragment.product)
+            {
+                revision = revision.max(layout_revision);
+            }
+        }
+        revision
+    }
+
     /// Ask every producer on one output for its display layout — once per
     /// PRODUCT, not per fragment: a patched producer is cut into several runs
     /// and every one of them wants the same geometry.
@@ -735,7 +761,6 @@ impl Engine {
         candidate: &PublishedOutputCandidate,
     ) -> OutputDisplayParts {
         let mut probed: Vec<(ControlProduct, Result<ControlLayout2d, String>)> = Vec::new();
-        let mut revision = candidate.placement_revision;
         for fragment in &candidate.fragments {
             if probed
                 .iter()
@@ -744,10 +769,7 @@ impl Engine {
                 continue;
             }
             let answer = match self.control_display_layout_probe(registry, fragment.product) {
-                Ok(Some(ControlDisplayLayout::Layout2d(layout))) => {
-                    revision = revision.max(layout.revision);
-                    Ok(layout)
-                }
+                Ok(Some(ControlDisplayLayout::Layout2d(layout))) => Ok(layout),
                 Ok(None) => Err(format!(
                     "node {:?} exposes no display layout for control output {}",
                     fragment.product.node(),
@@ -757,7 +779,7 @@ impl Engine {
             };
             probed.push((fragment.product, answer));
         }
-        OutputDisplayParts { probed, revision }
+        OutputDisplayParts { probed }
     }
 
     /// Where to draw the lamps of one published frame.

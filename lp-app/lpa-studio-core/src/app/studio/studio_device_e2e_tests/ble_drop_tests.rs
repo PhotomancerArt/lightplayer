@@ -124,7 +124,7 @@ impl lpa_client::ClientIo for AirIo {
 /// shape of finding 1: the editor is open on a board reached over
 /// Bluetooth, the board restarts and its radio link drops, and the board
 /// comes back on a new link. The editor holds, then resumes on the new link
-/// with the same session — never the Devices page.
+/// with the same session — never sent home.
 #[test]
 fn a_bluetooth_board_that_restarts_under_the_editor_resumes_it() {
     let (mut bench, tasks, device, present) = lens_over_bluetooth("dev000000bledrop01");
@@ -414,7 +414,7 @@ fn bundled_example_files() -> Vec<(String, Vec<u8>)> {
 }
 
 /// A LightPlayer script for the board reached over Bluetooth.
-fn bluetooth_board(uid: &str) -> FakeLightPlayerState {
+pub(super) fn bluetooth_board(uid: &str) -> FakeLightPlayerState {
     FakeLightPlayerState::new()
         .with_identity(FakeDeviceIdentity::new(uid, "Bench board"))
         .with_base_mac("a0:f2:62:87:b4:8c")
@@ -434,7 +434,7 @@ fn lens_over_bluetooth(uid: &str) -> (DeviceBench, TaskPool, FakeEsp32Device, Rc
 
 /// A bench reaching `device` over Bluetooth only. `memory` runs before the
 /// Bluetooth half is installed: what the browser remembers.
-fn bench_over_bluetooth(
+pub(super) fn bench_over_bluetooth(
     device: &FakeEsp32Device,
     memory: impl FnOnce(&mut DeviceBench),
 ) -> (DeviceBench, TaskPool, Rc<Cell<bool>>) {
@@ -560,7 +560,7 @@ fn wait_for_the_resume(bench: &mut DeviceBench, tasks: &TaskPool) {
 }
 
 /// Step until the device's access line reads `line`.
-fn wait_for_access_line(
+pub(super) fn wait_for_access_line(
     bench: &mut DeviceBench,
     tasks: &TaskPool,
     device: crate::DeviceId,

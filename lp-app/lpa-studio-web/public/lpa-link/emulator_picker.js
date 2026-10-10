@@ -225,7 +225,11 @@ function row(board, onPick, kind = "serial") {
 /// channel admits one client per board (the door answers a second with 409),
 /// and that client is this page. Pressing them dispatches `connect` /
 /// `disconnect` on the bus, which is the same edge Chrome fires on a replug.
-export function installDevBanner({ bus, backingUrl, facade = null }) {
+///
+/// A SECOND TAB (`?emu-second-tab=1`) holds a board's bytes and not its
+/// cable: its rows are marked `data-cable="other-page"` and the cable's
+/// controls are disabled, saying whose cable it is. That page is not failed.
+export function installDevBanner({ bus, backingUrl, facade = null, secondTab = false }) {
   const banner = document.createElement("div");
   banner.id = "lp-emu-banner";
   style(banner, {
@@ -253,7 +257,9 @@ export function installDevBanner({ bus, backingUrl, facade = null }) {
 
   const said = document.createElement("span");
   said.id = "lp-emu-banner-text";
-  said.textContent = "navigator.serial in this page is a shim";
+  said.textContent = secondTab
+    ? "navigator.serial in this page is a shim (second tab: the bytes, not the cable)"
+    : "navigator.serial in this page is a shim";
   style(said, { color: PALETTE.dim });
 
   const toggle = document.createElement("button");
@@ -410,8 +416,16 @@ function boardRow(bus, board, refresh) {
   // A detached board says so where a plugged-in one says whether an
   // application holds it open: with the cable out there is no port to be open.
   const state = board.attached === false ? "detached" : board.open ? "open" : "closed";
+  // A second tab's port has the bytes and not the cable: the cable is
+  // another page's, and this row says so rather than offering it.
+  const cableless = board.cable === false;
+  if (cableless) {
+    row.dataset.cable = "other-page";
+  }
   const detail = document.createElement("span");
-  detail.textContent = [board.mac, state].filter(Boolean).join("  ·  ");
+  detail.textContent = [board.mac, state, cableless ? "cable: another page" : null]
+    .filter(Boolean)
+    .join("  ·  ");
   style(detail, {
     minWidth: "0",
     color: board.attached === false ? PALETTE.warn : PALETTE.dim,
@@ -422,7 +436,10 @@ function boardRow(bus, board, refresh) {
   cable.className = "lp-emu-banner-detach";
   cable.dataset.boardId = board.boardId;
   cable.textContent = "detach";
-  cable.disabled = board.attached === false;
+  cable.disabled = board.attached === false || cableless;
+  if (cableless) {
+    cable.title = OTHER_PAGE_HOLDS_THE_CABLE;
+  }
   style(cable, { ...buttonStyle(), marginLeft: "auto" });
 
   const plug = document.createElement("button");
@@ -430,7 +447,10 @@ function boardRow(bus, board, refresh) {
   plug.className = "lp-emu-banner-attach";
   plug.dataset.boardId = board.boardId;
   plug.textContent = "attach";
-  plug.disabled = board.attached !== false;
+  plug.disabled = board.attached !== false || cableless;
+  if (cableless) {
+    plug.title = OTHER_PAGE_HOLDS_THE_CABLE;
+  }
   style(plug, buttonStyle());
 
   const run = async (button, work) => {
@@ -523,6 +543,9 @@ function boardRow(bus, board, refresh) {
   row.append(name, detail, ...switches, cable, plug);
   return row;
 }
+
+/// Why a second tab's cable controls are disabled.
+const OTHER_PAGE_HOLDS_THE_CABLE = "another page holds this board's cable";
 
 /// The name a person reads off the board: D0 is GPIO0 on the XIAO ESP32-C6,
 /// and what a project's `button:local:D0` endpoint names.
