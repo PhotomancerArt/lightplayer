@@ -252,6 +252,10 @@ radio_cfg_probe_pool8 = ["radio_cfg_probe", "trouble-host?/default-packet-pool-s
 # (`lp_sram_probe.rs`).
 e03_lp_heap = []
 e03_lp_sram_probe = ["e03_lp_heap"]
+# ...and a one-shot ballast on the 2nd heartbeat that leaves
+# `LP_E3_BALLAST_LEAVE` bytes free outside LP SRAM (`lp_sram_ballast.rs`);
+# builds with or without `e03_lp_heap`, for the counterfactual.
+e03_ballast = []
 alloc_trace_emu = ["esp-alloc/alloc-hooks", "fw-esp32-common/alloc-trace-marks"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record

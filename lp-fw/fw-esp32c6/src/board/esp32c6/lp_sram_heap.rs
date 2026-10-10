@@ -102,6 +102,20 @@ pub fn region() -> (usize, usize) {
     (START.load(Ordering::Relaxed), SIZE.load(Ordering::Relaxed))
 }
 
+/// Free bytes in the region as the allocator counts them; 0 when it is not
+/// installed.
+#[allow(dead_code, reason = "read only by the E3 ballast")]
+pub fn free_bytes() -> usize {
+    let index = INDEX.load(Ordering::Relaxed);
+    if index == usize::MAX {
+        return 0;
+    }
+    match esp_alloc::HEAP.stats().region_stats.get(index) {
+        Some(Some(region)) => region.free,
+        _ => 0,
+    }
+}
+
 /// Log `[lp-heap]` when the region's use has changed since the last line:
 /// used and free as the allocator counts them, and the most it has held at
 /// any heartbeat.

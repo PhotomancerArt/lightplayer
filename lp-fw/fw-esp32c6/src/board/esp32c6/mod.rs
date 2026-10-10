@@ -19,6 +19,8 @@ pub mod constants;
 ))]
 pub mod cycle_counter;
 pub mod init;
+#[cfg(feature = "e03_ballast")]
+pub mod lp_sram_ballast;
 #[cfg(feature = "e03_lp_heap")]
 pub mod lp_sram_heap;
 #[cfg(feature = "e03_lp_sram_probe")]
