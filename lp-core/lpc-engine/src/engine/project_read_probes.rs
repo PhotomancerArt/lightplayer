@@ -550,6 +550,31 @@ impl Engine {
         })
     }
 
+    /// The lamps every published output carries (its `OutputChannels`
+    /// count: samples / 3), summed — what a read's lamp-sized allocations
+    /// scale with (the display layout at 20 B a lamp, the mapping points at
+    /// 16 B). The server's per-request read gate reads it
+    /// (`lpa_server::read_cost`).
+    /// Allocates nothing.
+    pub fn published_output_lamps(&self) -> u32 {
+        let mut total = 0u32;
+        for entry in self.tree().entries() {
+            let NodeEntryState::Alive(node) = entry.state.value() else {
+                continue;
+            };
+            let Some(buffer_id) = node.runtime_output_sink_buffer_id() else {
+                continue;
+            };
+            let Some(buffer) = self.runtime_buffers().get(buffer_id) else {
+                continue;
+            };
+            if let RuntimeBufferMetadata::OutputChannels { channels, .. } = buffer.value().metadata {
+                total = total.saturating_add(channels);
+            }
+        }
+        total
+    }
+
     /// Read the frames every output node has ALREADY published.
     ///
     /// The cheap counterpart of

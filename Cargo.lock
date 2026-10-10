@@ -6604,6 +6604,7 @@ dependencies = [
  "lpfs",
  "lpvm-native",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
