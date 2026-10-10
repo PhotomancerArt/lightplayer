@@ -74,7 +74,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                     None => break,
                 },
             };
-            collect_sector(&mut self.log, victim.sector)?;
+            collect_sector(&mut self.log, victim.sector, !victim.has_garbage)?;
             stat!(self.stats.gc_runs += 1);
             if self.enough(need) {
                 return Ok(());

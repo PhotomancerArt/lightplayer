@@ -29,7 +29,11 @@ fn spread_garbage_never_refuses_then_accepts() {
     for files in [15, 16, 17, u64::MAX] {
         for small in [150, 250, 350] {
             for want in [2000, 4000] {
-                let mut st = spread_garbage(&cfg, 2000, small, files);
+                // (A store filled to the brim may refuse even the deletes'
+                // directories: no such cell.)
+                let Some(mut st) = spread_garbage(&cfg, 2000, small, files) else {
+                    continue;
+                };
                 let first = st.put("/new.bin", &noise(99, want)).is_ok();
                 let mut again = mount(st.into_flash(), &cfg);
                 let second = again.put("/new.bin", &noise(99, want)).is_ok();
@@ -127,12 +131,63 @@ fn a_hot_head_full_of_old_roots_is_renewed() {
     }
 }
 
+/// Compaction near full. Copies of a project until one is refused, then
+/// edits of the kind a user makes there (a re-push, one or two shaders
+/// saved). With every sector's garbage collected, GC compacts sectors whose
+/// only waste is their tail; copying their records in sector order, a
+/// record that did not fit the head's tail opened a head at once and left
+/// that tail unused, so compaction cycled over the same sectors and every
+/// one of these edits was refused. Filling the head's tail with the
+/// records that fit first wins those tails back.
+#[test]
+fn compaction_near_full_wins_the_tails_back() {
+    let cfg = StoreConfig::default();
+    let mut fitted = 0;
+    for seed in 0..2u64 {
+        let mut st = mount(formatted(NorGeometry::c6(16), &cfg), &cfg);
+        let mut copies = 0;
+        while push(
+            &mut st,
+            &project(&format!("f{copies}"), seed * 100 + copies),
+        )
+        .is_ok()
+        {
+            copies += 1;
+        }
+        for i in 0..6u64 {
+            let slot = format!("f{}", (i * 7 + seed) % copies);
+            let edit: Files = match (i + seed) % 3 {
+                0 => project(&slot, seed * 7777 + i),
+                1 => vec![(
+                    format!("/projects/{slot}/m1/shader.glsl"),
+                    text(seed * 91 + i, 900),
+                )],
+                _ => vec![
+                    (
+                        format!("/projects/{slot}/m0/shader.glsl"),
+                        text(seed * 93 + i, 900),
+                    ),
+                    (
+                        format!("/projects/{slot}/m2/shader.glsl"),
+                        text(seed * 97 + i, 900),
+                    ),
+                ],
+            };
+            fitted += push(&mut st, &edit).is_ok() as u32;
+        }
+        let mut st = mount(st.into_flash(), &cfg);
+        assert_eq!(snapshot(&mut st).len(), 12 * copies as usize);
+    }
+    assert!(fitted >= 6, "{fitted} of 12 edits fitted");
+}
+
 type Files = Vec<(String, Vec<u8>)>;
 
 /// [`spread_garbage_never_refuses_then_accepts`]'s store, 16 sectors: `big`
 /// and `small` noise files in turn (at most `files` of each, or until a
-/// write is refused), then every small one deleted in one transaction.
-fn spread_garbage(cfg: &StoreConfig, big: usize, small: usize, files: u64) -> Store {
+/// write is refused), then every small one deleted in one transaction
+/// (`None` if that transaction is refused).
+fn spread_garbage(cfg: &StoreConfig, big: usize, small: usize, files: u64) -> Option<Store> {
     let mut st = mount(formatted(NorGeometry::c6(16), cfg), cfg);
     let mut smalls = Vec::new();
     for i in 0..files {
@@ -150,10 +205,10 @@ fn spread_garbage(cfg: &StoreConfig, big: usize, small: usize, files: u64) -> St
     }
     st.begin().unwrap();
     for p in &smalls {
-        st.delete(p).unwrap();
+        st.delete(p).ok()?;
     }
-    st.commit().unwrap();
-    mount(st.into_flash(), cfg)
+    st.commit().ok()?;
+    Some(mount(st.into_flash(), cfg))
 }
 
 /// [`a_rerun_after_a_cut_fits_where_the_step_fitted`]'s store, 16 sectors,

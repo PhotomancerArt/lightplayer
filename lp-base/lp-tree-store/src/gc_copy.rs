@@ -3,6 +3,14 @@
 //! compares), and only then kill and erase. Runs only right after a mark
 //! has pruned the index, so the index entries in the victim are exactly its
 //! live records.
+//!
+//! Records go in sector order, except when compacting (`pack`: a victim
+//! whose only waste is its tail): then each copy is the largest record left
+//! that fits what the head has left, and only when none fits does the next
+//! one in order open a sector. In order, a victim whose first record does
+//! not fit the head's tail opens a head at once and leaves that tail unused,
+//! so compaction near full could cycle over the same few sectors without
+//! gaining a byte (the 2026-10-10 defect); filling the tail first does not.
 
 use alloc::vec::Vec;
 
@@ -16,6 +24,7 @@ use crate::store_error::StoreError;
 pub fn collect_sector<F: Flash>(
     log: &mut RecordLog<F>,
     victim: u32,
+    pack: bool,
 ) -> Result<(), StoreError<F::Error>> {
     let mut items: Vec<(u32, ObjectId)> = log
         .index
@@ -33,7 +42,29 @@ pub fn collect_sector<F: Flash>(
         }
     }
     log.gc_victim = Some(victim);
-    for (_, id) in items {
+    if pack {
+        // Sorted by offset; each slot's offset now becomes its record's
+        // length (the order stays).
+        for it in &mut items {
+            let loc = log
+                .index
+                .get(it.1)
+                .ok_or(StoreError::Corrupt("missing record"))?;
+            it.0 = log.header_at(loc)?.total_len();
+        }
+    }
+    while !items.is_empty() {
+        let mut next = 0;
+        if pack {
+            let room = log.head_remaining(head);
+            let mut best = 0;
+            for (i, &(len, _)) in items.iter().enumerate() {
+                if len <= room && len > best {
+                    (best, next) = (len, i);
+                }
+            }
+        }
+        let (_, id) = items.remove(next);
         let (h, payload) = log.read_record(id)?;
         log.append(head, h.kind, h.codec, id, &[&payload])?;
         stat!(
