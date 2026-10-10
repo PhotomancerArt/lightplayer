@@ -23,12 +23,12 @@
 //! height (five 28 px rows, their hairlines inside them) and spans their
 //! five grid rows; `overflow: hidden` is a guard, never the fit.
 //!
-//! Walk hooks: `data-board-panel` on the block, `data-panel-channel` and
-//! `data-panel-state` (`read-default`, `read-following`, `engaged`) on each
-//! control, `data-all-controls` on the last row.
+//! Walk hooks: `data-board-panel` on the block, `data-all-controls` on the
+//! last row; each control carries the panel's own (`data-panel-scope`,
+//! `data-panel-channel`, `data-panel-state`: [`ModulePanelControl`]).
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiBoardPanel, UiCardControl, UiPanelControlState, UiPanelWidget};
+use lpa_studio_core::{UiAction, UiBoardPanel, UiCardControl, UiPanelWidget};
 
 use super::{ModulePanelControl, panel_gesture_actions};
 use crate::app::board_card::{CardAction, CardActionLook};
@@ -101,8 +101,8 @@ pub fn CompactPanel(
     }
 }
 
-/// One picked control: the panel's own control at card size, wearing the
-/// walk hooks.
+/// One picked control: the panel's own control at card size (its walk
+/// hooks are its own).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn CardControl(
@@ -110,20 +110,13 @@ fn CardControl(
     on_panel: EventHandler<super::PanelGesture>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    let channel = control.view.channel.clone();
-    let state = state_name(control.view.state);
     rsx! {
-        div {
-            class: "tw:contents",
-            "data-panel-channel": "{channel}",
-            "data-panel-state": state,
-            ModulePanelControl {
-                view: control.view,
-                scope: control.scope,
-                compact: true,
-                on_panel: Some(on_panel),
-                on_action: Some(on_action),
-            }
+        ModulePanelControl {
+            view: control.view,
+            scope: control.scope,
+            compact: true,
+            on_panel: Some(on_panel),
+            on_action: Some(on_action),
         }
     }
 }
@@ -143,15 +136,6 @@ fn split_master(controls: &[UiCardControl]) -> (Option<UiCardControl>, Vec<UiCar
 /// "· 2 more" when the play page has more than the card shows.
 fn more_words(more: usize) -> Option<String> {
     (more > 0).then(|| format!("\u{b7} {more} more"))
-}
-
-/// The walk hook's name for a control's panel state.
-fn state_name(state: UiPanelControlState) -> &'static str {
-    match state {
-        UiPanelControlState::ReadDefault => "read-default",
-        UiPanelControlState::ReadFollowing => "read-following",
-        UiPanelControlState::Engaged => "engaged",
-    }
 }
 
 /// The block: the five bars' rows of the card's grid, at their height
@@ -188,7 +172,8 @@ const ROW_CHEVRON_CLASS: &str =
 #[cfg(test)]
 mod tests {
     use lpa_studio_core::{
-        UiPanelControl, UiPanelControlView, UiPanelEmit, UiSlotFieldState, UiSlotValue,
+        UiPanelControl, UiPanelControlState, UiPanelControlView, UiPanelEmit, UiSlotFieldState,
+        UiSlotValue,
     };
 
     use super::*;

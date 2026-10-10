@@ -41,6 +41,13 @@
 //! Values render in **tabular numerals inside a reserved slot**, because a
 //! panel whose row reflows while you drag a fader is not a control panel.
 //!
+//! **Walk hooks**, on the control wherever a panel draws it (the editor,
+//! the play page, the board card): `data-panel-scope` and
+//! `data-panel-channel` (its identity, panel.md P1) and `data-panel-state`
+//! (`read-default`, `read-following`, `engaged`). A walk reads a control
+//! written in one session as held in the next — the board's own word, since
+//! a fresh session has no local echo.
+//!
 //! **At card size** (`compact`, the connected board card's panel — the
 //! card's five 28 px bars give way to it, at their height) the same
 //! control lays out tighter, never as another widget: a fader is one row
@@ -129,12 +136,13 @@ pub fn ModulePanelControl(
     let aspects = view.detail_aspects(&scope);
     let UiPanelControlView {
         // The channel rides inside `control.panel_target` for dispatch;
-        // the bare name is only the map key upstream.
-        channel: _,
+        // the bare name is the map key upstream, and the walk hook here.
+        channel,
         control,
         state,
         source: _,
     } = view;
+    let state_hook = panel_state_hook(state);
     let engaged = state.engaged();
     let label_class = panel_state_label_class(state);
     let readout_class = panel_state_readout_class(state);
@@ -246,7 +254,12 @@ pub fn ModulePanelControl(
     };
 
     rsx! {
-        div { id: "{anchor_id}", class: column_class,
+        div {
+            id: "{anchor_id}",
+            class: column_class,
+            "data-panel-scope": "{scope}",
+            "data-panel-channel": "{channel}",
+            "data-panel-state": state_hook,
             ModulePanelControlBody {
                 control,
                 state,
@@ -461,6 +474,16 @@ fn label_visual(label: &str, color_class: &'static str) -> Element {
                 StudioIcon { name: StudioIconName::InfoBare, size: 9 }
             }
         }
+    }
+}
+
+/// The walk hook's name for a panel state (`data-panel-state`): what a walk
+/// reads to tell the board's held control from one it only follows.
+pub(crate) fn panel_state_hook(state: UiPanelControlState) -> &'static str {
+    match state {
+        UiPanelControlState::ReadDefault => "read-default",
+        UiPanelControlState::ReadFollowing => "read-following",
+        UiPanelControlState::Engaged => "engaged",
     }
 }
 

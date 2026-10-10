@@ -965,10 +965,29 @@ pub(crate) fn lens_device_uid(view: &UiStudioView) -> Option<&str> {
 ///
 /// A path: the router's click interception carries the page-load flags
 /// (`?emu=`, `?ble=`, `?record=`) onto it, as it does for every in-app
-/// link, so the link stays the same document's address. Following it opens
-/// nothing twice: the session is already the lens.
+/// link, so the link stays the same document's address. Its slug is the
+/// canonical one (D10: `slugify` of the display name), as the address bar
+/// heals it to, so the link reads as the address it lands on. Following it
+/// opens nothing twice: the session is already the lens.
 pub(crate) fn play_address(view: &UiStudioView) -> Option<String> {
     if let Some(route) = lens_route(view) {
+        let route = match route {
+            StudioRoute::Project {
+                uid,
+                slug,
+                view,
+                on,
+            } => StudioRoute::Project {
+                uid,
+                slug: slug
+                    .as_deref()
+                    .map(share_link::slugify)
+                    .filter(|slug| !slug.is_empty()),
+                view,
+                on,
+            },
+            other => other,
+        };
         return Some(route.with_play(true).path());
     }
     let uid = lens_device_uid(view)?;
@@ -2680,6 +2699,25 @@ mod tests {
             play_address(&board_view(Some(SHARE_UID))),
             Some(format!(
                 "/p/porch-sign-{SHARE_UID}/play?on=mac:60:55:f9:0a:0b:0c"
+            ))
+        );
+    }
+
+    /// The slug is the canonical one the address bar heals to, not the
+    /// display name (found live: `/p/Peach (1D)-prj…/play`).
+    #[test]
+    fn the_play_address_carries_the_canonical_slug() {
+        let view = editor_view(Some(UiLensRuntime::Device {
+            uid: BOARD_UID.to_string(),
+            transport: lpa_studio_core::LinkTransport::Serial,
+            project_uid: Some(SHARE_UID.to_string()),
+            base_mac: Some("60:55:f9:0a:0b:0c".to_string()),
+        }))
+        .with_open_project(Some(SHARE_UID.to_string()), Some("Peach (1D)".to_string()));
+        assert_eq!(
+            play_address(&view),
+            Some(format!(
+                "/p/peach-1d-{SHARE_UID}/play?on=mac:60:55:f9:0a:0b:0c"
             ))
         );
     }

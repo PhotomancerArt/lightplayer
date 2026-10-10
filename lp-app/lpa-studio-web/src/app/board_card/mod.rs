@@ -44,11 +44,12 @@
 //!   (`AgentMark`), so a walk presses an offer by its path;
 //! - `data-board-terminal` on the board's terminal in the corner's details
 //!   (`DeviceTerminal`): what the board said, in its own words;
-//! - connected, in the bars' place: `data-board-panel` on the panel,
-//!   `data-panel-channel="<channel>"` and
-//!   `data-panel-state="read-default|read-following|engaged"` on each of its
-//!   controls, `data-all-controls` on its last row (All controls, and Edit
-//!   at its end).
+//! - connected, in the bars' place: `data-board-panel` on the panel and
+//!   `data-all-controls` on its last row (All controls, and Edit at its
+//!   end); each of its controls carries the panel control's own
+//!   `data-panel-scope`, `data-panel-channel` and
+//!   `data-panel-state="read-default|read-following|engaged"`, as it does in
+//!   the editor and on the play page (`ModulePanelControl`).
 //!
 //! A bar's details trigger is the button named "<Bar> details" ("Project
 //! details", …), the corner's "Status details". Details render inside the
