@@ -1197,6 +1197,26 @@ iram-flash-literals-esp32v3 *args:
     python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
         --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
 
+# The ISR-in-RAM guard for fw-esp32s3: the same check as the classic's, against
+# the S3's own committed table (`lp-fw/fw-esp32s3/iram-flash-literals.baseline.txt`)
+# and its flash window (`--chip esp32s3`). esp-hal's `place-switch-tables-in-ram`
+# is OFF here and `rwdata_hook.x` names the tables that stay in RAM; the
+# `.rodata.cst*` pools moved to flash too, which is only safe while this check
+# keeps saying no RAM-resident function loads a literal that points into flash
+# that it did not load before. Run it after touching either key.
+#
+#   just iram-flash-literals-esp32s3                     # check against the baseline
+#   just iram-flash-literals-esp32s3 --write-baseline    # re-bless it, deliberately
+iram-flash-literals-esp32s3 *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/iram-flash-literals.py {{ fw_esp32s3_elf }} --chip esp32s3 \
+        --baseline lp-fw/fw-esp32s3/iram-flash-literals.baseline.txt {{ args }}
+
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
 # (it cross-compiles for Xtensa under a different toolchain), so nothing else
