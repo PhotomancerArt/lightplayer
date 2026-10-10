@@ -28,6 +28,14 @@ pub fn region() -> (usize, usize) {
 #[cfg(feature = "e11_lend_dram2")]
 pub fn install() {
     esp_alloc::HEAP.set_lend_region(1);
+    set_min_size();
+}
+
+/// Variant `e11_lend_big_only`: borrower allocations under 1 KiB look for a
+/// hole elsewhere first.
+fn set_min_size() {
+    #[cfg(feature = "e11_lend_big_only")]
+    esp_alloc::HEAP.set_lend_min_size(1024);
 }
 
 /// Register the block as the heap's fourth region and make it the lend
@@ -48,4 +56,5 @@ pub fn install() {
         ));
     }
     esp_alloc::HEAP.set_lend_region(3);
+    set_min_size();
 }

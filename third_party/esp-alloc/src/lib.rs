@@ -453,6 +453,9 @@ pub struct LendStats {
 #[cfg(feature = "lend-region")]
 struct LendState {
     region: Option<usize>,
+    /// A borrower's allocation goes to the lend region first only from this
+    /// size up; smaller ones fill the other regions' holes first.
+    min_size: usize,
     stats: LendStats,
 }
 
@@ -477,6 +480,7 @@ impl EspHeapInner {
             #[cfg(feature = "lend-region")]
             lend: LendState {
                 region: None,
+                min_size: 0,
                 stats: LendStats {
                     overflow_bytes: 0,
                     overflow_count: 0,
@@ -503,7 +507,7 @@ impl EspHeapInner {
         // SAFETY: the firmware's predicate takes no lock and allocates nothing.
         let borrower = lend_matches && unsafe { _esp_alloc_lend_borrower() };
         let size = layout.size() as u32;
-        if borrower {
+        if borrower && layout.size() >= self.lend.min_size {
             if let Some(allocation) = self.heap[lend].as_mut().and_then(|r| r.allocate(layout)) {
                 self.lend.stats.borrower_count += 1;
                 self.note_lend_peak(lend);
@@ -521,15 +525,20 @@ impl EspHeapInner {
                 continue;
             }
             if let Some(allocation) = region.allocate(layout) {
-                if borrower {
+                if borrower && layout.size() >= self.lend.min_size {
                     self.lend.stats.overflow_bytes = self.lend.stats.overflow_bytes.saturating_add(size);
                     self.lend.stats.overflow_count += 1;
                 }
                 return Some(allocation);
             }
         }
-        if lend_matches && !borrower {
+        if lend_matches && (!borrower || layout.size() < self.lend.min_size) {
             if let Some(allocation) = self.heap[lend].as_mut().and_then(|r| r.allocate(layout)) {
+                if borrower {
+                    self.lend.stats.borrower_count += 1;
+                    self.note_lend_peak(lend);
+                    return Some(allocation);
+                }
                 self.lend.stats.spill_bytes = self.lend.stats.spill_bytes.saturating_add(size);
                 self.lend.stats.spill_count += 1;
                 self.note_lend_peak(lend);
@@ -790,6 +799,14 @@ impl EspHeap {
     #[cfg(feature = "lend-region")]
     pub fn set_lend_region(&self, index: usize) {
         self.inner.with(|heap| heap.lend.region = Some(index));
+    }
+
+    /// RESEARCH (E11): a borrower's allocations under `bytes` look for a
+    /// hole in the other regions first (0, the default: every size goes to
+    /// the lend region first).
+    #[cfg(feature = "lend-region")]
+    pub fn set_lend_min_size(&self, bytes: usize) {
+        self.inner.with(|heap| heap.lend.min_size = bytes);
     }
 
     /// RESEARCH (E11): the lend region's counters.

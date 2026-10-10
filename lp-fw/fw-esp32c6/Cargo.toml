@@ -232,6 +232,9 @@ e11_link_standin = ["lp-perf/hook"]
 # heap reaches dram2 after main AND the radio region, a borrower first).
 e11_no_tenant = []
 e11_lend_dram2 = []
+# ...and: only a borrower's allocations of 1 KiB and up go to the block
+# first; smaller ones fill the general heap's holes first (as today).
+e11_lend_big_only = []
 # Every heap alloc/free handed to the EMULATOR (`src/alloc_trace_emu.rs`) —
 # OFF by default, never shipped, never flashed: each hook is `ebreak; ret`, so
 # silicon traps on the first allocation. `lp-cli emu run --alloc-trace` claims

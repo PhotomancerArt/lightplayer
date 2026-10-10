@@ -143,11 +143,17 @@ fn rounds(editor: &mut EditorReads<'_>, rounds: u32) {
 fn whole_file(editor: &mut EditorReads<'_>, path: &str) -> String {
     let at = editor.host.board_seconds();
     let lp_path = lpfs::LpPathBuf::from(path);
+    // A reply over the link's frame budget is dropped by the board, not
+    // refused: give up after 5 emulated seconds rather than the host's 60.
+    let budget = editor.host.answer_budget_s;
+    editor.host.answer_budget_s = 5.0;
     let mut client = editor.client();
-    match block_on(client.fs_read(lp_path.as_path())) {
+    let line = match block_on(client.fs_read(lp_path.as_path())) {
         Ok(read) => format!("{path} at {at:.3} s: {} B", read.value.len()),
         Err(error) => format!("{path} at {at:.3} s: REFUSED {error}"),
-    }
+    };
+    editor.host.answer_budget_s = budget;
+    line
 }
 
 /// Deploy and load `dir`; the loaded project.
