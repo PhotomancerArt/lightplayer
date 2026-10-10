@@ -17,15 +17,16 @@
 use dioxus::prelude::*;
 use lpa_studio_core::app::devices::device_layout_step::LayoutStaging;
 use lpa_studio_core::{
-    ActivityEnd, BarLayer, BoardPlays, DeviceActivityKind, DeviceActivityView, DeviceBoardFs,
-    DeviceCardFeedView, DeviceEscape, DeviceFirmwareAge, DeviceFirmwareFace, DeviceFlashLayoutView,
-    DeviceFlashStep, DeviceId, DeviceLayoutVerdict, DeviceLinkCounters, DeviceLinkId,
-    DeviceLoadedProject, DeviceStatus, DeviceTerminalKind, DeviceTerminalLine, DeviceView,
-    DeviceWireVersion, FIRMWARE_NEEDS_USB, FeedLiveness, HeardNetwork, HeldElsewhere, HoldLevel,
-    HoldVia, INSTALL_FIND_PARAM, LastAttempt, NetworkStatus, OfferArgs, OutcomeView,
+    ActivityEnd, BarLayer, BoardConnection, BoardPlays, DeviceActivityKind, DeviceActivityView,
+    DeviceBoardFs, DeviceCardFeedView, DeviceEscape, DeviceFirmwareAge, DeviceFirmwareFace,
+    DeviceFlashLayoutView, DeviceFlashStep, DeviceId, DeviceLayoutVerdict, DeviceLinkCounters,
+    DeviceLinkId, DeviceLoadedProject, DeviceStatus, DeviceTerminalKind, DeviceTerminalLine,
+    DeviceView, DeviceWireVersion, FIRMWARE_NEEDS_USB, FeedLiveness, HeardNetwork, HeldElsewhere,
+    HoldLevel, HoldVia, INSTALL_FIND_PARAM, LastAttempt, NetworkStatus, OfferArgs, OutcomeView,
     PendingLinkView, SavedNetworkInfo, StationState, UiDeviceAccess, UiDeviceWifi, UiLinkKind,
-    UiOfferTree, UiRuntimeBand, UiTakeOver, UiUnlockOffer, UiWifiConnect, UpdateFixture,
-    UpdateFixtureRow, WIFI_BUSY_WORDS, device_layout_view, lan_link_for_endpoint,
+    UiOfferTree, UiPanelGroup, UiRuntimeBand, UiTakeOver, UiUnlockOffer, UiWifiConnect,
+    UpdateFixture, UpdateFixtureRow, WIFI_BUSY_WORDS, board_panel_picks, device_layout_view,
+    lan_link_for_endpoint,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_wire::RelayState;
@@ -37,11 +38,14 @@ use crate::app::home::device_offer_story_fixtures::{
     STORY_BOARD_NOW, StoryBoardCard, StoryNewBoardCard, story_board_prefix,
 };
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
+use crate::app::module::module_fixtures::{
+    card_few_controls_panel, card_many_controls_panel, card_root_panel, card_root_panel_held,
+};
 
 // --- Every state ------------------------------------------------------------
 
 #[story(
-    description = "The board card in every state, one height each (AC5): live (\"58 fps\" beside the blue dot, Edit as the primary), connecting (the connection bar working: spinner, \"Identifying…\", the iridescent sweep along its foot, Cancel), offline with its last picture (dimmed, its age \"5 h ago\" in the corner, \"Offline · 2 weeks\" in its connection bar, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated XIAO ESP32-C6\", in this tab), a board reached through lightplayer.app (\"Wi‑Fi via lightplayer.app · live\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"Open in another tab\" in orange, the picture that tab saved, dimmed, Connect), taking over (the connection bar working: \"Asking the other tab…\", Connect disabled) and taken (\"Taken by another tab\", Connect). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
+    description = "The board card in every state, one height each (AC5): live (\"58 fps\" beside the blue dot, Connect as the primary, Edit on the project bar), connected (the board's panel in the five bars' place at their height: the master fader, three knobs, All controls · 2 more with Edit at its end; Done as the primary), connecting (the connection bar working: spinner, \"Identifying…\", the iridescent sweep along its foot, Cancel), offline with its last picture (dimmed, its age \"5 h ago\" in the corner, \"Offline · 2 weeks\" in its connection bar, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated XIAO ESP32-C6\", in this tab), a board reached through lightplayer.app (\"Wi‑Fi via lightplayer.app · live\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"Open in another tab\" in orange, the picture that tab saved, dimmed, Connect), taking over (the connection bar working: \"Asking the other tab…\", Connect disabled) and taken (\"Taken by another tab\", Connect). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
 )]
 fn board_card_every_state() -> Element {
     rsx! {
@@ -54,6 +58,9 @@ fn board_card_every_state() -> Element {
                     plays: running(),
                     on_action: |_| {},
                 }
+            }
+            Cell { caption: "connected",
+                {connected_card(card_root_panel(), None)}
             }
             Cell { caption: "connecting",
                 StoryBoardCard { card: identifying(), on_action: |_| {} }
@@ -208,6 +215,154 @@ fn board_card_network_busy() -> Element {
                     relay: true,
                     wifi_connect: Some(busy_connect(true)),
                     last_seen_at: Some(STORY_BOARD_NOW - 14.0 * DAY),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+// --- Connected --------------------------------------------------------------
+
+#[story(
+    description = "A connected board (Connect pressed on its card): the five bars give way, at the same height, to the board's panel — the master brightness fader across the card (label, fader, value), then a row of three knobs (speed and hue following what drives them, in violet; palette, stepped, at its default), then \"All controls · 2 more\" (a link to the board's own play page; the mirror toggle and a second fader are there) with Edit flush at the row's end. Done is the primary; the picture is the session's own frames. Same widgets and gestures as the panel everywhere else: drag a control and it turns gold and offers to let go. No panel reset and no auto-save switch on the card (the play page has both)."
+)]
+fn board_card_connected() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card(card_root_panel(), None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The connected card at a phone's width, beside a watched one: the picture is 108 px, and the panel keeps the five bars' height (140 px) — master fader, the three knobs, All controls · 2 more with Edit. Both cards are 300 px tall."
+)]
+fn board_card_connected_narrow() -> Element {
+    rsx! {
+        section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:gap-[9px] tw:p-3",
+            {connected_card(card_root_panel(), None)}
+            StoryBoardCard {
+                card: porch(),
+                feed: live_feed(),
+                open_uid: Some(PORCH_UID.to_string()),
+                plays: running(),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A connected board whose project has one control and no master: the row holds the one knob, and the All controls row has no \"more\" (the play page has nothing else), Edit at its end. The panel keeps the bars' height."
+)]
+fn board_card_connected_few_controls() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card(card_few_controls_panel(), None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A connected board with a big panel (fifteen controls across the root and four effects): the card draws the master and three knobs, at most four, and \"All controls · 11 more\". The card does not grow."
+)]
+fn board_card_connected_many_controls() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card(card_many_controls_panel(), None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A connected board with one control held (the hue knob, dragged on the card): gold, and its let-go glyph beside its label, exactly as on the panel everywhere else. Letting go returns it to following the project."
+)]
+fn board_card_connected_engaged() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card(card_root_panel_held("hue", 0.82), None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A board connected over Bluetooth with the play password (\"Unlocked with friends · play\"): the panel works the same — every control writes — but there is no auto-save anywhere on the card, and the All controls row's Edit wears the lock (pressing it asks for the edit password). Emulated boards answer at the edit tier, so this state is in stories, not on a live walk."
+)]
+fn board_card_connected_play_only() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                {connected_card(card_root_panel(), Some(play_only_access()))}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Connect pressed: the board's session is opening (or the board is being reached first). The connection bar is the work — the spinner and \"Connecting…\", the iridescent sweep along its foot — and the primary reads \"Connecting…\", disabled (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
+)]
+fn board_card_connecting() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    connection: BoardConnection::Connecting,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The last Connect did not open: the connection bar is striped with \"Couldn't connect\" and Retry (Connect again), the reason in the bar's details. The card is otherwise the board's facts, Connect its primary."
+)]
+fn board_card_connect_failed() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    connection: BoardConnection::Failed {
+                        reason: "The board didn't answer in time".to_string(),
+                    },
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The board's card docked in the editor (Edit pressed on a connected card): the five bars, the session's picture, and Done as the primary — Done ends the session from here as it does from the home page. No Edit: the editor already shows the board."
+)]
+fn board_card_docked_done() -> Element {
+    rsx! {
+        section { class: "tw:p-4",
+            div { class: CARD_WIDTH_CLASS,
+                StoryBoardCard {
+                    card: porch(),
+                    feed: lens_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    docked: true,
+                    connection: BoardConnection::Connected,
                     on_action: |_| {},
                 }
             }
@@ -867,6 +1022,57 @@ pub(crate) fn live_feed() -> Option<DeviceCardFeedView> {
         liveness: FeedLiveness::Live,
         from_lens: false,
     })
+}
+
+/// The session's own picture: the frames the lens draws while the board is
+/// connected (or docked in the editor), live.
+pub(crate) fn lens_feed() -> Option<DeviceCardFeedView> {
+    Some(DeviceCardFeedView {
+        frame: Some(live_card_lamp_frame()),
+        frame_age_secs: Some(0.2),
+        engine_fps: Some(57),
+        liveness: FeedLiveness::Live,
+        from_lens: true,
+    })
+}
+
+/// The porch board connected on its card, its panel core's picks of
+/// `root`. With `access`, it holds that access over Bluetooth (the
+/// play-only story); else it is on its USB cable, at the edit tier.
+pub(crate) fn connected_card(root: UiPanelGroup, access: Option<UiDeviceAccess>) -> Element {
+    let panel = board_panel_picks(&root, Some(true));
+    let (card, link) = match access {
+        Some(_) => (over_network(porch()), Some(UiLinkKind::Bluetooth)),
+        None => (porch(), None),
+    };
+    rsx! {
+        StoryBoardCard {
+            card,
+            feed: lens_feed(),
+            link,
+            access,
+            open_uid: Some(PORCH_UID.to_string()),
+            plays: running(),
+            editor_holds_it: true,
+            connection: BoardConnection::Connected,
+            panel: Some(panel),
+            on_action: |_| {},
+        }
+    }
+}
+
+/// Bluetooth unlocked with the play password: play, not edit.
+pub(crate) fn play_only_access() -> UiDeviceAccess {
+    UiDeviceAccess {
+        over_bluetooth: true,
+        line: Some("Unlocked with friends · play".to_string()),
+        unlock: Some(UiUnlockOffer::PlayOnly),
+        grant: Some(lpa_studio_core::UiAccessGrant {
+            tier: lpa_studio_core::AccessTier::Play,
+            key: Some("friends".to_string()),
+        }),
+        ..UiDeviceAccess::default()
+    }
 }
 
 /// The last picture before the board went away, five hours old.
