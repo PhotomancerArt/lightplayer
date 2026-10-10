@@ -148,8 +148,8 @@ def heap_regions(elf: str):
             regions.append((m.group(3).lower(), int(m.group(1), 16), int(m.group(2), 16)))
     # research/ram-e03: an image built with `e03_lp_heap` has a fifth region,
     # LP SRAM from `_rtc_fast_persistent_end` (8-aligned) to 0x5000_4000. It
-    # has no static of its own, so it is found by the code that installs it.
-    if "lp_sram_heap7install" in out or "lp_sram_heap::install" in out:
+    # has no array of its own; the module's statics say it is linked in.
+    if "lp_sram_heap::" in out:
         for line in out.splitlines():
             m = re.match(r"^([0-9a-f]+) .* _rtc_fast_persistent_end$", line)
             if m:
