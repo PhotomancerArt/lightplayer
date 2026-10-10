@@ -1095,12 +1095,13 @@ def main() -> int:
             g = out["groupings"][nm]
             m = next(x for x in g["marks"] if x["mark"] == mi)
             v = m["largest_per_group"][g["absorber"]]
-            cells.append(fmt(v) + ("" if g["mode"] != "does not fit" else "*"))
+            cells.append(fmt(v) if g["mode"] != "does not fit" else "—")
         text = t.marks[mi][2].split(": ", 1)[-1][:56]
         print(f"| {t.marks[mi][1] / CYCLES_PER_US / 1e6:.2f} s {text} | {fmt(today_largest(mi))} | "
               + " | ".join(cells) + " |")
     print()
-    print("`*` = the grouping does not fit the areas; its figure assumes one flat budget.")
+    print("— = the grouping's regions, each at its footprint, need more than the areas hold: "
+          "there is no absorber to measure.")
     print()
 
     print("### Summary over every marker from the first project load on")
@@ -1121,6 +1122,16 @@ def main() -> int:
         cmed = comp[len(comp) // 2] if comp else 0
         mt = min((m["today"] for m in ms), default=0)
         ma = min((m["largest_per_group"][g["absorber"]] for m in ms), default=0)
+        if g["mode"] == "does not fit":
+            row = {"grouping": nm, "total": g["total"],
+                   "pct_of_peak": 100 * g["total"] / max(rust_peak, 1), "mode": g["mode"],
+                   "min_today": mt, "min_absorber": None, "min_ratio": None,
+                   "median_ratio": None, "median_ratio_compiles": None,
+                   "over_budget": g["total"] - budget}
+            g["summary"] = row
+            print(f"| {nm} | {fmt(g['total'])} | {row['pct_of_peak']:.1f} | does not fit "
+                  f"(+{fmt(g['total'] - budget)} B over {fmt(budget)}) | {fmt(mt)} | — | — | — | — |")
+            continue
         row = {"grouping": nm, "total": g["total"],
                "pct_of_peak": 100 * g["total"] / max(rust_peak, 1),
                "mode": g["mode"], "min_today": mt, "min_absorber": ma,

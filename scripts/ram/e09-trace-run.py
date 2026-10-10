@@ -84,6 +84,32 @@ def main() -> int:
         reqs.append(json.dumps({"loadProject": {"path": f"projects/{name}"}}))
         reqs.append(json.dumps("stopAllProjects"))
         emulated_s = 20 + len(reqs) * (int(gap) / 1000 + 1.0) + 8
+    elif workload == "choker-studio":
+        # Studio's staged initial sync (`lp-cli profile --workload
+        # studio-sync`'s three stages: the skeleton, the slot detail, the
+        # binding-graph probe), here with ONE slot read of every node rather
+        # than pages of 16 (the trace runs with no client to learn the ids;
+        # the choker has fewer than 16 nodes, so it is one page either way),
+        # then the card's feed: 30 output-frame reads, the first with its
+        # geometry, the rest without (Studio's steady feed holds it).
+        uploads = [str(CHOKER)]
+        h = 1  # the first project loaded on a fresh board
+        def read(request):
+            return json.dumps({"projectRead": {"handle": h, "request": {"since": None, **request}}})
+        reqs.append(read({"queries": [
+            {"shapes": {"level": "detail"}},
+            {"nodes": {"level": "detail", "nodes": "all", "include_slots": False}},
+            {"resources": {"level": "summary", "payloads": "none"}},
+            {"runtime": None}]}))
+        reqs.append(read({"queries": [
+            {"nodes": {"level": "detail", "nodes": "all", "include_slots": True}}]}))
+        reqs.append(read({"probes": [
+            {"binding_graph": {"structure": "always", "include_values": False}}]}))
+        reqs.append(read({"probes": [{"output_frame": {"geometry": "always", "samples": "srgb8"}}]}))
+        for _ in range(29):
+            reqs.append(read({"probes": [{"output_frame": {"geometry": "none", "samples": "srgb8"}}]}))
+        reqs.append(json.dumps("stopAllProjects"))
+        emulated_s = 10 + len(reqs) * (int(gap) / 1000 + 0.3) + 5
     elif workload == "meteor":
         uploads = ["catalog/patterns/meteor"]
         reqs = [json.dumps("listLoadedProjects"), json.dumps("stopAllProjects")]
