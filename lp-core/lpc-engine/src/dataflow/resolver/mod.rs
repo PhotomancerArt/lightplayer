@@ -9,6 +9,16 @@
 //! remain available through convenience helpers, but the resolver can also
 //! carry maps, records, options, and receiver-owned merge results.
 
+// E10 spike: `ProjectAlloc` is `Global` (a `Copy` ZST) with the arena off and
+// a non-`Copy` handle with it on; the same `.clone()` serves both.
+#![cfg_attr(
+    not(feature = "project-arena"),
+    allow(
+        clippy::clone_on_copy,
+        reason = "ProjectAlloc is Global only with project-arena off"
+    )
+)]
+
 pub mod production;
 pub mod query_intern;
 pub mod query_key;
