@@ -41,6 +41,7 @@ def main() -> int:
     ap.add_argument("--region", default="dram2")
     ap.add_argument("--detail", action="store_true", help="list every live block per point")
     ap.add_argument("--depth", type=int, default=2)
+    ap.add_argument("--end", action="store_true", help="add a point at the end of the trace")
     ap.add_argument("--runs", action="store_true",
                     help="per point, the region as runs of live blocks (gaps < 64 B merged): "
                          "offset, span, bytes, birth windows, the run's biggest owner")
@@ -85,6 +86,8 @@ def main() -> int:
                     in_compile = False
                 elif BEFORE in text:
                     points.append((compiles, {p: r for p, r in live.items() if lo <= p < hi}))
+    if args.end:
+        points.append(("end", {p: r for p, r in live.items() if lo <= p < hi}))
 
     def owner(rid: int) -> str:
         names = [sym(int(x, 16)) for x in recs[rid][1].split(",") if x]
@@ -113,7 +116,8 @@ def main() -> int:
         if hi - cursor > best[0]:
             best = (hi - cursor, cursor, prev, None)
         gap, at, below, above = best
-        largest_by_point.append(gap)
+        if n != "end":
+            largest_by_point.append(gap)
         def name(r):
             if r is None:
                 return "(region edge)"
