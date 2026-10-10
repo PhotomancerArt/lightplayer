@@ -34,6 +34,9 @@ struct WifiConnectAttempt {
     host: String,
     /// Why it failed, in the card's words.
     failure: Option<String>,
+    /// It was turned away because another device holds the board's one
+    /// network connection.
+    busy: bool,
 }
 
 /// What a card or Connect a board says about its connect.
@@ -48,6 +51,10 @@ pub struct UiWifiConnect {
     pub connecting: bool,
     /// Why the last one failed, in plain words.
     pub error: Option<String>,
+    /// The last one was turned away because another device holds the
+    /// board's one network connection (the card's "Someone else
+    /// connected"), rather than failing.
+    pub busy: bool,
 }
 
 /// Every connect to a Wi‑Fi board this page asked for and has not seen
@@ -65,6 +72,7 @@ impl WifiConnects {
             WifiConnectAttempt {
                 host: host.to_string(),
                 failure: None,
+                busy: false,
             },
         );
     }
@@ -77,7 +85,14 @@ impl WifiConnects {
         host: &str,
         result: Result<(), WifiConnectFailure>,
     ) {
-        self.finish_with_words(target, host, result.map_err(|failure| failure.words()));
+        self.finish_with_words(
+            target,
+            host,
+            result.map_err(|failure| {
+                let busy = matches!(failure, WifiConnectFailure::Busy);
+                (failure.words(), busy)
+            }),
+        );
     }
 
     /// A connect through the relay ended: as [`Self::finish`].
@@ -87,25 +102,33 @@ impl WifiConnects {
         host: &str,
         result: Result<(), RelayConnectFailure>,
     ) {
-        self.finish_with_words(target, host, result.map_err(|failure| failure.words()));
+        self.finish_with_words(
+            target,
+            host,
+            result.map_err(|failure| {
+                let busy = matches!(failure, RelayConnectFailure::Busy);
+                (failure.words(), busy)
+            }),
+        );
     }
 
     fn finish_with_words(
         &mut self,
         target: WifiConnectTarget,
         host: &str,
-        result: Result<(), String>,
+        result: Result<(), (String, bool)>,
     ) {
         match result {
             Ok(()) => {
                 self.attempts.remove(&target);
             }
-            Err(words) => {
+            Err((words, busy)) => {
                 self.attempts.insert(
                     target,
                     WifiConnectAttempt {
                         host: host.to_string(),
                         failure: Some(words),
+                        busy,
                     },
                 );
             }
@@ -139,6 +162,7 @@ impl WifiConnects {
             through_relay: matches!(target, WifiConnectTarget::Relay(_)),
             connecting: attempt.failure.is_none(),
             error: attempt.failure.clone(),
+            busy: attempt.busy,
         })
     }
 
@@ -167,7 +191,8 @@ mod tests {
                 host: "10.0.0.5".to_string(),
                 through_relay: false,
                 connecting: true,
-                error: None
+                error: None,
+                busy: false
             })
         );
         connects.finish(board, "10.0.0.5", Ok(()));

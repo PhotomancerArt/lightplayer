@@ -22,14 +22,14 @@ use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 use crate::core::OffersProvider;
 
 #[story(
-    description = "A board Studio met over USB, unplugged: it is a card under Offline boards, and because its Wi‑Fi status said it is on the network at 192.168.1.40 — learned over USB and kept in this browser, never in the registry — its tile offers \"Connect over Wi‑Fi\" (`devices/<board>/connect-wifi`, a core offer the app agent sees too) beside Reconnect and Forget. It wears the outline voice the tile's call to action wears. No flag: Studio installs the LAN link in every browser with a WebSocket."
+    description = "A board Studio met over USB, unplugged: it is a card under Offline boards, and because its Wi‑Fi status said it is on the network at 192.168.1.40 — learned over USB and kept in this browser, never in the registry — its name bar's Connect goes over Wi‑Fi, with the Wi‑Fi icon (`devices/<board>/connect-wifi`, a core offer the app agent sees too); the cable's Connect is in its connection details. No flag: Studio installs the LAN link in every browser with a WebSocket."
 )]
 fn wifi_remembered_board_offers_connect() -> Element {
     remembered_tile(None)
 }
 
 #[story(
-    description = "The same tile just after \"Connect over Wi‑Fi\" was pressed: the button waits (\"Connecting…\", disabled) and the line under the board says where — \"Connecting to 192.168.1.40…\". The socket is bounded (10 s), and the connect waits for the board's own first frame, so a board that turns the connection away is heard, not mistaken for connected. On success the board comes back as a card in the grid, the SAME device (merged by its MAC), its line reading \"Wi‑Fi · 192.168.1.40\"."
+    description = "The same card just after Connect was pressed: it waits (\"Connecting…\", disabled) and the connection bar's work says \"Connecting over Wi‑Fi…\". The socket is bounded (10 s), and the connect waits for the board's own first frame, so a board that turns the connection away is heard, not mistaken for connected. On success the board comes back under Online boards, the SAME device (merged by its MAC), its connection bar naming Wi‑Fi."
 )]
 fn wifi_remembered_board_connecting() -> Element {
     remembered_tile(Some(UiWifiConnect {
@@ -37,11 +37,12 @@ fn wifi_remembered_board_connecting() -> Element {
         through_relay: false,
         connecting: true,
         error: None,
+        busy: false,
     }))
 }
 
 #[story(
-    description = "The same tile when nothing answered at the remembered address (the board is off, or on another network, or its address changed): the line says so in plain words — \"Couldn't reach the board at 192.168.1.40. Is it on this network?\" — and \"Connect over Wi‑Fi\" can be pressed again. Studio keeps no session redialling an address that did not answer."
+    description = "The same card when nothing answered at the remembered address (the board is off, or on another network, or its address changed): striped, the connection bar says so plainly — \"Couldn't reach the board at 192.168.1.40. Is it on this network?\" — with Retry, and Connect works again. Studio keeps no session redialling an address that did not answer."
 )]
 fn wifi_remembered_board_unreachable() -> Element {
     remembered_tile(Some(failed(
@@ -53,7 +54,7 @@ fn wifi_remembered_board_unreachable() -> Element {
 }
 
 #[story(
-    description = "The same tile when the board turned the connection away: its one Wi‑Fi slot is taken — Studio in another tab updating it, or lp-cli — so it closed the socket with \"try again later\" (1013). The line says so (\"Busy with another connection — try again\"), and \"Connect over Wi‑Fi\" can be pressed again once the other connection lets go."
+    description = "The same card when the board turned the connection away: its one Wi‑Fi slot is taken — Studio in another tab updating it, or lp-cli — so it closed the socket with \"try again later\" (1013). The connection bar says \"Someone else connected\" in orange, and Connect works again once the other connection lets go."
 )]
 fn wifi_remembered_board_busy() -> Element {
     remembered_tile(Some(failed("192.168.1.40", WifiConnectFailure::Busy)))
@@ -89,6 +90,7 @@ fn wifi_add_slot_connecting() -> Element {
             through_relay: false,
             connecting: true,
             error: None,
+            busy: false,
         }),
         true,
     )
@@ -199,5 +201,6 @@ fn failed(host: &str, failure: WifiConnectFailure) -> UiWifiConnect {
         through_relay: false,
         connecting: false,
         error: Some(failure.words()),
+        busy: matches!(failure, WifiConnectFailure::Busy),
     }
 }

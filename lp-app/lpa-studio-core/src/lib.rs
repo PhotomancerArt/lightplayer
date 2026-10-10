@@ -50,6 +50,14 @@ pub use app::devices::BrowserRelaySource;
 pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
+pub use app::devices::board_card::{
+    ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput, CornerMark,
+    LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT, PictureSource, RosterCardsInput,
+    SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard,
+    UiBoardPicture, UiBoardPresence, UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar,
+    UiPrimary, UiStackBar, UiStatusCorner, activity_bar, activity_words, bluetooth_switch,
+    board_card, chip_words, link_icon, pending_board_card, roster_board_card, roster_board_cards,
+};
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
     UpdateFixture, UpdateFixtureRow, file_build, looked_up_release,
@@ -85,6 +93,10 @@ pub use app::devices::{
     sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
+};
+pub use app::devices::{
+    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
+    duration_words,
 };
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
@@ -130,9 +142,11 @@ pub use lpa_devices::identity::MacAddress;
 pub use app::access::{
     AccessAdded, AccessCommand, AccessPersist, AccessTier, AccountKeys, BrowserKey,
     DEFAULT_KDF_ITERATIONS, DeviceAccessChange, DroppedKey, MAX_SECRETS_PER_FILE, NetworkLinkKeys,
-    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UiAccessPanel, UiDeviceAccess, UiKeyGroup,
-    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, account_key_refused_sentence, dropped_sentence,
-    not_permitted_sentence, open_summary, tier_word,
+    OpenTo, PLAY_ONLY_SENTENCE, SecretKind, UNLOCK_PASSWORD_PARAM, UNLOCK_REMEMBER_PARAM,
+    UNLOCK_VERB, UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiKeyGroup,
+    UiLoginPrompt, UiPasswordLine, UiUnlockOffer, UnlockOp, UnlockPassword,
+    account_key_refused_sentence, device_unlock_offer, dropped_sentence, not_permitted_sentence,
+    open_summary, tier_word, unlock_offer,
 };
 pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,

@@ -158,8 +158,8 @@ fn row_status(entry: &UiHomeBoard, card: Option<&DeviceView>) -> UiStatus {
     }
 }
 
-/// The editor address the row's Open link goes to: the card's own rule,
-/// restated (`device_roster_card.rs`, the running face's Open). Only a
+/// The editor address the row's Open link goes to: the rule the card's
+/// Edit offer follows (`device_edit_offer`), restated. Only a
 /// READY board (identified, port open, idle) that runs a project, and has
 /// a registry address, can be opened; Degraded is a refinement of Ready
 /// and keeps it.

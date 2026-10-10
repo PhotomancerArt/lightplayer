@@ -255,6 +255,9 @@ pub(crate) fn node_status_label_class(kind: UiStatusKind) -> &'static str {
         UiStatusKind::Good => {
             "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-good-border tw:bg-status-good-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-good-foreground"
         }
+        UiStatusKind::Live => {
+            "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-live-border tw:bg-status-live-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-live-foreground"
+        }
         UiStatusKind::Warning => {
             "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-warning-foreground"
         }

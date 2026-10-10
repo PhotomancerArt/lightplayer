@@ -19,7 +19,7 @@ use crate::app::home::ble_access_stories::{usb_access, usb_card};
 use crate::app::home::device_offer_story_fixtures::StoryDeviceCard;
 
 #[story(
-    description = "A board reached through lightplayer.app's relay (`relay:<mac>`, opened by \"Connect through lightplayer.app\" or the `?relay=<mac>` shortcut), unlocked at edit by the account's key: the device line leads with \"Wi‑Fi via lightplayer.app\" — the same words the editor header uses — then the unlock and the freshness. No Connections group: its USB and Bluetooth rows would describe links this board is not on (behind `?relay=1` the card said \"USB connected\"). Its preview, before a frame lands, is a running board's (\"No picture yet — the live feed is coming.\"), never \"No live picture over Bluetooth\", which it said before PR C. Firmware verbs need USB, as on every network link."
+    description = "A board reached through lightplayer.app's relay (`relay:<mac>`, opened by \"Connect through lightplayer.app\" or the `?relay=<mac>` shortcut), unlocked at edit by the account's key: the connection bar says \"Wi‑Fi via lightplayer.app · connected\" with the cloud icon — the same words the editor header uses — and its details carry no USB line (behind `?relay=1` the card said \"USB connected\"). Before a frame lands, the status corner's details say a running board's words (\"No picture yet — the live feed is coming.\"), never \"No live picture over Bluetooth\", which it said before PR C. Firmware verbs need USB, as on every network link."
 )]
 fn relay_card_connected() -> Element {
     rsx! {
@@ -35,6 +35,11 @@ fn relay_card_connected() -> Element {
                     unlock: None,
                     panel: None,
                     account_key_refused: None,
+                    grant: Some(lpa_studio_core::UiAccessGrant {
+                        tier: lpa_studio_core::AccessTier::Edit,
+                        key: Some("Yona's account".to_string()),
+                    }),
+                    waiting: None,
                 }),
                 lan: lan_link_for_endpoint("relay:a0f26287b48c"),
                 on_action: |_| {},
@@ -44,7 +49,7 @@ fn relay_card_connected() -> Element {
 }
 
 #[story(
-    description = "A board plugged in over USB while signed in, whose access list is full of passwords and account keys — nothing Studio may drop to make room (it drops the oldest other browser's key when there is one). The account's key could not go on, so the board can never be reached through lightplayer.app; the card says so under its Connections group, with the reason, instead of only inside the Access panel: \"Your account's key couldn't be added, so this board can't be reached through lightplayer.app. This device is full, and nothing on it can make room on its own — remove something from its list.\""
+    description = "A board plugged in over USB while signed in, whose access list is full of passwords and account keys — nothing Studio may drop to make room (it drops the oldest other browser's key when there is one). The account's key could not go on, so the board can never be reached through lightplayer.app; the access bar turns orange and the status corner carries the notice, not only the access panel: \"Your account's key couldn't be added, so this board can't be reached through lightplayer.app. This device is full, and nothing on it can make room on its own — remove something from its list.\""
 )]
 fn usb_card_account_key_refused() -> Element {
     let mut access = usb_access(Some(true), false);

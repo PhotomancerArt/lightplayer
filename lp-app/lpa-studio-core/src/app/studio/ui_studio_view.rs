@@ -53,18 +53,15 @@ pub enum UiChromeSessionStatus {
     Empty,
 }
 
-/// The LENS session's card, docked in the editor (D43): the roster's own
-/// projection of the device the editor is open on — the gallery's
-/// `DeviceView` verbatim, never a second card. One arm, for one kind of
-/// runtime (PD9); a sim wears the runtime band and nothing else.
+/// The LENS session's card, docked in the editor (D43): the board card the
+/// home page draws for the device the editor is open on, built by the same
+/// builder with the editor holding it — never a second card. One arm, for
+/// one kind of runtime (PD9).
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiLensCard {
-    Device {
-        card: crate::DeviceView,
-        /// The runtime band, for a lens on a sim (PD11) — the docked pane
-        /// draws the SAME card the grid does, band and all.
-        runtime: Option<crate::UiRuntimeBand>,
-    },
+    /// The board's card (`crate::board_card`, with the editor holding it:
+    /// no primary until Done lands).
+    Board(Box<crate::UiBoardCard>),
 }
 
 /// The tab's ONE runtime session, projected for the header

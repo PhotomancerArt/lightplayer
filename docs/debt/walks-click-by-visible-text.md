@@ -57,6 +57,19 @@ wrong control (fixed 2026-10-09).
   `/`, and the Devices nav link became the logo. Fixed with the hooks above.
   The lanes were not run in the implementing worktree (it had no release
   bundle, firmware package or `lp-cli` build); the PR says who ran them.
+- **2026-10-09** — the board card (plan `lp2025/2026-10-08-2050-the-board-card`,
+  P09): every board-card read moved onto the card's own hooks
+  (`data-board-card`, `data-bar`, `data-bar-work`, `data-board-corner`,
+  `data-board-terminal`, `data-offer-path`) through `StudioDriver`'s card
+  helpers: a verb is pressed by its offer path, ready is core offering
+  `push` or `edit`, and the board's words come off its terminal. Running
+  the lanes before and after found three lanes already red on `main` for
+  reasons that are not the card: `walk-wifi-emu usb`/`ble` stop at "open"
+  (they assume a board whose Wi‑Fi cannot connect; today's firmware can),
+  every `walk-migration-emu` scenario but W2 stops building its fixture
+  (today's image reaches the pre-2026-10 filesystem at 0x310000), and
+  `walk-drop-emu`'s editor never opens over an `emu serve` door
+  (`docs/defects/2026-10-09-the-editor-never-opens-on-an-emu-serve-usb-board.md`).
 
 **Exit criteria** — every walk addresses Studio through a hook the page
 owns (an id or a `data-` attribute, as the board card's `[data-board-card]`

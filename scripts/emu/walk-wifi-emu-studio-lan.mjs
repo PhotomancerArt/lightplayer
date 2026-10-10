@@ -13,12 +13,14 @@
 //       (`lp.devices.wifi-addresses.v1`, keyed by MAC) — the address the
 //       board's own status gave
 //   S2  the cable is gone (Studio reloads with no `?emu=`: no USB at all):
-//       c6-a is a card under Offline boards offering "Connect over Wi‑Fi"; pressed,
-//       the board says a secure LAN session opened, the SAME device comes
-//       back as a card saying "Wi‑Fi · …", and a project pushed from it
-//       lands (the board's console: `Project loaded`, frames advancing)
+//       c6-a is a card under Offline boards whose primary is Connect over
+//       Wi‑Fi (`connect-wifi`); pressed, the board says a secure LAN session
+//       opened, the SAME device comes back as its card on the Wi‑Fi link
+//       ("Wi‑Fi · …", reached at the remembered address), and a project
+//       pushed from it lands (the board's console: `Project loaded`, frames
+//       advancing)
 //   S3  c6-b, never seen: the Network square's row, with its address →
-//       it connects (its console, its MAC on the card); a SECOND browser
+//       it connects (its console, its card keyed by its MAC); a SECOND browser
 //       typing c6-a's address is told "Busy with another connection — try
 //       again" (c6-a's console: every LAN link in use), and the first
 //       page's link to c6-a stays up
@@ -38,7 +40,10 @@
 // THE BOARD'S WORDS DECIDE EVERY STEP: each board's console (its USB link
 // held by `lp-cli link capture`, as the `lan` lane holds it) and its status
 // answers over its USB door. Studio's words only say when to look — except
-// S4, where no board is involved and the page's sentence is the claim.
+// S4, where no board is involved and the page's sentence is the claim. A
+// board's card is read by its hooks, as the `lan` lane reads it (`Page`):
+// keyed by the board's MAC, ready when core offers it a project or the
+// editor, its verbs pressed by their offer paths.
 //
 // NOT CI. Made-up test values only. Headless Chrome. Serves the release
 // Studio bundle itself on this worktree's stable slot. Needs: `just
@@ -51,7 +56,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { findChrome, StudioDriver } from "./studio-driver.mjs";
+import { StudioDriver, boardPath, findChrome } from "./studio-driver.mjs";
 import {
   PACKAGED_C6_MERGED,
   RELEASE_BUNDLE,
@@ -69,11 +74,9 @@ import {
   LAN,
   MAIN_TEXT,
   NET,
-  PANEL,
   Page,
   STEP_MS,
   awaitStatus,
-  cardOf,
   delay,
   forwardOf,
   holdConsole,
@@ -95,14 +98,25 @@ const WALK_PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 /// An address nothing listens at (port 9, discard: never a board's).
 const NOWHERE = "127.0.0.1:9";
 
-/// Core's words (`wifi_connect_failure.rs`, `wifi_connect_op.rs`). They say
-/// where to look; the boards' consoles say what happened.
+/// Core's words (`wifi_connect_failure.rs`, `wifi_connect_op.rs`,
+/// `board_card/connection_bar.rs`). They say where to look; the boards'
+/// consoles say what happened.
 const WORDS = {
+  // The verb's own words, where the connection details draw it; as an
+  // offline card's primary (Wi‑Fi first, `primary_action.rs`) it reads
+  // "Connect". The walk presses it by its offer, `connect-wifi`.
   connectOverWifi: "Connect over Wi‑Fi",
   busy: "Busy with another connection — try again",
   unreachable: (host) => `Couldn't reach the board at ${host}. Is it on this network?`,
-  wifiLine: (address) => `Wi‑Fi · ${address}`,
+  // The connection bar's line on a LAN link ("Wi‑Fi · connected" or
+  // "· live"), and its details' Address: what the plan line names.
+  wifiLine: (address) => `Wi‑Fi · …, Address ${address}`,
 };
+
+/// The offline card of `board` (a MAC): its card under Offline boards
+/// (`#home-offline-boards`, `offline_boards.rs`), by its hook.
+const offlineCard = (board) =>
+  `document.querySelector(${JSON.stringify(`#home-offline-boards [data-board-card="${boardPath(board)}"]`)})`;
 
 /// The Network row's address field and its Connect (`wifi_address_entry.rs`);
 /// the row opens when the Network square is pressed (`openNetworkRow`).
@@ -200,9 +214,9 @@ async function main() {
 
   if (options.dryRun) {
     const steps = [
-      `S1 lp-cli wifi add <usb door> ${NET.ssid} (each board) → status connected; Studio ?emu= → the USB square → ${A} Ready → ${BOOK_KEY}[${A}'s MAC].ip == its status ip`,
-      `S2 hold both consoles; book entry ip → ${A}'s forward (the one substitution); Studio with no ?emu= → ${A}'s tile → ${WORDS.connectOverWifi} → console: secure session opening → card "${WORDS.wifiLine("<fwd a>")}" Ready, ${A}'s MAC, one device → push ${WALK_PROJECT} → console: Project loaded, frames advance`,
-      `S3 Network row: <fwd b> → Connect → ${B}'s console: secure session opening → card Ready with ${B}'s MAC; a second browser: <fwd a> → "${WORDS.busy}" and ${A}'s console: every LAN link in use; ${A}'s first link not closed`,
+      `S1 lp-cli wifi add <usb door> ${NET.ssid} (each board) → status connected; Studio ?emu= → the USB square → ${A}'s card ready (push or edit offered) → ${BOOK_KEY}[${A}'s MAC].ip == its status ip`,
+      `S2 hold both consoles; book entry ip → ${A}'s forward (the one substitution); Studio with no ?emu= → ${A}'s card under Offline boards → connect-wifi (${WORDS.connectOverWifi}, its primary) → console: secure session opening → its card ready, "${WORDS.wifiLine("<fwd a>")}", one device → push ${WALK_PROJECT} → console: Project loaded, frames advance`,
+      `S3 Network row: <fwd b> → Connect → ${B}'s console: secure session opening → ${B}'s card (its MAC) ready at <fwd b>; a second browser: <fwd a> → "${WORDS.busy}" and ${A}'s console: every LAN link in use; ${A}'s first link not closed`,
       `S4 the second browser: ${NOWHERE} → "${WORDS.unreachable(NOWHERE)}"`,
     ];
     writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify({ out, boards: boardsSpec, extraArgs, steps, prerequisites: needs, chrome }, null, 2));
@@ -313,7 +327,10 @@ async function main() {
       await driver.detach(B);
       await driver.pressConnect("USB", { timeoutMs: STEP_MS });
       await driver.pickBoard(A, { timeoutMs: STEP_MS });
-      await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: `${A} Ready over USB` });
+      // Ready over USB, as core reads it: c6-a's card (by its MAC) offers it
+      // a project or the editor.
+      await driver.waitCard({ board: mac[A], timeoutMs: STEP_MS });
+      await driver.boardRuns({ board: mac[A], timeoutMs: STEP_MS });
       // The board's own address (its status, read by lp-cli above) is what
       // Studio remembered, by the board's MAC — and nothing for c6-b.
       const book = await driver.waitFor(
@@ -334,7 +351,7 @@ async function main() {
       holds[id] = await holdConsole({ doorAddr: door.addr, board: id, file: path.join(consoleDir, `${id}.link.log`) });
     }
     for (const id of BOARDS) await holds[id].console.waitFor("[link] up (session", { what: "its USB link up for the capture" });
-    const page = new Page(driver);
+    const page = new Page(driver, { doorAddr: door.addr });
 
     await step("S2", `no cable: ${A}'s tile offers "${WORDS.connectOverWifi}"; pressed, it comes back over Wi‑Fi and an edit lands`, async (seen) => {
       // The stand-in (DD193, see the header): the remembered entry's ip
@@ -351,15 +368,13 @@ async function main() {
       seen.substituted = rewritten;
       await page.load(plainUrl);
       const from = holds[A].console.mark();
-      // The board is a card under Offline boards, always open: wait for its
-      // verb THERE (not for a control elsewhere on the page that says the
-      // same), then press it.
-      await driver.clickWhenReady(WORDS.connectOverWifi, {
-        timeoutMs: STEP_MS,
-        scope: `document.querySelector('#home-offline-boards')`,
-      });
+      // The board is a card under Offline boards, always open: wait for ITS
+      // card there (by its MAC), then press its `connect-wifi` — the offline
+      // card's primary, Wi‑Fi first (`primary_action.rs`) — on its face.
+      await driver.waitFor(`Boolean(${offlineCard(mac[A])})`, { timeoutMs: STEP_MS, what: `${A}'s card under Offline boards` });
+      seen.pressed = await driver.pressOffer("connect-wifi", { board: mac[A], timeoutMs: STEP_MS });
       seen.opened = (await holds[A].console.waitFor(/\[lan\] link \S+ .*secure session opening/, { from, what: "a secure LAN session opening" })).trim();
-      await page.cardSays(fwd[A], "Ready");
+      await page.cardReady(fwd[A]);
       const shown = await page.cardMac(fwd[A]);
       if (shown !== mac[A]) throw new Error(`the Wi‑Fi card shows ${shown}, not ${A}'s ${mac[A]}`);
       // The same device: no card left under Offline boards for it. c6-b was
@@ -368,22 +383,14 @@ async function main() {
       const offline = await driver.evaluate(`Boolean(document.querySelector('#home-offline-boards'))`);
       seen.offlineSection = offline;
       if (offline) throw new Error(`Offline boards is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
-      // An edit lands: a project pushed from the Wi‑Fi card loads on the board.
-      const card = `(${cardOf(fwd[A])}?.innerText || '')`;
-      const face = await driver.waitFor(
-        `(() => { const t = ${card}; return t.includes('Remove project') ? 'running' : t.includes('to choose from') ? 'empty' : false; })()`,
-        { timeoutMs: STEP_MS, what: `${A}'s card to say what it runs` },
-      );
-      if (face === "running") {
-        await page.clickInCard(fwd[A], "Remove project");
-        await driver.click("Remove project", { scope: cardOf(fwd[A]) });
-        await driver.waitFor(`${card}.includes('to choose from')`, { timeoutMs: STEP_MS, what: `${A}'s empty face` });
-      }
+      // An edit lands: a project pushed from the Wi‑Fi card loads on the
+      // board, by the card's offers — what it runs removed first
+      // (`Page.clearProject`), then `push` → the project pick → Put it on the
+      // board (`Page.pushProject`). The console mark sits between the two, so
+      // the old project's frames cannot count.
+      await page.clearProject(fwd[A]);
       const pushed = holds[A].console.mark();
-      await page.clickInCard(fwd[A], "to choose from");
-      await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_MS, what: "the project popover" });
-      await driver.click(WALK_PROJECT, { scope: PANEL });
-      await page.clickInCard(fwd[A], "Put it on the board");
+      await page.pushProject(fwd[A], WALK_PROJECT);
       seen.loadLine = (await holds[A].console.waitFor("Project loaded", { from: pushed, what: "`Project loaded`" })).trim();
       seen.frameCounts = await holds[A].console.framesAdvance({ from: pushed });
       return { opened: seen.opened, loaded: seen.loadLine, frames: seen.frameCounts };
@@ -397,7 +404,7 @@ async function main() {
       if (typed !== "typed") throw new Error(`the Network row's address field: ${typed}`);
       await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the Network row's Connect" });
       seen.bOpened = (await holds[B].console.waitFor(/\[lan\] link \S+ .*secure session opening/, { from, what: "a secure LAN session opening" })).trim();
-      await page.cardSays(fwd[B], "Ready");
+      await page.cardReady(fwd[B]);
       const shown = await page.cardMac(fwd[B]);
       if (shown !== mac[B]) throw new Error(`the card at ${fwd[B]} shows ${shown}, not ${B}'s ${mac[B]}`);
 
