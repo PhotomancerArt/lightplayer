@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# flash-tears-soak.sh [--batches N] [--date YYYY-MM-DD] [--keep-lease] [--dry-run]
+# flash-tears-soak.sh [--unaligned] [--batches N] [--date YYYY-MM-DD] [--keep-lease] [--dry-run]
 #
 # The tree-store M4 desk sitting in one command: power cuts on the SACRIFICIAL
 # C6, recorded through the validation system. Each batch is one
@@ -13,6 +13,17 @@
 #   scripts/emu/flash-tears-soak.sh --batches 10        # the whole 500-cut sitting
 #   scripts/emu/flash-tears-soak.sh --batches 1         # one foreground run of 50
 #   scripts/emu/flash-tears-soak.sh --dry-run           # print the protocol, touch nothing
+#   scripts/emu/flash-tears-soak.sh --unaligned --batches 2   # 100 cuts of `flash-tears-unaligned`
+#
+# `--unaligned` records the `flash-tears-unaligned` payload instead: the same
+# image gates and cuts, every program started off a 32-byte boundary
+# (`lp-fw/fw-checks/src/checks/flash_tears/program_plan.rs`); its transcripts
+# land under `lp-emu/transcripts/esp32c6/flash-tears-unaligned/`.
+#
+# The first cut of every batch proves itself: `flash-tears-cuts.py` stops
+# (exit 5) when the boot after a power cycle does not say reset `poweron`,
+# or never comes — a hub that cannot switch VBUS lets `board power-cycle`
+# exit 0 and changes nothing.
 #
 # Then read them: scripts/emu/flash-tears-analyze.py lp-emu/transcripts/esp32c6/flash-tears/silicon-*.txt
 #
@@ -40,6 +51,7 @@ MAC="14:C1:9F:E6:54:90"
 # the sidecar says to expect, and it is checked after each batch.
 FLASH_JEDEC="0x464016"
 HOLDER="${BOARD_HOLDER:-direct: tree-store M4}"
+payload="flash-tears"
 batches=1
 date="$(date +%F)"
 keep_lease=""
@@ -48,6 +60,7 @@ dry_run=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --batches) batches="$2"; shift 2 ;;
+        --unaligned) payload="flash-tears-unaligned"; shift ;;
         --date) date="$2"; shift 2 ;;
         --keep-lease) keep_lease=1; shift ;;
         --dry-run) dry_run=1; shift ;;
@@ -80,28 +93,28 @@ note="flash part JEDEC id ${FLASH_JEDEC} expected (what this board's part answer
 identity=(--board "$board_desc" --mac "$board_mac" --note "$note")
 
 if [[ -n "$dry_run" ]]; then
-    BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- validate record flash-tears \
+    BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- validate record "$payload" \
         --config silicon:esp32c6 --port "<resolved by MAC $MAC>" --date "$date" \
         --commit "$commit" "${identity[@]}" --dry-run
     exit 0
 fi
 
-board take "$SLUG" --as "$HOLDER" --for "M4 flash-tears soak" --minutes 60 >/dev/null \
+board take "$SLUG" --as "$HOLDER" --for "M4 $payload soak" --minutes 60 >/dev/null \
     || board renew "$SLUG" --as "$HOLDER" --minutes 60
 if [[ -z "$keep_lease" ]]; then
     trap 'board drop "$SLUG" --as "$HOLDER"' EXIT
 fi
 port="$(BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- fwcheck port --mac "$MAC" | tail -1)"
-echo "port $port, firmware $commit, $batches batch(es) of 50 cuts"
+echo "port $port, firmware $commit, $batches batch(es) of 50 cuts of $payload"
 
 for ((b = 1; b <= batches; b++)); do
     board renew "$SLUG" --as "$HOLDER" --minutes 60 >/dev/null
     echo "=== batch $b of $batches ==="
-    BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- validate record flash-tears \
+    BOARD_HOLDER="$HOLDER" cargo run -q -p lp-cli -- validate record "$payload" \
         --config silicon:esp32c6 --port "$port" --date "$date" --commit "$commit" \
         "${identity[@]}"
     # The newest transcript of this sitting: every boot read the stated part.
-    newest="$(ls -t lp-emu/transcripts/esp32c6/flash-tears/silicon-esp32c6-"$date"-*.txt | head -1)"
+    newest="$(ls -t lp-emu/transcripts/esp32c6/"$payload"/silicon-esp32c6-"$date"-*.txt | head -1)"
     scripts/emu/flash-tears-check-part.py "$newest" "$FLASH_JEDEC"
     # The cut driver re-resolves the port after every cut; pick it up again
     # for the next flash.

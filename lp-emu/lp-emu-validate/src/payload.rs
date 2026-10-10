@@ -3025,6 +3025,57 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             strap: "app",
         },
     },
+    // `flash-tears` with every program started off a 32-byte boundary
+    // (tree-store M2 P10's question, the owed M4 sitting): the same harness,
+    // scan, cut driver and emulated twin; only the program plan
+    // (`program_plan.rs`) and the name differ. Its own name so its
+    // transcripts never feed the page-aligned histogram the calibrated
+    // model's weights are counted from.
+    Payload {
+        name: "flash-tears-unaligned",
+        chips: &[],
+        display_name: "Power cuts on a sacrificial board, programs started off every 32-byte \
+                       boundary: where a torn unaligned program stops",
+        fw_check_slug: "flash-tears-unaligned",
+        firmware_features: &["test_flash_tears_unaligned"],
+        fw_checks_feature: Some("check-flash-tears"),
+        emits_header: true,
+        sentinel: Sentinel::Ready("[flash-tears] === SCAN DONE ==="),
+        host_script: None,
+        pin_script: None,
+        wire: &[],
+        record_kinds: &[
+            "ft-boot",
+            "ft-journal",
+            "ft-sector",
+            "ft-summary",
+            "ft-repair",
+            "ft-timing",
+        ],
+        mask_set: "flash-tears",
+        fields: FLASH_TEARS_FIELDS,
+        series: &[],
+        capture: Capture::PowerCuts {
+            cuts: 50,
+            min_ms: 50,
+            max_ms: 2000,
+        },
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: FLASH_TEARS_EMULATED_SCRIPT,
+        }),
+        probes: &[],
+        run_secs: Some(5),
+        fresh_chip: false,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::RomUp {
+            reset_cause: "poweron",
+            strap: "app",
+        },
+    },
 ];
 
 pub fn find_payload(name: &str) -> Result<&'static Payload> {
@@ -3623,7 +3674,7 @@ mod tests {
         // whose subject is a power cut.
         for other in ALL_PAYLOADS
             .iter()
-            .filter(|o| o.name != p.name && o.name != "flash-tears")
+            .filter(|o| o.name != p.name && !o.name.starts_with("flash-tears"))
         {
             assert_eq!(other.capture, Capture::Monitor, "{}", other.name);
         }
@@ -3806,6 +3857,14 @@ mod tests {
     #[test]
     fn flash_tears_is_cut_by_a_hand_on_the_plug() {
         let p = find_payload("flash-tears").unwrap();
+        let u = find_payload("flash-tears-unaligned").unwrap();
+        // The unaligned payload is the same capture, the same twin and the
+        // same records; only its image (the program plan) differs.
+        assert_eq!(u.capture, p.capture);
+        assert_eq!(u.sentinel, p.sentinel);
+        assert_eq!(u.host_plan.map(|h| h.script), p.host_plan.map(|h| h.script));
+        assert_eq!(u.record_kinds, p.record_kinds);
+        assert_eq!(u.firmware_features, &["test_flash_tears_unaligned"]);
         assert_eq!(
             p.capture,
             Capture::PowerCuts {

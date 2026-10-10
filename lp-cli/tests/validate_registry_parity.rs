@@ -197,6 +197,9 @@ fn the_host_side_properties_are_not_mirrored_and_that_is_the_point() {
             // each boot's ready line and cuts the power between them. Its
             // emulated twin is the dry run: five power cycles, no tears.
             "flash-tears",
+            // The same cuts with every program started off a 32-byte
+            // boundary: the same harness, host and twin.
+            "flash-tears-unaligned",
         ],
         "the emu-m6 set, M4's flash-backed boot, P5's two walks, M5's chase, M5's oracle \
          walk, M8's ROM-up boot and tree-store M4's power cuts drive the host; nothing else"
@@ -404,6 +407,11 @@ fn every_payloads_header_line_is_pinned() {
             "flash-tears",
             "esp32c6,test_flash_tears",
             "[fw-checks-header] {\"schema\":1,\"payload\":\"flash-tears\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_flash_tears\",\"firmware_dirty\":false}\n",
+        ),
+        (
+            "flash-tears-unaligned",
+            "esp32c6,test_flash_tears_unaligned",
+            "[fw-checks-header] {\"schema\":1,\"payload\":\"flash-tears-unaligned\",\"chip\":\"esp32c6\",\"firmware_commit\":\"d6cfaa2051ae\",\"firmware_features\":\"esp32c6,test_flash_tears_unaligned\",\"firmware_dirty\":false}\n",
         ),
         (
             "rmt-chase",

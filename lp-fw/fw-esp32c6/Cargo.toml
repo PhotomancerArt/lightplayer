@@ -282,6 +282,11 @@ test_rmt_rx = ["dep:fw-checks", "fw-checks/check-rmt-rx", "fw-checks/check-rmt"]
 # classifier and boot flow live in fw-checks as `checks::flash_tears`; what
 # stays here is esp-storage, the clock, the USB link and the reset reason.
 test_flash_tears = ["dep:fw-checks", "fw-checks/check-flash-tears"]
+# The same harness as the `flash-tears-unaligned` payload: every program
+# starts off a 32-byte boundary, so a torn prefix says whether program
+# commands count from the write's address or from absolute boundaries. Same
+# board, same gates; never built together with `test_flash_tears`.
+test_flash_tears_unaligned = ["dep:fw-checks", "fw-checks/check-flash-tears"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,
