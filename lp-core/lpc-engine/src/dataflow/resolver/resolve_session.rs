@@ -111,7 +111,7 @@ impl<'a> EngineSession<'a> {
     }
 
     /// The interned, shared key for `query` — see [`Resolver::intern_key`].
-    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+    pub fn intern_key(&mut self, query: &QueryKey) -> crate::dataflow::resolver::KeyRc {
         self.resolver.intern_key(query)
     }
 
@@ -205,11 +205,14 @@ impl<'a> EngineSession<'a> {
         host: &mut H,
         id: QueryId,
         query: &QueryKey,
-    ) -> Result<Rc<ResolvedRoute>, SessionResolveError> {
+    ) -> Result<crate::dataflow::resolver::RouteRc, SessionResolveError> {
         if let Some(route) = self.resolver.cache().route(id) {
             return Ok(Rc::clone(route));
         }
-        let route = Rc::new(self.compute_route(host, query)?);
+        let route = Rc::new_in(
+            self.compute_route(host, query)?,
+            self.resolver.intern().allocator().clone(),
+        );
         self.resolver
             .cache_mut()
             .insert_route(id, Rc::clone(&route));

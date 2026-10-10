@@ -28,6 +28,7 @@ mod probe_read_backs;
 #[cfg(all(test, feature = "node-shader"))]
 mod probe_read_back_tests;
 mod project_apply;
+pub mod project_arena;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,
 // and how the verdict clears.

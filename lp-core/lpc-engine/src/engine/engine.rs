@@ -185,7 +185,7 @@ impl Engine {
             revision,
             frame_time: FrameTime::zero(),
             tree: RuntimeNodeTree::new(root_path.clone(), revision),
-            resolver: Resolver::new(),
+            resolver: Resolver::new_in(crate::engine::project_arena::project_alloc_for_engine()),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
             project_runtime_index: ProjectRuntimeIndex::new(),

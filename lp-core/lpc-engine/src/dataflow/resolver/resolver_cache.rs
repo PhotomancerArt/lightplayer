@@ -33,6 +33,11 @@ use alloc::vec::Vec;
 use crate::dataflow::resolver::production::{Production, ProductionSource};
 use crate::dataflow::resolver::query_intern::QueryId;
 use crate::dataflow::resolver::route::ResolvedRoute;
+use crate::engine::project_arena::ProjectAlloc;
+
+/// A cached route, shared: the `Rc` box lives in the cache's allocator (E10);
+/// a `MergeByKey`'s input `Vec` and any literal `LpValue` inside it do not.
+pub type RouteRc = Rc<ResolvedRoute, ProjectAlloc>;
 
 /// Monotonic per-frame stamp. Wrapping is harmless: entries are rewritten far
 /// more often than `u32` wraps, and a stale entry would have to survive
@@ -43,13 +48,13 @@ struct FrameStamp(u32);
 #[derive(Clone, Debug)]
 pub struct ResolverCache {
     frame: FrameStamp,
-    values: Vec<Option<(FrameStamp, Production)>>,
-    structural: Vec<Option<Production>>,
-    routes: Vec<Option<Rc<ResolvedRoute>>>,
+    values: Vec<Option<(FrameStamp, Production)>, ProjectAlloc>,
+    structural: Vec<Option<Production>, ProjectAlloc>,
+    routes: Vec<Option<RouteRc>, ProjectAlloc>,
     /// Bitset over [`QueryId`]: queries known to resolve to an absent
     /// option. A decision, like a route, so it is kept whatever
     /// [`Self::set_retain_payloads`] says.
-    absent: Vec<u32>,
+    absent: Vec<u32, ProjectAlloc>,
     /// Whether [`Self::insert`] stores payloads at all — see
     /// [`Self::set_retain_payloads`].
     retain_payloads: bool,
@@ -57,20 +62,34 @@ pub struct ResolverCache {
 
 impl Default for ResolverCache {
     fn default() -> Self {
-        Self {
-            frame: FrameStamp::default(),
-            values: Vec::new(),
-            structural: Vec::new(),
-            routes: Vec::new(),
-            absent: Vec::new(),
-            retain_payloads: cfg!(feature = "resolver-payload-cache"),
-        }
+        Self::new_in(ProjectAlloc::default())
     }
 }
 
 impl ResolverCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An empty cache whose tables live in `alloc`.
+    pub fn new_in(alloc: ProjectAlloc) -> Self {
+        Self {
+            frame: FrameStamp::default(),
+            values: Vec::new_in(alloc.clone()),
+            structural: Vec::new_in(alloc.clone()),
+            routes: Vec::new_in(alloc.clone()),
+            absent: Vec::new_in(alloc),
+            retain_payloads: cfg!(feature = "resolver-payload-cache"),
+        }
+    }
+
+    /// An empty cache in `alloc` with this one's settings and frame stamp
+    /// (E10's epoch arena: the tables move to a fresh arena per epoch).
+    pub fn fresh_in(&self, alloc: ProjectAlloc) -> Self {
+        let mut fresh = Self::new_in(alloc);
+        fresh.frame = self.frame;
+        fresh.retain_payloads = self.retain_payloads;
+        fresh
     }
 
     /// Whether resolved *payloads* — the two value tables — are stored at all.
@@ -98,8 +117,9 @@ impl ResolverCache {
         if !retain {
             // Release whatever a previous setting accumulated, capacity and
             // all: a table that is never read again must not hold pages.
-            self.values = Vec::new();
-            self.structural = Vec::new();
+            let alloc = self.routes.allocator().clone();
+            self.values = Vec::new_in(alloc.clone());
+            self.structural = Vec::new_in(alloc);
         }
     }
 
@@ -155,11 +175,11 @@ impl ResolverCache {
 
     /// Routes are shared rather than copied: a cache hit on the hot path must
     /// not deep-copy the binding sources it just avoided recomputing.
-    pub fn route(&self, id: QueryId) -> Option<&Rc<ResolvedRoute>> {
+    pub fn route(&self, id: QueryId) -> Option<&RouteRc> {
         self.routes.get(id.index()).and_then(Option::as_ref)
     }
 
-    pub fn insert_route(&mut self, id: QueryId, route: Rc<ResolvedRoute>) {
+    pub fn insert_route(&mut self, id: QueryId, route: RouteRc) {
         grow_to(&mut self.routes, id.index());
         self.routes[id.index()] = Some(route);
     }
@@ -195,7 +215,7 @@ fn absent_bit(id: QueryId) -> (usize, u32) {
     (id.index() / 32, 1 << (id.index() % 32))
 }
 
-fn grow_to<T>(table: &mut Vec<Option<T>>, index: usize) {
+fn grow_to<T, A: core::alloc::Allocator>(table: &mut Vec<Option<T>, A>, index: usize) {
     if table.len() <= index {
         table.resize_with(index + 1, || None);
     }
@@ -313,7 +333,10 @@ mod tests {
         let mut cache = ResolverCache::new();
         let key = id(&mut table, "routed");
 
-        cache.insert_route(key, Rc::new(ResolvedRoute::Produce));
+        cache.insert_route(
+            key,
+            Rc::new_in(ResolvedRoute::Produce, ProjectAlloc::default()),
+        );
         cache.begin_frame();
         assert!(
             matches!(cache.route(key).map(|r| &**r), Some(ResolvedRoute::Produce)),
