@@ -107,6 +107,13 @@ use fw_esp32_common::boot;
 mod alloc_trace_emu;
 #[cfg(all(feature = "alloc_watch_diag", not(fw_harness)))]
 mod alloc_watch;
+#[cfg(all(
+    any(feature = "e11_lender", feature = "e11_link_standin"),
+    not(fw_harness)
+))]
+mod lender;
+#[cfg(all(feature = "e11_lender", feature = "alloc_watch_diag"))]
+compile_error!("`e11_lender` and `alloc_watch_diag` both own lp-perf's hook: pick one");
 #[cfg(all(feature = "alloc_watch_diag", feature = "alloc_trace_emu"))]
 compile_error!("`alloc_watch_diag` and `alloc_trace_emu` both define esp-alloc's hooks: pick one");
 #[cfg(any(
@@ -289,6 +296,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     HEARTBEAT_STACK_LINES_DUE.store(true, core::sync::atomic::Ordering::Relaxed);
     #[cfg(feature = "alloc_watch_diag")]
     alloc_watch::drain();
+    #[cfg(feature = "e11_lender")]
+    lender::lender_edge::log_heartbeat();
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -1053,6 +1062,12 @@ fn lp_engine_entry(core: CoreBoot) {
     server.set_messages_first(true);
     #[cfg(feature = "alloc_watch_diag")]
     alloc_watch::install();
+    // RESEARCH (research/ram-e11): reads, whole-file reads and compiles
+    // borrow the big block instead of passing the read gate.
+    #[cfg(feature = "e11_lender")]
+    lender::lender_edge::install(&mut server);
+    #[cfg(all(feature = "e11_link_standin", not(feature = "e11_lender")))]
+    lender::link_standin::install_counting_hook();
     // Wire hello identity: compile-time provenance from build.rs, injected
     // into the server (sans-IO: the server never reads env/git itself),
     // plus the boot-time read of the root-stamped device identity. The
@@ -1202,6 +1217,10 @@ fn lp_engine_entry(core: CoreBoot) {
         env!("LP_BUILD_COMMIT"),
         env!("LP_BUILD_DIRTY"),
     );
+    // RESEARCH (research/ram-e11): the mid-project link stand-in, on the
+    // main executor like the Bluetooth host's own tasks.
+    #[cfg(feature = "e11_link_standin")]
+    spawner.spawn(lender::link_standin::link_standin_task().unwrap());
     spawner.spawn(engine_task(app).unwrap());
 }
 

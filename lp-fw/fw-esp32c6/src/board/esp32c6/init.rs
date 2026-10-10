@@ -102,6 +102,9 @@ pub fn init_board() -> (
             crate::c_heap::RADIO,
         ));
     }
+    // RESEARCH (research/ram-e11): the lender's block, fourth and last.
+    #[cfg(feature = "e11_lender")]
+    crate::lender::lend_region::install();
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
@@ -130,9 +133,6 @@ pub fn init_board() -> (
     )
 }
 
-/// The main heap region's size (see the RAM-split note in [`init_board`]):
-/// the 236,000 B main RAM gives the heap, less the radio's region.
-const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE - E06_HEAP_MAIN_SHRINK;
 /// RAM research E6 (throwaway): bytes taken off the main region at build time
 /// (`LP_E06_HEAP_MAIN_SHRINK=<bytes>`), so an image with a larger allocator
 /// control block in `.bss` (esp-alloc's TLSF) keeps the LLFF image's stack.
@@ -155,6 +155,15 @@ const fn parse_usize(text: Option<&str>) -> usize {
     }
     value
 }
+/// The main heap region's size (see the RAM-split note in [`init_board`]):
+/// the 236,000 B main RAM gives the heap, less the radio's region.
+#[cfg(any(not(feature = "e11_lender"), feature = "e11_lend_dram2"))]
+const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE - E06_HEAP_MAIN_SHRINK;
+/// RESEARCH (research/ram-e11): the lender's block comes out of the main
+/// region, so the heap's total is unchanged.
+#[cfg(all(feature = "e11_lender", not(feature = "e11_lend_dram2")))]
+const HEAP_MAIN_SIZE: usize =
+    236_000 - HEAP_RADIO_SIZE - crate::lender::LEND_BYTES - E06_HEAP_MAIN_SHRINK;
 /// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
 /// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth
 /// up (2026-09-24), less the 10,320 B the lean ESP-NOW buffers gave back

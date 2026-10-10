@@ -4253,6 +4253,7 @@ dependencies = [
  "lp-bootctl",
  "lp-collection 1.0.0",
  "lp-gfx-lpvm",
+ "lp-lender",
  "lp-link",
  "lp-perf",
  "lp-recovery",
@@ -6194,6 +6195,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-lender"
+version = "40.0.0"
+
+[[package]]
 name = "lp-link"
 version = "40.0.0"
 dependencies = [
@@ -6588,6 +6593,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-gfx-lpvm",
+ "lp-lender",
  "lp-perf",
  "lp-recovery",
  "lpa-client",

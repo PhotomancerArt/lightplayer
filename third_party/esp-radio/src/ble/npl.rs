@@ -25,6 +25,19 @@ const EVENT_QUEUE_SIZE: usize = 16;
 
 const TIME_FOREVER: u32 = crate::compat::OSI_FUNCS_TIME_BLOCKING;
 
+// LP fork (fourth diff, README-LP.md): the controller's mbuf pool sizes, which
+// were the literals `12` and `24`. On the C6 they are the build options
+// `ESP_RADIO_CONFIG_BLE_MSYS_1_BLOCK_COUNT` / `_2_` (defaults unchanged); on
+// the other NPL chips they stay the literals.
+#[cfg(esp32c6)]
+const MSYS_1_BLOCKS: u16 = esp_config::esp_config_int!(u16, "ESP_RADIO_CONFIG_BLE_MSYS_1_BLOCK_COUNT");
+#[cfg(not(esp32c6))]
+const MSYS_1_BLOCKS: u16 = 12;
+#[cfg(esp32c6)]
+const MSYS_2_BLOCKS: u16 = esp_config::esp_config_int!(u16, "ESP_RADIO_CONFIG_BLE_MSYS_2_BLOCK_COUNT");
+#[cfg(not(esp32c6))]
+const MSYS_2_BLOCKS: u16 = 24;
+
 #[cfg(esp32c2)]
 const OS_MSYS_1_BLOCK_COUNT: i32 = 24;
 #[cfg(esp32c2)]
@@ -1205,7 +1218,7 @@ pub(crate) fn ble_init(config: &Config) -> PhyInitGuard<'static> {
             let res = sync_stack_initEnv();
             assert!(res == 0, "sync_stack_initEnv returned {}", res);
 
-            let res = r_esp_ble_msys_init(256, 320, 12, 24, 1);
+            let res = r_esp_ble_msys_init(256, 320, MSYS_1_BLOCKS, MSYS_2_BLOCKS, 1);
             assert!(res == 0, "esp_ble_msys_init returned {}", res);
         }
 
