@@ -22,6 +22,11 @@ when the answer came, and an answer to an ask that is no longer waiting is
 ignored. A second press (Retry) would have found the claim gone and opened
 the board at once.
 
+Again on 2026-10-10, in the first walk run for PR #1121 (step 4, A asking:
+"That tab didn't answer" while B's card said "Taken by another tab"), on a
+desk at load average 40–63 with sibling builds running; the next run passed
+every step at load average 105, its step 4 answered in 195 ms.
+
 **Root cause** — Not established. What is known: the holder's release waits
 for its port to close in the model (`PendingRelease::ready_to_release`, with
 `RELEASE_CLOSE_PATIENCE_SECS` 3 s as the fallback), the port's own close had

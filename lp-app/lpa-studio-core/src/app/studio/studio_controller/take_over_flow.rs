@@ -12,12 +12,12 @@
 //!    open — kept shut, read as held, refused, or refused after the release
 //!    — re-identifies, once ([`FreedPorts`]). Only the freed port can open,
 //!    and its hello says which board it is, so no pairing of ports to
-//!    boards is ever needed. A board held by its
-//!    network slot is reached by the board's ordinary connect instead: its
-//!    own network link here (one this tab let go reopens), else over Wi‑Fi
-//!    at the address this browser remembers, else through lightplayer.app
-//!    when someone is signed in ([`NetworkRoad`]); with none of them the
-//!    offer says "No way to reach it from here".
+//!    boards is ever needed. A board held by its network slot is reached
+//!    by the board's ordinary connect instead: its own network link here
+//!    (one this tab let go reopens), else over Wi‑Fi at the address this
+//!    browser remembers, else through lightplayer.app when someone is
+//!    signed in ([`NetworkRoad`]); with none of them the offer says "No way
+//!    to reach it from here".
 //! 4. A busy holder's refusal, "not held" while another tab has it, no
 //!    answer, a network connect that fails (in its own words), or a board
 //!    that does not open in time end the take-over with the reason
