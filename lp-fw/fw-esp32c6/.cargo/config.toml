@@ -64,6 +64,13 @@ ESP_LOG = "info"
 # (lp2025/2026-10-09-1203-ram-research): held for Yona as a memory-layout change.
 ESP_HAL_CONFIG_PLACE_WIFI_IRAM_IN_FLASH = "true"
 ESP_HAL_CONFIG_PLACE_WIFI_RX_SLP_IRAM_IN_FLASH = "true"
+# The BLE controller's `.iram1` (17.4 KB more), with the controller told it runs
+# from flash (esp-radio fork's third diff) — ESP-IDF's
+# `BT_CTRL_RUN_IN_FLASH_ONLY`, which IDF marks EXPERIMENTAL. On silicon this
+# was proven advertising only, never with a central connected: drop these two
+# lines to keep the Wi-Fi half alone.
+ESP_HAL_CONFIG_PLACE_BLE_CONTROLLER_IRAM_IN_FLASH = "true"
+ESP_RADIO_CONFIG_BLE_CONTROLLER_FLASH_ONLY_PARAMS = "true"
 # littlefs2-sys bindgen needs stdint.h when targeting bare-metal; use host's stdint
 [unstable]
 build-std = ["core", "alloc"]
