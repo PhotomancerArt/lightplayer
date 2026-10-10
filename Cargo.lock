@@ -6194,6 +6194,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lp-lender"
+version = "40.0.0"
+
+[[package]]
 name = "lp-link"
 version = "40.0.0"
 dependencies = [

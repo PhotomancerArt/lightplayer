@@ -1,0 +1,13 @@
+[package]
+name = "lp-lender"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "RESEARCH (E11): one lender for the big block — one taker at a time, by priority, at tick safe points, with discardable tenants (sans-IO, no_std, no alloc)"
+
+[dependencies]
+
+[lints]
+workspace = true

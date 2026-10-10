@@ -12,6 +12,7 @@ members = [
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
     "lp-base/lp-tree-store",
+    "lp-base/lp-lender",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-relay",
@@ -154,6 +155,7 @@ default-members = [
     "lp-base/lp-crc32",
     "lp-base/lp-seam",
     "lp-base/lp-tree-store",
+    "lp-base/lp-lender",
     # lp-app workspace members
     "lp-core/lpc-access",
     "lp-core/lpc-relay",
