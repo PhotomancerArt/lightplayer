@@ -517,6 +517,116 @@ fn t7_an_idle_holder_lets_go_in_order() {
     assert_eq!(desk.attempts(0, "A"), opens, "nothing reopened the port");
 }
 
+/// T7, prompt: a holder whose card is showing the board's picture answers
+/// within a second of the ask, on the injected clock. Each turn runs in the
+/// actor's order — the note and the release's first half (the picture, the
+/// disconnect), then the tick's card feed — so the feed comes due between
+/// the disconnect and the port's close reaching the fold. Its pull must
+/// not start on the link being let go: a request on a closing port is
+/// never answered, and the actor (the close, the release) would wait out
+/// its five-second budget behind it
+/// (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`).
+#[test]
+fn t7_a_feeding_holder_answers_within_a_second() {
+    let desk = Desk::new(&[("dev000000holdt7cc", MAC_A)]);
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let asker = desk.bus.tab();
+    a.run_a_project_alone(MAC_A);
+    a.feed_a_frame(MAC_A);
+    // The feed is due again by the time the ask lands.
+    for _ in 0..60 {
+        a.step();
+    }
+    asker.take_inbox();
+
+    let asked_at = desk.clock.get();
+    asker.post(&HoldNote::Ask {
+        request: 2,
+        key: usb_key(MAC_A),
+        holder: None,
+    });
+    let released = HoldNote::Answer {
+        request: 2,
+        asker: asker.tab_id(),
+        outcome: crate::AskOutcome::Released,
+    };
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    let answered_at = loop {
+        a.step();
+        feed_tick(&mut a.bench, &a.tasks, 5.0);
+        if asker.take_inbox().iter().any(|(_, note)| *note == released) {
+            break desk.clock.get();
+        }
+        assert!(std::time::Instant::now() < deadline, "no answer");
+    };
+    assert!(
+        answered_at - asked_at < 1.0,
+        "the holder took {:.2} s to answer",
+        answered_at - asked_at
+    );
+    assert!(!a.holds(MAC_A));
+}
+
+/// T7, budget: the holder's whole release fits inside the asker's
+/// patience. A port whose close never comes back still lets the lock go
+/// [`RELEASE_PATIENCE_SECS`] after the ask, and the asker hears `Released`
+/// with two seconds to spare before it would say "That tab didn't answer".
+///
+/// [`RELEASE_PATIENCE_SECS`]: crate::app::devices::board_hold::RELEASE_PATIENCE_SECS
+#[test]
+fn t7_a_holder_whose_port_never_closes_answers_inside_the_askers_patience() {
+    use crate::app::devices::board_hold::RELEASE_PATIENCE_SECS;
+    use crate::app::devices::take_over_state::ASK_PATIENCE_SECS;
+
+    let desk = Desk::new(&[("dev000000holdt7dd", MAC_A)]);
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let asker = desk.bus.tab();
+    a.run_a_project_alone(MAC_A);
+    a.feed_a_frame(MAC_A);
+    asker.take_inbox();
+    desk.boards[0].state.borrow_mut().close_hangs = true;
+
+    let asked_at = desk.clock.get();
+    asker.post(&HoldNote::Ask {
+        request: 2,
+        key: usb_key(MAC_A),
+        holder: None,
+    });
+    let released = HoldNote::Answer {
+        request: 2,
+        asker: asker.tab_id(),
+        outcome: crate::AskOutcome::Released,
+    };
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT * 4;
+    let answered_at = loop {
+        a.step();
+        if asker.take_inbox().iter().any(|(_, note)| *note == released) {
+            break desk.clock.get();
+        }
+        assert!(std::time::Instant::now() < deadline, "no answer");
+    };
+    let took = answered_at - asked_at;
+    assert!(
+        took >= RELEASE_PATIENCE_SECS,
+        "the lock went at {took:.2} s, before the close was waited on"
+    );
+    assert!(
+        took < RELEASE_PATIENCE_SECS + 0.5 && took + 1.5 < ASK_PATIENCE_SECS,
+        "the holder took {took:.2} s of the asker's {ASK_PATIENCE_SECS} s"
+    );
+    assert!(
+        desk.log_of(&["close:A"]).is_empty(),
+        "the port never closed"
+    );
+    assert!(!a.holds(MAC_A));
+}
+
 /// T8: without an edge every flow is as before holds existed: the sweep
 /// runs at once and opens the port, and nothing is gated or claimed.
 #[test]
@@ -1412,6 +1522,9 @@ struct SharedBoardState {
     holder: Option<&'static str>,
     /// Every open each tab attempted, refused ones included.
     attempts: BTreeMap<&'static str, usize>,
+    /// A close never comes back (one stuck behind a pending write): the
+    /// port stays open in the tab that holds it.
+    close_hangs: bool,
 }
 
 /// One tab's port onto a [`SharedUsbBoard`]: the fake's link exists only
@@ -1458,6 +1571,9 @@ impl Link for SharedPortLink {
                 self.inner = Some(link);
             }
             LinkCommand::Close => {
+                if self.board.state.borrow().close_hangs {
+                    return;
+                }
                 if let Some(inner) = self.inner.as_mut() {
                     inner.submit(LinkCommand::Close);
                 }

@@ -1,8 +1,9 @@
 ---
-status: open
+status: fixed
 found: 2026-10-09      # how: e2e (`just walk-two-tabs-emu`, 2 of the 7 runs that reached the take-over; a desk with sibling builds running)
-area: lpa-studio-core `board_hold/hold_answer.rs` (`RELEASE_CLOSE_PATIENCE_SECS`) × `take_over_state.rs` (`ASK_PATIENCE_SECS`)
-class: unclassified
+fixed: c751b84ca
+area: lpa-studio-core `device_frame_feed.rs` (`feed_target`) × `board_hold/hold_answer.rs` (`RELEASE_PATIENCE_SECS`) × `take_over_state.rs` (`ASK_PATIENCE_SECS`)
+class: state-conflation
 related:
   - docs/adr/2026-10-08-the-board-card-and-one-home-page.md (the amendment of 2026-10-09: take-over)
   - lp2025/2026-10-08-2330-one-tab-holds-a-board (p3-usb-holder-side.md, p4-usb-asker-side.md)
@@ -25,31 +26,63 @@ the board at once.
 Again on 2026-10-10, in the first walk run for PR #1121 (step 4, A asking:
 "That tab didn't answer" while B's card said "Taken by another tab"), on a
 desk at load average 40–63 with sibling builds running; the next run passed
-every step at load average 105, its step 4 answered in 195 ms.
+every step at load average 105, its step 4 answered in 195 ms. Both runs
+were on a tree without the fix below (it reached `main` the same day,
+#1122).
 
-**Root cause** — Not established. What is known: the holder's release waits
-for its port to close in the model (`PendingRelease::ready_to_release`, with
-`RELEASE_CLOSE_PATIENCE_SECS` 3 s as the fallback), the port's own close had
-completed 1 ms after it began, and the answer still came about 5.4 s later,
-close to the fallback plus a late wake (3 s plus about 2 s). So either the
-model did not see the close until the `Due` wake, or the wake itself ran
-late. The pages' frame loops were healthy in the runs where this was
-measured (about 62 frames a second), and a desk with other builds running is
-where it happened. The two patience figures (3 s to close and 5 s to
-answer) also leave only 2 s for the picture write, the disconnect and any
-stall, so any hiccup in the holder reads as "didn't answer".
+**Root cause** — The card's frame feed read "the port is open" off the
+roster's presence, and presence stays `Open` from the moment a Disconnect
+folds until the port's close comes back to the fold. A holder lets a board
+go inside one actor batch: the ask is heard, `settle_device_records` writes
+the picture and folds the Disconnect (`run_due_hold_releases`), and the
+same batch's tick then runs the card feed. When the holder's card was
+showing the board's picture and its 150 ms gap had passed, `feed_target`
+picked the device and the pull sent a request on the port being closed.
+Nothing answers that request, so the pull waited out the shared-link reply
+budget (`RESPONSE_BUDGET`, 5 s) with the actor stuck behind it. The port's
+close had come back within milliseconds (the pump drained it), but its fold
+and the release's own `Due` wake sat queued until the pull gave up, and
+`Released` went out in the next batch, about 5.5 s after the ask.
 
-**Fix** — none yet. Candidates: have the asker's wait run from the moment
-the holder says it is releasing (a `Releasing` note, with the asker's
-patience restarting), or make the asker take a late `Released` for an ask
-it already failed as an answer (the board is free; `Gone` already opens it
-for a waiting ask, `take_over_freed`, so an ask that failed in the last few
-seconds could be treated the same).
+A walk with the hold flow and the actor's batches traced (2026-10-10, page
+B holding at step 4) showed it step by step: ask heard → picture written
+and Disconnect folded at +99 ms (presence still `Open`) → the pump drained
+`Closed` at +107 ms → that batch took 5,504 ms, 5,404 of them in the card
+feed → `Released` at +5,504 ms. The second failing run looked the same
+(feed 5,390 ms). Whether the feed came due inside the release's batch was a
+race on its 150 ms gap, which is why it came and went.
 
-**Regression coverage** — none. The walk records each ask's time to answer
-(`report.answerMs`), so a slow release shows in the report.
+A second weakness made the two timeouts fragile even without the stall: the
+holder's 3 s close fallback started after the picture write, so nothing
+bounded its whole release inside the asker's 5 s.
+
+**Fix** — `feed_target` never targets a device whose connection intent is
+Disconnected (the model has asked for its port closed), so no pull starts
+on a port that is being let go. And the holder's release is now one budget
+counted from the ask: `RELEASE_PATIENCE_SECS` (3 s; it was
+`RELEASE_CLOSE_PATIENCE_SECS`, counted after the picture write). The lock
+goes by then whether or not the port has closed, and a compile-time check
+in `take_over_state.rs` holds that budget plus 2 s inside `ASK_PATIENCE_SECS`.
+No "letting go…" note was needed: with nothing stalling the actor the answer
+takes tens of milliseconds, and the holder's longest release (a close that
+never comes back) is now 3 s from the ask. The walk's report notes any
+answer over 1 s.
+
+**Regression coverage** — `t7_a_feeding_holder_answers_within_a_second`
+(`studio_device_e2e_tests/board_hold_tests.rs`: each turn in the actor's
+order, a holder whose card is feeding, the answer within 1 s of the ask on
+the injected clock; 5.01 s before the fix),
+`t7_a_holder_whose_port_never_closes_answers_inside_the_askers_patience`,
+`hold_answer::a_slow_picture_write_does_not_stretch_the_release`, and the
+compile-time budget. The walk on a loaded desk (`--steps 3-4`): before the
+fix, step 4 failed in 2 of 2 runs (5,504 and 5,480 ms); after it, 6 of
+6 runs passed both take-overs, the 12 answers taking 69–341 ms (load
+average 41–103), and no actor batch took longer than 700 ms.
 
 **Lesson** — Two timeouts in series have to be written as a budget: the
 asker's patience is the holder's whole release, not its first step, and the
 holder's own fallback must fit inside it with room for the machine to be
-slow.
+slow. A passive lane that awaits inside the actor also turns any request
+that can never be answered into a stall of everything queued behind it, so
+it must ask whether the model has already let the resource go, not only
+whether the evidence still reads open.

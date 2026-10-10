@@ -490,6 +490,7 @@ async function main() {
       // How long the holder took to answer (the asker's patience is 5 s).
       const asked = b.find((e) => e.ev === "note" && e.note?.ask);
       report.answerMs = { ...report.answerMs, bTookFromA: asked ? released.at - asked.at : null };
+      noteSlowAnswer(report, "A", report.answerMs.bTookFromA);
       return `A "Taken by another tab"; B ready (${face}), the board said "${hello.slice(0, 60)}"; asked → released in ${report.answerMs.bTookFromA} ms; A closed → released (+${released.at - closed.at} ms) → B opened (${opened.at - released.at >= 0 ? "+" : ""}${opened.at - released.at} ms from the release heard); B's ${early.length} earlier open(s) all refused${early.length ? ` (${early.map((e) => e.error).join(", ")})` : ""}`;
     });
 
@@ -506,6 +507,7 @@ async function main() {
       const asked = a.filter((e) => e.ev === "note" && e.note?.ask).at(-1);
       const answered = a.filter((e) => e.ev === "note" && e.note?.answer?.outcome === "released").at(-1);
       report.answerMs = { ...report.answerMs, aTookFromB: asked && answered ? answered.at - asked.at : null };
+      noteSlowAnswer(report, "B", report.answerMs.aTookFromB);
       return `B "Taken by another tab"; A live again (${face}) and holds the lock; asked → released in ${report.answerMs.aTookFromB} ms`;
     });
 
@@ -614,6 +616,16 @@ async function main() {
   console.log(
     `\n✓ the two-tabs walk finished (steps ${fromStep}-${toStep}): one tab held the board, the other watched, took it over, gave it back, and picked it up when the holder closed — with no board.`,
   );
+}
+
+/// A holder's answer should come well inside a second (the asker waits 5 s;
+/// docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md).
+/// Page wall-clock on an emulated board is never a gate, so a slow answer is
+/// a note in the report, not a failure.
+function noteSlowAnswer(report, holder, ms) {
+  if (ms !== null && ms > 1_000) {
+    report.notes.push(`tab ${holder}'s answer took ${ms} ms (over 1 s; the asker waits 5 s)`);
+  }
 }
 
 function markdown(report) {
