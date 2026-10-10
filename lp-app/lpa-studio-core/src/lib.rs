@@ -138,11 +138,13 @@ pub use app::frame_feed::{
     CLOSE_INSPECTION_SAMPLE_FORMAT, CardFeedApply, CardFeedState, PREVIEW_SAMPLE_FORMAT,
 };
 pub use app::home::{
-    DEFAULT_STRIP_PIXELS, GenerateProjectError, GeneratedProject, HOME_NODE_ID, HomeOp,
-    NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM, OPEN_PROJECT_PARAM, ProjectTemplate,
-    UiExampleCard, UiExampleGroup, UiHomeView, UiOpenMismatch, UiPackageCard, UiRunningProject,
-    ZipBytes, example_groups, generate_board_project, home_offers, new_project_offer,
-    open_project_offer, template_project_files,
+    DEFAULT_STRIP_PIXELS, EXAMPLE_PATTERNS_LABEL, EXAMPLE_PROJECTS_LABEL, GenerateProjectError,
+    GeneratedProject, HOME_NODE_ID, HomeOp, NEW_PROJECT_NAME_PARAM, NEW_PROJECT_TEMPLATE_PARAM,
+    OPEN_PROJECT_PARAM, ProjectTemplate, UiExampleCard, UiExampleGroup, UiHomeBoard,
+    UiHomeBoardKind, UiHomeConnect, UiHomeSection, UiHomeSections, UiHomeTab, UiHomeView,
+    UiOpenMismatch, UiPackageCard, UiRunningProject, ZipBytes, build_home_sections, example_groups,
+    example_page_label, generate_board_project, home_offers, new_project_offer, open_project_offer,
+    stamp_on_boards, template_project_files,
 };
 pub use app::library::{DESKTOP_BOARD_ID, ProjectTarget};
 pub use app::network::{

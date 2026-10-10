@@ -85,7 +85,7 @@ impl LanDeviceTransport {
     }
 
     /// Reach the board at `url` now (a user's "Connect over Wi‑Fi", or an
-    /// address typed into the add slot), answering why not in plain words.
+    /// address typed into Connect a board's Network row), answering why not in plain words.
     pub fn connect(&self, url: &str) -> DeviceTransportFuture<Result<(), WifiConnectFailure>> {
         let host = lan_host(url).to_string();
         let secure = self.source.secure_page();

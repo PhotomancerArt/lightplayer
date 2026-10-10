@@ -11,7 +11,8 @@
 //   - `DeviceAccess.selectPrompt` picks the device by its chooser id or name.
 //
 // Any page works: the lab (`/`), the frame pipe (`/pipe`, for `lp-cli link
-// capture blepipe:`), or Studio itself (`--click-text "via Bluetooth"`).
+// capture blepipe:`), or Studio itself (`--click-expr` on the Bluetooth square
+// of its home page's Connect a board section).
 //
 // Launch Chrome in the BACKGROUND with its own scratch profile, never a
 // foreground window (it would steal the desk's focus):
@@ -38,7 +39,8 @@
 // `--id` is the chooser's device id, which `list` (or `join`'s output)
 // prints. Prefer it: two desk boards can share a name prefix, and the
 // chooser shows the name macOS cached, not the one the board advertises.
-// `--click-text` presses a control by its text (Studio's "via Bluetooth");
+// `--click-text` presses a control by its text; Studio's Bluetooth square is
+// better pressed with an exact, scoped `--click-expr` (see the README);
 // the default press is the lab and pipe pages' `#btn-join`.
 //
 // Chrome needs macOS's Bluetooth permission (TCC) for itself; if it has

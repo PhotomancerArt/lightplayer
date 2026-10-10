@@ -27,7 +27,7 @@
 //!   — rendered for all five [`ProjectRelationship`] states.
 //! - [`share_person`] / [`share_url`] — the two small view models the panel
 //!   renders from, host-tested away from the markup.
-//! - [`archived_projects`] — the Projects page's collapsed archive drawer,
+//! - [`archived_projects`] — the home page's collapsed archive drawer,
 //!   its one loud verb Restore, and the `archive_project` half.
 //! - [`visitor_mode`] / [`visitor_banner`] — the P6 visitor surface: who
 //!   this viewer is per the service, and the status strip under the chrome

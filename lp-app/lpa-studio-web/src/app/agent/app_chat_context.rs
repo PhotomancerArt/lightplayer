@@ -1,6 +1,6 @@
 //! [`AppChatChrome`]: the app chat's web-local chrome state — whether the
-//! drawer is open, and the composer draft — shared by the header button,
-//! the home page's front door and the drawer itself.
+//! drawer is open, and the composer draft — shared by the header button
+//! and the drawer itself.
 //!
 //! Like a popover's open flag, none of it is core state (plan A2): the
 //! conversation, its cards and its cost live in core
@@ -15,9 +15,8 @@ use dioxus::prelude::*;
 pub(crate) struct AppChatChrome {
     /// The drawer is open.
     pub open: Signal<bool>,
-    /// The composer's draft (the front door and the drawer share it, so a
-    /// request typed on the home page is still there after connecting a
-    /// provider).
+    /// The composer's draft (kept here, above every route, so a request
+    /// typed in the drawer is still there after connecting a provider).
     pub draft: Signal<String>,
 }
 
@@ -27,9 +26,4 @@ pub(crate) fn use_provide_app_chat_chrome() -> AppChatChrome {
         open: Signal::new(false),
         draft: Signal::new(String::new()),
     })
-}
-
-/// The chrome state, when a web app provides it (stories do not).
-pub(crate) fn use_app_chat_chrome() -> Option<AppChatChrome> {
-    use_hook(try_consume_context::<AppChatChrome>)
 }

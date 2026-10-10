@@ -13,11 +13,11 @@
 //       (`lp.devices.wifi-addresses.v1`, keyed by MAC) — the address the
 //       board's own status gave
 //   S2  the cable is gone (Studio reloads with no `?emu=`: no USB at all):
-//       c6-a is a remembered tile offering "Connect over Wi‑Fi"; pressed,
+//       c6-a is a card under Offline boards offering "Connect over Wi‑Fi"; pressed,
 //       the board says a secure LAN session opened, the SAME device comes
 //       back as a card saying "Wi‑Fi · …", and a project pushed from it
 //       lands (the board's console: `Project loaded`, frames advancing)
-//   S3  c6-b, never seen: "Connect a board on Wi‑Fi" with its address →
+//   S3  c6-b, never seen: the Network square's row, with its address →
 //       it connects (its console, its MAC on the card); a SECOND browser
 //       typing c6-a's address is told "Busy with another connection — try
 //       again" (c6-a's console: every LAN link in use), and the first
@@ -57,6 +57,7 @@ import {
   RELEASE_BUNDLE,
   SERVED_FIRMWARE,
   boardRegistry,
+  openNetworkRow,
   serveStudioBundle,
   startDoor,
   startRecordSink,
@@ -103,7 +104,8 @@ const WORDS = {
   wifiLine: (address) => `Wi‑Fi · ${address}`,
 };
 
-/// The add slot's address field and its Connect (`wifi_address_entry.rs`).
+/// The Network row's address field and its Connect (`wifi_address_entry.rs`);
+/// the row opens when the Network square is pressed (`openNetworkRow`).
 const ADDRESS_FIELD = `document.querySelector('#main input[placeholder^="192.168.1.40"]')`;
 /// The grid holding the field, its Connect and its status line.
 const ADDRESS_ENTRY = `${ADDRESS_FIELD}?.closest('label')?.parentElement?.parentElement`;
@@ -140,7 +142,7 @@ function studioUrl({ studioPort, doorAddr = null, sinkUrl }) {
   const query = new URLSearchParams();
   if (doorAddr) query.set("emu", `ws://${doorAddr}`);
   query.set("record", sinkUrl);
-  return `http://localhost:${studioPort}/devices?${query.toString()}`;
+  return `http://localhost:${studioPort}/?${query.toString()}`;
 }
 
 /// A MAC as the address book keys it: 12 lowercase hex.
@@ -149,7 +151,7 @@ const bookKey = (mac) => String(mac).toLowerCase().replace(/[^0-9a-f]/g, "");
 /// The address book as this page's storage holds it.
 const READ_BOOK = `(() => { try { return JSON.parse(localStorage.getItem(${JSON.stringify(BOOK_KEY)}) || '{}'); } catch { return {}; } })()`;
 
-/// Type `text` into the add slot's address field, as a keyboard does for
+/// Type `text` into the Network row's address field, as a keyboard does for
 /// Dioxus (`input` events carry the value), and press its Connect.
 function typeAddressAndConnect(text) {
   return `(() => {
@@ -198,9 +200,9 @@ async function main() {
 
   if (options.dryRun) {
     const steps = [
-      `S1 lp-cli wifi add <usb door> ${NET.ssid} (each board) → status connected; Studio ?emu= → via USB → ${A} Ready → ${BOOK_KEY}[${A}'s MAC].ip == its status ip`,
+      `S1 lp-cli wifi add <usb door> ${NET.ssid} (each board) → status connected; Studio ?emu= → the USB square → ${A} Ready → ${BOOK_KEY}[${A}'s MAC].ip == its status ip`,
       `S2 hold both consoles; book entry ip → ${A}'s forward (the one substitution); Studio with no ?emu= → ${A}'s tile → ${WORDS.connectOverWifi} → console: secure session opening → card "${WORDS.wifiLine("<fwd a>")}" Ready, ${A}'s MAC, one device → push ${WALK_PROJECT} → console: Project loaded, frames advance`,
-      `S3 add slot: <fwd b> → Connect → ${B}'s console: secure session opening → card Ready with ${B}'s MAC; a second browser: <fwd a> → "${WORDS.busy}" and ${A}'s console: every LAN link in use; ${A}'s first link not closed`,
+      `S3 Network row: <fwd b> → Connect → ${B}'s console: secure session opening → card Ready with ${B}'s MAC; a second browser: <fwd a> → "${WORDS.busy}" and ${A}'s console: every LAN link in use; ${A}'s first link not closed`,
       `S4 the second browser: ${NOWHERE} → "${WORDS.unreachable(NOWHERE)}"`,
     ];
     writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify({ out, boards: boardsSpec, extraArgs, steps, prerequisites: needs, chrome }, null, 2));
@@ -309,7 +311,7 @@ async function main() {
       await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: 420_000, what: "Studio to finish loading" });
       // c6-b never meets this browser: its cable stays out for this page.
       await driver.detach(B);
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_MS });
       await driver.pickBoard(A, { timeoutMs: STEP_MS });
       await driver.waitFor(`${MAIN_TEXT}.includes('Ready')`, { timeoutMs: STEP_MS, what: `${A} Ready over USB` });
       // The board's own address (its status, read by lp-cli above) is what
@@ -349,16 +351,23 @@ async function main() {
       seen.substituted = rewritten;
       await page.load(plainUrl);
       const from = holds[A].console.mark();
-      await driver.clickWhenReady("show", { timeoutMs: STEP_MS, exact: true });
-      await driver.clickWhenReady(WORDS.connectOverWifi, { timeoutMs: STEP_MS });
+      // The board is a card under Offline boards, always open: wait for its
+      // verb THERE (not for a control elsewhere on the page that says the
+      // same), then press it.
+      await driver.clickWhenReady(WORDS.connectOverWifi, {
+        timeoutMs: STEP_MS,
+        scope: `document.querySelector('#home-offline-boards')`,
+      });
       seen.opened = (await holds[A].console.waitFor(/\[lan\] link \S+ .*secure session opening/, { from, what: "a secure LAN session opening" })).trim();
       await page.cardSays(fwd[A], "Ready");
       const shown = await page.cardMac(fwd[A]);
       if (shown !== mac[A]) throw new Error(`the Wi‑Fi card shows ${shown}, not ${A}'s ${mac[A]}`);
-      // The same device: no remembered tile left for it.
-      const tiles = await driver.evaluate(`${MAIN_TEXT}.match(/remembered board/g)?.length ?? 0`);
-      seen.rememberedLines = tiles;
-      if (tiles) throw new Error(`a remembered line is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
+      // The same device: no card left under Offline boards for it. c6-b was
+      // never seen by this browser, so nothing else is remembered and the
+      // whole section is gone.
+      const offline = await driver.evaluate(`Boolean(document.querySelector('#home-offline-boards'))`);
+      seen.offlineSection = offline;
+      if (offline) throw new Error(`Offline boards is still drawn after the merge: ${await driver.evaluate(MAIN_TEXT)}`);
       // An edit lands: a project pushed from the Wi‑Fi card loads on the board.
       const card = `(${cardOf(fwd[A])}?.innerText || '')`;
       const face = await driver.waitFor(
@@ -383,9 +392,10 @@ async function main() {
 
     await step("S3", `${B}, never seen, by its address; a second browser to ${A} is told it is busy`, async (seen) => {
       const from = holds[B].console.mark();
+      await openNetworkRow(driver, { timeoutMs: STEP_MS });
       const typed = await driver.evaluate(typeAddressAndConnect(fwd[B]));
-      if (typed !== "typed") throw new Error(`the add slot's address field: ${typed}`);
-      await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the add slot's Connect" });
+      if (typed !== "typed") throw new Error(`the Network row's address field: ${typed}`);
+      await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the Network row's Connect" });
       seen.bOpened = (await holds[B].console.waitFor(/\[lan\] link \S+ .*secure session opening/, { from, what: "a secure LAN session opening" })).trim();
       await page.cardSays(fwd[B], "Ready");
       const shown = await page.cardMac(fwd[B]);
@@ -394,6 +404,8 @@ async function main() {
       second = await StudioDriver.launch({ width: 1100, height: 900 });
       await second.navigate(plainUrl);
       await second.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: 420_000, what: "the second Studio to load" });
+      // S4 (below) types into the same page later: the row stays open.
+      await openNetworkRow(second, { timeoutMs: STEP_MS });
       const busyFrom = holds[A].console.mark();
       const typedSecond = await second.evaluate(typeAddressAndConnect(fwd[A]));
       if (typedSecond !== "typed") throw new Error(`the second page's address field: ${typedSecond}`);

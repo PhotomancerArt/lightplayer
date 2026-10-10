@@ -1,7 +1,7 @@
-//! The add slot's third way in: "via Wi‑Fi", one address field and its
-//! Connect — core's `devices/connect-wifi-address` offer, drawn with the
-//! generic offer form (the field is the offer's own `address` parameter, so
-//! the app agent fills the same one).
+//! The Connect a board section's third way in, behind its Network square:
+//! one address field and its Connect — core's `devices/connect-wifi-address`
+//! offer, drawn with the generic offer form (the field is the offer's own
+//! `address` parameter, so the app agent fills the same one).
 //!
 //! Plain on purpose (the network-transport plan's A1: no new surface): a
 //! field, a button, and one line under them saying what the last connect
@@ -19,7 +19,7 @@ use crate::core::{ActionButton, ActionButtonVariant, OfferParamsForm, resolved_a
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub(crate) fn WifiAddressEntry(
     offer: UiOffer,
-    /// The add slot's connect under way, or why it failed (core's).
+    /// The section's connect under way, or why it failed (core's).
     #[props(default)]
     connect: Option<UiWifiConnect>,
     /// Stories only: the field as typed.
@@ -40,9 +40,9 @@ pub(crate) fn WifiAddressEntry(
     let empty = current
         .get(WIFI_ADDRESS_PARAM)
         .is_none_or(|value| value.trim().is_empty());
-    // The press as the offer binds it, worded as the slot's button: the
+    // The press as the offer binds it, worded as the row's button: the
     // offer's own label ("Connect a board on Wi‑Fi") is for a reader with
-    // no slot around it (the app agent, ⌘K).
+    // no section around it (the app agent, ⌘K).
     let press = match offer.press(&resolved_args(&offer, &current)) {
         Ok(action) => action,
         Err(refused) => offer.action.clone().disabled(refused.to_string()),

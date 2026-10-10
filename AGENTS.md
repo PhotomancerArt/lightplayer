@@ -212,6 +212,10 @@ the app through the same view model and presses the same actions. See
   routes or opens anything because of it; navigation stays in
   `router.rs`. Don't report what core already owns (node focus, card
   sections, `UiSelection`): read it.
+- **View state is not an offer.** The home page's tabs, its cards/list
+  switch and a fold are page-local state, not user verbs: no `UiAction`, not
+  in the offer tree. The agent reads every section of the page through
+  `UiHomeView.sections`, the way a person sees it.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
@@ -303,8 +307,8 @@ the app through the same view model and presses the same actions. See
   `_lightplayer._tcp`. Hosts reach it as `lan:<ip>` or `lan:lp-xxxx.local`
   (`lp-cli`, whose `lan list` browses `_lightplayer._tcp`; and Studio, with
   no flag: a board it has met is offered "Connect over Wi‑Fi" at the address
-  it last gave, and the add slot takes an address; and, signed in, "Connect
-  through lightplayer.app" as `relay:<mac>`). The link is `LinkConfig::ws()` (one
+  it last gave, and Connect a board's Network row takes an address; and, signed
+  in, "Connect through lightplayer.app" as `relay:<mac>`). The link is `LinkConfig::ws()` (one
   frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
   access entries; the tier comes from the key, as on Bluetooth). Its replies
   are JSON, and the C6 has one **network slot**, shared by the LAN and the
@@ -856,8 +860,9 @@ are director-proposed and pending Yona's ship-gate decision; see the ADR.)
 
 ## Studio against an emulated board (no hardware)
 
-`just studio-dev-emu` starts `lp-cli emu serve` holding two emulated ESP32-C6
-boards beside the dev server and prints three lines: the door's `/boards` URL,
+`just studio-dev-emu` starts `lp-cli emu serve` holding three emulated ESP32-C6
+boards (`c6-a` on the packaged firmware, `c6-b` and `c6-c` blank) beside the
+dev server and prints three lines: the door's `/boards` URL,
 the `?emu=` query to open Studio with, and a *predicted* Studio URL. The URL
 `studio-dev` prints below them is the source of truth, as always.
 
@@ -865,8 +870,8 @@ Open `http://127.0.0.1:<studio port>/?emu=ws://127.0.0.1:<emu port>`. That flag
 — and only that flag — replaces `navigator.serial` in the page with a virtual
 USB bus over those boards, so Studio's real device stack connects, identifies
 and runs against them. Without it nothing is fetched and `navigator.serial` is
-Chromium's own. Connect a device the way you would with a board: the in-page
-picker stands where Chrome's chooser would be, and a page-level banner names
+Chromium's own. Press **USB** under Connect a board the way you would with
+hardware: the in-page picker stands where Chrome's chooser would be, and a page-level banner names
 the shim, the backing URL and each board, with `detach` / `attach` buttons that
 are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
 bench port and no Chromium policy profile: a polyfilled `navigator.serial`
@@ -982,9 +987,9 @@ someone else's `latest`.
 **Wi‑Fi boards need no flag.** Studio installs its LAN link in every
 browser with a WebSocket: a board it has met over any link remembers its
 Wi‑Fi address in this browser (`lp.devices.wifi-addresses.v1`, never the
-registry), and its remembered tile offers "Connect over Wi‑Fi"
-(`devices/<board>/connect-wifi`); "Connect a board on Wi‑Fi" in the add slot
-takes an address (`devices/connect-wifi-address`). **`?lan=<host>`** stays as
+registry), and its Offline boards card offers "Connect over Wi‑Fi"
+(`devices/<board>/connect-wifi`); the Network square under Connect a board
+opens an address row (`devices/connect-wifi-address`). **`?lan=<host>`** stays as
 a dev shortcut that dials a board at page load by its LAN address
 (`lp-xxxx.local`, an IP, or an emulator's `127.0.0.1:<forward>`), over the
 secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
@@ -1037,7 +1042,8 @@ fallback for a central that loses too much. Each link logs its policy and,
 during bulk traffic, a 15 s rate/resend/srtt line as `[ble <session>] …` on
 the page's console.
 
-An emulated board added on the **Devices page** asks the emulator for the
+An emulated board added from **Connect a board** on the home page ("start a
+board here") asks the emulator for the
 LED performance seam (`led=fast`, softly: an image too old for it boots
 seam-free and says why), and says what came of it in one journal line per
 start (`emu: LED fast mode on (led=fast)`, or why it is off). `?seams=none`
@@ -1432,7 +1438,8 @@ their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
   default; Bluetooth is next. A *performance* seam skips work the emulator
   models faithfully but slowly, and still bills its time: `led=fast` (the
   WS281x wait) keeps frames, fps and heap identical. **Performance seams are
-  on only for the emulated boards a user adds on Studio's Devices page** —
+  on only for the emulated boards a user adds from Connect a board on Studio's
+  home page** —
   never `?emu=` (ws or tab), `emu serve`'s defaults, the walks, CI or
   `lp-cli validate` (which refuses them).
 - **Seam off is today's machine.** With nothing asked for, nothing scans,
@@ -1441,7 +1448,7 @@ their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
   engage is an error), `--seams-prefer <atoms>` (soft: engage what the image
   allows, else one `SEAM none engaged: <why>` line), `--seams-info <image>`
   (what an image declares). `emu serve` board options `seams=` /
-  `seams_prefer=`. Studio's `?seams=<atoms|none>` replaces the Devices-page
+  `seams_prefer=`. Studio's `?seams=<atoms|none>` replaces the home page's
   choice. Atoms are `<seam>=<impl>` joined by `+`.
 - **The label says so.** An engaged run's configuration is the base name plus
   its atoms (`lp-emu:esp32c6:t2+led=fast`), every chip start prints `SEAM …`

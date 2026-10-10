@@ -27,7 +27,7 @@
 //! | no reset over GATT | [`a_reset_over_bluetooth_fails_by_name`] |
 //! | M4: an untrusted link that never logs in is closed in 10 s | [`an_untrusted_link_that_never_logs_in_is_dropped`] |
 //! | a borrowing conversation's io | [`the_conversation_io_round_trips_a_request`] |
-//! | availability, for the add slot's copy | [`availability_reads_the_browser_not_a_guess`] |
+//! | availability, for Connect a board's copy | [`availability_reads_the_browser_not_a_guess`] |
 //! | channel 3 (the update) both ways, once the board announced it (M7 P12) | [`the_update_channel_flows_both_ways_once_the_board_announces_it`] |
 //! | nothing on channel 3 to a board that never announced it (DS9) | [`nothing_goes_out_on_channel_3_to_a_board_that_never_announced_it`] |
 //! | `?ble=emu`: a board's reset is a GATT drop, then a reconnect | [`a_board_reset_is_a_gatt_drop_and_the_session_reconnects_by_itself`] |

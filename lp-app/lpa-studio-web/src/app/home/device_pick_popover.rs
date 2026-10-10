@@ -596,7 +596,7 @@ fn ProjectPickPanel(
                     }
                 }
             }
-            p { class: panel_foot_class(), "Same cards as the Explore and Projects pages." }
+            p { class: panel_foot_class(), "Same cards as Explore and the home page." }
         }
     }
 }

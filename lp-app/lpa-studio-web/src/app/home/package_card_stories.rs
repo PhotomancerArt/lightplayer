@@ -39,12 +39,13 @@ fn pattern_card(exports: Vec<String>) -> UiPackageCard {
     UiPackageCard {
         uid: "prj_7hTn4Vb88cRpZq2FjXsLmo".to_string(),
         kind: "Module".to_string(),
-        project_kind: "Pattern".to_string(),
+        project_kind: lpa_studio_core::app::library::package_manifest::PATTERN_KIND_LABEL
+            .to_string(),
         exports,
         slug: "2026-08-06-0930-sparkle-pack".to_string(),
         last_saved_at: Some(STORY_NOW - 3.0 * 3600.0),
         provenance: None,
-        on_device: None,
+        on_boards: Vec::new(),
         open_elsewhere: false,
         target: None,
         health: PackageHealth::Ready,

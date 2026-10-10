@@ -22,7 +22,7 @@ all the way down to
 [LightPlayer's own code](https://github.com/PhotomancerArt/lightplayer),
 which is fully open-source and free.
 
-You can [get started](/devices) right away using our browser-based simulator,
+You can [get started](/) right away using our browser-based simulator,
 no hardware required!
 
 ## Simple on the surface, deep everywhere

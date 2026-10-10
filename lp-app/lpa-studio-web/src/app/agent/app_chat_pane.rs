@@ -26,7 +26,7 @@ pub(crate) const APP_CHAT_LEDE: &str =
 pub(crate) fn AppChatPane(
     view: UiAppAgentView,
     /// The composer draft, owned by the web app (it survives the drawer
-    /// closing, and the home page's front door writes it too).
+    /// closing).
     draft: Signal<String>,
     /// Open tool rows expanded on first render (stories).
     #[props(default = false)]

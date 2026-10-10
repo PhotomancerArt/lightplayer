@@ -10,12 +10,12 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     DeviceEscape, DeviceRosterView, DeviceStatus, RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS,
-    RelayConnectFailure, RosterView, UiHomeView, UiWifiConnect,
+    RelayConnectFailure, RosterView, UiHomeTab, UiHomeView, UiWifiConnect,
 };
 use lpa_studio_web_story_macros::story;
 
 use crate::app::home::ble_access_stories::usb_card;
-use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 
 #[story(
     description = "A board Studio met over USB, unplugged, while someone is signed in: its tile offers \"Connect through lightplayer.app\" (`devices/<board>/connect-relay`, a core offer the app agent sees too) beside \"Connect over Wi‑Fi\" (this browser remembers its address) and Reconnect and Forget. The relay is on for everyone — no `?relay=` flag. Signed out, the button is not there: only the account's key, put on the board when it was plugged in signed in, opens it through lightplayer.app."
@@ -67,7 +67,7 @@ fn relay_remembered_board_busy() -> Element {
     remembered_tile(Some(failed(&RelayConnectFailure::Busy.words())), true)
 }
 
-/// The devices page with one remembered board, its line open, offered
+/// The home page's Boards tab with one board under Offline boards, offered
 /// "Connect through lightplayer.app" — and "Connect over Wi‑Fi" too when
 /// this browser remembers its address (`with_address`).
 fn remembered_tile(connect: Option<UiWifiConnect>, with_address: bool) -> Element {
@@ -91,6 +91,7 @@ fn remembered_tile(connect: Option<UiWifiConnect>, with_address: bool) -> Elemen
         projects: Vec::new(),
         examples: Vec::new(),
         devices,
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -101,9 +102,9 @@ fn remembered_tile(connect: Option<UiWifiConnect>, with_address: bool) -> Elemen
     };
     rsx! {
         section { class: "tw:max-w-[760px] tw:p-4",
-            StoryDevicesPage {
+            StoryHomePage {
                 home,
-                remembered_open: true,
+                initial_tab: Some(UiHomeTab::Boards),
                 wifi_addresses,
                 relay_boards: vec![id],
                 on_action: |_| {},

@@ -32,7 +32,7 @@
 //! - nobody holds the wire — a coarse effect or the editor lens pauses the
 //!   pump, and a pull then could never be answered (design pin: never pull
 //!   under a borrow);
-//! - the card is WANTED (mounted on the devices page) and the page is
+//! - the card is WANTED (mounted on the home page) and the page is
 //!   visible — a picture nobody can see is serial time the board would
 //!   rather spend on the wire's other traffic;
 //! - the feed is not PARKED: three consecutive pulls that timed out or

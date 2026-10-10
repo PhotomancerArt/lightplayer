@@ -47,13 +47,18 @@ pub struct ManifestFields {
     pub exports: Vec<String>,
 }
 
+/// The display label a pattern project's kind reads as ([`kind_label`]).
+/// `UiPackageCard::is_pattern` compares against it, and it is the only
+/// place core does.
+pub const PATTERN_KIND_LABEL: &str = "Pattern";
+
 /// Display label for a project's authored kind (`"General"` | `"Pattern"`
 /// | `"Show"` | `"Rig"`) — shared by the project popup's settings rows and
 /// the gallery card (P1 of the module authoring plan).
 pub fn kind_label(kind: &ProjectKind) -> &'static str {
     match kind {
         ProjectKind::General => "General",
-        ProjectKind::Pattern { .. } => "Pattern",
+        ProjectKind::Pattern { .. } => PATTERN_KIND_LABEL,
         ProjectKind::Show => "Show",
         ProjectKind::Rig { .. } => "Rig",
     }

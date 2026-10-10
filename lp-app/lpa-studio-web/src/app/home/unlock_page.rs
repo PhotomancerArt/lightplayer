@@ -11,7 +11,7 @@
 //! and the card says "Unlocked with friends · play".
 //!
 //! A browser without Web Bluetooth (Brave, Safari, Firefox, iPhone) gets
-//! the add slot's own explanation and way forward.
+//! Connect a board's own explanation and way forward.
 
 use std::cell::RefCell;
 
@@ -20,7 +20,7 @@ use lpa_studio_core::{AccessCommand, OfferPath, UiAction};
 
 use super::access_fields::HELP_CLASS;
 use super::ble_reach::{BluetoothReach, ble_reach_note, use_ble_reach};
-use super::devices_page::TransportOffer;
+use super::connect_board::TransportOffer;
 use super::reach_note::this_page_url;
 use super::unlock_link::{UNLOCK_PATH, UnlockLink};
 use crate::base::{StudioIcon, StudioIconName};
@@ -136,7 +136,7 @@ pub(crate) fn UnlockPage(
                         on_action: move |action| {
                             on_action.call(action);
                             crate::route_recording::note_route_reason("unlock-connect");
-                            crate::router::navigate_push(&crate::router::StudioRoute::Devices);
+                            crate::router::navigate_push(&crate::router::StudioRoute::Home);
                         },
                     }
                 }

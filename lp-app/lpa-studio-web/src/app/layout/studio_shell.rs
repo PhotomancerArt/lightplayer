@@ -5,20 +5,9 @@ use crate::app::layout::ReconnectingCurtain;
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
 use crate::app::project::MismatchPage;
 use crate::app::workbench::{WorkbenchFrame, WorkbenchHrefs, view_for_route};
-use crate::app::{DevicesPage, ProjectOpeningFrame, ProjectsPage};
+use crate::app::{HomePage, ProjectOpeningFrame};
 use crate::core::PaneView;
 use crate::router::ProjectView;
-
-/// Which gallery page the shell renders when the view has no open
-/// editor (P09 split): the route picks it — `#/` = Devices,
-/// `#/projects` = Projects. Lens routes leave the default; they only
-/// see the gallery in transient detach windows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ShellGallery {
-    #[default]
-    Devices,
-    Projects,
-}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -28,9 +17,6 @@ pub fn StudioShell(
     /// Fixed clock for home-gallery stories; `None` uses the platform clock.
     #[props(default)]
     now_secs: Option<f64>,
-    /// The gallery page for no-editor renders (see [`ShellGallery`]).
-    #[props(default)]
-    gallery: ShellGallery,
     /// The route says a project but the view hasn't reached it yet: render
     /// the project-shaped opening frame instead of the gallery (the URL's
     /// intent picks the frame — no gallery flash on a project reload).
@@ -130,18 +116,12 @@ pub fn StudioShell(
         };
     }
 
+    // No editor: the home page, the same page `/` draws (PD1). This arm
+    // serves a cold `/device/<uid>` load, where the cards are the connect
+    // evidence, and a lens detaching.
     if let Some(home) = home {
-        return match gallery {
-            ShellGallery::Devices => rsx! {
-                div { class: "tw:grid tw:gap-7",
-                    DevicesPage { home: *home, on_action }
-                }
-            },
-            ShellGallery::Projects => rsx! {
-                div { class: "tw:grid tw:gap-7",
-                    ProjectsPage { home: *home, now_secs, on_action }
-                }
-            },
+        return rsx! {
+            HomePage { home: Some(*home), on_action: Some(on_action), now_secs }
         };
     }
 
