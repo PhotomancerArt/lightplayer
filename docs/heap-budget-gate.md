@@ -348,6 +348,48 @@ application's entry on the classic, so the bootloader adds seconds of wall
 clock and nothing to the answer. The places that boot the whole chain are the
 walks, `scripts/emu/m4-walk.sh` and `scripts/emu/m4-walk-esp32v3.sh`.
 
+## The whole-RAM ledger
+
+The gate above grades the heap and the stack. It does not say where the *rest*
+of a chip's SRAM goes — the radio blobs' code, the statics, the idle windows.
+`scripts/ram-ledger.py` reads that off a linked ELF, for all three chips, in
+under a second, with no build:
+
+```bash
+just fetch-ci-images                                   # CI's own images, no firmware build
+just ram-ledger target/ci-images/<sha>/esp32c6/tree/ESP32C6_SERVER_RADIO_SPLIT/p2.elf
+just ram-ledger target/ci-images/<sha>/esp32v3/fw-esp32v3-shipped.elf --json /tmp/v3.json
+just ram-ledger <any-elf> --chip esp32s3 --top 12      # --chip is detected unless the ELF is odd
+just test-ram-ledger                                   # its self-test (synthetic ELF + a smoke run)
+```
+
+It prints a Markdown ledger whose rows (ROM reserve, cache, code in RAM, radio
+code by blob library, `.data`, `.bss` by crate, each heap region, the stack,
+idle bytes) **sum to the chip's SRAM or the script exits 2**, then the owners
+and top symbols per row and an "attribution" table saying how many bytes are
+named by a sized symbol, inferred from neighbours, held only by their section,
+or **unknown**. `--json` adds every address extent and every symbol over
+`--min-symbol` bytes (default 256) for scripts that census the statics.
+
+What it is and is not:
+
+- It is a **link-time** map. A heap's live bytes and a stack's high-water mark
+  are runtime facts — the ledger gives the region, never the fill.
+- The chip's windows, and the spans the firmware registers by constant at boot
+  (the classic's SRAM1 heap regions, its JIT region), are **hard-coded and
+  cited** in `CHIPS` (`scripts/ram-ledger.py`), because the ELF cannot say them.
+  A section that falls in a window the map says the image does not own is a
+  printed warning, so a drifted map announces itself.
+- The C6's radio-blob symbols are joined to the `lib*.a` archives of the
+  `esp-wifi-sys-esp32c6` version `Cargo.lock` pins (found under the cargo
+  registry; `--blobs DIR` overrides). The join was cross-checked against
+  `rust-nm` on the same archives and matched to the byte.
+- The Xtensa images carry no local labels, so anonymous constants in `.data`
+  show up as "section only" runs with their neighbours named. That is the
+  honest limit of an ELF without a link map.
+- The S3's top 32 KiB of SRAM2 is shown as data cache on the assumption of
+  ESP-IDF's 32 KiB default; the bootloader, not the app ELF, sets it.
+
 ## Ratchet, not ceiling
 
 The record holds **today's measured values** — descriptive ("what this
