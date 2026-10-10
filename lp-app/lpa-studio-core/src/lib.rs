@@ -109,6 +109,10 @@ pub use app::devices::{
     BundledOwnBuild, BundledOwnBuildSource, MemoryOwnBuildSource, OWN_BUILD_MISMATCH,
     OwnBuildSource, UpdateHost,
 };
+pub use app::devices::{
+    CONNECT_VERB, ConnectFacts, DONE_VERB, NOTHING_ON_IT_YET, device_connect_offer,
+    device_done_offer,
+};
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
     FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
@@ -134,6 +138,7 @@ pub use app::devices::{
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;

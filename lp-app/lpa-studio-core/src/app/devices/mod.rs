@@ -69,6 +69,7 @@ pub mod browser_sim_source;
 pub mod browser_transport;
 pub mod bundled_own_build;
 pub mod composite_transport;
+pub mod connect_offer;
 pub mod device_affordance;
 pub mod device_backup_import;
 pub mod device_backup_op;
@@ -104,6 +105,7 @@ pub mod device_update_standing;
 pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
+pub mod done_offer;
 pub mod edit_offer;
 pub mod emu_transport;
 pub mod firmware_file_build;
@@ -168,6 +170,7 @@ pub use browser_sim_source::BrowserSimLinkSource;
 pub use browser_transport::BrowserSerialTransport;
 pub use bundled_own_build::{BundledOwnBuild, BundledOwnBuildSource, OWN_BUILD_MISMATCH};
 pub use composite_transport::CompositeDeviceTransport;
+pub use connect_offer::{CONNECT_VERB, ConnectFacts, NOTHING_ON_IT_YET, device_connect_offer};
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
 };
@@ -248,6 +251,7 @@ pub use device_update_words::{
     UpdateRunWord, update_session_words, update_words,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
+pub use done_offer::{DONE_VERB, device_done_offer};
 pub use edit_offer::{EDIT_VERB, device_edit_offer};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,

@@ -177,6 +177,9 @@ mod ble_drop_tests;
 /// The board card, built in core, on real boards: its primary pressed by
 /// path, and every action it draws an offer the tree publishes.
 mod board_card_tests;
+/// Connected: Connect, Edit and Done by path, the home page and an open
+/// session side by side, and the surface following the place.
+mod connected_tests;
 /// The home page's sections over this bench: a board plugged in is
 /// online, a detached one is offline, and the Connect a board section's
 /// offers are all published.
@@ -5837,19 +5840,16 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
     ] {
         assert!(names.contains(&verb), "{verb} missing from {names:?}");
     }
-    for absent in [
-        "flash",
-        "connect",
-        "reconnect",
-        "cancel",
-        "retry",
-        "remove-project",
-    ] {
+    for absent in ["flash", "reconnect", "cancel", "retry", "remove-project"] {
         assert!(
             !names.contains(&absent),
             "{absent} on a Ready, empty board: {names:?}"
         );
     }
+    // Connect is the board's panel, here (Q9 of "connected"): a board
+    // running nothing has none to show, and says so.
+    let connect = crate::OfferPath::parse("devices/mac-6055f90a0b0c/connect").unwrap();
+    assert_eq!(bench.offer_reason(connect), crate::NOTHING_ON_IT_YET);
     for (verb, lasting) in &verbs {
         let expected = matches!(verb.as_str(), "erase" | "forget" | "update-firmware");
         assert_eq!(*lasting, expected, "{verb}");

@@ -1,3 +1,4 @@
+pub mod connected_board;
 pub mod console_command;
 pub mod lens_hold;
 pub mod lens_reconnect;
@@ -84,6 +85,7 @@ pub use crate::core::log::{
 };
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
+pub use connected_board::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use console_command::ConsoleCommand;
 pub use place::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 pub use play_view_op::PlayViewOp;

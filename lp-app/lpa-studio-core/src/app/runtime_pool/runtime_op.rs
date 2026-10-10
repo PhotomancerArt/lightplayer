@@ -1,7 +1,9 @@
 //! Verbs that act on the attached RUNTIME rather than on a project.
 //!
-//! Four of them, all lens-scoped: open the editor on a device, close it,
-//! give up on an open still in flight, and set the runtime's log level (the
+//! All lens-scoped: open the editor on a device by its address, connect a
+//! board (its session held by the home page, on its card), show the editor
+//! on a board (connecting it first when it must), close the session, give
+//! up on an open still in flight, and set the runtime's log level (the
 //! console's runtime-level selector).
 //! None is device-specific, so they get their own small op rather than
 //! riding a project op.
@@ -11,6 +13,8 @@
 //! a runtime verb.
 
 use core::any::Any;
+
+use lpa_devices::DeviceId;
 
 use crate::{
     ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_ACTION_DEADLINE, UiLogLevel,
@@ -27,9 +31,20 @@ pub enum RuntimeOp {
     /// device's wire, install a device session, attach the lens. `uid` is
     /// the device's registered `dev…` uid — the `/device/<uid>` address.
     OpenDeviceLens { uid: String },
+    /// Connect a board (`devices/<board>/connect`): open the lens on it
+    /// the way an address does, with the HOME PAGE holding the session
+    /// ([`ConnectedBoard`](crate::ConnectedBoard)): going home keeps it, and
+    /// it shows on the board's card. A session on another board closes
+    /// first (one board connected at a time).
+    ConnectDevice { device: DeviceId },
+    /// Show the editor on a board (`devices/<board>/edit`): on the
+    /// connected board, the session already open, with nothing reattached
+    /// or read again; on any other board, connect it first, then show the
+    /// editor.
+    EditDevice { device: DeviceId },
     /// Close the device lens: detach the editor, drop the device session,
     /// give the wire back to the roster. The device itself stays on its
-    /// card — nothing about the board changes.
+    /// card — nothing about the board changes. A board card's Done.
     CloseDeviceLens,
     /// Give up on the open in flight: the opening frame's Cancel. Drops a
     /// held open (a board that is not here yet), closes a lens the open had
@@ -59,6 +74,18 @@ impl ControllerOp for RuntimeOp {
                 ActionPriority::Primary,
             )
             .with_icon("open"),
+            Self::ConnectDevice { .. } => ActionMeta::new(
+                "Connect",
+                "Open this board's controls here, on its card.",
+                ActionPriority::Primary,
+            )
+            .with_icon("connect"),
+            Self::EditDevice { .. } => ActionMeta::new(
+                "Edit",
+                "Open this board's project in the editor.",
+                ActionPriority::Primary,
+            )
+            .with_icon("edit"),
             Self::CloseDeviceLens => ActionMeta::new(
                 "Close",
                 "Close the editor on this board and give its wire back.",
@@ -80,9 +107,13 @@ impl ControllerOp for RuntimeOp {
             },
             // The attach is a handful of wire reads (loaded projects, the
             // project's inventory) on a board that just said hello.
-            Self::OpenDeviceLens { .. } => ActionClass::Foreground {
-                deadline: PROJECT_ACTION_DEADLINE,
-            },
+            // Connect and Edit open the same lens an address does (or
+            // nothing at all, on the connected board).
+            Self::OpenDeviceLens { .. } | Self::ConnectDevice { .. } | Self::EditDevice { .. } => {
+                ActionClass::Foreground {
+                    deadline: PROJECT_ACTION_DEADLINE,
+                }
+            }
             // Tears the session down; it owns the connection for the
             // duration, so it carries no deadline.
             Self::CloseDeviceLens | Self::CancelOpen => ActionClass::Recovery,
@@ -131,6 +162,27 @@ mod tests {
                 .consequence
                 .is_routine()
         );
+    }
+
+    #[test]
+    fn connect_and_edit_are_bounded_like_an_open_and_routine() {
+        for op in [
+            RuntimeOp::ConnectDevice {
+                device: DeviceId(7),
+            },
+            RuntimeOp::EditDevice {
+                device: DeviceId(7),
+            },
+        ] {
+            assert_eq!(
+                op.action_class(),
+                ActionClass::Foreground {
+                    deadline: PROJECT_ACTION_DEADLINE,
+                },
+                "{op:?}"
+            );
+            assert!(op.default_action_meta().consequence.is_routine(), "{op:?}");
+        }
     }
 
     #[test]

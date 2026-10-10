@@ -30,6 +30,10 @@
 //! Lasting through their meta), plus the three that depend on the board:
 //! Flash (Q3), Push (Q4) and the over-the-air install (an older version is
 //! Lasting).
+//!
+//! `connect` on a board Studio is talking to — its session, on its card —
+//! is the controller's, beside `edit` and `done`
+//! ([`device_connect_offer`](super::connect_offer::device_connect_offer)).
 
 use lpa_devices::Action;
 use lpa_devices::device::DeviceStatus;
