@@ -103,6 +103,8 @@ mod c_heap;
 mod desk_espnow_meter;
 #[cfg(not(fw_harness))]
 use fw_esp32_common::boot;
+#[cfg(feature = "alloc_trace_emu")]
+mod alloc_trace_emu;
 #[cfg(any(
     not(fw_harness),
     feature = "test_button",

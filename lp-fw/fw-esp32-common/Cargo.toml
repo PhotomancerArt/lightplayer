@@ -111,6 +111,11 @@ uart-link = ["dep:lp-link", "dep:critical-section"]
 # every 5 s — frame intervals, render offset and judder, tick cost with and
 # without requests, link-task passes. OFF by default, never shipped.
 frame-pace-diag = ["dep:critical-section"]
+# Every log record handed to the emulator's allocation trace as a marker, at
+# the instant it is logged (`_lp_alloc_trace_mark`, an `ebreak` the chip
+# crate defines — fw-esp32c6's `alloc_trace_emu`). OFF by default, never
+# shipped, never flashed.
+alloc-trace-marks = []
 # The Wi-Fi station, chip-free (`net`; Wi-Fi roadmap M6): the join policy,
 # the scan answer, and the boundary the chip's radio (and the emulator's
 # network seam) plug into. The C6 turns it on.
