@@ -118,7 +118,7 @@ pub fn push_device_offer(
         None,
         &consequence,
     );
-    let offer = push_offer(view, projects, examples);
+    let offer = push_offer(view.board_id.as_deref(), projects, examples);
     if let Some(reason) = offer.unavailable {
         return Some(UiOffer::new(path, "upload", template.disabled(reason)));
     }
@@ -458,6 +458,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,

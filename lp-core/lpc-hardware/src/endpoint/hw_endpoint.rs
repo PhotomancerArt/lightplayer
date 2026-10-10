@@ -73,3 +73,29 @@ impl HwEndpoint {
         self.status.is_available()
     }
 }
+
+/// The endpoint a lookup should use out of a stream of candidates: the first
+/// available one that `matches`, else the first one that `matches` at all.
+///
+/// An endpoint that exists but is claimed still has to reach its driver, so it
+/// fails there with the driver's own account of why. The stream is consumed
+/// lazily and the walk stops at the first available match, so a driver that
+/// yields endpoints one at a time never builds the ones after it.
+pub fn preferred_endpoint(
+    candidates: impl IntoIterator<Item = HwEndpoint>,
+    matches: &dyn Fn(&HwEndpoint) -> bool,
+) -> Option<HwEndpoint> {
+    let mut first_match: Option<HwEndpoint> = None;
+    for endpoint in candidates {
+        if !matches(&endpoint) {
+            continue;
+        }
+        if endpoint.is_available() {
+            return Some(endpoint);
+        }
+        if first_match.is_none() {
+            first_match = Some(endpoint);
+        }
+    }
+    first_match
+}

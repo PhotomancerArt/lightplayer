@@ -76,3 +76,19 @@ smallest value that still boots. The same shape applies to the classic
 high-water (12,860 B and 13,088 B in their chip records), and what a project
 running on them needs from the stack is not recorded anywhere this entry
 could find.
+
+## Seen (2026-10-10, RAM research E6)
+
+The arm passed an image that cannot load a project. A TLSF build of the split
+image (`ESP_ALLOC_CONFIG_HEAP_ALGORITHM=TLSF`, research/ram @ `8733eb97b`)
+moves 21,064 B of allocator control block into `.bss` and the stack falls
+from 48,984 B to 27,920 B; `heap-budget-check.sh chips 0 esp32c6` on it says
+`ok: stackTotal: 27920 B … 15220 B above the high-water band` (the allocator
+figures fail, the stack line does not), and the same image's first project
+load on `lp-emu:esp32c6:t1` panics with `Detected a write to the main stack's
+guard value`. The same lines on the classic and the S3: the first-fit classic
+peaks at 30,336 B loading `projects/test/basic` (37,056 B stack, 6,720 B to
+spare) and the first-fit S3 at 30,208 B (32,416 B stack, 2,208 B to spare);
+`catalog/patterns/meteor` overflows the first-fit classic's stack at its load
+([2026-10-10-meteor-overflows-the-classics-main-stack-at-load](2026-10-10-meteor-overflows-the-classics-main-stack-at-load.md)).
+All emulated (`lp-emu:esp32c6:t1`, `lp-emu:esp32v3:t1`, `lp-emu:esp32s3:t1`).

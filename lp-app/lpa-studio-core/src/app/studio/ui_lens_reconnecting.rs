@@ -41,7 +41,7 @@ impl UiLensReconnecting {
     /// The curtain while the board is being updated: its link drops and
     /// comes back as the board resets into its new firmware, and that is
     /// the update, not a lost connection — so the detail is the update's
-    /// own line ("Updating over Bluetooth… 40%").
+    /// own line ("Updating · 1 of 2 · 40%").
     pub fn updating(update_line: &str) -> Self {
         Self::with_detail(update_line.to_string())
     }
@@ -77,8 +77,8 @@ mod tests {
 
     #[test]
     fn while_the_board_updates_the_curtain_names_the_update() {
-        let strip = UiLensReconnecting::updating("Updating over Bluetooth… 40%");
+        let strip = UiLensReconnecting::updating("Updating · 1 of 2 · 40%");
         assert_eq!(strip.headline, "Reconnecting…");
-        assert_eq!(strip.detail, "Updating over Bluetooth… 40%");
+        assert_eq!(strip.detail, "Updating · 1 of 2 · 40%");
     }
 }

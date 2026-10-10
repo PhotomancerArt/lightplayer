@@ -174,6 +174,11 @@ mod agent_device_journey_tests;
 pub(crate) mod agent_device_seat;
 /// A Bluetooth link that drops under the editor and comes back.
 mod ble_drop_tests;
+/// The board card, built in core, on real boards: its primary pressed by
+/// path, and every action it draws an offer the tree publishes.
+mod board_card_tests;
+/// One tab holds a board: two tabs on one in-memory hold bus.
+mod board_hold_tests;
 /// The home page's sections over this bench: a board plugged in is
 /// online, a detached one is offline, and the Connect a board section's
 /// offers are all published.
@@ -190,6 +195,9 @@ mod relay_connect_tests;
 /// identifies, refuses firmware, is never given keys, and comes back after
 /// its leg drops.
 mod relay_link_tests;
+/// Unlock as an offer, `devices/<board>/unlock`, on boards reached over
+/// Bluetooth that hold nothing, or only play.
+mod unlock_tests;
 /// Reaching a board over Wi‑Fi without a flag: its remembered address, an
 /// address typed into Connect a board's Network row.
 mod wifi_connect_tests;
@@ -1140,6 +1148,10 @@ impl DeviceBench {
                     }
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
+                    }
+                    // The hold edge's answers (one tab holds a board).
+                    crate::StudioCommand::HoldEdge(event) => {
+                        self.controller.on_hold_edge_event(event);
                     }
                     _ => {}
                 }
@@ -3879,7 +3891,7 @@ fn the_empty_face_pushes_an_example_and_the_card_ends_up_running() {
         "the empty face's primary verb is live: {card:?}"
     );
     // The picker really is built from the gallery's two lists.
-    let offer = crate::push_offer(&card, &[], &[]);
+    let offer = crate::push_offer(card.board_id.as_deref(), &[], &[]);
     assert!(
         offer.new_project_unavailable.is_some(),
         "a board that has not named itself cannot have a starter generated: {offer:?}"

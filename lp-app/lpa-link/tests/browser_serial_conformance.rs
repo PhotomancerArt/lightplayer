@@ -154,6 +154,24 @@ extern "C" {
     #[wasm_bindgen(js_name = uninstallShim)]
     fn js_uninstall_shim() -> Promise;
 
+    #[wasm_bindgen(js_name = installSecondTab)]
+    fn js_install_second_tab(second_tab: bool) -> Promise;
+
+    #[wasm_bindgen(js_name = secondTabBoardsJson)]
+    fn js_second_tab_boards_json() -> String;
+
+    #[wasm_bindgen(js_name = openPortOf)]
+    fn js_open_port_of(first: bool, board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = closePortOf)]
+    fn js_close_port_of(first: bool, board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = secondTabCableVerb)]
+    fn js_second_tab_cable_verb(board_id: &str, verb: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = openAttemptsOf)]
+    fn js_open_attempts_of(first: bool, board_id: &str) -> Promise;
+
     #[wasm_bindgen(js_name = busBoardIds)]
     fn js_bus_board_ids() -> Promise;
 
@@ -833,6 +851,152 @@ async fn the_flash_bridge_acquires_the_live_generation() {
         "browser_esp32_flash.js reports Web Serial unsupported under the shim"
     );
     log("flash-bridge acquisition: getPort resolved the live generation after a replug");
+
+    shim_off().await;
+}
+
+// ---------------------------------------------------------------------------
+// A second tab (`?emu-second-tab=1`)
+// ---------------------------------------------------------------------------
+//
+// Real Chrome lists a granted port in both tabs of a browser and refuses only
+// the second `open()`. The door admits ONE `/control` client per board, so a
+// second page's install is refused (409) — unless it asks to be a second tab,
+// when it gets the board's bytes and not its cable. These pin both halves:
+// the loud failure without the flag is unchanged, and with it the port can
+// open and close (take a board over) while every cable verb says whose cable
+// it is. They reach inside the scripted door's second bus, so they run
+// against it only.
+
+/// The outcome of a promise that resolves to a string.
+async fn text(promise: Promise) -> String {
+    JsFuture::from(promise)
+        .await
+        .expect("a string outcome")
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// `describeBoards()` of the second page, one board.
+fn second_tab_board(board: &str) -> JsValue {
+    let all = js_sys::JSON::parse(&js_second_tab_boards_json()).expect("boards JSON");
+    Array::from(&all)
+        .iter()
+        .find(|entry| {
+            Reflect::get(entry, &JsValue::from_str("boardId"))
+                .ok()
+                .and_then(|id| id.as_string())
+                .as_deref()
+                == Some(board)
+        })
+        .expect("the second page holds the board")
+}
+
+#[wasm_bindgen_test]
+async fn a_second_page_without_the_flag_fails_to_install_as_before() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+
+    assert_eq!(
+        text(js_install_second_tab(false)).await,
+        "NetworkError",
+        "a second page that is not a second tab meets the door's 409, loudly"
+    );
+    log("second page without the flag: NetworkError at install, as ever");
+
+    shim_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_second_tab_installs_cableless_and_opens_what_the_first_lets_go() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    assert_eq!(text(js_install_second_tab(true)).await, "installed");
+
+    let board = second_tab_board("c6-a");
+    assert_eq!(
+        Reflect::get(&board, &JsValue::from_str("cable"))
+            .unwrap()
+            .as_bool(),
+        Some(false),
+        "another page holds the cable"
+    );
+    assert_eq!(
+        Reflect::get(&board, &JsValue::from_str("granted"))
+            .unwrap()
+            .as_bool(),
+        Some(true),
+        "a page with no chooser grants at load"
+    );
+    let holds = Reflect::get(&board, &JsValue::from_str("holds")).unwrap();
+    assert_eq!(
+        Array::from(&holds).length(),
+        0,
+        "the page's default switches are the cable's, not the second tab's"
+    );
+    assert!(
+        !js_control_log("c6-a").contains("pin"),
+        "no pin verb from a port with no cable: {}",
+        js_control_log("c6-a")
+    );
+
+    // The first page opens the board; the second is refused, as Chrome
+    // refuses a second open().
+    assert_eq!(text(js_open_port_of(true, "c6-a")).await, "opened");
+    assert_eq!(text(js_open_port_of(false, "c6-a")).await, "NetworkError");
+    // It lets go (a take-over's holder closes first); the second opens.
+    assert_eq!(text(js_close_port_of(true, "c6-a")).await, "closed");
+    assert_eq!(text(js_open_port_of(false, "c6-a")).await, "opened");
+    assert_eq!(text(js_open_port_of(true, "c6-a")).await, "NetworkError");
+    assert_eq!(text(js_close_port_of(false, "c6-a")).await, "closed");
+
+    let attempts = |first: bool| async move {
+        JsFuture::from(js_open_attempts_of(first, "c6-a"))
+            .await
+            .expect("attempts")
+            .as_f64()
+            .unwrap_or(-1.0)
+    };
+    assert_eq!(
+        attempts(false).await,
+        2.0,
+        "the second page's open() ran twice"
+    );
+    assert_eq!(attempts(true).await, 2.0, "and the first page's twice");
+    log("second tab: cable-less, opens and closes the bytes in turn with the first");
+
+    shim_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_cable_verb_on_a_cableless_port_rejects() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    assert_eq!(text(js_install_second_tab(true)).await, "installed");
+
+    for verb in ["detach", "attach", "reset", "downloadMode", "state", "pins"] {
+        let outcome = text(js_second_tab_cable_verb("c6-a", verb)).await;
+        assert!(
+            outcome.starts_with("NetworkError: ")
+                && outcome.contains("another page holds this board's cable"),
+            "{verb}: {outcome}"
+        );
+    }
+    assert!(
+        !js_control_log("c6-a").contains("detach"),
+        "nothing reached the door: {}",
+        js_control_log("c6-a")
+    );
+    log("second tab: every cable verb rejects, and none reaches the door");
 
     shim_off().await;
 }

@@ -497,8 +497,32 @@ and `backing`. A level can depend on the board. Flashing a blank chip is
 Routine and flashing over firmware is Lasting. A push over a project the
 library has no copy of is Lasting, and Routine otherwise. Bluetooth reach
 is a core fact (`devices/bluetooth_reach.rs`), so `devices/connect-ble`
-is published disabled with its reason. See
+is published disabled with its reason. Unlock takes `password` (secret) and
+`remember`; pressed with no password it raises the sheet
+(`access/unlock_offer.rs`, `unlock_op.rs`: the op holds the password in an
+`UnlockPassword` whose `Debug` writes `<redacted>`, so the session recorder
+never carries it). It is published while a board's link holds nothing, or
+only play, and the board is linked and idle. `edit` opens the board's
+project in the editor (`devices/edit_offer.rs`, `RuntimeOp::OpenDeviceLens`;
+the web's lens sync then writes `/device/<uid>`). It is published on a
+board that is Ready (or Degraded), running a project, linked, idle and
+registered, and it is the board card's primary there until the card's own
+Connect lands. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
+
+A board another tab of this browser holds offers `devices/<board
+ref>/take-over` (`take_over_offer.rs`; the controller decides when) instead
+of `connect`, `retry` and `identify`, which would each open a port that tab
+holds. Its level is what it closes over there, by the holder's last word:
+`Watching` is Routine, `Open` (and a level not said yet) is Undoable, and
+`Busy` is disabled with "Busy in the other tab: <label>". It asks the
+holder, waits five seconds, and on `Released` opens the ports the hold kept
+shut — or, for a board held by its network slot, runs the board's ordinary
+connect (its own network link here, else `connect-wifi`, else
+`connect-relay`; with none of them it is disabled, "No way to reach it from
+here"). `connect-wifi` and `connect-relay` are not offered while another tab
+holds the board's network slot. The progress is
+`DeviceRosterView.take_overs` (`UiTakeOver`).
 
 ### Which board plays which project
 
@@ -528,6 +552,125 @@ the board card's project bar ("Holiday Eaves · 3 boards", "Out of date") and
 the home page's "Other projects" ask. Both read this join and never build
 their own. A project on an offline board counts as on a board; pending links
 are not in the join.
+
+### The board card is built in core
+
+Every board Studio shows — new, online or offline, on the home page, docked
+in the editor or on the mismatch page — is one card, built here as data
+(`devices/board_card/`) and only drawn by the web. `board_card(&BoardCardInput)`
+builds a roster board's card and `pending_board_card(..)` a new board's;
+`roster_board_cards(&RosterCardsInput)` builds every card on a roster, new
+boards first. `StudioController::view()` publishes them on
+`DeviceRosterView.cards` once the view's offers are published, and the
+editor's docked card is `UiLensCard::Board`, built with the editor holding
+the board (no primary until the card's Done lands). A builder reads only the
+board's own offers from the published tree, so a card can point at nothing
+core did not offer.
+
+A card (`UiBoardCard`) is:
+
+- the **picture** (`UiBoardPicture`): the board's lights, dimmed when they
+  are the last known ones, or the update's light while an update holds them;
+- the **status corner** (`UiStatusCorner`): a mark (a blue dot when all is
+  fine, the worst notice's icon otherwise, quiet for a board Studio is not
+  watching), a reading ("58 fps", "5 h ago"), and details holding the
+  notices, how the board is running, the picture's words and its terminal;
+- the **name bar** (`UiNameBar`): the board's name and its **one primary**
+  (`UiPrimary`): Install, Unlock, Connect, Power on or Edit, or a disabled
+  word saying why (`primary_action.rs` has the order);
+- **five bars** (`UiStackBar`), always project · connection · access ·
+  firmware · hardware, each one line: a summary, an aside, a tone (blue is
+  Update, orange is attention or someone else has it), at most one action,
+  and the bar's work while an activity runs in it. Each bar has its own file
+  (`project_bar.rs` …), whose doc is the table of what it says.
+
+A bar's **details** (`UiBarDetails`) are `RichSection<UiCardAction>`
+sections (a notice first, facts, verbs, a Danger section last) and today's
+surfaces as named panels (`UiDetailPanel`: the terminal, access, the
+Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other
+version, restore from file); `raised` asks the web to open them now (the
+layout question). Every action is a `UiCardAction`: the offer it presses,
+the card's word and icon for it, preset values, and how it is drawn
+(`UiActionDraw`: a press, the project pick, the board pick, the offer's own
+params, or the sheet core raises).
+
+A bar's **work** (`UiBarWork`) is the activity in the bar whose subject it
+changes (a push in project, an identify or a Wi‑Fi connect in connection, a
+flash or update in firmware): its words and percent, its Cancel, green for
+about three seconds once it is done, striped with Retry when it failed. Done
+and Failed come from `ActivityEnds` (`devices/activity_ends.rs`), read off
+the device journal in studio core. Which project a board plays is
+`BoardProjects` (above).
+
+The web draws a card with `lpa-studio-web`'s `app/board_card/` and decides
+only its look — never what a bar says, its tone, or which offer it carries.
+The walks read the card by the hooks that module documents.
+
+### One tab holds a board
+
+A USB port opens in one tab only, and a board's network slot takes one
+client. So that another Studio tab of the same browser can say "Open in
+another tab" instead of "in use by another app", ask the holder to let go,
+and notice when it dies, a tab that holds a board takes a Web Lock named for
+it after the board's hello (`HoldKey`: `lp-board:usb:<vid>:<pid>:<mac>` or
+`lp-board:net:<mac>`) and says so on a channel (`HoldNote`, versioned and
+never persisted). `devices/board_hold/` holds the vocabulary: the book of
+who holds what (`BoardHoldBook`), the one door to the browser
+(`BoardHoldEdge`, installed by the web with `set_board_hold_edge`; notes
+arrive as `StudioCommand::BoardHold`), and its host double
+(`MemoryBoardHoldBus`, several tabs on one bus). The device model carries
+the fact on the board (`Event::BoardHeld`, `DeviceView.held_elsewhere`) and
+on a port it must not open (`Event::LinkHeld`). Taking a board over is the
+offer at `devices/<board ref>/take-over` (above, "Device verbs are
+offers"), the asker's side in `studio_controller/take_over_flow.rs`. A
+board another tab holds counts as online (`split_roster`), and its picture
+follows the holder's sidecar: a newer sidecar frame replaces a frame that
+is not live here (`CardFeedState::seed_if_newer`). The card says all of
+this in `devices/board_card/held_board.rs`: Connect is the primary and
+presses `take-over`; the connection bar reads "Open in another tab" (with
+"editor open" or what the holder is busy with), "Taken by another tab" for a
+tab that let go, or the take-over's own work ("Asking the other tab…",
+"Opening…", or striped with Retry), all in the orange "someone has it" tone;
+the picture is the one the holder saved; and the card is Online.
+
+The holder's side (`studio_controller/board_hold_flow.rs`, pure halves in
+`board_hold/`): a tab's first sweep waits for one look at the lock manager
+(`HoldPriming`), so it never opens a port another tab holds. Claim order is
+open, hello, then lock, then announce; release order is close the port,
+release the lock, then announce (`hold_reconcile`). The gate
+(`UsbHoldGate`, kept on the effects layer) attaches a sweep's new ports
+without opening them when the other tabs' claims for their vendor:product
+account for all of them, reads a refused open against the same claims, and
+names the board when exactly one claim and one port of the kind are in play.
+A holder announces `Watching`, `Open` (its editor is on the board) or
+`Busy(label)`; it refuses an ask while busy and otherwise closes the editor,
+writes the last picture, disconnects, waits for the close, releases, then
+says `Released` (`hold_answer`). A sentinel watch per hold elsewhere clears
+the fact when the holder dies, and never opens the port — except for a hold
+read off the lock manager at load whose holder never spoke: that is the old
+page of a reload, whose lock outlives it for a moment, and when it frees the
+ports it kept shut open as a fresh load opens them. A port the claims kept
+shut loses its "held by another tab" mark (`Event::LinkFreed`) once no claim
+of its kind stands. No verb on a held board hands its port or its record
+away: no Forget, and over USB no Flash, Erase or Reset; a held pending port
+offers no Reset or dismiss.
+
+A board's one network slot (the LAN or the relay; one slot whichever road
+took it) is held the same way, as `lp-board:net:<mac>`, with no gate: there
+is nothing to refuse before the dial. A board held both ways shows its USB
+hold first. The board gives its slot to the newest client that proves the
+holder's key, and closes the holder with an ordinary close that its page
+would redial; every tab of one browser presents the same keys, so a tab
+that hears another tab newly say it holds a slot this tab had **yields**: it
+closes its own session by request (an open link through `Disconnect`, a
+dropped one through the transport's forget), lets the hold go, and its board
+says it was taken. A holder whose link took the slot before the tab it left
+let the lock go announces `Holds { locked: false }` and claims again until
+the lock is its own; other tabs watch only a locked hold. A refusal from
+anyone else (1013, 4429) is a stranger's busy: no fact, no `take-over`, and
+the connect stays offered. See
+`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md`
+for what stays open (another browser, lp-cli).
 
 ## Device Management UX
 

@@ -894,6 +894,11 @@ impl ActivityReducer for FlashActivity {
                 // borrow is the fold's too (it pauses freshness).
                 Event::IdentityObserved { .. }
                 | Event::GrantAnswered { .. }
+                // Another tab's hold is the roster's and the fold's news, never this
+                // reducer's: a link this activity runs on was opened here.
+                | Event::BoardHeld { .. }
+                | Event::LinkHeld { .. }
+                | Event::LinkFreed { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 | Event::LinkBorrow { .. } => ActivityStep::nothing(),

@@ -93,6 +93,10 @@ pub struct DeviceRosterView {
     /// Connect a board's Network row, under way, or why it
     /// failed (`devices/connect-wifi-address`).
     pub wifi_address_connect: Option<super::UiWifiConnect>,
+    /// Each board another tab held whose Connect is under way here, or why
+    /// it failed (`devices/<board>/take-over`). Joined by the controller,
+    /// which holds the asks; absent = nothing to say.
+    pub take_overs: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiTakeOver>,
     /// Each device's firmware-update words (the update-states spike,
     /// direction C): the firmware zone's line and bar, the picture slot's
     /// sentence and light, the header chip and version. Joined by the
@@ -111,6 +115,23 @@ pub struct DeviceRosterView {
     /// project bar and the home page's "Other projects" both read it.
     /// Joined by the controller, which holds the library and the lens.
     pub board_projects: super::BoardProjects,
+    /// How each board is reached — the open link's kind, else the last
+    /// one's; for a new board, its pending link's — read off the endpoint
+    /// ([`super::UiLinkKind::of_endpoint`]), never off
+    /// `DeviceView::is_over_bluetooth` (true on every network link). Absent
+    /// for a board no link has named (a row rehydrated cold).
+    pub link_kinds: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiLinkKind>,
+    /// When the registry last saw each board (its row's `last_seen_at`,
+    /// epoch seconds): how long an offline board has been away.
+    pub last_seen: std::collections::BTreeMap<lpa_devices::DeviceId, f64>,
+    /// How each board's last activity ended, and when
+    /// ([`super::ActivityEnds`]): a bar's Done and Failed.
+    pub ends: std::collections::BTreeMap<lpa_devices::DeviceId, super::ActivityEnd>,
+    /// Every board's card, built in core: new boards first, then the
+    /// roster's boards in order. Filled by the controller once the view's
+    /// offers are published (a card points only at offered verbs); empty in
+    /// any view built before that.
+    pub cards: Vec<super::board_card::UiBoardCard>,
 }
 
 impl Default for DeviceRosterView {
@@ -130,10 +151,15 @@ impl Default for DeviceRosterView {
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            take_overs: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: super::BoardProjects::default(),
+            link_kinds: std::collections::BTreeMap::new(),
+            last_seen: std::collections::BTreeMap::new(),
+            ends: std::collections::BTreeMap::new(),
+            cards: Vec::new(),
         }
     }
 }
@@ -186,11 +212,17 @@ pub struct RememberedView {
 /// Split a roster view into cards worth drawing and the quiet remembered
 /// line underneath (D7). Connected order is preserved; remembered devices
 /// keep the roster's own (last-seen-sorted) order too.
+///
+/// A board another tab of this browser holds is connected, whatever its
+/// status here: it is plugged in and running, and "offline" would be false
+/// (it has no link in this tab only because that tab has the port).
 pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
     let mut connected = Vec::new();
     let mut remembered = Vec::new();
     for device in &roster.roster.devices {
-        if device.status == lpa_devices::device::DeviceStatus::Offline {
+        if device.status == lpa_devices::device::DeviceStatus::Offline
+            && device.held_elsewhere.is_none()
+        {
             remembered.push(RememberedView {
                 id: device.id,
                 title: device.title.clone(),
@@ -225,6 +257,9 @@ pub struct DeviceRoster {
     /// Which registry row each device's record lives in, by the model's
     /// handle. See [`Self::remember_key`].
     keys: std::collections::BTreeMap<u64, String>,
+    /// How each board's last activity ended, read off the journal as it is
+    /// drained (the board card's Done and Failed).
+    ends: super::ActivityEnds,
 }
 
 impl DeviceRoster {
@@ -241,7 +276,18 @@ impl DeviceRoster {
             effects: DeviceEffects::new(),
             keys: std::collections::BTreeMap::new(),
             mirrored_through: 0,
+            ends: super::ActivityEnds::default(),
         }
+    }
+
+    /// How each board's last activity ended ([`super::ActivityEnds`]).
+    pub fn activity_ends(&self) -> &super::ActivityEnds {
+        &self.ends
+    }
+
+    /// The same, for the controller's once-per-view lapse check.
+    pub fn activity_ends_mut(&mut self) -> &mut super::ActivityEnds {
+        &mut self.ends
     }
 
     pub fn effects_mut(&mut self) -> &mut DeviceEffects {
@@ -414,7 +460,10 @@ impl DeviceRoster {
         // An update leg whose link went ends; a driver whose activity ended
         // goes.
         self.effects.reconcile_updates(&self.roster);
-        self.drain_journal()
+        let lines = self.drain_journal();
+        let roster = &self.roster;
+        self.ends.retain(|device| roster.device(device).is_some());
+        lines
     }
 
     /// Record writes the effects layer collected, for the controller to run
@@ -457,6 +506,8 @@ impl DeviceRoster {
             // Joined by the controller, which holds the connects.
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            // Joined by the controller, which holds the asks.
+            take_overs: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
@@ -464,6 +515,27 @@ impl DeviceRoster {
             backup_download: self.effects.layout().download(),
             // Joined by the controller, which holds the library and the lens.
             board_projects: super::BoardProjects::default(),
+            // A new board's kind is its pending link's endpoint.
+            link_kinds: self
+                .roster
+                .devices()
+                .iter()
+                .filter_map(|device| {
+                    let endpoint = device.identity.endpoint.as_ref()?;
+                    Some((device.id, super::UiLinkKind::of_endpoint(Some(endpoint))))
+                })
+                .chain(self.roster.pending().iter().map(|entry| {
+                    (
+                        entry.device_id(),
+                        super::UiLinkKind::of_endpoint(Some(&entry.info.endpoint)),
+                    )
+                }))
+                .collect(),
+            // Joined by the controller, which holds the registry rows.
+            last_seen: std::collections::BTreeMap::new(),
+            ends: self.ends.all().clone(),
+            // Built by the controller once the view's offers are published.
+            cards: Vec::new(),
         }
     }
 
@@ -573,6 +645,11 @@ impl DeviceRoster {
                 continue;
             }
             highest = highest.max(entry.seq);
+            if let (Scope::Device(device), lpa_devices::journal::JournalRecord::Note(note)) =
+                (entry.scope, &entry.record)
+            {
+                self.ends.note(device, note, entry.at);
+            }
             lines.push(JournalLine {
                 scope: scope_label(entry.scope),
                 entry: format!("{:?}", entry.record),
@@ -864,6 +941,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Reconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,
@@ -894,6 +972,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,
@@ -912,6 +991,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            take_overs: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![
@@ -938,6 +1018,10 @@ mod tests {
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: Default::default(),
+            link_kinds: Default::default(),
+            last_seen: Default::default(),
+            ends: Default::default(),
+            cards: Vec::new(),
         };
 
         let split = split_roster(&view);
@@ -976,6 +1060,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            take_overs: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],
@@ -989,6 +1074,10 @@ mod tests {
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: Default::default(),
+            link_kinds: Default::default(),
+            last_seen: Default::default(),
+            ends: Default::default(),
+            cards: Vec::new(),
         };
 
         let split = split_roster(&view);
@@ -1000,5 +1089,36 @@ mod tests {
             .collect();
         assert_eq!(titles, vec!["A", "B", "C"]);
         assert!(split.remembered.is_empty());
+    }
+
+    /// Z9: a remembered board another tab of this browser holds is
+    /// connected — plugged in and running there — even with no link here;
+    /// one nobody holds stays on the remembered line.
+    #[test]
+    fn a_board_another_tab_holds_is_connected_not_remembered() {
+        let mut held = offline_view(2, "Held", None);
+        held.held_elsewhere = Some(lpa_devices::HeldElsewhere {
+            via: lpa_devices::HoldVia::Usb,
+            level: lpa_devices::HoldLevel::Watching,
+            taken_from_here: false,
+        });
+        let view = DeviceRosterView {
+            roster: RosterView {
+                devices: vec![held, offline_view(3, "Unplugged", None)],
+                pending: Vec::new(),
+            },
+            ..DeviceRosterView::default()
+        };
+
+        let split = split_roster(&view);
+
+        let connected: Vec<&str> = split
+            .connected
+            .iter()
+            .map(|device| device.title.as_str())
+            .collect();
+        assert_eq!(connected, vec!["Held"]);
+        assert_eq!(split.remembered.len(), 1);
+        assert_eq!(split.remembered[0].title, "Unplugged");
     }
 }

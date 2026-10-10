@@ -28,9 +28,19 @@
 //     fail in a way that reads like a shim bug.
 //
 // Studio's own affordances are addressed BY THEIR VISIBLE TEXT ("It's
-// connected", "Flash firmware", "Put it on the board"). That is deliberate:
-// it is what the spec's `manual:` steps already say, so the emulated lane and
-// the silicon lane are describing the same click.
+// connected", "Put it on the board") where they have no hook. That is
+// deliberate: it is what the spec's `manual:` steps already say, so the
+// emulated lane and the silicon lane are describing the same click.
+//
+// A BOARD is different: its card carries hooks (`app/board_card/mod.rs`,
+// "Walk hooks"), and the card helpers below read it by them — the card by
+// `data-board-card`, a bar by `data-bar`, its work by `data-bar-work`, the
+// status corner by `data-board-corner`, and every verb by the offer path its
+// `AgentMark` carries. A verb is pressed by its path, a state is waited on
+// as the offer core publishes for it, and what the board said is read off
+// its own terminal in the corner's details. None of them matches the card's
+// face text for a verb or a state: a page string Studio can satisfy by
+// itself is a weak predicate, and two of them shipped.
 
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -147,6 +157,74 @@ function matchingControls(text, { scope = "document", exact = false } = {}) {
 /// The home page's Connect a board section: where the squares live.
 const CONNECT_SCOPE = "document.querySelector('#home-connect-board')";
 
+/// The open popover's panel: a picker the card opened (the board pick, the
+/// project pick), or any other panel. One popover is open at a time.
+export const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
+
+/// A bar's layer, as `data-bar` names it, to the name its details trigger
+/// carries ("Project details").
+const BAR_NAMES = {
+  project: "Project",
+  connection: "Connection",
+  access: "Access",
+  firmware: "Firmware",
+  hardware: "Hardware",
+};
+
+/// `devices/<board ref>` for `board`: a MAC (any case, with or without
+/// colons) is `mac-<12 lowercase hex>` (`BoardRef`); a ref (`mac-…`,
+/// `new-3`, `sim-…`, `emu-…`) or a whole `devices/…` path is taken as it is.
+export function boardPath(board) {
+  const text = String(board).trim();
+  if (text.startsWith("devices/")) return text;
+  const hex = text.replace(/:/g, "").toLowerCase();
+  if (/^[0-9a-f]{12}$/.test(hex)) return `devices/mac-${hex}`;
+  return `devices/${text}`;
+}
+
+/// The MAC (`aa:bb:cc:dd:ee:ff`) a `devices/mac-<hex>` path names, or null.
+export function macOfPath(boardPathText) {
+  const match = /mac-([0-9a-f]{12})$/.exec(boardPathText ?? "");
+  return match ? match[1].match(/../g).join(":") : null;
+}
+
+/// The page-side expression for the card at `path`.
+function cardSelector(path) {
+  return `document.querySelector(${JSON.stringify(`[data-board-card="${path}"]`)})`;
+}
+
+/// The page-side expression for the page's only card: null while there are
+/// none, or several.
+const ONLY_CARD = `((() => { const all = document.querySelectorAll('[data-board-card]'); return all.length === 1 ? all[0] : null; })())`;
+
+/// Page-side: the `AgentMark` around a verb's control on `card` —
+/// `data-offer-path` ends with `/<verb>` — on the card's face
+/// (`inDetails` false: the name bar's primary, a bar's action, a work's
+/// Cancel) or inside an open popover (`inDetails` true: a bar's or the
+/// corner's details, where the rest of a board's verbs live). A details
+/// card renders inside the card's DOM, so the two are told apart by the
+/// popover's layer.
+const FIND_MARK = `((card, verb, inDetails) => card ? [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')]
+  .find((mark) => Boolean(mark.closest('.ux-popover-layer')) === inDetails) || null : null)`;
+
+/// Page-side: the button that presses an `AgentMark`'s offer. The mark is
+/// `display: contents`; its control is the last button inside it (an
+/// `ActionButton`'s one button, a picker's trigger, or a choice's press
+/// after its params).
+const PRESSABLE = `((mark) => { if (!mark) return null; const all = mark.querySelectorAll('button'); return all.length ? all[all.length - 1] : null; })`;
+
+/// Page-side: a bar's line as it reads — its pieces (summary, aside, or the
+/// work's words) each trimmed and joined by one space, so "USB · connected"
+/// and its aside "also cloud" read "USB · connected also cloud".
+const LINE_TEXT = `((el) => [...el.children].map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
+
+/// Page-side test for a text: includes a string, or matches a RegExp.
+function textTest(words) {
+  return words instanceof RegExp
+    ? `((t) => new RegExp(${JSON.stringify(words.source)}, ${JSON.stringify(words.flags)}).test(t))`
+    : `((t) => t.includes(${JSON.stringify(words)}))`;
+}
+
 /// The page-side half of every wait: a promise that a MutationObserver
 /// settles. Injected once per document; see rule 2.
 const WAIT_HELPER = `
@@ -211,26 +289,43 @@ export class StudioDriver {
     );
     const exited = once(child, "exit").catch(() => {});
     const cdp = await Cdp.open(await devToolsUrl(child));
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Log.enable", {}, sessionId).catch(() => {});
-    await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: WAIT_HELPER }, sessionId);
-    // A headless target Chrome considers unfocused is throttled the way a
-    // background tab is, and the command-line flags above do not reach it —
-    // they are about backgrounded WINDOWS. This is the one that reaches a
-    // CDP-created target, and it matters far more now that the page may be
-    // hosting an emulator: a throttled Worker runs the guest at a fraction
-    // of a per cent of real time, which reads as a board that never answered.
-    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
-    return new StudioDriver({ cdp, sessionId, child, exited, userDataDir, keepProfile: profileDir !== null });
+    const { targetId, sessionId } = await attachNewTarget(cdp, {});
+    return new StudioDriver({ cdp, sessionId, targetId, child, exited, userDataDir, keepProfile: profileDir !== null });
   }
 
-  constructor({ cdp, sessionId, child, exited, userDataDir, keepProfile = false }) {
+  /// A SECOND TAB of the same browser: a new target in a new WINDOW of the
+  /// browser this driver launched, sharing its profile — so the two pages
+  /// share OPFS, Web Locks and `BroadcastChannel`, which is what "one tab
+  /// holds a board" is about. (Every other "second page" a walk has made is
+  /// another Chrome with a temporary profile, and shares none of them.)
+  ///
+  /// A new window, not a background tab: headless Chrome counts each window's
+  /// page as visible, and the card's frame feed and the picture's sidecar
+  /// write only run on a visible page. `tabVisible()` is how a walk checks.
+  ///
+  /// The returned driver shares this one's DevTools connection and browser;
+  /// its console is its own (the handlers filter by session). Its `close()`
+  /// closes only its target; this driver's `close()` still ends the browser.
+  async openTab() {
+    const { targetId, sessionId } = await attachNewTarget(this.cdp, { newWindow: true });
+    return new StudioDriver({
+      cdp: this.cdp,
+      sessionId,
+      targetId,
+      child: this.child,
+      exited: this.exited,
+      userDataDir: this.userDataDir,
+      keepProfile: true,
+      ownsBrowser: false,
+    });
+  }
+
+  constructor({ cdp, sessionId, targetId = null, child, exited, userDataDir, keepProfile = false, ownsBrowser = true }) {
     this.keepProfile = keepProfile;
+    this.ownsBrowser = ownsBrowser;
     this.cdp = cdp;
     this.sessionId = sessionId;
+    this.targetId = targetId;
     this.child = child;
     this.exited = exited;
     this.userDataDir = userDataDir;
@@ -277,6 +372,13 @@ export class StudioDriver {
       throw new Error(`page evaluation failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
     }
     return result.value;
+  }
+
+  /// `document.visibilityState` of this page. A walk with two tabs asserts
+  /// `"visible"` for both before it starts: the card's frame feed and the
+  /// picture's sidecar write only run on a visible page.
+  async tabVisible() {
+    return this.evaluate("document.visibilityState");
   }
 
   /// Wait for a page-side predicate. `source` is a JS expression evaluated in
@@ -404,6 +506,310 @@ export class StudioDriver {
     }
   }
 
+  // --- the board card, by its hooks ----------------------------------------
+  //
+  // Every helper here takes `{ board }`: a MAC (any case, colons or not), a
+  // board ref (`mac-…`, `new-3`, `sim-…`, `emu-…`) or a whole
+  // `devices/<ref>` path ([`boardPath`]). Omitted, it means the page's only
+  // card, and the helper throws when there are several — a walk with more
+  // than one board names the one it means.
+
+  /// The page-side expression for one board's card (an element or null),
+  /// for use as a `scope`. Throws when `board` is omitted and the page holds
+  /// several cards.
+  async card({ board = null } = {}) {
+    if (board != null) return cardSelector(boardPath(board));
+    const paths = await this.cardPaths();
+    if (paths.length > 1) {
+      throw new Error(`there are ${paths.length} board cards (${paths.join(", ")}); name the board`);
+    }
+    return ONLY_CARD;
+  }
+
+  /// Every board card's `devices/<ref>`, in page order.
+  async cardPaths() {
+    return this.evaluate(
+      `[...document.querySelectorAll('[data-board-card]')].map((el) => el.getAttribute('data-board-card'))`,
+    );
+  }
+
+  /// Wait for the board's card to be on the page.
+  async waitCard({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    const scope = await this.card({ board });
+    await this.waitFor(`Boolean(${scope})`, { timeoutMs, what: `the card of ${board ?? "the board"}` });
+    return this.evaluate(`${scope}.getAttribute('data-board-card')`);
+  }
+
+  /// Wait until core publishes `verb` on the board's card — its offer at
+  /// `devices/<ref>/<verb>` is drawn (`data-offer-path`), and with
+  /// `enabled` its button can be pressed. A published offer is core's
+  /// reading of the board's state, so this stands where a wait on "Ready"
+  /// stood. A verb that lives in a bar's details is drawn only while they
+  /// are open: name the `bar` and they are opened first.
+  async waitOffer(verb, { board = null, bar = null, enabled = true, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    if (bar) await this.openBar(bar, { board, timeoutMs });
+    const scope = await this.card({ board });
+    await this.waitFor(
+      `(() => { const card = ${scope}; if (!card) return false;
+                const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${Boolean(bar)}));
+                return Boolean(button) && (${!enabled} || !button.disabled); })()`,
+      { timeoutMs, what: `the offer \`${verb}\`${enabled ? " (enabled)" : ""} on ${board ?? "the card"}${bar ? `'s ${bar} details` : ""}` },
+    );
+  }
+
+  /// Whether `verb` is drawn on the card's face right now (no wait);
+  /// `inDetails` asks the open details instead.
+  async offered(verb, { board = null, enabled = false, inDetails = false } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return false;
+                const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${inDetails}));
+                return Boolean(button) && (${!enabled} || !button.disabled); })()`,
+    );
+  }
+
+  /// The words on the control that presses the offer at
+  /// `devices/<ref>/<verb>` — "Connect" on a held board's `take-over` — read
+  /// off the card's face (or, with `inDetails`, an open details card); `null`
+  /// when the card draws no such offer. A read, never a press.
+  async offerWords(verb, { board = null, inDetails = false } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return null;
+                const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${inDetails}));
+                return button ? (button.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`,
+    );
+  }
+
+  /// Which home page section the board's card sits in: `"online"` (under
+  /// `#home-online-boards`), `"offline"` (`#home-offline-boards`), or `null`
+  /// when it is in neither (or not on the page).
+  async boardSection({ board = null } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return null;
+                if (card.closest('#home-online-boards')) return 'online';
+                if (card.closest('#home-offline-boards')) return 'offline';
+                return null; })()`,
+    );
+  }
+
+  /// The card's picture as its hooks name it: `{ source, frame }` —
+  /// `data-picture` (`link`, `lens`, `saved`, `none`) and whether a frame is
+  /// drawn — and whether it is dimmed (last known, not current). `null`
+  /// when the card or its picture is not there.
+  async pictureOf({ board = null } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return null;
+                const picture = card.querySelector('[data-picture]'); if (!picture) return null;
+                return { source: picture.getAttribute('data-picture'),
+                         frame: picture.getAttribute('data-picture-frame') === 'true',
+                         dim: picture.classList.contains('ux-play-frame-dim') }; })()`,
+    );
+  }
+
+  /// Open a bar's details ("project", "connection", "access", "firmware",
+  /// "hardware"): any other details on the card are closed first — one
+  /// popover at a time. Waits for the details card to be drawn. The details
+  /// render inside the card's DOM, so reads stay scoped to the card.
+  async openBar(layer, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    const name = BAR_NAMES[layer];
+    if (!name) throw new Error(`no bar ${JSON.stringify(layer)}; bars are ${Object.keys(BAR_NAMES).join(", ")}`);
+    return this.openDetails(`[data-bar="${layer}"] button[aria-label="${name} details"]`, { board, timeoutMs, what: `the ${layer} bar` });
+  }
+
+  /// Open the status corner's details: notices, how the board is running,
+  /// the picture's words, and the board's terminal.
+  async openCorner({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    return this.openDetails(`[data-board-corner] button[aria-label="Status details"]`, { board, timeoutMs, what: "the status corner" });
+  }
+
+  async openDetails(triggerSelector, { board, timeoutMs, what }) {
+    const scope = await this.card({ board });
+    const trigger = `${scope}?.querySelector(${JSON.stringify(triggerSelector)})`;
+    await this.waitFor(`Boolean(${trigger})`, { timeoutMs, what });
+    if ((await this.evaluate(`${trigger}.getAttribute('aria-expanded')`)) === "true") return;
+    await this.closeDetails({ board });
+    await this.evaluate(`(() => { const el = ${trigger}; el.scrollIntoView({ block: 'center' }); el.click(); return true; })()`);
+    await this.waitFor(
+      `(() => { const el = ${trigger}; return Boolean(el) && el.getAttribute('aria-expanded') === 'true'
+                && Boolean(el.parentElement.querySelector('[id^="ux-popover-panel"]')); })()`,
+      { timeoutMs, what: `${what}'s details to open` },
+    );
+  }
+
+  /// Close every popover open on the card — a bar's details, the corner's,
+  /// or a picker — by its own trigger, and wait until none is open.
+  async closeDetails({ board = null, timeoutMs = 30_000 } = {}) {
+    const scope = await this.card({ board });
+    const open = `[...(${scope}?.querySelectorAll('button[aria-expanded="true"]') ?? [])]`;
+    const closed = await this.evaluate(`(() => { const all = ${open}; all.forEach((el) => el.click()); return all.length; })()`);
+    if (closed > 0) {
+      await this.waitFor(`${open}.length === 0`, { timeoutMs, what: "the card's open details to close" });
+    }
+    return closed;
+  }
+
+  /// Press the offer at `devices/<ref>/<verb>` on the card: its own button,
+  /// in the card's word. `bar` opens that bar's details first, when the verb
+  /// lives there. A Lasting verb arms on its first click; `confirm` clicks
+  /// it again, which is the press. A pick (the project or board pick) opens
+  /// its picker; the caller picks inside it (`PANEL`). Returns the button's
+  /// words.
+  async pressOffer(verb, { board = null, bar = null, confirm = false, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    // Without a bar the verb is on the card's face: whatever details are
+    // open close first, so the press never opens a second popover.
+    if (!bar) await this.closeDetails({ board });
+    await this.waitOffer(verb, { board, bar, timeoutMs });
+    const scope = await this.card({ board });
+    const press = `(() => { const button = ${PRESSABLE}(${FIND_MARK}(${scope}, ${JSON.stringify(verb)}, ${Boolean(bar)}));
+                            if (!button || button.disabled) return null;
+                            button.scrollIntoView({ block: 'center' }); button.click();
+                            return (button.textContent || '').replace(/\\s+/g, ' ').trim(); })()`;
+    const pressed = await this.evaluate(press);
+    if (pressed === null) throw new Error(`the offer \`${verb}\` went away before it could be pressed`);
+    if (confirm) {
+      const again = await this.evaluate(press);
+      if (again === null) throw new Error(`the offer \`${verb}\` went away between its arm and its press`);
+    }
+    return pressed;
+  }
+
+  /// A bar's line as it reads: its summary and aside, or its work's words
+  /// while it carries work. `null` when the card or the bar is not there.
+  async barText(layer, { board = null } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(`(() => { const el = ${scope}?.querySelector(${JSON.stringify(`[data-bar="${layer}"] button[aria-label="${BAR_NAMES[layer]} details"]`)});
+      return el ? ${LINE_TEXT}(el) : null; })()`);
+  }
+
+  /// Wait until a bar's line includes `words` (a string) or matches it (a
+  /// RegExp). Returns the line.
+  async waitBar(layer, words, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    const scope = await this.card({ board });
+    const test = textTest(words);
+    return this.waitFor(
+      `(() => { const el = ${scope}?.querySelector(${JSON.stringify(`[data-bar="${layer}"] button[aria-label="${BAR_NAMES[layer]} details"]`)});
+                if (!el) return false; const t = ${LINE_TEXT}(el);
+                return ${test}(t) ? t : false; })()`,
+      { timeoutMs, what: `the ${layer} bar to read ${words}` },
+    );
+  }
+
+  /// One fact in a bar's details ("Version" in the firmware details, "Id"
+  /// in the hardware details): opens them, reads the value, closes them.
+  /// `null` when the details carry no such fact.
+  async detailsFact(layer, label, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    await this.openBar(layer, { board, timeoutMs });
+    const scope = await this.card({ board });
+    try {
+      return await this.evaluate(`(() => { const card = ${scope}; if (!card) return null;
+        const wanted = ${JSON.stringify(label.toLowerCase())};
+        const dt = [...card.querySelectorAll('[id^="ux-popover-panel"] dt')]
+          .find((el) => (el.textContent || '').trim().toLowerCase() === wanted);
+        const dd = dt?.nextElementSibling;
+        return dd ? (dd.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`);
+    } finally {
+      await this.closeDetails({ board });
+    }
+  }
+
+  /// A bar's work: `"running"`, `"done"`, `"failed"`, or `"none"` (no work),
+  /// off its `data-bar-work`; `null` when the card is not there.
+  async workState(layer, { board = null } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(`(() => { const card = ${scope}; if (!card) return null;
+      const bar = card.querySelector('[data-bar="${layer}"]'); if (!bar) return null;
+      return bar.getAttribute('data-bar-work') || 'none'; })()`);
+  }
+
+  /// Wait until a bar's work is one of `states` (a state or a list of them,
+  /// as `workState` names them). Returns the state.
+  async waitWork(layer, states, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    const wanted = Array.isArray(states) ? states : [states];
+    const scope = await this.card({ board });
+    return this.waitFor(
+      `(() => { const card = ${scope}; if (!card) return false;
+                const bar = card.querySelector('[data-bar="${layer}"]'); if (!bar) return false;
+                const state = bar.getAttribute('data-bar-work') || 'none';
+                return ${JSON.stringify(wanted)}.includes(state) ? state : false; })()`,
+      { timeoutMs, what: `the ${layer} bar's work to be ${wanted.join(" or ")}` },
+    );
+  }
+
+  /// The board's own terminal lines (its corner's details, `data-board-terminal`),
+  /// one string per row. Opens the corner, reads, and closes it again.
+  async terminalLines({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    await this.openCorner({ board, timeoutMs });
+    const scope = await this.card({ board });
+    try {
+      return await this.evaluate(`(() => { const term = ${scope}?.querySelector('[data-board-terminal]');
+        return term ? [...term.children].map((row) => (row.textContent || '').replace(/\\s+/g, ' ').trim()) : []; })()`);
+    } finally {
+      await this.closeDetails({ board });
+    }
+  }
+
+  /// THE BOARD'S OWN WORDS: open the status corner's details and wait for
+  /// the board's terminal to hold `words` (a string, or a RegExp), then
+  /// close them. Returns the line that said it.
+  async boardSaid(words, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    await this.openCorner({ board, timeoutMs });
+    const scope = await this.card({ board });
+    const test = textTest(words);
+    try {
+      return await this.waitFor(
+        `(() => { const term = ${scope}?.querySelector('[data-board-terminal]'); if (!term) return false;
+                  const rows = [...term.children].map((row) => (row.textContent || '').replace(/\\s+/g, ' ').trim());
+                  return rows.find((row) => ${test}(row)) || false; })()`,
+        { timeoutMs, what: `the board to say ${words}` },
+      );
+    } finally {
+      await this.closeDetails({ board }).catch(() => {});
+    }
+  }
+
+  /// Studio's own flash flow on a blank board's card, the way a person does
+  /// it: the firmware bar says "No firmware", the primary Install (`flash`)
+  /// opens the board pick, picking `model` presses it, and the flash is the
+  /// firmware bar's work — it must START and then FINISH (a wait on "No
+  /// firmware went away" alone is satisfied the instant the work starts).
+  /// Finished means the work is gone and the bar no longer says "No
+  /// firmware"; the board's own state (its backing's registry) is the
+  /// caller's to check.
+  async flashBlank(model, { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000 } = {}) {
+    await this.waitBar("firmware", "No firmware", { board, timeoutMs });
+    await this.pressOffer("flash", { board, timeoutMs });
+    await this.waitFor(`Boolean(${PANEL})`, { timeoutMs, what: "the board-model picker" });
+    // Picking the model is the press: the board pick in verb mode.
+    await this.click(model, { scope: PANEL });
+    await this.waitWork("firmware", "running", { board, timeoutMs });
+    const scope = await this.card({ board });
+    await this.waitFor(
+      `(() => { const bar = ${scope}?.querySelector('[data-bar="firmware"]');
+                if (!bar || bar.getAttribute('data-bar-work') === 'running') return false;
+                return !(bar.textContent || '').includes('No firmware'); })()`,
+      { timeoutMs: flashTimeoutMs, what: "the flash to finish" },
+    );
+  }
+
+  /// What the board says it runs, as core reads it: `"empty"` once its
+  /// project bar offers `push` ("Add a project"), `"running"` once its
+  /// primary Edit can be pressed. Waits for one of the two — the card is
+  /// ready either way.
+  async boardRuns({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    const scope = await this.card({ board });
+    return this.waitFor(
+      `(() => { const card = ${scope}; if (!card) return false;
+                const push = ${FIND_MARK}(card, 'push', false);
+                if (push?.closest('[data-bar="project"]') && ${PRESSABLE}(push)) return 'empty';
+                const edit = ${PRESSABLE}(${FIND_MARK}(card, 'edit', false));
+                return edit && !edit.disabled ? 'running' : false; })()`,
+      { timeoutMs, what: `the board to say what it runs (\`push\` or \`edit\` offered)` },
+    );
+  }
+
   // --- the shim's own page contract ---------------------------------------
 
   /// `window.__lpEmuSerial.bus.describeBoards()` — what the page's chrome
@@ -478,7 +884,23 @@ export class StudioDriver {
       .map((line) => `[${line.level}] ${line.text}`);
   }
 
+  /// Close THIS page's target and nothing else: the browser, and every other
+  /// tab of it, carry on. The page leaves the way a closed tab does — its
+  /// sockets go with its renderer and its Web Locks vanish — so this is the
+  /// walk's "the holder crashed or closed". After it this driver can no
+  /// longer evaluate anything; a walk that owns the browser still ends it
+  /// with `close()`.
+  async closeTab() {
+    if (!this.targetId) throw new Error("this driver has no target id to close");
+    await this.cdp.send("Target.closeTarget", { targetId: this.targetId });
+  }
+
   async close() {
+    if (!this.ownsBrowser) {
+      // A second tab: its target only. The browser is the first driver's.
+      await this.closeTab().catch(() => {});
+      return;
+    }
     try {
       try { await this.cdp.send("Browser.close"); } catch { this.cdp.close(); }
     } finally {
@@ -498,6 +920,28 @@ export class StudioDriver {
       }
     }
   }
+}
+
+/// A new page target (in a new window with `newWindow`), attached and
+/// prepared the way every walk page is: domains on, the wait helper in every
+/// document, and focus emulated.
+async function attachNewTarget(cdp, { newWindow = false }) {
+  const params = { url: "about:blank" };
+  if (newWindow) params.newWindow = true;
+  const { targetId } = await cdp.send("Target.createTarget", params);
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Log.enable", {}, sessionId).catch(() => {});
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: WAIT_HELPER }, sessionId);
+  // A headless target Chrome considers unfocused is throttled the way a
+  // background tab is, and the command-line flags above do not reach it —
+  // they are about backgrounded WINDOWS. This is the one that reaches a
+  // CDP-created target, and it matters far more now that the page may be
+  // hosting an emulator: a throttled Worker runs the guest at a fraction
+  // of a per cent of real time, which reads as a board that never answered.
+  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
+  return { targetId, sessionId };
 }
 
 function devToolsUrl(child) {

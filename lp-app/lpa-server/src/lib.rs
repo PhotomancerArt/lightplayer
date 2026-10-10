@@ -31,6 +31,7 @@ pub mod read_cost;
 pub mod read_gate;
 pub mod recovery_report;
 pub mod server;
+pub mod whole_file_gate;
 
 pub use access_gate::{Required, classify};
 pub use access_guarded_fs::AccessGuardedFs;

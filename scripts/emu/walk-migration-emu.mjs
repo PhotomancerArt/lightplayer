@@ -4,9 +4,10 @@
 // Real Studio, in headless Chrome, updating an emulated ESP32-C6 that is a
 // "fielded board": the current firmware on the frozen pre-2026-10 partition
 // table, its files in a 240-block littlefs at 0x310000 — the board every
-// shipped C6 is today. Studio's own Update firmware runs the layout
-// migration through esptool-js, over the `?emu=` virtual serial port, into
-// the emulated mask ROM's download console.
+// shipped C6 is today. Studio's own Update (the board card's
+// `update-firmware` offer) runs the layout migration through esptool-js,
+// over the `?emu=` virtual serial port, into the emulated mask ROM's
+// download console.
 //
 // One scenario per invocation (a migration is ~180 s emulated and a run is
 // several minutes of wall clock; a scenario must fit one foreground command):
@@ -19,7 +20,7 @@
 //       completed migration with every file
 //   W9  a board flashed with the new image by a path that skipped the
 //       migration (a bare `esptool write_flash 0x0`): it boots HOLDING its
-//       files, and the card's Finish update moves them
+//       files, and the firmware bar's Finish update moves them
 //   W7a cable pulled during the filesystem write: the board comes back
 //       formatted with its backup in this browser
 //   W7b  …then Restore files puts them back (W8: the tab was
@@ -34,7 +35,15 @@
 // the door's console for the firmware's own `[INIT]`/`[FS]` lines, and, after
 // the door has written the chip back, `lp-cli hardware lpfs report --image`
 // of the chip file against the fixture's own report, file by file (SHA-256).
-// Studio's words are used only to know when to click.
+// Studio is read only to know when, and what, to press — and only through
+// the board card's hooks (`lp-app/lpa-studio-web/src/app/board_card/mod.rs`,
+// "Walk hooks"): the offers core publishes on the card (`data-offer-path`:
+// `update-firmware`, `finish-update`, `restore-files`, `continue-update`,
+// `cancel-update`, `flash`), the firmware bar's work (the update's steps,
+// `lpa_devices::FlashStep`), the firmware details core raises while the
+// layout question is open (`UiDetailPanel::Layout` — no longer a dialog),
+// the access and connection details, and the board's terminal in the status
+// corner. Never the card's face text.
 //
 // NOT CI (same rule as walk-no-board). Needs: the release Studio bundle
 // (`just studio-web-story-build`), the packaged firmware
@@ -48,7 +57,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { PANEL, StudioDriver, boardPath } from "./studio-driver.mjs";
 import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -59,6 +68,9 @@ const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 let BOARD = "c6-a";
 const MAC = "60:55:f9:0a:0b:0c";
 const UID = "dev0000000000000011";
+/// The board model the fixture is (its stamped `/hardware.json`): what the
+/// board pick is answered with when the way back is a flash.
+const BOARD_MODEL = "XIAO ESP32-C6";
 const STUDIO_LOAD_MS = 420_000;
 const STEP_MS = 180_000;
 /// A wedged-run guard for a whole migration, never a measurement.
@@ -117,18 +129,19 @@ function fixtureAccessJson() {
   return JSON.stringify({ version: 2, bleEnabled: true, open: true, secrets });
 }
 
-/// What the card's Access row must say once the board is back: who gets
-/// in with no password, as the board's own store has it — a summary the row
-/// shows only once the list was read (main's #929 panel; it replaced the
-/// old "Who has access N" count). The default fixture's store is a version-2
+/// What the card's access details must say once the board is back: who gets
+/// in with no password, as the board's own store has it — the "This board"
+/// section's "Open to" (`access_bar.rs`, `open_summary` in core's
+/// `ui_access_view.rs`; main's #929 panel, which replaced the old "Who has
+/// access N" count). Core draws it with the access panel, and says
+/// "password" there before the board has answered its list too, so it is
+/// judged only once the Bluetooth switch — locked until that answer — is on
+/// and usable ([`awaitAccess`]). The default fixture's store is a version-2
 /// file with `open: false` (nobody: "password"); the full store has `open:
 /// true` (play: "anyone can play").
 function expectedOpenSummary() {
   return FULL_ACCESS ? "anyone can play" : "password";
 }
-
-/// The card's Access row (`button` whose text starts "Access"), if drawn.
-const ACCESS_ROW = `[...document.querySelectorAll('button')].find((b) => /^Access\\b/.test((b.innerText || '').trim()))`;
 
 // --- the fixture board ---------------------------------------------------
 
@@ -259,44 +272,174 @@ function startSink() {
 // --- the page --------------------------------------------------------------
 
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
-const PAGE_TEXT = `(document.body?.innerText || '')`;
 
+/// The board's card, `devices/mac-<hex>` by the MAC the shim lists for
+/// `BOARD` (`main` sets it once the shim is up); `null` when the shim names
+/// none, and then the walk reads the one linked card ([`liveBoard`]).
+let CARD = null;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/// The firmware verbs a settled card offers this fixture: Update (the
+/// firmware bar's action on a board older than this Studio, otherwise a verb
+/// in the firmware details — `firmware_bar.rs`), Finish update on a board
+/// holding its files, Restore files on a board whose files are in a backup
+/// (both the firmware bar's action: `device_layout_view.rs`'s
+/// `FINISH_UPDATE`, `RESTORE_FILES`).
+const SETTLED_VERBS = ["update-firmware", "finish-update", "restore-files"];
+
+/// Page-side: `layer`'s open details on the card at `board` (the popover
+/// panel, a descendant of the bar), or null.
+function barPanel(board, layer) {
+  return `document.querySelector(${JSON.stringify(`[data-board-card="${board}"] [data-bar="${layer}"] [id^="ux-popover-panel"]`)})`;
+}
+
+/// Page-side: the button that presses `verb` on the card at `board` — the
+/// last button inside its `AgentMark`, on the card's face or (`inDetails`)
+/// inside its open details: the button the driver's `pressOffer` clicks.
+function offerButton(board, verb, inDetails) {
+  return `((() => {
+    const card = document.querySelector(${JSON.stringify(`[data-board-card="${board}"]`)});
+    const mark = card ? [...card.querySelectorAll(${JSON.stringify(`[data-offer-path$="/${verb}"]`)})]
+      .find((m) => Boolean(m.closest('.ux-popover-layer')) === ${Boolean(inDetails)}) : null;
+    const all = mark ? mark.querySelectorAll('button') : [];
+    return all.length ? all[all.length - 1] : null;
+  })())`;
+}
+
+/// The card the board is on now: its own (`CARD`) while that card is
+/// linked, else the one linked card on the page — a board that comes back
+/// from a pulled cable not running LightPlayer can be a new card until it
+/// says who it is. Linked: its connection bar does not read "Offline · …"
+/// (`connection_bar.rs`, `offline_words`).
+async function liveBoard(driver) {
+  const paths = await driver.cardPaths();
+  const linked = [];
+  for (const board of paths) {
+    const line = await driver.barText("connection", { board });
+    if (line && !line.startsWith("Offline")) linked.push(board);
+  }
+  if (CARD && linked.includes(CARD)) return CARD;
+  if (linked.length === 1) return linked[0];
+  if (CARD && paths.includes(CARD)) return CARD;
+  if (paths.length === 1) return paths[0];
+  throw new Error(`no one card for the board (cards: ${paths.join(", ") || "none"}; linked: ${linked.join(", ") || "none"})`);
+}
+
+/// The first of `verbs` a card offers right now, and where: on a card's face
+/// (the firmware bar's action), else inside a card's firmware details (where
+/// Update sits on a board that is not older than this Studio). Returns
+/// `{ board, verb, bar }`, or null. Opens and closes the details it looks in.
+async function findFirmwareVerb(driver, verbs) {
+  const paths = await driver.cardPaths();
+  for (const board of paths) {
+    for (const verb of verbs) {
+      if (await driver.offered(verb, { board })) return { board, verb, bar: null };
+    }
+  }
+  for (const board of paths) {
+    try {
+      await driver.openBar("firmware", { board, timeoutMs: 10_000 });
+    } catch {
+      continue;
+    }
+    try {
+      for (const verb of verbs) {
+        if (await driver.offered(verb, { board, inDetails: true })) return { board, verb, bar: "firmware" };
+      }
+    } finally {
+      await driver.closeDetails({ board }).catch(() => {});
+    }
+  }
+  return null;
+}
+
+/// Until a card offers one of `verbs` ([`findFirmwareVerb`]), polled every
+/// second: a verb in a bar's details is drawn only while they are open, so
+/// no single page-side wait can see it arrive.
+async function waitFirmwareVerb(driver, verbs, { timeoutMs, what }) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = await findFirmwareVerb(driver, verbs);
+    if (found) return found;
+    if (Date.now() > deadline) throw new Error(`waiting for ${what}: no card offered ${verbs.join(", ")}`);
+    await sleep(1_000);
+  }
+}
+
+/// Connect over USB, and wait for the card to settle with a firmware verb
+/// (returns where it is, [`findFirmwareVerb`]).
 async function connect(driver) {
   await driver.pressConnect("USB", { timeoutMs: STEP_MS });
   await driver.pickBoard(BOARD, { timeoutMs: STEP_MS });
-  await driver.waitFor(`${MAIN_TEXT}.includes('Update firmware') || ${MAIN_TEXT}.includes('Finish update') || ${MAIN_TEXT}.includes('Restore files')`, {
-    timeoutMs: STEP_MS,
-    what: "the card to settle with a firmware verb",
+  return waitFirmwareVerb(driver, SETTLED_VERBS, { timeoutMs: STEP_MS, what: "the card to settle with a firmware verb" });
+}
+
+/// A Lasting verb arms on its first press and acts on its second (the
+/// armed button wears `ux-armed`, `ActionButton`). `{ board, verb, bar }`
+/// says where it is ([`findFirmwareVerb`]): on the card's face (`bar`
+/// null), or in that bar's details.
+async function pressLasting(driver, { board, verb, bar }) {
+  await driver.pressOffer(verb, { board, bar, timeoutMs: STEP_MS });
+  await driver.waitFor(`Boolean(${offerButton(board, verb, Boolean(bar))}?.classList.contains('ux-armed'))`, {
+    timeoutMs: 10_000,
+    what: `${verb} to arm`,
   });
+  await driver.pressOffer(verb, { board, bar, timeoutMs: STEP_MS });
 }
 
-/// A Lasting action arms on its first click and acts on its second.
-async function pressLasting(driver, text) {
-  await driver.clickWhenReady(text, { timeoutMs: STEP_MS });
-  await driver.waitFor(`[...document.querySelectorAll('.ux-armed')].length > 0`, { timeoutMs: 10_000, what: `${text} to arm` });
-  await driver.click(text);
+/// A verb that may or may not arm: pressed once, and once more when its
+/// button is a Lasting one (`ux-armed-chip`). `flash` — the Install a card
+/// offers a board that is not running LightPlayer — is the board pick in
+/// verb mode: picking the board is the press.
+async function pressMaybeArmed(driver, { board, verb, bar }) {
+  if (verb === "flash") {
+    await driver.pressOffer("flash", { board, timeoutMs: STEP_MS });
+    await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_MS, what: "the board-model picker" });
+    await driver.click(BOARD_MODEL, { scope: PANEL });
+    return;
+  }
+  await driver.waitOffer(verb, { board, bar, timeoutMs: STEP_MS });
+  const arms = await driver.evaluate(`Boolean(${offerButton(board, verb, Boolean(bar))}?.classList.contains('ux-armed-chip'))`);
+  if (arms) await pressLasting(driver, { board, verb, bar });
+  else await driver.pressOffer(verb, { board, bar, timeoutMs: STEP_MS });
 }
 
-/// A verb that may or may not arm (the not-LightPlayer face's Flash is a
-/// one-click row action today): click, and click again only if it armed.
-async function pressMaybeArmed(driver, text) {
-  await driver.clickWhenReady(text, { timeoutMs: STEP_MS });
-  const armed = await driver
-    .waitFor(`[...document.querySelectorAll('.ux-armed')].length > 0`, { timeoutMs: 3_000, what: `${text} to arm` })
-    .then(() => true, () => false);
-  if (armed) await driver.click(text);
-}
-
-/// The card's words for each step of an update (`lpa_devices::FlashStep`,
-/// G1 walk 2026-10-03): the card names the step it is on, so the walk reads
-/// which ones it showed, in order. The terminal's lines carry no ellipsis,
-/// so these match the card alone.
+/// The firmware bar's words for each step of an update
+/// (`lpa_devices::FlashStep`, G1 walk 2026-10-03): the bar's work names the
+/// step it is on (`board_card/bar_work.rs`), so the walk reads which ones it
+/// showed, in order. Read off every card's firmware bar — a board that came
+/// back from a pulled cable can be a new card until it says who it is.
 const STEP_LABELS = ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"];
-const STEPS_NOW = `(() => { const t = ${MAIN_TEXT}; return ${JSON.stringify(STEP_LABELS)}.filter((l) => t.includes(l)); })()`;
+/// Page-side: every card's firmware bar, as its line reads (its work's
+/// words while it carries work).
+const FIRMWARE_LINES = `[...document.querySelectorAll('[data-board-card] [data-bar="firmware"] button[aria-label="Firmware details"]')].map((el) => (el.textContent || '').replace(/\\s+/g, ' ').trim())`;
+const STEPS_NOW = `(() => { const lines = ${FIRMWARE_LINES}; return ${JSON.stringify(STEP_LABELS)}.filter((l) => lines.some((t) => t.includes(l))); })()`;
+/// Page-side: the firmware bars' lines, joined — a diagnostic.
+const FIRMWARE_LINE = `${FIRMWARE_LINES}.filter(Boolean).join(' | ')`;
 
-/// The steps the card names until `until` holds, each once, in the order it
-/// first showed them. Polled (every 250 ms): a step can be shorter than one
-/// of the page's own mutation-driven waits would notice.
+/// The layout question's words, as core writes them
+/// (`device_layout_view.rs`): its two titles, and the refusal's. They sit in
+/// the firmware details, which core raises (`UiBarDetails.raised`) while the
+/// question or the refusal is open — no longer a dialog.
+const QUESTION_WORDS = ["Move this board's files to the new layout", "Put this board's files back", "don't fit the new firmware"];
+/// Page-side: the text of the firmware details holding the question (or the
+/// refusal), or ''.
+const QUESTION_NOW = `(() => {
+  const words = ${JSON.stringify(QUESTION_WORDS)};
+  for (const panel of document.querySelectorAll('[data-board-card] [data-bar="firmware"] [id^="ux-popover-panel"]')) {
+    const text = (panel.textContent || '').replace(/\\s+/g, ' ').trim();
+    if (words.some((w) => text.includes(w))) return text;
+  }
+  return '';
+})()`;
+
+/// Whether any wait saw the layout question (or the refusal) open.
+let questionSeen = false;
+
+/// The steps the firmware bar names until `until` holds, each once, in the
+/// order it first showed them. Polled (every 250 ms): a step can be shorter
+/// than one of the page's own mutation-driven waits would notice.
 async function watchSteps(driver, until, { timeoutMs, what }) {
   const seen = [];
   const deadline = Date.now() + timeoutMs;
@@ -306,9 +449,10 @@ async function watchSteps(driver, until, { timeoutMs, what }) {
       seen.push(label);
       await onStepShown(label);
     }
+    if (!questionSeen && (await driver.evaluate(QUESTION_NOW))) questionSeen = true;
     if (await driver.evaluate(until)) return seen;
     if (Date.now() > deadline) throw new Error(`${what} never came (the card's steps so far: ${seen.join(" → ") || "none"})`);
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(250);
   }
 }
 
@@ -326,38 +470,149 @@ const cardSteps = [];
 /// at a screenshot, so a run leaves one picture per step label).
 let onStepShown = async () => {};
 
+/// Until the firmware details hold the layout question (or the refusal);
+/// returns their text.
 async function awaitQuestion(driver) {
-  const question = `${PAGE_TEXT}.includes("Move this board's files to the new layout") || ${PAGE_TEXT}.includes("Put this board's files back") || ${PAGE_TEXT}.includes("don't fit the new firmware")`;
-  for (const label of await watchSteps(driver, question, { timeoutMs: MIGRATION_MS, what: "the layout question (or refusal)" })) cardSteps.push(label);
-  // Behind an open question the card says it is waiting for the answer.
+  for (const label of await watchSteps(driver, `Boolean(${QUESTION_NOW})`, { timeoutMs: MIGRATION_MS, what: "the layout question (or refusal)" })) cardSteps.push(label);
+  // Behind an open question the firmware bar says it is waiting for the
+  // answer.
   for (const label of await driver.evaluate(STEPS_NOW)) if (cardSteps.at(-1) !== label) cardSteps.push(label);
-  return driver.evaluate(PAGE_TEXT);
+  return driver.evaluate(QUESTION_NOW);
 }
 
-/// The sheet IS the question, so Continue acts on its one press — it never
-/// arms a "Confirm continue" (G1 walk 2026-10-03, Yona: "they already
-/// committed to it once"). One click, and the question closes.
+/// The card whose open firmware details offer `verb` — the question's own
+/// verbs (`continue-update`, `cancel-update`) live there while core raises
+/// them.
+async function cardAsking(driver, verb) {
+  return driver.waitFor(
+    `(() => { const mark = [...document.querySelectorAll(${JSON.stringify(`[data-board-card] [data-bar="firmware"] [data-offer-path$="/${verb}"]`)})]
+                .find((m) => Boolean(m.closest('.ux-popover-layer')));
+              return mark ? mark.closest('[data-board-card]').getAttribute('data-board-card') : false; })()`,
+    { timeoutMs: 15_000, what: `the question's \`${verb}\` in the raised firmware details` },
+  );
+}
+
+/// The firmware details ARE the question, so Continue acts on its one
+/// press — it never arms a "Confirm continue" (G1 walk 2026-10-03, Yona:
+/// "they already committed to it once"; `ActionButton`'s
+/// `asked_by_surface`). One press, and the question closes: core stops
+/// offering `continue-update` and lowers the details.
 async function pressContinue(driver) {
-  const dialog = `document.querySelector('[role="dialog"]')`;
-  await driver.click("Continue", { scope: dialog });
-  await driver.waitFor(`!document.querySelector('[role="dialog"]')`, {
+  const board = await cardAsking(driver, "continue-update");
+  await driver.pressOffer("continue-update", { board, bar: "firmware", timeoutMs: 15_000 });
+  await driver.waitFor(`!document.querySelector('[data-board-card] [data-offer-path$="/continue-update"]')`, {
     timeoutMs: 15_000,
     what: "the question to close on ONE press of Continue (did it arm instead?)",
   });
 }
 
+/// Until the update ends; returns the board terminal's outcome line
+/// (`firmware installed — <board>`), or "" when it never came.
 async function awaitInstalled(driver) {
-  // The activity ends when the card stops naming a step; whether it
+  // The activity ends when the firmware bar stops naming a step; whether it
   // succeeded is read after (a terminal line can say "failed" mid-run —
   // esptool-js's own connect retries do).
   await driver.waitFor(`${STEPS_NOW}.length > 0`, { timeoutMs: STEP_MS, what: "the update to start" });
   for (const label of await watchSteps(driver, `${STEPS_NOW}.length === 0`, { timeoutMs: MIGRATION_MS, what: "the update to end" })) cardSteps.push(label);
   // The activity's OUTCOME line is the last thing it writes (after the
-  // board-manifest stamp); give it its moment before anything is closed.
-  await driver
-    .waitFor(`${MAIN_TEXT}.includes('firmware installed')`, { timeoutMs: 60_000, what: "the outcome line" })
-    .catch(() => {});
-  return driver.evaluate(MAIN_TEXT);
+  // board-manifest stamp), on the board's terminal in the status corner's
+  // details; give it its moment.
+  const board = await liveBoard(driver).catch(() => null);
+  if (!board) return "";
+  return driver.boardSaid("firmware installed", { board, timeoutMs: 60_000 }).catch(() => "");
+}
+
+/// Say each new reading of the firmware bar while `waiting` runs: the
+/// moment the walk waits for is a progress reading, and a run that misses it
+/// should show which readings it saw.
+async function narrateFirmwareBar(driver, waiting) {
+  let done = false;
+  let said = "";
+  const narrator = (async () => {
+    while (!done) {
+      const line = await driver.evaluate(FIRMWARE_LINE).catch(() => "");
+      if (line && line !== said) {
+        said = line;
+        console.log(`    card: ${line}`);
+      }
+      await sleep(250);
+    }
+  })();
+  try {
+    return await waiting;
+  } finally {
+    done = true;
+    await narrator;
+  }
+}
+
+/// Page-side: every card as a walk reads it — its ref, each bar's line, and
+/// the verbs on its face (a record, never a predicate).
+const CARDS_NOW = `[...document.querySelectorAll('[data-board-card]')].map((card) => ({
+  card: card.getAttribute('data-board-card'),
+  bars: Object.fromEntries([...card.querySelectorAll('[data-bar]')].map((bar) => [bar.getAttribute('data-bar'),
+    (bar.querySelector('button[aria-label$=" details"]')?.textContent || '').replace(/\\s+/g, ' ').trim()])),
+  offers: [...card.querySelectorAll('[data-offer-path]')].filter((m) => !m.closest('.ux-popover-layer'))
+    .map((m) => m.getAttribute('data-offer-path').split('/').pop()),
+}))`;
+
+/// Page-side: the Bluetooth switch in the card's open connection details
+/// (`UiDetailPanel::Bluetooth`, drawn only while the card holds the board's
+/// access list or the link is Bluetooth), as `{ on, disabled }`, or null.
+function bluetoothSwitch(board) {
+  return `(() => { const sw = ${barPanel(board, "connection")}?.querySelector('button[role="switch"][aria-label="Bluetooth"]');
+    return sw ? { on: sw.getAttribute('aria-checked') === 'true', disabled: sw.disabled } : null; })()`;
+}
+
+/// Page-side: one fact in the card's open `layer` details (`dt` → `dd`), or
+/// null.
+function detailsLine(board, layer, label) {
+  return `(() => { const dt = [...(${barPanel(board, layer)}?.querySelectorAll('dt') ?? [])]
+      .find((el) => (el.textContent || '').trim().toLowerCase() === ${JSON.stringify(label.toLowerCase())});
+    const dd = dt?.nextElementSibling;
+    return dd ? (dd.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`;
+}
+
+/// The card's access rows, read where they live now: the Bluetooth switch
+/// (the connection details); who gets in with no password, the access
+/// details' "Open to" (null while the card holds no list); and whether the
+/// access panel still says it is reading the list.
+async function readAccess(driver, board) {
+  try {
+    await driver.openBar("connection", { board, timeoutMs: STEP_MS });
+    const bluetooth = await driver.evaluate(bluetoothSwitch(board));
+    await driver.openBar("access", { board, timeoutMs: STEP_MS });
+    const open = await driver.evaluate(detailsLine(board, "access", "Open to"));
+    const reading = await driver.evaluate(`(${barPanel(board, "access")}?.textContent || '').includes("Reading the device's list")`);
+    return { bluetooth, open, reading };
+  } finally {
+    await driver.closeDetails({ board }).catch(() => {});
+  }
+}
+
+/// Until the card's access rows are the board's, `timeoutMs` in all: the
+/// Bluetooth switch on and usable (it is locked until the board has answered
+/// its list, `ui_bluetooth_switch.rs`), then "Open to" saying `want`.
+async function awaitAccess(driver, board, want, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const left = () => Math.max(1_000, deadline - Date.now());
+  try {
+    await driver.openBar("connection", { board, timeoutMs: left() });
+    await driver.waitFor(`(() => { const sw = ${bluetoothSwitch(board)}; return Boolean(sw) && sw.on && !sw.disabled; })()`, {
+      timeoutMs: left(),
+      what: "the Bluetooth switch on and usable",
+    });
+    await driver.openBar("access", { board, timeoutMs: left() });
+    await driver.waitFor(`${detailsLine(board, "access", "Open to")} === ${JSON.stringify(want)}`, {
+      timeoutMs: left(),
+      what: `the access details' Open to: ${want}`,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await driver.closeDetails({ board }).catch(() => {});
+  }
 }
 
 /// The cable comes out of a USB-powered board: power and data together.
@@ -524,7 +779,11 @@ async function main() {
   const consoleText = async () => (door ? boardConsole(door) : await driver.evaluate(`window.__walkConsole ?? ""`));
   try {
     await driver.navigate(url);
-    await driver.awaitShim();
+    // The board's card is named by its MAC (`BoardRef`: `mac-<hex>`), as the
+    // shim lists it — the door's `mac=`, or the tab board's own.
+    const shimBoards = await driver.awaitShim();
+    const mac = shimBoards?.find((b) => b.boardId === BOARD)?.mac ?? (door ? MAC : null);
+    CARD = mac ? boardPath(mac) : null;
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: STUDIO_LOAD_MS, what: "Studio to load" });
     if (spec.tab) {
       const seeded = await seedTabBoard(driver);
@@ -539,9 +798,9 @@ async function main() {
         await new Promise((r) => setTimeout(r, 1_000));
       }
     }
-    await connect(driver);
+    const settled = await connect(driver);
     await shot("connected");
-    step("connected", true, "the card settled");
+    step("connected", true, `the card settled (${settled.verb}${settled.bar ? ` in its ${settled.bar} details` : ""} on ${settled.board})`);
 
     // The door writes the console back every 2 s: let what the board has
     // said so far land before marking where the update's words begin.
@@ -562,21 +821,29 @@ async function main() {
         said.includes("[ble] off (files held") && !said.includes("[ble] enabled"),
         (said.match(/\[ble\][^\n]*/) ?? ["(no [ble] line)"])[0].slice(0, 120),
       );
-      const heldPage = await driver.evaluate(MAIN_TEXT);
-      step("the card shows no access list for it", !(await driver.evaluate(`Boolean(${ACCESS_ROW})`)), "");
-      step("the card offers Finish update", heldPage.includes("Finish update"), "");
-      await pressLasting(driver, "Finish update");
+      // No access list: the access details carry no "This board" section,
+      // whose "Open to" core draws only while it holds the board's list
+      // (`access_bar.rs`), beside the access panel itself.
+      const listed = await driver.detailsFact("access", "Open to", { board: settled.board, timeoutMs: STEP_MS });
+      step("the card shows no access list for it", listed === null, listed === null ? "" : `Open to: ${listed}`);
+      const finish = await findFirmwareVerb(driver, ["finish-update"]);
+      step("the card offers Finish update", Boolean(finish), finish ? `\`finish-update\` on ${finish.bar ? `its ${finish.bar} details` : "its firmware bar"}` : "");
+      await pressLasting(driver, finish);
     } else if (scenario === "W7b") {
-      step("formatted board offers its backup", (await driver.evaluate(MAIN_TEXT)).includes("Restore files"), "");
-      await pressLasting(driver, "Restore files");
+      const restore = await findFirmwareVerb(driver, ["restore-files"]);
+      step("formatted board offers its backup", Boolean(restore), restore ? `\`restore-files\` on ${restore.bar ? `its ${restore.bar} details` : "its firmware bar"}` : "");
+      await pressLasting(driver, restore);
     } else {
-      await pressLasting(driver, "Update firmware");
+      // Update: the firmware bar's action on a board older than this
+      // Studio, otherwise a verb in its firmware details.
+      await pressLasting(driver, await waitFirmwareVerb(driver, ["update-firmware"], { timeoutMs: STEP_MS, what: "Update on the card" }));
     }
 
     if (scenario === "W2") {
       const text = await awaitInstalled(driver);
       await shot("updated");
-      step("no question asked", !text.includes("Move this board's files"), "");
+      // The firmware details never held the question, at any reading.
+      step("no question asked", !questionSeen, "");
       step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
     } else {
       const page = await awaitQuestion(driver);
@@ -608,51 +875,55 @@ async function main() {
       } else {
         step("asked", page.includes("Move this board's files") || page.includes("Put this board's files back"), "");
         if (scenario === "W4") {
-          await driver.click("Cancel", { scope: `document.querySelector('[role="dialog"]')` });
-          await driver.waitFor(`!${PAGE_TEXT}.includes("Move this board's files")`, { timeoutMs: STEP_MS, what: "the question to close" });
-          await driver.waitFor(`${MAIN_TEXT}.includes('Update firmware')`, { timeoutMs: MIGRATION_MS, what: "the board back on its firmware" });
+          // Cancel, in the raised firmware details: it loses nothing, so it
+          // acts on one press (pressed again only should it ever arm).
+          await pressMaybeArmed(driver, { board: await cardAsking(driver, "cancel-update"), verb: "cancel-update", bar: "firmware" });
+          await driver.waitFor(`!${QUESTION_NOW}`, { timeoutMs: STEP_MS, what: "the question to close" });
+          await waitFirmwareVerb(driver, ["update-firmware"], { timeoutMs: MIGRATION_MS, what: "the board back on its firmware" });
           await shot("cancelled");
         } else {
           await pressContinue(driver);
-          step("Continue acted on one press", true, "the question closed on the first click; nothing armed");
+          step("Continue acted on one press", true, "the question closed on the first press; nothing armed");
           if (scenario === "W5") {
             // The firmware's own write: esptool-js writes the merged image
             // from 0x0 first and the filesystem (0x35…) only after it, so a
-            // reading inside the app's range is the firmware mid-write.
-            const moment = `(() => {
-              const at = [...${MAIN_TEXT}.matchAll(/Writing at 0x([0-9a-f]+)/g)].map((m) => parseInt(m[1], 16));
-              const last = at.length ? at[at.length - 1] : 0;
-              return last >= 0x100000 && last < 0x300000;
-            })()`;
-            const deadline = Date.now() + MIGRATION_MS;
-            while (!(await driver.evaluate(moment))) {
-              if (Date.now() > deadline) throw new Error("the moment to pull the cable never came");
-              await new Promise((r) => setTimeout(r, 250));
-            }
+            // reading inside the app's range is the firmware mid-write. Its
+            // `Writing at 0x…` lines are on the board's terminal (the status
+            // corner's details); the addresses only climb, so the first line
+            // in [0x100000, 0x300000) is the last one written when it lands.
+            const writing = await driver
+              .boardSaid(/Writing at 0x[12][0-9a-f]{5}(?![0-9a-f])/, { board: await liveBoard(driver), timeoutMs: MIGRATION_MS })
+              .catch((error) => {
+                throw new Error(`the moment to pull the cable never came (${error.message})`);
+              });
             await shot("before-pull");
-            const writing = (await driver.evaluate(MAIN_TEXT)).match(/Writing at 0x[0-9a-f]+[^\n]*/g)?.pop() ?? "";
             step("cable pulled during the firmware write", (await pullCable(driver)) === "pulled", writing);
             await driver.attach(BOARD);
             await connect(driver).catch(() => {});
             // What the board does on its power-on boot (a part-written app),
             // in its own words, before anything is asked of it again.
-            await new Promise((r) => setTimeout(r, 15_000));
-            const afterPull = await driver.evaluate(MAIN_TEXT);
-            verdict.afterPull = { card: afterPull.slice(0, 1500), board: (await consoleText()).slice(-1500).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "") };
+            await sleep(15_000);
+            verdict.afterPull = { card: await driver.evaluate(CARDS_NOW), board: (await consoleText()).slice(-1500).replace(/[\x00-\x09\x0b-\x1f\x7f-\xff]/g, "") };
             await shot("after-pull");
             // A part-written app does not boot ("No bootable app partitions"),
             // so the card meets a board that is not running LightPlayer: its
-            // way back is the face for that, Flash firmware with the board
-            // picked — the same verb a blank board offers.
-            let verb = ["Finish update", "Restore files", "Update firmware"].find((v) => afterPull.includes(v));
-            if (!verb && afterPull.includes("boards fit") && afterPull.includes("Flash firmware")) {
-              await driver.clickWhenReady("boards fit", { timeoutMs: STEP_MS });
-              await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, { timeoutMs: STEP_MS, what: "the board-model picker" });
-              await driver.click("XIAO ESP32-C6", { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-              verb = "Flash firmware";
+            // way back is the card's primary for that, Install (`flash`, the
+            // board pick) — the same verb a blank board offers.
+            let way = await findFirmwareVerb(driver, ["finish-update", "restore-files", "update-firmware"]);
+            if (!way) {
+              for (const board of await driver.cardPaths()) {
+                if (await driver.offered("flash", { board })) {
+                  way = { board, verb: "flash", bar: null };
+                  break;
+                }
+              }
             }
-            step("the card offers a way back", Boolean(verb), verb ?? afterPull.slice(0, 300));
-            await pressMaybeArmed(driver, verb);
+            step(
+              "the card offers a way back",
+              Boolean(way),
+              way ? `\`${way.verb}\`${way.bar ? ` in its ${way.bar} details` : ""} on ${way.board}` : JSON.stringify(verdict.afterPull.card).slice(0, 300),
+            );
+            await pressMaybeArmed(driver, way);
             const again = await awaitQuestion(driver);
             await shot("question-again");
             step("asked again", again.includes("Move this board's files") || again.includes("Put this board's files back"), "");
@@ -661,26 +932,20 @@ async function main() {
             await shot("installed");
             step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
           } else if (scenario === "W7a") {
-            // The card names the step, not its percentage; the terminal
-            // carries esptool-js's own lines: the filesystem body (block 2
-            // on, so 0x352000) is being written once esptool-js says so.
-            const when = `${MAIN_TEXT}.includes('Writing at 0x352000')`;
-            // Poll the card (and say what it says) rather than one long
-            // wait: the moment is a progress reading, and a run that misses
-            // it should show which readings it saw.
-            const deadline = Date.now() + MIGRATION_MS;
-            let seen = "";
-            while (!(await driver.evaluate(when))) {
-              const line = (await driver.evaluate(MAIN_TEXT)).match(/(Writing firmware|Moving files|Verifying files|Reading the board|Resetting the board|Flashing firmware|Checking the files)[^\n]*/)?.[0] ?? "";
-              if (line !== seen) {
-                seen = line;
-                console.log(`    card: ${line}`);
-              }
-              if (Date.now() > deadline) throw new Error("the moment to pull the cable never came");
-              await new Promise((r) => setTimeout(r, 250));
-            }
+            // The firmware bar names the step, not its address; the board's
+            // terminal carries esptool-js's own lines: the filesystem body
+            // (block 2 on, so 0x352000) is being written once esptool-js
+            // says so.
+            // Say what the firmware bar reads while waiting: the moment is
+            // a progress reading, and a run that misses it should show which
+            // readings it saw.
+            const board = await liveBoard(driver);
+            await narrateFirmwareBar(driver, driver.boardSaid("Writing at 0x352000", { board, timeoutMs: MIGRATION_MS })).catch((error) => {
+              throw new Error(`the moment to pull the cable never came (${error.message})`);
+            });
             await shot("before-pull");
-            step("cable pulled", (await pullCable(driver)) === "pulled", (await driver.evaluate(MAIN_TEXT)).match(/(Writing firmware|Moving files)[^\n]*/)?.[0] ?? "");
+            const reading = await driver.evaluate(FIRMWARE_LINE);
+            step("cable pulled", (await pullCable(driver)) === "pulled", reading);
             await driver.attach(BOARD);
             await connect(driver).catch(() => {});
             // The board's own power-on boot, to its end (a port must be
@@ -696,7 +961,7 @@ async function main() {
               if (Date.now() > bootBy) throw new Error("the board never finished its power-on boot after the pull");
               await new Promise((r) => setTimeout(r, 1_000));
             }
-            await driver.waitFor(`${MAIN_TEXT}.includes('Finish update') || ${MAIN_TEXT}.includes('Restore files') || ${MAIN_TEXT}.includes('Update firmware')`, { timeoutMs: STEP_MS, what: "the board back after the pull" });
+            await waitFirmwareVerb(driver, ["finish-update", "restore-files", "update-firmware"], { timeoutMs: STEP_MS, what: "the board back after the pull" });
             await shot("after-pull");
           } else {
             const text = await awaitInstalled(driver);
@@ -728,31 +993,31 @@ async function main() {
     // add had thrown away the list it read). Studio reads the list once per
     // connection; wait for that, then say what the card shows. W7a's board
     // is formatted, so its list is a different one and is not judged here.
+    // The rows live in the card's details now: the Bluetooth switch in the
+    // connection details, who gets in with no password in the access
+    // details ("Open to"), the access panel beside it.
     if (scenario !== "W7a") {
-      const rows = `(() => {
-        const sw = document.querySelector('button[role="switch"][aria-label="Bluetooth"]');
-        const row = ${ACCESS_ROW};
-        return {
-          bluetooth: sw ? { on: sw.getAttribute('aria-checked') === 'true', disabled: sw.disabled } : null,
-          open: row ? row.innerText.trim().replace(/^Access\\s*/, '').trim() : null,
-          reading: (document.querySelector('#main')?.innerText || '').includes("Reading the device's list"),
-        };
-      })()`;
-      const want = JSON.stringify(expectedOpenSummary());
-      const ready = await driver
-        .waitFor(`(() => { const r = ${rows}; return r.bluetooth && r.bluetooth.on && !r.bluetooth.disabled && r.open === ${want}; })()`, {
-          timeoutMs: 60_000,
-          what: "the card's access rows",
-        })
-        .then(() => true, () => false);
-      const seen = await driver.evaluate(rows);
+      const board = await liveBoard(driver).catch(() => CARD);
+      const ready = board ? await awaitAccess(driver, board, expectedOpenSummary(), 60_000) : false;
+      const seen = board ? await readAccess(driver, board).catch((error) => ({ error: error.message })) : { error: "no card for the board" };
       verdict.access = seen;
       if (FULL_ACCESS) {
-        // The panel says why this browser is not on the list.
-        await driver.evaluate(`${ACCESS_ROW}?.click()`).catch(() => {});
-        await new Promise((r) => setTimeout(r, 1_000));
-        verdict.access.full = (await driver.evaluate(PAGE_TEXT)).includes("device is full");
-        await shot("access-panel");
+        // The access panel says why this browser is not on the list (core's
+        // `FULL_SENTENCE`, `device_access_ops.rs`), in the access details.
+        verdict.access.full = false;
+        if (board) {
+          try {
+            await driver.openBar("access", { board, timeoutMs: STEP_MS });
+            verdict.access.full = await driver
+              .waitFor(`(${barPanel(board, "access")}?.textContent || '').includes("device is full")`, { timeoutMs: 10_000, what: "the access panel to say the device is full" })
+              .then(() => true, () => false);
+            await shot("access-panel");
+          } catch {
+            /* judged below: `full` stays false */
+          } finally {
+            await driver.closeDetails({ board }).catch(() => {});
+          }
+        }
       }
       // Judged after the files (below): a run that fails here still says
       // whether every file moved.
