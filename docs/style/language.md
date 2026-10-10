@@ -103,7 +103,8 @@ The rest of the page's words:
 The board card's verbs:
 
 - **Connect** — open the board here and show its panel on the card. The
-  link's icon says how (USB, Bluetooth, Wi‑Fi, the cloud).
+  link's icon says how (USB, Bluetooth, Wi‑Fi, the cloud). On a board
+  another tab holds, Connect takes it over.
 - **Done** — close it; the card shows its facts again.
 - **Edit** — open the board's project in the editor. It's the project
   bar's action, for people who can edit. Until Connect lands, Edit is the
@@ -134,7 +135,21 @@ access), the bar says **Not known yet**.
 the relay; it's a property of the board, not of the link in use. A board
 that doesn't is **direct**.
 
-When another person or tab holds a board, say who: **"Sean is editing"**,
-**"Open in another tab"**, or **"Someone else connected"** when Studio
-can't tell who. Offer to take over when Connect is pressed, not on the
-card.
+When another person or tab holds a board, say who:
+
+- **Open in another tab** — another tab of this browser has the board.
+  Its aside says what that tab is doing: "editor open", or the work it is
+  busy with.
+- **Taken by another tab** — this tab had the board and let go because
+  another tab asked.
+- **Someone else connected** — a holder Studio can't name, on the board's
+  one network connection (a person, or another browser). The card offers
+  Retry and nothing else.
+- **"Sean is editing"** — a person, once Studio knows who (step 3).
+
+**Connect is the take-over** on a board another tab holds: there is no
+separate button on the card. Its tint says what it closes over there (the
+error tint when that tab has the editor open) and it is disabled, with the
+reason ("Busy in the other tab: Updating · 42%"), while that tab is
+flashing, updating or pushing. A tab that doesn't answer in 5 s is "That
+tab didn't answer", with Retry.

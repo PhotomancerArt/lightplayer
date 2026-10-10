@@ -625,7 +625,13 @@ offer at `devices/<board ref>/take-over` (above, "Device verbs are
 offers"), the asker's side in `studio_controller/take_over_flow.rs`. A
 board another tab holds counts as online (`split_roster`), and its picture
 follows the holder's sidecar: a newer sidecar frame replaces a frame that
-is not live here (`CardFeedState::seed_if_newer`).
+is not live here (`CardFeedState::seed_if_newer`). The card says all of
+this in `devices/board_card/held_board.rs`: Connect is the primary and
+presses `take-over`; the connection bar reads "Open in another tab" (with
+"editor open" or what the holder is busy with), "Taken by another tab" for a
+tab that let go, or the take-over's own work ("Asking the other tab…",
+"Opening…", or striped with Retry), all in the orange "someone has it" tone;
+the picture is the one the holder saved; and the card is Online.
 
 The holder's side (`studio_controller/board_hold_flow.rs`, pure halves in
 `board_hold/`): a tab's first sweep waits for one look at the lock manager

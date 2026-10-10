@@ -216,6 +216,13 @@ the app through the same view model and presses the same actions. See
   switch and a fold are page-local state, not user verbs: no `UiAction`, not
   in the offer tree. The agent reads every section of the page through
   `UiHomeView.sections`, the way a person sees it.
+- **Taking a board from another tab is one offer,
+  `devices/<board ref>/take-over`,** drawn as Connect and priced by what it
+  closes in the holder's tab: `Routine` when the holder only watches,
+  `Undoable` when it has the editor open (or has not said), disabled with the
+  holder's reason while it is flashing, updating or pushing. It is never
+  `Lasting` and needs no user activation; the agent presses it and says what
+  it did. It names the board by MAC and never pairs ports.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
@@ -889,7 +896,13 @@ Flip it **off** to test the power-off itself. It works the same on `?emu=tab`.
 
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
-second lens on the same session.
+second lens on the same session. The one exception is the one-tab-holds-a-board
+walk: a second page of the same browser may install with `?emu-second-tab=1`,
+which gives it each board's bytes and not its cable (the door and the 409 are
+unchanged; without the flag a second page still fails at install). It can
+`open()` and `close()` the port, and every cable verb (detach, attach, reset,
+D0) rejects. `just walk-two-tabs-emu --serve-release` walks it (two tabs of one
+headless Chrome, one profile, against one emulated board).
 
 **`?ble=emu`** (beside `?emu=`) does the same for Bluetooth: it replaces
 `navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, so
@@ -1083,6 +1096,7 @@ With a dev server already up on this worktree's port:
 ```bash
 just walk-no-board                        # flash → connect → identify → upload → detach → re-attach
 just walk-no-board --tab                  # the same six steps with NO SERVER — the board is a Worker in the page
+just walk-two-tabs-emu --serve-release    # one tab holds a board: A holds, B (?emu-second-tab=1) watches, takes over, A takes it back, A closes
 just device-scenario run s1 --emu         # one golden-trace scenario, no board
 just device-scenario                      # both lanes' capture status
 just device-scenario check-guard          # the overwrite guard, proved by trying
