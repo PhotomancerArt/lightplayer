@@ -29,6 +29,28 @@ options:
       - value: false
     active: 'chip == "esp32c6"'
 
+  # LP fork (fourth diff, README-LP.md): the C6 controller's mbuf pools, default
+  # unchanged. No block is allocated at init on the emulator, and the blob's
+  # block-get callback allocates one block at a time, so these read as a cap on
+  # the controller's transient ACL memory, not a standing cost (RAM research E13).
+  - name: ble_msys_1_block_count
+    description: "Number of 256-byte mbuf blocks the BLE controller may take (ESP-IDF `BT_NIMBLE_MSYS_1_BLOCK_COUNT`, 12)"
+    default:
+      - value: 12
+    constraints:
+      - type:
+          validator: positive_integer
+    active: 'chip == "esp32c6"'
+
+  - name: ble_msys_2_block_count
+    description: "Number of 320-byte mbuf blocks the BLE controller may take (ESP-IDF `BT_NIMBLE_MSYS_2_BLOCK_COUNT`, 24)"
+    default:
+      - value: 24
+    constraints:
+      - type:
+          validator: positive_integer
+    active: 'chip == "esp32c6"'
+
   - name: event_channel_capacity
     description: "Capacity of the internal event channel"
     default:

@@ -56,6 +56,19 @@ that makes three calls (`r_priv_sdk_config_max_aux_offset_set(2000)`,
 build is byte-for-byte the code above. RAM research experiment E2
 (`lp2025/2026-10-09-1203-ram-research`); nothing turns it on.
 
+### 4. The C6 controller's mbuf pool sizes are build options (`esp_config.yml`, `src/ble/npl.rs`)
+
+`ble_init` called `r_esp_ble_msys_init(256, 320, 12, 24, 1)` with the block
+counts as literals. On the C6 they are now `ESP_RADIO_CONFIG_BLE_MSYS_1_BLOCK_COUNT`
+(12) and `ESP_RADIO_CONFIG_BLE_MSYS_2_BLOCK_COUNT` (24), defaults unchanged
+(the other NPL chips keep the literals), so the values passed are what they
+were. RAM research experiment E13 (`lp2025/2026-10-09-1203-ram-research`):
+the pools are the memory the controller takes for ACL data; on the emulator
+none of it is allocated at init, and the blob's block-get callback
+(`r_ble_ll_mem_memblock_get_cb`) checks a budget and then allocates one block
+at a time. Whether lowering them lowers a connected board's radio-heap
+high-water is a silicon question the build option exists to ask.
+
 ## Re-syncing with upstream
 
 Copy the new version out of the cargo registry, delete `.cargo-ok`,

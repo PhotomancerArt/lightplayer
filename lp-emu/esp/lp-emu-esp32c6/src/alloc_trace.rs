@@ -19,7 +19,18 @@
 //! F <cycle> <ptr hex> <size>                                a free
 //! M <cycle> <text>                                          a host marker (a console line)
 //! L <cycle> <text>                                          a guest log record, as logged
+//! S <ptr hex> <size> <first> <last> <words>                 at the run's end: a live block's touched extent
 //! ```
+//!
+//! `S` lines (RAM experiment E13; only with [`AllocTrace::with_extents`]) are
+//! written once, when the run ends, for every block of at least
+//! [`EXTENT_MIN`] bytes still live: the offsets of the first and last
+//! non-zero word in it (`-1` if none) and how many words are non-zero. With
+//! extents on, every such block is also zero-filled the moment it is
+//! allocated (memory the allocator hands out is undefined, so zeros are one
+//! of the things it may hold), so a stack block shows its high-water as
+//! `size - first`. This changes the machine's memory contents, not its
+//! timing or the trace's other lines, and is off by default.
 //!
 //! `L` lines come from a third hook, `_lp_alloc_trace_mark(text, len)`, which
 //! the firmware calls with every log record it formats (fw-esp32-common's
@@ -38,6 +49,7 @@
 //! the host up to a slice after the guest wrote it, so a marker's cycle is a
 //! bound, not the instant of the log call.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::machine::Esp32C6Machine;
@@ -45,6 +57,9 @@ use crate::rom::HookResult;
 
 /// The deepest backtrace a line carries.
 pub const MAX_FRAMES: usize = 32;
+
+/// Blocks at least this big are followed to the run's end for their `S` line.
+pub const EXTENT_MIN: u32 = 1024;
 
 /// The C6's HP SRAM, where every stack and so every frame pointer lives.
 const DRAM: core::ops::Range<u32> = 0x4080_0000..0x4088_0000;
@@ -62,6 +77,10 @@ pub struct AllocTrace {
     pub markers: u64,
     /// The first write error, if any; the trace stops writing after it.
     pub error: Option<String>,
+    /// Live blocks of at least [`EXTENT_MIN`] bytes: pointer -> size.
+    live_big: BTreeMap<u32, u32>,
+    /// Zero-fill big blocks at allocation and write `S` lines at the end.
+    extents: bool,
 }
 
 impl AllocTrace {
@@ -82,7 +101,16 @@ impl AllocTrace {
             frees: 0,
             markers: 0,
             error,
+            live_big: BTreeMap::new(),
+            extents: false,
         }
+    }
+
+    /// Follow every block of [`EXTENT_MIN`] bytes or more to the run's end
+    /// for its `S` line, zero-filling each as it is allocated.
+    pub fn with_extents(mut self, on: bool) -> Self {
+        self.extents = on;
+        self
     }
 
     /// Write a host marker at `cycle`: one line, newlines flattened.
@@ -180,10 +208,20 @@ fn on_alloc(m: &mut Esp32C6Machine) -> HookResult {
     let (caps, ptr, size) = (r[11], r[12], r[13]);
     let frames = backtrace(m, r[1], r[8]);
     let cycle = m.cycles();
+    let extents = m.alloc_trace_mut().is_some_and(|t| t.extents);
+    if extents && ptr != 0 && size >= EXTENT_MIN {
+        let mut off = 0;
+        while off + 4 <= size {
+            m.poke_word(ptr + off, 0);
+            off += 4;
+        }
+    }
     if let Some(t) = m.alloc_trace_mut() {
         t.allocs += 1;
         if ptr == 0 {
             t.failed += 1;
+        } else if extents && size >= EXTENT_MIN {
+            t.live_big.insert(ptr, size);
         }
         t.write(format_args!("A {cycle} {ptr:x} {size} {caps} {frames}"));
     }
@@ -196,9 +234,37 @@ fn on_dealloc(m: &mut Esp32C6Machine) -> HookResult {
     let cycle = m.cycles();
     if let Some(t) = m.alloc_trace_mut() {
         t.frees += 1;
+        t.live_big.remove(&ptr);
         t.write(format_args!("F {cycle} {ptr:x} {size}"));
     }
     HookResult::Ret
+}
+
+/// Write the run's `S` lines: for each live block of at least
+/// [`EXTENT_MIN`] bytes, the first and last non-zero word's offset and the
+/// count of non-zero words. Call once, when the run ends.
+pub fn write_extents(m: &mut Esp32C6Machine) {
+    let blocks: Vec<(u32, u32)> = match m.alloc_trace_mut() {
+        Some(t) if t.extents => t.live_big.iter().map(|(p, s)| (*p, *s)).collect(),
+        _ => return,
+    };
+    for (ptr, size) in blocks {
+        let (mut first, mut last, mut words) = (-1i64, -1i64, 0u32);
+        let mut off = 0u32;
+        while off + 4 <= size {
+            if m.peek_word(ptr + off).unwrap_or(0) != 0 {
+                if first < 0 {
+                    first = i64::from(off);
+                }
+                last = i64::from(off);
+                words += 1;
+            }
+            off += 4;
+        }
+        if let Some(t) = m.alloc_trace_mut() {
+            t.write(format_args!("S {ptr:x} {size} {first} {last} {words}"));
+        }
+    }
 }
 
 /// `ra`, then the saved `ra` of each frame on the `s0` chain, comma-joined

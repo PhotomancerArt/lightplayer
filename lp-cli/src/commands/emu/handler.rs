@@ -695,7 +695,8 @@ fn install_alloc_trace(
     let trace = lp_emu_esp32c6::alloc_trace::AllocTrace::new(
         Box::new(std::io::BufWriter::with_capacity(1 << 20, file)),
         &header,
-    );
+    )
+    .with_extents(args.alloc_trace_extents);
     lp_emu_esp32c6::alloc_trace::install(machine, alloc_at, dealloc_at, trace);
     // Optional: an image whose logger marks its records (`alloc-trace-marks`).
     let marks = elf.symbol("_lp_alloc_trace_mark").map(|s| s.address);

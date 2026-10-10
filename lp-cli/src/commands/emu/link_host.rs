@@ -148,6 +148,7 @@ impl EmuUsbBoard for C6Board {
             (m.bus.unmapped_reads(), m.bus.unmapped_writes()),
             flash,
         );
+        lp_emu_esp32c6::alloc_trace::write_extents(m);
         if let Some(trace) = m.alloc_trace_mut() {
             trace.flush();
             lines.push(trace.summary());

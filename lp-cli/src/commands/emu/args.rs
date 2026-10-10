@@ -464,6 +464,14 @@ pub struct RunArgs {
     #[arg(long = "alloc-trace-elf", value_name = "ELF", requires = "alloc_trace")]
     pub alloc_trace_elf: Option<PathBuf>,
 
+    /// With `--alloc-trace`: zero-fill every heap block of 1 KiB or more as it
+    /// is allocated and write an `S` line per such block still live at the
+    /// run's end — the first and last non-zero word's offset in it — so a
+    /// task's stack high-water reads as `size - first` (RAM experiment E13).
+    /// Changes the guest's memory contents (never its timing). The C6 only.
+    #[arg(long = "alloc-trace-extents", requires = "alloc_trace")]
+    pub alloc_trace_extents: bool,
+
     /// The run's pace: `realtime` (1×, never ahead of wall time) or `max` (as
     /// fast as possible, never paced). Left out, the board runs at 1× only
     /// while a host is connected through its `--lan` forward. A set pace is
