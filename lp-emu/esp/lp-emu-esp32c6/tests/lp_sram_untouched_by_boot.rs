@@ -21,6 +21,13 @@
 //! core, deep-sleep wake — no reset cause for it is modelled) is not covered.
 //! Emulated evidence, `lp-emu:esp32c6:t1`; never a silicon claim.
 //!
+//! An image built with fw-esp32c6's `e03_lp_heap` hands that span to the
+//! heap at boot, and the allocator writes its free-block header (two words:
+//! the block's size, and a null next) at the region's first byte. The test
+//! allows exactly those two words in such an image and nothing else; so run
+//! on a region-on image it says the region's only writer during boot was the
+//! allocator.
+//!
 //! `#[ignore]`d for the usual reason (`test_support`): it needs the shipped
 //! split image (`just test-emu-c6`, or `LP_EMU_C6_SPLIT_<SLUG>`).
 
@@ -57,6 +64,10 @@ fn no_boot_path_writes_lp_sram_above_the_recovery_region() {
         }
     };
     let chip_len = std::fs::metadata(split.merged()).unwrap().len() as u32;
+    let elf = std::fs::read(split.p2_elf()).expect("the ELF reads");
+    let lp_heap = elf.windows(12).any(|w| w == b"lp_sram_heap");
+    // The allocator's header: `[size, next]` at the region's start.
+    let header = [LP_SRAM_BASE + RECOVERY_LEN, LP_SRAM_BASE + RECOVERY_LEN + 4];
     for cause in [
         ResetCause::PowerOn,
         ResetCause::UsbUartHpSys,
@@ -92,13 +103,16 @@ fn no_boot_path_writes_lp_sram_above_the_recovery_region() {
             if word != sentinel(i) {
                 if 4 * i < RECOVERY_LEN {
                     changed_low += 1;
+                } else if lp_heap && header.contains(&at) {
+                    println!("{cause:?}: allocator header 0x{at:08x} = 0x{word:08x}");
                 } else {
                     changed_high.push((at, word));
                 }
             }
         }
         println!(
-            "{cause:?}: {changed_low} of {} recovery-region words written, {} of {} words above it",
+            "{cause:?} (LP heap {}): {changed_low} of {} recovery-region words written, {} of {} words above it besides the allocator's header",
+            if lp_heap { "on" } else { "off" },
             RECOVERY_LEN / 4,
             changed_high.len(),
             words - RECOVERY_LEN / 4
