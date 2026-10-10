@@ -436,6 +436,21 @@ pub struct RunArgs {
     #[arg(long = "seam-trace", value_name = "FILE")]
     pub seam_trace: Option<PathBuf>,
 
+    /// Write the allocation trace here: one line per heap allocation and free
+    /// the guest makes, with its backtrace, and one marker line per console
+    /// line (`lp_emu_esp32c6::alloc_trace` has the format). Needs an image
+    /// built with fw-esp32c6's `alloc_trace_emu` feature, whose hooks are an
+    /// `ebreak` the emulator answers — a DIAGNOSTIC image, never flashed. The
+    /// C6 only.
+    #[arg(long = "alloc-trace", value_name = "FILE")]
+    pub alloc_trace: Option<PathBuf>,
+
+    /// The ELF that names the allocation trace's hooks (`_esp_alloc_alloc`,
+    /// `_esp_alloc_dealloc`), when `--elf` does not: a split image's
+    /// `p2.elf`, beside the `loader.elf` that boots it.
+    #[arg(long = "alloc-trace-elf", value_name = "ELF", requires = "alloc_trace")]
+    pub alloc_trace_elf: Option<PathBuf>,
+
     /// The run's pace: `realtime` (1×, never ahead of wall time) or `max` (as
     /// fast as possible, never paced). Left out, the board runs at 1× only
     /// while a host is connected through its `--lan` forward. A set pace is

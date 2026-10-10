@@ -64,6 +64,9 @@ pub trait EmuUsbBoard {
     /// End of a run: flush what the machine buffers (decoded frames, the
     /// flash write-back) and describe it, one line each.
     fn finish(&mut self) -> Vec<String>;
+    /// A console line arrived: a marker for the allocation trace, when the
+    /// board keeps one (`--alloc-trace`, the C6's).
+    fn console_marker(&mut self, _line: &str) {}
 }
 
 /// The run-report lines both chips print the same way.
@@ -140,11 +143,23 @@ impl EmuUsbBoard for C6Board {
         let m = &mut self.machine;
         m.flush_frames();
         let flash = m.flush_flash();
-        finish_lines(
+        let mut lines = finish_lines(
             m.instructions(),
             (m.bus.unmapped_reads(), m.bus.unmapped_writes()),
             flash,
-        )
+        );
+        if let Some(trace) = m.alloc_trace_mut() {
+            trace.flush();
+            lines.push(trace.summary());
+        }
+        lines
+    }
+
+    fn console_marker(&mut self, line: &str) {
+        let cycle = self.machine.cycles();
+        if let Some(trace) = self.machine.alloc_trace_mut() {
+            trace.marker(cycle, line);
+        }
     }
 }
 
@@ -573,6 +588,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
     }
 
     fn line(&mut self, line: String) {
+        self.board.console_marker(&line);
         if self.echo {
             eprintln!("{line}");
         }

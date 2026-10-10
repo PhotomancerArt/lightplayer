@@ -114,6 +114,8 @@ use fw_esp32_common::boot;
 mod hardware;
 #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
 mod heap_map;
+#[cfg(feature = "alloc_trace_emu")]
+mod alloc_trace_emu;
 pub use fw_esp32_common::logger;
 // jit_fns (JIT host-log symbol) now lives in fw-esp32-common; linked via the
 // extern reference from the JIT builtin table.
