@@ -26,8 +26,21 @@ in editor" link** on the home page branch's tip (`claude/one-home-page`
 2bb7e11b7), so it is not the board card's change. The same walk on the tab
 backing (`WALK_BACKING=tab`, the board a Worker in the page) opens the editor
 and passes every step, and `walk-ble-emu` opens the editor over `?ble=emu`.
-`walk-drop-emu` on `main` could not be run here: `main`'s copy has no
-`--serve-release` and needs a dev server.
+`walk-drop-emu` on `main` could not be run here at the time: `main`'s copy had
+no `--serve-release` and needed a dev server.
+
+**Control run on `main`, same day.** Once the home page (#1071) had merged,
+`main` itself (`cdd5b5f50`: today's card, its "Open in editor" link, `main`'s
+own copy of the walk) was built (`just studio-web-story-build`,
+`just studio-firmware-package-served`, the default single C6 image) and walked
+with `just walk-drop-emu --serve-release`. It fails the same way at the same
+step (`connect` and `push` pass, `editor` waits out its deadline, the console
+repeats `expected project read frame seq 1, got 0`). The board card branch
+merged with that `main` (`04c50ef8e`) fails twice out of two. So the failure is
+on `main`, not something the board card brought. A run of the same walk on the
+home page branch at `2bb7e11b7` that passed is on record from the director's
+desk and is not explained here: the image variant (`LP_FW_IMAGE=split`) and
+the date of the `main` underneath are the two differences not yet ruled out.
 
 **Root cause** — not known. The error says two project reads interleaved on
 one link (a read's frame 0 arrived where the next frame of another read was
