@@ -4,12 +4,28 @@
 // One continuous Studio session, in a headless browser, against an emulated
 // ESP32-C6 that nothing on the desk is plugged into:
 //
-//     flash → connect → identify → upload a project → detach → re-attach
+//     flash → connect → identify → upload a project
+//       → card-connect → card-panel → card-all-controls → card-done
+//       → card-edit → card-back → card-edit-again
+//       → detach → re-attach
 //
-// That order is `plan.md`'s acceptance criterion 6 verbatim, and this is the
-// artefact G2 looks at. It is deliberately NOT six scenarios in a row: the
-// point is that one board, one page and one grant carry all the way through,
-// because that is where the defects this instrument exists for live.
+// The first four and the last two are `plan.md`'s acceptance criterion 6
+// verbatim, and this is the artefact G2 looks at. It is deliberately NOT six
+// scenarios in a row: the point is that one board, one page and one grant
+// carry all the way through, because that is where the defects this
+// instrument exists for live.
+//
+// The seven `card-*` steps are the connected card (roadmap M4,
+// `lp2025/2026-10-08-2330-connected-in-the-card` P7): Connect on the card
+// turns its bars into the board's panel with the page staying on `/`; a
+// control written there; All controls (the play page) and back; Done; Edit
+// on the watched card connects first; Back keeps the session; Edit on the
+// All controls row reopens nothing; Done on the editor's docked card. Each
+// one waits on the board's words, never on a string Studio could satisfy
+// itself: a panel control turns held at once from Studio's own echo, so
+// "held" is read in a FRESH session (after Done), where the only source is
+// the board's panel state; and "nothing reopened" is the absence of a new
+// `pool install` device event.
 //
 // It is NOT a CI job and must not become one (PD9, pre-ruled E-cost): it
 // wants Chrome, a dev server, a packaged firmware and an emulator. It is a
@@ -490,6 +506,216 @@ async function main() {
       steps.pushVerdict = ended?.entry ?? null;
     });
 
+    // THE CONNECTED CARD (M4). One session on the card, carried through the
+    // editor and back. `pool` device events are the sessions themselves: an
+    // `install` is a session opening, a `remove` one closing.
+    const card = `document.querySelector(${JSON.stringify(`[data-board-card="${boardPath(boardMac)}"]`)})`;
+    const poolCount = (action) =>
+      sink.records.filter((record) => record.kind === "pool" && record.action === action).length;
+    const poolRecord = (action) => (record) => record.kind === "pool" && record.action === action;
+    /// The control the walk writes on the card, by its identity (scope and
+    /// channel): read held in the next session, then let go.
+    let written = null;
+    const writtenSelector = () =>
+      `[data-panel-scope=${JSON.stringify(written.scope)}][data-panel-channel=${JSON.stringify(written.channel)}]`;
+    /// The editor, as a page shows it: a lens address, and the workbench's
+    /// Play toggle mounted.
+    const waitEditor = (what) =>
+      driver.waitFor(
+        `(location.pathname.startsWith('/p/') || location.pathname.startsWith('/device/'))
+          && Boolean(document.querySelector('a[title^="Play mode"]'))
+          ? location.pathname + location.search : false`,
+        { timeoutMs: STEP_DEADLINE_MS, what },
+      );
+    const cardPanel = (what) =>
+      driver.waitFor(
+        `(() => { const c = ${card}; return location.pathname === '/'
+                  && Boolean(c?.querySelector('[data-board-panel] [data-panel-channel]')); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what },
+      );
+    const sessions = {};
+
+    await step("card-connect", "Connect on the board's card: its bars become its panel, on the home page", async () => {
+      const installs = poolCount("install");
+      const before = sink.records.length;
+      // Connect, the card's primary on a ready board running a project.
+      await driver.pressOffer("connect", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
+      // Its controls come from the board's own project read.
+      await cardPanel("the board's panel on its card, the page still at `/`");
+      await sink.awaitRecord(poolRecord("install"), 30_000, before, "the session's `pool install`");
+      const controls = await driver.evaluate(
+        `[...${card}.querySelectorAll('[data-board-panel] [data-panel-channel]')]
+          .map((el) => el.getAttribute('data-panel-scope') + ' ' + el.getAttribute('data-panel-channel') + ' ' + el.getAttribute('data-panel-state'))`,
+      );
+      const bars = await driver.evaluate(`${card}.querySelectorAll('[data-bar]').length`);
+      if (bars !== 0) throw new Error(`the connected card still draws ${bars} bar(s)`);
+      sessions.connect = poolCount("install") - installs;
+      if (sessions.connect !== 1) throw new Error(`Connect opened ${sessions.connect} session(s), not one`);
+      console.log(`  the card's panel: ${controls.join(" · ")}   (pool install +1, the address still /)`);
+      // AC6: the connected card's picture is the session's own frames, live
+      // — the corner reads a frame rate, not an age. Bounded, not timed.
+      const corner = `${card}?.querySelector('[data-board-corner]')`;
+      const live = await driver
+        .waitFor(
+          `(() => { const p = ${card}?.querySelector('[data-picture]'); const c = ${corner};
+                    const reading = (c?.textContent || '').replace(/\\s+/g, ' ').trim();
+                    return p?.getAttribute('data-picture') === 'lens' && /fps/.test(reading) ? reading : false; })()`,
+          { timeoutMs: 60_000, what: "the card's picture to be the session's own, live (the corner reading fps)" },
+        )
+        .catch(async (error) => {
+          const now = await driver.evaluate(
+            `(() => { const p = ${card}?.querySelector('[data-picture]');
+                      return (p?.getAttribute('data-picture') ?? 'none') + ' · ' + ((${corner})?.textContent || '').replace(/\\s+/g, ' ').trim(); })()`,
+          );
+          throw new Error(`${error.message.split("\n")[0]} — the picture reads ${now}`);
+        });
+      console.log(`  the card's picture: the session's own, live — the corner reads ${live}`);
+    });
+
+    await step("card-panel", "write the card's first control to its far end", async () => {
+      const before = sink.records.length;
+      written = await driver.evaluate(`(() => {
+        const control = ${card}.querySelector('[data-board-panel] [data-panel-channel]');
+        const out = { scope: control.getAttribute('data-panel-scope'), channel: control.getAttribute('data-panel-channel') };
+        const knob = control.querySelector('[role="slider"]');
+        const range = control.querySelector('input[type="range"]');
+        const toggle = control.querySelector('button[role="switch"]');
+        if (knob) {
+          knob.focus();
+          out.how = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
+          knob.dispatchEvent(new KeyboardEvent('keydown', { key: out.how, bubbles: true, cancelable: true }));
+        } else if (range) {
+          const to = Number(range.value) >= Number(range.max) ? range.min : range.max;
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(range, to);
+          range.dispatchEvent(new Event('input', { bubbles: true }));
+          out.how = 'to ' + to;
+        } else if (toggle) {
+          toggle.click();
+          out.how = 'flipped';
+        }
+        return out;
+      })()`);
+      if (!written.how) throw new Error(`the card's first control (${written.channel}) has no widget the walk can turn`);
+      // The write going out and the board answering it (the dispatched
+      // action awaits the board's reply). That it HOLDS is read in the next
+      // session (card-edit): here the control reads held from Studio's own
+      // echo, which proves nothing.
+      const record = await sink.awaitRecord(
+        (r) => r.kind === "action" && /PanelWrite/.test(r.name ?? ""),
+        60_000,
+        before,
+        "the panel write's dispatch",
+      );
+      if (record.outcome !== "ok") throw new Error(`the panel write failed: ${record.error}`);
+      console.log(`  wrote ${written.scope} ${written.channel} (${written.how}); ${record.name} ${record.outcome}`);
+    });
+
+    await step("card-all-controls", "All controls: the board's play page on the same session; Back to its card", async () => {
+      const installs = poolCount("install");
+      const href = await driver.evaluate(`${card}.querySelector('[data-all-controls] a')?.getAttribute('href') ?? null`);
+      if (!href) throw new Error("the All controls row is not a link");
+      await driver.evaluate(`${card}.querySelector('[data-all-controls] a').click()`);
+      const play = await driver.waitFor(
+        `location.pathname.endsWith('/play') && Boolean(document.querySelector('#main [data-panel-channel]'))
+          ? location.pathname + location.search : false`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the play page and its panel" },
+      );
+      if (poolCount("install") !== installs) throw new Error("All controls opened a second session");
+      await driver.evaluate("history.back()");
+      await cardPanel("the card's panel again, back at `/`");
+      if (poolCount("install") !== installs) throw new Error("going back home opened a session");
+      sessions.allControls = { href, play };
+      console.log(`  All controls → ${play}  (href ${href}); back at /, no new session`);
+    });
+
+    await step("card-done", "Done: the session closes and the card shows its five bars", async () => {
+      const before = sink.records.length;
+      await driver.pressOffer("done", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(
+        `(() => { const c = ${card}; return Boolean(c) && !c.querySelector('[data-board-panel]')
+                  && c.querySelectorAll('[data-bar]').length === 5; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's five bars" },
+      );
+      await sink.awaitRecord(poolRecord("remove"), 30_000, before, "the session's `pool remove`");
+    });
+
+    await step("card-edit", "Edit on the watched card connects first and opens the editor; the control written before Done reads held", async () => {
+      const installs = poolCount("install");
+      const before = sink.records.length;
+      // Edit, the project bar's action on a watched board.
+      await driver.pressOffer("edit", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
+      const at = await waitEditor("the editor on the board's project");
+      await sink.awaitRecord(poolRecord("install"), 30_000, before, "the new session's `pool install`");
+      if (poolCount("install") !== installs + 1) throw new Error("Edit did not open exactly one session");
+      // THE BOARD'S WORD: a fresh session has no echo of the write, so a
+      // control that reads held here is the board's panel state saying it
+      // kept the write.
+      await driver.waitFor(
+        `[...document.querySelectorAll(${JSON.stringify(writtenSelector())})]
+          .some((el) => el.getAttribute('data-panel-state') === 'engaged')`,
+        { timeoutMs: STEP_DEADLINE_MS, what: `${written.channel} to read held in the fresh session (the board's own read)` },
+      );
+      console.log(`  the editor at ${at}; ${written.scope} ${written.channel} reads held in the new session`);
+    });
+
+    await step("card-back", "Back from the editor: the card holds the same session, its panel again", async () => {
+      const installs = poolCount("install");
+      await driver.evaluate("history.back()");
+      await cardPanel("the card's panel, back at `/`");
+      if (poolCount("install") !== installs) throw new Error("going home opened a new session");
+      const state = await driver.evaluate(
+        `${card}.querySelector('[data-board-panel] ' + ${JSON.stringify(writtenSelector())})?.getAttribute('data-panel-state') ?? null`,
+      );
+      if (state !== "engaged") throw new Error(`${written.channel} reads ${state} on the card, not held`);
+      console.log(`  the session kept (no pool install); ${written.channel} still held on the card`);
+    });
+
+    await step("card-edit-again", "Edit on the All controls row: the editor with nothing reopened; let go; Done on the docked card", async () => {
+      const installs = poolCount("install");
+      await driver.evaluate(`(() => {
+        window.__lpWalkOpeningSeen = Boolean(document.querySelector('[data-opening-frame]'));
+        window.__lpWalkOpeningObserver?.disconnect();
+        window.__lpWalkOpeningObserver = new MutationObserver(() => {
+          if (document.querySelector('[data-opening-frame]')) window.__lpWalkOpeningSeen = true;
+        });
+        window.__lpWalkOpeningObserver.observe(document.body, { subtree: true, childList: true });
+      })()`);
+      const pressed = await driver.evaluate(`(() => {
+        const mark = ${card}.querySelector('[data-all-controls] [data-offer-path$="/edit"]');
+        const buttons = mark ? mark.querySelectorAll('button') : [];
+        const button = buttons[buttons.length - 1];
+        if (!button || button.disabled) return null;
+        button.click();
+        return (button.textContent || '').trim();
+      })()`);
+      if (!pressed) throw new Error("the All controls row draws no Edit to press");
+      const at = await waitEditor("the editor, on the session already open");
+      const opened = await driver.evaluate("window.__lpWalkOpeningSeen === true");
+      if (opened) throw new Error("an opening frame was drawn: Edit reopened the session");
+      if (poolCount("install") !== installs) throw new Error("Edit on the connected board opened a new session");
+      // Let go of the written control (its let-go glyph), so the cable steps
+      // start from a board holding nothing; the board's next read says so.
+      await driver.evaluate(`(() => {
+        const reset = [...document.querySelectorAll(${JSON.stringify(writtenSelector())})]
+          .map((el) => el.querySelector('button[aria-label^="Reset "]')).find(Boolean);
+        reset.click();
+      })()`);
+      await driver.waitFor(
+        `[...document.querySelectorAll(${JSON.stringify(writtenSelector())})]
+          .every((el) => el.getAttribute('data-panel-state') !== 'engaged')`,
+        { timeoutMs: STEP_DEADLINE_MS, what: `${written.channel} to be let go` },
+      );
+      // Done on the editor's docked card ends the session; the page goes home.
+      await driver.pressOffer("done", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(
+        `(() => { const c = ${card}; return location.pathname === '/' && Boolean(c)
+                  && !c.querySelector('[data-board-panel]') && c.querySelectorAll('[data-bar]').length === 5; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "home, the card's five bars" },
+      );
+      console.log(`  ${pressed} on the row → ${at}: no opening frame, no pool install; let go; Done → / and the card's facts`);
+    });
+    steps.sessions = sessions;
+
     // 5. DETACH mid-session — the CABLE, through the bus. Not a reset, not a
     // socket close: on native USB the serial block survives every reset the
     // channel can ask for, so only the cable un-mints a port.
@@ -544,6 +770,16 @@ async function main() {
   // preamble so ordinary console noise — a 404, a warning — still only
   // reports.
   const panics = consoleErrors.filter((l) => l.includes("panicked at"));
+  // The whole trace's sessions, after every record has landed (the sink is
+  // fed in batches, so a step's own count can see a record late): the card
+  // steps open exactly two (Connect, and Edit on the watched card) and
+  // close both (Done, Done on the docked card). More is a reopen.
+  const pool = {
+    install: sink.records.filter((r) => r.kind === "pool" && r.action === "install").length,
+    remove: sink.records.filter((r) => r.kind === "pool" && r.action === "remove").length,
+  };
+  const cardStepsRan = steps.some((s) => s.name === "card-edit-again" && s.ok);
+  const poolWrong = cardStepsRan && (pool.install !== 2 || pool.remove !== 2);
 
   // The trace, and a per-step index into it.
   writeFileSync(path.join(options.out, "walk.jsonl"), sink.raw.join("\n") + "\n");
@@ -580,12 +816,18 @@ async function main() {
   console.log("");
   console.log("=== the walk, step by step");
   for (const s of steps) {
-    console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(9)} ${s.recordCount ?? s.records.length} record(s)   ${path.basename(s.shot)}`);
+    console.log(`  ${s.ok ? "✓" : "✗"} ${s.name.padEnd(17)} ${s.recordCount ?? s.records.length} record(s)   ${path.basename(s.shot)}`);
   }
   if (healed) console.log(`\n  the alias:   /devices → ${healed.split("?")[0]}, its query kept (wire, emu, record)`);
   if (sections.afterDetach) {
     console.log(
       `  the section: after detach ${sections.afterDetach} · after re-attach ${sections.afterReattach ?? "(not reached)"}   (reported, not asserted)`,
+    );
+  }
+  if (cardStepsRan) {
+    console.log(
+      `  the sessions: pool install ×${pool.install}, remove ×${pool.remove} over the whole trace ` +
+        `(Connect and Edit open one each; Done twice) ${poolWrong ? "✗" : "✓"}`,
     );
   }
   if (registry) {
@@ -622,13 +864,19 @@ async function main() {
   }
   if (panics.length) {
     console.error(
-      `\nThe walk's six steps passed, but the page panicked ${panics.length} time(s). ` +
+      `\nThe walk's steps passed, but the page panicked ${panics.length} time(s). ` +
         `The full text is in walk-steps.json (consoleErrors).`,
     );
     process.exit(1);
   }
+  if (poolWrong) {
+    console.error(
+      `\nThe walk's steps passed, but the trace holds ${pool.install} session open(s) and ${pool.remove} close(s), not two of each: something reopened.`,
+    );
+    process.exit(1);
+  }
   console.log(
-    `\n✓ the walk finished: flash → connect → identify → upload → detach → re-attach, ` +
+    `\n✓ the walk finished: flash → connect → identify → upload → card-connect → card-panel → card-all-controls → card-done → card-edit → card-back → card-edit-again → detach → re-attach, ` +
       `with no board${door ? "" : " and no server"}.`,
   );
 }
