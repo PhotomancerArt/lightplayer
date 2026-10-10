@@ -10,7 +10,7 @@ use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
 use crate::object_id::ObjectId;
 use crate::record_log::RecordLog;
-use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader, SectorRead};
+use crate::sector_header::HeadKind;
 use crate::store_error::StoreError;
 
 pub fn collect_sector<F: Flash>(
@@ -58,11 +58,13 @@ fn victim_kind<F: Flash>(
     log: &mut RecordLog<F>,
     victim: u32,
 ) -> Result<HeadKind, StoreError<F::Error>> {
-    let mut h = [0u8; SECTOR_HEADER_LEN as usize];
-    log.read(log.addr(victim, 0), &mut h)?;
-    Ok(match SectorHeader::decode(&h, log.sector_size) {
-        SectorRead::Trusted { header, .. } => header.kind,
-        // A victim is a written sector, so its header was trusted at mount.
-        _ => HeadKind::Cold,
+    // Header bytes 4..8: version, head kind, log2 of the sector size. The
+    // header was checked whole when the sector was mounted or opened.
+    let mut b = [0u8; 4];
+    log.read(log.addr(victim, 4), &mut b)?;
+    Ok(if b[2] == HeadKind::Hot.index() as u8 {
+        HeadKind::Hot
+    } else {
+        HeadKind::Cold
     })
 }

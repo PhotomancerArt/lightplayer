@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use crate::flash::Flash;
 use crate::gc_copy::collect_sector;
 use crate::gc_mark::{MarkRole, mark, prune};
-use crate::gc_victim::choose_victim;
+use crate::gc_victim::{Victim, choose_victim};
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::ObjectId;
 use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN};
@@ -47,15 +47,32 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         // sectors frees one only once enough of it is collected). Tail-only
         // compaction can churn without gaining a sector when records are
         // near `record_max`, so only a run of those that frees nothing past
-        // the best so far stops GC.
+        // the best so far stops it. Last, a head's own garbage, which no
+        // victim reaches (a full hot head is mostly old roots and hot
+        // directories): renew the head — its live records copied to a new
+        // head of its kind, the old one erased — when that lets the write
+        // open fewer sectors. Renewing frees no sector; it gives the head its
+        // garbage back as room.
         let mut best_free = self.log.free_count();
         let mut stalls = 0;
         for _ in 0..self.log.sector_count * 4 {
             if self.log.free_count() == 0 {
                 break;
             }
-            let Some(victim) = choose_victim(&self.log, self.cfg.gc_policy) else {
-                break;
+            let victim = match choose_victim(&self.log, self.cfg.gc_policy)
+                .filter(|_| stalls <= self.cfg.reserve + 2)
+            {
+                Some(v) => v,
+                None => match self
+                    .renewal_helps(HeadKind::Cold, need)
+                    .or_else(|| self.renewal_helps(HeadKind::Hot, need))
+                {
+                    Some(sector) => Victim {
+                        sector,
+                        has_garbage: true,
+                    },
+                    None => break,
+                },
             };
             collect_sector(&mut self.log, victim.sector)?;
             stat!(self.stats.gc_runs += 1);
@@ -68,23 +85,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 stalls = 0;
             } else if !victim.has_garbage {
                 stalls += 1;
-                if stalls > self.cfg.reserve + 2 {
-                    break;
-                }
-            }
-        }
-        // Last, a head's own garbage, which no victim reaches (a full hot
-        // head is mostly old roots and hot directories): renew the head —
-        // its live records copied to a new head of its kind, the old one
-        // erased — when that lets the write open fewer sectors. Renewing
-        // frees no sector; it gives the head its garbage back as room.
-        for kind in HeadKind::ALL {
-            if let Some(s) = self.renewal_helps(kind, need) {
-                collect_sector(&mut self.log, s)?;
-                stat!(self.stats.gc_runs += 1);
-                if self.enough(need) {
-                    return Ok(());
-                }
             }
         }
         Err(StoreError::NoSpace)
