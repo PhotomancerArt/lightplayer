@@ -25,7 +25,7 @@ use crate::dataflow::resolver::{
 use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic_framed;
 use crate::node::{
-    ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
+    ControlNode, ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
     NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, RenderNode, TickContext,
     VisualRenderServices,
 };
@@ -1405,6 +1405,37 @@ impl Engine {
         registry: &ProjectRegistry,
         product: ControlProduct,
     ) -> Result<Option<ControlDisplayLayout>, SessionResolveError> {
+        self.with_probe_host(registry, |host| host.node_control_display_layout(product))
+    }
+
+    /// The revision [`Self::control_display_layout_probe`] would stamp on a
+    /// producer's layout, WITHOUT building the layout.
+    ///
+    /// The published-frame read learns every producer's revision on every
+    /// read — it is part of the geometry's revision, which the client compares
+    /// with the one it holds — but needs the layout itself only when that
+    /// comparison says it is stale. Answers from the node's cached state, so a
+    /// read the client already holds the geometry for allocates no per-lamp
+    /// layout at all.
+    ///
+    /// `Ok(None)` exactly when the layout probe would be.
+    pub(crate) fn control_display_layout_revision_probe(
+        &mut self,
+        registry: &ProjectRegistry,
+        product: ControlProduct,
+    ) -> Result<Option<Revision>, SessionResolveError> {
+        self.with_probe_host(registry, |host| {
+            host.node_control_display_layout_revision(product)
+        })
+    }
+
+    /// Run `f` against a resolve host over this engine's borrows, for a probe
+    /// that wants a node's answer without ticking anything.
+    fn with_probe_host<R>(
+        &mut self,
+        registry: &ProjectRegistry,
+        f: impl FnOnce(&mut EngineResolveHost<'_>) -> R,
+    ) -> R {
         let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
@@ -1430,7 +1461,7 @@ impl Engine {
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
         };
-        host.node_control_display_layout(product)
+        f(&mut host)
     }
 }
 
@@ -2910,6 +2941,33 @@ impl EngineResolveHost<'_> {
         &mut self,
         product: ControlProduct,
     ) -> Result<Option<ControlDisplayLayout>, SessionResolveError> {
+        self.with_stolen_control_node(product, |control_node, ctx| {
+            control_node.control_display_layout(product, ctx)
+        })
+    }
+
+    /// The revision half of [`Self::node_control_display_layout`]: the same
+    /// steal, the same guard, but only
+    /// [`crate::node::ControlNode::control_display_layout_revision`] runs.
+    fn node_control_display_layout_revision(
+        &mut self,
+        product: ControlProduct,
+    ) -> Result<Option<Revision>, SessionResolveError> {
+        self.with_stolen_control_node(product, |control_node, ctx| {
+            control_node.control_display_layout_revision(product, ctx)
+        })
+    }
+
+    /// Steal the producer of `product` exactly like the render probe does, run
+    /// `ask` on its control capability, and put it back.
+    fn with_stolen_control_node<T>(
+        &mut self,
+        product: ControlProduct,
+        ask: impl FnOnce(
+            &mut dyn ControlNode,
+            &mut ControlRenderContext<'_>,
+        ) -> Result<Option<T>, NodeError>,
+    ) -> Result<Option<T>, SessionResolveError> {
         let node_id = product.node();
         let revision = self.frame_revision;
         let mut node_runtime = {
@@ -2960,7 +3018,7 @@ impl EngineResolveHost<'_> {
                 self,
             );
             catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
-                control_node.control_display_layout(product, &mut ctx)
+                ask(control_node, &mut ctx)
             })
         };
 
