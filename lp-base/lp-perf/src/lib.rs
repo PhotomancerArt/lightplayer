@@ -33,6 +33,19 @@ pub const EVENT_SERVER_BOOT: &str = "server-boot";
 /// largest-free-block gate cannot see; this window is what makes it
 /// measurable (`docs/heap-budget-gate.md`).
 pub const EVENT_PROJECT_READ: &str = "project-read";
+/// RESEARCH (research/ram-e15): one registry refresh after a filesystem
+/// change (`ProjectRegistry::refresh_artifacts`): the inventory it derives
+/// lives until the next edit. A C6 research image routes what this window
+/// allocates out of `dram2_seg`.
+pub const EVENT_REGISTRY_REFRESH: &str = "registry-refresh";
+/// RESEARCH (research/ram-e15): one shader-text materialization
+/// (`ProjectRegistry::read_asset_text_if_changed`): the text lives until the
+/// next edit.
+pub const EVENT_ASSET_TEXT: &str = "asset-text";
+/// RESEARCH (research/ram-e15): one whole-artifact read
+/// (`ArtifactStore::read_bytes`): a transient, even inside the two windows
+/// above.
+pub const EVENT_ARTIFACT_READ: &str = "artifact-read";
 /// One playlist entry's subtree leaving the engine at the pre-tick
 /// residency step (`Engine::apply_residency`): registry re-derive, runtime
 /// subtree removal. Its window is what a cycle's heap trace frames.

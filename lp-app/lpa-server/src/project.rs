@@ -648,8 +648,12 @@ impl Project {
         let ctx = ParseCtx { shapes: &shapes };
         let changes = {
             let fs_ref = self.fs.borrow();
-            self.registry
-                .refresh_artifacts(&*fs_ref, events, frame, &ctx)
+            lp_perf::emit_begin!(lp_perf::EVENT_REGISTRY_REFRESH);
+            let changes = self
+                .registry
+                .refresh_artifacts(&*fs_ref, events, frame, &ctx);
+            lp_perf::emit_end!(lp_perf::EVENT_REGISTRY_REFRESH);
+            changes
         };
         {
             let fs_ref = self.fs.borrow();

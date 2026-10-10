@@ -74,6 +74,8 @@ features = ["nightly"]
 alloc-hooks = []
 # LP fork, RESEARCH (E11): one region lent to a borrower (see `LendStats`).
 lend-region = []
+# LP fork, RESEARCH (E15): one region a scoped request reaches last (see `AvoidStats`).
+avoid-region = []
 compat = []
 default = [
     "compat",

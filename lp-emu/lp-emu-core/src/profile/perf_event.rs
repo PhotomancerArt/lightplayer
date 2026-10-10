@@ -21,6 +21,9 @@ pub static KNOWN_EVENT_NAMES: &[&str] = &[
     "server-boot",
     "entry-unload",
     "entry-load",
+    "registry-refresh",
+    "asset-text",
+    "artifact-read",
     "profile:start",
     "profile:end",
 ];

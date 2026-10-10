@@ -100,7 +100,10 @@ impl ArtifactStore {
             });
         }
 
-        match fs.read_file(path.as_path()) {
+        lp_perf::emit_begin!(lp_perf::EVENT_ARTIFACT_READ);
+        let read = fs.read_file(path.as_path());
+        lp_perf::emit_end!(lp_perf::EVENT_ARTIFACT_READ);
+        match read {
             Ok(bytes) => {
                 if let Some(entry) = self.by_location.get_mut(location) {
                     entry.read_state = ArtifactReadState::ReadOk;

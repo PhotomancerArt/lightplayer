@@ -15,6 +15,8 @@ diff = []
 [dependencies]
 libm = "0.2"
 lp-collection = { workspace = true, features = ["serde"] }
+# RESEARCH (research/ram-e15): the `artifact-read` marker.
+lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 serde = { workspace = true, features = ["derive"] }

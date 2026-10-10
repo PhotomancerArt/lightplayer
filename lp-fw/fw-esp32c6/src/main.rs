@@ -112,6 +112,11 @@ mod alloc_watch;
     not(fw_harness)
 ))]
 mod lender;
+// RESEARCH (research/ram-e15): the per-edit results reach dram2_seg last.
+#[cfg(all(feature = "e15_results_out", not(fw_harness)))]
+mod results_out;
+#[cfg(all(feature = "e15_results_out", any(feature = "e11_lender", feature = "alloc_watch_diag")))]
+compile_error!("`e15_results_out` owns lp-perf's hook, as `e11_lender` and `alloc_watch_diag` do: pick one");
 #[cfg(all(feature = "e11_lender", feature = "alloc_watch_diag"))]
 compile_error!("`e11_lender` and `alloc_watch_diag` both own lp-perf's hook: pick one");
 #[cfg(all(feature = "alloc_watch_diag", feature = "alloc_trace_emu"))]
@@ -298,6 +303,8 @@ fn heartbeat_memory_stats() -> Option<lpc_wire::server::MemoryStats> {
     alloc_watch::drain();
     #[cfg(feature = "e11_lender")]
     lender::lender_edge::log_heartbeat();
+    #[cfg(feature = "e15_results_out")]
+    results_out::log_counters();
     esp32_memory_stats().map(|(free_bytes, used_bytes)| lpc_wire::server::MemoryStats {
         free_bytes,
         used_bytes,
@@ -1072,6 +1079,8 @@ fn lp_engine_entry(core: CoreBoot) {
     // borrow the big block instead of passing the read gate.
     #[cfg(feature = "e11_lender")]
     lender::lender_edge::install(&mut server);
+    #[cfg(feature = "e15_results_out")]
+    results_out::install();
     #[cfg(all(feature = "e11_link_standin", not(feature = "e11_lender")))]
     lender::link_standin::install_counting_hook();
     // Wire hello identity: compile-time provenance from build.rs, injected

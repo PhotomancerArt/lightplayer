@@ -425,6 +425,42 @@ struct EspHeapInner {
     internal_heap_stats: InternalHeapStats,
     #[cfg(feature = "lend-region")]
     lend: LendState,
+    #[cfg(feature = "avoid-region")]
+    avoid: AvoidState,
+}
+
+/// ⚠️ **LP fork, RESEARCH (E15, `research/ram-e15`; never for main as
+/// written).** One region a capability-free request reaches LAST while the
+/// firmware says so (`_esp_alloc_avoid`, asked inside the heap lock on every
+/// capability-free allocation): every other region first, in registration
+/// order, then the avoided one. E11's `lend-region`, inverted: here the
+/// big block keeps the long-lived results OUT.
+#[cfg(feature = "avoid-region")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AvoidStats {
+    /// Scoped allocations placed outside the avoided region.
+    pub avoided_count: u32,
+    /// Their bytes (requested).
+    pub avoided_bytes: u32,
+    /// Scoped allocations that found no room elsewhere and went to the
+    /// avoided region anyway.
+    pub fell_back_count: u32,
+    /// Their bytes (requested).
+    pub fell_back_bytes: u32,
+}
+
+#[cfg(feature = "avoid-region")]
+struct AvoidState {
+    region: Option<usize>,
+    stats: AvoidStats,
+}
+
+#[cfg(feature = "avoid-region")]
+unsafe extern "Rust" {
+    /// Whether the allocation being made now should reach the avoided
+    /// region last. Called with the heap's lock held: no allocation, no
+    /// lock, no logging.
+    fn _esp_alloc_avoid() -> bool;
 }
 
 /// ⚠️ **LP fork, RESEARCH (E11, `research/ram-e11`; never for main as
@@ -490,7 +526,60 @@ impl EspHeapInner {
                     peak_used: 0,
                 },
             },
+            #[cfg(feature = "avoid-region")]
+            avoid: AvoidState {
+                region: None,
+                stats: AvoidStats {
+                    avoided_count: 0,
+                    avoided_bytes: 0,
+                    fell_back_count: 0,
+                    fell_back_bytes: 0,
+                },
+            },
         }
+    }
+
+    /// The avoid-region path (see [`AvoidStats`]): `None` when this request
+    /// is not scoped (the caller places it as usual).
+    #[cfg(feature = "avoid-region")]
+    fn allocate_avoiding(
+        &mut self,
+        capabilities: EnumSet<MemoryCapability>,
+        layout: Layout,
+    ) -> Option<Option<NonNull<u8>>> {
+        let avoid = self.avoid.region?;
+        // Only capability-free requests (Rust's global allocator) can reach
+        // a capability-free region; tagged ones are placed as usual.
+        if !capabilities.is_empty() {
+            return None;
+        }
+        // SAFETY: the firmware's predicate takes no lock and allocates nothing.
+        if !unsafe { _esp_alloc_avoid() } {
+            return None;
+        }
+        let size = layout.size() as u32;
+        for (index, region) in self.heap.iter_mut().enumerate() {
+            if index == avoid {
+                continue;
+            }
+            let Some(region) = region.as_mut() else {
+                continue;
+            };
+            if !region.capabilities.is_superset(capabilities) {
+                continue;
+            }
+            if let Some(allocation) = region.allocate(layout) {
+                self.avoid.stats.avoided_count += 1;
+                self.avoid.stats.avoided_bytes = self.avoid.stats.avoided_bytes.saturating_add(size);
+                return Some(Some(allocation));
+            }
+        }
+        let allocation = self.heap[avoid].as_mut().and_then(|r| r.allocate(layout));
+        if allocation.is_some() {
+            self.avoid.stats.fell_back_count += 1;
+            self.avoid.stats.fell_back_bytes = self.avoid.stats.fell_back_bytes.saturating_add(size);
+        }
+        Some(allocation)
     }
 
     /// The lend-region allocation path (see [`LendStats`]).
@@ -702,7 +791,9 @@ impl EspHeapInner {
             .lend
             .region
             .map(|lend| self.allocate_lend(lend, capabilities, layout));
-        #[cfg(not(feature = "lend-region"))]
+        #[cfg(all(not(feature = "lend-region"), feature = "avoid-region"))]
+        let lent = self.allocate_avoiding(capabilities, layout);
+        #[cfg(not(any(feature = "lend-region", feature = "avoid-region")))]
         let lent: Option<Option<NonNull<u8>>> = None;
         let allocation = if let Some(lent) = lent {
             let Some(allocation) = lent else {
@@ -807,6 +898,19 @@ impl EspHeap {
     #[cfg(feature = "lend-region")]
     pub fn set_lend_min_size(&self, bytes: usize) {
         self.inner.with(|heap| heap.lend.min_size = bytes);
+    }
+
+    /// RESEARCH (E15): make the region registered `index`-th (0-based) the
+    /// one a scoped request reaches last. See [`AvoidStats`].
+    #[cfg(feature = "avoid-region")]
+    pub fn set_avoid_region(&self, index: usize) {
+        self.inner.with(|heap| heap.avoid.region = Some(index));
+    }
+
+    /// RESEARCH (E15): the avoid region's counters.
+    #[cfg(feature = "avoid-region")]
+    pub fn avoid_stats(&self) -> AvoidStats {
+        self.inner.with(|heap| heap.avoid.stats)
     }
 
     /// RESEARCH (E11): the lend region's counters.
