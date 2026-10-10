@@ -162,7 +162,8 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 /// `lp-emu-esp32v3/tests/boot.rs` pins the classic's.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
-[INIT] chip=esp32s3 arch=xtensa heap=245760
+[INIT] chip=esp32s3 arch=xtensa heap=245760+73744=319504 (dram_seg arena + dram2_seg)
+[INIT] heap regions: 0 .bss+245760 (dram_seg arena), 1 0x3fcdb700+73744 (dram2_seg, bootloader's)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
 [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
 [INIT] runtime started
@@ -171,8 +172,8 @@ const HELLO: &str = "\
 
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
-const HELLO_BYTES: usize = 280;
-const HELLO_SHA: &str = "ada9ac611c14dc1cbe3bfb97f7880c0fe877ddbfbb268dc0a993e2f26665c138";
+const HELLO_BYTES: usize = 420;
+const HELLO_SHA: &str = "e1ae47e53739229a3c310d03472e089545119f0b8042d2d7013faa4b981aa2c1";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
