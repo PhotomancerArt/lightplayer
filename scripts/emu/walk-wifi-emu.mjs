@@ -6,7 +6,9 @@
 // (Wi‑Fi plan P13: two emulated boards on one virtual LAN, Studio over
 // `?lan=`); this file hands `lan` and its arguments straight to it. `relay`
 // (Wi‑Fi relay plan P9, `walk-wifi-emu-relay.mjs`) likewise: lp-cli-driven,
-// one board reaching an in-process relay through the LAN's uplink.
+// one board reaching an in-process relay through the LAN's uplink; and
+// `relay-p1` (the same script, `--protocol-1`): a core built at the last
+// relay protocol 1 commit at this hub.
 //
 // Real Studio, headless, against an emulated ESP32-C6 running the shipped
 // firmware image — over the `?emu=` USB shim (`usb`) or the `?ble=emu`
@@ -99,7 +101,7 @@ function wifiLine() {
 function args() {
   const lane = process.argv[2];
   if (lane !== "usb" && lane !== "ble") {
-    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|studio-lan|studio-lan-reset|studio-relay> (lan, studio-lan, studio-lan-reset, studio-relay: [--out <dir>] [--keep-open] [--dry-run])");
+    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|relay-p1|studio-lan|studio-lan-reset|studio-relay> (lan, studio-lan, studio-lan-reset, studio-relay: [--out <dir>] [--keep-open] [--dry-run])");
     process.exit(2);
   }
   return { lane, out: path.join(ROOT, "target/walk-wifi-emu", lane) };
@@ -413,6 +415,12 @@ async function main() {
 // (and skips the lane).
 if (process.argv[2] === "lan") await import("./walk-wifi-emu-lan.mjs");
 else if (process.argv[2] === "relay") await import("./walk-wifi-emu-relay.mjs");
+// `relay-p1` (pictures-through-the-cloud plan P6): the relay walk's
+// protocol 1 lane, a core built at the last protocol 1 commit at this hub.
+else if (process.argv[2] === "relay-p1") {
+  process.argv.push("--protocol-1");
+  await import("./walk-wifi-emu-relay.mjs");
+}
 // `studio-lan` (network-transport plan P04): Studio with no flag reaching
 // boards on the virtual LAN — its own walk too.
 else if (process.argv[2] === "studio-lan") await import("./walk-wifi-emu-studio-lan.mjs");

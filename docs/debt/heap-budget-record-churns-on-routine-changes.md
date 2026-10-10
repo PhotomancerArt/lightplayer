@@ -335,6 +335,21 @@ long-lived branch conflict on this file whenever main re-baselined too.
   attributed cause. Workaround as before: the director takes CI's figures,
   never a local bless.
 
+- 2026-10-10 — **the dirty re-check a fourth time, and a fetched image
+  reads differently again** (relay pictures PR #1066, head `e7d96922f`, run
+  38082107209, merge commit `2cbecd05f3e1`). The heap job's clean first step
+  (version `2cbecd0`) read 104,652 B used / 196,884 B free / 116,656 B
+  largest block / 12,168 B stack high water against main's record of
+  105,708 / 195,828 / 116,704, failing on `largestFreeBlock` alone (-48 B;
+  the other two "improved"). Its `Figure moves` bless agreed with that
+  boot to the byte; the re-check, built as `2cbecd0-dirty-134625PT`, read
+  104,684 / 196,852 / 116,672 and answered "not-a-figure-move", so
+  `just apply-ci-figures 1066` found no patch. A local
+  `heap-budget-baseline-chips esp32c6` on the fetched `Emulator C6` image of
+  the same run read 104,660 / 196,876 / 116,688 / 12,164 — the 2026-10-07
+  entry's two-builds-in-one-run gap. Workaround as before: the record takes
+  the heap job's clean first-step figures, transcribed from its log.
+
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each
 legitimately re-baseline different chips/projects do not conflict. Likely

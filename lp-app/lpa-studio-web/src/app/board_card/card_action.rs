@@ -91,6 +91,11 @@ pub struct CardPreviews {
     pub access_keys_open: bool,
     /// The other-version form with values picked (and armed).
     pub other_version: Option<super::other_version_form::OfferPickerPreview>,
+    /// A bar's sweep (work with no percent) parked at this `left`, in percent
+    /// of the bar and with its motion off: a capture freezes every animation
+    /// at its first frame, so a sweep otherwise rests at the bar's left edge
+    /// and its far end is never seen.
+    pub sweep_parked_at: Option<i16>,
 }
 
 /// Provide `scope` to every action below the caller; readers re-render

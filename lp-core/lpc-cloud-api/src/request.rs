@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::access::Access;
 use crate::account_password_tier::AccountPasswordTier;
+use crate::board_picture::BoardPictures;
 use crate::sidecar_meta::SidecarMeta;
 
 /// A client→service request. See [`crate::response::CloudResponse`] for the
@@ -76,6 +77,8 @@ pub enum CloudRequest {
     ResetAccountKey,
     /// See [`ListBoards`].
     ListBoards,
+    /// See [`crate::board_picture::BoardPictures`].
+    BoardPictures(BoardPictures),
 }
 
 /// Who is the caller? Answered with [`crate::response::UserInfo`]; never
@@ -406,6 +409,12 @@ impl From<ResetAccountKey> for CloudRequest {
 impl From<ListBoards> for CloudRequest {
     fn from(_: ListBoards) -> Self {
         CloudRequest::ListBoards
+    }
+}
+
+impl From<BoardPictures> for CloudRequest {
+    fn from(request: BoardPictures) -> Self {
+        CloudRequest::BoardPictures(request)
     }
 }
 

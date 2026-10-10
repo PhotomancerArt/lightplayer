@@ -18,7 +18,10 @@
 //! - two boards under one account are both in `ListBoards`, on the same
 //!   network as the caller (loopback);
 //! - with 100 ms added each way on the device leg, the session still comes
-//!   up well inside its login deadline and requests answer (numbers printed).
+//!   up well inside its login deadline and requests answer (numbers printed);
+//! - relay protocol 2: the host board says its firmware and its project's
+//!   name, sends its picture (the empty one with no project), its own
+//!   accounts read it and nobody else does, and watching makes it fast.
 
 use std::future::Future;
 use std::time::{Duration, Instant};
@@ -33,6 +36,7 @@ use lp_cli::server::run_server_loop_with;
 use lpa_client::LpClient;
 use lpa_client::transport_lan::{BoardPassword, LanError, os_entropy};
 use lpc_access::{DeviceAccessFile, OpenTo, SecretEntry, Tier};
+use lpc_cloud_api::KnownPicture;
 use lpc_model::AsLpPath;
 use lpc_relay::RelayBoardId;
 use lpfs::{LpFs, LpFsMemory};
@@ -317,6 +321,63 @@ fn a_boards_own_relay_driver_registers_with_its_lan_address_and_carries_a_sessio
     harness.stop();
 }
 
+/// The C6's own relay driver, picture slot and `serve_relay` (the host
+/// harness) against the real hub: its picture reaches the cache (no lamps:
+/// the harness loads no project), watching makes it send more, and the
+/// picture outlives the board, marked offline.
+#[test]
+fn a_boards_own_relay_driver_sends_pictures_and_its_picture_outlives_it() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let (harness, board) = HarnessBoard::start(&cloud, vec![alice.entry()]);
+    cloud.wait_for_boards(1);
+
+    let picture = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+    })
+    .expect("the board's picture reaches the hub");
+    assert!(picture.online);
+    assert!(picture.outputs.is_empty(), "the harness plays nothing");
+    assert_eq!(picture.colors.map(|colors| colors.0.len()), Some(0));
+    let listed = cloud.list_boards(&alice.session);
+    assert_eq!(listed.boards[0].relay_proto, 2);
+    assert_eq!(listed.boards[0].firmware.as_deref(), Some("host-harness"));
+
+    let before = harness.relay_status().1.pictures;
+    let started = Instant::now();
+    let mut after = before;
+    while started.elapsed() < Duration::from_secs(20) {
+        cloud.board_pictures(&alice.session, &[known(board, None)], true);
+        after = harness.relay_status().1.pictures;
+        if after >= before + 3 && started.elapsed() >= Duration::from_secs(2) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    println!(
+        "[relay-pictures] harness board: {before} -> {after} pictures in {:.1} s watched",
+        started.elapsed().as_secs_f64()
+    );
+    assert!(
+        after >= before + 3,
+        "watching made it fast: {before} -> {after}"
+    );
+
+    harness.stop();
+    let kept = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+            .filter(|picture| !picture.online)
+    })
+    .expect("the picture outlives the board");
+    assert_eq!(kept.id, board.to_string());
+}
+
 /// D2 with the real hub and clients: Alice's relay session moves to the LAN
 /// when she opens it with the same key, and Bob, through the relay, is told
 /// busy while she holds it.
@@ -374,7 +435,174 @@ fn the_same_key_moves_a_relay_session_to_the_lan_and_anyone_else_is_busy() {
     harness.stop();
 }
 
+/// Relay protocol 2 on the host board: its hello says lp-cli's version,
+/// its project report names `Basic`, and its picture reaches the hub's
+/// cache, where the board's own account reads it and nobody else does.
+#[test]
+fn a_host_board_sends_its_project_and_its_picture_and_members_read_them() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let bob = cloud.account("bob");
+    let board = HostBoard::start_playing(&cloud.origin(), vec![alice.entry()], "basic");
+    cloud.wait_for_boards(1);
+
+    let listed = wait_until(Duration::from_secs(10), || {
+        let list = cloud.list_boards(&alice.session);
+        list.boards
+            .into_iter()
+            .find(|presence| presence.id == board.to_string() && presence.project.is_some())
+    })
+    .expect("the board's project reaches the hub");
+    assert_eq!(listed.relay_proto, 2);
+    assert_eq!(listed.firmware.as_deref(), Some(env!("LP_APP_VERSION")));
+    assert_eq!(listed.project.as_deref(), Some("Basic"));
+
+    let picture = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+    })
+    .expect("the board's picture reaches the hub");
+    assert_eq!(picture.id, board.to_string());
+    assert!(picture.online);
+    let lamps: u64 = picture.outputs.iter().map(|&lamps| u64::from(lamps)).sum();
+    assert!(
+        lamps > 0,
+        "the basic project has lamps: {:?}",
+        picture.outputs
+    );
+    let colors = picture.colors.as_ref().expect("colours on a first read");
+    assert_eq!(colors.0.len() % 3, 0);
+    let count = (colors.0.len() / 3) as u64;
+    assert_eq!(count, lamps.min(256), "min(T, 256) samples");
+    assert!(colors.0.iter().any(|&byte| byte != 0), "something is lit");
+    println!(
+        "[relay-pictures] host board: outputs {:?}, {count} colours, seq {}",
+        picture.outputs, picture.seq
+    );
+
+    // Idle: the next picture is a minute away, so the caller holds this one.
+    let again = cloud.board_pictures(&alice.session, &[known(board, Some(picture.seq))], false);
+    assert_eq!(again.pictures.len(), 1);
+    assert_eq!(again.pictures[0].seq, picture.seq);
+    assert!(again.pictures[0].colors.is_none(), "the caller has these");
+
+    assert!(
+        cloud
+            .board_pictures(&bob.session, &[known(board, None)], false)
+            .pictures
+            .is_empty(),
+        "another account reads nothing"
+    );
+    let guest = cloud.guest();
+    assert!(
+        cloud
+            .board_pictures(&guest, &[known(board, None)], true)
+            .pictures
+            .is_empty(),
+        "a guest reads nothing"
+    );
+}
+
+/// With nothing loaded the host board still answers: the empty picture,
+/// and no project.
+#[test]
+fn a_host_board_with_no_project_sends_an_empty_picture() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let board = HostBoard::start(&cloud.origin(), vec![alice.entry()], &[]);
+    cloud.wait_for_boards(1);
+
+    let picture = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+    })
+    .expect("the empty picture reaches the hub");
+    assert!(picture.outputs.is_empty(), "no lamps");
+    assert_eq!(
+        picture.colors.map(|colors| colors.0.len()),
+        Some(0),
+        "count 0"
+    );
+    let list = cloud.list_boards(&alice.session);
+    let presence = list
+        .boards
+        .iter()
+        .find(|presence| presence.id == board.to_string())
+        .expect("listed");
+    assert_eq!(presence.project, None, "no project");
+    assert_eq!(presence.relay_proto, 2);
+}
+
+/// A member watching (`watch: true`, once a second) makes the host board
+/// send pictures fast. A host test on real time: the net is generous and
+/// the number is printed.
+#[test]
+fn watching_makes_a_host_board_fast() {
+    let cloud = Cloud::start(None);
+    let alice = cloud.account("alice");
+    let board = HostBoard::start_playing(&cloud.origin(), vec![alice.entry()], "basic");
+    cloud.wait_for_boards(1);
+    let first = wait_until(Duration::from_secs(10), || {
+        cloud
+            .board_pictures(&alice.session, &[known(board, None)], false)
+            .pictures
+            .pop()
+    })
+    .expect("a first picture");
+
+    let started = Instant::now();
+    let mut seqs = vec![first.seq];
+    while started.elapsed() < Duration::from_secs(20) {
+        let held = seqs.last().copied();
+        let read = cloud.board_pictures(&alice.session, &[known(board, held)], true);
+        if let Some(picture) = read.pictures.first()
+            && Some(picture.seq) != held
+        {
+            seqs.push(picture.seq);
+        }
+        if seqs.len() > 3 && started.elapsed() >= Duration::from_secs(5) {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    println!(
+        "[relay-pictures] watched for {:.1} s: seq moved {} times ({seqs:?})",
+        started.elapsed().as_secs_f64(),
+        seqs.len() - 1
+    );
+    assert!(
+        seqs.len() > 3,
+        "watching moved the picture at least 3 times: {seqs:?}"
+    );
+}
+
 // ---- helpers ---------------------------------------------------------
+
+/// A `BoardPictures` entry for `board`, holding `seq`.
+fn known(board: RelayBoardId, seq: Option<u64>) -> KnownPicture {
+    KnownPicture {
+        id: board.to_string(),
+        seq,
+    }
+}
+
+/// Poll `probe` every 100 ms until it answers, up to `wait`.
+fn wait_until<T>(wait: Duration, mut probe: impl FnMut() -> Option<T>) -> Option<T> {
+    let deadline = Instant::now() + wait;
+    loop {
+        if let Some(found) = probe() {
+            return Some(found);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
 
 /// The C6's board-side relay on the host harness: its network slot, mux
 /// and server, locked (no "Anyone"), holding `accounts`, on `cloud`'s relay.
@@ -428,6 +656,27 @@ struct HostBoard;
 
 impl HostBoard {
     fn start(origin: &str, accounts: Vec<SecretEntry>, passwords: &[SecretEntry]) -> RelayBoardId {
+        Self::spawn(origin, accounts, passwords, None)
+    }
+
+    /// The same board playing `projects/test/<project>`: its files written
+    /// into the memory filesystem under `projects/<project>/`, loaded and
+    /// run two frames before the relay starts (no upload, and no process
+    /// environment touched: these tests run in parallel).
+    fn start_playing(
+        origin: &str,
+        accounts: Vec<SecretEntry>,
+        project: &'static str,
+    ) -> RelayBoardId {
+        Self::spawn(origin, accounts, &[], Some(project))
+    }
+
+    fn spawn(
+        origin: &str,
+        accounts: Vec<SecretEntry>,
+        passwords: &[SecretEntry],
+        project: Option<&'static str>,
+    ) -> RelayBoardId {
         let mut seed = [0u8; 16];
         os_entropy(&mut seed);
         let board = host_board_id(&URL_SAFE_NO_PAD.encode(seed));
@@ -451,20 +700,51 @@ impl HostBoard {
                 store.to_json().unwrap().as_bytes(),
             )
             .unwrap();
+            if let Some(project) = project {
+                write_test_project(&fs, project);
+            }
             let accounts = lp_cli::server::relay_host::relay_accounts(&fs);
             let mut server = create_server_on(Box::new(fs), None, true, None).unwrap();
             server.set_entropy_source(Some(os_entropy));
+            if let Some(project) = project {
+                server
+                    .load_project(format!("/projects/{project}").as_path())
+                    .expect("the test project loads");
+                for _ in 0..2 {
+                    server.advance_frame(16).expect("a frame");
+                }
+            }
             runtime.block_on(async move {
-                let transport =
+                let mut transport =
                     start_relay_host(NoLocalLinks, &origin, board, "test board".into(), accounts)
                         .unwrap();
+                transport.report_project(&server);
                 let _ = run_server_loop_with(server, transport, |server, transport| {
-                    transport.send_hellos(server);
+                    transport.after_tick(server);
                 })
                 .await;
             });
         });
         board
+    }
+}
+
+/// `projects/test/<project>`'s files, into `fs` under `/projects/<project>/`.
+fn write_test_project(fs: &LpFsMemory, project: &str) {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../projects/test")
+        .join(project);
+    for entry in std::fs::read_dir(&dir).expect("the test project's directory") {
+        let path = entry.expect("an entry").path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        fs.write_file(
+            format!("/projects/{project}/{name}").as_path(),
+            &std::fs::read(&path).expect("a project file"),
+        )
+        .expect("written");
     }
 }
 

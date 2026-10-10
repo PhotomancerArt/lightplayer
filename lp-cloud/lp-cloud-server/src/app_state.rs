@@ -126,7 +126,7 @@ impl AppState {
                 Arc::new(upstream),
                 Arc::new(list_upstream),
             )),
-            relay: RelayRegistry::new(),
+            relay: RelayRegistry::with_pictures(config.relay_pictures),
             config: Arc::new(config),
         }
     }

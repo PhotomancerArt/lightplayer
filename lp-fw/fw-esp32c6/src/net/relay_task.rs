@@ -17,6 +17,12 @@
 //! - **Where.** `lightplayer.app:80`, always, on the product image; a desk
 //!   image built with `LP_RELAY_HOST=<host>[:port]` dials that instead and
 //!   says so at boot (RD14).
+//! - **Relay protocol 2.** The hello carries the build's version
+//!   ([`relay_config`]: the manifest's version slot, what the wire hello
+//!   reports; on a split image the core and the engine come from one link,
+//!   so it is the core's too). The project's facts and the pictures the hub
+//!   asks for come from the main thread through `RELAY_BOARD` (its frame
+//!   hook, `relay_probes::serve_relay`); this task only moves them.
 //! - **Memory.** The leg's TCP and WebSocket buffers (5,830 B) exist only
 //!   while the board may dial (joined, Cloud relay on, an account entry
 //!   held: RD8), and the route's outgoing frame (1,091 B) only while a
@@ -27,6 +33,10 @@
 //!   measured the boot-time 6,921 B taking the largest free block from
 //!   19,556 B to 13,448 B on the emulated C6 with `projects/test/basic`
 //!   loaded and a network session open, under the read gate's 16,384 B.
+//!   A picture's buffer (at most 836 B, `MAX_BOARD_PICTURE_FRAME`) is
+//!   reserved by the main thread only once the hub asks for a picture, goes
+//!   back and forth between the threads after that, and is freed whenever
+//!   the leg ends or the board may not dial.
 
 use alloc::collections::VecDeque;
 use alloc::string::String;
@@ -37,7 +47,9 @@ use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::{IpAddress, Ipv4Address, Stack};
 use embassy_time::{Duration, Instant, Timer};
-use fw_esp32_common::net::relay::{RelayDriver, RelayLegIo, RelayLegSizes, run_relay_leg};
+use fw_esp32_common::net::relay::{
+    RelayDriver, RelayLegIo, RelayLegSizes, RelayPictureSlot, run_relay_leg,
+};
 use fw_esp32_common::net::ws::RX_OVERHEAD;
 use fw_esp32_common::radio_link::lan_link_config::LAN_MAX_FRAME;
 use fw_esp32_common::radio_link::{RADIO_LINK_SLOTS, SharedPort};
@@ -118,6 +130,9 @@ impl C6RelayIo {
         if let Some(accounts) = RELAY_BOARD.take_accounts() {
             driver.handle(now, RelayEvent::Accounts(accounts));
         }
+        if let Some(facts) = RELAY_BOARD.take_project() {
+            driver.handle(now, RelayEvent::Project(facts));
+        }
         driver.handle(
             now,
             RelayEvent::Network {
@@ -197,6 +212,12 @@ impl RelayLegIo for C6RelayIo {
             if let Some(accounts) = RELAY_BOARD.take_accounts() {
                 return RelayEvent::Accounts(accounts);
             }
+            if let Some(facts) = RELAY_BOARD.take_project() {
+                return RelayEvent::Project(facts);
+            }
+            if RELAY_BOARD.pictures.news() {
+                return RelayEvent::PictureReady;
+            }
             let changed = {
                 let mut address = self.address.borrow_mut();
                 match select(RELAY_BOARD.wait(), address.changed()).await {
@@ -210,8 +231,12 @@ impl RelayLegIo for C6RelayIo {
         }
     }
 
+    fn picture_slot(&self) -> &RelayPictureSlot {
+        &RELAY_BOARD.pictures
+    }
+
     fn publish(&self, driver: &RelayDriver) {
-        RELAY_BOARD.publish(driver);
+        RELAY_BOARD.publish(driver, self.now_us());
     }
 }
 
@@ -226,8 +251,9 @@ fn lan_address(address: Option<[u8; 4]>) -> Option<LanAddress> {
 
 /// The relay's `config` for this board: its MAC, its name (the stamped
 /// `/.lp/device.json` name, else its `lp-xxxx` LAN label), this build's wire
-/// version, and the relay's address (`lightplayer.app:80`, or the desk
-/// image's `LP_RELAY_HOST`). One session at a time: the C6 holds one.
+/// version and app version (the protocol 2 hello's firmware), and the
+/// relay's address (`lightplayer.app:80`, or the desk image's
+/// `LP_RELAY_HOST`). One session at a time: the C6 holds one.
 pub fn relay_config(board_mac: [u8; 6], name: Option<String>) -> RelayClientConfig {
     RelayClientConfig {
         host: String::from(RELAY_HOST),
@@ -236,6 +262,7 @@ pub fn relay_config(board_mac: [u8; 6], name: Option<String>) -> RelayClientConf
         label: name.unwrap_or_else(|| fw_esp32_common::net::mdns::mdns_label(board_mac)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
         max_routes: 1,
+        firmware: crate::manifest_version(),
     }
 }
 
