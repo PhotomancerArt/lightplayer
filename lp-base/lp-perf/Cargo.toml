@@ -10,6 +10,8 @@ rust-version.workspace = true
 default = []
 syscall = ["dep:lp-emu-abi"]
 log     = ["dep:log"]
+# RESEARCH (research/frag-reads): forward markers to a firmware-installed fn.
+hook    = []
 
 [dependencies]
 lp-emu-abi = { path = "../../lp-emu/lp-emu-abi", optional = true }

@@ -197,6 +197,7 @@ pub struct LpServer {
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
+    read_cost_margin: Option<u32>,
     /// Answer a tick's requests before rendering its frame (see
     /// [`Self::set_messages_first`]). Off = render first, then answer.
     messages_first: bool,
@@ -400,6 +401,7 @@ impl LpServer {
             network_changed: None,
             access_changed: None,
             read_gate: None,
+            read_cost_margin: None,
             messages_first: false,
             reboot_hook: None,
             firmware_manifest: None,
@@ -1068,7 +1070,27 @@ impl LpServer {
                     // request with a structured terminal error instead
                     // of letting infallible alloc abort-reset the
                     // board mid-assembly.
-                    if let Some(refusal) = self.read_gate.and_then(|gate| {
+                    // RESEARCH (research/ram-e07): with a per-request margin
+                    // installed, the floors are this read's own estimated
+                    // cost plus the margin, not the chip's fixed pair.
+                    let request_gate = self.read_cost_margin.map(|margin| {
+                        let lamps = self
+                            .project_manager
+                            .get_project(handle)
+                            .map(|project| project.engine().published_output_lamps())
+                            .unwrap_or(0);
+                        let cost = crate::read_cost::ReadCost::estimate(&request, lamps);
+                        log::info!(
+                            "[e07] read cost: {lamps} lamps, working set {} B, largest ask {} B",
+                            cost.working_set,
+                            cost.largest_ask
+                        );
+                        ReadGate {
+                            min_free_bytes: cost.working_set.saturating_add(margin),
+                            min_largest_block_bytes: cost.largest_ask.saturating_add(512),
+                        }
+                    });
+                    if let Some(refusal) = request_gate.or(self.read_gate).and_then(|gate| {
                         let memory = server_status.memory.as_ref();
                         gate.check(memory.map(|memory| memory.free_bytes), largest_block)
                             .err()
@@ -1423,6 +1445,14 @@ impl LpServer {
     /// Unset = reads are never refused.
     pub fn set_read_gate(&mut self, gate: Option<ReadGate>) {
         self.read_gate = gate;
+    }
+
+    /// RESEARCH (`research/ram-e07`): size the read gate per request
+    /// ([`crate::read_cost::ReadCost`]): a read needs its own estimated
+    /// working set plus `margin` free, and a block for its own largest ask.
+    /// `None` (the default) keeps [`Self::set_read_gate`]'s fixed floors.
+    pub fn set_read_cost_margin(&mut self, margin: Option<u32>) {
+        self.read_cost_margin = margin;
     }
 
     /// Choose the order [`Self::tick_and_send`] works in. Default off.

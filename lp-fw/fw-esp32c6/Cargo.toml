@@ -204,6 +204,21 @@ desk_ble_fault = ["ble"]
 heap_map_diag = ["lpc-shared"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
+# RESEARCH (research/frag-reads; never shipped): per-window allocation census
+# (`src/alloc_watch.rs`). Exclusive with `heap_track_diag` and `alloc_trace_emu` (all own the hooks).
+alloc_watch_diag = ["esp-alloc/alloc-hooks", "lpc-shared", "lp-perf/hook", "dep:heapless"]
+# RESEARCH (research/ram-e07; never shipped): the read gate sized per request
+# (`lpa_server::read_cost`), and a boot-time heap ballast
+# (`LP_E7_BALLAST_BYTES` at build time) that puts a desk board where the
+# 2026-10-09 defect's board was.
+e07_read_cost = []
+e07_ballast = []
+# Every heap alloc/free handed to the EMULATOR (`src/alloc_trace_emu.rs`) —
+# OFF by default, never shipped, never flashed: each hook is `ebreak; ret`, so
+# silicon traps on the first allocation. `lp-cli emu run --alloc-trace` claims
+# the two addresses and writes one line per call. Excludes `heap_track_diag`
+# and `alloc_watch_diag`.
+alloc_trace_emu = ["esp-alloc/alloc-hooks", "fw-esp32-common/alloc-trace-marks"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
 # per frame. The pattern, the checksum and the record live in fw-checks as

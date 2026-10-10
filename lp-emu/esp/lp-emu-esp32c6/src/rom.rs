@@ -223,6 +223,21 @@ impl HookTable {
         self.install_at(bus, sym.address, symbol, call)
     }
 
+    /// Claim `address` for `call` WITHOUT patching it: for an `ebreak` the
+    /// guest image already carries (the allocation trace's hooks, see
+    /// [`crate::alloc_trace`]). `original` is recorded as the `ebreak` itself.
+    pub fn claim(&mut self, address: u32, symbol: &'static str, call: HostHook) {
+        self.by_pc.insert(
+            address,
+            Hook {
+                symbol,
+                address,
+                original: EBREAK,
+                call,
+            },
+        );
+    }
+
     /// [`install`](Self::install) at an address already resolved — for a
     /// symbol found by demangled path (`--break-at`), whose ELF name is not
     /// what the listing should show.

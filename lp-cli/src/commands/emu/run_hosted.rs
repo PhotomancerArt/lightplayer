@@ -62,7 +62,7 @@ async fn run_hosted_async<B: EmuUsbBoard>(
 
     let mut failures: Vec<String> = Vec::new();
     let mut ended = None;
-    if args.upload.is_some() || !args.request.is_empty() {
+    if !args.upload.is_empty() || !args.request.is_empty() {
         if let Err(error) = converse(&mut host, args, micros).await {
             failures.push(format!("{error:#}"));
         }
@@ -136,7 +136,7 @@ async fn converse<B: EmuUsbBoard>(
         host.board_seconds()
     );
 
-    if let Some(dir) = &args.upload {
+    for dir in &args.upload {
         let dir = std::env::current_dir()?
             .join(dir)
             .canonicalize()
@@ -172,6 +172,10 @@ async fn converse<B: EmuUsbBoard>(
             .is_none()
         {
             bail!("no answer to --request `{text}` before the deadline");
+        }
+        if args.request_gap_ms > 0 {
+            let until = host.board.micros() + args.request_gap_ms * 1000;
+            host.run_until(until.min(micros), None)?;
         }
     }
     Ok(())
