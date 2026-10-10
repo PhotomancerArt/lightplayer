@@ -213,6 +213,28 @@ alloc_watch_diag = ["esp-alloc/alloc-hooks", "lpc-shared", "lp-perf/hook", "dep:
 # 2026-10-09 defect's board was.
 e07_read_cost = []
 e07_ballast = []
+# RESEARCH (research/ram-e11; never shipped): one lender for the big block
+# (`src/lender/`). A region carved from the main heap that the general heap
+# reaches last and a borrower's allocations reach first (esp-alloc fork
+# `lend-region`); project reads, whole-file reads and shader compiles
+# borrow it through `lp-lender`. Who is the borrower is the polled embassy
+# task, read from embassy-executor's `trace` hooks. Excludes the diagnostics
+# that own lp-perf's hook (`alloc_watch_diag`).
+e11_lender = ["esp-alloc/lend-region", "embassy-executor/trace", "lp-perf/hook", "dep:lp-lender"]
+# RESEARCH (research/ram-e11): with `e11_lender`, a ~18 KB link-shaped
+# allocation (E8's phone link: 7,112 + 6,904 B and small pieces) made by a
+# task of its own after the 30th project read, standing in for a Bluetooth
+# central connecting mid-project. Also builds without `e11_lender`, for the
+# baseline image.
+e11_link_standin = ["lp-perf/hook"]
+# RESEARCH (research/ram-e11) variants of `e11_lender`: no card-picture
+# tenant; and the lend region is `dram2_seg` itself (no carve: the general
+# heap reaches dram2 after main AND the radio region, a borrower first).
+e11_no_tenant = []
+e11_lend_dram2 = []
+# ...and: only a borrower's allocations of 1 KiB and up go to the block
+# first; smaller ones fill the general heap's holes first (as today).
+e11_lend_big_only = []
 # Every heap alloc/free handed to the EMULATOR (`src/alloc_trace_emu.rs`) —
 # OFF by default, never shipped, never flashed: each hook is `ebreak; ret`, so
 # silicon traps on the first allocation. `lp-cli emu run --alloc-trace` claims
@@ -526,6 +548,7 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true 
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, optional = true, features = ["ser-write-json"] }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
+lp-lender = { path = "../../lp-base/lp-lender", optional = true }
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false }
 lp-bootctl = { path = "../../lp-base/lp-bootctl", default-features = false }
 # The over-the-air update session (protocol v1) the split image's core runs,
