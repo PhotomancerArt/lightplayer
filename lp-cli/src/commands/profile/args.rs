@@ -83,8 +83,9 @@ pub struct ProfileArgs {
     /// replayed with one lever already pulled (repeatable; each `--cf` is one
     /// row). `scratch=<windows>` replaces everything born and freed inside a
     /// window with one arena of its peak; `residents-first=<windows>` hoists
-    /// what the window leaves behind to its start; `tlsf` replays through
-    /// `rlsf` instead of the first-fit list. Join terms with `+` to combine
+    /// what the window leaves behind to its start; `tlsf` replays through a
+    /// model of `rlsf` at the device's 32-bit geometry instead of the first-fit
+    /// list. Join terms with `+` to combine
     /// them in one row, e.g.
     /// `--cf scratch=shader-compile+residents-first=project-load`.
     #[arg(long = "cf", value_name = "SPEC")]

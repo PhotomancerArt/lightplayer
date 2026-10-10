@@ -189,7 +189,8 @@ pub enum CounterfactualTerm {
     /// Hoist every allocation born inside an opening of each named window and
     /// still live at its end to the opening's start.
     ResidentsFirst(Vec<String>),
-    /// Replay unchanged, but through `rlsf` instead of the first-fit list.
+    /// Replay unchanged, but through a model of `rlsf` at the device's
+    /// geometry instead of the first-fit list.
     Tlsf,
 }
 
