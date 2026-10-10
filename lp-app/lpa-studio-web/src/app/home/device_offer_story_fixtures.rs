@@ -76,6 +76,10 @@ pub(crate) fn roster_tree(
         if let Some(edit) = lpa_studio_core::device_edit_offer(&prefix, card, uid) {
             tree.publish(edit);
         }
+        // Connect on a board another tab holds is its take-over.
+        if let Some(offer) = story_take_over_offer(card, devices.take_overs.get(&card.id)) {
+            tree.publish(offer);
+        }
         // The Wi‑Fi verbs, under the same prefix.
         if let Some(wifi) = devices.wifi.get(&card.id) {
             for offer in lpa_studio_core::app::network::wifi_offers(&prefix, wifi) {
@@ -380,6 +384,24 @@ pub(crate) fn StoryDeviceCard(
     }
 }
 
+/// `devices/<board>/take-over` as the controller publishes it for a board
+/// another tab holds: its level is the holder's last word, and it waits
+/// while the other tab is being asked. `None` for a board nobody holds.
+pub(crate) fn story_take_over_offer(
+    card: &DeviceView,
+    take_over: Option<&lpa_studio_core::UiTakeOver>,
+) -> Option<lpa_studio_core::UiOffer> {
+    let held = card.held_elsewhere.as_ref()?;
+    let asking = take_over.is_some_and(|over| over.words == lpa_studio_core::TAKE_OVER_ASKING);
+    Some(lpa_studio_core::take_over_offer(
+        &story_board_prefix(card.id),
+        card.id,
+        &held.level,
+        asking,
+        true,
+    ))
+}
+
 /// The time every board-card story is told at (epoch seconds): a card's
 /// ages ("Offline · 2 weeks", a done bar's few seconds) read against it.
 pub(crate) const STORY_BOARD_NOW: f64 = 1_791_000_000.0;
@@ -411,6 +433,10 @@ pub(crate) fn StoryBoardCard(
     /// A Wi‑Fi or relay connect under way, or why it failed.
     #[props(default)]
     wifi_connect: Option<lpa_studio_core::UiWifiConnect>,
+    /// A take-over of the board from another tab, under way or failed
+    /// (the board wears `held_elsewhere` for it to mean anything).
+    #[props(default)]
+    take_over: Option<lpa_studio_core::UiTakeOver>,
     #[props(default)] update: Option<lpa_studio_core::UiDeviceUpdate>,
     #[props(default)] update_facts: UpdateOfferFacts,
     /// The board's files across a layout change (its verbs in
@@ -475,6 +501,10 @@ pub(crate) fn StoryBoardCard(
     if let Some(offer) = lpa_studio_core::device_edit_offer(&prefix, &card, open_uid.as_deref()) {
         tree.publish(offer);
     }
+    // The controller's `take-over`, on a board another tab holds.
+    if let Some(offer) = story_take_over_offer(&card, take_over.as_ref()) {
+        tree.publish(offer);
+    }
     if let Some(wifi) = wifi.as_ref() {
         for offer in lpa_studio_core::app::network::wifi_offers(&prefix, wifi) {
             tree.publish(offer);
@@ -511,6 +541,7 @@ pub(crate) fn StoryBoardCard(
         wifi: wifi.as_ref(),
         lan: lan.as_ref(),
         wifi_connect: wifi_connect.as_ref(),
+        take_over: take_over.as_ref(),
         update: update.as_ref(),
         layout: layout.as_ref(),
         plays: &plays,
@@ -781,6 +812,7 @@ fn ready_device(id: lpa_studio_core::DeviceId, title: &str) -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,

@@ -15,12 +15,15 @@
 //! the typed model that provides it — an exclusive per-project Web Lock
 //! held while a project is open, plus a short-lived catalog lock for
 //! structural transactions (Project before Catalog, never the reverse).
-//! See `docs/adr/2026-07-08-per-project-library-locking.md`.
+//! See `docs/adr/2026-07-08-per-project-library-locking.md`. The Web Locks
+//! mechanics under it are [`named_locks`], which Studio's board holds use
+//! too.
 
 pub mod flusher;
 pub mod library_layout;
 pub mod library_locks;
 pub mod lp_fs_opfs;
+pub mod named_locks;
 pub mod opfs_error;
 pub mod opfs_read;
 pub mod opfs_root;
@@ -35,6 +38,10 @@ pub use library_locks::{
     try_acquire_polling,
 };
 pub use lp_fs_opfs::{FlushReport, LpFsOpfs};
+pub use named_locks::{
+    LockWatch, NamedLockGuard, held_lock_names, try_acquire_named_lock,
+    try_acquire_named_lock_polling, watch_lock,
+};
 pub use opfs_error::OpfsError;
 pub use opfs_read::{list_child_dirs, load_tree, load_tree_filtered, read_file};
 pub use opfs_root::{open_dir, opfs_root};

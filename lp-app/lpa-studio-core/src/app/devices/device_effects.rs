@@ -245,6 +245,11 @@ pub struct DeviceEffects {
     /// What the fold knew about each board when its update leg was asked
     /// for, staged by the roster just before the leg's command is applied.
     update_legs: BTreeMap<(DeviceId, EffectId), super::update_host::LegFacts>,
+    /// The ports another tab's claims account for (one tab holds a board):
+    /// a sweep attaches them without opening them, and the model's open of
+    /// one is answered with `Event::LinkHeld` instead. Empty — nothing
+    /// gated — where no hold edge keeps it.
+    hold_gate: super::board_hold::SharedUsbHoldGate,
 }
 
 impl Default for DeviceEffects {
@@ -273,7 +278,15 @@ impl DeviceEffects {
             clock: None,
             update: super::update_host::UpdateHost::new(),
             update_legs: BTreeMap::new(),
+            hold_gate: super::board_hold::SharedUsbHoldGate::default(),
         }
+    }
+
+    /// The ports held shut because another tab's claims account for them
+    /// ([`super::board_hold::UsbHoldGate`]); the controller keeps its
+    /// claims current.
+    pub fn hold_gate(&self) -> &super::board_hold::SharedUsbHoldGate {
+        &self.hold_gate
     }
 
     /// The over-the-air update's host.
@@ -729,6 +742,12 @@ impl DeviceEffects {
 
     fn apply_one(&mut self, command: Command) {
         match command {
+            // A port another tab holds is never opened here: the model hears
+            // that it is held instead, and its identify settles at once.
+            Command::Link {
+                link,
+                command: LinkCommand::Open { .. },
+            } if self.hold_gate.borrow().gates(link) => self.answer_held_open(link),
             Command::Link { link, command } => self.submit(link, command),
             Command::StartTimer { timer, after_ms } => self.start_timer(timer, after_ms),
             Command::RequestUsbGrant => self.request_grant(GrantChooser::Usb),
@@ -1045,6 +1064,17 @@ impl DeviceEffects {
         });
     }
 
+    /// The model asked to open `link`, whose port another tab holds: say
+    /// so instead (naming the board when the claims name exactly it), and
+    /// leave the port shut.
+    fn answer_held_open(&mut self, link: LinkId) {
+        let mac = self.hold_gate.borrow().association(link);
+        log::debug!("device link {link:?} is held by another tab; not opening it");
+        if let Some(sink) = &self.sink {
+            sink(Input::Event(Event::LinkHeld { link, mac }));
+        }
+    }
+
     fn submit(&mut self, link: LinkId, command: LinkCommand) {
         let Some(slot) = self.links.get(&link) else {
             // A command for a link that is gone is not a crash: the port
@@ -1153,6 +1183,7 @@ impl DeviceEffects {
             .collect();
         let register = self.registrar();
         let ids: Vec<LinkId> = (0..MAX_SWEEP_LINKS).map(|_| self.mint_link_id()).collect();
+        let gate = Rc::clone(&self.hold_gate);
         spawn(Box::pin(async move {
             let granted = match transport.discover_granted().await {
                 Ok(granted) => granted,
@@ -1161,15 +1192,27 @@ impl DeviceEffects {
                     return;
                 }
             };
+            let fresh: Vec<GrantedLink> = granted
+                .into_iter()
+                .filter(|grant| !held.contains(&grant.info.endpoint))
+                .collect();
+            // Read the new ports against the claims as they stand NOW, after
+            // the discovery: a group of one kind that the other tabs' claims
+            // account for is attached and never opened.
+            let pairs: Vec<_> = fresh
+                .iter()
+                .map(|grant| super::board_hold::usb_pair_of(&grant.info))
+                .collect();
+            let gated = gate.borrow().gate_decisions(&pairs);
             let mut ids = ids.into_iter();
-            for grant in granted {
-                if held.contains(&grant.info.endpoint) {
-                    continue;
-                }
+            for ((grant, pair), gated) in fresh.into_iter().zip(pairs).zip(gated) {
                 let Some(link) = ids.next() else {
                     log::warn!("more granted ports than one sweep attaches; the rest wait");
                     return;
                 };
+                if let (true, Some(pair)) = (gated, pair) {
+                    gate.borrow_mut().gate(link, pair);
+                }
                 register(link, grant, Rc::clone(&sink));
             }
         }));
@@ -1256,6 +1299,13 @@ impl DeviceEffects {
     pub fn retain_links(&mut self, keep: impl Fn(LinkId) -> bool) {
         self.links
             .retain(|link, slot| slot.awaiting_attach || keep(*link));
+        // The gate forgets ports the model let go; an arrival not settled
+        // yet is still this tab's.
+        let links = &self.links;
+        let arrivals = self.arrivals.borrow();
+        self.hold_gate.borrow_mut().retain_links(|link| {
+            links.contains_key(&link) || arrivals.iter().any(|arrival| arrival.link == link)
+        });
     }
 
     fn drop_endpoint(&mut self, endpoint: &EndpointKey) {

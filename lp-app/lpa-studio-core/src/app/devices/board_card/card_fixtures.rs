@@ -5,7 +5,9 @@
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{ActivityView, DeviceView, Escape, FirmwareFace, LoadedProject};
-use lpa_devices::{ActivityKind, DeviceId, FirmwareAge, WireVersion};
+use lpa_devices::{
+    ActivityKind, DeviceId, FirmwareAge, HeldElsewhere, HoldLevel, HoldVia, WireVersion,
+};
 
 use super::board_card_input::BoardCardInput;
 use crate::app::access::{UiDeviceAccess, UiUnlockOffer, device_unlock_offer};
@@ -22,6 +24,8 @@ use crate::app::devices::edit_offer::device_edit_offer;
 use crate::app::devices::lan_link_view::UiLanLink;
 use crate::app::devices::relay_connect_offer::connect_relay_offer;
 use crate::app::devices::runtime_band::UiRuntimeBand;
+use crate::app::devices::take_over_offer::{TAKE_OVER_ASKING, take_over_offer};
+use crate::app::devices::take_over_state::UiTakeOver;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::devices::wifi_connect_offer::connect_wifi_offer;
 use crate::app::devices::wifi_connects::UiWifiConnect;
@@ -42,6 +46,8 @@ pub(crate) struct CardFixture {
     pub wifi: Option<UiDeviceWifi>,
     pub lan: Option<UiLanLink>,
     pub wifi_connect: Option<UiWifiConnect>,
+    /// A take-over of the board from another tab, under way or failed.
+    pub take_over: Option<UiTakeOver>,
     pub update: Option<UiDeviceUpdate>,
     /// The update standing the offers are published from.
     pub update_facts: UpdateOfferFacts,
@@ -66,6 +72,8 @@ pub(crate) struct CardFixture {
     /// More verbs the controller publishes beside the device's own (the
     /// layout verbs).
     pub extra_offers: Vec<UiOffer>,
+    /// Verbs the fixture withholds from [`Self::publish`].
+    hidden: Vec<String>,
     /// Published by [`Self::input`].
     offers: Vec<UiOffer>,
 }
@@ -84,6 +92,7 @@ impl CardFixture {
             wifi: None,
             lan: None,
             wifi_connect: None,
+            take_over: None,
             update: None,
             update_facts: UpdateOfferFacts::default(),
             layout: None,
@@ -102,6 +111,7 @@ impl CardFixture {
             wifi_address: false,
             relay: false,
             extra_offers: Vec::new(),
+            hidden: Vec::new(),
             offers: Vec::new(),
         }
     }
@@ -117,6 +127,27 @@ impl CardFixture {
         fixture.view.can_receive_project = false;
         fixture.view.can_remove_project = false;
         fixture.view.escapes = vec![Escape::Reconnect, Escape::Forget];
+        fixture.plays = BoardPlays::Unknown;
+        fixture
+    }
+
+    /// The same board, held by another tab of this browser: its port is
+    /// there and this tab never opened it (status Attached), so nothing
+    /// is known of what runs on it.
+    pub fn held(level: HoldLevel) -> Self {
+        let mut fixture = Self::ready();
+        fixture.view.status = DeviceStatus::Attached;
+        fixture.view.state_label = "Attached \u{2014} not listening".to_string();
+        fixture.view.firmware_face = FirmwareFace::Unknown;
+        fixture.view.loaded_project = LoadedProject::Unknown;
+        fixture.view.engine_fps = None;
+        fixture.view.can_receive_project = false;
+        fixture.view.can_remove_project = false;
+        fixture.view.held_elsewhere = Some(HeldElsewhere {
+            via: HoldVia::Usb,
+            level,
+            taken_from_here: false,
+        });
         fixture.plays = BoardPlays::Unknown;
         fixture
     }
@@ -167,6 +198,7 @@ impl CardFixture {
             wifi: self.wifi.as_ref(),
             lan: self.lan.as_ref(),
             wifi_connect: self.wifi_connect.as_ref(),
+            take_over: self.take_over.as_ref(),
             update: self.update.as_ref(),
             layout: self.layout.as_ref(),
             plays: &self.plays,
@@ -184,6 +216,21 @@ impl CardFixture {
     pub fn offers(&mut self) -> Vec<UiOffer> {
         self.offers = self.publish();
         self.offers.clone()
+    }
+
+    /// The board's offer for `verb`, which must be published.
+    #[track_caller]
+    pub fn offers_at(&mut self, verb: &str) -> UiOffer {
+        let path = self.board.clone().child(verb);
+        self.offers()
+            .into_iter()
+            .find(|offer| offer.path == path)
+            .unwrap_or_else(|| panic!("{path} is not offered"))
+    }
+
+    /// The board does not publish `verb` (the controller had no reason to).
+    pub fn without_offer(&mut self, verb: &str) {
+        self.hidden.push(verb.to_string());
     }
 
     fn publish(&self) -> Vec<UiOffer> {
@@ -218,6 +265,20 @@ impl CardFixture {
         if self.relay && offline_wire {
             offers.push(connect_relay_offer(&self.board, self.view.id, false));
         }
+        // The controller's `take-over`, on a board another tab holds.
+        if let Some(held) = self.view.held_elsewhere.as_ref() {
+            let asking = self
+                .take_over
+                .as_ref()
+                .is_some_and(|over| over.words == TAKE_OVER_ASKING);
+            offers.push(take_over_offer(
+                &self.board,
+                self.view.id,
+                &held.level,
+                asking,
+                true,
+            ));
+        }
         offers.extend(device_unlock_offer(&self.board, &self.view, unlock));
         offers.extend(device_edit_offer(
             &self.board,
@@ -225,6 +286,12 @@ impl CardFixture {
             self.uid.as_deref(),
         ));
         offers.extend(self.extra_offers.iter().cloned());
+        offers.retain(|offer| {
+            !self
+                .hidden
+                .iter()
+                .any(|verb| offer.path == self.board.clone().child(verb))
+        });
         offers
     }
 }
@@ -291,6 +358,7 @@ fn ready_view() -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        held_elsewhere: None,
         update_blocked: None,
         escapes: vec![Escape::Disconnect, Escape::Forget],
     }

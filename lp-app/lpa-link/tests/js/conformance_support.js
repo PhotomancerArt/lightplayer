@@ -33,6 +33,9 @@ const CYCLES_PER_US = 160;
 const CYCLES_PER_COMMAND = 16_000;
 
 let door = null;
+/// A SECOND bus on the same scripted door: a second page of one browser
+/// (`?emu-second-tab=1`). See `installSecondTab`.
+let secondBus = null;
 /// The tab backing, when the suite is running over Workers. Held so
 /// `uninstallShim` can end them: a Worker is not garbage-collected by
 /// dropping the port that was talking to it.
@@ -355,7 +358,7 @@ export async function installScripted(boardIds) {
   await watchReboots();
 }
 
-function nativeBackingOverScript() {
+function nativeBackingOverScript({ secondTab = false } = {}) {
   // Built here rather than imported so the transport injection is visible at
   // the one place a test could otherwise be fooled about what it is running.
   return {
@@ -363,12 +366,92 @@ function nativeBackingOverScript() {
     listBoards: async () => (await (await door.fetch("http://scripted.emu.invalid/boards")).json()).boards,
     connect: async (boardId, board) => {
       const { EmulatorPort } = (await load()).port;
-      return EmulatorPort.connect("http://scripted.emu.invalid/", boardId, board, {
-        WebSocketImpl: ScriptedSocket,
-        fetchImpl: (url) => door.fetch(url),
-      });
+      return EmulatorPort.connect(
+        "http://scripted.emu.invalid/",
+        boardId,
+        board,
+        {
+          WebSocketImpl: ScriptedSocket,
+          fetchImpl: (url) => door.fetch(url),
+        },
+        { secondTab },
+      );
     },
   };
+}
+
+/// A SECOND page of one browser against the SAME scripted door — `?emu-second-tab=1`
+/// when `secondTab`, the page as it always was when not. The first install
+/// (`installScripted`) holds every board's `/control`, so the door refuses the
+/// second page's claim (409) exactly as `emu serve` does.
+///
+/// Returns `"installed"`, or the name of the error the install failed with —
+/// `"NetworkError"` is the loud 409 a second page without the flag has always
+/// met. Built with `createBus`, not `install`, so the first page's
+/// `navigator.serial` is left where it is. `holds` is the dev page's D0 switch:
+/// a cable-less port must not send it (the cable's owner already did).
+export async function installSecondTab(secondTab) {
+  const { createBus } = await polyfill();
+  try {
+    secondBus = await createBus("http://scripted.emu.invalid/", {
+      backing: nativeBackingOverScript({ secondTab }),
+      holds: { 0: true },
+    });
+    return "installed";
+  } catch (error) {
+    secondBus = null;
+    return String(error?.name ?? error);
+  }
+}
+
+/// The second page's boards, described as the banner reads them
+/// (`describeBoards()`), as JSON: `cable`, `openAttempts`, `holds`, …
+export function secondTabBoardsJson() {
+  return JSON.stringify(secondBus?.describeBoards() ?? []);
+}
+
+/// `port.open()` on the second page's port for `boardId`, or on the FIRST
+/// page's when `first`: `"opened"`, or the error's name. A held port is
+/// `NetworkError`, as Chrome's is.
+export async function openPortOf(first, boardId) {
+  const bus = first ? (await polyfill()).bus() : secondBus;
+  const port = bus.livePortFor(boardId);
+  try {
+    await port.open({ baudRate: 115_200 });
+    return "opened";
+  } catch (error) {
+    return String(error?.name ?? error);
+  }
+}
+
+/// `port.close()` on the same port; `"closed"` or the error's name.
+export async function closePortOf(first, boardId) {
+  const bus = first ? (await polyfill()).bus() : secondBus;
+  const port = bus.livePortFor(boardId);
+  try {
+    await port.close();
+    return "closed";
+  } catch (error) {
+    return String(error?.name ?? error);
+  }
+}
+
+/// A cable verb on the second page's emulator port for `boardId`: `"ok"`, or
+/// `"<name>: <message>"`.
+export async function secondTabCableVerb(boardId, verb) {
+  const emulator = secondBus.livePortFor(boardId).emulator;
+  try {
+    await emulator[verb]();
+    return "ok";
+  } catch (error) {
+    return `${error?.name}: ${error?.message}`;
+  }
+}
+
+/// How many times `port.open()` ran for `boardId` on the second page (or the first).
+export async function openAttemptsOf(first, boardId) {
+  const bus = first ? (await polyfill()).bus() : secondBus;
+  return bus.openAttemptsFor(boardId);
 }
 
 /// Install the polyfill over boards hosted **in this tab** — one Worker per
@@ -423,6 +506,10 @@ export async function installLive(baseUrl, boardIds) {
 
 export async function uninstallShim() {
   const { uninstall } = await polyfill();
+  if (secondBus) {
+    await secondBus.dispose().catch(() => {});
+    secondBus = null;
+  }
   await uninstall();
   door = null;
   // A Worker outlives the bus that was holding its port, and a suite that
