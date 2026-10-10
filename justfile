@@ -3238,7 +3238,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3356,6 +3356,24 @@ lint-red-main-needs:
 # changes. docs/debt/ci-runner-time-over-the-concurrency-cap.md.
 lint-ci-durations:
     python3 scripts/ci/job-durations.py --self-test
+
+# The defect registry's index, built from each entry's frontmatter when it is
+# read: there is no hand-written table, so two PRs that each file a defect
+# never touch a shared line (docs/debt/hand-written-defects-index.md).
+# Markdown on stdout, newest first. `--by-class` (classes by count, then each
+# one's entries; † marks a class missing from the vocabulary), `--open`,
+# `--class <name>`; they combine.
+defects-index *args:
+    python3 scripts/defects-index.py {{ args }}
+
+# Every docs/defects/ entry carries what the index reads (a dated file name,
+# status open/fixed/wontfix, found, area, a one-word class, a title), and no
+# hand-written row has come back to the README. Its own fixture tests first.
+# Offline, stdlib python, ~0.1 s. CI runs it in the Lint job and, because a
+# defect-only PR is docs-only and skips Lint, in its own "Defect registry" job.
+lint-defects:
+    python3 scripts/defects-index.py --self-test
+    python3 scripts/defects-index.py --check
 
 # Main push's version tagger, against throwaway git repos: each run tags its
 # own commit, a tagged commit is a no-op, and a lost tag race retries.

@@ -94,10 +94,21 @@ def main() -> int:
         entries = [e for e in entries if e.klass == args.klass]
     entries.sort(key=lambda e: (e.date, e.file), reverse=True)
     if args.by_class:
-        print(render_by_class(entries, read_vocabulary(args.dir)))
+        emit(render_by_class(entries, read_vocabulary(args.dir)))
     else:
-        print(render_table(entries, with_class=True))
+        emit(render_table(entries, with_class=True))
     return 0
+
+
+def emit(text: str) -> None:
+    """Print, and stop quietly when the reader closes the pipe (`| head`)."""
+    try:
+        print(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # Python's documented recipe: point stdout at devnull so the
+        # interpreter's own flush at exit does not raise a second time.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
 
 
 @dataclass
