@@ -86,8 +86,6 @@ fn place_of(
 pub(crate) fn page_of(route: &StudioRoute) -> UiPage {
     match route {
         StudioRoute::Home => UiPage::Home,
-        StudioRoute::Devices => UiPage::Devices,
-        StudioRoute::Projects => UiPage::Projects,
         StudioRoute::Explore => UiPage::Explore,
         StudioRoute::Account => UiPage::Account,
         StudioRoute::Unlock => UiPage::Unlock,
@@ -129,7 +127,10 @@ mod tests {
 
     #[test]
     fn a_route_reads_as_its_page_with_its_view() {
-        assert_eq!(page_of(&StudioRoute::parse("/devices")), UiPage::Devices);
+        // The home page's old addresses read as the home page.
+        for alias in ["/devices", "/projects", "/home", "/"] {
+            assert_eq!(page_of(&StudioRoute::parse(alias)), UiPage::Home, "{alias}");
+        }
         assert_eq!(
             page_of(&StudioRoute::parse("/device/dev123/patch")),
             UiPage::Device {

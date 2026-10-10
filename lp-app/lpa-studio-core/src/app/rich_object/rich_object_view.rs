@@ -52,7 +52,8 @@ impl<A> RichObjectView<A> {
 /// Worst-first rank of a status family for the rollup.
 fn tone_severity(tone: UiStatusKind) -> u8 {
     match tone {
-        UiStatusKind::Neutral => 0,
+        // Blue is not a problem: it reads like Neutral here.
+        UiStatusKind::Neutral | UiStatusKind::Live => 0,
         UiStatusKind::Good => 1,
         UiStatusKind::Working => 2,
         // Warning (unsaved-yellow) and Attention (health-orange) are equal
@@ -198,6 +199,7 @@ mod tests {
         RichSection {
             title: title.to_string(),
             tone,
+            sentence: None,
             lines: vec![RichLine::new("label", "value")],
             chip: None,
             affordances: affordances.to_vec(),

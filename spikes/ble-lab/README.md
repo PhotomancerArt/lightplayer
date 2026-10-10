@@ -319,15 +319,18 @@ open -g -n -a "Google Chrome" --args --remote-debugging-port=0 \
     --user-data-dir=<scratch>/chrome-studio --no-first-run --no-default-browser-check "$STUDIO/"
 CDP=$(head -1 <scratch>/chrome-studio/DevToolsActivePort)
 C="node spikes/ble-lab/scripts/cdp-central.mjs --debug-port $CDP --page ${STUDIO#http://}"
-$C list --click-text "via Bluetooth" --timeout-ms 8000   # the ids, nothing picked
-$C join --id '<the board id>' --click-text "via Bluetooth"
+# the home page's Bluetooth square: exact word, inside Connect a board
+BT='[...document.querySelectorAll("#home-connect-board button")].find((b) => !b.disabled && b.innerText.trim() === "Bluetooth")?.click() ?? null'
+$C list --click-expr "$BT" --timeout-ms 8000             # the ids, nothing picked
+$C join --id '<the board id>' --click-expr "$BT"
 $C shot target/ota-ble/studio-1.png                      # the card, as the person would see it
 $C click "<a button's text>"                             # press what the card offers
 ```
 
-- `--click-text` presses the first enabled control whose text has those
-  words. "via Bluetooth" is Studio's add-a-board choice; if it is not on
-  screen (boards already listed), open the Devices list first with `click`.
+- `--click-expr` runs the expression as the press. The Bluetooth square is
+  the exact word `Bluetooth` inside `#home-connect-board` (Connect a board,
+  never hidden); a bare `--click-text "Bluetooth"` would also press a board
+  card's Bluetooth switch, which is why the press is scoped.
 - A **locked board** asks for its password on the card. Press the card's
   password button with `click`, then type into the focused field with `js
   "document.execCommand('insertText', false, '<password>')"`, which fires

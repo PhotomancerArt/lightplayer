@@ -6,7 +6,8 @@
 //!   pressed, it comes back on a LAN link as the SAME device (merged by
 //!   MAC), presenting the keys typed for that board at another address;
 //!   Forget forgets the address with the board;
-//! - a board never seen is reached by an address typed into the add slot;
+//! - a board never seen is reached by an address typed into Connect a board's
+//!   Network row;
 //! - a connect that fails says why in plain words, where it was pressed.
 //!
 //! Every verb is pressed by its offer path, as the card and the app agent
@@ -22,7 +23,7 @@ const IP: &str = "192.168.4.100";
 const URL: &str = "ws://192.168.4.100/link";
 /// Its base MAC, and the same as a board key.
 const MAC: &str = "a0:f2:62:87:b4:8e";
-const KEY: &str = "a0f26287b48e";
+pub(super) const KEY: &str = "a0f26287b48e";
 
 /// A LAN board the test answers for: a connect makes its session present
 /// (or fails with the socket's words the test set), and present sessions
@@ -84,7 +85,7 @@ impl crate::LanLinkSource for ConnectableLanBoard {
 }
 
 /// The LAN half and what the test reads back from it.
-struct LanRig {
+pub(super) struct LanRig {
     refuse: Rc<RefCell<Option<String>>>,
     asked: Rc<RefCell<Vec<String>>>,
     /// Every stored form of the address book the web edge was handed.
@@ -94,7 +95,7 @@ struct LanRig {
 /// Install the shipped build's halves beside the bench's USB: a sim half
 /// (none is created) and the LAN half over [`ConnectableLanBoard`]; and the
 /// address book's web edge.
-fn with_lan(bench: &mut DeviceBench, device: &FakeEsp32Device) -> LanRig {
+pub(super) fn with_lan(bench: &mut DeviceBench, device: &FakeEsp32Device) -> LanRig {
     let rig = LanRig {
         refuse: Rc::default(),
         asked: Rc::default(),
@@ -363,7 +364,7 @@ fn a_board_never_seen_is_reached_by_its_address_and_remembered_by_its_mac() {
 
 /// A LightPlayer board joined to a network: its station says it is
 /// connected at [`IP`] (the firmware's station, scripted).
-fn joined_light_player(uid: &str) -> FakeEsp32Device {
+pub(super) fn joined_light_player(uid: &str) -> FakeEsp32Device {
     FakeEsp32Device::new(
         FakeDeviceScript::new(FakeBootState::LightPlayer(
             FakeLightPlayerState::new()

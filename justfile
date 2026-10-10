@@ -2417,6 +2417,25 @@ heap-budget-check margin_pct="0": install-rv32-target
 heap-budget-baseline project="": install-rv32-target
     scripts/heap-budget-check.sh baseline {{ project }}
 
+# Where every byte of a chip's SRAM goes, read off a linked firmware ELF: ROM
+# reserve, cache, code in RAM, the radio blobs by library, .data/.bss by crate,
+# each heap region, the stack, idle bytes. The rows sum to the chip's RAM or the
+# script exits non-zero. Pure Python, no build: point it at a CI image
+# (`just fetch-ci-images`, then target/ci-images/<sha>/<chip>/…) or your own ELF.
+#
+#   just ram-ledger target/ci-images/<sha>/esp32c6/tree/ESP32C6_SERVER_RADIO_SPLIT/p2.elf
+#   just ram-ledger <elf> --chip esp32s3 --json out.json
+#
+# Flags: scripts/ram-ledger.py --help; method and limits: docs/heap-budget-gate.md
+# ("The whole-RAM ledger"). `just test-ram-ledger` is its self-test.
+ram-ledger *args:
+    python3 scripts/ram-ledger.py {{ args }}
+
+# The ledger's own tests: a synthetic ELF always, and a smoke run on the newest
+# fetched CI image when there is one (it says so loudly when there is not).
+test-ram-ledger:
+    python3 scripts/test_ram_ledger.py
+
 # The heap-budget record's OTHER source: a shipped firmware image booted whole
 # on its own SoC emulator, read from the allocator figures its own first
 # heartbeat reports.
@@ -4835,7 +4854,9 @@ fixture-fw variant port="":
 # TWO LANES since emulator plan two M6. `run <id> --emu` runs the same
 # scenario with NO BOARD, against an `lp-cli emu serve` the runner starts
 # itself, in headless Chrome; `check-guard` proves the emulated lane cannot
-# write a silicon fixture's name.
+# write a silicon fixture's name. `--emu --serve-release` serves the release
+# bundle itself (after `just studio-web-story-build`): no dev server, no
+# prompt, one foreground command.
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
@@ -4875,8 +4896,9 @@ walk-migration-emu *args:
     node scripts/emu/walk-migration-emu.mjs {{ args }}
 
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
-# → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
-# C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
+# → identify → push → the card's picture → Play → idle → knob, over `?ble=emu`
+# against an emulated C6, and the bytes/s the card and an idle Play-mode
+# Studio put on a `ble:` link (wire bytes over the emulated USB link, not air).
 # Needs a Studio on this worktree's port, like walk-no-board — or
 # `--serve-release` (after `just studio-web-story-build`), which serves the
 # release bundle itself. Not CI.
@@ -4942,7 +4964,8 @@ walk-wifi-emu lane *args:
 # and re-seated under the editor and under Play — the page must stay put
 # behind "Reconnecting…" and resume the same session (defect
 # 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
-# this worktree's port; never a CI job.
+# this worktree's port, or `--serve-release` (after `just studio-web-story-build`),
+# which serves the release bundle itself; never a CI job.
 walk-drop-emu *args:
     node scripts/emu/walk-drop-emu.mjs {{ args }}
 

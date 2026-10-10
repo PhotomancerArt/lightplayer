@@ -12,11 +12,12 @@
 //! path, so each of these is a loadable, linkable address):
 //!
 //! ```text
-//! /                     the Home landing (via the logo, not a nav tab);
-//!                       also the empty/unknown path. `/home` still parses
-//!                       as an alias, and is never emitted.
-//! /devices              the devices section
-//! /projects             the projects library section
+//! /                     the home page: the boards, the projects and the
+//!                       catalog on one page (via the logo, not a nav tab);
+//!                       also the empty/unknown path. `/devices`,
+//!                       `/projects` and `/home` are aliases that are never
+//!                       emitted: they load the page and the address heals
+//!                       to `/`, its whole query kept ([`canonical_address`])
 //! /explore              the explore section (placeholder until modpacks)
 //! /account              the signed-in account's profile page (identity,
 //!                       account, sessions); signed out it asks you in
@@ -144,15 +145,15 @@
 //!   bar HEALS to `/p/<slugify(name)>-<uid>` via `replaceState` (D10), so
 //!   a stale slug, a case-mangled paste and a bare uid all straighten out
 //!   without a navigation or a history entry. One place: `web_app.rs`.
-//! - the editor went away → `replace(Devices)` — the gallery the cards
-//!   live on, not the `/` landing — once an open had actually started
-//!   (`saw_opening`); the boot-time home flash never rewrites the URL, or
-//!   a startup reopen would erase the very route that requested it.
+//! - the editor went away → `replace(Home)` — the home page, where the
+//!   cards live — once an open had actually started (`saw_opening`); the
+//!   boot-time home flash never rewrites the URL, or a startup reopen
+//!   would erase the very route that requested it.
 //! - browser navigation (back/forward/in-app link/manual URL edit) →
-//!   dispatch: to a gallery route (`Devices`/`Projects`, the sections
-//!   that render the shell) while the editor is open = lens detach
-//!   (runtime-pool P3: the editor closes, every runtime session keeps
-//!   running); to `Project` = the open-on-sim path when the LIBRARY HAS
+//!   dispatch: to a site route (Home and the other sections) while the
+//!   editor is open = the session ends (single-session policy; a board's
+//!   lens closes and the board keeps running); to `Project` = the
+//!   open-on-sim path when the LIBRARY HAS
 //!   that uid (create/reuse the sim session and push the head — D19 — or
 //!   re-attach when that project is already the sim's loaded project), and
 //!   otherwise somebody else's share link: the uid is held as a
@@ -160,9 +161,9 @@
 //!   URL untouched (the visitor pull is a later round); to `Device` =
 //!   attach the existing session for that uid, or granted-port connect
 //!   (M1) + attach.
-//!   Connecting/failed device states render honestly on the gallery's cards
-//!   (their connect evidence) — the device route never shows the opening
-//!   frame.
+//!   Connecting/failed device states render honestly on the home page's
+//!   cards (their connect evidence; the shell's no-editor arm is the home
+//!   page) — the device route never shows the opening frame.
 //! - reload = re-derivation by the same rules: the pool dies with the
 //!   page, and the route rebuilds its runtime (`Project` respawns the sim
 //!   + loads; `Device` reconnects the granted port + attaches).
@@ -194,22 +195,17 @@ use lpc_history::PrefixedUid;
     )
 )]
 pub(crate) enum StudioRoute {
-    /// The landing page — the `/` (root) landing. Reached through the
-    /// logo, not a nav tab (vision D1/D11). `/home` still parses as an
-    /// alias so old links keep working, but only `/` is ever emitted.
-    /// Unknown/malformed paths land here too — the URL is user input.
-    /// Placeholder content until M3.
+    /// The home page (`/`): the boards, the projects and the catalog on
+    /// one page (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`).
+    /// Reached through the logo, not a nav tab (vision D1/D11).
     ///
-    /// The root used to be [`StudioRoute::Devices`] (vision Q2's lean:
-    /// "are my devices up?" is a returning user's first question), marked
-    /// revisit-when-Home-is-real; Yona ruled for Home at the root
-    /// 2026-08-06.
+    /// `/devices`, `/projects` and `/home` are its aliases — the Devices
+    /// and Projects pages it replaced, and an old spelling of the root —
+    /// and so is a bare `/device` or junk under it: they parse here, the
+    /// address heals to `/` with its whole query kept
+    /// ([`canonical_address`]), and only `/` is ever emitted. Unknown or
+    /// malformed paths land here too — the URL is user input.
     Home,
-    /// The devices section (`/devices`).
-    Devices,
-    /// The projects library section (`/projects`). Renders the same
-    /// gallery as Devices until the P09 page split.
-    Projects,
     /// The explore section (`/explore`) — community/example content.
     /// Placeholder until modpack scaffolding gives it real material.
     Explore,
@@ -349,15 +345,14 @@ impl StudioRoute {
         let (path, fragment) = path.split_once('#').unwrap_or((path, ""));
         let (path, query) = path.split_once('?').unwrap_or((path, ""));
         // The device hint (D43). Read once here, handed to the `/p/` arms
-        // below; every other route ignores it, so a stray `?on=` on
-        // `/devices` is exactly as meaningless as it looks.
+        // below; every other route ignores it, so a stray `?on=` on `/` is
+        // exactly as meaningless as it looks.
         let on = query_param(query, "on").and_then(DeviceHint::parse);
         let mut segments = path.split('/').filter(|s| !s.is_empty());
         match segments.next() {
             // The device route: exactly one uid segment, optionally a view
-            // suffix. A bare `/device` or depth junk lands on the Devices
-            // page — the gallery is the honest answer to "which board?" —
-            // never on a blank Home.
+            // suffix. A bare `/device` or depth junk lands on Home — the
+            // page whose boards are the honest answer to "which board?".
             Some("device") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(uid), None, _) => device_route(uid, ProjectView::Workspace),
                 (Some(uid), Some("play"), None) => device_route(uid, ProjectView::Play),
@@ -367,7 +362,7 @@ impl StudioRoute {
                 (Some(uid), Some("mapping" | "map"), None) => {
                     device_route(uid, ProjectView::Mapping)
                 }
-                _ => StudioRoute::Devices,
+                _ => StudioRoute::Home,
             },
             // The project route. Exactly one link segment, optionally
             // followed by `play` — depth junk is not a guess at some
@@ -391,11 +386,12 @@ impl StudioRoute {
                 }
                 _ => StudioRoute::Home,
             },
-            // `/home` is a kept alias for the root — old links stay
-            // loadable; `path()` only ever emits `/`.
-            Some("home") if segments.next().is_none() => StudioRoute::Home,
-            Some("devices") if segments.next().is_none() => StudioRoute::Devices,
-            Some("projects") if segments.next().is_none() => StudioRoute::Projects,
+            // The kept aliases of the root: `/home`, and the Devices and
+            // Projects pages the home page replaced. Old links and the
+            // walks' bookmarks stay loadable; `path()` only ever emits `/`.
+            Some(alias) if HOME_ALIASES.contains(&alias) && segments.next().is_none() => {
+                StudioRoute::Home
+            }
             Some("explore") if segments.next().is_none() => StudioRoute::Explore,
             Some("account") if segments.next().is_none() => StudioRoute::Account,
             Some("unlock") if segments.next().is_none() => StudioRoute::Unlock,
@@ -459,8 +455,6 @@ impl StudioRoute {
     pub(crate) fn path(&self) -> String {
         match self {
             StudioRoute::Home => "/".to_string(),
-            StudioRoute::Devices => "/devices".to_string(),
-            StudioRoute::Projects => "/projects".to_string(),
             StudioRoute::Explore => "/explore".to_string(),
             StudioRoute::Account => "/account".to_string(),
             StudioRoute::Unlock => "/unlock".to_string(),
@@ -502,7 +496,7 @@ impl StudioRoute {
     /// cosmetic and may be stale, so matching on it would frame a project
     /// that is already open. Drives the opening frame, which only project
     /// routes render; a device route's connecting window renders honestly
-    /// on the gallery's cards instead.
+    /// on the home page's cards instead.
     pub(crate) fn project_matches_view(&self, view: &UiStudioView) -> bool {
         match self {
             StudioRoute::Project { uid, .. } => {
@@ -609,7 +603,7 @@ impl StudioRoute {
 
     /// The `?on=` device hint this address carries, if any. Only the
     /// project addresses have one — a device route names a device
-    /// outright, and a gallery route runs nothing.
+    /// outright, and a site route runs nothing.
     pub(crate) fn device_hint(&self) -> Option<&DeviceHint> {
         match self {
             StudioRoute::Project { on, .. } | StudioRoute::Example { on, .. } => on.as_ref(),
@@ -682,12 +676,67 @@ fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
         .map(|(_, value)| value)
 }
 
+/// The one-segment paths that are aliases of [`StudioRoute::Home`]: an old
+/// spelling of the root, and the Devices and Projects pages the home page
+/// replaced. Parsed, never emitted.
+const HOME_ALIASES: [&str; 3] = ["home", "devices", "projects"];
+
+/// Where an alias of Home heals to, or `None` when `path_and_query` is not
+/// one (`/` itself, a lens route, any other section, and an unknown path
+/// that merely reads as Home).
+///
+/// The aliases are `/devices`, `/projects`, `/home`, and a bare `/device`
+/// or junk under it. Each heals to `/` carrying the alias's **whole
+/// query**: every flag the page read at load (`?emu=`, `?lan=`, `?ble=`,
+/// `?relay=`, `?record=`, `?firmware-store=`, `?seams=`, `?wire=`, …), in
+/// its order, so a reload of the healed address is the same page. Two
+/// kinds of param go, the ones every address write drops ([`route_search`]):
+/// `?on=` (only a `/p/` address carries a device hint) and the legacy
+/// params.
+///
+/// Not built on [`with_page_flags`], which carries only
+/// [`PAGE_LOAD_FLAGS`]: a heal built on it would drop `?lan=` and `?relay=`
+/// from the address, and a reload would stop being the page it was.
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(
+        dead_code,
+        reason = "called by the wasm boot heal; host builds only run the unit tests"
+    )
+)]
+pub(crate) fn canonical_address(path_and_query: &str) -> Option<String> {
+    let address = path_and_query
+        .split_once('#')
+        .map_or(path_and_query, |(address, _)| address);
+    let (path, query) = address.split_once('?').unwrap_or((address, ""));
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    let alias = match (segments.next(), segments.next()) {
+        (Some(only), None) if HOME_ALIASES.contains(&only) => true,
+        // `/device` with no uid, or with depth junk, reads as Home.
+        (Some("device"), _) => StudioRoute::parse(path) == StudioRoute::Home,
+        _ => false,
+    };
+    alias.then(|| format!("/{}", route_search(query, &StudioRoute::Home)))
+}
+
+/// [`canonical_address`] of the address the page loaded at. Read at boot,
+/// before the first address write.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn boot_canonical_address() -> Option<String> {
+    canonical_address(&current_path()?)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn boot_canonical_address() -> Option<String> {
+    None
+}
+
 /// One `/device/` uid segment as a route. The uid is the registered `dev…`
 /// identity verbatim (never re-spelled — it is what the roster keys on);
-/// an empty segment is the gallery, not a guess.
+/// an empty segment is the home page, not a guess.
 fn device_route(uid: &str, view: ProjectView) -> StudioRoute {
     if uid.is_empty() {
-        return StudioRoute::Devices;
+        return StudioRoute::Home;
     }
     StudioRoute::Device {
         uid: uid.to_string(),
@@ -1467,19 +1516,76 @@ mod tests {
         let current =
             "?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest&on=mac:aa&x=1";
         assert_eq!(
-            with_page_flags("/devices", current),
-            "/devices?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest"
+            with_page_flags("/", current),
+            "/?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest"
         );
         // The link's own query wins, and keeps its order.
         assert_eq!(
             with_page_flags("/p/x-prjy?on=mac:bb&emu=tab", current),
             "/p/x-prjy?on=mac:bb&emu=tab&record=http%3A%2F%2F127.0.0.1%3A2%2Fingest"
         );
-        assert_eq!(with_page_flags("/devices", ""), "/devices");
+        assert_eq!(with_page_flags("/", ""), "/");
+        assert_eq!(with_page_flags("/?on=mac:aa", "?x=1"), "/?on=mac:aa");
+    }
+
+    /// `/devices`, `/projects`, `/home` and junk under `/device` are aliases
+    /// of Home: they heal to `/` carrying the whole query, in order — the
+    /// flags `with_page_flags` would carry and the ones it would not
+    /// (`?lan=`, `?firmware-store=`, `?wire=`) alike — less `?on=`.
+    #[test]
+    fn an_alias_heals_to_the_root_with_its_whole_query() {
         assert_eq!(
-            with_page_flags("/devices?on=mac:aa", "?x=1"),
-            "/devices?on=mac:aa"
+            canonical_address(
+                "/devices?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A9%2Fingest&lan=ws://127.0.0.1:2/link&firmware-store=http://127.0.0.1:3&wire=packed"
+            )
+            .as_deref(),
+            Some(
+                "/?emu=ws://127.0.0.1:1&record=http%3A%2F%2F127.0.0.1%3A9%2Fingest&lan=ws://127.0.0.1:2/link&firmware-store=http://127.0.0.1:3&wire=packed"
+            )
         );
+        assert_eq!(
+            canonical_address("/projects?emu=tab").as_deref(),
+            Some("/?emu=tab")
+        );
+        assert_eq!(canonical_address("/home").as_deref(), Some("/"));
+        assert_eq!(canonical_address("/devices/").as_deref(), Some("/"));
+        assert_eq!(
+            canonical_address("/relay?x").as_deref(),
+            None,
+            "an unknown path is not an alias"
+        );
+        // Only a `/p/` address carries a device hint.
+        assert_eq!(canonical_address("/devices?on=sim").as_deref(), Some("/"));
+        assert_eq!(
+            canonical_address("/devices?on=sim&emu=tab&relay=1").as_deref(),
+            Some("/?emu=tab&relay=1")
+        );
+        // A bare `/device` and depth junk under it read as Home, and heal.
+        assert_eq!(
+            canonical_address("/device?ble=emu").as_deref(),
+            Some("/?ble=emu")
+        );
+        assert_eq!(
+            canonical_address("/device/deva/play/extra").as_deref(),
+            Some("/")
+        );
+    }
+
+    #[test]
+    fn the_root_and_every_real_route_are_not_aliases() {
+        for address in [
+            "/",
+            "/?emu=tab",
+            "/p/x",
+            "/p/x-prj3fKq8Zr21bTxYw0AhVmDpe?on=sim",
+            "/device/dev0000000000000001",
+            "/device/dev0000000000000001/play",
+            "/explore",
+            "/docs/getting-started",
+            "/boards",
+        ] {
+            assert_eq!(canonical_address(address), None, "{address:?}");
+        }
     }
 
     use lpa_studio_core::{UiConsoleView, UiPaneView, UiStatus, UiViewContent};
@@ -1489,8 +1595,6 @@ mod tests {
     fn every_route() -> Vec<StudioRoute> {
         vec![
             StudioRoute::Home,
-            StudioRoute::Devices,
-            StudioRoute::Projects,
             StudioRoute::Explore,
             StudioRoute::Account,
             StudioRoute::Unlock,
@@ -1679,10 +1783,10 @@ mod tests {
 
     /// `/device/<uid>` addresses a board's session (round-2 M5): one uid
     /// segment, the same view suffixes as a project, and both dialects.
-    /// A bare `/device` or depth junk lands on the Devices page — the
-    /// gallery is the honest answer to "which board?" — never on Home.
+    /// A bare `/device` or depth junk lands on Home — the page whose boards
+    /// are the honest answer to "which board?".
     #[test]
-    fn device_paths_address_a_board_and_junk_lands_on_the_gallery() {
+    fn device_paths_address_a_board_and_junk_lands_on_home() {
         let device = |view| StudioRoute::Device {
             uid: "devx".to_string(),
             view,
@@ -1717,8 +1821,9 @@ mod tests {
             "#/device/devx/extra",
             "#/device/devx/play/extra",
         ] {
-            assert_eq!(StudioRoute::parse(path), StudioRoute::Devices, "{path:?}");
+            assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
         }
+        assert_eq!(device_route("", ProjectView::Workspace), StudioRoute::Home);
         // Play and workspace are one session; a different board is not.
         assert!(device(ProjectView::Play).same_session(&device(ProjectView::Workspace)));
         assert!(
@@ -1811,12 +1916,25 @@ mod tests {
         assert_eq!(StudioRoute::Home.path(), "/");
     }
 
-    /// Devices is its own section now, at its own slug.
+    /// The Devices and Projects pages are the home page now: their old
+    /// addresses (and `/home`) parse as Home, in both dialects, and only `/`
+    /// is emitted. A path under one of them is not an alias.
     #[test]
-    fn the_devices_section_has_its_own_slug() {
-        assert_eq!(StudioRoute::parse("/devices"), StudioRoute::Devices);
-        assert_eq!(StudioRoute::parse("#/devices"), StudioRoute::Devices);
-        assert_eq!(StudioRoute::Devices.path(), "/devices");
+    fn devices_projects_and_home_are_aliases_of_home() {
+        for path in [
+            "/devices",
+            "/projects",
+            "/home",
+            "#/devices",
+            "#/projects",
+            "/devices/",
+            "/devices?emu=tab",
+        ] {
+            assert_eq!(StudioRoute::parse(path), StudioRoute::Home, "{path:?}");
+        }
+        assert_eq!(StudioRoute::parse("/devices/x"), StudioRoute::Home);
+        assert_eq!(canonical_address("/devices/x"), None);
+        assert_eq!(StudioRoute::Home.path(), "/");
     }
 
     #[test]
@@ -2183,7 +2301,7 @@ mod tests {
     /// meaningless as it looks, and is never re-emitted.
     #[test]
     fn no_other_route_carries_a_hint() {
-        for path in ["/devices?on=sim", "/device/deva?on=sim", "/docs?on=sim"] {
+        for path in ["/?on=sim", "/device/deva?on=sim", "/docs?on=sim"] {
             let route = StudioRoute::parse(path);
             assert_eq!(route.device_hint(), None, "{path:?}");
             assert!(!route.path().contains("on="), "{path:?}");
@@ -2563,9 +2681,9 @@ mod tests {
     // lens_sync_target: where the address goes when the editor shows
     // -----------------------------------------------------------------
     //
-    // `on_shell_route` is the view loop's own set (`web_app.rs`): the
-    // gallery sections and the lens routes. The tests pass it by hand,
-    // `true` for those and `false` for every other page.
+    // `on_shell_route` is the view loop's own set (`web_app.rs`): the lens
+    // routes. The tests pass it by hand, `true` for those and `false` for
+    // every other page.
 
     /// The defect (docs/defects/2026-10-08-the-device-play-address-loses-play.md):
     /// a `/device/<uid>/play` load heals to the project's address WITH
@@ -2670,14 +2788,14 @@ mod tests {
     }
 
     /// Q3: an unbound lens that has just taken the editor from a page that
-    /// is not a lens route (Home, or the gallery while it exists) goes to
+    /// is not a lens route (Home, or another section) goes to
     /// `/device/<uid>`, the only time that address is written. A steady
     /// one there is left where it is.
     #[test]
     fn an_unbound_lens_opened_from_a_page_goes_to_its_device_address() {
         let bound = lens_route(&board_view(None));
         assert_eq!(bound, None, "no project address");
-        for (current, on_shell_route) in [(StudioRoute::Home, false), (StudioRoute::Devices, true)]
+        for (current, on_shell_route) in [(StudioRoute::Home, false), (StudioRoute::Explore, false)]
         {
             let lens_move = lens_sync_target(
                 &current,
@@ -2775,11 +2893,14 @@ mod tests {
                 "a new lens from {current:?}"
             );
         }
-        // …while on a gallery section (a shell route) even a steady lens
-        // is followed, as a push
+        // …while on a shell route a steady lens is followed. Which routes
+        // are shell routes is the caller's (the view loop's) set; handed
+        // one that is not a lens route, the move is a push, as from any
+        // page. (Since the home page replaced the gallery sections, the
+        // app's set holds only lens routes.)
         assert_eq!(
             lens_sync_target(
-                &StudioRoute::Projects,
+                &StudioRoute::Home,
                 bound.as_ref(),
                 Some(BOARD_UID),
                 true,

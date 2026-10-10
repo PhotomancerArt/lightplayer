@@ -1,7 +1,7 @@
 # Recording a Studio session (`?record=`)
 
 When something goes wrong between Studio and a board (a hang at "Syncing
-project…", a silent kick back to Devices, a stream that loses a frame),
+project…", a silent kick back to the home page, a stream that loses a frame),
 the session recorder writes down everything the page saw, so an agent can
 replay it afterwards. It records to a small receiver on your own machine;
 nothing is uploaded anywhere.
@@ -62,7 +62,7 @@ One line per event, timed from the session start:
  +5.264s  WIRE  →  serial:1  accessList id=1073741824 39 B
  +5.279s  WIRE  ←  serial:1  accessList id=1073741824 71 B packed
  +5.286s  REQ      c11#1073741824 access.list answered in 22.0 ms
-+40.615s  ROUTE    /p/playful-choker-…?on=mac:… → /devices   (browser-nav)
++40.615s  ROUTE    /p/playful-choker-…?on=mac:… → /   (browser-nav)
 +40.746s  REQ      c15#1090519058 project.read failed in 64.0 ms: server error: Project not found: handle 1
 ```
 
@@ -91,7 +91,7 @@ The file is JSON Lines. Every line has `seq` (the page's own order) and `t`
 | kind | what it is |
 |---|---|
 | `session` | the first line: recording id, build (version, sha, channel, branch), browser, page URL |
-| `route` | an address change, with `from`, `to` and a `reason` (`boot`, `browser-nav`, `slug-heal`, `hint-heal`, and `open-ended: …` for the kick back to Devices after an open) |
+| `route` | an address change, with `from`, `to` and a `reason` (`boot`, `browser-nav`, `slug-heal`, `hint-heal`, and `open-ended: …` for the kick back to the home page after an open) |
 | `command` | a Studio command sent from the UI (name and a short summary, not a dump) |
 | `action` | an action's result: `ok`/`failed`, how long it took, the error |
 | `open` | a project-open stage (`on-device:uploading`, `idle`, `failed`, …) |

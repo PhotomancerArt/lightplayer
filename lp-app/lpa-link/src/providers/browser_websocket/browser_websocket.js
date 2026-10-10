@@ -354,7 +354,7 @@ export function onActivity(id, callback) {
 
 /// Wait until the connection that is up now proves itself — because a
 /// person asked for it and is waiting for the answer ("Connect over Wi‑Fi",
-/// an address typed into the add slot). A board that answers sends a frame
+/// an address typed into Connect a board's Network row). A board that answers sends a frame
 /// (its half of the handshake); a board that turns the connection away
 /// closes it right after the upgrade (a busy board's 1013, "try again
 /// later"). Resolves `true` on a frame, or when `ms` pass with the link

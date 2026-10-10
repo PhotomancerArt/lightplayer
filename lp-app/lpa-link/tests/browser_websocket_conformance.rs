@@ -396,7 +396,7 @@ async fn a_close_by_request_is_never_redialled() {
 }
 
 /// A connect a person asked for ("Connect over Wi‑Fi", an address typed into
-/// the add slot) waits for the board's answer, not just the upgrade: a busy
+/// Connect a board's Network row) waits for the board's answer, not just the upgrade: a busy
 /// board takes the upgrade and closes with 1013 at once, and that is the
 /// answer the caller hears, in the socket's words; a board that sends its
 /// first frame has answered; a socket that never opens says so.

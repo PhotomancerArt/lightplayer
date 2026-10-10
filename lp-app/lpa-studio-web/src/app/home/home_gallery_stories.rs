@@ -1,7 +1,11 @@
-//! Gallery-page stories: first run, populated, opening, and no-store.
-//! The P09 split divided the combined gallery into Devices / Projects /
-//! Explore pages; these stories stack all three from one fixture so the
-//! old coverage stays in frame.
+//! Home page stories on the old gallery's fixtures: first run, populated,
+//! opening, no-store, no transport, the roster. The home page (2026-10-08)
+//! replaced the Devices, Projects and Explore pages with one page, and these
+//! stories draw that page from one fixture. They keep their old names on
+//! purpose: a story's id is its file path plus function name, so the
+//! stories comment on a PR reads the change as a before/after rather than
+//! a delete and an add. The page's own states (signed out, guest, the full
+//! library, the list view, each tab) are in `home_page_stories.rs`.
 //!
 //! ⚠️ The DEVICE-roster rows (the connected/offline/blank/safe-mode cards,
 //! the empty-device push buttons, the section-label candidates over a
@@ -17,7 +21,7 @@ use lpa_studio_core::app::library::PackageHealth;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
-    UiControlProductPreview, UiControlSampleFormat, UiExampleCard, UiHomeView, UiIssue,
+    UiControlProductPreview, UiControlSampleFormat, UiExampleCard, UiHomeTab, UiHomeView, UiIssue,
     UiPackageCard, UiRuntimeBand,
 };
 
@@ -28,27 +32,25 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
-use crate::app::home::ExplorePage;
 use crate::app::home::card_thumb::CardThumb;
-use crate::app::home::device_offer_story_fixtures::StoryDevicesPage;
+use crate::app::home::connect_board::ConnectBoardSection;
+use crate::app::home::device_offer_story_fixtures::StoryHomePage;
 use crate::app::home::device_offer_story_fixtures::{
-    StoryDeviceCard, StoryPendingCard, add_slot_tree,
+    StoryBoardCard, StoryDeviceCard, StoryPendingCard, add_slot_tree,
 };
 use crate::app::home::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickPopover,
 };
 use crate::app::home::device_terminal::DeviceTerminal;
 use crate::app::home::gallery_preview::ThumbPreviewBadge;
-use crate::app::home::home_offer_story_fixtures::StoryProjectsPage;
-use crate::app::home::target_pick_popover::TargetPickPopover;
 use crate::core::OffersProvider;
 use lpa_studio_core::{BluetoothReach, OfferArgs, PUSH_SOURCE_PARAM, UiOffer};
 
 /// A fixed "now" so relative times in baselines never drift.
-const STORY_NOW: f64 = 1_800_000_000.0;
+pub(crate) const STORY_NOW: f64 = 1_800_000_000.0;
 
 /// One of each kind, so the grouped surfaces show both sections.
-fn examples() -> Vec<UiExampleCard> {
+pub(crate) fn examples() -> Vec<UiExampleCard> {
     vec![
         UiExampleCard {
             id: "catalog/fyeah-sign".to_string(),
@@ -69,7 +71,7 @@ fn examples() -> Vec<UiExampleCard> {
     ]
 }
 
-fn packages() -> Vec<UiPackageCard> {
+pub(crate) fn packages() -> Vec<UiPackageCard> {
     vec![
         UiPackageCard {
             uid: "prj3fKq8Zr21bTxYw0AhVmDpe".to_string(),
@@ -79,7 +81,7 @@ fn packages() -> Vec<UiPackageCard> {
             slug: "2026-07-02-0930-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 2.0 * 3600.0),
             provenance: None,
-            on_device: Some("Luna's porch sign".to_string()),
+            on_boards: vec!["Luna's porch sign".to_string()],
             open_elsewhere: false,
             target: None,
             health: PackageHealth::Ready,
@@ -92,7 +94,7 @@ fn packages() -> Vec<UiPackageCard> {
             slug: "2026-07-04-1102-basic".to_string(),
             last_saved_at: Some(STORY_NOW - 5.0 * 86_400.0),
             provenance: Some("Remixed from Basic".to_string()),
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: PackageHealth::Ready,
@@ -105,7 +107,7 @@ fn packages() -> Vec<UiPackageCard> {
             slug: "2026-05-28-1740-porch-sign".to_string(),
             last_saved_at: Some(STORY_NOW - 40.0 * 86_400.0),
             provenance: Some("Forked from 2026-07-02-0930-porch-sign".to_string()),
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: PackageHealth::Ready,
@@ -114,15 +116,15 @@ fn packages() -> Vec<UiPackageCard> {
 }
 
 #[story(
-    description = "First run, create-first since the D17 deviation (2026-07-27): the empty Projects section header carries the New chip beside Import — a pure-blank create-and-open — and the empty-library copy leads with creating a project before pointing at the examples."
+    description = "First run with an empty library, in a browser that has no transport (the default roster: no Web Serial, so Connect a board says why instead of drawing squares that can only fail). A first visit, so no tabs and no cards/list switch. Create-first (the D17 deviation, 2026-07-27): Other projects is only its add row — New (a pure-blank create-and-open), Import, Paste — and the empty library has no paragraph of its own; the add row is the empty state. Then the examples and the footer. The same first visit in Chrome is home_landing's `landing`."
 )]
 fn first_run() -> Element {
-    // no devices ever granted: the Connected section collapses to a slim
-    // affordance; the library holds nothing yet
+    // no boards, no transport; the library holds nothing yet
     let home = UiHomeView {
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -161,7 +163,7 @@ fn project_format_states() -> Element {
         slug: "2026-06-11-0815-half-written".to_string(),
         last_saved_at: None,
         provenance: None,
-        on_device: None,
+        on_boards: Vec::new(),
         open_elsewhere: false,
         target: None,
         health: PackageHealth::Blocked {
@@ -176,6 +178,7 @@ fn project_format_states() -> Element {
         projects,
         examples: examples(),
         devices: Default::default(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -187,12 +190,15 @@ fn project_format_states() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A full library and no boards: three projects under Other projects (newest saved first, each with its age and where it came from), then the add row. Compare with home_page_full_library, which has boards, patterns and a project that boards play."
+)]
 fn populated() -> Element {
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -204,7 +210,9 @@ fn populated() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A project another tab holds open: its card wears the neutral \"open in another tab\" badge and stays fully rendered and clickable (the refusal notice explains)."
+)]
 fn project_open_in_another_tab() -> Element {
     // M4b: a project another tab holds open — neutral badge, card stays
     // fully rendered and clickable (the refusal notice explains)
@@ -214,6 +222,7 @@ fn project_open_in_another_tab() -> Element {
         projects,
         examples: examples(),
         devices: Default::default(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -225,12 +234,15 @@ fn project_open_in_another_tab() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "A project opening: its card shows busy, and every other card and the examples wait until it has opened."
+)]
 fn opening_a_project() -> Element {
     let mut home = UiHomeView {
         projects: packages(),
         examples: examples(),
         devices: Default::default(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -373,7 +385,7 @@ fn poster_states() -> Element {
 /// because these baselines are CI-canonical. The bytes are LINEAR unorm16,
 /// which is what the wire carries and what `LampView` decodes; feeding it
 /// display-sRGB here would make the story disagree with the real card.
-fn thumb_lamp_frame() -> UiControlProductPreview {
+pub(crate) fn thumb_lamp_frame() -> UiControlProductPreview {
     const COLS: u32 = 24;
     const ROWS: u32 = 3;
     const LAMPS: u32 = COLS * ROWS;
@@ -443,13 +455,14 @@ fn gallery(home: UiHomeView) -> Element {
 }
 
 #[story(
-    description = "No transport (a browser without Web Serial, or a build without the provider): the Devices page says so rather than showing an empty roster, which would read as \"you have no devices\"."
+    description = "No transport (a browser without Web Serial, or a build without the provider): the home page's Connect a board says so rather than showing squares that can only fail, which would read as \"you have no boards\"."
 )]
 fn devices_page_without_a_transport() -> Element {
     gallery(UiHomeView {
         projects: packages(),
         examples: examples(),
         devices: DeviceRosterView::default(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
@@ -457,68 +470,69 @@ fn devices_page_without_a_transport() -> Element {
 }
 
 #[story(
-    description = "The Devices page under D7 (disconnect → disappear, AC9), with the cards in their four-zone reading (P9): each card is header · PROJECT (preview, the project name or \"Nothing loaded\", its verbs) · FIRMWARE (\"<firmware> · <board>\", Flash firmware … Factory reset, with the terminal flush edge to edge underneath as the same zone's second half) · DEVICE (freshness, Reset · Disconnect … Forget), with no labels anywhere — a zone is known by what it says and what it offers. The pending link wears the same grammar minus the project zone, which it has nothing to fill. The grid holds only boards that are actually THERE — a pending link still identifying, the two connected cards, and the add slot at the insertion point. The board Studio remembers but cannot see is not a card at all: it is the one quiet line under the grid, counted and collapsed, with 'show' as the way in. That line is where Forget lives for an absent board, which is why an unplugged board can still be removed without plugging it back in. Compare with devices_page_remembered_open."
+    description = "The home page's boards (the Devices page's roster, folded in), each one the board card: its picture, the name bar with one primary, then the project, connection, access, firmware and hardware bars, with no labels anywhere — a bar is known by its icon and what it says. Online boards holds the boards that are THERE — the new board first (\"USB · new\", \"No firmware\" in orange, Install as its primary), then the running board and the empty one (\"Nothing on it yet\", Add a project) — then Connect a board, then Offline boards: the board Studio remembers and cannot see is a card of its own there (the 2026-10-08 ADR reverses the old \"disconnect → disappear\" line), \"Offline\" on its connection bar, its firmware the version it last ran (\"last seen\"), Connect as its primary and Forget in its hardware details, so an unplugged board can still be removed without plugging it back in. \"Unlocking your boards\" is the closed fold under them."
 )]
 fn devices_page_roster() -> Element {
-    devices_page_story(false)
-}
-
-#[story(
-    description = "The same page with the remembered line expanded (D7, AC9). Each absent board is a dashed, dimmed tile at card width: its name, the 120px preview slot saying WHY there is no picture (not connected, and when it was last heard — never a stale frame passed off as current), the board id · last-seen meta, and the two verbs an absent board can honestly offer — Reconnect in the outline voice (some bridges' port grants do not survive a replug) and Forget as a reserve-width inline confirm. The tiles are deliberately not cards: an offline board has no project, firmware, terminal or device zone to fill, because it has none of those facts to hand."
-)]
-fn devices_page_remembered_open() -> Element {
-    devices_page_story(true)
-}
-
-/// The page stories' one body: the roster with a pending link, two
-/// connected boards and one remembered board, with the line open or shut.
-fn devices_page_story(remembered_open: bool) -> Element {
+    // The roster with a pending link, two connected boards and one
+    // remembered board, on the All tab.
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),
         devices: roster_page_fixture(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryDevicesPage { home, remembered_open, on_action: |_| {} }
+            StoryHomePage { home, now_secs: Some(STORY_NOW), on_action: |_| {} }
         }
     }
 }
 
 #[story(
-    description = "The add slot's target menu, open (D44, PD16, D1, spike 2 + 2b). The slot keeps \"via USB\" (under \"Connect a board\") as its spectrum CTA — a board on the desk is the common case — and grows a quiet second verb, \"start a board here ▾\", because the slot where the next card appears should offer BOTH ways a card can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the runtime band and the `?on=` grammar use — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands in the grid next to the slot that made it. The panel floats in the top layer, so the slot is exactly as tall open as shut and the roster never reflows."
+    description = "The Connect a board section's target menu, open (D44, PD16, D1, spike 2 + 2b). The section keeps its three squares — USB, Bluetooth, Network — and grows a quiet second verb under them, \"start a board here ▾\", because the place where the next board comes from should offer BOTH ways a board can appear. The menu is two groups: Desktop alone at the top (it is the default target and the one every new project gets), then every catalog board this build can actually start, in catalog order, each row a silhouette · name · tag. The tag is a lowercase WORD — the same word the `?on=` grammar uses — rather than a chip or a sentence, and it says what picking that row would START. THE THING TO LOOK AT: the XIAO ESP32-C6 now appears TWICE, because this build can emulate it and sim-versus-emu is the user's choice, never a default Studio flips. `emu` comes first — exact, then fast — and the two rows are otherwise identical, which is the claim: one board, two runtimes. The hint line under the rows has earned its place and explains the two words; it names NO modifier key, because the two rows are the whole of the choice. Picking a row mints a record of that kind, powers it on, and the card lands under Online boards. The panel floats in the top layer, so the section is exactly as tall open as shut and the page never reflows."
 )]
 fn devices_target_pick_open() -> Element {
     rsx! {
         // Tall enough for the WHOLE panel — every row plus the hint line
         // under them. The panel floats in the top layer, so a section that
         // merely fits the trigger clips exactly the half this story is for.
-        section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:place-items-center tw:p-4",
+        section { class: "tw:grid tw:min-h-[720px] tw:w-[360px] tw:content-start tw:p-4",
             OffersProvider { offers: add_slot_tree(true, BluetoothReach::Ready),
-                TargetPickPopover { initially_open: true, on_action: |_| {} }
+                ConnectBoardSection {
+                    ble_reach: Some(BluetoothReach::Ready),
+                    page_url: Some("https://lightplayer.app/".to_string()),
+                    pick_open: true,
+                    on_action: |_| {},
+                }
             }
         }
     }
 }
 
 #[story(
-    description = "A powered-off sim, where Q5 put it: on the remembered line, in the same dashed tile an unplugged board gets. Powering a sim off keeps its record and takes everything else — so the tile says what it has (a name, the board it acts as) and nothing it does not, and its preview slot carries the honest sentence rather than a stale picture. The one thing that differs from a board's tile is the verb in the Reconnect slot: a runtime this tab makes has no port grant to ask the browser back for, so the escape reads POWER ON, in the same outline voice, dispatching the same `Connect` the model already has (PD8/Q15 — a sim adds a link and an effect backend, never a fifth flow). Forget keeps its inline confirm, whose words are the sim's own: \"Forget this sim? Its record and name go; nothing else exists.\" (D46)."
+    description = "A powered-off sim, where Q5 put it: under Offline boards (the Boards tab), the same board card an unplugged board gets. Powering a sim off keeps its record and takes everything else — so the card says what it has (a name, \"Simulated XIAO ESP32-C6\" on the hardware bar) and nothing it does not: \"In this tab · off\", and a dark picture rather than a stale one. The one thing that differs from an unplugged board's card is the primary: a runtime this tab makes has no port grant to ask the browser back for, so it reads POWER ON, dispatching the same `Connect` the model already has (PD8/Q15 — a sim adds a link and an effect backend, never a fifth flow). Forget (hardware details) keeps its confirm, whose words are the sim's own: \"Forget this sim? Its record and name go; nothing else exists.\" (D46)."
 )]
 fn devices_card_sim_powered_off() -> Element {
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),
         devices: powered_off_sim_fixture(),
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                on_action: |_| {},
+            }
         }
     }
 }
@@ -548,6 +562,10 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         layout: Default::default(),
         backup_download: None,
         board_projects: Default::default(),
+        link_kinds: Default::default(),
+        last_seen: Default::default(),
+        ends: Default::default(),
+        cards: Vec::new(),
         feeds: Default::default(),
         runtime_bands: [(id, UiRuntimeBand::sim("seeed/xiao-esp32-c6", Some("cpu")))]
             .into_iter()
@@ -561,7 +579,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
 }
 
 #[story(
-    description = "The remembered line open, with the board's LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_remembered_open`, but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. The tile's 120px slot draws that frame exactly as a card's Offline look does — the lamp field dimmed and desaturated, the neutral pill \"last frame · 3 h ago\" with the age measured from when the board actually published it (the STORED capture stamp, not the reload) — instead of the \"Not connected — …\" sentence. Nothing else on the tile moves: same dashed border, same height, same board · last-heard meta line, same Reconnect / Forget verbs. Compare against `devices_page_remembered_open`, whose remembered board has no sidecar and keeps its sentence."
+    description = "An offline board with its LAST PICTURE (the honest-device-preview follow-up, 2026-09-07): the same page as `devices_page_roster` (here on the Boards tab), but the remembered board's feed carries the frame Studio persisted to its per-uid sidecar the last time the board was fed. Its card under Offline boards draws that frame dimmed (last known, not current), and its status corner reads \"3 h ago\" — the age measured from when the board actually published it (the STORED capture stamp, not the reload); the corner's details say \"last frame · 3 h ago\". Nothing else on the card moves: same height, same bars, same Connect and Forget. Compare against `devices_page_roster`, whose remembered board has no sidecar and keeps its picture dark."
 )]
 fn devices_page_remembered_last_frame() -> Element {
     let mut devices = roster_page_fixture();
@@ -585,19 +603,25 @@ fn devices_page_remembered_last_frame() -> Element {
         projects: packages(),
         examples: examples(),
         devices,
+        sections: Default::default(),
         library_available: true,
         opening: None,
         issue: None,
     };
     rsx! {
         section { class: "tw:p-4",
-            StoryDevicesPage { home, remembered_open: true, on_action: |_| {} }
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                on_action: |_| {},
+            }
         }
     }
 }
 
 #[story(
-    description = "The card's four zones and the height rule (AC2), as a measurement: the six device states in 400px columns — running, nothing loaded, needs firmware, flashing at 62%, sending (indeterminate), and degraded. Under the header (title · status chip · board · chip · MAC · firmware) the card is divided by SUBJECT, with no labels: PROJECT (preview slot 120px · info line 17px · bar 4px · verbs 30px) says what is on the board and offers Open · Clear faults … the pick + Put it on the board … Remove; FIRMWARE (info 17px · bar 4px · verbs 30px, then the terminal) reads \"<firmware> · <board>\" or \"Blank flash — needs firmware\", holds Flash firmware … Factory reset, and carries the terminal as its second half — one zone, no hairline between the verb row and the log, and the dark ground running flush to both card edges rather than sitting in a padded well (the pair is one section so a later milestone can put it behind one curtain); DEVICE (info 17px · verbs 30px) carries the freshness line and Reset · Retry · Disconnect … Forget. An activity narrates in the zone whose subject it changes, lights THAT zone's bar and puts its Cancel in THAT zone's verb row: compare Flashing (firmware bar lit, the firmware line counting percent) with Sending (project bar sweeping, the project line narrating). Every row exists in every state, so all six cards MUST measure the same height, and a board event — a heartbeat, a fault, a lost link, a new terminal line — can never move a card nor make the gallery jump while a flash runs. Laid out three rows of two rather than six across so every state fits the captured sheet."
+    description = "The board card's height rule (AC2), as a measurement: six states in 400px columns — running, nothing loaded, needs firmware, flashing at 62%, sending (indeterminate), and degraded. Every card is a picture, the name bar and the same five bars — project · connection · access · firmware · hardware — divided by SUBJECT, with no labels: a bar is known by its icon and what it says. Running: the board's project, \"USB · connected\", Edit as the primary. Nothing loaded: \"Nothing on it yet\" with Add a project. Needs firmware: \"No firmware\" in orange on the firmware bar, Install as the primary, the status corner orange. Degraded: the fault in orange on the project bar, Clear faults in its details. An activity narrates in the bar whose subject it changes, with its spinner, its iridescent foot and its Cancel there: compare Flashing (the firmware bar: \"Flashing firmware · 62%\") with Sending (the project bar: \"Sending the project\", no percent, so its foot sweeps); meanwhile the name bar's Edit waits, disabled, saying \"Busy:\" and the same words. Every row exists in every state, so all six cards MUST measure the same height, and a board event — a heartbeat, a fault, a lost link, a new terminal line — can never move a card nor make the gallery jump while a flash runs. Laid out three rows of two rather than six across so every state fits the captured sheet."
 )]
 fn devices_card_states() -> Element {
     let states = card_state_fixtures();
@@ -627,11 +651,17 @@ fn devices_card_states() -> Element {
 }
 
 #[story(
-    description = "The preview slot with the live feed (plan 2026-09-06 device-card-live-feed): the same Running card five times at 400px, each with the board's own published frame (a canned 72-lamp sign) joined at the app view. LIVE — calm green pill \"live · 43 fps\" (the board's engine rate off its heartbeat); STALE — the frame stays, amber \"last frame · 12 s ago\" past the 5 s threshold; OFFLINE — the last in-session frame dimmed and desaturated, neutral \"last frame · 12 s ago\" (last known, not current); LENS — the editor holds the wire, the feed is paused, the last frame dimmed with \"editor has the wire\"; NO LAYOUT — frames arrive but the board's lamp layout exceeded the wire's read budget, so the slot says so instead of painting nothing. The lamp field is aspect-fit and letterboxed INSIDE the fixed 120px slot — the slot never follows the layout's aspect — so all five cards measure exactly the height of `devices_card_states`' cards: the picture arriving moves nothing. Compare against `devices_card_states` for the never-fed sentence."
+    description = "The card's picture with the live feed (plan 2026-09-06 device-card-live-feed): the same Running card five times at 400px, each with the board's own published frame joined at the app view. LIVE — \"USB · live\" on the connection bar, the status corner reading \"43 fps\" (the board's engine rate off its heartbeat); STALE — the frame stays, the corner reading its age, \"12 s ago\"; OFFLINE — the last in-session frame dimmed (last known, not current); LENS — the editor holds the wire, the feed is paused, the last frame dimmed, \"editor has the wire\" in the corner's details; NO LAYOUT — frames arrive but the board's lamp layout exceeded the wire's read budget, so the picture stays dark and the corner's details say why. The lamp field is aspect-fit and letterboxed INSIDE the fixed picture row — it never follows the layout's aspect — so all five cards measure exactly the height of `devices_card_states`' cards: the picture arriving moves nothing. Compare `devices_card_states` for the never-fed card."
 )]
 fn devices_card_live_feed() -> Element {
     let running = card_state_fixtures().remove(0);
     let (_, card, open_uid) = running;
+    // The feed's rate is the board's own, off its heartbeat (core joins one
+    // from the other): the view says it too.
+    let card = DeviceView {
+        engine_fps: Some(43),
+        ..card
+    };
     let frame = live_card_lamp_frame();
     let feed = |liveness: FeedLiveness, with_layout: bool| DeviceCardFeedView {
         frame: Some(match with_layout {
@@ -678,7 +708,7 @@ fn devices_card_live_feed() -> Element {
 }
 
 #[story(
-    description = "The pending card at each identification stage, beside a settled neighbour (follow-up filed at the ship of PR #518). The header's identity is the SAME two fixed mono rows the settled card prints — hardware above, binding · firmware below — decided in core per stage (`pending_identity_rows`), so a link still identifying reads like the cards around it instead of one sentence sitting in a two-row slot. NOTHING HEARD (a board parked in ROM or saying nothing): \"chip unknown\" over \"no identity until flashed\" — neither row blank, because an empty first row under an Identifying chip reads as a fault. CHIP ONLY (the boot banner named it, still identifying): \"esp32c6\" over the same sentence, exactly the row a settled pre-hello board prints. CHIP + MAC (the flash preflight probed it, verdict settled blank): \"esp32c6\" over \"60:55:f9:0a:0b:0c · no firmware\" — the settled card's own words the moment a binding exists, and never \"until flashed\" beside a MAC. SETTLED (the running neighbour from devices_card_states) is here for the level check: headers stay 90px, so a pending card's zones start where its neighbour's do (ADR 2026-09-03, amended 2026-09-04). The pending card keeps its own zone set — FIRMWARE + terminal and DEVICE, no project zone — so it is shorter by design; what must line up is the header."
+    description = "A new board's card at each identification stage, beside a settled neighbour (follow-up filed at the ship of PR #518): the same board card, its bars decided in core per stage, so a link still identifying reads like the cards around it. NOTHING HEARD (a board parked in ROM or saying nothing): the hardware bar says \"chip unknown\", the firmware bar \"Known once it identifies\", and the connection bar \"USB · new\" with its identifying as the bar's work — no bar blank, because an empty row under an identifying board reads as a fault; its primary, Connect, waits, saying how far it has got. CHIP ONLY (the boot banner named it, still identifying): the hardware bar names the chip, \"ESP32-C6\". CHIP + MAC (the flash preflight probed it, verdict settled blank): the firmware bar says \"No firmware\" in orange, the MAC is in the hardware details, and the primary is Install. SETTLED (the running neighbour from devices_card_states) is here for the level check: every card is one height, so a new board's bars sit exactly where its neighbour's do."
 )]
 fn devices_card_pending() -> Element {
     let stages = pending_stage_fixtures();
@@ -743,7 +773,7 @@ fn pending_stage_fixtures() -> Vec<(&'static str, PendingLinkView)> {
 }
 
 #[story(
-    description = "The quiet state: a board whose port is open and which has stopped saying anything (NotResponding). It is deliberately undramatic — the chip reads Not responding in the neutral tone, and the DEVICE zone's info line carries the honest staleness (\"last heard 4 min ago\") rather than an invented failure, with the way out beside it: Reset · Retry (re-run identification, no replug needed) · Disconnect … Forget. Nothing is claimed about what is loaded: the board has not said, so the PROJECT zone's info line stays empty at its height and the preview slot says the feed has nothing to show. The FIRMWARE zone still names the firmware and board the record remembers — going quiet does not unlearn what the board already said."
+    description = "The quiet state: a board whose port is open and which has stopped saying anything (NotResponding). It invents no failure: the connection bar says \"USB · not responding\" in the warning tone, with Retry (re-run identification, no replug needed) at its end, and its details carry the honest staleness (\"last heard 4 min ago\") and Disconnect; Reset is in the hardware details, Forget apart. Nothing is claimed about what is loaded: the board has not said, so the project bar reads \"Not known yet\" and the picture stays dark. The firmware bar still names the firmware the record remembers, and the hardware bar the board — going quiet does not unlearn what the board already said."
 )]
 fn devices_card_not_responding() -> Element {
     rsx! {
@@ -761,7 +791,7 @@ fn devices_card_not_responding() -> Element {
 }
 
 #[story(
-    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live, and it acts on ONE press: the sheet is the question, so Continue does not arm a second time (G1 walk 2026-10-03; it keeps its Lasting tint, and the app agent still hands it to the user). Download backup is always there, Cancel leaves the board untouched. Behind the sheet the card says \"Waiting for your answer…\", not \"Flashing firmware…\". Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware line says they are waiting and the Update verb reads Finish update. The sheets are pinned in their boxes for capture; on the page they rise over it, so asking never changes the card's height."
+    description = "An update that moves a board's files to the new layout (the C6 repartition), in its four faces, all drawn from core's own copy (`device_layout_view`). The board card asks the question in its firmware details, which core raises so they open by themselves. Top left: the question while the update waits — Studio has already stored a backup in this browser, so Continue is live, and it acts on ONE press: the details are the question, so Continue does not arm a second time (G1 walk 2026-10-03; it keeps its Lasting tint, and the app agent still hands it to the user). Download backup is always there, Cancel leaves the board untouched. Under the question the firmware bar's work says \"Waiting for your answer…\", not \"Flashing firmware…\". Top right: the same question when this browser could NOT keep the backup and the board will be nearly full afterwards — Continue stays disabled until the backup is downloaded. Bottom left: the refusal when the files do not fit; nothing was changed, and the files can still be downloaded. Bottom right: a board that came back holding its files after an interrupted update — the firmware bar says \"Files waiting\" in orange, with Finish update at its end."
 )]
 fn devices_card_layout_change() -> Element {
     use lpa_studio_core::app::devices::device_layout_step::LayoutStaging;
@@ -865,15 +895,11 @@ fn devices_card_layout_change() -> Element {
         let layout = device_layout_view(&card, prefix, fs, true, staged, None, None, &mut offers);
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
-                crate::core::OffersProvider { offers,
-                    crate::app::home::device_roster_card::DeviceRosterCard {
-                        card,
-                        projects: vec![],
-                        examples: vec![],
-                        layout,
-                        layout_sheet_inline: true,
-                        on_action: |_| {},
-                    }
+                StoryBoardCard {
+                    card,
+                    layout,
+                    extra_offers: Some(offers),
+                    on_action: |_| {},
                 }
             }
         }
@@ -944,15 +970,11 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
     );
     rsx! {
         div { class: "tw:grid tw:content-start tw:gap-2",
-            crate::core::OffersProvider { offers,
-                crate::app::home::device_roster_card::DeviceRosterCard {
-                    card,
-                    projects: vec![],
-                    examples: vec![],
-                    layout,
-                    layout_sheet_inline: true,
-                    on_action: |_| {},
-                }
+            StoryBoardCard {
+                card,
+                layout,
+                extra_offers: Some(offers),
+                on_action: |_| {},
             }
         }
     }
@@ -980,20 +1002,19 @@ fn removed_board_note_cell() -> Element {
         prefix, "studio-b",
     ));
     rsx! {
-        crate::core::OffersProvider { offers,
-            crate::app::home::device_roster_card::DeviceRosterCard {
-                card,
-                projects: packages(),
-                examples: examples(),
-                layout,
-                on_action: |_| {},
-            }
+        StoryBoardCard {
+            card,
+            projects: packages(),
+            examples: examples(),
+            layout,
+            extra_offers: Some(offers),
+            on_action: |_| {},
         }
     }
 }
 
 #[story(
-    description = "After a Remove that leaves another folder on the board: the project line, which would say \"Nothing loaded\", says what the board will start at its next power-up — \"studio-b starts at next power-up\" — in core's words, with the longer sentence (\"studio-b is still on the board and will start when it's next powered on.\") on hover. It is the same one-line, truncating info line, so the card is exactly as tall as the \"Nothing loaded\" card in `devices_card_states`. Shown at desktop card width (left) and phone card width (right). It goes away as soon as anything else happens to the board (a push, a project reported loaded). Needs Yona's look before merge."
+    description = "After a Remove that leaves another folder on the board: the project bar, which would say \"Nothing on it yet\", says what the board will start at its next power-up — \"studio-b starts at next power-up\" — in core's words, with the longer sentence (\"studio-b is still on the board and will start when it's next powered on.\") in its details. It is the same fixed bar, so the card is exactly as tall as the \"Nothing loaded\" card in `devices_card_states`. Shown at desktop card width (left) and phone card width (right). It goes away as soon as anything else happens to the board (a push, a project reported loaded). Needs Yona's look before merge."
 )]
 fn devices_card_removed_board_note() -> Element {
     rsx! {
@@ -1007,7 +1028,7 @@ fn devices_card_removed_board_note() -> Element {
 }
 
 #[story(
-    description = "The gap Decision 11 of the repartition ADR closes: a board needing its files back, with no pending backup in THIS browser — a different machine, cleared storage, or an interrupted migration whose only surviving copy is the file it offered as a download. \"Restore from a backup file…\" is the one restore verb (no Restore files, no Download backup: there is nothing stored here), and the board's Update stands beside it: an update never touches the board's files, so a files problem never hides it (defect 2026-10-06). Pressing it opens the OS file picker directly — a file dialog cannot be a `UiAction`, the same reasoning as the project library's own zip Import — so there is no sheet to capture here; the next two stories show the words it leads to."
+    description = "The gap Decision 11 of the repartition ADR closes: a board needing its files back, with no pending backup in THIS browser — a different machine, cleared storage, or an interrupted migration whose only surviving copy is the file it offered as a download. The firmware bar says \"Its files need restoring\"; its details hold \"Restore from a backup file…\" as the one restore verb (no Restore files, no Download backup: nothing is stored here) and the board's Update: an update never touches the board's files (defect 2026-10-06). Pressing it opens the OS file picker directly — a file dialog cannot be a `UiAction`, as with the library's zip Import — so there is no sheet to capture here; the next two stories show the words it leads to."
 )]
 fn devices_card_restore_from_file_menu() -> Element {
     rsx! {
@@ -1018,7 +1039,7 @@ fn devices_card_restore_from_file_menu() -> Element {
 }
 
 #[story(
-    description = "A board that came back without its files while THIS browser still holds their backup (the update that moved them was cut off mid-write; the repartition walk's W7): the line names the backup's date, and the row offers Restore files, Download backup and Restore from a backup file… — and the board's Update beside them, because an update never touches the board's files, so a files problem never hides it (defect 2026-10-06). Four verbs do not fit one card's width, so this row (and only this face's) takes a second line."
+    description = "A board that came back without its files while THIS browser still holds their backup (the update that moved them was cut off mid-write; the repartition walk's W7): the firmware bar says \"Its files need restoring\" with Restore files, and its details name the backup's date and hold Download backup, Restore from a backup file… and the board's Update — an update never touches the board's files, so a files problem never hides it (defect 2026-10-06). The card keeps its height."
 )]
 fn devices_card_restore_files_beside_update() -> Element {
     let pending = lpa_studio_core::BackupEntry {
@@ -1070,7 +1091,7 @@ fn devices_card_restore_from_file_refused() -> Element {
 }
 
 #[story(
-    description = "An update's steps, as the card names them (G1 walk 2026-10-03, Yona: \"the 'Flashing firmware…' label isn't really right for the first phase\"). Left to right, top to bottom, in the order an update that moves a board's files runs: Reading the board… (its layout, and its files when they must move — nothing is written yet), Waiting for your answer… (the question is up; no stale percent from the read), Flashing firmware…, Moving files…, Checking the files… (the read-back, and the board's own boot proving they mounted). The words are the device model's own (`FlashStep`), and the card's status label reads the same words. A flash that moves no files reads the board, then says Flashing firmware… to the end, as before."
+    description = "An update's steps, as the card names them (G1 walk 2026-10-03, Yona: \"the 'Flashing firmware…' label isn't really right for the first phase\"). In the order an update that moves a board's files runs, each on the firmware bar: Reading the board… (its layout, and its files when they must move — nothing is written yet), Waiting for your answer… (the question is up; no stale percent from the read), Flashing firmware…, Moving files…, Checking the files… (the read-back, and the board's own boot proving they mounted). The words are the device model's own (`FlashStep`); the disabled Edit says them after \"Busy:\". A flash that moves no files reads the board, then says Flashing firmware… to the end, as before."
 )]
 fn devices_card_update_steps() -> Element {
     use lpa_studio_core::DeviceFlashStep;
@@ -1134,7 +1155,7 @@ fn devices_card_update_steps() -> Element {
 }
 
 #[story(
-    description = "An older LightPlayer board — the hello of a board on a wire this Studio cannot read (every fielded C6 at wire 32, in a wire-33 Studio) — in a fresh browser, attached mid-stream so no boot banner named its chip. LEFT: its hello named the board Studio stamped on it (`hardware.boardId`, the one other field read off an older hello), so the card knows the board — and through it the chip — and offers Update firmware for it in one click, with no board pick (G1 walk 2026-10-03, Yona: \"it really shouldn't say 8 boards fit … ideally we'd know what board it is\"). Its identity row reads \"older LightPlayer\", not the old contradictory \"no firmware\". RIGHT: the same board when nothing names it (never stamped, nothing remembered) — the one case left for the pick, over every board."
+    description = "An older LightPlayer board — the hello of a board on a wire this Studio cannot read (every fielded C6 at wire 32, in a wire-33 Studio) — in a fresh browser, attached mid-stream so no boot banner named its chip. Both firmware bars say \"Older LightPlayer\", not the old contradictory \"No firmware\". LEFT: its hello named the board Studio stamped on it (`hardware.boardId`, the one other field read off an older hello), so the card knows the board, and through it the chip, and its firmware details offer Update with no board pick (G1 walk 2026-10-03, Yona: \"it really shouldn't say 8 boards fit … ideally we'd know what board it is\"). RIGHT: the same board when nothing names it (never stamped, nothing remembered) — the one case left for the pick: Install, over every board."
 )]
 fn devices_card_older_firmware() -> Element {
     let older = DeviceView {
@@ -1193,7 +1214,7 @@ fn devices_card_older_firmware() -> Element {
 }
 
 #[story(
-    description = "The armed destructive chips, idle beside both armed states (2K+, devices-treatments spike gate 2026-08-31; RESERVE width from the device-card-v2 spike §2, 2026-09-02). The chip renders both 'Forget' and 'Confirm Forget' in one grid cell, so it is already as wide as its armed reading and the first click changes text and tone WITHOUT moving the chip or its neighbours — compare the footers, the chips sit at the same width and the card's height is unchanged. Middle: Forget armed in the DEVICE zone. Right: Remove armed in the PROJECT zone's verb row — D8, the OTHER destructive chip, which marks the whole card exactly as Forget does, and the two now sit in different zones, which is why a capture that proves the marking needs both. Arming dims what the card SAYS (the header and every zone's info line, the preview and the terminal) and never what it OFFERS: every verb row keeps full contrast, so the chip that is asking stays legible. Blur or the 4s window stands down. Captured with the story-only armed_preview hooks; the knock and the quiet drain track are motion and do not capture."
+    description = "The board card's two Lasting verbs armed, beside the idle card (2K+, devices-treatments spike gate 2026-08-31; D8). Middle: Forget armed in the hardware details' danger zone. Right: Remove project armed in the project details' danger zone — D8, the OTHER destructive verb, in another bar's details, which is why a capture that proves the arming needs both. Each arms in place, two clicks: its row reads its confirm in the error tint with the quiet drain, and nothing else on the card dims (the old card-wide marking is gone). Blur or the 4s window stands down. Captured with the story-only armed_preview hooks; the knock and the quiet drain track are motion and do not capture."
 )]
 fn devices_card_armed() -> Element {
     let card = armed_card_fixture();
@@ -1226,23 +1247,40 @@ fn devices_card_armed() -> Element {
 }
 
 #[story(
-    description = "Running vs Degraded, side by side (a fault is never black, 2026-09-02). Left: the healthy running card. Right: the SAME board reporting a faulted node — the chip drops from Ready to Degraded in the attention tone, and the PROJECT zone's info line takes the attention tone to name the node and the runtime's own reason, in the row that otherwise holds the project name (one line, the full text on hover). The running face is deliberately kept: a degraded board is still running, which is why Open stays and the fault reads as a line rather than as a new state. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb, in the same zone as the fault it answers — Clear faults, beside Open — which forgets the board's crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
+    description = "Running vs Degraded, side by side under Online boards on the Boards tab (a fault is never black, 2026-09-02). First: the healthy running card. Second: a board in the SAME state reporting a faulted node — the project bar takes the attention tone and names the node and the runtime's own reason, in the bar that otherwise holds the project name (one line; the whole fault in its details), and the status corner carries the same notice. The running card is deliberately kept: a degraded board is still running, which is why Edit stays its primary and the fault reads as a bar's words rather than as a new state. This is the card that lied for two days while a quarantined shader rendered black (2026-09-01 bench). The degraded card also carries one extra verb, in the project details with the fault it answers — Clear faults — which forgets the board's crash ledger and re-arms the faulted nodes; the healthy card does not offer it, because there would be nothing for it to do."
 )]
 fn devices_page_degraded_card() -> Element {
+    // Two boards, not one board twice: the page lists a board once. The
+    // second is the first's state with a faulted node, under its own handle.
     let healthy = roster_fixture().roster.devices.remove(0);
-    let degraded = degraded_card_fixture();
+    let mut degraded = degraded_card_fixture();
+    degraded.id = DeviceId(11);
+    degraded.title = "Roof sign".to_string();
+    let base = roster_fixture();
+    let mut open_addresses = base.open_addresses.clone();
+    open_addresses.insert(11, "dev000000daqf6dvvqy".to_string());
+    let home = UiHomeView {
+        projects: Vec::new(),
+        examples: examples(),
+        devices: DeviceRosterView {
+            open_addresses,
+            roster: RosterView {
+                pending: Vec::new(),
+                devices: vec![healthy, degraded],
+            },
+            ..base
+        },
+        sections: Default::default(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
     rsx! {
-        div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            StoryDeviceCard {
-                card: healthy,
-                projects: vec![],
-                examples: vec![],
-                on_action: |_| {},
-            }
-            StoryDeviceCard {
-                card: degraded,
-                projects: vec![],
-                examples: vec![],
+        section { class: "tw:p-4",
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
                 on_action: |_| {},
             }
         }
@@ -1251,7 +1289,7 @@ fn devices_page_degraded_card() -> Element {
 
 #[story(
     label = "Agent light — a device card's verb",
-    description = "The agent light (agentic-UI M8) on a device card. The assistant pressed this board's Remove (`devices/<board>/remove-project`) — or handed it to you on a card — so that chip in the PROJECT zone's verb row wears the assistant's orchid ring (spinning live, still here), and the same chip on the docked lens card would too: every control that draws an offer is keyed by the offer's path. LEFT: at rest. RIGHT: lit. The card's size, its zones and every other verb stay exactly where they were."
+    description = "The agent light (agentic-UI M8) on a board card. The assistant pressed this board's Remove project (`devices/<board>/remove-project`) — or handed it to you on a card — so that row, in the project details, wears the assistant's orchid ring (spinning live, still here), as it would on the docked lens card: every control that draws an offer is keyed by the offer's path. Both cards have the project details open. LEFT: at rest. RIGHT: lit. Nothing else on the card moves."
 )]
 fn devices_card_agent_lit() -> Element {
     let card = roster_fixture().roster.devices.remove(0);
@@ -1259,19 +1297,18 @@ fn devices_card_agent_lit() -> Element {
         story_board_prefix(card.id).child("remove-project"),
         lpa_studio_core::AgentActivityKind::Pressed,
     )]);
+    let project_details = crate::app::board_card::CardPart::Bar(lpa_studio_core::BarLayer::Project);
     rsx! {
         div { class: "tw:grid tw:max-w-xl tw:grid-cols-2 tw:gap-3 tw:p-4",
-            StoryDeviceCard {
+            StoryBoardCard {
                 card: card.clone(),
-                projects: vec![],
-                examples: vec![],
+                details_open: Some(project_details),
                 on_action: |_| {},
             }
             crate::app::agent::AgentActivityProvider { activity: lit,
-                StoryDeviceCard {
+                StoryBoardCard {
                     card,
-                    projects: vec![],
-                    examples: vec![],
+                    details_open: Some(project_details),
                     on_action: |_| {},
                 }
             }
@@ -1302,7 +1339,7 @@ fn degraded_card_fixture() -> DeviceView {
 /// A roster covering the four states this milestone can reach: a fresh plug
 /// still identifying, a settled LightPlayer, one mid-activity, and a blank
 /// chip whose only honest verb is round 2\'s.
-fn roster_fixture() -> DeviceRosterView {
+pub(crate) fn roster_fixture() -> DeviceRosterView {
     DeviceRosterView {
         access: Default::default(),
         wifi: Default::default(),
@@ -1316,6 +1353,10 @@ fn roster_fixture() -> DeviceRosterView {
         layout: Default::default(),
         backup_download: None,
         board_projects: Default::default(),
+        link_kinds: Default::default(),
+        last_seen: Default::default(),
+        ends: Default::default(),
+        cards: Vec::new(),
         feeds: Default::default(),
         runtime_bands: Default::default(),
         // The running card has earned a registry row, so it has an editor
@@ -1659,7 +1700,7 @@ fn story_repeat(kind: DeviceTerminalKind, text: &str, repeats: u32) -> DeviceTer
 ///
 /// Cut from [`roster_fixture`] rather than written again, so the cards in
 /// the page stories are the same cards the state stories measure.
-fn roster_page_fixture() -> DeviceRosterView {
+pub(crate) fn roster_page_fixture() -> DeviceRosterView {
     let full = roster_fixture();
     let mut devices = full.roster.devices;
     // 0 = running · 3 = empty · 4 = the remembered board.
@@ -1679,6 +1720,10 @@ fn roster_page_fixture() -> DeviceRosterView {
         layout: Default::default(),
         backup_download: None,
         board_projects: Default::default(),
+        link_kinds: Default::default(),
+        last_seen: Default::default(),
+        ends: Default::default(),
+        cards: Vec::new(),
         feeds: Default::default(),
         runtime_bands: Default::default(),
         open_addresses: full.open_addresses,
@@ -1698,7 +1743,7 @@ fn roster_page_fixture() -> DeviceRosterView {
 /// story is that an activity changes what the rows say and never how tall
 /// they are.
 #[story(
-    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words, decided in core and tested per variant. Two VERBS for two situations (ruled 2026-09-04): a running LightPlayer offers UPDATE FIRMWARE, matching its line's \"update recommended\"; a needs-firmware face offers FLASH FIRMWARE with the board pick, since nothing is known. OLDER (a running LightPlayer one wire version behind — still Ready, the project and its fault still on the project line, the firmware line reading \"<firmware> · <board> — older than Studio, update recommended\", and Update firmware as ONE click because the registry knows the board: offered, never forced — warn, then proceed); OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — so the SAME Update verb opens the pick once, and the panel says why); NEWER (the same the other way, no recommendation); PRE-HELLO (speaks the framing, never said hello); FOREIGN (a recognised factory firmware, named); BOOTLOADER (parked in ROM download mode); SILENT (open port, nothing heard, Retry beside Reset); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04: the window restarted so the Firmware zone says \"No firmware reported yet\", while the header keeps the chip, board and firmware the record remembers — \"fw-esp32v3 7c80a27 · last seen\", memory marked as memory in the dim tone, never a live claim). The header's identity is TWO fixed mono rows (board · chip, then MAC · firmware — spike device-card-identity-line, 2026-09-04) because one truncated line ellipsised every card here at \"… · fw fw-esp…\" and hid exactly that clause. The chip is the STATUS, unchanged by the wire version; the face's sentence lives in the Firmware zone — and every card measures the same height (AC2)."
+    description = "One card per FIRMWARE FACE — the sheet that did not exist when an older board shipped drawn as a blank chip (bench 2026-09-04: a proto-19 classic on a proto-20 Studio read \"Blank flash — needs firmware\" and \"no firmware\" while its terminal decoded the hello naming fw-esp32v3 and a heartbeat carrying a red fault). Eight cards in 400px columns, each in ITS OWN words on its firmware bar, decided in core and tested per variant. Two verbs for two situations (ruled 2026-09-04): a running LightPlayer's firmware bar offers UPDATE; a needs-firmware face's primary is INSTALL, with the board pick, since nothing is known. OLDER (a running LightPlayer one wire version behind — still running, its fault in orange on the project bar): the firmware bar is blue, the version alone, with Update and no board pick because the registry knows the board — offered, never forced; OLDER, BOARD UNKNOWN (the bench classic verbatim: its hello says `?` because the board id comes from the manifest Studio stamps at flash and this board was flashed from the CLI, the registry has no board either, and a classic chip fits several boards — so the SAME Update opens the board pick once, and the panel says why); NEWER (plain, no recommendation); PRE-HELLO, FOREIGN, BOOTLOADER and SILENT, each named in orange — \"Pre-hello firmware\", \"Other firmware\", \"In download mode\", \"No response\" — with the whole verdict in the firmware details and Install as the primary (SILENT's connection bar also says \"USB · not responding\", with Retry); and ATTACHED — NOT LISTENING (the older classic after Disconnect, bench 2026-09-04): \"USB · not connected\" with Connect as the primary, while the firmware bar keeps the version the record remembers with \"last seen\" — memory marked as memory, never a live claim. The status corner carries each card's worst notice, and every card measures the same height (AC2)."
 )]
 fn devices_card_firmware_faces() -> Element {
     let faces = firmware_face_fixtures();
@@ -2002,7 +2047,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
 /// A sim-backed device card: the SAME `DeviceView` a board gets, plus the
 /// record's own title and board, so the only difference the sheet shows is
 /// the band.
-fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
+pub(crate) fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
     let running = roster_fixture().roster.devices.remove(0);
     DeviceView {
         id: DeviceId(id),
@@ -2014,7 +2059,7 @@ fn sim_card_view(id: u64, title: &str, board_id: &str) -> DeviceView {
 }
 
 #[story(
-    description = "The sim as a device (PD9/PD11): three faces of the SAME `DeviceRosterCard` a board gets, wearing the one thing that marks a runtime that is not silicon — the 24px runtime band under the identity rows, in the bound family, reading \"▶ Sim · <target> · in this tab · <granted tier>\". READY (Desktop, GPU) — the card a library open lands on; READY (a board sim, CPU) — the same card acting as a XIAO ESP32-C6, which is what makes \"it acts as its target\" legible; UNDER THE LENS — the editor holds the wire, so the preview slot says so and the feed is paused, exactly as it does for a board. No title prefix, no tinted edge, no second glyph: everything else on these cards is the device grammar verbatim (D38)."
+    description = "The sim as a device (PD9/PD11): three faces of the SAME board card a board gets, the one difference being what its bars say. The hardware bar reads \"Simulated <board>\" with \"in this tab\" as its aside (the tier the worker was granted is in the hardware details), and the connection bar \"In this tab · live\". READY (Desktop, GPU) — the card a library open lands on; READY (a board sim, CPU) — the same card acting as a XIAO ESP32-C6, which is what makes \"it acts as its target\" legible; UNDER THE LENS — the editor holds the wire, so the picture is dimmed and the status corner says so, exactly as it does for a board. No title prefix, no tinted edge, no second glyph: everything else is the board card verbatim (D38)."
 )]
 fn devices_card_sim_faces() -> Element {
     let desktop = sim_card_view(11, "Desktop sim", "lightplayer/desktop");
@@ -2076,16 +2121,15 @@ fn devices_card_sim_faces() -> Element {
                     }
                 }
             }
-            // Powered off: an offline sim is not a card at all — its
-            // record sits on the Devices page's remembered line with
-            // Power on in the Reconnect slot (Q5), which
-            // `devices_page_remembered_open` already captures.
+            // Powered off: an offline sim is not a live card — its record
+            // sits under Offline boards with Power on in the Reconnect slot
+            // (Q5), which `devices_card_sim_powered_off` captures.
         }
     }
 }
 
 #[story(
-    description = "The emu as a device (D1/D25): the SAME `DeviceRosterCard` a sim and a board get, differing in one 24px row — the runtime band, reading \"▶ Emu · XIAO ESP32-C6 · in this tab · <speed>\". Compare against `devices_card_sim_faces`: everything above and below the band is identical, which is the whole claim of \"always a device\". THE THING TO JUDGE IS THE LAST CLAUSE. A sim's band ends in the shader tier its worker was GRANTED; an emu grants no tier, so the honest thing to put where the tier went is the number that actually varies — how fast the emulated board runs against wall time. Three readings, and they are the real measured range: 0.5× is a desk tab doing ordinary work; 0.04× is a tab nobody is looking at, and it is written to two decimals precisely so it does not read \"0.0×\", which would be both wrong and alarming; and NOTHING MEASURED YET drops the clause entirely rather than printing a zero — an emu whose first measuring window has not closed is not a board running at no speed. `×` is a measurement of something the person can see (the board is slow), not a judgement about it; the word that would alarm is \"degraded\"."
+    description = "The emu as a device (D1/D25): the SAME board card a sim and a board get. The hardware bar reads \"Emulated XIAO ESP32-C6\" with \"in this tab\" as its aside; compare against `devices_card_sim_faces`, which differs only in that word. THE THING TO JUDGE IS THE SPEED, in the hardware details: a sim's details carry the shader tier its worker was GRANTED; an emu grants no tier, so the honest thing to show is the number that actually varies — how fast the emulated board runs against wall time. Three readings, and they are the real measured range: 0.5× is a desk tab doing ordinary work; 0.04× is a tab nobody is looking at, written to two decimals so it never reads \"0.0×\"; and NOTHING MEASURED YET shows no speed at all rather than a zero. The cards here are closed, so the speed is one click into the hardware bar."
 )]
 fn devices_card_emu_band() -> Element {
     let faces: Vec<(&str, Option<f64>)> = vec![
@@ -2134,7 +2178,7 @@ fn devices_card_emu_band() -> Element {
 }
 
 #[story(
-    description = "An emu that came up on a BLANK CHIP (D22/D24): the needs-firmware face, on the same card, with the emu band under it. An emu is born flashed — the record's first power-on hands the worker a manifest URL and the worker fetches the packaged build, writes it into the 4 MiB image and boots into it — so this face means the fetch did not happen: this build serves no image for the board, or the network refused. THE CLAIM TO CHECK IS THAT NOTHING IS SPECIAL HERE. It is verbatim the face a blank board on the desk gets (compare `devices_card_firmware_faces`): the same verdict line and the same board pick beside the same Flash firmware verb. (The terminal below them is the story fixture's shared transcript, shared with every card story on this page — it is furniture here, not evidence.) And the verb means what it says — mode A writes the emulated chip directly and resets it, with no ROM downloader in the way — which is exactly why the two verbs a sim has nothing honest to do are real on an emu. The band is the one row that tells you where this board is; the speed clause is absent because a chip that never booted has reported no time."
+    description = "An emu that came up on a BLANK CHIP (D22/D24): the needs-firmware face, on the same board card, \"Emulated XIAO ESP32-C6\" on its hardware bar. An emu is born flashed — the record's first power-on hands the worker a manifest URL and the worker fetches the packaged build, writes it into the 4 MiB image and boots into it — so this face means the fetch did not happen: this build serves no image for the board, or the network refused. THE CLAIM TO CHECK IS THAT NOTHING IS SPECIAL HERE. It is verbatim what a blank board on the desk gets (compare `devices_card_firmware_faces`): \"No firmware\" on the firmware bar, the verdict in its details, Install with the board pick. (The terminal in the status corner is the story fixture's shared transcript — furniture here, not evidence.) And the verb means what it says — mode A writes the emulated chip directly and resets it, with no ROM downloader in the way — which is exactly why the two verbs a sim has nothing honest to do are real on an emu. The hardware bar is the one row that tells you where this board is; no speed in its details: a chip that never booted has reported no time."
 )]
 fn devices_card_emu_needs_firmware() -> Element {
     let card = DeviceView {
@@ -2268,6 +2312,7 @@ fn store_unavailable_with_issue() -> Element {
         projects: Vec::new(),
         examples: examples(),
         devices: Default::default(),
+        sections: Default::default(),
         library_available: false,
         opening: None,
         issue: Some(UiIssue::new("Failed to open serial port.")),
@@ -2279,8 +2324,8 @@ fn store_unavailable_with_issue() -> Element {
     }
 }
 
-/// The P09 pages stacked from one fixture — the story stand-in for the
-/// old combined gallery page (the app renders them on separate routes).
+/// The home page from one fixture — what the old Devices, Projects and
+/// Explore pages stacked here now all draw as one page.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn GalleryPages(
@@ -2289,11 +2334,7 @@ fn GalleryPages(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     rsx! {
-        div { class: "tw:grid tw:gap-10",
-            StoryDevicesPage { home: home.clone(), on_action }
-            StoryProjectsPage { home: home.clone(), now_secs, on_action }
-            ExplorePage { home: Some(home), on_action }
-        }
+        StoryHomePage { home, now_secs, on_action }
     }
 }
 
@@ -2505,7 +2546,7 @@ fn pick_popover_library() -> Vec<UiPackageCard> {
             ),
             last_saved_at: Some(STORY_NOW - f64::from(index) * 3600.0),
             provenance: None,
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: PackageHealth::Ready,
@@ -2541,7 +2582,7 @@ fn pick_popover_examples() -> Vec<UiExampleCard> {
 }
 
 #[story(
-    description = "The gallery pick popover open on its NEW tab, the one source that has no name yet. Under the starter card sits the optional Project name field, prefilled with the board's own title — a piece and the board that runs it usually share a name, so leaving it is the common case and the hint says so. Typing a different name swaps the hint for one offer, ticked by default: name the board the same. Nothing here is a step — the CTA in the verb row still dispatches one Push, now carrying the project's name (and, when ticked, the board's rename) as parameters. The board's rename is only ever offered on a NEW project; an example or a library project pushed to the board never renames it."
+    description = "The gallery pick popover open on its NEW tab, the one source that has no name yet. Under the starter card sits the optional Project name field, prefilled with the board's own title — a piece and the board that runs it usually share a name, so leaving it is the common case and the hint says so. Typing a different name swaps the hint for one offer, ticked by default: name the board the same. Nothing here is a step — the one press still dispatches one Push, now carrying the project's name (and, when ticked, the board's rename) as parameters. The board's rename is only ever offered on a NEW project; an example or a library project pushed to the board never renames it."
 )]
 fn device_pick_popover_new_tab() -> Element {
     rsx! {
@@ -2549,7 +2590,8 @@ fn device_pick_popover_new_tab() -> Element {
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
                     offer: pick_popover_push(),
-                    card: pick_popover_card(),
+                    board_id: pick_popover_card().board_id,
+                    board_title: pick_popover_card().title,
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
                     initially_open: true,
@@ -2563,7 +2605,7 @@ fn device_pick_popover_new_tab() -> Element {
 }
 
 #[story(
-    description = "The device card's header ⋯ menu, open: the project card's menu grammar on the device card, holding the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName and closes the menu; the name is Studio's (persisted to the registry) and is never written to the board. Every board verb keeps its zone; this is a menu, not a fourth verb row. The pending card carries no menu — a link that has not identified itself has no intent to write a name into, and names itself through the board pick's name field instead."
+    description = "Rename, on the board card: the hardware bar's details, open, hold the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName; the name is Studio's (persisted to the registry) and is never written to the board. Beside it are the board's model, chip and id, Reset, and Forget apart in the danger zone. A new board's card has no Rename — a link that has not identified itself has no entry to name, and names itself through the board pick's name field instead."
 )]
 fn devices_card_menu_open() -> Element {
     let card = roster_fixture().roster.devices.remove(0);
@@ -2584,7 +2626,7 @@ fn devices_card_menu_open() -> Element {
 }
 
 #[story(
-    description = "The device card's ⋯ menu with the board's LINK section (plan D13): under Rename, the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the bytes it sent and received, each in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 of its 40 sent frames (well over DD2's 5 % floor) and restarted once, so those two wear the warning tone — a restart is notable at any count, a resend only once it clears the floor. The panel floats, so the fixed-height card pays nothing for it; a link that reports no counters (Bluetooth, a sim) shows Rename alone."
+    description = "The board's LINK counters (plan D13), in the connection bar's details: the lp-link counters the board reports on every heartbeat, in the board's own words — frames it had to send again, frames that reached it damaged, times the link restarted and went quiet, and the bytes it sent and received, each in the unit that keeps the number short. On a clean cable every count is 0; here the board has resent 3 of its 40 sent frames (well over DD2's 5 % floor) and restarted once, so those two wear the warning tone — a restart is notable at any count, a resend only once it clears the floor. The details float, so the fixed-height card pays nothing for them; a link that reports no counters (Bluetooth, a sim) shows none."
 )]
 fn devices_card_menu_link_counters() -> Element {
     let mut card = roster_fixture().roster.devices.remove(0);
@@ -2601,12 +2643,14 @@ fn devices_card_menu_link_counters() -> Element {
     rsx! {
         section { class: "tw:min-h-[640px] tw:p-4",
             div { class: "tw:w-[400px]",
-                StoryDeviceCard {
+                StoryBoardCard {
                     card,
                     open_uid: Some("dev000000daqf6dvvqz".to_string()),
                     projects: packages(),
                     examples: examples(),
-                    menu_initially_open: true,
+                    details_open: Some(crate::app::board_card::CardPart::Bar(
+                        lpa_studio_core::BarLayer::Connection,
+                    )),
                     on_action: |_| {},
                 }
             }
@@ -2615,7 +2659,7 @@ fn devices_card_menu_link_counters() -> Element {
 }
 
 #[story(
-    description = "The gallery pick popover, open (P6, AC8). The card's verb row holds ONE 30px control — the trigger — and the options live in a panel in the browser's top layer, so a library of forty projects can no longer make the card taller than the viewport (the reflow rule, AC2). Tabs are the three sources core's push_offer already groups, with their counts; the search box filters titles client-side; the cards are the gallery's own thumbs with their provenance, and a picked one wears the app-wide selection grammar (spectrum ring + wash + check). Picking closes the panel and updates the trigger — nothing is journaled until the CTA beside it dispatches the Push."
+    description = "The gallery pick popover, open (P6, AC8). The trigger is ONE 30px control and the options live in a panel in the browser's top layer, so a library of forty projects can never make a card taller than the viewport (the reflow rule, AC2). Tabs are the three sources core's push_offer already groups, with their counts; the search box filters titles client-side; the cards are the gallery's own thumbs with their provenance, and a picked one wears the app-wide selection grammar (spectrum ring + wash + check). Picking closes the panel and updates the trigger — nothing is journaled until the CTA beside it dispatches the Push."
 )]
 fn device_pick_popover_open() -> Element {
     rsx! {
@@ -2623,7 +2667,8 @@ fn device_pick_popover_open() -> Element {
             div { class: "tw:flex tw:h-[30px] tw:min-w-0 tw:items-center tw:gap-1.5 tw:overflow-hidden tw:whitespace-nowrap",
                 ProjectPickPopover {
                     offer: pick_popover_push(),
-                    card: pick_popover_card(),
+                    board_id: pick_popover_card().board_id,
+                    board_title: pick_popover_card().title,
                     projects: pick_popover_library(),
                     examples: pick_popover_examples(),
                     initially_open: true,
@@ -2642,7 +2687,7 @@ fn device_board_pick_open() -> Element {
 }
 
 #[story(
-    description = "Update firmware's pick, open (ruled 2026-09-04). A running LightPlayer wears UPDATE FIRMWARE, and when its board is known that is one click. This is the other case — the bench classic: its hello reports board `?` (the board id comes from the manifest Studio stamps at flash, and this board was flashed from the CLI), the registry has no board, and a classic ESP32 chip fits several served boards — so the SAME quiet chip is the picker's trigger, and the panel earns the detour with one line under its filter: \"This board hasn't said which board it is. Pick once; Studio stamps it at flash, and next time this is one click.\" Picking a board flashes it straight away: the verb was already pressed. The verb, the reason, and whether a pick is needed at all are decided in core (`firmware_verb`) and tested there; this panel only draws them."
+    description = "Update's board pick, open (ruled 2026-09-04). An older LightPlayer's firmware bar offers Update, with no pick when its board is known. This is the other case — the bench classic: its hello reports board `?` (the board id comes from the manifest Studio stamps at flash, and this board was flashed from the CLI), the registry has no board, and a classic ESP32 chip fits several served boards — so the SAME Update is the picker's trigger, and the panel earns the detour with one line under its filter: \"This board hasn't said which board it is. Pick once; Studio stamps it at flash, and next time this is one click.\" Picking a board flashes it straight away: the verb was already pressed. The verb, the reason, and whether a pick is needed at all are decided in core (`firmware_verb`) and tested there; this panel only draws them."
 )]
 fn device_update_pick_open() -> Element {
     board_pick_story(BoardPickMode::Verb, ("esp32", ChipSource::BootBanner))

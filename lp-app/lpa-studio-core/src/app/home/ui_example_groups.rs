@@ -61,6 +61,22 @@ pub fn example_groups(cards: &[UiExampleCard]) -> Vec<UiExampleGroup> {
 pub const PROJECTS_LABEL: &str = "Projects";
 /// The heading over the single-effect patterns.
 pub const PATTERNS_LABEL: &str = "Patterns";
+/// The home page's heading over the real pieces: on a page that also holds
+/// "Your patterns", the catalog's sections say they are examples. (The group
+/// labels above stay: the push offer titles its sections with them,
+/// `device_push.rs`.)
+pub const EXAMPLE_PROJECTS_LABEL: &str = "Example projects";
+/// The home page's heading over the single-effect patterns.
+pub const EXAMPLE_PATTERNS_LABEL: &str = "Example patterns";
+
+/// The home page's heading for a group, by its [`UiExampleGroup::key`]
+/// (`projects` | `patterns`, the only two there are).
+pub fn example_page_label(group_key: &str) -> &'static str {
+    match group_key {
+        "patterns" => EXAMPLE_PATTERNS_LABEL,
+        _ => EXAMPLE_PROJECTS_LABEL,
+    }
+}
 pub const PROJECTS_LEDE: &str =
     "Real pieces, wired the way they were built. Open one here, then make it yours.";
 pub const PATTERNS_LEDE: &str =
@@ -106,6 +122,22 @@ mod tests {
         );
         assert_eq!(groups[0].label, "Projects");
         assert_eq!(groups[1].label, "Patterns");
+    }
+
+    #[test]
+    fn the_page_words_the_groups_as_examples_and_the_group_labels_stay() {
+        let groups = example_groups(&[
+            card("catalog/fyeah-sign", ProjectKind::General),
+            card("catalog/pulse", pattern()),
+        ]);
+        let page: Vec<&str> = groups
+            .iter()
+            .map(|group| example_page_label(group.key))
+            .collect();
+        assert_eq!(page, ["Example projects", "Example patterns"]);
+        // The push offer's section titles still read the group labels.
+        assert_eq!(groups[0].label, PROJECTS_LABEL);
+        assert_eq!(groups[1].label, PATTERNS_LABEL);
     }
 
     #[test]

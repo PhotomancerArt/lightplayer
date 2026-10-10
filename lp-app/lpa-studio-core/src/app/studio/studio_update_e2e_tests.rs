@@ -756,6 +756,100 @@ fn the_store_restores_a_released_build_and_names_its_latest() {
     );
 }
 
+/// The board card's firmware bar runs an update by path: blue with Update
+/// while one is available; pressed, its work says each piece in the
+/// story's short words; at the end the bar is green for a few seconds,
+/// then the version alone.
+#[test]
+fn the_firmware_bar_runs_an_update_by_path_and_names_each_piece() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    let device = bench.connect_device();
+    bench.run_until("the card to offer Update", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let bar = firmware_bar(&bench, device);
+    assert_eq!(bar.tone, crate::UiStatusKind::Live);
+    let update = bar.action.expect("Update");
+    assert_eq!(update.word, "Update");
+    assert_eq!(
+        update.offer,
+        bench.controller.device_verb(device, "update-firmware")
+    );
+    bench
+        .controller
+        .press(&update.offer, update.args.clone())
+        .expect("the update starts");
+
+    let mut said = Vec::<String>::new();
+    for _ in 0..MAX_STEPS {
+        bench.step();
+        if let Some(work) = firmware_bar(&bench, device).work
+            && work.state == crate::BarWorkState::Running
+            && said.last() != Some(&work.words)
+        {
+            said.push(work.words);
+        }
+        if bench.outcome(device).is_some() && !bench.updating(device) {
+            break;
+        }
+    }
+    assert!(
+        said.iter().any(|words| words.starts_with("Backing up")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|words| words.starts_with("Updating · 1 of 2")),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().all(|words| !words.contains("USB")),
+        "the link is the sentence's, not the bar's: {said:?}"
+    );
+    bench.run_until_update_ends(device);
+    bench.assert_runs(&y());
+    let done = firmware_bar(&bench, device);
+    assert_eq!(
+        done.work.map(|work| work.state),
+        Some(crate::BarWorkState::Done),
+        "green for a moment"
+    );
+    bench.clock.set(bench.clock.get() + crate::DONE_SHOWS_SECS);
+    let after = firmware_bar(&bench, device);
+    assert_eq!(after.work, None);
+    assert_eq!(after.summary, "2026.10.06-1", "the version alone");
+    assert_eq!(after.tone, crate::UiStatusKind::Neutral);
+}
+
+/// A crashing board's firmware bar offers Reinstall, pressed by path: the
+/// engine is written once.
+#[test]
+fn a_crashing_boards_firmware_bar_reinstalls_by_path() {
+    let mut bench = Bench::new(Board::running_x(), Some(y()));
+    bench.cache_engine(&x());
+    let device = bench.connect_device();
+    bench.board_mut().rig.board.catalog[0].crashes = true;
+    bench.board_mut().reset_in_place();
+    bench.run_until("the card to offer Reinstall", |bench| {
+        matches!(bench.standing(device), UpdateStanding::KeepsCrashing { .. })
+    });
+    let bar = firmware_bar(&bench, device);
+    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    let reinstall = bar.action.expect("Reinstall");
+    assert_eq!(reinstall.word, "Reinstall");
+    assert_eq!(
+        reinstall.offer,
+        bench.controller.device_verb(device, "reinstall-firmware")
+    );
+    let boots = bench.board().rig.boots;
+    bench
+        .controller
+        .press(&reinstall.offer, reinstall.args.clone())
+        .expect("Reinstall starts");
+    bench.run_until_update_ends(device);
+    assert_eq!(bench.board().rig.boots, boots + 1, "written once");
+}
+
 /// Reinstall on a crashing board: the board's own engine (from the cache)
 /// is written once; the model's crash is the build's, so the board comes
 /// back crashing and the update says so rather than writing it again.
@@ -2435,6 +2529,22 @@ impl Bench {
             }
         }
     }
+}
+
+/// The firmware bar of `device`'s card, as the home view publishes it.
+fn firmware_bar(bench: &Bench, device: DeviceId) -> crate::UiStackBar {
+    bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .into_iter()
+        .find(|card| card.device == device)
+        .expect("the board's card")
+        .bar(crate::BarLayer::Firmware)
+        .clone()
 }
 
 // ---------------------------------------------------------------------

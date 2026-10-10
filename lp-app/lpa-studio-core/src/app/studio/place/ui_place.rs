@@ -48,11 +48,11 @@ mod tests {
 
     #[test]
     fn panels_are_kept_sorted_and_once_so_one_place_compares_equal() {
-        let one = UiPlace::new(UiPage::Devices)
+        let one = UiPlace::new(UiPage::Home)
             .with_panel(UiPanel::Session(UiSessionSection::Device))
             .with_panel(UiPanel::AppChat)
             .with_panel(UiPanel::AppChat);
-        let other = UiPlace::new(UiPage::Devices)
+        let other = UiPlace::new(UiPage::Home)
             .with_panel(UiPanel::AppChat)
             .with_panel(UiPanel::Session(UiSessionSection::Device));
 
