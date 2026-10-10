@@ -54,7 +54,11 @@ def main():
     run = Path(sys.argv[1])
     show_lines = "--lines" in sys.argv
     marks = phases(run)
-    lines = (run / "usb.txt").read_bytes().decode("utf-8", "replace").splitlines()
+    # The driver's --usb-respawn writes one file per capture after a reset.
+    lines = []
+    for f in [run / "usb.txt"] + sorted(run.glob("usb-r*.txt")):
+        if f.exists():
+            lines += f.read_bytes().decode("utf-8", "replace").splitlines()
     by_phase = {}
     order = []
     events = []

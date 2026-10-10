@@ -52,6 +52,7 @@ STUDIO_BT = (
 
 CHILDREN = []  # Popen, each its own process group
 PROFILES = []  # Chrome scratch profiles to pkill at exit
+RESPAWNS = []  # UsbRespawn threads to stop first at exit
 T0 = time.monotonic()
 
 
@@ -68,6 +69,9 @@ def spawn(argv, out, **kw):
 
 
 def stop(p, sig=signal.SIGINT, wait=8):
+    if isinstance(p, UsbRespawn):
+        p.stop_all()
+        return 0
     if p.poll() is not None:
         return p.returncode
     for s in (sig, signal.SIGTERM, signal.SIGKILL):
@@ -92,6 +96,8 @@ def kill_chrome(profile):
 
 
 def cleanup():
+    for r in RESPAWNS:
+        r.stopping.set()
     for p in reversed(CHILDREN):
         stop(p)
     for prof in PROFILES:
@@ -105,16 +111,24 @@ def on_signal(signum, _frame):
 
 
 class Console:
-    """The USB console file the capture writes, read as it grows."""
+    """The USB console file the capture writes, read as it grows — plus, with
+    --usb-respawn, the files of the captures that replaced it after the port
+    went away (`usb-r01.txt`, …), read as one stream in order."""
 
     def __init__(self, path):
         self.path = Path(path)
 
+    def files(self):
+        return [self.path] + sorted(self.path.parent.glob(self.path.stem + "-r*.txt"))
+
     def lines(self):
-        try:
-            return self.path.read_bytes().decode("utf-8", "replace").splitlines()
-        except FileNotFoundError:
-            return []
+        out = []
+        for f in self.files():
+            try:
+                out += f.read_bytes().decode("utf-8", "replace").splitlines()
+            except FileNotFoundError:
+                pass
+        return out
 
     def count(self):
         return len(self.lines())
@@ -157,7 +171,54 @@ def start_usb(args, out):
     for r in args.usb_request or []:
         cmd += ["--request", r]
     p = spawn(cmd, out / "usb-lpcli.log")
-    return p, Console(out / "usb.txt")
+    if not getattr(args, "usb_respawn", False):
+        return p, Console(out / "usb.txt")
+    return UsbRespawn(args, out, p), Console(out / "usb.txt")
+
+
+class UsbRespawn:
+    """Keep a USB console capture running across board resets: when one
+    capture ends early (its port went away), wait for the board's port to
+    come back and start another, writing `usb-rNN.txt`. A thread of this
+    process; `stop()` ends it and the capture it holds."""
+
+    def __init__(self, args, out, first):
+        import threading
+
+        self.args, self.out, self.p, self.n = args, out, first, 0
+        self.end = time.monotonic() + args.usb_secs
+        self.stopping = threading.Event()
+        RESPAWNS.append(self)
+        self.t = threading.Thread(target=self.run, daemon=True)
+        self.t.start()
+
+    def run(self):
+        while not self.stopping.is_set() and time.monotonic() < self.end - 5:
+            if self.p.poll() is None:
+                time.sleep(0.5)
+                continue
+            port = ""
+            while not self.stopping.is_set() and not port and time.monotonic() < self.end - 5:
+                port = board_port(self.args.mac)
+                if not port or not os.path.exists(port):
+                    port = ""
+                    time.sleep(0.5)
+            if not port or self.stopping.is_set():
+                return
+            self.n += 1
+            left = int(self.end - time.monotonic())
+            cmd = [self.args.lpcli, "link", "capture", port, "--console", self.out / f"usb-r{self.n:02d}.txt",
+                   "--seconds", str(max(5, left))]
+            log(f"usb capture {self.n} (the port came back)")
+            self.p = spawn(cmd, self.out / f"usb-r{self.n:02d}-lpcli.log")
+
+    def poll(self):
+        return None if not self.stopping.is_set() else 0
+
+    def stop_all(self):
+        self.stopping.set()
+        self.t.join(timeout=30)
+        stop(self.p)
 
 
 def launch_chrome(args, out, url):
@@ -351,10 +412,45 @@ def scenario_pipe(args, out):
     marks.mark("joined" if res else "join-failed")
     if not res:
         return 4
-    end = time.monotonic() + args.secs
-    resets = list(args.reset_at or [])
-    while time.monotonic() < end and host.poll() is None:
-        time.sleep(1)
+    i, _ = Console(out / "ble.txt").wait(r"\[host-ble\].*(connection \d+ up|link up)|M!\{\"id\":0,\"msg\":\{\"hello\"", 40, 0,
+                                          "the host's first link")
+    marks.mark("link-up" if i is not None else "link-up-unseen")
+    if args.during:
+        # A foreground command run while the central holds the link (resets,
+        # USB requests); bounded by the run's own --secs.
+        marks.mark("during-start")
+        t = max(10, int(args.secs - (time.monotonic() - T0) - args.settle - 15))
+        log(f"during (≤ {t}s): {args.during}")
+        with open(out / "during.log", "ab") as f:
+            try:
+                rc = subprocess.run(["zsh", "-c", args.during], stdout=f, stderr=subprocess.STDOUT, timeout=t).returncode
+            except subprocess.TimeoutExpired:
+                rc = "timeout"
+        marks.mark(f"during-end rc={rc}")
+        time.sleep(args.settle)
+        stop(host)
+    else:
+        end = time.monotonic() + args.secs
+        ble = Console(out / "ble.txt")
+        since = ble.count()
+        restarts = 0
+        while time.monotonic() < end and host.poll() is None:
+            time.sleep(1)
+            # Mac Chrome's wedge (spikes/ble-lab README, "When Mac Chrome
+            # wedges"): the page's connect() keeps timing out though the
+            # board advertises. Quit THAT Chrome, open it again, join again;
+            # the host takes the new page as the new connection.
+            fails = sum(1 for ln in ble.lines()[since:] if "connect failed" in ln)
+            if fails >= args.wedge_after and restarts < args.max_restarts:
+                restarts += 1
+                marks.mark(f"chrome-restart {restarts} (after {fails} failed connects)")
+                kill_chrome(Path(args.profile))
+                time.sleep(3)
+                port = launch_chrome(args, out, url)
+                wait_page(port, page)
+                res, err = cdp(port, page, "join", "--id", dev, "--timeout-ms", "45000", timeout=80, out=out / "cdp.log")
+                marks.mark("rejoined" if res else "rejoin-failed")
+                since = ble.count()
     marks.mark(f"host-exit rc={host.poll()}")
     v, _ = cdp(port, page, "js", "pipe.S", timeout=20, out=out / "cdp.log")
     (out / "pipe-S.json").write_text(json.dumps(v, indent=1))
@@ -384,9 +480,13 @@ def main():
     ap.add_argument("--usb-secs", type=int, default=560)
     ap.add_argument("--usb-request", action="append")
     ap.add_argument("--no-usb", action="store_true")
+    ap.add_argument("--usb-respawn", action="store_true", help="restart the USB capture after each board reset")
     ap.add_argument("--secs", type=int, default=500, help="pipe: the host's --seconds and the wait bound")
     ap.add_argument("--host-args", default="")
-    ap.add_argument("--reset-at", type=float, action="append")
+    ap.add_argument("--during", default=None, help="pipe: a command run (zsh -c) while the central holds the link")
+    ap.add_argument("--wedge-after", type=int, default=4, help="pipe: failed connects before Chrome is restarted")
+    ap.add_argument("--max-restarts", type=int, default=3)
+    ap.add_argument("--settle",type=int, default=20, help="pipe: seconds after --during before the host stops")
     ap.add_argument("--deadline", type=int, default=590, help="hard bound on the whole run")
     args = ap.parse_args()
     out = Path(args.out)
