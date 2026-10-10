@@ -13,7 +13,7 @@
 //! covers the library pages and the live sim card.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
+use lpa_studio_core::{DeviceCardFeedView, FeedLiveness, HoldLevel};
 use lpa_studio_web_story_macros::story;
 use lpc_model::ProjectKind;
 
@@ -32,6 +32,7 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
+use crate::app::board_card::board_card_stories::{held_by_another_tab, saved_by_another_tab};
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::connect_board::ConnectBoardSection;
 use crate::app::home::device_offer_story_fixtures::StoryHomePage;
@@ -599,6 +600,43 @@ fn devices_page_remembered_last_frame() -> Element {
             liveness: FeedLiveness::Offline,
         },
     );
+    let home = UiHomeView {
+        projects: packages(),
+        examples: examples(),
+        devices,
+        sections: Default::default(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A board another tab of this browser holds sits under ONLINE boards — it is plugged in and running, and \"Offline\" would be false — beside the board this tab has live. The held board's card: the picture the other tab saved (dimmed, \"5 min ago\" in the corner), \"Open in another tab\" in orange on its connection bar, and Connect as its primary, which takes the board over from that tab. The live board's card is as ever (\"58 fps\", Edit). Nothing is under Offline boards but the board Studio remembers and cannot see. Compare `board_card_held_by_another_tab`, the card alone in each state of the holder."
+)]
+fn devices_page_held_board() -> Element {
+    let mut devices = roster_page_fixture();
+    // The empty board is the one another tab holds.
+    let held = devices.roster.devices[1].id;
+    let title = devices.roster.devices[1].title.clone();
+    devices.roster.devices[1] = DeviceView {
+        id: held,
+        title,
+        ..held_by_another_tab(HoldLevel::Watching, false)
+    };
+    if let Some(feed) = saved_by_another_tab() {
+        devices.feeds.insert(held, feed);
+    }
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),

@@ -94,6 +94,7 @@ pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
         wifi: None,
         lan: None,
         wifi_connect: None,
+        take_over: None,
         update: None,
         layout: None,
         plays: &plays,
