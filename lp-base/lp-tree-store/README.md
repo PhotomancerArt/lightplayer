@@ -378,6 +378,12 @@ write it could hold. Four causes, each pinned by `edge_gc_tests.rs`:
    renews a head (its live records to a new head of its kind) when that
    lets the write open fewer sectors.
 
+Still open (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`):
+on a 16-sector store at the reserve, GC's in-order copies of near-1 KB
+records cannot always pack the cold sectors as tight as the layout a cut
+replaced, so a few re-runs are still refused (8 of 756 of `lp-store-bench
+mutants`' full-flash cases, lp-nor-sim).
+
 ## G1 figures (2026-10-08)
 
 Every number here is an **lp-nor-sim simulator** number — not emulator,
