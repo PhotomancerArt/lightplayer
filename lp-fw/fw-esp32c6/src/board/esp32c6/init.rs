@@ -132,7 +132,26 @@ pub fn init_board() -> (
 
 /// The main heap region's size (see the RAM-split note in [`init_board`]):
 /// the 236,000 B main RAM gives the heap, less the radio's region.
-const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE;
+const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE - E06_HEAP_MAIN_SHRINK;
+/// RAM research E6 (throwaway): bytes taken off the main region at build time
+/// (`LP_E06_HEAP_MAIN_SHRINK=<bytes>`), so an image with a larger allocator
+/// control block in `.bss` (esp-alloc's TLSF) keeps the LLFF image's stack.
+/// Unset, it is 0 and the image is today's.
+const E06_HEAP_MAIN_SHRINK: usize = parse_usize(option_env!("LP_E06_HEAP_MAIN_SHRINK"));
+
+const fn parse_usize(text: Option<&str>) -> usize {
+    let Some(text) = text else { return 0 };
+    let bytes = text.as_bytes();
+    let mut value = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        let digit = bytes[i];
+        assert!(digit.is_ascii_digit(), "LP_E06_HEAP_MAIN_SHRINK must be decimal");
+        value = value * 10 + (digit - b'0') as usize;
+        i += 1;
+    }
+    value
+}
 /// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
 /// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth
 /// up (2026-09-24), less the 10,320 B the lean ESP-NOW buffers gave back
