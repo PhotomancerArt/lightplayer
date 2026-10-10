@@ -80,26 +80,39 @@ impl ReadCost {
         // The layout Vec is sized by doubling, so its block is the next power
         // of two of the lamp count (2,560 B at 73 lamps, 10,240 B at 512).
         let layout_ask = LAYOUT_BYTES_PER_LAMP.saturating_mul(lamps.max(1).next_power_of_two());
+        // Lamp-sized probes add up (their layouts are alive together: the
+        // control focus at 512 lamps is 10.8 KB over the output frame's own
+        // read). The fixed-size ones run one after another and free their
+        // scratch between, so the biggest counts, plus 1 KiB for each other
+        // one's retained result (the lens reads at 73 lamps are 3.5 KB over
+        // the output frame alone, not the 9 KB a sum would say).
+        let mut fixed_max = 0u32;
+        let mut fixed_count = 0u32;
         for probe in &request.probes {
-            match probe {
+            let fixed = match probe {
                 ProjectProbeRequest::OutputFrame(_) => {
                     working_set += OUTPUT_FRAME_PER_LAMP.saturating_mul(lamps);
                     largest_ask = largest_ask.max(layout_ask);
+                    continue;
                 }
                 ProjectProbeRequest::ControlProduct(_) => {
                     working_set += CONTROL_PRODUCT_PER_LAMP.saturating_mul(lamps);
                     largest_ask = largest_ask.max(layout_ask);
+                    continue;
                 }
                 ProjectProbeRequest::RenderProduct(render) => {
                     // The texture (w × h × 8) and its read-back copy.
                     let texture = render.width.saturating_mul(render.height).saturating_mul(8);
-                    working_set += texture.saturating_mul(2);
                     largest_ask = largest_ask.max(texture);
+                    texture.saturating_mul(2)
                 }
-                ProjectProbeRequest::BindingGraph(_) => working_set += BINDING_GRAPH,
-                ProjectProbeRequest::Timebase(_) => working_set += TIMEBASE,
-            }
+                ProjectProbeRequest::BindingGraph(_) => BINDING_GRAPH,
+                ProjectProbeRequest::Timebase(_) => TIMEBASE,
+            };
+            fixed_max = fixed_max.max(fixed);
+            fixed_count += 1;
         }
+        working_set += fixed_max + 1024 * fixed_count.saturating_sub(1);
         Self {
             working_set,
             largest_ask,
@@ -107,15 +120,11 @@ impl ReadCost {
     }
 }
 
-/// Lamps from a published output's channel count (RGB; an RGBW output is
-/// over-counted, which only makes the estimate safer).
-pub fn lamps_from_channels(channels: u32) -> u32 {
-    channels.div_ceil(3)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate alloc;
+    use alloc::format;
 
     fn request(json: &str) -> ProjectReadRequest {
         serde_json::from_str(json).expect("a read request")
@@ -142,6 +151,32 @@ mod tests {
     }
 
     #[test]
+    fn every_measured_editor_read_is_covered() {
+        // The lens reads of `lp-cli/tests/support/editor_reads.rs`, with the
+        // E7 census's peaks (lp-emu:esp32c6:t1, alloc_watch_diag @ d108574fc).
+        let lens = |probe: &str| {
+            format!(
+                r#"{{"since":5,"queries":[{{"shapes":{{"level":"detail"}}}},{{"nodes":{{"level":"detail","nodes":"all","include_slots":true}}}},{{"runtime":null}}],"probes":[{probe}{{"output_frame":{{"geometry":"always","samples":"srgb8"}}}},{{"binding_graph":{{"structure":"always","include_values":true}}}}]}}"#
+            )
+        };
+        let render = r#"{"render_product":{"product":{"node":5,"output":0},"width":16,"height":16,"format":"srgb8"}},"#;
+        let control = r#"{"control_product":{"product":{"node":2,"output":0,"preferred_extent":{"rows":1,"samples_per_row":219}},"sample_format":"srgb8","geometry":"always"}},"#;
+        for (probe, lamps, measured) in [
+            ("", 73, 12_140),
+            ("", 241, 20_408),
+            ("", 512, 39_404),
+            (render, 73, 14_020),
+            (render, 512, 40_196),
+            (control, 73, 15_520),
+            (control, 241, 25_900),
+            (control, 512, 50_168),
+        ] {
+            let cost = ReadCost::estimate(&request(&lens(probe)), lamps);
+            assert!(cost.working_set >= measured, "{lamps} lamps {probe}: {cost:?} < {measured}");
+        }
+    }
+
+    #[test]
     fn a_first_sync_with_slots_asks_for_the_largest_slot_value() {
         let cost = ReadCost::estimate(
             &request(r#"{"since":null,"queries":[{"nodes":{"level":"detail","nodes":"all","include_slots":true}}]}"#),
@@ -149,12 +184,5 @@ mod tests {
         );
         assert!(cost.working_set >= 25_072, "{cost:?}");
         assert_eq!(cost.largest_ask, SLOT_VALUE_ASK);
-    }
-
-    #[test]
-    fn lamps_round_up_from_channels() {
-        assert_eq!(lamps_from_channels(219), 73);
-        assert_eq!(lamps_from_channels(220), 74);
-        assert_eq!(lamps_from_channels(0), 0);
     }
 }

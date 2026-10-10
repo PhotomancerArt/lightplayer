@@ -550,6 +550,30 @@ impl Engine {
         })
     }
 
+    /// RESEARCH (`research/ram-e07`): the lamps every published output
+    /// carries (its `OutputChannels` count: samples / 3), summed — what a
+    /// read's lamp-sized allocations scale with
+    /// (the display layout at 20 B a lamp, the mapping points at 16 B).
+    /// Allocates nothing.
+    pub fn published_output_lamps(&self) -> u32 {
+        let mut total = 0u32;
+        for entry in self.tree().entries() {
+            let NodeEntryState::Alive(node) = entry.state.value() else {
+                continue;
+            };
+            let Some(buffer_id) = node.runtime_output_sink_buffer_id() else {
+                continue;
+            };
+            let Some(buffer) = self.runtime_buffers().get(buffer_id) else {
+                continue;
+            };
+            if let RuntimeBufferMetadata::OutputChannels { channels, .. } = buffer.value().metadata {
+                total = total.saturating_add(channels);
+            }
+        }
+        total
+    }
+
     /// Read the frames every output node has ALREADY published.
     ///
     /// The cheap counterpart of
@@ -577,29 +601,6 @@ impl Engine {
     /// (`just fw-esp32c6-size-check`; `docs/adr/2026-07-28-esp32c6-flash-budget.md`).
     /// One call per probe per read costs nothing measurable.
     #[inline(never)]
-    /// RESEARCH (`research/ram-e07`): the channels every published output
-    /// carries, summed — what a read's lamp-sized allocations scale with
-    /// (the display layout at 20 B a lamp, the mapping points at 16 B).
-    /// Allocates nothing.
-    pub fn published_output_channels(&self) -> u32 {
-        let mut total = 0u32;
-        for entry in self.tree().entries() {
-            let NodeEntryState::Alive(node) = entry.state.value() else {
-                continue;
-            };
-            let Some(buffer_id) = node.runtime_output_sink_buffer_id() else {
-                continue;
-            };
-            let Some(buffer) = self.runtime_buffers().get(buffer_id) else {
-                continue;
-            };
-            if let RuntimeBufferMetadata::OutputChannels { channels, .. } = buffer.value().metadata {
-                total = total.saturating_add(channels);
-            }
-        }
-        total
-    }
-
     pub fn read_project_output_frame_probe(
         &mut self,
         registry: &ProjectRegistry,

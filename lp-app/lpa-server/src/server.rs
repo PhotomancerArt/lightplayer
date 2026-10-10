@@ -1077,13 +1077,14 @@ impl LpServer {
                         let lamps = self
                             .project_manager
                             .get_project(handle)
-                            .map(|project| {
-                                crate::read_cost::lamps_from_channels(
-                                    project.engine().published_output_channels(),
-                                )
-                            })
+                            .map(|project| project.engine().published_output_lamps())
                             .unwrap_or(0);
                         let cost = crate::read_cost::ReadCost::estimate(&request, lamps);
+                        log::info!(
+                            "[e07] read cost: {lamps} lamps, working set {} B, largest ask {} B",
+                            cost.working_set,
+                            cost.largest_ask
+                        );
                         ReadGate {
                             min_free_bytes: cost.working_set.saturating_add(margin),
                             min_largest_block_bytes: cost.largest_ask.saturating_add(512),
