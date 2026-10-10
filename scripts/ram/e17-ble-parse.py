@@ -13,7 +13,7 @@ from pathlib import Path
 
 HB = re.compile(r'^M!(\{.*"heartbeat".*)$')
 KEEP = re.compile(
-    r"\[ble\] link\d+: (connected|notifications on|disconnected)|\[radio-heap\]|\[stack\]|stack\] high-water"
+    r"\[ble\] link\d+: (connected|notifications on|disconnected)|\[radio-heap\]|\[stack\]|stack\] (high-water|#)"
     r"|\[e17|Guru|panic|rst:0x|\[RECOVERY\]|alloc .* failed|overflow"
 )
 

@@ -409,6 +409,16 @@ def scenario_pipe(args, out):
             return 4
         time.sleep(2)
     res, err = cdp(port, page, "join", "--id", dev, "--timeout-ms", "45000", timeout=80, out=out / "cdp.log")
+    if not res:
+        # Seen twice, each time on the first pipe run after a flash: cdp's
+        # join returns nothing and the page drops its WebSocket ~6 s after
+        # attaching (the page went away under it). One fresh Chrome, once.
+        marks.mark("join-failed; one retry with a fresh Chrome")
+        kill_chrome(Path(args.profile))
+        time.sleep(3)
+        port = launch_chrome(args, out, url)
+        wait_page(port, page)
+        res, err = cdp(port, page, "join", "--id", dev, "--timeout-ms", "45000", timeout=80, out=out / "cdp.log")
     marks.mark("joined" if res else "join-failed")
     if not res:
         return 4
