@@ -1,7 +1,6 @@
 //! Per-uniform cache of the resolver keys the authored-def sync reads.
 
 use alloc::format;
-use alloc::rc::Rc;
 use alloc::string::String;
 use lp_collection::VecMap;
 use lpc_model::SlotPath;
@@ -57,7 +56,7 @@ pub struct AuthoredFieldKeys {
 
 /// One consumed uniform's authored-field keys, indexed by [`AuthoredField`].
 pub struct UniformFieldKeys {
-    keys: [Option<Rc<QueryKey>>; AuthoredField::COUNT],
+    keys: [Option<crate::dataflow::resolver::KeyRc>; AuthoredField::COUNT],
 }
 
 /// An authored field of one shader uniform, as a fixed index into

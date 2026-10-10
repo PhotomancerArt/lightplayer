@@ -72,6 +72,12 @@ node-shader = []
 # 110 KB arena 8,368 B is roughly 90 LEDs of capacity.
 resolver-payload-cache = []
 
+# --- E10 spike (research/ram-e10 only, never to main) ----------------------
+# On: each Engine's resolver tables (intern table, resolver cache, interned
+# keys and routes) allocate in a per-project bump arena with byte counters
+# (`engine::project_arena`). Off: the same types over `Global`.
+project-arena = []
+
 # --- Phasor breakpoint log (removal-only, same contract as the gates above) --
 #
 # On: every phasor on a timebase keeps an event-sparse log of the breakpoints

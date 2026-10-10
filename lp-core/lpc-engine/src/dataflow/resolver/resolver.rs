@@ -112,9 +112,14 @@ pub struct Resolver {
 
 impl Resolver {
     pub fn new() -> Self {
+        Self::new_in(crate::engine::project_arena::ProjectAlloc::default())
+    }
+
+    /// A resolver whose tables live in `alloc` (E10: one arena per engine).
+    pub fn new_in(alloc: crate::engine::project_arena::ProjectAlloc) -> Self {
         Self {
-            cache: ResolverCache::new(),
-            intern: QueryInternTable::new(),
+            cache: ResolverCache::new_in(alloc.clone()),
+            intern: QueryInternTable::new_in(alloc),
             structure_epoch: 0,
             frame_counters: ResolveFrameCounters::default(),
             force_invalidate_per_frame: false,
@@ -147,7 +152,7 @@ impl Resolver {
     /// rebuilding it (a node caching the authored fields it reads every
     /// tick): sharing the table's `Rc` means the cached key costs a pointer
     /// rather than a second copy of the path's segment `Vec` and `String`s.
-    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+    pub fn intern_key(&mut self, query: &QueryKey) -> crate::dataflow::resolver::KeyRc {
         let id = self.intern.intern(query);
         Rc::clone(
             self.intern
@@ -214,6 +219,11 @@ impl Resolver {
 
     /// The graph changed shape: every cached decision and value is suspect.
     pub fn invalidate_structure(&mut self) {
+        crate::engine::project_arena::log_arena(
+            self.intern.allocator(),
+            "epoch-end",
+            self.structure_epoch,
+        );
         self.structure_epoch = self.structure_epoch.wrapping_add(1);
         self.cache.invalidate_structure();
         self.intern.clear();

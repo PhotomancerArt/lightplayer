@@ -330,7 +330,7 @@ impl<'r> TickContext<'r> {
     /// scoped, unlike a `QueryId`); what [`Self::structure_epoch`] is for is
     /// noticing that the intern table dropped its half, so the holder can
     /// re-share rather than keep a private copy alive.
-    pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+    pub fn intern_key(&mut self, query: &QueryKey) -> crate::dataflow::resolver::KeyRc {
         self.resolver.intern_key(query)
     }
 

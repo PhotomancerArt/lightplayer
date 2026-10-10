@@ -8,6 +8,12 @@
 //! - Output channel management
 
 #![no_std]
+// E10 spike: the resolver's tables take an allocator parameter.
+#![feature(allocator_api)]
+#![allow(
+    unstable_features,
+    reason = "E10 spike: allocator_api for the per-project resolver arena; research/ram-e10 only"
+)]
 
 extern crate alloc;
 #[cfg(test)]

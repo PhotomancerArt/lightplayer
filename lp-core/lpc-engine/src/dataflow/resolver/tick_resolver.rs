@@ -54,8 +54,11 @@ pub trait TickResolver {
     /// session-backed implementation hands back the table's own `Rc`, which
     /// is what keeps a per-node key cache from doubling the resident path
     /// data the resolver already holds.
-    fn intern_key(&mut self, query: &QueryKey) -> alloc::rc::Rc<QueryKey> {
-        alloc::rc::Rc::new(query.clone())
+    fn intern_key(&mut self, query: &QueryKey) -> crate::dataflow::resolver::KeyRc {
+        alloc::rc::Rc::new_in(
+            query.clone(),
+            crate::engine::project_arena::ProjectAlloc::default(),
+        )
     }
 
     /// How many times the graph has changed shape. Only equality across two
@@ -237,7 +240,7 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
             .map_err(ResolveError::from)
     }
 
-    fn intern_key(&mut self, query: &QueryKey) -> alloc::rc::Rc<QueryKey> {
+    fn intern_key(&mut self, query: &QueryKey) -> crate::dataflow::resolver::KeyRc {
         self.session.intern_key(query)
     }
 

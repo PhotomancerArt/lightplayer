@@ -18,6 +18,13 @@ use core::hash::{Hash, Hasher};
 use lpc_model::SlotPath;
 
 use crate::dataflow::resolver::query_key::QueryKey;
+use crate::engine::project_arena::ProjectAlloc;
+
+/// An interned key, shared with the intern table: the `Rc` box lives in the
+/// table's allocator (E10). The key's own heap parts (`SlotPath` segments,
+/// `ChannelName`) do not — `QueryKey` has no allocator parameter, so its
+/// clone lands in `Global` whatever allocator boxes it.
+pub type KeyRc = Rc<QueryKey, ProjectAlloc>;
 
 /// A [`QueryKey`] reduced to an index, valid for one structural epoch.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -91,21 +98,41 @@ fn hash_slot_path(path: &SlotPath, hasher: &mut impl Hasher) {
 }
 
 /// `QueryKey` ↔ [`QueryId`], scoped to a structural epoch.
-#[derive(Clone, Debug, Default)]
+// `Default` by hand: `Vec<T, A>: Default` exists only for `A = Global`.
+#[derive(Clone, Debug)]
 pub struct QueryInternTable {
     /// Indexed by [`QueryId`]: the key it stands for.
     ///
     /// Shared rather than owned, so that resolution can hold on to a key while
     /// mutating the resolver around it without copying heap data.
-    keys: Vec<Rc<QueryKey>>,
+    keys: Vec<KeyRc, ProjectAlloc>,
     /// `(hash, id)` sorted by hash, so lookup is a binary search plus one
     /// equality check in the common case.
-    by_hash: Vec<(u64, QueryId)>,
+    by_hash: Vec<(u64, QueryId), ProjectAlloc>,
+}
+
+impl Default for QueryInternTable {
+    fn default() -> Self {
+        Self::new_in(ProjectAlloc::default())
+    }
 }
 
 impl QueryInternTable {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// An empty table whose storage lives in `alloc`.
+    pub fn new_in(alloc: ProjectAlloc) -> Self {
+        Self {
+            keys: Vec::new_in(alloc.clone()),
+            by_hash: Vec::new_in(alloc),
+        }
+    }
+
+    /// The allocator this table's storage lives in.
+    pub fn allocator(&self) -> &ProjectAlloc {
+        self.keys.allocator()
     }
 
     /// Id for `query`, assigning one if this is the first time it is seen.
@@ -122,7 +149,8 @@ impl QueryInternTable {
         }
 
         let id = QueryId(self.keys.len() as u32);
-        self.keys.push(Rc::new(query.clone()));
+        let key = Rc::new_in(query.clone(), self.keys.allocator().clone());
+        self.keys.push(key);
         self.by_hash.insert(start, (hash, id));
         id
     }
@@ -139,7 +167,7 @@ impl QueryInternTable {
     }
 
     /// The key an id stands for.
-    pub fn key(&self, id: QueryId) -> Option<&Rc<QueryKey>> {
+    pub fn key(&self, id: QueryId) -> Option<&KeyRc> {
         self.keys.get(id.index())
     }
 

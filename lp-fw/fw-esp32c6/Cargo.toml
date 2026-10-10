@@ -247,6 +247,10 @@ radio_cfg_probe = ["radio"]
 # trouble-host's packet pool at 8 packets (default 16), for the same measurement.
 radio_cfg_probe_pool8 = ["radio_cfg_probe", "trouble-host?/default-packet-pool-size-8"]
 alloc_trace_emu = ["esp-alloc/alloc-hooks", "fw-esp32-common/alloc-trace-marks"]
+# RESEARCH (research/ram-e10; never shipped): the resolver's tables in a
+# per-project bump arena with byte counters (`lpc_engine::engine::project_arena`),
+# `[e10] arena …` log lines at each structural epoch and at the arena's drop.
+e10_arena = ["lpa-server?/project-arena"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
 # the shipping `lp-ws281x` refill path, three passes, one `rmt-frame` record
 # per frame. The pattern, the checksum and the record live in fw-checks as

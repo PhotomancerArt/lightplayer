@@ -22,7 +22,7 @@ pub mod route;
 pub mod tick_resolver;
 
 pub use production::{Production, ProductionSource};
-pub use query_intern::{QueryId, QueryInternTable};
+pub use query_intern::{KeyRc, QueryId, QueryInternTable};
 pub use query_key::QueryKey;
 pub use resolve_error::{ResolveError, SessionResolveError};
 pub use resolve_host::ResolveHost;
@@ -31,6 +31,6 @@ pub use resolve_trace::{
     ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard,
 };
 pub use resolver::{ResolveFrameCounters, Resolver};
-pub use resolver_cache::ResolverCache;
+pub use resolver_cache::{ResolverCache, RouteRc};
 pub use route::ResolvedRoute;
 pub use tick_resolver::{SessionHostResolver, TickResolver};
