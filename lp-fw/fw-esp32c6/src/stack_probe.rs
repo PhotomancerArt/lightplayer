@@ -1,7 +1,8 @@
 //! Main-task stack high-water probe.
 //!
-//! The main stack is the RAM left above `.bss` (see `board::esp32c6::init`),
-//! and nothing else on this chip measures how much of it a workload uses:
+//! The main stack is `dram2_seg`, all 64 KiB of it (see
+//! `board::esp32c6::init::add_heap_regions`), and nothing else on this chip
+//! measures how much of it a workload uses:
 //! esp-rtos only *detects* an overflow, at a scheduler switch, after the
 //! fact. This paints the unused stack once at boot and later scans for the
 //! lowest painted word still intact — the classic watermark — so the

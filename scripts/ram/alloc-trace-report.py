@@ -142,10 +142,21 @@ def heap_regions(elf: str):
         ["rust-nm", "-S", "-C", elf], capture_output=True, text=True, check=True
     ).stdout
     regions = []
+    # Linker-defined spans (`_heap_<name>_start` / `_heap_<name>_end`, absolute
+    # symbols with no size): the main region and the reclaimed tail since the
+    # stack moved into dram2_seg (RAM research E4, `fw-esp32c6/build.rs`).
+    bounds: dict[str, dict[str, int]] = defaultdict(dict)
     for line in out.splitlines():
         m = re.match(r"^([0-9a-f]+) ([0-9a-f]+) [bBdD] .*init::HEAP_([A-Z0-9]+)$", line)
         if m:
             regions.append((m.group(3).lower(), int(m.group(1), 16), int(m.group(2), 16)))
+            continue
+        m = re.match(r"^([0-9a-f]+) (?:[0-9a-f]+ )?[aA] _heap_([a-z0-9]+)_(start|end)$", line)
+        if m:
+            bounds[m.group(2)][m.group(3)] = int(m.group(1), 16)
+    for name, b in bounds.items():
+        if "start" in b and "end" in b and b["end"] > b["start"]:
+            regions.append((name, b["start"], b["end"] - b["start"]))
     return sorted(regions, key=lambda r: r[1])
 
 

@@ -48,10 +48,12 @@ const TICK: Duration = Duration::from_secs(5);
 
 pub async fn run_comms_lab(spawner: embassy_executor::Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    // The product's heap, region for region (as `test_ble` does), so a BLE
-    // build's controller finds the memory it finds in the product.
-    esp_alloc::heap_allocator!(size: 236_000);
-    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 65_536);
+    // The product's heap, region for region (`board::esp32c6::init`), so a
+    // BLE build's controller finds the memory it finds in the product. The
+    // main stack fills `dram2_seg`, so nothing here may ask for
+    // `#[ram(reclaimed)]` any more.
+    // SAFETY: once, before anything allocates.
+    unsafe { crate::board::esp32c6::init::add_heap_regions() };
 
     // Raw text before any link exists: the host sees it as `Text`.
     esp_println::println!(

@@ -14,6 +14,10 @@
 //! - `eh_frame.x`, flattened to a no-op so nothing captures `.eh_frame` into a
 //!   section of its own.
 //!
+//! And a third for a different reason, the RAM layout: `stack.x`, so the main
+//! stack fills `dram2_seg` and main RAM's residual is the heap's main region
+//! (see [`patched_stack_x`]).
+//!
 //! Until 2026-08-02 it also patched `text.x`, to capture `.eh_frame` into
 //! `.text` for the `unwinding` crate. That is gone with the rest of the unwind
 //! tier (ADR `2026-08-02-rv32-firmwares-are-abort-tier`), and with it the
@@ -360,14 +364,18 @@ SECTIONS {
     // so the patch is re-applied. (With the `links` edge above, cargo's own
     // fingerprint propagation already does this; the watches are the belt to
     // that braces, and they cost nothing.)
-    for file in ["eh_frame.x", "rodata.x"] {
+    for file in ["eh_frame.x", "rodata.x", "stack.x"] {
         println!("cargo:rerun-if-changed={}", esp_hal_ld.join(file).display());
     }
+    // Read before patching: the guard offset is esp-config's, substituted into
+    // esp-hal's own copy, and the patch keeps it rather than restating it.
+    let patched_stack = patched_stack_x(&esp_hal_ld.join("stack.x"));
     patch_file(
         &esp_hal_ld.join("eh_frame.x"),
         "/* patched: this image is abort tier and emits no unwind tables */\n",
     );
     patch_file(&esp_hal_ld.join("rodata.x"), patched_rodata);
+    patch_file(&esp_hal_ld.join("stack.x"), &patched_stack);
 
     // Emitting rerun-if-changed disables cargo's default rule (re-run when any
     // package file changes), so restate it as the package dir.
@@ -384,6 +392,120 @@ SECTIONS {
     // `DEP_ESP_HAL_LINKER_SCRIPTS`, or a missing script inside it — both abort
     // the build instead of carrying on.
     println!("cargo:rerun-if-changed={}", manifest_dir.display());
+}
+
+/// The lowest address an ESP-IDF second-stage bootloader we ship loads into:
+/// IDF v5.5.1's (`lp-fw/bootloaders/`) puts a segment at
+/// `0x4086B910..0x4086C7D8` (its entry point is in it), espflash 3.3.0's at
+/// `0x4086C410..0x4086D158`. It is IDF's `bootloader_iram_seg_start` for the
+/// C6 (`components/bootloader/subproject/main/ld/esp32c6/bootloader.ld.in`:
+/// the loader segment's start, `0x4086E610`, less the 0x2D00 B IRAM
+/// segment), 11,520 B below where esp-hal's `RAM` region ends.
+const BOOTLOADER_LOW: u32 = 0x4086_B910;
+
+/// The main stack's size, from the top of `dram2_seg` down. All of it (64 KiB)
+/// is E4's choice; a smaller stack leaves the rest of `dram2_seg` to the
+/// reclaimed tail, contiguous with that tail's part of main RAM.
+const MAIN_STACK_BYTES: u32 = 0x1_0000;
+
+/// esp-hal's `stack.x`, replaced (RAM research E4): the main stack moves into
+/// `dram2_seg`, and RWDATA's residual becomes the main heap region.
+///
+/// esp-hal's own script opens `.stack` right after `.data`/`.bss` and closes it
+/// at the end of RWDATA, so the stack is whatever the statics leave, in main
+/// RAM, and `dram2_seg` (the 64 KiB the second-stage bootloader uses and then
+/// vacates) can only be a second, separate heap region. This script puts the
+/// stack at the top of `dram2_seg` instead ([`MAIN_STACK_BYTES`]; all of it),
+/// and gives the rest to the heap as two linker-defined spans:
+///
+/// - `.heap_main`: from the end of the statics up to [`BOOTLOADER_LOW`]. The
+///   main region (`Internal`): radio C blocks may land here, so it must stop
+///   below every address a bootloader loads into, or a radio DMA write that
+///   outlives a warm reset could land on the bootloader again
+///   (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
+/// - the reclaimed tail, `.heap_reclaimed` (+ `.heap_reclaimed_dram2`): from
+///   [`BOOTLOADER_LOW`] to the bottom of the stack — RWDATA's last 11,520 B,
+///   plus whatever of `dram2_seg` a smaller stack leaves (none at 64 KiB). The
+///   bootloader loads into it on every reset, so it carries no capability tag
+///   (`c_heap::BOOTLOADER_RECLAIMED`): Rust's allocator only, as `dram2_seg`
+///   was before.
+/// - `.stack`: the top of `dram2_seg`. The stack neither survives a reset nor
+///   is a DMA target, which is the tenant the bootloader's segment wants.
+///
+/// The location counter cannot move backwards, so statics that grow past
+/// [`BOOTLOADER_LOW`] fail the link by name, and anything that asks for
+/// `#[ram(reclaimed)]` (`.dram2_uninit`, placed after `.stack` by esp-hal's
+/// `dram2.x`) overflows `dram2_seg` and fails it too.
+fn patched_stack_x(stock: &std::path::Path) -> String {
+    let text = std::fs::read_to_string(stock).unwrap_or_else(|e| {
+        panic!(
+            "esp-hal generated no readable {}: {e}. The stack.x patch reads the stack \
+             guard offset from it.",
+            stock.display()
+        )
+    });
+    let guard = text
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("__stack_chk_guard = ABSOLUTE(_stack_end) +"))
+        .unwrap_or_else(|| {
+            panic!(
+                "{} has no `__stack_chk_guard = ABSOLUTE(_stack_end) + N;` line (esp-hal \
+                 changed its stack.x; this patch keeps that line verbatim, so a rerun over \
+                 its own output finds it too): rewrite the patch against the new script \
+                 rather than guess the offset.",
+                stock.display()
+            )
+        });
+    format!(
+        "\
+/* patched by fw-esp32c6/build.rs (patched_stack_x): the main stack fills
+   dram2_seg; RWDATA's residual is the main heap. */
+SECTIONS {{
+  .heap_main (NOLOAD) : ALIGN(8)
+  {{
+    _heap_main_start = ABSOLUTE(.);
+    . = {BOOTLOADER_LOW:#010x};
+    _heap_main_end = ABSOLUTE(.);
+  }} > RWDATA
+
+  /* must be last segment using RWDATA */
+  .heap_reclaimed (NOLOAD) : ALIGN(8)
+  {{
+    _heap_reclaimed_start = ABSOLUTE(.);
+    . = ORIGIN(RWDATA) + LENGTH(RWDATA);
+  }} > RWDATA
+
+  .heap_reclaimed_dram2 (NOLOAD) :
+  {{
+    . = ORIGIN(dram2_seg) + LENGTH(dram2_seg) - {MAIN_STACK_BYTES:#x};
+    _heap_reclaimed_end = ABSOLUTE(.);
+  }} > dram2_seg
+
+  .stack (NOLOAD) : ALIGN(16)
+  {{
+    _stack_end = ABSOLUTE(.);
+    _stack_end_cpu0 = ABSOLUTE(.);
+
+    /* The stack_guard for `stack-protector` mitigation (esp-hal's line, kept) */
+    {guard}
+
+    . = ORIGIN(dram2_seg) + LENGTH(dram2_seg);
+
+    . = ALIGN (16);
+    _stack_start = ABSOLUTE(.);
+    _stack_start_cpu0 = ABSOLUTE(.);
+  }} > dram2_seg
+}}
+
+ASSERT(_heap_reclaimed_start == {BOOTLOADER_LOW:#010x}, \"
+fw-esp32c6 stack.x: the main heap region does not end where the bootloader's load range begins\");
+ASSERT(_heap_reclaimed_end == _stack_end, \"
+fw-esp32c6 stack.x: something sits between the reclaimed tail and the main stack\");
+ASSERT(_stack_start - _stack_end == {MAIN_STACK_BYTES:#x}, \"
+fw-esp32c6 stack.x: the main stack is not MAIN_STACK_BYTES\");
+"
+    )
 }
 
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded
