@@ -1,7 +1,9 @@
 //! [`BoardCard`]: one board, drawn from core's [`UiBoardCard`] — the
 //! picture with the status corner cut out of it, the name bar and its one
 //! primary, then the five bars, always project · connection · access ·
-//! firmware · hardware.
+//! firmware · hardware. Connected, the board's panel stands in the bars'
+//! place, at their height ([`CompactPanel`]: `card.panel`), its All controls
+//! row linking the session's play page.
 //!
 //! **One height in every state** (AC5, `docs/style/ui.md` "Stable
 //! Layout"): the card is an explicit grid — the picture's row (138 px, or
@@ -24,9 +26,11 @@ use lpa_studio_core::{
 
 use super::board_picture::BoardPicture;
 use super::card_action::{CardPreviews, CardScope, use_provide_card_scope};
+use super::card_play_address::use_card_play_address;
 use super::name_bar::NameBar;
 use super::stack_bar::StackBar;
 use super::status_corner::StatusCorner;
+use crate::app::module::CompactPanel;
 
 /// A part of the card whose details a story mounts open.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,6 +96,8 @@ pub fn BoardCard(
         previews,
     });
     let board = card.board.clone();
+    // Connected: All controls goes to the session's play page.
+    let all_controls = use_card_play_address();
     rsx! {
         article { class: CARD_CLASS, "data-board-card": "{card.board}",
             div { class: PICTURE_SLOT_CLASS,
@@ -104,14 +110,21 @@ pub fn BoardCard(
                 }
             }
             NameBar { bar: card.name_bar.clone(), on_action }
-            for bar in card.bars {
-                StackBar {
-                    key: "{bar.layer.as_str()}",
-                    initially_open: details_open == Some(CardPart::Bar(bar.layer)),
-                    bar,
-                    board: board.clone(),
-                    on_action,
-                }
+            match card.panel {
+                Some(panel) => rsx! {
+                    CompactPanel { panel, all_controls, on_action }
+                },
+                None => rsx! {
+                    for bar in card.bars {
+                        StackBar {
+                            key: "{bar.layer.as_str()}",
+                            initially_open: details_open == Some(CardPart::Bar(bar.layer)),
+                            bar,
+                            board: board.clone(),
+                            on_action,
+                        }
+                    }
+                },
             }
         }
     }
@@ -232,6 +245,32 @@ mod tests {
                 "{path} is drawn unmarked: {marked:?}"
             );
         }
+    }
+
+    /// Connected (`panel: Some`), the card draws the board's panel in the
+    /// bars' place and no bar; watched (`None`), the five bars and no panel.
+    #[test]
+    fn a_connected_card_draws_its_panel_in_the_bars_place() {
+        let (watched, tree) = card_and_tree(&porch_view());
+        assert_eq!(watched.panel, None);
+        let html = render_card(watched.clone(), tree.clone(), None);
+        assert_eq!(attribute_values(&html, "data-bar").len(), 5);
+        assert!(!html.contains("data-board-panel"), "{html}");
+
+        let connected = UiBoardCard {
+            panel: Some(lpa_studio_core::UiBoardPanel {
+                target: None,
+                controls: Vec::new(),
+                more: 3,
+                auto_save: None,
+                edit: None,
+            }),
+            ..watched
+        };
+        let html = render_card(connected, tree, None);
+        assert!(html.contains("data-board-panel"), "{html}");
+        assert!(html.contains("data-all-controls"), "{html}");
+        assert!(attribute_values(&html, "data-bar").is_empty(), "{html}");
     }
 
     /// Every verb in an open details card is drawn from its offer and

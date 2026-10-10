@@ -10,7 +10,9 @@
 //! One face at three zoom levels, all shipped: the effect author works
 //! inside the module (children expanded as sibling cards), the artist sees
 //! the module face as a card in the workspace, and the end user sees the
-//! root module's face alone (play mode, `/sim|device/<key>/play`). The
+//! root module's face alone (play mode, `/sim|device/<key>/play`). A
+//! connected board's card draws a pick of that panel at card size
+//! ([`CompactPanel`]), with the same controls. The
 //! sidebar bus pane is gone: bus-as-controls lives on the face, and
 //! bus-as-writers/readers in the wiring drawer.
 //!
@@ -19,6 +21,7 @@
 //! kind-specific hero + sections. The widgets themselves (knob v2, fader,
 //! toggle) are the production ones, extended with one `engaged` prop.
 
+mod compact_panel;
 mod module_face;
 mod module_panel;
 mod module_panel_control;
@@ -43,6 +46,7 @@ pub(crate) mod playlist_panel_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod wiring_drawer_stories;
 
+pub use compact_panel::CompactPanel;
 pub use module_face::{ExportFindingRow, ModuleFace};
 pub use module_panel::{ModulePanel, NestedPanelGroup};
 pub use module_panel_control::ModulePanelControl;

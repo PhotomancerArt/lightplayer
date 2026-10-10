@@ -6,9 +6,9 @@ use dioxus_icons::lucide::{
     FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, LayoutGrid,
     Lightbulb, Link, Link2, Link2Off, List, ListMusic, Locate, LocateFixed, Lock, LockOpen,
     Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus, Power,
-    Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, Smartphone, Sparkles,
-    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb, Users,
-    Waypoints, Wifi, X, Zap,
+    Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, SlidersHorizontal, Smartphone,
+    Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb,
+    Users, Waypoints, Wifi, X, Zap,
 };
 
 #[component]
@@ -116,6 +116,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Restart => rsx! { RotateCcw { size } },
         StudioIconName::ViewCards => rsx! { LayoutGrid { size } },
         StudioIconName::ViewList => rsx! { List { size } },
+        StudioIconName::Sliders => rsx! { SlidersHorizontal { size } },
     }
 }
 
@@ -317,6 +318,9 @@ pub enum StudioIconName {
     ViewCards,
     /// Rows: the home page's list view.
     ViewList,
+    /// Two sliders: the connected board card's All controls row (the
+    /// board's play page).
+    Sliders,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

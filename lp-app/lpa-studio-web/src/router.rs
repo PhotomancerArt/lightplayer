@@ -956,6 +956,31 @@ pub(crate) fn lens_device_uid(view: &UiStudioView) -> Option<&str> {
     Some(uid)
 }
 
+/// The play page of the session the lens holds: where the connected board
+/// card's **All controls** goes (CD12 of
+/// `lp2025/2026-10-08-2330-connected-in-the-card`). The lens's own address
+/// with play on (`/p/…/play?on=…`), else, for a lens with no project
+/// address (a board whose project is not at the library head, or one a
+/// play-only link left unbound), `/device/<uid>/play`. `None` with no lens.
+///
+/// A path: the router's click interception carries the page-load flags
+/// (`?emu=`, `?ble=`, `?record=`) onto it, as it does for every in-app
+/// link, so the link stays the same document's address. Following it opens
+/// nothing twice: the session is already the lens.
+pub(crate) fn play_address(view: &UiStudioView) -> Option<String> {
+    if let Some(route) = lens_route(view) {
+        return Some(route.with_play(true).path());
+    }
+    let uid = lens_device_uid(view)?;
+    Some(
+        StudioRoute::Device {
+            uid: uid.to_string(),
+            view: ProjectView::Play,
+        }
+        .path(),
+    )
+}
+
 /// What the lens sync writes to the address bar ([`lens_sync_target`]).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LensSyncMove {
@@ -2641,6 +2666,38 @@ mod tests {
             }))),
             None
         );
+    }
+
+    // -----------------------------------------------------------------
+    // play_address: where a connected card's All controls goes
+    // -----------------------------------------------------------------
+
+    /// A bound lens: the project's own address with play on, the board's
+    /// hint riding along.
+    #[test]
+    fn a_bound_lens_plays_at_its_project_address() {
+        assert_eq!(
+            play_address(&board_view(Some(SHARE_UID))),
+            Some(format!(
+                "/p/porch-sign-{SHARE_UID}/play?on=mac:60:55:f9:0a:0b:0c"
+            ))
+        );
+    }
+
+    /// An unbound lens (no project address): the board's own play page.
+    #[test]
+    fn an_unbound_lens_plays_at_the_boards_address() {
+        assert_eq!(
+            play_address(&board_view(None)),
+            Some(format!("/device/{BOARD_UID}/play"))
+        );
+    }
+
+    /// No lens, no play page.
+    #[test]
+    fn no_lens_has_no_play_address() {
+        assert_eq!(play_address(&editor_view(None)), None);
+        assert_eq!(play_address(&UiStudioView::empty()), None);
     }
 
     #[test]
