@@ -41,7 +41,10 @@ struct Slot {
     reported: AtomicUsize,
 }
 
-#[allow(clippy::declare_interior_mutable_const)]
+#[allow(
+    clippy::declare_interior_mutable_const,
+    reason = "only the array initialiser below copies it; each slot is its own static atomic"
+)]
 const EMPTY: Slot = Slot {
     addr: AtomicUsize::new(0),
     size: AtomicUsize::new(0),
