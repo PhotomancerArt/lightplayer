@@ -359,6 +359,27 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
     min_largest_block_bytes: 8 * 1024,
 };
 
+/// What a ProjectRead must leave free past its own estimated cost
+/// (`lpa_server::read_cost`): room for the link and radio tasks while it
+/// runs. Since 2026-10-09 this, not [`READ_GATE`]'s flat 40 KiB, is what a
+/// read is held to.
+///
+/// Measured (research experiment E7, `lp2025/2026-10-09-1203-ram-research`):
+///
+/// - [`READ_GATE`] was 4.7x the device card's read at the choker's 73 lamps
+///   (8,656 B emulated with its layout; 3,996 B on loose-c6 with a Bluetooth
+///   central), so a phone's ~18 KB link left the card refused at 40.6 KB
+///   free (`docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`),
+///   and 0.8–1.06x the same read at 512 lamps (38,716 B, three 10,240 B
+///   asks), so a 512-lamp board just over it could reset;
+/// - inside a read's window on silicon no other task's allocation showed:
+///   the card's read peaked at 3,996 B over BLE, the editor's at 13,040 B.
+///   16 KiB is the request-decode margin (`server_payload`) kept for the
+///   same job. It covers a second Bluetooth link's 7.1 KB link RAM opening
+///   mid-read, not the whole ~18 KB a phone's link was measured to cost.
+#[cfg(not(fw_harness))]
+const READ_COST_MARGIN: u32 = 16 * 1024;
+
 #[cfg(not(fw_harness))]
 fn read_headroom_probe() -> Option<u32> {
     // At once when no project is loaded (the load gate's probe, after a
@@ -1012,6 +1033,11 @@ fn lp_engine_entry(core: CoreBoot) {
         ))
     });
     server.set_read_gate(Some(READ_GATE));
+    // Each read is held to its own cost (`lpa_server::read_cost`) plus
+    // `READ_COST_MARGIN`, so the card's 9 KB read is not refused for the
+    // editor's 25 KB one, and a 512-lamp read is refused rather than reset.
+    // `READ_GATE` above stays installed for a server built without it.
+    server.set_read_cost_margin(Some(READ_COST_MARGIN));
     // The station's probes and its settings hook (`wifi`): the server reads
     // what the station publishes, and hands it the network file after every
     // change (`net::station_probes`).
