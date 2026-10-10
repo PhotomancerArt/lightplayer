@@ -146,7 +146,10 @@ const fn parse_usize(text: Option<&str>) -> usize {
     let mut i = 0;
     while i < bytes.len() {
         let digit = bytes[i];
-        assert!(digit.is_ascii_digit(), "LP_E06_HEAP_MAIN_SHRINK must be decimal");
+        assert!(
+            digit.is_ascii_digit(),
+            "LP_E06_HEAP_MAIN_SHRINK must be decimal"
+        );
         value = value * 10 + (digit - b'0') as usize;
         i += 1;
     }
