@@ -53,8 +53,19 @@ config edit is the only trigger.
 **Regression coverage** — `a_failing_open_is_retried_on_a_backoff_and_at_once_on_a_config_change`
 and `the_backoff_stops_doubling_at_its_cap` in
 `lp-core/lpc-engine/src/nodes/power_button/power_button_node.rs`, which count
-opens through a wrapping `ButtonService`. The choker's engine heap record is
-re-blessed with the drop (see the PR).
+opens through a wrapping `ButtonService`.
+
+**What the heap record shows** — Per-frame allocations in the choker's
+steady-render capture (`lp-cli profile --collect alloc --mode steady-render`,
+`playful-choker-tryout`, engine emulator, `A` events per frame): before, 1,513
+in each of the four captured frames; after, 226 in three of them and 1,512 in
+the fourth, which is the one frame that falls on a retry. The record keeps the
+*worst* frame of the window, so it still reads a retry frame: transient
+41,887 → 41,872 B, allocations 1,844 → 1,843, largest allocation unchanged at
+20,480 B. The record did not collapse because the fix leaves one attempt per
+backoff, and four 40 ms frames are enough to contain one. A retry is still a
+20 KB transient; making it cheap needs `find_endpoint` to stop building the
+whole endpoint list to find one match (out of scope here).
 
 **Lesson** — The 2026-07-28 entry fixed the *restatement* and left the
 *retry*: a tick error that is the same every frame is a condition, and a
