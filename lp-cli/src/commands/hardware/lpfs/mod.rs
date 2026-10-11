@@ -26,6 +26,12 @@ use anyhow::Result;
 
 use super::args::{LpfsArgs, LpfsCommand};
 
+/// What lp-cli says about a board whose hello reports `fs: refused` (an
+/// `fs-tree` build that found a newer or damaged store header). Never a
+/// migration or a restore: those would write over the store it kept.
+pub const REFUSED_STORE: &str = "the board refused its file store: a newer or damaged store \
+     header; its files are kept — read them with `lp-cli hardware tree extract`";
+
 pub fn handle_lpfs(args: LpfsArgs) -> Result<()> {
     match args.command {
         LpfsCommand::Report(args) => report::handle_report(args),

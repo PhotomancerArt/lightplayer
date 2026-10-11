@@ -1354,7 +1354,10 @@ impl LpServer {
     /// network's `last`) are filled in.
     fn network_body(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
         let fs = &*self.base_fs;
-        let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
+        let held = matches!(
+            self.hello.hardware.fs,
+            lpc_wire::FsBootState::LegacyHeld | lpc_wire::FsBootState::Refused
+        );
         match request {
             ClientRequest::NetworkAdd { .. }
             | ClientRequest::NetworkForget { .. }

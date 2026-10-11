@@ -156,6 +156,9 @@ pub fn read_target(port: &str) -> Result<String> {
 /// command's whole point is "is the board now running what was asked for".
 pub fn wait_for_hello(port: &str, expected_version: &str, expected_target: &str) -> Result<()> {
     with_hello(port, |hello| {
+        if hello.hardware.fs == lpc_wire::FsBootState::Refused {
+            bail!("{}", crate::commands::hardware::lpfs::REFUSED_STORE);
+        }
         if hello.hardware.fs != lpc_wire::FsBootState::Mounted {
             bail!(
                 "the board came back with its filesystem {:?}, not mounted — its files are in \
