@@ -109,7 +109,7 @@ fn measure(label: &str, elf: &std::path::Path) -> Vec<String> {
 
     // Mount, empty: format on the first boot, mount on the second.
     let host = board(elf, Vec::new(), 0x9E7F_0001);
-    let mut host = boot_counted(host, &mut rows, label, "first boot (format)");
+    let host = boot_counted(host, &mut rows, label, "first boot (format)");
     let mut host = power_cycle(host, 0x9E7F_0002);
     watch(&host);
     let before = flash_count(&host);
