@@ -5,10 +5,11 @@
 //! with a project loaded and a radio link open that is often more than the
 //! largest free block (a 10,240 B read reset the silicon C6, PR B's desk
 //! walk; `docs/defects/2026-10-06-a-message-the-heap-cannot-reassemble-resets-the-board.md`).
-//! Both `FsRequest::Read` (`handlers::fs_read_refusal`) and Studio's pull,
-//! `FsRequest::ChangesSince` (`file_sync`), read files whole, so both ask
-//! this one question first and refuse in the same words — refusal, not
-//! reset.
+//! `FsRequest::Read` (`handlers::fs_read_refusal`), Studio's pull,
+//! `FsRequest::ChangesSince`, and the package hash Studio's Edit press asks
+//! for first, `FsRequest::HashPackage` (both `file_sync`), read files whole,
+//! so each asks this one question first and refuses in the same words —
+//! refusal, not reset.
 
 extern crate alloc;
 

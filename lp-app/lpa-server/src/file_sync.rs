@@ -261,6 +261,26 @@ pub fn handle_write_chunk(
 /// hash — the device root, `/projects`, a `.lp` directory itself — is
 /// refused.
 pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
+    handle_hash_package_with_headroom(fs, prefix, None)
+}
+
+/// [`handle_hash_package`] on a board that can say how much heap is left in
+/// one block.
+///
+/// The hash reads every hashed file of the package whole
+/// (`lpc_history::hash_package`), so before it starts, each of those files
+/// asks the same question `FsRequest::Read` and the pull do
+/// ([`crate::whole_file_gate::whole_file_refusal`]). One that would not fit
+/// refuses the hash — `error` set, `hash` empty — in `Read`'s own words;
+/// nothing was read. Studio's Edit press asks for this hash first (the
+/// library bind), and on the choker the 27,091 B mapping SVG reset the C6
+/// out of memory here
+/// (`docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md`).
+pub fn handle_hash_package_with_headroom(
+    fs: &dyn LpFs,
+    prefix: LpPathBuf,
+    headroom: Option<ReadHeadroomProbe>,
+) -> FsResponse {
     if hash_would_cover_a_write_only_file(fs, prefix.as_path()) {
         return FsResponse::PackageHash {
             prefix,
@@ -282,6 +302,14 @@ pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
     };
     let hash = {
         let view = view.borrow();
+        if let Some(refusal) = hash_read_refusal(&*view, headroom) {
+            log::warn!("fs gate: hash of {} — {refusal}", prefix.as_str());
+            return FsResponse::PackageHash {
+                prefix,
+                hash: alloc::string::String::new(),
+                error: Some(refusal),
+            };
+        }
         lpc_history::hash_package(&*view)
     };
     match hash {
@@ -296,6 +324,25 @@ pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
             error: Some(format!("{e}")),
         },
     }
+}
+
+/// The whole-file gate's refusal for the first file `lpc_history::hash_package`
+/// would read on `package` (its own root) that the heap's largest block
+/// cannot hold; `None` when every one fits or nothing probes the heap. The
+/// walk is the hasher's own: every hashed path that is not a directory. A
+/// listing that fails is left to the hash, which reports it.
+fn hash_read_refusal(
+    package: &dyn LpFs,
+    headroom: Option<ReadHeadroomProbe>,
+) -> Option<alloc::string::String> {
+    headroom?;
+    let paths = package.list_dir(LpPath::new("/"), true).ok()?;
+    paths.iter().find_map(|path| {
+        if !lpc_history::hash::is_hashed_path(path) || package.is_dir(path).unwrap_or(true) {
+            return None;
+        }
+        whole_file_refusal(package, path.as_path(), headroom)
+    })
 }
 
 /// Whether the canonical hash of `prefix` would take in a write-only file
@@ -552,6 +599,68 @@ mod tests {
         };
         assert_eq!(error, None);
         assert_eq!(entries.len(), 1);
+    }
+
+    /// The package hash reads every hashed file whole, so a package with one
+    /// file the largest block cannot hold is refused before anything is read
+    /// — in `Read`'s words, with no hash — and one that fits hashes exactly
+    /// as the ungated hash does. Files the hash leaves out (the package's own
+    /// `/.lp/`) are not asked about.
+    #[test]
+    fn a_hash_over_a_file_that_does_not_fit_is_refused_not_attempted() {
+        let fs = lpfs::LpFsMemory::new();
+        fs.write_file("/projects/x/project.json".as_path(), b"{}")
+            .unwrap();
+        fs.write_file("/projects/x/playful-mapping.svg".as_path(), &[7u8; 27_091])
+            .unwrap();
+        let hash = |headroom: Option<ReadHeadroomProbe>| {
+            handle_hash_package_with_headroom(&fs, LpPathBuf::from("/projects/x"), headroom)
+        };
+
+        let tight: ReadHeadroomProbe = || Some(24_032);
+        match hash(Some(tight)) {
+            FsResponse::PackageHash { hash, error, .. } => {
+                assert!(hash.is_empty(), "a refused hash carries no hash");
+                let error = error.expect("refusal in words");
+                assert!(
+                    error.starts_with("read refused: board memory busy"),
+                    "{error}"
+                );
+                assert!(error.contains("27091 B file needs 27603 B"), "{error}");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        let just_fits: ReadHeadroomProbe = || Some(27_091 + 512);
+        let ungated = handle_hash_package(&fs, LpPathBuf::from("/projects/x"));
+        for headroom in [Some(just_fits), None] {
+            assert_eq!(format!("{:?}", hash(headroom)), format!("{ungated:?}"));
+        }
+        let FsResponse::PackageHash {
+            hash: value, error, ..
+        } = ungated
+        else {
+            panic!("not a hash");
+        };
+        assert_eq!(error, None);
+        assert_eq!(value.len(), 64);
+
+        // a big file in the package's own `.lp/` is not hashed, so not asked
+        let sidecar = lpfs::LpFsMemory::new();
+        sidecar
+            .write_file("/projects/x/project.json".as_path(), b"{}")
+            .unwrap();
+        sidecar
+            .write_file("/projects/x/.lp/state.json".as_path(), &[1u8; 27_091])
+            .unwrap();
+        let FsResponse::PackageHash { error, .. } = handle_hash_package_with_headroom(
+            &sidecar,
+            LpPathBuf::from("/projects/x"),
+            Some(tight),
+        ) else {
+            panic!("not a hash");
+        };
+        assert_eq!(error, None);
     }
 
     #[test]
