@@ -54,6 +54,24 @@ rustflags = [
 
 [env]
 ESP_LOG = "info"
+
+# RAM placement of anonymous constants. esp-hal's default sends every match
+# lookup table in the image, the interrupt-handler tables and the
+# `.rodata.cst*` pools into `.data` — 10.4 KB on this build, out of an SRAM
+# where `.data`, `.bss` and `.stack` are zero-sum (E5 of the RAM research
+# program, 2026-10-10; the classic did the same on 2026-09-06, #521).
+#
+# Turning the default off wholesale would send `lp_ws281x`'s refill tables to
+# flash, which the ISR-in-RAM rule forbids. So the default goes off and
+# `rwdata_hook.x` (found via build.rs's link-search path) names the exceptions
+# that stay. `just iram-data-refs-esp32c6` is the check that the exception list
+# is still complete — run it after touching either key.
+#
+# ⚠️ `touch src/main.rs` after changing these: cargo does not always retrigger
+# cfg-dependent codegen on an env-only change, and a stale image looks like
+# "the hook did nothing".
+ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
+ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"
 # littlefs2-sys bindgen needs stdint.h when targeting bare-metal; use host's stdint
 [unstable]
 build-std = ["core", "alloc"]

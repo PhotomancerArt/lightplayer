@@ -1197,6 +1197,21 @@ iram-flash-literals-esp32v3 *args:
     python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
         --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
 
+# The ISR-in-RAM guard for fw-esp32c6: which lookup tables a RAM-resident
+# function reads out of FLASH.
+#
+# The C6 twin of `iram-flash-literals-esp32v3`, for the one decision the C6
+# makes about constants: esp-hal's `place-switch-tables-in-ram` is OFF and
+# `lp-fw/fw-esp32c6/rwdata_hook.x` names the tables that stay in RAM (the RMT
+# refill's). This resolves the addresses every `.trap`/`.rwtext`/`.rwtext.wifi`
+# function forms and fails, naming the function, when one lands on a
+# `.Lswitch.table.*` symbol in flash. Needs the image (`just build-fw-esp32c6`).
+#
+#   just iram-data-refs-esp32c6           # check; exit 1 names the regression
+#   just iram-data-refs-esp32c6 --list    # also print the references that are in RAM
+iram-data-refs-esp32c6 *args:
+    python3 scripts/iram-data-refs-rv32.py {{ fw_esp32c6_elf }} {{ args }}
+
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
 # (it cross-compiles for Xtensa under a different toolchain), so nothing else
