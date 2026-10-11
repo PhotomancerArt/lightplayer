@@ -1,5 +1,5 @@
 ---
-status: fixed (e61488124, 4d02d2e91, 542669249)
+status: fixed      # fixed by e61488124, 4d02d2e91, 542669249
 found: 2026-10-09      # test (M3 P2 long walk, lp-store-bench, lp-nor-sim)
 area: lp-tree-store `store_space.rs` `ensure_room` (GC's stall rule) and GC's victim choice
 class: budget-exhaustion
