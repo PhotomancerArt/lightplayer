@@ -41,6 +41,12 @@ lpc_model::lp_embed_manifest_core! {
             cfg!(feature = "radio"),
             lpc_model::LpFeature::SvcRadioEspnow,
         ),
+        // `fs-tree` (never shipped): what the update guard reads in a new
+        // core before it lets it boot over this board's tree store.
+        lpc_model::manifest::feature_fragment(
+            cfg!(feature = "fs-tree"),
+            lpc_model::LpFeature::FsTree,
+        ),
     ],
     limits_json: concat!("{\"flashAppBytes\":", env!("LP_FLASH_APP_BYTES"), "}"),
     // The split image takes over-the-air updates in layout 1; a plain
@@ -129,8 +135,18 @@ mod io_thread_stack_diag;
 // their load generators instead.
 #[cfg(lp_net)]
 mod net;
+// The SHA accelerator: a split image's boot-path hashes (`ota/`), and the
+// tree store's record ids in an `fs-tree` build — split or not, so it lives
+// outside `ota/` (split-only).
+#[cfg(all(not(fw_harness), any(lp_split, feature = "fs-tree")))]
+mod hw_sha;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod ota;
+// The heap's peak between heartbeats (`[heap] peak=…`), never shipped.
+#[cfg(all(feature = "heap_peak_diag", not(fw_harness)))]
+mod heap_peak_diag;
+#[cfg(all(feature = "heap_peak_diag", feature = "heap_map_diag"))]
+compile_error!("`heap_peak_diag` and `heap_map_diag` both own esp-alloc's hooks: pick one");
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -174,12 +190,24 @@ mod bootctl;
     feature = "test_flash_tears"
 ))]
 mod flash_layout;
-#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
+// Not in the size measurement's build (`measure_no_legacy_probe`): with the
+// legacy probe gone nothing here is reached, and littlefs is dropped.
+#[cfg(all(
+    not(feature = "memory_fs"),
+    not(fw_harness),
+    not(feature = "measure_no_legacy_probe")
+))]
 mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod legacy_layout;
-#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
+#[cfg(all(not(feature = "memory_fs"), not(fw_harness), not(feature = "fs-tree")))]
 use fw_esp32_common::lp_fs;
+// `fs-tree`: `lpfs` is the tree store (plan
+// `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`). Never shipped.
+#[cfg(all(feature = "fs-tree", not(fw_harness)))]
+mod tree_flash;
+#[cfg(all(feature = "fs-tree", feature = "memory_fs"))]
+compile_error!("`fs-tree` and `memory_fs` are two filesystems: pick one");
 
 #[cfg(all(
     feature = "radio",
@@ -320,6 +348,8 @@ fn log_heartbeat_stack_lines() {
         net::net_thread_stack_diag::log_if_grown();
         #[cfg(lp_net)]
         net::net_heartbeat::log_line();
+        #[cfg(feature = "heap_peak_diag")]
+        heap_peak_diag::log_line();
     }
 }
 
@@ -612,9 +642,72 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                     );
                     (Box::new(LpFsMemory::new()), FsBootState::Memory)
                 }
+                // The tree store (`fs-tree`): mount; a partition with no store
+                // on it (blank, littlefs, an interrupted first format) is
+                // formatted only when no pre-repartition filesystem is
+                // waiting at the old offset; a store the mount will not
+                // adopt (a newer or damaged header) is REFUSED — nothing
+                // written, files kept, access locked (`fs: refused`).
+                #[cfg(feature = "fs-tree")]
+                Some(partition) => {
+                    use fw_esp32_common::tree_fs::{FormatVerdict, TreeFsInit, init_tree_guarded};
+                    let summary = |how: &str, s: lp_tree_store::MountSummary| {
+                        esp_println::println!(
+                            "[FS] tree store {how} ({} sectors, {} free, root {})",
+                            s.sectors,
+                            s.free_sectors,
+                            s.root_seq
+                        );
+                    };
+                    match init_tree_guarded(
+                        crate::tree_flash::tree_flash(flash_storage, partition),
+                        crate::hw_sha::StoreSha256,
+                        lp_tree_store::StoreConfig::default(),
+                        |flash| {
+                            if crate::tree_flash::legacy_lpfs_present(flash) {
+                                FormatVerdict::Hold
+                            } else {
+                                FormatVerdict::Format
+                            }
+                        },
+                    ) {
+                        TreeFsInit::Mounted(fs, s) => {
+                            esp_println::println!("[INIT] Flash filesystem mounted");
+                            summary("mounted", s);
+                            (Box::new(fs), FsBootState::Mounted)
+                        }
+                        TreeFsInit::Formatted(fs, s) => {
+                            esp_println::println!("[INIT] Flash filesystem mounted");
+                            summary("formatted", s);
+                            (Box::new(fs), FsBootState::Formatted)
+                        }
+                        TreeFsInit::Held(_) => {
+                            esp_println::println!(
+                                "[FS] legacy-layout filesystem found at {:#x} — not formatting; \
+                                 files are held for migration; using memory FS",
+                                crate::legacy_layout::LEGACY_LPFS_V1_OFFSET
+                            );
+                            (Box::new(LpFsMemory::new()), FsBootState::LegacyHeld)
+                        }
+                        TreeFsInit::Refused { why, .. } => {
+                            esp_println::println!(
+                                "[FS] tree store refused: a newer or damaged store header — \
+                                 files kept ({why}); using memory FS, access locked"
+                            );
+                            (Box::new(LpFsMemory::new()), FsBootState::Refused)
+                        }
+                        TreeFsInit::FormatFailed => {
+                            esp_println::println!(
+                                "[WARN] tree store format failed, falling back to memory"
+                            );
+                            (Box::new(LpFsMemory::new()), FsBootState::Memory)
+                        }
+                    }
+                }
                 // The legacy guard (crate::legacy_layout): a partition that
                 // will not mount is formatted only when no pre-repartition
                 // filesystem is waiting at the old offset.
+                #[cfg(not(feature = "fs-tree"))]
                 Some(partition) => match lp_fs::LpFsFlash::init_guarded(
                     crate::flash_storage::LpFlashStorage::new(flash_storage, partition),
                     crate::flash_storage::lpfs_config,
@@ -782,6 +875,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             }
             (true, None) => {
                 log::error!("[ble] enabled, but the BT peripheral is gone — BLE off");
+                false
+            }
+            (false, _) if fs_boot_state == lpc_wire::FsBootState::Refused => {
+                log::info!(
+                    "[ble] off (file store refused: the device store waits on the flash with it)"
+                );
                 false
             }
             (false, _) if fs_boot_state == lpc_wire::FsBootState::LegacyHeld => {
@@ -1062,6 +1161,10 @@ fn lp_engine_entry(core: CoreBoot) {
     // The server cannot derive any of it.
     server.set_hardware_identity(chip_identity());
     server.set_fs_boot_state(fs_boot_state);
+    // The filesystem this build serves, said in the hello as in the manifest
+    // core (`fs-tree`: never shipped).
+    #[cfg(feature = "fs-tree")]
+    server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
     // The board this firmware is running as, from the loaded manifest — the
     // catalog key a card needs to re-flash or wire a new project for it.
     server.set_board_id(Some(alloc::string::String::from(

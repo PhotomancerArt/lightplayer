@@ -218,7 +218,9 @@ fn garbage_flash_never_panics_and_formats() {
             Ok(_) => panic!("garbage mounted"),
             Err((_, f, _)) => f,
         };
-        TreeStore::format(&mut f, &mut SoftSha256, &c).unwrap();
+        TreeStore::format(&mut f, SoftSha256, c.clone())
+            .map_err(|(e, ..)| e)
+            .unwrap();
         let mut st = mount(f, &c);
         assert!(st.list("/").unwrap().is_empty());
     }

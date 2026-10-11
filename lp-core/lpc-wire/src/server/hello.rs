@@ -37,6 +37,14 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 42: `FsBootState::Refused` (`fs: refused`; plan
+///   `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D1) — an
+///   `fs-tree` board that found a newer or damaged tree-store header
+///   wrote nothing, kept its files and serves a RAM filesystem with its
+///   access locked. A new value of a required hello field: an old Studio
+///   cannot decode a refused board's hello. The same train adds the
+///   feature `fs.tree` (`LpFeature::FsTree`, an `fs-tree` build's hello and
+///   manifest core). `PACK_FORMAT_VERSION` is unchanged.
 /// - 41: file bodies on the edit path go as text — `AssetBodyOverlay::
 ///   ReplaceBody` (Studio's shader edit, `SetArtifactBody`, and the bodies an
 ///   overlay read returns) and `WireCreateNodeRequest`'s `body` and
@@ -425,7 +433,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 41;
+pub const WIRE_PROTO_VERSION: u32 = 42;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -856,7 +864,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 41,
+            WIRE_PROTO_VERSION, 42,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

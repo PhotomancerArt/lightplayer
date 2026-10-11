@@ -233,6 +233,7 @@ pub const fn feature_fragment(enabled: bool, feature: LpFeature) -> &'static str
             LpFeature::GfxWgpu => "\"gfx.wgpu\",",
             LpFeature::DiagUnwind => "\"diag.unwind\",",
             LpFeature::ShaderF32 => "\"shader.f32\",",
+            LpFeature::FsTree => "\"fs.tree\",",
         }
     } else {
         ""

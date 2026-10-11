@@ -16,9 +16,9 @@ use lp_bootctl::{BOOT_RECORD_SECTORS, BootRecord, SplitLayout};
 use lpc_update::board::{FlashFault, UpdateTarget};
 
 use super::boot_state::BootState;
-use super::hw_sha::BootSha256;
 use super::split_flash::{BLOCK, SECTOR, SplitFlash};
 use super::update_timing::{FlashTiming, now_us};
+use crate::hw_sha::BootSha256;
 
 /// The split image's side of an update.
 pub struct SplitUpdateTarget {
@@ -173,6 +173,21 @@ impl UpdateTarget for SplitUpdateTarget {
         len: u32,
         build_hash: u32,
     ) -> Result<(), FlashFault> {
+        // `fs-tree` (D8): a core that would not mount this board's tree
+        // store would format it on its first boot — refuse it here, before
+        // the record that boots it, and say why.
+        #[cfg(feature = "fs-tree")]
+        {
+            let flash = &mut self.flash;
+            let verdict =
+                fw_esp32_common::fs_tree_core_guard::core_store_verdict(len, |at, buf| {
+                    flash.read(dest + at, buf)
+                });
+            if let Some(why) = verdict.refusal() {
+                log::warn!("[OTA] core install refused: {why}");
+                return Err(FlashFault);
+            }
+        }
         let record = BootRecord {
             seq: self.record_seq.wrapping_add(1),
             core_off: dest,

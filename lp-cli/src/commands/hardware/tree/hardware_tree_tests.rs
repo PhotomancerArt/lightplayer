@@ -31,7 +31,9 @@ fn source() -> TreeSourceArgs {
 fn store(sectors: u32) -> Store {
     let cfg = StoreConfig::default();
     let mut f = NorFlashSim::new(NorGeometry::c6(sectors));
-    TreeStore::format(&mut f, &mut SoftSha256, &cfg).unwrap();
+    TreeStore::format(&mut f, SoftSha256, cfg.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
     mount(f)
 }
 
@@ -206,7 +208,9 @@ fn hardware_tree_torn_root() {
 fn hardware_tree_retired_sector() {
     let cfg = StoreConfig::default();
     let mut f = NorFlashSim::new(NorGeometry::c6(16));
-    TreeStore::format(&mut f, &mut SoftSha256, &cfg).unwrap();
+    TreeStore::format(&mut f, SoftSha256, cfg.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
     f.add_wear_out(WearOut {
         sector: 9,
         after_erases: 0,

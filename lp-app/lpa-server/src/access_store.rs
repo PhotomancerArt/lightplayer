@@ -78,9 +78,20 @@ pub fn device_store_at_boot(
     fs: &dyn LpFs,
     fs_boot_state: lpc_wire::FsBootState,
 ) -> DeviceAccessFile {
-    if fs_boot_state == lpc_wire::FsBootState::LegacyHeld {
-        log::info!("access: files held for the layout change; the device store waits with them");
-        return DeviceAccessFile::locked();
+    match fs_boot_state {
+        lpc_wire::FsBootState::LegacyHeld => {
+            log::info!(
+                "access: files held for the layout change; the device store waits with them"
+            );
+            return DeviceAccessFile::locked();
+        }
+        // A refused store (`fs-tree`): the same, for the same reason — the
+        // board's real store is on the flash it would not mount.
+        lpc_wire::FsBootState::Refused => {
+            log::info!("access: the file store was refused; the device store waits with it");
+            return DeviceAccessFile::locked();
+        }
+        _ => {}
     }
     read_device_store(fs)
 }
@@ -268,6 +279,20 @@ mod tests {
                 DeviceAccessFile::fresh()
             );
         }
+    }
+
+    /// An `fs-tree` board that refused its store (a newer or damaged store
+    /// header) serves a RAM filesystem: read as missing, its store would be
+    /// fresh — open, Bluetooth on — while its real access list waits on the
+    /// flash. It boots locked instead (plan D1).
+    #[test]
+    fn a_refused_store_boots_locked_not_open() {
+        let fs = LpFsMemory::new();
+        let store = device_store_at_boot(&fs, lpc_wire::FsBootState::Refused);
+        assert_eq!(store, DeviceAccessFile::locked());
+        assert!(!store.ble_enabled);
+        assert_eq!(store.open, OpenTo::Nobody);
+        assert!(store.secrets.is_empty());
     }
 
     #[test]

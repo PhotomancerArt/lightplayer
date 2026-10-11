@@ -156,9 +156,15 @@ the crate's tests and `lp-store-bench`).
 
 ## API
 
-`TreeStore::format(&mut flash, &mut hasher, &cfg)`,
 `TreeStore::mount(flash, hasher, cfg)` (never panics; `Err((error, flash,
-hasher))` when no complete root), `get`, `file_size`, `exists`, `list`
+hasher))` when there is no complete root, the error saying what is there —
+below), `TreeStore::format(flash, hasher, cfg)` (by value, like `mount`, and
+returning the mounted empty store: a firmware that mounts and, on `NoStore`,
+formats what the mount handed back links **one** `TreeStore<F, H>`; a
+`&mut` format beside a by-value mount linked the whole store twice, +8 KB;
+tests pass `&mut flash`, since `Flash` is implemented for `&mut F`),
+`summary` (`MountSummary`: sectors, free sectors, the committed root's
+sequence — always on, for a boot line), `get`, `file_size`, `exists`, `list`
 (sorted, plain string prefix), `put`, `append`, `put_chunk_deflated`,
 `delete`, `delete_prefix` (`"<dir>/"` only: the directory and everything
 under it, one change; any other prefix is `InvalidPath`),
@@ -166,6 +172,31 @@ under it, one change; any other prefix is `InvalidPath`),
 `stats` and `reset_transient_peak` (feature `stats`), `free_sectors`,
 `flash`/`flash_mut`, `into_flash`, `into_parts`. After `StoreError::Flash`
 the store must be dropped.
+
+**Mount verdicts** (`mount_verdict.rs`; read from what mount's first pass
+already reads, no byte of the format involved), and who acts on each:
+
+| error | what is on the flash | the firmware (`fs-tree`) |
+|---|---|---|
+| `NoStore` | no sector with a trusted header of this format (blank, a littlefs partition, foreign data), or trusted sectors holding nothing but the empty directory `format` writes and no root (a power cut during a first `format`) | formats (after the legacy-layout probe holds nothing) |
+| `Damaged(why)` | a store's records — a file, a non-empty directory, a root, a record of an unknown kind — and no complete root, or a root whose tree did not check | refuses: no store, files kept, access locked |
+| `Unsupported(why)` | a sector header of a newer format, another sector size, an unknown incompat flag or head kind | refuses, as `Damaged` |
+
+Mount never returns `Corrupt` (a record that did not check while mount read
+the committed tree is `Damaged`). The sweep
+`mount_verdict_tests::a_cut_anywhere_in_a_first_format_is_no_store` cuts a
+first `format` at every operation under every named tear model, over blank,
+littlefs-shaped and garbage flash: every cut mounts as `NoStore`, and a
+second format works.
+
+**`format`'s sector walk lives in one place**: `RecordLog::kill_and_erase`
+(kill the header, erase, read back as erased) over every sector, then an
+empty directory and a root. It erases and verifies all of them (≈ 176 ×
+21 ms ≈ 3.7 s on a C6 partition, each erase inside esp-storage's critical
+section). A lazy or incremental format — kill the headers, erase on a
+sector's first open (`open_sector` already erases and verifies a sector
+that was not erased this session) — is an adoption-round requirement
+(plan `2026-10-08-2339-tree-store-firmware-and-emulator`, D4), not built.
 
 ## Inspecting an image: `lp-cli hardware tree`
 
@@ -267,9 +298,11 @@ location-detail=none`, `-Z fmt-debug=none`, `panic=abort`): with the plain
 release profile core's sort and formatting look kilobytes bigger and the
 store ~4.5 KB smaller than they are on the C6. `--features lpfs` makes the
 same calls through `LpFsTree` as a `dyn lpfs::LpFs` (every trait method
-linked), for the store plus its adapter. Format and mount go through
-`&mut` both, so they share one monomorph (a by-value mount links the store
-twice, +8 KB). From `size-probe/`: `cargo build --release --target
+linked), for the store plus its adapter. The probe boots as the firmware
+does — mount by value, and on `NoStore` format by value what the mount
+handed back — so both name one `TreeStore<RamFlash, ProbeHasher>`
+(`rust-nm --demangle` shows every store symbol once and no `&mut RamFlash`
+instantiation). From `size-probe/`: `cargo build --release --target
 riscv32imac-unknown-none-elf [--features lpfs]`, then `rust-size -A` and
 `rust-nm --demangle --print-size --size-sort`.
 

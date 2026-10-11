@@ -21,6 +21,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::flash::Flash;
+use crate::mount_verdict::{EMPTY_DIR, mount_failure};
 use crate::node_read::read_node_into;
 use crate::object_hasher::ObjectHasher;
 use crate::object_id::{IdTag, ObjectId};
@@ -83,25 +84,42 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
-    /// Kill and erase every sector (retiring any that will not erase), then
-    /// commit an empty tree. Works on any flash content.
-    pub fn format(flash: &mut F, hasher: &mut H, cfg: &StoreConfig) -> Res<(), F> {
-        check_config(flash.sector_count(), flash.sector_size(), cfg)?;
-        let mut st = TreeStore::<&mut F, &mut H>::empty(flash, hasher, cfg.clone());
-        for s in 0..st.log.sector_count {
-            st.log.kill_and_erase(s)?;
+    /// Kill and erase every sector (retiring any that will not erase),
+    /// commit an empty tree, and mount it: the store `mount` returns for
+    /// this flash. Works on any flash content. Takes the flash and the
+    /// hasher **by value**, as `mount` does, so a firmware that mounts, and
+    /// on [`StoreError::NoStore`] formats what the mount handed back, links
+    /// one `TreeStore<F, H>` (a `&mut` format beside a by-value mount
+    /// linked the whole store twice). A failure hands the flash and the
+    /// hasher back.
+    ///
+    /// The sector walk (kill, erase, erase-verify) is `RecordLog`'s
+    /// `kill_and_erase`, the one place a lazy format would change.
+    pub fn format(
+        flash: F,
+        hasher: H,
+        cfg: StoreConfig,
+    ) -> Result<Self, (StoreError<F::Error>, F, H)> {
+        if let Err(e) = check_config(flash.sector_count(), flash.sector_size(), &cfg) {
+            return Err((e, flash, hasher));
         }
-        let empty = st.write_dir_bytes(HeadKind::Cold, &[0, 0])?;
-        st.work = WorkDirs {
-            cold: empty,
-            hot: empty,
-        };
-        st.write_root()
+        let mut st = Self::empty(flash, hasher, cfg);
+        if let Err(e) = st.format_walk() {
+            return Err((e, st.log.flash, st.hasher));
+        }
+        let Self {
+            log, hasher, cfg, ..
+        } = st;
+        Self::mount(log.into_flash(), hasher, cfg)
     }
 
     /// Scan the flash and adopt the newest complete root (I1). Never panics
-    /// on any content; a flash with no complete root is an error, which
-    /// hands the flash and the hasher back.
+    /// on any content. A flash with no complete root is an error that says
+    /// what is there — [`StoreError::NoStore`] (nothing of a store, or only
+    /// an interrupted format's records: format it), [`StoreError::Damaged`]
+    /// (a store's records and no complete root: keep it) or
+    /// [`StoreError::Unsupported`] (a newer format: keep it) — and hands the
+    /// flash and the hasher back.
     pub fn mount(
         flash: F,
         hasher: H,
@@ -113,7 +131,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut st = Self::empty(flash, hasher, cfg);
         match st.load() {
             Ok(()) => Ok(st),
-            Err(e) => Err((e, st.log.flash, st.hasher)),
+            Err(e) => Err((mount_failure(e), st.log.flash, st.hasher)),
         }
     }
 
@@ -342,6 +360,20 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             live_after_mark: 0,
             inflight: Vec::new(),
         }
+    }
+
+    /// Format's body: every sector killed and erased, then an empty
+    /// directory and a root naming it.
+    fn format_walk(&mut self) -> Res<(), F> {
+        for s in 0..self.log.sector_count {
+            self.log.kill_and_erase(s)?;
+        }
+        let empty = self.write_dir_bytes(HeadKind::Cold, &EMPTY_DIR)?;
+        self.work = WorkDirs {
+            cold: empty,
+            hot: empty,
+        };
+        self.write_root()
     }
 
     pub(crate) fn max_payload(&self) -> usize {

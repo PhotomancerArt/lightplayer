@@ -8,7 +8,7 @@
 //! It is what would have caught the split image's dropped-tail defect
 //! (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`):
 //! a committed header over an engine whose last bytes never reached flash.
-//! It hashes on the SHA accelerator ([`super::hw_sha`]).
+//! It hashes on the SHA accelerator ([`crate::hw_sha`]).
 //!
 //! An engine an update installs is hashed before it is committed (DM11), and
 //! its trial confirms on its link, so the guard does not run again after an
@@ -16,8 +16,8 @@
 
 use super::ENGINE_VADDR;
 use super::boot_state::BootState;
-use super::hw_sha;
 use super::split_flash::SplitFlash;
+use crate::hw_sha;
 
 /// Hash the mapped engine (`len` bytes behind [`ENGINE_VADDR`]) against
 /// `digest`. `Err` names why the core must not enter it.

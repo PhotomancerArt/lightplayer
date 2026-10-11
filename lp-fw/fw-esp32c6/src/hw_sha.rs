@@ -1,6 +1,8 @@
-//! SHA-256 on the C6's SHA accelerator, for the core's two boot-path hashes:
-//! the core's own SHA-256 ([`super::board_identity`], every boot) and the
-//! engine guard ([`super::engine_guard`], the first boot after a flash).
+//! SHA-256 on the C6's SHA accelerator, for a split image's two boot-path
+//! hashes — the core's own SHA-256 (`ota::board_identity`, every boot) and
+//! the engine guard (`ota::engine_guard`, the first boot after a flash) — and,
+//! in an `fs-tree` build (split or not), the tree store's record ids
+//! ([`StoreSha256`], the store's `ObjectHasher`).
 //!
 //! In software (`sha2` at the image's `opt-level = "z"`) those cost about a
 //! second each on silicon: 1,241 ms for the 1.2 MB core and 1,380 ms for the
@@ -8,13 +10,15 @@
 //! in a few dozen cycles, so what is left is feeding it — the CPU's sixteen
 //! word writes per block, and the reads that bring the bytes in. On the
 //! bench C6 (2026-10-06) the core takes 157 ms (read through the cache,
-//! [`super::engine_window::ScratchWindow`]) and the engine guard 235 ms.
+//! `ota::engine_window::ScratchWindow`) and the engine guard 235 ms.
 //!
 //! The peripheral is stolen rather than threaded through `core_boot`:
 //! nothing else in this image drives it (the radios' crypto and the access
-//! login are software `sha2`), and both callers run once, on the boot task,
-//! one after the other. [`HW_BUSY`] still makes a second, overlapping caller
-//! fall back to software rather than interleave its blocks with the first's.
+//! login are software `sha2`). The boot hashes run once each, on the boot
+//! task; the store hashes on the task that owns the filesystem, one record
+//! at a time, each digest started and finished inside one call. [`HW_BUSY`]
+//! makes a second, overlapping caller fall back to software rather than
+//! interleave its blocks with the first's, so the two never share a block.
 //!
 //! The emulator models the block's compression function bit for bit (the
 //! IDF bootloader's image check needs it, `lp-emu-esp32c6`'s `periph/sha.rs`),
@@ -90,8 +94,27 @@ impl Drop for BootSha256 {
 }
 
 /// SHA-256 of `bytes`, on the accelerator when it is free.
+#[cfg(lp_split)]
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut sha = BootSha256::new();
     sha.update(bytes);
     sha.finalize()
+}
+
+/// The tree store's hasher: each record id is one [`BootSha256`] over the
+/// record's parts — on the accelerator when it is free, else in software
+/// (the same digest either way).
+#[cfg(feature = "fs-tree")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StoreSha256;
+
+#[cfg(feature = "fs-tree")]
+impl lp_tree_store::ObjectHasher for StoreSha256 {
+    fn sha256(&mut self, parts: &[&[u8]]) -> [u8; 32] {
+        let mut sha = BootSha256::new();
+        for part in parts {
+            sha.update(part);
+        }
+        sha.finalize()
+    }
 }

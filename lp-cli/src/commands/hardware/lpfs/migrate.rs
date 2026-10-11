@@ -184,6 +184,9 @@ fn verify_hello(port: &str, expected_uid: Option<&str>) -> Result<()> {
         let Some(hello) = hello else {
             bail!("the board came back without a hello");
         };
+        if hello.hardware.fs == lpc_wire::FsBootState::Refused {
+            bail!("{}", super::REFUSED_STORE);
+        }
         if hello.hardware.fs != lpc_wire::FsBootState::Mounted {
             bail!(
                 "the board came back with its filesystem {:?}, not mounted — its files are in the \
