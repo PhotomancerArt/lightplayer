@@ -130,6 +130,10 @@ pub mod outcome_code {
     /// A strict seam request cannot engage (`Outcome::Seam`). A tab asks
     /// softly (`seams_prefer=`), so a Studio board never sees it.
     pub const SEAM: i32 = 8;
+    /// A `--flash-cut` plan fired (`Outcome::PowerCut`). Unreachable through
+    /// this ABI — a tab's configuration cannot arm one — and here so the
+    /// mapping stays total.
+    pub const POWER_CUT: i32 = 9;
 }
 
 pub fn code_for(outcome: &Outcome) -> i32 {
@@ -143,6 +147,7 @@ pub fn code_for(outcome: &Outcome) -> i32 {
         Outcome::WallTimeout { .. } => outcome_code::WALL_TIMEOUT,
         Outcome::DeepSleep { .. } => outcome_code::DEEP_SLEEP,
         Outcome::Seam { .. } => outcome_code::SEAM,
+        Outcome::PowerCut { .. } => outcome_code::POWER_CUT,
     }
 }
 

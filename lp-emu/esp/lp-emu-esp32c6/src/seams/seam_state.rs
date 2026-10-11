@@ -144,14 +144,16 @@ impl SeamState {
             .find(|s| s.is_code() && s.site.vaddr == pc && (s.armed || s.ever_armed))
     }
 
-    /// `base` plus the engaged atoms, then the pace when one was set
-    /// (`…+net=lan@pace=realtime`); exactly `base` with none engaged and no
-    /// pace set.
-    pub fn label(&self, base: &str) -> String {
+    /// `base` plus the engaged atoms, then `suffix` (the run's other
+    /// `+` markers, such as `+flash-cut`), then the pace when one was set
+    /// (`…+net=lan+flash-cut@pace=realtime`); exactly `base` with none
+    /// engaged, no suffix and no pace set.
+    pub fn label(&self, base: &str, suffix: &str) -> String {
         let mut label = match &self.engaged {
             Some(e) => e.label(base),
             None => base.to_string(),
         };
+        label.push_str(suffix);
         label.push_str(&Pace::label_suffix(self.pace));
         label
     }

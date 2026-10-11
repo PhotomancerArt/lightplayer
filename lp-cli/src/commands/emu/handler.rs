@@ -146,6 +146,15 @@ fn run(args: RunArgs) -> Result<()> {
     if args.chip != EmuChip::Esp32C6 && args.pace.is_some() {
         bail!("--pace is the C6's: a pace is held at its network seam's LAN pump");
     }
+    if args.chip != EmuChip::Esp32C6 && args.flash_cut.is_some() {
+        bail!("--flash-cut is the C6's: only its flash chip arms a power cut yet");
+    }
+    let flash_cut = args
+        .flash_cut
+        .as_deref()
+        .map(lp_emu_esp32c6::flash_cut_spec::FlashCutSpec::parse)
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("--flash-cut: {e}"))?;
     if args.chip != EmuChip::Esp32C6 && (args.seams.is_some() || args.seams_prefer.is_some()) {
         bail!("--seams / --seams-prefer are the C6's (Xtensa seams are the roadmap's M7)");
     }
@@ -193,6 +202,9 @@ fn run(args: RunArgs) -> Result<()> {
     // is connected through its `--lan` forward.
     if let Some(pace) = args.pace {
         builder = builder.pace(pace.pace());
+    }
+    if let Some(spec) = flash_cut {
+        builder = builder.flash_cut(spec);
     }
 
     if args.ota.ota_offer.is_some() && !args.host_link {
@@ -427,6 +439,7 @@ fn run(args: RunArgs) -> Result<()> {
     };
     let outcome = machine.run_until(&stop);
     print_seam_lines(&mut machine);
+    print_flash_cut_lines(&machine);
     // A frame still open on a pad is reported as incomplete rather than
     // silently dropped.
     machine.flush_frames();
@@ -603,6 +616,15 @@ pub(super) fn seam_request(
     Ok(request)
 }
 
+/// A `--flash-cut` run's lines: the cut (`FLASH-CUT …`, or that the plan
+/// never fired), the in-range op census (`FLASH-OPS …`) and any weak bits.
+/// Nothing when no plan was armed.
+pub(super) fn print_flash_cut_lines(machine: &Esp32C6Machine) {
+    for line in machine.flash_cut_summary() {
+        eprintln!("emu: {line}");
+    }
+}
+
 /// A chip start's `SEAM …` lines, as the machine produced them.
 pub(super) fn print_seam_lines(machine: &mut Esp32C6Machine) {
     for line in machine.take_seam_lines() {
@@ -627,6 +649,7 @@ pub(super) fn describe(outcome: &Outcome) -> String {
             format!("guest entered deep sleep ({wake})")
         }
         Outcome::Seam { why, .. } => format!("a --seams seam cannot engage: {why}"),
+        Outcome::PowerCut { report, .. } => format!("a --flash-cut power cut ({report})"),
     }
 }
 
