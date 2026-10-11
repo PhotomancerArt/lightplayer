@@ -1,5 +1,5 @@
 ---
-status: mitigated
+status: open           # mitigated (the two-number gate); the fix is plan 2026-09-27-1218-fragmentation-tolerant-reads, PR B
 found: 2026-09-27      # hardware walk of #854 on the PLAYFUL choker (Bluetooth on); prod refusals 2026-09-26
 area: lpa-server ProjectRead gate (largest-block floor) × fw-esp32c6's two-region heap with Bluetooth on × edit-time residents in the heap's free tail
 class: stand-in-divergence   # largest-free-block stands in for "can this read afford to run" — second time

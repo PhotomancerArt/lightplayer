@@ -1,5 +1,5 @@
 ---
-status: FIXED 2026-09-08 — `lp-emu/esp/lp-emu-esp32c6/src/periph/i2c_ana_mst.rs`
+status: fixed          # 2026-09-08 — `lp-emu/esp/lp-emu-esp32c6/src/periph/i2c_ana_mst.rs`
 found: 2026-09-08      # M7 of the esp-emulator plan, on the ROM-up boot
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/accept.rs (`i2c_ana_mst`)
 class: accept-block-too-coarse

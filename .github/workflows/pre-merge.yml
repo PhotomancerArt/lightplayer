@@ -83,6 +83,7 @@ env:
 # paragraphs below):
 #
 #   detect-changes ─┬─ lint              (fmt + clippy + repo lints + feature-variant tests)
+#                   ├─ defects           (the defect registry's frontmatter; seconds, docs-only PRs too)
 #                   ├─ validate-x64      (build prereqs + gated test recipes + schema-check + heap ratchet)
 #                   ├─ validate-gfx      (ARM; wgpu tree)
 #                   ├─ validate-browser  (real-browser wasm suites)
@@ -104,10 +105,12 @@ env:
 #                                           names the PRs since the last green main)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
-# docs-only PR runs nothing but detect-changes — with one carve-out:
+# docs-only PR runs nothing but detect-changes — with two carve-outs:
 # `docs/user-guide/**` is compiled INTO lpa-studio-web (`include_str!`ed
 # articles with build-generated embed/sim/link checks), so a user-guide-only
-# PR still runs validate-x64 and validate-stories. All gates follow the same
+# PR still runs validate-x64 and validate-stories; and `docs/defects/**` runs
+# the seconds-long `defects` job, the registry's frontmatter lint (the index
+# is built from it). All gates follow the same
 # philosophy: conservative dependency-closure filters on PRs, and pushes to
 # main force every gate true, so anything a filter miss lets through surfaces
 # on the very next merge.
@@ -202,6 +205,7 @@ jobs:
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
       emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
       release: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.release }}
+      defects: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.defects }}
       # The 35-minute layout-migration job runs only on PRs that touch its
       # paths; main pushes skip it (Yona, 2026-10-05).
       c6_layout: ${{ steps.some.outputs.c6_layout }}
@@ -619,6 +623,13 @@ jobs:
               - 'Cargo.lock'
               - 'justfile'
               - 'rust-toolchain.toml'
+            # The defect registry's frontmatter lint (the `defects` job). A
+            # defect-only PR is docs-only, so `core` above is false and the
+            # Lint job, which also runs it, never does.
+            defects:
+              - 'docs/defects/**'
+              - 'scripts/defects-index.py'
+              - '.github/workflows/pre-merge.yml'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
               - 'lp-fw/fw-esp32c6/.cargo/config.toml'
@@ -804,6 +815,33 @@ jobs:
             grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
             grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
+
+  # The defect registry has no committed index: `just defects-index` builds it
+  # from each entry's frontmatter when it is read, so two PRs that each file a
+  # defect never conflict on a shared table (docs/debt/hand-written-defects-index.md).
+  # This lints that every entry carries what the index reads, and that no
+  # hand-written row came back to the README. Lint's `just check-lint` runs it
+  # too, but a defect-only PR is docs-only (`core` false, no Lint job), so
+  # without this job a bad entry would first go red on main. Stdlib python on
+  # a sparse checkout.
+  defects:
+    name: Defect registry
+    runs-on: ubuntu-24.04
+    # trivial: a sparse checkout and ~0.1 s of python.
+    timeout-minutes: 5
+    needs: detect-changes
+    if: needs.detect-changes.outputs.defects == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            docs/defects
+            scripts
+          persist-credentials: false
+      - name: Lint the defect registry (just lint-defects)
+        run: |
+          python3 scripts/defects-index.py --self-test
+          python3 scripts/defects-index.py --check
 
   # fw-esp32s3 is the repo's only crate on a SECOND toolchain (Espressif's
   # Xtensa Rust fork — no upstream target exists), so no other job compiles it.
@@ -3934,6 +3972,7 @@ jobs:
     needs:
       - detect-changes
       - lint
+      - defects
       - firmware-xtensa
       - firmware-esp32v3
       - validate-xtensa
