@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-10      # how: e2e (walk-no-board, both backings, emulated, lp-emu:esp32c6:t1)
-fixed: this change
+fixed: 2a8c955fa
 area: lpa-studio-core studio_actor (`CommandPlan`) × `ConnectedBoard::note_page_moved`
 class: edge-rule-over-latest-wins
 related:
