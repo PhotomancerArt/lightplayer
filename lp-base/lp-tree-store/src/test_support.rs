@@ -117,8 +117,17 @@ pub struct SweepReport {
 /// cut tears the recovery run too (a double cut); then re-run the step and
 /// require the new state, also after a remount, with no sector retired.
 pub fn sweep(geom: NorGeometry, cfg: &StoreConfig, steps: &[Step], max_cuts: u64) -> SweepReport {
+    sweep_from(formatted(geom, cfg), cfg, steps, max_cuts)
+}
+
+/// [`sweep`] from a given (mountable) flash rather than a fresh format.
+pub fn sweep_from(
+    mut flash: NorFlashSim,
+    cfg: &StoreConfig,
+    steps: &[Step],
+    max_cuts: u64,
+) -> SweepReport {
     let mut report = SweepReport::default();
-    let mut flash = formatted(geom, cfg);
     let mut old = snapshot(&mut mount(flash.clone(), cfg));
     for (si, step) in steps.iter().enumerate() {
         let pre = flash.clone();

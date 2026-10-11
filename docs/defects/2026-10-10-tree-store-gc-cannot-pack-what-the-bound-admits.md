@@ -63,6 +63,36 @@ would turn.
 current behaviour (it asserts the refusal; when a fix makes it fail, the fix
 closes this).
 
+**More occurrences: M3's tight walks (2026-10-10)** — with the fix merged,
+M3's long walks at 28–48 sectors (the edit mix, one corpus in all three
+slots, a cut every 10 steps under `clean`, `byte_prefix`, `random_bits`
+and `calibrated`) meet this refusal often where the walk sits at the
+reserve: c13 at 48 sectors, **4 of 4 walks** stop at a refused re-run
+(steps 420, 2,140, 3,350 and 7,080); c20 at 48, 2 of 4 (steps 60 and
+90); c20 at 36, 1 of 4 (step 14,690); c13 at 28 and 36, 0 of 8 (100,000
+steps each, about 55 % of steps refused before writing). `full-flash` at
+48 sectors on c13: 25 of 7,320 cut cases over 8 seeds; the P5 re-race's
+full-flash units: `t1` 6 of 1,564 at 176 sectors (0 of 1,449 at 128),
+`t1@codec=host_deflate` 3 of 1,682 at 128 and 12 of 1,855 at 176. Every
+one is `rerun_failed: NoSpace` with the committed state intact (some
+`a second attempt after a remount: fits`, some `: NoSpace`). All
+**lp-nor-sim simulator** figures. Twelve of them (the seven walk failures
+and five full-flash ones) were replayed with a local, uncommitted build
+that printed every `ensure_room` exit: in each, the packing bound admitted
+the write, GC collected every victim with garbage, and then tail-only
+compaction cycled over two or three sectors that hold no garbage (e.g.
+s2, s21, s42, each 3,570 B live of 3,594 used) until the stall rule
+stopped it, one sector short. Many of the cycling sectors hold three
+full-size 1,024 B records (3,096 B used: header + 3 × 1,024), a 1,000 B
+tail no full-size record fits, and the cold head's room at the exit is
+1,000 or 3,048 B (4,072 − 3 × 1,024, 4,072 − 1,024): the byte-sum bound
+counts tails that record granularity cannot fill. Replay (the first stops
+at step 60, the second at step 420):
+`cargo run --release -p lp-store-bench -- long --candidates t1 --sectors 48 --seeds 1 --first-seed 4 --steps 1000 --cut-every 10 --check-every 1000 --corpora c20 --tears clean,byte_prefix,random_bits,calibrated --edit-mix`
+(and the same with `--corpora c13`). Not fixed here (M3 reports); the
+rate is the new fact for the DD34 ruling, which rested on 11 of 792 in a
+synthetic in-crate walk.
+
 **Lesson** — near full, "fits" depends on the layout, and a power cut
 changes the layout without changing the live set. A store that admits by
 layout and a GC that can only approach its byte bound will disagree
