@@ -13,6 +13,7 @@ use alloc::vec::Vec;
 
 use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
+use crate::mount_verdict::FormatResidue;
 use crate::mount_walk::index_closure;
 use crate::object_hasher::ObjectHasher;
 use crate::record_scan::{RootCandidates, scan_sector};
@@ -27,6 +28,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut valid: Vec<(u32, u32, HeadKind)> = Vec::new();
         // Closed to appends: a record failed to check, or an unknown compat flag.
         let mut closed = alloc::vec![false; n as usize];
+        let mut residue = FormatResidue::default();
         for s in 0..n {
             let mut h = [0u8; SECTOR_HEADER_LEN as usize];
             self.log.read(self.log.addr(s, 0), &mut h)?;
@@ -34,6 +36,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 SectorRead::Untrusted => {}
                 SectorRead::Unsupported(why) => return Err(StoreError::Unsupported(why)),
                 SectorRead::Trusted { header, appendable } => {
+                    residue.saw_trusted_sector();
                     valid.push((header.seq, s, header.kind));
                     self.log.sectors.erase_count[s as usize] = header.erase_count;
                     self.log.sectors.seq[s as usize] = header.seq;
@@ -45,7 +48,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         // Pass 1: every trusted record, CRC-checked; roots kept apart.
         let mut roots = RootCandidates::default();
         for &(_, s, _) in &valid {
-            let scan = scan_sector(&mut self.log, s, &mut roots)?;
+            let scan = scan_sector(&mut self.log, s, &mut roots, &mut residue)?;
             self.log.sectors.end[s as usize] = scan.end as u16;
             closed[s as usize] |= scan.closed;
         }
@@ -66,7 +69,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             }
         }
         let Some((id, walked)) = chosen else {
-            return Err(StoreError::Corrupt("no complete root"));
+            return Err(residue.no_root());
         };
         stat!(
             self.stats.marks += 1;

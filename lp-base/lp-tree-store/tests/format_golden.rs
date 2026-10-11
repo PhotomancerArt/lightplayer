@@ -39,7 +39,9 @@ fn image() -> String {
         ..StoreConfig::default()
     };
     let mut f = NorFlashSim::new(NorGeometry::c6(8));
-    TreeStore::format(&mut f, &mut SoftSha256, &cfg).unwrap();
+    TreeStore::format(&mut f, SoftSha256, cfg.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
     let Ok(mut st) = TreeStore::mount(f, SoftSha256, cfg.clone()) else {
         panic!("mount")
     };
