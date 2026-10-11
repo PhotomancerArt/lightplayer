@@ -39,9 +39,13 @@ const SEND_QUEUE: usize = 4;
 const SEND_BUDGET: usize = 1280;
 
 /// A reassembly buffer above this is released once its request is delivered.
-/// An upload's chunk grows one to ~5.5 KB (`FILE_SYNC_CHUNK_BYTES`' 4 KiB of
-/// data, base64 in its JSON envelope); it must not stay. Half the C6's
-/// 1,024 B: every request that is not an upload is well under it.
+/// An upload's chunk grows one to ~5.5 KB at most: a raw `WriteChunk`'s 4 KiB
+/// of data base64 in its JSON envelope, or (since wire 42) a
+/// `WriteChunkDeflated` that would not compress. A deflated chunk is
+/// usually far smaller — the push plans each to fit a 1,024-byte record,
+/// ~1,006 B of deflate, ~1.4 KB as base64 — but the worst case stays.
+/// Either must not stay. Half the C6's 1,024 B: every request that is not an
+/// upload is well under it.
 const KEEP_REASSEMBLY: usize = 512;
 
 /// The board's resend-timer floor: the C6's 200 ms, not the preset's 40 ms.

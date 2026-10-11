@@ -56,6 +56,20 @@ change has to be readable, or cleanly refused, by the core before it.
   to its length or its id, and stores the deflated bytes as they came (or
   the logical bytes, when the stream does not fit a record or does not
   shrink — same id). Device writes are stored.
+- **The wire contract** (wire 42, `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`).
+  `LpFsTree` is the one `LpFs` whose `batches_are_atomic()` is `true`, so a
+  server answers `BeginBatch` with `atomic: true` and a push is one
+  transaction, committed after the board has loaded and hashed it. An
+  aborted batch also puts `LpFsTree`'s change log back as it was at
+  `begin_batch` (the version counter stays monotonic). `WriteChunkDeflated`
+  reaches `put_chunk_deflated` (no expected id: the board computes it)
+  through `LpFs::write_deflated_chunk`. A full store says "no space left on
+  device", littlefs's words, which a pushing client matches to make room.
+  The client plans its chunks with the hasher-free `plan_deflated_chunks`
+  (feature `deflate-plan`, miniz_oxide level 10) for the wire's constant
+  record hint (1,024 B); `host_deflate_chunks` is that plan plus ids. A
+  deflated chunk dedupes against another deflated push of the same bytes,
+  not against a plain write of them (the boundaries differ).
 - **Verify after write, retire.** Every program is read back; every erase
   is read back as all `0xFF`, then its sector header programmed and read
   back. A mismatch retires the sector (never opened, erased or collected
@@ -148,7 +162,8 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`
-as the transaction), `host-deflate` (`host_deflate_chunks`, miniz_oxide —
+as the transaction), `deflate-plan` (`plan_deflated_chunks`, miniz_oxide, no
+hasher — a client's push, native and wasm), `host-deflate` (`host_deflate_chunks`, the plan with ids —
 host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`), `stats`
 (`TreeStore::stats`, `TreeStoreStats`, `reset_transient_peak`: the counters
 and the RAM-peak accounting, ~1.2 KB of RV32 code; off in firmware, on for
