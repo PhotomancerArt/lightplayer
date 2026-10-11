@@ -19,6 +19,7 @@ use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 use crate::overlay::inventory_change_summary::change_summary_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::registry::base_value_display;
+use crate::registry::project_identity::ProjectIdentity;
 use crate::{
     ArtifactStore, CommitError, EntryResidency, LoadResult, ParseCtx, RegistryError,
     asset::{AssetBytes, AssetReadError, AssetText},
@@ -34,6 +35,9 @@ pub struct ProjectRegistry {
     /// Which playlist entries derivation walks (see
     /// [`crate::registry::entry_residency`]).
     pub(super) residency: EntryResidency,
+    /// `project.json`'s name and uid, kept from the load gate's parse
+    /// ([`Self::identity`]).
+    identity: ProjectIdentity,
 }
 
 impl ProjectRegistry {
@@ -51,7 +55,15 @@ impl ProjectRegistry {
             inventory: ProjectInventory::new(),
             root: None,
             residency: EntryResidency::new(),
+            identity: ProjectIdentity::default(),
         }
+    }
+
+    /// Who the project says it is: `project.json`'s name and uid as of the
+    /// last load or refresh that carried it (see [`ProjectIdentity`]).
+    #[must_use]
+    pub fn identity(&self) -> &ProjectIdentity {
+        &self.identity
     }
 
     pub fn load_root(
@@ -83,7 +95,10 @@ impl ProjectRegistry {
     /// deep parse failure. A missing or malformed container manifest is a
     /// HARD refuse (settled D-A): the manifest carries the format gate, so
     /// skipping it would let unversioned projects load ungated.
-    fn check_container_manifest(&self, fs: &dyn LpFs) -> Result<(), RegistryError> {
+    ///
+    /// The manifest's name and uid are kept ([`Self::identity`]): the gate
+    /// has already parsed them.
+    fn check_container_manifest(&mut self, fs: &dyn LpFs) -> Result<(), RegistryError> {
         use lpfs::AsLpPath;
 
         let bytes = fs
@@ -97,11 +112,12 @@ impl ProjectRegistry {
         let text = core::str::from_utf8(&bytes).map_err(|_| RegistryError::Manifest {
             message: format!("{} is not UTF-8", Self::CONTAINER_MANIFEST_PATH),
         })?;
-        let manifest =
+        let mut manifest =
             ProjectManifest::read_json(text).map_err(|error| RegistryError::Manifest {
                 message: format!("{}: {error}", Self::CONTAINER_MANIFEST_PATH),
             })?;
         if manifest.format == Some(PROJECT_FORMAT_VERSION) {
+            self.identity = ProjectIdentity::from_manifest(&mut manifest);
             Ok(())
         } else {
             Err(RegistryError::FormatVersion {
@@ -483,12 +499,37 @@ impl ProjectRegistry {
         frame: Revision,
         ctx: &ParseCtx<'_>,
     ) -> lpc_model::ProjectChangeSummary {
+        if events
+            .iter()
+            .any(|event| event.path.as_str() == Self::CONTAINER_MANIFEST_PATH)
+        {
+            self.refresh_identity(fs);
+        }
         let before = self.inventory.clone();
         self.artifacts.apply_fs_changes(events, frame);
         let after = self.derive_inventory(fs, frame, ctx);
         let changes = change_summary_between(&before, &after);
         self.inventory = after;
         changes
+    }
+
+    /// `project.json` changed: read its name and uid again. A manifest that
+    /// no longer reads (deleted, mid-write, not JSON) keeps the identity
+    /// the project loaded with; whether the project may still run is the
+    /// loader's format gate's business, not this.
+    fn refresh_identity(&mut self, fs: &dyn LpFs) {
+        use lpfs::AsLpPath;
+
+        let Ok(bytes) = fs.read_file(Self::CONTAINER_MANIFEST_PATH.as_path()) else {
+            return;
+        };
+        let Some(mut manifest) = core::str::from_utf8(&bytes)
+            .ok()
+            .and_then(|text| ProjectManifest::read_json(text).ok())
+        else {
+            return;
+        };
+        self.identity = ProjectIdentity::from_manifest(&mut manifest);
     }
 
     pub fn commit_overlay(

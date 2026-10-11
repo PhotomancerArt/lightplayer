@@ -1,11 +1,11 @@
 //! The connects to a Wi‑Fi board someone asked for, while they run and once
 //! they fail: what the card ("Connect over Wi‑Fi", "Connect through
-//! lightplayer.app") and the add slot ("Connect a board on Wi‑Fi") say under
-//! their button.
+//! lightplayer.app") and Connect a board's Network row say under their
+//! button.
 //!
 //! One attempt per target: a known board on the LAN or through the relay
 //! (by MAC, so the answer finds its card even if the roster merged the entry
-//! meanwhile), or the add slot's one field. A new press replaces the
+//! meanwhile), or Connect a board's one address field. A new press replaces the
 //! target's attempt; a success clears it (the board's card takes over from
 //! there); a failure stays, in plain words, until the next press.
 
@@ -23,7 +23,7 @@ pub enum WifiConnectTarget {
     Board(BoardKey),
     /// A known board's card, through lightplayer.app's relay, by its MAC.
     Relay(BoardKey),
-    /// The add slot's address field.
+    /// Connect a board's address field.
     Address,
 }
 
@@ -34,9 +34,12 @@ struct WifiConnectAttempt {
     host: String,
     /// Why it failed, in the card's words.
     failure: Option<String>,
+    /// It was turned away because another device holds the board's one
+    /// network connection.
+    busy: bool,
 }
 
-/// What a card or the add slot says about its connect.
+/// What a card or Connect a board says about its connect.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiWifiConnect {
     /// The address being reached: `192.168.1.40`, `lp-1a2b.local`; through
@@ -48,6 +51,10 @@ pub struct UiWifiConnect {
     pub connecting: bool,
     /// Why the last one failed, in plain words.
     pub error: Option<String>,
+    /// The last one was turned away because another device holds the
+    /// board's one network connection (the card's "Someone else
+    /// connected"), rather than failing.
+    pub busy: bool,
 }
 
 /// Every connect to a Wi‑Fi board this page asked for and has not seen
@@ -65,6 +72,7 @@ impl WifiConnects {
             WifiConnectAttempt {
                 host: host.to_string(),
                 failure: None,
+                busy: false,
             },
         );
     }
@@ -77,7 +85,14 @@ impl WifiConnects {
         host: &str,
         result: Result<(), WifiConnectFailure>,
     ) {
-        self.finish_with_words(target, host, result.map_err(|failure| failure.words()));
+        self.finish_with_words(
+            target,
+            host,
+            result.map_err(|failure| {
+                let busy = matches!(failure, WifiConnectFailure::Busy);
+                (failure.words(), busy)
+            }),
+        );
     }
 
     /// A connect through the relay ended: as [`Self::finish`].
@@ -87,25 +102,33 @@ impl WifiConnects {
         host: &str,
         result: Result<(), RelayConnectFailure>,
     ) {
-        self.finish_with_words(target, host, result.map_err(|failure| failure.words()));
+        self.finish_with_words(
+            target,
+            host,
+            result.map_err(|failure| {
+                let busy = matches!(failure, RelayConnectFailure::Busy);
+                (failure.words(), busy)
+            }),
+        );
     }
 
     fn finish_with_words(
         &mut self,
         target: WifiConnectTarget,
         host: &str,
-        result: Result<(), String>,
+        result: Result<(), (String, bool)>,
     ) {
         match result {
             Ok(()) => {
                 self.attempts.remove(&target);
             }
-            Err(words) => {
+            Err((words, busy)) => {
                 self.attempts.insert(
                     target,
                     WifiConnectAttempt {
                         host: host.to_string(),
                         failure: Some(words),
+                        busy,
                     },
                 );
             }
@@ -139,6 +162,7 @@ impl WifiConnects {
             through_relay: matches!(target, WifiConnectTarget::Relay(_)),
             connecting: attempt.failure.is_none(),
             error: attempt.failure.clone(),
+            busy: attempt.busy,
         })
     }
 
@@ -167,7 +191,8 @@ mod tests {
                 host: "10.0.0.5".to_string(),
                 through_relay: false,
                 connecting: true,
-                error: None
+                error: None,
+                busy: false
             })
         );
         connects.finish(board, "10.0.0.5", Ok(()));

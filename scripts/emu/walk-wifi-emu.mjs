@@ -6,20 +6,24 @@
 // (Wi‑Fi plan P13: two emulated boards on one virtual LAN, Studio over
 // `?lan=`); this file hands `lan` and its arguments straight to it. `relay`
 // (Wi‑Fi relay plan P9, `walk-wifi-emu-relay.mjs`) likewise: lp-cli-driven,
-// one board reaching an in-process relay through the LAN's uplink.
+// one board reaching an in-process relay through the LAN's uplink; and
+// `relay-p1` (the same script, `--protocol-1`): a core built at the last
+// relay protocol 1 commit at this hub.
 //
 // Real Studio, headless, against an emulated ESP32-C6 running the shipped
 // firmware image — over the `?emu=` USB shim (`usb`) or the `?ble=emu`
 // Bluetooth polyfill (`ble`):
 //
-//     connect → open the card's Wi‑Fi row (nothing saved: it opens on
-//       "Add a network by name") → type a made-up network and password →
-//       Save → back on the list, the new row says "Saved · this firmware
-//       can't connect…" → Done → "+ Connect to a network" → a second
-//       network → Save
+//     connect (ready when the card offers the board a project or Edit) →
+//       open the card's connection details, where the Wi‑Fi panel sits
+//       (nothing saved: it opens on "Add a network by name") → type a
+//       made-up network and password → Save → back on the list, the new row
+//       says "Saved · this firmware can't connect…" → Done → "+ Connect to a
+//       network" → a second network → Save
 //       → the board's own flash holds the network file
 //       → reload the page, connect again → both networks read back from the
-//         board (Studio never stores a password)
+//         board, the connection details' Wi‑Fi line says "2 saved" (Studio
+//         never stores a password)
 //       → Cloud relay off (on by default) → open the first network's page →
 //         Forget (two clicks) → only the second is left
 //
@@ -31,7 +35,11 @@
 //
 // Every claim keys off the BOARD (its status answer read back after a
 // reload, the bytes the door writes back to the chip file), never a Studio
-// string something else could satisfy. Studio's words say when to click.
+// string something else could satisfy. Studio's words say when to click,
+// and the board's card is read only by its hooks
+// (`lp-app/lpa-studio-web/src/app/board_card/mod.rs`, "Walk hooks"): ready
+// by the offer core publishes, and the Wi‑Fi panel inside the card's
+// connection details (`UiDetailPanel::Wifi`), never the card's face.
 //
 // NOT CI. Made-up values only (lp-walk-net / correct-horse-42). Needs: the
 // release Studio bundle (`just studio-web-story-build`), the packaged C6
@@ -43,7 +51,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { StudioDriver, boardPath } from "./studio-driver.mjs";
 import { serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -57,15 +65,43 @@ const STUDIO_LOAD_MS = 420_000;
 const STEP_MS = 180_000;
 
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
-const PANEL = `document.querySelector('[id^="ux-popover-panel"]')`;
-const PANEL_TEXT = `(${PANEL}?.innerText || '')`;
-/// The card's Wi‑Fi row: the button whose text starts "Wi‑Fi".
-const WIFI_ROW = `[...document.querySelectorAll('button')].find((b) => (b.innerText || '').trim().startsWith(${JSON.stringify(WIFI)}))`;
+
+/// The board's card, `devices/mac-<hex>` by the MAC the shim lists for
+/// `BOARD` (`load` sets it); `null` when the shim names none, and then the
+/// page's only card.
+let CARD = null;
+
+/// Page-side: the board's card.
+function card() {
+  return CARD
+    ? `document.querySelector(${JSON.stringify(`[data-board-card="${CARD}"]`)})`
+    : `document.querySelector('[data-board-card]')`;
+}
+
+/// Page-side: the card's open connection details, where the Wi‑Fi panel
+/// sits (`UiDetailPanel::Wifi`, `app/home/wifi_panel.rs` drawn in the card).
+function panel() {
+  return `(${card()}?.querySelector('[data-bar="connection"] [id^="ux-popover-panel"]') ?? null)`;
+}
+
+function panelText() {
+  return `(${panel()}?.innerText || '')`;
+}
+
+/// Page-side: the connection details' Wi‑Fi line — the "Links" fact core
+/// labels "Wi‑Fi" (`connection_bar.rs`; its value is
+/// `UiDeviceWifi::row_value`) — or null.
+function wifiLine() {
+  return `(() => { const dt = [...(${panel()}?.querySelectorAll('dt') ?? [])]
+      .find((el) => (el.textContent || '').trim() === ${JSON.stringify(WIFI)});
+    const dd = dt?.nextElementSibling;
+    return dd ? (dd.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`;
+}
 
 function args() {
   const lane = process.argv[2];
   if (lane !== "usb" && lane !== "ble") {
-    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|studio-lan|studio-lan-reset|studio-relay> (lan, studio-lan, studio-lan-reset, studio-relay: [--out <dir>] [--keep-open] [--dry-run])");
+    console.error("usage: node scripts/emu/walk-wifi-emu.mjs <usb|ble|lan|relay|relay-p1|studio-lan|studio-lan-reset|studio-relay> (lan, studio-lan, studio-lan-reset, studio-relay: [--out <dir>] [--keep-open] [--dry-run])");
     process.exit(2);
   }
   return { lane, out: path.join(ROOT, "target/walk-wifi-emu", lane) };
@@ -75,7 +111,7 @@ function args() {
 /// Dioxus (`input` events carry the value).
 function typeInto(selector, text) {
   return `(() => {
-    const el = ${PANEL}?.querySelector(${JSON.stringify(selector)});
+    const el = ${panel()}?.querySelector(${JSON.stringify(selector)});
     if (!el) return false;
     el.focus();
     el.value = ${JSON.stringify(text)};
@@ -98,10 +134,10 @@ async function typeNetworkWith(driver, ssid, password) {
 /// flight; opening the popover asks the board again).
 async function saveWith(driver) {
   await driver.waitFor(
-    `[...${PANEL}.querySelectorAll('button')].some((b) => !b.disabled && (b.innerText || '').trim() === 'Save')`,
+    `[...(${panel()}?.querySelectorAll('button') ?? [])].some((b) => !b.disabled && (b.innerText || '').trim() === 'Save')`,
     { timeoutMs: STEP_MS, what: "Save to be pressable" },
   );
-  await driver.click("Save", { scope: PANEL });
+  await driver.click("Save", { scope: panel() });
 }
 
 async function main() {
@@ -160,7 +196,11 @@ async function main() {
   };
   const load = async () => {
     await driver.navigate(url);
-    await driver.awaitShim();
+    // The board's card is named by its MAC (`BoardRef`: `mac-<hex>`), as
+    // the shim lists it from the door.
+    const boards = await driver.awaitShim();
+    const mac = boards?.find((b) => b.boardId === BOARD)?.mac;
+    CARD = mac ? boardPath(mac) : null;
     await driver.waitFor(`${MAIN_TEXT}.length > 0`, { timeoutMs: STUDIO_LOAD_MS, what: "Studio to finish loading" });
     if (lane === "ble") {
       await driver.waitFor("Boolean(window.__lpEmuBluetooth)", { what: "the Bluetooth polyfill" });
@@ -168,31 +208,31 @@ async function main() {
   };
   const connect = async () => {
     // After a reload a granted board may come back on its own; else add it.
+    // Ready, as core reads it: the card offers the board a project, or the
+    // editor on the one it runs (`boardRuns`).
     const back = await driver
-      .waitFor(`Boolean(${WIFI_ROW})`, { timeoutMs: 20_000, what: "the board to come back on its own" })
+      .boardRuns({ board: CARD, timeoutMs: 20_000 })
       .then(() => true)
       .catch(() => false);
     if (back) return "came back on its own";
-    await driver.clickWhenReady(lane === "usb" ? "via USB" : "via Bluetooth", { timeoutMs: STEP_MS });
+    await driver.pressConnect(lane === "usb" ? "USB" : "Bluetooth", { timeoutMs: STEP_MS });
     await driver.pickBoard(BOARD, { timeoutMs: STEP_MS });
-    await driver.waitFor(`${MAIN_TEXT}.includes('Ready') && Boolean(${WIFI_ROW})`, {
-      timeoutMs: STEP_MS,
-      what: "the card, Ready, with its Wi‑Fi row",
-    });
+    await driver.boardRuns({ board: CARD, timeoutMs: STEP_MS });
     return "added and identified";
   };
   const typeNetwork = (ssid, password) => typeNetworkWith(driver, ssid, password);
   const save = () => saveWith(driver);
   const openWifi = async () => {
-    await driver.waitFor(`Boolean(${WIFI_ROW})`, { timeoutMs: STEP_MS, what: "the Wi‑Fi row" });
-    await driver.evaluate(`${WIFI_ROW}.click()`);
+    // The Wi‑Fi panel is a section of the card's connection details;
+    // opening them asks the board for its networks again.
+    await driver.openBar("connection", { board: CARD, timeoutMs: STEP_MS });
     // Every root page ends on the Cloud relay switch.
-    await driver.waitFor(`${PANEL_TEXT}.includes('Cloud relay')`, {
+    await driver.waitFor(`${panelText()}.includes('Cloud relay')`, {
       timeoutMs: STEP_MS,
-      what: "the Wi‑Fi panel",
+      what: "the Wi‑Fi panel in the connection details",
     });
     // Settled, not mid-fade, so the step's screenshot reads.
-    await driver.waitFor(`getComputedStyle(${PANEL}).opacity === '1'`, {
+    await driver.waitFor(`getComputedStyle(${panel()}).opacity === '1'`, {
       timeoutMs: 10_000,
       what: "the panel to finish fading in",
     }).catch(() => null);
@@ -214,9 +254,14 @@ async function main() {
 
     await step("connect", `connect the emulated board over ${lane === "usb" ? "the USB shim" : "?ble=emu"}`, connect);
 
-    await step("open", "open the Wi‑Fi row: nothing saved, so it opens on adding a network by name", async () => {
+    await step("open", "open the Wi‑Fi panel (the connection details): nothing saved, so it opens on adding a network by name", async () => {
       await openWifi();
-      await driver.waitFor(`${PANEL_TEXT}.includes('Not set up.') && ${PANEL_TEXT}.includes("can't list networks")`, {
+      // Core's words for a firmware that cannot connect (every M5 image):
+      // `NOT_SET_UP_UNSUPPORTED` and `CANNOT_LIST` (`wifi_words.rs`). A board
+      // whose station is not `unsupported` opens on `PICK_A_NETWORK` ("Not
+      // connected. Pick the board's network:") and a Nearby list instead —
+      // not this walk's page, and not this step's to pass.
+      await driver.waitFor(`${panelText()}.includes('Not set up.') && ${panelText()}.includes("can't list networks")`, {
         timeoutMs: STEP_MS,
         what: "the connect page (Not set up., type the name)",
       });
@@ -230,29 +275,29 @@ async function main() {
 
     await step("saved", "Save: back on the list, the new row says it is saved and this firmware can't connect yet", async () => {
       await save();
-      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(SSID)}) && ${PANEL_TEXT}.includes("this firmware can't connect to Wi‑Fi yet. It will after an update.")`, {
+      await driver.waitFor(`${panelText()}.includes(${JSON.stringify(SSID)}) && ${panelText()}.includes("this firmware can't connect to Wi‑Fi yet. It will after an update.")`, {
         timeoutMs: STEP_MS,
         what: "the new row's test (Saved · this firmware can't connect…)",
       });
       const leak = await noPasswordOnThePage();
       if (leak) throw new Error(`the password is on the page: ${leak}`);
-      await driver.click("Done", { scope: PANEL });
+      await driver.click("Done", { scope: panel() });
       return `saved; the password is nowhere on the page`;
     });
 
     await step("second", "+ Connect to a network → a second network → Save: both are listed", async () => {
-      await driver.click("Connect to a network", { scope: PANEL });
-      await driver.waitFor(`${PANEL_TEXT}.includes('Add a network by name')`, {
+      await driver.click("Connect to a network", { scope: panel() });
+      await driver.waitFor(`${panelText()}.includes('Add a network by name')`, {
         timeoutMs: STEP_MS,
         what: "the connect page",
       });
       await typeNetwork(SECOND_SSID, SECOND_PASSWORD);
       await save();
-      await driver.waitFor(`${PANEL_TEXT}.includes(${JSON.stringify(SSID)}) && ${PANEL_TEXT}.includes(${JSON.stringify(SECOND_SSID)})`, {
+      await driver.waitFor(`${panelText()}.includes(${JSON.stringify(SSID)}) && ${panelText()}.includes(${JSON.stringify(SECOND_SSID)})`, {
         timeoutMs: STEP_MS,
         what: "both networks on the list",
       });
-      await driver.click("Done", { scope: PANEL });
+      await driver.click("Done", { scope: panel() });
       return `${SSID}, ${SECOND_SSID}`;
     });
 
@@ -275,20 +320,24 @@ async function main() {
     await step("reloaded", "reload the page and connect again: both networks read back from the board", async () => {
       await load();
       const how = await connect();
-      await driver.waitFor(`(${WIFI_ROW}?.innerText || '').includes('2 saved')`, {
+      // The connection details' Wi‑Fi line: "2 saved" is core's
+      // `UiDeviceWifi::row_value` for two networks on a firmware that cannot
+      // connect.
+      await driver.openBar("connection", { board: CARD, timeoutMs: STEP_MS });
+      await driver.waitFor(`(${wifiLine()} || '').includes('2 saved')`, {
         timeoutMs: STEP_MS,
-        what: "the Wi‑Fi row to say 2 saved",
+        what: "the connection details' Wi‑Fi line to say 2 saved",
       });
       await openWifi();
-      await driver.waitFor(`${PANEL_TEXT}.includes("this firmware can't connect to Wi‑Fi yet") && ${PANEL_TEXT}.includes(${JSON.stringify(SECOND_SSID)})`, {
+      await driver.waitFor(`${panelText()}.includes("this firmware can't connect to Wi‑Fi yet") && ${panelText()}.includes(${JSON.stringify(SECOND_SSID)})`, {
         timeoutMs: STEP_MS,
         what: "the list after the reload",
       });
-      return `${how}; the row says 2 saved; both listed`;
+      return `${how}; the Wi‑Fi line says 2 saved; both listed`;
     });
 
     await step("relay-off", "turn the cloud relay off (it is on by default): the board's answer says so", async () => {
-      const relay = `${PANEL}.querySelector('button[role="switch"][aria-label="Cloud relay"]')`;
+      const relay = `${panel()}?.querySelector('button[role="switch"][aria-label="Cloud relay"]')`;
       const before = await driver.evaluate(`${relay}?.getAttribute('aria-checked')`);
       if (before !== "true") throw new Error(`the Cloud relay switch starts ${before}, not on`);
       // Drawn locked while a read is in flight (opening the panel asks the
@@ -306,24 +355,24 @@ async function main() {
     });
 
     await step("forget", "the first network's page → Forget (Lasting: arm, then confirm): only the second is left", async () => {
-      await driver.click(SSID, { scope: PANEL });
-      await driver.waitFor(`${PANEL_TEXT}.includes("Password: saved on the board. It can't be shown.")`, {
+      await driver.click(SSID, { scope: panel() });
+      await driver.waitFor(`${panelText()}.includes("Password: saved on the board. It can't be shown.")`, {
         timeoutMs: STEP_MS,
         what: "the network's page",
       });
-      await driver.click("Forget", { scope: PANEL });
+      await driver.click("Forget", { scope: panel() });
       // Armed (red, the 4 s window): the second click inside it acts.
-      await driver.waitFor(`Boolean(${PANEL}.querySelector('.ux-armed'))`, {
+      await driver.waitFor(`Boolean(${panel()}?.querySelector('.ux-armed'))`, {
         timeoutMs: 3_000,
         what: "Forget to arm",
       });
-      await driver.click("Forget", { scope: PANEL });
-      await driver.waitFor(`!${PANEL_TEXT}.includes(${JSON.stringify(SSID)}) && ${PANEL_TEXT}.includes(${JSON.stringify(SECOND_SSID)})`, {
+      await driver.click("Forget", { scope: panel() });
+      await driver.waitFor(`!${panelText()}.includes(${JSON.stringify(SSID)}) && ${panelText()}.includes(${JSON.stringify(SECOND_SSID)})`, {
         timeoutMs: STEP_MS,
         what: "the list without the first network",
       });
       const relayOff = await driver.evaluate(
-        `${PANEL}.querySelector('button[role="switch"][aria-label="Cloud relay"]')?.getAttribute('aria-checked') === 'false'`,
+        `${panel()}?.querySelector('button[role="switch"][aria-label="Cloud relay"]')?.getAttribute('aria-checked') === 'false'`,
       );
       if (!relayOff) throw new Error("the cloud relay came back on");
       return `${SECOND_SSID} left; the relay stays off`;
@@ -366,6 +415,12 @@ async function main() {
 // (and skips the lane).
 if (process.argv[2] === "lan") await import("./walk-wifi-emu-lan.mjs");
 else if (process.argv[2] === "relay") await import("./walk-wifi-emu-relay.mjs");
+// `relay-p1` (pictures-through-the-cloud plan P6): the relay walk's
+// protocol 1 lane, a core built at the last protocol 1 commit at this hub.
+else if (process.argv[2] === "relay-p1") {
+  process.argv.push("--protocol-1");
+  await import("./walk-wifi-emu-relay.mjs");
+}
 // `studio-lan` (network-transport plan P04): Studio with no flag reaching
 // boards on the virtual LAN — its own walk too.
 else if (process.argv[2] === "studio-lan") await import("./walk-wifi-emu-studio-lan.mjs");

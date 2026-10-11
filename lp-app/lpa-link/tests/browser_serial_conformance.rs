@@ -81,6 +81,7 @@ use lpa_link::device_link::wire_reader::{ReadFrame, WireRead};
 use lpa_link::providers::browser_serial_esp32::{
     BrowserSerialEsp32Provider, LensTapLine, web_serial_link,
 };
+use lpc_wire::lp_link::sniffer::{Direction, LinkSniffer, SniffEvent};
 use lpc_wire::lp_link::{CH_PROTO, Link, LinkConfig, LinkEvent, SelectiveRepeat};
 use wasm_bindgen_futures::spawn_local;
 
@@ -152,6 +153,24 @@ extern "C" {
 
     #[wasm_bindgen(js_name = uninstallShim)]
     fn js_uninstall_shim() -> Promise;
+
+    #[wasm_bindgen(js_name = installSecondTab)]
+    fn js_install_second_tab(second_tab: bool) -> Promise;
+
+    #[wasm_bindgen(js_name = secondTabBoardsJson)]
+    fn js_second_tab_boards_json() -> String;
+
+    #[wasm_bindgen(js_name = openPortOf)]
+    fn js_open_port_of(first: bool, board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = closePortOf)]
+    fn js_close_port_of(first: bool, board_id: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = secondTabCableVerb)]
+    fn js_second_tab_cable_verb(board_id: &str, verb: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = openAttemptsOf)]
+    fn js_open_attempts_of(first: bool, board_id: &str) -> Promise;
 
     #[wasm_bindgen(js_name = busBoardIds)]
     fn js_bus_board_ids() -> Promise;
@@ -837,6 +856,152 @@ async fn the_flash_bridge_acquires_the_live_generation() {
 }
 
 // ---------------------------------------------------------------------------
+// A second tab (`?emu-second-tab=1`)
+// ---------------------------------------------------------------------------
+//
+// Real Chrome lists a granted port in both tabs of a browser and refuses only
+// the second `open()`. The door admits ONE `/control` client per board, so a
+// second page's install is refused (409) — unless it asks to be a second tab,
+// when it gets the board's bytes and not its cable. These pin both halves:
+// the loud failure without the flag is unchanged, and with it the port can
+// open and close (take a board over) while every cable verb says whose cable
+// it is. They reach inside the scripted door's second bus, so they run
+// against it only.
+
+/// The outcome of a promise that resolves to a string.
+async fn text(promise: Promise) -> String {
+    JsFuture::from(promise)
+        .await
+        .expect("a string outcome")
+        .as_string()
+        .unwrap_or_default()
+}
+
+/// `describeBoards()` of the second page, one board.
+fn second_tab_board(board: &str) -> JsValue {
+    let all = js_sys::JSON::parse(&js_second_tab_boards_json()).expect("boards JSON");
+    Array::from(&all)
+        .iter()
+        .find(|entry| {
+            Reflect::get(entry, &JsValue::from_str("boardId"))
+                .ok()
+                .and_then(|id| id.as_string())
+                .as_deref()
+                == Some(board)
+        })
+        .expect("the second page holds the board")
+}
+
+#[wasm_bindgen_test]
+async fn a_second_page_without_the_flag_fails_to_install_as_before() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+
+    assert_eq!(
+        text(js_install_second_tab(false)).await,
+        "NetworkError",
+        "a second page that is not a second tab meets the door's 409, loudly"
+    );
+    log("second page without the flag: NetworkError at install, as ever");
+
+    shim_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_second_tab_installs_cableless_and_opens_what_the_first_lets_go() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    assert_eq!(text(js_install_second_tab(true)).await, "installed");
+
+    let board = second_tab_board("c6-a");
+    assert_eq!(
+        Reflect::get(&board, &JsValue::from_str("cable"))
+            .unwrap()
+            .as_bool(),
+        Some(false),
+        "another page holds the cable"
+    );
+    assert_eq!(
+        Reflect::get(&board, &JsValue::from_str("granted"))
+            .unwrap()
+            .as_bool(),
+        Some(true),
+        "a page with no chooser grants at load"
+    );
+    let holds = Reflect::get(&board, &JsValue::from_str("holds")).unwrap();
+    assert_eq!(
+        Array::from(&holds).length(),
+        0,
+        "the page's default switches are the cable's, not the second tab's"
+    );
+    assert!(
+        !js_control_log("c6-a").contains("pin"),
+        "no pin verb from a port with no cable: {}",
+        js_control_log("c6-a")
+    );
+
+    // The first page opens the board; the second is refused, as Chrome
+    // refuses a second open().
+    assert_eq!(text(js_open_port_of(true, "c6-a")).await, "opened");
+    assert_eq!(text(js_open_port_of(false, "c6-a")).await, "NetworkError");
+    // It lets go (a take-over's holder closes first); the second opens.
+    assert_eq!(text(js_close_port_of(true, "c6-a")).await, "closed");
+    assert_eq!(text(js_open_port_of(false, "c6-a")).await, "opened");
+    assert_eq!(text(js_open_port_of(true, "c6-a")).await, "NetworkError");
+    assert_eq!(text(js_close_port_of(false, "c6-a")).await, "closed");
+
+    let attempts = |first: bool| async move {
+        JsFuture::from(js_open_attempts_of(first, "c6-a"))
+            .await
+            .expect("attempts")
+            .as_f64()
+            .unwrap_or(-1.0)
+    };
+    assert_eq!(
+        attempts(false).await,
+        2.0,
+        "the second page's open() ran twice"
+    );
+    assert_eq!(attempts(true).await, 2.0, "and the first page's twice");
+    log("second tab: cable-less, opens and closes the bytes in turn with the first");
+
+    shim_off().await;
+}
+
+#[wasm_bindgen_test]
+async fn a_cable_verb_on_a_cableless_port_rejects() {
+    if real_backing() {
+        log_skip("it reaches inside the scripted door's second bus");
+        return;
+    }
+    shim_over(&["c6-a"]).await;
+    assert_eq!(text(js_install_second_tab(true)).await, "installed");
+
+    for verb in ["detach", "attach", "reset", "downloadMode", "state", "pins"] {
+        let outcome = text(js_second_tab_cable_verb("c6-a", verb)).await;
+        assert!(
+            outcome.starts_with("NetworkError: ")
+                && outcome.contains("another page holds this board's cable"),
+            "{verb}: {outcome}"
+        );
+    }
+    assert!(
+        !js_control_log("c6-a").contains("detach"),
+        "nothing reached the door: {}",
+        js_control_log("c6-a")
+    );
+    log("second tab: every cable verb rejects, and none reaches the door");
+
+    shim_off().await;
+}
+
+// ---------------------------------------------------------------------------
 // The polyfill's own contract
 // ---------------------------------------------------------------------------
 
@@ -1258,11 +1423,8 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed_on(board
         id: 41,
         msg: lpc_wire::ClientRequest::StopAllProjects,
     };
-    web_serial_link::send_client_json(
-        bench.id,
-        &lpc_wire::json::to_string(&request).expect("json"),
-    )
-    .expect("the link takes the request");
+    let request_json = lpc_wire::json::to_string(&request).expect("json");
+    web_serial_link::send_client_json(bench.id, &request_json).expect("the link takes the request");
     let reads = bench
         .exchange_until(|reads| answer(reads, 41).is_some())
         .await;
@@ -1273,12 +1435,53 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed_on(board
         BOARD.with(|double| double.borrow().requests.contains(&41)),
         "the board saw the request as one proto message"
     );
-    let raw = js_received_bytes(&bench.board);
+    // No `M!` line: every byte the host wrote is in a link frame. Not a
+    // search for the bytes `M!`, which the host's nonce and checksums hold
+    // by chance about once in 3,000 runs
+    // (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.md).
+    let preset = board.host_preset();
+    let messages = host_proto_messages(bench.host_wrote(), &preset);
     assert!(
-        !raw.contains("M!"),
-        "nothing the host wrote is an M! line: {raw:?}"
+        messages.contains(&request_json),
+        "the request went out as one link message: {messages:?}"
     );
     bench.close().await;
+}
+
+/// The frame check above reads the bytes a classic's port wrote in a CI run
+/// whose first SYN's checksum ends `4d 21` — `M!` — as the link frames they
+/// are, the request among them.
+#[wasm_bindgen_test]
+fn the_frame_check_reads_a_checksum_that_spells_m_bang_as_a_checksum() {
+    assert_eq!(&HOST_WROTE_IN_CI[18..22], [0xdd, 0x5f, 0x4d, 0x21]);
+    let messages = host_proto_messages(&HOST_WROTE_IN_CI, &LinkConfig::uart());
+    assert!(
+        messages.contains(&r#"{"id":41,"msg":"stopAllProjects"}"#.to_string()),
+        "{messages:?}"
+    );
+}
+
+/// An `M!` line among the host's bytes, the framing it no longer writes, is
+/// caught: it is text outside every frame.
+#[wasm_bindgen_test]
+#[should_panic(expected = "the host wrote bytes outside link frames")]
+fn the_frame_check_catches_an_m_bang_line() {
+    let mut written = HOST_WROTE_IN_CI.to_vec();
+    written.extend_from_slice(b"M!{\"id\":42,\"msg\":\"stopAllProjects\"}\n");
+    host_proto_messages(&written, &LinkConfig::uart());
+}
+
+/// A frame whose checksum does not verify is caught: the check reads the
+/// session from the host's SYNs and verifies every frame under it.
+#[wasm_bindgen_test]
+#[should_panic(expected = "not a verified link frame")]
+fn the_frame_check_catches_a_frame_that_does_not_verify() {
+    let mut written = HOST_WROTE_IN_CI.to_vec();
+    // The request frame's last checksum byte.
+    let at = written.len() - 13;
+    assert_eq!(written[at], 0xf3);
+    written[at] = 0xf4;
+    host_proto_messages(&written, &LinkConfig::uart());
 }
 
 /// A link frame the board wrote in two halves, drained in between, comes out
@@ -1604,6 +1807,8 @@ struct LinkBench {
     board: String,
     profile: Board,
     reads: Vec<WireRead>,
+    /// Every byte the host has written at the board, in order.
+    written: Vec<u8>,
 }
 
 impl LinkBench {
@@ -1647,6 +1852,7 @@ impl LinkBench {
             board,
             profile,
             reads: Vec::new(),
+            written: Vec::new(),
         })
     }
 
@@ -1661,6 +1867,7 @@ impl LinkBench {
     async fn exchange_until(&mut self, done: impl Fn(&[WireRead]) -> bool) -> Vec<WireRead> {
         for _ in 0..200 {
             let written = js_take_received_raw(&self.board).to_vec();
+            self.written.extend_from_slice(&written);
             let out = BOARD.with(|board| {
                 let mut board = board.borrow_mut();
                 board.on_bytes(&written);
@@ -1676,6 +1883,15 @@ impl LinkBench {
             }
         }
         std::mem::take(&mut self.reads)
+    }
+
+    /// Everything the host has written at the board since the bench opened.
+    /// What the board double has not read yet is taken too, so it never
+    /// will: for the end of a test.
+    fn host_wrote(&mut self) -> &[u8] {
+        let rest = js_take_received_raw(&self.board).to_vec();
+        self.written.extend_from_slice(&rest);
+        &self.written
     }
 
     async fn close(self) {
@@ -1815,6 +2031,71 @@ fn answer(reads: &[WireRead], id: u64) -> Option<&ReadFrame> {
         WireRead::Frame(frame) if frame.message.as_ref().is_ok_and(|m| m.id == id) => Some(frame),
         _ => None,
     })
+}
+
+/// Every byte a classic's port wrote in CI run 37951739994 (job 113893308952,
+/// 2026-10-09), when `a_classic_request_is_…` failed on a chance `M!`: two
+/// SYNs under the host nonce `0xe7d4bb42`, an ACK, the packed opt-in, an
+/// ACK, the request (id 41) and an ACK. Rebuilt from the panic's lossy
+/// Debug string, which it reproduces character for character: the nonce is
+/// the only one that fits both SYNs' checksums, and every other checksum
+/// follows from it (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.md).
+const HOST_WROTE_IN_CI: [u8; 212] = [
+    0x00, 0x02, 0x03, 0x01, 0x01, 0x05, 0x42, 0xbb, 0xd4, 0xe7, 0x01, 0x01, 0x01, 0x01, 0x01, 0x07,
+    0x01, 0x04, 0xdd, 0x5f, 0x4d, 0x21, 0x00, 0x00, 0x02, 0x03, 0x01, 0x01, 0x06, 0x42, 0xbb, 0xd4,
+    0xe7, 0x01, 0x04, 0xa2, 0xb0, 0x01, 0x07, 0x01, 0x04, 0x02, 0x88, 0x6c, 0x0d, 0x00, 0x00, 0x02,
+    0x02, 0x01, 0x06, 0x04, 0x61, 0x1d, 0xd9, 0x62, 0x00, 0x00, 0x02, 0x38, 0x55, 0x02, 0x04, 0x7b,
+    0x22, 0x69, 0x64, 0x22, 0x3a, 0x39, 0x30, 0x30, 0x37, 0x31, 0x39, 0x39, 0x32, 0x35, 0x34, 0x37,
+    0x34, 0x30, 0x39, 0x39, 0x31, 0x2c, 0x22, 0x6d, 0x73, 0x67, 0x22, 0x3a, 0x7b, 0x22, 0x73, 0x65,
+    0x74, 0x45, 0x6e, 0x63, 0x6f, 0x64, 0x69, 0x6e, 0x67, 0x22, 0x3a, 0x7b, 0x22, 0x65, 0x6e, 0x63,
+    0x6f, 0x64, 0x69, 0x6e, 0x67, 0x22, 0x3a, 0x22, 0x70, 0x61, 0x63, 0x6b, 0x65, 0x64, 0x22, 0x2c,
+    0x22, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x22, 0x3a, 0x32, 0x7d, 0x7d, 0x7d, 0x7a, 0xfb, 0x56,
+    0x93, 0x00, 0x00, 0x02, 0x02, 0x07, 0x03, 0x04, 0xf8, 0xb5, 0x3e, 0x56, 0x00, 0x00, 0x2a, 0x38,
+    0x01, 0x03, 0x04, 0x7b, 0x22, 0x69, 0x64, 0x22, 0x3a, 0x34, 0x31, 0x2c, 0x22, 0x6d, 0x73, 0x67,
+    0x22, 0x3a, 0x22, 0x73, 0x74, 0x6f, 0x70, 0x41, 0x6c, 0x6c, 0x50, 0x72, 0x6f, 0x6a, 0x65, 0x63,
+    0x74, 0x73, 0x22, 0x7d, 0x77, 0xd5, 0x2a, 0xf3, 0x00, 0x00, 0x02, 0x02, 0x07, 0x04, 0x04, 0xbd,
+    0x7c, 0x53, 0x2c, 0x00,
+];
+
+/// The proto-channel messages in what a host wrote under `preset`, once
+/// every byte of it is shown to belong to a link frame: back-to-back
+/// `0x00 COBS-FF 0x00` frames with nothing between them (so no text and no
+/// `M!` line), each one decoding and passing its checksum under the session
+/// the host's own SYNs name.
+fn host_proto_messages(written: &[u8], preset: &LinkConfig) -> Vec<String> {
+    // Split on the delimiter: a frame body sits between each pair and
+    // nothing sits anywhere else, so pieces at even places are empty and
+    // pieces at odd places are bodies.
+    let pieces: Vec<&[u8]> = written.split(|&byte| byte == 0).collect();
+    let in_frames = pieces.len() % 2 == 1
+        && pieces
+            .iter()
+            .enumerate()
+            .all(|(at, piece)| piece.is_empty() == (at % 2 == 0));
+    assert!(
+        in_frames,
+        "the host wrote bytes outside link frames: {written:?}"
+    );
+
+    let mut sniffer = LinkSniffer::new(preset.crc, preset.escape_ff);
+    let mut messages = Vec::new();
+    let mut on = |event: SniffEvent| match event {
+        SniffEvent::Session { .. } => {}
+        SniffEvent::Message {
+            channel,
+            data,
+            verified: true,
+            ..
+        } => {
+            if channel == CH_PROTO {
+                messages.push(String::from_utf8_lossy(&data).into_owned());
+            }
+        }
+        other => panic!("the host wrote {other:?}, not a verified link frame: {written:?}"),
+    };
+    sniffer.push(Direction::HostToBoard, 0, written, &mut on);
+    sniffer.flush(Direction::HostToBoard, &mut on);
+    messages
 }
 
 /// The Rust half of the pump for the tests that drive the SUPPORT module's

@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use crate::activity::{ActivityKind, UpdateIntentFacts, UpdateOutcomeFacts, UpdateStageFacts};
 use crate::device::DeviceStatus;
 use crate::event::{Action, Command, Event, Input};
+use crate::held_elsewhere::HeldElsewhere;
 use crate::identity::{DeviceId, DeviceUid, EndpointKey, MacAddress, PeerIdentity};
 use crate::link::{LinkEvent, LinkId, LinkInfo, ResetKind};
 use crate::roster::{Roster, RosterConfig};
@@ -295,6 +296,24 @@ pub enum Step {
         device: u64,
         mac: String,
     },
+    /// Another tab of this browser holds the board with this MAC (`held`),
+    /// or no longer does (`held` absent).
+    BoardHeld {
+        mac: String,
+        #[serde(default)]
+        held: Option<HeldElsewhere>,
+    },
+    /// This link's port is held by another tab, so it is not opened here;
+    /// `mac` when the other tab's claims name exactly this link's board.
+    LinkHeld {
+        link: u64,
+        #[serde(default)]
+        mac: Option<String>,
+    },
+    /// The hold that kept this link's port shut has ended.
+    LinkFreed {
+        link: u64,
+    },
     SetName {
         device: u64,
         name: String,
@@ -389,6 +408,40 @@ impl Step {
             link,
             label: label.to_string(),
         }
+    }
+
+    /// Another tab holds the board with this MAC (`Some`), or no longer
+    /// does (`None`).
+    pub fn board_held(mac: &str, held: Option<HeldElsewhere>) -> Self {
+        Self::BoardHeld {
+            mac: mac.to_string(),
+            held,
+        }
+    }
+
+    /// This link's port is held by another tab; `mac` when the claims name
+    /// its board.
+    pub fn link_held(link: u64, mac: Option<&str>) -> Self {
+        Self::LinkHeld {
+            link,
+            mac: mac.map(str::to_string),
+        }
+    }
+
+    /// The hold that kept this link's port shut has ended.
+    pub fn link_freed(link: u64) -> Self {
+        Self::LinkFreed { link }
+    }
+
+    /// Attach a MAC to a `hello` or `heartbeat` step.
+    pub fn mac(mut self, value: &str) -> Self {
+        match &mut self {
+            Self::Hello { mac, .. } | Self::Heartbeat { mac, .. } => {
+                *mac = Some(value.to_string());
+            }
+            _ => panic!("mac() only applies to hello/heartbeat steps"),
+        }
+        self
     }
 
     /// Attach a uid to a `hello` or `heartbeat` step.
@@ -657,6 +710,15 @@ impl Step {
                 device: DeviceId(device),
                 name,
             }),
+            Self::BoardHeld { mac, held } => Input::Event(Event::BoardHeld {
+                mac: MacAddress(mac),
+                held,
+            }),
+            Self::LinkHeld { link, mac } => Input::Event(Event::LinkHeld {
+                link: LinkId(link),
+                mac: mac.map(MacAddress),
+            }),
+            Self::LinkFreed { link } => Input::Event(Event::LinkFreed { link: LinkId(link) }),
             Self::Advance => return None,
         })
     }

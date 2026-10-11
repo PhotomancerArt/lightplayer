@@ -212,6 +212,17 @@ the app through the same view model and presses the same actions. See
   routes or opens anything because of it; navigation stays in
   `router.rs`. Don't report what core already owns (node focus, card
   sections, `UiSelection`): read it.
+- **View state is not an offer.** The home page's tabs, its cards/list
+  switch and a fold are page-local state, not user verbs: no `UiAction`, not
+  in the offer tree. The agent reads every section of the page through
+  `UiHomeView.sections`, the way a person sees it.
+- **Taking a board from another tab is one offer,
+  `devices/<board ref>/take-over`,** drawn as Connect and priced by what it
+  closes in the holder's tab: `Routine` when the holder only watches,
+  `Undoable` when it has the editor open (or has not said), disabled with the
+  holder's reason while it is flashing, updating or pushing. It is never
+  `Lasting` and needs no user activation; the agent presses it and says what
+  it did. It names the board by MAC and never pairs ports.
 - The rework toward migrating every surface onto the tree is a roadmap
   (`lp2025/2026-10-01-1255-agentic-ui-roadmap`). Don't migrate whole
   surfaces ad hoc. Don't add new web-built actions either.
@@ -251,8 +262,15 @@ the app through the same view model and presses the same actions. See
   `RELAY_PROTO_VERSION` and the hub accepts exactly the versions it lists
   (`SUPPORTED_RELAY_PROTO_VERSIONS`), refusing others by name — like
   `CLOUD_API_VERSION`. Any change to a relay frame's bytes, a reason code or
-  the proof bumps it; `lpc-relay/tests/relay_frame_golden.rs` holds the
-  bytes, and a golden is never edited to make a change pass. What rides
+  the proof bumps it. Two protocols are live: 1 (its bytes in
+  `lpc-relay/tests/relay_frame_golden.rs`, never edited at all) and 2
+  (pictures through the cloud, `relay_frame_golden_v2.rs`); a golden is
+  never edited to make a change pass. **The hub never sends a protocol 2
+  frame to a protocol 1 leg** (one send path, `to_board`, guards it): a
+  protocol 1 board drops its leg on a frame it does not know. A protocol 2
+  board sends its picture and its project's name in the clear (a decision,
+  not an oversight), never a project uid or a package hash, which travel
+  only as keyed tags. What rides
   inside a route is the ordinary secure lp-link, so the wire rule above
   still governs it. lp-cli reaches a board through the relay with
   `relay:<board-id>[@<origin>]` (session from `LP_CLOUD_SESSION`, env only)
@@ -303,8 +321,8 @@ the app through the same view model and presses the same actions. See
   `_lightplayer._tcp`. Hosts reach it as `lan:<ip>` or `lan:lp-xxxx.local`
   (`lp-cli`, whose `lan list` browses `_lightplayer._tcp`; and Studio, with
   no flag: a board it has met is offered "Connect over Wi‑Fi" at the address
-  it last gave, and the add slot takes an address; and, signed in, "Connect
-  through lightplayer.app" as `relay:<mac>`). The link is `LinkConfig::ws()` (one
+  it last gave, and Connect a board's Network row takes an address; and, signed
+  in, "Connect through lightplayer.app" as `relay:<mac>`). The link is `LinkConfig::ws()` (one
   frame per WebSocket message) with the secure channel (NNpsk0 keyed by the
   access entries; the tier comes from the key, as on Bluetooth). Its replies
   are JSON, and the C6 has one **network slot**, shared by the LAN and the
@@ -492,7 +510,7 @@ runtime.
 | `lp-engine`      | Shader runtime, node graph             | yes              |
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
-| `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO) | yes |
+| `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO); relay protocol 2: the picture, the project report by keyed tags, the picture schedule | yes |
 | `lp-json-pack`   | JSON Pack: a compact binary form of JSON that decodes back to byte-identical JSON text (`lp-base/`, generic; names coded against an injected seed and a per-connection learned table) | yes |
 | `lp-seam`        | The emulator-seam ABI: the one declaration of every seam, its identity (`SEAM_ABI_ID`), the descriptor table layout, and the macros that generate a seam function and its call (`lp-base/`, MIT). See "Emulator seams" below | yes |
 | `lp-nor-sim`     | The NOR flash power-cut model: a deterministic sans-IO model of the C6's SPI flash that loses power after any program or erase (torn programs, weak erases), shared by the store testbed and the emulator (`lp-emu/`, MIT) | yes |
@@ -770,7 +788,8 @@ This applies to every session, not just delegated ones. See
 ### Defect and debt registers during implementation
 
 When implementation fixes a user-reported or walk-found defect, write or close
-its `docs/defects/` entry in the same change (see `docs/defects/README.md`).
+its `docs/defects/` entry in the same change (see `docs/defects/README.md`;
+the entry is the whole change, since the index is built from frontmatter).
 When it hits a recurring operational burden, check `docs/debt/` for the entry,
 follow its Workarounds, and append the incident; file a new entry only for a
 structural, recurring burden. Do the same during push and CI repair — a CI
@@ -856,8 +875,9 @@ are director-proposed and pending Yona's ship-gate decision; see the ADR.)
 
 ## Studio against an emulated board (no hardware)
 
-`just studio-dev-emu` starts `lp-cli emu serve` holding two emulated ESP32-C6
-boards beside the dev server and prints three lines: the door's `/boards` URL,
+`just studio-dev-emu` starts `lp-cli emu serve` holding three emulated ESP32-C6
+boards (`c6-a` on the packaged firmware, `c6-b` and `c6-c` blank) beside the
+dev server and prints three lines: the door's `/boards` URL,
 the `?emu=` query to open Studio with, and a *predicted* Studio URL. The URL
 `studio-dev` prints below them is the source of truth, as always.
 
@@ -865,8 +885,8 @@ Open `http://127.0.0.1:<studio port>/?emu=ws://127.0.0.1:<emu port>`. That flag
 — and only that flag — replaces `navigator.serial` in the page with a virtual
 USB bus over those boards, so Studio's real device stack connects, identifies
 and runs against them. Without it nothing is fetched and `navigator.serial` is
-Chromium's own. Connect a device the way you would with a board: the in-page
-picker stands where Chrome's chooser would be, and a page-level banner names
+Chromium's own. Press **USB** under Connect a board the way you would with
+hardware: the in-page picker stands where Chrome's chooser would be, and a page-level banner names
 the shim, the backing URL and each board, with `detach` / `attach` buttons that
 are the cable. You need **no** WebSerial grant, no `just serial-grant`, no
 bench port and no Chromium policy profile: a polyfilled `navigator.serial`
@@ -884,7 +904,13 @@ Flip it **off** to test the power-off itself. It works the same on `?emu=tab`.
 
 The door admits **one client per board** (a second gets 409), so one Studio tab
 per `emu serve`, and use `?on=` (a different, orthogonal flag) if you want a
-second lens on the same session.
+second lens on the same session. The one exception is the one-tab-holds-a-board
+walk: a second page of the same browser may install with `?emu-second-tab=1`,
+which gives it each board's bytes and not its cable (the door and the 409 are
+unchanged; without the flag a second page still fails at install). It can
+`open()` and `close()` the port, and every cable verb (detach, attach, reset,
+D0) rejects. `just walk-two-tabs-emu --serve-release` walks it (two tabs of one
+headless Chrome, one profile, against one emulated board).
 
 **`?ble=emu`** (beside `?emu=`) does the same for Bluetooth: it replaces
 `navigator.bluetooth` with `public/lpa-link/virtual_bluetooth.js`, so
@@ -982,9 +1008,9 @@ someone else's `latest`.
 **Wi‑Fi boards need no flag.** Studio installs its LAN link in every
 browser with a WebSocket: a board it has met over any link remembers its
 Wi‑Fi address in this browser (`lp.devices.wifi-addresses.v1`, never the
-registry), and its remembered tile offers "Connect over Wi‑Fi"
-(`devices/<board>/connect-wifi`); "Connect a board on Wi‑Fi" in the add slot
-takes an address (`devices/connect-wifi-address`). **`?lan=<host>`** stays as
+registry), and its Offline boards card offers "Connect over Wi‑Fi"
+(`devices/<board>/connect-wifi`); the Network square under Connect a board
+opens an address row (`devices/connect-wifi-address`). **`?lan=<host>`** stays as
 a dev shortcut that dials a board at page load by its LAN address
 (`lp-xxxx.local`, an IP, or an emulator's `127.0.0.1:<forward>`), over the
 secure `ws()` link (`docs/adr/2026-10-07-c6-wifi-link.md`).
@@ -1037,7 +1063,8 @@ fallback for a central that loses too much. Each link logs its policy and,
 during bulk traffic, a 15 s rate/resend/srtt line as `[ble <session>] …` on
 the page's console.
 
-An emulated board added on the **Devices page** asks the emulator for the
+An emulated board added from **Connect a board** on the home page ("start a
+board here") asks the emulator for the
 LED performance seam (`led=fast`, softly: an image too old for it boots
 seam-free and says why), and says what came of it in one journal line per
 start (`emu: LED fast mode on (led=fast)`, or why it is off). `?seams=none`
@@ -1077,6 +1104,7 @@ With a dev server already up on this worktree's port:
 ```bash
 just walk-no-board                        # flash → connect → identify → upload → detach → re-attach
 just walk-no-board --tab                  # the same six steps with NO SERVER — the board is a Worker in the page
+just walk-two-tabs-emu --serve-release    # one tab holds a board: A holds, B (?emu-second-tab=1) watches, takes over, A takes it back, A closes
 just device-scenario run s1 --emu         # one golden-trace scenario, no board
 just device-scenario                      # both lanes' capture status
 just device-scenario check-guard          # the overwrite guard, proved by trying
@@ -1187,9 +1215,16 @@ produced) a regression test, or the lesson outlives the fix. Fix-forward
 trivialities stay commit messages.
 
 When you fix a qualifying bug, write the entry in the same change; when a walk
-or debugging session finds one you don't fix, file it `status: open`. Update
-the index in `docs/defects/README.md` either way. Recurring classes in that
-index are architecture signals — surface them when you see one repeat.
+or debugging session finds one you don't fix, file it `status: open`. The
+entry file is the whole change: there is no index to update. The index is
+built from each entry's frontmatter when it is read (`just defects-index`,
+`--by-class`, `--open`), so two PRs that each file a defect never touch a
+shared line. `just lint-defects` (in `check-lint`, and CI's "Defect registry"
+job, which runs on docs-only PRs too) fails an entry missing `status`
+(exactly `open`/`fixed`/`wontfix`), `found`, `area`, `class` or its title. It
+also fails a hand-written row added back to `docs/defects/README.md`; delete
+that row. Recurring classes in `just defects-index --by-class` are
+architecture signals — surface them when you see one repeat.
 
 ## Studio UI visual baselines
 
@@ -1432,7 +1467,8 @@ their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
   default; Bluetooth is next. A *performance* seam skips work the emulator
   models faithfully but slowly, and still bills its time: `led=fast` (the
   WS281x wait) keeps frames, fps and heap identical. **Performance seams are
-  on only for the emulated boards a user adds on Studio's Devices page** —
+  on only for the emulated boards a user adds from Connect a board on Studio's
+  home page** —
   never `?emu=` (ws or tab), `emu serve`'s defaults, the walks, CI or
   `lp-cli validate` (which refuses them).
 - **Seam off is today's machine.** With nothing asked for, nothing scans,
@@ -1441,7 +1477,7 @@ their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
   engage is an error), `--seams-prefer <atoms>` (soft: engage what the image
   allows, else one `SEAM none engaged: <why>` line), `--seams-info <image>`
   (what an image declares). `emu serve` board options `seams=` /
-  `seams_prefer=`. Studio's `?seams=<atoms|none>` replaces the Devices-page
+  `seams_prefer=`. Studio's `?seams=<atoms|none>` replaces the home page's
   choice. Atoms are `<seam>=<impl>` joined by `+`.
 - **The label says so.** An engaged run's configuration is the base name plus
   its atoms (`lp-emu:esp32c6:t2+led=fast`), every chip start prints `SEAM …`

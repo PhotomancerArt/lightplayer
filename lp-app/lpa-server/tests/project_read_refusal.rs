@@ -187,6 +187,65 @@ fn unset_probe_never_refuses() {
     );
 }
 
+/// Studio's Edit press asks the running board for its package hash (the
+/// library bind) before it reads anything else, and the hash reads every
+/// file whole. Through the server's live dispatch, with the choker's
+/// 27,091 B mapping SVG loaded and LC6's largest block (2026-10-10), the
+/// hash is refused in words and the server keeps answering; a heap that
+/// holds the file hashes it.
+/// (`docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md`)
+#[test]
+fn a_package_hash_the_heap_cannot_hold_is_refused_and_the_server_stays_alive() {
+    let (mut server, project_path) = server_with_clock_project("hash-refusal", Some(plenty_free));
+    server
+        .base_fs_mut()
+        .write_file(
+            project_path.join("playful-mapping.svg").as_path(),
+            &[b' '; 27_091],
+        )
+        .expect("write mapping");
+    let _handle = server.load_project(project_path.as_path()).expect("load");
+
+    server.set_read_headroom_probe(Some(|| Some(23_820)));
+    let error = hash_error(&mut server, &project_path, 51).expect("a refusal");
+    assert!(
+        error.starts_with("read refused: board memory busy") && error.contains("retry shortly"),
+        "{error}"
+    );
+    assert!(error.contains("27091 B file"), "{error}");
+
+    server.set_read_headroom_probe(Some(|| Some(60_000)));
+    assert_eq!(hash_error(&mut server, &project_path, 52), None);
+}
+
+/// Sends one `HashPackage` of `project_path` and returns its `error`.
+fn hash_error(server: &mut LpServer, project_path: &LpPathBuf, id: u64) -> Option<String> {
+    let mut transport = VecTransport::default();
+    let request = Incoming::primary(ClientMessage {
+        id,
+        msg: ClientRequest::Filesystem(lpc_wire::server::FsRequest::HashPackage {
+            prefix: project_path.clone(),
+        }),
+    });
+    block_on(server.tick_and_send(16, vec![request], &mut transport)).expect("tick");
+    let reply = transport
+        .sent
+        .iter()
+        .find(|frame| frame.id == id)
+        .expect("the hash is answered");
+    match &reply.msg {
+        WireServerMsgBody::Filesystem(lpc_wire::server::FsResponse::PackageHash {
+            hash,
+            error,
+            ..
+        }) => {
+            assert_eq!(hash.is_empty(), error.is_some(), "{hash:?} {error:?}");
+            error.clone()
+        }
+        other => panic!("not a hash reply: {other:?}"),
+    }
+}
+
 /// The C6's numbers (`fw-esp32c6/src/main.rs` `READ_GATE`).
 const GATE: ReadGate = ReadGate {
     min_free_bytes: 40 * 1024,

@@ -387,6 +387,34 @@ The wasm backing's own decisions — the Worker, the pacing contract, the
 flash image's home, the `emu_*` ABI — are their own ADR:
 [2026-09-10-the-c6-emulator-runs-in-the-tab.md](2026-09-10-the-c6-emulator-runs-in-the-tab.md).
 
+## Amendment 2026-10-09 — a second page may hold a board's bytes (one tab holds a board, M5)
+
+Rule 1 stands: nothing under `lpa-link/src/providers/browser_serial_esp32/**`
+or `browser_esp32_device_controller.js` changed. The door stands too: it
+still admits one client per endpoint, and a second `/control` client is
+still refused with 409.
+
+Rule 2's eleven calls stand: the polyfill adds behaviour, not calls. A page
+opened with `?emu-second-tab=1` may install although another page holds a
+board's cable. Real Chrome lists a granted port in both tabs of a browser and
+refuses only the second `open()`; the door's one-client rule used to fail the
+second page at install, which made "two tabs, one board" impossible to walk.
+With the flag, a refused `/control` makes a **cable-less** port
+(`EmulatorPort.hasCable` false): it can list, grant, `open()` and `close()`
+the board's bytes, every cable verb (`detach`, `attach`, signals, reset,
+download mode, `state`, `pins`) rejects with `NetworkError` naming whose
+cable it is, and the page's default D0 switches are left to the page that
+holds the cable. The banner marks such a board `data-cable="other-page"`.
+Without the flag nothing changes, the loud 409 at install included: it is
+what stops a reloading page from installing without its cable. The bus also
+counts every `port.open()` per board (`openAttempts`), which a walk reads.
+
+This is the door's way of being a second tab, and no more: a taker tab has
+the bytes and not the cable, so it cannot reset, flash or switch the board.
+`just walk-two-tabs-emu` is its walk
+(`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`, the amendment of
+the same date).
+
 ## Follow-ups
 - **The golden-trace question** (plan two OQ3) was answered at G2 and is its own
   ADR: [2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md](2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.md).

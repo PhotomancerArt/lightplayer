@@ -1,5 +1,5 @@
 ---
-status: FIXED 2026-09-08 — swept from the PAC; `accept.rs::DEVIATIONS` is the list
+status: fixed          # 2026-09-08 — swept from the PAC; `accept.rs::DEVIATIONS` is the list
 found: 2026-09-07      # M4 of the esp-emulator plan, on the second-boot gate
 fixed: every block, from the PAC (was: SPI1 and SPI0 only)
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/ (every `accept::*` RegFile)

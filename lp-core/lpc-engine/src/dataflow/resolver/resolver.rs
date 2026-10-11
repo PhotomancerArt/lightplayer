@@ -80,6 +80,11 @@ pub struct Resolver {
     cache: ResolverCache,
     intern: QueryInternTable,
     structure_epoch: u64,
+    /// Open [`Self::begin_structure_batch`] scopes. While nonzero,
+    /// [`Self::invalidate_structure`] only records that one is owed.
+    batch_depth: u32,
+    /// An invalidation was requested inside a batch and is paid at its end.
+    batch_pending: bool,
     frame_counters: ResolveFrameCounters,
     force_invalidate_per_frame: bool,
     /// `(node, authored path)` → the consumed-slot query it names.
@@ -116,6 +121,8 @@ impl Resolver {
             cache: ResolverCache::new(),
             intern: QueryInternTable::new(),
             structure_epoch: 0,
+            batch_depth: 0,
+            batch_pending: false,
             frame_counters: ResolveFrameCounters::default(),
             force_invalidate_per_frame: false,
             static_paths: VecMap::new(),
@@ -138,6 +145,7 @@ impl Resolver {
 
     /// Id for `query`, assigning one on first use this epoch.
     pub fn intern_query(&mut self, query: &QueryKey) -> QueryId {
+        self.assert_not_batching();
         self.intern.intern(query)
     }
 
@@ -148,6 +156,7 @@ impl Resolver {
     /// tick): sharing the table's `Rc` means the cached key costs a pointer
     /// rather than a second copy of the path's segment `Vec` and `String`s.
     pub fn intern_key(&mut self, query: &QueryKey) -> Rc<QueryKey> {
+        self.assert_not_batching();
         let id = self.intern.intern(query);
         Rc::clone(
             self.intern
@@ -163,6 +172,7 @@ impl Resolver {
         node: NodeId,
         path: &'static str,
     ) -> Result<QueryId, SlotPathError> {
+        self.assert_not_batching();
         if let Some(id) = self.static_paths.get(&(node, path)) {
             return Ok(*id);
         }
@@ -175,6 +185,7 @@ impl Resolver {
     /// Id for the bus query on `channel` in `scope`, building the
     /// [`lpc_model::ChannelName`] at most once per epoch.
     pub fn intern_static_bus(&mut self, scope: Option<ScopeRef>, channel: &'static str) -> QueryId {
+        self.assert_not_batching();
         if let Some(id) = self.static_bus.get(&(scope, channel)) {
             return *id;
         }
@@ -189,6 +200,7 @@ impl Resolver {
     /// The shared handle for a produced slot's path, interning it on first
     /// use. See [`Self::produced_paths`].
     pub fn produced_slot_path(&mut self, slot: &SlotPath) -> Rc<SlotPath> {
+        self.assert_not_batching();
         match self
             .produced_paths
             .binary_search_by(|held| held.as_ref().cmp(slot))
@@ -213,7 +225,53 @@ impl Resolver {
     }
 
     /// The graph changed shape: every cached decision and value is suspect.
+    ///
+    /// Inside a [`Self::begin_structure_batch`] scope this only records the
+    /// debt; the single real invalidation runs when the outermost scope ends.
     pub fn invalidate_structure(&mut self) {
+        if self.batch_depth > 0 {
+            self.batch_pending = true;
+            return;
+        }
+        self.invalidate_structure_now();
+    }
+
+    /// Open a scope in which structural invalidations coalesce into one, paid
+    /// at [`Self::end_structure_batch`].
+    ///
+    /// For a mutation that changes the graph in many steps and resolves
+    /// nothing between them (an apply that removes nodes, reattaches them and
+    /// re-registers every binding): each step used to invalidate on its own,
+    /// and only the last epoch ever resolved anything. Nothing may resolve
+    /// inside the scope — a cache filled between two steps would survive the
+    /// later ones — so the interning entry points assert it in debug builds.
+    /// Scopes nest; every `begin` needs its `end`, error paths included.
+    pub fn begin_structure_batch(&mut self) {
+        self.batch_depth += 1;
+    }
+
+    /// Close a [`Self::begin_structure_batch`] scope; the outermost one pays
+    /// the invalidation if any step asked for it.
+    pub fn end_structure_batch(&mut self) {
+        debug_assert!(self.batch_depth > 0, "unbalanced end_structure_batch");
+        self.batch_depth = self.batch_depth.saturating_sub(1);
+        if self.batch_depth == 0 && core::mem::take(&mut self.batch_pending) {
+            self.invalidate_structure_now();
+        }
+    }
+
+    /// Resolution inside a structure batch would fill a cache the batch's
+    /// closing invalidation is no longer ordered after. See
+    /// [`Self::begin_structure_batch`].
+    #[inline]
+    fn assert_not_batching(&self) {
+        debug_assert_eq!(
+            self.batch_depth, 0,
+            "resolution inside a structure batch: the cache it fills would outlive the invalidations folded into the batch's end"
+        );
+    }
+
+    fn invalidate_structure_now(&mut self) {
         self.structure_epoch = self.structure_epoch.wrapping_add(1);
         self.cache.invalidate_structure();
         self.intern.clear();

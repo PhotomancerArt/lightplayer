@@ -1,3 +1,9 @@
+---
+status: fixed
+found: 2026-07-30      # the Xtensa filetest corpus
+area: lpvm-native/regalloc (walk.rs)
+class: config-masked-defect
+---
 # Defect: two-value returns were not a parallel move (Xtensa)
 
 - **Date:** 2026-07-30

@@ -32,7 +32,12 @@ use crate::error::CloudError;
 /// v5 = the cloud relay (2026-10-06): `ListBoards`, answered by
 /// [`BoardList`](crate::board_presence::BoardList) — the signed-in account's
 /// boards online at the relay.
-pub const CLOUD_API_VERSION: u32 = 5;
+///
+/// v6 = pictures through the cloud (2026-10-08): `BoardPictures`, answered
+/// by [`BoardPictureList`](crate::board_picture::BoardPictureList) — a
+/// board's last picture, kept by the relay, read by the board's accounts;
+/// and `BoardPresence.relayProto` / `firmware` / `project`.
+pub const CLOUD_API_VERSION: u32 = 6;
 
 /// Refuse a call whose declared version does not match [`CLOUD_API_VERSION`].
 ///

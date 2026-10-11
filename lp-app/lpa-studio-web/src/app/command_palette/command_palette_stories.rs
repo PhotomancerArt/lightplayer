@@ -70,7 +70,7 @@ fn chrome_hint() -> Element {
                 div {
                     class: "tw:border tw:border-dashed tw:border-border-muted tw:px-4 tw:pt-3",
                     style: "max-width: 1000px;",
-                    SiteChrome { section: SiteSection::Devices,
+                    SiteChrome { section: SiteSection::Home,
                         CommandPaletteHint { on_open: |_| {}, platform: Some(platform) }
                         VersionChipPreview {
                             chip: BuildChip::Release("2026.10.02-1".to_string()),

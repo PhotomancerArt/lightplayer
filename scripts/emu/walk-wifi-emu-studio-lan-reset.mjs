@@ -5,19 +5,21 @@
 // One emulated ESP32-C6, `c6-a`, running the packaged firmware ROM-up on the
 // `lan` lane's virtual LAN (`lan=home`). Real Studio, headless, on its
 // release bundle, with no `?emu=` and no `?lan=`: the board is reached the
-// way a person reaches it, by typing its address into "Connect a board on
-// Wi‑Fi".
+// way a person reaches it, by typing its address into the Network row of
+// Connect a board.
 //
 //   R1  the board joins the fixture's network over its USB door; the walk
 //       then holds that door as the board's console
 //   R2  Studio connects to it by address: the board says a secure LAN
-//       session opened, and the card says "Ready" — with Reset ENABLED
-//       (it used to be drawn disabled, "Reset needs USB")
+//       session opened, and its card is ready (core offers it a project or
+//       the editor) — with Reset ENABLED: core publishes `reset-board`,
+//       pressable, in the hardware bar's details (it used to be drawn
+//       disabled, "Reset needs USB")
 //   R3  Reset is pressed, once, and nothing else is: the board's console
 //       says it acked the restart and the ROM boots it again (a software
 //       reset), it rejoins the network,
 //       and a NEW secure LAN session opens from the page's own redial; the
-//       card is "Ready" again with no click
+//       card is ready again with no click
 //
 // ⚠️ THE `studio-lan` LANE'S STAND-IN (ruling DD193): an emulated board's
 // LAN lease is not reachable from the host, so the walk types the board's
@@ -27,7 +29,9 @@
 //
 // THE BOARD'S WORDS DECIDE EVERY STEP: its console (its USB link held by
 // `lp-cli link capture`). Studio's words only say when to look — except the
-// card's Reset being enabled, which is the page's claim.
+// card's Reset being enabled, which is the page's claim: core's offer
+// (`devices/<board>/reset-board`, `device_offers.rs`), read and pressed by
+// its offer path, never by a button's words.
 //
 // NOT CI. Made-up test values only. Headless Chrome. Needs what
 // `studio-lan` needs (`just walk-wifi-emu studio-lan-reset --dry-run` lists
@@ -45,6 +49,7 @@ import {
   RELEASE_BUNDLE,
   SERVED_FIRMWARE,
   boardRegistry,
+  openNetworkRow,
   serveStudioBundle,
   startDoor,
   startRecordSink,
@@ -54,12 +59,10 @@ import {
 import {
   FIXTURE,
   LAN,
-  MAIN_TEXT,
   NET,
   Page,
   STEP_MS,
   awaitStatus,
-  cardOf,
   forwardOf,
   holdConsole,
   lpCli,
@@ -72,8 +75,9 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 const LP_CLI = path.join(ROOT, "target/debug/lp-cli");
 const A = "c6-a";
 
-/// The add slot's address field and its Connect (`wifi_address_entry.rs`),
-/// as the `studio-lan` lane finds them.
+/// The Network row's address field and its Connect (`wifi_address_entry.rs`),
+/// as the `studio-lan` lane finds them; the row opens when the Network square
+/// is pressed (`openNetworkRow`).
 const ADDRESS_FIELD = `document.querySelector('#main input[placeholder^="192.168.1.40"]')`;
 const ADDRESS_ENTRY = `${ADDRESS_FIELD}?.closest('label')?.parentElement?.parentElement`;
 const PRESS_ADDRESS_CONNECT = `(() => {
@@ -84,10 +88,21 @@ const PRESS_ADDRESS_CONNECT = `(() => {
   return true;
 })()`;
 
-/// The card's Reset button: its whole text is "Reset" (Factory reset is
-/// another button).
-const resetButton = (forward) =>
-  `[...(${cardOf(forward)}?.querySelectorAll('button') ?? [])].find((b) => (b.innerText || '').trim() === 'Reset')`;
+/// Reset: core's `reset-board`, a Routine verb in the hardware bar's details
+/// (`board_card/hardware_bar.rs`; enabled over the LAN at the author tier,
+/// `device_offers.rs`). Factory reset is another verb (`erase`).
+const RESET = { verb: "reset-board", bar: "hardware" };
+
+/// Page-side: the board is not ready, as core reads it — its card is gone,
+/// or it offers neither a project (`push` on its project bar) nor the
+/// editor (`edit`, pressable) on its face. `StudioDriver.boardRuns`'s
+/// question turned around, for the wait on the board going away.
+const notReady = (scope) => `(() => { const card = ${scope}; if (!card) return true;
+  const face = (verb) => [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')].filter((mark) => !mark.closest('.ux-popover-layer'));
+  const pressable = (mark) => { const all = mark.querySelectorAll('button'); const button = all[all.length - 1]; return Boolean(button) && !button.disabled; };
+  const empty = face('push').some((mark) => mark.closest('[data-bar="project"]') && mark.querySelector('button'));
+  const running = face('edit').some(pressable);
+  return !empty && !running; })()`;
 
 /// The board's words: the server acking the request and resetting
 /// (`lpa-server`'s `tick_and_send`; the firmware's own `[REBOOT]` line is
@@ -155,8 +170,8 @@ async function main() {
   if (options.dryRun) {
     const steps = [
       `R1 lp-cli wifi add <usb door> ${NET.ssid} → status connected; hold the USB door as the console`,
-      `R2 Studio, no flag: add slot <forward> → Connect → console: secure session opening → card Ready, Reset enabled`,
-      `R3 press Reset once → console: "${BOARD.asked}", the ROM's reset banner, an address, a new secure session → card Ready again, no click`,
+      `R2 Studio, no flag: Network row <forward> → Connect → console: secure session opening → its card ready (push or edit offered), ${RESET.verb} offered and enabled in the ${RESET.bar} details`,
+      `R3 press ${RESET.verb} once → console: "${BOARD.asked}", the ROM's reset banner, an address, a new secure session → its card ready again, no click`,
     ];
     writeFileSync(path.join(out, "walk-plan.json"), JSON.stringify({ out, boards: boardsSpec, extraArgs, steps, prerequisites: needs, chrome }, null, 2));
     console.log("THE EMULATED STUDIO-LAN RESET WALK — dry run: nothing started");
@@ -197,7 +212,7 @@ async function main() {
   const mac = String(entry.mac).toLowerCase();
   let configuration = entry.configuration ?? "unknown";
   const query = new URLSearchParams({ record: sinkUrl });
-  const url = `http://localhost:${port}/devices?${query.toString()}`;
+  const url = `http://localhost:${port}/?${query.toString()}`;
 
   console.log("\nTHE EMULATED STUDIO-LAN RESET WALK");
   console.log(`  board    ${A} ${mac} → forward ${fwd}`);
@@ -257,28 +272,41 @@ async function main() {
     await step("R2", `Studio, no flag, connects to ${A} by address; Reset is enabled`, async (seen) => {
       driver = await StudioDriver.launch({ width: 1100, height: 900 });
       await driver.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 2, mobile: false }, driver.sessionId);
-      page = new Page(driver);
+      page = new Page(driver, { doorAddr: door.addr });
       await page.load(url);
       const from = hold.console.mark();
-      await driver.waitFor(`Boolean(${ADDRESS_FIELD})`, { timeoutMs: STEP_MS, what: "the add slot's address field" });
+      await openNetworkRow(driver, { timeoutMs: STEP_MS });
+      await driver.waitFor(`Boolean(${ADDRESS_FIELD})`, { timeoutMs: STEP_MS, what: "the Network row's address field" });
       await driver.type("192.168.1.40", fwd, { scope: "document.querySelector('#main')" });
-      await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the add slot's Connect" });
+      await driver.waitFor(PRESS_ADDRESS_CONNECT, { timeoutMs: 30_000, what: "the Network row's Connect" });
       seen.opened = (await hold.console.waitFor(BOARD.session, { from, what: "a secure LAN session opening" })).trim();
-      await page.cardSays(fwd, "Ready");
+      await page.cardReady(fwd);
       const shown = await page.cardMac(fwd);
       if (shown !== mac) throw new Error(`the Wi‑Fi card shows ${shown}, not ${A}'s ${mac}`);
-      seen.reset = await driver.waitFor(
-        `(() => { const b = ${resetButton(fwd)}; return b && !b.disabled ? (b.title || b.getAttribute('aria-label') || 'enabled') : false; })()`,
-        { timeoutMs: STEP_MS, what: "the card's Reset to be enabled" },
-      );
+      // Reset enabled: core publishes `reset-board` in the hardware details,
+      // pressable. What its button says (its title, or its own words) is
+      // what the report keeps.
+      await driver.waitOffer(RESET.verb, { board: mac, bar: RESET.bar, timeoutMs: STEP_MS });
+      const scope = await driver.card({ board: mac });
+      seen.reset = await driver.evaluate(`(() => {
+        const mark = ${scope}?.querySelector('[data-bar="${RESET.bar}"] [id^="ux-popover-panel"] [data-offer-path$="/${RESET.verb}"]');
+        const all = mark ? mark.querySelectorAll('button') : [];
+        const b = all[all.length - 1];
+        return b && !b.disabled ? (b.title || b.getAttribute('aria-label') || (b.textContent || '').replace(/\\s+/g, ' ').trim() || 'enabled') : false; })()`);
+      await driver.closeDetails({ board: mac });
+      if (!seen.reset) throw new Error(`\`${RESET.verb}\` went away before its words could be read`);
       return { opened: seen.opened, reset: seen.reset };
     });
 
     await step("R3", "Reset, pressed once: the board restarts and the card comes back with no click", async (seen) => {
       const from = hold.console.mark();
+      // The details open first, so the clock starts at the press itself.
+      await driver.waitOffer(RESET.verb, { board: mac, bar: RESET.bar, timeoutMs: STEP_MS });
       const pressedAt = Date.now();
-      const clicked = await driver.evaluate(`(() => { const b = ${resetButton(fwd)}; if (!b || b.disabled) return false; b.click(); return true; })()`);
-      if (!clicked) throw new Error("the card's Reset was not there to press");
+      // Routine (`device_offers.rs`): one press, no arm. `pressOffer` throws
+      // if the offer is not there to press.
+      seen.pressed = await driver.pressOffer(RESET.verb, { board: mac, bar: RESET.bar, timeoutMs: STEP_MS });
+      await driver.closeDetails({ board: mac }).catch(() => {});
       const at = () => `${((Date.now() - pressedAt) / 1000).toFixed(1)} s`;
       const timeline = {};
       seen.asked = (await hold.console.waitFor(BOARD.asked, { from, what: "it was asked to restart" })).trim();
@@ -286,9 +314,10 @@ async function main() {
       const afterAck = from + hold.console.since(from).indexOf(seen.asked);
       seen.booted = (await hold.console.waitFor(BOARD.booted, { from: afterAck, what: "the ROM's software-reset banner" })).trim();
       timeline.booted = at();
-      // The card leaves "Ready" while the board is away (the link dropped).
+      // The card stops being ready while the board is away (the link
+      // dropped): core withdraws what it offered a linked board.
       seen.away = await driver
-        .waitFor(`!${cardOf(fwd)} || !(${cardOf(fwd)}?.innerText || '').includes('Ready')`, { timeoutMs: 60_000, what: "the card to notice" })
+        .waitFor(notReady(await driver.card({ board: mac })), { timeoutMs: 60_000, what: "the card to notice" })
         .then(() => true)
         .catch(() => false);
       timeline.cardAway = seen.away ? at() : "not seen (the redial beat the poll)";
@@ -298,12 +327,12 @@ async function main() {
       const afterAddress = afterAsked + hold.console.since(afterAsked).indexOf(seen.address);
       seen.relinked = (await hold.console.waitFor(BOARD.session, { from: afterAddress, what: "a new secure LAN session after the restart" })).trim();
       timeline.sessionOpened = at();
-      await page.cardSays(fwd, "Ready", "the card to say Ready again");
+      await page.cardReady(fwd);
       timeline.cardReady = at();
-      seen.resetAgain = await driver.waitFor(
-        `(() => { const b = ${resetButton(fwd)}; return Boolean(b && !b.disabled); })()`,
-        { timeoutMs: STEP_MS, what: "Reset enabled again on the new link" },
-      );
+      // Reset enabled again on the new link: core publishes it, pressable.
+      await driver.waitOffer(RESET.verb, { board: mac, bar: RESET.bar, timeoutMs: STEP_MS });
+      await driver.closeDetails({ board: mac });
+      seen.resetAgain = true;
       seen.timeline = timeline;
       return { asked: seen.asked, booted: seen.booted, address: seen.address, relinked: seen.relinked, timeline };
     });

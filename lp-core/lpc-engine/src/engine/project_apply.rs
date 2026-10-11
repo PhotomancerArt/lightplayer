@@ -50,7 +50,24 @@ impl Engine {
     /// This is intentionally a lifecycle/topology operation. Same-kind
     /// definition body changes and asset body changes are value changes owned by
     /// runtime nodes through resolver/revision-aware reads.
+    ///
+    /// One apply is one structural invalidation of the resolver, however many
+    /// nodes it removes, reattaches or re-wires: the steps coalesce in a
+    /// `Resolver::begin_structure_batch` scope, and nothing resolves between
+    /// them. (It used to be one per binding re-registered, 14 on the choker.)
     pub fn apply_project_changes(
+        &mut self,
+        fs: &dyn LpFs,
+        registry: &mut ProjectRegistry,
+        changes: &ProjectChangeSummary,
+    ) -> Result<RuntimeApplyResult, ProjectLoadError> {
+        self.resolver_mut().begin_structure_batch();
+        let result = self.apply_project_changes_batched(fs, registry, changes);
+        self.resolver_mut().end_structure_batch();
+        result
+    }
+
+    fn apply_project_changes_batched(
         &mut self,
         fs: &dyn LpFs,
         registry: &mut ProjectRegistry,
@@ -217,6 +234,17 @@ impl Engine {
     /// ([`Self::apply_project_changes`]) and entry residency
     /// ([`Self::apply_residency`]).
     pub(super) fn rewire_projection(
+        &mut self,
+        registry: &mut ProjectRegistry,
+        frame: lpc_model::Revision,
+    ) -> Result<(), ProjectLoadError> {
+        self.resolver_mut().begin_structure_batch();
+        let result = self.rewire_projection_batched(registry, frame);
+        self.resolver_mut().end_structure_batch();
+        result
+    }
+
+    fn rewire_projection_batched(
         &mut self,
         registry: &mut ProjectRegistry,
         frame: lpc_model::Revision,

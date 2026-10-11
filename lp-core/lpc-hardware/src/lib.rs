@@ -59,7 +59,7 @@ pub use drivers::ws281x::virtual_ws281x_driver::{VirtualWs281xDriver, VirtualWs2
 pub use drivers::ws281x::ws281x_driver::{
     WS281X_MAX_LEDS_PER_PORT, Ws281xConfig, Ws281xDriver, Ws281xOutput, ws281x_capped_byte_count,
 };
-pub use endpoint::hw_endpoint::HwEndpoint;
+pub use endpoint::hw_endpoint::{HwEndpoint, preferred_endpoint};
 pub use endpoint::hw_endpoint_error::HardwareEndpointError;
 pub use endpoint::hw_endpoint_id::HwEndpointId;
 pub use endpoint::hw_endpoint_kind::HwEndpointKind;

@@ -42,7 +42,7 @@ import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import process from "node:process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { PANEL, StudioDriver, macOfPath } from "./studio-driver.mjs";
 
 /// The packaged C6 firmware ELF `studio-dev-emu` boots its boards from — the
 /// same build `studio-firmware-package-served` leaves behind, so a board that
@@ -64,6 +64,12 @@ export const PACKAGED_C6_MERGED = "target/studio-web-assets/firmware/esp32c6-4mb
 /// assertion: nothing in this milestone concludes anything from elapsed time,
 /// and an agent-driven tab is throttled to ~1 Hz anyway.
 const STEP_DEADLINE_MS = 90_000;
+/// The same kind of deadline for a `flash` step: the ROM's download console
+/// writes ~2.4 MB and the guest then boots it (walk-no-board's figure).
+const FLASH_DEADLINE_MS = 900_000;
+/// The board a `flash` step picks in the card's board pick when the spec
+/// names none (walk-no-board's).
+const DEFAULT_BOARD_MODEL = "XIAO ESP32-C6";
 
 // --- the door -------------------------------------------------------------
 
@@ -336,7 +342,15 @@ export function startRecordSink() {
 // --- the steps ------------------------------------------------------------
 
 /// One scenario's `emulated.steps`, executed against a live Studio. `ctx`
-/// carries the driver, the shot directory, and the sink's `awaitRecord`.
+/// carries the driver, the shot directory, the door's address and the
+/// sink's `awaitRecord`.
+///
+/// Every step that reads or presses the board does it through the board
+/// card's hooks (`lpa-studio-web/src/app/board_card/mod.rs`, "Walk hooks"):
+/// a card by `data-board-card`, a verb by the offer path its `AgentMark`
+/// carries, a bar by `data-bar`, and what the board said off its own
+/// terminal. Never the card's face text: a page string Studio can satisfy by
+/// itself is a weak predicate, and two of them shipped.
 export async function runSteps(steps, ctx) {
   const done = [];
   for (const [index, step] of steps.entries()) {
@@ -355,12 +369,12 @@ async function runStep(step, ctx) {
     case "connect": {
       // The one call `browser_esp32_device_controller.js` makes, answered by
       // the page's own chooser. Studio never learns anything is different.
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       const picked = await driver.pickBoard(step.board, { timeoutMs: STEP_DEADLINE_MS });
       return `picked ${picked} in the in-page chooser`;
     }
     case "cancel-connect": {
-      await driver.clickWhenReady("via USB", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`Boolean(document.querySelector('#lp-emu-picker'))`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the chooser",
@@ -369,16 +383,39 @@ async function runStep(step, ctx) {
       return "chooser closed with nothing (NotFoundError, as Chrome's would)";
     }
     case "settle": {
-      // The card's own words, not a duration.
-      const words = step.words ?? ["Ready", "Blank flash", "Incompatible", "needs firmware", "Gone"];
-      const alternatives = words.map((word) => JSON.stringify(word)).join(", ");
-      const seen = await driver.waitFor(
-        `(() => { const t = document.querySelector('#main')?.innerText || "";
-                  const hit = [${alternatives}].find((w) => t.includes(w));
-                  return hit || false; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: `the card to say one of ${alternatives}` },
-      );
-      return `card says ${JSON.stringify(seen)}`;
+      // What core says the board is, not a duration and not the card's face
+      // text: the verbs it publishes on the card's face (`offers`, each one
+      // enabled; `a|b` is either, as an `expect` matcher spells it) and what
+      // each bar's line says (`bars`: `{ <layer>: "<words it includes>" }`).
+      if (step.words) {
+        throw new Error(
+          "`settle` no longer takes `words`: they matched the card's face text. " +
+            "Name the verbs core publishes (`offers`) and the bars' words (`bars`).",
+        );
+      }
+      const offers = step.offers ?? [];
+      const bars = Object.entries(step.bars ?? {});
+      if (offers.length === 0 && bars.length === 0) {
+        throw new Error("`settle` needs `offers` (verbs on the card's face) or `bars` ({ <layer>: <words> })");
+      }
+      const board = await boardOf(step, ctx);
+      const said = [];
+      if (offers.length) {
+        const scope = await driver.card({ board });
+        const found = await driver.waitFor(
+          `(() => { const card = ${scope}; if (!card) return false;
+                    const hits = ${JSON.stringify(offers)}
+                      .map((alternatives) => alternatives.split('|').find((verb) => ${FACE_OFFER}(card, verb)));
+                    return hits.every(Boolean) ? hits : false; })()`,
+          { timeoutMs: STEP_DEADLINE_MS, what: `the card to offer ${offers.map((verb) => `\`${verb}\``).join(" and ")}` },
+        );
+        said.push(`offers ${found.map((verb) => `\`${verb}\``).join(", ")}`);
+      }
+      for (const [layer, words] of bars) {
+        const line = await driver.waitBar(layer, words, { board, timeoutMs: STEP_DEADLINE_MS });
+        said.push(`its ${layer} bar reads ${JSON.stringify(line)}`);
+      }
+      return `card ${board ? `of ${board}` : "(the only one)"}: ${said.join(" · ")}`;
     }
     case "mark":
       // Draw a line under everything captured so far, so a later `await`
@@ -396,38 +433,100 @@ async function runStep(step, ctx) {
       return `trace: ${JSON.stringify(record)}`;
     }
     case "flash": {
-      const verb = step.verb ?? "Flash firmware";
-      await driver.clickWhenReady(verb, { timeoutMs: STEP_DEADLINE_MS });
-      return `clicked ${JSON.stringify(verb)}`;
+      // A blank board's card, the way a person does it: its firmware bar
+      // says "No firmware", the primary Install (`flash`) opens the board
+      // pick, picking `model` is the press, and the flash is the firmware
+      // bar's work, which must start and then finish (`flashBlank`).
+      if (step.verb) {
+        throw new Error("`flash` no longer clicks a verb by its words: it presses `flash`; name the board pick's `model`");
+      }
+      const model = step.model ?? DEFAULT_BOARD_MODEL;
+      await driver.flashBlank(model, {
+        board: await boardOf(step, ctx),
+        timeoutMs: STEP_DEADLINE_MS,
+        flashTimeoutMs: FLASH_DEADLINE_MS,
+      });
+      return `flashed through the card's Install (\`flash\`), picking ${JSON.stringify(model)}`;
     }
     case "project": {
-      await driver.clickWhenReady("to choose from", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the project popover",
-      });
-      const chosen = await driver.click(step.name, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-      return `chose ${JSON.stringify(chosen)}`;
+      // `push`: an empty board's project bar action ("Add a project"),
+      // drawn as the project pick; the project is chosen in its panel.
+      await driver.pressOffer("push", { board: await boardOf(step, ctx), timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_DEADLINE_MS, what: "the project pick" });
+      const chosen = await driver.click(step.name, { scope: PANEL });
+      return `pressed \`push\`, chose ${JSON.stringify(chosen)}`;
     }
     case "push": {
-      await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_DEADLINE_MS });
-      return "clicked Put it on the board";
+      // The pick's own button, in its panel: core's words for the push
+      // (`device_push.rs`), not the card's.
+      await driver.clickWhenReady("Put it on the board", { scope: PANEL, timeoutMs: STEP_DEADLINE_MS });
+      return "clicked Put it on the board in the project pick";
     }
     case "detach":
       return await driver.detach(step.board);
     case "attach":
       return await driver.attach(step.board);
     case "card": {
-      // Any other card control, by its visible text (Reset, Disconnect, …).
-      const clicked = await driver.clickWhenReady(step.text, { timeoutMs: STEP_DEADLINE_MS });
-      return `clicked ${JSON.stringify(clicked)}`;
+      // Any other verb on the card, by its offer path: `verb` on the card's
+      // face, or in `bar`'s details when it lives there (Reset is the
+      // hardware details' `reset-board`); `confirm` presses a Lasting verb
+      // (its first click arms it, the second is the press).
+      if (!step.verb) {
+        throw new Error("`card` presses an offer: name its `verb` (and its `bar` when it lives in a bar's details)");
+      }
+      const board = await boardOf(step, ctx);
+      const pressed = await driver.pressOffer(step.verb, {
+        board,
+        bar: step.bar ?? null,
+        confirm: step.confirm === true,
+        timeoutMs: STEP_DEADLINE_MS,
+      });
+      if (step.bar) await driver.closeDetails({ board }).catch(() => {});
+      return `pressed \`${step.verb}\` (${JSON.stringify(pressed)})`;
     }
     case "text": {
+      // With `bar`: one bar of the board's card, its line and its details
+      // (opened for the read, closed after) — the firmware's label may sit in
+      // the firmware bar's summary or, when the bar says something more
+      // pressing, in its details. Without: anywhere on the page, for page
+      // text that is not the card's.
+      if (step.bar) {
+        const board = await boardOf(step, ctx);
+        await driver.openBar(step.bar, { board, timeoutMs: STEP_DEADLINE_MS });
+        const scope = await driver.card({ board });
+        try {
+          await driver.waitFor(
+            `(${scope}?.querySelector(${JSON.stringify(`[data-bar="${step.bar}"]`)})?.textContent || '')
+               .replace(/\\s+/g, ' ').includes(${JSON.stringify(step.contains)})`,
+            { timeoutMs: STEP_DEADLINE_MS, what: `the ${step.bar} bar to say ${JSON.stringify(step.contains)}` },
+          );
+        } finally {
+          await driver.closeDetails({ board }).catch(() => {});
+        }
+        return `the ${step.bar} bar says ${JSON.stringify(step.contains)}`;
+      }
       const seen = await driver.waitFor(
         `(document.body.innerText || "").includes(${JSON.stringify(step.contains)})`,
         { timeoutMs: STEP_DEADLINE_MS, what: `the page to say ${JSON.stringify(step.contains)}` },
       );
       return seen ? `page says ${JSON.stringify(step.contains)}` : null;
+    }
+    case "said": {
+      // THE BOARD'S OWN WORDS: its terminal, in the status corner's details,
+      // streamed off the wire — not a name the project pick already put on
+      // the page.
+      const line = await driver.boardSaid(step.words, { board: await boardOf(step, ctx), timeoutMs: STEP_DEADLINE_MS });
+      return `the board said ${JSON.stringify(line)}`;
+    }
+    case "board": {
+      // The board's card on the page, by its hook
+      // (`data-board-card="devices/mac-<hex>"`): core keys it by the MAC the
+      // board's own hello said, so a card for each of two boards is two
+      // identities, neither wallpapering the other.
+      const board = await boardOf(step, ctx);
+      if (!board) throw new Error("`board` names the card to wait for: a door board id (`board`) or a `mac`");
+      const ref = await driver.waitCard({ board, timeoutMs: STEP_DEADLINE_MS });
+      return `card ${ref} (${macOfPath(ref) ?? "no MAC in its ref"})`;
     }
     case "shot": {
       if (!ctx.shotDir) return "(no shot directory — skipped)";
@@ -444,6 +543,47 @@ async function runStep(step, ctx) {
   }
 }
 
+/// The card a step names, as `StudioDriver`'s card helpers take it: `mac` as
+/// written, or the door's board `board` by the MAC its live registry lists
+/// (`GET /boards`) — core keys a board's card by that MAC
+/// (`devices/mac-<hex>`, `BoardRef`). Neither: `null`, the page's only card
+/// (the helpers throw when there are several). A board that has not said who
+/// it is yet (a blank chip) is `devices/new-<n>`: leave it unnamed.
+async function boardOf(step, ctx) {
+  if (step.mac) return String(step.mac).toLowerCase();
+  if (!step.board) return null;
+  const row = (await boardRegistry(ctx.doorAddr)).find((entry) => entry.id === step.board);
+  if (!row) throw new Error(`the door holds no board \`${step.board}\``);
+  return String(row.mac).toLowerCase();
+}
+
+/// Page-side: whether `verb` is drawn on `card`'s face — its `AgentMark`
+/// (`data-offer-path` ending `/<verb>`) outside an open details popover —
+/// with its button enabled. The driver's `offered(verb, { enabled: true })`,
+/// as a predicate one wait can combine across verbs (`settle`'s `a|b`).
+const FACE_OFFER = `((card, verb) => [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')]
+  .filter((mark) => !mark.closest('.ux-popover-layer'))
+  .some((mark) => { const buttons = mark.querySelectorAll('button');
+                    const button = buttons[buttons.length - 1];
+                    return Boolean(button) && !button.disabled; }))`;
+
+/// The wait for the Network row's address field, and the press that opens
+/// it (`openNetworkRow`): the field's placeholder starts with this.
+const ADDRESS_FIELD_SELECTOR = `#main input[placeholder^="192.168.1.40"]`;
+
+/// Open the home page's Network row — the address field and its Connect —
+/// and wait for the field. The Network square toggles the row, so a second
+/// press would close it: when the field is already on the page this presses
+/// nothing. Every walk that types an address calls this first.
+export async function openNetworkRow(driver, { timeoutMs = STEP_DEADLINE_MS } = {}) {
+  const open = () => driver.evaluate(`Boolean(document.querySelector(${JSON.stringify(ADDRESS_FIELD_SELECTOR)}))`);
+  if (!(await open())) await driver.pressConnect("Network", { timeoutMs });
+  await driver.waitFor(`Boolean(document.querySelector(${JSON.stringify(ADDRESS_FIELD_SELECTOR)}))`, {
+    timeoutMs,
+    what: "the Network row's address field",
+  });
+}
+
 /// Open Studio on the canonical dev server with BOTH flags. They compose:
 /// `index.html`'s reader and `device_events_io.rs`'s are two separate parsers
 /// over the same query string and neither reads the other's parameter.
@@ -451,7 +591,7 @@ async function runStep(step, ctx) {
 /// `doorAddr: null` is the TAB backing (`?emu=tab`): the emulator runs in a
 /// Worker in the page and there is no address to name. Everything else about
 /// the lane is unchanged, which is the point of the spelling.
-export function studioUrlFor({ studioPort, doorAddr = null, sinkUrl, route = "/devices" }) {
+export function studioUrlFor({ studioPort, doorAddr = null, sinkUrl, route = "/" }) {
   const query = new URLSearchParams();
   query.set("emu", doorAddr ? `ws://${doorAddr}` : "tab");
   query.set("record", sinkUrl);

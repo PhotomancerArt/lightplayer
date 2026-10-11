@@ -1,9 +1,11 @@
 ---
-status: open
+status: fixed      # fixed by e61488124, 4d02d2e91, 542669249
 found: 2026-10-09      # test (M3 P2 long walk, lp-store-bench, lp-nor-sim)
 area: lp-tree-store `store_space.rs` `ensure_room` (GC's stall rule) and GC's victim choice
 class: budget-exhaustion
+fixed: e61488124, 4d02d2e91, 542669249
 related:
+  - docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md
   - lp2025/2026-10-08-1017-tree-store-device-round
   - docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md
 ---
@@ -54,18 +56,68 @@ that garbage as reclaimable. Seed 2 of
 them persistent (lp-nor-sim). In every case the committed state is intact
 (old) and the store recovers once space is freed (`recovered true`).
 
-**Fix** — none yet. Candidates for the store's PR: count a stall only when a
-collection frees nothing it could have (not when the free count merely
-fails to beat its best), or keep collecting while the packing bound says the
-write fits and victims with garbage remain, with the loop's
-`sector_count * 4` bound as the backstop.
+**Fix** — `e61488124`, `4d02d2e91` and `542669249` (F1 of the plan, PR
+#1123). The second mechanism, instrumented (every GC exit and every mount
+printed the sectors' used and live bytes and the heads; seed 2 above,
+lp-nor-sim): of the 23 refused re-runs, 18 had the **hot head closed by the
+cut** — a record cut inside the hot head (a clean cut between a record's
+header and payload programs, or a torn root) fails its CRC, mount trusts
+nothing after it, so the re-run needs a new hot sector where the step had
+used the head's tail. Free sat at the reserve; GC collected the closed hot
+sector, copying its 1,676 live bytes (root, hot directory, panels) into the
+**cold** head, which had 32 B left, so it opened a sector for the one it
+freed: free 3 → 3, and the re-run still needed a fourth. Of the other five,
+four had the cold head closed the same way, each cut after the attempt's
+own GC had opened a sector and before it erased its victim (free 2 at the
+remount), and one was cut between a victim's copies and its erase with both
+heads intact. One of the 18 never reached GC: the packing bound refused it
+(live 48,899 + 42 B over its 48,864 B) on live bytes the layout had held
+before the cut. So the leading guess was half right: the garbage that could
+not come back sat in heads — closed ones, which GC collected at the price of
+a sector, and the open hot head, which it never collected (the full-flash
+`no_recovery` case: a hot head of 4,045 B, 1,946 of them old roots, room for
+27 B, a 42 B root refused fault-free). And once those were fixed, the
+re-runs still refused had every garbage byte collected and tail-only
+compaction cycling over the same three sectors (s13, s4, s11, …), 17 B short
+of a record: copying a victim in sector order, a first record that did not
+fit the head's tail opened a head at once and left that tail unused.
 
-**Regression coverage** — none yet. Replay (lp-nor-sim, release, ~25 s):
-`cargo run --release -p lp-store-bench -- long --candidates t1 --seeds 1
---first-seed 2 --steps 2151 --edit-mix --corpora c40,c40reuse,c20` →
-`FIRST rerun_failed: step 2150 cut 378/615 byte_prefix: NoSpace`. The store
-fix should add a test that refuses-then-accepts no longer happens on this
-shape (the walk's prefix is `driver_long::long_walk_prefix`).
+Five changes, each pinned by a test: (1) `ensure_room` collects every victim
+with garbage and counts a stall only for a tail-only collection (the
+defect's first candidate); (2) `gc_copy.rs` copies a victim's records to the
+head of its own kind (read from its sector header), so collecting a closed
+hot sector gives a hot head its room back for no sector; (3)
+`fits_after_compaction` is usable sectors less the reserve, no longer one
+more for the second head, so it never rejects what a layout holds (a cut
+leaves the live set, so the bound, as it was); (4) GC renews a head — its
+live records to a new head of its kind — when the head's own garbage would
+let the write open fewer sectors; (5) compaction (a tail-only victim) copies
+the largest record that fits the head's tail first, and opens a sector only
+when none does. No format change. +682 B of `.text` on the size probe with
+the C6's flags (42,210 → 42,892; with `lpfs` 57,268 → 57,918), `.rodata`
+unchanged.
+
+After the fix (M3's drivers on a local merge with PR #1069, lp-nor-sim): the
+long walk above runs its 2,151 steps with 0 failures and 0 refusals (was
+`rerun_failed` at step 2150); the full-flash command above has 0 failures on
+both seeds (was 8 of 333 and 15 of 322, 14 persistent); `lp-store-bench
+mutants`' unmutated store fails nothing in any driver (was 23 of 655
+full-flash cases), and every mutant caught before is caught after
+(`skip_kill` newly, by the wear walk); 24 full-flash seeds: 0 of 8,959 cut
+cases (was 29 of 8,954 with changes 1–4 only). A walk of the same shape
+inside the crate still finds a few — filed on its own,
+`2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`.
+
+**Regression coverage** — `lp-base/lp-tree-store/src/edge_gc_tests.rs`:
+`spread_garbage_never_refuses_then_accepts` (1: thin garbage over every
+sector; a refusal is final after a remount),
+`a_rerun_after_a_cut_fits_where_the_step_fitted` (2, 3: a full store, panel
+writes cut at every op, clean and torn, every re-run fits),
+`a_hot_head_full_of_old_roots_is_renewed` (4) and
+`compaction_near_full_wins_the_tails_back` (5). Each fails with its change
+taken out alone. Synthetic shapes on 16 sectors rather than the long walk's
+prefix (2,150 steps on 128 sectors over the c40 corpora is neither fast nor
+in this crate). Replays as above.
 
 **Lesson** — a "give up when it stops improving" heuristic in GC is a
 liveness promise the cut sweeps never test, because their workloads never

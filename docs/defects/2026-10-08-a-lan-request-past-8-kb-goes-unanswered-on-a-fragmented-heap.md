@@ -48,3 +48,28 @@ reproduces it (`#[ignore]`d), reporting `NO ANSWER in 20s` per edit.
 **Lesson** — a fallible allocation that turns an OOM into a drop still
 needs someone to tell. The 2026-10-06 fix made the reassembly survive; it
 did not make the request end.
+
+## 2026-10-10: on silicon, over Bluetooth, after the reassembly fix
+
+The third option above landed the same day (`942f0e237`, "a message past
+8 KB reassembles on a fragmented heap": fragments spill into pieces and
+are copied once into one exact block at the end), and this entry was not
+updated. It moved the cliff where it said it would — to the largest
+block — and the drop is still unanswered there.
+
+RAM research E17 (`lp2025/2026-10-09-1203-ram-research`, CX1
+`14:C1:9F:E6:54:90`, a research image of `research/ram-e17` with the BLE
+controller's `acl_buf_count` at 12, meteor running, a Mac Chrome central
+over `spikes/ble-lab`'s pipe): a 10,000 B `FsRequest::Write` (a ~13.4 KB
+message) over the Bluetooth link was never answered, twice in two runs.
+The host sent it and waited out its 190 s; nothing was logged, no
+refusal came back, the link stayed up with 0 resends, and 3 KB writes on
+the same link and image were answered. Every heartbeat while it waited
+said `largestFreeBlock: 10888` (42,832 before the link). The same 10 KB
+writes were answered on two other images whose largest block dipped only
+to 12.7–13.5 KB. Nothing showed the knob dropping
+anything itself; what the heartbeats show is the block it left. The evidence is in the program's
+`experiments/e17-ble-central-sitting/evidence/step4/acl12-w{a,b}/`.
+
+So the second option — answering the drop — is what is left: on any
+link, a request larger than the largest block still ends in silence.

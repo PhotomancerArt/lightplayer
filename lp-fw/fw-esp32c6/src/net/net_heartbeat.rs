@@ -1,4 +1,7 @@
-//! The heartbeat's `[wifi]` and `[relay]` lines.
+//! The heartbeat's `[wifi]` and `[relay]` lines. The `[relay]` line ends
+//! `· pictures N idle|watched|off` (relay protocol 2): the pictures sent
+//! since boot, and what the hub has them doing now. Engine code: it runs
+//! from the server loop's upkeep, never from the core.
 
 use lpc_wire::StationState;
 
@@ -36,12 +39,14 @@ pub fn log_line() {
             state.ssid().unwrap_or("")
         ),
     }
-    let (relay, counters, routes) = super::relay_probes::RELAY_BOARD.heartbeat();
+    let (relay, counters, routes, pictures) = super::relay_probes::RELAY_BOARD.heartbeat();
     log::info!(
-        "[relay] state={relay} routes={routes} rx={} tx={} · takeovers {} busy {}",
+        "[relay] state={relay} routes={routes} rx={} tx={} · takeovers {} busy {} · pictures {} {}",
         counters.rx_bytes,
         counters.tx_bytes,
         counters.takeovers,
-        counters.busy
+        counters.busy,
+        counters.pictures,
+        pictures.word()
     );
 }

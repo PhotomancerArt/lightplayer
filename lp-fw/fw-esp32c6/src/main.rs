@@ -312,6 +312,8 @@ fn log_heartbeat_stack_lines() {
     if HEARTBEAT_STACK_LINES_DUE.swap(false, core::sync::atomic::Ordering::Relaxed) {
         stack_probe::log_if_grown("heartbeat");
         c_heap::log_if_grown("heartbeat");
+        #[cfg(feature = "lp_sram_heap")]
+        board::esp32c6::lp_sram_heap::log_if_changed("heartbeat");
         #[cfg(feature = "io_thread_stack_diag")]
         io_thread_stack_diag::log_if_grown();
         #[cfg(feature = "net_thread_stack_diag")]
@@ -395,6 +397,18 @@ fn reboot_now() {
 #[cfg(not(fw_harness))]
 fn reset_now() -> ! {
     crate::board::esp32c6::restart::restart()
+}
+
+/// The server loop's one frame hook (`server_loop::set_frame_hook` holds
+/// one): a split image's update-light record, and the relay's answers
+/// (relay protocol 2's picture and project facts, `relay_probes`). Every
+/// frame, so each half is cheap when it has nothing to do.
+#[cfg(all(not(fw_harness), any(lp_split, lp_net)))]
+fn frame_hook(server: &LpServer) {
+    #[cfg(lp_split)]
+    output::status_light_note::persist(server);
+    #[cfg(lp_net)]
+    net::relay_probes::serve_relay(server);
 }
 
 #[cfg(not(fw_harness))]
@@ -1058,9 +1072,10 @@ fn lp_engine_entry(core: CoreBoot) {
     // core's update session says it, as it answers `Q` on channel 3.
     #[cfg(lp_split)]
     server.set_firmware_manifest(Some(ota::running_manifest));
-    // ...and records the strip its update light may drive.
-    #[cfg(lp_split)]
-    server_loop::set_frame_hook(output::status_light_note::persist);
+    // ...and records the strip its update light may drive; and the relay's
+    // answers (relay protocol 2). One frame hook holds both.
+    #[cfg(any(lp_split, lp_net))]
+    server_loop::set_frame_hook(frame_hook);
     // JSON Pack: answer a host's opt-in with what this image's transport
     // can write (`fw-esp32-common/json-pack`).
     server.set_packed_encoding_supported(

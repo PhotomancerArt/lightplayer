@@ -24,6 +24,35 @@ pub struct UiDeviceAccess {
     /// saying so, and why ([`account_key_refused_sentence`]). Shown on the
     /// card, not only inside the Access panel.
     pub account_key_refused: Option<String>,
+    /// What this link holds, when it holds something (untrusted links,
+    /// while the port is open): the board card's access bar says the tier
+    /// and the key from this, never by reading [`Self::line`].
+    pub grant: Option<UiAccessGrant>,
+    /// What an untrusted link is doing about access while it holds nothing
+    /// settled: being checked, being unlocked, or a board no password
+    /// reaches. `None` once it holds a grant, while it is Locked
+    /// ([`Self::unlock`] says so), and on a trusted link.
+    pub waiting: Option<UiAccessWait>,
+}
+
+/// What a link holds: the tier, and the key that got it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiAccessGrant {
+    pub tier: Tier,
+    /// The key's label ("Yona's MacBook", "your account key"); `None` when
+    /// the board is open at that tier.
+    pub key: Option<String>,
+}
+
+/// An untrusted link's access, not settled yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiAccessWait {
+    /// Asking the link's hello what it holds.
+    Checking,
+    /// A login conversation is running.
+    Unlocking,
+    /// The board has no password and is not open: only USB reaches it.
+    NoPassword,
 }
 
 /// What the card says when the account's key could not be added over USB,

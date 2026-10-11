@@ -5,14 +5,22 @@
 //! The routes' server links are `LinkTrust::Relayed`, numbered from
 //! [`RELAY_LINK_IDS`] so they never meet the inner transport's. Each server
 //! tick pumps the routes (frames in from the device leg, requests and
-//! handshake events out, frames back to the leg); a link that came up is
-//! owed its hello, which [`RelayHostTransport::send_hellos`] sends after
-//! the tick.
+//! handshake events out, frames back to the leg). After the tick,
+//! [`RelayHostTransport::after_tick`] sends each link that came up its
+//! hello, makes the picture the hub asked for (relay protocol 2: the
+//! engine's picture of the first loaded project, written in place), and
+//! once a second hands the leg the project's facts if they changed — the
+//! same two answers a C6 gives its relay. Nothing here logs the project's
+//! uid or a colour.
 
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use lpa_server::LpServer;
-use lpc_relay::RelayState;
+use lpc_relay::{
+    DEFAULT_PICTURE_SAMPLES, MAX_BOARD_PICTURE_FRAME, MAX_PICTURE_OUTPUTS, RelayProjectFacts,
+    RelayState, picture_sample_count, write_picture_header,
+};
 use lpc_shared::transport::{Incoming, KeyAnswer, Link, LinkId, SecureLinkEvent, ServerTransport};
 use lpc_wire::{TransportError, WireServerMessage, WireServerMsgBody};
 use tokio::sync::mpsc;
@@ -22,6 +30,9 @@ use super::relay_route_link::RelayRouteLink;
 
 /// The first server link id a relay session gets.
 pub const RELAY_LINK_IDS: u32 = 1_000_000;
+
+/// How often the project's facts are compared with what the leg was told.
+const PROJECT_CHECK_EVERY: Duration = Duration::from_secs(1);
 
 /// See the module doc.
 pub struct RelayHostTransport<T> {
@@ -36,6 +47,17 @@ pub struct RelayHostTransport<T> {
     closed: Vec<LinkId>,
     came_up: Vec<LinkId>,
     state: RelayState,
+    /// The hub asked for a picture the loop has not made yet.
+    picture_wanted: bool,
+    /// The picture frame, written in place and kept across pictures.
+    picture: Vec<u8>,
+    /// Lamps per output of the picture being made.
+    lamps: Vec<u32>,
+    /// The project's name and uid as the leg was last told; `None` before
+    /// the first report.
+    project_told: Option<Option<(String, Option<String>)>>,
+    /// When the project's facts were last compared.
+    project_checked: Option<Instant>,
 }
 
 impl<T: ServerTransport> RelayHostTransport<T> {
@@ -58,12 +80,81 @@ impl<T: ServerTransport> RelayHostTransport<T> {
             closed: Vec::new(),
             came_up: Vec::new(),
             state: RelayState::Off,
+            picture_wanted: false,
+            picture: Vec::with_capacity(MAX_BOARD_PICTURE_FRAME),
+            lamps: Vec::with_capacity(MAX_PICTURE_OUTPUTS),
+            project_told: None,
+            project_checked: None,
         }
+    }
+
+    /// The server loop's per-tick hook: each relay session that came up
+    /// its hello first, then the picture the hub asked for (at most one a
+    /// tick), then the project's facts if a second has passed since they
+    /// were last compared.
+    pub fn after_tick(&mut self, server: &LpServer) {
+        self.send_hellos(server);
+        if std::mem::take(&mut self.picture_wanted) {
+            self.send_picture(server);
+        }
+        if self
+            .project_checked
+            .is_none_or(|at| at.elapsed() >= PROJECT_CHECK_EVERY)
+        {
+            self.report_project(server);
+        }
+    }
+
+    /// Tell the leg the server's project now, if it changed since the leg
+    /// was last told (always, the first time). Call it once before the
+    /// server loop starts, so the client holds the facts before its first
+    /// registration; [`Self::after_tick`] keeps them current. Allocates
+    /// only on a change.
+    pub fn report_project(&mut self, server: &LpServer) {
+        self.project_checked = Some(Instant::now());
+        let facts = server.loaded_project_facts();
+        let same = match (&self.project_told, facts) {
+            (Some(None), None) => true,
+            (Some(Some((name, uid))), Some(facts)) => {
+                name == facts.name && uid.as_deref() == facts.uid
+            }
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        let told = facts.map(|facts| (facts.name.to_string(), facts.uid.map(str::to_string)));
+        let report = told.as_ref().map(|(name, uid)| RelayProjectFacts {
+            name: name.clone(),
+            uid: uid.clone(),
+            content_hash: None,
+        });
+        self.project_told = Some(told);
+        let _ = self.commands.send(LegCommand::Project(report));
+    }
+
+    /// Make the picture the hub asked for, in place, and hand it to the
+    /// leg: the first loaded project's outputs, at most sixteen, sampled to
+    /// at most [`DEFAULT_PICTURE_SAMPLES`] colours (the empty picture when
+    /// nothing is loaded).
+    fn send_picture(&mut self, server: &LpServer) {
+        server.output_picture_lamps(MAX_PICTURE_OUTPUTS, &mut self.lamps);
+        let total = self.lamps.iter().map(|&lamps| u64::from(lamps)).sum();
+        let count = picture_sample_count(total, DEFAULT_PICTURE_SAMPLES);
+        if write_picture_header(&mut self.picture, &self.lamps, count).is_err() {
+            // A shape the hub would refuse (a lamp sum past u32): no
+            // picture; the client asks again at its next due time.
+            return;
+        }
+        server.append_output_picture(&self.lamps, u32::from(count), &mut self.picture);
+        let _ = self
+            .commands
+            .send(LegCommand::Picture(self.picture.clone()));
     }
 
     /// Send each relay session that came up since the last call its hello
     /// (the board's first message on every `Up`), built for that link.
-    pub fn send_hellos(&mut self, server: &LpServer) {
+    fn send_hellos(&mut self, server: &LpServer) {
         for id in std::mem::take(&mut self.came_up) {
             let Some(route) = self.routes.values_mut().find(|route| route.owns(id)) else {
                 continue;
@@ -108,6 +199,7 @@ impl<T: ServerTransport> RelayHostTransport<T> {
                     }
                     self.state = state;
                 }
+                LegEvent::TakePicture => self.picture_wanted = true,
             }
         }
         let mut next_id = self.next_id;

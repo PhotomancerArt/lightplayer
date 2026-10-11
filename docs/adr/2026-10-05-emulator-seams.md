@@ -11,6 +11,13 @@
   `2026-10-06-cloud-relay` (the uplink, section 11's 2026-10-07 amendment,
   that lets an emulated C6 dial a relay), `2026-10-01-network-link-security`
 
+> **Amended 2026-10-09** (the one home page): "Studio's Devices page" and
+> "Devices-page boards" below mean **Connect a board → start a board here,
+> on the home page** (`/`); the Devices page is gone
+> ([2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md)).
+> The code is route-independent (`browser_emu_source.rs` asks for the seams
+> whichever page started the board); only the name changed.
+
 ## Context
 
 The ESP32-C6 emulator runs the shipped firmware image, byte for byte, and

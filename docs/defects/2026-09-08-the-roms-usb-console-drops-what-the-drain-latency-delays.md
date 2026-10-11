@@ -1,5 +1,5 @@
 ---
-status: FIXED same day by M5 P3 (PR #595), from the other side
+status: fixed          # same day by M5 P3 (PR #595), from the other side
 found: 2026-09-08      # M7 of the esp-emulator plan, on the ROM-up boot log
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/usb_sj.rs (`IN_DRAIN_LATENCY_US`)
 class: modeled-number-meets-a-new-path
