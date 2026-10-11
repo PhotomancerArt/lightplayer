@@ -3623,7 +3623,20 @@ test-emu-c6-cli-link: install-rv32-target
 # lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts -- --include-ignored --nocapture
+
+# The tree-store cut walk's long form (plan
+# lp2025/2026-10-08-2339-tree-store-firmware-and-emulator, P7): every erase
+# under every erase shape, a larger seeded sample, byte_prefix and
+# random_bits, a c40-class push, and the littlefs control (report-only).
+# Never CI (`test-emu-c6-cli-boards` runs the CI subset). `scenarios` is a
+# comma list (`format,push,push-c40,save,panel,switch`; empty: all);
+# `sectors=128` runs on a fixture table's 128-sector `lpfs` (the control
+# stays at 176 and is skipped there). Emulated, never hardware-validated.
+#   just walk-tree-store-cuts-emu
+#   just walk-tree-store-cuts-emu format 128
+walk-tree-store-cuts-emu scenarios="" sectors="176": install-rv32-target
+    LP_TREE_CUTS=long LP_TREE_CUTS_SCENARIOS={{ scenarios }} LP_TREE_CUTS_SECTORS={{ sectors }} LP_TREE_CUTS_CONTROL={{ if sectors == "176" { "1" } else { "0" } }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_tree_store_cuts -- --include-ignored --nocapture
 
 # The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
 # B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
