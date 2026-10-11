@@ -11,6 +11,35 @@ transports are supplied by the embedding app.
 
 `no_std`, designed for embedding.
 
+## The fs batch (a push is one transaction)
+
+Every fs request is stateless (`file_sync`'s pull-model rule) with one
+exception: a **batch** (`FsRequest::BeginBatch` … `CommitBatch`), the
+server's one piece of fs state between requests (`batch_state.rs`; ADR
+`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`).
+
+- At most one is open, owned by the link that began it. `BeginBatch` answers
+  `atomic` from `LpFs::batches_are_atomic`; on a backend without
+  transactions (littlefs, memory, the host fs) it opens nothing and answers
+  `atomic: false`.
+- While it is open, another link's fs mutations (writes, deletes, batch
+  verbs) are refused ("batch busy"); reads and everything off the fs wire go
+  on. The server's own writes (a project's saves, the startup choice) join
+  the batch.
+- It ends on commit (the only ending that lands it), abort, the owner link
+  closing (`ServerTransport::take_closed_links`) or resetting
+  (`take_reset_links`, which the USB, UART and radio transports report), a
+  second `BeginBatch` from the owner, or 60 s with no request from the owner,
+  counted on the frame clock with handling time excluded (the tick after a
+  long `LoadProject` is not idle time). After the timeout the owner's
+  mutations are refused, naming why, until it begins or aborts again.
+- `WriteChunkDeflated` is stateless: its length is checked first, then
+  `LpFs::write_deflated_chunk` checks the offset, inflates and writes
+  (the tree store keeps the deflated bytes).
+
+Host tests: `tests/batch_state.rs`, `tests/push_boundary.rs` (a real client
+conversation, cut sweeps), `tests/lp_fs_wrapper_conformance.rs`.
+
 ## Access
 
 Every request is classified (`access_gate.rs`) and answered `NotPermitted`

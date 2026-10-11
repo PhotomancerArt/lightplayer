@@ -183,15 +183,33 @@ transport, owned by the layer above (`lpa-link`'s `DeviceSession::reconnect`).
 ## Project Deploy Semantics
 
 Server-protocol project deploys should use this crate rather than open-coding
-request sequences. The shared deploy flow is currently:
+request sequences. Every path that writes a project runs ONE primitive,
+`push_files::deploy_files` (over `LpClient` or `TokioLpClient`, through
+`FileRequestSink`):
 
 1. `StopAllProjects`
-2. write files under `/projects/{project_id}/...`
-3. `LoadProject { path: "projects/{project_id}" }`
+2. `BeginBatch` — the answer's `atomic` says whether the board commits a batch
+   as one (the tree store) or each write by itself (littlefs, memory, host)
+3. optionally `DeleteDir` (a replace rather than a write-over)
+4. write files under `/projects/{project_id}/...`: deflated
+   (`WriteChunkDeflated`, `lp_tree_store::plan_deflated_chunks` for the wire's
+   1,024-byte record hint) where that shrinks a file by a tenth, plain `Write`
+   / `WriteChunk` otherwise and under 64 B
+5. `LoadProject { path: "projects/{project_id}" }`
+6. on an atomic board, `CommitBatch` — after the load, so the board commits
+   only a project it loaded. Any error after the begin sends `AbortBatch`.
 
-That ordering avoids the ESP32 trying to run multiple loaded projects during a
+Stopping first avoids the ESP32 trying to run multiple loaded projects during a
 replace-in-place upload. Direct bootloader/raw filesystem image access is not a
 server-protocol deploy; it belongs below this layer in `lpa-link` management.
+
+Studio's device push (`push_project`) asks the same `BeginBatch` and runs one
+of two conversations: `device_push_one_slot` (atomic: the project replaced in
+its own folder, hash-checked, then committed; any failure aborts and reloads
+the old project) or `device_push_two_slot` (not atomic: today's `demo` ↔
+`demo-b` push, deleted once every board runs the tree store). See
+`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`.
+`device_stamp`'s journaled `/hardware.json` writes stay raw `WriteChunk`s.
 
 Use `deploy_project_files` for initial upload/load flows such as CLI upload,
 CLI dev startup, firmware demo checks, and browser hardware demo loading. Use

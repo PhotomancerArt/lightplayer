@@ -7,6 +7,16 @@
 //!
 //! All paths handled by these types are absolute paths relative to a project
 //! root; see [`LpFs`] for the path contract.
+//!
+//! Beyond files, the trait carries a **batch** (`begin_batch` …
+//! `commit_batch`/`abort_batch`, real only where `batches_are_atomic` is
+//! `true` — the tree store) and a **deflated chunk write**
+//! (`write_deflated_chunk`, whose default inflates and writes plain bytes):
+//! the two halves of a wire push
+//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`). A
+//! *wrapper* (`LpFsView`, a server's `AccessGuardedFs`) must forward every
+//! method, defaulted ones included — the defaults are a backend's answers —
+//! and carries `#[deny(clippy::missing_trait_methods)]` to keep it so.
 
 #![no_std]
 extern crate alloc;
@@ -27,7 +37,7 @@ pub use error::FsError;
 pub use fs_event::{ChangeType, FsChange};
 pub use fs_event::{FsEvent, FsEventKind, FsVersion};
 pub use impls::lp_fs_mem::LpFsMemory;
-pub use lp_fs::LpFs;
+pub use lp_fs::{LpFs, MAX_DEFLATED_CHUNK_LOGICAL};
 pub use lp_fs_view::LpFsView;
 
 #[cfg(feature = "std")]

@@ -14,6 +14,7 @@ pub mod access_gate;
 pub mod access_guarded_fs;
 pub mod access_state;
 pub mod access_store;
+pub mod batch_state;
 pub mod device_identity;
 pub mod error;
 pub mod file_sync;

@@ -1,6 +1,6 @@
 //! The push conversation, in one runtime-neutral place.
 //!
-//! Studio has had these three steps since the sim shipped — they are what
+//! Studio has had these steps since the sim shipped — they are what
 //! `StudioServerClient::open_library_project` does — but they lived above a
 //! `StudioServerClient`, which owns a session, a log sink and a pull loop.
 //! A device push has none of those: it runs inside a coarse effect that
@@ -11,9 +11,11 @@
 //!
 //! ```text
 //! 1. ListLoadedProjects  → which storage dir does this board run from?
-//! 2. StopAll → clear → chunked writes → LoadProject   (project_deploy's
-//!    order, file_sync_ops' chunking — unchanged, on purpose)
-//! 3. HashPackage         → does the board hold exactly the library's bytes?
+//! 2. StopAll → BeginBatch → does this board's filesystem have batches?
+//! 3. atomic:     one slot  (crate::device_push_one_slot)
+//!    not atomic: two slots (crate::device_push_two_slot, delete at adoption)
+//!    both: clear → writes (deflated where that shrinks them) → LoadProject
+//!          → HashPackage, through the shared primitive (crate::push_files)
 //! ```
 //!
 //! Step 1 is why the push is not simply "write to `demo`": a board flashed
@@ -24,28 +26,21 @@
 //! one that refused its saved project still holds it, and that is the dir
 //! the push replaces.
 //!
-//! Step 2 never writes over the dir the board runs from. It writes the
-//! OTHER slot ([`other_slot`]: `demo` ↔ `demo-b`) and removes the old dir
-//! only once the new one has loaded and hashed. A board that refuses the new
-//! project (format, parse, heap, a recovery gate) is told to load the old
-//! dir again, which is still whole — and which `startup_project` still
-//! names, since the server persists that only on a load that succeeded. A
-//! refused push used to leave the board dark over a folder it had refused.
+//! Step 2 asks the board, not a build fact: the `BeginBatch` answer's
+//! `atomic` is what the filesystem under this request does
+//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`). A board
+//! with batches replaces the project in its own folder and commits after the
+//! load and the hash; any failure aborts, and the old project is whole. A
+//! board without them opens nothing and gets the two-slot push.
 //!
-//! Two copies need room for two copies. When the board runs out of space
-//! writing the second one, the push removes the partial new slot and the old
-//! one and writes again into the old folder's own name: the old project is
-//! gone either way, and a power cut mid-way leaves `startup_project` naming a
-//! folder the next push replaces normally. A project that still does not fit
-//! alone ends in an error that says the old copy went.
-//!
-//! Step 3 is not optional. A serial wire drops bytes; a truncated write that
-//! loaded anyway would leave a board running something no library has, and
-//! the next sync verdict would be computed against a lie.
+//! The hash is not optional. A serial wire drops bytes; a truncated write
+//! that loaded anyway would leave a board running something no library has,
+//! and the next sync verdict would be computed against a lie.
 
 use crate::client::LpClient;
 use crate::client_error::{ClientError, ClientResult};
 use crate::client_io::ClientIo;
+use crate::push_files::{LpClientSink, abort_batch, begin_batch};
 
 /// What a finished push did.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -88,105 +83,53 @@ pub async fn push_project<Io: ClientIo>(
         Some(running) => Some(running.clone()),
         None => saved_startup_project(client).await,
     };
-    let storage_id = match &previous {
-        Some(running) => other_slot(running),
-        None => fallback_storage_id.to_string(),
+
+    // Stopped before the batch opens, so nothing the running project saves
+    // on its way out joins it.
+    client.stop_all_projects().await?;
+    let atomic = match begin_batch(&mut LpClientSink::new(client)).await {
+        Ok(atomic) => atomic,
+        Err(error) => {
+            // The begin may have reached the board even if its answer did
+            // not: drop whatever it opened.
+            let _ = abort_batch(&mut LpClientSink::new(client)).await;
+            return Err(error);
+        }
     };
-
-    progress(format!("Sending the project to {storage_id}"), Some(20));
-    let landed = write_and_verify(client, &storage_id, files, expected_hash, progress).await;
-
-    match (landed, previous) {
-        (Ok(hash), previous) => {
-            if let Some(old) = previous.filter(|old| *old != storage_id) {
-                // Best-effort: the new project runs and is verified. A dir
-                // that survives this is the next push's target slot, which
-                // that push clears first.
-                let _ = client.delete_project_dir(&old).await;
-            }
-            progress("Done".to_string(), Some(100));
-            Ok(PushReport { storage_id, hash })
+    match atomic {
+        true => {
+            crate::device_push_one_slot::push_one_slot(
+                client,
+                files,
+                expected_hash,
+                fallback_storage_id,
+                running,
+                previous,
+                progress,
+            )
+            .await
         }
-        (Err(error), Some(old)) if old != storage_id && running.is_none() => {
-            // The board ran nothing before and runs nothing now. Its saved
-            // folder was never touched and `startup_project` still names it
-            // (the server persists only a load that succeeded), so there is
-            // nothing to restore: drop what it refused and say what is left.
-            let _ = client.delete_project_dir(&storage_id).await;
-            Err(with_note(
-                error,
-                &format!(
-                    "the board is still running nothing; its saved project ({old}) \
-                     is untouched and is what it tries at the next boot"
-                ),
-            ))
+        false => {
+            crate::device_push_two_slot::push_two_slot(
+                client,
+                files,
+                expected_hash,
+                fallback_storage_id,
+                running,
+                previous,
+                progress,
+            )
+            .await
         }
-        (Err(error), Some(old)) if old != storage_id && is_no_space(&error) => {
-            // The board cannot hold two copies. Everything is already
-            // stopped (`replace_and_load_project` stops first), so the old
-            // copy can go: drop the partial new slot, then the old one, and
-            // write again into the OLD folder's own name. A power cut mid-way
-            // then leaves `startup_project` naming a folder the next push
-            // replaces normally — a retry into the other slot would orphan a
-            // partial folder for good.
-            progress(
-                format!("This board can't hold two copies — removing {old} to make room"),
-                Some(40),
-            );
-            let cleared = match client.delete_project_dir(&storage_id).await {
-                Ok(_) => client.delete_project_dir(&old).await.map(|_| ()),
-                Err(error) => Err(error),
-            };
-            if cleared.is_err() {
-                // The old folder is not provably gone: restore it as usual.
-                return Err(restore_previous(client, error, &old, &storage_id, progress).await);
-            }
-            progress(format!("Sending the project to {old}"), Some(50));
-            match write_and_verify(client, &old, files, expected_hash, progress).await {
-                Ok(hash) => {
-                    progress("Done".to_string(), Some(100));
-                    Ok(PushReport {
-                        storage_id: old,
-                        hash,
-                    })
-                }
-                Err(error) => {
-                    let _ = client.delete_project_dir(&old).await;
-                    Err(match is_no_space(&error) {
-                        true => ClientError::Server(format!(
-                            "this board can't hold two copies of the project, so the old copy \
-                             ({old}) was removed to make room — and the project still doesn't \
-                             fit on the board"
-                        )),
-                        false => with_note(
-                            error,
-                            &format!(
-                                "the previous project ({old}) was removed to make room, so \
-                                 the board is running nothing"
-                            ),
-                        ),
-                    })
-                }
-            }
-        }
-        (Err(error), Some(old)) if old != storage_id => {
-            Err(restore_previous(client, error, &old, &storage_id, progress).await)
-        }
-        (Err(error), _) => Err(error),
     }
 }
 
-/// Write `files` into `storage_id`, load it, and check the board holds
-/// exactly the library's bytes.
-async fn write_and_verify<Io: ClientIo>(
+/// Check the board holds exactly the library's bytes in `storage_id`.
+pub(crate) async fn verify_hash<Io: ClientIo>(
     client: &mut LpClient<Io>,
     storage_id: &str,
-    files: &[(String, Vec<u8>)],
     expected_hash: &str,
-    progress: PushProgress<'_>,
 ) -> ClientResult<String> {
-    client.replace_and_load_project(storage_id, files).await?;
-    progress("Checking what the board received".to_string(), Some(85));
     let outcome = client.hash_package(storage_id).await?;
     match outcome.value == expected_hash {
         true => Ok(outcome.value),
@@ -201,35 +144,11 @@ async fn write_and_verify<Io: ClientIo>(
     }
 }
 
-/// The old dir was never touched: put it back on, then drop what the board
-/// refused. The error is the refusal, with what became of the board appended
-/// — the card must not guess.
-async fn restore_previous<Io: ClientIo>(
-    client: &mut LpClient<Io>,
-    error: ClientError,
-    old: &str,
-    storage_id: &str,
-    progress: PushProgress<'_>,
-) -> ClientError {
-    progress(
-        match is_no_space(&error) {
-            true => "The board is out of room for a second copy; restoring what it ran",
-            false => "The board refused it; restoring what it ran",
-        }
-        .to_string(),
-        Some(90),
-    );
-    let restored = client
-        .project_load(&crate::project_deploy::project_load_path(old))
-        .await;
-    let _ = client.delete_project_dir(storage_id).await;
-    with_restore_note(error, old, restored.is_ok())
-}
-
 /// Whether the board said its flash is full. Matched on the error text, the
 /// way [`LpClient::delete_project_dir`] matches a missing dir: fs errors
-/// cross the wire as display strings.
-fn is_no_space(error: &ClientError) -> bool {
+/// cross the wire as display strings (littlefs's words, which the tree
+/// store's adapter uses too).
+pub(crate) fn is_no_space(error: &ClientError) -> bool {
     match error {
         ClientError::Server(message) | ClientError::Protocol(message) => {
             message.contains("no space left on device")
@@ -238,20 +157,7 @@ fn is_no_space(error: &ClientError) -> bool {
     }
 }
 
-/// The dir a push writes when the board runs from `running`: never the one
-/// it runs from, so a refusal leaves that one whole. Two slots alternate
-/// (`demo` ↔ `demo-b`), so a board never holds more than two copies and the
-/// dir name stays recognisable.
-pub(crate) fn other_slot(running: &str) -> String {
-    match running.strip_suffix(SLOT_B_SUFFIX) {
-        Some(base) if !base.is_empty() => base.to_string(),
-        _ => format!("{running}{SLOT_B_SUFFIX}"),
-    }
-}
-
-const SLOT_B_SUFFIX: &str = "-b";
-
-fn with_restore_note(error: ClientError, old: &str, restored: bool) -> ClientError {
+pub(crate) fn with_restore_note(error: ClientError, old: &str, restored: bool) -> ClientError {
     let note = match restored {
         true => format!("the board is running its previous project ({old}) again"),
         false => format!(
@@ -262,7 +168,7 @@ fn with_restore_note(error: ClientError, old: &str, restored: bool) -> ClientErr
     with_note(error, &note)
 }
 
-fn with_note(error: ClientError, note: &str) -> ClientError {
+pub(crate) fn with_note(error: ClientError, note: &str) -> ClientError {
     match error {
         ClientError::Server(message) => ClientError::Server(format!("{message} — {note}")),
         ClientError::Protocol(message) => ClientError::Protocol(format!("{message} — {note}")),
@@ -318,222 +224,23 @@ pub(crate) fn storage_id_of(path: &str) -> Option<String> {
     (!id.is_empty()).then(|| id.to_string())
 }
 
+/// The scripted board both conversations' tests talk to.
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_script {
+    use lpc_model::AsLpPathBuf;
+    use lpc_wire::{BatchOp, WireServerMessage, WireServerMsgBody};
 
-    use lpc_wire::{WireServerMessage, WireServerMsgBody};
+    pub(crate) const HASH: &str = "abc123";
+    pub(crate) const NO_SPACE: &str = "no space left on device";
 
-    use crate::scripted_io::ScriptedIo;
-
-    #[test]
-    fn a_reported_path_names_the_storage_dir_a_push_replaces() {
-        assert_eq!(storage_id_of("/projects/demo").as_deref(), Some("demo"));
-        assert_eq!(storage_id_of("projects/demo/").as_deref(), Some("demo"));
-        assert_eq!(
-            storage_id_of("/projects/2026-08-30-porch/sub").as_deref(),
-            Some("2026-08-30-porch")
-        );
-        // Not a project dir: a push must not replace it.
-        assert_eq!(storage_id_of("/somewhere/else"), None);
-        assert_eq!(storage_id_of("/projects/"), None);
-    }
-
-    #[test]
-    fn a_push_writes_the_slot_the_board_does_not_run_from() {
-        assert_eq!(other_slot("demo"), "demo-b");
-        assert_eq!(other_slot("demo-b"), "demo");
-        assert_eq!(other_slot("2026-08-30-porch"), "2026-08-30-porch-b");
-        // A dir literally named "-b" has no base; it alternates with "-b-b".
-        assert_eq!(other_slot("-b"), "-b-b");
-    }
-
-    /// (a) Room for two copies: the push is the two-slot push it always was —
-    /// new slot written and verified, then the old one removed.
-    #[tokio::test]
-    async fn a_push_with_room_writes_the_other_slot_then_removes_the_old_one() {
-        let io = ScriptedIo::new([
-            loaded(1, "demo"),
-            stopped(2),
-            deleted(3),
-            written(4, None),
-            written(5, None),
-            loaded_ok(6),
-            hashed(7, HASH),
-            deleted(8),
-        ]);
-        let mut client = LpClient::new(io);
-        let mut noted: Vec<String> = Vec::new();
-        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
-
-        let report = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
-            .await
-            .expect("pushed");
-
-        assert_eq!(report.storage_id, "demo-b");
-        assert_eq!(
-            ops(&client.into_io().sent),
-            [
-                "list-loaded",
-                "stop",
-                "delete demo-b",
-                "write /projects/demo-b/project.json",
-                "write /projects/demo-b/main.glsl",
-                "load projects/demo-b",
-                "hash /projects/demo-b",
-                "delete demo",
-            ]
-        );
-        assert!(!noted.iter().any(|label| label.contains("two copies")));
-    }
-
-    /// (b) The board runs out of room for the second copy: the partial new
-    /// slot and the old one go, and the project is written again into the OLD
-    /// folder's own name — so a power cut mid-way leaves `startup_project`
-    /// naming a folder the next push replaces normally.
-    #[tokio::test]
-    async fn no_room_for_two_copies_replaces_the_old_slot_in_place() {
-        let io = ScriptedIo::new([
-            loaded(1, "demo"),
-            stopped(2),
-            deleted(3),
-            written(4, None),
-            written(5, Some(NO_SPACE)),
-            // The wipe: partial new slot, then the old one.
-            deleted(6),
-            deleted(7),
-            // The rewrite, into `demo`.
-            stopped(8),
-            deleted(9),
-            written(10, None),
-            written(11, None),
-            loaded_ok(12),
-            hashed(13, HASH),
-        ]);
-        let mut client = LpClient::new(io);
-        let mut noted: Vec<String> = Vec::new();
-        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
-
-        let report = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
-            .await
-            .expect("pushed in place");
-
-        assert_eq!(report.storage_id, "demo", "the old folder's own name");
-        assert_eq!(report.hash, HASH);
-        assert_eq!(
-            ops(&client.into_io().sent),
-            [
-                "list-loaded",
-                "stop",
-                "delete demo-b",
-                "write /projects/demo-b/project.json",
-                "write /projects/demo-b/main.glsl",
-                "delete demo-b",
-                "delete demo",
-                "stop",
-                "delete demo",
-                "write /projects/demo/project.json",
-                "write /projects/demo/main.glsl",
-                "load projects/demo",
-                "hash /projects/demo",
-            ]
-        );
-        assert!(
-            noted
-                .iter()
-                .any(|label| label.contains("can't hold two copies") && label.contains("demo")),
-            "the card says why the old copy is going: {noted:?}"
-        );
-    }
-
-    /// (c) Too big even alone: the old copy is gone, and the error says so in
-    /// plain words instead of "the board refused it".
-    #[tokio::test]
-    async fn a_project_too_big_even_alone_says_the_old_copy_was_removed() {
-        let io = ScriptedIo::new([
-            loaded(1, "demo"),
-            stopped(2),
-            deleted(3),
-            written(4, Some(NO_SPACE)),
-            deleted(5),
-            deleted(6),
-            stopped(7),
-            deleted(8),
-            written(9, Some(NO_SPACE)),
-            // Best-effort cleanup of the partial rewrite.
-            deleted(10),
-        ]);
-        let mut client = LpClient::new(io);
-        let mut noted: Vec<String> = Vec::new();
-        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
-
-        let error = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
-            .await
-            .expect_err("does not fit");
-
-        let message = error.to_string();
-        assert!(message.contains("demo"), "{message}");
-        assert!(message.contains("removed to make room"), "{message}");
-        assert!(message.contains("still doesn't fit"), "{message}");
-        assert!(!message.contains("refused"), "{message}");
-        assert!(
-            !noted.iter().any(|label| label.contains("restoring")),
-            "there is nothing to restore: {noted:?}"
-        );
-    }
-
-    /// (d) Any other failure keeps today's path: the old folder was never
-    /// touched, so it is loaded again and the refused slot dropped.
-    #[tokio::test]
-    async fn a_failure_that_is_not_about_space_restores_the_previous_project() {
-        let io = ScriptedIo::new([
-            loaded(1, "demo"),
-            stopped(2),
-            deleted(3),
-            written(4, Some("corrupt block")),
-            loaded_ok(5),
-            deleted(6),
-        ]);
-        let mut client = LpClient::new(io);
-        let mut noted: Vec<String> = Vec::new();
-        let mut progress = |label: String, _percent: Option<u8>| noted.push(label);
-
-        let error = push_project(&mut client, &files(), HASH, "fallback", &mut progress)
-            .await
-            .expect_err("refused");
-
-        assert!(
-            error
-                .to_string()
-                .contains("the board is running its previous project (demo) again"),
-            "{error}"
-        );
-        assert_eq!(
-            ops(&client.into_io().sent),
-            [
-                "list-loaded",
-                "stop",
-                "delete demo-b",
-                "write /projects/demo-b/project.json",
-                "load projects/demo",
-                "delete demo-b",
-            ]
-        );
-        assert!(noted.iter().any(|label| label.contains("refused it")));
-    }
-
-    const HASH: &str = "abc123";
-    const NO_SPACE: &str = "no space left on device";
-
-    fn files() -> Vec<(String, Vec<u8>)> {
+    pub(crate) fn files() -> Vec<(String, Vec<u8>)> {
         vec![
             ("project.json".to_string(), b"{}".to_vec()),
             ("main.glsl".to_string(), b"void main() {}".to_vec()),
         ]
     }
 
-    fn loaded(id: u64, dir: &str) -> WireServerMessage {
-        use lpc_model::AsLpPathBuf;
+    pub(crate) fn loaded(id: u64, dir: &str) -> WireServerMessage {
         let project = lpc_wire::LoadedProject::new(
             lpc_wire::WireProjectHandle(1),
             format!("/projects/{dir}").as_path_buf(),
@@ -546,12 +253,42 @@ mod tests {
         )
     }
 
-    fn stopped(id: u64) -> WireServerMessage {
+    pub(crate) fn nothing_loaded(id: u64) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ListLoadedProjects {
+                projects: Vec::new(),
+            },
+        )
+    }
+
+    pub(crate) fn read_missing(id: u64) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Read {
+                path: "/lightplayer.json".as_path_buf(),
+                data: None,
+                error: Some("File not found: /lightplayer.json".to_string()),
+            }),
+        )
+    }
+
+    pub(crate) fn stopped(id: u64) -> WireServerMessage {
         WireServerMessage::new(id, WireServerMsgBody::StopAllProjects)
     }
 
-    fn deleted(id: u64) -> WireServerMessage {
-        use lpc_model::AsLpPathBuf;
+    pub(crate) fn batch(id: u64, op: BatchOp, atomic: bool) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Batch {
+                op,
+                atomic,
+                error: None,
+            }),
+        )
+    }
+
+    pub(crate) fn deleted(id: u64) -> WireServerMessage {
         WireServerMessage::new(
             id,
             WireServerMsgBody::Filesystem(lpc_wire::FsResponse::DeleteDir {
@@ -561,8 +298,7 @@ mod tests {
         )
     }
 
-    fn written(id: u64, error: Option<&str>) -> WireServerMessage {
-        use lpc_model::AsLpPathBuf;
+    pub(crate) fn written(id: u64, error: Option<&str>) -> WireServerMessage {
         WireServerMessage::new(
             id,
             WireServerMsgBody::Filesystem(lpc_wire::FsResponse::Write {
@@ -572,7 +308,7 @@ mod tests {
         )
     }
 
-    fn loaded_ok(id: u64) -> WireServerMessage {
+    pub(crate) fn loaded_ok(id: u64) -> WireServerMessage {
         WireServerMessage::new(
             id,
             WireServerMsgBody::LoadProject {
@@ -581,8 +317,16 @@ mod tests {
         )
     }
 
-    fn hashed(id: u64, hash: &str) -> WireServerMessage {
-        use lpc_model::AsLpPathBuf;
+    pub(crate) fn server_error(id: u64, error: &str) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Error {
+                error: error.to_string(),
+            },
+        )
+    }
+
+    pub(crate) fn hashed(id: u64, hash: &str) -> WireServerMessage {
         WireServerMessage::new(
             id,
             WireServerMsgBody::Filesystem(lpc_wire::FsResponse::PackageHash {
@@ -594,24 +338,53 @@ mod tests {
     }
 
     /// What the conversation asked, one word-and-target per request.
-    fn ops(sent: &[lpc_wire::ClientMessage]) -> Vec<String> {
+    pub(crate) fn ops(sent: &[lpc_wire::ClientMessage]) -> Vec<String> {
         use lpc_wire::{ClientRequest, FsRequest};
         sent.iter()
             .map(|message| match &message.msg {
                 ClientRequest::ListLoadedProjects => "list-loaded".to_string(),
                 ClientRequest::StopAllProjects => "stop".to_string(),
+                ClientRequest::Filesystem(FsRequest::BeginBatch) => "begin".to_string(),
+                ClientRequest::Filesystem(FsRequest::CommitBatch) => "commit".to_string(),
+                ClientRequest::Filesystem(FsRequest::AbortBatch) => "abort".to_string(),
                 ClientRequest::Filesystem(FsRequest::DeleteDir { path }) => {
                     format!("delete {}", path.as_str().trim_start_matches("/projects/"))
                 }
                 ClientRequest::Filesystem(FsRequest::Write { path, .. }) => {
                     format!("write {}", path.as_str())
                 }
+                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated {
+                    path, offset, ..
+                }) => {
+                    format!("deflated {} @{offset}", path.as_str())
+                }
                 ClientRequest::Filesystem(FsRequest::HashPackage { prefix }) => {
                     format!("hash {}", prefix.as_str())
+                }
+                ClientRequest::Filesystem(FsRequest::Read { path }) => {
+                    format!("read {}", path.as_str())
                 }
                 ClientRequest::LoadProject { path } => format!("load {path}"),
                 other => format!("{other:?}"),
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reported_path_names_the_storage_dir_a_push_replaces() {
+        assert_eq!(storage_id_of("/projects/demo").as_deref(), Some("demo"));
+        assert_eq!(storage_id_of("projects/demo/").as_deref(), Some("demo"));
+        assert_eq!(
+            storage_id_of("/projects/2026-08-30-porch/sub").as_deref(),
+            Some("2026-08-30-porch")
+        );
+        // Not a project dir: a push must not replace it.
+        assert_eq!(storage_id_of("/somewhere/else"), None);
+        assert_eq!(storage_id_of("/projects/"), None);
     }
 }

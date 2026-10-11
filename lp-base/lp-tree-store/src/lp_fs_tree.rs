@@ -4,7 +4,10 @@
 //! says), the change log follows the littlefs adapter (RAM only, latest
 //! change per path), and `chroot` is `LpFsView` over a handle sharing this
 //! one's store and change log. The batch methods are the store's
-//! transaction.
+//! transaction (`batches_are_atomic` is `true`), and an aborted batch puts
+//! the change log back as it was when the batch began. A deflated wire chunk
+//! (`write_deflated_chunk`) goes to `TreeStore::put_chunk_deflated`, which
+//! keeps the deflated bytes.
 
 use alloc::format;
 use alloc::rc::Rc;
@@ -30,6 +33,10 @@ struct Inner<F: Flash, H: ObjectHasher> {
     store: TreeStore<F, H>,
     version: FsVersion,
     changes: Vec<(LpPathBuf, FsVersion, FsEventKind)>,
+    /// The change log as it stood when the open batch began: an abort puts
+    /// it back, so a pull after an aborted push is not told of writes (or
+    /// deletes) that never landed. `None` outside a batch.
+    changes_before_batch: Option<Vec<(LpPathBuf, FsVersion, FsEventKind)>>,
 }
 
 impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
@@ -39,7 +46,16 @@ impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
                 store,
                 version: FsVersion::default(),
                 changes: Vec::new(),
+                changes_before_batch: None,
             })),
+        }
+    }
+
+    /// Another handle on the same store and change log — for an embedder
+    /// (or a test) that keeps one beside the one it gave the server.
+    pub fn handle(&self) -> Self {
+        Self {
+            inner: Rc::clone(&self.inner),
         }
     }
 
@@ -94,7 +110,13 @@ fn norm(path: &LpPath) -> Result<String, FsError> {
 }
 
 fn store_err<E: Debug>(e: StoreError<E>) -> FsError {
-    FsError::Filesystem(format!("tree store: {e:?}"))
+    match e {
+        // littlefs's words: a pushing client matches them to make room.
+        StoreError::NoSpace => {
+            FsError::Filesystem(String::from("tree store: no space left on device"))
+        }
+        e => FsError::Filesystem(format!("tree store: {e:?}")),
+    }
 }
 
 fn not_found(p: &str) -> FsError {
@@ -275,15 +297,66 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
     }
 
     fn begin_batch(&self) -> Result<(), FsError> {
-        self.inner.borrow_mut().store.begin().map_err(store_err)
+        let mut i = self.inner.borrow_mut();
+        i.store.begin().map_err(store_err)?;
+        i.changes_before_batch = Some(i.changes.clone());
+        Ok(())
     }
 
     fn commit_batch(&self) -> Result<(), FsError> {
-        self.inner.borrow_mut().store.commit().map_err(store_err)
+        let mut i = self.inner.borrow_mut();
+        i.store.commit().map_err(store_err)?;
+        i.changes_before_batch = None;
+        Ok(())
     }
 
+    /// The store drops the batch, and the change log goes back to what it
+    /// was when the batch began. The version counter does not go back: a
+    /// version once handed out is never handed out again.
     fn abort_batch(&self) -> Result<(), FsError> {
-        self.inner.borrow_mut().store.abort().map_err(store_err)
+        let mut i = self.inner.borrow_mut();
+        i.store.abort().map_err(store_err)?;
+        if let Some(before) = i.changes_before_batch.take() {
+            i.changes = before;
+        }
+        Ok(())
+    }
+
+    fn batches_are_atomic(&self) -> bool {
+        true
+    }
+
+    /// The store's own deflated write (`TreeStore::put_chunk_deflated`): it
+    /// checks the length and offset, inflates to verify, and keeps the
+    /// deflated bytes when they fit a record (plain bytes otherwise, same
+    /// id). Nothing is written on a mismatch.
+    fn write_deflated_chunk(
+        &self,
+        path: &LpPath,
+        offset: u32,
+        logical_len: u32,
+        deflated: &[u8],
+    ) -> Result<(), FsError> {
+        let p = norm(path)?;
+        if p == "/" {
+            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
+        }
+        let existed = {
+            let st = &mut self.inner.borrow_mut().store;
+            let existed = st.exists(&p).map_err(store_err)?;
+            st.put_chunk_deflated(&p, offset, logical_len, None, deflated)
+                .map_err(store_err)?;
+            existed
+        };
+        self.record(
+            &p,
+            if existed {
+                FsEventKind::Modify
+            } else {
+                FsEventKind::Create
+            },
+        );
+        Ok(())
     }
 
     fn current_version(&self) -> FsVersion {

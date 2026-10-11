@@ -23,6 +23,8 @@ macro_rules! stat {
 }
 
 mod blob_codec;
+#[cfg(feature = "deflate-plan")]
+mod deflate_plan;
 mod dir_node;
 mod dir_rebuild;
 mod flash;
@@ -80,6 +82,8 @@ mod test_support;
 mod txn_tests;
 
 pub use blob_codec::MAX_LOGICAL_CHUNK;
+#[cfg(feature = "deflate-plan")]
+pub use deflate_plan::{DEFAULT_DEFLATE_LEVEL, PlannedChunk, plan_deflated_chunks};
 pub use flash::Flash;
 #[cfg(feature = "host-deflate")]
 pub use host_deflate::{HostChunk, host_deflate_chunks};

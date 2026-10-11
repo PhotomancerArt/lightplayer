@@ -24,16 +24,14 @@ use crate::client_io::ClientIo;
 use crate::client_observer::{
     ClientObservation, RequestOutcome, observe, observe_frame, request_kind,
 };
-use crate::project_deploy::{
-    ProjectDeployFile, project_deploy_requests, project_write_requests,
-    validate_project_deploy_response,
-};
+use crate::project_deploy::ProjectDeployFile;
 use crate::protocol_session::{
     PendingAsk, ProtocolSession, ResponseDisposition, next_borrowed_wire_request_id_base,
 };
 use crate::pull_loop::{
     CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
 };
+use crate::push_files::{BatchUse, DeployOutcome, DeployPlan, LpClientSink, deploy_files};
 
 /// Result value plus protocol events observed while waiting for it.
 #[derive(Debug)]
@@ -936,35 +934,79 @@ where
         }
     }
 
+    /// Write `files` into the project, over what is there, in one batch on
+    /// a board that has them, deflated where that shrinks them
+    /// ([`crate::push_files`]). No stop, no load.
     pub async fn push_project_files(
         &mut self,
         project_id: &str,
         files: impl IntoIterator<Item = ProjectDeployFile>,
     ) -> ClientResult<ClientOutcome<()>> {
-        let mut events = Vec::new();
-        for request in project_write_requests(project_id, files) {
-            let outcome = self.send_request(request.clone()).await?;
-            events.extend(outcome.events);
-            validate_project_deploy_response(&request, &outcome.value.msg)?;
-        }
-        Ok(ClientOutcome::new((), events))
+        let plan = DeployPlan {
+            stop: false,
+            batch: BatchUse::Begin,
+            clear: false,
+            deflate: true,
+            load: false,
+            expected_hash: None,
+        };
+        self.deploy(project_id, files, plan, &mut |_| {})
+            .await
+            .map(|outcome| outcome.map(drop))
     }
 
+    /// Stop what runs, write `files` over the project, and load it — in one
+    /// batch on a board that has them (committed after the load), deflated
+    /// where that shrinks them ([`crate::push_files`]). `lp-cli upload` and
+    /// `dev`, the docs and preview hosts.
     pub async fn deploy_project_files(
         &mut self,
         project_id: &str,
         files: impl IntoIterator<Item = ProjectDeployFile>,
     ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
-        let mut events = Vec::new();
-        let mut handle = None;
-        for request in project_deploy_requests(project_id, files) {
-            let outcome = self.send_request(request.clone()).await?;
-            events.extend(outcome.events);
-            handle = validate_project_deploy_response(&request, &outcome.value.msg)?.or(handle);
-        }
-        handle
+        let plan = DeployPlan {
+            stop: true,
+            batch: BatchUse::Begin,
+            clear: false,
+            deflate: true,
+            load: true,
+            expected_hash: None,
+        };
+        let outcome = self.deploy(project_id, files, plan, &mut |_| {}).await?;
+        let events = outcome.events;
+        outcome
+            .value
+            .handle
             .map(|handle| ClientOutcome::new(handle, events))
             .ok_or_else(|| ClientError::Protocol("project deploy did not load project".into()))
+    }
+
+    /// [`crate::push_files::deploy_files`] over this client.
+    pub async fn deploy(
+        &mut self,
+        project_id: &str,
+        files: impl IntoIterator<Item = ProjectDeployFile>,
+        plan: DeployPlan<'_>,
+        on_step: &mut dyn FnMut(DeployStep),
+    ) -> ClientResult<ClientOutcome<DeployOutcome>> {
+        let files: Vec<(String, Vec<u8>)> = files
+            .into_iter()
+            .map(|file| (file.relative_path().to_string(), file.bytes().to_vec()))
+            .collect();
+        self.deploy_slice(project_id, &files, plan, on_step).await
+    }
+
+    /// [`Self::deploy`] over files already in memory.
+    pub async fn deploy_slice(
+        &mut self,
+        project_id: &str,
+        files: &[(String, Vec<u8>)],
+        plan: DeployPlan<'_>,
+        on_step: &mut dyn FnMut(DeployStep),
+    ) -> ClientResult<ClientOutcome<DeployOutcome>> {
+        let mut sink = LpClientSink::new(self);
+        let value = deploy_files(&mut sink, project_id, files, plan, on_step).await?;
+        Ok(ClientOutcome::new(value, sink.events))
     }
 
     /// Pull the files changed under a project since an fs revision
@@ -997,18 +1039,23 @@ where
     /// Whole-project replace: clear the project directory, then push files
     /// (load-as-push, device push). An absent directory is tolerated —
     /// replacing nothing is a plain push. Verification is the caller's
-    /// `hash_package` call.
+    /// `hash_package` call. One batch on a board that has them.
     pub async fn replace_project_files(
         &mut self,
         project_id: &str,
         files: impl IntoIterator<Item = ProjectDeployFile>,
     ) -> ClientResult<ClientOutcome<()>> {
-        let mut events = Vec::new();
-        let cleared = self.delete_project_dir(project_id).await?;
-        events.extend(cleared.events);
-        let push = self.push_project_files(project_id, files).await?;
-        events.extend(push.events);
-        Ok(ClientOutcome::new((), events))
+        let plan = DeployPlan {
+            stop: false,
+            batch: BatchUse::Begin,
+            clear: true,
+            deflate: true,
+            load: false,
+            expected_hash: None,
+        };
+        self.deploy(project_id, files, plan, &mut |_| {})
+            .await
+            .map(|outcome| outcome.map(drop))
     }
 
     /// Delete a project directory outright.
@@ -1068,52 +1115,23 @@ where
         files: &[(String, Vec<u8>)],
         on_step: &mut dyn FnMut(DeployStep),
     ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
-        let mut events = Vec::new();
-        on_step(DeployStep::Clearing);
-        let stop = self.send_request(ClientRequest::StopAllProjects).await?;
-        events.extend(stop.events);
-        validate_project_deploy_response(&ClientRequest::StopAllProjects, &stop.value.msg)?;
-        let cleared = self.delete_project_dir(project_id).await?;
-        events.extend(cleared.events);
-
-        let total_bytes: u64 = files.iter().map(|(_, bytes)| bytes.len() as u64).sum();
-        let mut sent_bytes = 0u64;
-        on_step(DeployStep::Writing {
-            sent_bytes,
-            total_bytes,
-        });
-        let writes = project_write_requests(
-            project_id,
-            files
-                .iter()
-                .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone())),
-        );
-        for request in writes {
-            let written = match &request {
-                ClientRequest::Filesystem(
-                    FsRequest::Write { data, .. } | FsRequest::WriteChunk { data, .. },
-                ) => data.len() as u64,
-                _ => 0,
-            };
-            let outcome = self.send_request(request.clone()).await?;
-            events.extend(outcome.events);
-            validate_project_deploy_response(&request, &outcome.value.msg)?;
-            sent_bytes += written;
-            on_step(DeployStep::Writing {
-                sent_bytes,
-                total_bytes,
-            });
-        }
-
-        on_step(DeployStep::Loading);
-        let request = ClientRequest::LoadProject {
-            path: crate::project_deploy::project_load_path(project_id),
+        // In place, as it always was, but one batch on a board that has
+        // them: it deletes first, so a refused load leaves the old project.
+        let plan = DeployPlan {
+            stop: true,
+            batch: BatchUse::Begin,
+            clear: true,
+            deflate: true,
+            load: true,
+            expected_hash: None,
         };
-        let outcome = self.send_request(request.clone()).await?;
-        events.extend(outcome.events);
-        let handle = validate_project_deploy_response(&request, &outcome.value.msg)?
-            .ok_or_else(|| ClientError::Protocol("load did not return a handle".into()))?;
-        Ok(ClientOutcome::new(handle, events))
+        let outcome = self.deploy_slice(project_id, files, plan, on_step).await?;
+        let events = outcome.events;
+        outcome
+            .value
+            .handle
+            .map(|handle| ClientOutcome::new(handle, events))
+            .ok_or_else(|| ClientError::Protocol("load did not return a handle".into()))
     }
 
     /// Canonical package hash of a project directory (push/pull verify).

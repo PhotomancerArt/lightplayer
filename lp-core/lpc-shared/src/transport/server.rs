@@ -128,6 +128,19 @@ pub trait ServerTransport {
         Vec::new()
     }
 
+    /// Links whose session ended and began again since the last call — an
+    /// lp-link `Reset` or a fresh `Up` (the cable replugged, the host
+    /// restarted) — while the link itself, and its id, stayed. The server
+    /// drops what the old session left open on the board (an fs batch it
+    /// began), so the next session's first write never joins it.
+    ///
+    /// A single-link transport reports its one link's id
+    /// ([`LinkId::PRIMARY`]); a transport whose sessions cannot reset, or
+    /// that reports a new session as a closed link and a new id, has none.
+    fn take_reset_links(&mut self) -> Vec<LinkId> {
+        Vec::new()
+    }
+
     /// Secure links' handshake events since the last call (key lookups,
     /// wrong keys, authenticated sessions), drained by the server before
     /// it answers any message that tick. A transport with no secure links

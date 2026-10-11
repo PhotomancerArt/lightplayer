@@ -13,10 +13,14 @@ std = []
 [dependencies]
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
+# `LpFs::write_deflated_chunk`'s default: inflate a deflated wire chunk
+# before writing it (no_std, no alloc; already in every device image).
+lp-deflate = { path = "../lp-deflate" }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 
 [lints]
 workspace = true

@@ -50,6 +50,12 @@ impl AccessGuardedFs {
     }
 }
 
+// Every method forwarded, none defaulted: a default would answer for the
+// project's filesystem without asking it — a batch through the guard was a
+// silent per-call commit until 2026-10-10. The lint fails clippy on a new
+// `LpFs` method until it is forwarded here; `tests/lp_fs_wrapper_conformance.rs`
+// proves each forward reaches the filesystem underneath.
+#[deny(clippy::missing_trait_methods)]
 impl LpFs for AccessGuardedFs {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         if lpc_access::is_write_only_file_path(path.as_str()) {
@@ -98,6 +104,34 @@ impl LpFs for AccessGuardedFs {
     // A view of a view is still a project's view: it stays guarded.
     fn chroot(&self, subdir: &LpPath) -> Result<Rc<RefCell<dyn LpFs>>, FsError> {
         Ok(Self::guard(self.inner.borrow().chroot(subdir)?))
+    }
+
+    fn begin_batch(&self) -> Result<(), FsError> {
+        self.inner.borrow().begin_batch()
+    }
+
+    fn commit_batch(&self) -> Result<(), FsError> {
+        self.inner.borrow().commit_batch()
+    }
+
+    fn abort_batch(&self) -> Result<(), FsError> {
+        self.inner.borrow().abort_batch()
+    }
+
+    fn batches_are_atomic(&self) -> bool {
+        self.inner.borrow().batches_are_atomic()
+    }
+
+    fn write_deflated_chunk(
+        &self,
+        path: &LpPath,
+        offset: u32,
+        logical_len: u32,
+        deflated: &[u8],
+    ) -> Result<(), FsError> {
+        self.inner
+            .borrow()
+            .write_deflated_chunk(path, offset, logical_len, deflated)
     }
 
     fn current_version(&self) -> FsVersion {

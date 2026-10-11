@@ -124,8 +124,12 @@ fn classify_fs(request: &FsRequest, projects_dir: &str) -> Required {
         }
         FsRequest::Write { .. }
         | FsRequest::WriteChunk { .. }
+        | FsRequest::WriteChunkDeflated { .. }
         | FsRequest::DeleteFile { .. }
-        | FsRequest::DeleteDir { .. } => return Required::Edit,
+        | FsRequest::DeleteDir { .. }
+        | FsRequest::BeginBatch
+        | FsRequest::CommitBatch
+        | FsRequest::AbortBatch => return Required::Edit,
     };
     if is_within_dir(read_path, projects_dir) {
         Required::Play
@@ -189,8 +193,17 @@ mod tests {
                 offset: 0,
                 data: alloc::vec![],
             },
+            FsRequest::WriteChunkDeflated {
+                path: path.clone(),
+                offset: 0,
+                logical_len: 0,
+                data: alloc::vec![],
+            },
             FsRequest::DeleteFile { path: path.clone() },
             FsRequest::DeleteDir { path },
+            FsRequest::BeginBatch,
+            FsRequest::CommitBatch,
+            FsRequest::AbortBatch,
         ] {
             assert_eq!(
                 classify(&ClientRequest::Filesystem(request), "/projects"),

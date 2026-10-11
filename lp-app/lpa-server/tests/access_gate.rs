@@ -1120,10 +1120,19 @@ fn fs_requests(dir: &str) -> Vec<FsRequest> {
             offset: 0,
             data: b"x".to_vec(),
         },
+        FsRequest::WriteChunkDeflated {
+            path: file.clone(),
+            offset: 0,
+            logical_len: 1,
+            data: vec![0xab, 0x00, 0x00],
+        },
         FsRequest::DeleteFile { path: file },
         FsRequest::DeleteDir {
             path: alloc::format!("{dir}/scratch").as_path_buf(),
         },
+        FsRequest::BeginBatch,
+        FsRequest::CommitBatch,
+        FsRequest::AbortBatch,
     ]
 }
 

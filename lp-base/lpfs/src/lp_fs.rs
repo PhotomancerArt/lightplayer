@@ -11,6 +11,11 @@ use crate::error::FsError;
 use crate::fs_event::{FsEvent, FsVersion};
 use crate::{LpPath, LpPathBuf};
 
+/// The most bytes one [`LpFs::write_deflated_chunk`] may inflate to (the
+/// tree store's largest logical chunk; the wire's
+/// `lpc_wire::budget::FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL`).
+pub const MAX_DEFLATED_CHUNK_LOGICAL: usize = 4 * 1024;
+
 /// Platform-agnostic filesystem trait
 ///
 /// All paths are relative to the project root. `/project.json` is always the project
@@ -141,6 +146,65 @@ pub trait LpFs {
     /// transactions).
     fn abort_batch(&self) -> Result<(), FsError> {
         Ok(())
+    }
+
+    /// Whether [`Self::begin_batch`] really makes a batch: `true` only on a
+    /// backend whose batch commits as one (the tree store). The default
+    /// `false` is every backend that commits each call by itself — which is
+    /// what the trait's batch defaults do — so a server can tell a client
+    /// the truth about *this* filesystem instead of a build fact.
+    fn batches_are_atomic(&self) -> bool {
+        false
+    }
+
+    /// Write one chunk of a file sent as raw deflate (RFC 1951): what
+    /// `deflated` inflates to — exactly `logical_len` bytes, at most
+    /// [`MAX_DEFLATED_CHUNK_LOGICAL`] — lands at the file's **logical**
+    /// `offset`. `offset == 0` creates or truncates; any other offset must
+    /// equal the file's current length (an append). Both are checked before
+    /// anything is allocated or inflated, and a stream that does not inflate
+    /// to exactly `logical_len` bytes writes nothing.
+    ///
+    /// The default inflates into a heap buffer of `logical_len` (at most
+    /// 4 KiB, beside the request that carried it — the one cost a board
+    /// without at-rest compression pays) and writes the plain bytes with
+    /// [`Self::write_file`] or [`Self::append_file`]. A backend that keeps
+    /// the deflated bytes (the tree store) overrides it.
+    fn write_deflated_chunk(
+        &self,
+        path: &LpPath,
+        offset: u32,
+        logical_len: u32,
+        deflated: &[u8],
+    ) -> Result<(), FsError> {
+        let logical = logical_len as usize;
+        if logical > MAX_DEFLATED_CHUNK_LOGICAL {
+            return Err(FsError::Filesystem(alloc::format!(
+                "deflated chunk too large: {logical} B logical, at most {MAX_DEFLATED_CHUNK_LOGICAL}"
+            )));
+        }
+        if offset != 0 {
+            let len = self.file_size(path)?;
+            if len != u64::from(offset) {
+                return Err(FsError::Filesystem(alloc::format!(
+                    "offset mismatch: file is {len} bytes, chunk at {offset}"
+                )));
+            }
+        }
+        let mut buf = alloc::vec![0u8; logical];
+        match lp_deflate::inflate(deflated, &mut buf, 0) {
+            Ok(n) if n == logical => {}
+            _ => {
+                return Err(FsError::Filesystem(alloc::string::String::from(
+                    "corrupt deflated chunk: it does not inflate to its length",
+                )));
+            }
+        }
+        if offset == 0 {
+            self.write_file(path, &buf)
+        } else {
+            self.append_file(path, &buf)
+        }
     }
 
     /// Get the current filesystem version
