@@ -516,8 +516,10 @@ pub fn cut(
                     return keep(
                         &cut_chip,
                         format!(
-                            "littlefs: the cut image's files are no state the dry run saw in the step ({} files)",
-                            files.len()
+                            "littlefs: the cut image's files are no state the dry run saw in the step ({} files; against the step's first state: {}; its last: {})",
+                            files.len(),
+                            diff(&dry.seen[lo].1, files),
+                            diff(&dry.seen[hi].1, files)
                         ),
                     );
                 }
@@ -558,7 +560,7 @@ pub fn cut(
             );
         }
     };
-    let wire = match wire_files(&mut host) {
+    let wire = match wire_files(&mut host, &host_files) {
         Ok(files) => files,
         Err(e) => {
             return keep(
@@ -592,15 +594,37 @@ pub fn cut(
     CutVerdict::Pass { step, landed }
 }
 
-/// Every file the board serves, read over the wire.
-fn wire_files(host: &mut EmuLinkHost<C6Board>) -> Result<Files, String> {
+/// Every file the board serves, read over the wire: a recursive listing of
+/// `/` (the littlefs adapter refuses one — `list_dir : invalid parameter` —
+/// so there it is `/projects`, recursively, and the root files `known`
+/// names).
+fn wire_files(host: &mut EmuLinkHost<C6Board>, known: &Files) -> Result<Files, String> {
     let mut client = LpClient::new(host).with_request_ids_from(90_000);
-    let listed = block_on(client.fs_list_dir(LpPath::new("/"), true))
-        .map_err(|e| e.to_string())?
-        .value;
+    let listed: Vec<String> = match block_on(client.fs_list_dir(LpPath::new("/"), true)) {
+        Ok(listed) => listed
+            .value
+            .iter()
+            .map(|p| p.as_str().to_string())
+            .collect(),
+        Err(_) => {
+            let mut paths: BTreeSet<String> =
+                block_on(client.fs_list_dir(LpPath::new("/projects"), true))
+                    .map_err(|e| e.to_string())?
+                    .value
+                    .iter()
+                    .map(|p| p.as_str().to_string())
+                    .collect();
+            paths.extend(
+                known
+                    .keys()
+                    .filter(|p| !p.starts_with("/projects/"))
+                    .cloned(),
+            );
+            paths.into_iter().collect()
+        }
+    };
     let mut out = Files::new();
     for path in listed {
-        let path = path.as_str().to_string();
         match block_on(client.fs_read(LpPath::new(&path))) {
             Ok(read) => {
                 out.insert(path, read.value);

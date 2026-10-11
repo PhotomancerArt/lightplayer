@@ -94,7 +94,13 @@ fn a_cut_at_any_flash_operation_loses_nothing_committed() {
 
     let mut failures = Vec::new();
     let mut table = Vec::new();
-    for scenario in scenarios(&tree, Fs::Tree, long) {
+    // `LP_TREE_CUTS_SKIP_TREE=1`: the littlefs control alone (a second run
+    // of the long form, when one command cannot hold both).
+    let skip_tree = std::env::var("LP_TREE_CUTS_SKIP_TREE").as_deref() == Ok("1");
+    for scenario in scenarios(&tree, Fs::Tree, long)
+        .into_iter()
+        .filter(|_| !skip_tree)
+    {
         if only
             .as_ref()
             .is_some_and(|o| !o.iter().any(|n| n == scenario.name))
@@ -106,7 +112,7 @@ fn a_cut_at_any_flash_operation_loses_nothing_committed() {
         table.push(row);
     }
     let mut control_rows = Vec::new();
-    if control && replay.is_none() {
+    if control && (replay.is_none() || skip_tree) {
         if let Some(shipped) = elf("emu_tree_store_cuts control", &FwImage::SHIPPED) {
             for scenario in scenarios(&shipped, Fs::Littlefs, long) {
                 if scenario.name == "format"
@@ -116,7 +122,8 @@ fn a_cut_at_any_flash_operation_loses_nothing_committed() {
                 {
                     continue;
                 }
-                control_rows.push(walk(&shipped, &scenario, Fs::Littlefs, long, None));
+                let replay = replay.as_deref().filter(|_| skip_tree);
+                control_rows.push(walk(&shipped, &scenario, Fs::Littlefs, long, replay));
             }
         }
     }
@@ -221,6 +228,14 @@ fn walk(elf: &Path, scenario: &Scenario, fs: Fs, long: bool, replay: Option<&str
             push(i, TearModel::BytePrefix);
             push(i, TearModel::RandomBits);
         }
+    }
+    // `LP_TREE_CUTS_MODELS=calibrated,clean`: only those models (a long
+    // scenario split across runs).
+    if let Ok(models) = std::env::var("LP_TREE_CUTS_MODELS")
+        && !models.is_empty()
+    {
+        let keep: Vec<&str> = models.split(',').collect();
+        plan.retain(|k| keep.contains(&k.tear.name()));
     }
     if let Some(key) = replay {
         let parts: Vec<&str> = key.split(':').collect();
