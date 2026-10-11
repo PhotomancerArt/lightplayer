@@ -624,6 +624,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         ota_state = ota::begin(None);
     }
 
+    // `heap_peak_diag` (never shipped) also times the mount, either
+    // filesystem: the tree store's perf figures (plan D5/Q17).
+    #[cfg(feature = "heap_peak_diag")]
+    let mount_t0 = embassy_time::Instant::now();
     // Create filesystem before hardware providers so /hardware.json can override board policy.
     let (base_fs, fs_boot_state): (Box<dyn lpfs::LpFs>, lpc_wire::FsBootState) = {
         #[cfg(not(feature = "memory_fs"))]
@@ -756,6 +760,9 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
             )
         }
     };
+    #[cfg(feature = "heap_peak_diag")]
+    // No `{:?}`: the image builds with `-Z fmt-debug=none`.
+    esp_println::println!("[perf] fs mount {} us", mount_t0.elapsed().as_micros());
     #[cfg(feature = "memory_fs")]
     esp_println::println!("[INIT] In-memory filesystem created");
 
