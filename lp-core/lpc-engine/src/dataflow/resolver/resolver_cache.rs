@@ -30,6 +30,7 @@
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
+use crate::dataflow::resolver::payload_bytes::payload_bytes_within;
 use crate::dataflow::resolver::production::{Production, ProductionSource};
 use crate::dataflow::resolver::query_intern::QueryId;
 use crate::dataflow::resolver::route::ResolvedRoute;
@@ -53,7 +54,14 @@ pub struct ResolverCache {
     /// Whether [`Self::insert`] stores payloads at all — see
     /// [`Self::set_retain_payloads`].
     retain_payloads: bool,
+    /// The largest payload [`Self::insert`] keeps, in heap bytes; `None`
+    /// keeps all of them — see [`Self::set_payload_cap`].
+    payload_cap: Option<usize>,
 }
+
+/// The payload cap a `resolver-payload-cap` build starts with: payloads over
+/// this many heap bytes are recomputed on every read instead of kept.
+pub const RESOLVER_PAYLOAD_CAP_BYTES: usize = 1024;
 
 impl Default for ResolverCache {
     fn default() -> Self {
@@ -64,6 +72,11 @@ impl Default for ResolverCache {
             routes: Vec::new(),
             absent: Vec::new(),
             retain_payloads: cfg!(feature = "resolver-payload-cache"),
+            payload_cap: if cfg!(feature = "resolver-payload-cap") {
+                Some(RESOLVER_PAYLOAD_CAP_BYTES)
+            } else {
+                None
+            },
         }
     }
 }
@@ -101,6 +114,43 @@ impl ResolverCache {
             self.values = Vec::new();
             self.structural = Vec::new();
         }
+    }
+
+    /// Keep only payloads of at most `cap` heap bytes (by
+    /// [`payload_bytes_within`]); a larger one is recomputed on every read,
+    /// as if payloads were off for that query alone. `None` keeps every
+    /// payload. Only meaningful while payloads are retained at all.
+    ///
+    /// The middle path between the two settings of
+    /// [`Self::set_retain_payloads`]: most queries are scalars, a few are
+    /// kilobytes (an engaged palette's `LpValue` is ~5.6 KB on the PLAYFUL
+    /// choker), and the cap lets the small ones stay hot.
+    ///
+    /// Clears what is already cached, so no entry over the new cap survives.
+    pub fn set_payload_cap(&mut self, cap: Option<usize>) {
+        self.payload_cap = cap;
+        self.values = Vec::new();
+        self.structural = Vec::new();
+    }
+
+    /// The heap bytes of each payload held right now — `(query index,
+    /// structural, bytes)` — for memory censuses and tests. Frame values from
+    /// an earlier frame are counted too: they still hold their memory.
+    pub fn payload_census(&self) -> Vec<(usize, bool, usize)> {
+        let mut out = Vec::new();
+        for (index, slot) in self.structural.iter().enumerate() {
+            if let Some(production) = slot {
+                let bytes = payload_bytes_within(&production.data, usize::MAX).unwrap_or(0);
+                out.push((index, true, bytes));
+            }
+        }
+        for (index, slot) in self.values.iter().enumerate() {
+            if let Some((_, production)) = slot {
+                let bytes = payload_bytes_within(&production.data, usize::MAX).unwrap_or(0);
+                out.push((index, false, bytes));
+            }
+        }
+        out
     }
 
     /// Whether a production may outlive the frame that computed it.
@@ -142,6 +192,11 @@ impl ResolverCache {
 
     pub fn insert(&mut self, id: QueryId, production: Production) {
         if !self.retain_payloads {
+            return;
+        }
+        if let Some(cap) = self.payload_cap
+            && payload_bytes_within(&production.data, cap).is_none()
+        {
             return;
         }
         if Self::is_structural(&production.source) {
