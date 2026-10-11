@@ -3,6 +3,10 @@
 //! split image (the product's shape), each with `heap_peak_diag`, same
 //! project, same emulator:
 //!
+//! (The unsplit image, direct load: the split one boots ROM-up and walked
+//! far slower than the 10-minute command it had; the heap figures compare
+//! the two filesystems on one image shape.)
+//!
 //! - **resident**: requested bytes live after a reboot with a c40-shaped
 //!   project stored (and loaded at boot), at the second `[heap]` line;
 //!   `fs-tree` minus littlefs is the store's share;
@@ -12,7 +16,8 @@
 //!   appends, each with its `file_size` check);
 //! - **overlap**: the highest window peak and the lowest largest free block
 //!   (sampled at the `[heap]` lines and the heartbeats) across a c40 push
-//!   whose load compiles the shader, and panel writes after it; and whether
+//!   (into its own slot: littlefs has no room for two) whose load compiles
+//!   the shader, and panel writes after it; and whether
 //!   the board stayed up (one boot, no allocation failure).
 //!
 //! Requested bytes, not allocator overhead (`max_usage` is printed beside
@@ -33,11 +38,7 @@ mod tree_store_measure;
 
 use editor_reads::{block_on, heartbeats};
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp_common::Strap;
-use lp_emu_esp32c6::flash::FlashBacking;
-use lp_emu_esp32c6::loader::ResetCause;
-use lp_emu_esp32c6::machine::{AppSource, BootMode, Esp32C6Builder, UsbHost};
-use lp_emu_esp32c6::test_support::{FwImage, split_image};
+use lp_emu_esp32c6::test_support::FwImage;
 use lpa_client::LpClient;
 use lpc_model::LpValue;
 use lpfs::LpPath;
@@ -61,21 +62,25 @@ struct Ram {
 #[ignore = "needs split fw-esp32c6 builds; run by hand (see the module docs)"]
 fn ram_resident_transient_and_compile_overlap() {
     let mut rows = Vec::new();
+    // `LP_TREE_RAM_FS=fs-tree|littlefs`: one image per run (each walk is
+    // minutes of emulated time).
+    let only = std::env::var("LP_TREE_RAM_FS")
+        .ok()
+        .filter(|s| !s.is_empty());
     for (label, image) in [
         ("fs-tree", FwImage::FS_TREE_HEAP_PEAK),
         ("littlefs", FwImage::SHIPPED_HEAP_PEAK),
     ] {
-        let split = match split_image(&image) {
-            Ok(split) => split,
-            Err(reason) => {
-                eprintln!("emu_tree_store_ram: skipped — {reason}");
-                return;
-            }
+        if only.as_deref().is_some_and(|o| o != label) {
+            continue;
+        }
+        let Some(elf) = elf("emu_tree_store_ram", &image) else {
+            return;
         };
-        rows.push((label, measure(&split)));
+        rows.push((label, measure(label, &elf)));
     }
     println!(
-        "\nRAM — configuration=lp-emu:esp32c6:t1+net=lan, split image, heap_peak_diag (requested bytes)"
+        "\nRAM — configuration=lp-emu:esp32c6:t1+net=lan, unsplit image (direct load), heap_peak_diag (requested bytes)"
     );
     println!(
         "| | resident live | resident max_usage | largest at rest | save | panel write | 12 KiB in 3 chunks | overlap peak | overlap min largest | boots |"
@@ -95,47 +100,42 @@ fn ram_resident_transient_and_compile_overlap() {
             r.boots
         );
     }
-    let (t, l) = (&rows[0].1, &rows[1].1);
-    println!(
-        "fs-tree − littlefs: resident {:+} B; transient save {:+}, panel {:+}, chunks {:+}; overlap peak {:+}, min largest {:+}",
-        t.resident_live as i64 - l.resident_live as i64,
-        t.save - l.save,
-        t.panel - l.panel,
-        t.chunks - l.chunks,
-        t.overlap_peak as i64 - l.overlap_peak as i64,
-        t.overlap_min_largest as i64 - l.overlap_min_largest as i64,
-    );
+    if let [(_, t), (_, l)] = &rows[..] {
+        println!(
+            "fs-tree − littlefs: resident {:+} B; transient save {:+}, panel {:+}, chunks {:+}; overlap peak {:+}, min largest {:+}",
+            t.resident_live as i64 - l.resident_live as i64,
+            t.save - l.save,
+            t.panel - l.panel,
+            t.chunks - l.chunks,
+            t.overlap_peak as i64 - l.overlap_peak as i64,
+            t.overlap_min_largest as i64 - l.overlap_min_largest as i64,
+        );
+    }
     for (label, r) in &rows {
         assert_eq!(r.boots, 1, "{label}: the board reset during the walk");
     }
 }
 
-fn measure(split: &lp_emu_esp32c6::test_support::SplitImage) -> Ram {
-    let merged = std::fs::read(split.merged()).expect("the merged image");
-    let machine = Esp32C6Builder::new()
-        .boot_mode(BootMode::RomUp)
-        .app(AppSource::Path(split.p2_elf()))
-        .flash(FlashBacking::Bytes(merged))
-        .reset_cause(ResetCause::UsbUartHpSys)
-        .strap(Strap::App)
-        .usb_host(UsbHost::Attached { draining: true })
-        .usb_sj_queue_source()
-        .reboot_on_reset(true)
-        .build()
-        .expect("the split image builds a machine");
-    let mut host = EmuLinkHost::new(
-        C6Board::new(machine).expect("a hosted board"),
-        0x4A40_0001,
-        true,
-    );
+fn measure(label: &str, elf: &std::path::Path) -> Ram {
+    let wall = std::time::Instant::now();
+    let note = |host: &EmuLinkHost<C6Board>, what: &str| {
+        eprintln!(
+            "[{label}] {what} at {:.1} s emulated, {:.0} s wall",
+            host.board_seconds(),
+            wall.elapsed().as_secs_f64()
+        );
+    };
+    let mut host = board(elf, Vec::new(), 0x4A40_0001);
     boot(&mut host);
     let c40 = c40_files();
     {
         let mut client = LpClient::new(&mut host).with_request_ids_from(1_000);
         block_on(client.replace_and_load_project("demo", &c40)).expect("upload c40");
     }
+    note(&host, "uploaded");
     let mut host = power_cycle(host, 0x4A40_0002);
     boot(&mut host);
+    note(&host, "rebooted");
     let mut ram = Ram::default();
 
     // Resident: the second line after the reboot (the first heartbeat's
@@ -143,6 +143,7 @@ fn measure(split: &lp_emu_esp32c6::test_support::SplitImage) -> Ram {
     next_heap_line(&mut host);
     let (rest, _) = next_heap_line(&mut host);
     ram.resident_live = rest.live;
+    note(&host, &format!("resident {rest:?}"));
     ram.resident_max_usage = rest.max_usage;
     ram.resident_largest = rest.largest;
 
@@ -162,6 +163,7 @@ fn measure(split: &lp_emu_esp32c6::test_support::SplitImage) -> Ram {
     }
     let (after, _) = next_heap_line(&mut host);
     ram.save = after.peak as i64 - before.live as i64;
+    note(&host, &format!("save {}", ram.save));
 
     // Transient: a panel write and its auto-save (10 s spacing).
     let (before, from) = next_heap_line(&mut host);
@@ -195,6 +197,7 @@ fn measure(split: &lp_emu_esp32c6::test_support::SplitImage) -> Ram {
     }
     let (after, _) = next_heap_line(&mut host);
     ram.chunks = after.peak as i64 - before.live as i64;
+    note(&host, &format!("chunks {}", ram.chunks));
 
     // Overlap: a c40 push whose load compiles, then panel writes.
     let beats_from = host.console().len();
@@ -207,7 +210,10 @@ fn measure(split: &lp_emu_esp32c6::test_support::SplitImage) -> Ram {
             }
         }
         let mut client = LpClient::new(&mut host).with_request_ids_from(4_000);
-        block_on(client.replace_and_load_project("demo-b", &edited)).expect("the push");
+        // Into the same slot: littlefs cannot hold two c40 copies (`no space
+        // left on device` at the 27th document of the second: every file
+        // over its 512 B inline limit takes whole 4 KiB blocks).
+        block_on(client.replace_and_load_project("demo", &edited)).expect("the push");
     }
     panel_time(&mut host, 4.5);
     panel_time(&mut host, 5.5);
@@ -227,6 +233,10 @@ fn measure(split: &lp_emu_esp32c6::test_support::SplitImage) -> Ram {
         .min()
         .unwrap_or(0);
     ram.boots = boots(&host);
+    note(
+        &host,
+        &format!("overlap {} / {}", ram.overlap_peak, ram.overlap_min_largest),
+    );
     ram
 }
 

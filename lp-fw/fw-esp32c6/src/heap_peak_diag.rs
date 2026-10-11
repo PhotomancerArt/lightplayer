@@ -47,7 +47,16 @@ fn _esp_alloc_alloc(
     }
     let live = LIVE.fetch_add(size, Ordering::Relaxed) + size;
     if !PROBING.load(Ordering::Relaxed) {
-        PEAK.fetch_max(live, Ordering::Relaxed);
+        // A compare-exchange loop, not `fetch_max`: that is `amomaxu.w`,
+        // which the emulated C6 does not decode (an illegal-instruction
+        // panic at boot; docs/defects/2026-10-10-the-emulated-c6-has-no-amomin-or-amomax.md).
+        let mut seen = PEAK.load(Ordering::Relaxed);
+        while live > seen {
+            match PEAK.compare_exchange_weak(seen, live, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => break,
+                Err(now) => seen = now,
+            }
+        }
     }
 }
 
