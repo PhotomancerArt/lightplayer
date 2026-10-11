@@ -32,7 +32,7 @@ fn u(v: &Value) -> u64 {
 }
 
 /// `t1`, `t1@codec=stored`, `f2[96]` …
-fn label(r: &Value) -> String {
+fn label(r: &Value, base: u64) -> String {
     let cand = s(&r["candidate"]);
     let cfg = &r["config"];
     let dials: Vec<String> = cfg["dials"]
@@ -44,15 +44,15 @@ fn label(r: &Value) -> String {
         l = format!("{l}@{}", dials.join("+"));
     }
     if let Some(n) = cfg["sectors"].as_u64()
-        && n != 128
+        && n != base
     {
         l = format!("{l}[{n}]");
     }
     l
 }
 
-fn is_default(r: &Value) -> bool {
-    !label(r).contains(['@', '['])
+fn is_default(r: &Value, base: u64) -> bool {
+    !label(r, base).contains(['@', '['])
 }
 
 fn wl(r: &Value) -> String {
@@ -77,6 +77,9 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
         .last()
         .map(|(_, r)| r.clone())
         .unwrap_or(Value::Null);
+    // The run's own partition (`overnight --sectors`): its default-dial
+    // runs are the headline; others are labelled `[n]`.
+    let base = start["sectors"].as_u64().unwrap_or(128);
     let end = of("overnight_end").last().map(|(_, r)| r.clone());
     writeln!(md, "# Storage candidate race — scoreboard\n").unwrap();
     writeln!(
@@ -99,7 +102,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
     // Candidates seen at their default config.
     let mut cands: Vec<String> = recs
         .iter()
-        .filter(|(_, r)| r["candidate"].is_string() && is_default(r))
+        .filter(|(_, r)| r["candidate"].is_string() && is_default(r, base))
         .map(|(_, r)| s(&r["candidate"]))
         .collect();
     cands.sort();
@@ -110,7 +113,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
     let mut kinds: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
     let mut truncated: Vec<String> = Vec::new();
     for (_, r) in of("sweep_summary") {
-        let key = (s(&r["driver"]), label(r), wl(r), s(&r["tear"]));
+        let key = (s(&r["driver"]), label(r, base), wl(r), s(&r["tear"]));
         let e = sweeps.entry(key.clone()).or_default();
         e[0] += u(&r["cases"]);
         e[1] += u(&r["landed"]);
@@ -118,7 +121,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
         e[3] += u(&r["non_atomic"]);
         e[4] += 1;
         if let Some(m) = r["kinds"].as_object() {
-            let k = kinds.entry(label(r)).or_default();
+            let k = kinds.entry(label(r, base)).or_default();
             for (name, n) in m {
                 *k.entry(name.clone()).or_default() += u(n);
             }
@@ -139,14 +142,14 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
     }
     let mut random: BTreeMap<String, [u64; 5]> = BTreeMap::new();
     for (_, r) in of("random_summary") {
-        let e = random.entry(label(r)).or_default();
+        let e = random.entry(label(r, base)).or_default();
         e[0] += 1;
         e[1] += u(&r["steps_run"]);
         e[2] += u(&r["cuts"]);
         e[3] += u(&r["failures"]);
         e[4] += u(&r["non_atomic"]);
         if let Some(m) = r["kinds"].as_object() {
-            let k = kinds.entry(label(r)).or_default();
+            let k = kinds.entry(label(r, base)).or_default();
             for (name, n) in m {
                 *k.entry(name.clone()).or_default() += u(n);
             }
@@ -173,7 +176,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
         // M3's drivers: long walks' cuts and full-flash cut cases (their
         // failures, cut or not, count against eligibility).
         for (t, c) in [("long_summary", "cuts"), ("full_flash_summary", "cases")] {
-            for (_, r) in of(t).filter(|(_, r)| same(&label(r), l)) {
+            for (_, r) in of(t).filter(|(_, r)| same(&label(r, base), l)) {
                 cases += u(&r[c]);
                 fails += u(&r["failures"]);
             }
@@ -182,25 +185,25 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
     };
     let measure_of = |cand: &str, w: &str| {
         of("measure")
-            .filter(|(_, r)| s(&r["candidate"]) == cand && is_default(r) && wl(r) == w)
+            .filter(|(_, r)| s(&r["candidate"]) == cand && is_default(r, base) && wl(r) == w)
             .last()
             .map(|(_, r)| r.clone())
     };
     let min_of = |cand: &str, w: &str| {
         of("min_sectors")
-            .filter(|(_, r)| s(&r["candidate"]) == cand && is_default(r) && wl(r) == w)
+            .filter(|(_, r)| s(&r["candidate"]) == cand && is_default(r, base) && wl(r) == w)
             .last()
             .map(|(_, r)| s(&r["min_sectors"]))
             .unwrap_or_else(|| "—".into())
     };
     let endurance_of = |cand: &str| {
         of("endurance")
-            .filter(|(_, r)| s(&r["result"]["candidate"]) == cand && is_default(&r["result"]))
+            .filter(|(_, r)| s(&r["result"]["candidate"]) == cand && is_default(&r["result"], base))
             .last()
             .map(|(_, r)| r.clone())
     };
 
-    writeln!(md, "## Headline (128-sector partition, default dials)\n").unwrap();
+    writeln!(md, "## Headline ({base}-sector partition, default dials)\n").unwrap();
     writeln!(
         md,
         "| candidate | eligible (zero cut failures) | c40 sectors at rest / flash peak | smallest partition: push c40 / editable c40 | mount reads (save c40) | RAM | code | write amp (30 days) | erases per sector after 30 days min/median/max |"
@@ -365,12 +368,12 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
 
     writeln!(
         md,
-        "\n## Fault-free measures (default dials, 128 sectors)\n"
+        "\n## Fault-free measures (default dials, {base} sectors)\n"
     )
     .unwrap();
     writeln!(md, "| candidate | workload | ok | sectors used end/max | flash non-blank end/peak | write amp | mount KB/calls | RAM KB | erases max | live KB |").unwrap();
     writeln!(md, "|---|---|---|---|---|---|---|---|---|---|").unwrap();
-    for (_, r) in of("measure").filter(|(_, r)| is_default(r)) {
+    for (_, r) in of("measure").filter(|(_, r)| is_default(r, base)) {
         writeln!(
             md,
             "| {} | {} | {} | {}/{} | {}/{} | {:.2} | {:.1}/{} | {:.1} | {} | {:.1} |",
@@ -397,7 +400,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
     writeln!(md, "\n### Smallest partitions\n").unwrap();
     writeln!(md, "| candidate | workload | min sectors |").unwrap();
     writeln!(md, "|---|---|---|").unwrap();
-    for (_, r) in of("min_sectors").filter(|(_, r)| is_default(r)) {
+    for (_, r) in of("min_sectors").filter(|(_, r)| is_default(r, base)) {
         writeln!(
             md,
             "| {} | {} | {} |",
@@ -407,7 +410,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
         )
         .unwrap();
     }
-    writeln!(md, "\n### Fill to full (128 sectors)\n").unwrap();
+    writeln!(md, "\n### Fill to full ({base} sectors)\n").unwrap();
     writeln!(md, "| candidate | c20 copies held | saves after (of 20) | largest c40-style project (modules) | its size KB |").unwrap();
     writeln!(md, "|---|---|---|---|---|").unwrap();
     for c in &cands {
@@ -436,8 +439,8 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
         .unwrap();
     }
 
-    dial_table(&mut md, &recs, &sweeps);
-    m3_tables(&mut md, &recs);
+    dial_table(&mut md, &recs, &sweeps, base);
+    m3_tables(&mut md, &recs, base);
 
     writeln!(md, "\n## What did not run\n").unwrap();
     match &end {
@@ -470,7 +473,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
 
 /// The M3 drivers: long walks, full flash, mount fuzz, GC dials where GC
 /// runs.
-fn m3_tables(md: &mut String, recs: &[(usize, Value)]) {
+fn m3_tables(md: &mut String, recs: &[(usize, Value)], base: u64) {
     let of = |t: &'static str| recs.iter().filter(move |(_, r)| r["type"] == t);
     let first = |r: &Value| {
         let f = &r["first_failure"];
@@ -489,7 +492,7 @@ fn m3_tables(md: &mut String, recs: &[(usize, Value)]) {
             writeln!(
                 md,
                 "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} ({}) | {} |",
-                label(r),
+                label(r, base),
                 s(&r["seed"]),
                 if r["edit_mix"] == true {
                     "edit"
@@ -519,7 +522,7 @@ fn m3_tables(md: &mut String, recs: &[(usize, Value)]) {
             writeln!(
                 md,
                 "| {} | {} | {} | {} | {} | {} ({}) | {} ({}) | {} | {} | {} | {} |",
-                label(r),
+                label(r, base),
                 s(&r["corpus"]),
                 s(&r["seed"]),
                 s(&r["fill_slots"]),
@@ -546,7 +549,7 @@ fn m3_tables(md: &mut String, recs: &[(usize, Value)]) {
                     writeln!(
                         md,
                         "| {} | {} | {k} | {} | {} | {} | {} | {} |",
-                        label(r),
+                        label(r, base),
                         s(&r["seed"]),
                         s(&c["cases"]),
                         s(&c["mounted"]),
@@ -572,7 +575,7 @@ fn m3_tables(md: &mut String, recs: &[(usize, Value)]) {
             writeln!(
                 md,
                 "| {} | {} | {} | {} | {} | {:.2} | {}/{} | {} | {} |",
-                label(r),
+                label(r, base),
                 s(&r["workload"]),
                 s(&r["ok"]),
                 s(&r["gc_runs"]),
@@ -592,11 +595,12 @@ fn dial_table(
     md: &mut String,
     recs: &[(usize, Value)],
     sweeps: &BTreeMap<(String, String, String, String), [u64; 5]>,
+    base: u64,
 ) {
     // label → (push used, save used max, panel write amp, RAM, mount KB, ok)
     let mut rows: BTreeMap<String, BTreeMap<String, Value>> = BTreeMap::new();
     for (_, r) in recs.iter().filter(|(_, r)| r["type"] == "dial_measure") {
-        rows.entry(label(r))
+        rows.entry(label(r, base))
             .or_default()
             .insert(s(&r["workload"]["kind"]), r.clone());
     }
@@ -690,7 +694,7 @@ fn dial_table(
         )
         .unwrap();
     }
-    writeln!(md, "\n### Best per axis value (best achievable with that value, clean settings at 128 sectors)\n").unwrap();
+    writeln!(md, "\n### Best per axis value (best achievable with that value, clean settings at {base} sectors)\n").unwrap();
     writeln!(
         md,
         "| dial = value | min save-c40 sectors | min panel write amp | min RAM KB |"
