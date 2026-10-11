@@ -10,6 +10,20 @@ time alone.
 | `examples-meteor.script` | `lp-cli upload examples/meteor` — 14 frames, the two-shader project the spike report §11.2 measured its heap ledger on |
 | `shader-oracle.script` | `lp-cli upload projects/test/shader-oracle` — 12 frames (no `clock.json`), the host oracle's own project, captured at `7e043ae2d` over the USB link; the walk M5 P4's pin gate replays |
 
+**These are `M!` records, and the capture recipe below no longer produces
+one (2026-10-10, wire proto 42).** Since wire proto 30 the shipped image
+speaks lp-link on USB (the classic's UART0 since 32), so a `lp-cli upload`
+through `upload-walk.sh` now transcribes lp-link frames — COBS bytes and
+CRCs, no `M!{…}` lines — and `walk-script.py` finds no request in them. The
+scripts here are kept as the committed pre-lp-link record of what the client
+sent: the shape checks (`shader_oracle_pin`, `basic_pin`, `five_wires`, the
+S3's `pin_frames`) read them as text, and the `upload_walk*` replays run them
+against the pinned reference images at `d6cfaa205`, whose `M!` firmware still
+reads them. **A change to what `lp-cli upload` sends — wire proto 42's batch
+and deflated chunks — therefore does not invalidate them, and they are not
+re-captured.** What the current client sends to the current image is walked
+live, over the product's own link, by `lp-cli/tests/emu_batch_push.rs`.
+
 **A walk is not a link.** The same file replays on either: `after "<line>"`
 matches what a host *on the link the run used* received, so `upload-walk`
 runs `examples-basic.script` over the spike's UART0 workaround and
