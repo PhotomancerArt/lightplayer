@@ -451,8 +451,7 @@ pub fn handle_fs_request_with_headroom(
         // where the link is; they never reach a handler.
         FsRequest::BeginBatch | FsRequest::CommitBatch | FsRequest::AbortBatch => {
             Err(ServerError::Core(
-                "batch verbs are answered by the server that holds the batch, not a handler"
-                    .into(),
+                "batch verbs are answered by the server that holds the batch, not a handler".into(),
             ))
         }
     }

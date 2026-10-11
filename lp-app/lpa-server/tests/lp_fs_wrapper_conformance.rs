@@ -34,10 +34,7 @@ fn a_view_forwards_every_method_to_its_parent() {
         call(&mut view, method, "/a.txt");
         // A view of a view is a longer prefix over the same parent, and the
         // change log's bookkeeping is the parent's own.
-        let local = matches!(
-            method,
-            "chroot" | "clear_changes_before" | "record_changes"
-        );
+        let local = matches!(method, "chroot" | "clear_changes_before" | "record_changes");
         assert_eq!(
             heard.borrow().contains(&method),
             !local,

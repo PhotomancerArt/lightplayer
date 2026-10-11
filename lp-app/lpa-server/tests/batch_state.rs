@@ -29,7 +29,9 @@ use lpc_model::{AsLpPath, AsLpPathBuf, FsVersion};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::{Incoming, Link, LinkId, LinkTrust, ServerTransport};
 use lpc_wire::server::{BatchOp, FileChangeKind, FsRequest, FsResponse};
-use lpc_wire::{ClientMessage, ClientRequest, TransportError, WireServerMessage, WireServerMsgBody};
+use lpc_wire::{
+    ClientMessage, ClientRequest, TransportError, WireServerMessage, WireServerMsgBody,
+};
 use lpfs::{LpFs, LpFsMemory};
 
 const USB: Link = Link::PRIMARY;
@@ -46,7 +48,8 @@ fn a_board_without_transactions_opens_no_batch() {
     assert_eq!(rig.begin(USB), (true, false, None));
     // Nothing is held: another link writes, and every write landed by itself.
     rig.write(USB, "/projects/a/f.txt", b"a").expect("written");
-    rig.write(OTHER, "/projects/a/g.txt", b"g").expect("written");
+    rig.write(OTHER, "/projects/a/g.txt", b"g")
+        .expect("written");
     assert_eq!(rig.commit(USB).2.as_deref(), Some("no batch is open"));
     assert_eq!(rig.read("/projects/a/f.txt").as_deref(), Some(&b"a"[..]));
 }
@@ -55,7 +58,8 @@ fn a_board_without_transactions_opens_no_batch() {
 fn a_committed_batch_lands_and_survives_a_remount() {
     let mut rig = Rig::tree();
     assert_eq!(rig.begin(USB), (true, true, None));
-    rig.write(USB, "/projects/a/f.txt", b"new").expect("written");
+    rig.write(USB, "/projects/a/f.txt", b"new")
+        .expect("written");
     // The batch's own reads see its writes.
     assert_eq!(rig.read("/projects/a/f.txt").as_deref(), Some(&b"new"[..]));
     assert_eq!(rig.commit(USB), (true, true, None));
@@ -78,9 +82,12 @@ fn another_links_writes_are_refused_while_its_reads_are_served() {
     assert_eq!(rig.begin(OTHER).2.as_deref(), Some(BATCH_BUSY));
     assert_eq!(rig.commit(OTHER).2.as_deref(), Some(BATCH_BUSY));
     // Its read goes on.
-    match rig.fs(OTHER, FsRequest::Read {
-        path: "/projects/a/f.txt".as_path_buf(),
-    }) {
+    match rig.fs(
+        OTHER,
+        FsRequest::Read {
+            path: "/projects/a/f.txt".as_path_buf(),
+        },
+    ) {
         FsResponse::Read { data, error, .. } => {
             assert_eq!(error, None);
             assert_eq!(data.as_deref(), Some(&b"old"[..]));
@@ -89,7 +96,8 @@ fn another_links_writes_are_refused_while_its_reads_are_served() {
     }
     // Once the batch ends, the other link writes again.
     rig.abort(USB);
-    rig.write(OTHER, "/projects/a/g.txt", b"g").expect("written");
+    rig.write(OTHER, "/projects/a/g.txt", b"g")
+        .expect("written");
 }
 
 #[test]
@@ -97,12 +105,14 @@ fn the_owner_link_closing_drops_its_batch() {
     let mut rig = Rig::tree();
     rig.seed("/projects/a/f.txt", b"old");
     rig.begin(OTHER);
-    rig.write(OTHER, "/projects/a/f.txt", b"half").expect("written");
+    rig.write(OTHER, "/projects/a/f.txt", b"half")
+        .expect("written");
     rig.transport.closed.push(OTHER.id);
     rig.idle(16);
     assert_eq!(rig.read("/projects/a/f.txt").as_deref(), Some(&b"old"[..]));
     // The next link's write is not in a batch: it lands by itself.
-    rig.write(USB, "/projects/a/f.txt", b"next").expect("written");
+    rig.write(USB, "/projects/a/f.txt", b"next")
+        .expect("written");
     assert_eq!(
         rig.remounted()
             .read_file("/projects/a/f.txt".as_path())
@@ -116,14 +126,16 @@ fn the_owner_session_resetting_drops_its_batch() {
     let mut rig = Rig::tree();
     rig.seed("/projects/a/f.txt", b"old");
     rig.begin(USB);
-    rig.write(USB, "/projects/a/f.txt", b"half").expect("written");
+    rig.write(USB, "/projects/a/f.txt", b"half")
+        .expect("written");
     // The cable replugged: same link, a new session.
     rig.transport.reset.push(USB.id);
     rig.idle(16);
     assert_eq!(rig.read("/projects/a/f.txt").as_deref(), Some(&b"old"[..]));
     // The new session's first write does not join the old batch, and is
     // not held to it.
-    rig.write(USB, "/projects/a/f.txt", b"next").expect("written");
+    rig.write(USB, "/projects/a/f.txt", b"next")
+        .expect("written");
     assert_eq!(rig.commit(USB).2.as_deref(), Some("no batch is open"));
     assert_eq!(
         rig.remounted()
@@ -138,7 +150,8 @@ fn an_idle_batch_is_dropped_and_its_owner_told_why() {
     let mut rig = Rig::tree();
     rig.seed("/projects/a/f.txt", b"old");
     rig.begin(USB);
-    rig.write(USB, "/projects/a/f.txt", b"half").expect("written");
+    rig.write(USB, "/projects/a/f.txt", b"half")
+        .expect("written");
     rig.idle(16); // the delta after a handled request is its handling time
     rig.idle((BATCH_IDLE_TIMEOUT_MS / 2) as u32);
     assert!(rig.batch_open(), "half the timeout");
@@ -152,7 +165,8 @@ fn an_idle_batch_is_dropped_and_its_owner_told_why() {
     assert!(rig.commit(USB).2.unwrap().contains("dropped"));
     // An abort clears it; the next write lands.
     assert_eq!(rig.abort(USB).2, None);
-    rig.write(USB, "/projects/a/f.txt", b"next").expect("written");
+    rig.write(USB, "/projects/a/f.txt", b"next")
+        .expect("written");
 }
 
 /// A `LoadProject` that compiles for twenty seconds blocks the tick, so the
@@ -176,15 +190,20 @@ fn a_long_request_between_requests_is_not_idle_time() {
 fn a_second_begin_from_the_owner_starts_a_fresh_batch() {
     let mut rig = Rig::tree();
     rig.begin(USB);
-    rig.write(USB, "/projects/a/lost.txt", b"lost").expect("written");
+    rig.write(USB, "/projects/a/lost.txt", b"lost")
+        .expect("written");
     // The client lost the first answer and begins again.
     assert_eq!(rig.begin(USB), (true, true, None));
     assert_eq!(rig.read("/projects/a/lost.txt"), None, "the old batch went");
-    rig.write(USB, "/projects/a/kept.txt", b"kept").expect("written");
+    rig.write(USB, "/projects/a/kept.txt", b"kept")
+        .expect("written");
     rig.commit(USB);
     let fs = rig.remounted();
     assert!(!fs.file_exists("/projects/a/lost.txt".as_path()).unwrap());
-    assert_eq!(fs.read_file("/projects/a/kept.txt".as_path()).unwrap(), b"kept");
+    assert_eq!(
+        fs.read_file("/projects/a/kept.txt".as_path()).unwrap(),
+        b"kept"
+    );
 }
 
 #[test]
@@ -320,11 +339,14 @@ impl Rig {
     }
 
     fn changes(&mut self, prefix: &str) -> Vec<(String, FileChangeKind)> {
-        match self.fs(USB, FsRequest::ChangesSince {
-            prefix: prefix.as_path_buf(),
-            since: FsVersion::new(1),
-            cursor: None,
-        }) {
+        match self.fs(
+            USB,
+            FsRequest::ChangesSince {
+                prefix: prefix.as_path_buf(),
+                since: FsVersion::new(1),
+                cursor: None,
+            },
+        ) {
             FsResponse::Changes { entries, error, .. } => {
                 assert_eq!(error, None);
                 entries
@@ -365,10 +387,13 @@ impl Rig {
     }
 
     fn write(&mut self, link: Link, path: &str, data: &[u8]) -> Result<(), String> {
-        match self.fs(link, FsRequest::Write {
-            path: path.as_path_buf(),
-            data: data.to_vec(),
-        }) {
+        match self.fs(
+            link,
+            FsRequest::Write {
+                path: path.as_path_buf(),
+                data: data.to_vec(),
+            },
+        ) {
             FsResponse::Write { error: None, .. } => Ok(()),
             FsResponse::Write { error: Some(e), .. } => Err(e),
             other => panic!("{other:?}"),
@@ -376,9 +401,12 @@ impl Rig {
     }
 
     fn delete_dir(&mut self, link: Link, path: &str) -> Result<(), String> {
-        match self.fs(link, FsRequest::DeleteDir {
-            path: path.as_path_buf(),
-        }) {
+        match self.fs(
+            link,
+            FsRequest::DeleteDir {
+                path: path.as_path_buf(),
+            },
+        ) {
             FsResponse::DeleteDir { error: None, .. } => Ok(()),
             FsResponse::DeleteDir { error: Some(e), .. } => Err(e),
             other => panic!("{other:?}"),
@@ -394,12 +422,15 @@ impl Rig {
         logical_len: u32,
         data: Vec<u8>,
     ) -> (u32, Option<String>) {
-        match self.fs(link, FsRequest::WriteChunkDeflated {
-            path: path.as_path_buf(),
-            offset,
-            logical_len,
-            data,
-        }) {
+        match self.fs(
+            link,
+            FsRequest::WriteChunkDeflated {
+                path: path.as_path_buf(),
+                offset,
+                logical_len,
+                data,
+            },
+        ) {
             FsResponse::WriteChunk { written, error, .. } => (written, error),
             other => panic!("{other:?}"),
         }

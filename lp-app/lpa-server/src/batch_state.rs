@@ -213,10 +213,7 @@ impl BatchState {
                 // With none open, there is nothing to drop.
                 answer(BatchOp::Abort, None)
             }
-            _ => answer(
-                BatchOp::Abort,
-                Some(String::from("not a batch verb")),
-            ),
+            _ => answer(BatchOp::Abort, Some(String::from("not a batch verb"))),
         }
     }
 

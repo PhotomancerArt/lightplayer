@@ -480,7 +480,8 @@ fn file_sync_round_trips_over_the_protocol() {
     // patterned one — so the sim inflates), WriteChunk runs for the rest
     let mut deflated_chunks = 0;
     for (relative_path, content) in &files {
-        for request in lpa_client::push_files::file_requests("e2esync", relative_path, content, true)
+        for request in
+            lpa_client::push_files::file_requests("e2esync", relative_path, content, true)
         {
             let logical = lpa_client::push_files::logical_bytes(&request);
             if matches!(

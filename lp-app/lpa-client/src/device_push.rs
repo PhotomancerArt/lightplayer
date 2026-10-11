@@ -353,7 +353,9 @@ pub(crate) mod test_script {
                 ClientRequest::Filesystem(FsRequest::Write { path, .. }) => {
                     format!("write {}", path.as_str())
                 }
-                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { path, offset, .. }) => {
+                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated {
+                    path, offset, ..
+                }) => {
                     format!("deflated {} @{offset}", path.as_str())
                 }
                 ClientRequest::Filesystem(FsRequest::HashPackage { prefix }) => {

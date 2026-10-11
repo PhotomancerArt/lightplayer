@@ -25,13 +25,13 @@ use crate::client_observer::{
     ClientObservation, RequestOutcome, observe, observe_frame, request_kind,
 };
 use crate::project_deploy::ProjectDeployFile;
-use crate::push_files::{BatchUse, DeployOutcome, DeployPlan, LpClientSink, deploy_files};
 use crate::protocol_session::{
     PendingAsk, ProtocolSession, ResponseDisposition, next_borrowed_wire_request_id_base,
 };
 use crate::pull_loop::{
     CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
 };
+use crate::push_files::{BatchUse, DeployOutcome, DeployPlan, LpClientSink, deploy_files};
 
 /// Result value plus protocol events observed while waiting for it.
 #[derive(Debug)]

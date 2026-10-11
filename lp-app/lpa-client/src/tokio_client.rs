@@ -28,11 +28,9 @@ use crate::client_error::ClientError;
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
 use crate::project_deploy::ProjectDeployFile;
-use crate::push_files::{
-    BatchUse, DeployOutcome, DeployPlan, FileRequestSink, deploy_files,
-};
 use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 use crate::pull_loop::{NeverCancel, ProgressDeadline, PullIo, PullOutcome, run_project_read};
+use crate::push_files::{BatchUse, DeployOutcome, DeployPlan, FileRequestSink, deploy_files};
 use crate::transport::ClientTransport;
 
 pub type SharedClientTransport = Arc<Mutex<Box<dyn ClientTransport>>>;

@@ -32,11 +32,11 @@
 //! do not come here.
 
 use async_trait::async_trait;
+use lp_tree_store::{DEFAULT_DEFLATE_LEVEL, plan_deflated_chunks};
 use lpc_model::AsLpPathBuf;
 use lpc_wire::budget::FILE_SYNC_RECORD_MAX_HINT;
 use lpc_wire::server::{BatchOp, FsResponse};
 use lpc_wire::{ClientRequest, FsRequest, WireProjectHandle, WireServerMsgBody};
-use lp_tree_store::{DEFAULT_DEFLATE_LEVEL, plan_deflated_chunks};
 
 use crate::client::{DeployStep, LpClient};
 use crate::client_error::{ClientError, ClientResult};
@@ -490,11 +490,17 @@ mod tests {
             .await
             .expect("deployed");
         let sent = ops(&client.into_io().sent);
-        assert_eq!(sent[..3], ["stop", "begin", "write /projects/demo/project.json"]);
+        assert_eq!(
+            sent[..3],
+            ["stop", "begin", "write /projects/demo/project.json"]
+        );
         assert_eq!(sent[3], "deflated /projects/demo/main.glsl @0");
         assert_eq!(sent.len(), 3 + chunks + 2);
         assert_eq!(sent[sent.len() - 2..], ["load projects/demo", "commit"]);
-        assert!(!sent.iter().any(|op| op.starts_with("delete")), "write over");
+        assert!(
+            !sent.iter().any(|op| op.starts_with("delete")),
+            "write over"
+        );
     }
 
     fn chunk_written(id: u64) -> lpc_wire::WireServerMessage {
@@ -531,10 +537,11 @@ mod tests {
             })
             .collect();
         let requests = file_requests("p", "n.bin", &noise, true);
-        assert!(requests.iter().all(|r| matches!(
-            r,
-            ClientRequest::Filesystem(FsRequest::WriteChunk { .. })
-        )));
+        assert!(
+            requests
+                .iter()
+                .all(|r| matches!(r, ClientRequest::Filesystem(FsRequest::WriteChunk { .. })))
+        );
     }
 
     #[test]
@@ -565,9 +572,10 @@ mod tests {
             text.len() as u64
         );
         // Without deflate: today's form.
-        assert!(file_requests("p", "s.glsl", &text, false).iter().all(|r| matches!(
-            r,
-            ClientRequest::Filesystem(FsRequest::WriteChunk { .. })
-        )));
+        assert!(
+            file_requests("p", "s.glsl", &text, false)
+                .iter()
+                .all(|r| matches!(r, ClientRequest::Filesystem(FsRequest::WriteChunk { .. })))
+        );
     }
 }

@@ -118,7 +118,12 @@ fn a_replug_mid_batch_leaves_the_old_project_and_no_stale_batch() {
         answer,
         WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
     ));
-    assert!(board.remounted().file_exists("/projects/demo/note.txt".as_path()).unwrap());
+    assert!(
+        board
+            .remounted()
+            .file_exists("/projects/demo/note.txt".as_path())
+            .unwrap()
+    );
 }
 
 #[test]
@@ -162,7 +167,12 @@ fn a_corrupt_deflated_chunk_writes_nothing() {
         }
         other => panic!("{other:?}"),
     }
-    assert!(!board.remounted().file_exists("/projects/x/s.glsl".as_path()).unwrap());
+    assert!(
+        !board
+            .remounted()
+            .file_exists("/projects/x/s.glsl".as_path())
+            .unwrap()
+    );
 }
 
 #[test]
@@ -289,7 +299,10 @@ fn measure_the_wire_on_the_corpus() {
 
         let planned = file_requests("p", path, bytes, true);
         let deflated = planned.iter().any(|r| {
-            matches!(r, ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { .. }))
+            matches!(
+                r,
+                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { .. })
+            )
         });
         deflated_files += usize::from(deflated);
         planned_requests += planned.len();
@@ -299,9 +312,7 @@ fn measure_the_wire_on_the_corpus() {
         at_rest_planned += planned
             .iter()
             .map(|r| match r {
-                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { data, .. }) => {
-                    data.len()
-                }
+                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { data, .. }) => data.len(),
                 ClientRequest::Filesystem(
                     FsRequest::Write { data, .. } | FsRequest::WriteChunk { data, .. },
                 ) => data.len(),
@@ -336,7 +347,13 @@ fn measure_the_wire_on_the_corpus() {
             at_rest_fixed += bytes
                 .chunks(4096)
                 .zip(&chunks)
-                .map(|(c, z)| if z.len() + 2 <= 1008 { z.len() } else { c.len() })
+                .map(|(c, z)| {
+                    if z.len() + 2 <= 1008 {
+                        z.len()
+                    } else {
+                        c.len()
+                    }
+                })
                 .sum::<usize>();
         } else {
             fixed_requests += raw.len();
@@ -345,7 +362,10 @@ fn measure_the_wire_on_the_corpus() {
         }
     }
     let pct = |a: usize, b: usize| a as f64 * 100.0 / b as f64;
-    std::println!("corpus (simulator, host): {} files, {logical} B logical", files.len());
+    std::println!(
+        "corpus (simulator, host): {} files, {logical} B logical",
+        files.len()
+    );
     std::println!("| form | requests | wire bytes | vs raw | at rest |");
     std::println!("|---|---:|---:|---:|---:|");
     std::println!("| raw (today) | {raw_requests} | {raw_bytes} | 100.0 % | {logical} |");
@@ -415,7 +435,10 @@ impl Board {
         .on_borrowed_wire()
     }
 
-    fn push(&self, files: &[(String, Vec<u8>)]) -> lpa_client::ClientResult<lpa_client::PushReport> {
+    fn push(
+        &self,
+        files: &[(String, Vec<u8>)],
+    ) -> lpa_client::ClientResult<lpa_client::PushReport> {
         let mut client = self.client();
         let mut progress = |_label: String, _percent: Option<u8>| {};
         block_on(push_project(
@@ -427,7 +450,11 @@ impl Board {
         ))
     }
 
-    fn request(&self, client: &mut LpClient<Loopback>, request: ClientRequest) -> WireServerMsgBody {
+    fn request(
+        &self,
+        client: &mut LpClient<Loopback>,
+        request: ClientRequest,
+    ) -> WireServerMsgBody {
         block_on(client.send_request(request))
             .expect("answered")
             .value
@@ -457,7 +484,11 @@ impl Board {
     }
 
     fn reset_link(&self) {
-        self.inner.borrow_mut().transport.reset.push(LinkId::PRIMARY);
+        self.inner
+            .borrow_mut()
+            .transport
+            .reset
+            .push(LinkId::PRIMARY);
     }
 
     fn hash(&self, dir: &str) -> String {
@@ -650,7 +681,11 @@ fn collect(dir: &Path, root: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         if path.is_dir() {
             collect(&path, root, out);
         } else {
-            let rel = path.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
             out.push((rel, std::fs::read(&path).unwrap()));
         }
     }
