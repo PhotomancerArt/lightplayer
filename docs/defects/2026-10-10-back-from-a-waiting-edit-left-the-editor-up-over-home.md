@@ -39,7 +39,11 @@ seen; nothing else reads the place differently.
 `connected_tests::a_move_and_back_behind_a_long_edit_still_ends_the_wait`
 (which also pins the hazard: Home reported over Home is no move). The walk's
 `card-back` is the live check, and it is a race: a green lane is evidence the
-road works, not that the race was hit.
+road works, not that the race was hit. A lane hit it when the Edit's own
+batch carried a tick (a project read after the action) and Back's reports
+were queued before the next batch ran: one `--serve-release` door run on the
+old code failed on that shape, and one `--tab` run on the fix passed on it
+(1 of the 6 runs on the fix that reached `card-back` hit it).
 
 **Lesson** — a rule that fires on an edge cannot read a stream something
 upstream folds to its latest value. Latest-wins was right for what place fed
