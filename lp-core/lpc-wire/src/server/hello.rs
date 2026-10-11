@@ -42,8 +42,9 @@ use crate::server::hello_auth::HelloAuth;
 ///   `fs-tree` board that found a newer or damaged tree-store header
 ///   wrote nothing, kept its files and serves a RAM filesystem with its
 ///   access locked. A new value of a required hello field: an old Studio
-///   cannot decode a refused board's hello. `PACK_FORMAT_VERSION` is
-///   unchanged.
+///   cannot decode a refused board's hello. The same train adds the
+///   feature `fs.tree` (`LpFeature::FsTree`, an `fs-tree` build's hello and
+///   manifest core). `PACK_FORMAT_VERSION` is unchanged.
 /// - 41: file bodies on the edit path go as text — `AssetBodyOverlay::
 ///   ReplaceBody` (Studio's shader edit, `SetArtifactBody`, and the bodies an
 ///   overlay read returns) and `WireCreateNodeRequest`'s `body` and

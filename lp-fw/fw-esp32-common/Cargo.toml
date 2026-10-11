@@ -53,6 +53,11 @@ lpc-relay = { path = "../../lp-core/lpc-relay", optional = true }
 # sans-IO). Already in every split image's core.
 lpc-update = { path = "../../lp-core/lpc-update", optional = true }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"], optional = true }
+# `tree_fs` + `aligned_nor_flash` (feature `fs-tree`): the tree store as the
+# board's filesystem, over any word-aligned `embedded-storage` part. No
+# `soft-sha`: the chip passes its hardware SHA.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs"], optional = true }
+embedded-storage = { version = "0.3", optional = true }
 
 # Server stack (heavy) — only with the `server` feature, mirroring the bin crates.
 lp-recovery = { path = "../../lp-base/lp-recovery", default-features = false, optional = true }
@@ -137,9 +142,18 @@ host-lan-harness = [
     "critical-section/std",
     "dep:lp-gfx",
 ]
+# The tree store as the board's filesystem (`tree_fs`, `aligned_nor_flash`;
+# plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`). Off by
+# default; the C6's `fs-tree` turns it on. Never in a shipped image.
+fs-tree = ["server", "dep:lp-tree-store", "dep:embedded-storage"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
+# `tree_fs` / `aligned_nor_flash` tests: the store with its software hasher,
+# over the NOR model (MIT, `lp-emu/`; a dev-dependency only).
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["lpfs", "soft-sha", "nor-sim"] }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+embedded-storage = "0.3"
 # The seam ABI on the host, for the unit tests of `seams` and the network
 # seam's adapters (every call shim runs its silicon body off riscv32).
 lp-seam = { path = "../../lp-base/lp-seam" }

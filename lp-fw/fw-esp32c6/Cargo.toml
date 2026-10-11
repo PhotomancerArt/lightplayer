@@ -247,6 +247,24 @@ test_button = ["server"]  # Test root-owned GPIO button input with internal pull
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
+# The tree store as `lpfs` (plan
+# `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`) — OFF by default,
+# NEVER shipped: never in `lp-fw/builds/served.json`, a release or
+# `bless-chips`. The board's filesystem is `lp-tree-store` over esp-storage
+# (`src/tree_flash.rs`: the word-alignment shim) with the SHA accelerator as
+# its hasher (`src/hw_sha.rs`); every board file goes through it, because
+# they all go through `base_fs`. Mount verdicts (`fw_esp32_common::tree_fs`):
+# a partition with no store (blank, littlefs, an interrupted first format)
+# is formatted, unless the legacy-layout probe finds a pre-repartition
+# filesystem (then held, as today); a newer or damaged store is REFUSED —
+# nothing written, files kept, access locked (`fs: refused`). Its update
+# session refuses a core install built without `fs-tree` (a littlefs core
+# would format the store). littlefs stays linked for the legacy probe. See
+# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md. Not
+# `test_*` (that prefix is a harness entrypoint), and not with `memory_fs`.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,fs-tree
+fs-tree = ["server", "fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 # JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
@@ -531,6 +549,9 @@ log = { workspace = true, default-features = false }
 embedded-storage = "0.3"
 esp-storage = { version = "0.9", features = ["esp32c6", "panic-unaligned-buffer"] }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+# `fs-tree` only: the tree store as `lpfs`. No `soft-sha` (the SHA
+# accelerator is the hasher), no `stats`.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs"], optional = true }
 
 [lints]
 workspace = true

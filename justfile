@@ -2199,11 +2199,21 @@ fw-esp32c6-split features="": install-rv32-target
 # The GATE is the smallest of the steady and update headrooms, against
 # `margin`. `unsplit=1` also builds the monolithic image and prints the code
 # and image deltas against it (informational; CI does not pay that build).
-fw-esp32c6-size-check margin="65536" unsplit="": install-rv32-target
+# `features` (the third, positional: `just fw-esp32c6-size-check 65536 ""
+# esp32c6,server,fs-tree`) measures another feature set the same way — the
+# tree store, never shipped. The default, empty, is the shipped image and is
+# what CI gates.
+fw-esp32c6-size-check margin="65536" unsplit="" features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    just fw-esp32c6-split
-    out=target/fw-split/shipped
+    if [[ -z "{{ features }}" ]]; then
+        just fw-esp32c6-split
+        out=target/fw-split/shipped
+    else
+        just fw-esp32c6-split "{{ features }}"
+        out="target/fw-split/$(echo "{{ features }}" | tr ',' '_')"
+        echo "features: {{ features }} (not the shipped image)"
+    fi
     verdict="$(head -1 "${out}/verify.txt")"
     echo "${verdict}"
     # The shader compiler lands in the engine: the evidence, by crate.
@@ -2214,7 +2224,7 @@ fw-esp32c6-size-check margin="65536" unsplit="": install-rv32-target
     fi
     cargo run -q -p lp-fw-split --release -- headroom "${out}/split.json" --margin {{ margin }}
     if [ -n "{{ unsplit }}" ]; then
-        (cd lp-fw/fw-esp32c6 && LP_FW_TARGET=esp32c6-4mb cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
+        (cd lp-fw/fw-esp32c6 && LP_FW_TARGET=esp32c6-4mb cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features "{{ if features == "" { "esp32c6,server" } else { features } }}")
         img="$(mktemp)"
         trap 'rm -f "${img}"' EXIT
         espflash save-image --chip esp32c6 --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "${img}" >/dev/null
@@ -2711,6 +2721,7 @@ clippy-host:
     # same gap `test-rust-features` closes below for the tests.
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
+    cargo clippy -p fw-esp32-common --features fs-tree --all-targets -- --no-deps -D warnings
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
     # flate2/zlib-rs) is off by default for the same reason.
     cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
@@ -2790,6 +2801,13 @@ clippy-fw-esp32c6: install-rv32-target
     echo "clippy: split (LP_SPLIT_LINK=1)"
     LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,server -- --no-deps -D warnings
+    # `fs-tree` (the tree store as `lpfs`; never shipped), plain and split:
+    # nothing else lints its mount, its shim's glue or its update guard.
+    echo "clippy: --features fs-tree (plain, then split)"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,fs-tree -- --no-deps -D warnings
+    LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,server,fs-tree -- --no-deps -D warnings
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader
@@ -2994,6 +3012,9 @@ test-rust-features:
     # ...and the C6's Bluetooth links (feature `radio-link`, the mux and the
     # radio slots), with `json-pack` so the packed-session test runs too.
     cargo test -p fw-esp32-common --features radio-link,json-pack
+    # The tree store as the board's filesystem (`fs-tree`, never shipped):
+    # the mount verdict, the alignment shim and the update guard.
+    cargo test -p fw-esp32-common --features fs-tree
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.

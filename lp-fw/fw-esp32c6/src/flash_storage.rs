@@ -5,12 +5,20 @@
 //!
 //! Where `lpfs` is comes from the flashed partition table
 //! ([`crate::flash_layout::FlashLayout`]), never a transcribed constant.
+//!
+//! An `fs-tree` build serves the tree store instead (`crate::tree_flash`)
+//! and keeps only the legacy-layout probe from here
+//! ([`legacy_lpfs_present_at`]), which is what keeps littlefs linked there.
 
+#[cfg(not(feature = "fs-tree"))]
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
+#[cfg(not(feature = "fs-tree"))]
+use embedded_storage::nor_flash::NorFlash;
+use embedded_storage::nor_flash::ReadNorFlash;
 use littlefs_rust::{Config, Error as LfsError, Storage};
 
+#[cfg(not(feature = "fs-tree"))]
 use crate::flash_layout::PartitionExtent;
 
 /// Block size: 4KB (matches ESP32 flash sector).
@@ -25,11 +33,13 @@ const LOOKAHEAD_SIZE: u32 = 64;
 ///
 /// Translates littlefs block/offset addressing to absolute flash addresses
 /// within the lpfs partition.
+#[cfg(not(feature = "fs-tree"))]
 pub struct LpFlashStorage {
     flash: esp_storage::FlashStorage<'static>,
     partition: PartitionExtent,
 }
 
+#[cfg(not(feature = "fs-tree"))]
 impl LpFlashStorage {
     /// Create storage adapter for the located lpfs partition.
     ///
@@ -50,16 +60,27 @@ impl LpFlashStorage {
     /// mount, and never when the located partition IS the legacy one — then
     /// the failed mount was already the answer.
     pub fn legacy_lpfs_present(&mut self) -> bool {
-        use crate::legacy_layout::{LEGACY_LPFS_V1_BLOCKS, LEGACY_LPFS_V1_OFFSET};
-        if self.partition.offset == LEGACY_LPFS_V1_OFFSET {
-            return false;
-        }
-        let region = RegionReader {
-            flash: &mut self.flash,
-            offset: LEGACY_LPFS_V1_OFFSET,
-        };
-        fw_esp32_common::lp_fs::lpfs_mounts_read_only(region, config_for(LEGACY_LPFS_V1_BLOCKS))
+        legacy_lpfs_present_at(&mut self.flash, self.partition.offset)
     }
+}
+
+/// Is a pre-repartition LightPlayer filesystem at the legacy offset, for a
+/// board whose located `lpfs` starts at `lpfs_offset` and did not mount?
+/// Probed read-only. Never when the located partition IS the legacy one —
+/// then the failed mount was already the answer.
+pub fn legacy_lpfs_present_at(
+    flash: &mut esp_storage::FlashStorage<'static>,
+    lpfs_offset: u32,
+) -> bool {
+    use crate::legacy_layout::{LEGACY_LPFS_V1_BLOCKS, LEGACY_LPFS_V1_OFFSET};
+    if lpfs_offset == LEGACY_LPFS_V1_OFFSET {
+        return false;
+    }
+    let region = RegionReader {
+        flash,
+        offset: LEGACY_LPFS_V1_OFFSET,
+    };
+    fw_esp32_common::lp_fs::lpfs_mounts_read_only(region, config_for(LEGACY_LPFS_V1_BLOCKS))
 }
 
 /// A read-only littlefs view of a flash region at `offset` (the legacy
@@ -85,6 +106,7 @@ impl Storage for RegionReader<'_> {
     }
 }
 
+#[cfg(not(feature = "fs-tree"))]
 impl Storage for LpFlashStorage {
     fn read(&mut self, block: u32, offset: u32, buf: &mut [u8]) -> Result<(), LfsError> {
         let addr = self.block_offset(block, offset);
@@ -105,6 +127,7 @@ impl Storage for LpFlashStorage {
 
 /// Block count published by [`LpFlashStorage::new`], read back by
 /// [`lpfs_config`].
+#[cfg(not(feature = "fs-tree"))]
 static LPFS_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 
 /// littlefs configuration for the lpfs partition.
@@ -120,6 +143,7 @@ static LPFS_BLOCK_COUNT: AtomicU32 = AtomicU32::new(0);
 /// A zero block count means this ran before any adapter was built; littlefs
 /// rejects it rather than mounting a zero-length filesystem, so the failure is
 /// loud.
+#[cfg(not(feature = "fs-tree"))]
 pub fn lpfs_config() -> Config {
     config_for(LPFS_BLOCK_COUNT.load(Ordering::Relaxed))
 }

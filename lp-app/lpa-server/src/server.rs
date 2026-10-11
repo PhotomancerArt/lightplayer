@@ -1796,7 +1796,8 @@ fn graphics_feature(backend_name: &str) -> Option<lpc_model::LpFeature> {
             | LpFeature::SvcButton
             | LpFeature::SvcRadioEspnow
             | LpFeature::DiagUnwind
-            | LpFeature::ShaderF32 => None,
+            | LpFeature::ShaderF32
+            | LpFeature::FsTree => None,
         }
     }
 

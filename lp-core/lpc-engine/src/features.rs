@@ -46,6 +46,7 @@ const fn origin(feature: LpFeature) -> FeatureOrigin {
         LpFeature::GfxNull => FeatureOrigin::Embedder,
         LpFeature::GfxWgpu => FeatureOrigin::Embedder,
         LpFeature::ShaderF32 => FeatureOrigin::Embedder,
+        LpFeature::FsTree => FeatureOrigin::Embedder,
     }
 }
 
@@ -89,11 +90,12 @@ pub const ENGINE_FEATURE_FRAGMENT: &str = lpc_model::lp_const_concat!(
     engine_fragment(LpFeature::ALL[13]),
     engine_fragment(LpFeature::ALL[14]),
     engine_fragment(LpFeature::ALL[15]),
+    engine_fragment(LpFeature::ALL[16]),
 );
 
 // A new LpFeature variant grows ALL past this fragment list — fail the build
 // here until the list above covers it.
-const _: () = assert!(LpFeature::ALL.len() == 16);
+const _: () = assert!(LpFeature::ALL.len() == 17);
 
 #[cfg(test)]
 mod tests {

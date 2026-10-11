@@ -15,6 +15,7 @@
 //! - `gfx.*` — the graphics backend compiled into the build
 //! - `diag.*` — diagnostics tier (e.g. unwinding panic recovery)
 //! - `shader.*` — shader-engine capabilities (e.g. native f32 math)
+//! - `fs.*` — the board's filesystem (e.g. the tree store)
 
 use serde::{Deserialize, Serialize};
 
@@ -75,13 +76,18 @@ pub enum LpFeature {
     /// Native IEEE-754 f32 shader math alongside Q16.16.
     #[serde(rename = "shader.f32")]
     ShaderF32,
+    /// The board's filesystem is the tree store (`fs-tree` builds; never
+    /// shipped). A core install without it would format the store, so the
+    /// `fs-tree` update session checks a new core's manifest for it.
+    #[serde(rename = "fs.tree")]
+    FsTree,
 }
 
 impl LpFeature {
     /// Every feature, in declaration order. Iteration over the registry goes
     /// through this const so call sites stay wildcard-free: adding a variant
     /// without extending it is caught by [`tests::all_is_total_and_unique`].
-    pub const ALL: [LpFeature; 16] = [
+    pub const ALL: [LpFeature; 17] = [
         LpFeature::NodeButton,
         LpFeature::NodeClock,
         LpFeature::NodeFluid,
@@ -98,6 +104,7 @@ impl LpFeature {
         LpFeature::GfxWgpu,
         LpFeature::DiagUnwind,
         LpFeature::ShaderF32,
+        LpFeature::FsTree,
     ];
 
     /// The stable wire identifier, identical to the serde form.
@@ -119,6 +126,7 @@ impl LpFeature {
             LpFeature::GfxWgpu => "gfx.wgpu",
             LpFeature::DiagUnwind => "diag.unwind",
             LpFeature::ShaderF32 => "shader.f32",
+            LpFeature::FsTree => "fs.tree",
         }
     }
 
@@ -193,6 +201,7 @@ mod tests {
                 LpFeature::GfxWgpu => 13,
                 LpFeature::DiagUnwind => 14,
                 LpFeature::ShaderF32 => 15,
+                LpFeature::FsTree => 16,
             }
         }
         for (i, feature) in LpFeature::ALL.iter().enumerate() {
