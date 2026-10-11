@@ -160,27 +160,30 @@ c40 (278 ms vs 3 ms; 331 ms nearly full), and its first boot's format is
 3.7 s of erases on silicon (estimate). Both are boot-time and before the
 radios; M7 should measure them on CX1, with any watchdog.
 
-## Size (P9; local macOS builds, split image)
+## Size (P9; local macOS builds, split image, all after `main`'s #1092)
 
-| image | core B | engine B | app.bin B | image headroom | steady | update | **gate** |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| default, `main` `5c78fcd06` | 1,429,376 | 1,851,530 | 3,330,048 | 77,824 | 81,782 | 491,520 | **81,782** |
-| default, this PR | see the PR's final size check | | | | | | |
-| `fs-tree` (legacy probe kept) | 1,430,512 | 1,852,198 | 3,330,048 | 77,824 | 81,114 | 491,520 | **81,114** |
-| `fs-tree`, no probe (`measure_no_legacy_probe`) | 1,425,376 | 1,852,228 | 3,330,048 | 77,824 | 81,084 | 491,520 | **81,084** |
+| image | core B | engine B | app.bin B | image headroom | steady | update | **gate** | core slack to its page |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| default, `main` `5d72e82a2` | 1,420,176 | 1,851,530 | 3,330,048 | 77,824 | 81,782 | 491,520 | **81,782** | 21,616 |
+| default, this PR `d91351728` | 1,420,224 | 1,851,754 | 3,330,048 | 77,824 | 81,558 | 491,520 | **81,558** | 21,568 |
+| `fs-tree` (legacy probe kept) | 1,430,512 | 1,852,198 | 3,330,048 | 77,824 | 81,114 | 491,520 | **81,114** | 11,280 |
+| `fs-tree`, no probe (`measure_no_legacy_probe`) | 1,425,376 | 1,852,228 | 3,330,048 | 77,824 | 81,084 | 491,520 | **81,084** | 16,416 |
 
-The core starts at `0x18000`; the engine at `0x178000` in every row: **no
-row crosses a 32 KiB page.**
+The core starts at `0x18000` and the engine at `0x178000` in every row:
+**no row crosses a 32 KiB page.** The default image moved by +48 B (core) and
++224 B (engine; gate −224 B), app.bin unchanged: the wire's new `refused`
+value and the feature registry's `fs.tree`, which every build carries.
 
 **This disagrees with the plan (D7, notes "Size").** The prediction was an
-`fs-tree` core ≈ 40–42 KB bigger, a page crossed and the gate ≈ 55.6 KB
-under the 64 KB floor. Measured, the core grows **1,136 B** and the gate
-stays at **81,114 B**, above the floor. By symbol (`rust-nm --print-size`,
-default vs `fs-tree` p2.elf): `lp_tree_store` +39,652 B, littlefs −21,558 B
-(3,754 B left: the read-only probe's mount), `LpFsFlash` −7,980 B, other
-−8,391 B. The legacy probe keeps only littlefs's mount path; LTO drops its
-writer, its format and the adapter. "Littlefs removed" (no probe) puts the
-core 4 KB *under* today's.
+`fs-tree` core ≈ 40–42 KB bigger, a page crossed and the gate ≈ 55.6 KB,
+under the 64 KB floor. Measured, the core grows **10,288 B** and the gate is
+**81,114 B**, above the floor. By symbol (`rust-nm --print-size`, the
+default vs the `fs-tree` p2.elf): `lp_tree_store` +39,652 B, littlefs
+−21,558 B (3,754 B left: the read-only probe's mount), `LpFsFlash` −7,980 B,
+everything else +979 B. The legacy probe keeps only littlefs's mount path;
+LTO drops its writer, its format and the adapter. "littlefs removed" (no
+probe) is +5,152 B over the default core (the plan's estimate was
++6.6–8.6 KB).
 
 ## D4: the first-boot format, accepted for M5
 
@@ -194,8 +197,8 @@ the server); M7 measures it on CX1, including whether a watchdog fires.
 
 1. **littlefs and the legacy probe leave the image, or the store shrinks by
    ~10 KB (D7).** Measured, the `fs-tree` image already clears the 64 KB
-   floor with the probe (81,114 B), so this condition as written is met by
-   the numbers; what remains of it is the D8 hazard (below) and the probe's
+   floor with the probe (gate 81,114 B, core +10.3 KB), so this condition
+   as written is met by the numbers; what remains of it is the D8 hazard (below) and the probe's
    own question (the legacy layout it protects is not reachable on today's
    image).
 2. **A lazy or incremental format (D4).** Yona, 2026-10-10: "not the end of
