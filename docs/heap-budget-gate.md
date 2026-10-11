@@ -221,10 +221,26 @@ board is flashed with — booted whole, run to its first heartbeat, and read fro
 the allocator figures the firmware itself reports over its own link. Since
 OTA M2 (2026-10-04) the C6's shipped image is the **split image**
 (`lp-fw-split`: loader, boot records, core, engine): the ratchet builds it with
-`just fw-esp32c6-split`, direct-loads its loader over its flashed `merged.bin`
+the shipped features and target, as a **figure build** (below), into
+`target/fw-split/figures`, direct-loads its loader over its flashed `merged.bin`
 (`lp-cli emu run --over`, held to a ROM-up boot by
 `lp-emu-esp32c6/tests/split_boot.rs`), and reads symbols from its `p2.elf`;
 `LP_EMU_C6_SPLIT_ESP32C6_SERVER_RADIO` names an already-built split directory.
+
+**The C6's image is a figure build** (`LP_FIGURE_BUILD=1`,
+`tools/lp-app-version`): stamped with the fixed version `0000000` and
+`LP_BUILD_DIRTY=false`, whatever the tree's state. The version's length
+reaches the boot heap, and `lp-fw-split` stamps it afresh on every build, so
+until 2026-10-10 the re-check CI runs after a re-baseline — on the tree the
+re-baseline had just written to — was stamped `<sha>-dirty-<time>`, read
+~32 B more than the boot it was confirming, and never handed back a patch;
+and a desk's 9-character sha read 8 B off CI's 7
+(`docs/debt/heap-budget-record-churns-on-routine-changes.md`). The emulator
+suite's shipped split image is a figure build too, so the image CI uploads
+for `just fetch-ci-images` is the ratchet's bytes. Product builds never set
+the variable; `target/fw-split/shipped` keeps the tree's real version. Seven
+characters is CI's own short-sha length, so a change to the pin's length moves
+every C6 heap figure.
 
 ```bash
 just heap-budget-check-chips     # the ratchet, both chips
