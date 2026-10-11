@@ -1,0 +1,12 @@
+[application]
+name = "lab-mapping-web"
+default_platform = "web"
+asset_dir = "public"
+out_dir = "dist"
+
+[web.app]
+title = "Mapping lab"
+base_path = "/"
+
+[web.watcher]
+watch_path = ["lab/mapping/web/src", "lab/mapping/model/src"]

@@ -1,0 +1,16 @@
+[package]
+name = "lab-mapping-web"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Mapping design lab: the canvas page (Dioxus web) over lab-mapping-model"
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+lab-mapping-model = { path = "../model" }
+
+[lints]
+workspace = true

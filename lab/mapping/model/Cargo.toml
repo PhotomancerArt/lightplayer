@@ -1,0 +1,17 @@
+[package]
+name = "lab-mapping-model"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Mapping design lab: the editor model — fixtures, components, objects, selection, hints (pure, no product crates)"
+
+# The fence: this crate depends on NO workspace crate. It is the model Yona
+# reads and edits, and it has to stay small and abstract enough to drop into
+# the app later. See lab/mapping/README.md.
+[dependencies]
+
+[lints]
+workspace = true
