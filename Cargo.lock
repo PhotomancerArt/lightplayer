@@ -6587,6 +6587,7 @@ dependencies = [
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "hashbrown 0.15.5",
  "log",
  "lp-gfx-lpvm",
@@ -6607,6 +6608,7 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lpvm-native",
+ "miniz_oxide",
  "serde",
 ]
 

@@ -164,6 +164,10 @@ lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
 # pushes with, and cuts of the flash under a server-driven batch.
 lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["lpfs", "nor-sim", "deflate-plan"] }
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+# `tests/push_boundary.rs`: the loopback `ClientIo` the real push conversation
+# runs over, and the fixed-4 KiB deflate the corpus measurement compares.
+async-trait = "0.1"
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"] }
 
 [lints]
 workspace = true
