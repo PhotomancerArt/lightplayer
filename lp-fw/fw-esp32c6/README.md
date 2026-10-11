@@ -275,6 +275,16 @@ it, because they all go through `base_fs`.
   core would format the store
   (`fw_esp32_common::fs_tree_core_guard`).
 
+Two measurement features ride with it, neither shipped: `heap_peak_diag`
+(`[heap] peak=… live=… max_usage=… largest=…` after each heartbeat — the
+peak of requested bytes since the line before — and `[perf] fs mount <us>
+us` at boot; not with `heap_map_diag`) and `measure_no_legacy_probe`
+(`fs-tree` without the legacy probe: the size table's "littlefs removed"
+row; such a board formats a legacy layout instead of holding it). Size any
+of them with `just fw-esp32c6-size-check 65536 "" <features>`. The
+emulator walks are `lp-cli/tests/emu_tree_store_{boot,cuts,ram,perf}.rs`;
+the report is `docs/reports/2026-10-10-tree-store-emulator-walk.md`.
+
 `fs-tree` + `memory_fs` is a `compile_error!`. See
 `docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md`.
 
