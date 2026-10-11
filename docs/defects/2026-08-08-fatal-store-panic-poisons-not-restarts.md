@@ -1,3 +1,10 @@
+---
+status: fixed
+found: 2026-08-08      # report (prod 502s behind a green healthz after the #388 deploy)
+fixed: 0a60c42a1
+area: lp-cloud-store-sqlite store_fatal.rs × lp-cloud-server with_service
+class: assumed-context # the recovery story assumed a panic kills the process
+---
 # A fatal store panic poisons the lock instead of restarting the node
 
 **Mechanism.** The sqlite adapter's fail-fast policy (`store_fatal.rs`)
