@@ -33,6 +33,9 @@ members = [
     "lp-app/lpa-palettes",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-studio-web",
+    # The mapping design lab (lab/mapping/README.md)
+    "lab/mapping/model",
+    "lab/mapping/web",
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",

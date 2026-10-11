@@ -5585,6 +5585,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-mapping-model"
+version = "40.0.0"
+
+[[package]]
+name = "lab-mapping-web"
+version = "40.0.0"
+dependencies = [
+ "dioxus",
+ "lab-mapping-model",
+]
+
+[[package]]
 name = "lazy-js-bundle"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
