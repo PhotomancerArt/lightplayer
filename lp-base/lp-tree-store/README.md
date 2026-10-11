@@ -152,7 +152,8 @@ as the transaction), `host-deflate` (`host_deflate_chunks`, miniz_oxide —
 host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`), `stats`
 (`TreeStore::stats`, `TreeStoreStats`, `reset_transient_peak`: the counters
 and the RAM-peak accounting, ~1.2 KB of RV32 code; off in firmware, on for
-the crate's tests and `lp-store-bench`).
+the crate's tests and `lp-store-bench`), `mutants` (test-only: the mutation
+switches below; no product build turns it on).
 
 ## API
 
@@ -281,8 +282,26 @@ test --release -p lp-tree-store cut_sweep` runs every cut point;
 `LP_TREE_STORE_SWEEP_TEARS=calibrated` (or any of `lp-nor-sim`'s
 `TearModel::NAMED`, comma-separated) picks the tear models — the torn-header
 test (`a_torn_kill_erase_or_header_program_never_reads_as_newer`) follows the
-same dial — and `LP_TREE_STORE_SWEEP_SECTORS=128` the geometry of every sweep
-but the GC one, whose point is a small flash.
+same dial (its run floor scales with the number of models) — and
+`LP_TREE_STORE_SWEEP_SECTORS=128` the geometry of every sweep but the GC one,
+whose point is a small flash.
+
+**Counter wrap** (`counter_wrap_tests.rs`, a test-only start value): the
+sector sequence (u32) wraps safely under cuts; the root sequence (u64) does
+not — a commit past `u64::MAX` mounts as the one before it, pinned by
+`the_root_sequence_does_not_wrap`
+(`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
+commits, not reachable in practice).
+
+**Mutants** (feature `mutants`, `mutants.rs`): eleven switches, each
+breaking one guarantee — skip the kill before an erase; trust record headers
+without the payload CRC; dedup against every indexed id; GC erasing its
+victim before its copies; the root before the directories; resume a head
+without its tail check; `NoSpace` checked after writing; GC forgetting the
+pending set; the sector header magic first; a newer version read as
+untrusted; open a sector without the erase read-back. `lp-store-bench
+mutants` runs each through a fixed driver set and requires every one caught
+and the unmutated store clean (its README has the table).
 
 ## Code size (RV32)
 

@@ -22,6 +22,9 @@ nor-sim = ["dep:lp-nor-sim"]
 # `TreeStore::stats`: counters and RAM-peak accounting (tests, the bench).
 # Off in firmware: ~0.7 KB of RV32 code for numbers nothing on a device reads.
 stats = []
+# Test-only mutation switches (`mutants::set_mutant`): each breaks one
+# guarantee on purpose, for `lp-store-bench mutants`. Never in a product build.
+mutants = []
 # `StoreImage`: the read-only inspector over a raw image of the partition
 # (`lp-cli hardware tree inspect|check|extract`). Host tooling; never on a
 # device. Reports derive `serde::Serialize` for `--json`.

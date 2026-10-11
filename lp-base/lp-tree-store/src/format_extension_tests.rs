@@ -147,9 +147,10 @@ fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
         .map_err(|(e, ..)| e)
         .unwrap();
     let ops = probe.ops_since_plan();
-    let mut runs = 0u32;
+    let tears = crate::test_support::sweep_tears();
+    let mut runs = 0usize;
     for k in 0..ops {
-        for tear in crate::test_support::sweep_tears() {
+        for &tear in &tears {
             for seed in 0..24u64 {
                 let mut g = f.clone();
                 g.set_plan(FaultPlan::cut(k, tear, seed << 8 | k));
@@ -172,7 +173,13 @@ fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
             }
         }
     }
-    assert!(runs > 1000, "{runs} runs");
+    // The bar was set at three models (> 1000 runs); it scales with how many
+    // `LP_TREE_STORE_SWEEP_TEARS` names.
+    assert!(
+        runs * 3 > 1000 * tears.len(),
+        "{runs} runs over {} models",
+        tears.len()
+    );
 }
 
 /// A root whose tail carries a tag this version does not know is the

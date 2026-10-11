@@ -22,6 +22,21 @@ macro_rules! stat {
     };
 }
 
+/// Whether the named [`mutants::Mutant`] is switched on: `false` (and the
+/// mutant code compiled out) without the test-only `mutants` feature.
+#[cfg(feature = "mutants")]
+macro_rules! mutant {
+    ($m:ident) => {
+        crate::mutants::on(crate::mutants::Mutant::$m)
+    };
+}
+#[cfg(not(feature = "mutants"))]
+macro_rules! mutant {
+    ($m:ident) => {
+        false
+    };
+}
+
 mod blob_codec;
 mod dir_node;
 mod dir_rebuild;
@@ -40,6 +55,8 @@ mod mount_summary;
 mod mount_verdict;
 mod mount_walk;
 mod multi_node;
+#[cfg(feature = "mutants")]
+pub mod mutants;
 mod node_read;
 mod node_write;
 mod object_hasher;
@@ -64,6 +81,8 @@ mod tree_store;
 mod tree_walk;
 mod vec_growth;
 
+#[cfg(test)]
+mod counter_wrap_tests;
 #[cfg(test)]
 mod cut_sweep_tests;
 #[cfg(test)]
