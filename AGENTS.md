@@ -788,7 +788,8 @@ This applies to every session, not just delegated ones. See
 ### Defect and debt registers during implementation
 
 When implementation fixes a user-reported or walk-found defect, write or close
-its `docs/defects/` entry in the same change (see `docs/defects/README.md`).
+its `docs/defects/` entry in the same change (see `docs/defects/README.md`;
+the entry is the whole change, since the index is built from frontmatter).
 When it hits a recurring operational burden, check `docs/debt/` for the entry,
 follow its Workarounds, and append the incident; file a new entry only for a
 structural, recurring burden. Do the same during push and CI repair — a CI
@@ -1214,9 +1215,16 @@ produced) a regression test, or the lesson outlives the fix. Fix-forward
 trivialities stay commit messages.
 
 When you fix a qualifying bug, write the entry in the same change; when a walk
-or debugging session finds one you don't fix, file it `status: open`. Update
-the index in `docs/defects/README.md` either way. Recurring classes in that
-index are architecture signals — surface them when you see one repeat.
+or debugging session finds one you don't fix, file it `status: open`. The
+entry file is the whole change: there is no index to update. The index is
+built from each entry's frontmatter when it is read (`just defects-index`,
+`--by-class`, `--open`), so two PRs that each file a defect never touch a
+shared line. `just lint-defects` (in `check-lint`, and CI's "Defect registry"
+job, which runs on docs-only PRs too) fails an entry missing `status`
+(exactly `open`/`fixed`/`wontfix`), `found`, `area`, `class` or its title. It
+also fails a hand-written row added back to `docs/defects/README.md`; delete
+that row. Recurring classes in `just defects-index --by-class` are
+architecture signals — surface them when you see one repeat.
 
 ## Studio UI visual baselines
 

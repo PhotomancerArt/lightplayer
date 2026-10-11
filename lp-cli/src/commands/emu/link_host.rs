@@ -140,11 +140,14 @@ impl EmuUsbBoard for C6Board {
         let m = &mut self.machine;
         m.flush_frames();
         let flash = m.flush_flash();
-        finish_lines(
+        let mut lines = finish_lines(
             m.instructions(),
             (m.bus.unmapped_reads(), m.bus.unmapped_writes()),
             flash,
-        )
+        );
+        // `--flash-cut`: the cut and the in-range census, when one was armed.
+        lines.extend(m.flash_cut_summary());
+        lines
     }
 }
 

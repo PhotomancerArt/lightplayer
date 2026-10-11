@@ -67,6 +67,8 @@ mod vec_growth;
 #[cfg(test)]
 mod cut_sweep_tests;
 #[cfg(test)]
+mod edge_gc_tests;
+#[cfg(test)]
 mod format_extension_tests;
 #[cfg(all(test, feature = "lpfs"))]
 mod lp_fs_tree_tests;
