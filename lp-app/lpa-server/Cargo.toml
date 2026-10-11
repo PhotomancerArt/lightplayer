@@ -159,6 +159,11 @@ lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false, features
 # the board's update session (its model board, `test-support`) the way the
 # firmware's link mux hands it — the radio links' channel-3 access, end to end.
 lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
+# `tests/batch_state.rs`, `tests/push_boundary.rs`: a server over the tree
+# store (an atomic backend) on simulated NOR flash, the deflate plan a client
+# pushes with, and cuts of the flash under a server-driven batch.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["lpfs", "nor-sim", "deflate-plan"] }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 
 [lints]
 workspace = true

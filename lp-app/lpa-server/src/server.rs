@@ -24,6 +24,7 @@ use lpc_shared::transport::{
 use lpc_wire::{ClientRequest, WireServerMessage};
 
 use crate::access_gate::classify;
+use crate::batch_state::{BatchState, fs_request_changes_files};
 use crate::access_state::{AccessState, EntropySource};
 use crate::access_store;
 use crate::heartbeat_status::HeartbeatStatus;
@@ -251,6 +252,9 @@ pub struct LpServer {
     /// [`ServerTransport::take_closed_links`]), the device's one login and
     /// its backoff, and the clock and randomness they run on.
     access: AccessState,
+    /// The one fs batch a link may hold open (`FsRequest::BeginBatch`): its
+    /// owner and idle time; the filesystem holds the transaction.
+    batch: BatchState,
 }
 
 /// After the first failure, restate a persistent tick error only every
@@ -431,6 +435,7 @@ impl LpServer {
             },
             tick_failures: HashMap::new(),
             access: AccessState::new(),
+            batch: BatchState::new(),
         }
     }
 
@@ -919,6 +924,18 @@ impl LpServer {
         // gone before anything else is answered this tick.
         for closed in transport.take_closed_links() {
             self.access.close_link(closed);
+            self.end_link_batch(closed);
+        }
+        // A link whose session reset keeps its id and its login (the same
+        // cable), but not an fs batch its old session began: the new
+        // session's first write must not join it.
+        for reset in transport.take_reset_links() {
+            self.end_link_batch(reset);
+        }
+        // The batch's idle clock: this tick's delta, unless the last tick
+        // handled a request (then the delta is that request's time).
+        if self.batch.tick(delta_ms, &*self.base_fs) {
+            self.access.invalidate_device_store();
         }
         // Then secure links' handshakes: a link that came up this tick
         // holds its key's tier before its first request is gated.
@@ -956,16 +973,44 @@ impl LpServer {
                 response_count += 1;
                 continue;
             }
-            // Any fs mutation may have rewritten the device store; the
-            // cached `open` flag is re-read on next use.
-            if let ClientRequest::Filesystem(
-                lpc_wire::server::FsRequest::Write { .. }
-                | lpc_wire::server::FsRequest::WriteChunk { .. }
-                | lpc_wire::server::FsRequest::DeleteFile { .. }
-                | lpc_wire::server::FsRequest::DeleteDir { .. },
-            ) = &client_msg.msg
-            {
-                self.access.invalidate_device_store();
+            self.batch.note_handled(link.id);
+            if let ClientRequest::Filesystem(fs_request) = &client_msg.msg {
+                // Any fs mutation (a commit or an abort included) may have
+                // rewritten the device store; the cached `open` flag is
+                // re-read on next use.
+                if fs_request_changes_files(fs_request) {
+                    self.access.invalidate_device_store();
+                }
+                // The batch: another link's mutation is refused while one
+                // is open, and the batch verbs are answered here, where the
+                // link is known.
+                let answer = match self.batch.refusal(link.id, fs_request) {
+                    Some(refusal) => Some(refusal),
+                    None if matches!(
+                        fs_request,
+                        lpc_wire::server::FsRequest::BeginBatch
+                            | lpc_wire::server::FsRequest::CommitBatch
+                            | lpc_wire::server::FsRequest::AbortBatch
+                    ) =>
+                    {
+                        Some(self.batch.handle(link.id, fs_request, &*self.base_fs))
+                    }
+                    None => None,
+                };
+                if let Some(answer) = answer {
+                    transport
+                        .send(
+                            link.id,
+                            WireServerMessage::new(
+                                msg_id,
+                                lpc_wire::server::ServerMsgBody::Filesystem(answer),
+                            ),
+                        )
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                    continue;
+                }
             }
 
             match client_msg.msg {
@@ -1239,6 +1284,18 @@ impl LpServer {
         }
 
         Ok(response_count)
+    }
+
+    /// The link that holds the open fs batch, if one is open.
+    pub fn fs_batch_owner(&self) -> Option<LinkId> {
+        self.batch.owner()
+    }
+
+    /// `link` closed or reset: drop a batch it owns.
+    fn end_link_batch(&mut self, link: LinkId) {
+        if self.batch.link_ended(link, &*self.base_fs) {
+            self.access.invalidate_device_store();
+        }
     }
 
     /// Get a reference to the base filesystem

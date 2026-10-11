@@ -2,7 +2,12 @@
 //! hash (roadmap M2b).
 //!
 //! Every operation is stateless per request (pull-model rule: no server-side
-//! client state). Pagination determinism comes from bytewise path ordering;
+//! client state). **One exception:** the fs batch (`FsRequest::BeginBatch`
+//! … `CommitBatch`) is server-held state between requests, owned by the link
+//! that began it — [`crate::batch_state`], and the ADR
+//! `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md` for why and
+//! its rules. Everything here stays stateless: a write inside a batch is the
+//! same request as one outside it. Pagination determinism comes from bytewise path ordering;
 //! a [`FileCursor`] identifies an exact resume point. Reads never consume or
 //! clear the fs change log — [`crate::server`]'s own `advance_frame`
 //! consumption is untouched.
@@ -15,7 +20,8 @@ use alloc::vec::Vec;
 
 use lpc_model::{FsVersion, LpPath, LpPathBuf};
 use lpc_wire::budget::{
-    FILE_SYNC_CHUNK_BYTES, FILE_SYNC_PAGE_MAX_ENTRIES, FILE_SYNC_PAGE_RAW_BYTES,
+    FILE_SYNC_CHUNK_BYTES, FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL, FILE_SYNC_PAGE_MAX_ENTRIES,
+    FILE_SYNC_PAGE_RAW_BYTES,
 };
 use lpc_wire::server::{FileChangeKind, FileChunk, FileCursor, FsResponse};
 use lpfs::{FsEventKind, LpFs};
@@ -248,6 +254,44 @@ pub fn handle_write_chunk(
             written: 0,
             error: Some(format!("{e}")),
         },
+    }
+}
+
+/// Handle `FsRequest::WriteChunkDeflated`: one chunk as raw deflate, at a
+/// logical offset, answered like a `WriteChunk` (`written` = logical bytes).
+///
+/// The length is checked here, before anything is allocated; the offset
+/// (0, or the file's current length) and the inflate are
+/// `LpFs::write_deflated_chunk`'s, which checks before it inflates and
+/// writes nothing on a mismatch. A refused chunk leaves an open batch open:
+/// the client decides to abort.
+pub fn handle_write_chunk_deflated(
+    fs: &mut dyn LpFs,
+    path: LpPathBuf,
+    offset: u32,
+    logical_len: u32,
+    deflated: &[u8],
+) -> FsResponse {
+    let refusal = |error| FsResponse::WriteChunk {
+        path: path.clone(),
+        offset,
+        written: 0,
+        error: Some(error),
+    };
+    if logical_len as usize > FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL {
+        return refusal(format!(
+            "deflated chunk too large: {logical_len} B logical, at most \
+             {FILE_SYNC_DEFLATED_CHUNK_MAX_LOGICAL}"
+        ));
+    }
+    match fs.write_deflated_chunk(path.as_path(), offset, logical_len, deflated) {
+        Ok(()) => FsResponse::WriteChunk {
+            path,
+            offset,
+            written: logical_len,
+            error: None,
+        },
+        Err(e) => refusal(format!("{e}")),
     }
 }
 

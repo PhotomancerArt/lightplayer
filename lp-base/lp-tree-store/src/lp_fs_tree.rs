@@ -51,6 +51,14 @@ impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
         }
     }
 
+    /// Another handle on the same store and change log — for an embedder
+    /// (or a test) that keeps one beside the one it gave the server.
+    pub fn handle(&self) -> Self {
+        Self {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+
     /// The store underneath (stats, a harness's flash access).
     pub fn with_store<T>(&self, f: impl FnOnce(&mut TreeStore<F, H>) -> T) -> T {
         f(&mut self.inner.borrow_mut().store)
