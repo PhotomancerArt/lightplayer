@@ -204,6 +204,52 @@ pub fn project_files(relative: &str) -> Vec<(String, Vec<u8>)> {
     files
 }
 
+/// A c40-shaped project: `projects/test/basic` (so it loads and renders)
+/// plus 124 JSON-like documents under `docs/`, 132 files and ~216 KB in all
+/// — the shape of the store's real c40 corpus (132 documents, 216 KB;
+/// `lp-tree-store`'s README, "G1 figures"), which lives outside the repo.
+/// Deterministic. The extra documents are stored and hashed with the
+/// package; nothing loads them.
+pub fn c40_files() -> Vec<(String, Vec<u8>)> {
+    const WORDS: [&str; 12] = [
+        "\"kind\": ",
+        "\"shader\"",
+        ", ",
+        "\"speed\": ",
+        "0.25",
+        "{\n  ",
+        "\n}",
+        "\"palette\"",
+        "[1, 2, 3]",
+        "\"phase\": ",
+        "\"uniform\"",
+        "\"color\": ",
+    ];
+    let mut files = project_files("projects/test/basic");
+    let mut r: u64 = 0xC40;
+    let mut next = || {
+        r = r
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        r >> 33
+    };
+    for i in 0..124 {
+        // 600..=2,900 B, ~1.75 KB on average.
+        let len = 600 + (next() % 2_301) as usize;
+        let mut doc = Vec::with_capacity(len + 16);
+        while doc.len() < len {
+            doc.extend_from_slice(WORDS[(next() % WORDS.len() as u64) as usize].as_bytes());
+            if next() % 5 == 0 {
+                doc.extend_from_slice(format!("{}", next() % 1000).as_bytes());
+            }
+        }
+        doc.truncate(len);
+        files.push((format!("docs/doc-{i:03}.json"), doc));
+    }
+    files.sort();
+    files
+}
+
 pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

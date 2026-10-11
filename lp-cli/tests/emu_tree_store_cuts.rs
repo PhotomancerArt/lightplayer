@@ -433,9 +433,9 @@ fn scenarios(elf: &Path, fs: Fs, long: bool) -> Vec<Scenario> {
         panel_values: Vec::new(),
     });
     if long {
-        // A c40-class push: `catalog/projects/rocaille` (36 KB, a heavier
-        // shader than basic's), edited, into the other slot.
-        let mut c40 = project_files("catalog/projects/rocaille");
+        // A c40-class push (`c40_files`: basic plus 124 documents, 132
+        // files, ~216 KB), its shader edited, into the other slot.
+        let mut c40 = c40_files();
         for (p, b) in &mut c40 {
             if p.ends_with(".glsl") {
                 b.extend_from_slice(b"\n// pushed by the cut walk\n");
