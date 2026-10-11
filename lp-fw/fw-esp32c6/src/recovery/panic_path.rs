@@ -109,7 +109,12 @@ pub fn largest_free_block() -> usize {
     // compare it with round floors.
     #[cfg(all(feature = "heap_map_diag", not(fw_harness)))]
     return crate::heap_map::untracked(largest_free_block_now);
-    #[cfg(not(all(feature = "heap_map_diag", not(fw_harness))))]
+    #[cfg(all(feature = "heap_peak_diag", not(fw_harness)))]
+    return crate::heap_peak_diag::untracked(largest_free_block_now);
+    #[cfg(not(all(
+        any(feature = "heap_map_diag", feature = "heap_peak_diag"),
+        not(fw_harness)
+    )))]
     largest_free_block_now()
 }
 

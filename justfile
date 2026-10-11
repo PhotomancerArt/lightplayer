@@ -2803,9 +2803,13 @@ clippy-fw-esp32c6: install-rv32-target
         --features esp32c6,server -- --no-deps -D warnings
     # `fs-tree` (the tree store as `lpfs`; never shipped), plain and split:
     # nothing else lints its mount, its shim's glue or its update guard.
-    echo "clippy: --features fs-tree (plain, then split)"
+    # With it, its two measurement features: the heap-peak line and the
+    # probe-less build the size table's "littlefs removed" row comes from.
+    echo "clippy: --features fs-tree (plain with heap_peak_diag, probe-less, split)"
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,fs-tree -- --no-deps -D warnings
+        --features esp32c6,fs-tree,heap_peak_diag -- --no-deps -D warnings
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,measure_no_legacy_probe -- --no-deps -D warnings
     LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,server,fs-tree -- --no-deps -D warnings
     # The loader: a standalone crate (its own workspace, target and script).
@@ -3619,7 +3623,7 @@ test-emu-c6-cli-link: install-rv32-target
 # lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot -- --include-ignored --nocapture
 
 # The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
 # B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded

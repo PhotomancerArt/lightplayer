@@ -142,6 +142,11 @@ mod net;
 mod hw_sha;
 #[cfg(all(lp_split, not(fw_harness)))]
 mod ota;
+// The heap's peak between heartbeats (`[heap] peak=…`), never shipped.
+#[cfg(all(feature = "heap_peak_diag", not(fw_harness)))]
+mod heap_peak_diag;
+#[cfg(all(feature = "heap_peak_diag", feature = "heap_map_diag"))]
+compile_error!("`heap_peak_diag` and `heap_map_diag` both own esp-alloc's hooks: pick one");
 #[cfg(any(
     not(fw_harness),
     feature = "test_rmt",
@@ -185,7 +190,13 @@ mod bootctl;
     feature = "test_flash_tears"
 ))]
 mod flash_layout;
-#[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
+// Not in the size measurement's build (`measure_no_legacy_probe`): with the
+// legacy probe gone nothing here is reached, and littlefs is dropped.
+#[cfg(all(
+    not(feature = "memory_fs"),
+    not(fw_harness),
+    not(feature = "measure_no_legacy_probe")
+))]
 mod flash_storage;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod legacy_layout;
@@ -337,6 +348,8 @@ fn log_heartbeat_stack_lines() {
         net::net_thread_stack_diag::log_if_grown();
         #[cfg(lp_net)]
         net::net_heartbeat::log_line();
+        #[cfg(feature = "heap_peak_diag")]
+        heap_peak_diag::log_line();
     }
 }
 

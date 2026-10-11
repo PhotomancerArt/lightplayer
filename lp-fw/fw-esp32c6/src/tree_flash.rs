@@ -32,6 +32,16 @@ pub fn tree_flash(flash: FlashStorage<'static>, partition: PartitionExtent) -> T
 /// (probed read-only; Q5: kept, so littlefs stays linked)? Asked only when
 /// the store found no store on `lpfs`.
 pub fn legacy_lpfs_present(flash: &mut TreeFlash) -> bool {
-    let lpfs_offset = flash.offset();
-    crate::flash_storage::legacy_lpfs_present_at(flash.part_mut(), lpfs_offset)
+    // The size measurement's build (`measure_no_legacy_probe`, never
+    // shipped): no probe, so LTO drops littlefs.
+    #[cfg(feature = "measure_no_legacy_probe")]
+    {
+        let _ = flash;
+        false
+    }
+    #[cfg(not(feature = "measure_no_legacy_probe"))]
+    {
+        let lpfs_offset = flash.offset();
+        crate::flash_storage::legacy_lpfs_present_at(flash.part_mut(), lpfs_offset)
+    }
 }

@@ -1354,18 +1354,22 @@ impl LpServer {
     /// network's `last`) are filled in.
     fn network_body(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
         let fs = &*self.base_fs;
-        let held = matches!(
-            self.hello.hardware.fs,
-            lpc_wire::FsBootState::LegacyHeld | lpc_wire::FsBootState::Refused
-        );
+        // A board serving a RAM filesystem over files it kept (held for the
+        // layout change, or a refused store): a network written here would
+        // be gone at the next reboot, and its real file waits on the flash.
+        let kept = match self.hello.hardware.fs {
+            lpc_wire::FsBootState::LegacyHeld => Some(network_store::HELD_BOARD_REFUSAL),
+            lpc_wire::FsBootState::Refused => Some(network_store::REFUSED_STORE_REFUSAL),
+            _ => None,
+        };
         match request {
             ClientRequest::NetworkAdd { .. }
             | ClientRequest::NetworkForget { .. }
             | ClientRequest::NetworkSet { .. }
-                if held =>
+                if kept.is_some() =>
             {
                 lpc_wire::server::ServerMsgBody::Error {
-                    error: alloc::string::String::from(network_store::HELD_BOARD_REFUSAL),
+                    error: alloc::string::String::from(kept.unwrap_or_default()),
                 }
             }
             ClientRequest::NetworkAdd {
