@@ -245,9 +245,11 @@ impl<F: Flash> RecordLog<F> {
             // reads back: a torn or worn header never shows the magic in
             // front of a wrong version (FORMAT.md "Sector": a reader refuses
             // the magic + a newer version).
-            self.program(addr + 4, &bytes[4..])?;
-            let mut ok = self.verify(addr + 4, &bytes[4..], &[])?;
-            if ok {
+            // (The `MagicFirst` mutant programs and verifies it whole.)
+            let first = if mutant!(MagicFirst) { 0 } else { 4 };
+            self.program(addr + first, &bytes[first as usize..])?;
+            let mut ok = self.verify(addr + first, &bytes[first as usize..], &[])?;
+            if ok && first == 4 {
                 self.program(addr, &bytes[..4])?;
                 ok = self.verify(addr, &bytes, &[])?;
             }
@@ -272,12 +274,14 @@ impl<F: Flash> RecordLog<F> {
         self.sectors.end[s as usize] = NEEDS_ERASE;
         self.sectors.live[s as usize] = 0;
         let addr = self.addr(s, 0);
-        self.program(addr, &KILLED_SECTOR_HEADER)?;
+        if !mutant!(SkipKill) {
+            self.program(addr, &KILLED_SECTOR_HEADER)?;
+        }
         self.flash.erase_sector(s).map_err(StoreError::Flash)?;
         stat!(self.counters.erases += 1);
         let c = &mut self.sectors.erase_count[s as usize];
         *c = c.wrapping_add(1);
-        if !self.reads_erased(s, 0)? {
+        if !mutant!(OpenWithoutReadBack) && !self.reads_erased(s, 0)? {
             stat!(self.counters.verify_failures += 1);
             self.retire(s);
             return Ok(false);

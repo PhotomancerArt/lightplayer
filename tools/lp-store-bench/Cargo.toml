@@ -8,11 +8,16 @@ rust-version.workspace = true
 description = "Host testbed that races on-device store candidates through simulated power cuts on lp-nor-sim (spike tooling; never linked into firmware)"
 publish = false
 
+[features]
+# `mutants`: T1's mutation switches (`lp-tree-store/mutants`). The `mutants`
+# command re-runs itself with this on; nothing else turns it on.
+mutants = ["lp-tree-store/mutants"]
+
 [dependencies]
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
 # T1: the tree store under test (v1), with the host-side deflater.
-lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim", "host-deflate", "stats"] }
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim", "host-deflate", "stats", "inspect"] }
 clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
 serde = { workspace = true, features = ["derive", "std"] }

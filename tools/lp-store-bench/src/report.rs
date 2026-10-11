@@ -170,6 +170,14 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
                 fails += v[3];
             }
         }
+        // M3's drivers: long walks' cuts and full-flash cut cases (their
+        // failures, cut or not, count against eligibility).
+        for (t, c) in [("long_summary", "cuts"), ("full_flash_summary", "cases")] {
+            for (_, r) in of(t).filter(|(_, r)| same(&label(r), l)) {
+                cases += u(&r[c]);
+                fails += u(&r["failures"]);
+            }
+        }
         (cases, fails)
     };
     let measure_of = |cand: &str, w: &str| {
@@ -429,6 +437,7 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
     }
 
     dial_table(&mut md, &recs, &sweeps);
+    m3_tables(&mut md, &recs);
 
     writeln!(md, "\n## What did not run\n").unwrap();
     match &end {
@@ -457,6 +466,126 @@ pub fn render_report(out: &Path) -> std::io::Result<String> {
         serde_json::to_string_pretty(&json!({"headline": summary, "end": end}))?,
     )?;
     Ok(md)
+}
+
+/// The M3 drivers: long walks, full flash, mount fuzz, GC dials where GC
+/// runs.
+fn m3_tables(md: &mut String, recs: &[(usize, Value)]) {
+    let of = |t: &'static str| recs.iter().filter(move |(_, r)| r["type"] == t);
+    let first = |r: &Value| {
+        let f = &r["first_failure"];
+        if f.is_null() {
+            String::new()
+        } else {
+            format!("{}: {}", s(&f["kind"]), s(&f["detail"])).replace('|', "/")
+        }
+    };
+    if of("long_summary").next().is_some() {
+        writeln!(md, "\n## Long walks\n").unwrap();
+        writeln!(md, "One store kept mounted, a cut every N steps (a full cut case), a full-state check and remount every M; `edit` = fill three slots once, then saves, panel writes and re-pushes. GC runs = victims collected in the walk's own mounts.\n").unwrap();
+        writeln!(md, "| candidate | seed | mix | steps | refused | cuts | checks | failures | GC runs | GC copies | erases (max/sector) | first failure |").unwrap();
+        writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|---|").unwrap();
+        for (_, r) in of("long_summary") {
+            writeln!(
+                md,
+                "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} ({}) | {} |",
+                label(r),
+                s(&r["seed"]),
+                if r["edit_mix"] == true {
+                    "edit"
+                } else {
+                    "random"
+                },
+                s(&r["steps_run"]),
+                s(&r["steps_no_space"]),
+                s(&r["cuts"]),
+                s(&r["checks"]),
+                s(&r["failures"]),
+                s(&r["gc"]["gc_runs"]),
+                s(&r["gc"]["gc_copies"]),
+                s(&r["gc"]["erases_total"]),
+                s(&r["gc"]["erases_max"]),
+                first(r)
+            )
+            .unwrap();
+        }
+    }
+    if of("full_flash_summary").next().is_some() {
+        writeln!(md, "\n## Full flash\n").unwrap();
+        writeln!(md, "Unique copies of a project until the store refuses, then the edge (saves, panel writes, re-pushes, deletes, a push that cannot fit) with cuts in every step, then delete all copies but one and push again.\n").unwrap();
+        writeln!(md, "| candidate | corpus | seed | copies held | refusals | edge (refused) | cut cases (in refused steps) | failures | kinds | recovered | GC runs |").unwrap();
+        writeln!(md, "|---|---|---|---|---|---|---|---|---|---|---|").unwrap();
+        for (_, r) in of("full_flash_summary") {
+            writeln!(
+                md,
+                "| {} | {} | {} | {} | {} | {} ({}) | {} ({}) | {} | {} | {} | {} |",
+                label(r),
+                s(&r["corpus"]),
+                s(&r["seed"]),
+                s(&r["fill_slots"]),
+                s(&r["refusals"]),
+                s(&r["edge_steps"]),
+                s(&r["edge_refused"]),
+                s(&r["cases"]),
+                s(&r["refused_cases"]),
+                s(&r["failures"]),
+                r["kinds"].to_string().replace('|', "/"),
+                s(&r["recovered"]),
+                s(&r["gc"]["gc_runs"]),
+            )
+            .unwrap();
+        }
+    }
+    if of("fuzz_summary").next().is_some() {
+        writeln!(md, "\n## Mount fuzz\n").unwrap();
+        writeln!(md, "| candidate | seed | image kind | cases | mounted | refused | failures | first failure |").unwrap();
+        writeln!(md, "|---|---|---|---|---|---|---|---|").unwrap();
+        for (_, r) in of("fuzz_summary") {
+            if let Some(kinds) = r["by_kind"].as_object() {
+                for (k, c) in kinds {
+                    writeln!(
+                        md,
+                        "| {} | {} | {k} | {} | {} | {} | {} | {} |",
+                        label(r),
+                        s(&r["seed"]),
+                        s(&c["cases"]),
+                        s(&c["mounted"]),
+                        s(&c["refused"]),
+                        s(&c["failures"]),
+                        if u(&c["failures"]) > 0 {
+                            first(r)
+                        } else {
+                            String::new()
+                        }
+                    )
+                    .unwrap();
+                }
+            }
+        }
+    }
+    if of("gc_dial_row").next().is_some() {
+        writeln!(md, "\n## T1's GC dials where GC runs\n").unwrap();
+        writeln!(md, "c40, fault-free (GC runs and copies over the whole workload in one mount), plus a sampled cut sweep of four save steps.\n").unwrap();
+        writeln!(md, "| setting | workload | ok | GC runs | GC copies | write amp | erases median/max | cut cases | cut failures |").unwrap();
+        writeln!(md, "|---|---|---|---|---|---|---|---|---|").unwrap();
+        for (_, r) in of("gc_dial_row") {
+            writeln!(
+                md,
+                "| {} | {} | {} | {} | {} | {:.2} | {}/{} | {} | {} |",
+                label(r),
+                s(&r["workload"]),
+                s(&r["ok"]),
+                s(&r["gc_runs"]),
+                s(&r["gc_copies"]),
+                r["write_amp"].as_f64().unwrap_or(0.0),
+                s(&r["erases_median"]),
+                s(&r["erases_max"]),
+                s(&r["cut_cases"]),
+                s(&r["cut_failures"]),
+            )
+            .unwrap();
+        }
+    }
 }
 
 fn dial_table(
@@ -624,6 +753,10 @@ mod tests {
             candidates: vec!["mem".into()],
             sectors: 16,
             quick: true,
+            tears: lp_nor_sim::TearModel::ALL.to_vec(),
+            max_round: None,
+            done: Default::default(),
+            whole_units: false,
         };
         run_overnight(&p, &CorpusSet::new(None), &sink);
         let md = render_report(&dir).unwrap();

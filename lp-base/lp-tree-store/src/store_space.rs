@@ -26,6 +26,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// record written since, so once it has grown an eighth (+ 16) past the
     /// live set of the last mark, mark now and prune it back.
     pub(crate) fn ensure_room(&mut self, need: &[(HeadKind, u32)]) -> Res<(), F> {
+        #[cfg(feature = "mutants")]
+        if self.dry {
+            return Ok(());
+        }
         let live = self.live_after_mark;
         if self.log.index.len() > live + live / 8 + 16 {
             self.mark_and_prune()?;
@@ -136,8 +140,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         }
         roots.push((self.work.cold, MarkRole::Dir));
         roots.push((self.work.hot, MarkRole::Dir));
-        roots.extend(self.delta.set_ids().map(|id| (id, MarkRole::Node)));
-        roots.extend(self.inflight.iter().copied());
+        if !mutant!(GcForgetsPending) {
+            roots.extend(self.delta.set_ids().map(|id| (id, MarkRole::Node)));
+            roots.extend(self.inflight.iter().copied());
+        }
         let m = mark(&mut self.log, &roots)?;
         stat!(self.stats.marks += 1);
         prune(&mut self.log, m);

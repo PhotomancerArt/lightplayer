@@ -33,6 +33,10 @@ pub fn collect_sector<F: Flash>(
         .collect();
     heap_sort_by(&mut items, |a, b| a.0 < b.0);
     log.note(items.capacity() * core::mem::size_of::<(u32, ObjectId)>());
+    #[cfg(feature = "mutants")]
+    if mutant!(GcEraseBeforeCopy) {
+        return crate::mutants::collect_erasing_first(log, victim, items);
+    }
     let head = victim_kind(log, victim)?;
     // A head being collected (renewed) stops being one: its copies open a
     // new head of its kind.
