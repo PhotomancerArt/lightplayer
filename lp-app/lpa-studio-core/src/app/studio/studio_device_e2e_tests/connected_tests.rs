@@ -228,6 +228,51 @@ fn going_home_shows_the_card_again() {
     assert_eq!(bench.lens_session_id(), session, "nothing reopened");
 }
 
+/// The page always has a place before Edit (Home, where the card is). Edit
+/// is a long action, and the web's two reports behind it — the editor's
+/// page (the lens sync's move), then Home (Back) — reach the actor in one
+/// batch, which applies each in order (`CommandPlan::places`). Only the
+/// whole sequence ends the wait: the last report alone equals the place
+/// before Edit, which is not a move. Folded to the last report, the editor
+/// stayed up over `/` and the page drew only the examples (both
+/// `walk-no-board` lanes' `card-back`, 2026-10-10).
+#[test]
+fn a_move_and_back_behind_a_long_edit_still_ends_the_wait() {
+    let (mut bench, _tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct000018", "usb-conn-18");
+    let home = UiPlace::new(UiPage::Home);
+    bench.controller.set_place(home.clone());
+    bench.press_device(id, "edit", OfferArgs::new());
+    let project_uid = bench
+        .controller
+        .view()
+        .open_project_uid
+        .expect("a bound project");
+    let its_page = UiPlace::new(UiPage::Project {
+        uid: project_uid,
+        view: UiProjectView::Nodes,
+    });
+    let session = bench.lens_session_id();
+
+    // The hazard: the last report alone is no move, and the Edit waits on.
+    bench.controller.set_place(home.clone());
+    assert!(
+        bench.controller.connected().unwrap().editor_waiting,
+        "Home reported over Home is not a move"
+    );
+    assert!(bench.controller.view().home.is_none());
+
+    // The batch as the actor applies it: every report, in order.
+    for place in [its_page, home] {
+        bench.controller.set_place(place);
+    }
+    let view = bench.controller.view();
+    assert!(!bench.controller.connected().unwrap().editor_waiting);
+    assert!(view.home.is_some(), "the home page, with the card");
+    assert!(view.panes.is_empty());
+    assert_eq!(bench.lens_session_id(), session, "the session kept");
+}
+
 /// One board connected at a time: Connect on a second board closes the
 /// first session (its wire back with the roster), then opens the second.
 #[test]

@@ -287,6 +287,12 @@ genuinely fits none of these, and define it here in one line.
   a magic number), but the stream carries random or checksummed bytes, so
   the marker turns up by chance at a rate set by the stream's length. The
   fix shape is to parse the framing and assert on what the parser reports.
+- **`edge-rule-over-latest-wins`** — a rule that fires on a transition
+  reads a signal an upstream stage folds to its latest value, so a move and
+  a move back inside one folding window read as no move. Latent while the
+  signal arrives slower than the stage drains; a long action ahead of it
+  makes it routine. The fix shape is to deliver every report, in order, to
+  any reader of edges.
 
 ## Index
 
@@ -397,6 +403,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
+| edge-rule-over-latest-wins | 2026-10-10 | [back-from-a-waiting-edit-left-the-editor-up-over-home](2026-10-10-back-from-a-waiting-edit-left-the-editor-up-over-home.md) | fixed (this change) | lpa-studio-core `CommandPlan` × `ConnectedBoard::note_page_moved`: the actor folded a batch's place reports to the last; Edit's editor-page report and Back's Home report queued behind the long Edit landed in one batch, Home equalled the place before Edit, so the waiting Edit never ended and `/` drew only the examples. Every report is applied in order now. Found by `walk-no-board`'s `card-back` on the connected plan's branch |
 | fidelity | 2026-10-10 | [the-fake-boards-heartbeat-misses-a-boot-loaded-project](2026-10-10-the-fake-boards-heartbeat-misses-a-boot-loaded-project.md) | **open** | lpa-link fake device `FakeDeviceCore::loaded_projects` × the synthetic heartbeat: a fake scripted to resume its project at boot (`with_loaded_project`) answers `ListLoadedProjects` with it but heartbeats `loaded_projects: []` until something asks, because the list is built only from wire answers; real firmware heartbeats from its registry. Studio's card then reads the board as running nothing (Connect disabled, "Nothing on it yet"), so the connected plan's play-tier test primes the fake with an address open and Done first. Found by the connected plan's P4 |
 | assumed-context | 2026-10-10 | [firmware-install-drops-a-lease-its-caller-already-held](2026-10-10-firmware-install-drops-a-lease-its-caller-already-held.md) | **open** | lp-cli `firmware install` × the desk's `board` lease: the install always runs `board take` then `board drop`; for a caller who already held the board, `take` renews the lease to 30 min and `drop` ends it, so the board is free (and the caller's next flash unleased) the moment the install returns. Found twice in RAM research E17's sitting on CX1 |
 | budget-exhaustion | 2026-10-10 | [meteor-overflows-the-classics-main-stack-at-load](2026-10-10-meteor-overflows-the-classics-main-stack-at-load.md) | **open** | fw-esp32v3 main stack (37,056 B) × a project load: the first-fit classic image loading `catalog/patterns/meteor` on `lp-emu:esp32v3:t1` reaches 31,600 B at `project new after services` and hits the stack guard after `graphics`; `projects/test/basic` peaks at 30,336 B. Found by RAM research E6's control run; emulated only |
