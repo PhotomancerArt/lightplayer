@@ -568,6 +568,17 @@ fn check(
             first_diff(&state, model),
         ));
     }
+    // NOR cannot set a bit by programming: a store that asks for it wrote
+    // cells it never read back as erased (a worn erase it did not check, a
+    // tail it resumed blind). Weak bits a tear left are not counted
+    // (`lp-nor-sim`'s `violations_0_to_1`).
+    let v = store.flash_snapshot().stats().violations_0_to_1;
+    if v > 0 {
+        return Err(Failure::new(
+            "program_over_unerased",
+            format!("{v} byte(s) asked a cleared bit to become 1"),
+        ));
+    }
     Ok(store)
 }
 

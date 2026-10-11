@@ -17,7 +17,7 @@ mutants = ["lp-tree-store/mutants"]
 lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
 lp-crc32 = { path = "../../lp-base/lp-crc32" }
 # T1: the tree store under test (v1), with the host-side deflater.
-lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim", "host-deflate", "stats"] }
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["nor-sim", "host-deflate", "stats", "inspect"] }
 clap = { version = "4", features = ["derive"] }
 rayon = "1.11"
 serde = { workspace = true, features = ["derive", "std"] }

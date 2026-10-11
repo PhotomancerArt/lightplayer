@@ -11,7 +11,15 @@
 //!   history, under a random tear model;
 //! - `newer_version` (T1 only): a store whose one trusted sector header
 //!   claims a newer format version (CRC resealed) — a rolled-back core
-//!   reading a newer core's store.
+//!   reading a newer core's store;
+//! - `stale_tail` (T1 only, **non-physical**): a committed store whose two
+//!   newest sectors carry a few non-`0xFF` bytes in the erased tail past
+//!   their last record — what a bad erase or a foreign writer would leave;
+//!   no tear model produces it. The store must mount it at that committed
+//!   state, take the history's next step, and never program a byte the
+//!   tail held (a program asking a cleared bit to become 1:
+//!   `program_over_unerased`) — the guarantee the head-resume tail check
+//!   keeps.
 //!
 //! Pass: mount never panics and never loops (the read watchdog); when it
 //! mounts, the state it reads is one the history committed (a `cut` image:
@@ -31,7 +39,9 @@ use serde::{Deserialize, Serialize};
 use crate::cut_case::READ_BUDGET;
 use crate::driver_exhaustive::FailureRecord;
 use crate::driver_random::next_step;
-use crate::oracle::{Failure, Model, apply_step, judge_old_or_new, read_state, run_step};
+use crate::oracle::{
+    Failure, Model, apply_step, first_diff, judge_old_or_new, read_state, run_step,
+};
 use crate::workload::board_step;
 use crate::{
     Candidate, CandidateConfig, CandidateStore, CorpusSet, Reproducer, Scoreboard, Step, StoreError,
@@ -247,7 +257,7 @@ fn one_case(
     c: u64,
 ) -> CaseResult {
     let kinds: &[&'static str] = if t1 {
-        &["garbage", "mutated", "cut", "newer_version"]
+        &["garbage", "mutated", "cut", "newer_version", "stale_tail"]
     } else {
         &["garbage", "mutated", "cut"]
     };
@@ -282,6 +292,9 @@ fn case_inner(
     let cfg = &p.config;
     let mut rng = SimRng::new(p.seed ^ c.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xF0_22);
     let hist = &histories[rng.below(histories.len() as u64) as usize];
+    if kind == "stale_tail" {
+        return stale_tail_case(cand, cfg, hist, &mut rng, res);
+    }
     // The image, and the states a mount of it may show.
     let (mut image, allowed): (NorFlashSim, Allowed) = match kind {
         "garbage" => (
@@ -347,6 +360,81 @@ fn case_inner(
         }
     };
     format_after(cand, cfg, flash)
+}
+
+/// A `stale_tail` case: committed state `j` with stale bytes in its newest
+/// sectors' tails; it mounts at that state, takes step `j` (or a probe at
+/// the history's end) without programming over them, and then a format
+/// works.
+fn stale_tail_case(
+    cand: &dyn Candidate,
+    cfg: &CandidateConfig,
+    hist: &History,
+    rng: &mut SimRng,
+    res: &mut CaseResult,
+) -> Result<(), Failure> {
+    let j = rng.below(hist.states.len() as u64) as usize;
+    let mut image = if j < hist.pres.len() {
+        hist.pres[j].clone()
+    } else {
+        hist.last.clone()
+    };
+    if !stale_tail(&mut image, rng) {
+        return Ok(());
+    }
+    image.set_panic_on_violation(false);
+    image.power_cycle(FaultPlan::none());
+    image.set_read_budget(Some(READ_BUDGET));
+    let mut store = match cand.mount(image, cfg) {
+        Ok(s) => s,
+        Err((e, _)) => {
+            let text = e.to_string();
+            let kind = if text.contains("Watchdog") {
+                "loop"
+            } else {
+                "stale_tail_unmountable"
+            };
+            return Err(Failure::new(kind, text));
+        }
+    };
+    res.mounted = true;
+    let old = &hist.states[j];
+    judge(store.as_mut(), &Allowed::OneOf(vec![old.clone()]))?;
+    let before = store.flash_snapshot().stats().violations_0_to_1;
+    let step = match hist.steps.get(j) {
+        Some(s) => s.clone(),
+        None => {
+            let mut s = Step::new("probe");
+            s.put("/stale-probe.json", Arc::new(b"{\"stale\": 1}".to_vec()));
+            s
+        }
+    };
+    let mut new = old.clone();
+    apply_step(&mut new, &step);
+    let expect = match run_step(store.as_mut(), &step) {
+        Ok(()) => new,
+        Err(StoreError::NoSpace) => old.clone(),
+        Err(e) => return Err(Failure::new("step_error_without_cut", e.to_string())),
+    };
+    let after = store.flash_snapshot().stats().violations_0_to_1;
+    if after > before {
+        return Err(Failure::new(
+            "program_over_unerased",
+            format!(
+                "{} byte(s) programmed over a tail that did not read 0xFF",
+                after - before
+            ),
+        ));
+    }
+    let paths = old.keys().chain(expect.keys()).cloned().collect();
+    let state = read_state(store.as_mut(), &paths)?;
+    if state != expect {
+        return Err(Failure::new(
+            "stale_tail_wrong_state",
+            first_diff(&state, &expect),
+        ));
+    }
+    format_after(cand, cfg, store.into_flash())
 }
 
 /// What a mounted image may hold.
@@ -544,6 +632,37 @@ fn newer_version(f: &mut NorFlashSim, rng: &mut SimRng) -> bool {
     true
 }
 
+/// T1, non-physical: in the two newest trusted sectors whose tail past the
+/// last record reads erased, set a short run of bytes (each with a cleared
+/// bit) at a random offset in the first 64 bytes of that tail. `false` when
+/// no sector has such a tail.
+fn stale_tail(f: &mut NorFlashSim, rng: &mut SimRng) -> bool {
+    let ss = f.geometry().sector_size;
+    let mut image = vec![0u8; (f.geometry().sector_count * ss) as usize];
+    f.peek(0, &mut image);
+    let Ok(img) = lp_tree_store::StoreImage::open(&image, Some(ss)) else {
+        return false;
+    };
+    let mut open: Vec<(u32, u32, u32)> = img
+        .report()
+        .sectors
+        .iter()
+        .filter(|s| s.tail_erased && s.records_end < ss)
+        .filter_map(|s| s.header.as_ref().map(|h| (h.seq, s.index, s.records_end)))
+        .collect();
+    open.sort_unstable_by(|a, b| b.cmp(a));
+    open.truncate(2);
+    for &(_, s, end) in &open {
+        let at = (end + rng.below(u64::from((ss - end).min(64))) as u32) as usize;
+        let len = (1 + rng.below(32) as usize).min(ss as usize - at);
+        let bytes: Vec<u8> = (0..len)
+            .map(|_| rng.next_u8() & !(1 << rng.below(8)))
+            .collect();
+        rewrite(f, s, |b| b[at..at + len].copy_from_slice(&bytes));
+    }
+    !open.is_empty()
+}
+
 fn sector_bytes(f: &NorFlashSim, s: u32) -> Vec<u8> {
     let ss = f.geometry().sector_size;
     let mut b = vec![0u8; ss as usize];
@@ -593,7 +712,7 @@ mod tests {
             &Scoreboard::memory(),
         );
         assert_eq!(s.failures, 0, "{s:#?}");
-        assert_eq!(s.by_kind.len(), 4, "{s:?}");
+        assert_eq!(s.by_kind.len(), 5, "{s:?}");
         assert!(s.by_kind.values().all(|k| k.cases >= 30), "{s:?}");
         assert!(
             s.by_kind["mutated"].mounted > 0 && s.by_kind["cut"].mounted > 0,
