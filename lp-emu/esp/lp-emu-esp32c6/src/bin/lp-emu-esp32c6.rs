@@ -119,6 +119,15 @@ OPTIONS:
                             host link's packets, e.g.
                             in-drop=0.5%,in-tail=0.5%,in-run=0.1%,out-drop=0.5%,seed=7
                             (lp_emu_esp_common::link_faults) [none]
+    --flash-cut <n>:<model>:<seed>[,range=<off>+<len>][,then=stop|power-cycle]
+                            a TEST switch, off by default: cut the power in
+                            the middle of the <n>th (0-based, from power-on)
+                            program or erase command inside lpfs (the chip's
+                            own table row, or range=), tearing it per an
+                            lp-nor-sim model (clean, byte_prefix,
+                            random_bits, calibrated, calibrated_<shape>).
+                            then=stop ends the run (exit 6); power-cycle runs
+                            on. Labels the run +flash-cut [none]
     --usb-sj stderr|file:<path>|tcp:<host:port>
                             where the bytes a USB host RECEIVED go — IN
                             packets a draining host took [kept in memory,
@@ -416,6 +425,7 @@ struct Args {
     usb_sj_drain: UsbSjDrain,
     usb_in_free_lag_ns: u64,
     usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    flash_cut: Option<lp_emu_esp32c6::flash_cut_spec::FlashCutSpec>,
     usb_script: Vec<PathBuf>,
     pin_script: Vec<PathBuf>,
     wires: Vec<(PadId, PadId)>,
@@ -551,6 +561,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(faults) = args.usb_faults.clone() {
         builder = builder.usb_faults(faults);
+    }
+    if let Some(spec) = args.flash_cut.clone() {
+        builder = builder.flash_cut(spec);
     }
     if let Some(blocks) = args.jit_blocks {
         builder = builder.jit_blocks(blocks);
@@ -841,6 +854,13 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
                 args.usb_faults = Some(
                     lp_emu_esp_common::link_faults::LinkFaults::parse(&text)
                         .map_err(|e| format!("--usb-faults: {e}"))?,
+                );
+            }
+            "--flash-cut" => {
+                let text = value("--flash-cut")?;
+                args.flash_cut = Some(
+                    lp_emu_esp32c6::flash_cut_spec::FlashCutSpec::parse(&text)
+                        .map_err(|e| format!("--flash-cut: {e}"))?,
                 );
             }
             "--usb-script" => args.usb_script.push(value("--usb-script")?.into()),
@@ -1557,6 +1577,9 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
     if let Some((to_host, to_device)) = machine.usb_fault_counters() {
         eprintln!("usb-faults: device→host {to_host}; host→device {to_device}");
     }
+    for line in machine.flash_cut_summary() {
+        eprintln!("{line}");
+    }
     if let Some(tcp) = machine.control_tcp() {
         eprintln!(
             "control: {} listened, {} client(s) attached, {} command(s) applied",
@@ -1637,6 +1660,12 @@ fn report(machine: &mut Esp32C6Machine, outcome: &Outcome) {
         Outcome::WallTimeout { .. } => {
             eprintln!("WALL TIMEOUT — the host-clock safety net, not a guest event")
         }
+        Outcome::PowerCut { report, .. } => eprintln!(
+            "POWER CUT at cycle {} ({} us) — {report}; the flash holds what the cut left \
+             (--flash-cut)",
+            report.cycle,
+            report.cycle / memmap::CYCLES_PER_US
+        ),
         Outcome::Seam { cycle, why } => eprintln!(
             "SEAM ERROR at cycle {cycle} ({} us): {why}",
             cycle / memmap::CYCLES_PER_US

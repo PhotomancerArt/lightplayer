@@ -1,5 +1,7 @@
 pub mod app;
 pub mod base;
+#[cfg(target_arch = "wasm32")]
+mod browser_board_hold;
 mod clipboard;
 pub mod cloud;
 pub mod core;

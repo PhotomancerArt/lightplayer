@@ -1,3 +1,9 @@
+---
+status: fixed
+found: 2026-07-30      # PR #195, a stacked PR with an empty checks list
+area: .github/workflows/pre-merge.yml (trigger)
+class: ungated-variant
+---
 # Defect: a PR based on a non-`main` branch got no CI at all
 
 - **Date:** 2026-07-30

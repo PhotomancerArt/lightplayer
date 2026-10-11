@@ -1057,10 +1057,15 @@ impl ProjectLoader {
         projected_nodes: &[ProjectedNode],
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
-        for node in projected_nodes {
-            register_node_bindings(registry, runtime, projected_nodes, node, frame)?;
-        }
-        Ok(())
+        // Every `add_binding` invalidates the resolver's structure, and
+        // nothing resolves until the last one is in: one epoch, not one per
+        // binding.
+        runtime.resolver_mut().begin_structure_batch();
+        let result = projected_nodes.iter().try_for_each(|node| {
+            register_node_bindings(registry, runtime, projected_nodes, node, frame)
+        });
+        runtime.resolver_mut().end_structure_batch();
+        result
     }
 }
 

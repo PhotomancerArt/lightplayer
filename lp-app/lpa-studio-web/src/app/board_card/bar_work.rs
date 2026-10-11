@@ -2,7 +2,8 @@
 //! content while it carries [`UiBarWork`]: Studio's conic spinner and the
 //! step and percent while it runs, with the iridescent fill along the
 //! bar's foot ([`WorkFoot`]: its width the percent, a sweep when the
-//! percent is unknown, quieter when another device runs it); the check and
+//! percent is unknown, quieter when another device runs it, all of it
+//! inside a clipped track the bar's width); the check and
 //! the words, green, when it ended well (core keeps it there for a few
 //! seconds); the failure's mark and words, striped, when it failed. The
 //! bar's row draws the tint ([`super::stack_bar::bar_class`]) and the
@@ -12,6 +13,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{BarWorkState, UiBarWork};
 
+use super::card_action::use_card_scope;
 use crate::base::{
     StudioIcon, StudioIconName, conic_spinner_class, iridescent_fill_class,
     iridescent_fill_static_class,
@@ -42,16 +44,22 @@ pub fn BarWork(work: UiBarWork) -> Element {
     }
 }
 
-/// The running work's fill along the bar's foot: absolutely placed, so it
-/// costs the row no height.
+/// The running work's fill along the bar's foot: a track the bar's width
+/// and 2 px tall, absolutely placed so it costs the row no height, and
+/// clipped, with the fill inside it. The sweep's keyframes move the fill's
+/// `left` from -35 % to 100 % of what it is placed against, so the fill
+/// is placed against the track, which cuts what lies past the bar; clipping
+/// the bar or the card would cut the details that float over it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn WorkFoot(percent: Option<u8>, other: bool) -> Element {
+    let parked = use_card_scope().previews.sweep_parked_at;
     rsx! {
-        div {
-            class: foot_class(percent, other),
-            style: foot_style(percent),
-            aria_hidden: "true",
+        div { class: TRACK_CLASS, "data-work-track": "true", aria_hidden: "true",
+            div {
+                class: foot_class(percent, other),
+                style: foot_style(percent, parked),
+            }
         }
     }
 }
@@ -98,17 +106,26 @@ pub(crate) fn foot_class(percent: Option<u8>, other: bool) -> String {
 
 /// The foot's width, set in every state: a whole-string `style` write never
 /// removes a property, so a sweep that follows a measured fill would keep
-/// the old width unless this says the sweep's own.
-pub(crate) fn foot_style(percent: Option<u8>) -> String {
-    match percent {
-        Some(percent) => format!("width: {}%;", u32::from(percent).min(100)),
-        None => "width: 35%;".to_string(),
+/// the old width unless this says the sweep's own. A story's `parked` sweep
+/// rests at that `left` (percent of the track) with its motion off, since a
+/// capture freezes every animation at its first frame.
+pub(crate) fn foot_style(percent: Option<u8>, parked: Option<i16>) -> String {
+    match (percent, parked) {
+        (Some(percent), _) => format!("width: {}%;", u32::from(percent).min(100)),
+        (None, None) => "width: 35%;".to_string(),
+        (None, Some(left)) => format!("width: 35%; left: {left}%; animation: none;"),
     }
 }
 
-/// Along the row's foot, 2 px, under everything the row holds.
+/// The track: along the row's foot, 2 px, the row's width, under everything
+/// the row holds, and the clip for the fill inside it. Positioned, so the
+/// fill is placed against it and not against the bar.
+const TRACK_CLASS: &str =
+    "tw:pointer-events-none tw:absolute tw:inset-x-0 tw:bottom-0 tw:h-0.5 tw:overflow-hidden";
+
+/// The fill in its track, the track's full height.
 const FOOT_CLASS: &str =
-    "tw:pointer-events-none tw:absolute tw:bottom-0 tw:left-0 tw:h-0.5 tw:rounded-r-xs";
+    "tw:pointer-events-none tw:absolute tw:inset-y-0 tw:left-0 tw:rounded-r-xs";
 
 /// The sweep: the paint shuttling across while it shifts.
 const FOOT_SWEEP_CLASS: &str = "tw:[animation:ux-iri-sweep_4s_linear_infinite,ux-card-op-sweep_1.1s_ease-in-out_infinite] tw:motion-reduce:[animation:none]";
@@ -118,15 +135,16 @@ const FOOT_OTHER_CLASS: &str = "tw:opacity-50";
 
 #[cfg(test)]
 mod tests {
+    use super::super::card_test_fixtures::render;
     use super::*;
 
     /// The foot always says its width, so a sweep after a measured fill
     /// never keeps the old one; another device's fill is quieter.
     #[test]
     fn the_fill_states_its_width_in_every_state() {
-        assert_eq!(foot_style(Some(40)), "width: 40%;");
-        assert_eq!(foot_style(Some(250)), "width: 100%;");
-        assert_eq!(foot_style(None), "width: 35%;");
+        assert_eq!(foot_style(Some(40), None), "width: 40%;");
+        assert_eq!(foot_style(Some(250), None), "width: 100%;");
+        assert_eq!(foot_style(None, None), "width: 35%;");
         assert!(foot_class(Some(40), true).contains("tw:opacity-50"));
         assert!(!foot_class(Some(40), false).contains("opacity"));
         assert!(foot_class(Some(40), false).contains("ux-iri-fill"));
@@ -136,11 +154,26 @@ mod tests {
         assert!(sweep.contains("ux-card-op-sweep"), "{sweep}");
     }
 
-    /// A bar with work is the same one fixed row in every state: the foot
+    /// A story parks the sweep, and only the sweep: a measured fill never
+    /// moves for it.
+    #[test]
+    fn a_parked_sweep_rests_where_the_story_says() {
+        assert_eq!(
+            foot_style(None, Some(85)),
+            "width: 35%; left: 85%; animation: none;"
+        );
+        assert_eq!(
+            foot_style(None, Some(-20)),
+            "width: 35%; left: -20%; animation: none;"
+        );
+        assert_eq!(foot_style(Some(40), Some(85)), "width: 40%;");
+    }
+
+    /// A bar with work is the same one fixed row in every state: the track
     /// is absolutely placed, and the words are one cut line.
     #[test]
     fn the_work_is_one_fixed_row_in_every_state() {
-        assert!(FOOT_CLASS.contains("tw:absolute"));
+        assert!(TRACK_CLASS.contains("tw:absolute"));
         for state in [
             BarWorkState::Running,
             BarWorkState::Done,
@@ -156,5 +189,75 @@ mod tests {
             work_state_name(&BarWorkState::Failed { retry: None }),
             "failed"
         );
+    }
+
+    /// The fill stays inside the bar (the 2026-10-10 defect): the sweep's
+    /// keyframes run `left` from -35 % to 100 % of what the fill is placed
+    /// against, so a fill with no clipped track the bar's width draws out
+    /// past the card's edge. The track clips, and the fill fills the track.
+    #[test]
+    fn the_fill_is_clipped_to_a_track_the_bars_width() {
+        for token in [
+            "tw:absolute",
+            "tw:inset-x-0",
+            "tw:bottom-0",
+            "tw:h-0.5",
+            "tw:overflow-hidden",
+        ] {
+            assert!(TRACK_CLASS.contains(token), "{token}: {TRACK_CLASS}");
+        }
+        for class in [foot_class(Some(40), false), foot_class(None, false)] {
+            assert!(class.contains("tw:absolute"), "{class}");
+            assert!(class.contains("tw:inset-y-0"), "{class}");
+            assert!(!class.contains("tw:bottom-0"), "{class}");
+            assert!(!class.contains("overflow"), "{class}");
+        }
+        // The keyframes it rides are the ones that leave the track.
+        let css = include_str!("../../style.css");
+        let at = css.find("@keyframes ux-card-op-sweep").expect("the sweep");
+        let keyframes = &css[at..at + css[at..].find("\n}").expect("it closes")];
+        assert!(keyframes.contains("left: -35%"), "{keyframes}");
+        assert!(keyframes.contains("left: 100%"), "{keyframes}");
+    }
+
+    /// The DOM a person gets: the fill is the clipped track's only child,
+    /// the track carries the clip, and nothing else in the foot does — the
+    /// bar, the card and the details that float over them are not what
+    /// cuts the fill.
+    #[test]
+    fn the_rendered_fill_sits_inside_the_clipped_track() {
+        let html = render(sweeping_foot, ());
+        assert!(html.starts_with("<div "), "{html}");
+        let track_tag = &html[..html.find('>').expect("the track's tag closes")];
+        assert!(track_tag.contains("data-work-track"), "{html}");
+        assert!(track_tag.contains("tw:overflow-hidden"), "{html}");
+        // One fill, inside it, with the sweep on it; nothing else clips.
+        let inside = &html[track_tag.len()..];
+        assert_eq!(inside.matches("<div ").count(), 1, "{html}");
+        assert!(inside.contains("ux-iri-fill-static"), "{html}");
+        assert!(inside.contains("ux-card-op-sweep"), "{html}");
+        assert!(inside.contains("width: 35%;"), "{html}");
+        assert!(!inside.contains("overflow"), "{html}");
+    }
+
+    /// A measured fill is inside the same track.
+    #[test]
+    fn a_measured_fill_is_inside_the_same_track() {
+        let html = render(measured_foot, ());
+        assert!(html.contains("data-work-track"), "{html}");
+        assert!(html.contains("tw:overflow-hidden"), "{html}");
+        assert!(html.contains("width: 40%;"), "{html}");
+    }
+
+    fn sweeping_foot() -> Element {
+        rsx! {
+            WorkFoot { percent: None, other: false }
+        }
+    }
+
+    fn measured_foot() -> Element {
+        rsx! {
+            WorkFoot { percent: Some(40), other: false }
+        }
     }
 }

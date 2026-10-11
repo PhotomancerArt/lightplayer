@@ -57,6 +57,7 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         wifi: None,
         lan: None,
         wifi_connect: None,
+        take_over: None,
         update: None,
         layout: None,
         plays: &lpa_studio_core::BoardPlays::Running {
@@ -131,6 +132,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         ],
         update_blocked: None,
         last_update_outcome: None,
+        held_elsewhere: None,
     }
 }
 

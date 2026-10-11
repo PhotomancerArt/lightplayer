@@ -75,7 +75,10 @@ LP_CLOUD_SESSION=… lp-cli upload projects/test/basic relay:10bda3b08e30
 a C6 does — the same `lpc-relay` client, one session at a time — for building
 against before a board is on Wi-Fi. With `LP_CLOUD_SESSION` set it installs
 the account's key in its own access store first (it prints only
-`installed <name>'s account key`), then prints the `relay:` address to use:
+`installed <name>'s account key`), then prints the `relay:` address to use.
+Like a C6 it speaks relay protocol 2: it says lp-cli's version in its hello,
+reports its first loaded project's name, and sends the picture of its outputs
+whenever the relay asks. To try it:
 
 ```sh
 just cloud-serve                                   # a local relay; note its URL

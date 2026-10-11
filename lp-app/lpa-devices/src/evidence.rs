@@ -158,6 +158,21 @@ pub struct Evidence {
     /// says nothing about the board.
     #[serde(default)]
     pub wire_borrowed: bool,
+    /// Another tab of this browser holds this board.
+    ///
+    /// A fact about the BOARD, folded from [`Event::BoardHeld`] (which the
+    /// roster keeps per MAC and puts on every device that names it, in
+    /// whichever order the two arrive). Link attach, detach and loss leave it
+    /// alone: the other tab's hold does not end because this tab's link to
+    /// the board changed. Only a `BoardHeld` clears it.
+    #[serde(default)]
+    pub held_elsewhere: Option<crate::held_elsewhere::HeldElsewhere>,
+    /// The CURRENT link's port is held by another tab, so it was not opened
+    /// here ([`Event::LinkHeld`]). A fact about the link, like
+    /// [`Self::link_carries_update_channel`]: a new link, a detach, or the
+    /// port opening after all clears it.
+    #[serde(default)]
+    link_held_by_tab: bool,
     /// The card's terminal tail: raw serial lines, decoded wire frames and
     /// activity narration, in the order they happened.
     ///
@@ -212,6 +227,9 @@ impl Evidence {
                 // A borrow belongs to the link it was taken on. This is a
                 // different link, so nothing is holding it.
                 self.wire_borrowed = false;
+                // Nor has anyone said yet that another tab holds THIS link's
+                // port. (The board's own fact, `held_elsewhere`, stands.)
+                self.link_held_by_tab = false;
                 if let Some(learned) = identity.bind_endpoint(info.endpoint.clone()) {
                     notes.extend(identity_notes(learned));
                 }
@@ -225,12 +243,31 @@ impl Evidence {
                 // has, so it would never arrive. Without this the device
                 // would stop evaluating freshness for good.
                 self.wire_borrowed = false;
+                self.link_held_by_tab = false;
             }
             Event::Link { link, event } => {
                 notes.extend(self.fold_link_event(now, *link, event, identity, config));
             }
             Event::LinkBorrow { held, .. } => {
                 self.wire_borrowed = *held;
+            }
+            Event::BoardHeld { held, .. } => self.fold_board_held(held.as_ref()),
+            // The port is held by another tab, so it was never opened here:
+            // presence stays `Present`, and the MAC the claims name (when
+            // they name exactly this link's board) is learned as a hello's
+            // would be.
+            // The hold that kept it shut ended: the mark goes, and the port
+            // stays as it was (not open here).
+            Event::LinkFreed { .. } => self.link_held_by_tab = false,
+            Event::LinkHeld { mac, .. } => {
+                self.link_held_by_tab = true;
+                if let Some(mac) = mac {
+                    let observed = crate::identity::PeerIdentity {
+                        mac: Some(mac.clone()),
+                        ..Default::default()
+                    };
+                    notes.extend(identity_notes(identity.learn(&observed)));
+                }
             }
             Event::TimerFired { .. } => {
                 // A borrowed wire is a wire with no reader: the pump is
@@ -520,6 +557,22 @@ impl Evidence {
         self.observations.settled
     }
 
+    /// Whether the current link's port is held by another tab, so it was
+    /// not opened here ([`Event::LinkHeld`]).
+    pub fn link_held_by_tab(&self) -> bool {
+        self.link_held_by_tab
+    }
+
+    /// The [`Event::BoardHeld`] arm of the fold.
+    ///
+    /// Callable without a clock because the fact moves nothing time-based:
+    /// the roster also folds it this way into a device that learns the
+    /// board's MAC after the fact arrived (a record loaded later, a pending
+    /// link promoted later), which is how arrival order stops mattering.
+    pub(crate) fn fold_board_held(&mut self, held: Option<&crate::held_elsewhere::HeldElsewhere>) {
+        self.held_elsewhere = held.cloned();
+    }
+
     /// The link this device is currently on, if any.
     pub fn link(&self) -> Option<LinkId> {
         self.presence.link()
@@ -538,6 +591,8 @@ impl Evidence {
             LinkEvent::Opened { info } => {
                 self.presence = Presence::Open { link, since: now };
                 self.link_carries_update_channel = info.carries_update_channel;
+                // It opened, so no other tab holds it now.
+                self.link_held_by_tab = false;
                 // A fresh port is a fresh window: whatever we concluded
                 // about the previous generation is no longer evidence.
                 self.begin_window(now);

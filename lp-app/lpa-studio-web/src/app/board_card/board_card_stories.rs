@@ -21,10 +21,11 @@ use lpa_studio_core::{
     DeviceCardFeedView, DeviceEscape, DeviceFirmwareAge, DeviceFirmwareFace, DeviceFlashLayoutView,
     DeviceFlashStep, DeviceId, DeviceLayoutVerdict, DeviceLinkCounters, DeviceLinkId,
     DeviceLoadedProject, DeviceStatus, DeviceTerminalKind, DeviceTerminalLine, DeviceView,
-    DeviceWireVersion, FIRMWARE_NEEDS_USB, FeedLiveness, HeardNetwork, INSTALL_FIND_PARAM,
-    LastAttempt, NetworkStatus, OfferArgs, OutcomeView, PendingLinkView, SavedNetworkInfo,
-    StationState, UiDeviceAccess, UiDeviceWifi, UiLinkKind, UiOfferTree, UiRuntimeBand,
-    UiUnlockOffer, UpdateFixture, UpdateFixtureRow, device_layout_view, lan_link_for_endpoint,
+    DeviceWireVersion, FIRMWARE_NEEDS_USB, FeedLiveness, HeardNetwork, HeldElsewhere, HoldLevel,
+    HoldVia, INSTALL_FIND_PARAM, LastAttempt, NetworkStatus, OfferArgs, OutcomeView,
+    PendingLinkView, SavedNetworkInfo, StationState, UiDeviceAccess, UiDeviceWifi, UiLinkKind,
+    UiOfferTree, UiRuntimeBand, UiTakeOver, UiUnlockOffer, UiWifiConnect, UpdateFixture,
+    UpdateFixtureRow, WIFI_BUSY_WORDS, device_layout_view, lan_link_for_endpoint,
 };
 use lpa_studio_web_story_macros::story;
 use lpc_wire::RelayState;
@@ -40,7 +41,7 @@ use crate::app::home::home_gallery_stories::live_card_lamp_frame;
 // --- Every state ------------------------------------------------------------
 
 #[story(
-    description = "The board card in every state, one height each (AC5): live (\"58 fps\" beside the blue dot, Edit as the primary), connecting (the connection bar working: spinner, \"Identifying…\", the iridescent sweep along its foot, Cancel), offline with its last picture (dimmed, its age \"5 h ago\" in the corner, \"Offline · 2 weeks\" in its connection bar, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated XIAO ESP32-C6\", in this tab) and a board reached through lightplayer.app (\"Wi‑Fi via lightplayer.app · live\", the cloud icon). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
+    description = "The board card in every state, one height each (AC5): live (\"58 fps\" beside the blue dot, Edit as the primary), connecting (the connection bar working: spinner, \"Identifying…\", the iridescent sweep along its foot, Cancel), offline with its last picture (dimmed, its age \"5 h ago\" in the corner, \"Offline · 2 weeks\" in its connection bar, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated XIAO ESP32-C6\", in this tab), a board reached through lightplayer.app (\"Wi‑Fi via lightplayer.app · live\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"Open in another tab\" in orange, the picture that tab saved, dimmed, Connect), taking over (the connection bar working: \"Asking the other tab…\", Connect disabled) and taken (\"Taken by another tab\", Connect). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
 )]
 fn board_card_every_state() -> Element {
     rsx! {
@@ -108,6 +109,142 @@ fn board_card_every_state() -> Element {
             }
             Cell { caption: "through lightplayer.app",
                 {relay_card(None)}
+            }
+            Cell { caption: "held by another tab",
+                {held_card(HoldLevel::Watching, false, None)}
+            }
+            Cell { caption: "taking over",
+                {held_card(HoldLevel::Watching, false, Some(asking_the_other_tab()))}
+            }
+            Cell { caption: "taken by another tab",
+                {held_card(HoldLevel::Watching, true, None)}
+            }
+        }
+    }
+}
+
+// --- Work with no percent ---------------------------------------------------
+
+#[story(
+    description = "Work with no percent on a bar (\"Identifying…\"), the iridescent sweep along its foot, at the two ends of its pass. A capture freezes every animation, so a sweep would only ever be seen at its first frame, at the bar's left edge; these park it as it is entering (the fill reaching 20 % of the bar's width past the card's left edge) and leaving (reaching 20 % past its right edge), with a third card at the first frame for comparison. The fill lives in a track the bar's width and is clipped to it: no pixel of it may land outside the card, and the card's border, its rounded corner and the status corner's notch stay whole. (Yona found it on lightplayer.app, 2026-10-10: the fill ran past the card's right edge into the page.) The picture, the name bar and the other bars are the connecting card's, unchanged."
+)]
+fn board_card_sweep_stays_inside_the_card() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "entering",
+                StoryBoardCard {
+                    card: identifying(),
+                    previews: CardPreviews {
+                        sweep_parked_at: Some(-20),
+                        ..CardPreviews::default()
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "leaving",
+                StoryBoardCard {
+                    card: identifying(),
+                    previews: CardPreviews {
+                        sweep_parked_at: Some(85),
+                        ..CardPreviews::default()
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "at its first frame",
+                StoryBoardCard { card: identifying(), on_action: |_| {} }
+            }
+        }
+    }
+}
+
+// --- A board another tab holds ----------------------------------------------
+
+#[story(
+    description = "A board another tab of this browser holds (one tab holds each board; the others show its last picture and say so). Three frames of the same card, by what the holder is doing: WATCHING (it holds the board and nothing of the user's is open there): the picture that tab saved, dimmed, its age (\"5 min ago\") in the corner; the connection bar says \"Open in another tab\" in orange, the colour of \"someone has it\", and nothing else; the name bar's primary is Connect, whose offer is the take-over; the corner is orange too, its details saying \"The last picture another tab saved.\". EDITOR OPEN: the aside says \"editor open\", and Connect wears the error tint (taking the board closes that editor; the undo is pressing Connect over there). BUSY: the aside is what the holder is doing (\"Updating · 42%\"), and Connect is disabled saying \"Busy in the other tab: Updating · 42%\". The card is the board's own card: same height, same five bars."
+)]
+fn board_card_held_by_another_tab() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "watching",
+                {held_card(HoldLevel::Watching, false, None)}
+            }
+            Cell { caption: "its editor open",
+                {held_card(HoldLevel::Open, false, None)}
+            }
+            Cell { caption: "busy",
+                {held_card(HoldLevel::Busy("Updating · 42%".to_string()), false, None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "Connect on a board another tab holds, while it runs and when it fails. ASKING: the connection bar is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), Connect is disabled saying the same words, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: the bar is striped with \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, which presses the same take-over; Connect is a press again. The picture and the status corner do not change for work."
+)]
+fn board_card_taking_over() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "asking the other tab",
+                {held_card(HoldLevel::Watching, false, Some(asking_the_other_tab()))}
+            }
+            Cell { caption: "opening",
+                {held_card(HoldLevel::Watching, false, Some(UiTakeOver {
+                    words: "Opening…".to_string(),
+                    failed: false,
+                }))}
+            }
+            Cell { caption: "that tab didn't answer",
+                {held_card(HoldLevel::Watching, false, Some(UiTakeOver {
+                    words: "That tab didn't answer".to_string(),
+                    failed: true,
+                }))}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The tab that let go because another tab asked. Its card stays: \"Taken by another tab\" in orange on the connection bar, the picture it saved on the way out (dimmed, with its age), and Connect, which takes the board back the same way. Nothing reopens by itself."
+)]
+fn board_card_taken_from_this_tab() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "taken by another tab",
+                {held_card(HoldLevel::Watching, true, None)}
+            }
+            Cell { caption: "its editor open over there",
+                {held_card(HoldLevel::Open, true, None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A board whose one network connection is someone else's — a person Studio cannot name, so there is no tab to ask. The connection bar says \"Someone else connected\" in orange, and offers Retry on the same road (Wi‑Fi, or the cloud) and nothing more: taking a board from another person is sharing's question. Compare \"Open in another tab\", which is a tab of this browser and whose Connect takes it over."
+)]
+fn board_card_network_busy() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "over Wi‑Fi",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    wifi_address: Some("192.168.1.40".to_string()),
+                    wifi_connect: Some(busy_connect(false)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 14.0 * DAY),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "through lightplayer.app",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    relay: true,
+                    wifi_connect: Some(busy_connect(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 14.0 * DAY),
+                    on_action: |_| {},
+                }
             }
         }
     }
@@ -537,6 +674,82 @@ pub(crate) fn relay_card(open: Option<CardPart>) -> Element {
     }
 }
 
+/// The porch board as another tab's hold leaves it here: its port is there
+/// and was never opened (a gated link the model keeps), so nothing is
+/// known of what runs on it. `level` is the holder's last word;
+/// `taken_from_here` is a tab that let go on request.
+pub(crate) fn held_by_another_tab(level: HoldLevel, taken_from_here: bool) -> DeviceView {
+    DeviceView {
+        status: DeviceStatus::Attached,
+        state_label: "Attached — not listening".to_string(),
+        freshness_label: None,
+        firmware_face: DeviceFirmwareFace::Unknown,
+        remembered_firmware: Some("fw-esp32c6 2026.10.05-2".to_string()),
+        loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
+        can_receive_project: false,
+        can_remove_project: false,
+        terminal: Vec::new(),
+        held_elsewhere: Some(HeldElsewhere {
+            via: HoldVia::Usb,
+            level,
+            taken_from_here,
+        }),
+        escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
+        ..porch()
+    }
+}
+
+/// The card of a board another tab holds, with `take_over` under way or
+/// failed; the picture is the one that tab saved five minutes ago.
+pub(crate) fn held_card(
+    level: HoldLevel,
+    taken_from_here: bool,
+    take_over: Option<UiTakeOver>,
+) -> Element {
+    rsx! {
+        StoryBoardCard {
+            card: held_by_another_tab(level, taken_from_here),
+            feed: saved_by_another_tab(),
+            take_over,
+            on_action: |_| {},
+        }
+    }
+}
+
+/// The ask is out: the other tab has five seconds to answer.
+pub(crate) fn asking_the_other_tab() -> UiTakeOver {
+    UiTakeOver {
+        words: "Asking the other tab…".to_string(),
+        failed: false,
+    }
+}
+
+/// The picture another tab saved five minutes ago.
+pub(crate) fn saved_by_another_tab() -> Option<DeviceCardFeedView> {
+    Some(DeviceCardFeedView {
+        frame: Some(live_card_lamp_frame()),
+        frame_age_secs: Some(5.0 * 60.0),
+        engine_fps: None,
+        liveness: FeedLiveness::Offline,
+    })
+}
+
+/// A connect turned away because someone else holds the board's network
+/// connection.
+fn busy_connect(through_relay: bool) -> UiWifiConnect {
+    UiWifiConnect {
+        host: match through_relay {
+            true => "lightplayer.app".to_string(),
+            false => "192.168.1.40".to_string(),
+        },
+        through_relay,
+        connecting: false,
+        error: Some(WIFI_BUSY_WORDS.to_string()),
+        busy: true,
+    }
+}
+
 /// A day, in seconds.
 pub(crate) const DAY: f64 = 86_400.0;
 
@@ -582,6 +795,7 @@ pub(crate) fn porch() -> DeviceView {
         terminal: porch_terminal(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,
@@ -673,6 +887,7 @@ pub(crate) fn new_board() -> PendingLinkView {
         detected_chip: Some("esp32c6".to_string()),
         mac: Some("60:55:f9:0a:0b:0d".to_string()),
         firmware_blocked: None,
+        held_by_tab: false,
         escapes: vec![DeviceEscape::Forget],
     }
 }

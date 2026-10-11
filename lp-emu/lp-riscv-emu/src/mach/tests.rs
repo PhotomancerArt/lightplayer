@@ -853,6 +853,86 @@ fn a_store_that_lowers_the_last_line_leaves_nothing_pending() {
     assert_eq!(rig.hart.external(), None, "the store cleared the line");
 }
 
+/// `lr.w x12, (x10)`: funct5 0b00010, funct3 0b010, opcode AMO (0x2f).
+const LR_W_A2_A0: u32 = (0b00010 << 27) | (10 << 15) | (0b010 << 12) | (12 << 7) | 0x2f;
+/// `sc.w x13, x11, (x10)`: funct5 0b00011.
+const SC_W_A3_A1_A0: u32 =
+    (0b00011 << 27) | (11 << 20) | (10 << 15) | (0b010 << 12) | (13 << 7) | 0x2f;
+
+/// The shape of esp-rtos's run-queue push: read the head with `lr.w`, write
+/// the new head with `sc.w`, and retry when the `sc.w` fails. Here an
+/// interrupt lands between the two and its handler writes the head itself.
+/// `take_the_interrupt` decides whether that interrupt is taken.
+fn lr_then_maybe_a_trap_then_sc(take_the_interrupt: bool) -> Rig {
+    const HEAD: u32 = RAM_BASE + 0x100;
+    let mut rig = Rig::new();
+    assert!(rig.hart.set_csr_raw(MIE, 0xFFFF_FFFF));
+    rig.set_reg(10, HEAD);
+    rig.set_reg(11, 0x1111_1111); // what the interrupted code stores
+    rig.set_reg(14, 0x2222_2222); // what the handler stores
+    rig.load(HEAD, &[0xAAAA_AAAA]);
+    rig.load(RAM_BASE, &[LR_W_A2_A0, SC_W_A3_A1_A0, encode::ebreak()]);
+    // The handler: write the head, mask the line it came in on, return.
+    rig.load(
+        VEC,
+        &[
+            encode::sw(Gpr::new(10), Gpr::new(14), 0),
+            encode::csrrw(Gpr::new(0), Gpr::new(0), MIE),
+            MRET,
+        ],
+    );
+
+    assert_eq!(rig.run(1), SliceEnd::BudgetExhausted);
+    assert_eq!(rig.hart.pc(), RAM_BASE + 4, "the lr.w alone has run");
+    assert_eq!(rig.reg(12), 0xAAAA_AAAA);
+    assert_eq!(rig.hart.reservation(), Some(HEAD));
+
+    if take_the_interrupt {
+        rig.hart.set_external(Some(9));
+        assert!(rig.hart.poll_interrupts(), "the interrupt is taken");
+        assert_eq!(rig.hart.reservation(), None, "taking a trap ends it");
+    }
+
+    assert_eq!(rig.run(500), SliceEnd::Ebreak { pc: RAM_BASE + 8 });
+    rig
+}
+
+#[test]
+fn sc_w_fails_when_a_trap_was_taken_since_its_lr_w() {
+    let rig = lr_then_maybe_a_trap_then_sc(true);
+    assert_eq!(rig.reg(13), 1, "the sc.w reports failure");
+    assert_eq!(
+        rig.bus.word_at(RAM_BASE + 0x100),
+        0x2222_2222,
+        "and the handler's write survives"
+    );
+}
+
+#[test]
+fn sc_w_succeeds_when_nothing_came_between_it_and_its_lr_w() {
+    let rig = lr_then_maybe_a_trap_then_sc(false);
+    assert_eq!(rig.reg(13), 0, "the sc.w reports success");
+    assert_eq!(rig.bus.word_at(RAM_BASE + 0x100), 0x1111_1111);
+    assert_eq!(rig.hart.reservation(), None, "and used the reservation up");
+}
+
+#[test]
+fn a_snapshot_carries_the_reservation() {
+    let mut rig = Rig::new();
+    rig.set_reg(10, RAM_BASE + 0x100);
+    rig.load(RAM_BASE, &[LR_W_A2_A0, SC_W_A3_A1_A0, encode::ebreak()]);
+    assert_eq!(rig.run(1), SliceEnd::BudgetExhausted);
+
+    let mut restored = Rig {
+        hart: rig.hart.clone(),
+        bus: TestBus::new(),
+    };
+    restored.load(RAM_BASE, &[LR_W_A2_A0, SC_W_A3_A1_A0, encode::ebreak()]);
+    assert_eq!(restored.hart.reservation(), Some(RAM_BASE + 0x100));
+    assert_eq!(restored.run(500), SliceEnd::Ebreak { pc: RAM_BASE + 8 });
+    assert_eq!(restored.reg(13), 0, "the restored sc.w still pairs with it");
+}
+
 // --- beyond the twelve ------------------------------------------------------
 
 #[test]

@@ -1,3 +1,9 @@
+---
+status: open           # the storm shape is gone (abort tier); boot-time heap headroom for an oversized project remains
+found: 2026-08-02      # hardware-walk (runtime-block-plan smoke, PR #276)
+area: fw-esp32c6 boot auto-load × heap headroom for an oversized project
+class: budget-exhaustion
+---
 # C6: a project declaring more outputs than the board offers ends in an OOM panic storm
 
 - **Date:** 2026-08-02

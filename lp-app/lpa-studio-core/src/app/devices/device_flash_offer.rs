@@ -541,6 +541,7 @@ mod tests {
             detected_chip: Some("esp32c6".to_string()),
             mac: None,
             firmware_blocked: None,
+            held_by_tab: false,
             escapes: vec![Escape::Forget],
         };
         let prefix = OfferPath::board(&crate::BoardRef::New(3));
@@ -713,6 +714,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,

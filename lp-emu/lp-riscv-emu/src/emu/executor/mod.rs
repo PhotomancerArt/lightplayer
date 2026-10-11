@@ -2,7 +2,9 @@
 
 extern crate alloc;
 
-use crate::emu::{error::EmulatorError, fp_regs::FpRegs, logging::InstLog};
+use crate::emu::{
+    error::EmulatorError, fp_regs::FpRegs, logging::InstLog, lr_reservation::LrReservation,
+};
 use lp_emu_core::Bus;
 
 pub use lp_emu_core::InstClass;
@@ -62,6 +64,9 @@ pub(super) fn read_reg(regs: &[i32; 32], reg: lp_riscv_inst::Gpr) -> i32 {
 /// `fp` carries the RV32F architectural state (see [`FpRegs`]). Only the
 /// floating-point arms and the three F-extension CSRs in [`system`] read or
 /// write it; the integer categories never see it.
+///
+/// `reservation` is the hart's `lr.w` reservation (see [`LrReservation`]).
+/// Only the atomic arm touches it; ending it on a trap is the caller's job.
 #[inline(always)]
 pub(crate) fn decode_execute<M: LoggingMode, B: Bus>(
     inst_word: u32,
@@ -69,6 +74,7 @@ pub(crate) fn decode_execute<M: LoggingMode, B: Bus>(
     regs: &mut [i32; 32],
     _memory: &mut B,
     fp: &mut FpRegs,
+    reservation: &mut LrReservation,
 ) -> Result<ExecutionResult, EmulatorError> {
     // Check if compressed instruction (bits [1:0] != 0b11)
     if (inst_word & 0x3) != 0x3 {
@@ -124,7 +130,7 @@ pub(crate) fn decode_execute<M: LoggingMode, B: Bus>(
         }
         0x2f => {
             // Atomic instructions (A extension)
-            atomic::decode_execute_atomic::<M, B>(inst_word, pc, regs, _memory)
+            atomic::decode_execute_atomic::<M, B>(inst_word, pc, regs, _memory, reservation)
         }
         // Floating point (F extension). `lp-riscv-inst` has no F support, so
         // `float` decodes the word itself. Compressed float encodings (Zcf)
@@ -278,7 +284,15 @@ mod tests {
         let mut regs = [0i32; 32];
         regs[10] = 0; // x10 = base address 0, so lw/sw imm is the address
         let mut fp = FpRegs::new();
-        decode_execute::<LoggingDisabled, _>(inst_word, 0x1000, &mut regs, bus, &mut fp)
+        let mut reservation = LrReservation::new();
+        decode_execute::<LoggingDisabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            bus,
+            &mut fp,
+            &mut reservation,
+        )
     }
 
     #[test]

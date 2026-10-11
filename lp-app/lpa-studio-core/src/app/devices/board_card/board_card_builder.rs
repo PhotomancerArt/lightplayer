@@ -41,7 +41,9 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
-        presence: match input.offline() {
+        // A board another tab holds is plugged in and running: Online,
+        // whatever it is here (`split_roster` says the same).
+        presence: match input.offline() && input.view.held_elsewhere.is_none() {
             true => UiBoardPresence::Offline,
             false => UiBoardPresence::Online,
         },
@@ -136,14 +138,16 @@ fn debug_assert_offered(card: &UiBoardCard, offers: &[UiOffer]) {
 
 #[cfg(test)]
 mod tests {
-    use lpa_devices::ActivityKind;
+    use lpa_devices::device::DeviceStatus;
     use lpa_devices::view::OutcomeView;
+    use lpa_devices::{ActivityKind, HoldLevel};
 
-    use super::super::card_fixtures::{CardFixture, activity, board};
+    use super::super::card_fixtures::{CardFixture, activity, board, feed};
     use super::super::primary_action::tests::pending_view;
     use super::super::ui_stack_bar::BarLayer;
     use super::*;
     use crate::app::devices::activity_ends::ActivityEnd;
+    use crate::app::devices::device_card_feed_view::FeedLiveness;
 
     #[test]
     fn a_card_has_its_five_bars_in_order() {
@@ -202,6 +206,65 @@ mod tests {
         let card = board_card(&CardFixture::offline().input());
         assert_eq!(card.presence, UiBoardPresence::Offline);
         assert_eq!(card.status.mark, CornerMark::Quiet);
+    }
+
+    /// A board another tab holds is an Online card (A3: it is plugged in
+    /// and running), with the picture that tab saved, dimmed and aged, and
+    /// Connect as its primary.
+    #[test]
+    fn a_board_another_tab_holds_is_an_online_card_with_its_saved_picture() {
+        for status in [DeviceStatus::Attached, DeviceStatus::Offline] {
+            let mut fixture = CardFixture::held(HoldLevel::Open);
+            fixture.view.status = status;
+            let mut saved = feed(FeedLiveness::Offline, true);
+            saved.frame_age_secs = Some(300.0);
+            fixture.feed = Some(saved);
+            let card = board_card(&fixture.input());
+
+            assert_eq!(card.presence, UiBoardPresence::Online, "{status:?}");
+            assert_eq!(card.picture.source, PictureSource::Saved);
+            assert!(card.picture.dim);
+            assert!(card.picture.frame.is_some());
+            assert_eq!(card.status.reading.as_deref(), Some("5 min ago"));
+            assert_eq!(
+                card.status.mark,
+                CornerMark::Notice(UiStatusKind::Attention),
+                "someone has it: orange"
+            );
+            let running = card.status.details.sections.last().expect("running");
+            let lines: Vec<(&str, &str)> = running
+                .lines
+                .iter()
+                .map(|line| (line.label.as_str(), line.value.as_str()))
+                .collect();
+            assert_eq!(
+                lines,
+                [
+                    ("State", "Open in another tab"),
+                    ("Picture", "The last picture another tab saved.")
+                ]
+            );
+            assert_eq!(
+                card.name_bar.primary.as_ref().map(|primary| primary.word()),
+                Some("Connect")
+            );
+            assert_eq!(
+                card.bar(BarLayer::Connection).summary,
+                "Open in another tab"
+            );
+        }
+    }
+
+    /// A held board nobody has saved a picture for says so, instead of
+    /// "Not connected".
+    #[test]
+    fn a_held_board_with_no_picture_says_who_has_it() {
+        let mut fixture = CardFixture::held(HoldLevel::Watching);
+        let card = board_card(&fixture.input());
+        assert_eq!(card.picture.source, PictureSource::None);
+        let running = card.status.details.sections.last().expect("running");
+        assert!(running.lines.iter().any(|line| line.label == "Picture"
+            && line.value == "Another tab has this board. It has saved no picture yet."));
     }
 
     #[test]

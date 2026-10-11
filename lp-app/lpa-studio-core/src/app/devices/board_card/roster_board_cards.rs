@@ -102,6 +102,7 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
         wifi: roster.wifi.get(&view.id),
         lan: roster.lan_links.get(&view.id),
         wifi_connect: roster.wifi_connects.get(&view.id),
+        take_over: roster.take_overs.get(&view.id),
         update: roster.updates.get(&view.id),
         layout: roster.layout.get(&view.id),
         plays,

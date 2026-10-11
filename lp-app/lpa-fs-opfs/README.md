@@ -60,6 +60,12 @@ project Y in a second tab because project X was open in the first). See
   locks — gallery data is a fresh read-only mount, and whole-file atomic
   writes make torn files impossible.
 
+The Web Locks mechanics under both (the claim and its guard, the polling
+ladder, the query of held names, and a watch that queues behind a holder
+and lets go the moment it is granted) are `named_locks.rs`, whose one other
+user is Studio's board hold (`lpa-studio-web/src/browser_board_hold.rs`,
+`lp-board:` locks).
+
 Acquisition *policy* is the caller's, which is why this crate offers both
 `try_acquire` (one `ifAvailable` shot — for a structural op the refusal
 is the answer) and `try_acquire_polling` (a bounded ladder — for a caller
