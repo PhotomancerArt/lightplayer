@@ -29,6 +29,7 @@ pub fn button(evt: &MouseEvent) -> Option<Button> {
     match evt.trigger_button() {
         Some(MouseButton::Primary) => Some(Button::Primary),
         Some(MouseButton::Auxiliary) => Some(Button::Middle),
+        Some(MouseButton::Secondary) => Some(Button::Secondary),
         _ => None,
     }
 }

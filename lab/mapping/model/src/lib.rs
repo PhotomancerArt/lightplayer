@@ -10,7 +10,10 @@
 //!   Derived, never stored.
 //! - [`Target`] — anything you can select, in ONE tree: group → line →
 //!   lamp, circle → ring → lamp.
-//! - [`pick`] — which level a click selects (the Figma-style drill-down).
+//! - [`area`] — each thing's shape on screen: what's outlined is what a
+//!   click hits.
+//! - [`pick`] — which thing a click selects (the Figma-style drill-down,
+//!   ⌥-click through overlaps).
 //! - [`props`] — properties as data; the inspector is drawn from them, for
 //!   one thing or many.
 //! - [`Editor`] — the state, driven by input events, with no IO.
@@ -20,6 +23,7 @@
 //!
 //! Vision: `~/.photomancer/planning/lp2025/2026-10-10-1853-mapping-design-lab/`.
 
+pub mod area;
 pub mod camera;
 pub mod commands;
 pub mod component;
@@ -28,7 +32,6 @@ pub mod editor;
 pub mod fixture;
 pub mod geom;
 pub mod hints;
-pub mod hit_test;
 pub mod notice;
 pub mod object;
 pub mod pick;
@@ -36,9 +39,10 @@ pub mod props;
 pub mod target;
 pub mod tree_rows;
 
+pub use area::Area;
 pub use camera::Camera;
 pub use component::{Component, ComponentId, ComponentKind, Ring};
-pub use editor::{Button, Editor, Gesture, Key, Mods, Tool};
+pub use editor::{Button, ContextMenu, Editor, Gesture, Key, MenuItem, Mods, Tool};
 pub use fixture::Fixture;
 pub use geom::{Rect, Vec2};
 pub use hints::{Hint, HintBar};

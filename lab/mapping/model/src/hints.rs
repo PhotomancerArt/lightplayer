@@ -71,7 +71,16 @@ impl Editor {
                 vec![h("release", "finish it"), h("Esc", "cancel")],
             ),
             Gesture::Press { .. } | Gesture::None => {
-                if self.space_held {
+                if self.menu.is_some() {
+                    (
+                        "Choosing what's under the cursor".into(),
+                        vec![
+                            h("click", "select it"),
+                            h("⇧ click", "add it to the selection"),
+                            h("Esc", "close the list"),
+                        ],
+                    )
+                } else if self.space_held {
                     (
                         "Hand".into(),
                         vec![
@@ -119,6 +128,11 @@ impl Editor {
                     "⌘ click",
                     format!("select {} directly", f.long_label(&target)),
                 ));
+            } else if self.mods.alt {
+                out.push(h(
+                    "⌥ click",
+                    format!("select {} — the next one here", f.long_label(&target)),
+                ));
             } else if going_in {
                 out.push(h(
                     "click",
@@ -132,12 +146,17 @@ impl Editor {
                 out.push(h("click", format!("select {}", f.long_label(&target))));
             }
             if !self.mods.command
-                && let Some(deep) = self.hover_hit()
+                && let Some(deep) = self.hover_deep()
                 && deep != target
             {
                 out.push(h("⌘ click", format!("select {} directly", f.label(&deep))));
             }
+            let here = self.hover_candidates().len();
+            if here > 1 && !self.mods.alt {
+                out.push(h("⌥ click", format!("the next of the {here} here")));
+            }
             out.push(h("⇧ click", "add to or remove from the selection"));
+            out.push(h("right-click", "list everything under the cursor"));
         }
 
         if self.selection.is_empty() {
@@ -246,6 +265,23 @@ impl Editor {
                 .map(|o| o.lamps.len())
                 .sum();
                 Some(format!("{lamps} lamps · one every {} units", self.spacing))
+            }
+            Gesture::None if self.menu.is_none() => {
+                let here = self.hover_candidates();
+                if here.len() > 1 {
+                    let word = f.kind_word(&here[0]);
+                    let same = here.iter().all(|t| f.kind_word(t) == word);
+                    let what = if same {
+                        format!("{} {word}s", here.len())
+                    } else {
+                        format!("{} things", here.len())
+                    };
+                    Some(format!(
+                        "{what} here · ⌥ click for the next · right-click to choose"
+                    ))
+                } else {
+                    None
+                }
             }
             Gesture::Moving { .. } => {
                 if self.selection.iter().any(|t| !t.is_authored()) {

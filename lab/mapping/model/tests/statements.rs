@@ -223,6 +223,133 @@ fn box_touches_and_option_encloses() {
     }
 }
 
+// ---- areas and overlaps --------------------------------------------------
+
+/// Clicking empty space inside a group selects the group.
+#[test]
+fn empty_space_inside_a_group_selects_it() {
+    let mut e = editor();
+    // Between the tail's two lines, x = 14 and x = 22.
+    click_at(&mut e, Vec2::new(18.0, 40.0), none());
+    assert_eq!(e.selection, vec![comp("group1")]);
+}
+
+/// Clicking the empty middle of a circle selects the circle.
+#[test]
+fn the_middle_of_a_circle_selects_it() {
+    let mut e = editor();
+    click_at(&mut e, Vec2::new(70.0, 40.0), none());
+    assert_eq!(e.selection, vec![comp("circle1")]);
+}
+
+/// What's outlined is exactly what a click hits: wherever the hover shows
+/// something, that thing's area holds the cursor, and where no area holds
+/// it, nothing is hovered.
+#[test]
+fn the_outline_is_the_area_a_click_hits() {
+    for start in [vec![], vec![comp("circle1")], vec![comp("line1")]] {
+        let mut e = editor();
+        e.select(start.clone());
+        for gx in 0..60 {
+            for gy in 0..40 {
+                let p = e
+                    .camera
+                    .to_screen(Vec2::new(gx as f64 * 2.0, gy as f64 * 2.0));
+                e.pointer_move(p, none());
+                let under = e.fixture.things_at(&e.camera, p);
+                match e.hover_target() {
+                    Some(t) => {
+                        let area = e
+                            .fixture
+                            .area(&e.camera, &t)
+                            .expect("hovered things have an area");
+                        assert!(area.contains(p), "{t:?} hovered outside its area at {p:?}");
+                    }
+                    None => assert!(under.is_empty(), "nothing hovered over {under:?}"),
+                }
+            }
+        }
+    }
+}
+
+/// Where two things at the same level overlap, ⌥-click selects the next
+/// one, and keeps going round.
+#[test]
+fn option_click_cycles_through_overlaps() {
+    let mut e = editor();
+    // A line crossing line3 at (60, 74).
+    e.fixture.add(ComponentKind::line(
+        Vec2::new(60.0, 66.0),
+        Vec2::new(60.0, 79.0),
+        6,
+    ));
+    let at = Vec2::new(60.0, 74.0);
+    click_at(&mut e, at, alt());
+    let first = e.selection.clone();
+    click_at(&mut e, at, alt());
+    let second = e.selection.clone();
+    click_at(&mut e, at, alt());
+    assert_ne!(first, second);
+    assert_eq!(e.selection, first, "round again");
+    let both = [comp("line3"), comp("line4")];
+    assert!(both.contains(&first[0]) && both.contains(&second[0]));
+}
+
+/// When more than one thing at the click's level is under the cursor, the
+/// cursor note says so and how to reach the others.
+#[test]
+fn the_cursor_note_names_overlaps() {
+    let mut e = editor();
+    e.fixture.add(ComponentKind::line(
+        Vec2::new(60.0, 66.0),
+        Vec2::new(60.0, 79.0),
+        6,
+    ));
+    e.pointer_move(e.camera.to_screen(Vec2::new(60.0, 74.0)), none());
+    let note = e.cursor_note().expect("a note");
+    assert!(
+        note.contains("2 lines here") && note.contains("⌥ click") && note.contains("right-click"),
+        "{note}"
+    );
+}
+
+/// Right-click lists everything under the cursor, every level, in tree
+/// order; choosing an item selects it; Esc closes the list and changes
+/// nothing. The list opens only when asked for.
+#[test]
+fn right_click_lists_whats_here() {
+    let mut e = editor();
+    let at = lamp_screen(&e, "circle1", "r2", 5);
+    e.pointer_down(at, Button::Secondary, none());
+    let menu = e.menu.clone().expect("a menu");
+    let targets: Vec<Target> = menu.items.iter().map(|i| i.target.clone()).collect();
+    assert_eq!(
+        targets[..3],
+        [
+            comp("circle1"),
+            ring("circle1", "r2"),
+            lamp("circle1", "r2", 5)
+        ]
+    );
+    assert_eq!(
+        menu.items
+            .iter()
+            .map(|i| i.depth)
+            .take(3)
+            .collect::<Vec<_>>(),
+        [0, 1, 2]
+    );
+    assert!(e.selection.is_empty(), "opening it selects nothing");
+
+    key(&mut e, Key::Escape, none());
+    assert!(e.menu.is_none() && e.selection.is_empty());
+
+    e.pointer_down(at, Button::Secondary, none());
+    e.menu_choose(1, false);
+    assert_eq!(e.selection, vec![ring("circle1", "r2")]);
+    assert!(e.menu.is_none());
+}
+
 // ---- editing ---------------------------------------------------------------
 
 /// Changing a line's count keeps the selected lamp selected.
@@ -467,6 +594,13 @@ fn lamp_screen(e: &Editor, component: &str, key: &str, index: u32) -> Vec2 {
 
 fn click_lamp(e: &mut Editor, component: &str, key: &str, index: u32, mods: Mods) {
     let at = lamp_screen(e, component, key, index);
+    e.pointer_move(at, mods);
+    e.pointer_down(at, Button::Primary, mods);
+    e.pointer_up(at, mods);
+}
+
+fn click_at(e: &mut Editor, world: Vec2, mods: Mods) {
+    let at = e.camera.to_screen(world);
     e.pointer_move(at, mods);
     e.pointer_down(at, Button::Primary, mods);
     e.pointer_up(at, mods);

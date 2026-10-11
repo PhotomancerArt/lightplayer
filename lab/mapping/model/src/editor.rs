@@ -8,9 +8,8 @@ use crate::camera::Camera;
 use crate::component::{ComponentId, ComponentKind};
 use crate::fixture::Fixture;
 use crate::geom::{Rect, Vec2};
-use crate::hit_test::hit;
 use crate::notice::Notice;
-use crate::pick::{PickMode, pick};
+use crate::pick::{PickMode, level_candidates, pick};
 use crate::target::Target;
 
 /// Modifier keys held during an event. `command` is ⌘ on a Mac (Ctrl
@@ -28,6 +27,8 @@ pub struct Mods {
 pub enum Button {
     Primary,
     Middle,
+    /// Right-click: the "what's here" menu.
+    Secondary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,8 +68,12 @@ pub enum Gesture {
     /// Button down, not yet moved far enough to be a drag.
     Press {
         start: Vec2,
-        hit: Option<Target>,
+        /// Something was under the cursor.
+        over: bool,
+        /// …and it was (inside) the selection.
         on_selection: bool,
+        /// The press already chose (⌥-click); releasing does nothing more.
+        decided: bool,
         mods: Mods,
     },
     /// Dragging the selection. `base` is the fixture before the drag, so the
@@ -91,6 +96,25 @@ pub enum Gesture {
     },
 }
 
+/// The right-click menu: everything under the cursor, every level, in tree
+/// order. Opened only when asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContextMenu {
+    /// Where it opened, in screen pixels.
+    pub at: Vec2,
+    pub items: Vec<MenuItem>,
+    /// The item under the pointer: outlined on the canvas.
+    pub hover: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuItem {
+    pub target: Target,
+    /// Indent: 0 for top-level things.
+    pub depth: usize,
+    pub label: String,
+}
+
 /// How far, in screen pixels, a press moves before it is a drag.
 pub const DRAG_THRESHOLD_PX: f64 = 3.0;
 const UNDO_LIMIT: usize = 200;
@@ -111,6 +135,7 @@ pub struct Editor {
     /// Lamp spacing, in fixture units, for drawing.
     pub spacing: f64,
     pub notice: Option<Notice>,
+    pub menu: Option<ContextMenu>,
     undo: Vec<(Fixture, Vec<Target>)>,
     redo: Vec<(Fixture, Vec<Target>)>,
     fitted: bool,
@@ -132,6 +157,7 @@ impl Editor {
             space_held: false,
             spacing: 2.4,
             notice: None,
+            menu: None,
             undo: Vec::new(),
             redo: Vec::new(),
             fitted: false,
@@ -140,23 +166,47 @@ impl Editor {
 
     // ---- what the page reads -------------------------------------------
 
-    /// The deepest thing under the pointer.
-    pub fn hover_hit(&self) -> Option<Target> {
-        if !matches!(self.gesture, Gesture::None) || self.tool != Tool::Select || self.space_held {
+    /// The pointer, if hovering means anything right now (select tool, no
+    /// gesture, no menu, not panning).
+    fn hover_point(&self) -> Option<Vec2> {
+        let idle = matches!(self.gesture, Gesture::None) && self.tool == Tool::Select;
+        if !idle || self.space_held || self.menu.is_some() {
             return None;
         }
-        hit(&self.fixture, &self.camera, self.pointer?)
+        self.pointer
     }
 
     /// What a click right now would select — the hover outline (D17).
     pub fn hover_target(&self) -> Option<Target> {
-        let h = self.hover_hit()?;
-        Some(pick(
+        let p = self.hover_point()?;
+        pick(
             &self.fixture,
+            &self.camera,
             &self.selection,
-            &h,
+            p,
             self.click_mode(self.mods),
-        ))
+        )
+    }
+
+    /// What a ⌘-click right now would select.
+    pub fn hover_deep(&self) -> Option<Target> {
+        let p = self.hover_point()?;
+        pick(
+            &self.fixture,
+            &self.camera,
+            &self.selection,
+            p,
+            PickMode::Deep,
+        )
+    }
+
+    /// The things at the click's level under the pointer, nearest first —
+    /// more than one means ⌥-click has somewhere to go.
+    pub fn hover_candidates(&self) -> Vec<Target> {
+        match self.hover_point() {
+            Some(p) => level_candidates(&self.fixture, &self.camera, &self.selection, p),
+            None => Vec::new(),
+        }
     }
 
     /// The level the selection lives in: its parent, or `None` for the
@@ -211,6 +261,14 @@ impl Editor {
         self.mods = mods;
         self.pointer = Some(at);
         self.notice = None;
+        if button == Button::Secondary {
+            self.open_menu(at);
+            return;
+        }
+        if self.menu.take().is_some() {
+            // A click away from the menu just closes it.
+            return;
+        }
         if button == Button::Middle || self.space_held {
             self.gesture = Gesture::Panning { last: at };
             return;
@@ -222,30 +280,45 @@ impl Editor {
                 };
             }
             Tool::Select => {
-                let h = hit(&self.fixture, &self.camera, at);
-                let on_selection = h.as_ref().is_some_and(|h| {
-                    self.fixture
-                        .chain(h)
-                        .iter()
-                        .any(|t| self.selection.contains(t))
-                });
-                // Pressing something new selects it straight away, so a
-                // drag moves it. Pressing the selection waits: it may be a
-                // drag (move it) or a click (go into it).
-                if let Some(h) = &h
-                    && !on_selection
-                {
-                    let t = pick(&self.fixture, &self.selection, h, self.press_mode(mods));
-                    if mods.shift {
-                        self.toggle(t);
-                    } else {
+                let under = self.fixture.things_at(&self.camera, at);
+                let over = !under.is_empty();
+                let on_selection = under.iter().any(|t| self.selection.contains(t));
+                let mut decided = false;
+                if over && mods.alt {
+                    // ⌥: the next overlapping thing at this level.
+                    if let Some(t) = pick(
+                        &self.fixture,
+                        &self.camera,
+                        &self.selection,
+                        at,
+                        PickMode::Next,
+                    ) {
                         self.selection = vec![t];
+                    }
+                    decided = true;
+                } else if over && !on_selection {
+                    // Pressing something new selects it straight away, so a
+                    // drag moves it. Pressing the selection waits: it may be
+                    // a drag (move it) or a click (go into it).
+                    if let Some(t) = pick(
+                        &self.fixture,
+                        &self.camera,
+                        &self.selection,
+                        at,
+                        self.press_mode(mods),
+                    ) {
+                        if mods.shift {
+                            self.toggle(t);
+                        } else {
+                            self.selection = vec![t];
+                        }
                     }
                 }
                 self.gesture = Gesture::Press {
                     start: at,
-                    hit: h,
-                    on_selection,
+                    over,
+                    on_selection: on_selection || decided,
+                    decided,
                     mods,
                 };
             }
@@ -258,7 +331,7 @@ impl Editor {
         match self.gesture.clone() {
             Gesture::Press {
                 start,
-                hit,
+                over,
                 mods: press_mods,
                 ..
             } => {
@@ -266,7 +339,7 @@ impl Editor {
                     return;
                 }
                 let start_world = self.camera.to_world(start);
-                if hit.is_some() && !self.selection.is_empty() {
+                if over && !self.selection.is_empty() {
                     self.begin_move(start_world);
                     self.drag_to(at);
                 } else {
@@ -298,33 +371,33 @@ impl Editor {
         self.pointer = Some(at);
         self.mods = mods;
         match std::mem::replace(&mut self.gesture, Gesture::None) {
+            Gesture::Press { decided: true, .. } => {}
             Gesture::Press {
-                hit,
+                over,
                 on_selection,
                 mods: press_mods,
                 ..
-            } => match hit {
-                // A click on the selection: go in, add/remove, or go deep.
-                Some(h) if on_selection => {
-                    let t = pick(
+            } => {
+                if over && on_selection {
+                    // A click on the selection: go in, add/remove, or go deep.
+                    if let Some(t) = pick(
                         &self.fixture,
+                        &self.camera,
                         &self.selection,
-                        &h,
+                        at,
                         self.click_mode(press_mods),
-                    );
-                    if press_mods.shift {
-                        self.toggle(t);
-                    } else {
-                        self.selection = vec![t];
+                    ) {
+                        if press_mods.shift {
+                            self.toggle(t);
+                        } else {
+                            self.selection = vec![t];
+                        }
                     }
+                } else if !over && !press_mods.shift {
+                    self.selection.clear();
                 }
-                Some(_) => {} // selected on press
-                None => {
-                    if !press_mods.shift {
-                        self.selection.clear();
-                    }
-                }
-            },
+                // Otherwise it was selected on press.
+            }
             Gesture::Drawing { start_world } => {
                 self.finish_drawing(start_world, self.camera.to_world(at))
             }
@@ -376,7 +449,9 @@ impl Editor {
                 true
             }
             Key::Escape => {
-                self.escape();
+                if self.menu.take().is_none() {
+                    self.escape();
+                }
                 true
             }
             Key::Enter => {
@@ -428,9 +503,58 @@ impl Editor {
     fn click_mode(&self, mods: Mods) -> PickMode {
         if mods.command {
             PickMode::Deep
+        } else if mods.alt {
+            PickMode::Next
         } else {
             PickMode::Click
         }
+    }
+
+    // ---- the right-click menu ---------------------------------------------
+
+    pub fn open_menu(&mut self, at: Vec2) {
+        let f = &self.fixture;
+        let items: Vec<MenuItem> = f
+            .things_at(&self.camera, at)
+            .into_iter()
+            .map(|t| MenuItem {
+                depth: f.chain(&t).len() - 1,
+                label: f.label(&t),
+                target: t,
+            })
+            .collect();
+        self.gesture = Gesture::None;
+        if items.is_empty() {
+            self.menu = None;
+            self.notice = Some(Notice::info("Nothing under the cursor here"));
+            return;
+        }
+        self.menu = Some(ContextMenu {
+            at,
+            items,
+            hover: None,
+        });
+    }
+
+    pub fn menu_hover(&mut self, item: Option<usize>) {
+        if let Some(m) = &mut self.menu {
+            m.hover = item;
+        }
+    }
+
+    /// Pick a menu item: select it, or with ⇧ add it.
+    pub fn menu_choose(&mut self, item: usize, shift: bool) {
+        let Some(m) = self.menu.take() else { return };
+        let Some(it) = m.items.get(item) else { return };
+        if shift {
+            self.toggle(it.target.clone());
+        } else {
+            self.selection = vec![it.target.clone()];
+        }
+    }
+
+    pub fn close_menu(&mut self) {
+        self.menu = None;
     }
 
     fn press_mode(&self, mods: Mods) -> PickMode {

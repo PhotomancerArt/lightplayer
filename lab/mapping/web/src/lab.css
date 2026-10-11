@@ -76,14 +76,12 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .obj-draft .stroke { stroke: var(--hover); stroke-dasharray: 4 3; }
 .obj-draft .lamp { fill: var(--lamp); opacity: 1; }
 
-.outline-selected { fill: none; stroke: var(--selection); stroke-width: 1.5; }
+.outline-selected { fill: var(--selection-bg); stroke: var(--selection); stroke-width: 1.5; }
 .outline-selected-label { fill: var(--selection); font: 600 11px var(--font); }
 .outline-context { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 5 4; }
 .outline-context-label { fill: var(--text-subtle); font: 11px var(--font); }
-.outline-hover { fill: none; stroke: var(--hover); stroke-width: 1; }
-.halo { fill: none; stroke-linecap: round; }
-.outline-selected.halo { stroke: var(--selection); stroke-width: 14; stroke-opacity: 0.16; }
-.outline-hover.halo { stroke: var(--hover); stroke-width: 14; stroke-opacity: 0.18; }
+.outline-hover { fill: rgba(140, 170, 255, 0.07); stroke: var(--hover); stroke-width: 1; }
+
 .lamp-ring-selected { fill: none; stroke: var(--selection); stroke-width: 2; }
 .lamp-ring-hover { fill: none; stroke: var(--hover); stroke-width: 1.2; }
 .select-box { fill: rgba(140, 170, 255, 0.08); stroke: var(--hover); stroke-width: 1; stroke-dasharray: 4 3; }
@@ -117,3 +115,8 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .notice-line { padding-left: 2ch; }
 .notice-eq { color: var(--hover); }
 .crumb-many { color: var(--text); font-weight: 600; }
+.menu { position: absolute; width: 200px; background: rgba(20, 20, 28, 0.97); border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 0; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 5; }
+.menu-title, .menu-foot { font-size: 11px; color: var(--text-subtle); padding: 4px 10px; }
+.menu-foot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; }
+.menu-item { padding: 4px 10px; cursor: pointer; color: var(--text-muted); }
+.menu-item.on { background: var(--selection-bg); color: var(--text); }

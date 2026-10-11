@@ -2,8 +2,9 @@
 //! transparent layer on top that takes every pointer event (so coordinates
 //! are always relative to the canvas, never to whatever SVG shape was hit).
 //!
-//! The visual language of selection (D17):
-//! - hover: a thin blue outline around what a click would select;
+//! The visual language of selection (D17). Every outline is the thing's
+//! AREA (`lab_mapping_model::area`) — the same shape a click hits:
+//! - hover: a thin blue outline of what a click would select;
 //! - selected: a solid light outline, with its name above it;
 //! - the level you are in (the selection's parent): a dashed outline;
 //! - everything outside that level: dimmed.
@@ -45,48 +46,44 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         .unwrap_or_default();
 
     let mut outlines: Vec<Outline> = Vec::new();
-    if let Some(c) = &context
-        && let Some(r) = target_rect(f, &cam, c)
-    {
-        outlines.push(Outline {
-            shape: OutlineShape::Rect(r),
-            class: "outline-context",
-            label: Some(f.label(c)),
-        });
-    }
-    for t in &e.selection {
-        if matches!(t, Target::Lamp { .. }) {
-            continue;
-        }
-        if let Some(shape) = outline_shape(f, &cam, t) {
+    let mut add = |t: &Target, class: &'static str, label: bool| {
+        if let Some(a) = f.area(&cam, t) {
+            let top = a.top();
             outlines.push(Outline {
-                shape,
-                class: "outline-selected",
-                label: Some(f.label(t)),
+                path: a.outline_path(),
+                class,
+                label: label.then(|| (f.label(t), top)),
             });
         }
+    };
+    if let Some(c) = &context {
+        add(c, "outline-context", true);
     }
-    let mut lamp_rings: Vec<(Vec2, &'static str)> = e
-        .selection
-        .iter()
-        .filter_map(|t| lamp_screen(f, &cam, t).map(|p| (p, "lamp-ring-selected")))
-        .collect();
-    if let Some(h) = &hover
-        && !e.selection.contains(h)
+    for t in &e.selection {
+        add(t, "outline-selected", !matches!(t, Target::Lamp { .. }));
+    }
+    // In the right-click list, the item under the pointer is outlined;
+    // otherwise, what a click would select.
+    let menu_hover = e
+        .menu
+        .as_ref()
+        .and_then(|m| m.hover.and_then(|i| m.items.get(i)))
+        .map(|i| i.target.clone());
+    if let Some(h) = menu_hover.or(hover)
+        && !e.selection.contains(&h)
     {
-        match lamp_screen(f, &cam, h) {
-            Some(p) => lamp_rings.push((p, "lamp-ring-hover")),
-            None => {
-                if let Some(shape) = outline_shape(f, &cam, h) {
-                    outlines.push(Outline {
-                        shape,
-                        class: "outline-hover",
-                        label: None,
-                    });
-                }
-            }
-        }
+        add(&h, "outline-hover", false);
     }
+    let menu: Option<(Vec2, Vec<(usize, String, Option<usize>)>)> = e.menu.as_ref().map(|m| {
+        (
+            m.at,
+            m.items
+                .iter()
+                .enumerate()
+                .map(|(i, it)| (it.depth, it.label.clone(), m.hover.filter(|h| *h == i)))
+                .collect(),
+        )
+    });
     let box_rect = e.selection_box().map(|r| screen_rect(&cam, r));
     let note = e.cursor_note().zip(e.pointer);
     let cursor = match (&e.gesture, e.space_held, e.tool) {
@@ -136,14 +133,11 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 }
                 for (i, o) in outlines.iter().enumerate() {
                     g { key: "o{i}",
-                        {outline(o)}
-                        if let Some(label) = &o.label {
-                            text { class: "{o.class}-label", x: "{o.label_at().x}", y: "{o.label_at().y}", "{label}" }
+                        path { class: "{o.class}", d: "{o.path}", fill_rule: "evenodd" }
+                        if let Some((label, at)) = &o.label {
+                            text { class: "{o.class}-label", x: "{at.x}", y: "{at.y - 5.0}", text_anchor: "middle", "{label}" }
                         }
                     }
-                }
-                for (i, (p, c)) in lamp_rings.iter().enumerate() {
-                    circle { key: "r{i}", class: "{c}", cx: "{p.x}", cy: "{p.y}", r: "7.5" }
                 }
                 if let Some(r) = box_rect {
                     rect { class: "select-box", x: "{r.min.x}", y: "{r.min.y}", width: "{r.width()}", height: "{r.height()}" }
@@ -151,6 +145,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             }
             div {
                 class: "canvas-input",
+                oncontextmenu: move |evt| evt.prevent_default(),
                 onmousedown: move |evt| {
                     if let Some(b) = input::button(&evt) {
                         evt.prevent_default();
@@ -165,6 +160,26 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     let d = input::wheel_delta(&evt);
                     ed.write().wheel(input::wheel_point(&evt), d, input::mods(evt.modifiers()));
                 },
+            }
+            if let Some((at, items)) = menu {
+                div {
+                    class: "menu",
+                    style: "{menu_place(at, vw, vh)}",
+                    onmouseleave: move |_| ed.write().menu_hover(None),
+                    div { class: "menu-title", "Under the cursor" }
+                    for (i, (depth, label, hovered)) in items.into_iter().enumerate() {
+                        div {
+                            key: "{i}",
+                            class: if hovered.is_some() { "menu-item on" } else { "menu-item" },
+                            style: "padding-left: {10 + depth * 14}px",
+                            onmouseenter: move |_| ed.write().menu_hover(Some(i)),
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |evt| ed.write().menu_choose(i, evt.modifiers().shift()),
+                            "{label}"
+                        }
+                    }
+                    div { class: "menu-foot", kbd { "⇧" } " adds · " kbd { "Esc" } " closes" }
+                }
             }
             if let Some((text, at)) = note {
                 div { class: "cursor-note", style: "left: {at.x + 16.0}px; top: {at.y + 18.0}px", "{text}" }
@@ -205,33 +220,30 @@ enum ShapeView {
     Ring(Vec2, f64),
 }
 
-/// How a selected or hovered thing is marked: lines and rings get a halo
-/// along their own shape; groups and circles get a box.
+/// Where the right-click list opens: beside the cursor, flipped inward when
+/// it would run off the canvas.
+fn menu_place(at: Vec2, vw: f64, vh: f64) -> String {
+    const W: f64 = 200.0;
+    const H: f64 = 220.0;
+    let x = if at.x + 4.0 + W > vw {
+        (at.x - 4.0 - W).max(0.0)
+    } else {
+        at.x + 4.0
+    };
+    let y = if at.y + 4.0 + H > vh {
+        (at.y - 4.0 - H).max(0.0)
+    } else {
+        at.y + 4.0
+    };
+    format!("left: {x}px; top: {y}px")
+}
+
+/// A selected, hovered or context outline: the thing's area as a path.
 struct Outline {
-    shape: OutlineShape,
+    path: String,
     class: &'static str,
-    label: Option<String>,
-}
-
-enum OutlineShape {
-    Rect(Rect),
-    Segment(Vec2, Vec2),
-    Ring(Vec2, f64),
-}
-
-impl Outline {
-    /// Where its name goes: above the box, or just outside the start of a
-    /// line, or above a ring.
-    fn label_at(&self) -> Vec2 {
-        match self.shape {
-            OutlineShape::Rect(r) => Vec2::new(r.min.x + 2.0, r.min.y - 5.0),
-            OutlineShape::Segment(a, b) => {
-                let top = if a.y <= b.y { a } else { b };
-                Vec2::new(top.x + 10.0, top.y - 8.0)
-            }
-            OutlineShape::Ring(c, r) => Vec2::new(c.x + r * 0.72 + 6.0, c.y - r * 0.72 - 4.0),
-        }
-    }
+    /// Its name, and the top of its area to put it at.
+    label: Option<(String, Vec2)>,
 }
 
 fn object_view(
@@ -349,58 +361,4 @@ fn arrow(o: &ObjectView) -> Element {
 
 fn screen_rect(cam: &Camera, r: Rect) -> Rect {
     Rect::from_corners(cam.to_screen(r.min), cam.to_screen(r.max))
-}
-
-fn outline(o: &Outline) -> Element {
-    match o.shape {
-        OutlineShape::Rect(r) => rsx! {
-            rect { class: "{o.class}", x: "{r.min.x}", y: "{r.min.y}", width: "{r.width()}", height: "{r.height()}", rx: "6" }
-        },
-        OutlineShape::Segment(a, b) => rsx! {
-            line { class: "{o.class} halo", x1: "{a.x}", y1: "{a.y}", x2: "{b.x}", y2: "{b.y}" }
-        },
-        OutlineShape::Ring(c, r) => rsx! {
-            circle { class: "{o.class} halo", cx: "{c.x}", cy: "{c.y}", r: "{r}" }
-        },
-    }
-}
-
-/// A line or a ring is marked along its own shape; anything that holds
-/// other things (a group, a circle) gets a box.
-fn outline_shape(f: &Fixture, cam: &Camera, t: &Target) -> Option<OutlineShape> {
-    let object = match t {
-        Target::Object(o) => f.object(o),
-        Target::Component(id) if f.component(id).is_some_and(|c| c.is_single_object()) => f
-            .component(id)
-            .and_then(|c| objects_of(c).into_iter().next()),
-        _ => None,
-    };
-    match object.map(|o| o.shape) {
-        Some(ObjectShape::Segment { from, to }) => Some(OutlineShape::Segment(
-            cam.to_screen(from),
-            cam.to_screen(to),
-        )),
-        Some(ObjectShape::Ring { center, radius }) => Some(OutlineShape::Ring(
-            cam.to_screen(center),
-            radius * cam.scale,
-        )),
-        None => target_rect(f, cam, t).map(OutlineShape::Rect),
-    }
-}
-
-/// A target's outline on screen: around its lamps, padded.
-fn target_rect(f: &Fixture, cam: &Camera, t: &Target) -> Option<Rect> {
-    let r = Rect::around(f.lamps_under(t).into_iter().map(|p| cam.to_screen(p)))?;
-    let pad = 9.0;
-    Some(Rect::new(
-        r.min - Vec2::new(pad, pad),
-        r.max + Vec2::new(pad, pad),
-    ))
-}
-
-fn lamp_screen(f: &Fixture, cam: &Camera, t: &Target) -> Option<Vec2> {
-    match t {
-        Target::Lamp { .. } => f.lamps_under(t).first().map(|p| cam.to_screen(*p)),
-        _ => None,
-    }
 }
