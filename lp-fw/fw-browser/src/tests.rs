@@ -459,46 +459,50 @@ fn file_sync_round_trips_over_the_protocol() {
         .collect();
     files.push(("assets/big.bin".to_string(), big.clone()));
 
-    // --- push: Write for small files, WriteChunk sequence for the big one
+    // --- the push asks for a batch: the sim's memory fs has none
+    let responses = send_protocol_request(
+        runtime_id,
+        next_request_id(&mut next_id),
+        ClientRequest::Filesystem(FsRequest::BeginBatch),
+        1,
+    );
+    assert!(matches!(
+        &responses[0].msg,
+        WireServerMsgBody::Filesystem(FsResponse::Batch {
+            atomic: false,
+            error: None,
+            ..
+        })
+    ));
+
+    // --- push the requests every push sends (`lpa_client::push_files`):
+    // Write for small files, deflated chunks for what shrinks (the big,
+    // patterned one — so the sim inflates), WriteChunk runs for the rest
+    let mut deflated_chunks = 0;
     for (relative_path, content) in &files {
-        let full_path = format!("/projects/e2esync/{relative_path}");
-        if content.len() <= FILE_SYNC_CHUNK_BYTES {
-            let responses = send_protocol_request(
-                runtime_id,
-                next_request_id(&mut next_id),
-                ClientRequest::Filesystem(FsRequest::Write {
-                    path: full_path.as_str().as_path_buf(),
-                    data: content.clone(),
-                }),
-                1,
-            );
-            assert!(matches!(
-                &responses[0].msg,
-                WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. })
-            ));
-        } else {
-            for (index, chunk) in content.chunks(FILE_SYNC_CHUNK_BYTES).enumerate() {
-                let responses = send_protocol_request(
-                    runtime_id,
-                    next_request_id(&mut next_id),
-                    ClientRequest::Filesystem(FsRequest::WriteChunk {
-                        path: full_path.as_str().as_path_buf(),
-                        offset: (index * FILE_SYNC_CHUNK_BYTES) as u32,
-                        data: chunk.to_vec(),
-                    }),
-                    1,
-                );
-                match &responses[0].msg {
-                    WireServerMsgBody::Filesystem(FsResponse::WriteChunk {
-                        error: None,
-                        written,
-                        ..
-                    }) => assert_eq!(*written as usize, chunk.len()),
-                    other => panic!("write chunk failed: {other:?}"),
-                }
+        for request in lpa_client::push_files::file_requests("e2esync", relative_path, content, true)
+        {
+            let logical = lpa_client::push_files::logical_bytes(&request);
+            if matches!(
+                request,
+                ClientRequest::Filesystem(FsRequest::WriteChunkDeflated { .. })
+            ) {
+                deflated_chunks += 1;
+            }
+            let responses =
+                send_protocol_request(runtime_id, next_request_id(&mut next_id), request, 1);
+            match &responses[0].msg {
+                WireServerMsgBody::Filesystem(FsResponse::Write { error: None, .. }) => {}
+                WireServerMsgBody::Filesystem(FsResponse::WriteChunk {
+                    error: None,
+                    written,
+                    ..
+                }) => assert_eq!(u64::from(*written), logical),
+                other => panic!("write failed: {other:?}"),
             }
         }
     }
+    assert!(deflated_chunks > 0, "the sim took deflated chunks");
 
     // --- a mis-offset chunk is rejected, file untouched
     let responses = send_protocol_request(

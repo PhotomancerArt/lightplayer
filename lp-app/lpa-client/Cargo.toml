@@ -41,6 +41,9 @@ getrandom = { version = "0.3", optional = true }
 # A board's relay id (`relay:` specifiers) and the relay's close codes.
 # no_std and small; lpa-client already links lpc-access, its one dependency.
 lpc-relay = { path = "../../lp-core/lpc-relay" }
+# The deflate plan of a push (`push_files`): miniz_oxide, cut into chunks that
+# each fit one tree-store record. No hasher, no store; wasm-safe.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["deflate-plan"] }
 
 [features]
 default = ["host"]

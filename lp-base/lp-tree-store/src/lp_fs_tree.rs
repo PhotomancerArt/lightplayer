@@ -110,7 +110,13 @@ fn norm(path: &LpPath) -> Result<String, FsError> {
 }
 
 fn store_err<E: Debug>(e: StoreError<E>) -> FsError {
-    FsError::Filesystem(format!("tree store: {e:?}"))
+    match e {
+        // littlefs's words: a pushing client matches them to make room.
+        StoreError::NoSpace => {
+            FsError::Filesystem(String::from("tree store: no space left on device"))
+        }
+        e => FsError::Filesystem(format!("tree store: {e:?}")),
+    }
 }
 
 fn not_found(p: &str) -> FsError {

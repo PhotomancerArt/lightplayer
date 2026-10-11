@@ -44,5 +44,8 @@ lp-app-version = { path = "../../tools/lp-app-version" }
 
 [dev-dependencies]
 lpc-history = { path = "../../lp-core/lpc-history" }
+# `file_sync_round_trips_over_the_protocol`: the write requests every push
+# sends (`lpa_client::push_files`), deflated chunks included.
+lpa-client = { path = "../../lp-app/lpa-client", default-features = false }
 lpc-view = { path = "../../lp-core/lpc-view" }
 wasm-bindgen-test = "0.3"
