@@ -1,3 +1,9 @@
+---
+status: fixed
+found: 2026-07-30      # the Xtensa filetest corpus
+area: lpvm-native/regalloc (pool.rs)
+class: config-masked-defect
+---
 # Defect: the ABI's withheld sret register was allocated anyway (Xtensa)
 
 - **Date:** 2026-07-30

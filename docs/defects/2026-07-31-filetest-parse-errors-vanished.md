@@ -1,3 +1,10 @@
+---
+status: fixed
+found: 2026-07-31      # implementing axis-scoped filetest dispositions (f32 M3)
+fixed: baf613a0d
+area: lps-filetests (src/lib.rs, src/parse/mod.rs)
+class: partial-knowledge-loss
+---
 # Filetest parse errors vanished instead of failing
 
 **Found:** 2026-07-31, while implementing axis-scoped filetest dispositions (f32 M3).

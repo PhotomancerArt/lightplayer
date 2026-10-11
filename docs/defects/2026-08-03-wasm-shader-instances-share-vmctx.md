@@ -2,7 +2,7 @@
 status: fixed
 found: 2026-08-03      # how: modules-vision GF walk — examples/meteor frozen in the editor sim while the clock advanced
 area: lpvm-wasm rt_wasmtime + rt_browser (instance vmctx placement)
-class: shared-mutable-state / silent-clobber
+class: shared-mutable-state  # / silent-clobber
 related:
   - lp-core/lpc-engine/tests/meteor_compute_animates.rs
   - lp-shader/lp-shader/src/tests.rs (compute_instances_on_one_engine_keep_isolated_state)

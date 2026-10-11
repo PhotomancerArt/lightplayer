@@ -30,16 +30,24 @@ breakage — stay commit messages. The registry is for defects whose
 *shape* recurs.
 
 Write the entry **at fix time, riding the fix commit**: the same change
-that fixes a qualifying bug adds its entry (and updates the index
-below). `status: open` entries are legal and expected for
-found-not-yet-fixed defects — hardware-walk and live-debugging findings
-get a home immediately, before anyone decides when to fix them.
+that fixes a qualifying bug adds its entry. The new file is the whole
+registry change: the index is built from entries' frontmatter (see
+[Index](#index)), so there is no shared table to edit, and two PRs that
+each file a defect never touch the same line. Closing a defect is an
+edit to that entry's `status` and `fixed`, nothing else. `status: open`
+entries are legal and expected for found-not-yet-fixed defects —
+hardware-walk and live-debugging findings get a home immediately, before
+anyone decides when to fix them.
 
 ## Entry template
 
+The file name is `YYYY-MM-DD-slug.md`, and the frontmatter's `status`,
+`found`, `area` and `class`, with the `# title` line, are what the index
+shows. `just lint-defects` fails an entry missing any of them.
+
 ```markdown
 ---
-status: fixed          # open | fixed | wontfix
+status: fixed          # exactly open | fixed | wontfix; detail goes in a comment like this one
 found: YYYY-MM-DD      # how: hardware-walk | live-debugging | ci | e2e | report
 fixed: <commit>        # absent while open. NOTE: an entry cannot cite
                        # its OWN commit (the hash doesn't exist yet, and
@@ -47,7 +55,7 @@ fixed: <commit>        # absent while open. NOTE: an entry cannot cite
                        # at commit time and fill the real hash in the NEXT
                        # commit that touches the registry.
 area: <crate/module>
-class: <one from the vocabulary>
+class: <one from the vocabulary>   # one kebab-case word
 related: []            # other defects, ADRs, plan dirs
 ---
 # <one-line title>
@@ -290,7 +298,27 @@ genuinely fits none of these, and define it here in one line.
 
 ## Index
 
-Grouped by class, because a class that keeps recurring is the
+The index is built from each entry's frontmatter when you read it, and
+it is never written down. Every defect PR used to add a row to a table
+here, so any two of them open at once conflicted, and a conflicted PR
+gets no CI at all
+([`docs/debt/hand-written-defects-index.md`](../debt/hand-written-defects-index.md)).
+
+```bash
+just defects-index                    # every entry, newest first
+just defects-index --by-class         # classes by count, then each one's entries
+just defects-index --open             # open entries only (combines with the others)
+just defects-index --class fidelity   # one class
+```
+
+`just lint-defects` checks that every entry carries what the index
+reads. It runs in `just check-lint`, and in CI's "Defect registry" job,
+which runs on a docs-only PR too. It also fails on a table row added back
+here: a branch cut before the table went away re-adds its row when it
+merges main, and the fix is to delete that row. A class missing from the
+vocabulary above is not a failure; `--by-class` marks it with †.
+
+Read it grouped by class, because a class that keeps recurring is the
 model-smell signal: one `backend-contract-divergence` is a bug, two in
 a week is an argument for a conformance suite. When a class accumulates
 entries, say so out loud — that is an architecture finding, not a
@@ -394,6 +422,7 @@ differently because each names *how* the symptom was misread rather than
 for `split-source-of-truth`/`config-masked-defect` above. Four in a month,
 now with a fix (`docs/adr/2026-09-02-fault-is-never-black.md`): watch whether
 a fifth still lands somewhere the new `Fault` status and pattern don't reach.
+
 
 | Class | Date | Entry | Status | Area |
 | --- | --- | --- | --- | --- |
@@ -648,6 +677,7 @@ a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 | state-conflation | 2026-10-08 | [reset-was-disabled-on-a-board-on-wifi](2026-10-08-reset-was-disabled-on-a-board-on-wifi.md) | fixed (this change) | lpa-studio-core `device_offers` × lpa-devices `ResetBoard`: Reset read `is_over_bluetooth()`, which is `firmware_blocked` and so true on every network link, and drew "Reset needs USB" on a Wi‑Fi board; the model only had the line reset. Over Bluetooth, the LAN and the relay, Reset is now the wire's `Reboot` (enabled for the author tier), and the card comes back on the redialled link with no click |
 | state-conflation | 2026-10-07 | [a-relay-card-said-bluetooth-and-usb-connected](2026-10-08-a-relay-card-said-bluetooth-and-usb-connected.md) | fixed (network transport PR C) | lpa-studio-web `device_roster_card` × lpa-studio-core `lan_link_view`: a board through the relay took its link kind from `is_over_bluetooth()` (= `firmware_blocked`, true on every network link) and said "No live picture over Bluetooth", "USB connected" and "Connecting over Bluetooth…". Core's network line now covers `relay:` and carries the kind ("Wi‑Fi via lightplayer.app"); the second conflation of that predicate in a day |
 | config-masked-defect | 2026-10-08 | [a-studio-update-burst-past-the-send-ring-was-dropped](2026-10-08-a-studio-update-burst-past-the-send-ring-was-dropped.md) | fixed (OTA Wi‑Fi PR B) | lpa-link `link_port_service.rs`: channel-3 messages the 24 KiB send ring refused with `Full` were dropped as errors; USB and Bluetooth (4 ahead) never filled it, the LAN (8 ahead of raw 4 KiB restore chunks) did, and a Wi‑Fi restore stalled at 1 % (found by `walk-ota-emu --lan`). They now wait in an outbox, as lp-cli's host does |
+
 
 ## Predecessor: `docs/bugs/`
 

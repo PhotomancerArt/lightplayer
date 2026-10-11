@@ -1,8 +1,9 @@
 ---
-status: fixed (the load gate is superseded: docs/adr/2026-10-07-project-loads-are-tried-and-recovered.md)
+status: fixed          # the load gate is superseded: docs/adr/2026-10-07-project-loads-are-tried-and-recovered.md
 found: 2026-08-29
 fixed: 2026-08-30
 area: lpa-server project load vs the D7 refusal contract (classic-first, all chips)
+class: budget-exhaustion
 related:
   - ../adr/2026-08-28-project-reads-bounded-streamed-refusable.md
   - 2026-08-26-project-read-assembly-oom-resets-classic.md
