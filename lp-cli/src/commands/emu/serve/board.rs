@@ -104,6 +104,10 @@ pub struct BoardSpec {
     /// This board's pace (`pace=`, else `--pace`), or `None`: unset, held to
     /// wall time only while a host is connected through its LAN forward.
     pub pace: Option<lp_emu_esp_common::seam::net::Pace>,
+    /// A power cut at a flash command (`flash_cut=<spec>`, its options
+    /// joined with `;`), off by default. A `then=stop` cut stops the board;
+    /// `then=power-cycle` power-cycles it and serves on.
+    pub flash_cut: Option<lp_emu_esp32c6::flash_cut_spec::FlashCutSpec>,
     /// The persistent flash file, `None` for a merged board (which carries
     /// the whole chip already) and for a serve with no `--state-dir`.
     pub flash: Option<PathBuf>,
@@ -436,9 +440,16 @@ fn run_board(this: RunBoard) {
     };
     report_seams(&mut machine, &spec.id, &seams);
     let mut last_flush = Instant::now();
+    let mut flash_cut_said = false;
     while !shutdown.load(Ordering::SeqCst) {
         let outcome = machine.run_until(&stop);
         report_seams(&mut machine, &spec.id, &seams);
+        // `flash_cut=`: say the cut once, when it fires (a `then=power-cycle`
+        // board runs straight on through it).
+        if !flash_cut_said && let Some(report) = machine.last_flash_cut() {
+            eprintln!("emu serve: board `{}` {report}", spec.id);
+            flash_cut_said = true;
+        }
         reboots.store(machine.reboots(), Ordering::SeqCst);
         power_cycles.store(machine.power_cycles(), Ordering::SeqCst);
         if let Some(air) = &options.air {
@@ -633,6 +644,9 @@ fn build(
     if let Some(pace) = spec.pace {
         builder = builder.pace(pace);
     }
+    if let Some(cut) = &spec.flash_cut {
+        builder = builder.flash_cut(cut.clone());
+    }
     // On a served LAN, as participant `seat`: attached at build with its
     // eFuse MAC when the network seam is wanted.
     if let Some(seat) = &options.lan {
@@ -760,6 +774,7 @@ mod tests {
             seams: lp_emu_esp_common::seam::SeamRequest::prefer("led=fast").unwrap(),
             lan: None,
             pace: None,
+            flash_cut: None,
             flash: None,
             console: None,
         };
