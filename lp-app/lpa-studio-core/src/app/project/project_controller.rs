@@ -3619,6 +3619,12 @@ impl ProjectController {
     /// Refuse to open `handle`, leaving the editor showing what was found
     /// and what to do about it. The returned error carries the same fact
     /// for the log and the caller's error path.
+    ///
+    /// Also marks the open in flight as REFUSED
+    /// ([`crate::app::open_progress::note_open_refused`]): retrying would
+    /// re-run this same classifier against these same bytes and refuse the
+    /// exact same way, so the opening frame's Retry must not offer it
+    /// (Yona, 2026-10-03).
     fn refuse_open(
         &mut self,
         handle: &crate::app::library::PackageHandle,
@@ -3628,6 +3634,7 @@ impl ProjectController {
         self.classified_open_issue = Some(
             UiIssue::new(format!("{}: {headline}", handle.slug)).with_detail(remedy.to_string()),
         );
+        crate::app::open_progress::note_open_refused();
         UiError::Project(format!("{}: {headline}. {remedy}", handle.slug))
     }
 
@@ -11189,6 +11196,46 @@ mod tests {
         };
         assert_eq!(issue.message, "the runtime went away");
         assert_eq!(issue.detail, None);
+    }
+
+    /// The open-progress signal `OpenFailureNotice` reads (D11 follow-up,
+    /// 2026-10-03): `refuse_open`'s classified refusal must mark the open
+    /// in flight as refused, which is what tells the opening frame not to
+    /// offer Retry — retrying the same bytes through the same classifier
+    /// would fail the exact same way. A pre-flight that neither migrates
+    /// nor refuses (the current-format case) must not raise it either.
+    /// [`crate::app::open_progress`]'s own tests cover what the flag does
+    /// to `OpenFailure.retry` once a failure is reported; this is the one
+    /// place that proves `refuse_open` is what raises it.
+    #[test]
+    fn migrate_on_open_marks_the_attempt_refused_only_when_it_refuses() {
+        crate::app::open_progress::reset_for_test();
+        let (store, summary) =
+            package_for_open(&[("project.json", br#"{"format":3,"name":"ancient"}"#)]);
+        let mut handle = store.open(summary.uid).unwrap();
+        let mut project = ProjectController::new();
+        project
+            .migrate_package_on_open(&mut handle, 2.0)
+            .expect_err("below the floor");
+        assert!(
+            crate::app::open_progress::open_refused_for_test(),
+            "refuse_open must mark the attempt refused so Retry is withheld"
+        );
+
+        crate::app::open_progress::reset_for_test();
+        let (store, summary) = package_for_open(&[(
+            "project.json",
+            format!(r#"{{"format":{}}}"#, lpc_model::PROJECT_FORMAT_VERSION).as_bytes(),
+        )]);
+        let mut handle = store.open(summary.uid).unwrap();
+        let mut project = ProjectController::new();
+        project
+            .migrate_package_on_open(&mut handle, 2.0)
+            .expect("already current");
+        assert!(
+            !crate::app::open_progress::open_refused_for_test(),
+            "a pre-flight that never refuses must leave Retry alone"
+        );
     }
 
     /// A current-format `project.json` the strict reader refuses: the
