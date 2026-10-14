@@ -252,8 +252,11 @@ From the top:
 - **The name bar.** The board's name, its group or owner under it, and one
   primary action. The action is a plain, flush section of the bar with an
   icon leading the word: the link's icon before Connect, a lock before
-  Unlock, ✓ before Done. The spectrum ring lights it on hover, like any
-  action.
+  Unlock, ✓ before Done, + before Add a project. The spectrum ring lights
+  it on hover, like any action. **The primary is never a greyed verb:** a
+  board with nothing on it offers the next step (Add a project), and one
+  that can't be pressed shows its reason as its word, drawn quiet
+  ("Connecting…", "Updating · 42%", "Offline · 2 weeks").
 - **The bars,** always in this order: project · connection · access ·
   firmware · hardware. Each is one line: an icon, a summary, an aside, and
   at most one action.
@@ -274,6 +277,15 @@ The rules:
   striped with Retry.
 - **A bar's action sits flush at its end,** as a section of the bar, not a
   chip floating inside it.
+- **A mark is an icon alone at a bar's end,** after the aside, with its
+  words as its accessible name and hover: the cloud on a board also
+  reachable through lightplayer.app, lit in the live tone while it is, quiet
+  while Cloud relay is on and the board isn't there yet. A fact a mark
+  carries is not repeated in words on the bar.
+- **Every bar names its subject.** "No project", "Project not known",
+  "Access not known · when it's back", "Firmware not known", never a bare
+  "Not known yet". A stand-in's connection bar says what it is:
+  "Simulated · running", "Emulated · off".
 - **Details open as Studio's detail card, merged with the bar that opened
   it** (the merged-outline popover). Every fact the bar's summary leaves
   out lives there; nothing on the card is lost, only moved.

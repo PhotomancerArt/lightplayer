@@ -531,8 +531,10 @@ rulings where the build had to choose. It is not a new decision.
     press: the intent is held (`PendingLens::connect`) and gives up after
     `CONNECT_INTENT_GRACE` (60 s) with "The board didn't answer in time"
     and Retry, or at once when the board turns out locked or needs
-    firmware (its own primary takes over). On a ready board running
-    nothing it is disabled: "Nothing on it yet".
+    firmware (its own primary takes over). On a ready board running no
+    project it is disabled ("No project"), and the card's primary is Add a
+    project instead: a primary is never a greyed verb (the feel gate's
+    first round, below).
   - `done` closes the session (`RuntimeOp::CloseDeviceLens`,
     `app/devices/done_offer.rs`), on the card and on the editor's docked
     card. It is Routine even with unsaved edits: they live on the board as
@@ -585,5 +587,34 @@ rulings where the build had to choose. It is not a new decision.
   `/device/<uid>/play`. The emulator answers at the edit tier, so the play
   tier is proven by core tests and stories; a desk check is queued.
 - **No connected session survives a reload,** and nothing new is
-  persisted: no wire, persisted-format, firmware, `lpa-devices` or
-  `localStorage` change.
+  persisted: no wire, persisted-format or firmware change.
+
+### The feel gate's first round (2026-10-14)
+
+Yona looked at the connected card and asked for words and one rule. What
+changed, none of it a new decision:
+
+- **A primary is never a greyed verb.** With no project on a ready board,
+  the primary is the next step, Add a project (the project bar's `push`,
+  which the bar then does not repeat). A primary that cannot be pressed
+  says why in its own word, as "Connecting…" did: "Updating · 42%",
+  "Offline · 2 weeks", "Identifying…", "Busy in the other tab".
+- **Every bar names its subject:** "No project" (there is firmware on the
+  board), "Project not known", "Access not known · when it's back",
+  "Firmware not known", "Board not known". A stand-in says what it is:
+  "Simulated · running", "Emulated · off". "also cloud" became the cloud
+  icon alone at the connection bar's end, lit while lightplayer.app can
+  reach the board.
+- **A board's files are gone only on evidence it had some**, never on a
+  fresh install's formatted first boot, and the notice offers Start fresh
+  (`devices/<board>/start-fresh`, Routine) beside the restores. The choice
+  is kept per board in this browser's `localStorage` until the board runs a
+  project again: a convenience, not a persisted format.
+- **The identify asks a board what it runs** when it has not said, so a sim
+  (which sends no heartbeat) reads "No project" with Add a project
+  (`lpa-devices`, `IdentifyActivity`).
+- **A Connect that opened the port chooser waits on its answer**: nothing
+  picked lets it go at once. "Couldn't connect" goes once the board is
+  reached another way.
+
+The defects are filed under `docs/defects/2026-10-14-*`.

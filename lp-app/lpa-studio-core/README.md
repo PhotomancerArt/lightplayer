@@ -504,6 +504,17 @@ is published disabled with its reason. Unlock takes `password` (secret) and
 never carries it). It is published while a board's link holds nothing, or
 only play, and the board is linked and idle.
 
+A board whose files are gone is offered its way back and a way on
+(`devices/device_layout_view.rs`): Restore files (a backup this browser
+kept), Restore from a backup file…, and `start-fresh`
+(`DeviceStartFreshOp`, Routine: nothing on the board changes, the notice
+goes). The notice needs evidence the board had files (`FilesEvidence`, from
+`devices/board_files_memory.rs`: a pending backup, a project seen running
+here or given by this browser, a stamped identity it no longer names): a
+fresh install's first boot formats too, and is not a loss. A Start fresh
+is kept per board in this browser (the web edge's `localStorage`,
+`FRESH_STARTS_STORAGE_KEY`) until the board runs a project again.
+
 Three verbs open, show and close the board's session (the editor's lens),
 which the home page can hold (`app/studio/connected_board.rs`,
 `studio_controller/connect_flow.rs`; the board card ADR, §4):
@@ -516,8 +527,10 @@ which the home page can hold (`app/studio/connected_board.rs`,
   on the session's own page (`ConnectedBoard::shows_editor`, which reads the
   place and acts on nothing). It is published on a board that is Ready (or
   Degraded), linked, idle, holds a tier (any: the play password is enough),
-  registered, and not the board this tab's session is on; disabled,
-  "Nothing on it yet", on a board running nothing. A session on another
+  registered, and not the board this tab's session is on; disabled, "No
+  project", on a board running none (its card's primary is then Add a
+  project, the `push` offer), and "Project not known" until the board says
+  what it runs. A session on another
   board closes first: one board is connected at a time. Connect reaches the
   board if it must, then opens its panel, in one press: on a closed port
   (`device_offers.rs`) it opens the port; on an offline board it takes the
@@ -528,8 +541,11 @@ which the home page can hold (`app/studio/connected_board.rs`,
   board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
   "The board didn't answer in time" (`StudioController::connect_failure`),
   and it lets go at once when the board turns out locked or needing
-  firmware (Unlock, Install take over), on Done, another Connect, an Edit
-  elsewhere, or an address's open. While an editor open is held for the
+  firmware (Unlock, Install take over), when the port chooser it opened
+  closes with nothing picked (no failure: the user said no) or fails (said
+  on the card), on Done, another Connect, an Edit elsewhere, or an
+  address's open. "Couldn't connect" goes by itself once the board is
+  ready on another link (`ConnectFailure::outlived`). While an editor open is held for the
   board (the opening frame's exit), it opens the port only. Not published
   again while it waits, nor on an offline stand-in (Power on is its way
   back).
@@ -613,8 +629,9 @@ A card (`UiBoardCard`) is:
   watching), a reading ("58 fps", "5 h ago"), and details holding the
   notices, how the board is running, the picture's words and its terminal;
 - the **name bar** (`UiNameBar`): the board's name and its **one primary**
-  (`UiPrimary`): Install, Unlock, Connect, Power on or Done, or a disabled
-  word saying why ("Connecting…", "Nothing on it yet";
+  (`UiPrimary`): Install, Unlock, Connect, Add a project, Power on or
+  Done; never a greyed verb: when nothing can be pressed, its word is the
+  reason ("Connecting…", "Updating · 42%", "Offline · 2 weeks";
   `primary_action.rs` has the order);
 - **five bars** (`UiStackBar`), always project · connection · access ·
   firmware · hardware, each one line: a summary, an aside, a tone (blue is
