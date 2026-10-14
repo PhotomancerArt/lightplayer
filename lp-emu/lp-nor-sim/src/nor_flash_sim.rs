@@ -418,7 +418,9 @@ impl NorFlashSim {
             | TearModel::CalibratedReadsFfWeak
             | TearModel::CalibratedReadsFf
             | TearModel::CalibratedBeforeErase
-            | TearModel::CalibratedMidWord => unreachable!("calibrated tears return above"),
+            | TearModel::CalibratedMidWord
+            | TearModel::CalibratedZeroingMidWord
+            | TearModel::CalibratedFirstLift => unreachable!("calibrated tears return above"),
             TearModel::BytePrefix => {
                 let n = rng.below(data.len() as u64) as usize;
                 for (i, &d) in data.iter().enumerate().take(n) {
