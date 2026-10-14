@@ -1,6 +1,6 @@
-//! What each component kind says about the properties of the things it
-//! makes. This is the ONLY place that knows a line has a lamp count and a
-//! ring has a radius; the inspector reads the descriptors (`props.rs`).
+//! What each kind of thing says about its properties. This is the ONLY
+//! place that knows a line has a lamp count, a ring has a radius and a
+//! port has pixels; the inspector reads the descriptors (`props.rs`).
 //!
 //! Note the object-level controls (D11): a ring's lamps, radius and
 //! direction are edited with the ring selected, but they are stored on the
@@ -50,6 +50,12 @@ pub const HEIGHT: PropDesc = PropDesc {
     },
     nudge: false,
 };
+pub const PIXELS: PropDesc = PropDesc {
+    id: "pixels",
+    label: "Pixels",
+    kind: PropKind::Count { min: 1 },
+    nudge: true,
+};
 pub const COUNTER_CLOCKWISE: PropDesc = PropDesc {
     id: "ccw",
     label: "Counter-clockwise",
@@ -61,11 +67,16 @@ impl Project {
     /// The properties of one target, with its values, in display order.
     pub fn props_of(&self, t: &Target) -> Vec<(PropDesc, PropRaw)> {
         match t {
-            Target::Fixture(id) => match self.fixture(id) {
+            // A module and an output have none yet (a name, later).
+            Target::Node(id) => match self.fixture(id) {
                 Some(f) => vec![
                     (WIDTH, PropRaw::Number(f.size.x)),
                     (HEIGHT, PropRaw::Number(f.size.y)),
                 ],
+                None => Vec::new(),
+            },
+            Target::Port { output, key } => match self.output(output).and_then(|o| o.port(key)) {
+                Some(p) => vec![(PIXELS, PropRaw::Count(p.pixels as i64))],
                 None => Vec::new(),
             },
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
@@ -102,7 +113,16 @@ impl Project {
         };
         let new = edited(&desc, current, edit);
         match t {
-            Target::Fixture(id) => {
+            Target::Port { output, key } => {
+                let Some(p) = self.output_mut(output).and_then(|o| o.port_mut(key)) else {
+                    return false;
+                };
+                match (prop_id, new) {
+                    ("pixels", PropRaw::Count(n)) => p.pixels = n as u32,
+                    _ => return false,
+                }
+            }
+            Target::Node(id) => {
                 let Some(f) = self.fixture_mut(id) else {
                     return false;
                 };

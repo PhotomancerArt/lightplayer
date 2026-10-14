@@ -7,7 +7,9 @@
 //! - ring: a band around its circle;
 //! - circle: a disc out past its outer ring;
 //! - group: a rounded hull around its children — the shape you'd draw
-//!   around them by hand.
+//!   around them by hand;
+//! - module, fixture: a frame — its border and title tab, not its inside;
+//! - output: its whole card; a port: its row on the card.
 //!
 //! Areas are in screen pixels, because their padding is: a line is as easy
 //! to hit zoomed out as zoomed in.
@@ -24,7 +26,7 @@ pub const LINE_PAD_PX: f64 = 10.0;
 pub const RING_PAD_PX: f64 = 8.0;
 pub const CIRCLE_PAD_PX: f64 = 10.0;
 pub const GROUP_PAD_PX: f64 = 14.0;
-/// A fixture is picked by its border, within this many pixels…
+/// A frame (module, fixture) is picked by its border, within this many pixels…
 pub const FRAME_EDGE_PX: f64 = 5.0;
 /// …or by its title tab above the box, this tall.
 pub const FRAME_TITLE_PX: f64 = 18.0;
@@ -36,9 +38,11 @@ pub enum Area {
     Hull { points: Vec<Vec2>, pad: f64 },
     /// Everything within `pad` of a circle's line.
     Band { center: Vec2, radius: f64, pad: f64 },
-    /// A fixture: its border and its title tab, NOT its inside — the inside
-    /// belongs to what's drawn in it, and to the selection box.
+    /// A frame: its border and its title tab, NOT its inside — the inside
+    /// belongs to what's in it, and to the selection box.
     Frame { rect: Rect, title: Rect },
+    /// A filled rectangle: an output card, a port's row.
+    Box { rect: Rect },
 }
 
 impl Area {
@@ -60,6 +64,7 @@ impl Area {
             Area::Frame { rect, title } => {
                 title.contains(p) || edge_distance(rect, p) <= FRAME_EDGE_PX
             }
+            Area::Box { rect } => rect.contains(p),
         }
     }
 
@@ -71,6 +76,13 @@ impl Area {
             Area::Band { center, radius, .. } => (p.distance(*center) - radius).abs(),
             Area::Frame { rect, title } => {
                 if title.contains(p) {
+                    0.0
+                } else {
+                    edge_distance(rect, p)
+                }
+            }
+            Area::Box { rect } => {
+                if rect.contains(p) {
                     0.0
                 } else {
                     edge_distance(rect, p)
@@ -96,6 +108,7 @@ impl Area {
                 pad,
             } => Vec2::new(center.x, center.y - radius - pad),
             Area::Frame { title, .. } => title.min,
+            Area::Box { rect } => Vec2::new((rect.min.x + rect.max.x) / 2.0, rect.min.y),
         }
     }
 
@@ -117,6 +130,7 @@ impl Area {
                 }
             }
             Area::Frame { rect, title } => format!("{} {}", rect_path(rect), rect_path(title)),
+            Area::Box { rect } => rect_path(rect),
         }
     }
 }
@@ -148,20 +162,28 @@ impl Project {
         let origin = t
             .owner()
             .and_then(|c| self.fixture_of(c))
-            .map(|f| self.origin(&f.id))
+            .map(|n| self.origin(&n.id))
             .unwrap_or_default();
         let local = |p: Vec2| camera.to_screen(p + origin);
         match t {
-            Target::Fixture(id) => {
-                let f = self.fixture(id)?;
-                let b = self.world_bounds(id)?;
+            Target::Node(id) => {
+                let n = self.node(id)?;
+                let b = self.node_rect(id)?;
                 let rect = Rect::from_corners(screen(b.min), screen(b.max));
-                let width = 14.0 + 7.0 * f.name.chars().count() as f64;
+                if !n.is_frame() {
+                    return Some(Area::Box { rect });
+                }
                 let title = Rect::new(
                     Vec2::new(rect.min.x, rect.min.y - FRAME_TITLE_PX - 2.0),
-                    Vec2::new(rect.min.x + width, rect.min.y - 2.0),
+                    Vec2::new(rect.min.x + title_width(&n.name), rect.min.y - 2.0),
                 );
                 Some(Area::Frame { rect, title })
+            }
+            Target::Port { output, key } => {
+                let b = self.port_rect(output, key)?;
+                Some(Area::Box {
+                    rect: Rect::from_corners(screen(b.min), screen(b.max)),
+                })
             }
             Target::Lamp { .. } => {
                 let p = *self.lamps_under(t).first()?;
@@ -209,27 +231,26 @@ impl Project {
     /// this.
     pub fn things_at(&self, camera: &Camera, p: Vec2) -> Vec<Target> {
         let mut out = Vec::new();
-        // A fixture's area is only its frame, so look inside every one.
-        for f in self.children(None) {
-            if self.area(camera, &f).is_some_and(|a| a.contains(p)) {
-                out.push(f.clone());
-            }
-            for t in self.children(Some(&f)) {
-                self.collect_at(camera, p, &t, &mut out);
-            }
+        for t in self.children(None) {
+            self.collect_at(camera, p, &t, &mut out);
         }
         out
     }
 
     /// Every child's area lies inside its parent's (a lamp's disc inside its
     /// line's capsule, a ring's band inside its circle's disc, everything
-    /// inside its group's hull), so a thing the cursor is outside of has
-    /// nothing under the cursor inside it either.
+    /// inside its group's hull, a port's row inside its card), so a thing
+    /// the cursor is outside of has nothing under the cursor inside it
+    /// either. Frames are the exception: a frame's area is only its border,
+    /// so look inside every one.
     fn collect_at(&self, camera: &Camera, p: Vec2, t: &Target, out: &mut Vec<Target>) {
-        if !self.area(camera, t).is_some_and(|a| a.contains(p)) {
+        let hit = self.area(camera, t).is_some_and(|a| a.contains(p));
+        if !hit && !self.is_frame(t) {
             return;
         }
-        out.push(t.clone());
+        if hit {
+            out.push(t.clone());
+        }
         for child in self.children(Some(t)) {
             self.collect_at(camera, p, &child, out);
         }
@@ -240,6 +261,11 @@ impl Project {
         self.area(camera, t)
             .map_or(f64::INFINITY, |a| a.distance(p))
     }
+}
+
+/// A frame's title tab, in pixels: wide enough for its name.
+pub fn title_width(name: &str) -> f64 {
+    14.0 + 7.0 * name.chars().count() as f64
 }
 
 fn collect_objects(f: &Project, c: &crate::Component) -> Vec<crate::Object> {

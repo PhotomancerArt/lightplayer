@@ -1,38 +1,35 @@
 //! A fixture: one physical thing (a tail, a ring display, a dome), with its
 //! own bounding box and component tree. Its coordinates are its own:
-//! `(0, 0)` is the top-left of its box, wherever the canvas lays it out.
+//! `(0, 0)` is the top-left of its box, wherever the layout puts it.
+//!
+//! A fixture is one kind of node (`node.rs`); its id and name live on the
+//! node. What it carries of its own is its drawing and its patch rules.
 
 use crate::component::{Component, ComponentId};
 use crate::geom::{Rect, Vec2};
-
-/// A fixture's id, minted by the project (`fixture1`, …) and never reused.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FixtureId(pub String);
-
-impl FixtureId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-}
-
-impl std::fmt::Display for FixtureId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+use crate::patch::PatchRule;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fixture {
-    pub id: FixtureId,
-    pub name: String,
     /// The fixture's extent, from `(0, 0)`. Lamps outside it are never lit
     /// (D4).
     pub size: Vec2,
     /// Top-level components, in authoring order.
     pub components: Vec<Component>,
+    /// Where its lamps go, in order. The patch they make is derived
+    /// (`patch.rs`), never stored.
+    pub rules: Vec<PatchRule>,
 }
 
 impl Fixture {
+    pub fn new(size: Vec2) -> Self {
+        Self {
+            size,
+            components: Vec::new(),
+            rules: Vec::new(),
+        }
+    }
+
     /// The box in the fixture's own coordinates.
     pub fn bounds(&self) -> Rect {
         Rect::new(Vec2::default(), self.size)

@@ -1,7 +1,9 @@
-//! The tree pane's rows: one tree (D18). Components, and the derived rings
-//! under a circle. Lamps are reached on the canvas, not listed here.
+//! The tree pane's rows: one tree (D18). Nodes — modules, fixtures,
+//! outputs and their ports — then components, and the derived rings under
+//! a circle. Lamps are reached on the canvas, not listed here.
 
 use crate::component::ComponentKind;
+use crate::node::NodeKind;
 use crate::project::Project;
 use crate::target::Target;
 
@@ -30,11 +32,28 @@ impl Project {
             return;
         }
         let lamps = self.lamps_under(t).len();
+        let patch = self.effective_patch();
         let detail = match t {
-            Target::Fixture(id) => match self.fixture(id) {
-                Some(f) => format!("{} × {} · {lamps} lamps", f.size.x, f.size.y),
+            Target::Node(id) => match self.node(id).map(|n| &n.kind) {
+                Some(NodeKind::Fixture(f)) => {
+                    format!("{} × {} · {lamps} lamps", f.size.x, f.size.y)
+                }
+                Some(NodeKind::Module { children }) => {
+                    format!("{} nodes · {lamps} lamps", children.len())
+                }
+                Some(NodeKind::Output(o)) => {
+                    let used: u32 = o.ports.iter().map(|p| patch.used(id, &p.key)).sum();
+                    format!("{} ports · {used}/{} px", o.ports.len(), o.pixels())
+                }
                 None => String::new(),
             },
+            Target::Port { output, key } => {
+                let pixels = self
+                    .output(output)
+                    .and_then(|o| o.port(key))
+                    .map_or(0, |p| p.pixels);
+                format!("{}/{pixels} px", patch.used(output, key))
+            }
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
                 Some(ComponentKind::Circle { rings, .. }) => {
                     format!("{} rings · {lamps} lamps", rings.len())

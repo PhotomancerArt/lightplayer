@@ -8,8 +8,11 @@ use crate::props::{PropEdit, common_props};
 use crate::target::Target;
 
 impl Editor {
-    /// ⌫: delete what you authored; a ring goes through its circle; a lamp
-    /// is refused with a reason and a way to do it (D18, D20).
+    /// ⌫: delete what you authored — a node (a module with everything in
+    /// it), a component; a ring goes through its circle and a port through
+    /// its output; a lamp is refused with a reason and a way to do it (D18,
+    /// D20). Deleting an output leaves the rules that named it as problems,
+    /// said out loud; nothing is retargeted.
     pub fn delete_selection(&mut self) {
         if self.selection.is_empty() {
             self.notice = Some(Notice::refused(
@@ -32,13 +35,28 @@ impl Editor {
             .cloned()
             .collect();
 
-        let mut fixtures = Vec::new();
+        let mut nodes = Vec::new();
         let mut components = Vec::new();
         let mut rings = Vec::new();
+        let mut ports: Vec<(crate::NodeId, String)> = Vec::new();
         let mut refused: Vec<(Target, String, String)> = Vec::new();
         for t in &roots {
             match t {
-                Target::Fixture(id) => fixtures.push(id.clone()),
+                Target::Node(id) => nodes.push(id.clone()),
+                Target::Port { output, key } => {
+                    let total = f.output(output).map_or(0, |o| o.ports.len());
+                    let going = ports.iter().filter(|(o, _)| o == output).count();
+                    if going + 1 >= total {
+                        let name = f.node_name(output);
+                        refused.push((
+                            t.clone(),
+                            format!("it is {name}'s last port"),
+                            format!("delete {name} itself (Esc selects it, then ⌫)"),
+                        ));
+                    } else {
+                        ports.push((output.clone(), key.clone()));
+                    }
+                }
                 Target::Component(id) => components.push(id.clone()),
                 Target::Object(o) => {
                     let total = match f.component(&o.component).map(|c| &c.kind) {
@@ -74,20 +92,32 @@ impl Editor {
             }
         }
 
-        let deleted: Vec<String> = fixtures
+        let deleted: Vec<String> = nodes
             .iter()
-            .map(|x| f.label(&Target::Fixture(x.clone())))
+            .map(|x| f.node_name(x))
             .chain(components.iter().map(|c| c.to_string()))
             .chain(
                 rings
                     .iter()
                     .map(|o| f.long_label(&Target::Object(o.clone()))),
             )
+            .chain(ports.iter().map(|(o, k)| {
+                f.long_label(&Target::Port {
+                    output: o.clone(),
+                    key: k.clone(),
+                })
+            }))
             .collect();
+        let problems_before = f.effective_patch().problems;
         if !deleted.is_empty() {
             self.checkpoint();
-            for x in &fixtures {
-                self.project.remove_fixture(x);
+            for x in &nodes {
+                self.project.remove_node(x);
+            }
+            for (o, k) in &ports {
+                if let Some(out) = self.project.output_mut(o) {
+                    out.ports.retain(|p| &p.key != k);
+                }
             }
             for c in &components {
                 self.project.remove(c);
@@ -104,7 +134,29 @@ impl Editor {
         self.selection = refused.iter().map(|(t, _, _)| t.clone()).collect();
         self.after_edit();
 
+        let broken: Vec<String> = self
+            .project
+            .effective_patch()
+            .problems
+            .into_iter()
+            .filter(|p| !problems_before.contains(p))
+            .map(|p| self.project.node_name(&p.fixture))
+            .collect();
         self.notice = Some(match (deleted.is_empty(), refused.first()) {
+            (false, None) if !broken.is_empty() => Notice {
+                why: Some(format!(
+                    "{} still patch{} to it: {}, shown in the inspector",
+                    join(&broken),
+                    if broken.len() == 1 { "es" } else { "" },
+                    if broken.len() == 1 {
+                        "its rule is now a problem"
+                    } else {
+                        "their rules are now problems"
+                    },
+                )),
+                help: Some("nothing was pointed anywhere else; ⌘Z brings it back".into()),
+                ..Notice::info(format!("Deleted {}", join(&deleted)))
+            },
             (false, None) => Notice::info(format!("Deleted {}", join(&deleted))),
             (deleted_none, Some((t, why, help))) => {
                 let what = if refused.len() == 1 {
@@ -192,17 +244,14 @@ impl Editor {
             ));
             return;
         }
-        if let Some(t) = targets
-            .iter()
-            .find(|t| matches!(self.project.kind_word(t), "group" | "fixture"))
-        {
+        if let Some(t) = targets.iter().find(|t| !self.project.has_direction(t)) {
             self.notice = Some(Notice::refused(
                 format!("Can't reverse {}", self.project.long_label(t)),
                 format!(
                     "a {} has no direction of its own",
                     self.project.kind_word(t)
                 ),
-                "Enter goes into it; select its lines to reverse them",
+                "select a line or a ring; r reverses which end the data enters",
             ));
             return;
         }
@@ -223,7 +272,7 @@ impl Editor {
                         r.reversed = !r.reversed;
                     }
                 }
-                Target::Lamp { .. } | Target::Fixture(_) => {}
+                Target::Lamp { .. } | Target::Node(_) | Target::Port { .. } => {}
             }
         }
         // Keep each selected lamp on the same physical lamp.
@@ -265,6 +314,18 @@ impl Editor {
             self.project.edit_prop(t, prop_id, edit, spacing);
         }
         self.after_edit();
+    }
+}
+
+impl crate::Project {
+    /// Lines, circles, rings and lamps have a data direction; groups,
+    /// nodes and ports don't.
+    pub fn has_direction(&self, t: &Target) -> bool {
+        match t {
+            Target::Component(_) => !matches!(self.kind_word(t), "group"),
+            Target::Object(_) | Target::Lamp { .. } => true,
+            Target::Node(_) | Target::Port { .. } => false,
+        }
     }
 }
 

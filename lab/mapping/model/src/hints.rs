@@ -44,6 +44,7 @@ impl Editor {
             h("⌘ scroll · pinch", "zoom"),
             h("space-drag", "pan"),
             h("⇧1", "fit"),
+            h("⇧2", "frame the selection"),
             h("⌘Z", "undo"),
         ];
         let (lead, hints) = match &self.gesture {
@@ -185,9 +186,18 @@ impl Editor {
             None => out.push(h("Esc", "deselect")),
         }
         if let Some(child) = f.children(Some(first)).first() {
+            let framed = if f.is_fixture(first) && !f.outputs_of(first.node().unwrap()).is_empty() {
+                ", framed with its outputs"
+            } else {
+                ""
+            };
             out.push(h(
                 "Enter",
-                format!("into {} — selects {}", f.label(first), f.label(child)),
+                format!(
+                    "into {} — selects {}{framed}",
+                    f.label(first),
+                    f.label(child)
+                ),
             ));
         }
         let word = f.kind_word(first);
@@ -223,7 +233,7 @@ impl Editor {
                 ),
             ));
         }
-        if word != "group" && word != "fixture" {
+        if self.selection.iter().all(|t| f.has_direction(t)) {
             out.push(h("r", "reverse the data direction"));
         }
         out.push(h("⌘A", self.select_all_hint()));
@@ -300,9 +310,10 @@ impl Editor {
 fn selection_lead(f: &Project, selection: &[Target]) -> String {
     match selection {
         [] => format!(
-            "Nothing selected · {} · {} fixtures · {} lamps",
+            "Nothing selected · {} · {} fixtures · {} outputs · {} lamps",
             f.name,
-            f.fixtures.len(),
+            f.fixtures().len(),
+            f.outputs().len(),
             f.lamp_count()
         ),
         [one] => format!("{} selected", f.long_label(one)),
@@ -324,6 +335,31 @@ fn delete_hint(f: &Project, selection: &[Target]) -> String {
     }
     match selection {
         [Target::Object(o)] => format!("remove ring {} from {}", o.key, o.component),
+        [t @ Target::Port { output, .. }] => {
+            format!("remove {} from {}", f.label(t), f.node_name(output))
+        }
+        [Target::Node(id)] if f.output(id).is_some() => {
+            let fed = f
+                .fixtures()
+                .iter()
+                .filter(|n| {
+                    n.fixture()
+                        .is_some_and(|x| x.rules.iter().any(|r| r.output() == id))
+                })
+                .count();
+            if fed == 0 {
+                format!("delete {}", f.node_name(id))
+            } else {
+                format!(
+                    "delete {} — the {fed} fixture{} patched to it keep their rule, as a problem",
+                    f.node_name(id),
+                    if fed == 1 { "" } else { "s" }
+                )
+            }
+        }
+        [Target::Node(id)] if f.node(id).is_some_and(|n| !n.children().is_empty()) => {
+            format!("delete {} and everything in it", f.node_name(id))
+        }
         [one] => format!("delete {}", f.label(one)),
         many => format!("delete these {}", many.len()),
     }

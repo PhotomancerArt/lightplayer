@@ -1,45 +1,58 @@
-//! The project: every fixture, laid out on one canvas in a grid. The one
-//! thing that is authored and kept; everything else is derived from it.
+//! The project: the root module. Its `nodes` are what sits at the top of
+//! the canvas — fixtures, outputs, modules holding more of them. It is the
+//! one thing that is authored and kept; everything else (objects, the
+//! layout, the patch, the edges) is derived from it.
 //!
-//! Each fixture keeps its own box and coordinates. The canvas places them in
-//! a grid, in order, so a project reads like a board of nodes. Ids are
-//! minted here, so a component id is unique across the whole project.
+//! Ids are minted here, so a component id or a node id is unique across
+//! the whole project — and only across the project: nothing assumes it is
+//! the only one (D44).
 //!
-//! Positions this file hands out (`objects`, `object`, `world_bounds`) are
-//! in **world** units: the fixture's own coordinates plus where the grid
-//! put it. Edits go to components in the fixture's own coordinates; a move
-//! is the same delta in both.
+//! Positions this file hands out (`objects`, `object`) are in **world**
+//! units: a fixture's own coordinates plus where the layout put it
+//! (`layout.rs`). Edits go to components in the fixture's own coordinates;
+//! a move is the same delta in both.
 
 use crate::component::{Component, ComponentId, ComponentKind};
-use crate::fixture::{Fixture, FixtureId};
+use crate::fixture::Fixture;
 use crate::geom::{Rect, Vec2};
+use crate::node::{self, Node, NodeId, NodeKind};
 use crate::object::{Object, ObjectId, ObjectShape, objects_of};
-
-/// Space between fixtures in the grid, in world units.
-pub const GRID_GAP: f64 = 24.0;
+use crate::output::{Output, PixelFormat};
+use crate::patch::PatchRule;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub name: String,
-    /// In grid order: left to right, then down.
-    pub fixtures: Vec<Fixture>,
+    /// The root module's children, in authoring order.
+    pub nodes: Vec<Node>,
     /// Per kind, the next number to mint. Never decremented, so an id is
     /// never handed out twice.
-    next_line: u32,
-    next_circle: u32,
-    next_group: u32,
-    next_fixture: u32,
+    counters: Counters,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Counters {
+    line: u32,
+    circle: u32,
+    group: u32,
+    module: u32,
+    fixture: u32,
+    output: u32,
 }
 
 impl Project {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            fixtures: Vec::new(),
-            next_line: 1,
-            next_circle: 1,
-            next_group: 1,
-            next_fixture: 1,
+            nodes: Vec::new(),
+            counters: Counters {
+                line: 1,
+                circle: 1,
+                group: 1,
+                module: 1,
+                fixture: 1,
+                output: 1,
+            },
         }
     }
 
@@ -48,159 +61,204 @@ impl Project {
     /// Mint an id for a new component of this kind and wrap it.
     pub fn mint(&mut self, kind: ComponentKind) -> Component {
         let (word, counter) = match kind {
-            ComponentKind::Line { .. } => ("line", &mut self.next_line),
-            ComponentKind::Circle { .. } => ("circle", &mut self.next_circle),
-            ComponentKind::Group { .. } => ("group", &mut self.next_group),
+            ComponentKind::Line { .. } => ("line", &mut self.counters.line),
+            ComponentKind::Circle { .. } => ("circle", &mut self.counters.circle),
+            ComponentKind::Group { .. } => ("group", &mut self.counters.group),
         };
         let id = ComponentId::new(format!("{word}{counter}"));
         *counter += 1;
         Component { id, kind }
     }
 
-    pub fn add_fixture(&mut self, name: impl Into<String>, size: Vec2) -> FixtureId {
-        let id = FixtureId::new(format!("fixture{}", self.next_fixture));
-        self.next_fixture += 1;
-        self.fixtures.push(Fixture {
+    /// Mint a node id and put the node in `parent` (a module), or at the
+    /// root when `parent` is `None`. Returns its id; `None` if `parent` is
+    /// not a module.
+    pub fn add_node(
+        &mut self,
+        parent: Option<&NodeId>,
+        name: impl Into<String>,
+        kind: NodeKind,
+    ) -> Option<NodeId> {
+        let (word, n) = match kind {
+            NodeKind::Module { .. } => ("module", self.counters.module),
+            NodeKind::Fixture(_) => ("fixture", self.counters.fixture),
+            NodeKind::Output(_) => ("output", self.counters.output),
+        };
+        let id = NodeId::new(format!("{word}{n}"));
+        let node = Node {
             id: id.clone(),
             name: name.into(),
-            size,
-            components: Vec::new(),
-        });
-        id
+            kind,
+        };
+        let list = match parent {
+            None => &mut self.nodes,
+            Some(p) => self.node_mut(p)?.children_mut()?,
+        };
+        list.push(node);
+        match word {
+            "module" => self.counters.module += 1,
+            "fixture" => self.counters.fixture += 1,
+            _ => self.counters.output += 1,
+        }
+        Some(id)
+    }
+
+    pub fn add_module(&mut self, parent: Option<&NodeId>, name: &str) -> Option<NodeId> {
+        self.add_node(parent, name, NodeKind::Module { children: vec![] })
+    }
+
+    pub fn add_fixture(
+        &mut self,
+        parent: Option<&NodeId>,
+        name: &str,
+        size: Vec2,
+    ) -> Option<NodeId> {
+        self.add_node(parent, name, NodeKind::Fixture(Fixture::new(size)))
+    }
+
+    pub fn add_output(
+        &mut self,
+        parent: Option<&NodeId>,
+        name: &str,
+        ports: &[(&str, u32, PixelFormat)],
+    ) -> Option<NodeId> {
+        self.add_node(parent, name, NodeKind::Output(Output::new(ports)))
     }
 
     /// Mint and append a top-level component to a fixture; returns its id.
-    pub fn add(&mut self, fixture: &FixtureId, kind: ComponentKind) -> Option<ComponentId> {
+    pub fn add(&mut self, fixture: &NodeId, kind: ComponentKind) -> Option<ComponentId> {
         let component = self.mint(kind);
         let id = component.id.clone();
         self.fixture_mut(fixture)?.components.push(component);
         Some(id)
     }
 
-    // ---- lookups ---------------------------------------------------------
-
-    pub fn fixture(&self, id: &FixtureId) -> Option<&Fixture> {
-        self.fixtures.iter().find(|f| &f.id == id)
+    /// Patch a fixture's lamps to an output with the auto rule.
+    pub fn auto_patch(&mut self, fixture: &NodeId, output: &NodeId) {
+        if let Some(f) = self.fixture_mut(fixture) {
+            f.rules.push(PatchRule::Auto {
+                output: output.clone(),
+            });
+        }
     }
 
-    pub fn fixture_mut(&mut self, id: &FixtureId) -> Option<&mut Fixture> {
-        self.fixtures.iter_mut().find(|f| &f.id == id)
+    // ---- nodes -------------------------------------------------------------
+
+    pub fn node(&self, id: &NodeId) -> Option<&Node> {
+        node::find(&self.nodes, id)
     }
 
-    /// The fixture a component lives in.
-    pub fn fixture_of(&self, id: &ComponentId) -> Option<&Fixture> {
-        self.fixtures.iter().find(|f| f.component(id).is_some())
+    pub fn node_mut(&mut self, id: &NodeId) -> Option<&mut Node> {
+        node::find_mut(&mut self.nodes, id)
+    }
+
+    /// Every node, depth-first: a module before what's inside it.
+    pub fn all_nodes(&self) -> Vec<&Node> {
+        let mut out = Vec::new();
+        node::walk(&self.nodes, &mut out);
+        out
+    }
+
+    /// The module holding a node, or `None` at the root (or if absent).
+    pub fn parent_module(&self, id: &NodeId) -> Option<&NodeId> {
+        node::parent_of(&self.nodes, id, None).flatten()
+    }
+
+    /// The node's name, or its id if it's gone.
+    pub fn node_name(&self, id: &NodeId) -> String {
+        self.node(id)
+            .map(|n| n.name.clone())
+            .unwrap_or_else(|| id.to_string())
+    }
+
+    pub fn remove_node(&mut self, id: &NodeId) -> Option<Node> {
+        node::remove_from(&mut self.nodes, id)
+    }
+
+    pub fn fixture(&self, id: &NodeId) -> Option<&Fixture> {
+        self.node(id)?.fixture()
+    }
+
+    pub fn fixture_mut(&mut self, id: &NodeId) -> Option<&mut Fixture> {
+        self.node_mut(id)?.fixture_mut()
+    }
+
+    pub fn output(&self, id: &NodeId) -> Option<&Output> {
+        self.node(id)?.output()
+    }
+
+    pub fn output_mut(&mut self, id: &NodeId) -> Option<&mut Output> {
+        self.node_mut(id)?.output_mut()
+    }
+
+    /// Every fixture node, in tree order.
+    pub fn fixtures(&self) -> Vec<&Node> {
+        self.all_nodes()
+            .into_iter()
+            .filter(|n| n.fixture().is_some())
+            .collect()
+    }
+
+    /// Every output node, in tree order.
+    pub fn outputs(&self) -> Vec<&Node> {
+        self.all_nodes()
+            .into_iter()
+            .filter(|n| n.output().is_some())
+            .collect()
+    }
+
+    /// The first node of this name, in tree order.
+    pub fn named(&self, name: &str) -> Option<&Node> {
+        self.all_nodes().into_iter().find(|n| n.name == name)
+    }
+
+    // ---- components --------------------------------------------------------
+
+    /// The fixture node a component lives in.
+    pub fn fixture_of(&self, id: &ComponentId) -> Option<&Node> {
+        self.fixtures()
+            .into_iter()
+            .find(|n| n.fixture().is_some_and(|f| f.component(id).is_some()))
     }
 
     pub fn component(&self, id: &ComponentId) -> Option<&Component> {
-        self.fixtures.iter().find_map(|f| f.component(id))
+        self.fixtures()
+            .into_iter()
+            .find_map(|n| n.fixture()?.component(id))
     }
 
     pub fn component_mut(&mut self, id: &ComponentId) -> Option<&mut Component> {
-        self.fixtures.iter_mut().find_map(|f| f.component_mut(id))
+        let fixture = self.fixture_of(id)?.id.clone();
+        self.fixture_mut(&fixture)?.component_mut(id)
     }
 
     /// The group holding `id`, or `None` when `id` is top-level in its
     /// fixture (or absent).
     pub fn parent_group(&self, id: &ComponentId) -> Option<&ComponentId> {
-        self.fixture_of(id)?.parent_group(id)
+        self.fixture_of(id)?.fixture()?.parent_group(id)
     }
 
     /// Remove a component (and everything under it) wherever it lives.
     pub fn remove(&mut self, id: &ComponentId) -> Option<Component> {
-        self.fixtures.iter_mut().find_map(|f| f.remove(id))
-    }
-
-    pub fn remove_fixture(&mut self, id: &FixtureId) -> Option<Fixture> {
-        let i = self.fixtures.iter().position(|f| &f.id == id)?;
-        Some(self.fixtures.remove(i))
-    }
-
-    // ---- the grid --------------------------------------------------------
-
-    /// Where each fixture's `(0, 0)` lands in world units. Columns are
-    /// ⌈√n⌉ wide; each column as wide as its widest fixture, each row as
-    /// tall as its tallest.
-    pub fn origins(&self) -> Vec<Vec2> {
-        let n = self.fixtures.len();
-        if n == 0 {
-            return Vec::new();
-        }
-        let cols = (n as f64).sqrt().ceil() as usize;
-        let rows = n.div_ceil(cols);
-        let mut col_w = vec![0.0f64; cols];
-        let mut row_h = vec![0.0f64; rows];
-        for (i, f) in self.fixtures.iter().enumerate() {
-            col_w[i % cols] = col_w[i % cols].max(f.size.x);
-            row_h[i / cols] = row_h[i / cols].max(f.size.y);
-        }
-        let col_x: Vec<f64> = col_w
-            .iter()
-            .scan(0.0, |x, w| {
-                let at = *x;
-                *x += w + GRID_GAP;
-                Some(at)
-            })
-            .collect();
-        let row_y: Vec<f64> = row_h
-            .iter()
-            .scan(0.0, |y, h| {
-                let at = *y;
-                *y += h + GRID_GAP;
-                Some(at)
-            })
-            .collect();
-        (0..n)
-            .map(|i| Vec2::new(col_x[i % cols], row_y[i / cols]))
-            .collect()
-    }
-
-    pub fn origin(&self, id: &FixtureId) -> Vec2 {
-        let i = self.fixtures.iter().position(|f| &f.id == id);
-        i.and_then(|i| self.origins().get(i).copied())
-            .unwrap_or_default()
-    }
-
-    /// A fixture's box in world units.
-    pub fn world_bounds(&self, id: &FixtureId) -> Option<Rect> {
-        let f = self.fixture(id)?;
-        let o = self.origin(id);
-        Some(Rect::new(o, o + f.size))
-    }
-
-    /// Everything on the canvas, for "fit".
-    pub fn extent(&self) -> Rect {
-        let rects: Vec<Rect> = self
-            .fixtures
-            .iter()
-            .filter_map(|f| self.world_bounds(&f.id))
-            .collect();
-        Rect::around(rects.iter().flat_map(|r| [r.min, r.max]))
-            .unwrap_or(Rect::new(Vec2::default(), Vec2::new(100.0, 60.0)))
-    }
-
-    /// The fixture whose box holds a world point.
-    pub fn fixture_at(&self, p: Vec2) -> Option<FixtureId> {
-        self.fixtures
-            .iter()
-            .find(|f| self.world_bounds(&f.id).is_some_and(|r| r.contains(p)))
-            .map(|f| f.id.clone())
+        let fixture = self.fixture_of(id)?.id.clone();
+        self.fixture_mut(&fixture)?.remove(id)
     }
 
     // ---- derived: objects and lamps, in world units ----------------------
 
-    /// Every object with the fixture it lives in, in grid then authoring
-    /// order.
-    pub fn placed_objects(&self) -> Vec<(FixtureId, Object)> {
-        let origins = self.origins();
+    /// Every object with the fixture it lives in, in tree then authoring
+    /// order — the order the auto patch fills ports in.
+    pub fn placed_objects(&self) -> Vec<(NodeId, Object)> {
         let mut out = Vec::new();
-        for (f, origin) in self.fixtures.iter().zip(origins) {
+        for n in self.fixtures() {
+            let Some(f) = n.fixture() else { continue };
+            let origin = self.origin(&n.id);
             let mut objects = Vec::new();
             collect_objects(&f.components, &mut objects);
             out.extend(
                 objects
                     .into_iter()
-                    .map(|o| (f.id.clone(), placed(o, origin))),
+                    .map(|o| (n.id.clone(), placed(o, origin))),
             );
         }
         out
@@ -210,10 +268,21 @@ impl Project {
         self.placed_objects().into_iter().map(|(_, o)| o).collect()
     }
 
+    /// One fixture's objects, in authoring order, in world units.
+    pub fn objects_in(&self, fixture: &NodeId) -> Vec<Object> {
+        let Some(f) = self.fixture(fixture) else {
+            return Vec::new();
+        };
+        let origin = self.origin(fixture);
+        let mut objects = Vec::new();
+        collect_objects(&f.components, &mut objects);
+        objects.into_iter().map(|o| placed(o, origin)).collect()
+    }
+
     pub fn object(&self, id: &ObjectId) -> Option<Object> {
-        let f = self.fixture_of(&id.component)?;
-        let origin = self.origin(&f.id);
-        let component = f.component(&id.component)?;
+        let n = self.fixture_of(&id.component)?;
+        let origin = self.origin(&n.id);
+        let component = n.fixture()?.component(&id.component)?;
         objects_of(component)
             .into_iter()
             .find(|o| &o.id == id)
@@ -224,7 +293,7 @@ impl Project {
     pub fn lamps_outside(&self) -> Vec<(ObjectId, u32)> {
         let mut out = Vec::new();
         for (f, object) in self.placed_objects() {
-            let Some(bounds) = self.world_bounds(&f) else {
+            let Some(bounds) = self.node_rect(&f) else {
                 continue;
             };
             for (i, lamp) in object.lamps.iter().enumerate() {
@@ -240,12 +309,25 @@ impl Project {
         self.objects().iter().map(|o| o.lamps.len()).sum()
     }
 
-    /// The lab's starting project: Yona's desk. A tail that runs out and
-    /// back, a two-ring circle display, a strip, and an empty fixture to
-    /// draw a scarf into.
+    /// The fixture whose box holds a world point.
+    pub fn fixture_at(&self, p: Vec2) -> Option<NodeId> {
+        self.fixtures()
+            .into_iter()
+            .find(|n| self.node_rect(&n.id).is_some_and(|r| r.contains(p)))
+            .map(|n| n.id.clone())
+    }
+
+    /// The lab's starting project: Yona's desk. A tail rig (the tail that
+    /// runs out and back, and its own output), a two-ring circle display
+    /// and a strip sharing the main output, and an empty fixture to draw a
+    /// scarf into.
     pub fn seed() -> Self {
         let mut p = Project::new("desk");
-        let tail = p.add_fixture("tail", Vec2::new(36.0, 82.0));
+        let grb = PixelFormat::Grb;
+
+        let rig = p.add_module(None, "tail rig");
+        let tail = p.add_fixture(rig.as_ref(), "tail", Vec2::new(36.0, 82.0));
+        let tail_out = p.add_output(rig.as_ref(), "tail out", &[("GPIO 10", 60, grb)]);
         let out = p.mint(ComponentKind::line(
             Vec2::new(14.0, 70.0),
             Vec2::new(14.0, 12.0),
@@ -256,23 +338,35 @@ impl Project {
             Vec2::new(22.0, 70.0),
             25,
         ));
+
+        let ring = p.add_fixture(None, "ring display", Vec2::new(70.0, 70.0));
+        let strip = p.add_fixture(None, "strip", Vec2::new(80.0, 20.0));
+        let main = p.add_output(None, "main", &[("D0", 64, grb), ("D1", 30, grb)]);
+        p.add_fixture(None, "scarf", Vec2::new(100.0, 30.0));
+
+        let (Some(tail), Some(tail_out), Some(ring), Some(strip), Some(main)) =
+            (tail, tail_out, ring, strip, main)
+        else {
+            unreachable!("the seed's parents are modules")
+        };
         p.add(&tail, ComponentKind::group(vec![out, back]));
-        let ring = p.add_fixture("ring display", Vec2::new(70.0, 70.0));
         p.add(
             &ring,
             ComponentKind::circle(Vec2::new(35.0, 35.0), &[(26.0, 40), (16.0, 24)]),
         );
-        let strip = p.add_fixture("strip", Vec2::new(80.0, 20.0));
         p.add(
             &strip,
             ComponentKind::line(Vec2::new(6.0, 10.0), Vec2::new(74.0, 10.0), 30),
         );
-        p.add_fixture("scarf", Vec2::new(100.0, 30.0));
+        p.auto_patch(&tail, &tail_out);
+        p.auto_patch(&ring, &main);
+        p.auto_patch(&strip, &main);
         p
     }
 }
 
-fn collect_objects(list: &[Component], out: &mut Vec<Object>) {
+/// Every object under these components, in authoring order.
+pub(crate) fn collect_objects(list: &[Component], out: &mut Vec<Object>) {
     for c in list {
         out.extend(objects_of(c));
         collect_objects(c.children(), out);
@@ -295,4 +389,9 @@ fn placed(mut o: Object, origin: Vec2) -> Object {
         },
     };
     o
+}
+
+/// The rectangle around a set of rectangles.
+pub(crate) fn union(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
+    Rect::around(rects.into_iter().flat_map(|r| [r.min, r.max]))
 }

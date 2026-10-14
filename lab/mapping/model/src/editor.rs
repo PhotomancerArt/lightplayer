@@ -9,7 +9,7 @@ use crate::component::{ComponentId, ComponentKind};
 use crate::geom::{Rect, Vec2};
 use crate::notice::Notice;
 use crate::pick::{PickMode, level_candidates, pick};
-use crate::project::Project;
+use crate::project::{Project, union};
 use crate::target::Target;
 
 /// Modifier keys held during an event. `command` is ⌘ on a Mac (Ctrl
@@ -115,6 +115,9 @@ pub struct MenuItem {
     pub label: String,
 }
 
+/// Around lamps framed with ⇧2, in world units, so one lamp isn't the
+/// whole screen.
+const FRAME_PAD: f64 = 6.0;
 /// How far, in screen pixels, a press moves before it is a drag.
 pub const DRAG_THRESHOLD_PX: f64 = 3.0;
 const UNDO_LIMIT: usize = 200;
@@ -253,8 +256,43 @@ impl Editor {
         }
     }
 
+    /// ⇧1: everything on the canvas.
     pub fn fit(&mut self) {
         self.camera = Camera::fit(self.project.extent(), self.viewport, 40.0);
+    }
+
+    /// ⇧2: the selection. A fixture is framed with the outputs it feeds,
+    /// so you see both ends of its patch; anything else, on its own.
+    pub fn frame_selection(&mut self) {
+        let rects = self.selection.iter().filter_map(|t| self.framing_rect(t));
+        match union(rects) {
+            Some(r) => self.camera = Camera::fit(r, self.viewport, 40.0),
+            None => {
+                self.notice = Some(Notice::refused(
+                    "Nothing to frame",
+                    "nothing is selected",
+                    "select something first; ⇧1 fits everything",
+                ))
+            }
+        }
+    }
+
+    /// What ⇧2 frames for one target, in world units.
+    pub fn framing_rect(&self, t: &Target) -> Option<Rect> {
+        let p = &self.project;
+        match t {
+            Target::Node(id) if p.fixture(id).is_some() => union(
+                std::iter::once(id.clone())
+                    .chain(p.outputs_of(id))
+                    .filter_map(|n| p.node_rect(&n)),
+            ),
+            Target::Node(id) => p.node_rect(id),
+            Target::Port { output, key } => p.port_rect(output, key),
+            other => p.lamps_rect(other).map(|r| {
+                let pad = Vec2::new(FRAME_PAD, FRAME_PAD);
+                Rect::new(r.min - pad, r.max + pad)
+            }),
+        }
     }
 
     pub fn pointer_down(&mut self, at: Vec2, button: Button, mods: Mods) {
@@ -494,6 +532,7 @@ impl Editor {
             ('=' | '+', false, _) => self.nudge(1),
             ('r', false, _) => self.reverse(),
             ('1' | '!', false, true) => self.fit(),
+            ('2' | '@', false, true) => self.frame_selection(),
             _ => return false,
         }
         true
@@ -612,12 +651,21 @@ impl Editor {
         }
     }
 
+    /// Enter: go into the selection. Opening a fixture also frames it with
+    /// its outputs (D42), so the patch it is about to show is on screen.
     pub fn enter(&mut self) {
         let Some(first) = self.selection.first().cloned() else {
             return;
         };
         match self.project.children(Some(&first)).into_iter().next() {
-            Some(child) => self.selection = vec![child],
+            Some(child) => {
+                if self.project.is_fixture(&first)
+                    && let Some(r) = self.framing_rect(&first)
+                {
+                    self.camera = Camera::fit(r, self.viewport, 40.0);
+                }
+                self.selection = vec![child];
+            }
             None => {
                 self.notice = Some(Notice::info(format!(
                     "{} is as deep as it goes",
@@ -652,26 +700,32 @@ impl Editor {
 
     /// ⌘A: everything at the selection's level. Pressed again once that
     /// level is all selected, it climbs one level, so ⌘A ⌘A … always ends
-    /// at the whole fixture — and ⌘A ⌫ from nothing selected deletes
-    /// everything.
+    /// at the whole project — and ⌘A ⌫ from nothing selected empties every
+    /// fixture.
     pub fn select_all(&mut self) {
-        // The levels ⌘A can select, from where you are outward. The last
-        // two are "everything you drew, in every fixture" and "the
-        // fixtures themselves".
+        // The levels ⌘A can select, from where you are outward: first the
+        // levels inside a fixture, then the levels of nodes (inside modules,
+        // an output's ports), then "everything you drew, in every fixture",
+        // and last the project's own nodes.
+        let p = &self.project;
         let mut levels: Vec<Vec<Target>> = Vec::new();
+        // A selection spread over several levels (everything drawn) is
+        // already outside them all.
         let mut context = self.context();
-        while let Some(c) = context {
-            levels.push(self.project.children(Some(&c)));
-            context = self.project.parent(&c);
+        if self.selection.iter().any(|t| p.parent(t) != context) {
+            context = None;
         }
-        let contents: Vec<Target> = self
-            .project
-            .pick_level(None)
-            .into_iter()
-            .filter(|t| !matches!(t, Target::Fixture(_)))
-            .collect();
-        levels.push(contents);
-        levels.push(self.project.children(None));
+        while let Some(c) = context {
+            levels.push(p.children(Some(&c)));
+            context = p.parent(&c);
+        }
+        levels.push(
+            p.pick_level(None)
+                .into_iter()
+                .filter(|t| matches!(t, Target::Component(_)))
+                .collect(),
+        );
+        levels.push(p.children(None));
         let next = levels
             .into_iter()
             .find(|level| !level.is_empty() && !level.iter().all(|t| self.selection.contains(t)));
@@ -691,12 +745,13 @@ impl Editor {
         if probe.selection == self.selection {
             return "everything is selected".into();
         }
-        if probe
-            .selection
-            .iter()
-            .all(|t| matches!(t, Target::Fixture(_)))
-        {
-            return "select the fixtures themselves".into();
+        if probe.selection.iter().all(|t| matches!(t, Target::Node(_))) {
+            let parent = p.parent(&probe.selection[0]);
+            let one_parent = probe.selection.iter().all(|t| p.parent(t) == parent);
+            return match parent {
+                Some(m) if one_parent => format!("select everything in {}", p.label(&m)),
+                _ => "select the nodes themselves".into(),
+            };
         }
         let mut parents: Vec<Option<Target>> = Vec::new();
         for t in &probe.selection {
@@ -725,13 +780,14 @@ impl Editor {
         let mut selection = base_selection.clone();
         let enclosed = self.mods.alt;
         // The box works at the level you are in: lamps inside a ring,
-        // what's drawn at the top (fixtures are see-through to it).
+        // what's drawn at the top (frames are see-through to it). Nodes
+        // are picked by their title, never caught by a box.
         let context = base_selection.first().and_then(|s| self.project.parent(s));
         let level: Vec<Target> = self
             .project
             .pick_level(context.as_ref())
             .into_iter()
-            .filter(|t| !matches!(t, Target::Fixture(_)))
+            .filter(|t| !matches!(t, Target::Node(_)))
             .collect();
         for t in level {
             let lamps = self.project.lamps_under(&t);
@@ -775,8 +831,8 @@ impl Editor {
         let owners = self.move_owners();
         if owners.is_empty() {
             self.notice = Some(Notice::refused(
-                "Fixtures don't move by dragging",
-                "the canvas lays fixtures out in a grid",
+                "Nodes don't move by dragging",
+                "the canvas lays nodes out by itself, in columns",
                 "drag what's inside a fixture, or change its size in the inspector",
             ));
         } else {

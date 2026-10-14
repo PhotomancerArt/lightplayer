@@ -3,12 +3,17 @@
 //! Each test's doc comment IS the statement. Read this file as the list.
 //! When a statement changes, change the sentence first, then the code.
 //!
-//! The project is `Project::seed()`, four fixtures in a grid:
-//! - `tail`: group1 (line1 out, line2 back), lines at x = 14 and 22;
-//! - `ring display`: circle1 at (35, 35), rings r1 (outer, 40 lamps) and r2
-//!   (inner, 24 lamps);
-//! - `strip`: line3, (6, 10) → (74, 10), 30 lamps;
-//! - `scarf`: empty, to draw into.
+//! The project is `Project::seed()`, "desk", laid out in columns:
+//! - module `tail rig`, holding
+//!   - fixture `tail`: group1 (line1 out, line2 back), lines at x = 14 and
+//!     22, auto-patched to `tail out`;
+//!   - output `tail out`: one port, GPIO 10, 60 px;
+//! - fixture `ring display`: circle1 at (35, 35), rings r1 (outer, 40
+//!   lamps) and r2 (inner, 24 lamps), auto-patched to `main`;
+//! - fixture `strip`: line3, (6, 10) → (74, 10), 30 lamps, auto-patched to
+//!   `main` after the ring display;
+//! - output `main`: ports D0 (64 px) and D1 (30 px);
+//! - fixture `scarf`: empty, no rule, to draw into.
 //!
 //! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
 //! turns them into the canvas's.
@@ -24,13 +29,23 @@ fn select_all_then_delete_deletes_everything() {
     key(&mut e, Key::Char('a'), cmd());
     key(&mut e, Key::Delete, none());
     assert_eq!(e.project.lamp_count(), 0);
-    assert!(e.project.fixtures.iter().all(|f| f.components.is_empty()));
-    assert_eq!(e.project.fixtures.len(), 4, "the fixtures themselves stay");
+    assert!(
+        e.project
+            .fixtures()
+            .iter()
+            .all(|n| n.fixture().unwrap().components.is_empty())
+    );
+    assert_eq!(
+        e.project.fixtures().len(),
+        4,
+        "the fixtures themselves stay"
+    );
+    assert_eq!(e.project.outputs().len(), 2, "and the outputs");
 }
 
 /// ⌘A climbs a level each time: from a lamp, every lamp of its ring, then
 /// every ring, then everything in its fixture, then everything you drew in
-/// every fixture, then the fixtures themselves.
+/// every fixture, then the nodes themselves.
 #[test]
 fn select_all_climbs_to_everything_from_anywhere() {
     let mut e = editor();
@@ -54,9 +69,9 @@ fn select_all_climbs_to_everything_from_anywhere() {
         vec![comp("group1"), comp("circle1"), comp("line3")]
     );
     key(&mut e, Key::Char('a'), cmd());
-    assert_eq!(e.selection, e.project.children(None), "the fixtures");
+    assert_eq!(e.selection, e.project.children(None), "the nodes");
     key(&mut e, Key::Delete, none());
-    assert!(e.project.fixtures.is_empty());
+    assert!(e.project.nodes.is_empty());
 }
 
 /// Deleting a lamp is refused, and the refusal says why and what to do.
@@ -233,7 +248,7 @@ fn box_touches_and_option_encloses() {
     // all of it.
     for (mods, want) in [(none(), vec![comp("group1")]), (alt(), vec![])] {
         let mut e = editor();
-        let a = e.camera.to_screen(place(&e, "tail", 2.0, 2.0));
+        let a = e.camera.to_screen(place(&e, "tail", 5.0, 5.0));
         let b = e.camera.to_screen(place(&e, "tail", 34.0, 40.0));
         e.pointer_down(a, Button::Primary, none());
         e.pointer_move(a + Vec2::new(10.0, 10.0), mods);
@@ -369,27 +384,6 @@ fn right_click_lists_whats_here() {
 
 // ---- fixtures -------------------------------------------------------------
 
-/// Fixtures sit in a grid and never overlap.
-#[test]
-fn fixtures_never_overlap() {
-    let e = editor();
-    let boxes: Vec<Rect> = e
-        .project
-        .fixtures
-        .iter()
-        .map(|f| e.project.world_bounds(&f.id).unwrap())
-        .collect();
-    for (i, a) in boxes.iter().enumerate() {
-        for b in &boxes[i + 1..] {
-            let apart = a.max.x <= b.min.x
-                || b.max.x <= a.min.x
-                || a.max.y <= b.min.y
-                || b.max.y <= a.min.y;
-            assert!(apart, "{a:?} overlaps {b:?}");
-        }
-    }
-}
-
 /// Clicking a fixture's title selects the fixture; clicking inside it
 /// selects what's drawn there.
 #[test]
@@ -423,7 +417,8 @@ fn a_fixtures_size_is_a_property() {
     let mut e = editor();
     e.select(vec![fixture(&e, "scarf")]);
     e.edit_selection_prop("width", PropEdit::SetNumber(140.0));
-    assert_eq!(e.project.fixtures[3].size.x, 140.0);
+    let scarf = node_id(&e, "scarf");
+    assert_eq!(e.project.fixture(&scarf).unwrap().size.x, 140.0);
 }
 
 /// A box drag that leaves the canvas keeps going, and finishes where the
@@ -432,7 +427,7 @@ fn a_fixtures_size_is_a_property() {
 fn a_drag_survives_leaving_the_canvas() {
     let mut e = editor();
     // From the tail's bottom-left, up past the top of the canvas.
-    let a = e.camera.to_screen(place(&e, "tail", 2.0, 80.0));
+    let a = e.camera.to_screen(place(&e, "tail", 5.0, 77.0));
     e.pointer_down(a, Button::Primary, none());
     e.pointer_move(a + Vec2::new(10.0, -10.0), none());
     e.pointer_leave();
@@ -441,6 +436,276 @@ fn a_drag_survives_leaving_the_canvas() {
     assert!(e.selection_box().is_some(), "the box is still there");
     e.pointer_up(outside, none());
     assert_eq!(e.selection, vec![comp("group1")]);
+}
+
+// ---- nodes, outputs, edges -------------------------------------------------
+
+/// Layout never overlaps nodes, at any level.
+#[test]
+fn layout_never_overlaps_nodes() {
+    let mut e = editor();
+    // A second module, nested in the first, so there are three levels.
+    let rig = node_id(&e, "tail rig");
+    let inner = e.project.add_module(Some(&rig), "spare").unwrap();
+    e.project
+        .add_fixture(Some(&inner), "spare strip", Vec2::new(30.0, 10.0));
+    let p = &e.project;
+    let mut levels: Vec<Vec<&Node>> = vec![p.nodes.iter().collect()];
+    for n in p.all_nodes() {
+        if !n.children().is_empty() {
+            levels.push(n.children().iter().collect());
+        }
+    }
+    assert!(levels.len() >= 3);
+    for level in levels {
+        let boxes: Vec<(String, Rect)> = level
+            .iter()
+            .map(|n| (n.name.clone(), p.node_rect(&n.id).unwrap()))
+            .collect();
+        for (i, (na, a)) in boxes.iter().enumerate() {
+            for (nb, b) in &boxes[i + 1..] {
+                let apart = a.max.x <= b.min.x
+                    || b.max.x <= a.min.x
+                    || a.max.y <= b.min.y
+                    || b.max.y <= a.min.y;
+                assert!(apart, "{na} {a:?} overlaps {nb} {b:?}");
+            }
+        }
+    }
+    // And a module's frame holds everything in it.
+    for n in p.all_nodes() {
+        let frame = p.node_rect(&n.id).unwrap();
+        for c in n.children() {
+            let r = p.node_rect(&c.id).unwrap();
+            assert!(
+                frame.contains(r.min) && frame.contains(r.max),
+                "{} in {}",
+                c.name,
+                n.name
+            );
+        }
+    }
+}
+
+/// A node of any kind (module, fixture, output) selects, deletes and
+/// climbs (Esc) the same way.
+#[test]
+fn every_kind_of_node_selects_deletes_and_climbs_alike() {
+    for name in ["tail rig", "tail", "tail out", "ring display", "main"] {
+        let mut e = editor();
+        let t = fixture(&e, name);
+        e.select(vec![t.clone()]);
+        key(&mut e, Key::Escape, none());
+        assert_eq!(
+            e.selection,
+            e.project.parent(&t).into_iter().collect::<Vec<_>>(),
+            "Esc climbs from {name} to its frame"
+        );
+        e.select(vec![t.clone()]);
+        key(&mut e, Key::Delete, none());
+        assert!(!e.project.exists(&t), "{name} deleted");
+        key(&mut e, Key::Char('z'), cmd());
+        assert!(e.project.exists(&t), "{name} back");
+    }
+    // A child of a module climbs to it.
+    let mut e = editor();
+    e.select(vec![fixture(&e, "tail out")]);
+    key(&mut e, Key::Escape, none());
+    assert_eq!(e.selection, vec![fixture(&e, "tail rig")]);
+}
+
+/// Clicking inside a module selects what's inside it; the module is picked
+/// by its title or border.
+#[test]
+fn a_module_is_see_through() {
+    let mut e = editor();
+    // Between the tail's two lines: group1, through the module and the
+    // fixture.
+    let between = place(&e, "tail", 18.0, 40.0);
+    click_at(&mut e, between, none());
+    assert_eq!(e.selection, vec![comp("group1")]);
+    // The tail out card, inside the module.
+    let card = e.project.node_rect(&node_id(&e, "tail out")).unwrap();
+    e.select(vec![]);
+    click_at(&mut e, card.min + Vec2::new(20.0, 3.0), none());
+    assert_eq!(e.selection, vec![fixture(&e, "tail out")]);
+    // The module's title tab.
+    let corner = e.camera.to_screen(place(&e, "tail rig", 0.0, 0.0));
+    let title = corner + Vec2::new(12.0, -10.0);
+    e.pointer_move(title, none());
+    e.pointer_down(title, Button::Primary, none());
+    e.pointer_up(title, none());
+    assert_eq!(e.selection, vec![fixture(&e, "tail rig")]);
+}
+
+/// Clicking an output selects it; clicking it again selects the port under
+/// the cursor.
+#[test]
+fn clicking_an_output_then_again_selects_a_port() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    let d1 = e.project.port_rect(&main, "p2").unwrap();
+    let at = d1.min.lerp(d1.max, 0.5);
+    click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![Target::Node(main.clone())]);
+    click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![port(&main, "p2")]);
+    assert_eq!(e.project.label(&e.selection[0]), "D1");
+}
+
+/// The auto rule fills an output's ports in order: ring display fills D0
+/// (64/64), strip fills D1 (30/30); the tail fills GPIO 10 with 50 of 60.
+#[test]
+fn the_auto_rule_fills_ports_in_order() {
+    let e = editor();
+    let p = &e.project;
+    let main = node_id(&e, "main");
+    let tail_out = node_id(&e, "tail out");
+    assert_eq!(p.port_fill(&main, "p1"), (64, 64));
+    assert_eq!(p.port_fill(&main, "p2"), (30, 30));
+    assert_eq!(p.port_fill(&tail_out, "p1"), (50, 60));
+    let patch = p.effective_patch();
+    assert!(patch.unpatched.is_empty() && patch.problems.is_empty());
+    // The ring display's lamps: r1 then r2, in data order, from pixel 0.
+    let d0: Vec<(String, std::ops::Range<u32>, u32)> = patch
+        .spans
+        .iter()
+        .filter(|s| s.output == main && s.port == "p1")
+        .map(|s| (s.object.key.clone(), s.lamps.clone(), s.start_pixel))
+        .collect();
+    assert_eq!(d0, vec![("r1".into(), 0..40, 0), ("r2".into(), 0..24, 40)]);
+    // One more lamp on the strip has nowhere to go: it is unpatched, not
+    // squeezed in.
+    let mut e = editor();
+    e.select(vec![comp("line3")]);
+    key(&mut e, Key::Char('='), none());
+    let patch = e.project.effective_patch();
+    assert_eq!(patch.unpatched.len(), 1);
+    assert_eq!(patch.unpatched[0].lamps, 30..31);
+}
+
+/// Patch edges match the effective patch: bundled per (fixture, output)
+/// from outside, one per span from inside a fixture.
+#[test]
+fn patch_edges_match_the_effective_patch() {
+    let mut e = editor();
+    let edges = e.edges();
+    let bundled: Vec<(Target, Target, String)> = edges
+        .iter()
+        .map(|x| (x.from.clone(), x.to.clone(), x.label.clone()))
+        .collect();
+    assert_eq!(
+        bundled,
+        vec![
+            (
+                fixture(&e, "tail"),
+                fixture(&e, "tail out"),
+                "50 lamps".into()
+            ),
+            (
+                fixture(&e, "ring display"),
+                fixture(&e, "main"),
+                "64 lamps".into()
+            ),
+            (fixture(&e, "strip"), fixture(&e, "main"), "30 lamps".into()),
+        ]
+    );
+    assert!(edges.iter().all(|x| x.bundled && x.active));
+
+    // Inside the tail: one edge per span, from each line to its port.
+    e.select(vec![comp("line2")]);
+    let spans = e.project.effective_patch().spans;
+    let tail = node_id(&e, "tail");
+    let tail_out = node_id(&e, "tail out");
+    let all = e.edges();
+    let inside: Vec<&Edge> = all.iter().filter(|x| !x.bundled).collect();
+    let tail_spans: Vec<_> = spans.iter().filter(|s| s.fixture == tail).collect();
+    assert_eq!(inside.len(), tail_spans.len());
+    assert_eq!(inside[0].from, comp("line1"));
+    assert_eq!(inside[0].to, port(&tail_out, "p1"));
+    assert_eq!(inside[1].label, "lamps 0–24 → GPIO 10 @25");
+    // The other fixtures stay bundled.
+    assert_eq!(e.edges().iter().filter(|x| x.bundled).count(), 2);
+}
+
+/// Deleting an output leaves its fixtures' rules as visible problems;
+/// nothing is retargeted.
+#[test]
+fn deleting_an_output_leaves_problems_not_retargets() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    e.select(vec![Target::Node(main.clone())]);
+    key(&mut e, Key::Delete, none());
+    let p = &e.project;
+    let patch = p.effective_patch();
+    let broken: Vec<String> = patch
+        .problems
+        .iter()
+        .map(|x| p.node_name(&x.fixture))
+        .collect();
+    assert_eq!(broken, vec!["ring display", "strip"]);
+    assert!(patch.problems.iter().all(|x| x.missing == main));
+    let ring = node_id(&e, "ring display");
+    assert_eq!(
+        p.fixture(&ring).unwrap().rules,
+        vec![PatchRule::Auto {
+            output: main.clone()
+        }],
+        "the rule still names main"
+    );
+    assert!(patch.spans.iter().all(|s| s.fixture == node_id(&e, "tail")));
+    // The notice says so.
+    let n = e.notice.clone().unwrap();
+    assert!(n.why.unwrap().contains("ring display and strip"));
+    // And so does the problem, in rustc style.
+    let pn = patch.problems[0].notice(p);
+    assert!(pn.text.contains("no longer exists") && pn.help.is_some());
+}
+
+/// Selecting a port highlights exactly the lamps it carries.
+#[test]
+fn a_selected_port_highlights_its_lamps() {
+    let e = editor();
+    let main = node_id(&e, "main");
+    let d1 = e.project.lamps_on_port(&main, "p2");
+    let line3 = ObjectId::new(&ComponentId::new("line3"), "line");
+    assert_eq!(d1, (0..30).map(|i| (line3.clone(), i)).collect::<Vec<_>>());
+    let d0 = e.project.lamps_on_port(&main, "p1");
+    assert_eq!(d0.len(), 64);
+    assert!(d0.iter().all(|(o, _)| o.component.as_str() == "circle1"));
+    // And the other way: the ring display lands on D0 only.
+    assert_eq!(
+        e.project.ports_of(&fixture(&e, "ring display")),
+        vec![port(&main, "p1")]
+    );
+}
+
+/// Enter on a fixture frames the fixture together with its outputs.
+#[test]
+fn enter_on_a_fixture_frames_it_with_its_outputs() {
+    let mut e = editor();
+    let overview = e.camera.scale;
+    e.select(vec![fixture(&e, "ring display")]);
+    key(&mut e, Key::Enter, none());
+    assert_eq!(e.selection, vec![comp("circle1")]);
+    assert!(e.camera.scale > overview, "zoomed in");
+    for name in ["ring display", "main"] {
+        let r = e.project.node_rect(&node_id(&e, name)).unwrap();
+        for corner in [r.min, r.max] {
+            let s = e.camera.to_screen(corner);
+            assert!(
+                s.x >= 0.0 && s.y >= 0.0 && s.x <= e.viewport.x && s.y <= e.viewport.y,
+                "{name} is on screen"
+            );
+        }
+    }
+    // ⇧2 frames a selection the same way; ⇧1 fits everything again.
+    let framed = e.camera;
+    e.select(vec![fixture(&e, "ring display")]);
+    key(&mut e, Key::Char('1'), shift());
+    assert!(e.camera.scale < framed.scale);
+    key(&mut e, Key::Char('2'), shift());
+    assert_eq!(e.camera, framed);
 }
 
 // ---- editing ---------------------------------------------------------------
@@ -621,30 +886,50 @@ fn holding_command_changes_the_click_hint() {
     );
 }
 
-/// Every key the hint bar offers for a selected ring does something.
+/// Every key the hint bar offers does something — for a selected ring, and
+/// for a port, an output, a module and a fixture alike.
 #[test]
 fn every_offered_key_does_something() {
-    let mut e = editor();
-    e.select(vec![ring("circle1", "r2")]);
-    let bar = e.hint_bar();
-    for (keys, key_) in [
-        ("Esc", Key::Escape),
-        ("Enter", Key::Enter),
-        ("r", Key::Char('r')),
-        ("− =", Key::Char('=')),
-    ] {
-        assert!(
-            bar.hints.iter().any(|h| h.keys == keys),
-            "{keys} is offered"
-        );
-        let mut probe = e.clone();
-        let before = (probe.project.clone(), probe.selection.clone());
-        probe.key_down(key_.clone(), none());
-        assert_ne!(
-            (probe.project, probe.selection),
-            before,
-            "{keys} changed something"
-        );
+    let e0 = editor();
+    let main = node_id(&e0, "main");
+    let starts = [
+        ring("circle1", "r2"),
+        port(&main, "p1"),
+        Target::Node(main.clone()),
+        fixture(&e0, "tail rig"),
+        fixture(&e0, "strip"),
+    ];
+    for start in starts {
+        let mut e = editor();
+        e.select(vec![start.clone()]);
+        let bar = e.hint_bar();
+        if matches!(start, Target::Object(_)) {
+            for keys in ["Esc", "Enter", "r", "− ="] {
+                assert!(
+                    bar.hints.iter().any(|h| h.keys == keys),
+                    "{keys} is offered"
+                );
+            }
+        }
+        for (keys, key_) in [
+            ("Esc", Key::Escape),
+            ("Enter", Key::Enter),
+            ("r", Key::Char('r')),
+            ("− =", Key::Char('=')),
+            ("⌫", Key::Delete),
+        ] {
+            if !bar.hints.iter().any(|h| h.keys == keys) {
+                continue;
+            }
+            let mut probe = e.clone();
+            let before = (probe.project.clone(), probe.selection.clone());
+            probe.key_down(key_.clone(), none());
+            assert_ne!(
+                (probe.project, probe.selection),
+                before,
+                "{keys} changed something for {start:?}"
+            );
+        }
     }
 }
 
@@ -667,6 +952,20 @@ fn cmd() -> Mods {
     }
 }
 
+fn shift() -> Mods {
+    Mods {
+        shift: true,
+        ..Mods::default()
+    }
+}
+
+fn port(output: &NodeId, key: &str) -> Target {
+    Target::Port {
+        output: output.clone(),
+        key: key.into(),
+    }
+}
+
 fn alt() -> Mods {
     Mods {
         alt: true,
@@ -674,32 +973,23 @@ fn alt() -> Mods {
     }
 }
 
-/// A point in a fixture's own coordinates, on the canvas.
-fn place(e: &Editor, fixture_name: &str, x: f64, y: f64) -> Vec2 {
-    let f = e
-        .project
-        .fixtures
-        .iter()
-        .find(|f| f.name == fixture_name)
-        .unwrap();
-    e.project.origin(&f.id) + Vec2::new(x, y)
+/// A point in a node's own coordinates (from its top-left), on the canvas.
+fn place(e: &Editor, name: &str, x: f64, y: f64) -> Vec2 {
+    e.project.origin(&node_id(e, name)) + Vec2::new(x, y)
 }
 
+fn node_id(e: &Editor, name: &str) -> NodeId {
+    e.project.named(name).unwrap().id.clone()
+}
+
+/// A node, by name: a fixture, a module, an output.
 fn fixture(e: &Editor, name: &str) -> Target {
-    Target::Fixture(
-        e.project
-            .fixtures
-            .iter()
-            .find(|f| f.name == name)
-            .unwrap()
-            .id
-            .clone(),
-    )
+    Target::Node(node_id(e, name))
 }
 
 /// A short line in `strip` crossing line3 at (40, 10).
 fn cross_line3(e: &mut Editor) {
-    let strip = e.project.fixtures[2].id.clone();
+    let strip = node_id(e, "strip");
     e.project.add(
         &strip,
         ComponentKind::line(Vec2::new(40.0, 2.0), Vec2::new(40.0, 18.0), 6),
