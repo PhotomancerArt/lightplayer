@@ -80,6 +80,9 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     /// Records a flush has written (or names) that nothing reachable names
     /// yet: marked live while it runs.
     pub(crate) inflight: Vec<(ObjectId, crate::gc_mark::MarkRole)>,
+    /// The last write GC could not make room for (RAM only: a mount forgets
+    /// it). See `store_space::Refusal`.
+    pub(crate) refused: Option<crate::store_space::Refusal>,
     /// `mutants`: a flush that computes ids and writes nothing.
     #[cfg(feature = "mutants")]
     pub(crate) dry: bool,
@@ -344,6 +347,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             stats: TreeStoreStats::default(),
             live_after_mark: 0,
             inflight: Vec::new(),
+            refused: None,
             #[cfg(feature = "mutants")]
             dry: false,
         }
