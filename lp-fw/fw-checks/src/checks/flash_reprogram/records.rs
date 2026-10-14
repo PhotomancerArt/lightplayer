@@ -20,6 +20,9 @@ pub struct BootRecord<'a> {
     pub generation: u32,
     pub keep: [Option<u32>; MAX_KEEP],
     pub pending: usize,
+    /// What the loop before this boot did (`program`, `erase`; `none` on a
+    /// fresh region).
+    pub loop_mode: &'a str,
 }
 
 impl fmt::Display for BootRecord<'_> {
@@ -27,7 +30,7 @@ impl fmt::Display for BootRecord<'_> {
         let m = self.mac;
         write!(
             f,
-            "{{\"kind\":\"fr-boot\",\"reset\":\"{}\",\"mac\":\"{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\",\"flash_id\":\"0x{:06x}\",\"base\":\"0x{:x}\",\"sectors\":{},\"state\":\"{}\",\"seq\":{},\"generation\":{},\"keep\":{},\"pending\":{}}}",
+            "{{\"kind\":\"fr-boot\",\"reset\":\"{}\",\"mac\":\"{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\",\"flash_id\":\"0x{:06x}\",\"base\":\"0x{:x}\",\"sectors\":{},\"state\":\"{}\",\"seq\":{},\"generation\":{},\"keep\":{},\"pending\":{},\"loop\":\"{}\"}}",
             self.reset,
             m[0],
             m[1],
@@ -43,6 +46,7 @@ impl fmt::Display for BootRecord<'_> {
             self.generation,
             List(&self.keep),
             self.pending,
+            self.loop_mode,
         )
     }
 }
@@ -341,19 +345,136 @@ pub struct PrepareRecord {
     pub keep: [Option<u32>; MAX_KEEP],
     pub pending: usize,
     pub next_generation: u32,
+    /// Sectors programmed with the next generation's pattern for an erase
+    /// loop to erase (0 before a program loop).
+    pub programmed_sectors: u32,
 }
 
 impl fmt::Display for PrepareRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{\"kind\":\"fr-prepare\",\"erased_sectors\":{},\"erase_us\":{},\"blank\":{},\"keep\":{},\"pending\":{},\"next_generation\":{}}}",
+            "{{\"kind\":\"fr-prepare\",\"erased_sectors\":{},\"erase_us\":{},\"blank\":{},\"keep\":{},\"pending\":{},\"next_generation\":{},\"next_loop\":\"{}\",\"programmed_sectors\":{}}}",
             self.erased_sectors,
             self.erase_us,
             self.blank,
             List(&self.keep),
             self.pending,
             self.next_generation,
+            super::mode_of(self.next_generation).name(),
+            self.programmed_sectors,
+        )
+    }
+}
+
+/// `fr-escan`: an erase loop's sectors, read once each, in order.
+pub struct EraseScanRecord {
+    pub generation: u32,
+    pub sectors: u32,
+    /// The loop's index of the first sector that does not read all `0xFF`;
+    /// `None`: the loop erased them all before the cut.
+    pub first_dirty: Option<u32>,
+    /// That sector: `pattern` (the erase never touched it) or `other`.
+    pub first_class: &'static str,
+    pub scan_us: u64,
+}
+
+impl fmt::Display for EraseScanRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{\"kind\":\"fr-escan\",\"generation\":{},\"sectors\":{},\"first_dirty\":{},\"first_class\":\"{}\",\"scan_us\":{}}}",
+            self.generation,
+            self.sectors,
+            Opt(self.first_dirty),
+            self.first_class,
+            self.scan_us,
+        )
+    }
+}
+
+/// `fr-esector`: one torn-erase sector read `reads` times at one stage —
+/// `window` (64 reads, as found), `after` it was programmed to `0x00`, or
+/// the next boot's `recheck`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EraseSectorRecord {
+    pub stage: &'static str,
+    pub addr: u32,
+    /// The loop's index of the sector.
+    pub index: u32,
+    pub reads: u32,
+    /// Bits that read both ways.
+    pub weak: u32,
+    /// Bits that read 0 on every read.
+    pub stable_zero: u32,
+    /// Bits that read 1 on every read.
+    pub stable_one: u32,
+    /// Bytes from the sector's start that read `0x00` on every read.
+    pub leading_zero_bytes: u32,
+    /// Bits whose stable value is the old pattern's (`window` only: an
+    /// erase that had not lifted them yet, or never pre-programmed them).
+    pub as_pattern: u32,
+}
+
+impl EraseSectorRecord {
+    /// Every bit reads 0 on every read.
+    pub fn zeroed(&self) -> bool {
+        self.weak == 0 && self.stable_one == 0
+    }
+}
+
+impl fmt::Display for EraseSectorRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{\"kind\":\"fr-esector\",\"stage\":\"{}\",\"addr\":\"0x{:x}\",\"index\":{},\"reads\":{},\"weak\":{},\"stable_zero\":{},\"stable_one\":{},\"leading_zero_bytes\":{},\"as_pattern\":{},\"zeroed\":{}}}",
+            self.stage,
+            self.addr,
+            self.index,
+            self.reads,
+            self.weak,
+            self.stable_zero,
+            self.stable_one,
+            self.leading_zero_bytes,
+            self.as_pattern,
+            self.zeroed(),
+        )
+    }
+}
+
+/// `fr-econtrol`: a torn-erase sector read [`super::SECTOR_READS`] more
+/// times, left alone, against its 64 window reads.
+pub struct EraseControlRecord {
+    pub addr: u32,
+    pub reads: u32,
+    /// Weak in the window's reads.
+    pub weak_window: u32,
+    /// Weak in the control's reads.
+    pub weak_control: u32,
+    /// Weak in both.
+    pub weak_both: u32,
+    /// Weak in the window, stable through every control read.
+    pub settled_alone: u32,
+    /// Stable in the window, weak in the control.
+    pub new_weak: u32,
+    /// Bits stable in both but read differently (none expected).
+    pub moved: u32,
+}
+
+impl fmt::Display for EraseControlRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{\"kind\":\"fr-econtrol\",\"addr\":\"0x{:x}\",\"reads\":{},\"gap_us\":{},\"weak_window\":{},\"weak_control\":{},\"weak_both\":{},\"settled_alone\":{},\"new_weak\":{},\"moved\":{}}}",
+            self.addr,
+            self.reads,
+            super::CONTROL_GAP_US,
+            self.weak_window,
+            self.weak_control,
+            self.weak_both,
+            self.settled_alone,
+            self.new_weak,
+            self.moved,
         )
     }
 }

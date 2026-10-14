@@ -1664,6 +1664,16 @@ static FLASH_REPROGRAM_FIELDS: &[FieldSpec] = &[
         class: FieldClass::Structural,
     },
     FieldSpec {
+        record: "fr-esector",
+        field: "weak",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-esector",
+        field: "zeroed",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
         record: "fr-scan",
         field: "scan_us",
         class: FieldClass::Timing,
@@ -3149,8 +3159,10 @@ pub static ALL_PAYLOADS: &[Payload] = &[
     // board and cut driver as `flash-tears`, a work loop that only programs
     // (every erase runs before the scan-done line), and a boot that finds
     // the torn words, reads them left alone, re-programs them and reads them
-    // again, then once more after the next cut. Not `flash-tears-*`: its
-    // transcripts are not tear-shape histograms.
+    // again, then once more after the next cut. Even generations' loops
+    // erase instead (a program cut tears inside a word about 1 time in 80),
+    // and a torn erase's sector is zeroed and read the same way. Not
+    // `flash-tears-*`: its transcripts are not tear-shape histograms.
     Payload {
         name: "flash-reprogram",
         chips: &[],
@@ -3174,6 +3186,9 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             "fr-write",
             "fr-prepare",
             "fr-timing",
+            "fr-escan",
+            "fr-esector",
+            "fr-econtrol",
         ],
         mask_set: "flash-tears",
         fields: FLASH_REPROGRAM_FIELDS,

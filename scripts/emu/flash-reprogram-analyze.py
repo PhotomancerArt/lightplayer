@@ -130,6 +130,103 @@ def outcome(reads: dict | None) -> str:
     return "still weak"
 
 
+def erase_section(boots: list[dict]) -> None:
+    """The erase loop's cuts: each torn sector, left alone, zeroed, re-checked."""
+    p = print
+    ecuts = [b for b in boots if b["boot"]["reset"] == "poweron" and b["boot"].get("loop") == "erase"]
+    if not ecuts:
+        return
+    by_path: dict[str, list[dict]] = {}
+    for b in boots:
+        by_path.setdefault(b["path"], []).append(b)
+    finished = sum(1 for b in ecuts if (one(b, "fr-escan") or {}).get("first_dirty") is None)
+    untouched = sum(
+        1
+        for b in ecuts
+        if (one(b, "fr-escan") or {}).get("first_class") == "pattern" and not of(b, "fr-esector", stage="window")
+    )
+    rows = []
+    for b in ecuts:
+        seq = by_path[b["path"]]
+        nxt = seq[b["n"] + 1] if b["n"] + 1 < len(seq) else None
+        for w in of(b, "fr-esector", stage="window"):
+            addr = w["addr"]
+            rows.append(
+                {
+                    "path": os.path.basename(b["path"]),
+                    "boot": b["n"],
+                    "w": w,
+                    "ctl": next(iter(of(b, "fr-econtrol", addr=addr)), None),
+                    "after": next(iter(of(b, "fr-esector", stage="after", addr=addr)), None),
+                    "re": next(iter(of(nxt, "fr-esector", stage="recheck", addr=addr)), None) if nxt else None,
+                    "re_reset": nxt["boot"]["reset"] if nxt else None,
+                }
+            )
+    p(f"### Erase loop: {len(ecuts)} cuts")
+    p()
+    p(
+        f"{len(rows)} torn sector(s); {finished} cut(s) after the loop had erased every sector; "
+        f"{untouched} with the sector in flight still its old pattern and the one before it erased whole."
+    )
+    p()
+    if not rows:
+        return
+
+    def shape(w: dict) -> str:
+        bits = 4096 * 8
+        if w["stable_zero"] == 0:
+            return "reads erased, weak"
+        if w["stable_one"] == 0:
+            return "all zero, weak" if w["weak"] else "all zero"
+        if w["leading_zero_bytes"] > 0 and w["leading_zero_bytes"] * 8 + w["as_pattern"] + w["weak"] >= bits - 64:
+            return "zeroing"
+        return "erasing"
+
+    def st(r: dict | None) -> str:
+        if r is None:
+            return "—"
+        if r["zeroed"]:
+            return "all 0, stable"
+        return f"{r['weak']} weak, {r['stable_one']} stable 1"
+
+    p(
+        "| transcript | boot | sector | shape | weak (64 reads) | stable 1s | left alone, 512 reads: weak / "
+        "settled alone / new | programmed 0x00, 512 reads | after the next cut, 512 reads |"
+    )
+    p("|---|---:|---|---|---:|---:|---|---|---|")
+    for r in rows:
+        w, c = r["w"], r["ctl"]
+        cs = f"{c['weak_control']} / {c['settled_alone']} / {c['new_weak']}" if c else "—"
+        re_s = st(r["re"])
+        if r["re"] is not None and r["re_reset"] != "poweron":
+            re_s += f" (reset `{r['re_reset']}`, not a cut)"
+        p(
+            f"| {r['path']} | {r['boot']} | {w['addr']} | {shape(w)} | {w['weak']} | {w['stable_one']} | {cs} | "
+            f"{st(r['after'])} | {re_s} |"
+        )
+    p()
+    weak_rows = [r for r in rows if r["w"]["weak"] > 0 or (r["ctl"] and r["ctl"]["weak_control"] > 0)]
+    tot_w = sum(r["w"]["weak"] for r in weak_rows)
+    tot_c = sum(r["ctl"]["weak_control"] for r in weak_rows if r["ctl"])
+    tot_alone = sum(r["ctl"]["settled_alone"] for r in weak_rows if r["ctl"])
+    after_ok = sum(1 for r in weak_rows if r["after"] and r["after"]["zeroed"])
+    after_weak = sum(r["after"]["weak"] for r in weak_rows if r["after"])
+    after_ones = sum(r["after"]["stable_one"] for r in weak_rows if r["after"])
+    re_rows = [r for r in weak_rows if r["re"] is not None and r["re_reset"] == "poweron"]
+    re_ok = sum(1 for r in re_rows if r["re"]["zeroed"])
+    p(
+        "| torn sectors with weak bits | weak bits (64 reads) | weak bits left alone (512 reads) "
+        "| 64-read weak bits stable through the 512 | zeroed and stable after re-program "
+        "| weak / stable-1 bits after re-program | zeroed and stable after the next cut |"
+    )
+    p("|---:|---:|---:|---:|---:|---:|---:|")
+    p(
+        f"| {len(weak_rows)} | {tot_w} | {tot_c} | {tot_alone} | {after_ok} of {len(weak_rows)} | "
+        f"{after_weak} / {after_ones} | {re_ok} of {len(re_rows)} |"
+    )
+    p()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("paths", nargs="*")
@@ -146,12 +243,18 @@ def main() -> int:
         return 0
 
     # A `fresh` boot set the region up (no state yet): it scans nothing.
-    cuts = [b for b in boots if b["boot"]["reset"] == "poweron" and b["boot"]["state"] != "fresh"]
+    every_cut = [b for b in boots if b["boot"]["reset"] == "poweron" and b["boot"]["state"] != "fresh"]
+    # The loop before a boot: `program` unless it says `erase` (the first
+    # 300 cuts' firmware printed no `loop`, and only programmed).
+    cuts = [b for b in every_cut if b["boot"].get("loop", "program") == "program"]
     resets: dict[str, int] = {}
     for b in boots:
         resets[b["boot"]["reset"]] = resets.get(b["boot"]["reset"], 0) + 1
     p = print
-    p(f"## `flash-reprogram`: {len(paths)} transcript(s), {len(boots)} boots, {len(cuts)} power cuts")
+    p(
+        f"## `flash-reprogram`: {len(paths)} transcript(s), {len(boots)} boots, {len(every_cut)} power cuts "
+        f"({len(cuts)} in a program loop, {len(every_cut) - len(cuts)} in an erase loop)"
+    )
     p()
     p("Boots by reset: " + ", ".join(f"`{k}` {v}" for k, v in sorted(resets.items())))
     p()
@@ -196,7 +299,7 @@ def main() -> int:
             scan = one(b, "fr-scan")
             if scan and scan["frontier"] is not None:
                 frontier_ms.append(scan["frontier"] / WRITE * per_write / 1000)
-    p("### Where the cut landed")
+    p("### Program loop: where the cut landed")
     p()
     p("| cut boots | region full (missed) | clean stop | torn word(s) |")
     p("|---:|---:|---:|---:|")
@@ -223,7 +326,7 @@ def main() -> int:
     weak_words = [
         w for w in cut_words if w["torn"]["weak"] > 0 or (w["before"] and not w["before"]["stable"])
     ]
-    p("### Torn words")
+    p("### Program loop: torn words")
     p()
     p(
         f"{len(cut_words)} torn word(s) after power cuts, {len(weak_words)} with a weak bit "
@@ -269,7 +372,7 @@ def main() -> int:
             out[k] = out.get(k, 0) + 1
         return out
 
-    p("### The answer, for words with a weak bit")
+    p("### Program loop: the answer, for words with a weak bit")
     p()
     p("| stage | outcome |")
     p("|---|---|")
@@ -292,6 +395,7 @@ def main() -> int:
                 f"({sum(1 for r in ws if not r['tail_ok'])} with a disturbed tail)."
             )
     p()
+    erase_section(boots)
     if anomalies:
         p("### Anomalies")
         p()

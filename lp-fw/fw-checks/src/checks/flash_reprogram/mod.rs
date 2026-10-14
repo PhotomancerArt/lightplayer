@@ -55,6 +55,20 @@
 //!    erase every other dirty sector, time one erase and 16 writes in the
 //!    scratch sector, and print [`SCAN_DONE_MARKER`].
 //!
+//! # Two loops, on alternate generations
+//!
+//! A program cut tears a word inside itself rarely: on CX1's first 250
+//! cuts of this payload, the part stopped on a whole word 247 times. So
+//! every even generation's loop **erases** instead ([`LoopMode::Erase`]):
+//! the boot before it programs the first [`ERASE_SECTORS`] sectors of the
+//! region with the generation's pattern, and the loop erases them one by
+//! one. A cut in an erase leaves a sector caught on its way to `0xFF` — a
+//! pre-program stopped inside a word, or cells part-way lifted, which in
+//! `flash-tears` carried a median of ~90 weak bits a sector — and each such
+//! sector is read, left alone, programmed to `0x00` (what the erase's own
+//! pre-program would have written) and read again, at the sector's scale:
+//! the same question, asked of far more cells than a torn program offers.
+//!
 //! Everything here is arithmetic over bytes and runs on the host against a
 //! fake part (`runner`'s tests), with a part whose weak bits settle when
 //! programmed and one whose do not. What stays in `fw-esp32c6` is the flash
@@ -139,3 +153,42 @@ pub const CONTROL_GAP_US: u64 = 20_000;
 
 /// Writes the boot's timed program makes in the scratch sector.
 pub const TIMING_WRITES: usize = 16;
+
+/// Sectors an erase loop erases (about 1.4 s of erasing on CX1, where the
+/// host cuts 0.4-0.9 s in).
+pub const ERASE_SECTORS: u32 = 64;
+
+/// Reads of a whole sector in one chunk of an erase-mode stage.
+pub const SECTOR_CHUNK_READS: usize = 64;
+
+/// Reads of a whole sector per erase-mode stage (control, after, re-check),
+/// in [`CONTROL_CHUNKS`] chunks [`CONTROL_GAP_US`] apart.
+pub const SECTOR_READS: usize = SECTOR_CHUNK_READS * CONTROL_CHUNKS;
+
+/// What a generation's work loop does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoopMode {
+    /// Program the region, write by write.
+    Program,
+    /// Erase the first [`ERASE_SECTORS`] sectors of the region, one by one.
+    Erase,
+}
+
+impl LoopMode {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Program => "program",
+            Self::Erase => "erase",
+        }
+    }
+}
+
+/// The loop generation `generation` runs: odd generations program, even
+/// ones erase.
+pub const fn mode_of(generation: u32) -> LoopMode {
+    if generation % 2 == 0 {
+        LoopMode::Erase
+    } else {
+        LoopMode::Program
+    }
+}

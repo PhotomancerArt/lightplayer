@@ -10,14 +10,14 @@ use core::fmt;
 use super::layout::{ProgramOrder, ReprogramLayout};
 use super::pattern::{fill, intended_word};
 use super::records::{
-    BootRecord, PrepareRecord, ReadsRecord, ReprogramRecord, ScanRecord, TimingRecord, TornWord,
-    WindowRecord, WordReads, WriteRecord,
+    BootRecord, EraseControlRecord, EraseScanRecord, EraseSectorRecord, PrepareRecord, ReadsRecord,
+    ReprogramRecord, ScanRecord, TimingRecord, TornWord, WindowRecord, WordReads, WriteRecord,
 };
 use super::state::{self, ENTRY_SIZE, State};
 use super::{
-    CONTROL_CHUNK_READS, CONTROL_CHUNKS, CONTROL_GAP_US, MAX_GROUPS, MAX_KEEP, MAX_SECTORS,
-    MAX_TORN, MAX_WINDOW, REGION_FIRST, SECTOR_SIZE, TIMING_WRITES, WINDOW_READS, WORD_SIZE,
-    WRITE_SIZE,
+    CONTROL_CHUNK_READS, CONTROL_CHUNKS, CONTROL_GAP_US, ERASE_SECTORS, LoopMode, MAX_GROUPS,
+    MAX_KEEP, MAX_SECTORS, MAX_TORN, MAX_WINDOW, REGION_FIRST, SECTOR_CHUNK_READS, SECTOR_SIZE,
+    TIMING_WRITES, WINDOW_READS, WORD_SIZE, WRITE_SIZE, mode_of,
 };
 
 /// The flash the payload drives. Addresses are absolute.
@@ -36,11 +36,14 @@ pub type Emit<'a> = &'a mut dyn FnMut(&dyn fmt::Display);
 /// A microsecond clock.
 pub type Clock<'a> = &'a mut dyn FnMut() -> u64;
 
-/// Working memory for one boot, about 12.5 KiB. The firmware puts it on the
+/// Working memory for one boot, about 20.5 KiB. The firmware puts it on the
 /// heap; nothing here allocates.
 pub struct Buffers {
     pub and: [u8; MAX_WINDOW],
     pub or: [u8; MAX_WINDOW],
+    /// A second pair, for an erase-mode stage read against the window.
+    pub and2: [u8; SECTOR_SIZE],
+    pub or2: [u8; SECTOR_SIZE],
     pub read: [u8; SECTOR_SIZE],
     pub write: [u8; WRITE_SIZE],
 }
@@ -50,6 +53,8 @@ impl Buffers {
         Self {
             and: [0; MAX_WINDOW],
             or: [0; MAX_WINDOW],
+            and2: [0; SECTOR_SIZE],
+            or2: [0; SECTOR_SIZE],
             read: [0; SECTOR_SIZE],
             write: [0; WRITE_SIZE],
         }
@@ -104,9 +109,28 @@ pub fn boot<F: ReprogramFlash>(
         generation: prev.generation,
         keep: prev.keep,
         pending: prev.pending_list().count(),
+        loop_mode: mode_of(prev.generation).name(),
     });
 
-    // 1. The words the last boot re-programmed, after this boot's cut.
+    // 1. The words (or, after an erase loop's boot, the sectors) the last
+    //    boot re-programmed, after this boot's cut.
+    let sectors_pending = mode_of(prev.pending_generation) == LoopMode::Erase
+        && prev.pending_list().next().is_none()
+        && prev.group_list().next().is_none();
+    if sectors_pending {
+        for s in prev.keep_list() {
+            let addr = layout.sector_addr(s);
+            sector_reads(flash, addr, CONTROL_CHUNKS, bufs, now_us)?;
+            let r = classify_sector(&bufs.and2, &bufs.or2, None);
+            emit(&EraseSectorRecord {
+                stage: "recheck",
+                addr,
+                index: u32::MAX,
+                reads: (SECTOR_CHUNK_READS * CONTROL_CHUNKS) as u32,
+                ..r
+            });
+        }
+    }
     for (write, span) in prev.group_list() {
         let r = check_write(flash, write, span, prev.pending_generation, bufs)?;
         emit(&WriteRecord {
@@ -128,7 +152,6 @@ pub fn boot<F: ReprogramFlash>(
         });
     }
 
-    // 2. The region, once, in the loop's order.
     let keep: [u32; MAX_KEEP] = {
         let mut k = [u32::MAX; MAX_KEEP];
         for (i, s) in prev.keep_list().enumerate() {
@@ -137,11 +160,92 @@ pub fn boot<F: ReprogramFlash>(
         k
     };
     let order = ProgramOrder::new(*layout, &keep);
+    let out = match mode_of(prev.generation) {
+        LoopMode::Program => {
+            program_experiment(flash, layout, &order, prev.generation, bufs, now_us, emit)?
+        }
+        LoopMode::Erase => {
+            erase_experiment(flash, layout, &order, prev.generation, bufs, now_us, emit)?
+        }
+    };
+    let Outcome {
+        dirty: scan_dirty,
+        keep_next,
+        torn,
+        n,
+        groups,
+    } = out;
+
+    // 6. Keep the torn words' sectors, erase every other dirty one.
+    let mut dirty = scan_dirty;
+    for s in prev.keep_list() {
+        dirty.set(s);
+    }
+    for s in keep_next.iter().flatten() {
+        dirty.clear(*s);
+    }
+    let next = State {
+        seq: prev.seq + 1,
+        generation: prev.generation + 1,
+        keep: keep_next,
+        pending_generation: prev.generation,
+        pending: {
+            let mut p = [None; MAX_TORN];
+            for (i, t) in torn[..n].iter().enumerate() {
+                p[i] = Some(t.addr);
+            }
+            p
+        },
+        groups,
+    };
+    let (erased, erase_us, blank) = erase_dirty(flash, layout, &dirty, bufs, now_us)?;
+    let keep: [u32; MAX_KEEP] = keep_next.map(|k| k.unwrap_or(u32::MAX));
+    let armed = Armed {
+        order: ProgramOrder::new(*layout, &keep),
+        generation: next.generation,
+    };
+    let programmed_sectors = arm_erase_loop(flash, &armed, bufs)?;
+    emit(&PrepareRecord {
+        erased_sectors: erased,
+        erase_us,
+        blank,
+        keep: keep_next,
+        pending: n,
+        next_generation: next.generation,
+        programmed_sectors,
+    });
+    write_state(flash, layout, free, &next)?;
+    emit(&timing(flash, layout, bufs, now_us)?);
+    Ok(armed)
+}
+
+/// What one boot's experiment leaves for the next: what to erase, what to
+/// keep, and the words it re-programmed.
+struct Outcome {
+    dirty: SectorSet,
+    keep_next: [Option<u32>; MAX_KEEP],
+    torn: [TornWord; MAX_TORN],
+    n: usize,
+    groups: [Option<(u32, u32)>; MAX_GROUPS],
+}
+
+/// After a program loop: the frontier, its torn words, the control, the
+/// re-program and the reads after it.
+fn program_experiment<F: ReprogramFlash>(
+    flash: &mut F,
+    layout: &ReprogramLayout,
+    order: &ProgramOrder,
+    generation: u32,
+    bufs: &mut Buffers,
+    now_us: Clock<'_>,
+    emit: Emit<'_>,
+) -> Result<Outcome, F::Error> {
+    // 2. The region, once, in the loop's order.
     let t0 = now_us();
-    let scan = scan_region(flash, &order, prev.generation, bufs)?;
+    let scan = scan_region(flash, order, generation, bufs)?;
     let scan_us = now_us() - t0;
     emit(&ScanRecord {
-        generation: prev.generation,
+        generation,
         order_bytes: order.len(),
         frontier: scan.frontier,
         frontier_addr: scan.frontier.map(|f| order.addr(f)),
@@ -159,14 +263,7 @@ pub fn boot<F: ReprogramFlash>(
     let mut keep_next: [Option<u32>; MAX_KEEP] = [None; MAX_KEEP];
     let mut n = 0;
     if let Some(frontier) = scan.frontier {
-        let w = window(
-            flash,
-            &order,
-            prev.generation,
-            frontier,
-            scan.last_dirty,
-            bufs,
-        )?;
+        let w = window(flash, order, generation, frontier, scan.last_dirty, bufs)?;
         // Follow torn words while their writes fit in the groups and their
         // sectors in the kept set.
         for t in w.torn.iter().take(w.found.min(MAX_TORN)) {
@@ -215,14 +312,14 @@ pub fn boot<F: ReprogramFlash>(
     // 5. Re-program each torn write's span with what it was meant to hold,
     //    then read it back.
     for &(write, span) in groups.iter().flatten() {
-        fill(write, prev.generation, &mut bufs.write[..span as usize]);
+        fill(write, generation, &mut bufs.write[..span as usize]);
         let t0 = now_us();
         flash.program(write, &bufs.write[..span as usize])?;
         let us = now_us() - t0;
         emit(&ReprogramRecord { write, span, us });
     }
     for &(write, span) in groups.iter().flatten() {
-        let r = check_write(flash, write, span, prev.generation, bufs)?;
+        let r = check_write(flash, write, span, generation, bufs)?;
         emit(&WriteRecord {
             stage: "after",
             ..r
@@ -237,44 +334,124 @@ pub fn boot<F: ReprogramFlash>(
         });
     }
 
-    // 6. Keep the torn words' sectors, erase every other dirty one.
-    let mut dirty = scan.dirty;
-    for s in prev.keep_list() {
-        dirty.set(s);
-    }
-    for s in keep_next.iter().flatten() {
-        dirty.clear(*s);
-    }
-    let next = State {
-        seq: prev.seq + 1,
-        generation: prev.generation + 1,
-        keep: keep_next,
-        pending_generation: prev.generation,
-        pending: {
-            let mut p = [None; MAX_TORN];
-            for (i, t) in torn[..n].iter().enumerate() {
-                p[i] = Some(t.addr);
-            }
-            p
-        },
+    Ok(Outcome {
+        dirty: scan.dirty,
+        keep_next,
+        torn,
+        n,
         groups,
-    };
-    let (erased, erase_us, blank) = erase_dirty(flash, layout, &dirty, bufs, now_us)?;
-    emit(&PrepareRecord {
-        erased_sectors: erased,
-        erase_us,
-        blank,
-        keep: keep_next,
-        pending: n,
-        next_generation: next.generation,
-    });
-    write_state(flash, layout, free, &next)?;
-    emit(&timing(flash, layout, bufs, now_us)?);
-    let keep: [u32; MAX_KEEP] = keep_next.map(|k| k.unwrap_or(u32::MAX));
-    Ok(Armed {
-        order: ProgramOrder::new(*layout, &keep),
-        generation: next.generation,
     })
+}
+
+/// After an erase loop: the first sector the loop had not finished and the
+/// last it had, each read 64 times; a sector that is neither stably erased
+/// nor stably its old pattern is torn, and is read left alone, programmed to
+/// `0x00` and read again.
+fn erase_experiment<F: ReprogramFlash>(
+    flash: &mut F,
+    layout: &ReprogramLayout,
+    order: &ProgramOrder,
+    generation: u32,
+    bufs: &mut Buffers,
+    now_us: Clock<'_>,
+    emit: Emit<'_>,
+) -> Result<Outcome, F::Error> {
+    let mut out = Outcome {
+        dirty: SectorSet::default(),
+        keep_next: [None; MAX_KEEP],
+        torn: [TornWord::default(); MAX_TORN],
+        n: 0,
+        groups: [None; MAX_GROUPS],
+    };
+    let sectors = ERASE_SECTORS.min(order.sectors());
+    let (mut first, mut first_class) = (None, "");
+    let t0 = now_us();
+    // Every sector the loop could have touched is checked for dirt (a
+    // reset that interrupted some other loop leaves more), but only the
+    // erase loop's own sectors are scanned for the one in flight.
+    for k in 0..order.sectors() {
+        let s = order.sector(k);
+        let addr = layout.sector_addr(s);
+        flash.read(addr, &mut bufs.read)?;
+        if bufs.read.iter().all(|&b| b == 0xFF) {
+            continue;
+        }
+        out.dirty.set(s);
+        if first.is_none() && k < sectors {
+            first = Some(k);
+            fill(addr, generation, &mut bufs.and2);
+            first_class = if bufs.read == bufs.and2 {
+                "pattern"
+            } else {
+                "other"
+            };
+        }
+    }
+    let scan_us = now_us() - t0;
+    emit(&EraseScanRecord {
+        generation,
+        sectors,
+        first_dirty: first,
+        first_class,
+        scan_us,
+    });
+    // The sector in flight is the first not erased, or the last erased (a
+    // torn erase that reads erased); the loop finished: the last.
+    let candidates = match first {
+        Some(0) => [Some(0), None],
+        Some(k) => [Some(k - 1), Some(k)],
+        None => [sectors.checked_sub(1), None],
+    };
+    for k in candidates.into_iter().flatten() {
+        let s = order.sector(k);
+        let addr = layout.sector_addr(s);
+        window_sector(flash, addr, bufs)?;
+        let w = classify_sector(
+            &bufs.and,
+            &bufs.or,
+            Some(generation_pattern(addr, generation)),
+        );
+        if w.weak == 0 && (w.stable_zero == 0 || w.as_pattern == (SECTOR_SIZE * 8) as u32) {
+            // Stably erased, or stably the old pattern: nothing torn here.
+            continue;
+        }
+        let Some(slot) = out.keep_next.iter().position(Option::is_none) else {
+            continue;
+        };
+        emit(&EraseSectorRecord {
+            stage: "window",
+            addr,
+            index: k,
+            reads: WINDOW_READS as u32,
+            ..w
+        });
+        // The control: read left alone, against the window.
+        sector_reads(flash, addr, CONTROL_CHUNKS, bufs, now_us)?;
+        emit(&control_of(addr, bufs));
+        // Program it to 0x00, what the erase's pre-program writes first.
+        bufs.write.fill(0);
+        let t0 = now_us();
+        for w in 0..(SECTOR_SIZE / WRITE_SIZE) as u32 {
+            flash.program(addr + w * WRITE_SIZE as u32, &bufs.write)?;
+        }
+        let us = now_us() - t0;
+        emit(&ReprogramRecord {
+            write: addr,
+            span: SECTOR_SIZE as u32,
+            us,
+        });
+        sector_reads(flash, addr, CONTROL_CHUNKS, bufs, now_us)?;
+        let a = classify_sector(&bufs.and2, &bufs.or2, None);
+        emit(&EraseSectorRecord {
+            stage: "after",
+            addr,
+            index: k,
+            reads: (SECTOR_CHUNK_READS * CONTROL_CHUNKS) as u32,
+            ..a
+        });
+        out.keep_next[slot] = Some(s);
+    }
+    Ok(out)
 }
 
 /// The work loop: the region, write by write, in order, then nothing.
@@ -283,14 +460,47 @@ pub fn work_loop<F: ReprogramFlash>(
     armed: &Armed,
     buf: &mut [u8; WRITE_SIZE],
 ) -> Result<(), F::Error> {
-    let mut at = 0;
-    while at < armed.order.len() {
-        let addr = armed.order.addr(at);
-        fill(addr, armed.generation, buf);
-        flash.program(addr, buf)?;
-        at += WRITE_SIZE as u32;
+    match mode_of(armed.generation) {
+        LoopMode::Program => {
+            let mut at = 0;
+            while at < armed.order.len() {
+                let addr = armed.order.addr(at);
+                fill(addr, armed.generation, buf);
+                flash.program(addr, buf)?;
+                at += WRITE_SIZE as u32;
+            }
+        }
+        LoopMode::Erase => {
+            for k in 0..ERASE_SECTORS.min(armed.order.sectors()) {
+                let addr = armed.order.layout.sector_addr(armed.order.sector(k));
+                flash.erase(addr, addr + SECTOR_SIZE as u32)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Before an erase loop: program the sectors it will erase with its
+/// generation's pattern (they are erased: the boot's prepare erased every
+/// dirty sector). Returns how many; 0 before a program loop.
+fn arm_erase_loop<F: ReprogramFlash>(
+    flash: &mut F,
+    armed: &Armed,
+    bufs: &mut Buffers,
+) -> Result<u32, F::Error> {
+    if mode_of(armed.generation) != LoopMode::Erase {
+        return Ok(0);
+    }
+    let sectors = ERASE_SECTORS.min(armed.order.sectors());
+    for k in 0..sectors {
+        let addr = armed.order.layout.sector_addr(armed.order.sector(k));
+        for w in 0..(SECTOR_SIZE / WRITE_SIZE) as u32 {
+            let at = addr + w * WRITE_SIZE as u32;
+            fill(at, armed.generation, &mut bufs.write);
+            flash.program(at, &bufs.write)?;
+        }
+    }
+    Ok(sectors)
 }
 
 /// No state: erase the state sector and the region, arm generation 1.
@@ -313,6 +523,7 @@ fn fresh<F: ReprogramFlash>(
         generation: 0,
         keep: [None; MAX_KEEP],
         pending: 0,
+        loop_mode: "none",
     });
     flash.erase(
         layout.state_addr(),
@@ -335,6 +546,7 @@ fn fresh<F: ReprogramFlash>(
         keep: [None; MAX_KEEP],
         pending: 0,
         next_generation: next.generation,
+        programmed_sectors: 0,
     });
     write_state(flash, layout, Some(0), &next)?;
     emit(&timing(flash, layout, bufs, now_us)?);
@@ -677,6 +889,119 @@ fn timing<F: ReprogramFlash>(
     Ok(t)
 }
 
+/// Read the sector at `addr` [`WINDOW_READS`] times into `bufs.and`/`or`.
+fn window_sector<F: ReprogramFlash>(
+    flash: &mut F,
+    addr: u32,
+    bufs: &mut Buffers,
+) -> Result<(), F::Error> {
+    for r in 0..WINDOW_READS {
+        flash.read(addr, &mut bufs.read)?;
+        accumulate(&mut bufs.and, &mut bufs.or, &bufs.read, r == 0);
+    }
+    Ok(())
+}
+
+/// Read the sector at `addr` `chunks` × [`SECTOR_CHUNK_READS`] times, the
+/// chunks [`CONTROL_GAP_US`] apart, into `bufs.and2`/`or2`.
+fn sector_reads<F: ReprogramFlash>(
+    flash: &mut F,
+    addr: u32,
+    chunks: usize,
+    bufs: &mut Buffers,
+    now_us: Clock<'_>,
+) -> Result<(), F::Error> {
+    for c in 0..chunks {
+        if c > 0 {
+            let t0 = now_us();
+            while now_us() - t0 < CONTROL_GAP_US {}
+        }
+        for r in 0..SECTOR_CHUNK_READS {
+            flash.read(addr, &mut bufs.read)?;
+            accumulate(&mut bufs.and2, &mut bufs.or2, &bufs.read, c == 0 && r == 0);
+        }
+    }
+    Ok(())
+}
+
+fn accumulate(and: &mut [u8], or: &mut [u8], read: &[u8], first: bool) {
+    for i in 0..read.len() {
+        if first {
+            (and[i], or[i]) = (read[i], read[i]);
+        } else {
+            and[i] &= read[i];
+            or[i] |= read[i];
+        }
+    }
+}
+
+/// A sector's bits by how they read; `pattern`: the old pattern's bytes, to
+/// count the bits that still read as it.
+fn classify_sector(and: &[u8], or: &[u8], pattern: Option<PatternOf>) -> EraseSectorRecord {
+    let mut r = EraseSectorRecord::default();
+    let mut leading = true;
+    for i in 0..SECTOR_SIZE {
+        let (a, o) = (and[i], or[i]);
+        r.weak += (a ^ o).count_ones();
+        r.stable_zero += (!o).count_ones();
+        r.stable_one += a.count_ones();
+        if leading && o == 0 {
+            r.leading_zero_bytes += 1;
+        } else {
+            leading = false;
+        }
+        if let Some(p) = pattern {
+            let pb = p.byte(i);
+            // Stable bits equal to the pattern's.
+            r.as_pattern += (!(a ^ o) & !(a ^ pb)).count_ones();
+        }
+    }
+    r
+}
+
+/// The control's reads (`and2`/`or2`) against the window's (`and`/`or`).
+fn control_of(addr: u32, bufs: &Buffers) -> EraseControlRecord {
+    let mut r = EraseControlRecord {
+        addr,
+        reads: (SECTOR_CHUNK_READS * CONTROL_CHUNKS) as u32,
+        weak_window: 0,
+        weak_control: 0,
+        weak_both: 0,
+        settled_alone: 0,
+        new_weak: 0,
+        moved: 0,
+    };
+    for i in 0..SECTOR_SIZE {
+        let ww = bufs.and[i] ^ bufs.or[i];
+        let wc = bufs.and2[i] ^ bufs.or2[i];
+        r.weak_window += ww.count_ones();
+        r.weak_control += wc.count_ones();
+        r.weak_both += (ww & wc).count_ones();
+        r.settled_alone += (ww & !wc).count_ones();
+        r.new_weak += (wc & !ww).count_ones();
+        r.moved += (!ww & !wc & (bufs.and[i] ^ bufs.and2[i])).count_ones();
+    }
+    r
+}
+
+/// The old pattern of one sector, byte by byte.
+#[derive(Clone, Copy)]
+struct PatternOf {
+    addr: u32,
+    generation: u32,
+}
+
+impl PatternOf {
+    fn byte(&self, i: usize) -> u8 {
+        let w = intended_word(self.addr + (i & !3) as u32, self.generation);
+        w.to_le_bytes()[i & 3]
+    }
+}
+
+fn generation_pattern(addr: u32, generation: u32) -> PatternOf {
+    PatternOf { addr, generation }
+}
+
 fn word_at(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
@@ -707,6 +1032,10 @@ mod tests {
         /// The first `whole` bytes land; in the next word, bit `weak`
         /// (meant 0) is left weak and every other clear lands.
         WeakBit { whole: usize, weak: u32 },
+        /// An erase caught lifting: the sector all 0 but for one stable 1
+        /// (byte 500, bit 7) and three weak bits (byte 100 bit 4, byte
+        /// 3000 bits 1 and 2).
+        Erasing,
     }
 
     #[derive(Debug, PartialEq)]
@@ -770,9 +1099,22 @@ mod tests {
             if !self.powered {
                 return Err(PowerLost);
             }
-            self.cells[from as usize..to as usize].fill(0xFF);
-            self.weak[from as usize..to as usize].fill(0);
-            Ok(())
+            let hit = self.cut_after == Some(self.ops);
+            self.ops += 1;
+            let (a, b) = (from as usize, to as usize);
+            if !hit {
+                self.cells[a..b].fill(0xFF);
+                self.weak[a..b].fill(0);
+                return Ok(());
+            }
+            self.powered = false;
+            if let Tear::Erasing = self.tear {
+                self.cells[a..b].fill(0x00);
+                self.cells[a + 500] = 0x80;
+                self.weak[a + 100] |= 0x10;
+                self.weak[a + 3000] |= 0x06;
+            }
+            Err(PowerLost)
         }
         fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), PowerLost> {
             if !self.powered {
@@ -785,6 +1127,7 @@ mod tests {
                 (false, _) => data.len(),
                 (true, Tear::Prefix(n)) => n.min(data.len()),
                 (true, Tear::WeakBit { whole, .. }) => whole.min(data.len()),
+                (true, Tear::Erasing) => 0,
             };
             for i in 0..n {
                 self.cells[a + i] &= data[i];
@@ -1024,7 +1367,113 @@ mod tests {
             &snapshot[..]
         );
         let (out, _) = boot_once(&mut nor);
-        assert!(records(&out, "fr-scan")[0].contains(r#""frontier":null"#));
+        // Generation 2's loop erased.
+        assert!(out[0].contains(r#""loop":"erase""#), "{}", out[0]);
+        let scan = records(&out, "fr-escan")[0];
+        assert!(scan.contains(r#""first_dirty":null"#), "{scan}");
         assert!(records(&out, "fr-reads")[0].contains(r#""correct":true"#));
+    }
+
+    /// Generation 1 programs; generation 2's loop erases what its boot
+    /// programmed.
+    fn to_an_erase_loop(nor: &mut FakeNor) -> Armed {
+        let (_, armed) = boot_once(nor);
+        assert_eq!(armed.generation, 1);
+        work(nor, &armed);
+        let (out, armed) = boot_once(nor);
+        let prep = records(&out, "fr-prepare")[0];
+        assert!(
+            prep.contains(r#""next_loop":"erase","programmed_sectors":18"#),
+            "{prep}"
+        );
+        assert_eq!(mode_of(armed.generation), LoopMode::Erase);
+        armed
+    }
+
+    #[test]
+    fn a_torn_erase_is_read_left_alone_zeroed_and_rechecked_on_a_settling_part() {
+        let mut nor = FakeNor::new(true);
+        let armed = to_an_erase_loop(&mut nor);
+        // Five sectors erased, the sixth torn.
+        nor.cut(5, Tear::Erasing);
+        work(&mut nor, &armed);
+        let (out, next) = boot_once(&mut nor);
+        assert!(out[0].contains(r#""loop":"erase""#), "{}", out[0]);
+        let scan = records(&out, "fr-escan")[0];
+        assert!(
+            scan.contains(r#""first_dirty":5,"first_class":"other""#),
+            "{scan}"
+        );
+        let sectors = records(&out, "fr-esector");
+        assert_eq!(sectors.len(), 2, "{sectors:?}");
+        assert!(sectors[0].contains(r#""stage":"window""#), "{}", sectors[0]);
+        assert!(sectors[0].contains(r#""weak":3,"#), "{}", sectors[0]);
+        assert!(sectors[0].contains(r#""stable_one":1,"#), "{}", sectors[0]);
+        let ctl = records(&out, "fr-econtrol")[0];
+        assert!(
+            ctl.contains(r#""weak_window":3,"weak_control":3,"weak_both":3,"settled_alone":0"#),
+            "{ctl}"
+        );
+        assert!(
+            sectors[1].contains(r#""stage":"after""#) && sectors[1].contains(r#""zeroed":true"#),
+            "{}",
+            sectors[1]
+        );
+        let kept = armed.order.sector(5);
+        assert_eq!(next.order.keep().collect::<Vec<_>>(), [kept]);
+        assert_eq!(mode_of(next.generation), LoopMode::Program);
+
+        // The next cut is the further power cycle.
+        nor.cut(7, Tear::Prefix(0));
+        work(&mut nor, &next);
+        let (out, last) = boot_once(&mut nor);
+        let re = records(&out, "fr-esector");
+        assert!(
+            re[0].contains(r#""stage":"recheck""#) && re[0].contains(r#""zeroed":true"#),
+            "{}",
+            re[0]
+        );
+        assert!(last.order.keep().next().is_none());
+        assert!(records(&out, "fr-prepare")[0].contains(r#""blank":true"#));
+    }
+
+    #[test]
+    fn a_torn_erase_whose_weak_bits_do_not_settle_reads_weak_after_zeroing() {
+        let mut nor = FakeNor::new(false);
+        let armed = to_an_erase_loop(&mut nor);
+        nor.cut(0, Tear::Erasing);
+        work(&mut nor, &armed);
+        let (out, _) = boot_once(&mut nor);
+        let scan = records(&out, "fr-escan")[0];
+        assert!(scan.contains(r#""first_dirty":0"#), "{scan}");
+        let after = records(&out, "fr-esector")[1];
+        assert!(
+            after.contains(r#""stage":"after""#) && after.contains(r#""weak":3,"#),
+            "{after}"
+        );
+        assert!(after.contains(r#""zeroed":false"#), "{after}");
+    }
+
+    #[test]
+    fn an_erase_that_did_not_start_or_finished_whole_is_not_torn() {
+        let mut nor = FakeNor::new(true);
+        let armed = to_an_erase_loop(&mut nor);
+        // The cut lands on the fourth erase, which does nothing.
+        nor.cut(3, Tear::Prefix(0));
+        work(&mut nor, &armed);
+        let (out, next) = boot_once(&mut nor);
+        let scan = records(&out, "fr-escan")[0];
+        assert!(
+            scan.contains(r#""first_dirty":3,"first_class":"pattern""#),
+            "{scan}"
+        );
+        assert!(records(&out, "fr-esector").is_empty());
+        assert!(next.order.keep().next().is_none());
+        // Every dirty sector erased for the program loop.
+        let prep = records(&out, "fr-prepare")[0];
+        assert!(
+            prep.contains(r#""erased_sectors":15"#) && prep.contains(r#""blank":true"#),
+            "{prep}"
+        );
     }
 }

@@ -16,8 +16,9 @@
 //!
 //! One boot: find `lpfs`; wait, writing nothing, for the host's byte; the
 //! header; the boot's records; the scan-done line; then the work loop,
-//! silently — it programs the region once and stops, so a cut after that
-//! finds the region full (`frontier: null`).
+//! silently — on odd generations it programs the region once, on even ones
+//! it erases the 64 sectors its boot programmed, and either way it then
+//! stops, so a cut after that finds nothing in flight.
 
 extern crate alloc;
 
@@ -88,9 +89,9 @@ pub async fn run_flash_reprogram(_: embassy_executor::Spawner) -> ! {
     };
 
     let mut flash = Flash(storage, Box::new(Bounce([0; WRITE_SIZE])));
-    // 12.5 KiB, zeroed in place: a `Box::new` of the arrays would build them
+    // 20.5 KiB, zeroed in place: a `Box::new` of the arrays would build them
     // on the main task's stack first.
-    // SAFETY: `Buffers` is four byte arrays; all zeroes is a valid value.
+    // SAFETY: `Buffers` is six byte arrays; all zeroes is a valid value.
     let mut bufs: Box<Buffers> = unsafe { Box::<Buffers>::new_zeroed().assume_init() };
 
     let result = {
