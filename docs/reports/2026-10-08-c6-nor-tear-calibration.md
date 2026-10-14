@@ -362,8 +362,10 @@ Outside the in-flight sector, over every cut:
 |---|---|---:|---:|
 | erase | cut before the erase started: both journal copies name the cycle and the sector holds the old pattern whole (the cut landed between the journal write and the erase command) | 1 | 0.2 % |
 | erase | untouched: the old pattern, whole, and the journal does not say where the cut landed | 0 | 0.0 % |
-| erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 17 | 3.4 % |
+| erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 16 | 3.2 % |
+| erase | torn erase, zeroing caught inside a word: whole `0x00` words from the front, then one word with only part of its pre-program clears landed (maybe weak bits on the others), old after it | 1 | 0.2 % |
 | erase | torn erase, all `0x00` | 63 | 12.6 % |
+| erase | torn erase, first lift: all `0x00` but a handful of bits (at most 32), each a stable 1 or weak | 0 | 0.0 % |
 | erase | torn erase, erasing: stable zeros spread over old **and** new zero positions | 69 | 13.8 % |
 | erase | torn erase, old data left (only old zeros, more than a residue) | 0 | 0.0 % |
 | erase | torn erase that reads all `0xFF` but has weak bits | 4 | 0.8 % |
@@ -388,7 +390,8 @@ The firmware's `verdict` against the phase it was sorted into:
 | `erased-weak` | erase:reads-ff-weak | 4 |
 | `mixed` | erase:all-zero | 63 |
 | `mixed` | erase:erasing | 58 |
-| `mixed` | erase:zeroing | 17 |
+| `mixed` | erase:zeroing | 16 |
+| `mixed` | erase:zeroing-mid-word | 1 |
 | `old` | cut:before-erase | 1 |
 | `torn-erase` | erase:erasing | 5 |
 | `torn-program` | erase:erasing | 6 |
@@ -403,7 +406,8 @@ The firmware's `verdict` against the phase it was sorted into:
 | phase | cuts | with weak bits | weak bits (min / median / max, where any) |
 |---|---:|---:|---|
 | cut:before-erase | 1 | 0 | — |
-| erase:zeroing | 17 | 0 | — |
+| erase:zeroing | 16 | 0 | — |
+| erase:zeroing-mid-word | 1 | 0 | — |
 | erase:all-zero | 63 | 0 | — |
 | erase:erasing | 69 | 65 | 1 / 83 / 2343 |
 | erase:reads-ff-weak | 4 | 4 | 1 / 2.5 / 8 |
@@ -441,10 +445,15 @@ The firmware's `verdict` against the phase it was sorted into:
 | `silicon-esp32c6-2026-10-14-41e96eead-r2.txt` boot 28 (cycle 4838) | 2360 | exact | 24 | yes | no | no |
 | `silicon-esp32c6-2026-10-14-41e96eead-r4.txt` boot 3 (cycle 9874) | 1264 | exact | 16 | yes | no | no |
 | `silicon-esp32c6-2026-10-14-41e96eead-r5.txt` boot 23 (cycle 13658) | 788 | exact | 20 | yes | no | no |
-| `silicon-esp32c6-2026-10-14-41e96eead-r6.txt` boot 32 (cycle 18268) | 3092 | exact | 20 | yes | no | no |
 | `silicon-esp32c6-2026-10-14-41e96eead-r6.txt` boot 42 (cycle 18631) | 3616 | exact | 0 | yes | yes | no |
 | `silicon-esp32c6-2026-10-14-41e96eead-r6.txt` boot 47 (cycle 18891) | 3072 | exact | 0 | yes | yes | yes |
-| **all 17** | | | | **17** | **2** | **1** |
+| **all 16** | | | | **16** | **2** | **1** |
+
+**Zeroing caught inside a word**: the word the run stopped in, and how many of its clears (the old pattern's ones in it) had landed. The record places the landed clears only to their page (`page_landed`); that they sit in the word the run had reached is the reading.
+
+| cut | word at | clears landed | of | weak bits |
+|---|---:|---:|---:|---:|
+| `silicon-esp32c6-2026-10-14-41e96eead-r6.txt` boot 32 (cycle 18268) | 3092 | 3 | 14 | 0 |
 
 **Erasing**: stable zeros left, as a share of the old pattern's zeros and of the new pattern's zeros (the old pattern's ones). The two shares track each other when the erase starts from all `0x00` — every bit is a zero to lift, whatever the old data was; an erase from the old data would leave only old zeros.
 
@@ -541,11 +550,12 @@ The firmware's `verdict` against the phase it was sorted into:
 | One program op is a 256-byte page; a cut between ops leaves whole pages | 58 of 79 prefixes end on a 32-byte command boundary, 9 of them on a page boundary; 21 end inside a command | **contradicted: the unit is the 32-byte ROM command** |
 | A torn erase leaves a byte-wise mix of old bytes, `0xFF` and weak bits (shape 0) | 0 of 418 erase cuts left old data beyond a residue | **not seen** |
 | A torn erase can read all `0xFF` and carry weak bits (shape 1) | 4 of 268 sectors reading all `0xFF` had weak bits (2, 3, 1, 8); the model sprinkles one weak bit in ~1 of 32 bytes (~128 a sector) | **held, rarely, and far lighter than modelled** |
-| A torn erase can be erased up to a point and old after it (shape 2) | 0 with `0xFF` then old; 17 with `0x00` then old (zeroing) | **not seen as `0xFF`-then-old; seen as `0x00`-then-old** |
+| A torn erase can be erased up to a point and old after it (shape 2) | 0 with `0xFF` then old; 16 with `0x00` then old (zeroing) | **not seen as `0xFF`-then-old; seen as `0x00`-then-old** |
 | A torn erase only lifts bits: it never leaves a `0` where the old data had a `1` | 144 of 418 erase cuts did (80 of them reading `0x00` from the front or throughout) | **contradicted** |
 | Weak bits come from torn erases | 71 in-flight sectors had weak bits, 69 of them erase-phase; 0 weak bits in settled sectors | **contradicted** |
 | A torn erase that started changes the sector (`Clean` leaves it old) | 1 of 418 erase-phase cuts left the old pattern whole: 1 with both journal copies naming the cycle — a cut between the journal write and the erase command, which the model draws as where the cut lands (`cut_before_erase`), not as an erase shape; 0 with nothing to say where the cut landed | **held: no started erase left the old data** |
 | A torn program stops on a whole 4-byte word | 2 of 79 torn programs stopped inside a word (some of its clears landed, weak bits possible); the model draws them as `program_mid_word` | **not always: the part's program unit can be caught part-way** |
+| An erase's pre-program stops on a whole 4-byte word, and its lift moves many cells at once | 1 of 418 erase cuts caught the pre-program inside a word (some of its clears landed); 0 caught the sector all `0x00` but a handful of bits; the model draws them as `erase_zeroing_mid_word` and `erase_first_lift` | **not always: the pre-program word, and the lift's first cells, can be caught** |
 | A cut damages only the operation in flight | 0 settled sectors damaged, 0 weak bits in them, 0 journal slots damaged outside the operation in flight (journal ops in flight: `journal:wrap-erase` 3) | **held** |
 
 ### `lp-emu:esp32c6:t1`
@@ -584,7 +594,9 @@ Outside the in-flight sector, over every cut:
 | erase | cut before the erase started: both journal copies name the cycle and the sector holds the old pattern whole (the cut landed between the journal write and the erase command) | 0 | 0.0 % |
 | erase | untouched: the old pattern, whole, and the journal does not say where the cut landed | 0 | 0.0 % |
 | erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 0 | 0.0 % |
+| erase | torn erase, zeroing caught inside a word: whole `0x00` words from the front, then one word with only part of its pre-program clears landed (maybe weak bits on the others), old after it | 0 | 0.0 % |
 | erase | torn erase, all `0x00` | 0 | 0.0 % |
+| erase | torn erase, first lift: all `0x00` but a handful of bits (at most 32), each a stable 1 or weak | 0 | 0.0 % |
 | erase | torn erase, erasing: stable zeros spread over old **and** new zero positions | 0 | 0.0 % |
 | erase | torn erase, old data left (only old zeros, more than a residue) | 0 | 0.0 % |
 | erase | torn erase that reads all `0xFF` but has weak bits | 0 | 0.0 % |
@@ -676,9 +688,11 @@ Outside the in-flight sector, over every cut:
 |---|---|---:|---:|
 | erase | cut before the erase started: both journal copies name the cycle and the sector holds the old pattern whole (the cut landed between the journal write and the erase command) | 0 | 0.0 % |
 | erase | untouched: the old pattern, whole, and the journal does not say where the cut landed | 0 | 0.0 % |
-| erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 5 | 2.5 % |
+| erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 4 | 2.0 % |
+| erase | torn erase, zeroing caught inside a word: whole `0x00` words from the front, then one word with only part of its pre-program clears landed (maybe weak bits on the others), old after it | 2 | 1.0 % |
 | erase | torn erase, all `0x00` | 24 | 12.0 % |
-| erase | torn erase, erasing: stable zeros spread over old **and** new zero positions | 34 | 17.0 % |
+| erase | torn erase, first lift: all `0x00` but a handful of bits (at most 32), each a stable 1 or weak | 2 | 1.0 % |
+| erase | torn erase, erasing: stable zeros spread over old **and** new zero positions | 32 | 16.0 % |
 | erase | torn erase, old data left (only old zeros, more than a residue) | 0 | 0.0 % |
 | erase | torn erase that reads all `0xFF` but has weak bits | 3 | 1.5 % |
 | erase | erased: all `0xFF`, no weak bits | 106 | 53.0 % |
@@ -690,8 +704,8 @@ Outside the in-flight sector, over every cut:
 | program | complete: the new pattern, whole | 0 | 0.0 % |
 | journal | cut in a journal copy's wrap: its erase before slot 0 (or that slot's first entry); the other copy kept the cycle | 1 | 0.5 % |
 | journal | cut in a journal entry's program (between the two copies' writes) | 1 | 0.5 % |
-| none | unknown | 1 | 0.5 % |
-| **erase** | | **172** | 86.0 % |
+| none | unknown | 0 | 0.0 % |
+| **erase** | | **173** | 86.5 % |
 | **program** | | **25** | 12.5 % |
 
 The firmware's `verdict` against the phase it was sorted into:
@@ -701,9 +715,10 @@ The firmware's `verdict` against the phase it was sorted into:
 | `erased` | erased | 106 |
 | `erased-weak` | erase:reads-ff-weak | 3 |
 | `mixed` | erase:all-zero | 24 |
-| `mixed` | erase:erasing | 31 |
-| `mixed` | erase:zeroing | 5 |
-| `mixed` | unknown | 1 |
+| `mixed` | erase:erasing | 29 |
+| `mixed` | erase:first-lift | 2 |
+| `mixed` | erase:zeroing | 4 |
+| `mixed` | erase:zeroing-mid-word | 2 |
 | `old` | journal:program | 1 |
 | `old` | journal:wrap-erase | 1 |
 | `torn-erase` | erase:erasing | 2 |
@@ -717,16 +732,17 @@ The firmware's `verdict` against the phase it was sorted into:
 
 | phase | cuts | with weak bits | weak bits (min / median / max, where any) |
 |---|---:|---:|---|
-| erase:zeroing | 5 | 0 | — |
+| erase:zeroing | 4 | 0 | — |
+| erase:zeroing-mid-word | 2 | 1 | 2 / 2 / 2 |
 | erase:all-zero | 24 | 0 | — |
-| erase:erasing | 34 | 33 | 1 / 140 / 2289 |
+| erase:first-lift | 2 | 1 | 1 / 1 / 1 |
+| erase:erasing | 32 | 31 | 2 / 171 / 2289 |
 | erase:reads-ff-weak | 3 | 3 | 1 / 1 / 2 |
 | erased | 106 | 0 | — |
 | program:command-boundary | 16 | 0 | — |
 | program:mid-command | 9 | 0 | — |
 | journal:wrap-erase | 1 | 0 | — |
 | journal:program | 1 | 0 | — |
-| unknown | 1 | 0 | — |
 
 - sectors reading all `0xFF` in every stable bit: 109; of those with weak bits: **3** (2, 1, 1 weak bits)
 
@@ -772,17 +788,28 @@ The firmware's `verdict` against the phase it was sorted into:
 |---|---|---|---|---|---|---|
 | `silicon-esp32c6-2026-10-14-609f0e4c9.txt` boot 43 (cycle 1852) | 1624 | exact | 24 | yes | no | no |
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 9 (cycle 6783) | 3260 | exact | 28 | yes | no | no |
-| `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 38 (cycle 7915) | 2364 | exact | 28 | yes | no | no |
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r4.txt` boot 15 (cycle 10097) | 484 | exact | 4 | yes | no | no |
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r4.txt` boot 18 (cycle 10231) | 220 | exact | 28 | yes | no | no |
-| **all 5** | | | | **5** | **0** | **0** |
+| **all 4** | | | | **4** | **0** | **0** |
+
+**Zeroing caught inside a word**: the word the run stopped in, and how many of its clears (the old pattern's ones in it) had landed. The record places the landed clears only to their page (`page_landed`); that they sit in the word the run had reached is the reading.
+
+| cut | word at | clears landed | of | weak bits |
+|---|---:|---:|---:|---:|
+| `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 10 (cycle 6837) | 764 | 17 | 21 | 2 |
+| `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 38 (cycle 7915) | 2364 | 2 | 16 | 0 |
+
+**First lift**: the bits that were not a stable `0`.
+
+| cut | stable 1s | weak bits | leading `0x00` bytes |
+|---|---:|---:|---:|
+| `silicon-esp32c6-2026-10-14-609f0e4c9.txt` boot 50 (cycle 2179) | 0 | 1 | 2154 |
+| `silicon-esp32c6-2026-10-14-609f0e4c9-r4.txt` boot 17 (cycle 10184) | 1 | 0 | 2530 |
 
 **Erasing**: stable zeros left, as a share of the old pattern's zeros and of the new pattern's zeros (the old pattern's ones). The two shares track each other when the erase starts from all `0x00` — every bit is a zero to lift, whatever the old data was; an erase from the old data would leave only old zeros.
 
 | cut | old zeros still 0 | old ones now 0 | weak bits | weak bytes |
 |---|---:|---:|---:|---:|
-| `silicon-esp32c6-2026-10-14-609f0e4c9.txt` boot 50 | 100.00 % | 99.99 % | 1 | 1 |
-| `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 10 | 100.00 % | 18.97 % | 2 | 2 |
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 45 | 34.63 % | 33.66 % | 2289 | 1803 |
 | `silicon-esp32c6-2026-10-14-609f0e4c9.txt` boot 37 | 27.00 % | 26.74 % | 2066 | 1645 |
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r2.txt` boot 29 | 20.59 % | 19.16 % | 1877 | 1540 |
@@ -816,7 +843,7 @@ The firmware's `verdict` against the phase it was sorted into:
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 43 | 0.01 % | 0.00 % | 2 | 2 |
 | `silicon-esp32c6-2026-10-14-609f0e4c9-r3.txt` boot 50 | 0.01 % | 0.00 % | 0 | 0 |
 
-- erase-phase cuts with a stable `0` where the old data had a `1`: **61** of 172
+- erase-phase cuts with a stable `0` where the old data had a `1`: **62** of 173
 
 **Timing of one cycle** (the timed cycle after each scan, 204 boots; µs, min / median / max):
 
@@ -825,7 +852,7 @@ The firmware's `verdict` against the phase it was sorted into:
 - `program_us`: 6157 / 6458 / 6749
 - `page_us_min`: 33 / 43 / 48
 - `page_us_max`: 409 / 1166.5 / 1474
-- share of a cycle (medians): journal 0.3 %, erase 81.0 %, program 18.8 %; the cuts landed 86.0 % in the erase and 12.5 % in the program
+- share of a cycle (medians): journal 0.3 %, erase 81.0 %, program 18.8 %; the cuts landed 86.5 % in the erase and 12.5 % in the program
 
 ### `flash-tears-unaligned` on `lp-emu:esp32c6:t1`
 
@@ -863,7 +890,9 @@ Outside the in-flight sector, over every cut:
 | erase | cut before the erase started: both journal copies name the cycle and the sector holds the old pattern whole (the cut landed between the journal write and the erase command) | 1 | 20.0 % |
 | erase | untouched: the old pattern, whole, and the journal does not say where the cut landed | 0 | 0.0 % |
 | erase | torn erase, zeroing: a run of `0x00` from the front, old after it | 0 | 0.0 % |
+| erase | torn erase, zeroing caught inside a word: whole `0x00` words from the front, then one word with only part of its pre-program clears landed (maybe weak bits on the others), old after it | 0 | 0.0 % |
 | erase | torn erase, all `0x00` | 0 | 0.0 % |
+| erase | torn erase, first lift: all `0x00` but a handful of bits (at most 32), each a stable 1 or weak | 0 | 0.0 % |
 | erase | torn erase, erasing: stable zeros spread over old **and** new zero positions | 0 | 0.0 % |
 | erase | torn erase, old data left (only old zeros, more than a residue) | 0 | 0.0 % |
 | erase | torn erase that reads all `0xFF` but has weak bits | 0 | 0.0 % |

@@ -941,6 +941,32 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
               f"**{sum(1 for _, ph in zr if ph.detail['on_page_boundary'])}** |")
             w("")
 
+        zm = [(b, ph) for b, ph in cuts if ph.cls == "erase:zeroing-mid-word"]
+        if zm:
+            w("**Zeroing caught inside a word**: the word the run stopped in, and how many of its clears "
+              "(the old pattern's ones in it) had landed. The record places the landed clears only to their "
+              "page (`page_landed`); that they sit in the word the run had reached is the reading.")
+            w("")
+            w("| cut | word at | clears landed | of | weak bits |")
+            w("|---|---:|---:|---:|---:|")
+            for b, ph in zm:
+                d = ph.detail
+                w(f"| `{os.path.basename(b.transcript)}` boot {b.index} (cycle {b.in_flight['wrote']}) | "
+                  f"{d['word_at']} | {d['word_landed_bits']} | {d['word_intended_bits']} | {d['weak_bits']} |")
+            w("")
+        fl = [(b, ph) for b, ph in cuts if ph.cls == "erase:first-lift"]
+        if fl:
+            w("**First lift**: the bits that were not a stable `0`.")
+            w("")
+            w("| cut | stable 1s | weak bits | leading `0x00` bytes |")
+            w("|---|---:|---:|---:|")
+            for b, ph in fl:
+                d = ph.detail
+                w(f"| `{os.path.basename(b.transcript)}` boot {b.index} (cycle {b.in_flight['wrote']}) | "
+                  f"{d['lifted_bits']} | {d['first_lift_weak_bits']} | "
+                  f"{b.in_flight.get('leading_zero_bytes', '—')} |")
+            w("")
+
         # Erasing: is it positional, or every cell at once?
         er = [(b, ph) for b, ph in cuts if ph.cls == "erase:erasing"]
         if er:
