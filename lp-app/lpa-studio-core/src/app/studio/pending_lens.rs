@@ -15,8 +15,9 @@
 //! - a connect hold gives up after [`CONNECT_INTENT_GRACE`], saying so on
 //!   the board's card ([`CONNECT_GAVE_UP`]), and lets go at once when the
 //!   board turns out locked or in need of firmware (its own primary,
-//!   Unlock or Install, takes over), and on Done, another Connect, an Edit
-//!   elsewhere, or an address's open.
+//!   Unlock or Install, takes over), when the chooser it opened closes
+//!   with nothing picked (the user said no) or fails (said on the card),
+//!   and on Done, another Connect, an Edit elsewhere, or an address's open.
 
 use core::time::Duration;
 
@@ -46,6 +47,12 @@ pub struct ConnectHold {
     /// An Edit had to reach the board first: the editor shows once it
     /// attaches.
     pub editor_waiting: bool,
+    /// The link the chooser this Connect opened answers for (the cable's
+    /// road to an offline board), until it answers: a chooser closed with
+    /// nothing picked ends the hold at once, rather than a minute of
+    /// "Connecting…" for a board the user did not pick (the connected feel
+    /// gate's finding 7).
+    pub chooser: Option<lpa_devices::LinkId>,
 }
 
 impl PendingLens {
@@ -64,8 +71,17 @@ impl PendingLens {
             connect: Some(ConnectHold {
                 since: now,
                 editor_waiting,
+                chooser: None,
             }),
         }
+    }
+
+    /// This Connect's hold, waiting on the chooser that answers for `link`.
+    pub fn with_chooser(mut self, link: lpa_devices::LinkId) -> Self {
+        if let Some(hold) = self.connect.as_mut() {
+            hold.chooser = Some(link);
+        }
+        self
     }
 
     /// Whether this is an address's hold on `uid`: an editor open held for
@@ -117,7 +133,8 @@ mod tests {
             connect.connect,
             Some(ConnectHold {
                 since: 5.0,
-                editor_waiting: true
+                editor_waiting: true,
+                chooser: None,
             })
         );
     }

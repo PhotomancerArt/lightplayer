@@ -20,7 +20,7 @@
 //! See `docs/adr/2026-10-08-the-board-card-and-one-home-page.md` §4 and
 //! `docs/adr/2026-07-24-runtime-pool.md`.
 
-use lpa_devices::DeviceId;
+use lpa_devices::{DeviceId, LinkId};
 
 use crate::{RuntimeId, UiPage, UiPlace};
 
@@ -54,13 +54,28 @@ pub enum ConnectPhase {
 
 /// Why the last Connect (or an Edit that had to connect first) did not
 /// open, for the board's card. Cleared by the next Connect, Edit or Done on
-/// any board.
+/// any board, and once the board is reached by another road
+/// ([`Self::outlived`]).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConnectFailure {
     /// The board the connect was for.
     pub device: DeviceId,
     /// What went wrong, in the words the open failed with.
     pub reason: String,
+    /// The link the board was on when the connect failed; `None` when it
+    /// was not reached at all.
+    pub link: Option<LinkId>,
+}
+
+impl ConnectFailure {
+    /// Whether the failure is old news: the board is ready on a link other
+    /// than the one it failed on — reached by another road (the USB
+    /// square, an install, a project pushed) — so "Couldn't connect" no
+    /// longer says anything true (the connected feel gate's finding 8).
+    /// `now` is the board's link and whether it is ready.
+    pub fn outlived(&self, link: Option<LinkId>, ready: bool) -> bool {
+        ready && link.is_some() && link != self.link
+    }
 }
 
 impl ConnectedBoard {
@@ -193,6 +208,27 @@ mod tests {
             "an unbound lens has no project page"
         );
         assert!(!board(false).shows_editor(Some(&at), Some("prjother")));
+    }
+
+    /// A failed Connect is old news once the board is ready on a link other
+    /// than the one it failed on; on the same link, or not ready, it stands.
+    #[test]
+    fn a_connect_failure_is_outlived_by_the_board_ready_on_another_link() {
+        let failure = |link| ConnectFailure {
+            device: DeviceId(1),
+            reason: "The board didn't answer in time".to_string(),
+            link,
+        };
+        let offline = failure(None);
+        assert!(offline.outlived(Some(LinkId(4)), true), "reached since");
+        assert!(!offline.outlived(Some(LinkId(4)), false), "not ready yet");
+        assert!(!offline.outlived(None, true), "not reached");
+        let on_its_link = failure(Some(LinkId(4)));
+        assert!(
+            !on_its_link.outlived(Some(LinkId(4)), true),
+            "the same road"
+        );
+        assert!(on_its_link.outlived(Some(LinkId(5)), true), "another road");
     }
 
     /// The director's ruling on P2–P3: a waiting Edit ends at the first

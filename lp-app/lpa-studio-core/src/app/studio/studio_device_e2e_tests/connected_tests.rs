@@ -511,15 +511,13 @@ fn connect_over_wifi_reaches_then_connects() {
     assert!(bench.controller.view().home.is_some());
 }
 
-/// A board that never comes back: after the grace the hold is gone, the
-/// card's words say why, and Connect is offered again.
+/// A board that never comes back: a Bluetooth board out of range (its
+/// chooser finds nothing, and the browser keeps watching for it). After the
+/// grace the hold is gone, the card's words say why, and Connect is offered
+/// again.
 #[test]
 fn a_connect_that_never_lands_gives_up_after_the_grace() {
-    let (mut bench, tasks, _device, id, uid) =
-        running_library_board("dev000000cnct00000d", "usb-conn-13");
-    unplug(&mut bench, &tasks, id);
-    // The chooser comes back empty: the board is nowhere to be found.
-    bench.chooser_grants.set(false);
+    let (mut bench, tasks, _present, id, uid) = offline_over_bluetooth("dev000000cnct00000d");
     let connect = bench.device_verb(id, "connect");
     bench.press(&connect, OfferArgs::new()).expect("Connect");
     for _ in 0..20 {
@@ -548,6 +546,74 @@ fn a_connect_that_never_lands_gives_up_after_the_grace() {
     assert_eq!(failure.reason, crate::CONNECT_GAVE_UP);
     assert!(bench.offered(&connect).is_enabled(), "Retry is Connect");
     assert!(bench.controller.connected().is_none());
+}
+
+/// The chooser Connect opens for an offline board on its cable closes with
+/// nothing picked (the user cancelled it, or the board is not there): the
+/// Connect is let go at once — no minute of "Connecting…" for a board
+/// nobody picked, no failure (the user said no) — and the card is back at
+/// Connect (the connected feel gate's finding 7).
+#[test]
+fn a_chooser_closed_with_nothing_picked_lets_the_connect_go_at_once() {
+    let (mut bench, tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct00000f", "usb-conn-15");
+    unplug(&mut bench, &tasks, id);
+    bench.chooser_grants.set(false);
+    let connect = bench.device_verb(id, "connect");
+    bench.press(&connect, OfferArgs::new()).expect("Connect");
+    tick_until(&mut bench, &tasks, "the hold to let go", |bench| {
+        bench.controller.pending_lens().is_none()
+    });
+    assert_eq!(bench.controller.connect_failure(), None, "not a failure");
+    assert!(bench.offered(&connect).is_enabled(), "Connect again");
+    let card = the_card(&bench, id);
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).work,
+        None,
+        "no Connecting… left on the card"
+    );
+    assert!(
+        bench
+            .console_line_containing("the chooser closed with nothing picked")
+            .is_some(),
+        "the console says why the hold went"
+    );
+}
+
+/// "Couldn't connect" goes once the board is reached by another road: a
+/// Connect gives up on a board out of range, then the board comes back on
+/// a fresh link by itself (or by the USB square, an install, a project) and
+/// is ready — the failure says nothing true any more (the connected feel
+/// gate's finding 8).
+#[test]
+fn a_failed_connect_clears_once_the_board_is_reached_another_way() {
+    let (mut bench, tasks, present, id, _uid) = offline_over_bluetooth("dev000000cnct000010");
+    let connect = bench.device_verb(id, "connect");
+    bench.press(&connect, OfferArgs::new()).expect("Connect");
+    bench.step(&tasks);
+    bench
+        .clock
+        .set(bench.clock.get() + crate::CONNECT_INTENT_GRACE.as_secs_f64() + 1.0);
+    drive(bench.controller.try_pending_device_lens());
+    assert!(bench.controller.connect_failure().is_some(), "gave up");
+    let words = |bench: &DeviceBench| {
+        the_card(bench, id)
+            .bar(crate::BarLayer::Connection)
+            .work
+            .clone()
+            .map(|work| work.words)
+    };
+    assert_eq!(words(&bench).as_deref(), Some(crate::COULDNT_CONNECT));
+
+    // Back in range: a fresh link, and the board ready on it.
+    present.set(true);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    tick_until(&mut bench, &tasks, "the failure to go", |bench| {
+        bench.controller.connect_failure().is_none()
+    });
+    assert_ne!(words(&bench).as_deref(), Some(crate::COULDNT_CONNECT));
 }
 
 /// A board reached over Bluetooth that comes back locked: the hold lets go
@@ -1208,6 +1274,47 @@ fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, id: crate::DeviceId) {
             .iter()
             .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
     });
+}
+
+/// A board reached over Bluetooth only, identified and registered, then
+/// out of range: offline, remembered. Its chooser finds nothing (the
+/// bench's Bluetooth chooser picks nothing), and `present` brings it back
+/// in range.
+fn offline_over_bluetooth(
+    uid: &str,
+) -> (
+    DeviceBench,
+    TaskPool,
+    Rc<Cell<bool>>,
+    crate::DeviceId,
+    String,
+) {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        bluetooth_board(uid),
+    )));
+    let (mut bench, tasks, present) = bench_over_bluetooth(&device, |_| {});
+    bench.run_until(&tasks, "the board to identify", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    bench.settle_library();
+    let id = bench.view().devices[0].id;
+    let address = bench.registry()[0].uid.clone();
+    present.set(false);
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Disconnected);
+    bench.run_until(&tasks, "the board to go offline", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
+    });
+    (bench, tasks, present, id, address)
 }
 
 /// The connected session shows on its card: the home page is up, no

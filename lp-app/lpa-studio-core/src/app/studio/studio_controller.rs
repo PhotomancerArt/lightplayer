@@ -1969,6 +1969,14 @@ impl StudioController {
                 },
             );
         }
+        self.keep_fresh_starts();
+        // A Connect waiting on the chooser it opened hears its answer.
+        if let Some((link, answer)) = &grant_answer {
+            self.note_connect_chooser(*link, answer);
+        }
+        // A failed Connect's words go once the board is reached by any
+        // road.
+        self.settle_connect_failure();
         // One tab holds a board: a refused open is read against the claims
         // standing now, at this batch's reconcile.
         if let Some(link) = link_error {

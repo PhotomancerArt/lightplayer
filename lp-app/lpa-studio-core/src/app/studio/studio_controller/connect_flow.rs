@@ -269,10 +269,24 @@ impl StudioController {
             && let Some(reach) = reach
         {
             self.hand_over_from(device);
+            let chooser_before = self.devices.effects().last_usb_grant_request();
             if let Err(error) = self.reach_board(device, reach).await {
                 return Err(self.connect_failed(device, error));
             }
             self.hold_connect(&uid, intent, &"the board is being reached");
+            // The cable's road opened the port chooser: the hold waits on
+            // its answer too (`note_connect_chooser`).
+            if let Some(link) = self
+                .devices
+                .effects()
+                .last_usb_grant_request()
+                .filter(|link| Some(*link) != chooser_before)
+            {
+                self.pending_device_lens = self
+                    .pending_device_lens
+                    .take()
+                    .map(|pending| pending.with_chooser(link));
+            }
             return Ok(UiNotices::new());
         }
         self.let_a_held_open_go();
@@ -303,10 +317,8 @@ impl StudioController {
         if hold.expired(now) {
             self.pending_device_lens = None;
             if let Some(device) = device {
-                self.connect_failure = Some(ConnectFailure {
-                    device,
-                    reason: crate::CONNECT_GAVE_UP.to_string(),
-                });
+                self.connect_failure =
+                    Some(self.connect_failure_for(device, &crate::CONNECT_GAVE_UP));
             }
             self.push_log(crate::UiLogDraft::new(
                 crate::UiLogLevel::Warn,
@@ -349,6 +361,54 @@ impl StudioController {
             // sheet here.
             self.note_action_error(&error);
         }
+    }
+
+    /// The chooser a Connect's hold opened answered for `link`: a board
+    /// picked keeps the hold (it attaches on the tick, once ready); nothing
+    /// picked lets it go at once, with no failure (the user said no, and
+    /// the card is back at Connect); a chooser that failed lets it go and
+    /// says why on the card. Any other chooser's answer is not the hold's.
+    pub(super) fn note_connect_chooser(
+        &mut self,
+        link: lpa_devices::LinkId,
+        answer: &lpa_devices::GrantAnswer,
+    ) {
+        let Some(pending) = self.pending_device_lens.as_ref().filter(|pending| {
+            pending
+                .connect
+                .is_some_and(|hold| hold.chooser == Some(link))
+        }) else {
+            return;
+        };
+        let uid = pending.uid.clone();
+        let device_at = self.device_at_address(&uid).map(|board| board.id);
+        let why = match answer {
+            lpa_devices::GrantAnswer::Picked => {
+                if let Some(hold) = self
+                    .pending_device_lens
+                    .as_mut()
+                    .and_then(|pending| pending.connect.as_mut())
+                {
+                    hold.chooser = None;
+                }
+                return;
+            }
+            lpa_devices::GrantAnswer::Dismissed => {
+                "the chooser closed with nothing picked".to_string()
+            }
+            lpa_devices::GrantAnswer::Failed { error } => {
+                let failure = device_at.map(|device| self.connect_failure_for(device, error));
+                self.connect_failure = failure.or(self.connect_failure.take());
+                format!("the chooser failed: {error}")
+            }
+        };
+        self.pending_device_lens = None;
+        self.push_log(crate::UiLogDraft::new(
+            crate::UiLogLevel::Info,
+            crate::UiLogOrigin::Studio,
+            format!("{uid}: {why}; the connect is let go"),
+        ));
+        self.mark_dirty();
     }
 
     /// Why a Connect's hold on the board at `uid` lets go at once, while
@@ -533,12 +593,52 @@ impl StudioController {
     /// Keep why `device`'s connect did not open, for its card; hand the
     /// error on to the dispatch.
     fn connect_failed(&mut self, device: DeviceId, error: UiError) -> UiError {
-        self.connect_failure = Some(ConnectFailure {
-            device,
-            reason: error.to_string(),
-        });
+        self.connect_failure = Some(self.connect_failure_for(device, &error));
         self.mark_dirty();
         error
+    }
+
+    /// `device`'s connect failure for `reason`, on the link the board is on
+    /// now (none, when it was not reached).
+    fn connect_failure_for(
+        &self,
+        device: DeviceId,
+        reason: &dyn core::fmt::Display,
+    ) -> ConnectFailure {
+        ConnectFailure {
+            device,
+            reason: reason.to_string(),
+            link: self
+                .devices
+                .roster()
+                .device(device)
+                .and_then(lpa_devices::Device::link),
+        }
+    }
+
+    /// Let a failed Connect's words go once they say nothing true: the
+    /// board is ready on another link than the one it failed on, reached
+    /// by another road ([`ConnectFailure::outlived`]), or is forgotten.
+    pub(super) fn settle_connect_failure(&mut self) {
+        let Some(failure) = &self.connect_failure else {
+            return;
+        };
+        let outlived = match self.devices.roster().device(failure.device) {
+            None => true,
+            Some(board) => {
+                let status = lpa_devices::view::device_view(board, self.device_now()).status;
+                let ready = matches!(
+                    status,
+                    lpa_devices::device::DeviceStatus::Ready
+                        | lpa_devices::device::DeviceStatus::Degraded
+                );
+                failure.outlived(board.link(), ready)
+            }
+        };
+        if outlived {
+            self.connect_failure = None;
+            self.mark_dirty();
+        }
     }
 
     /// A held open (a project card or an address waiting for its board)
