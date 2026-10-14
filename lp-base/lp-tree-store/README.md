@@ -82,6 +82,17 @@ change has to be readable, or cleanly refused, by the core before it.
   copy seen is the one FORMAT.md keeps; each record found is visited with
   the mark's own step. Its RAM is the live set's, whatever the garbage on
   flash.
+- **Mount settles each head's tail** before anything trusts it. A program
+  torn inside a 4-byte word can leave its one missing clear weak, so a
+  record reads whole on some reads and fails its CRC on others; only the
+  last program in the newest sector of each kind can be such a record. So
+  the first pass programs that sector's last record again with the bytes it
+  read and checked (program only clears, so the weak clear finishes and the
+  record reads so on every read), and reads it back; when the sector's
+  records end at a record that did not check, it programs that record's
+  header to zeros (it then fails on every read); a newest sector holding no
+  record is not resumed. Every later mount reads what this one read
+  (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
 - **Lookups walk.** No path is kept in RAM: `get`, `file_size` and
   `exists` read one directory record per path level from the working tree
   (the delta laid over it), as writes do. A lookup costs flash reads, not
@@ -294,7 +305,8 @@ format golden.
 
 **The cut sweeps** (`test_support::sweep`): for each step, every sampled
 cut point × every tear model (by default the three guessed ones: clean,
-byte-prefix, random-bits; torn erases leave weak bits): cut, power-cycle,
+byte-prefix, random-bits; torn erases leave weak bits; and
+`calibrated_mid_word`, every torn program caught inside a word): cut, power-cycle,
 mount, the **whole state** must be the old or the new one; a step that did
 not land is re-run (every third with a second cut inside the recovery) and
 must reach the new state, also after a remount, with no sector retired (no
@@ -312,6 +324,15 @@ same dial (its run floor scales with the number of models) — and
 `LP_TREE_STORE_SWEEP_SECTORS=128` the geometry of every sweep but the GC one,
 whose point is a small flash.
 
+**Every remount reads one state** (`cut_remounts_read_one_state`,
+`test_support::remount_sweep`): per-call commits and GC churn cut under
+`calibrated_mid_word` at every sampled point with 40 tear seeds a cut
+(`LP_TREE_STORE_SWEEP_SEEDS`), then mounted five times writing nothing; every
+mount must read the state the first one read. A torn record that reads whole
+on one read only shows up here as two states. It fails on a store that
+settles nothing and on one that re-programs a tail it read whole but leaves
+one it read bad (both at per-call step 2, cut 6, seed 33: a torn root).
+
 **Counter wrap** (`counter_wrap_tests.rs`, a test-only start value): the
 sector sequence (u32) wraps safely under cuts; the root sequence (u64) does
 not — a commit past `u64::MAX` mounts as the one before it, pinned by
@@ -319,13 +340,14 @@ not — a commit past `u64::MAX` mounts as the one before it, pinned by
 (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
 commits, not reachable in practice).
 
-**Mutants** (feature `mutants`, `mutants.rs`): eleven switches, each
+**Mutants** (feature `mutants`, `mutants.rs`): twelve switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
 without its tail check; `NoSpace` checked after writing; GC forgetting the
 pending set; the sector header magic first; a newer version read as
-untrusted; open a sector without the erase read-back. `lp-store-bench
+untrusted; open a sector without the erase read-back; trust the newest
+sectors' last programs on one read (no settle). `lp-store-bench
 mutants` runs each through a fixed driver set and requires every one caught
 and the unmutated store clean (its README has the table).
 
@@ -575,6 +597,13 @@ first-fit-decreasing bound, GC's top-off and passes, the refusal memory;
 2026-10-14): core probe `.text` 42,892 → **45,302 B** (+2,410 B against
 `main` just before it, the C6's flags).
 
+Settling each head's tail at mount (2026-10-14, `single-read-trust`): core
+probe `.text` 45,896 → **46,456 B** (+560 B; +16 B `.rodata`), through
+`LpFsTree` 62,758 → 63,304 B (+546 B), against `main` at `609f0e4c9`, the
+C6's flags. Almost all of it is `mount` (+494 B: the re-program, its
+read-back and the kill, inlined). Not in the shipped C6 image (the store
+is `fs-tree` only).
+
 On the study's own C6 image (another branch's build, fewer shared names)
 the same probe measured ~1.6 KB more new code: at the study's commit
 `938df14aa` this method gives 36,546 B where the study gave 38,132 B. The
@@ -635,16 +664,19 @@ B in 1,376 reads.
 
 ### Power cuts under the calibrated tears (P10)
 
-> **2026-10-14: the store fails under the re-fitted model's
-> `calibrated_mid_word`.** At 500 cuts, CX1 showed programs torn inside a
-> 4-byte word (2 of 79), one of them with its only missing clear weak. A
-> record torn that way reads whole on some reads. Mount trusts it once,
-> resumes the head behind it, and a later mount loses what was written
-> after it. Four of the seven in-crate sweeps fail, and so do some bench
-> cases. `calibrated` (the mix) and `calibrated_before_erase` stay clean.
-> Open: `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`;
-> numbers in `docs/reports/2026-10-08-c6-nor-tear-calibration.md` §11. The
-> P10 numbers below are the 200-cut model's.
+> **2026-10-14: fixed for the re-fitted model's `calibrated_mid_word`.**
+> At 500 cuts, CX1 showed programs torn inside a 4-byte word (2 of 79),
+> one of them with its only missing clear weak. A record torn that way
+> reads whole on some reads. Mount used to trust it once, resume the head
+> behind it, and lose what a later session wrote after it when a later
+> mount read it the other way: four of the seven in-crate sweeps failed,
+> and 49 of the bench's cases at each geometry. Mount now settles each
+> head's tail ("The design in brief"). Under `calibrated_mid_word`,
+> `calibrated` and `calibrated_before_erase`, every in-crate sweep passes at
+> its own geometry, 128 and 176 sectors, and the bench's `sweep` + `double`
+> fail 0 cases (lp-nor-sim simulator):
+> `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`.
+> The P10 numbers below are the 200-cut model's, on the store before it.
 
 `TearModel::Calibrated` is the tear measured on a real C6's flash (CX1, 200
 cuts, `docs/reports/2026-10-08-c6-nor-tear-calibration.md` §5): a torn

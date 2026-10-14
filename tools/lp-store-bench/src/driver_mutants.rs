@@ -6,7 +6,8 @@
 //! already covers — the report says which).
 //!
 //! The set, in order (the order "caught first" is read in): exhaustive cuts
-//! of small workloads under the guessed tears and `calibrated`; the same at
+//! of small workloads under the guessed tears, `calibrated` and
+//! `calibrated_mid_word`; the same at
 //! a partition where GC runs; double cuts; long walks on a small flash; a
 //! full-flash run; a mount fuzz; and a long walk with two sectors wearing
 //! out. Everything is synthetic (no corpus needed) and runs in seconds per
@@ -88,6 +89,9 @@ fn run_set(name: &str) -> MutantResult {
         TearModel::BytePrefix,
         TearModel::RandomBits,
         TearModel::Calibrated,
+        // Every torn program inside a word: the tear that leaves a record
+        // reading whole on one read only (what `trust_tail_once` breaks).
+        TearModel::CalibratedMidWord,
     ];
     let tear_names: Vec<String> = tears.iter().map(|t| t.name().to_string()).collect();
     let mut drivers = Vec::new();
