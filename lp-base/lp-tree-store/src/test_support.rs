@@ -112,8 +112,8 @@ pub struct SweepReport {
 
 /// For each step: run it fault-free to count its ops `n`, then for sampled
 /// `k in 0..=n` (`LP_TREE_STORE_SWEEP_CUTS` overrides `max_cuts`) and every
-/// tear model ([`sweep_tears`]: the three guessed ones unless
-/// `LP_TREE_STORE_SWEEP_TEARS` names others), fork the pre-step flash, cut at `k`, power-cycle, mount, and
+/// tear model ([`sweep_tears`]: the three guessed ones and
+/// `calibrated_mid_word` unless `LP_TREE_STORE_SWEEP_TEARS` names others), fork the pre-step flash, cut at `k`, power-cycle, mount, and
 /// require the **whole state** to be the old or the new one; every third
 /// cut tears the recovery run too (a double cut); then re-run the step and
 /// require the new state, also after a remount, with no sector retired.
@@ -199,6 +199,91 @@ pub fn sweep_from(
     report
 }
 
+/// What [`remount_sweep`] did.
+#[derive(Debug, Default)]
+pub struct RemountReport {
+    pub cuts: u64,
+    pub mounts: u64,
+    /// Cuts that left a weak bit somewhere (what the sweep is for).
+    pub weak: u64,
+}
+
+/// For each step, every sampled cut point × tear model (`tears`, or those
+/// `LP_TREE_STORE_SWEEP_TEARS` names) × `seeds` tear seeds: cut, power-cycle, mount, and require the state to be old or new
+/// — then mount the same flash `remounts` more times, writing nothing, and
+/// require **that same state** every time. A torn record whose one missing
+/// clear is weak reads whole on some reads and not on others; a mount that
+/// trusts (or distrusts) it on one read and a later mount that reads it the
+/// other way show up here as two different states
+/// (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
+pub fn remount_sweep(
+    geom: NorGeometry,
+    cfg: &StoreConfig,
+    steps: &[Step],
+    max_cuts: u64,
+    tears: &[TearModel],
+    seeds: u64,
+    remounts: u32,
+) -> RemountReport {
+    let tears = match std::env::var("LP_TREE_STORE_SWEEP_TEARS") {
+        Ok(v) if !v.trim().is_empty() => sweep_tears(),
+        _ => tears.to_vec(),
+    };
+    let mut report = RemountReport::default();
+    let mut flash = formatted(geom, cfg);
+    let mut old = snapshot(&mut mount(flash.clone(), cfg));
+    for (si, step) in steps.iter().enumerate() {
+        let pre = flash.clone();
+        let mut st = mount(pre.clone(), cfg);
+        st.flash_mut().set_plan(FaultPlan::none());
+        step(&mut st).unwrap_or_else(|e| panic!("step {si} fault-free: {e:?}"));
+        let n = st.flash().ops_since_plan();
+        let new = snapshot(&mut st);
+        flash = st.into_flash();
+        for k in sample(n, dial("LP_TREE_STORE_SWEEP_CUTS", max_cuts)) {
+            for &tear in &tears {
+                for seed in 0..seeds {
+                    let ctx = || format!("step {si} cut {k}/{n} {tear:?} seed {seed}");
+                    let mut st = mount(pre.clone(), cfg);
+                    st.flash_mut().set_plan(FaultPlan::cut(
+                        k,
+                        tear,
+                        seed << 40 | k << 8 | si as u64,
+                    ));
+                    let _ = step(&mut st);
+                    let mut f = st.into_flash();
+                    f.power_cycle(FaultPlan::none());
+                    report.weak += u64::from(
+                        (0..f.geometry().sector_count).any(|s| f.sector_damage(s).weak.is_some()),
+                    );
+                    let mut st = mount(f, cfg);
+                    let first = snapshot(&mut st);
+                    assert!(
+                        first == old || first == new,
+                        "{}: neither old nor new",
+                        ctx()
+                    );
+                    for r in 0..remounts {
+                        st = match TreeStore::mount(st.into_flash(), SoftSha256, cfg.clone()) {
+                            Ok(s) => s,
+                            Err((e, _, _)) => panic!("{}: remount {r} failed: {e:?}", ctx()),
+                        };
+                        assert!(
+                            snapshot(&mut st) == first,
+                            "{}: remount {r} read another state",
+                            ctx()
+                        );
+                    }
+                    report.mounts += 1 + u64::from(remounts);
+                    report.cuts += 1;
+                }
+            }
+        }
+        old = new;
+    }
+    report
+}
+
 /// A sweep dial: `default`, or the environment variable `name` when set
 /// (e.g. `LP_TREE_STORE_SWEEP_CUTS=100000` for an exhaustive local run).
 pub fn dial(name: &str, default: u64) -> u64 {
@@ -209,9 +294,11 @@ pub fn dial(name: &str, default: u64) -> u64 {
 }
 
 /// The tear models a sweep runs: [`TearModel::ALL`] (the three guessed
-/// ones), or the comma-separated names in `LP_TREE_STORE_SWEEP_TEARS`
-/// (`calibrated`, `calibrated_zeroing`, … — `lp-nor-sim`'s
-/// [`TearModel::NAMED`]). An unknown name panics rather than running less.
+/// ones) and `calibrated_mid_word` (every torn program caught inside a word,
+/// the tear that can leave a record reading whole on one read only), or the
+/// comma-separated names in `LP_TREE_STORE_SWEEP_TEARS` (`calibrated`,
+/// `calibrated_zeroing`, … — `lp-nor-sim`'s [`TearModel::NAMED`]). An
+/// unknown name panics rather than running less.
 pub fn sweep_tears() -> Vec<TearModel> {
     match std::env::var("LP_TREE_STORE_SWEEP_TEARS") {
         Ok(v) if !v.trim().is_empty() => v
@@ -222,7 +309,11 @@ pub fn sweep_tears() -> Vec<TearModel> {
                 })
             })
             .collect(),
-        _ => TearModel::ALL.to_vec(),
+        _ => {
+            let mut v = TearModel::ALL.to_vec();
+            v.push(TearModel::CalibratedMidWord);
+            v
+        }
     }
 }
 
