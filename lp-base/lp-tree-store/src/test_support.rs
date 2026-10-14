@@ -113,7 +113,8 @@ pub struct SweepReport {
 /// For each step: run it fault-free to count its ops `n`, then for sampled
 /// `k in 0..=n` (`LP_TREE_STORE_SWEEP_CUTS` overrides `max_cuts`) and every
 /// tear model ([`sweep_tears`]: the three guessed ones and
-/// `calibrated_mid_word` unless `LP_TREE_STORE_SWEEP_TEARS` names others), fork the pre-step flash, cut at `k`, power-cycle, mount, and
+/// `calibrated_mid_word`, `calibrated_zeroing_mid_word` and
+/// `calibrated_first_lift` unless `LP_TREE_STORE_SWEEP_TEARS` names others), fork the pre-step flash, cut at `k`, power-cycle, mount, and
 /// require the **whole state** to be the old or the new one; every third
 /// cut tears the recovery run too (a double cut); then re-run the step and
 /// require the new state, also after a remount, with no sector retired.
@@ -294,8 +295,11 @@ pub fn dial(name: &str, default: u64) -> u64 {
 }
 
 /// The tear models a sweep runs: [`TearModel::ALL`] (the three guessed
-/// ones) and `calibrated_mid_word` (every torn program caught inside a word,
-/// the tear that can leave a record reading whole on one read only), or the
+/// ones), `calibrated_mid_word` (every torn program caught inside a word,
+/// the tear that can leave a record reading whole on one read only), and
+/// the two rare erase states, `calibrated_zeroing_mid_word` (every torn
+/// erase caught inside a pre-program word) and `calibrated_first_lift`
+/// (every torn erase all zero but one bit), or the
 /// comma-separated names in `LP_TREE_STORE_SWEEP_TEARS` (`calibrated`,
 /// `calibrated_zeroing`, … — `lp-nor-sim`'s [`TearModel::NAMED`]). An
 /// unknown name panics rather than running less.
@@ -311,7 +315,11 @@ pub fn sweep_tears() -> Vec<TearModel> {
             .collect(),
         _ => {
             let mut v = TearModel::ALL.to_vec();
-            v.push(TearModel::CalibratedMidWord);
+            v.extend([
+                TearModel::CalibratedMidWord,
+                TearModel::CalibratedZeroingMidWord,
+                TearModel::CalibratedFirstLift,
+            ]);
             v
         }
     }
