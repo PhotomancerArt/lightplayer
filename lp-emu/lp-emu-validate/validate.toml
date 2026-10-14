@@ -199,6 +199,11 @@ name = "flash-tears"
 description = "Tree-store M4: power cuts on a SACRIFICIAL C6 (CX1, `c6-expendable`, tag `sacrificial`), to measure what real NOR tears look like and calibrate `lp-nor-sim`'s tear models against them. The image owns the first 18 sectors of `lpfs` and destroys the filesystem there. A silicon recording is fifty cuts: `scripts/emu/flash-tears-cuts.py` answers each boot's ready line, reads its scan to `[flash-tears] === SCAN DONE ===`, waits a random 50-2000 ms and cuts the power with `board power-cycle` (it refuses any board the desk registry does not tag `sacrificial`). `scripts/emu/flash-tears-soak.sh` runs the whole sitting as recordings of this set. The emulated twin cuts five times between flash operations, so its scans must show no tears at all: that is the dry run."
 payloads = ["flash-tears"]
 
+[[set]]
+name = "flash-tears-unaligned"
+description = "Tree-store M4's owed sitting (from M2 P10): the `flash-tears` power cuts on the same SACRIFICIAL C6, with every program started off a 32-byte boundary (a 20-byte write at offset 0, then 16-1040-byte writes, word-aligned and never on a 32-byte boundary, at `20 + k*4`, drawn from sector and cycle), to measure whether a torn prefix stops relative to the write's address or on absolute 32-byte boundaries. Same image gates, cut driver and emulated dry run as `flash-tears`; `scripts/emu/flash-tears-soak.sh --unaligned` runs it."
+payloads = ["flash-tears-unaligned"]
+
 # ---------------------------------------------------------------------------
 # Configurations
 # ---------------------------------------------------------------------------

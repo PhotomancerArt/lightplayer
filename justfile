@@ -2832,7 +2832,8 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     for feature in test_rmt test_rmt_rx test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental \
-                   test_cycle_probe test_gpio_input test_flash_tears; do
+                   test_cycle_probe test_gpio_input test_flash_tears \
+                   test_flash_tears_unaligned; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -3263,7 +3264,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3298,6 +3299,13 @@ lint-classic-capture:
 # --check comparison, on a synthetic three-lamp board built in memory.
 lint-pcb-export:
     python3 scripts/pcb-export-to-map2d.py --self-test
+
+# The flash-tears analyzer's own self-test, which needs no transcript: the
+# zero-run reconstruction, the unaligned program plan, and `--check-model`'s
+# rule (DD29) with its Bonferroni correction per family (DD32), including a
+# seeded Monte Carlo of honest samples drawn from the model. It opens no port.
+lint-flash-tears-analyze:
+    python3 scripts/emu/flash-tears-analyze.py --self-test
 
 # The control-flow torture corpus is generated; without this gate, hand edits to
 # those files are silently reverted by the next `--write` (that is how the
@@ -4487,8 +4495,9 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
-# The flash-tears calibration: every committed `flash-tears` transcript
-# (lp-emu/transcripts/esp32c6/flash-tears/) sorted into tear shapes, written
+# The flash-tears calibration: every committed `flash-tears` and
+# `flash-tears-unaligned` transcript (lp-emu/transcripts/esp32c6/flash-tears*/,
+# reported apart) sorted into tear shapes, written
 # into the report's generated block. Host only — reads transcripts, never a
 # port. Re-run after every batch of the CX1 sitting. `--json` for one line
 # per cut; with any argument the tables go to stdout instead.
@@ -4506,7 +4515,8 @@ flash-tears-analyze *args:
 # as the silicon transcripts: does a model reproduce CX1's tear histogram?
 # Simulator numbers, written under target/, never committed. Then
 # `just flash-tears-analyze --check-model` says whether lp-nor-sim's
-# calibrated weights still match every committed silicon cut.
+# calibrated shares are still within sampling noise of every committed
+# silicon cut (the rule is in its --help).
 flash-tears-sim cuts="200" seed="1":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -4515,6 +4525,21 @@ flash-tears-sim cuts="200" seed="1":
             --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --out "target/flash-tears-sim/$tear-{{ seed }}.txt"
     done
     scripts/emu/flash-tears-analyze.py target/flash-tears-sim/*-{{ seed }}.txt
+
+# The same, programming by the `flash-tears-unaligned` payload's plan: where
+# each model says an unaligned torn prefix stops (`lp-nor-sim` tears each
+# page op from its own start, which is the split the emulated mask ROM makes
+# — `scripts/emu/flash-tears-analyze.py --rom-split`). Simulator numbers,
+# never committed; the desk sitting is what says whether silicon agrees.
+flash-tears-sim-unaligned cuts="300" seed="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tear in clean byte_prefix calibrated; do
+        cargo run -q -p fw-checks --features check-flash-tears --example flash_tears_on_nor_sim -- \
+            --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --unaligned \
+            --out "target/flash-tears-sim-unaligned/$tear-{{ seed }}.txt"
+    done
+    scripts/emu/flash-tears-analyze.py target/flash-tears-sim-unaligned/*-{{ seed }}.txt
 
 # The classic ESP32 (v3) machine's speed probe: three pinned reference images
 # at t1 — the only grade this machine has — both cores at the default

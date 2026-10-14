@@ -25,10 +25,12 @@
 //! - `byte_prefix`, `random_bits`: the guessed models, applied by
 //!   `lp-nor-sim`'s own [`NorFlashSim`] on a scratch copy of the cells, so
 //!   their shapes are that crate's and nothing here re-derives them.
-//! - `calibrated` and the five forced `calibrated_*` models:
-//!   [`calibrated_tear::tear_program`] / [`calibrated_tear::tear_erase`]
+//! - `calibrated` and the forced `calibrated_*` models:
+//!   [`calibrated_tear::tear_program`] / [`calibrated_tear::cut_erase`]
 //!   called directly on the chip's bytes with `SimRng::new(seed)`, the CX1
-//!   mix ([`TearMix::CX1`], or [`TearMix::erase_only`] for a forced shape).
+//!   mix as [`TearModel::mix`] gives it. A program torn inside a word leaves
+//!   weak bits beside its cells, as a torn erase does; an erase cut can land
+//!   before the erase started (`shape=before_erase`: the granule untouched).
 //!
 //! nor-sim's "in-flight page program" is **this emulator's in-flight SPI
 //! program command**. The calibrated model stops a program on a 32-byte ROM
@@ -127,9 +129,12 @@ pub struct FlashCutReport {
     pub len: u32,
     pub tear: TearModel,
     /// The shape a calibrated erase tore into; `None` for a program, a
-    /// `clean` cut, and the guessed models (whose erase shapes `lp-nor-sim`
-    /// draws inside itself).
+    /// `clean` cut, the guessed models (whose erase shapes `lp-nor-sim`
+    /// draws inside itself) and a cut before the erase started.
     pub erase_shape: Option<EraseShape>,
+    /// A calibrated erase cut that landed before the erase started: the
+    /// granule is exactly as it was.
+    pub before_start: bool,
     /// Guest cycle of the command.
     pub cycle: u64,
     pub range_start: u32,
@@ -152,7 +157,11 @@ impl fmt::Display for FlashCutReport {
             self.addr,
             self.len,
             self.tear.name(),
-            self.erase_shape.map_or("-", erase_shape_name),
+            if self.before_start {
+                "before_erase"
+            } else {
+                self.erase_shape.map_or("-", erase_shape_name)
+            },
             self.cycle,
             self.range_start,
             self.range_len,
@@ -277,22 +286,26 @@ impl FlashCutter {
 
 /// The mix a calibrated `tear` draws from; `None` for the guessed models.
 fn calibrated_mix(tear: TearModel) -> Option<TearMix> {
-    match tear.forced_erase_shape() {
-        Some(shape) => Some(TearMix::CX1.erase_only(shape)),
-        None if tear.is_calibrated() => Some(TearMix::CX1),
-        None => None,
-    }
+    tear.mix(TearMix::CX1)
 }
 
 /// Tear a program of `data` into `cells` (the cells it targets, same
-/// length). The cells' current content is what the program lands on.
-pub(crate) fn tear_program(tear: TearModel, seed: u64, cells: &mut [u8], data: &[u8]) {
+/// length). The cells' current content is what the program lands on. New
+/// weak bits (a calibrated program torn inside a word) are ORed into `weak`
+/// (same length).
+pub(crate) fn tear_program(
+    tear: TearModel,
+    seed: u64,
+    cells: &mut [u8],
+    weak: &mut [u8],
+    data: &[u8],
+) {
     if tear == TearModel::Clean || data.is_empty() {
         return;
     }
     match calibrated_mix(tear) {
         Some(mix) => {
-            calibrated_tear::tear_program(&mix, &mut SimRng::new(seed), cells, 0, data);
+            calibrated_tear::tear_program(&mix, &mut SimRng::new(seed), cells, weak, 0, data);
         }
         None => {
             // The guessed models, exactly as `NorFlashSim` tears a page: one
@@ -306,27 +319,32 @@ pub(crate) fn tear_program(tear: TearModel, seed: u64, cells: &mut [u8], data: &
     }
 }
 
+/// What a cut at an erase did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EraseCut {
+    /// Torn: into this calibrated shape, or (`None`) a guessed model's or
+    /// `clean`'s.
+    Torn(Option<EraseShape>),
+    /// A calibrated cut that landed before the erase started: nothing moved.
+    BeforeStart,
+}
+
 /// Tear an erase of `cells` (the whole granule, old content in it). New weak
-/// bits are ORed into `weak` (the granule's mask, same length). The
-/// calibrated erase shape, when there is one.
+/// bits are ORed into `weak` (the granule's mask, same length).
 pub(crate) fn tear_erase(
     tear: TearModel,
     seed: u64,
     cells: &mut [u8],
     weak: &mut [u8],
-) -> Option<EraseShape> {
+) -> EraseCut {
     if tear == TearModel::Clean {
-        return None;
+        return EraseCut::Torn(None);
     }
     match calibrated_mix(tear) {
-        Some(mix) => {
-            let mut rng = SimRng::new(seed);
-            // The shape `tear_erase` will draw: the same first draw, on a
-            // copy of the stream.
-            let shape = mix.draw_erase(&mut rng.clone());
-            calibrated_tear::tear_erase(&mix, &mut rng, cells, weak);
-            Some(shape)
-        }
+        Some(mix) => match calibrated_tear::cut_erase(&mix, &mut SimRng::new(seed), cells, weak) {
+            Some(shape) => EraseCut::Torn(Some(shape)),
+            None => EraseCut::BeforeStart,
+        },
         None => {
             let len = cells.len() as u32;
             let mut sim = scratch(cells, 256.min(len));
@@ -338,7 +356,7 @@ pub(crate) fn tear_erase(
                     *w |= m;
                 }
             }
-            None
+            EraseCut::Torn(None)
         }
     }
 }
@@ -414,9 +432,18 @@ mod tests {
     fn a_clean_cut_changes_nothing() {
         let mut cells = old();
         let mut weak = vec![0u8; SS];
-        assert_eq!(tear_erase(TearModel::Clean, 3, &mut cells, &mut weak), None);
+        assert_eq!(
+            tear_erase(TearModel::Clean, 3, &mut cells, &mut weak),
+            EraseCut::Torn(None)
+        );
         assert_eq!(cells, old());
-        tear_program(TearModel::Clean, 3, &mut cells[..32], &[0u8; 32]);
+        tear_program(
+            TearModel::Clean,
+            3,
+            &mut cells[..32],
+            &mut weak[..32],
+            &[0u8; 32],
+        );
         assert_eq!(cells, old());
         assert!(weak.iter().all(|&w| w == 0));
     }
@@ -425,22 +452,24 @@ mod tests {
     fn a_calibrated_tear_is_the_nor_sim_call_with_the_same_seed() {
         for seed in 0..40 {
             let data: Vec<u8> = (0..32u8).map(|i| i.wrapping_mul(37)).collect();
-            let mut ours = vec![0xFFu8; 32];
-            tear_program(TearModel::Calibrated, seed, &mut ours, &data);
-            let mut theirs = vec![0xFFu8; 32];
+            let (mut ours, mut our_weak) = (vec![0xFFu8; 32], vec![0u8; 32]);
+            tear_program(TearModel::Calibrated, seed, &mut ours, &mut our_weak, &data);
+            let (mut theirs, mut their_weak) = (vec![0xFFu8; 32], vec![0u8; 32]);
             calibrated_tear::tear_program(
                 &TearMix::CX1,
                 &mut SimRng::new(seed),
                 &mut theirs,
+                &mut their_weak,
                 0,
                 &data,
             );
             assert_eq!(ours, theirs, "seed {seed}: program");
+            assert_eq!(our_weak, their_weak, "seed {seed}: program weak bits");
 
             let (mut ours, mut our_weak) = (old(), vec![0u8; SS]);
-            let shape = tear_erase(TearModel::Calibrated, seed, &mut ours, &mut our_weak);
+            let cut = tear_erase(TearModel::Calibrated, seed, &mut ours, &mut our_weak);
             let (mut theirs, mut their_weak) = (old(), vec![0u8; SS]);
-            calibrated_tear::tear_erase(
+            let shape = calibrated_tear::cut_erase(
                 &TearMix::CX1,
                 &mut SimRng::new(seed),
                 &mut theirs,
@@ -448,9 +477,9 @@ mod tests {
             );
             assert_eq!(ours, theirs, "seed {seed}: erase cells");
             assert_eq!(our_weak, their_weak, "seed {seed}: erase weak bits");
+            let want = shape.map_or(EraseCut::BeforeStart, |s| EraseCut::Torn(Some(s)));
             assert_eq!(
-                shape,
-                Some(TearMix::CX1.draw_erase(&mut SimRng::new(seed))),
+                cut, want,
                 "seed {seed}: the reported shape is the one drawn"
             );
         }
@@ -467,7 +496,10 @@ mod tests {
         ] {
             for seed in 0..20 {
                 let (mut cells, mut weak) = (old(), vec![0u8; SS]);
-                assert_eq!(tear_erase(tear, seed, &mut cells, &mut weak), Some(shape));
+                assert_eq!(
+                    tear_erase(tear, seed, &mut cells, &mut weak),
+                    EraseCut::Torn(Some(shape))
+                );
                 let weak_bits: u32 = weak.iter().map(|w| w.count_ones()).sum();
                 match shape {
                     EraseShape::AllZero => assert!(cells.iter().all(|&b| b == 0)),
@@ -492,11 +524,50 @@ mod tests {
     }
 
     #[test]
+    fn the_two_new_calibrated_models_cut_before_the_erase_and_inside_a_word() {
+        for seed in 0..20 {
+            let (mut cells, mut weak) = (old(), vec![0u8; SS]);
+            assert_eq!(
+                tear_erase(
+                    TearModel::CalibratedBeforeErase,
+                    seed,
+                    &mut cells,
+                    &mut weak
+                ),
+                EraseCut::BeforeStart
+            );
+            assert_eq!(cells, old(), "seed {seed}: nothing moved");
+            assert!(weak.iter().all(|&w| w == 0));
+
+            let data: Vec<u8> = (0..32u8).map(|i| i.wrapping_mul(37) & 0x7F).collect();
+            let (mut cells, mut weak) = (vec![0xFFu8; 32], vec![0u8; 32]);
+            tear_program(
+                TearModel::CalibratedMidWord,
+                seed,
+                &mut cells,
+                &mut weak,
+                &data,
+            );
+            assert!(weak.iter().any(|&w| w != 0), "seed {seed}: a weak bit");
+            assert!(
+                !(0..=32).any(|n| cells[..n] == data[..n] && cells[n..].iter().all(|&b| b == 0xFF)),
+                "seed {seed}: not a whole-byte prefix"
+            );
+        }
+    }
+
+    #[test]
     fn a_byte_prefix_program_lands_a_prefix_and_random_bits_only_clear() {
         let data: Vec<u8> = (0..32u8).map(|i| !(i | 0x01)).collect();
         for seed in 0..60 {
             let mut cells = vec![0xFFu8; 32];
-            tear_program(TearModel::BytePrefix, seed, &mut cells, &data);
+            tear_program(
+                TearModel::BytePrefix,
+                seed,
+                &mut cells,
+                &mut [0u8; 32],
+                &data,
+            );
             // The first n bytes landed whole, byte n is between, the rest is
             // untouched.
             // (Byte n may land whole by chance, so n is where the first
@@ -512,7 +583,13 @@ mod tests {
 
             let old = old();
             let mut cells = old[..32].to_vec();
-            tear_program(TearModel::RandomBits, seed, &mut cells, &data);
+            tear_program(
+                TearModel::RandomBits,
+                seed,
+                &mut cells,
+                &mut [0u8; 32],
+                &data,
+            );
             for ((c, o), d) in cells.iter().zip(&old[..32]).zip(&data) {
                 assert_eq!(c & !o, 0, "seed {seed}: no bit went 0→1");
                 assert_eq!(!c & (o & d), 0, "seed {seed}: only intended clears");
@@ -526,7 +603,10 @@ mod tests {
         for tear in [TearModel::BytePrefix, TearModel::RandomBits] {
             for seed in 0..30 {
                 let (mut cells, mut weak) = (old(), vec![0u8; SS]);
-                assert_eq!(tear_erase(tear, seed, &mut cells, &mut weak), None);
+                assert_eq!(
+                    tear_erase(tear, seed, &mut cells, &mut weak),
+                    EraseCut::Torn(None)
+                );
                 assert_ne!(cells, old(), "{} seed {seed}: the erase began", tear.name());
                 saw_weak |= weak.iter().any(|&w| w != 0);
             }
@@ -543,6 +623,7 @@ mod tests {
             len: 4096,
             tear: TearModel::Calibrated,
             erase_shape: Some(EraseShape::AllZero),
+            before_start: false,
             cycle: 1_234,
             range_start: 0x35_0000,
             range_len: 0xB_0000,
@@ -552,6 +633,15 @@ mod tests {
             report.to_string(),
             "FLASH-CUT op=12 kind=sector-erase addr=0x353000 len=4096 model=calibrated \
              shape=all_zero cycle=1234 range=0x350000+0xb0000 seed=7"
+        );
+        let before = FlashCutReport {
+            erase_shape: None,
+            before_start: true,
+            ..report
+        };
+        assert!(
+            before.to_string().contains(" shape=before_erase "),
+            "{before}"
         );
     }
 }

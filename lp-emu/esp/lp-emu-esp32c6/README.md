@@ -748,11 +748,14 @@ is `lp_emu_esp_common::engine::flash_cut`):
   chip when the machine is built (a `--flash` image with another table is
   cut in its real `lpfs`), else `0x350000+0xb0000`. `range=` overrides it.
 - **The tear** is an `lp-nor-sim` model by name: `clean` (the command does
-  nothing), `byte_prefix`, `random_bits`, `calibrated` (CX1's mix) and the
-  five forced erase shapes `calibrated_zeroing`, `calibrated_all_zero`,
-  `calibrated_erasing`, `calibrated_reads_ff_weak`, `calibrated_reads_ff`.
-  A calibrated program stops between commands or on a 4-byte word inside
-  this one; a torn block erase is one unit over its 64 KiB (the CX1 counts
+  nothing), `byte_prefix`, `random_bits`, `calibrated` (CX1's mix, 500
+  cuts) and the forced models: five erase shapes `calibrated_zeroing`,
+  `calibrated_all_zero`, `calibrated_erasing`, `calibrated_reads_ff_weak`,
+  `calibrated_reads_ff`, plus `calibrated_before_erase` (the cut lands
+  before the erase starts: the granule untouched, `shape=before_erase`) and
+  `calibrated_mid_word` (every program torn inside a word, with a weak bit).
+  A calibrated program stops between commands, on a 4-byte word inside
+  this one, or (2 of 79) inside a word; a torn block erase is one unit over its 64 KiB (the CX1 counts
   are sector erases: unmeasured for blocks).
 - **After the cut** the chip refuses every program and erase until the
   supply comes back, and the guest runs no further instruction. `then=stop`

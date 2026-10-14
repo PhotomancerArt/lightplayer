@@ -21,6 +21,13 @@ For the boot after the flash and then after each of `--cuts` power cuts:
 4. close the port, wait a random `--min-ms..=--max-ms`, and cut the power with
    `board power-cycle <MAC> --as $BOARD_HOLDER` — never uhubctl.
 
+**Every cut is checked to have been one.** The boot after each power cycle
+must say reset `poweron` in its `ft-boot` record, and it must boot at all: a
+hub that cannot switch VBUS still lets `board power-cycle` exit 0 (Yona's
+other house, 2026-10-08, hub `0-1`), and then the board stays in its silent
+work loop and never prints again. Either way the run stops (exit 5) instead
+of filing resets, or nothing, as power cuts.
+
 Every byte read goes into `--capture`, in order, untouched: the transcript is
 the port's bytes. What this script decided (the seed, each wait, each power
 cycle's output) goes to stderr, which the sitting log keeps.
@@ -107,8 +114,18 @@ def open_port(dev: str) -> int:
     return fd
 
 
-def capture_boot(dev: str, out, until: bytes, seconds: float) -> bool:
-    """Read one boot to the end of the line holding `until`."""
+def boot_reset(seen: bytes) -> str | None:
+    """The reset reason the boot's `ft-boot` record names, if it printed one."""
+    for raw in seen.split(b"\n"):
+        line = raw.decode("utf-8", errors="replace")
+        if '"kind":"ft-boot"' in line and "[fw-check-json] " in line:
+            return json.loads(line.split("[fw-check-json] ", 1)[1]).get("reset")
+    return None
+
+
+def capture_boot(dev: str, out, until: bytes, seconds: float) -> bytes | None:
+    """Read one boot to the end of the line holding `until`; its bytes, or
+    None if the line never came."""
     fd = open_port(dev)
     try:
         seen = b""
@@ -136,8 +153,8 @@ def capture_boot(dev: str, out, until: bytes, seconds: float) -> bool:
             seen += chunk
             at = seen.find(until)
             if at >= 0 and b"\n" in seen[at:]:
-                return True
-        return False
+                return seen
+        return None
     finally:
         os.close(fd)
 
@@ -181,10 +198,21 @@ def main() -> int:
         for boot in range(args.cuts + 1):
             what = "the boot after the flash" if boot == 0 else f"the boot after cut {boot}"
             port = find_port(args.mac, time.monotonic() + args.boot_seconds)
-            if not capture_boot(port, out, until, args.boot_seconds):
+            seen = capture_boot(port, out, until, args.boot_seconds)
+            if seen is None:
+                if boot > 0:
+                    log(f"STOPPED: {what} never reached the sentinel. If the hub cannot switch VBUS, "
+                        "`board power-cycle` exits 0 and changes nothing: the board is still in its silent "
+                        "work loop. Never fall back to a reset; a reset is not a power cut")
+                    return 5
                 log(f"FAILED: {what} never reached the sentinel")
                 return 1
-            log(f"captured {what}")
+            reset = boot_reset(seen)
+            if boot > 0 and reset != "poweron":
+                log(f"STOPPED: {what} reports reset `{reset}`, not `poweron`: that power cycle did not "
+                    "cut the power, so this is not a tear measurement")
+                return 5
+            log(f"captured {what} (reset {reset})")
             if boot == args.cuts:
                 break
             wait_ms = rng.randint(args.min_ms, args.max_ms)

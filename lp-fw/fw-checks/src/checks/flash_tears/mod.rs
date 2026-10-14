@@ -50,11 +50,18 @@ pub mod analysis;
 pub mod journal;
 pub mod layout;
 pub mod pattern;
+pub mod program_plan;
 pub mod records;
 pub mod runner;
 
 /// The payload's name, as the header and the registries spell it.
 pub const PAYLOAD: &str = "flash-tears";
+
+/// The same payload with its programs started off every 32-byte boundary
+/// ([`program_plan::ProgramMode::Unaligned`]): its own name, so its
+/// transcripts sit in their own directory and never feed the page-aligned
+/// histogram the calibrated model's weights come from.
+pub const PAYLOAD_UNALIGNED: &str = "flash-tears-unaligned";
 
 /// The line that ends one boot's scan: the host may cut power after it.
 ///

@@ -184,14 +184,19 @@ names; default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s
 --tears <names>` runs every driver of the smoke under those models; without
 it the smoke is what it always was (the sweeps under the three guessed
 models, the double cut under `random_bits`).
-`calibrated` is the model measured on a real part (CX1, 200 cuts:
+`calibrated` is the model measured on a real part (CX1, 500 cuts:
 `docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
-read `0x00` from the front or throughout, or silently read erased; it runs
-only when named, and a reproducer that names it replays under it.
+read `0x00` from the front or throughout, or silently read erased; rarely a
+cut that lands before an erase starts, or a program torn inside a 4-byte
+word with a weak bit; it runs only when named, and a reproducer that names
+it replays under it (under the weights of the build that replays it).
 `calibrated_zeroing`, `calibrated_all_zero`, `calibrated_erasing`,
 `calibrated_reads_ff_weak` and `calibrated_reads_ff` force every torn erase
-to that one measured state (programs keep the calibrated mix). A sweep
-summary's `torn_erases` counts the cases whose cut tore an erase.
+to that one measured state (programs keep the calibrated mix);
+`calibrated_before_erase` lands every erase cut before its erase and
+`calibrated_mid_word` tears every program inside a word (the other family
+keeps the mix). A sweep summary's `torn_erases` counts the cases whose cut
+tore an erase (an erase cut before it started is not one).
 
 `--corpus` defaults to the spike's `measurements/corpus`; `--out` to
 `target/lp-store-bench/<cmd>`; `--threads` 8; `--sectors` 128.

@@ -295,6 +295,10 @@ genuinely fits none of these, and define it here in one line.
   a magic number), but the stream carries random or checksummed bytes, so
   the marker turns up by chance at a rate set by the stream's length. The
   fix shape is to parse the framing and assert on what the parser reports.
+- **`single-read-trust`** — a check reads a medium once and moves a trust
+  boundary on the answer (a log's end, a blank tail, a CRC that passed),
+  but the medium can answer differently on the next read (a weak flash
+  bit), so a later read undoes the boundary and takes what was built on it.
 
 ## Index
 

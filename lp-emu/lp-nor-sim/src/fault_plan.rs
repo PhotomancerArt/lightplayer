@@ -1,6 +1,6 @@
 //! When to cut power and how the in-flight operation tears.
 
-use crate::calibrated_tear::EraseShape;
+use crate::calibrated_tear::{EraseShape, ProgramShape, TearMix};
 
 /// How the operation in flight when power goes is left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -13,11 +13,12 @@ pub enum TearModel {
     /// A program: a random subset of the page's intended 1→0 clears lands,
     /// anywhere in the page.
     RandomBits,
-    /// Tears shaped and weighted the way a real part tore (CX1, 200 cuts):
-    /// programs stop on a 32-byte command or a 4-byte word; erases leave a
-    /// `0x00` run from the front, all `0x00`, a zero residue with weak bits,
-    /// or a sector reading `0xFF` (see [`crate::calibrated_tear`]). Not in
-    /// [`TearModel::ALL`]: name it to run it.
+    /// Tears shaped and weighted the way a real part tore (CX1, 500 cuts):
+    /// programs stop on a 32-byte command or a 4-byte word, or rarely inside
+    /// a word; erases leave a `0x00` run from the front, all `0x00`, a zero
+    /// residue with weak bits, or a sector reading `0xFF`, and rarely the cut
+    /// lands before the erase started (see [`crate::calibrated_tear`]). Not
+    /// in [`TearModel::ALL`]: name it to run it.
     Calibrated,
     // [`TearModel::Calibrated`] with every torn erase forced to one shape
     // (programs keep the calibrated mix): a sweep in which every erase cut
@@ -33,6 +34,12 @@ pub enum TearModel {
     CalibratedReadsFfWeak,
     /// Calibrated, every torn erase [`EraseShape::ReadsFf`].
     CalibratedReadsFf,
+    /// Calibrated, every cut at an erase landing before the erase starts
+    /// (the sector untouched; programs keep the calibrated mix).
+    CalibratedBeforeErase,
+    /// Calibrated, every torn program [`ProgramShape::MidWord`] (erases keep
+    /// the calibrated mix).
+    CalibratedMidWord,
 }
 
 impl TearModel {
@@ -45,7 +52,7 @@ impl TearModel {
 
     /// Every model a name can select: [`TearModel::ALL`] and the calibrated
     /// one.
-    pub const NAMED: [TearModel; 9] = [
+    pub const NAMED: [TearModel; 11] = [
         TearModel::Clean,
         TearModel::BytePrefix,
         TearModel::RandomBits,
@@ -55,6 +62,8 @@ impl TearModel {
         TearModel::CalibratedErasing,
         TearModel::CalibratedReadsFfWeak,
         TearModel::CalibratedReadsFf,
+        TearModel::CalibratedBeforeErase,
+        TearModel::CalibratedMidWord,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -68,6 +77,8 @@ impl TearModel {
             TearModel::CalibratedErasing => "calibrated_erasing",
             TearModel::CalibratedReadsFfWeak => "calibrated_reads_ff_weak",
             TearModel::CalibratedReadsFf => "calibrated_reads_ff",
+            TearModel::CalibratedBeforeErase => "calibrated_before_erase",
+            TearModel::CalibratedMidWord => "calibrated_mid_word",
         }
     }
 
@@ -83,9 +94,20 @@ impl TearModel {
         }
     }
 
+    /// The mix a calibrated model draws from, given the flash's `base` mix
+    /// (`None` for the three guessed models).
+    pub fn mix(&self, base: TearMix) -> Option<TearMix> {
+        match self {
+            TearModel::Calibrated => Some(base),
+            TearModel::CalibratedBeforeErase => Some(base.before_erase_only()),
+            TearModel::CalibratedMidWord => Some(base.program_only(ProgramShape::MidWord)),
+            _ => self.forced_erase_shape().map(|s| base.erase_only(s)),
+        }
+    }
+
     /// Does this model tear the calibrated way (the mix, or a forced shape)?
     pub fn is_calibrated(&self) -> bool {
-        *self == TearModel::Calibrated || self.forced_erase_shape().is_some()
+        self.mix(TearMix::CX1).is_some()
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
