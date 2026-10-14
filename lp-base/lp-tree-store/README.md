@@ -579,6 +579,17 @@ B in 1,376 reads.
 
 ### Power cuts under the calibrated tears (P10)
 
+> **2026-10-14: the store fails under the re-fitted model's
+> `calibrated_mid_word`.** At 500 cuts, CX1 showed programs torn inside a
+> 4-byte word (2 of 79), one of them with its only missing clear weak. A
+> record torn that way reads whole on some reads. Mount trusts it once,
+> resumes the head behind it, and a later mount loses what was written
+> after it. Four of the seven in-crate sweeps fail, and so do some bench
+> cases. `calibrated` (the mix) and `calibrated_before_erase` stay clean.
+> Open: `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`;
+> numbers in `docs/reports/2026-10-08-c6-nor-tear-calibration.md` §11. The
+> P10 numbers below are the 200-cut model's.
+
 `TearModel::Calibrated` is the tear measured on a real C6's flash (CX1, 200
 cuts, `docs/reports/2026-10-08-c6-nor-tear-calibration.md` §5): a torn
 erase pre-programs the sector to `0x00` front to back before lifting it, so
