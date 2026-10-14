@@ -4102,6 +4102,7 @@ dependencies = [
  "lp-app-version",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",
+ "lpa-client",
  "lpa-server",
  "lpc-hardware",
  "lpc-history",
@@ -6463,6 +6464,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lp-tree-store",
  "lpc-access",
  "lpc-hardware",
  "lpc-model",
@@ -6586,11 +6588,14 @@ dependencies = [
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "hashbrown 0.15.5",
  "log",
  "lp-gfx-lpvm",
+ "lp-nor-sim",
  "lp-perf",
  "lp-recovery",
+ "lp-tree-store",
  "lpa-client",
  "lpc-access",
  "lpc-engine",
@@ -6604,6 +6609,7 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lpvm-native",
+ "miniz_oxide",
  "serde",
 ]
 
@@ -6964,6 +6970,8 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
+ "lp-deflate",
+ "miniz_oxide",
  "serde",
  "tempfile",
 ]

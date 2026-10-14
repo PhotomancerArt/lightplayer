@@ -1,7 +1,7 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.",
   "recorded": "2026-10-10",
-  "commit": "673c861db",
+  "commit": "ccabc673d",
   "modes": {
     "startup": {
       "windows": {
@@ -20,7 +20,7 @@
           "largest_alloc": 4008,
           "alloc_count": 5010,
           "alloc_bytes": 298226,
-          "largest_free_at_close": 210424,
+          "largest_free_at_close": 212280,
           "holes_at_close": 43
         },
         "frame": {
@@ -29,7 +29,7 @@
           "largest_alloc": 8148,
           "alloc_count": 6443,
           "alloc_bytes": 356120,
-          "largest_free_at_close": 170288,
+          "largest_free_at_close": 172144,
           "holes_at_close": 11
         },
         "shader-compile": {
@@ -38,7 +38,7 @@
           "largest_alloc": 8148,
           "alloc_count": 3686,
           "alloc_bytes": 188589,
-          "largest_free_at_close": 131720,
+          "largest_free_at_close": 133576,
           "holes_at_close": 36
         },
         "shader-link": {
@@ -47,7 +47,7 @@
           "largest_alloc": 3192,
           "alloc_count": 7,
           "alloc_bytes": 3337,
-          "largest_free_at_close": 131720,
+          "largest_free_at_close": 133576,
           "holes_at_close": 38
         }
       }
@@ -60,7 +60,7 @@
           "largest_alloc": 560,
           "alloc_count": 616,
           "alloc_bytes": 29251,
-          "largest_free_at_close": 131720,
+          "largest_free_at_close": 133576,
           "holes_at_close": 48
         }
       }

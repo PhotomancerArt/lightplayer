@@ -12,9 +12,13 @@ default = ["soft-sha"]
 # `SoftSha256`: the `sha2` crate behind the hasher seam (host, tests). The
 # firmware passes the C6's hardware SHA instead and leaves this off.
 soft-sha = ["dep:sha2"]
-# `host_deflate_chunks`: raw deflate (miniz_oxide) producing
+# `plan_deflated_chunks`: raw deflate (miniz_oxide) cut into chunks that each
+# fit one record — a client's side of a deflated wire push (`lpa-client`,
+# native and wasm). No hasher. Never on a device.
+deflate-plan = ["dep:miniz_oxide"]
+# `host_deflate_chunks`: the plan with each chunk's id, producing
 # `put_chunk_deflated` input — the host's side of a push. Never on a device.
-host-deflate = ["dep:miniz_oxide", "soft-sha"]
+host-deflate = ["deflate-plan", "soft-sha"]
 # `LpFsTree`: `lpfs::LpFs` over the store.
 lpfs = ["dep:lpfs"]
 # `impl Flash for lp_nor_sim::NorFlashSim`.

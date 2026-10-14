@@ -3614,7 +3614,7 @@ test-emu-c6-cli-agent: install-rv32-target
 # The link half's test binaries, named once: the recipe above runs them and
 # CI's figure-patch step re-runs them as a bless (`just c6-cli-link-tests`
 # prints them), so a binary added here is blessed too.
-C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture"
+C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture --test emu_batch_push"
 
 c6-cli-link-tests:
     @echo {{ C6_CLI_LINK_TESTS }}

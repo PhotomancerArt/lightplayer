@@ -333,6 +333,14 @@ the app through the same view model and presses the same actions. See
   may not dial. See `docs/adr/2026-10-07-c6-wifi-link.md` and
   `docs/adr/2026-10-06-cloud-relay.md` ("Device side"); the emulated LAN
   (`net=lan`) is `docs/adr/2026-10-05-emulator-seams.md` §11.
+- **A push is one transaction** (wire 42). Every project write runs one
+  primitive, `lpa_client::push_files::deploy_files`: `BeginBatch`, whose
+  `atomic` answer (`LpFs::batches_are_atomic`) says whether the board commits
+  it as one, deflated chunks (`writeChunkDeflated`), and `CommitBatch` after
+  the load and hash. The batch is the server's one piece of fs state, owned by
+  a link and ended by its close or reset (`ServerTransport::take_reset_links`)
+  or 60 s idle; an `LpFs` wrapper forwards every method. See
+  `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`.
 - **Project loads are tried, not gated.** There is no headroom gate before a
   `LoadProject`. A load is recorded in the RTC recovery region until its
   project has run 3 frames. A switch that resets the board boots the
