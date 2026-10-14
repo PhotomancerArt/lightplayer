@@ -45,7 +45,7 @@ mount without a complete root was `Corrupt("no complete root")`.
   Everything else the mount refuses — `Damaged`, `Unsupported`, a flash
   that would not read — is **refused**: nothing written, files kept, a RAM
   filesystem served, and the hello says `fs: refused`
-  (`lpc_wire::FsBootState::Refused`, wire 42).
+  (`lpc_wire::FsBootState::Refused`, wire 43).
 - **A refused board's access is locked**:
   `lpa_server::access_store::device_store_at_boot` returns
   `DeviceAccessFile::locked()` for `Refused` as for `LegacyHeld` (USB, a
@@ -80,4 +80,4 @@ mount without a complete root was `Corrupt("no complete root")`.
   install stop, and the board's log says why. A protocol-level reason is
   a channel-3 addition, left for the adoption round if it is wanted.
 - `refused` is a new value of a required hello field and `fs.tree` a new
-  feature: wire 42. A littlefs build never produces either.
+  feature: wire 43. A littlefs build never produces either.

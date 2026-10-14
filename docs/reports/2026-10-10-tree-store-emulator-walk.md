@@ -23,7 +23,7 @@ the SHA accelerator as its hasher. Every board file goes through it.
   of this format, or only an interrupted first format's empty directory) is
   formatted, unless the legacy probe holds; `Damaged` and `Unsupported` are
   **refused**: nothing written, files kept, `fs: refused`, access locked
-  (D1, wire 42). The store's code appears once in the ELF: 36 symbols name
+  (D1, wire 43). The store's code appears once in the ELF: 36 symbols name
   one `TreeStore<AlignedNorFlash<FlashStorage>, StoreSha256>`, and the
   size probe shows one `TreeStore<RamFlash, ProbeHasher>` and no `&mut`
   instantiation.

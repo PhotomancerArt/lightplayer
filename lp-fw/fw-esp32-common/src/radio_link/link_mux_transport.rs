@@ -235,6 +235,9 @@ pub struct LinkMuxTransport<U, D> {
     inbox: VecDeque<Incoming>,
     /// Closed links the server has not been told about yet.
     closed: Vec<LinkId>,
+    /// Radio links whose session reset or came up since the server last
+    /// asked ([`ServerTransport::take_reset_links`]).
+    reset: Vec<LinkId>,
     /// Keyed links' handshake events the server has not taken yet.
     #[cfg(feature = "wifi")]
     secure: Vec<(LinkId, SecureLinkEvent)>,
@@ -272,6 +275,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
             radio: Vec::with_capacity(LINK_SLOTS),
             inbox: VecDeque::with_capacity(INBOX_RESERVE),
             closed: Vec::with_capacity(LINK_SLOTS),
+            reset: Vec::with_capacity(LINK_SLOTS),
             #[cfg(feature = "wifi")]
             secure: Vec::with_capacity(LINK_SLOTS + 1),
             #[cfg(feature = "wifi")]
@@ -660,6 +664,9 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                             ));
                         }
                         radio.packed.back_to_json();
+                        if !self.reset.contains(&radio.id) {
+                            self.reset.push(radio.id);
+                        }
                         radio.session = Some(generation);
                         radio.ever_up = true;
                         radio.hello_owed = true;
@@ -671,6 +678,9 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
                             reset_keyed.push(radio.id);
                         }
                         radio.packed.back_to_json();
+                        if !self.reset.contains(&radio.id) {
+                            self.reset.push(radio.id);
+                        }
                         radio.session = None;
                         radio.tally.note_reset(reason);
                         // Requests from the ended session: its host fails
@@ -988,6 +998,12 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> ServerTransport for LinkMu
         let mut closed = self.primary.take_closed_links();
         closed.append(&mut self.closed);
         closed
+    }
+
+    fn take_reset_links(&mut self) -> Vec<LinkId> {
+        let mut reset = self.primary.take_reset_links();
+        reset.append(&mut self.reset);
+        reset
     }
 
     #[cfg(feature = "wifi")]

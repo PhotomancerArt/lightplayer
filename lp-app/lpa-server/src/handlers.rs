@@ -440,6 +440,25 @@ pub fn handle_fs_request_with_headroom(
         FsRequest::HashPackage { prefix } => Ok(
             crate::file_sync::handle_hash_package_with_headroom(fs, prefix, headroom),
         ),
+        FsRequest::WriteChunkDeflated {
+            path,
+            offset,
+            logical_len,
+            data,
+        } => Ok(crate::file_sync::handle_write_chunk_deflated(
+            fs,
+            path,
+            offset,
+            logical_len,
+            &data,
+        )),
+        // `LpServer::tick_and_send` answers these from its batch state,
+        // where the link is; they never reach a handler.
+        FsRequest::BeginBatch | FsRequest::CommitBatch | FsRequest::AbortBatch => {
+            Err(ServerError::Core(
+                "batch verbs are answered by the server that holds the batch, not a handler".into(),
+            ))
+        }
     }
 }
 
