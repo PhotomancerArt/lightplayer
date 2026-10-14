@@ -483,8 +483,21 @@ impl FlashImage {
         cycle: u64,
     ) -> FlashCutReport {
         let span = addr as usize..addr as usize + data.len();
-        flash_cut::tear_program(plan.tear, plan.seed, &mut self.bytes[span.clone()], data);
+        let mut weak = vec![0u8; data.len()];
+        flash_cut::tear_program(
+            plan.tear,
+            plan.seed,
+            &mut self.bytes[span.clone()],
+            &mut weak,
+            data,
+        );
         self.weak.solidify(addr, &self.bytes[span]);
+        if weak.iter().any(|&w| w != 0) {
+            // A program torn inside a word: its weak bits sit on clears that
+            // did not land, so `solidify` above never touches them.
+            self.weak.reseed(plan.seed);
+            self.weak.add(addr, &weak);
+        }
         self.programs += 1;
         let len = data.len() as u32;
         self.note_write(addr, len);
@@ -496,9 +509,15 @@ impl FlashImage {
     fn tear_erase(&mut self, plan: &FlashCut, addr: u32, len: u32, cycle: u64) -> FlashCutReport {
         let span = addr as usize..(addr + len) as usize;
         let mut weak = vec![0u8; len as usize];
-        let shape = flash_cut::tear_erase(plan.tear, plan.seed, &mut self.bytes[span], &mut weak);
-        self.weak.reseed(plan.seed);
-        self.weak.add(addr, &weak);
+        let cut = flash_cut::tear_erase(plan.tear, plan.seed, &mut self.bytes[span], &mut weak);
+        let (shape, before_start) = match cut {
+            flash_cut::EraseCut::Torn(shape) => (shape, false),
+            flash_cut::EraseCut::BeforeStart => (None, true),
+        };
+        if !before_start {
+            self.weak.reseed(plan.seed);
+            self.weak.add(addr, &weak);
+        }
         let kind = if len == BLOCK_LEN {
             self.block_erases += 1;
             FlashOpKind::BlockErase
@@ -507,7 +526,16 @@ impl FlashImage {
             FlashOpKind::SectorErase
         };
         self.note_write(addr, len);
-        self.record_cut(plan, kind, addr, len, shape, cycle)
+        let report = self.record_cut(plan, kind, addr, len, shape, cycle);
+        if before_start {
+            let report = FlashCutReport {
+                before_start: true,
+                ..report
+            };
+            self.cutter.record(report);
+            return report;
+        }
+        report
     }
 
     fn record_cut(
@@ -526,6 +554,7 @@ impl FlashImage {
             len,
             tear: plan.tear,
             erase_shape,
+            before_start: false,
             cycle,
             range_start: plan.range.start,
             range_len: plan.range.end - plan.range.start,
@@ -1462,6 +1491,7 @@ mod tests {
                 &TearMix::CX1,
                 &mut SimRng::new(seed),
                 &mut want[addr as usize..addr as usize + 32],
+                &mut [0u8; 32],
                 0,
                 &data,
             );
@@ -1476,7 +1506,7 @@ mod tests {
             let mut want = old.clone();
             let mut weak = vec![0u8; SECTOR_LEN as usize];
             let span = addr as usize..(addr + SECTOR_LEN) as usize;
-            calibrated_tear::tear_erase(
+            let shape = calibrated_tear::cut_erase(
                 &TearMix::CX1,
                 &mut SimRng::new(seed),
                 &mut want[span],
@@ -1488,7 +1518,9 @@ mod tests {
                 .map(|i| f.weak_bits().mask_at(addr + i))
                 .collect();
             assert_eq!(stored, weak, "seed {seed}: the weak mask is nor-sim's");
-            assert!(cut_report(&sb).erase_shape.is_some());
+            let report = cut_report(&sb);
+            assert_eq!(report.erase_shape, shape);
+            assert_eq!(report.before_start, shape.is_none());
         }
     }
 

@@ -291,6 +291,21 @@ pub const CX1_READS_FF_WEAK: [u32; 4] = [1, 2, 3, 8];
 /// reads where its weak bit reads 0.
 pub const CX1_MID_WORD: [(u32, u32, u32); 2] = [(3, 17, 1), (14, 15, 1)];
 
+/// A cut at an erase of `cells`, drawn and done: `None` when it landed
+/// before the erase started (`cells` and `weak` untouched), else the shape
+/// it tore into. What [`crate::NorFlashSim`] does at a calibrated erase cut,
+/// for a flash that is not a `NorFlashSim` (the emulator's chip).
+pub fn cut_erase(
+    mix: &TearMix,
+    rng: &mut SimRng,
+    cells: &mut [u8],
+    weak: &mut [u8],
+) -> Option<EraseShape> {
+    let shape = mix.draw_erase_cut(rng)?;
+    tear_erase(shape, rng, cells, weak);
+    Some(shape)
+}
+
 /// Tear an erase of `cells` (whose old content is still in it) into `shape`.
 /// `weak` is the sector's weak mask, all zero on entry.
 pub fn tear_erase(shape: EraseShape, rng: &mut SimRng, cells: &mut [u8], weak: &mut [u8]) {
