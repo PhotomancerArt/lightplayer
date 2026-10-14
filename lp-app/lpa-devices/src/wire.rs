@@ -424,6 +424,10 @@ pub enum BoardFs {
     /// A pre-repartition filesystem is waiting for a migration: the
     /// firmware refused to format over it.
     LegacyHeld,
+    /// The board refused its file store (a newer or damaged store header,
+    /// `fs-tree` builds): files kept on the flash, a RAM filesystem served,
+    /// access locked. Not a migration.
+    Refused,
 }
 
 impl HelloFacts {

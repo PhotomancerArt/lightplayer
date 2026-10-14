@@ -11,10 +11,19 @@ pub enum StoreError<E> {
     NoSpace,
     /// The flash failed (power lost); drop the store.
     Flash(E),
-    /// Flash content the store cannot use (no complete root at mount, a
-    /// record that fails its CRC or does not parse), or a deflated chunk
-    /// that does not inflate to its length or its id.
+    /// Flash content the store cannot use (a record that fails its CRC or
+    /// does not parse), or a deflated chunk that does not inflate to its
+    /// length or its id. Mount never returns it: see `Damaged`.
     Corrupt(&'static str),
+    /// Mount only: no store is here — no sector carries a trusted header of
+    /// this format (blank, littlefs, foreign data), or the trusted ones hold
+    /// only what an interrupted `format` writes. Nothing a user wrote is on
+    /// the flash; formatting it loses nothing.
+    NoStore,
+    /// Mount only: a store's records are here but no complete root (or the
+    /// committed tree did not check). Keep the flash (`lp-cli hardware tree
+    /// extract`); do not format over it.
+    Damaged(&'static str),
     /// Flash this code must not read: a sector header with an incompat flag
     /// or head kind a newer format added, or written for another sector
     /// size (FORMAT.md "Sector"). Nothing was read past the headers; do not

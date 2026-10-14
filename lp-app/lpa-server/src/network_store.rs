@@ -36,6 +36,11 @@ use lpfs::LpFs;
 pub const HELD_BOARD_REFUSAL: &str =
     "the board is holding its files for an update; finish the update first";
 
+/// The same refusal on a board that refused its file store (`fs: refused`,
+/// an `fs-tree` build): its network file is on the flash it kept.
+pub const REFUSED_STORE_REFUSAL: &str = "the board refused its file store (a newer or damaged \
+     store header); its files are kept — read them with `lp-cli hardware tree extract`";
+
 /// The network file at root `/.lp/network.json`: [`NetworkFile::none`] when
 /// there is none, and when it cannot be read (logged, never its bytes).
 ///

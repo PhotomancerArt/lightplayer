@@ -10,6 +10,7 @@
 use alloc::vec::Vec;
 
 use crate::flash::Flash;
+use crate::mount_verdict::FormatResidue;
 use crate::object_id::ObjectId;
 use crate::ram_index::RecordLoc;
 use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader};
@@ -67,11 +68,14 @@ pub struct ScannedSector {
     pub closed: bool,
 }
 
-/// Scan sector `s`, whose header was valid.
+/// Scan sector `s`, whose header was valid. Every CRC-good record is also
+/// shown to `residue` (`mount_verdict.rs`: was anything here beyond what
+/// `format` writes?).
 pub fn scan_sector<F: Flash>(
     log: &mut RecordLog<F>,
     s: u32,
     roots: &mut RootCandidates,
+    residue: &mut FormatResidue,
 ) -> Result<ScannedSector, StoreError<F::Error>> {
     let size = log.sector_size;
     let mut out = ScannedSector {
@@ -83,7 +87,7 @@ pub fn scan_sector<F: Flash>(
     while off + RECORD_HEADER_LEN <= size {
         let mut h = [0u8; RECORD_HEADER_LEN as usize];
         log.read(log.addr(s, off), &mut h)?;
-        let (len, root) = match RecordHeader::parse(&h) {
+        let (len, kind, root) = match RecordHeader::parse(&h) {
             HeaderRead::End => break,
             HeaderRead::Bad => {
                 out.closed = true;
@@ -91,8 +95,12 @@ pub fn scan_sector<F: Flash>(
             }
             // Checked like any record, then skipped: garbage (FORMAT.md
             // "Unknown records").
-            HeaderRead::Unknown { len } => (len, None),
-            HeaderRead::Record(r) => (r.len, Some(r).filter(|r| r.kind == RecordKind::Root)),
+            HeaderRead::Unknown { len } => (len, None, None),
+            HeaderRead::Record(r) => (
+                r.len,
+                Some(r.kind),
+                Some(r).filter(|r| r.kind == RecordKind::Root),
+            ),
         };
         let total = RECORD_HEADER_LEN + u32::from(len);
         if off + total > size {
@@ -106,6 +114,7 @@ pub fn scan_sector<F: Flash>(
             out.closed = true;
             break;
         }
+        residue.saw_record(kind, &payload);
         let loc = RecordLoc {
             sector: s,
             offset: off,

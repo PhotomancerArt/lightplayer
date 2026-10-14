@@ -701,7 +701,9 @@ fn config() -> StoreConfig {
 
 fn formatted() -> NorFlashSim {
     let mut flash = NorFlashSim::new(NorGeometry::c6(48));
-    TreeStore::format(&mut flash, &mut SoftSha256, &config()).expect("format");
+    TreeStore::format(&mut flash, SoftSha256, config())
+        .map_err(|(e, ..)| e)
+        .expect("format");
     flash
 }
 

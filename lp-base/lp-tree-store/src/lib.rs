@@ -53,6 +53,8 @@ mod host_deflate;
 mod image_inspect;
 #[cfg(feature = "lpfs")]
 mod lp_fs_tree;
+mod mount_summary;
+mod mount_verdict;
 mod mount_walk;
 mod multi_node;
 #[cfg(feature = "mutants")]
@@ -92,6 +94,8 @@ mod format_extension_tests;
 #[cfg(all(test, feature = "lpfs"))]
 mod lp_fs_tree_tests;
 #[cfg(test)]
+mod mount_verdict_tests;
+#[cfg(test)]
 mod ram_budget_tests;
 #[cfg(test)]
 mod store_tests;
@@ -110,6 +114,7 @@ pub use host_deflate::{HostChunk, host_deflate_chunks};
 pub use image_inspect::*;
 #[cfg(feature = "lpfs")]
 pub use lp_fs_tree::LpFsTree;
+pub use mount_summary::MountSummary;
 pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;
