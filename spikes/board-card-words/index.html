@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Board card words</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* =====================================================================
+   Board card words: every row's states, today's words beside proposed.
+   Palette from lpa-studio-web/src/style.css :root, via
+   spikes/board-card-stack (the converged card). Single dark look on
+   purpose: Studio is dark-only. Throwaway: production never imports
+   spikes/. Layout: a reading column of numbered sections; each row's
+   states are a table of real bars, Today | Proposed | Why.
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --bg:#0d0d13; --surface:#14141c; --panel:#17171f; --raised:#1d1d28; --raised-strong:#252532;
+  --bd:#343444; --bd-mut:#2b2b39; --bd-strong:#4a4a5e;
+  --tx:#f2f0e8; --strong:#fffaf0; --muted:#c9c9d2; --subtle:#9c9cab; --faint:#6d6f7a; --heading:#e9e9ef;
+  --spectrum:#5fe08b,#53c6f2,#a58af7,#ff5d5d,#ffab4a,#f5e04e;
+  --st-good-bg:#13241d;      --st-good-bd:#365545;      --st-good-tx:#7be0b2;
+  --st-live-bg:#142330;      --st-live-bd:#3c5c78;      --st-live-tx:#9cc8ee;
+  --st-attention-bg:#291f14; --st-attention-bd:#795833; --st-attention-tx:#f0b97a;
+  --st-error-bg:#301b1d;     --st-error-bd:#874b4b;     --st-error-tx:#ffc7c7;
+  --st-warn-bg:#292213;      --st-warn-bd:#8a6f35;      --st-warn-tx:#e8c56b;
+  --st-error-stripes:repeating-linear-gradient(135deg, rgba(255,93,93,.09) 0 6px, transparent 6px 12px);
+  --shell-bg:#0b0c0e; --shell-mut:#a7a49c; --shell-dim:#7c7a73; --shell-bd:#262a31; --shell-tx:#e8e6e1;
+  --new:#9cc8ee; --same:#6f6d66;
+}
+* { box-sizing:border-box; }
+html { background:var(--shell-bg); }
+body { margin:0; padding-block:32px 120px; padding-inline:clamp(16px, 3vw, 40px); background:var(--shell-bg); color:var(--shell-tx); font:14px/1.5 var(--font); }
+main { max-width:1400px; margin:0 auto; display:grid; gap:44px; }
+header { display:grid; gap:10px; max-width:860px; }
+h1 { font-size:26px; line-height:1.15; letter-spacing:-.01em; margin:0; color:var(--strong); text-wrap:balance; }
+.eyebrow { font:700 11px var(--font); letter-spacing:.14em; text-transform:uppercase; color:var(--shell-dim); }
+p { margin:0; }
+.hint { color:var(--shell-mut); font-size:14px; max-width:72ch; }
+.hint b, .why b { color:var(--shell-tx); font-weight:600; }
+code, .k { font-family:var(--mono); font-size:12px; color:var(--shell-mut); }
+section { display:grid; gap:14px; }
+h2 { margin:0; font-size:18px; color:var(--strong); display:flex; align-items:baseline; gap:12px; text-wrap:balance; }
+h2 .n { font:700 12px var(--mono); color:var(--shell-dim); min-width:22px; }
+.lede { color:var(--shell-mut); max-width:78ch; }
+
+/* ---- rules ---------------------------------------------------------- */
+.rules { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+@media (max-width: 900px) { .rules { grid-template-columns:1fr; } }
+.rule { border:1px solid var(--shell-bd); border-radius:8px; padding:12px 14px; display:grid; gap:4px; background:#101115; }
+.rule b { color:var(--strong); font-size:13.5px; }
+.rule span { color:var(--shell-mut); font-size:13px; }
+.rule .id { font:700 11px var(--mono); color:var(--new); }
+
+/* ---- the controls strip -------------------------------------------- */
+.strip { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; border:1px dashed var(--shell-bd); border-radius:8px; padding:10px 12px; }
+.strip .lbl { font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); }
+.seg { display:inline-flex; border:1px solid var(--bd); border-radius:7px; overflow:hidden; }
+.seg button { appearance:none; font:600 12.5px var(--font); color:var(--muted); background:transparent; border:0; padding:6px 12px; cursor:pointer; }
+.seg button + button { border-left:1px solid var(--bd); }
+.seg button[aria-pressed="true"] { background:var(--raised-strong); color:var(--strong); }
+.seg button:focus-visible, .wo:focus-visible, .gosec:focus-visible { outline:2px solid var(--st-live-tx); outline-offset:-2px; }
+.strip .note { color:var(--shell-dim); font-size:12.5px; }
+
+/* ---- the card (from spikes/board-card-stack) ----------------------- */
+svg.i { width:14px; height:14px; flex:none; }
+.cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(310px, 1fr)); gap:16px; align-items:start; }
+.cardwrap { display:grid; gap:6px; min-width:0; }
+.cap { font:700 11px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--shell-dim); }
+.sc { position:relative; border-radius:8px; border:1px solid var(--bd); background:var(--panel); min-width:0; color:var(--tx); font-size:13px; }
+.pic { position:relative; height:118px; background:#07080a; border-radius:7px 7px 0 0; overflow:hidden; }
+.pic svg { position:absolute; inset:0; width:100%; height:100%; }
+.pic.stale svg { opacity:.42; filter:saturate(.5); }
+.pic.mini { height:56px; }
+.notch { position:absolute; top:0; right:0; z-index:4; height:24px; display:inline-flex; align-items:center; gap:5px; padding:0 9px; background:var(--panel); color:var(--muted); border-bottom-left-radius:9px; border-top-right-radius:7px; font:600 10.5px var(--font); }
+.notch svg.i { width:13px; height:13px; }
+.notch::before, .notch::after { content:""; position:absolute; width:9px; height:9px; background:radial-gradient(circle at 0 100%, transparent 8.5px, var(--panel) 9px); }
+.notch::before { left:-9px; top:0; }
+.notch::after { right:0; bottom:-9px; }
+.notch .fps { font:700 10.5px var(--mono); color:var(--st-live-tx); }
+.notch .live { color:var(--st-live-tx); font-weight:700; }
+.notch .age { color:var(--subtle); }
+.dot { width:8px; height:8px; border-radius:50%; background:var(--st-live-tx); box-shadow:0 0 6px rgba(156,200,238,.6); margin:0 2px; flex:none; }
+.dot.idle { background:transparent; border:1.5px solid var(--faint); box-shadow:none; }
+.notch .att { color:var(--st-attention-tx); display:inline-flex; }
+.notch .warn { color:var(--st-warn-tx); display:inline-flex; }
+.notch .err { color:var(--st-error-tx); display:inline-flex; }
+.pic .lens { position:absolute; inset:0; background:rgba(7,8,10,.55); }
+
+.nb { position:relative; display:flex; align-items:center; gap:8px; height:50px; padding:0 8px 0 11px; border-top:1px solid var(--bd-mut); min-width:0; }
+.nb .nbt { flex:1; min-width:0; display:grid; gap:1px; }
+.nb b { font-size:13.5px; color:var(--strong); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.gosec { appearance:none; font:inherit; position:relative; align-self:stretch; margin:0 -8px 0 0; padding:0 15px; border:0; border-left:1px solid var(--bd);
+  background:rgba(255,255,255,.035); color:var(--strong); font-size:12.5px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:6px; cursor:default; border-radius:0 0 7px 0; }
+.nb.top .gosec { border-radius:0; }
+.gosec svg.i { width:12px; height:12px; }
+.gosec.word { color:var(--faint); background:transparent; font-weight:700; }
+.gosec.ring::after { content:""; position:absolute; inset:7px 6px; border-radius:6px; padding:1px; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite:exclude; -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; }
+.spin { width:11px; height:11px; border-radius:50%; flex:none; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
+  mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); -webkit-mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); animation:spin 1.1s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.iri { position:absolute; left:0; bottom:0; height:2px; border-radius:0 2px 2px 0; background:linear-gradient(90deg, var(--spectrum), #5fe08b); background-size:300% 100%; animation:iri 4s linear infinite; }
+@keyframes iri { to { background-position:300% 0; } }
+@media (prefers-reduced-motion: reduce) { .spin, .iri { animation:none; } }
+
+.srow { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); background:var(--surface); overflow:hidden; }
+.sc .srow:last-child { border-radius:0 0 7px 7px; }
+.srow svg.i { width:12px; height:12px; flex:none; color:var(--subtle); }
+.srow .s { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.srow .spring { flex:1; }
+.srow .a { flex:none; color:var(--subtle); white-space:nowrap; }
+.srow .chev { color:var(--faint); font-size:12px; flex:none; }
+.srow .mark { display:inline-flex; flex:none; color:var(--faint); }
+.srow .mark.lit { color:var(--st-live-tx); }
+.srow .mark svg.i { color:currentColor; }
+.srow.t-att { background:var(--st-attention-bg); color:var(--st-attention-tx); border-top-color:var(--st-attention-bd); }
+.srow.t-warn { background:var(--st-warn-bg); color:var(--st-warn-tx); border-top-color:var(--st-warn-bd); }
+.srow.t-err { background-color:var(--st-error-bg); background-image:var(--st-error-stripes); color:var(--st-error-tx); border-top-color:var(--st-error-bd); }
+.srow.t-up { background:var(--st-live-bg); color:var(--st-live-tx); border-top-color:var(--st-live-bd); }
+.srow[class*="t-"] svg.i, .srow[class*="t-"] .a { color:currentColor; }
+.srow[class*="t-"] .s { font-weight:700; }
+.srow.working { color:var(--strong); }
+.srow.working .s { font-weight:700; }
+.srow .lab { flex:none; width:58px; font:700 9.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+.srow[class*="t-"] .lab { color:currentColor; opacity:.75; }
+.wo { appearance:none; font:inherit; align-self:stretch; margin:0 -10px 0 4px; padding:0 11px; border:0; border-left:1px solid var(--bd); background:rgba(255,255,255,.035); color:var(--strong); font-size:11px; font-weight:800; white-space:nowrap; flex:none; display:inline-flex; align-items:center; gap:4px; cursor:default; }
+.wo svg.i { width:11px !important; height:11px !important; color:currentColor !important; }
+.srow[class*="t-"] .wo { border-left-color:currentColor; color:inherit; }
+.wo + .wo { margin-left:-10px; }
+
+/* ---- comparison tables --------------------------------------------- */
+.tbl { overflow-x:auto; border:1px solid var(--shell-bd); border-radius:10px; background:#0f1014; }
+table { width:100%; border-collapse:collapse; min-width:1160px; }
+thead th { position:sticky; top:0; text-align:left; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); padding:10px 12px; border-bottom:1px solid var(--shell-bd); background:#0f1014; }
+tbody td { vertical-align:middle; padding:10px 12px; border-bottom:1px solid #1b1d22; }
+tbody tr:last-child td { border-bottom:0; }
+td.st { width:210px; color:var(--shell-tx); font-size:13px; }
+td.st .id { display:block; font:700 11px var(--mono); color:var(--shell-dim); margin-bottom:2px; }
+td.v { width:372px; }
+td.why { color:var(--shell-mut); font-size:13px; min-width:0; }
+tr.same td.why { color:var(--same); }
+tr.changed td.st .id { color:var(--new); }
+.box { position:relative; width:350px; border:1px solid var(--bd); border-radius:8px; background:var(--panel); overflow:hidden; }
+.box .srow:first-child, .box .nb:first-child { border-top:0; }
+.box .srow:last-child { border-radius:0; }
+.box.gone { height:28px; display:flex; align-items:center; padding:0 10px; color:var(--faint); font-size:11.5px; font-style:italic; border-style:dashed; background:transparent; }
+.tag { display:inline-block; font:700 10px var(--font); letter-spacing:.08em; text-transform:uppercase; padding:1px 6px; border-radius:4px; margin-left:6px; vertical-align:1px; }
+.tag.c { color:var(--new); background:rgba(156,200,238,.1); }
+.tag.k { color:var(--same); background:rgba(255,255,255,.04); }
+
+/* ---- questions ------------------------------------------------------ */
+.qs { display:grid; gap:12px; }
+.q { border:1px solid var(--shell-bd); border-radius:10px; padding:14px 16px; display:grid; gap:6px; background:#101115; }
+.q h3 { margin:0; font-size:15px; color:var(--strong); display:flex; gap:10px; align-items:baseline; text-wrap:balance; }
+.q h3 .id { font:700 12px var(--mono); color:var(--new); }
+.q p { color:var(--shell-mut); max-width:84ch; }
+.q .lean { color:var(--shell-tx); }
+.q .lean b { color:var(--new); }
+footer { color:var(--shell-dim); font-size:12.5px; max-width:84ch; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <span class="eyebrow">Spike · board card · understandability pass</span>
+  <h1>Board card words</h1>
+  <p class="hint">Read each row of the card on its own. It should say <b>what it is about</b> and <b>what state it is in</b>, without its icon and without the rows around it, to someone who has never seen Studio. Below: a few whole cards, then one section per row with <b>every state that row can show</b>. Each state has today’s words (from the connected branch, after your first round of notes) beside the words I propose, and why. The picture itself is left alone; we’ll talk about it separately.</p>
+  <p class="hint">Changed states have a blue ID and a <span class="tag c">change</span> tag; unchanged ones are grey. Reply with IDs (“L2 yes, A2 no, keep it shorter”).</p>
+</header>
+
+<section>
+  <h2><span class="n">0</span>Six rules the proposals follow</h2>
+  <div class="rules" id="rules"></div>
+</section>
+
+<section>
+  <h2><span class="n">1</span>Common cards</h2>
+  <p class="lede">Eight states a person meets most. Flip between today, the proposal, and the proposal with a quiet label at the start of each row (the labels let the words get shorter, since the label carries the subject).</p>
+  <div class="strip">
+    <span class="lbl">Show</span>
+    <div class="seg" role="group" aria-label="Which words">
+      <button type="button" data-mode="cur" aria-pressed="false">Today</button>
+      <button type="button" data-mode="prop" aria-pressed="true">Proposed</button>
+      <button type="button" data-mode="lab" aria-pressed="false">Proposed + row labels</button>
+    </div>
+    <span class="note">The pictures are placeholders.</span>
+  </div>
+  <div class="cards" id="cards"></div>
+</section>
+
+<div id="rowsections"></div>
+
+<section>
+  <h2><span class="n">9</span>Questions for you</h2>
+  <div class="qs" id="qs"></div>
+</section>
+
+<footer>Sources: the state tables at the top of <code>lpa-studio-core/src/app/devices/board_card/*.rs</code> on <code>claude/connected-in-the-card</code> at <code>c688c990b</code>, and <code>device_update_words.rs</code>. Every “Today” cell is one of those rows, rendered with the converged card’s styles. Spike only: production never imports <code>spikes/</code>.</footer>
+</main>
+
+<script>
+/* =====================================================================
+   Icons (from spikes/board-card-stack)
+   ===================================================================== */
+const IC = {
+  usb:'<path d="M12 3v13"/><path d="M9 6l3-3 3 3"/><circle cx="12" cy="18.5" r="2.5"/><path d="M7 9v2.5l5 3"/><path d="M17 8v3.5l-5 3"/><rect x="5.6" y="7" width="2.8" height="2.4" rx=".4"/><circle cx="17" cy="7.5" r="1.3"/>',
+  ble:'<path d="m7 7 10 10-5 5V2l5 5L7 17"/>',
+  wifi:'<path d="M2.5 9a14 14 0 0 1 19 0"/><path d="M5.5 12.5a9.5 9.5 0 0 1 13 0"/><path d="M8.7 16a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor"/>',
+  cloud:'<path d="M7 18.5h10.2a4.3 4.3 0 0 0 .5-8.57A6 6 0 0 0 6.3 9.4a4.6 4.6 0 0 0 .7 9.1z"/>',
+  play:'<path d="M7 4.5v15l12.5-7.5z"/>',
+  spark:'<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  chip:'<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"/>',
+  lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  alert:'<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.5"/><circle cx="12" cy="17" r=".9" fill="currentColor"/>',
+  fw:'<rect x="4" y="3.5" width="5" height="7" rx="2.5"/><path d="M15 3.5h2v7M15 10.5h4"/><path d="M5 13.5h2v7M5 20.5h4"/><rect x="15" y="13.5" width="5" height="7" rx="2.5"/>',
+  check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  xoct:'<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="m9 9 6 6M15 9l-6 6"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  add:'<path d="M12 5v14M5 12h14"/>',
+  retry:'<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/>',
+  upload:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/>',
+  download:'<path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 20h14"/>',
+  key:'<circle cx="8" cy="15" r="4"/><path d="m11 12 8-8M16 7l3 3"/>',
+};
+const ic = (n) => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ''}</svg>`;
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+/* =====================================================================
+   Renderers
+   ===================================================================== */
+// A bar: {i icon, s summary, a aside, t tone (att|warn|err|up), act [{w, i}], work {w, p, fail}, mark lit|dim, gone}
+function bar(spec, label) {
+  if (!spec || spec.gone) return '';
+  const lab = label ? `<span class="lab">${label}</span>` : '';
+  if (spec.work) {
+    const w = spec.work;
+    if (w.fail) {
+      return `<div class="srow t-err">${lab}${ic(spec.i)}<span class="s">${esc(w.w)}</span><span class="spring"></span>${(spec.act||[]).map(act).join('')}<span class="chev">›</span></div>`;
+    }
+    const foot = w.p != null ? `<span class="iri" style="width:${w.p}%"></span>` : `<span class="iri" style="width:35%"></span>`;
+    return `<div class="srow working">${lab}<span class="spin"></span><span class="s">${esc(w.w)}</span><span class="spring"></span>${(spec.act||[]).map(act).join('')}${foot}</div>`;
+  }
+  const tone = spec.t ? ` t-${spec.t}` : '';
+  const aside = spec.a ? `<span class="a">${esc(spec.a)}</span>` : '';
+  const mark = spec.mark ? `<span class="mark ${spec.mark === 'lit' ? 'lit' : ''}" title="Also reachable through lightplayer.app">${ic('cloud')}</span>` : '';
+  const acts = (spec.act||[]).map(act).join('');
+  const chev = acts ? '' : '<span class="chev">›</span>';
+  return `<div class="srow${tone}">${lab}${ic(spec.i)}<span class="s">${esc(spec.s)}</span><span class="spring"></span>${aside}${mark}${acts}${chev}</div>`;
+}
+const act = (a) => `<button type="button" class="wo" tabindex="-1">${a.i ? ic(a.i) : ''}${esc(a.w)}</button>`;
+
+// The name bar: {name, p: {w, i, kind: press|word|none|ring}}
+function namebar(name, p, top) {
+  let prim = '';
+  if (p && p.kind !== 'none') {
+    const cls = p.kind === 'word' ? ' word' : p.kind === 'ring' ? ' ring' : '';
+    const lead = p.kind === 'busy' ? '<span class="spin"></span>' : (p.i ? ic(p.i) : '');
+    prim = `<button type="button" class="gosec${cls}" tabindex="-1">${lead}${esc(p.w)}</button>`;
+  }
+  return `<div class="nb${top ? ' top' : ''}"><div class="nbt"><b>${esc(name)}</b></div>${prim}</div>`;
+}
+
+// The status corner: {m mark: ok|idle|att|warn|err|none, r reading, live bool, lens bool}
+function corner(c) {
+  if (!c || c.m === 'none') return '';
+  const mark = c.m === 'ok' ? '<span class="dot"></span>' : c.m === 'idle' ? '<span class="dot idle"></span>'
+    : `<span class="${c.m}">${ic(c.m === 'err' ? 'xoct' : 'alert')}</span>`;
+  let r = '';
+  if (c.r) {
+    const cls = /fps$/.test(c.r) ? 'fps' : c.r === 'Live' ? 'live' : 'age';
+    r = `<span class="${cls}">${esc(c.r)}</span>`;
+  }
+  return `<span class="notch">${mark}${r}</span>`;
+}
+
+// A placeholder picture: a ring of LEDs, or nothing.
+function picture(kind, mini) {
+  const h = mini ? 56 : 118;
+  if (kind === 'none') return `<div class="pic${mini ? ' mini' : ''}"></div>`;
+  const n = 26, dots = [];
+  const cx = 150, cy = h / 2, rx = 60, ry = h / 2 - 12;
+  for (let k = 0; k < n; k++) {
+    const a = (k / n) * Math.PI * 2;
+    const hue = kind === 'old' ? 28 : (200 + k * 9) % 360;
+    const light = kind === 'old' ? 46 : 60;
+    dots.push(`<circle cx="${(cx + rx * Math.cos(a)).toFixed(1)}" cy="${(cy + ry * Math.sin(a)).toFixed(1)}" r="${mini ? 2.6 : 4}" fill="hsl(${hue} 80% ${light}%)"/>`);
+  }
+  const stale = kind === 'stale' || kind === 'old' ? ' stale' : '';
+  return `<div class="pic${mini ? ' mini' : ''}${stale}"><svg viewBox="0 0 300 ${h}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${dots.join('')}</svg>${kind === 'lens' ? '<span class="lens"></span>' : ''}</div>`;
+}
+
+/* =====================================================================
+   The rules
+   ===================================================================== */
+const RULES = [
+  ['R1', 'Every row names its subject', 'Without its icon, a row still says what it is about: “Playing studio”, “Firmware up to date”, “Access not known”. Never a bare state like “Not known yet” or “Out of date”.'],
+  ['R2', 'One meaning per word', '“Connect” and “connected” mean the card’s Connect, and nothing else. The connection row says how Studio reaches the board: “Over USB”, not “USB · connected”.'],
+  ['R3', 'Only something to press gets the button', 'When nothing can be pressed, the name bar has no button. The row that is busy or blocked says why, once, instead of a button-shaped label repeating it.'],
+  ['R4', 'Our words stay in the details', 'Frame rates, build labels (fw-esp32c6 c688c990b), “pre-hello” and chip names are for us. The row shows what a person can act on; the details keep the rest.'],
+  ['R5', 'A notice says what happened and what to do', 'Its words name the problem, its action fixes it, and there is a way out (Start fresh, Retry, Unlock).'],
+  ['R6', 'Old facts say they’re old', 'An offline board shows what we last knew, marked “last seen”, instead of “not known”.'],
+];
+
+/* =====================================================================
+   Every row's states. cur = today (the connected branch), prop = proposed.
+   lab = the proposed words when a row label carries the subject.
+   ===================================================================== */
+const SECTIONS = [
+{
+  key:'corner', n:2, title:'The corner on the picture',
+  lede:'Today: the worst notice’s icon (or a blue dot when all is well, a hollow ring when not linked), then the frame rate while live, or the picture’s age.',
+  kind:'corner',
+  rows:[
+    {id:'S1', st:'Live, all fine', cur:{m:'ok', r:'899 fps'}, prop:{m:'ok', r:'Live'}, why:'“899 fps” is a number for us. “Live” says the picture is the board right now. The frame rate moves to the corner’s details and its hover.'},
+    {id:'S2', st:'Unplugged; the picture is old', cur:{m:'idle', r:'2 h ago'}, prop:{m:'idle', r:'Seen 2 h ago'}, pic:'stale', why:'“2 h ago” on its own: what was 2 h ago? “Seen” says this is the last thing we saw.'},
+    {id:'S3', st:'A row needs you', cur:{m:'att', r:'4 d ago'}, prop:{m:'att', r:'Seen 4 d ago'}, pic:'stale', same:true, why:'The icon stays: it is the one sign of trouble while the card is connected and its rows are hidden under the panel.'},
+    {id:'S4', st:'Running nothing (no project)', cur:{m:'ok', r:''}, prop:{m:'ok', r:'Nothing playing'}, pic:'none', why:'A blue dot alone over a black picture says nothing.'},
+    {id:'S5', st:'Fresh install, an old picture kept', cur:{m:'ok', r:'4 d ago'}, prop:{m:'ok', r:'Nothing playing'}, pic:'old', propPic:'none', why:'Today it shows the picture of a project the board no longer has, with a blue “fine” dot. Drop the old picture when the board says it runs nothing.'},
+    {id:'S6', st:'Open in the editor', cur:{m:'ok', r:'899 fps'}, prop:{m:'ok', r:'In the editor'}, pic:'lens', why:'The picture is dimmed because the editor holds the board. Say so, instead of a frame rate.'},
+    {id:'S7', st:'Some work failed', cur:{m:'err', r:'899 fps'}, prop:{m:'err', r:'Live'}, same:true, why:'Unchanged apart from S1.'},
+  ],
+},
+{
+  key:'name', n:3, title:'The name bar and its one button',
+  lede:'The board’s name, and one primary action. After your first notes, an action that can’t be pressed already shows its reason as its word (“Updating · 42%”). The proposal goes one step further: no button at all when there is nothing to press.',
+  kind:'name',
+  rows:[
+    {id:'N1', st:'The name Studio gives a new board', cur:{name:'XIAO ESP32-C6 · Oct 11', p:{w:'Connect', i:'usb', kind:'press'}}, prop:{name:'XIAO ESP32-C6', p:{w:'Connect', i:'usb', kind:'press'}}, why:'“· Oct 11” reads as a timestamp, not part of a name. Add a number (“XIAO ESP32-C6 2”) only when two boards would share a name. Rename stays in the hardware row’s details.'},
+    {id:'N2', st:'Running a project', cur:{p:{w:'Connect', i:'usb', kind:'press'}}, prop:{p:{w:'Connect', i:'usb', kind:'press'}}, same:true, why:'Keeps Connect. The clash with the connection row’s “connected” is fixed on that row (L1).'},
+    {id:'N3', st:'Connected (the panel is open)', cur:{p:{w:'Done', i:'check', kind:'ring'}}, prop:{p:{w:'Done', i:'check', kind:'ring'}}, same:true, why:'Unchanged.'},
+    {id:'N4', st:'Connect pressed, on its way', cur:{p:{w:'Connecting…', i:'usb', kind:'word'}}, prop:{p:{w:'Connecting…', kind:'busy'}}, why:'Keeps the words (it answers your press) and adds the spinner, so it reads as happening, not as a disabled button.'},
+    {id:'N5', st:'No project on it', cur:{p:{w:'Add a project', i:'add', kind:'press'}}, prop:{p:{w:'Add a project', i:'add', kind:'press'}}, same:true, why:'From your first notes. Unchanged.'},
+    {id:'N6', st:'Needs firmware', cur:{p:{w:'Install', i:'fw', kind:'press'}}, prop:{p:{w:'Install firmware', i:'fw', kind:'press'}}, why:'“Install” what? There is room for the noun.'},
+    {id:'N7', st:'Locked', cur:{p:{w:'Unlock', i:'lock', kind:'press'}}, prop:{p:{w:'Unlock', i:'lock', kind:'press'}}, same:true, why:'Unchanged.'},
+    {id:'N8', st:'Simulated, off', cur:{p:{w:'Power on', i:'play', kind:'press'}}, prop:{p:{w:'Power on', i:'play', kind:'press'}}, same:true, why:'Unchanged.'},
+    {id:'N9', st:'Offline, reachable by another way', cur:{p:{w:'Connect', i:'wifi', kind:'press'}}, prop:{p:{w:'Connect', i:'wifi', kind:'press'}}, same:true, why:'Unchanged. The icon says which way it will go.'},
+    {id:'N10', st:'Another tab has it', cur:{p:{w:'Connect', i:'usb', kind:'press'}}, prop:{p:{w:'Connect here', i:'usb', kind:'press'}}, why:'Pressing it takes the board from the other tab. “here” says that it moves.'},
+    {id:'N11', st:'Busy (an update running)', cur:{p:{w:'Updating · 1 of 2 · 42%', kind:'word'}}, prop:{p:{kind:'none'}}, why:'The firmware row already shows the update and its progress. A button-shaped label repeating it looks pressable.'},
+    {id:'N12', st:'Offline, nothing reaches it', cur:{p:{w:'Offline · 2 weeks', kind:'word'}}, prop:{p:{kind:'none'}}, why:'The connection row says “Offline · last seen 2 weeks ago”. Once is enough.'},
+    {id:'N13', st:'Busy in the other tab', cur:{p:{w:'Busy in the other tab', kind:'word'}}, prop:{p:{kind:'none'}}, why:'The connection row says it (L13).'},
+    {id:'N14', st:'Running nothing, and nothing to send', cur:{p:{w:'No project', kind:'word'}}, prop:{p:{kind:'none'}}, why:'The project row says “No project”.'},
+    {id:'N15', st:'Hasn’t said what it runs (a moment after connecting)', cur:{p:{w:'Project not known', kind:'word'}}, prop:{p:{kind:'none'}}, why:'It only lasts a moment. An empty slot is calmer than a flash of words.'},
+    {id:'N16', st:'A new board being identified', cur:{p:{w:'Identifying…', kind:'word'}}, prop:{p:{w:'Identifying…', kind:'busy'}}, why:'Keeps the words, with the spinner, like N4.'},
+  ],
+},
+{
+  key:'project', n:4, title:'Project row', label:'Project',
+  lede:'What the board plays.',
+  rows:[
+    {id:'P1', st:'Playing a project from your library', cur:{i:'spark', s:'studio', act:[{w:'Edit', i:'edit'}]}, prop:{i:'spark', s:'Playing studio', act:[{w:'Edit', i:'edit'}]}, lab:{i:'spark', s:'studio', act:[{w:'Edit', i:'edit'}]}, why:'A bare “studio” could be anything. “Playing” makes it the project. With a row label, the bare name is enough.'},
+    {id:'P2', st:'The same project on several boards', cur:{i:'spark', s:'studio', a:'2 boards', act:[{w:'Edit', i:'edit'}]}, prop:{i:'spark', s:'Playing studio', a:'on 2 boards', act:[{w:'Edit', i:'edit'}]}, why:'“2 boards” alone reads like a count of something on this board.'},
+    {id:'P3', st:'No project', cur:{i:'spark', s:'No project'}, prop:{i:'spark', s:'No project'}, same:true, why:'From your first notes. Add a project is the name bar’s button.'},
+    {id:'P4', st:'Sending a project', cur:{i:'spark', work:{w:'Sending the project · 40%', p:40}}, prop:{i:'spark', work:{w:'Sending studio · 40%', p:40}}, why:'Names which project.'},
+    {id:'P5', st:'Playing an older copy', cur:{i:'spark', s:'Out of date', a:'studio', t:'att', act:[{w:'Send latest', i:'upload'}]}, prop:{i:'spark', s:'Playing an older studio', t:'att', act:[{w:'Send latest', i:'upload'}]}, why:'“Out of date” has no subject: the board? its firmware? Say it is the project.'},
+    {id:'P6', st:'The project has a fault', cur:{i:'spark', s:'Shader didn’t compile', t:'att'}, prop:{i:'spark', s:'studio has a problem', a:'a shader didn’t compile', t:'att'}, why:'Leads with which project. The fault’s own words follow, shorter.'},
+    {id:'P7', st:'Playing something not in your library', cur:{i:'spark', s:'party-2025', act:[{w:'Edit', i:'edit'}]}, prop:{i:'spark', s:'Playing party-2025', a:'not in your library', act:[{w:'Edit', i:'edit'}]}, why:'Says why it doesn’t show under Your projects.'},
+    {id:'P8', st:'Locked, so we can’t see', cur:{i:'spark', s:'Project not known'}, prop:{i:'spark', s:'Project hidden', a:'unlock to see'}, why:'We know why we can’t see it. Say so.'},
+    {id:'P9', st:'Offline', cur:{i:'spark', s:'Project not known'}, prop:{i:'spark', s:'Was playing studio', a:'last seen'}, why:'We knew the project when we last saw it (R6).'},
+    {id:'P10', st:'Hasn’t said yet', cur:{i:'spark', s:'Project not known'}, prop:{i:'spark', s:'Project not known yet'}, why:'Brief, but “yet” says the answer is coming.'},
+  ],
+},
+{
+  key:'link', n:5, title:'Connection row', label:'Link',
+  lede:'How Studio reaches the board, and how that is going. A small cloud at the end means lightplayer.app can reach it too (lit) or should but can’t right now (dim).',
+  rows:[
+    {id:'L1', st:'Plugged in, picture coming', cur:{i:'usb', s:'USB · live', mark:'lit'}, prop:{i:'usb', s:'Over USB', mark:'lit'}, lab:{i:'usb', s:'USB', mark:'lit'}, why:'Today “USB · connected” sits right under a Connect button, so the card says connected and offers Connect at once. Here “connected” is only the card’s state. Whether the picture is live is the corner’s job (S1).'},
+    {id:'L2', st:'Plugged in, no picture', cur:{i:'usb', s:'USB · connected'}, prop:{i:'usb', s:'Over USB'}, lab:{i:'usb', s:'USB'}, why:'Same as L1. “live” and “connected” were a difference only we cared about.'},
+    {id:'L3', st:'Over Wi‑Fi', cur:{i:'wifi', s:'Wi‑Fi · live', mark:'lit'}, prop:{i:'wifi', s:'Over Wi‑Fi', a:'Starlink Truck', mark:'lit'}, lab:{i:'wifi', s:'Wi‑Fi', a:'Starlink Truck', mark:'lit'}, why:'The network name answers “which Wi‑Fi?” when a board moves between houses.'},
+    {id:'L4', st:'Over Bluetooth', cur:{i:'ble', s:'Bluetooth · live'}, prop:{i:'ble', s:'Over Bluetooth'}, why:'As L1.'},
+    {id:'L5', st:'Through lightplayer.app', cur:{i:'cloud', s:'Wi‑Fi via lightplayer.app · live'}, prop:{i:'cloud', s:'Through lightplayer.app'}, why:'Shorter. The board’s own Wi‑Fi is in the details.'},
+    {id:'L6', st:'Cable in, port not open', cur:{i:'usb', s:'USB · not connected'}, prop:{i:'usb', s:'Plugged in', a:'press Connect'}, why:'“not connected” beside a plugged-in cable is confusing. It is plugged in; Connect opens it.'},
+    {id:'L7', st:'Unplugged', cur:{i:'usb', s:'Offline · 2 h'}, prop:{i:'usb', s:'Offline', a:'last seen 2 h ago'}, why:'“2 h” of what? Of being offline. Say “last seen”.'},
+    {id:'L8', st:'Not answering', cur:{i:'usb', s:'USB · not responding', t:'warn', act:[{w:'Retry', i:'retry'}]}, prop:{i:'usb', s:'Not answering over USB', t:'warn', act:[{w:'Retry', i:'retry'}]}, why:'Leads with the problem.'},
+    {id:'L9', st:'Connecting', cur:{i:'usb', work:{w:'Connecting…'}}, prop:{i:'usb', work:{w:'Connecting over USB…'}}, why:'Names the way it is trying.'},
+    {id:'L10', st:'The connection dropped; trying again', cur:{i:'usb', work:{w:'Reconnecting…'}}, prop:{i:'usb', work:{w:'Reconnecting…'}}, same:true, why:'Unchanged.'},
+    {id:'L11', st:'Connect failed', cur:{i:'usb', work:{w:'Couldn’t connect', fail:true}, act:[{w:'Retry', i:'retry'}]}, prop:{i:'usb', work:{w:'Couldn’t reach it over USB', fail:true}, act:[{w:'Retry', i:'retry'}]}, why:'Says which way failed, so Retry means something.'},
+    {id:'L12', st:'Someone else has its Wi‑Fi', cur:{i:'wifi', s:'Someone else connected', t:'att', act:[{w:'Retry', i:'retry'}]}, prop:{i:'wifi', s:'Someone else is using it', t:'att', act:[{w:'Retry', i:'retry'}]}, why:'Plain grammar, and it avoids “connected” (R2).'},
+    {id:'L13', st:'Another tab has it', cur:{i:'usb', s:'Open in another tab', a:'editor open', t:'att'}, prop:{i:'usb', s:'In use in another tab', a:'editing', t:'att'}, why:'“Open” sounds like an action. “In use” says why you can’t act here.'},
+    {id:'L14', st:'Another tab took it from you', cur:{i:'usb', s:'Taken by another tab', t:'att'}, prop:{i:'usb', s:'Another tab took it over', t:'att'}, why:'Active voice.'},
+    {id:'L15', st:'A simulated board, running', cur:{i:'play', s:'Simulated · running'}, prop:{i:'play', s:'Simulated in this tab'}, why:'From your first notes, one step on: “running” repeats the corner. Where it lives is what makes it different.'},
+    {id:'L16', st:'A simulated board, off', cur:{i:'play', s:'Simulated · off'}, prop:{i:'play', s:'Simulated · off'}, same:true, why:'Clear as it is.'},
+    {id:'L17', st:'Also reachable through lightplayer.app, but not right now', cur:{i:'usb', s:'USB · live', mark:'dim'}, prop:{i:'usb', s:'Over USB', mark:'dim'}, why:'The dim cloud: Cloud relay is on, the board isn’t registered. Its hover says so.'},
+  ],
+},
+{
+  key:'access', n:6, title:'Access row', label:'Access',
+  lede:'What you can do with the board, and why.',
+  rows:[
+    {id:'A1', st:'Plugged in (USB always edits)', cur:{i:'lock', s:'You can edit', a:'USB'}, prop:{i:'lock', s:'You can edit', a:'it’s plugged in'}, why:'“USB” as the aside reads like the connection row again. The aside is the reason.'},
+    {id:'A2', st:'No password set: anyone can edit', cur:{i:'alert', s:'You can edit', a:'anyone can edit', t:'warn'}, prop:{i:'alert', s:'Anyone nearby can edit', t:'warn', act:[{w:'Add password', i:'key'}]}, why:'Today’s two halves say the same thing twice, and the yellow doesn’t say why. The risk is that anyone nearby can change it, and the fix is one press.'},
+    {id:'A3', st:'Unlocked with a password', cur:{i:'lock', s:'You can edit', a:'Workshop key'}, prop:{i:'lock', s:'You can edit', a:'with your password'}, why:'The key’s name is ours. If there are several, the details list them.'},
+    {id:'A4', st:'Play only', cur:{i:'lock', s:'You can play', a:'anyone can play', act:[{w:'Unlock', i:'lock'}]}, prop:{i:'lock', s:'You can play, not edit', act:[{w:'Unlock', i:'lock'}]}, why:'Says what is missing, and Unlock gets it.'},
+    {id:'A5', st:'Locked', cur:{i:'lock', s:'Locked', a:'needs a password'}, prop:{i:'lock', s:'Locked', a:'needs a password'}, same:true, why:'Unchanged. Unlock is the name bar’s button.'},
+    {id:'A6', st:'Checking or unlocking', cur:{i:'lock', work:{w:'Access not known'}}, prop:{i:'lock', work:{w:'Checking access…'}}, why:'Says what is happening, not what is missing.'},
+    {id:'A7', st:'Offline', cur:{i:'lock', s:'Access not known', a:'when it’s back'}, prop:{i:'lock', s:'You could edit', a:'last seen'}, why:'We knew last time (R6).'},
+    {id:'A8', st:'Has no password, and isn’t open', cur:{i:'lock', s:'No password here', a:'set one over USB', t:'warn'}, prop:{i:'lock', s:'Only USB can reach it', a:'it has no password yet', t:'warn'}, why:'Today’s words sound like this browser lacks a password. The fact is that until it has one, only a cable reaches it.'},
+    {id:'A9', st:'A simulated board', cur:{i:'lock', s:'You can edit', a:'in this tab'}, prop:{i:'lock', s:'You can edit', a:'it’s simulated'}, why:'Gives the reason, as A1 does.'},
+  ],
+},
+{
+  key:'fw', n:7, title:'Firmware row', label:'Firmware',
+  lede:'The software on the board, and updates to it. Blue means an update is waiting; orange means it needs you.',
+  rows:[
+    {id:'F1', st:'Up to date', cur:{i:'fw', s:'fw-esp32c6 c688c990b'}, prop:{i:'fw', s:'Firmware up to date', a:'2026.10.14'}, lab:{i:'fw', s:'Up to date', a:'2026.10.14'}, why:'The build label is ours (R4). Lead with what matters, the version after. A local build’s aside reads “dev build c688c99”.'},
+    {id:'F2', st:'An update is waiting', cur:{i:'fw', s:'2026.10.08', t:'up', act:[{w:'Update', i:'download'}]}, prop:{i:'fw', s:'Update available', a:'2026.10.14', t:'up', act:[{w:'Update', i:'download'}]}, lab:{i:'fw', s:'Update available', a:'2026.10.14', t:'up', act:[{w:'Update', i:'download'}]}, why:'A blue version number alone doesn’t say “update”. The aside is the version you’d get.'},
+    {id:'F3', st:'An update waiting, play only', cur:{i:'fw', s:'2026.10.08', t:'up', act:[{w:'Update', i:'lock'}]}, prop:{i:'fw', s:'Update available', a:'2026.10.14', t:'up', act:[{w:'Update', i:'lock'}]}, why:'As F2. The lock on Update says it needs the password; its hover says so in words.'},
+    {id:'F4', st:'Updating', cur:{i:'fw', work:{w:'Updating · 1 of 2 · 42%', p:42}}, prop:{i:'fw', work:{w:'Updating firmware · 42%', p:42}}, why:'“1 of 2” is how we update (core, then engine). One percentage for the whole update; the steps go in the details.'},
+    {id:'F5', st:'Backing up first', cur:{i:'fw', work:{w:'Backing up · 12%', p:12}, act:[{w:'Cancel'}]}, prop:{i:'fw', work:{w:'Saving its files first · 12%', p:12}, act:[{w:'Cancel'}]}, why:'Backing up what? Its files, before the update.'},
+    {id:'F6', st:'Installing firmware', cur:{i:'fw', work:{w:'Flashing firmware…'}}, prop:{i:'fw', work:{w:'Installing firmware · 30%', p:30}}, why:'The same verb as the button (Install firmware, N6), and a percentage.'},
+    {id:'F7', st:'No LightPlayer firmware', cur:{i:'fw', s:'No firmware', t:'att'}, prop:{i:'fw', s:'No LightPlayer firmware', t:'att'}, why:'There may be other firmware on it. Install firmware is the button.'},
+    {id:'F8', st:'Very old LightPlayer firmware', cur:{i:'fw', s:'Pre-hello firmware', t:'att'}, prop:{i:'fw', s:'Old LightPlayer firmware', a:'install the latest', t:'att'}, why:'“Pre-hello” is our protocol history.'},
+    {id:'F9', st:'Keeps crashing', cur:{i:'fw', s:'2026.10.08 keeps crashing', t:'att', act:[{w:'Reinstall', i:'retry'}]}, prop:{i:'fw', s:'Firmware keeps crashing', t:'att', act:[{w:'Reinstall', i:'retry'}]}, why:'Names the subject; the version is in the details.'},
+    {id:'F10', st:'Needs a version Studio can’t get', cur:{i:'fw', s:'Needs 2026.09.30, which Studio can’t get', t:'att', act:[{w:'Install 2026.10.14', i:'download'}]}, prop:{i:'fw', s:'Firmware incomplete', t:'att', act:[{w:'Install latest', i:'download'}]}, why:'Too long for the row today. Lead with what happened; the details say which part Studio can’t fetch.'},
+    {id:'F11', st:'Must update over USB once', cur:{i:'fw', s:'Needs one update over USB', t:'att', act:[{w:'Update', i:'usb'}]}, prop:{i:'fw', s:'Plug in once to update', t:'att', act:[{w:'Update', i:'usb'}]}, why:'Says what you do. The details say what you get: after this one, it updates without a cable.'},
+    {id:'F12', st:'An update needs your OK (storage layout)', cur:{i:'fw', s:'Needs your answer', t:'att'}, prop:{i:'fw', s:'Update needs your OK', a:'see details', t:'att'}, why:'Answer to what? It is about the update.'},
+    {id:'F13', st:'Files were lost', cur:{i:'fw', s:'Its files are gone', t:'att', act:[{w:'Restore files', i:'upload'}, {w:'Start fresh'}]}, prop:{i:'fw', s:'Its files are gone', t:'att', act:[{w:'Restore', i:'upload'}, {w:'Start fresh'}]}, why:'From your first notes. Shortens Restore files to Restore so both choices fit.'},
+    {id:'F14', st:'An update stopped half-way', cur:{i:'fw', s:'Files waiting', t:'att', act:[{w:'Finish update', i:'download'}]}, prop:{i:'fw', s:'Update not finished', t:'att', act:[{w:'Finish', i:'download'}]}, why:'“Files waiting” names the mechanism. Say the update isn’t finished.'},
+    {id:'F15', st:'Offline', cur:{i:'fw', s:'2026.10.08', a:'last seen'}, prop:{i:'fw', s:'Firmware 2026.10.08', a:'last seen'}, why:'Names the subject (R1).'},
+    {id:'F16', st:'Not known', cur:{i:'fw', s:'Firmware not known'}, prop:{i:'fw', s:'Firmware not known'}, same:true, why:'From your first notes. Unchanged.'},
+  ],
+},
+{
+  key:'hw', n:8, title:'Hardware row', label:'Board',
+  lede:'What the board is. Its details hold the model, the chip, its ID, Rename and Forget.',
+  rows:[
+    {id:'H1', st:'Its model is known', cur:{i:'chip', s:'XIAO ESP32-C6'}, prop:{i:'chip', s:'XIAO ESP32-C6'}, same:true, why:'Unchanged.'},
+    {id:'H2', st:'Only its chip is known', cur:{i:'chip', s:'ESP32-C6'}, prop:{i:'chip', s:'An ESP32-C6 board', a:'model not picked'}, why:'A chip name alone looks like a model. Say the model is missing.'},
+    {id:'H3', st:'Nothing known yet', cur:{i:'chip', s:'Board not known'}, prop:{i:'chip', s:'Board model not known'}, why:'“Board not known” sounds like the board itself is a stranger.'},
+    {id:'H4', st:'A new board being identified', cur:{i:'chip', s:'chip unknown'}, prop:{i:'chip', work:{w:'Identifying the board…'}}, why:'It is happening now; say so.'},
+    {id:'H5', st:'A simulated board', cur:{i:'chip', s:'Simulated XIAO ESP32-S3 Plus', a:'in this tab'}, prop:{i:'chip', s:'XIAO ESP32-S3 Plus', a:'simulated'}, why:'Today the card says simulated three times (the name, the connection row, here). The model leads here; “simulated” is the aside.'},
+  ],
+},
+];
+
+/* =====================================================================
+   Common cards. Each row slot names a state id (or gives a spec).
+   ===================================================================== */
+const S = {};
+for (const sec of SECTIONS) for (const r of sec.rows) S[r.id] = r;
+const LABELS = { project:'Project', link:'Link', access:'Access', fw:'Firmware', hw:'Board' };
+
+const CARDS = [
+  {cap:'Running a project, plugged in', corner:'S1', pic:'live', name:'N1', prim:'N2',
+   rows:['P1','L1','A2','F1','H1']},
+  {cap:'Fresh install, no project yet', corner:'S5', pic:'old', propPic:'none', name:'N1', prim:'N5',
+   rows:['P3','L2','A2','F1','H1']},
+  {cap:'Unplugged two hours ago', corner:'S2', pic:'stale', name:'N1', prim:'N12',
+   rows:['P9','L7','A7','F15','H1']},
+  {cap:'On Wi‑Fi, an update waiting', corner:'S1', pic:'live', nameText:['Porch lamp','Porch lamp'], prim:'N2', primIcon:'wifi',
+   rows:['P1','L3','A3','F2','H1']},
+  {cap:'Locked, over Bluetooth', corner:{cur:{m:'idle', r:''}, prop:{m:'idle', r:''}}, pic:'none', nameText:['Fiber headband','Fiber headband'], prim:'N7',
+   rows:['P8','L4','A5','F15','H1']},
+  {cap:'Updating', corner:'S1', pic:'live', name:'N1', prim:'N11',
+   rows:['P1','L1','A1','F4','H1']},
+  {cap:'Open in another tab', corner:{cur:{m:'att', r:'899 fps'}, prop:{m:'att', r:'Live'}}, pic:'live', name:'N1', prim:'N10',
+   rows:['P1','L13','A1','F1','H1']},
+  {cap:'A simulated board, off', corner:{cur:{m:'none'}, prop:{m:'none'}}, pic:'none', nameText:['XIAO ESP32-S3 Plus (sim)','XIAO ESP32-S3 Plus (sim)'], prim:'N8',
+   rows:['P3','L16','A9',{cur:{i:'fw', s:'fw-browser c688c990b', a:'last seen'}, prop:{i:'fw', s:'Firmware', a:'same as this Studio'}},'H5']},
+];
+
+function pick(r, mode) {
+  if (mode === 'cur') return r.cur;
+  if (mode === 'lab') return r.lab || r.prop;
+  return r.prop;
+}
+
+function renderCards(mode) {
+  const out = CARDS.map((c) => {
+    const m = mode === 'cur' ? 'cur' : 'prop';
+    const cornerSpec = typeof c.corner === 'string' ? S[c.corner][m] : c.corner[m];
+    const picKind = m === 'prop' && c.propPic ? c.propPic : c.pic;
+    const name = c.nameText ? c.nameText[m === 'cur' ? 0 : 1] : S[c.name][m].name;
+    let prim = S[c.prim][m].p;
+    if (c.primIcon && prim.i) prim = {...prim, i:c.primIcon};
+    const keys = ['project','link','access','fw','hw'];
+    const rows = c.rows.map((slot, k) => {
+      const r = typeof slot === 'string' ? S[slot] : slot;
+      const label = mode === 'lab' ? LABELS[keys[k]] : null;
+      return bar(pick(r, mode), label);
+    }).join('');
+    return `<div class="cardwrap"><span class="cap">${esc(c.cap)}</span><div class="sc">${picture(picKind)}${corner(cornerSpec)}${namebar(name, prim)}${rows}</div></div>`;
+  });
+  document.getElementById('cards').innerHTML = out.join('');
+}
+
+/* =====================================================================
+   Row sections
+   ===================================================================== */
+function cell(sec, r, which) {
+  const spec = which === 'cur' ? r.cur : r.prop;
+  if (sec.kind === 'corner') {
+    const kind = which === 'prop' && r.propPic ? r.propPic : (r.pic || 'live');
+    return `<div class="box">${picture(kind, true)}${corner(spec)}</div>`;
+  }
+  if (sec.kind === 'name') {
+    const name = spec.name || 'XIAO ESP32-C6';
+    if (spec.p && spec.p.kind === 'none') return `<div class="box">${namebar(name, spec.p, true)}</div>`;
+    return `<div class="box">${namebar(name, spec.p, true)}</div>`;
+  }
+  return `<div class="box">${bar(spec)}</div>`;
+}
+
+function renderSections() {
+  const html = SECTIONS.map((sec) => {
+    const changed = sec.rows.filter((r) => !r.same).length;
+    const body = sec.rows.map((r) => {
+      const tag = r.same ? '<span class="tag k">keep</span>' : '<span class="tag c">change</span>';
+      return `<tr class="${r.same ? 'same' : 'changed'}" id="${r.id}"><td class="st"><span class="id">${r.id}${tag}</span>${esc(r.st)}</td><td class="v">${cell(sec, r, 'cur')}</td><td class="v">${cell(sec, r, 'prop')}</td><td class="why">${esc(r.why)}</td></tr>`;
+    }).join('');
+    return `<section id="${sec.key}"><h2><span class="n">${sec.n}</span>${esc(sec.title)}</h2><p class="lede">${esc(sec.lede)} <span class="k">${sec.rows.length} states · ${changed} changed</span></p><div class="tbl"><table><thead><tr><th>State</th><th>Today</th><th>Proposed</th><th>Why</th></tr></thead><tbody>${body}</tbody></table></div></section>`;
+  }).join('');
+  document.getElementById('rowsections').innerHTML = html;
+}
+
+/* =====================================================================
+   Questions
+   ===================================================================== */
+const QS = [
+  ['Q1', '“Connect” beside “USB · connected”: which word moves?', 'Today the card offers Connect while its connection row says “connected”. Either the row stops saying connected (L1: “Over USB”), or the button gets a new word (for example “Controls”, with Done becoming “Close”).', 'Change the row. Connect is already the word in the style guide and the page’s section names, and “Over USB” loses nothing.'],
+  ['Q2', 'Row labels, or words that carry their subject?', 'Section 1’s third view puts a quiet label at the start of each row (Project, Link, Access, Firmware, Board). The words get shorter (“studio”, “USB”, “Up to date”) and the card gets a little busier.', 'Words that carry their subject (the middle view). The card stays calm, and each row still reads on its own. Labels are a good fallback if the words still don’t land.'],
+  ['Q3', 'An empty button slot when there is nothing to press?', 'After your first notes, a button that can’t be pressed shows its reason as its word (“Updating · 1 of 2 · 42%”, “Offline · 2 weeks”). N11–N15 go further: no button at all, because the busy or blocked row already says why. Only “Connecting…” and “Identifying…” stay, with a spinner, because they answer something you did.', 'Empty slot. The words were already on the card once; the second copy looked pressable.'],
+  ['Q4', 'The corner: “Live” instead of a frame rate?', 'S1: the corner says “Live” while the board’s picture is current. The frame rate moves to the corner’s hover and details, where it stays one click away for us.', 'Yes.'],
+  ['Q5', 'Firmware as “up to date” with a release version, instead of the build label?', 'F1: “Firmware up to date · 2026.10.14”. A local build shows “dev build c688c99” in the aside. This needs the board’s release version in Studio’s hands, which the update story already has.', 'Yes.'],
+];
+function renderQs() {
+  document.getElementById('qs').innerHTML = QS.map(([id, h, p, lean]) =>
+    `<div class="q"><h3><span class="id">${id}</span>${esc(h)}</h3><p>${esc(p)}</p><p class="lean"><b>My lean:</b> ${esc(lean)}</p></div>`).join('');
+  document.getElementById('rules').innerHTML = RULES.map(([id, b, s]) =>
+    `<div class="rule"><span class="id">${id}</span><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
+}
+
+/* =====================================================================
+   Boot
+   ===================================================================== */
+let mode = 'prop';
+try { const m = localStorage.getItem('board-card-words.mode'); if (m === 'cur' || m === 'prop' || m === 'lab') mode = m; } catch (e) {}
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  renderCards(m);
+  try { localStorage.setItem('board-card-words.mode', m); } catch (e) {}
+}
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+renderQs();
+renderSections();
+setMode(mode);
+</script>
+</body>
+</html>
