@@ -44,6 +44,7 @@ pub mod age_words;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_card;
+pub mod board_files_memory;
 /// One tab holds a board: the hold vocabulary, the book, the edge trait and
 /// its in-memory double.
 pub mod board_hold;
@@ -98,6 +99,7 @@ pub mod device_push_offer;
 pub mod device_records;
 pub mod device_reset_reach;
 pub mod device_roster;
+pub mod device_start_fresh_op;
 pub mod device_transport;
 /// The update story's inputs, built for tests and for the web's stories.
 #[cfg(any(test, feature = "story-fixtures"))]
@@ -159,6 +161,7 @@ pub use add_device_offers::{
 pub use age_words::{age_words, duration_words};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
+pub use board_files_memory::{BoardFilesMemory, FRESH_STARTS_STORAGE_KEY};
 pub use board_hold::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
     HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
@@ -225,7 +228,9 @@ pub use device_identity::{
     device_identity_line, pending_identity_rows,
 };
 pub use device_layout_effect::BackupDownload;
-pub use device_layout_view::{UiDeviceLayout, UiLayoutPanel, device_layout_view};
+pub use device_layout_view::{
+    FilesEvidence, START_FRESH, UiDeviceLayout, UiLayoutPanel, device_layout_view,
+};
 pub use device_link_counter_rows::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
 pub use device_offers::{
     AUTOCONNECT_ENABLED_PARAM, DeviceOfferFacts, RENAME_NAME_PARAM, device_offers, escape_verb,
@@ -245,6 +250,7 @@ pub use device_reset_reach::{RESET_NEEDS_AUTHOR, RESET_WAITS_FOR_ANSWER, ResetRe
 pub use device_roster::{
     DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
 };
+pub use device_start_fresh_op::DeviceStartFreshOp;
 pub use device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,

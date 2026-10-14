@@ -4,7 +4,7 @@
 //! The busiest part of today's card — the face's verdict, the update
 //! story's line and bar, the layout question, the restore face, Flash,
 //! Update, Reinstall, Other version…, From a file…, Restore from a backup
-//! file…, Download backup and Factory reset — as one bar.
+//! file…, Start fresh, Download backup and Factory reset — as one bar.
 //!
 //! First match wins:
 //!
@@ -13,7 +13,7 @@
 //! | Flash or erase running | (the work shows) | — | Neutral | the work's Cancel |
 //! | An update running, or about to (its story is progress) | (the work: the update's short words) | — | Neutral | Cancel while backing up |
 //! | The layout question or refusal open | "Needs your answer" (a flash's own step shows as its work) | — | Attention | — (the details rise) |
-//! | Its files need restoring | "Its files need restoring" | — | Attention | Restore files |
+//! | Its files are gone (only on evidence it had some: never a fresh install) | "Its files are gone" | — | Attention | Restore files, or Start fresh with no backup here |
 //! | Its files are waiting | "Files waiting" | — | Attention | Finish update |
 //! | Needs you: keeps crashing | the update's words | — | Attention | Reinstall |
 //! | Needs you: a version Studio can't get | the update's words | — | Attention | Install <Studio's own> |
@@ -69,13 +69,17 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             None,
         )
     } else if input.offer("restore-files").is_some() || input.offer("restore-from-file").is_some() {
+        // The way back when this browser kept a backup; else the way on.
+        // Restore from a backup file… is in the details either way.
+        let restore = input
+            .offer("restore-files")
+            .filter(|_| !blocked)
+            .map(|restore| UiCardAction::press(restore, "Restore files").with_icon("upload"));
+        let start_fresh = || input.offer("start-fresh").map(start_fresh);
         (
-            "Its files need restoring".to_string(),
+            FILES_ARE_GONE.to_string(),
             UiStatusKind::Attention,
-            input
-                .offer("restore-files")
-                .filter(|_| !blocked)
-                .map(|restore| UiCardAction::press(restore, "Restore files").with_icon("upload")),
+            restore.or_else(start_fresh),
         )
     } else if let Some(finish) = input.offer("finish-update") {
         (
@@ -267,6 +271,11 @@ fn update_recommended(input: &BoardCardInput<'_>) -> bool {
     )
 }
 
+/// Start fresh: let the lost files go; the board waits for a project.
+fn start_fresh(offer: &UiOffer) -> UiCardAction {
+    UiCardAction::press(offer, "Start fresh").with_icon("add")
+}
+
 /// The update by USB: "Update", arming in place; the board pick when the
 /// board must be picked.
 fn usb_update(input: &BoardCardInput<'_>, offer: &UiOffer) -> UiCardAction {
@@ -435,6 +444,7 @@ fn details(
         ),
         update_verb,
         verb(input.offer("download-backup"), None, "download"),
+        input.offer("start-fresh").map(start_fresh),
     ]
     .into_iter()
     .flatten()

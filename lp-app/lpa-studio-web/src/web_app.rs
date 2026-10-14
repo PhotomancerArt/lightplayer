@@ -346,6 +346,15 @@ pub fn App() -> Element {
             controller.load_wifi_addresses(&json);
         }
         controller.set_on_wifi_addresses(crate::wifi_addresses_io::store_wifi_addresses_json);
+        // The boards whose owner chose Start fresh: their lost files are
+        // not news again after a reload. This browser only, like the
+        // addresses.
+        if let Some(json) =
+            crate::settings_io::load_local(lpa_studio_core::FRESH_STARTS_STORAGE_KEY)
+        {
+            controller.load_fresh_starts(&json);
+        }
+        controller.set_on_fresh_starts(crate::settings_io::store_fresh_starts);
         // Node copy produces envelope text in core and writes it here
         // (core never touches `navigator.clipboard`).
         controller.set_on_copy_text(crate::clipboard::write_text);

@@ -600,8 +600,11 @@ fn a_board_holding_its_files_offers_finish_update_as_the_firmware_action() {
 }
 
 /// The cable pulled mid filesystem write: the board boots formatted, and
-/// the firmware bar's action puts the stored backup back, at
-/// `…/restore-files`.
+/// the firmware bar says its files are gone, with the stored backup's way
+/// back as its action (`…/restore-files`) and Start fresh as the way on.
+/// Start fresh, pressed by path, lets the files go: the notice leaves the
+/// card, and this browser keeps the choice for the board (the web edge's
+/// storage), so a reload does not bring it back.
 #[test]
 fn a_formatted_boards_firmware_action_restores_its_files() {
     let device = legacy_light_player(Vec::new());
@@ -624,7 +627,7 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
     let bar = card_of(&bench, target)
         .bar(crate::BarLayer::Firmware)
         .clone();
-    assert_eq!(bar.summary, "Its files need restoring");
+    assert_eq!(bar.summary, crate::FILES_ARE_GONE);
     let restore = bar.action.clone().expect("Restore files");
     assert_eq!(restore.word, "Restore files");
     assert_eq!(restore.offer, bench.device_verb(target, RESTORE_FILES));
@@ -642,6 +645,103 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
         .flat_map(|section| section.affordances.iter().map(|action| action.word.clone()))
         .collect();
     assert!(verbs.contains(&"Download backup".to_string()), "{verbs:?}");
+    assert!(verbs.contains(&"Start fresh".to_string()), "{verbs:?}");
+    every_card_action_is_offered(&mut bench);
+
+    // Start fresh: Routine, the agent's to press too; nothing on the board
+    // changes, and the notice goes.
+    let kept = Rc::new(RefCell::new(Vec::<String>::new()));
+    let sink = Rc::clone(&kept);
+    bench
+        .controller
+        .set_on_fresh_starts(move |json| sink.borrow_mut().push(json.to_string()));
+    let start_fresh = bench.device_verb(target, crate::START_FRESH);
+    assert!(bench.offered(&start_fresh).consequence().is_routine());
+    bench
+        .press(&start_fresh, OfferArgs::new())
+        .expect("Start fresh");
+    let bar = card_of(&bench, target)
+        .bar(crate::BarLayer::Firmware)
+        .clone();
+    assert_ne!(bar.summary, crate::FILES_ARE_GONE, "the notice is gone");
+    bench.not_offered(&start_fresh);
+    assert_eq!(
+        kept.borrow().last().map(String::as_str),
+        Some(r#"["60:55:f9:0a:0b:0c"]"#),
+        "this browser keeps the choice, by the board's MAC"
+    );
+    every_card_action_is_offered(&mut bench);
+}
+
+/// A fresh install's first boot formats its storage, and so does every
+/// board Studio installs: a board this browser never saw hold anything has
+/// lost nothing. Its card is the ordinary one — no "Its files are gone", no
+/// restore — and its primary is the next step, Add a project (the connected
+/// feel gate's finding 1).
+#[test]
+fn a_freshly_installed_board_is_not_told_its_files_are_gone() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_fs_boot_state(lpc_wire::FsBootState::Formatted)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
+    let (mut bench, tasks) = identified(&device, "usb-card-fresh-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    let firmware = card.bar(crate::BarLayer::Firmware);
+    assert_ne!(firmware.summary, crate::FILES_ARE_GONE);
+    assert_ne!(
+        firmware.tone,
+        crate::UiStatusKind::Attention,
+        "{firmware:?}"
+    );
+    for verb in [crate::START_FRESH, RESTORE_FILES, "restore-from-file"] {
+        let path = bench.device_verb(id, verb);
+        bench.not_offered(&path);
+    }
+    assert_eq!(card.bar(crate::BarLayer::Project).summary, "No project");
+    assert_eq!(primary_offer(&card).word, "Add a project");
+    every_card_action_is_offered(&mut bench);
+}
+
+/// A sim sends no heartbeat: it only says what it runs when asked. As its
+/// identify ends it is asked, so a sim running nothing reads "No project"
+/// with Add a project, as a board does — never "Project not known" with no
+/// way on (the connected feel gate's finding 2).
+#[test]
+fn a_running_sim_with_no_project_offers_add_a_project() {
+    let (uid, base_mac) = sim_identity();
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(&uid, "Sim"))
+            .with_base_mac(&base_mac),
+    )));
+    let (mut bench, tasks, _uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+    let sim = bench.view().devices[0].id;
+    bench.press_device(sim, "reconnect", OfferArgs::new());
+    bench.run_until(&tasks, "the sim to say it runs nothing", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.loaded_project == lpa_devices::view::LoadedProject::Empty
+        })
+    });
+    let card = card_of(&bench, sim);
+    assert_eq!(card.bar(crate::BarLayer::Project).summary, "No project");
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).summary,
+        "Simulated · running"
+    );
+    let add = primary_offer(&card);
+    assert_eq!(add.word, "Add a project");
+    assert_eq!(add.offer, bench.device_verb(sim, "push"));
     every_card_action_is_offered(&mut bench);
 }
 

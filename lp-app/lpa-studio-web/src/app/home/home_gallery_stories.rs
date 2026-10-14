@@ -933,7 +933,17 @@ fn devices_card_layout_change() -> Element {
             .device_prefix(card.id)
             .cloned()
             .expect("the card's verbs are placed");
-        let layout = device_layout_view(&card, prefix, fs, true, staged, None, None, &mut offers);
+        let layout = device_layout_view(
+            &card,
+            prefix,
+            fs,
+            true,
+            lpa_studio_core::FilesEvidence::default(),
+            staged,
+            None,
+            None,
+            &mut offers,
+        );
         rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2",
                 StoryBoardCard {
@@ -1004,6 +1014,11 @@ fn needs_files_back_cell(pending: Option<&lpa_studio_core::BackupEntry>) -> Elem
         prefix,
         DeviceBoardFs::Formatted,
         false,
+        // A board this browser saw run a project: its loss is news.
+        lpa_studio_core::FilesEvidence {
+            remembered: true,
+            started_fresh: false,
+        },
         None,
         pending,
         Some("60:55:f9:0a:0b:0c"),

@@ -9400,24 +9400,66 @@ fn an_unnamed_board_with_its_files_gets_the_ordinary_card_and_its_update() {
     }
 }
 
-/// A board whose filesystem was just formatted DOES need its files back —
-/// and still gets its Update beside the restore: an update (over the air,
-/// or a flash that keeps `lpfs`) never touches the board's files, so the
-/// files state never withholds it (defect 2026-10-06).
+/// A board this tab saw run a project that comes back from a power cut with
+/// its storage formatted DOES need its files back — and still gets its
+/// Update beside the restore: an update (over the air, or a flash that
+/// keeps `lpfs`) never touches the board's files, so the files state never
+/// withholds it (defect 2026-10-06). The same board's first, fresh boot
+/// said nothing about files: a formatted boot is a loss only on evidence
+/// the board held some (defect 2026-10-14).
 #[test]
 fn a_board_that_formatted_offers_its_restore_and_its_update() {
-    let device = unnamed_light_player(lpc_wire::FsBootState::Formatted);
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac("10:bd:a3:b0:8e:30")
+            .with_fs_boot_state(lpc_wire::FsBootState::Formatted)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
     let (mut bench, tasks) = identified(&device, "usb-layout-formatted");
     let target = bench.view().devices[0].id;
-
     bench.wait_for_verb(&tasks, target, "update-firmware");
+    assert!(
+        !bench
+            .controller
+            .device_roster_view()
+            .layout
+            .contains_key(&target),
+        "a fresh boot lost nothing"
+    );
+
+    // It runs a project here, then loses power and boots formatted again,
+    // empty.
+    bench.push_gesture(target, bundled_example());
+    bench.run_until(&tasks, "the board to run what was pushed", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    device.fake_power_cycle();
+    bench.run_until(&tasks, "the card to say its files are gone", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.line.is_some())
+    });
     let layout = bench.controller.device_roster_view().layout[&target].clone();
     assert_eq!(
         layout.line.as_deref(),
-        Some("This board needs its files back — restore them from a backup file.")
+        Some(
+            "This board's files are gone. Restore them from a backup file if you have one. Or \
+             Start fresh, and the board waits for a new project."
+        )
     );
     assert!(layout.restore_from_file.is_some(), "the way back");
+    assert!(layout.start_fresh.is_some(), "the way on");
     assert!(card_offers(&bench, target, RESTORE_FROM_FILE));
+    assert!(card_offers(&bench, target, crate::START_FRESH));
     assert!(
         card_offers(&bench, target, "update-firmware"),
         "and its Update"
@@ -9473,7 +9515,7 @@ fn a_reboot_after_a_pull_mid_filesystem_write_still_offers_the_backup_and_update
         layout
             .line
             .as_deref()
-            .is_some_and(|line| line.contains("in a backup in this browser")),
+            .is_some_and(|line| line.contains("This browser kept a backup")),
         "{:?}",
         layout.line
     );

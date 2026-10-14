@@ -11,6 +11,7 @@
 //! Plain language on purpose (Yona gets lost in plan-speak): "files",
 //! "board", "backup" — never `lpfs`, "superblock" or a phase name.
 
+use lpa_devices::view::LoadedProject;
 use lpa_devices::wire::BoardFs;
 use lpa_devices::{Action, DeviceId, DeviceView, LayoutVerdict};
 
@@ -19,6 +20,7 @@ use super::device_backup_op::DeviceBackupOp;
 use super::device_backup_store::BackupEntry;
 use super::device_flash::{FirmwareVerb, firmware_verb};
 use super::device_layout_step::LayoutStaging;
+use super::device_start_fresh_op::DeviceStartFreshOp;
 use super::devices_op::DevicesOp;
 use crate::{ActionConfirmation, OfferPath, UiAction, UiOffer, UiOfferTree};
 
@@ -35,6 +37,25 @@ pub const FINISH_UPDATE: &str = "finish-update";
 /// `devices/<board>/restore-from-file`: import an outside backup ZIP (one
 /// this browser never stored itself) and restore it (plan P01).
 pub const RESTORE_FROM_FILE: &str = "restore-from-file";
+/// `devices/<board>/start-fresh`: let the files go, and leave the board
+/// empty for a new project.
+pub const START_FRESH: &str = "start-fresh";
+
+/// What this browser knows about a board's files beyond its hello: whether
+/// "its files are gone" is news. A fresh install's first boot formats its
+/// storage too, and a board that never held anything has lost nothing.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FilesEvidence {
+    /// The board held files once, as far as this browser knows: this tab
+    /// saw it run a project, this browser gave it one (a verified push in
+    /// the registry), or it carried a stamped identity its hello no longer
+    /// names. A backup pending for it here is evidence too, and is passed
+    /// on its own.
+    pub remembered: bool,
+    /// Its owner chose Start fresh since (or reset it to factory here): the
+    /// loss is not news, until the board runs a project again.
+    pub started_fresh: bool,
+}
 
 /// The card's layout facts for one device.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +82,9 @@ pub struct UiDeviceLayout {
     /// [`Self::restore`] whenever one exists, and ALSO when it does not:
     /// the board needs its files back but this browser has no copy of them.
     pub restore_from_file: Option<OfferPath>,
+    /// "Start fresh" — the way out for a board whose files are gone: let
+    /// them go, and leave the board empty for a new project.
+    pub start_fresh: Option<OfferPath>,
     /// This board's own base MAC, if known yet — so the one question a
     /// mismatched backup asks can name both boards.
     pub current_base_mac: Option<String>,
@@ -103,6 +127,7 @@ impl UiDeviceLayout {
             finish_update: None,
             download: None,
             restore_from_file: None,
+            start_fresh: None,
             current_base_mac: None,
             project_note: Some(UiProjectNote::starts_next(folder)),
         }
@@ -130,15 +155,18 @@ pub struct UiLayoutPanel {
 /// `offers_at` is the card's `devices/<board>` prefix (where the rest of its
 /// verbs are placed); `fs` is the board's last hello's
 /// filesystem state and `has_uid` whether that hello named a stamped
-/// identity; `pending` the stored backup still marked pending for its base
+/// identity; `evidence` what this browser knows of the board's files;
+/// `pending` the stored backup still marked pending for its base
 /// MAC; `staged` what its last inspection staged; `current_base_mac` the
 /// board's own base MAC, if known (the one question a mismatched backup-
 /// file import asks names it).
+#[allow(clippy::too_many_arguments)]
 pub fn device_layout_view(
     view: &DeviceView,
     offers_at: OfferPath,
     fs: BoardFs,
     has_uid: bool,
+    evidence: FilesEvidence,
     staged: Option<&LayoutStaging>,
     pending: Option<&BackupEntry>,
     current_base_mac: Option<&str>,
@@ -158,6 +186,7 @@ pub fn device_layout_view(
         finish_update: None,
         download: None,
         restore_from_file: None,
+        start_fresh: None,
         current_base_mac: current_base_mac.map(str::to_string),
         project_note: None,
     };
@@ -244,12 +273,19 @@ pub fn device_layout_view(
     // the loss, never inferred from a missing identity alone:
     //
     // - the boot that formatted (`fs: formatted`: whatever the board held
-    //   is gone from it);
+    //   is gone from it) on a board this browser knows HAD files (a backup
+    //   pending for it, or `evidence.remembered`). Every fresh install's
+    //   first boot formats too, and a board that never held anything has
+    //   lost nothing: it gets the ordinary card (the connected feel gate's
+    //   finding 1, `docs/defects/2026-10-14-a-freshly-installed-board-is-told-its-files-need-restoring.md`);
     // - a backup still PENDING for this board in this browser (the resume
     //   rule, Q14: an unfinished migration's backup), on a board that names
     //   no identity — any later boot of the formatted filesystem mounts
     //   fine but names none (the walk's W7b: a reboot between the
     //   interruption and the user's return must not hide the way back).
+    //
+    // Never on a board running a project (it has files: whatever was lost
+    // has been replaced), nor after its owner chose Start fresh.
     //
     // A mounted board that names no identity and has NO pending backup is
     // simply a board that was never named (Studio no longer stamps
@@ -263,20 +299,24 @@ pub fn device_layout_view(
     // None of this withholds the card's firmware verbs: an update (over
     // the air, or a plain flash that keeps `lpfs`) never touches the
     // board's files, so its `update-firmware` offer stands beside these.
-    let lost_files = match fs {
-        BoardFs::Formatted => true,
-        BoardFs::Mounted => !has_uid && pending.is_some(),
-        BoardFs::Unknown | BoardFs::Memory | BoardFs::LegacyHeld => false,
-    };
+    let running = matches!(view.loaded_project, LoadedProject::Running { .. });
+    let lost_files = !evidence.started_fresh
+        && !running
+        && match fs {
+            BoardFs::Formatted => pending.is_some() || evidence.remembered,
+            BoardFs::Mounted => !has_uid && pending.is_some(),
+            BoardFs::Unknown | BoardFs::Memory | BoardFs::LegacyHeld => false,
+        };
     if lost_files {
         layout.line = Some(match pending {
             Some(entry) => format!(
-                "This board's files from {} are in a backup in this browser.",
+                "This board's files are gone. This browser kept a backup from {}: Restore files \
+                 puts them back. Or Start fresh, and the board waits for a new project.",
                 date(entry.captured_at_epoch_seconds)
             ),
-            None => {
-                "This board needs its files back — restore them from a backup file.".to_string()
-            }
+            None => "This board's files are gone. Restore them from a backup file if you have \
+                     one. Or Start fresh, and the board waits for a new project."
+                .to_string(),
         });
         if let Some(entry) = pending
             && let Some(FirmwareVerb::Update(choice)) = firmware_verb(view)
@@ -329,6 +369,11 @@ pub fn device_layout_view(
                 DeviceBackupOp::action_for(device),
             ));
         }
+        layout.start_fresh = Some(publish(
+            START_FRESH,
+            "add",
+            DeviceStartFreshOp::action_for(device),
+        ));
         return Some(layout);
     }
     None
@@ -492,6 +537,7 @@ mod tests {
             prefix(),
             BoardFs::Mounted,
             true,
+            FilesEvidence::default(),
             Some(&staging),
             None,
             None,
@@ -536,6 +582,7 @@ mod tests {
                 prefix(),
                 fs,
                 has_uid,
+                FilesEvidence::default(),
                 None,
                 Some(&entry),
                 None,
@@ -558,6 +605,7 @@ mod tests {
                 prefix(),
                 BoardFs::Mounted,
                 true,
+                FilesEvidence::default(),
                 None,
                 None,
                 None,
@@ -581,6 +629,7 @@ mod tests {
             prefix(),
             BoardFs::Mounted,
             false,
+            FilesEvidence::default(),
             None,
             None,
             Some("10:bd:a3:b0:8e:30"),
@@ -607,6 +656,7 @@ mod tests {
             prefix(),
             BoardFs::Formatted,
             false,
+            remembered(),
             None,
             None,
             Some("60:55:f9:0a:0b:0c"),
@@ -619,6 +669,7 @@ mod tests {
             layout.restore_from_file.is_some(),
             "a file picker is still offered"
         );
+        assert!(layout.start_fresh.is_some(), "and the way on");
         assert_eq!(
             layout.current_base_mac.as_deref(),
             Some("60:55:f9:0a:0b:0c")
@@ -684,6 +735,7 @@ mod tests {
             prefix(),
             BoardFs::Mounted,
             true,
+            FilesEvidence::default(),
             None,
             None,
             None,
@@ -708,6 +760,7 @@ mod tests {
             prefix(),
             BoardFs::LegacyHeld,
             true,
+            FilesEvidence::default(),
             None,
             None,
             None,
@@ -735,6 +788,7 @@ mod tests {
             prefix(),
             BoardFs::Formatted,
             false,
+            FilesEvidence::default(),
             None,
             Some(&entry),
             None,
@@ -762,6 +816,7 @@ mod tests {
             prefix(),
             BoardFs::LegacyHeld,
             true,
+            FilesEvidence::default(),
             None,
             None,
             None,
@@ -773,6 +828,89 @@ mod tests {
             layout.finish_update.map(|path| path.to_string()),
             Some("devices/mac-6055f90a0b0c/finish-update".to_string())
         );
+    }
+
+    /// The connected feel gate's finding 1: every fresh install's first
+    /// boot formats, so `fs: formatted` alone is no evidence of a loss. A
+    /// board this browser never saw hold anything gets the ordinary card;
+    /// one it remembers, or has a backup for, is told its files are gone;
+    /// one running a project, or whose owner chose Start fresh, is not.
+    #[test]
+    fn a_formatted_boot_is_a_loss_only_on_evidence_the_board_had_files() {
+        let says_files_are_gone = |view: &DeviceView, evidence: FilesEvidence| {
+            let mut offers = UiOfferTree::new();
+            let layout = device_layout_view(
+                view,
+                prefix(),
+                BoardFs::Formatted,
+                false,
+                evidence,
+                None,
+                None,
+                None,
+                &mut offers,
+            );
+            let start_fresh = offers.get(&prefix().child(START_FRESH)).is_some();
+            assert_eq!(
+                layout.as_ref().is_some_and(|layout| layout.line.is_some()),
+                start_fresh,
+                "Start fresh comes with the notice"
+            );
+            start_fresh
+        };
+        let fresh_install = running_c6();
+        assert!(
+            !says_files_are_gone(&fresh_install, FilesEvidence::default()),
+            "a fresh install lost nothing"
+        );
+        assert!(says_files_are_gone(&fresh_install, remembered()));
+        assert!(!says_files_are_gone(
+            &fresh_install,
+            FilesEvidence {
+                remembered: true,
+                started_fresh: true,
+            }
+        ));
+        let mut running = running_c6();
+        running.loaded_project = lpa_devices::view::LoadedProject::Running {
+            label: "studio".to_string(),
+        };
+        assert!(
+            !says_files_are_gone(&running, remembered()),
+            "a board running a project has files"
+        );
+    }
+
+    /// The notice says what happened and what to do, in plain words.
+    #[test]
+    fn the_notice_says_what_happened_and_the_two_ways_on() {
+        let layout = device_layout_view(
+            &running_c6(),
+            prefix(),
+            BoardFs::Formatted,
+            false,
+            remembered(),
+            None,
+            None,
+            None,
+            &mut UiOfferTree::new(),
+        )
+        .expect("the notice");
+        assert_eq!(
+            layout.line.as_deref(),
+            Some(
+                "This board's files are gone. Restore them from a backup file if you have one. \
+                 Or Start fresh, and the board waits for a new project."
+            )
+        );
+    }
+
+    /// Evidence the board held files.
+    fn remembered() -> FilesEvidence {
+        FilesEvidence {
+            remembered: true,
+            started_fresh: false,
+        }
     }
 
     /// The fixture board's verbs' prefix: its MAC as the roster records it,

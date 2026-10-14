@@ -267,6 +267,9 @@ pub struct DeviceRoster {
     /// How each board's last activity ended, read off the journal as it is
     /// drained (the board card's Done and Failed).
     ends: super::ActivityEnds,
+    /// What this browser remembers of boards' files: whether "its files are
+    /// gone" is news ([`super::BoardFilesMemory`]).
+    files: super::BoardFilesMemory,
 }
 
 impl DeviceRoster {
@@ -284,7 +287,34 @@ impl DeviceRoster {
             keys: std::collections::BTreeMap::new(),
             mirrored_through: 0,
             ends: super::ActivityEnds::default(),
+            files: super::BoardFilesMemory::default(),
         }
+    }
+
+    /// What this browser remembers of boards' files.
+    pub fn files_memory(&self) -> &super::BoardFilesMemory {
+        &self.files
+    }
+
+    /// The same, for the controller: the fresh starts' stored form, the
+    /// registry's given projects, Start fresh.
+    pub fn files_memory_mut(&mut self) -> &mut super::BoardFilesMemory {
+        &mut self.files
+    }
+
+    /// Start fresh on `device`: its lost files are let go, and the card stops
+    /// saying they are gone. `false` when the board has said no MAC to
+    /// remember the choice by, or chose it already.
+    pub fn start_fresh(&mut self, device: lpa_devices::DeviceId) -> bool {
+        let Some(mac) = self
+            .roster
+            .device(device)
+            .and_then(|board| board.identity.mac.as_ref())
+            .map(|mac| mac.0.clone())
+        else {
+            return false;
+        };
+        self.files.start_fresh(&mac)
     }
 
     /// How each board's last activity ended ([`super::ActivityEnds`]).
@@ -468,8 +498,10 @@ impl DeviceRoster {
         // goes.
         self.effects.reconcile_updates(&self.roster);
         let lines = self.drain_journal();
+        self.note_boards_with_files();
         let roster = &self.roster;
         self.ends.retain(|device| roster.device(device).is_some());
+        self.files.retain(|device| roster.device(device).is_some());
         lines
     }
 
@@ -582,6 +614,20 @@ impl DeviceRoster {
                 let hello = device.evidence.classification.hello();
                 let fs = hello.map(|hello| hello.fs).unwrap_or_default();
                 let has_uid = hello.is_some_and(|hello| hello.identity.uid.is_some());
+                let mac = device.identity.mac.as_ref().map(|mac| mac.0.as_str());
+                let key = self
+                    .keys
+                    .get(&device.id.0)
+                    .cloned()
+                    .or_else(|| super::device_records::registry_key(&device.identity));
+                let evidence = super::FilesEvidence {
+                    remembered: self.files.remembers(
+                        device.id,
+                        key.as_deref(),
+                        device.identity.uid.is_some() && !has_uid,
+                    ),
+                    started_fresh: self.files.started_fresh(mac),
+                };
                 let staged = layout.staged(device.id);
                 let pending = device
                     .identity
@@ -613,6 +659,7 @@ impl DeviceRoster {
                     offers_at.clone(),
                     fs,
                     has_uid,
+                    evidence,
                     staged.as_ref(),
                     pending.as_ref(),
                     device.identity.mac.as_ref().map(|mac| mac.0.as_str()),
@@ -631,6 +678,21 @@ impl DeviceRoster {
                 ui.map(|ui| (device.id, ui))
             })
             .collect()
+    }
+
+    /// Every board that reports a project loaded holds files: remember it,
+    /// and end any fresh start chosen for it ([`super::BoardFilesMemory`]).
+    fn note_boards_with_files(&mut self) {
+        for device in self.roster.devices() {
+            if device
+                .evidence
+                .loaded_projects()
+                .is_some_and(|loaded| !loaded.is_empty())
+            {
+                let mac = device.identity.mac.as_ref().map(|mac| mac.0.as_str());
+                self.files.note_running(device.id, mac);
+            }
+        }
     }
 
     /// A `Close` for a link the model is releasing is the last thing that link
@@ -657,6 +719,20 @@ impl DeviceRoster {
                 (entry.scope, &entry.record)
             {
                 self.ends.note(device, note, entry.at);
+                // A factory reset here is the owner's own fresh start: the
+                // files it erased are not news when the board comes back.
+                if let lpa_devices::journal::JournalNote::ActivityEnded {
+                    kind: lpa_devices::ActivityKind::Erase,
+                    outcome,
+                } = note
+                    && outcome.is_success()
+                    && let Some(mac) = self
+                        .roster
+                        .device(device)
+                        .and_then(|board| board.identity.mac.as_ref())
+                {
+                    self.files.start_fresh(&mac.0);
+                }
             }
             lines.push(JournalLine {
                 scope: scope_label(entry.scope),

@@ -1199,6 +1199,7 @@ fn layout_card(refused: bool) -> Element {
         story_board_prefix(card.id),
         DeviceBoardFs::Mounted,
         true,
+        lpa_studio_core::FilesEvidence::default(),
         staged.as_ref(),
         None,
         None,

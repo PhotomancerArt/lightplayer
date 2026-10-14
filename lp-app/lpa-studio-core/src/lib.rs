@@ -109,9 +109,10 @@ pub use app::devices::{
 };
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
-    DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
-    MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
-    device_layout_view, device_restore_from_file_action,
+    BoardFilesMemory, DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp,
+    DeviceRestoreFromFileOp, DeviceStartFreshOp, FRESH_STARTS_STORAGE_KEY, FilesEvidence,
+    MemoryBackupStore, START_FRESH, UiDeviceLayout, UiLayoutPanel, check_backup_file,
+    check_store_contract, device_layout_view, device_restore_from_file_action,
 };
 pub use app::devices::{BoardPlays, BoardProjectInputs, BoardProjects, board_projects};
 pub use app::devices::{

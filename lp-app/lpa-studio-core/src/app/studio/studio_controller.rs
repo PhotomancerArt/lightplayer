@@ -178,6 +178,9 @@ pub struct StudioController {
     wifi_addresses: crate::WifiAddressBook,
     /// The web edge's sink for [`Self::wifi_addresses`]' stored form.
     on_wifi_addresses: Option<Box<dyn Fn(&str)>>,
+    /// The web edge's sink for the boards whose owner chose Start fresh
+    /// (the roster's [`crate::BoardFilesMemory`]), kept in this browser.
+    on_fresh_starts: Option<Box<dyn Fn(&str)>>,
     /// The connects over Wi‑Fi someone asked for, while they run and once
     /// they fail.
     wifi_connects: crate::WifiConnects,
@@ -517,6 +520,7 @@ impl StudioController {
             relay_transport: None,
             wifi_addresses: crate::WifiAddressBook::new(),
             on_wifi_addresses: None,
+            on_fresh_starts: None,
             wifi_connects: crate::WifiConnects::default(),
             wifi_spawner: None,
             wifi_tx: None,
@@ -754,6 +758,30 @@ impl StudioController {
     /// Where each board Studio has met is on Wi‑Fi, as core holds it.
     pub fn wifi_addresses(&self) -> &crate::WifiAddressBook {
         &self.wifi_addresses
+    }
+
+    /// The boards whose owner chose Start fresh, as this browser kept them
+    /// (the web edge's `localStorage`, [`crate::FRESH_STARTS_STORAGE_KEY`],
+    /// read at boot). Load before the actor takes ownership.
+    pub fn load_fresh_starts(&mut self, json: &str) {
+        self.devices.files_memory_mut().load_fresh_starts(json);
+    }
+
+    /// Where the fresh starts' stored form goes whenever it changes (the
+    /// web edge's `localStorage`). Install before the actor takes ownership.
+    pub fn set_on_fresh_starts(&mut self, hook: impl Fn(&str) + 'static) {
+        self.on_fresh_starts = Some(Box::new(hook));
+    }
+
+    /// Hand the fresh starts' stored form to the web edge when they changed
+    /// (a Start fresh, a factory reset here, a board running a project
+    /// again).
+    fn keep_fresh_starts(&mut self) {
+        if let Some(json) = self.devices.files_memory_mut().take_changed_fresh_starts()
+            && let Some(hook) = &self.on_fresh_starts
+        {
+            hook(&json);
+        }
     }
 
     /// The book changed: hand its stored form to the web edge.
@@ -4265,6 +4293,16 @@ impl StudioController {
                 // gallery and the picker.
                 self.project
                     .set_import_patterns(home_view_builder::importable_patterns(&inputs));
+                // The rows that name a project this browser gave a board:
+                // evidence the board held files, should it come back
+                // without them.
+                self.devices.files_memory_mut().set_given(
+                    inputs
+                        .registered
+                        .iter()
+                        .filter(|row| row.association.is_some())
+                        .map(|row| row.uid.clone()),
+                );
                 self.home_inputs = Some(inputs);
                 snapshot_fs = Some(fs);
             }
@@ -4505,6 +4543,15 @@ impl StudioController {
                 true => self.play_views.saturating_add(1),
                 false => self.play_views.saturating_sub(1),
             };
+            return Ok(UiNotices::new());
+        }
+        if node_id.as_str() == crate::DeviceStartFreshOp::NODE_ID {
+            let op = action.into_op::<crate::DeviceStartFreshOp>()?;
+            if !self.devices.start_fresh(op.device) {
+                log::debug!("start fresh on {:?}: nothing to remember", op.device);
+            }
+            self.keep_fresh_starts();
+            self.mark_dirty();
             return Ok(UiNotices::new());
         }
         if node_id.as_str() == crate::DeviceBackupOp::NODE_ID {
