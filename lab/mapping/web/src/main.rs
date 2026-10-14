@@ -37,7 +37,7 @@ fn App() -> Element {
             header { class: "top",
                 span { class: "brand", "Mapping lab" }
                 label { class: "fixture-picker",
-                    "Fixture "
+                    "Project "
                     select { tabindex: "-1", option { "desk" } }
                 }
                 div { class: "tools",

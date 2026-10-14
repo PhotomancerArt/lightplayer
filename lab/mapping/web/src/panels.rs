@@ -3,7 +3,8 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Editor, NoticeKind, Prop, PropEdit, PropKind, PropValue, Target, common_props,
+    Editor, NodeKind, Notice, NoticeKind, Project, Prop, PropEdit, PropKind, PropValue, Target,
+    common_props,
 };
 
 #[component]
@@ -22,6 +23,14 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
         .collect();
     let context = e.context();
     let name = e.project.name.clone();
+    let kinds: Vec<&'static str> = rows
+        .iter()
+        .map(|r| match &r.target {
+            Target::Node(_) => e.project.kind_word(&r.target),
+            Target::Port { .. } => "port",
+            _ => "",
+        })
+        .collect();
     drop(e);
 
     rsx! {
@@ -29,7 +38,7 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
         if rows.is_empty() {
             div { class: "empty", "Nothing here yet. Press L to draw a line." }
         }
-        for row in rows {
+        for (row, kind) in rows.into_iter().zip(kinds) {
             {
                 let t = row.target.clone();
                 let mut class = String::from("row");
@@ -44,8 +53,9 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
                 if row.derived {
                     class.push_str(" row-derived");
                 }
-                if matches!(t, Target::Fixture(_)) {
-                    class.push_str(" row-fixture");
+                if !kind.is_empty() {
+                    class.push_str(" row-");
+                    class.push_str(kind);
                 }
                 let pad = 10 + row.depth * 16;
                 rsx! {
@@ -119,10 +129,19 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
     };
     let fixture_facts = if selection.is_empty() {
         let outside = f.lamps_outside().len();
-        let n = f.fixtures.len();
+        let n = f.fixtures().len();
+        let outputs = f.outputs().len();
+        let patch = f.effective_patch();
+        let unpatched: usize = patch.unpatched.iter().map(|u| u.lamps.len()).sum();
         Some(vec![
             format!("{n} fixture{}", if n == 1 { "" } else { "s" }),
+            format!("{outputs} output{}", if outputs == 1 { "" } else { "s" }),
             format!("{} lamps", f.lamp_count()),
+            if unpatched == 0 {
+                "every lamp patched to a port".into()
+            } else {
+                format!("{unpatched} lamps on no port — they light nothing")
+            },
             if outside == 0 {
                 "every lamp inside its fixture's box".into()
             } else {
@@ -134,6 +153,10 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
     };
     let only_lamps =
         !selection.is_empty() && selection.iter().all(|t| matches!(t, Target::Lamp { .. }));
+    let node = match selection.as_slice() {
+        [t] => node_facts(f, t),
+        _ => None,
+    };
     drop(e);
 
     rsx! {
@@ -180,6 +203,38 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
                     div { class: "fact", "… and {more} more" }
                 }
             }
+            if let Some(n) = node {
+                if !n.ports.is_empty() {
+                    div { class: "section-title", "Ports" }
+                    for (i, (name, fill, ratio)) in n.ports.into_iter().enumerate() {
+                        div { key: "p{i}", class: "port-fact",
+                            span { "{name}" }
+                            span { class: "port-fact-fill", "{fill}" }
+                            div { class: "port-fact-bar", div { class: "port-fact-bar-in", style: "width: {ratio * 100.0}%" } }
+                        }
+                    }
+                }
+                if !n.patch.is_empty() || !n.problems.is_empty() {
+                    div { class: "section-title", "Patch" }
+                    for (i, fact) in n.patch.into_iter().enumerate() {
+                        div { key: "r{i}", class: "fact patch-rule", "{fact}" }
+                    }
+                    for (i, pr) in n.problems.into_iter().enumerate() {
+                        div { key: "x{i}", class: "notice refused problem",
+                            div { class: "notice-text", span { class: "notice-tag", "problem: " } "{pr.text}" }
+                            if let Some(why) = pr.why {
+                                div { class: "notice-line", span { class: "notice-eq", "= why: " } "{why}" }
+                            }
+                            if let Some(help) = pr.help {
+                                div { class: "notice-line", span { class: "notice-eq", "= help: " } "{help}" }
+                            }
+                        }
+                    }
+                }
+                for (i, fact) in n.facts.into_iter().enumerate() {
+                    div { key: "n{i}", class: "fact", "{fact}" }
+                }
+            }
             if let Some(info) = lamp_info {
                 div { class: "section-title", "Lamp" }
                 div { class: "fact", "{info}" }
@@ -198,6 +253,110 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
             }
         }
     }
+}
+
+/// What the inspector says about one node or port, beyond its properties.
+#[derive(Default)]
+struct NodeFacts {
+    /// An output's ports: name, `50/60 px`, how full.
+    ports: Vec<(String, String, f64)>,
+    /// A fixture's rules, then where its lamps land.
+    patch: Vec<String>,
+    problems: Vec<Notice>,
+    facts: Vec<String>,
+}
+
+fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
+    let mut out = NodeFacts::default();
+    let patch = f.effective_patch();
+    match t {
+        Target::Node(id) => match f.node(id).map(|n| &n.kind) {
+            Some(NodeKind::Output(o)) => {
+                for p in &o.ports {
+                    let used = patch.used(id, &p.key);
+                    out.ports.push((
+                        p.name.clone(),
+                        format!("{used}/{} px · {}", p.pixels, p.format.word()),
+                        (used as f64 / p.pixels.max(1) as f64).min(1.0),
+                    ));
+                }
+                let feeds: Vec<String> = f
+                    .fixtures()
+                    .iter()
+                    .filter(|n| f.outputs_of(&n.id).contains(id))
+                    .map(|n| n.name.clone())
+                    .collect();
+                if !feeds.is_empty() {
+                    out.facts.push(format!("Fed by {}", feeds.join(", ")));
+                }
+            }
+            Some(NodeKind::Fixture(fx)) => {
+                if fx.rules.is_empty() {
+                    out.patch.push("No rule: its lamps go nowhere yet".into());
+                }
+                for r in &fx.rules {
+                    out.patch.push(f.rule_label(r));
+                }
+                let ports: Vec<String> = f.ports_of(t).iter().map(|p| f.long_label(p)).collect();
+                if !ports.is_empty() {
+                    out.patch.push(format!("Lands on {}", ports.join(", ")));
+                }
+                let left: usize = patch
+                    .unpatched
+                    .iter()
+                    .filter(|u| &u.fixture == id)
+                    .map(|u| u.lamps.len())
+                    .sum();
+                let working = fx.rules.iter().any(|r| f.node(r.output()).is_some());
+                if left > 0 && working {
+                    out.patch
+                        .push(format!("{left} lamps past the end of its ports"));
+                }
+                out.problems = patch
+                    .problems
+                    .iter()
+                    .filter(|p| &p.fixture == id)
+                    .map(|p| p.notice(f))
+                    .collect();
+            }
+            Some(NodeKind::Module { children }) => {
+                out.facts.push(format!(
+                    "A module: {} nodes inside, laid out by themselves",
+                    children.len()
+                ));
+            }
+            None => return None,
+        },
+        Target::Port { output, key } => {
+            let port = f.output(output)?.port(key)?;
+            let (used, pixels) = f.port_fill(output, key);
+            out.facts.push(format!(
+                "{used} of {pixels} px used · {} · on {}",
+                port.format.word(),
+                f.node_name(output)
+            ));
+            let mut by: Vec<String> = Vec::new();
+            for s in patch
+                .spans
+                .iter()
+                .filter(|s| &s.output == output && &s.port == key)
+            {
+                by.push(format!(
+                    "{} lamps {}–{} at {}",
+                    f.long_label(&f.object_target(&s.object)),
+                    s.lamps.start,
+                    s.lamps.end - 1,
+                    s.start_pixel
+                ));
+            }
+            if by.is_empty() {
+                out.facts.push("Nothing is patched here yet".into());
+            }
+            out.facts.extend(by);
+        }
+        _ => return None,
+    }
+    Some(out)
 }
 
 /// One property, laid out from its descriptor alone.

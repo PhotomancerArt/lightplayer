@@ -16,6 +16,9 @@
     --hover: #8caaff;
     --lamp: #f5d99a;
     --refused: #ff8f8f;
+    /* The product's colour for what is bound: patches, buses. */
+    --bound: #a58af7;
+    --bound-bg: rgba(165, 138, 247, 0.16);
     --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
 }
@@ -51,7 +54,10 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .row-selected { background: var(--selection-bg); border-left-color: var(--selection); }
 .row-lit { border-left-color: var(--selection); }
 .row-context .row-label { text-decoration: underline dashed var(--text-subtle); text-underline-offset: 3px; }
-.row-fixture .row-label { font-weight: 600; color: var(--text); }
+.row-fixture .row-label, .row-module .row-label, .row-output .row-label { font-weight: 600; color: var(--text); }
+.row-module .row-label::before { content: "▣ "; color: var(--text-subtle); font-weight: 400; }
+.row-output .row-label::before { content: "⏚ "; color: var(--bound); font-weight: 400; }
+.row-port .row-label { color: var(--text-muted); }
 .row-derived .row-label { color: var(--text-subtle); font-style: italic; }
 .row-detail { color: var(--text-subtle); font-size: 12px; white-space: nowrap; }
 .empty, .hint-inline { color: var(--text-subtle); padding: 8px 12px; font-size: 12px; }
@@ -66,6 +72,28 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .frame-tab { fill: var(--surface-raised); stroke: var(--border); stroke-width: 1; }
 .frame-title { fill: var(--text-muted); font: 11px var(--font); }
 .frame-dimmed { opacity: 0.4; }
+.module .frame-box { fill: rgba(255, 255, 255, 0.018); stroke: var(--border-strong); stroke-dasharray: 6 4; }
+.module .frame-tab { fill: none; stroke: var(--border); stroke-dasharray: 3 3; }
+.module .frame-title { fill: var(--text-subtle); font-style: italic; }
+
+.card-box { fill: var(--surface-raised); stroke: var(--border-strong); stroke-width: 1; }
+.card-title { fill: var(--text); font-family: var(--font); font-weight: 600; }
+.card-dimmed { opacity: 0.4; }
+.port-sep { stroke: var(--border); stroke-width: 1; }
+.port-name { fill: var(--text-muted); font-family: var(--font); dominant-baseline: middle; }
+.port-fill { fill: var(--text-subtle); font-family: var(--mono); dominant-baseline: middle; }
+.port-bar-bg { fill: var(--bg); }
+.port-bar { fill: var(--bound); }
+.port-tint { fill: var(--bound-bg); }
+
+.edge-line { fill: none; stroke: var(--bound); stroke-width: 1.4; opacity: 0.75; }
+.edge-bundled .edge-line { stroke-width: 2.6; }
+.edge-selected .edge-line { opacity: 1; stroke-width: 2; }
+.edge-bundled.edge-selected .edge-line { stroke-width: 3.2; }
+.edge-quiet .edge-line { opacity: 0.32; }
+.edge-label { fill: var(--bound); font: 10px var(--font); paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; }
+.edge-quiet .edge-label { opacity: 0.45; }
+.lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
 
 .obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; }
 .obj .arrow { fill: var(--text-subtle); }
@@ -105,6 +133,12 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .num input { width: 64px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; text-align: right; }
 .key-hint { margin-left: 4px; }
 .flag.on { border-color: var(--selection); color: var(--text); }
+.port-fact { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 0; color: var(--text-muted); }
+.port-fact-fill { font: 12px var(--mono); color: var(--text-subtle); }
+.port-fact-bar { grid-column: 1 / -1; height: 3px; background: var(--bg); border-radius: 2px; }
+.port-fact-bar-in { height: 100%; background: var(--bound); border-radius: 2px; }
+.patch-rule { color: var(--bound); }
+.problem { padding: 6px 0; }
 
 .hints { grid-area: hints; border-top: 1px solid var(--border); background: var(--surface); }
 .bar { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; padding: 8px 12px; }

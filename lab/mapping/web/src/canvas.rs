@@ -8,11 +8,19 @@
 //! - selected: a solid light outline, with its name above it;
 //! - the level you are in (the selection's parent): a dashed outline;
 //! - everything outside that level: dimmed.
+//!
+//! Nodes (D42, D43): modules are faint dashed frames, fixtures solid
+//! frames, outputs cards with a row per port. The patch is drawn as violet
+//! edges — violet is the product's colour for what is bound — from a
+//! fixture (or, inside one, each object) to the port row it lands on.
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Camera, Component, ComponentId, Editor, FixtureId, Gesture, Object, ObjectShape, Project, Rect,
-    Target, Vec2, area::FRAME_TITLE_PX, object::objects_of,
+    Camera, Component, ComponentId, Editor, Gesture, NodeId, NodeKind, Object, ObjectShape,
+    Project, Rect, Target, Vec2,
+    area::{FRAME_TITLE_PX, title_width},
+    layout::{CARD_HEADER, CARD_ROW},
+    object::objects_of,
 };
 
 use crate::input;
@@ -29,22 +37,130 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     let cam = e.camera;
     let context = e.context();
     let hover = e.hover_target();
-    let frames: Vec<FrameView> = f
-        .fixtures
-        .iter()
-        .filter_map(|fx| {
-            let rect = screen_rect(&cam, f.world_bounds(&fx.id)?);
-            let dimmed = context
-                .as_ref()
-                .is_some_and(|c| !f.chain(&Target::Fixture(fx.id.clone())).contains(c));
-            Some(FrameView {
+    let open = e.open_fixtures();
+    let mut frames: Vec<FrameView> = Vec::new();
+    let mut cards: Vec<CardView> = Vec::new();
+    // Ports the selection lands on, tinted on their cards.
+    let mut tinted: Vec<Target> = Vec::new();
+    for t in &e.selection {
+        for p in f.ports_of(t) {
+            if !tinted.contains(&p) {
+                tinted.push(p);
+            }
+        }
+    }
+    let patch = f.effective_patch();
+    for n in f.all_nodes() {
+        let Some(world) = f.node_rect(&n.id) else {
+            continue;
+        };
+        let rect = screen_rect(&cam, world);
+        let t = Target::Node(n.id.clone());
+        let mut dimmed = context
+            .as_ref()
+            .is_some_and(|c| !f.is_ancestor_or_self(c, &t) && !f.is_ancestor_or_self(&t, c));
+        match &n.kind {
+            NodeKind::Module { .. } | NodeKind::Fixture(_) => frames.push(FrameView {
                 rect,
-                name: fx.name.clone(),
-                title_w: 14.0 + 7.0 * fx.name.chars().count() as f64,
+                name: n.name.clone(),
+                title_w: title_width(&n.name),
                 dimmed,
-            })
+                module: matches!(n.kind, NodeKind::Module { .. }),
+            }),
+            NodeKind::Output(o) => {
+                // An output an open fixture feeds stays lit.
+                if open.iter().any(|fx| f.outputs_of(fx).contains(&n.id)) {
+                    dimmed = false;
+                }
+                let rows = o
+                    .ports
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let top = world.min.y + CARD_HEADER + i as f64 * CARD_ROW;
+                        let row = screen_rect(
+                            &cam,
+                            Rect::new(
+                                Vec2::new(world.min.x, top),
+                                Vec2::new(world.max.x, top + CARD_ROW),
+                            ),
+                        );
+                        let used = patch.used(&n.id, &p.key);
+                        let pt = Target::Port {
+                            output: n.id.clone(),
+                            key: p.key.clone(),
+                        };
+                        PortRow {
+                            rect: row,
+                            name: p.name.clone(),
+                            fill: format!("{used}/{} px", p.pixels),
+                            ratio: (used as f64 / p.pixels.max(1) as f64).min(1.0),
+                            tinted: tinted.contains(&pt),
+                        }
+                    })
+                    .collect();
+                cards.push(CardView {
+                    rect,
+                    name: n.name.clone(),
+                    rows,
+                    dimmed,
+                });
+            }
+        }
+    }
+    // A module's frame goes under the frames inside it.
+    frames.sort_by_key(|fr| !fr.module);
+    let font = card_font(&cam);
+    // Edges landing on the same port stack their labels.
+    let mut landed: Vec<Target> = Vec::new();
+    let edges: Vec<EdgeView> = e
+        .edges()
+        .into_iter()
+        .map(|x| {
+            let stack = landed.iter().filter(|t| **t == x.to).count() as f64;
+            landed.push(x.to.clone());
+            let a = cam.to_screen(x.from_at);
+            let b = cam.to_screen(x.to_at);
+            let dx = ((b.x - a.x).abs() * 0.5).max(30.0);
+            let c1 = a + Vec2::new(dx, 0.0);
+            let c2 = b - Vec2::new(dx, 0.0);
+            let mid = (a + c1 * 3.0 + c2 * 3.0 + b) * 0.125 + Vec2::new(0.0, stack * 12.0);
+            let class = match (x.selected, x.bundled, e.selection.is_empty()) {
+                (true, true, _) => "edge edge-bundled edge-selected",
+                (true, false, _) => "edge edge-selected",
+                (false, true, true) => "edge edge-bundled",
+                (false, false, true) => "edge",
+                (false, true, false) => "edge edge-bundled edge-quiet",
+                (false, false, false) => "edge edge-quiet",
+            };
+            EdgeView {
+                d: format!(
+                    "M{},{} C{},{} {},{} {},{}",
+                    a.x, a.y, c1.x, c1.y, c2.x, c2.y, b.x, b.y
+                ),
+                label: x.label,
+                mid,
+                class,
+            }
         })
         .collect();
+    // The lamps a selected port carries.
+    let mut carried: Vec<Vec2> = Vec::new();
+    for t in &e.selection {
+        if let Target::Port { output, key } = t {
+            for (o, i) in f.lamps_on_port(output, key) {
+                if let Some(p) = f
+                    .lamps_under(&Target::Lamp {
+                        object: o,
+                        index: i,
+                    })
+                    .first()
+                {
+                    carried.push(cam.to_screen(*p));
+                }
+            }
+        }
+    }
 
     let objects: Vec<ObjectView> = f
         .placed_objects()
@@ -53,9 +169,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         .collect();
     // A draft goes into the fixture it was started in.
     let draft_bounds = match &e.gesture {
-        Gesture::Drawing { start_world } => f
-            .fixture_at(*start_world)
-            .and_then(|id| f.world_bounds(&id)),
+        Gesture::Drawing { start_world } => {
+            f.fixture_at(*start_world).and_then(|id| f.node_rect(&id))
+        }
         _ => None,
     };
     let draft: Vec<ObjectView> = e
@@ -83,12 +199,15 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         }
     };
     if let Some(c) = &context {
-        // A fixture's title tab already names it.
-        add(c, "outline-context", !matches!(c, Target::Fixture(_)));
+        // A node's title already names it.
+        add(c, "outline-context", !matches!(c, Target::Node(_)));
     }
     for t in &e.selection {
-        // A fixture's title tab already names it.
-        let label = !matches!(t, Target::Lamp { .. } | Target::Fixture(_));
+        // A node's title already names it; a port's row too.
+        let label = !matches!(
+            t,
+            Target::Lamp { .. } | Target::Node(_) | Target::Port { .. }
+        );
         add(t, "outline-selected", label);
     }
     // In the right-click list, the item under the pointer is outlined;
@@ -141,11 +260,19 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 height: "{vh}",
                 rect { class: "outside", x: "0", y: "0", width: "{vw}", height: "{vh}" }
                 for (i, fr) in frames.iter().enumerate() {
-                    g { key: "f{i}", class: if fr.dimmed { "frame frame-dimmed" } else { "frame" },
+                    g {
+                        key: "f{i}",
+                        class: match (fr.module, fr.dimmed) {
+                            (true, true) => "frame module frame-dimmed",
+                            (true, false) => "frame module",
+                            (false, true) => "frame frame-dimmed",
+                            (false, false) => "frame",
+                        },
                         rect {
                             class: "frame-box",
                             x: "{fr.rect.min.x}", y: "{fr.rect.min.y}",
                             width: "{fr.rect.width()}", height: "{fr.rect.height()}",
+                            rx: if fr.module { "6" } else { "0" },
                         }
                         rect {
                             class: "frame-tab",
@@ -160,6 +287,83 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         }
                     }
                 }
+                for (i, c) in cards.iter().enumerate() {
+                    g { key: "c{i}", class: if c.dimmed { "card card-dimmed" } else { "card" },
+                        rect {
+                            class: "card-box",
+                            x: "{c.rect.min.x}", y: "{c.rect.min.y}",
+                            width: "{c.rect.width()}", height: "{c.rect.height()}",
+                            rx: "4",
+                        }
+                        if font > 4.5 {
+                            text {
+                                class: "card-title",
+                                style: "font-size: {font * 1.1}px",
+                                x: "{c.rect.min.x + font * 0.7}",
+                                y: "{c.rect.min.y + font * 1.75}",
+                                "{c.name}"
+                            }
+                        }
+                        for (j, r) in c.rows.iter().enumerate() {
+                            g { key: "{j}",
+                                if r.tinted {
+                                    rect {
+                                        class: "port-tint",
+                                        x: "{r.rect.min.x}", y: "{r.rect.min.y}",
+                                        width: "{r.rect.width()}", height: "{r.rect.height()}",
+                                    }
+                                }
+                                line {
+                                    class: "port-sep",
+                                    x1: "{r.rect.min.x}", y1: "{r.rect.min.y}",
+                                    x2: "{r.rect.max.x}", y2: "{r.rect.min.y}",
+                                }
+                                if font > 4.5 {
+                                    text {
+                                        class: "port-name",
+                                        style: "font-size: {font}px",
+                                        x: "{r.rect.min.x + font * 0.7}",
+                                        y: "{r.rect.min.y + r.rect.height() * 0.55}",
+                                        "{r.name}"
+                                    }
+                                    text {
+                                        class: "port-fill",
+                                        style: "font-size: {font * 0.9}px",
+                                        x: "{r.rect.max.x - font * 0.7}",
+                                        y: "{r.rect.min.y + r.rect.height() * 0.55}",
+                                        text_anchor: "end",
+                                        "{r.fill}"
+                                    }
+                                }
+                                rect {
+                                    class: "port-bar-bg",
+                                    x: "{r.rect.min.x + font * 0.7}",
+                                    y: "{r.rect.max.y - r.rect.height() * 0.22}",
+                                    width: "{(r.rect.width() - font * 1.4).max(0.0)}",
+                                    height: "{(r.rect.height() * 0.09).max(1.0)}",
+                                }
+                                rect {
+                                    class: "port-bar",
+                                    x: "{r.rect.min.x + font * 0.7}",
+                                    y: "{r.rect.max.y - r.rect.height() * 0.22}",
+                                    width: "{(r.rect.width() - font * 1.4).max(0.0) * r.ratio}",
+                                    height: "{(r.rect.height() * 0.09).max(1.0)}",
+                                }
+                            }
+                        }
+                    }
+                }
+                for (i, x) in edges.iter().enumerate() {
+                    g { key: "e{i}", class: "{x.class}",
+                        path { class: "edge-line", d: "{x.d}" }
+                        text {
+                            class: "edge-label",
+                            x: "{x.mid.x}", y: "{x.mid.y - 4.0}",
+                            text_anchor: "middle",
+                            "{x.label}"
+                        }
+                    }
+                }
                 for (i, o) in objects.iter().chain(draft.iter()).enumerate() {
                     g { key: "{i}", class: "{o.class}",
                         {stroke(o)}
@@ -171,6 +375,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                             circle { class: "lamp-start", cx: "{p.0.x}", cy: "{p.0.y}", r: "{o.lamp_r + 3.0}" }
                         }
                     }
+                }
+                for (i, p) in carried.iter().enumerate() {
+                    circle { key: "k{i}", class: "lamp-ring-port", cx: "{p.x}", cy: "{p.y}", r: "{lamp_radius(&cam) + 2.5}" }
                 }
                 for (i, o) in outlines.iter().enumerate() {
                     g { key: "o{i}",
@@ -226,13 +433,46 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     }
 }
 
-/// One fixture's box on screen, with its title tab.
+/// One frame's box on screen — a module or a fixture — with its title tab.
 struct FrameView {
     rect: Rect,
     name: String,
-    /// Matches the title rect in the fixture's hit area (`area.rs`).
+    /// Matches the title rect in the frame's hit area (`area.rs`).
     title_w: f64,
     dimmed: bool,
+    module: bool,
+}
+
+/// An output's card: its title, then one row per port.
+struct CardView {
+    rect: Rect,
+    name: String,
+    rows: Vec<PortRow>,
+    dimmed: bool,
+}
+
+struct PortRow {
+    rect: Rect,
+    name: String,
+    /// `50/60 px`.
+    fill: String,
+    /// Used ÷ pixels, for the bar.
+    ratio: f64,
+    /// The selection lands here.
+    tinted: bool,
+}
+
+/// One patch edge: a cubic from what it leaves to the port row it reaches.
+struct EdgeView {
+    d: String,
+    label: String,
+    mid: Vec2,
+    class: &'static str,
+}
+
+/// Card text is sized in world units, so it zooms with the card.
+fn card_font(cam: &Camera) -> f64 {
+    3.9 * cam.scale
 }
 
 struct ObjectView {
@@ -276,7 +516,7 @@ struct Outline {
 fn object_view(
     f: &Project,
     cam: &Camera,
-    fixture: &FixtureId,
+    fixture: &NodeId,
     o: &Object,
     selection: &[Target],
     context: Option<&Target>,
@@ -291,7 +531,7 @@ fn object_view(
         (false, true) => "obj obj-dimmed",
         _ => "obj",
     };
-    let bounds = f.world_bounds(fixture);
+    let bounds = f.node_rect(fixture);
     let lamps = lamp_views(cam, o, bounds);
     ObjectView {
         class,
