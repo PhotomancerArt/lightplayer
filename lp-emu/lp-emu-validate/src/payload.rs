@@ -1622,6 +1622,74 @@ static FLASH_TEARS_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// The `flash-reprogram` records (tree-store M7). Every field is
+/// `Structural` but the microseconds: whether a re-programmed weak bit reads
+/// solid is what the part did. A transcript is not expected to replay equal
+/// to another — where a cut lands is random on purpose — and
+/// `scripts/emu/flash-reprogram-analyze.py` is what reads them.
+static FLASH_REPROGRAM_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        record: "fr-boot",
+        field: "reset",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-scan",
+        field: "frontier",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-window",
+        field: "torn_words",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-torn",
+        field: "weak",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-reads",
+        field: "stable",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-reads",
+        field: "correct",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-write",
+        field: "span_ok",
+        class: FieldClass::Structural,
+    },
+    FieldSpec {
+        record: "fr-scan",
+        field: "scan_us",
+        class: FieldClass::Timing,
+    },
+    FieldSpec {
+        record: "fr-timing",
+        field: "write_us_total",
+        class: FieldClass::Timing,
+    },
+];
+
+/// The `flash-reprogram` emulated twin's host: `flash-tears`' dry run with
+/// gaps long enough for this payload's boot, which erases and reads the
+/// whole partition (the first boot erases 175 sectors). The machine tears
+/// nothing, so every scan must find a clean frontier or a full region and
+/// no torn word: the twin proves the flow, never the part.
+pub const FLASH_REPROGRAM_EMULATED_SCRIPT: &str = "\
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+after \"boot: Loaded app\" +5ms \"g\"
+3000 power-cycle
+3100 power-cycle
+3400 power-cycle
+";
+
 /// The `flash-tears` emulated twin's host: open from power-on, a byte to
 /// each boot's ready line, and five power cycles.
 ///
@@ -3076,6 +3144,64 @@ pub static ALL_PAYLOADS: &[Payload] = &[
             strap: "app",
         },
     },
+    // Tree-store M7's question: does programming a torn word again with its
+    // intended value make its weak bits read solid? The same sacrificial
+    // board and cut driver as `flash-tears`, a work loop that only programs
+    // (every erase runs before the scan-done line), and a boot that finds
+    // the torn words, reads them left alone, re-programs them and reads them
+    // again, then once more after the next cut. Not `flash-tears-*`: its
+    // transcripts are not tear-shape histograms.
+    Payload {
+        name: "flash-reprogram",
+        chips: &[],
+        display_name: "Power cuts on a sacrificial board while it programs: does programming \
+                       a torn word again make its weak bits solid",
+        fw_check_slug: "flash-reprogram",
+        firmware_features: &["test_flash_reprogram"],
+        fw_checks_feature: Some("check-flash-reprogram"),
+        emits_header: true,
+        sentinel: Sentinel::Ready("[flash-reprogram] === SCAN DONE ==="),
+        host_script: None,
+        pin_script: None,
+        wire: &[],
+        record_kinds: &[
+            "fr-boot",
+            "fr-scan",
+            "fr-window",
+            "fr-torn",
+            "fr-reads",
+            "fr-reprogram",
+            "fr-write",
+            "fr-prepare",
+            "fr-timing",
+        ],
+        mask_set: "flash-tears",
+        fields: FLASH_REPROGRAM_FIELDS,
+        series: &[],
+        // The loop fills the region in about 0.9 s from the scan-done line,
+        // so the cut must come early: the driver's own wait is short, and
+        // `board power-cycle`'s start-up is the rest.
+        capture: Capture::PowerCuts {
+            cuts: 50,
+            min_ms: 0,
+            max_ms: 300,
+        },
+        link: Link::UsbSerialJtag,
+        emulator_features: None,
+        host_plan: Some(HostPlan {
+            host: "attached",
+            script: FLASH_REPROGRAM_EMULATED_SCRIPT,
+        }),
+        probes: &[],
+        run_secs: Some(12),
+        fresh_chip: false,
+        pin_capture: PinCapture::Off,
+        emulator_only: None,
+        boot: BootPath::RomUp {
+            reset_cause: "poweron",
+            strap: "app",
+        },
+    },
 ];
 
 pub fn find_payload(name: &str) -> Result<&'static Payload> {
@@ -3672,10 +3798,9 @@ mod tests {
 
         // Every other payload is watched from its first byte, but the one
         // whose subject is a power cut.
-        for other in ALL_PAYLOADS
-            .iter()
-            .filter(|o| o.name != p.name && !o.name.starts_with("flash-tears"))
-        {
+        for other in ALL_PAYLOADS.iter().filter(|o| {
+            o.name != p.name && !o.name.starts_with("flash-tears") && o.name != "flash-reprogram"
+        }) {
             assert_eq!(other.capture, Capture::Monitor, "{}", other.name);
         }
     }

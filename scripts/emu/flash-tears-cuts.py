@@ -115,10 +115,12 @@ def open_port(dev: str) -> int:
 
 
 def boot_reset(seen: bytes) -> str | None:
-    """The reset reason the boot's `ft-boot` record names, if it printed one."""
+    """The reset reason the boot's `ft-boot`/`fr-boot` record names, if it
+    printed one."""
     for raw in seen.split(b"\n"):
         line = raw.decode("utf-8", errors="replace")
-        if '"kind":"ft-boot"' in line and "[fw-check-json] " in line:
+        # `ft-boot` (flash-tears) or `fr-boot` (flash-reprogram).
+        if ('"kind":"ft-boot"' in line or '"kind":"fr-boot"' in line) and "[fw-check-json] " in line:
             return json.loads(line.split("[fw-check-json] ", 1)[1]).get("reset")
     return None
 
