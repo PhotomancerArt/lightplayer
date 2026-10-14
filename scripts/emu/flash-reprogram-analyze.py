@@ -218,17 +218,21 @@ def main() -> int:
 
     # The torn words.
     cut_words = [w for w in words if w["reset"] == "poweron"]
-    weak_words = [w for w in cut_words if w["torn"]["weak"] > 0]
+    # Weak: a bit that read both ways in the window's 64 reads OR in the
+    # control's 4,096 (a marginal bit can hold still for 64).
+    weak_words = [
+        w for w in cut_words if w["torn"]["weak"] > 0 or (w["before"] and not w["before"]["stable"])
+    ]
     p("### Torn words")
     p()
     p(
         f"{len(cut_words)} torn word(s) after power cuts, {len(weak_words)} with a weak bit "
-        f"({sum(w['torn']['weak'] for w in weak_words)} weak bits)."
+        f"({sum(max(w['torn']['weak'], len(w['before']['bits']) if w['before'] else 0) for w in weak_words)} weak bits)."
     )
     p()
     if cut_words:
         p(
-            "| transcript | boot | addr | byte in write | clears landed | unlanded | weak (64 reads) "
+            "| transcript | boot | addr | byte in write | clears landed | unlanded (stable 1) | weak in 64 reads "
             "| left alone, 4,096 reads | after re-program | after the next cut |"
         )
         p("|---|---:|---|---:|---:|---:|---:|---|---|---|")
@@ -242,7 +246,7 @@ def main() -> int:
                 ctl_s = outcome(ctl)
                 if fl:
                     ctl_s += "; " + ", ".join(
-                        f"bit {x['bit']} 0 on {x['share']:.0%} ({x['chunk_min']:.0%}–{x['chunk_max']:.0%} a chunk)"
+                        f"bit {x['bit']} read 0 on {x['zeros']} of {ctl['reads']} (chunks {x['chunk_min']:.1%}–{x['chunk_max']:.1%})"
                         for x in fl
                     )
             re_s = outcome(w["recheck"])

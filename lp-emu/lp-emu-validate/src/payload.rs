@@ -3178,13 +3178,16 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         mask_set: "flash-tears",
         fields: FLASH_REPROGRAM_FIELDS,
         series: &[],
-        // The loop fills the region in about 0.9 s from the scan-done line,
-        // so the cut must come early: the driver's own wait is short, and
-        // `board power-cycle`'s start-up is the rest.
+        // The loop fills the region in about 0.91 s from the scan-done line
+        // (2,784 writes of 327 µs on CX1), so the cut must come early. The
+        // first fifty cuts (0-300 ms) measured the rest: `board
+        // power-cycle` cut 455-736 ms (median 536) after the driver's wait,
+        // so 0-300 ms could overrun the region. 0-120 ms keeps every cut
+        // inside it.
         capture: Capture::PowerCuts {
             cuts: 50,
             min_ms: 0,
-            max_ms: 300,
+            max_ms: 120,
         },
         link: Link::UsbSerialJtag,
         emulator_features: None,
