@@ -1,8 +1,9 @@
 ---
-status: open
+status: fixed      # mount settles each head's tail: re-program its last record, kill a record that failed, never resume an empty head
 found: 2026-10-14      # test (lp-nor-sim calibrated_mid_word sweeps, after the CX1 500-cut re-fit)
 area: lp-base/lp-tree-store (record_scan.rs scan_sector; store_mount.rs head resume)
 class: single-read-trust
+fixed: 9c141ca7d, bd07c16f0
 related:
   - docs/defects/2026-10-14-the-calibrated-nor-model-never-tears-a-program-inside-a-word.md
   - docs/reports/2026-10-08-c6-nor-tear-calibration.md
@@ -69,22 +70,74 @@ Reproduced in a scratch test (sector 1): the torn 146-byte record at
 intended `0x74`. The re-run's `panel.json` (130 B) was committed, and after
 the remount the store held the old 120 B one.
 
-**Fix** — not in this change; this entry only files the finding. Directions:
-don't resume a head after mount (open a fresh sector, so a torn tail is
-always at the end of a closed one), or keep anything written after a
-mount's last trusted record out of reach of a record whose CRC was not
-read twice the same. A second read only lowers the odds. The root path
-needs its own answer. The newest root is normally the last record of its
-sector, so nothing written after it can vouch for it. At the least, mount
-must survive the root reading the other way on a later read: fall back a
-root instead of failing, and keep the root's bytes from the read it
-trusted. Also check whether GC can copy a record past such
-a tail.
+**Fix** — mount settles the last program of the newest sector of each
+kind (`record_scan.rs` `scan_sector`, told which sectors by
+`store_mount.rs`) during its first pass, before the closure walk, the root
+read or a resume can trust it. Only that program can be torn: every
+program before it was read back whole.
 
-**Regression coverage** — none yet. The sweeps above are the reproducer.
-`calibrated_mid_word` is in `TearModel::NAMED`, so
-`LP_TREE_STORE_SWEEP_TEARS=calibrated_mid_word` runs it. Add it to the
-sweeps' default list once the store passes.
+- When the sector's records end at erased space, its last record is
+  programmed again with the header and payload bytes the scan just
+  CRC-checked (`RecordLog::reprogram`), then read back. Program only
+  clears, and the bits it clears are the ones the record asked for, so the
+  weak clear finishes and the record reads so on every read. A read-back
+  that differs closes the sector.
+- When they end at a record that did not check (a bad header, a length past
+  the sector, a CRC that failed), that record's 16 header bytes are
+  programmed to zero (`RecordLog::kill_record`). It then fails to parse on
+  every read, so a later mount can never read it whole and offer a root (or
+  index a GC copy) the first mount did not see.
+- A newest sector that holds no record (its last program was its header's
+  magic, which can be weak the same way) is not resumed: the head opens a
+  fresh sector.
+
+No byte of the format changes (FORMAT.md gains the writer rule). It costs
+nothing on a write; a mount programs at most two records again (2 program
+calls each, header and payload, ≤ 1,040 B a record at `record_max` 1,024)
+and reads them back. Measured on a c40-shaped store at 128 sectors after a
+panel write: 4 program calls, 160 B programmed, 5 more read calls (320,722
+→ 320,882 B read). No erase is added, so no wear. RV32 size probe: +560 B
+`.text` (`mount` +494 B).
+
+Alternatives, measured the same way (lp-nor-sim, `calibrated_mid_word`;
+`lp-store-bench sweep` + `double` at 128 sectors, T1 stored and
+host_deflate, the case set the calibration report counts; and the in-crate
+sweeps at every cut point):
+
+| fix | bench failures | in-crate sweeps failing | cost |
+|---|---:|---|---|
+| none (`main`) | 49 | per-call, append, deflated push, GC | — |
+| read every record twice at mount | 33 | GC | twice mount's reads; only lowers the odds |
+| never resume a head after a mount | 16 (`unmountable`) | GC (a torn GC copy indexed, then read bad) | an erase and a part-empty sector per kind per session |
+| re-program the tail only (no kill) | 8 (`unmountable`) | none (the remount test below fails) | the chosen one's, less the kill |
+| **re-program the tail + kill a failed one** | **0** | **none** | above |
+
+Re-programming the tail (the director's lean) is necessary but not
+sufficient: a torn record that reads *bad* at the first mount and whole at
+a later one is the other half, and only making the bad read permanent
+closes it. Not resuming the head leaves a torn GC copy that read whole
+indexed as the newest copy, so its victim is freed and the record lost on
+the next bad read.
+
+Physically, re-programming bytes that already read so is the same kind of
+operation as the sector kill the store already does (programming over
+programmed cells, clearing only), and the part's own erase pre-programs
+every word to `0x00` before lifting it. That a re-program finishes a weak
+clear on CX1's part is the model's assumption (`lp-nor-sim` makes a weak
+bit solid when it is programmed to 0), not a silicon measurement.
+
+**Regression coverage** — `calibrated_mid_word` is now in the in-crate
+sweeps' default tear list (`test_support::sweep_tears`); against the
+unfixed store the default run fails `cut_sweep_per_call_commits` and
+`cut_sweep_deflated_push`. `cut_sweep_tests::cut_remounts_read_one_state`
+cuts per-call commits and GC churn under `calibrated_mid_word` with 40 tear
+seeds a cut and mounts each result five times writing nothing: every mount
+must read the first one's state. It fails on the unfixed store and on the
+re-program-only variant (per-call step 2, cut 6, seed 33: a torn root read
+bad, then whole). The mutant `trust_tail_once` switches the settle off;
+`lp-store-bench mutants` (whose set now runs `calibrated_mid_word`) catches
+it, and every one of the 12 mutants is caught. The reproducer above
+replays as `passes`.
 
 **Lesson** — "a CRC that passed" is a property of one read, not of the
 cells. The store already knows this for erases: a sector it did not erase
