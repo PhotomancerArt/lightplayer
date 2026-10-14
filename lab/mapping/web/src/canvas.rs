@@ -118,7 +118,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         .into_iter()
         .map(|x| {
             let stack = landed.iter().filter(|t| **t == x.to).count() as f64;
-            landed.push(x.to.clone());
+            if x.labelled {
+                landed.push(x.to.clone());
+            }
             let a = cam.to_screen(x.from_at);
             let b = cam.to_screen(x.to_at);
             let dx = ((b.x - a.x).abs() * 0.5).max(30.0);
@@ -138,7 +140,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     "M{},{} C{},{} {},{} {},{}",
                     a.x, a.y, c1.x, c1.y, c2.x, c2.y, b.x, b.y
                 ),
-                label: x.label,
+                label: x.labelled.then_some(x.label),
                 mid,
                 class,
             }
@@ -356,11 +358,13 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
-                        text {
-                            class: "edge-label",
-                            x: "{x.mid.x}", y: "{x.mid.y - 4.0}",
-                            text_anchor: "middle",
-                            "{x.label}"
+                        if let Some(label) = &x.label {
+                            text {
+                                class: "edge-label",
+                                x: "{x.mid.x}", y: "{x.mid.y - 4.0}",
+                                text_anchor: "middle",
+                                "{label}"
+                            }
                         }
                     }
                 }
@@ -465,7 +469,8 @@ struct PortRow {
 /// One patch edge: a cubic from what it leaves to the port row it reaches.
 struct EdgeView {
     d: String,
-    label: String,
+    /// Only for edges attached to a selected thing itself.
+    label: Option<String>,
     mid: Vec2,
     class: &'static str,
 }

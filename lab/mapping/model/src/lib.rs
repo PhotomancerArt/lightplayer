@@ -63,7 +63,7 @@ pub use edges::Edge;
 pub use editor::{Button, ContextMenu, Editor, Gesture, Key, MenuItem, Mods, Tool};
 pub use fixture::Fixture;
 pub use geom::{Rect, Vec2};
-pub use hints::{Hint, HintBar};
+pub use hints::{Hint, HintBar, HintKind};
 pub use layout::Layout;
 pub use node::{Node, NodeId, NodeKind};
 pub use notice::{Notice, NoticeKind};

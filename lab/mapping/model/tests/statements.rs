@@ -680,6 +680,26 @@ fn a_selected_port_highlights_its_lamps() {
     );
 }
 
+/// Edges stay quiet: with nothing selected none shows a label, and with
+/// something selected only the edges attached to that thing itself do.
+#[test]
+fn only_edges_on_the_selection_are_labelled() {
+    let mut e = editor();
+    assert!(e.edges().iter().all(|x| !x.labelled), "nothing selected, no labels");
+
+    let main = node_id(&e, "main");
+    e.select(vec![port(&main, "p2")]);
+    let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
+    assert_eq!(labelled.len(), 1, "only the strip's edge lands on D1");
+    assert_eq!(labelled[0].from, fixture(&e, "strip"));
+
+    // Inside the ring display, the circle's per-ring edges aren't attached
+    // to a selected ring, so only the selected ring's edge is labelled.
+    e.select(vec![ring("circle1", "r2")]);
+    let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
+    assert!(labelled.iter().all(|x| x.from == ring("circle1", "r2")), "{labelled:?}");
+}
+
 /// Enter on a fixture frames the fixture together with its outputs.
 #[test]
 fn enter_on_a_fixture_frames_it_with_its_outputs() {

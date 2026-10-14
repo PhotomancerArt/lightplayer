@@ -32,6 +32,9 @@ pub struct Edge {
     pub bundled: bool,
     /// It touches the selection: drawn at full strength.
     pub selected: bool,
+    /// It is attached to a selected thing itself (not just near one): only
+    /// these edges show their label, so the canvas stays quiet.
+    pub labelled: bool,
     /// Where it leaves and arrives, in world units: the right side of what
     /// it comes from, the left edge of the port row it lands on.
     pub from_at: Vec2,
@@ -64,6 +67,7 @@ impl Editor {
                     from_at: right_middle(p.lamps_rect(&from)),
                     to_at: p.port_left(&s.output, &s.port),
                     selected: self.touches_selection(&from, &to),
+                    labelled: self.selection.contains(&from) || self.selection.contains(&to),
                     from,
                     to,
                     active: true,
@@ -96,6 +100,14 @@ impl Editor {
                     };
                     self.touches_selection(&p.object_target(&s.object), &port)
                 }),
+                labelled: self.selection.contains(&from)
+                    || self.selection.contains(&to)
+                    || spans.iter().any(|s| {
+                        self.selection.contains(&Target::Port {
+                            output: s.output.clone(),
+                            key: s.port.clone(),
+                        })
+                    }),
                 from,
                 to,
                 active: true,

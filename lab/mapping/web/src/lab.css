@@ -59,7 +59,6 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .row-output .row-label::before { content: "⏚ "; color: var(--bound); font-weight: 400; }
 .row-port .row-label { color: var(--text-muted); }
 .row-derived .row-label { color: var(--text-subtle); font-style: italic; }
-.row-detail { color: var(--text-subtle); font-size: 12px; white-space: nowrap; }
 .empty, .hint-inline { color: var(--text-subtle); padding: 8px 12px; font-size: 12px; }
 .hint-inline { padding: 10px 0; }
 
@@ -141,11 +140,14 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .problem { padding: 6px 0; }
 
 .hints { grid-area: hints; border-top: 1px solid var(--border); background: var(--surface); }
-.bar { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; padding: 8px 12px; }
-.lead { font-weight: 600; margin-right: 6px; }
-.hint { color: var(--text-muted); white-space: nowrap; }
-.hint.view { color: var(--text-subtle); }
-.spacer { flex: 1; }
+.bar { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px 10px; }
+.lead { font-weight: 600; margin-bottom: 2px; }
+.hint-row { display: grid; grid-template-columns: 52px 1fr; align-items: baseline; }
+.hint-row-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-subtle); }
+.hint-row-items { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.hint { color: var(--text-muted); white-space: nowrap; display: inline-flex; align-items: baseline; gap: 6px; }
+.hint-row.quiet .hint { color: var(--text-subtle); }
+.hint-row.quiet kbd { opacity: 0.75; }
 .notice { font: 12px/1.5 var(--mono); padding: 8px 12px 0; color: var(--text-muted); }
 .notice.refused .notice-text { color: var(--text); }
 .notice-tag { color: var(--refused); font-weight: 700; }

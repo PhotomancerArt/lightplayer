@@ -3,8 +3,8 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Editor, NodeKind, Notice, NoticeKind, Project, Prop, PropEdit, PropKind, PropValue, Target,
-    common_props,
+    Editor, Hint, HintKind, NodeKind, Notice, NoticeKind, Project, Prop, PropEdit, PropKind,
+    PropValue, Target, common_props,
 };
 
 #[component]
@@ -71,8 +71,8 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
                                 ed.write().select(vec![t.clone()]);
                             }
                         },
+                        title: "{row.detail}",
                         span { class: "row-label", "{row.label}" }
-                        span { class: "row-detail", "{row.detail}" }
                     }
                 }
             }
@@ -445,6 +445,11 @@ pub fn HintBar(ed: Signal<Editor>) -> Element {
     let bar = e.hint_bar();
     let notice = e.notice.clone();
     drop(e);
+    let (mouse, keys): (Vec<Hint>, Vec<Hint>) = bar
+        .hints
+        .iter()
+        .cloned()
+        .partition(|h| h.kind == HintKind::Mouse);
     rsx! {
         if let Some(n) = notice {
             div { class: if n.kind == NoticeKind::Refused { "notice refused" } else { "notice" },
@@ -461,13 +466,28 @@ pub fn HintBar(ed: Signal<Editor>) -> Element {
             }
         }
         div { class: "bar",
-            span { class: "lead", "{bar.lead}" }
-            for (i, hint) in bar.hints.into_iter().enumerate() {
-                span { key: "{i}", class: "hint", kbd { "{hint.keys}" } " {hint.does}" }
-            }
-            span { class: "spacer" }
-            for (i, hint) in bar.view.into_iter().enumerate() {
-                span { key: "v{i}", class: "hint view", kbd { "{hint.keys}" } " {hint.does}" }
+            div { class: "lead", "{bar.lead}" }
+            HintRow { label: "mouse", hints: mouse, quiet: false }
+            HintRow { label: "keys", hints: keys, quiet: false }
+            HintRow { label: "view", hints: bar.view, quiet: true }
+        }
+    }
+}
+
+/// One labelled row of the hint bar: what the mouse does, what the keys do,
+/// or how to move around the canvas.
+#[component]
+fn HintRow(label: &'static str, hints: Vec<Hint>, quiet: bool) -> Element {
+    if hints.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: if quiet { "hint-row quiet" } else { "hint-row" },
+            span { class: "hint-row-label", "{label}" }
+            div { class: "hint-row-items",
+                for (i, hint) in hints.into_iter().enumerate() {
+                    span { key: "{i}", class: "hint", kbd { "{hint.keys}" } span { class: "hint-does", "{hint.does}" } }
+                }
             }
         }
     }

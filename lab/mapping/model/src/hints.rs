@@ -18,6 +18,14 @@ pub struct Hint {
     /// The keys or gesture, as written on screen: `⌫`, `⌘ click`, `− =`.
     pub keys: String,
     pub does: String,
+    /// Mouse or keyboard: the bar shows them as separate rows.
+    pub kind: HintKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HintKind {
+    Mouse,
+    Key,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,9 +38,17 @@ pub struct HintBar {
 }
 
 fn h(keys: &str, does: impl Into<String>) -> Hint {
+    let mouse = ["click", "drag", "release", "scroll", "pinch"]
+        .iter()
+        .any(|w| keys.contains(w));
     Hint {
         keys: keys.into(),
         does: does.into(),
+        kind: if mouse {
+            HintKind::Mouse
+        } else {
+            HintKind::Key
+        },
     }
 }
 
@@ -77,7 +93,7 @@ impl Editor {
                         "Choosing what's under the cursor".into(),
                         vec![
                             h("click", "select it"),
-                            h("⇧ click", "add it to the selection"),
+                            h("⇧ click", "add it"),
                             h("Esc", "close the list"),
                         ],
                     )
@@ -156,8 +172,8 @@ impl Editor {
             if here > 1 && !self.mods.alt {
                 out.push(h("⌥ click", format!("the next of the {here} here")));
             }
-            out.push(h("⇧ click", "add to or remove from the selection"));
-            out.push(h("right-click", "list everything under the cursor"));
+            out.push(h("⇧ click", "add or remove"));
+            out.push(h("right-click", "what's here"));
         }
 
         if self.selection.is_empty() {
@@ -309,13 +325,8 @@ impl Editor {
 
 fn selection_lead(f: &Project, selection: &[Target]) -> String {
     match selection {
-        [] => format!(
-            "Nothing selected · {} · {} fixtures · {} outputs · {} lamps",
-            f.name,
-            f.fixtures().len(),
-            f.outputs().len(),
-            f.lamp_count()
-        ),
+        // The counts live in the inspector; the bar says only where you are.
+        [] => "Nothing selected".into(),
         [one] => format!("{} selected", f.long_label(one)),
         many => {
             let word = f.kind_word(&many[0]);
