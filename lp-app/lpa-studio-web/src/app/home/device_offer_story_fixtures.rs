@@ -544,7 +544,7 @@ pub(crate) fn StoryBoardCard(
     relay: bool,
     /// Which project it plays. Left `Unknown`, it is core's join over the
     /// board's own report ([`lpa_studio_core::board_projects`] with no
-    /// registry and no lens): "Nothing on it yet" for an empty board, the
+    /// registry and no lens): "No project" for an empty board, the
     /// running label for a running one, as the controller would say.
     #[props(default = lpa_studio_core::BoardPlays::Unknown)]
     plays: lpa_studio_core::BoardPlays,
