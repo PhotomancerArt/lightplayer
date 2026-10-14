@@ -174,7 +174,9 @@ impl fmt::Display for FlashCutReport {
 pub fn erase_shape_name(shape: EraseShape) -> &'static str {
     match shape {
         EraseShape::Zeroing => "zeroing",
+        EraseShape::ZeroingMidWord => "zeroing_mid_word",
         EraseShape::AllZero => "all_zero",
+        EraseShape::FirstLift => "first_lift",
         EraseShape::Erasing => "erasing",
         EraseShape::ReadsFfWeak => "reads_ff_weak",
         EraseShape::ReadsFf => "reads_ff",
@@ -493,6 +495,11 @@ mod tests {
             (TearModel::CalibratedErasing, EraseShape::Erasing),
             (TearModel::CalibratedReadsFfWeak, EraseShape::ReadsFfWeak),
             (TearModel::CalibratedReadsFf, EraseShape::ReadsFf),
+            (
+                TearModel::CalibratedZeroingMidWord,
+                EraseShape::ZeroingMidWord,
+            ),
+            (TearModel::CalibratedFirstLift, EraseShape::FirstLift),
         ] {
             for seed in 0..20 {
                 let (mut cells, mut weak) = (old(), vec![0u8; SS]);
@@ -517,6 +524,17 @@ mod tests {
                     }
                     EraseShape::Erasing => {
                         assert_ne!(cells, old());
+                    }
+                    EraseShape::ZeroingMidWord => {
+                        // Zero words, one word part-landed, the old after it.
+                        let w = cells.chunks(4).position(|w| w != [0; 4]).unwrap();
+                        assert_eq!(cells[(w + 1) * 4..], old()[(w + 1) * 4..]);
+                        assert_ne!(cells[w * 4..(w + 1) * 4], old()[w * 4..(w + 1) * 4]);
+                    }
+                    EraseShape::FirstLift => {
+                        let ones: u32 = cells.iter().map(|b| b.count_ones()).sum();
+                        assert_eq!(ones, 1, "{}: one bit off zero", tear.name());
+                        assert!(weak_bits <= 1);
                     }
                 }
             }
