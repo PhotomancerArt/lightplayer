@@ -116,27 +116,32 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s eleven mutants, through one fixed set
+  store, then each of `lp-tree-store`'s twelve mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
-  walk with one sector worn on erases and one on programs). A catch is a
-  failure kind the unmutated store does not show in that driver; pass =
-  every mutant caught. Last run (commit `f8257303b`, lp-nor-sim simulator):
+  walk with one sector worn on erases and one on programs), every driver
+  under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
+  `calibrated_mid_word`. A catch is a failure kind the unmutated store does
+  not show in that driver; pass = every mutant caught. Last run (the
+  single-read-trust fix, 2026-10-14, lp-nor-sim simulator):
 
-  | mutant | caught first by | failures |
+  | mutant | caught by | failures |
   |---|---|---|
-  | `skip_kill` | wear | 1 (`unmountable`: a header reads newer) |
-  | `trust_record_headers` | sweep | 708 |
+  | `skip_kill` | wear | 1 (`unmountable`) |
+  | `trust_record_headers` | sweep | 853 |
   | `dedup_against_all_records` | long | 6 |
-  | `gc_erase_before_copy` | sweep_gc | 359 |
-  | `root_before_dirs` | double | 174 |
+  | `gc_erase_before_copy` | sweep_gc | 338 |
+  | `root_before_dirs` | double | 222 |
   | `resume_without_tail_check` | fuzz (`stale_tail`) | 70 |
-  | `no_space_after_write` | sweep | 337 |
-  | `gc_forgets_pending` | sweep | 104 |
-  | `magic_first` | sweep_gc | 2 |
+  | `no_space_after_write` | sweep | 409 |
+  | `gc_forgets_pending` | sweep | 105 |
+  | `magic_first` | sweep_gc | 4 |
   | `newer_version_untrusted` | fuzz (`newer_version`) | 120 |
   | `open_without_read_back` | wear (`program_over_unerased`) | 2 |
+  | `trust_tail_once` | double | 1 (`remount_failed`) |
 
-  The unmutated store: 0 failures in all seven drivers (5,164 cases).
+  The unmutated store: 0 failures in all seven drivers (6,115 cases).
+  Before `calibrated_mid_word` joined the set, `skip_kill` survived it
+  (10 of 11 caught at `609f0e4c9`).
 
 `overnight` also runs, every round, `long` (4 walks × 10k steps), one
 `full-flash` and one `fuzz` per candidate (P8–P10) and the GC dials once

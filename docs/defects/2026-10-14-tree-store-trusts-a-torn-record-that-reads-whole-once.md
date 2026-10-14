@@ -126,6 +126,16 @@ every word to `0x00` before lifting it. That a re-program finishes a weak
 clear on CX1's part is the model's assumption (`lp-nor-sim` makes a weak
 bit solid when it is programmed to 0), not a silicon measurement.
 
+With the fix, at 128 and at 176 sectors, under `calibrated_mid_word`,
+`calibrated` and `calibrated_before_erase`: the bench's exhaustive sweeps
+14,370 cases each, 0 failures; its double cuts 21,464–22,214 cases each, 0
+failures (up from 15,328, because a mount now programs, and the double
+driver cuts at every op of the mount that follows a cut); every in-crate
+cut sweep at every cut point passes at its own geometry, 128 and 176
+sectors. The `lp-emu:esp32c6:t1+net=lan+flash-cut` `fs-tree` cut walk
+(CI form, a local firmware build of this change): 164 cuts, 0 failures.
+All lp-nor-sim / emulator figures, never silicon.
+
 **Regression coverage** — `calibrated_mid_word` is now in the in-crate
 sweeps' default tear list (`test_support::sweep_tears`); against the
 unfixed store the default run fails `cut_sweep_per_call_commits` and
