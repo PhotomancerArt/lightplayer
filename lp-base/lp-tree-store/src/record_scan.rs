@@ -14,12 +14,13 @@
 //! last program in the newest sector of each kind can be torn (every
 //! program before it was read back whole), so mount settles that one before
 //! anything trusts it: when the sector's records end at erased space, its
-//! last record — or its sector header, when it holds none — is programmed
-//! again with the bytes this read checked and read back (it then reads so
-//! on every read: program only clears, and the bits it clears are the ones
-//! the record asked for); when they end at a record that did not check,
-//! that record's header is programmed to zeros, so it fails on every read.
-//! Either way a later mount reads what this one read
+//! last record is programmed again with the bytes this read checked, and
+//! read back (it then reads so on every read: program only clears, and the
+//! bits it clears are the ones the record asked for); when they end at a
+//! record that did not check, that record's header is programmed to zeros,
+//! so it fails on every read; a sector holding no record (its last program
+//! was its header's magic) is not resumed. Either way a later mount reads
+//! what this one read
 //! (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
 
 use alloc::vec::Vec;
@@ -32,7 +33,7 @@ use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader};
 use crate::record_kind::RecordKind;
 use crate::record_log::RecordLog;
 use crate::root_record::RootRecord;
-use crate::sector_header::{SECTOR_HEADER_LEN, SectorHeader, SectorRead};
+use crate::sector_header::SECTOR_HEADER_LEN;
 use crate::store_error::StoreError;
 
 /// A root found by the scan.
@@ -163,35 +164,21 @@ pub fn scan_sector<F: Flash>(
         if torn {
             log.kill_record(s, out.end)?;
         } else if !out.closed {
-            let settled = match last {
+            // A sector holding no record is not resumed: its header's magic
+            // (programmed last) is then its last program, and a head opens
+            // a fresh sector instead of settling it. Only a cut between a
+            // head's open and its first record leaves one.
+            out.closed = match last {
                 Some(h) => {
                     let at = out.end - RECORD_HEADER_LEN - payload.len() as u32;
-                    log.reprogram(log.addr(s, at), &h, &[&payload])?
+                    !log.reprogram(log.addr(s, at), &h, &[&payload])?
                 }
-                None => settle_sector_header(log, s)?,
+                None => true,
             };
-            out.closed = !settled;
         }
     }
     log.note(payload.capacity());
     Ok(out)
-}
-
-/// A sector holding no record: its header (the magic, programmed last, is
-/// the last program it saw) programmed again if it reads trusted now.
-fn settle_sector_header<F: Flash>(
-    log: &mut RecordLog<F>,
-    s: u32,
-) -> Result<bool, StoreError<F::Error>> {
-    let mut h = [0u8; SECTOR_HEADER_LEN as usize];
-    log.read(log.addr(s, 0), &mut h)?;
-    if !matches!(
-        SectorHeader::decode(&h, log.sector_size),
-        SectorRead::Trusted { .. }
-    ) {
-        return Ok(false);
-    }
-    log.reprogram(log.addr(s, 0), &h, &[])
 }
 
 #[cfg(test)]
