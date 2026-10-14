@@ -55,9 +55,14 @@ CHECK_MODEL_RULE = """\
      model's shares. `flash-tears-unaligned` silicon cuts are counted and
      printed apart; they neither confirm nor refute the erase mix.
   2. Per family. Which operation a cut tore is the workload's, so the erase
-     shapes are compared among the torn erases and the program shapes among
-     the torn programs. A cut after the program finished ("complete") is not
-     a torn operation and is left out.
+     shapes are compared among the cuts at an erase and the program shapes
+     among the torn programs. The erase family also holds `cut:before-erase`
+     (both journal copies name the cycle, the sector is old and whole: the
+     cut landed between the journal write and the erase command); the model
+     draws it as where an erase cut lands (`cut_before_erase`), not as a
+     shape. A cut after the program finished ("complete") is not a torn
+     operation and is left out, and so is a cut whose operation in flight was
+     the journal's own (`journal:*`): its shape is read only as slot counts.
   3. Confirmed when EVERY shape's observed share lies inside its Wilson score
      interval around the MODEL's share, at the observed n of its family.
      Bonferroni per family (DD32): a family tested in k cells puts each cell's
@@ -69,7 +74,8 @@ CHECK_MODEL_RULE = """\
      shape) still under 5 joins the thinnest remaining cell, so no cell is
      tested on fewer than 5 expected cuts.
   5. A silicon class the model has no shape for (untouched, erase:old-left,
-     program:scattered, ...) is never pooled away: seeing one is a failure.
+     program:scattered, ...), or one whose weight is 0, is never pooled away:
+     seeing one is a failure.
   6. Otherwise print the re-fit table (what --model-table prints) and exit 1.
 
 Only the shares are judged; the CX1_ERASING and CX1_READS_FF_WEAK residue
@@ -238,6 +244,63 @@ def read_transcript(path: str) -> Transcript:
     return Transcript(path, meta, boots, payload or PAYLOAD)
 
 
+# The journal's geometry (`journal.rs`): 256 slots a copy, cycle `c` in slot
+# `(c + copy * 128) % 256`, a copy erased just before its slot 0 is written.
+JOURNAL_SLOTS = SECTOR // 16
+
+
+def slot_of(copy: int, cycle: int) -> int:
+    return (cycle + copy * (JOURNAL_SLOTS // 2)) % JOURNAL_SLOTS
+
+
+def attribute_journal(b: Boot, ph: Phase) -> Phase:
+    """Which operation was in flight, when the journal says it was its own.
+
+    A cycle writes copy 0, then copy 1, then erases and programs its sector
+    (`runner.rs`'s `run_cycle`). The cycle the journal names is the highest
+    whole entry in either copy, so:
+
+    - the in-flight sector reads its last cycle **whole** (`complete`) when
+      the cut came before copy 0 named the next cycle: in copy 0's wrap (its
+      erase before slot 0, or that slot's entry: copy 0 then no longer holds
+      the cycle copy 1 names), or in copy 0's entry program (a torn next
+      slot) — or, copy 0 whole and its next slot blank, after the program;
+    - it reads its **old** pattern whole when copy 0 named it and the erase
+      had not moved a cell: in copy 1's wrap or copy 1's entry program (copy
+      1 does not hold the cycle yet), or — both copies holding it — between
+      the journal write and the erase command.
+
+    Returns `ph` re-classed, with the damaged journal slots the op in flight
+    accounts for in `journal_slots_in_flight`. Damage nothing here explains
+    stays outside the operation in flight."""
+    if ph.cls not in ("complete", "untouched") or len(b.journals) < 2:
+        return ph
+    latest = b.boot.get("latest")
+    if latest is None:
+        return ph
+    j = {r["copy"]: r for r in b.journals}
+    if ph.cls == "complete":
+        copy, cycle = 0, latest + 1
+    else:
+        copy, cycle = 1, latest
+    rec = j[copy]
+    holds = rec.get("latest") == latest
+    d = dict(ph.detail, journal_copy=copy)
+    if ph.cls == "untouched" and holds and j[0].get("latest") == latest and not rec.get("damaged"):
+        return Phase("cut:before-erase", "erase", d)
+    if slot_of(copy, cycle) == 0 and (not holds or rec.get("damaged", 0)):
+        d["journal_slots_in_flight"] = rec.get("damaged", 0)
+        return Phase("journal:wrap-erase", "journal", d)
+    if rec.get("torn_next") and (holds or ph.cls == "untouched"):
+        d["journal_slots_in_flight"] = 1
+        return Phase("journal:program", "journal", d)
+    if ph.cls == "untouched" and not holds:
+        # Copy 1's entry for the cycle had not landed at all (its slot blank).
+        d["journal_slots_in_flight"] = 0
+        return Phase("journal:program", "journal", d)
+    return ph
+
+
 def is_cut(b: Boot) -> bool:
     """A boot after a power cut in the work loop: a power-on reset into a
     region the journal says was mid-cycle."""
@@ -261,8 +324,21 @@ class Phase:
     detail: dict
 
 
+# A cut whose operation in flight was the journal's own (`journal.rs`), not
+# the region sector's: the in-flight sector then reads its last cycle whole
+# (complete) or its old pattern whole, and the journal says which op it was.
+# Their shape is read only as slot counts, so they feed no model share.
+JOURNAL_ROWS = [
+    ("journal:wrap-erase", "journal",
+     "cut in a journal copy's wrap: its erase before slot 0 (or that slot's first entry); the other copy "
+     "kept the cycle"),
+    ("journal:program", "journal", "cut in a journal entry's program (between the two copies' writes)"),
+]
 PHASE_ORDER = [
-    ("untouched", "erase", "untouched: the old pattern, whole (cut before the erase moved a cell)"),
+    ("cut:before-erase", "erase",
+     "cut before the erase started: both journal copies name the cycle and the sector holds the old "
+     "pattern whole (the cut landed between the journal write and the erase command)"),
+    ("untouched", "erase", "untouched: the old pattern, whole, and the journal does not say where the cut landed"),
     ("erase:zeroing", "erase", "torn erase, zeroing: a run of `0x00` from the front, old after it"),
     ("erase:all-zero", "erase", "torn erase, all `0x00`"),
     ("erase:erasing", "erase", "torn erase, erasing: stable zeros spread over old **and** new zero positions"),
@@ -271,8 +347,12 @@ PHASE_ORDER = [
     ("erased", "erase", "erased: all `0xFF`, no weak bits"),
     ("program:command-boundary", "program", "torn program, prefix ending on a 32-byte command boundary"),
     ("program:mid-command", "program", "torn program, prefix ending inside a 32-byte command"),
+    ("program:mid-word", "program",
+     "torn program, whole words then one word only part-landed (some of its clears, maybe weak bits), "
+     "nothing after"),
     ("program:scattered", "program", "torn program, scattered clears (no prefix)"),
     ("complete", "program", "complete: the new pattern, whole"),
+    *JOURNAL_ROWS,
     ("unknown", "none", "unknown"),
 ]
 # The unaligned payload's rows: the erase rows are the same; a torn program
@@ -288,6 +368,7 @@ PHASE_ORDER_UNALIGNED = [
     ("program:mid-word", "program", "torn program, prefix ending inside a 4-byte word (or a partial byte)"),
     ("program:scattered", "program", "torn program, scattered clears (no prefix)"),
     ("complete", "program", "complete: the new pattern, whole"),
+    *JOURNAL_ROWS,
     ("unknown", "none", "unknown"),
 ]
 PHASE_TEXT = {k: t for k, _, t in PHASE_ORDER + PHASE_ORDER_UNALIGNED}
@@ -398,6 +479,41 @@ def leading_zero_run(r: dict, new: bytes) -> tuple[int, int] | None:
     return (lo, hi)
 
 
+def mid_word(r: dict, new: bytes) -> dict | None:
+    """A page-aligned torn program that stopped INSIDE a 4-byte word: whole
+    bytes up to a word, then that word only part-landed (a partial byte, or
+    clears missing anywhere in it), and nothing after it. `None` for every
+    other torn program.
+
+    The firmware names two such cuts differently: `scattered` when the word
+    has more than one partial byte, `byte-prefix` when only its last byte is
+    partial. Both are this one shape at bit level: the part's program unit
+    was caught part-way."""
+    p = r.get("program") or {}
+    shape, extent = p.get("shape"), p.get("landed_extent", 0)
+    prefix, partial = p.get("prefix_bytes", 0), p.get("partial_bytes", 0)
+    if shape not in ("scattered", "byte-prefix") or p.get("stray_bits", 0) or extent == 0:
+        return None
+    at = prefix - prefix % WORD
+    if extent > at + WORD:
+        return None  # clears landed past the word: scattered for real
+    if shape == "byte-prefix" and not partial:
+        return None  # whole bytes: a prefix that ended on a byte (mid-command judges its word)
+    intended = sum(zeros(b) for b in new[at : at + WORD])
+    landed = r["landed_new_zeros"] - sum(zeros(b) for b in new[:at])
+    if not 0 <= landed < intended:
+        return None
+    return {
+        "end": at,
+        "word_at": at,
+        "word_intended_bits": intended,
+        "word_landed_bits": landed,
+        "landed_extent": extent,
+        "partial_bytes": partial,
+        "on_word_boundary": False,
+    }
+
+
 def classify(r: dict, payload: str = PAYLOAD) -> Phase:
     sector, wrote = r["sector"], r["wrote"]
     old = pattern(sector, wrote - REGION)
@@ -445,6 +561,10 @@ def classify(r: dict, payload: str = PAYLOAD) -> Phase:
             u = unaligned_end(r, new, writes)
             d.update({k: v for k, v in u.items() if k != "class"})
             return Phase(u["class"], "program", d)
+        word = mid_word(r, new)
+        if word is not None:
+            d.update(shape=shape, **word)
+            return Phase("program:mid-word", "program", d)
         if shape in ("op-boundary", "byte-prefix"):
             extent = p["landed_extent"]
             if shape == "op-boundary":
@@ -563,7 +683,7 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
             for b in t.boots:
                 idents[(b.boot.get("mac", "—"), b.boot.get("flash_id", "—"), b.boot.get("base", "—"))] += 1
                 f = b.in_flight
-                ph = classify(f, payload) if f else None
+                ph = attribute_journal(b, classify(f, payload)) if f else None
                 if is_cut(b) and f is not None:
                     n_cut += 1
                     cuts.append((b, ph))
@@ -618,13 +738,19 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
         unexpected = sum((b.summary or {}).get("settled_unexpected", 0) for b, _ in cuts)
         settled_n = sum(1 for b, _ in cuts for s in b.sectors if s.get("role") == "settled")
         settled_weak = sum(s.get("weak_bits", 0) for b, _ in cuts for s in b.sectors if s.get("role") == "settled")
-        journal_bad = sum(j.get("damaged", 0) for b, _ in cuts for j in b.journals)
+        journal_all = sum(j.get("damaged", 0) for b, _ in cuts for j in b.journals)
+        journal_in_flight = sum(ph.detail.get("journal_slots_in_flight", 0) for _, ph in cuts)
+        journal_bad = journal_all - journal_in_flight
         journal_torn = sum(1 for b, _ in cuts for j in b.journals if j.get("torn_next"))
+        journal_ops = Counter(ph.cls for _, ph in cuts if ph.phase == "journal")
         w("Outside the in-flight sector, over every cut:")
         w("")
         w(f"- settled sectors not holding their last cycle's pattern: **{unexpected}** (of {settled_n} read)")
         w(f"- weak bits in settled sectors: **{settled_weak}**")
-        w(f"- damaged journal slots: **{journal_bad}**; torn next slots: **{journal_torn}**")
+        w(f"- damaged journal slots outside the operation in flight: **{journal_bad}**; inside it: "
+          f"{journal_in_flight} (of {journal_all} damaged); torn next slots: **{journal_torn}**")
+        w(f"- cuts whose operation in flight was the journal's own: "
+          f"{', '.join(f'`{c}` {n}' for c, n in sorted(journal_ops.items())) or 'none'}")
         gaps = [r["cycles_before_cut"] for r in rows
                 if r["configuration"] == config and r["cycles_before_cut"] is not None]
         w(f"- work cycles completed between a scan and its cut (min / median / max): {stats(gaps)}")
@@ -688,7 +814,7 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
             w("")
             w("| shape | cuts | on a 4-B word boundary | on a 256-B page boundary | partial bytes (min / median / max) | end mod 32 |")
             w("|---|---:|---:|---:|---|---|")
-            for cls in ("program:command-boundary", "program:mid-command"):
+            for cls in ("program:command-boundary", "program:mid-command", "program:mid-word"):
                 mine = [ph for ph in prog if ph.cls == cls]
                 if not mine:
                     continue
@@ -902,6 +1028,9 @@ def assumptions(cuts, reads_ff, reads_ff_weak, prog, zr, er, erase_cuts, lifted_
     at_page = sum(1 for ph in prog if ph.cls == "program:command-boundary" and ph.detail["end"] % PAGE == 0)
     old_left = sum(1 for _, ph in cuts if ph.cls == "erase:old-left")
     untouched = sum(1 for _, ph in cuts if ph.cls == "untouched")
+    before_erase = sum(1 for _, ph in cuts if ph.cls == "cut:before-erase")
+    mid_word = sum(1 for _, ph in cuts if ph.cls == "program:mid-word")
+    journal_ops = Counter(ph.cls for _, ph in cuts if ph.phase == "journal")
     zero_states = sum(1 for _, ph in cuts if ph.cls in ("erase:zeroing", "erase:all-zero"))
     weak_cuts = [ph for _, ph in cuts if ph.detail["weak_bits"] > 0]
     weak_in_erase = sum(1 for ph in weak_cuts if ph.phase == "erase")
@@ -914,8 +1043,10 @@ def assumptions(cuts, reads_ff, reads_ff_weak, prog, zr, er, erase_cuts, lifted_
 
     rows = [
         ("A torn program lands a prefix of what it was asked to write (`BytePrefix`)",
-         f"{n_prog} torn programs, all prefixes; {scattered} scattered",
-         verdict(scattered == 0, n_prog, ("held", "contradicted", "not yet seen"))),
+         f"{n_prog} torn programs: {n_prog - mid_word} prefixes of whole bytes, {mid_word} whole words then "
+         f"one word part-landed (a prefix at word level, not at bit level); {scattered} scattered",
+         verdict(scattered == 0, n_prog, ("held at word level" if mid_word else "held", "contradicted",
+                                          "not yet seen"))),
         ("`BytePrefix`: the byte after the prefix gets a random subset of its clears",
          f"{partial} partial bytes in {n_prog} torn programs; {prefix_word} of {n_prog} prefixes end on a 4-byte word",
          verdict(partial > 0, n_prog, ("seen", "not seen: every prefix ends on a whole byte" + (" — a whole 4-byte word" if prefix_word == n_prog else ""), "not yet seen"))),
@@ -945,10 +1076,20 @@ def assumptions(cuts, reads_ff, reads_ff_weak, prog, zr, er, erase_cuts, lifted_
          f"{settled_weak} weak bits in settled sectors",
          verdict(weak_in_erase == len(weak_cuts), len(weak_cuts), ("held", "contradicted", "not yet seen"))),
         ("A torn erase that started changes the sector (`Clean` leaves it old)",
-         f"{untouched} of {n_erase} erase cuts left the old pattern whole",
+         f"{untouched + before_erase} of {n_erase} erase-phase cuts left the old pattern whole: {before_erase} "
+         "with both journal copies naming the cycle — a cut between the journal write and the erase command, "
+         "which the model draws as where the cut lands (`cut_before_erase`), not as an erase shape; "
+         f"{untouched} with nothing to say where the cut landed",
          verdict(untouched == 0, n_erase, ("held: no started erase left the old data", "seen", "not yet seen"))),
+        ("A torn program stops on a whole 4-byte word",
+         f"{mid_word} of {n_prog + scattered} torn programs stopped inside a word (some of its clears landed, "
+         "weak bits possible); the model draws them as `program_mid_word`",
+         verdict(mid_word == 0, n_prog + scattered, ("held", "not always: the part's program unit can be caught part-way",
+                                                     "not yet seen"))),
         ("A cut damages only the operation in flight",
-         f"{unexpected} settled sectors damaged, {settled_weak} weak bits in them, {journal_bad} journal slots damaged",
+         f"{unexpected} settled sectors damaged, {settled_weak} weak bits in them, {journal_bad} journal slots "
+         f"damaged outside the operation in flight (journal ops in flight: "
+         f"{', '.join(f'`{c}` {n}' for c, n in sorted(journal_ops.items())) or 'none'})",
          verdict(unexpected == 0 and settled_weak == 0 and journal_bad == 0, len(cuts),
                  ("held", "contradicted", "not yet seen"))),
     ]
@@ -981,6 +1122,8 @@ def self_test() -> int:
     # The first boot of the committed emulated dry run lists this plan.
     assert plan(6, 246)[:3] == [(0, 20), (20, 944), (964, 56)], plan(6, 246)[:3]
     check_model_self_test()
+    mid_word_self_test()
+    journal_self_test()
     print("self-test ok")
     return 0
 
@@ -995,6 +1138,118 @@ CX1_200_CUTS = {
     "erase:zeroing": 10, "erase:all-zero": 26, "erase:erasing": 28, "erase:reads-ff-weak": 1,
     "erased": 101, "program:command-boundary": 26, "program:mid-command": 7, "complete": 1,
 }
+
+
+def program_record(sector: int, cycle: int, cells: bytes, weak_bits: int = 0) -> dict:
+    """An in-flight `ft-sector` record for a torn program of `pattern(sector,
+    cycle)` that left `cells`, as the firmware's `program_tear` and its
+    counters would write it (`analysis.rs`)."""
+    old, new = pattern(sector, cycle - REGION), pattern(sector, cycle)
+    p = {"shape": None, "intended_bits": 0, "landed_bits": 0, "stray_bits": 0,
+         "prefix_bytes": 0, "partial_bytes": 0, "landed_extent": 0}
+    in_prefix = True
+    for i, (a, w) in enumerate(zip(cells, new)):
+        p["intended_bits"] += zeros(w)
+        landed = bin(~a & ~w & 0xFF).count("1")
+        p["landed_bits"] += landed
+        p["stray_bits"] += bin(~a & w & 0xFF).count("1")
+        if landed:
+            p["landed_extent"] = i + 1
+        if in_prefix and a == w:
+            p["prefix_bytes"] += 1
+        else:
+            in_prefix = False
+        if a != w and a != 0xFF:
+            p["partial_bytes"] += 1
+    extent = p["landed_extent"]
+    end = -(-extent // COMMAND) * COMMAND
+    if p["stray_bits"]:
+        p["shape"] = "stray"
+    elif cells[:extent] == new[:extent] and all(b == 0xFF for b in new[extent:end]):
+        p["shape"] = "op-boundary"
+    elif cells[: extent - 1] == new[: extent - 1]:
+        p["shape"] = "byte-prefix"
+    else:
+        p["shape"] = "scattered"
+    return {
+        "sector": sector, "wrote": cycle, "verdict": "torn-program",
+        "old_zero_bits": sum(zeros(b) for b in old), "new_zero_bits": sum(zeros(b) for b in new),
+        "remaining_old_zeros": 0, "landed_new_zeros": p["landed_bits"], "weak_bits": weak_bits,
+        "weak_bytes": min(weak_bits, 1), "ff_bytes": sum(1 for b in cells if b == 0xFF), "program": p,
+    }
+
+
+def mid_word_self_test() -> None:
+    """A torn program caught inside a word is `program:mid-word`, however
+    the firmware named it; a prefix on a whole word is not."""
+    sector, cycle = 0, 1328
+    new = pattern(sector, cycle)
+
+    def torn(n_whole: int, word: bytes | None) -> bytes:
+        tail = bytes(word or b"")
+        return new[:n_whole] + tail + bytes([0xFF] * (SECTOR - n_whole - len(tail)))
+
+    # CX1's first one: 3,872 whole bytes, then 3 of the next word's 17 clears
+    # in two bytes (the firmware: `scattered`).
+    word = bytearray([0xFF] * WORD)
+    for i, bit in ((1, 1), (3, 1), (3, 2)):
+        assert not new[3872 + i] >> bit & 1, (i, bit)
+        word[i] &= ~(1 << bit) & 0xFF
+    r = program_record(sector, cycle, torn(3872, bytes(word)), weak_bits=1)
+    assert r["program"]["shape"] == "scattered", r["program"]
+    ph = classify(r)
+    assert ph.cls == "program:mid-word", ph
+    assert (ph.detail["word_at"], ph.detail["word_landed_bits"], ph.detail["word_intended_bits"]) == (3872, 3, 17), ph
+    # The second: three whole bytes of a word and one byte part-landed (the
+    # firmware: `byte-prefix`, ending on the word).
+    at = next(a for a in range(3256, SECTOR, WORD) if zeros(new[a + 3]) >= 2)
+    last = new[at + 3]
+    partial = last | (1 << next(b for b in range(8) if not last >> b & 1))
+    r = program_record(sector, cycle, torn(at, new[at : at + 3] + bytes([partial])))
+    assert r["program"]["shape"] == "byte-prefix" and r["program"]["partial_bytes"] == 1, r["program"]
+    assert classify(r).cls == "program:mid-word", classify(r)
+    # Whole words: a mid-command prefix, or a command one; never mid-word.
+    assert classify(program_record(sector, cycle, torn(3256, None))).cls == "program:mid-command"
+    assert classify(program_record(sector, cycle, torn(3264, None))).cls == "program:command-boundary"
+    # Clears past the word are scattered for real.
+    far = bytearray(torn(3872, bytes(word)))
+    i = next(i for i in range(3880, SECTOR) if new[i] != 0xFF)
+    far[i] &= new[i]
+    assert classify(program_record(sector, cycle, bytes(far))).cls == "program:scattered"
+
+
+def journal_self_test() -> None:
+    """Which operation was in flight, read off the two journal copies."""
+
+    def boot(latest: int, cls: str, copies: list[tuple[int, int, int | None, bool]]) -> tuple[str, int]:
+        b = Boot("t", 0, {"latest": latest, "reset": "poweron", "state": "resume"})
+        b.journals = [{"copy": k, "valid": v, "damaged": d, "latest": l, "torn_next": {"shape": "x"} if t else None}
+                      for k, (v, d, l, t) in enumerate(copies)]
+        ph = attribute_journal(b, Phase(cls, PHASE_OF[cls], {}))
+        return ph.cls, ph.detail.get("journal_slots_in_flight", 0)
+
+    # CX1 `-r2` boot 39: copy 0's wrap erase (cycle 5376 is its slot 0); copy
+    # 1 kept 5375. All 256 damaged slots are the operation in flight.
+    assert boot(5375, "complete", [(0, 256, None, False), (128, 0, 5375, False)]) == ("journal:wrap-erase", 256)
+    # The same wrap reading erased (two of the 500 did): no damage, still the op in flight.
+    assert boot(22783, "complete", [(0, 0, None, False), (128, 0, 22783, False)]) == ("journal:wrap-erase", 0)
+    # Copy 1's wrap (cycle 128 mod 256 is its slot 0): the sector reads old.
+    assert boot(1152, "untouched", [(129, 0, 1152, False), (0, 200, None, False)]) == ("journal:wrap-erase", 200)
+    # CX1 `-r4` boot 24: both copies name the cycle, the sector is old.
+    assert boot(10716, "untouched", [(221, 0, 10716, False), (93, 0, 10716, False)]) == ("cut:before-erase", 0)
+    # The emulated dry run's boot 5: copy 1 has not named it yet.
+    assert boot(2895, "untouched", [(80, 0, 2895, False), (207, 0, 2894, False)]) == ("journal:program", 0)
+    # ... or its entry is torn: that slot is the op in flight.
+    assert boot(2895, "untouched", [(80, 0, 2895, False), (207, 1, 2894, True)]) == ("journal:program", 1)
+    # Copy 0's next entry torn after a finished program.
+    assert boot(1000, "complete", [(233, 1, 1000, True), (105, 0, 1000, False)]) == ("journal:program", 1)
+    # A finished program and a whole journal: complete, no journal op.
+    assert boot(1000, "complete", [(233, 0, 1000, False), (105, 0, 1000, False)]) == ("complete", 0)
+    # Damage no op explains stays outside it: a non-wrap copy that lost the cycle.
+    assert boot(1000, "complete", [(0, 50, None, False), (105, 0, 1000, False)]) == ("complete", 0)
+    # Other classes are left alone.
+    assert boot(1000, "erased", [(0, 9, None, False), (105, 0, 1000, False)]) == ("erased", 0)
+    assert slot_of(0, 5376) == 0 and slot_of(1, 1152) == 0 and slot_of(1, 10716) == 92
 
 
 def synthetic_rows(counts: dict[str, int], payload: str = PAYLOAD, config: str = "silicon:esp32c6") -> list[dict]:
@@ -1023,6 +1278,26 @@ def check_model_self_test() -> None:
     # A shape the model has no weight for is a failure, never pooled away.
     ok, lines = judge_model(synthetic_rows(dict(CX1_200_CUTS, **{"erase:old-left": 1})), CX1_200_RS)
     assert not ok and any("NOT MODELLED" in l for l in lines), lines
+    # The 200-cut model (no sub-word tear, no cut before an erase) against
+    # the 500 the sitting took: exactly those two, NOT MODELLED.
+    cx1_500 = {"erase:zeroing": 17, "erase:all-zero": 63, "erase:erasing": 69, "erase:reads-ff-weak": 4,
+               "erased": 264, "cut:before-erase": 1, "program:command-boundary": 58,
+               "program:mid-command": 19, "program:mid-word": 2, "journal:wrap-erase": 3}
+    ok, lines = judge_model(synthetic_rows(cx1_500), CX1_200_RS)
+    unmodelled = [l for l in lines if "NOT MODELLED" in l]
+    assert not ok and len(unmodelled) == 2, lines
+    assert any("cut:before-erase" in l for l in unmodelled) and any("mid-word" in l for l in unmodelled), lines
+    # ... a weight of 0 is no weight ...
+    zero = CX1_200_RS.replace("program_mid_command: 7,", "program_mid_command: 7, program_mid_word: 0,")
+    assert not judge_model(synthetic_rows(cx1_500), zero)[0]
+    # ... and the model with both weighed confirms; the journal's own wrap
+    # erases feed neither family.
+    cx1_500_rs = """pub const CX1: TearMix = TearMix {
+    erase_zeroing: 17, erase_all_zero: 63, erase_erasing: 69, erase_reads_ff_weak: 4, erase_reads_ff: 264,
+    cut_before_erase: 1, program_command_boundary: 58, program_mid_command: 19, program_mid_word: 2,
+};"""
+    ok, lines = judge_model(synthetic_rows(cx1_500), cx1_500_rs)
+    assert ok and any("torn erases: 418 cut(s)" in l for l in lines) and any("torn programs: 79" in l for l in lines), lines
     # Per payload: unaligned silicon cuts (any shape) and emulated cuts feed nothing.
     extra = synthetic_rows({"erase:all-zero": 90, "program:scattered": 9}, payload=PAYLOAD_UNALIGNED)
     extra += synthetic_rows({"erase:all-zero": 90}, config="lp-emu:esp32c6:t1")
@@ -1082,7 +1357,7 @@ def bonferroni_self_test() -> None:
     trials = 2000
     any_plain = [False] * trials
     for shapes in MODEL_SHAPES.values():
-        w = {cls: fields[f] for cls, f in shapes}
+        w = model_weights(fields, shapes)
         n = round(sum(CX1_200_CUTS[c] for c in w) * 2.5)
         miss_dd32 = 0
         for t in range(trials):
@@ -1108,6 +1383,11 @@ def model_table(rows: list[dict]) -> str:
         key=lambda t: t,
     )
     ff_weak = sorted(r["weak_bits"] for r in rows if r["class"] == "erase:reads-ff-weak")
+    mid_word = sorted(
+        ((r["word_landed_bits"], r["word_intended_bits"], r["weak_bits"]) for r in rows
+         if r["class"] == "program:mid-word"),
+        key=lambda t: (t[0] / t[1], t),
+    )
     out = [
         f"// {len(rows)} silicon cuts.",
         "pub const CX1: TearMix = TearMix {",
@@ -1116,13 +1396,18 @@ def model_table(rows: list[dict]) -> str:
         f"    erase_erasing: {n['erase:erasing']},",
         f"    erase_reads_ff_weak: {n['erase:reads-ff-weak']},",
         f"    erase_reads_ff: {n['erased']},",
+        f"    cut_before_erase: {n['cut:before-erase']},",
         f"    program_command_boundary: {n['program:command-boundary']},",
         f"    program_mid_command: {n['program:mid-command']},",
+        f"    program_mid_word: {n['program:mid-word']},",
         "};",
         f"pub const CX1_ERASING: [(u32, u32); {len(erasing)}] = [",
         *[f"    ({z}, {w})," for z, w in erasing],
         "];",
         f"pub const CX1_READS_FF_WEAK: [u32; {len(ff_weak)}] = [{', '.join(map(str, ff_weak))}];",
+        f"pub const CX1_MID_WORD: [(u32, u32, u32); {len(mid_word)}] = [",
+        *[f"    ({a}, {b}, {c})," for a, b, c in mid_word],
+        "];",
     ]
     for shape in ("untouched", "erase:old-left", "program:scattered", "unknown"):
         if n[shape]:
@@ -1141,12 +1426,22 @@ MODEL_SHAPES = {
         ("erase:erasing", "erase_erasing"),
         ("erase:reads-ff-weak", "erase_reads_ff_weak"),
         ("erased", "erase_reads_ff"),
+        # Not a shape: where the cut landed (before the erase started). The
+        # model draws it among the cuts at an erase, so it is judged there.
+        ("cut:before-erase", "cut_before_erase"),
     ],
     "program": [
         ("program:command-boundary", "program_command_boundary"),
         ("program:mid-command", "program_mid_command"),
+        ("program:mid-word", "program_mid_word"),
     ],
 }
+
+
+def model_weights(fields: dict[str, int], shapes: list[tuple[str, str]]) -> dict[str, int]:
+    """A family's weights by class. A shape the model file does not weigh
+    (no field, or 0) is not modelled: it is left out, so seeing it fails."""
+    return {cls: fields[f] for cls, f in shapes if fields.get(f, 0) > 0}
 # A class that is not a torn operation: a cut after the program finished.
 NOT_TORN = {"complete"}
 # DD29: a shape expected fewer times than this at the observed n is pooled.
@@ -1268,7 +1563,7 @@ def judge_model(rows: list[dict], rs: str) -> tuple[bool, list[str]]:
     for family, shapes in MODEL_SHAPES.items():
         observed = family_counts(rows, family)
         n = sum(observed.values())
-        weights = {cls: fields[f] for cls, f in shapes}
+        weights = model_weights(fields, shapes)
         cells = judge_family(observed, weights)
         tested = [c for c in cells if not c.get("unmodelled")]
         k = len(tested)
