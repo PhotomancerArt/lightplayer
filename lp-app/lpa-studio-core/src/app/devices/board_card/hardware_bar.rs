@@ -7,7 +7,7 @@
 //! | A stand-in | "Emulated <board>" / "Simulated <board>" | "in this tab" |
 //! | Its board is known | the board ("XIAO ESP32-C6") | — |
 //! | Only its chip is known | the chip ("ESP32-C6") | — |
-//! | Nothing | "Not known yet" | — |
+//! | Nothing | "Board not known" | — |
 //!
 //! Neutral, with no action. A stand-in says so first, because that is the
 //! one thing about a runtime a person has to know without opening anything
@@ -32,12 +32,12 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let chip = identity.chip.as_deref().map(chip_words);
     let (summary, aside) = match (input.runtime, &identity.board, &chip) {
         (Some(runtime), _, _) => (
-            format!("{} {}", stand_in_word(runtime.kind), runtime.target),
+            format!("{} {}", runtime.kind_word(), runtime.target),
             Some(runtime.locality.to_string()),
         ),
         (None, Some(board), _) => (board.clone(), None),
         (None, None, Some(chip)) => (chip.clone(), None),
-        (None, None, None) => ("Not known yet".to_string(), None),
+        (None, None, None) => ("Board not known".to_string(), None),
     };
     let mut lines = Vec::new();
     if let Some(board) = identity
@@ -71,7 +71,7 @@ pub(crate) fn hardware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         icon: "chip".to_string(),
         summary,
         aside,
-        aside_icon: None,
+        mark: None,
         tone: UiStatusKind::Neutral,
         action: None,
         work: None,
@@ -115,7 +115,7 @@ pub(crate) fn pending_hardware_bar(
         icon: "chip".to_string(),
         summary: chip,
         aside: None,
-        aside_icon: None,
+        mark: None,
         tone: UiStatusKind::Neutral,
         action: None,
         work: None,
@@ -133,14 +133,6 @@ pub(crate) fn pending_hardware_bar(
             panels: Vec::new(),
             raised: false,
         },
-    }
-}
-
-/// The words a stand-in's kind leads its board with.
-fn stand_in_word(kind: &str) -> &'static str {
-    match kind {
-        "Emu" => "Emulated",
-        _ => "Simulated",
     }
 }
 
@@ -212,7 +204,7 @@ mod tests {
             "only the chip, in the catalog's words"
         );
         fixture.view.detected_chip = None;
-        assert_eq!(hardware_bar(&fixture.input()).summary, "Not known yet");
+        assert_eq!(hardware_bar(&fixture.input()).summary, "Board not known");
     }
 
     /// Ported from the remembered tile: an offline board still names the
@@ -223,7 +215,7 @@ mod tests {
         assert_eq!(hardware_bar(&fixture.input()).summary, "XIAO ESP32-C6");
         fixture.view.board_id = None;
         fixture.view.detected_chip = None;
-        assert_eq!(hardware_bar(&fixture.input()).summary, "Not known yet");
+        assert_eq!(hardware_bar(&fixture.input()).summary, "Board not known");
     }
 
     /// Reset refused over a link without the author tier keeps its reason.

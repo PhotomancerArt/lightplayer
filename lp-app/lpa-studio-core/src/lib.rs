@@ -51,12 +51,13 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
-    ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS, BarLayer, BarWorkState, BoardCardInput,
-    BoardConnection, CONNECTING, COULDNT_CONNECT, CornerMark, LENS_SOURCE_WORDS,
-    LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, PictureSource, RECONNECTING, RosterCardsInput,
-    SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard,
-    UiBoardPanel, UiBoardPicture, UiBoardPresence, UiCardAction, UiCardControl, UiCornerDetails,
-    UiDetailPanel, UiNameBar, UiPrimary, UiStackBar, UiStatusCorner, activity_bar, activity_words,
+    ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS,
+    BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONNECTING,
+    COULDNT_CONNECT, CornerMark, FILES_ARE_GONE, LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE,
+    MASTER_CHANNEL, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
+    UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch, UiBoardCard, UiBoardPanel,
+    UiBoardPicture, UiBoardPresence, UiCardAction, UiCardControl, UiCornerDetails, UiDetailPanel,
+    UiNameBar, UiPrimary, UiStackBar, UiStatusCorner, activity_bar, activity_words,
     bluetooth_switch, board_card, board_panel_picks, chip_words, link_icon, pending_board_card,
     roster_board_card, roster_board_cards,
 };

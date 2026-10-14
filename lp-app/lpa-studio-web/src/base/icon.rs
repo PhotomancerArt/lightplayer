@@ -303,7 +303,8 @@ pub enum StudioIconName {
     Chip,
     /// Ones and zeros: the board card's firmware bar, and Install.
     Firmware,
-    /// A cloud: a board reached through lightplayer.app, and "also cloud".
+    /// A cloud: a board reached through lightplayer.app, and the mark of one
+    /// also reachable there.
     Cloud,
     /// A circled up-arrow: a blue (Live) bar's mark — a newer firmware is
     /// offered.

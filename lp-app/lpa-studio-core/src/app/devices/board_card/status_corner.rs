@@ -313,7 +313,7 @@ mod tests {
             icon: "chip".to_string(),
             summary: String::new(),
             aside: None,
-            aside_icon: None,
+            mark: None,
             tone,
             action: None,
             work: None,

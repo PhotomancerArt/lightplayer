@@ -23,7 +23,7 @@
 //! | Play only, an update available | the version alone | — | Live | Update with a lock (Unlock) |
 //! | Offline, or a closed port (nothing heard this time) | the remembered version | "last seen" ("when it's back" when the standing says Available) | Neutral (Live) | — |
 //! | The flash wants firmware | "No firmware", "Pre-hello firmware", … | — | Attention | — (Install is the primary); Update (by USB) for an older LightPlayer whose board is known |
-//! | Nothing known | "Not known yet" | — | Neutral | — |
+//! | Nothing known | "Firmware not known" | — | Neutral | — |
 //! | Otherwise | the version alone | — | Neutral | — |
 //!
 //! "The version alone" never repeats the board, the MAC or a verdict
@@ -46,6 +46,11 @@ use crate::app::devices::device_identity::{IdentityFirmware, device_identity_lin
 use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
 use crate::{RichLine, UiOffer, UiStatusKind};
+
+/// The bar's words when nothing says which firmware the board runs.
+const FIRMWARE_NOT_KNOWN: &str = "Firmware not known";
+/// The bar's words for a board that came back without the files it had.
+pub const FILES_ARE_GONE: &str = "Its files are gone";
 
 /// The firmware bar.
 pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
@@ -163,7 +168,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         details: details(input, &version, tone, action.as_ref()),
         summary,
         aside,
-        aside_icon: None,
+        mark: None,
         tone: if running { UiStatusKind::Neutral } else { tone },
         action: if running { None } else { action },
         work,
@@ -197,7 +202,7 @@ pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
         icon: "firmware".to_string(),
         summary,
         aside: None,
-        aside_icon: None,
+        mark: None,
         tone,
         action: None,
         work: None,
@@ -231,14 +236,14 @@ fn firmware_work(input: &BoardCardInput<'_>) -> Option<super::ui_bar_work::UiBar
 
 /// The version alone: the update story's version when there is one, else
 /// the label the board said hello with (or the one it is remembered by),
-/// else "Not known yet".
+/// else "Firmware not known".
 fn version_alone(input: &BoardCardInput<'_>, firmware: &IdentityFirmware) -> String {
     if let Some(update) = input.update {
         return update.version.text.clone();
     }
     firmware
         .label()
-        .map_or_else(|| "Not known yet".to_string(), str::to_string)
+        .map_or_else(|| FIRMWARE_NOT_KNOWN.to_string(), str::to_string)
 }
 
 /// Whether the board is older than this Studio, so the USB update is the
@@ -283,7 +288,7 @@ fn face_words(face: &FirmwareFace) -> &'static str {
         FirmwareFace::OlderLightPlayer { .. } => "Older LightPlayer",
         FirmwareFace::Unknown
         | FirmwareFace::LightPlayer { .. }
-        | FirmwareFace::CoreOnly { .. } => "Not known yet",
+        | FirmwareFace::CoreOnly { .. } => FIRMWARE_NOT_KNOWN,
     }
 }
 
@@ -859,10 +864,10 @@ mod tests {
     }
 
     #[test]
-    fn nothing_known_is_not_known_yet() {
+    fn nothing_known_names_what_is_not_known() {
         let mut fixture = CardFixture::ready();
         fixture.view.firmware_face = FirmwareFace::Unknown;
-        assert_eq!(firmware_bar(&fixture.input()).summary, "Not known yet");
+        assert_eq!(firmware_bar(&fixture.input()).summary, "Firmware not known");
     }
 
     /// Over a link that cannot carry firmware, every refused verb keeps its

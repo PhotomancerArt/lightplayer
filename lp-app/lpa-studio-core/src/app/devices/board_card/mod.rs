@@ -61,13 +61,16 @@ pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_connection::BoardConnection;
 pub use board_panel_picks::{BOARD_PANEL_CONTROLS, MASTER_CHANNEL, board_panel_picks};
 pub use board_picture::{LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE};
-pub use connection_bar::{COULDNT_CONNECT, RECONNECTING, SOMEONE_ELSE_SENTENCE};
+pub use connection_bar::{
+    ALSO_THROUGH_THE_CLOUD, CLOUD_NOT_YET, COULDNT_CONNECT, RECONNECTING, SOMEONE_ELSE_SENTENCE,
+};
+pub use firmware_bar::FILES_ARE_GONE;
 pub use hardware_bar::chip_words;
 pub use held_board::{
     EDITOR_OPEN_ASIDE, HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE, OPEN_IN_ANOTHER_TAB,
     TAKEN_BY_ANOTHER_TAB,
 };
-pub use primary_action::CONNECTING;
+pub use primary_action::{ADD_A_PROJECT, CONNECTING};
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
 pub use ui_bar_work::{BarWorkState, UiBarWork};
 pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
@@ -77,5 +80,5 @@ pub use ui_board_picture::{PictureSource, UiBoardPicture};
 pub use ui_card_action::{UiActionDraw, UiCardAction};
 pub use ui_detail_panel::UiDetailPanel;
 pub use ui_name_bar::{UiNameBar, UiPrimary};
-pub use ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+pub use ui_stack_bar::{BarLayer, UiBarDetails, UiBarMark, UiStackBar};
 pub use ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
