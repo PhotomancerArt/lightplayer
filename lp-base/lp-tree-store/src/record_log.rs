@@ -261,6 +261,7 @@ impl<F: Flash> RecordLog<F> {
             self.sectors.end[pick as usize] = SECTOR_HEADER_LEN as u16;
             self.sectors.live[pick as usize] = 0;
             self.sectors.seq[pick as usize] = header.seq;
+            self.sectors.set_kind(pick, kind);
             self.heads[kind.index()] = Some(pick);
             stat!(self.counters.sectors_opened += 1);
             return Ok(pick);

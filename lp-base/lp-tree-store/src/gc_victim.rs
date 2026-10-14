@@ -1,24 +1,30 @@
 //! Choosing the sector GC collects next.
 
 use crate::flash::Flash;
+use crate::gc_copy::opened_since;
 use crate::record_log::RecordLog;
 use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN};
 use crate::store_config::GcPolicy;
 
 /// The best victim: a written, non-head, non-retired sector with live
-/// records *and* garbage (a sector with no live record is already free).
+/// records *and* garbage (a sector with no live record is already free),
+/// that this GC pass did not open (`pass_from`: the first sector sequence
+/// the pass opened; what it opened holds its own packed copies).
 ///
 /// When no sector has garbage, a sector whose only waste is the unused tail
 /// it was left with when it stopped being a head (compaction, which the
 /// packing bound assumed): first the smallest whose live records all fit
 /// what the cold head has left (collecting it frees a sector without
 /// opening one), else the smallest of all (it opens a head, whose room the
-/// next one can use). Copying tail-only sectors can gain nothing when
-/// records are near `record_max` — every sector ends with the same tail —
-/// so the caller stops GC when those stop freeing sectors.
+/// next one can use). Each sector is collected at most once a pass, so a
+/// pass ends; the caller starts another while passes still win room.
 ///
 /// Needs exact live bytes (right after a mark, or GC's own copies since).
-pub fn choose_victim<F: Flash>(log: &RecordLog<F>, policy: GcPolicy) -> Option<Victim> {
+pub fn choose_victim<F: Flash>(
+    log: &RecordLog<F>,
+    policy: GcPolicy,
+    pass_from: u32,
+) -> Option<u32> {
     let cap = u64::from(log.sector_capacity());
     let now = u64::from(log.next_sector_seq);
     let head_room = u64::from(log.head_remaining(HeadKind::Cold));
@@ -26,7 +32,11 @@ pub fn choose_victim<F: Flash>(log: &RecordLog<F>, policy: GcPolicy) -> Option<V
     let mut best_tail: Option<(u64, u32)> = None;
     let mut smallest: Option<(u64, u32)> = None;
     for s in 0..log.sector_count {
-        if log.is_head(s) || !log.sectors.is_written(s) || log.sectors.is_retired(s) {
+        if log.is_head(s)
+            || !log.sectors.is_written(s)
+            || log.sectors.is_retired(s)
+            || opened_since(log, s, pass_from)
+        {
             continue;
         }
         let live = u64::from(log.sectors.live[s as usize]);
@@ -55,23 +65,5 @@ pub fn choose_victim<F: Flash>(log: &RecordLog<F>, policy: GcPolicy) -> Option<V
             best = Some((score, s));
         }
     }
-    match best {
-        Some((_, sector)) => Some(Victim {
-            sector,
-            has_garbage: true,
-        }),
-        None => best_tail.or(smallest).map(|(_, sector)| Victim {
-            sector,
-            has_garbage: false,
-        }),
-    }
-}
-
-/// A sector to collect, and whether it holds garbage: collecting one that
-/// does always wins its garbage back; one whose only waste is its tail may
-/// gain nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Victim {
-    pub sector: u32,
-    pub has_garbage: bool,
+    best.or(best_tail).or(smallest).map(|(_, sector)| sector)
 }

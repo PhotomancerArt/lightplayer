@@ -40,6 +40,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                     valid.push((header.seq, s, header.kind));
                     self.log.sectors.erase_count[s as usize] = header.erase_count;
                     self.log.sectors.seq[s as usize] = header.seq;
+                    self.log.sectors.set_kind(s, header.kind);
                     closed[s as usize] = !appendable;
                 }
             }
