@@ -19,6 +19,7 @@
 //! | Offline, nothing reaches it | "Offline · 2 weeks" | — | the last link's |
 //! | Ready, running, granted at any tier | Connect | `connect` | the link's |
 //! | Ready, running no project | Add a project (the project pick) | `push` | add |
+//! | …with nothing to push (`push` not offered, or refused) | "No project" (`connect`'s reason) | — | the link's |
 //! | Ready, not said what it runs | "Project not known" (`connect`'s reason) | — | the link's |
 //!
 //! **A primary is never a greyed verb.** One that cannot be pressed says
