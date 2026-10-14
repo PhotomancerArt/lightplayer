@@ -5868,9 +5868,9 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
         );
     }
     // Connect is the board's panel, here (Q9 of "connected"): a board
-    // running nothing has none to show, and says so.
+    // running no project has none to show, and says so.
     let connect = crate::OfferPath::parse("devices/mac-6055f90a0b0c/connect").unwrap();
-    assert_eq!(bench.offer_reason(connect), crate::NOTHING_ON_IT_YET);
+    assert_eq!(bench.offer_reason(connect), crate::NO_PROJECT);
     for (verb, lasting) in &verbs {
         let expected = matches!(verb.as_str(), "erase" | "forget" | "update-firmware");
         assert_eq!(*lasting, expected, "{verb}");

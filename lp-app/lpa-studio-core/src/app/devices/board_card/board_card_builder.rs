@@ -361,7 +361,8 @@ mod tests {
         ));
         assert_eq!(
             card.name_bar.primary.as_ref().map(|primary| primary.word()),
-            Some("Connect")
+            Some("Identifying…"),
+            "how far it has got, not a greyed Connect"
         );
         assert_eq!(card.panel, None);
     }

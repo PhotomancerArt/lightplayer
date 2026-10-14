@@ -4,8 +4,11 @@
 //! word, the spectrum ring on hover (`docs/style/ui.md` "The board card").
 //!
 //! An unavailable primary ([`UiPrimary::Unavailable`]) is the same section,
-//! disabled, its reason its title and its hidden text: "why can't I?" is
-//! answered where it is asked. It presses nothing, so it is not an action.
+//! disabled, its word the reason itself ("Connecting…", "Updating · 42%",
+//! "Offline · 2 weeks"), never a greyed verb: "why can't I?" is answered
+//! where it is asked. The whole reason is its hover, and its hidden text
+//! when it says more than the word. It presses nothing, so it is not an
+//! action.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiNameBar, UiPrimary};
@@ -60,7 +63,9 @@ fn UnavailablePrimary(word: String, icon: String, reason: String) -> Element {
                 }
                 span { class: "tw:inline-flex", "{word}" }
             }
-            span { class: "tw:sr-only", "{reason}" }
+            if reason != word {
+                span { class: "tw:sr-only", "{reason}" }
+            }
         }
     }
 }

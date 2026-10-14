@@ -5,19 +5,22 @@
 //! | Board | Summary | Aside | Tone | Action |
 //! |---|---|---|---|---|
 //! | A push or a removal running | (the work shows) | — | Neutral | the work's Cancel |
-//! | Locked (its link unlocked nothing) | "Not known yet" | — | Neutral | — |
+//! | Locked (its link unlocked nothing) | "Project not known" | — | Neutral | — |
 //! | Degraded | the fault, without its "Degraded: " lead | — | Attention | — |
 //! | Given an older version than the project's newest | "Out of date" | the project | Attention | "Send latest" (`push`, the project preset) |
-//! | Says it runs nothing | "Nothing on it yet", or what starts at its next power-up | — | Neutral | "Add a project" (`push`, the picker) |
+//! | Says it runs nothing | "No project", or what starts at its next power-up | — | Neutral | "Add a project" (`push`, the picker), unless the primary carries it |
 //! | Open in the editor, or given the newest | the project | "N boards" when shared | Neutral | Edit |
 //! | Runs something this library cannot name | its label | — | Neutral | Edit |
-//! | Has not said | "Not known yet" | — | Neutral | — |
+//! | Has not said | "Project not known" | — | Neutral | — |
 //!
 //! The order is the order of what a person needs to know first: what is
 //! happening to it now, then what is wrong with it, then what is stale, then
 //! what it is. `push` is offered only when the board can take a project and
 //! has said what it runs; without it there is no action, and the words
-//! stay.
+//! stay. On a ready board running no project, Add a project is the card's
+//! primary ([`super::primary_action::add_a_project`]), and the bar does not
+//! repeat it. Every summary names its subject: "No project" where the board
+//! said it runs none, "Project not known" where nothing has been heard.
 //!
 //! **Edit** (D32) takes the slot whenever no project notice does: Edit
 //! (`edit`, pencil) on a board you can edit, Edit with a lock (`unlock`, the
@@ -34,11 +37,14 @@ use lpa_devices::view::LoadedProject;
 use super::bar_work::bar_work;
 use super::board_card_input::BoardCardInput;
 use super::detail_sections::{danger, facts, notice, verbs, without_empty};
+use super::primary_action::{ADD_A_PROJECT, primary_action};
 use super::ui_bar_work::BarWorkState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
+use super::ui_name_bar::UiPrimary;
 use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
 use crate::app::devices::age_words::age_words;
 use crate::app::devices::board_plays::BoardPlays;
+use crate::app::devices::connect_offer::{NO_PROJECT, PROJECT_NOT_KNOWN};
 use crate::app::devices::device_push_offer::PUSH_SOURCE_PARAM;
 use crate::{OfferArgs, RichLine, UiStatusKind};
 
@@ -70,7 +76,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         .is_some_and(|access| access.unlock == Some(crate::app::access::UiUnlockOffer::Locked));
     let (summary, aside, tone, action) = if locked {
         (
-            "Not known yet".to_string(),
+            PROJECT_NOT_KNOWN.to_string(),
             None,
             UiStatusKind::Neutral,
             None,
@@ -104,11 +110,11 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 }),
             ),
             BoardPlays::Nothing => (
-                note.map_or_else(|| "Nothing on it yet".to_string(), |note| note.line.clone()),
+                note.map_or_else(|| NO_PROJECT.to_string(), |note| note.line.clone()),
                 None,
                 UiStatusKind::Neutral,
-                push.map(|push| {
-                    UiCardAction::press(push, "Add a project")
+                push.filter(|_| !primary_adds_a_project(input)).map(|push| {
+                    UiCardAction::press(push, ADD_A_PROJECT)
                         .with_icon("add")
                         .drawn(UiActionDraw::ProjectPick {
                             board_id: view.board_id.clone(),
@@ -123,7 +129,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             ),
             BoardPlays::Running { label } => (label.clone(), None, UiStatusKind::Neutral, None),
             BoardPlays::Unknown => (
-                "Not known yet".to_string(),
+                PROJECT_NOT_KNOWN.to_string(),
                 None,
                 UiStatusKind::Neutral,
                 None,
@@ -151,7 +157,7 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         ),
         summary,
         aside,
-        aside_icon: None,
+        mark: None,
         // Work in progress reads neutral; its words are the bar's.
         tone: if running { UiStatusKind::Neutral } else { tone },
         action: if running { None } else { action },
@@ -179,6 +185,15 @@ pub(crate) fn edit_action(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
     Some(UiCardAction::press(edit, "Edit").with_icon("edit"))
 }
 
+/// Whether the card's primary is Add a project (a ready board running no
+/// project): the bar then does not draw the same button again.
+fn primary_adds_a_project(input: &BoardCardInput<'_>) -> bool {
+    matches!(
+        primary_action(input, None),
+        Some(UiPrimary::Offer(action)) if action.word == ADD_A_PROJECT
+    )
+}
+
 /// A new board's project bar: it has not said what it runs.
 pub(crate) fn pending_project_bar() -> UiStackBar {
     let mut known = facts("Project", Vec::new());
@@ -186,9 +201,9 @@ pub(crate) fn pending_project_bar() -> UiStackBar {
     UiStackBar {
         layer: BarLayer::Project,
         icon: "project".to_string(),
-        summary: "Not known yet".to_string(),
+        summary: PROJECT_NOT_KNOWN.to_string(),
         aside: None,
-        aside_icon: None,
+        mark: None,
         tone: UiStatusKind::Neutral,
         action: None,
         work: None,
@@ -367,22 +382,42 @@ mod tests {
         );
     }
 
+    /// A ready board running no project says "No project"; Add a project is
+    /// the card's primary, so the bar does not repeat it.
     #[test]
-    fn an_empty_board_offers_add_a_project_with_the_picker() {
+    fn an_empty_board_says_no_project_and_leaves_add_a_project_to_the_primary() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.view.can_remove_project = false;
         fixture.plays = BoardPlays::Nothing;
         let bar = project_bar(&fixture.input());
-        assert_eq!(bar.summary, "Nothing on it yet");
+        assert_eq!(bar.summary, "No project");
         assert_eq!(bar.tone, UiStatusKind::Neutral);
-        let action = bar.action.expect("Add a project");
-        assert_eq!(action.word, "Add a project");
-        assert!(action.offer.to_string().ends_with("/push"));
+        assert_eq!(bar.action, None, "the primary carries Add a project");
+        let Some(UiPrimary::Offer(primary)) = primary_action(&fixture.input(), None) else {
+            panic!("Add a project is the primary");
+        };
+        assert_eq!(primary.word, "Add a project");
+        assert!(primary.offer.to_string().ends_with("/push"));
         assert!(matches!(
-            action.draw,
+            primary.draw,
             UiActionDraw::ProjectPick { board_id: Some(_) }
         ));
+    }
+
+    /// Where the primary is something else (the editor's docked card shows
+    /// Done), the bar keeps Add a project as its action.
+    #[test]
+    fn the_bar_keeps_add_a_project_when_the_primary_is_another_verb() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.loaded_project = LoadedProject::Empty;
+        fixture.view.can_remove_project = false;
+        fixture.plays = BoardPlays::Nothing;
+        fixture.editor_holds_it = true;
+        fixture.docked = true;
+        let action = project_bar(&fixture.input()).action.expect("Add a project");
+        assert_eq!(action.word, "Add a project");
+        assert!(action.offer.to_string().ends_with("/push"));
     }
 
     /// #1045: after a Remove left a folder, an empty board says what
@@ -450,34 +485,35 @@ mod tests {
     /// A Locked board answers only its hello and the unlock: what it runs
     /// is not known, whatever its refused read said (Q38).
     #[test]
-    fn a_locked_board_is_not_known_yet_even_when_its_read_said_nothing() {
+    fn a_locked_boards_project_is_not_known_even_when_its_read_said_nothing() {
         let mut fixture = CardFixture::ready().locked();
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.plays = BoardPlays::Nothing;
         let bar = project_bar(&fixture.input());
-        assert_eq!(bar.summary, "Not known yet");
+        assert_eq!(bar.summary, "Project not known");
         assert_eq!(bar.action, None, "no Add a project on a locked board");
     }
 
     #[test]
-    fn a_board_that_has_not_said_is_not_known_yet() {
+    fn a_board_that_has_not_said_names_what_is_not_known() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Unknown;
         fixture.plays = BoardPlays::Unknown;
-        assert_eq!(project_bar(&fixture.input()).summary, "Not known yet");
+        assert_eq!(project_bar(&fixture.input()).summary, "Project not known");
+        assert_eq!(pending_project_bar().summary, "Project not known");
     }
 
     /// Ported from the old card: the work's narration, then the fault, then
-    /// what the board plays — and "Not known yet" when it has not said.
+    /// what the board plays — and "Project not known" when it has not said.
     #[test]
     fn the_project_line_follows_the_ruled_priority() {
         let mut fixture = CardFixture::ready();
         fixture.view.loaded_project = LoadedProject::Unknown;
         fixture.plays = BoardPlays::Unknown;
-        assert_eq!(project_bar(&fixture.input()).summary, "Not known yet");
+        assert_eq!(project_bar(&fixture.input()).summary, "Project not known");
         fixture.view.loaded_project = LoadedProject::Empty;
         fixture.plays = BoardPlays::Nothing;
-        assert_eq!(project_bar(&fixture.input()).summary, "Nothing on it yet");
+        assert_eq!(project_bar(&fixture.input()).summary, "No project");
         fixture.view.loaded_project = LoadedProject::Running {
             label: "porch-sign".to_string(),
         };

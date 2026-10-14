@@ -8,7 +8,7 @@
 //!
 //! | Board | Connect |
 //! |---|---|
-//! | Ready (or Degraded), linked, idle, holds a tier, registered | opens the session; disabled, "Nothing on it yet", while it runs nothing |
+//! | Ready (or Degraded), linked, idle, holds a tier, registered | opens the session; disabled, "No project", while it runs none, and "Project not known" until it says |
 //! | the port is there but closed | opens the port, then the session ([`device_offers`](super::device_offers) publishes it, [`connect_port_action`]) |
 //! | offline, Studio can reach it | reaches it — Wi‑Fi first, then lightplayer.app, then its cable — then opens the session |
 //!
@@ -30,9 +30,13 @@ use crate::{ConnectReach, OfferPath, RuntimeOp, UiAction, UiOffer};
 /// The verb's path segment.
 pub const CONNECT_VERB: &str = "connect";
 
-/// Why Connect waits on a ready board that runs nothing (or has not said):
-/// there is no panel to show yet.
-pub const NOTHING_ON_IT_YET: &str = "Nothing on it yet";
+/// Why Connect waits on a ready board that runs no project: there is no
+/// panel to show. The card's primary is Add a project instead, and its
+/// project bar says the same words.
+pub const NO_PROJECT: &str = "No project";
+
+/// Why Connect waits on a ready board that has not said what it runs.
+pub const PROJECT_NOT_KNOWN: &str = "Project not known";
 
 /// What the controller knows about connecting to one board.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -88,7 +92,8 @@ pub fn device_connect_offer(
     let action = connect_action(view.id, None);
     let action = match view.loaded_project {
         LoadedProject::Running { .. } => action,
-        LoadedProject::Empty | LoadedProject::Unknown => action.disabled(NOTHING_ON_IT_YET),
+        LoadedProject::Empty => action.disabled(NO_PROJECT),
+        LoadedProject::Unknown => action.disabled(PROJECT_NOT_KNOWN),
     };
     Some(UiOffer::new(path, facts.icon, action))
 }
@@ -141,15 +146,18 @@ mod tests {
     }
 
     #[test]
-    fn a_board_running_nothing_says_so_disabled() {
-        for loaded in [LoadedProject::Empty, LoadedProject::Unknown] {
+    fn a_board_running_no_project_says_so_disabled() {
+        for (loaded, reason) in [
+            (LoadedProject::Empty, "No project"),
+            (LoadedProject::Unknown, "Project not known"),
+        ] {
             let mut view = running();
             view.loaded_project = loaded.clone();
             let offer = device_connect_offer(&prefix(), &view, &facts()).expect("published");
             assert_eq!(
                 offer.action.meta().enablement,
                 crate::ActionEnablement::Disabled {
-                    reason: NOTHING_ON_IT_YET.to_string()
+                    reason: reason.to_string()
                 },
                 "{loaded:?}"
             );

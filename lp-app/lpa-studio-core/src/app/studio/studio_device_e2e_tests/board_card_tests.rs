@@ -7,10 +7,11 @@ use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
 use crate::{UiBoardCard, UiCardAction, UiPrimary};
 
-/// A board with nothing on it cannot connect yet (Connect, disabled, with
-/// the offer's own reason); once a project runs, the card's primary is
-/// Connect, and pressing it by path opens the session on the card once —
-/// its primary Done. Edit, the project bar's action, shows the editor on
+/// A board running no project has no panel to connect to: its primary is
+/// the next step, Add a project (`push`, the project pick), never a greyed
+/// Connect, and `connect` is refused with "No project". Once a project
+/// runs, the card's primary is Connect, and pressing it by path opens the
+/// session on the card once — its primary Done. Edit, the project bar's action, shows the editor on
 /// that same session, and the docked card's primary is Done too.
 #[test]
 fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
@@ -24,13 +25,16 @@ fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let id = bench.view().devices[0].id;
-    let waiting = primary_offer(&card_of(&bench, id));
-    assert_eq!(waiting.offer, bench.device_verb(id, "connect"));
-    assert_eq!(waiting.word, "Connect");
+    let add = primary_offer(&card_of(&bench, id));
+    assert_eq!(add.offer, bench.device_verb(id, "push"));
+    assert_eq!(add.word, "Add a project");
+    assert_eq!(add.refused, None, "never a greyed primary");
+    assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));
+    let connect = bench.device_verb(id, "connect");
     assert_eq!(
-        waiting.refused.as_deref(),
-        Some(crate::NOTHING_ON_IT_YET),
-        "drawn disabled, with the offer's own reason"
+        bench.offer_reason(connect),
+        crate::NO_PROJECT,
+        "the agent reads why Connect waits"
     );
     every_card_action_is_offered(&mut bench);
 
@@ -248,10 +252,11 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     every_card_action_is_offered(&mut bench);
 }
 
-/// An empty board's project bar offers "Add a project": the `push` offer,
-/// drawn as the picker; pressed by path with a source, the push runs.
+/// An empty board says "No project", and its primary is "Add a project":
+/// the `push` offer, drawn as the picker, which the project bar does not
+/// repeat; pressed by path with a source, the push runs.
 #[test]
-fn an_empty_boards_project_action_adds_a_project_by_path() {
+fn an_empty_boards_primary_adds_a_project_by_path() {
     let device = empty_light_player("dev000000card000005");
     let (mut bench, tasks) = identified(&device, "usb-card-5");
     bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
@@ -262,9 +267,11 @@ fn an_empty_boards_project_action_adds_a_project_by_path() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let id = bench.view().devices[0].id;
-    let bar = card_of(&bench, id).bar(crate::BarLayer::Project).clone();
-    assert_eq!(bar.summary, "Nothing on it yet");
-    let add = bar.action.expect("Add a project");
+    let card = card_of(&bench, id);
+    let bar = card.bar(crate::BarLayer::Project).clone();
+    assert_eq!(bar.summary, "No project");
+    assert_eq!(bar.action, None, "the primary carries it, once");
+    let add = primary_offer(&card);
     assert_eq!(add.word, "Add a project");
     assert_eq!(add.offer, bench.device_verb(id, "push"));
     assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));

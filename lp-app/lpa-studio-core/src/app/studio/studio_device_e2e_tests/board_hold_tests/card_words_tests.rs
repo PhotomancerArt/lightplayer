@@ -66,8 +66,9 @@ fn c1_a_watchers_card_is_online_saying_another_tab_has_it_and_connects_by_taking
 
 /// C2: the holder's level is in the aside and in the cost. With its editor
 /// open, B's bar says "editor open" and its Connect is Undoable (the error
-/// tint, one click); busy with a push, B's Connect is disabled with the
-/// holder's reason, which the offer reads out too.
+/// tint, one click); busy with a push, B's primary says "Busy in the other
+/// tab" with the holder's reason on its hover, which the offer reads out
+/// too.
 #[test]
 fn c2_the_holders_level_is_the_aside_and_the_cost() {
     let desk = Desk::new(&[("dev000000holdc2aa", MAC_A)]);
@@ -122,10 +123,11 @@ fn c2_the_holders_level_is_the_aside_and_the_cost() {
     assert_eq!(
         card.name_bar.primary,
         Some(UiPrimary::Unavailable {
-            word: "Connect".to_string(),
+            word: "Busy in the other tab".to_string(),
             icon: "usb".to_string(),
             reason: reason.clone(),
-        })
+        }),
+        "never a greyed Connect: the primary says why"
     );
     assert_eq!(
         b.bench.offer_reason(b.verb(MAC_A, "take-over")),
@@ -136,8 +138,8 @@ fn c2_the_holders_level_is_the_aside_and_the_cost() {
 }
 
 /// C3: pressing the primary by path IS pressing `take-over`. While A is
-/// asked the bar is the work "Asking the other tab…" and Connect is
-/// disabled with those words; then "Opening…"; then the card is the
+/// asked the bar is the work "Asking the other tab…" and the primary says
+/// those words; then "Opening…"; then the card is the
 /// board's ordinary live card, whose primary is Edit.
 #[test]
 fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
@@ -165,11 +167,7 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
     );
     assert_eq!(
         card.name_bar.primary,
-        Some(UiPrimary::Unavailable {
-            word: "Connect".to_string(),
-            icon: "usb".to_string(),
-            reason: "Asking the other tab\u{2026}".to_string(),
-        })
+        Some(UiPrimary::says("Asking the other tab\u{2026}", "usb"))
     );
     assert_eq!(
         b.bench.offer_reason(primary.offer.clone()),
@@ -177,9 +175,13 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
     );
 
     run_until(&mut [&mut a, &mut b], "B to have the board", |tabs| {
-        tabs[1]
-            .card(MAC_A)
-            .is_some_and(|card| card.status == DeviceStatus::Ready)
+        tabs[1].card(MAC_A).is_some_and(|card| {
+            card.status == DeviceStatus::Ready
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
     });
     let card = b.ui_card(MAC_A);
     assert!(

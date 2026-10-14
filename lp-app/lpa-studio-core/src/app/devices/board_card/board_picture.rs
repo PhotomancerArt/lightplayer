@@ -208,7 +208,7 @@ fn preview_sentence(view: &DeviceView, activity: Option<&ActivityView>) -> Strin
         };
     }
     if view.loaded_project == LoadedProject::Empty {
-        return "Nothing on it yet — no picture until something runs.".to_string();
+        return "No project — no picture until one runs.".to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }
@@ -408,7 +408,7 @@ mod tests {
         card.loaded_project = LoadedProject::Empty;
         assert_eq!(
             preview_sentence(&card, None),
-            "Nothing on it yet — no picture until something runs."
+            "No project — no picture until one runs."
         );
         card.firmware_face = FirmwareFace::Blank;
         assert_eq!(

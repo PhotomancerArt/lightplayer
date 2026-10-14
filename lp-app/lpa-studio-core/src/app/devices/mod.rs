@@ -181,7 +181,9 @@ pub use browser_sim_source::BrowserSimLinkSource;
 pub use browser_transport::BrowserSerialTransport;
 pub use bundled_own_build::{BundledOwnBuild, BundledOwnBuildSource, OWN_BUILD_MISMATCH};
 pub use composite_transport::CompositeDeviceTransport;
-pub use connect_offer::{CONNECT_VERB, ConnectFacts, NOTHING_ON_IT_YET, device_connect_offer};
+pub use connect_offer::{
+    CONNECT_VERB, ConnectFacts, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
+};
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
 };

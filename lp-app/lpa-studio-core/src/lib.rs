@@ -118,7 +118,7 @@ pub use app::devices::{
     OwnBuildSource, UpdateHost,
 };
 pub use app::devices::{
-    CONNECT_VERB, ConnectFacts, DONE_VERB, NOTHING_ON_IT_YET, device_connect_offer,
+    CONNECT_VERB, ConnectFacts, DONE_VERB, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
     device_done_offer,
 };
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};

@@ -369,7 +369,7 @@ fn the_offers_follow_the_session() {
     bench.not_offered(&edit);
     bench.offered(&done);
 
-    // A board running nothing has no panel to show.
+    // A board running no project has no panel to show.
     let device = empty_light_player("dev000000cnct000009");
     let (mut empty, tasks) = identified(&device, "usb-conn-9");
     empty.run_until(&tasks, "the board to report nothing loaded", |bench| {
@@ -381,7 +381,7 @@ fn the_offers_follow_the_session() {
     });
     let board = empty.view().devices[0].id;
     let empty_connect = empty.device_verb(board, "connect");
-    assert_eq!(empty.offer_reason(empty_connect), crate::NOTHING_ON_IT_YET);
+    assert_eq!(empty.offer_reason(empty_connect), crate::NO_PROJECT);
 }
 
 /// A closed port: Connect opens it, the board identifies, and the session
