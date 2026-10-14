@@ -160,7 +160,10 @@ pub struct UiLayoutPanel {
 /// MAC; `staged` what its last inspection staged; `current_base_mac` the
 /// board's own base MAC, if known (the one question a mismatched backup-
 /// file import asks names it).
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each is one fact the card is built from, gathered by the roster"
+)]
 pub fn device_layout_view(
     view: &DeviceView,
     offers_at: OfferPath,
