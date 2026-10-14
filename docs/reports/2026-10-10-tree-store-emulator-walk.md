@@ -102,6 +102,13 @@ threads; CI's 4-core runner should take roughly twice that.
 The control's push-c40 was not run (littlefs cannot hold two c40 copies;
 see RAM), nor format.
 
+**Amendment, 2026-10-14:** the empty-file residue is fixed in today's
+littlefs firmware (PR #1134: a new file is written under a hidden name and
+renamed into place within its directory). Re-run on one machine: `main`
+`dc5164ef1` panel 9/30 (CI form) and 21/184 (long), push 0/649 (it no
+longer reproduced there); with the fix, push 736, save 292, switch 70, panel
+37 and 196 cuts, **0 failures**. The defect entry has the table.
+
 ## RAM (`emu_tree_store_ram`, P8, D5)
 
 Unsplit images with `heap_peak_diag` (the split ROM-up walk outran its
