@@ -76,8 +76,9 @@ enum Cmd {
         /// Tear models, comma-separated, by name: `clean`, `byte_prefix`,
         /// `random_bits` (the default list), `calibrated` (CX1's measured
         /// tears, `lp-nor-sim`'s `calibrated_tear.rs`) and
-        /// `calibrated_<zeroing|all_zero|erasing|reads_ff_weak|reads_ff>`
-        /// (every torn erase forced to that measured shape),
+        /// `calibrated_<zeroing|zeroing_mid_word|all_zero|first_lift|erasing|
+        /// reads_ff_weak|reads_ff>` (every torn erase forced to that
+        /// measured shape),
         /// `calibrated_before_erase` (every erase cut lands before its
         /// erase) and `calibrated_mid_word` (every program torn inside a
         /// word).
@@ -95,8 +96,9 @@ enum Cmd {
         /// Tear models, comma-separated, by name: `clean`, `byte_prefix`,
         /// `random_bits` (the default list), `calibrated` (CX1's measured
         /// tears, `lp-nor-sim`'s `calibrated_tear.rs`) and
-        /// `calibrated_<zeroing|all_zero|erasing|reads_ff_weak|reads_ff>`
-        /// (every torn erase forced to that measured shape),
+        /// `calibrated_<zeroing|zeroing_mid_word|all_zero|first_lift|erasing|
+        /// reads_ff_weak|reads_ff>` (every torn erase forced to that
+        /// measured shape),
         /// `calibrated_before_erase` (every erase cut lands before its
         /// erase) and `calibrated_mid_word` (every program torn inside a
         /// word).
