@@ -1437,6 +1437,8 @@ just heap-budget-check-chips                    # the firmware's own heap ledger
 just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a pinned figure: re-record them all (docs/chip-figures.md)
 just apply-ci-figures [pr]                      # …or take the patch CI already blessed on the PR (its sticky "figures moved" comment) — no firmware build
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
+lp-cli emu run --elf <elf> --flash-cut 400:calibrated:3,then=power-cycle   # a power cut at the 400th lpfs program/erase, torn per lp-nor-sim; label +flash-cut, validate refuses it
+just walk-tree-store-cuts-emu [scenarios] [sectors]   # the fs-tree firmware cut at flash ops and power-cycled, long form (never CI; the CI subset rides test-emu-c6-cli-boards)
 LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
 lp-cli wire unpack --sizes < capture.bin > capture.txt   # decode a board's lp-link capture back to `M!{json}` + console lines (`--lines` for an M! transport), with a per-message/total size report on stderr
 LP_WIRE_ENCODING=json lp-cli upload projects/test/basic serial:auto   # lp-cli's own serial transports never ask for packed — a JSON-vs-packed comparison, or a link you want to watch as text

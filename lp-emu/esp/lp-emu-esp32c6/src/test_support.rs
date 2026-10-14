@@ -195,6 +195,29 @@ impl FwImage {
         default_features: true,
     };
 
+    /// The shipped image with `lpfs` as the tree store (`fw-esp32c6`'s
+    /// `fs-tree`; plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`).
+    /// Never shipped: the tree-store walks (`lp-cli/tests/emu_tree_store_*`)
+    /// build it, unsplit, and its split twin through [`split_image`].
+    pub const FS_TREE: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "fs-tree"],
+        default_features: true,
+    };
+
+    /// [`FwImage::FS_TREE`] with the `[heap] peak=…` line
+    /// (`heap_peak_diag`): the tree store's RAM figures.
+    pub const FS_TREE_HEAP_PEAK: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "fs-tree", "heap_peak_diag"],
+        default_features: true,
+    };
+
+    /// [`FwImage::SHIPPED`] (littlefs) with the same `[heap] peak=…` line:
+    /// the RAM figures' comparison.
+    pub const SHIPPED_HEAP_PEAK: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "heap_peak_diag"],
+        default_features: true,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
@@ -270,6 +293,10 @@ const SOURCE_PATHS: &[&str] = &[
     "lp-base",
     "lp-shader",
     "lp-gfx",
+    // The server the image links (`ci-images.py`'s list names it too): an
+    // edit there moved the image and not this key, and a test ran the stale
+    // ELF (2026-10-10, the tree-store walks).
+    "lp-app/lpa-server",
     // The version every build stamps, and the split pipeline that links and
     // lays out a split image.
     "tools/lp-app-version",
