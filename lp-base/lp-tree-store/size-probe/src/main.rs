@@ -1,5 +1,14 @@
-//! lp-tree-store's RV32 size probe: every public entry point a device needs
-//! (format, mount, put, get, delete_prefix, list, commit) on a RAM flash.
+//! lp-tree-store's RV32 size probe: every public entry point the firmware
+//! will call (format, mount, put, append, put_chunk_deflated, get,
+//! file_size, exists, list, delete, delete_prefix, begin/commit/abort)
+//! on a RAM flash. No `stats`: the firmware builds without that feature.
+//!
+//! The hasher is the firmware's to inject (the C6 has SHA in hardware), so
+//! by default the probe passes a stand-in that costs a few bytes: the ELF
+//! is the store itself. `--features soft-sha` links `sha2` instead, for
+//! the store + a software SHA-256. `--features lpfs` makes the same calls
+//! through `LpFsTree` as a `dyn lpfs::LpFs` (every trait method linked, as
+//! the server holds it), for the store plus its adapter.
 
 #![no_std]
 #![no_main]
@@ -12,7 +21,9 @@ use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use lp_tree_store::{Codec, Flash, StoreConfig, TreeStore};
+#[cfg(not(feature = "soft-sha"))]
+use lp_tree_store::ObjectHasher;
+use lp_tree_store::{Flash, StoreConfig, TreeStore};
 
 const SECTORS: u32 = 16;
 const SECTOR: u32 = 4096;
@@ -37,14 +48,22 @@ impl Flash for RamFlash {
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), ()> {
         let cells = cells();
         let a = addr as usize;
-        for (c, d) in cells.get_mut(a..a + data.len()).ok_or(())?.iter_mut().zip(data) {
+        for (c, d) in cells
+            .get_mut(a..a + data.len())
+            .ok_or(())?
+            .iter_mut()
+            .zip(data)
+        {
             *c &= *d;
         }
         Ok(())
     }
     fn erase_sector(&mut self, sector: u32) -> Result<(), ()> {
         let s = (sector * SECTOR) as usize;
-        cells().get_mut(s..s + SECTOR as usize).ok_or(())?.fill(0xFF);
+        cells()
+            .get_mut(s..s + SECTOR as usize)
+            .ok_or(())?
+            .fill(0xFF);
         Ok(())
     }
 }
@@ -54,26 +73,102 @@ fn cells() -> &'static mut [u8] {
     unsafe { &mut *addr_of_mut!(CELLS) }
 }
 
+/// The firmware's hardware SHA stands here: an opaque call the optimizer
+/// cannot see through, costing about what a driver call does.
+#[cfg(not(feature = "soft-sha"))]
+struct ProbeHasher;
+
+#[cfg(not(feature = "soft-sha"))]
+impl ObjectHasher for ProbeHasher {
+    #[inline(never)]
+    fn sha256(&mut self, parts: &[&[u8]]) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        for p in parts {
+            for (i, b) in p.iter().enumerate() {
+                out[i % 32] ^= *b;
+            }
+        }
+        black_box(out)
+    }
+}
+
+#[cfg(feature = "soft-sha")]
+type ProbeHasher = lp_tree_store::SoftSha256;
+#[cfg(feature = "soft-sha")]
+#[allow(non_upper_case_globals)]
+const ProbeHasher: ProbeHasher = lp_tree_store::SoftSha256;
+
+fn hasher() -> &'static mut ProbeHasher {
+    static mut H: ProbeHasher = ProbeHasher;
+    // SAFETY: single-threaded probe.
+    unsafe { &mut *addr_of_mut!(H) }
+}
+
+fn flash() -> &'static mut RamFlash {
+    static mut FLASH: RamFlash = RamFlash;
+    // SAFETY: single-threaded probe.
+    unsafe { &mut *addr_of_mut!(FLASH) }
+}
+
+type ProbeStore = TreeStore<&'static mut RamFlash, &'static mut ProbeHasher>;
+
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
-    let cfg = StoreConfig {
-        codec: Codec::Stored,
-        ..StoreConfig::default()
-    };
-    let mut flash = RamFlash;
-    let _ = black_box(TreeStore::format(&mut flash, &cfg));
-    // Mount through `&mut` too, so format and mount share one
-    // `TreeStore<&mut RamFlash>` instantiation (a by-value mount would link
-    // the whole store twice).
-    if let Ok(mut st) = TreeStore::mount(&mut flash, cfg) {
-        let _ = st.put("/projects/a/project.json", black_box(b"{}"));
-        let _ = st.delete_prefix(black_box("/old/"));
-        let _ = black_box(st.commit());
-        let _ = black_box(st.get(black_box("/projects/a/project.json")));
-        let _ = black_box(st.list(black_box("/")));
-        black_box(st.stats());
+    let cfg = StoreConfig::default();
+    // Format and mount through `&mut` both, so they share one
+    // `TreeStore<&mut RamFlash, &mut ProbeHasher>` (a by-value mount would
+    // link the whole store twice).
+    let _ = black_box(TreeStore::format(flash(), hasher(), &cfg));
+    if let Ok(st) = TreeStore::mount(flash(), hasher(), cfg) {
+        calls(st);
     }
     loop {}
+}
+
+#[cfg(not(feature = "lpfs"))]
+fn calls(mut st: ProbeStore) {
+    {
+        let _ = st.put("/projects/a/project.json", black_box(b"{}"));
+        let _ = st.append("/projects/a/project.json", black_box(b"\n"));
+        let _ = st.begin();
+        let _ = st.put_chunk_deflated("/a/s.glsl", 0, 3, None, black_box(&[3, 0, 1, 2, 3]));
+        let _ = st.delete_prefix(black_box("/old/"));
+        let _ = black_box(st.commit());
+        let _ = st.abort();
+        let _ = black_box(st.delete(black_box("/x")));
+        let _ = black_box(st.get(black_box("/projects/a/project.json")));
+        let _ = black_box(st.file_size(black_box("/a")));
+        let _ = black_box(st.exists(black_box("/b")));
+        let _ = black_box(st.list(black_box("/")));
+    }
+}
+
+#[cfg(feature = "lpfs")]
+fn calls(st: ProbeStore) {
+    use alloc::rc::Rc;
+    use core::cell::RefCell;
+    use lpfs::{FsVersion, LpFs, LpPath};
+    let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(lp_tree_store::LpFsTree::new(st)));
+    let p = |s: &'static str| LpPath::new(black_box(s));
+    {
+        let f = fs.borrow();
+        let _ = f.write_file(p("/projects/a/project.json"), black_box(b"{}"));
+        let _ = f.append_file(p("/projects/a/project.json"), black_box(b"\n"));
+        let _ = f.begin_batch();
+        let _ = f.delete_dir(p("/old"));
+        let _ = black_box(f.commit_batch());
+        let _ = f.abort_batch();
+        let _ = black_box(f.delete_file(p("/x")));
+        let _ = black_box(f.read_file(p("/projects/a/project.json")));
+        let _ = black_box(f.file_size(p("/a")));
+        let _ = black_box(f.file_exists(p("/b")));
+        let _ = black_box(f.is_dir(p("/projects")));
+        let _ = black_box(f.list_dir(p("/"), black_box(true)));
+        let _ = black_box(f.chroot(p("/projects/a")));
+        let _ = black_box(f.get_changes_since(FsVersion::default()));
+    }
+    fs.borrow_mut().clear_changes_before(FsVersion::default());
+    black_box(fs);
 }
 
 // A bump allocator over a static heap: the probe never frees.

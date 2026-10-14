@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::access_file_error::AccessFileError;
 use crate::open_to::OpenTo;
 use crate::secret_entry::{SALT_BYTES, SecretEntry, SecretEntryV1, read_version, validate_secrets};
+use crate::secret_kind::SecretKind;
 
 /// The device's own access settings, at the root of its filesystem.
 ///
@@ -157,10 +158,16 @@ impl DeviceAccessFile {
     /// Add `entry`, or replace the entry with the same salt (a holder uses
     /// one salt everywhere, so the same salt is the same holder — this is
     /// how a rename re-labels). A new entry past
-    /// [`crate::MAX_SECRETS_PER_FILE`] is refused and nothing changes, and
-    /// so is an all-zero salt: the salt is a secure link's key id, and all
-    /// zero is the anonymous key's ([`crate::key_lookup`]). Only adding is
-    /// refused; a stored file is read as it is.
+    /// [`crate::MAX_SECRETS_PER_FILE`] is refused and nothing changes —
+    /// except an **account** key, which makes room by dropping the oldest
+    /// browser key (the first in file order; the file keeps no last-used
+    /// time). Browser keys pile up, and a full list of them must not keep
+    /// an account key, and so the relay, out for good. No other kind is
+    /// ever dropped, and with no browser key to drop an account key is
+    /// refused too. An all-zero salt is refused as well: the salt is a
+    /// secure link's key id, and all zero is the anonymous key's
+    /// ([`crate::key_lookup`]). Only adding is refused; a stored file is
+    /// read as it is.
     pub fn upsert_secret(&mut self, entry: SecretEntry) -> Result<(), AccessFileError> {
         if entry.iterations == 0 {
             return Err(AccessFileError::ZeroIterations { label: entry.label });
@@ -173,7 +180,19 @@ impl DeviceAccessFile {
             return Ok(());
         }
         if self.secrets.len() >= crate::MAX_SECRETS_PER_FILE {
-            return Err(AccessFileError::TooManySecrets(self.secrets.len() + 1));
+            let oldest_browser = if entry.kind == SecretKind::Account {
+                self.secrets
+                    .iter()
+                    .position(|s| s.kind == SecretKind::Browser)
+            } else {
+                None
+            };
+            match oldest_browser {
+                Some(index) => {
+                    self.secrets.remove(index);
+                }
+                None => return Err(AccessFileError::TooManySecrets(self.secrets.len() + 1)),
+            }
         }
         self.secrets.push(entry);
         Ok(())
@@ -204,7 +223,6 @@ fn malformed(error: serde_json::Error) -> AccessFileError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::secret_kind::SecretKind;
     use crate::tier::Tier;
     use alloc::vec;
 
@@ -381,6 +399,100 @@ mod tests {
         // Replacing is still allowed at the cap.
         file.upsert_secret(key("renamed", 16)).unwrap();
         assert_eq!(file.secrets[15].label, "renamed");
+    }
+
+    fn full_file(kinds: &[SecretKind]) -> DeviceAccessFile {
+        let mut file = DeviceAccessFile::fresh();
+        for (i, kind) in kinds.iter().enumerate() {
+            let salt = i as u8 + 1;
+            file.upsert_secret(
+                SecretEntry::from_password(
+                    &alloc::format!("k{salt}"),
+                    Tier::Edit,
+                    b"k",
+                    [salt; 16],
+                    1,
+                )
+                .with_kind(*kind),
+            )
+            .unwrap();
+        }
+        assert_eq!(file.secrets.len(), kinds.len());
+        file
+    }
+
+    fn account(salt: u8) -> SecretEntry {
+        SecretEntry::from_password("account", Tier::Edit, b"a", [salt; 16], 1)
+            .with_kind(SecretKind::Account)
+    }
+
+    #[test]
+    fn an_account_key_displaces_the_oldest_browser_key_in_a_full_file() {
+        let mut file = full_file(&[SecretKind::Browser; 16]);
+        let before = file.clone();
+        file.upsert_secret(account(40)).unwrap();
+        assert_eq!(file.secrets.len(), crate::MAX_SECRETS_PER_FILE);
+        assert!(
+            !file.secrets.iter().any(|s| s.salt == [1; 16]),
+            "first browser key gone"
+        );
+        assert_eq!(file.secrets[..15], before.secrets[1..]);
+        assert_eq!(file.secrets[15].salt, [40; 16]);
+        assert_eq!(file.secrets[15].kind, SecretKind::Account);
+    }
+
+    #[test]
+    fn an_account_key_displaces_the_only_browser_key_among_accounts() {
+        let mut kinds = [SecretKind::Account; 16];
+        kinds[7] = SecretKind::Browser;
+        let mut file = full_file(&kinds);
+        file.upsert_secret(account(40)).unwrap();
+        assert_eq!(file.secrets.len(), crate::MAX_SECRETS_PER_FILE);
+        assert!(
+            !file.secrets.iter().any(|s| s.salt == [8; 16]),
+            "the browser key went"
+        );
+        assert_eq!(
+            file.secrets
+                .iter()
+                .filter(|s| s.kind == SecretKind::Account)
+                .count(),
+            16
+        );
+    }
+
+    #[test]
+    fn an_account_key_is_refused_when_a_full_file_has_no_browser_key() {
+        let mut file = full_file(&[SecretKind::Account; 16]);
+        let before = file.clone();
+        assert_eq!(
+            file.upsert_secret(account(40)),
+            Err(AccessFileError::TooManySecrets(17))
+        );
+        assert_eq!(file, before);
+    }
+
+    #[test]
+    fn a_browser_key_is_still_refused_in_a_full_file_of_browser_keys() {
+        let mut file = full_file(&[SecretKind::Browser; 16]);
+        let before = file.clone();
+        let entry = SecretEntry::from_password("b", Tier::Edit, b"k", [40; 16], 1)
+            .with_kind(SecretKind::Browser);
+        assert_eq!(
+            file.upsert_secret(entry),
+            Err(AccessFileError::TooManySecrets(17))
+        );
+        assert_eq!(file, before);
+    }
+
+    #[test]
+    fn a_made_room_file_serializes_in_the_same_shape() {
+        let mut file = full_file(&[SecretKind::Browser; 16]);
+        file.upsert_secret(account(40)).unwrap();
+        let json = file.to_json().unwrap();
+        assert!(json.starts_with("{\"version\":3,\"secrets\":[{"), "{json}");
+        assert!(json.contains("\"kind\":\"account\""), "{json}");
+        assert_eq!(DeviceAccessFile::from_json(json.as_bytes()).unwrap(), file);
     }
 
     #[test]

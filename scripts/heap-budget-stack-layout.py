@@ -26,58 +26,27 @@ frozen in the record (docs/adr/2026-09-23-heap-budget-record-split-and-derived-s
   the statics leave, with nothing hidden between them.
 
 Pure stdlib, reading the section header and symbol tables directly (32-bit
-little-endian ELF — RV32 and Xtensa alike). Shape after
+little-endian ELF — RV32 and Xtensa alike) through `scripts/elf32.py`, the one
+ELF reader this script shares with `scripts/ram-ledger.py`. Shape after
 `scripts/emu/elf-section-digest.py`, and for its reason: `readelf`/`nm` are
 not on a stock macOS and a host `llvm-nm` is not guaranteed on every runner.
 """
 
 import json
-import struct
 import sys
 
-SHT_SYMTAB = 2
-SHT_NOBITS = 8
-SHF_ALLOC = 0x2
+from elf32 import Elf32, ElfError
 
 
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
-    with open(sys.argv[1], "rb") as f:
-        blob = f.read()
-    if blob[:4] != b"\x7fELF":
-        raise SystemExit(f"{sys.argv[1]}: not an ELF")
-    if blob[4] != 1 or blob[5] != 1:
-        raise SystemExit(f"{sys.argv[1]}: only 32-bit little-endian ELF is supported")
+    try:
+        elf = Elf32.open(sys.argv[1])
+    except ElfError as e:
+        raise SystemExit(str(e))
 
-    e_shoff, = struct.unpack_from("<I", blob, 0x20)
-    e_shentsize, e_shnum, e_shstrndx = struct.unpack_from("<HHH", blob, 0x2E)
-    heads = []
-    for i in range(e_shnum):
-        off = e_shoff + i * e_shentsize
-        # name, type, flags, addr, offset, size, link
-        heads.append(struct.unpack_from("<IIIIIII", blob, off))
-
-    def cstr(table_off: int, idx: int) -> str:
-        end = blob.index(b"\0", table_off + idx)
-        return blob[table_off + idx : end].decode("utf-8", "replace")
-
-    shstr_off = heads[e_shstrndx][4]
-    names = [cstr(shstr_off, h[0]) for h in heads]
-
-    wanted = {"_stack_start": None, "_stack_end": None}
-    for h in heads:
-        if h[1] != SHT_SYMTAB:
-            continue
-        _, _, _, _, sym_off, sym_size, link = h
-        str_off = heads[link][4]
-        for k in range(sym_size // 16):
-            st_name, st_value = struct.unpack_from("<II", blob, sym_off + k * 16)
-            if st_name == 0:
-                continue
-            name = cstr(str_off, st_name)
-            if name in wanted and wanted[name] is None:
-                wanted[name] = st_value
+    wanted = elf.symbol_values(["_stack_start", "_stack_end"])
     missing = [n for n, v in wanted.items() if v is None]
     if missing:
         raise SystemExit(f"{sys.argv[1]}: no {', '.join(missing)} in the symbol table (stripped?)")
@@ -87,13 +56,11 @@ def main() -> None:
     # on every chip here that is `.bss` (or whatever NOLOAD section esp-hal
     # places last before `.stack`) — the statics the stack is the residual of.
     statics_end, statics_name = None, None
-    for h, name in zip(heads, names):
-        _, typ, flags, addr, _, size, _ = h
-        if not flags & SHF_ALLOC or size == 0 or name == ".stack":
+    for s in elf.sections:
+        if not s.alloc or s.size == 0 or s.name == ".stack":
             continue
-        end = addr + size
-        if end <= bottom and (statics_end is None or end > statics_end):
-            statics_end, statics_name = end, name
+        if s.end <= bottom and (statics_end is None or s.end > statics_end):
+            statics_end, statics_name = s.end, s.name
     if statics_end is None:
         raise SystemExit(f"{sys.argv[1]}: no allocated section below _stack_end 0x{bottom:08x}")
 

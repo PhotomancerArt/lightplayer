@@ -1,5 +1,5 @@
 ---
-status: FIXED 2026-09-08 — `records_pins` on `[[configuration]]`
+status: fixed          # 2026-09-08 — `records_pins` on `[[configuration]]`
 found: 2026-09-08      # the emulator debt sweep, recording `rmt-chase` on the desk C6
 area: lp-emu/lp-emu-validate/src/replay.rs (`pin_self_disagreements`, the `PinCapture::EveryFrame` arm)
 class: gate-cannot-be-satisfied

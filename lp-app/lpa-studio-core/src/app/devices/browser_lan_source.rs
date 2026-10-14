@@ -7,7 +7,7 @@
 //! link; `WsClientIo` is the borrowing conversation's io. What is left here
 //! is opening one session per address Studio was asked to reach (the
 //! `?lan=` shortcut at page load; a card's "Connect over Wi‑Fi" or an
-//! address typed into the add slot later, through [`LanLinkSource::connect`]),
+//! address typed into Connect a board's Network row later, through [`LanLinkSource::connect`]),
 //! handing the page's link keys to the provider, and keeping one wire handle
 //! per session for the link and a borrowing conversation to share.
 //!

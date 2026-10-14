@@ -726,6 +726,63 @@ zero is invalid, `Cache_MSPI_MMU_Set` (`0x4002_7c90`) says an entry is
 function, on purpose — and the rung that was promised off it has landed as
 `t3`.
 
+### Flash-cut injection: a power cut at a flash command
+
+`--flash-cut` (a TEST switch, off by default) cuts the supply in the middle
+of one program or erase command inside the `lpfs` partition and tears it
+the way a NOR part tears (plan
+`lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, P1–P2; the engine
+is `lp_emu_esp_common::engine::flash_cut`):
+
+```text
+--flash-cut <n>:<model>:<seed>[,range=<off>+<len>][,then=stop|power-cycle]
+```
+
+- **What is counted:** every page program (the C6 ROM sends 32-byte
+  commands) and every 4 KiB sector / 64 KiB block erase the part executes
+  whose target touches the range. Reads, WREN, status polls and status
+  writes are not; neither is a command the part ignores (WEL clear, off the
+  chip), nor a chip erase. `<n>` is 0-based from power-on (from the moment
+  of arming, for `Esp32C6Machine::arm_flash_cut` on a running machine).
+- **The range** is the chip's own `lpfs` row, read from the table on the
+  chip when the machine is built (a `--flash` image with another table is
+  cut in its real `lpfs`), else `0x350000+0xb0000`. `range=` overrides it.
+- **The tear** is an `lp-nor-sim` model by name: `clean` (the command does
+  nothing), `byte_prefix`, `random_bits`, `calibrated` (CX1's mix) and the
+  five forced erase shapes `calibrated_zeroing`, `calibrated_all_zero`,
+  `calibrated_erasing`, `calibrated_reads_ff_weak`, `calibrated_reads_ff`.
+  A calibrated program stops between commands or on a 4-byte word inside
+  this one; a torn block erase is one unit over its 64 KiB (the CX1 counts
+  are sector erases: unmeasured for blocks).
+- **After the cut** the chip refuses every program and erase until the
+  supply comes back, and the guest runs no further instruction. `then=stop`
+  (the default) ends the run with `Outcome::PowerCut` — exit code 6, the
+  line `POWER CUT …` — and the flash as the cut left it (a `--flash` file is
+  written back). `then=power-cycle` restores the power (both domains, as the
+  `power-cycle` control verb does) and runs on, the plan spent. Weak bits a
+  torn erase leaves read seeded noise until the sector is erased, survive
+  the power cycle, and are **in-process only**: a `--flash` file gets the
+  stored cells and the run warns once.
+- **What it prints:** one parseable line,
+  `FLASH-CUT op=<n> kind=program|sector-erase|block-erase addr=0x… len=…
+  model=… shape=<erase shape|-> cycle=… range=0x…+0x… seed=…`, the in-range
+  census `FLASH-OPS range=… ops=… programs=… program_bytes=… sector_erases=…
+  block_erases=…`, and the weak-bit count when there are any — at exit, or,
+  on `emu serve`, when the cut fires.
+- **The label** gains `+flash-cut`, after the seam atoms and before a pace:
+  `lp-emu:esp32c6:t1+net=lan+flash-cut`. `lp-cli validate run` and `record`
+  refuse it: an injected fault never makes a transcript.
+- **The hosts:** the bin's `--flash-cut`, `lp-cli emu run --flash-cut` (same
+  grammar), and `emu serve`'s board option `flash_cut=<spec>` with the
+  spec's own options joined by `;` (`flash_cut=40:calibrated:7;then=power-cycle`).
+  Rust tests use `Esp32C6Builder::flash_cut` or `arm_flash_cut`, and may call
+  `power_cycle` themselves (`lp-cli/tests/emu_flash_cut_smoke.rs`).
+- **What it does not model:** flash busy time (every command still takes
+  zero emulated time, so a cut lands between instructions, never inside an
+  erase's 20-odd milliseconds), a brown-out's slow supply, cuts outside a
+  program or erase, and weak bits across processes. The S3 and the classic
+  share the engine but do not wire it.
+
 ### What an address costs (`t3`)
 
 `cache::CacheCost` is the C6's implementation of `lp_emu_core::MemoryCost` —

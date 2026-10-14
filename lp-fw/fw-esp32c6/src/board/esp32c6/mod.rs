@@ -18,6 +18,8 @@ pub mod constants;
 ))]
 pub mod cycle_counter;
 pub mod init;
+#[cfg(feature = "lp_sram_heap")]
+pub mod lp_sram_heap;
 pub mod restart;
 // The product boot's only, like the quirks.
 #[cfg(not(fw_harness))]

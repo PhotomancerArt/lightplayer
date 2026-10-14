@@ -30,6 +30,23 @@ pub struct RandomParams {
     /// Stop after this cut (replay of a failure).
     #[serde(default)]
     pub stop_at_cut: Option<u64>,
+    /// Tear models a cut draws from, by name; empty = the three guessed
+    /// ones ([`TearModel::ALL`]), drawn exactly as before the field existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tears: Vec<String>,
+}
+
+impl RandomParams {
+    /// The tear models this walk draws from (unknown names are an error).
+    pub fn tear_models(&self) -> Result<Vec<TearModel>, String> {
+        if self.tears.is_empty() {
+            return Ok(TearModel::ALL.to_vec());
+        }
+        self.tears
+            .iter()
+            .map(|t| TearModel::from_name(t).ok_or_else(|| format!("unknown tear model {t:?}")))
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -48,7 +65,7 @@ pub struct RandomSummary {
     pub error: Option<String>,
 }
 
-const SLOTS: [&str; 3] = ["a", "b", "c"];
+pub(crate) const SLOTS: [&str; 3] = ["a", "b", "c"];
 
 pub fn random_walk(
     cand: &dyn Candidate,
@@ -80,6 +97,7 @@ fn walk(
     sum: &mut RandomSummary,
 ) -> Result<(), String> {
     let cfg = &p.config;
+    let tears = p.tear_models()?;
     let mut rng = SimRng::new(p.seed);
     let mut flash = NorFlashSim::new(cfg.geometry());
     flash.set_panic_on_violation(true);
@@ -120,7 +138,7 @@ fn walk(
                 step_ops,
                 dry_error: None,
             };
-            let tear = TearModel::ALL[rng.below(3) as usize];
+            let tear = tears[rng.below(tears.len() as u64) as usize];
             let case = CutCase {
                 candidate: cand.name().into(),
                 config: cfg.clone(),
@@ -182,7 +200,7 @@ fn slots_present(model: &Model) -> Vec<&'static str> {
         .collect()
 }
 
-fn next_step(
+pub(crate) fn next_step(
     rng: &mut SimRng,
     model: &Model,
     corpora: &CorpusSet,
@@ -251,6 +269,7 @@ mod tests {
             steps: 40,
             cut_one_in: 3,
             stop_at_cut: None,
+            tears: vec![],
         }
     }
 

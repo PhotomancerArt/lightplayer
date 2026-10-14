@@ -24,6 +24,15 @@
 //! the reassembly buffer keeps its capacity (never past `max_message`) up to
 //! `keep` bytes, and is released once its message is out when it grew past
 //! that (`LinkConfig::keep_reassembly`).
+//!
+//! On a fragmented heap the buffer cannot always grow: a `realloc` needs the
+//! old and the new block at once (an 8 KB buffer doubling to 16 KB asks for
+//! 24 KB of heap, in two blocks). When growth fails, the rest of the message
+//! is kept in frame-sized pieces, one small allocation each, and joined with
+//! one copy into a single exact-length `Vec` when its last fragment arrives,
+//! so the biggest block the message ever asks for is its own length. If even
+//! that block is not to be had, the message is dropped and counted
+//! (`oversize_messages`, which the link reports in `LinkCounters`).
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -56,6 +65,10 @@ pub struct Inbox {
     events: VecDeque<LinkEvent>,
     /// Per channel: the message being reassembled.
     partials: [Vec<u8>; CHANNELS],
+    /// Per channel: the fragments after `partials`, once it could not grow.
+    spill: [Vec<Vec<u8>>; CHANNELS],
+    /// Per channel: the bytes held in `spill`.
+    spilled: [usize; CHANNELS],
     /// Bit `c`: channel `c` is mid-message.
     open: u8,
     /// Bit `c`: channel `c` is mid-way through a message too long to keep.
@@ -72,6 +85,9 @@ pub struct Inbox {
     /// Tests: a heap that cannot grow a reassembly buffer past this.
     #[cfg(test)]
     refuse_growth_past: Option<usize>,
+    /// Tests: a heap with no block for a joined message past this.
+    #[cfg(test)]
+    refuse_join_past: Option<usize>,
 }
 
 impl Inbox {
@@ -79,6 +95,8 @@ impl Inbox {
         Inbox {
             events: VecDeque::new(),
             partials: Default::default(),
+            spill: Default::default(),
+            spilled: [0; CHANNELS],
             open: 0,
             dropping: 0,
             oversize: 0,
@@ -88,6 +106,8 @@ impl Inbox {
             keep,
             #[cfg(test)]
             refuse_growth_past: None,
+            #[cfg(test)]
+            refuse_join_past: None,
         }
     }
 
@@ -110,6 +130,14 @@ impl Inbox {
         self.ready_bytes
             + self.events.capacity() * size_of::<LinkEvent>()
             + self.partials.iter().map(Vec::capacity).sum::<usize>()
+            + self
+                .spill
+                .iter()
+                .map(|pieces| {
+                    pieces.capacity() * size_of::<Vec<u8>>()
+                        + pieces.iter().map(Vec::capacity).sum::<usize>()
+                })
+                .sum::<usize>()
     }
 
     /// Room to take `n` more bytes toward a message on `chan` (the part of it
@@ -118,7 +146,7 @@ impl Inbox {
     /// other.
     pub fn has_room(&self, chan: u8, n: usize) -> bool {
         let c = chan as usize % CHANNELS;
-        let partial = self.partials[c].len();
+        let partial = self.partial_len(c);
         if self.dropping & (1 << c) != 0 || partial + n > self.max_message {
             // It will be dropped, which takes no room.
             return true;
@@ -139,7 +167,9 @@ impl Inbox {
 
     /// Bytes queued for the application (charged) or reassembling.
     pub fn bytes(&self) -> usize {
-        self.ready_bytes + self.partials.iter().map(Vec::len).sum::<usize>()
+        self.ready_bytes
+            + self.partials.iter().map(Vec::len).sum::<usize>()
+            + self.spilled.iter().sum::<usize>()
     }
 
     pub fn budget(&self) -> usize {
@@ -164,7 +194,7 @@ impl Inbox {
             self.abort_all();
             return Err(ProtocolError);
         }
-        if self.partials[c].len() + f.data.len() > self.max_message {
+        if self.partial_len(c) + f.data.len() > self.max_message {
             self.abort(f.chan);
             self.oversize += 1;
             if !f.fin {
@@ -176,12 +206,11 @@ impl Inbox {
             self.deliver(f.chan, f.data.to_vec());
             return Ok(());
         }
-        if !self.grow_partial(c, f.data.len()) {
+        if !self.take_fragment(c, f.data) {
             // The heap cannot hold the message: drop it to its end, as an
-            // oversize one is, rather than abort the program. A board's
-            // largest free block is often smaller than its `max_message`
-            // (PR B's emulated LAN walk: an 8 KB write reset the C6 here,
-            // with 13,448 B in one piece).
+            // oversize one is, rather than abort the program (PR B's
+            // emulated LAN walk: an 8 KB write reset the C6 here, with
+            // 13,448 B in one piece).
             self.abort(f.chan);
             self.oversize += 1;
             if !f.fin {
@@ -189,21 +218,28 @@ impl Inbox {
             }
             return Ok(());
         }
-        self.partials[c].extend_from_slice(f.data);
         self.open |= bit;
         if f.fin {
-            // Past `keep`, the buffer is released right after anyway: hand
-            // it over instead of copying it out first, so a large message
-            // never briefly needs both the reassembly buffer and its own
-            // copy. Within `keep`, the buffer stays allocated for the next
-            // message, so it must be copied out of, not taken.
-            let data = if self.partials[c].capacity() > self.keep {
-                core::mem::take(&mut self.partials[c])
+            let data = if self.spill[c].is_empty() {
+                // Past `keep`, the buffer is released right after anyway:
+                // hand it over instead of copying it out first, so a large
+                // message never briefly needs both the reassembly buffer and
+                // its own copy. Within `keep`, the buffer stays allocated for
+                // the next message, so it must be copied out of, not taken.
+                if self.partials[c].capacity() > self.keep {
+                    Some(core::mem::take(&mut self.partials[c]))
+                } else {
+                    Some(self.partials[c].as_slice().to_vec())
+                }
             } else {
-                self.partials[c].as_slice().to_vec()
+                self.join(c)
             };
             self.abort(f.chan);
-            self.deliver(f.chan, data);
+            match data {
+                Some(data) => self.deliver(f.chan, data),
+                // No block of the message's length: dropped and counted.
+                None => self.oversize += 1,
+            }
         }
         Ok(())
     }
@@ -212,6 +248,8 @@ impl Inbox {
     pub fn abort(&mut self, chan: u8) {
         let c = chan as usize % CHANNELS;
         self.partials[c].clear();
+        self.spill[c] = Vec::new();
+        self.spilled[c] = 0;
         self.open &= !(1 << c);
         self.dropping &= !(1 << c);
     }
@@ -220,6 +258,10 @@ impl Inbox {
     /// a gap without ARQ).
     pub fn abort_all(&mut self) {
         self.partials.iter_mut().for_each(Vec::clear);
+        self.spill
+            .iter_mut()
+            .for_each(|pieces| *pieces = Vec::new());
+        self.spilled = [0; CHANNELS];
         self.open = 0;
         self.dropping = 0;
     }
@@ -279,9 +321,51 @@ impl Inbox {
         self.events.push_back(LinkEvent::Message { channel, data });
     }
 
-    /// Make room for `n` more bytes in channel `c`'s reassembly buffer:
-    /// double, but never past `max_message` (the caller checked the message
-    /// fits it).
+    /// Bytes of channel `c`'s message reassembled so far.
+    fn partial_len(&self, c: usize) -> usize {
+        self.partials[c].len() + self.spilled[c]
+    }
+
+    /// Add one fragment's bytes to channel `c`'s message: to its reassembly
+    /// buffer while that can hold them, else as a piece of its own. `false`:
+    /// the heap has not even room for the piece.
+    fn take_fragment(&mut self, c: usize, data: &[u8]) -> bool {
+        if self.spill[c].is_empty() && self.grow_partial(c, data.len()) {
+            self.partials[c].extend_from_slice(data);
+            return true;
+        }
+        // Once a message spills, every later fragment follows it, to keep
+        // the order.
+        let mut piece = Vec::new();
+        if piece.try_reserve_exact(data.len()).is_err() || self.spill[c].try_reserve(1).is_err() {
+            return false;
+        }
+        piece.extend_from_slice(data);
+        self.spill[c].push(piece);
+        self.spilled[c] += data.len();
+        true
+    }
+
+    /// Channel `c`'s finished message, copied once into a `Vec` of exactly
+    /// its length. `None`: the heap has no block that long.
+    fn join(&mut self, c: usize) -> Option<Vec<u8>> {
+        let total = self.partial_len(c);
+        #[cfg(test)]
+        if self.refuse_join_past.is_some_and(|limit| total > limit) {
+            return None;
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(total).ok()?;
+        out.extend_from_slice(&self.partials[c]);
+        for piece in &self.spill[c] {
+            out.extend_from_slice(piece);
+        }
+        if self.partials[c].capacity() > self.keep {
+            self.partials[c] = Vec::new();
+        }
+        Some(out)
+    }
+
     /// Room for `n` more bytes in channel `c`'s reassembly buffer: doubled
     /// (to `max_message`) when the heap has it, else exactly what is needed.
     /// `false`: the heap has neither.
@@ -394,13 +478,53 @@ mod tests {
         assert_eq!(inbox.bytes(), 0, "the partial is dropped");
     }
 
-    /// A message the heap cannot reassemble is dropped to its end and
-    /// counted, never an allocation failure; a shorter one after it fits.
-    /// (The C6 reset here on an 8 KB write with 13,448 B in one piece.)
+    /// A buffer the heap cannot grow no longer costs the message: the rest
+    /// of it is kept in pieces and joined once, in order, into a block of
+    /// exactly its length. (The C6 reset here on an 8 KB write with 13,448 B
+    /// in one piece.)
     #[test]
-    fn a_message_the_heap_cannot_hold_is_dropped_not_fatal() {
+    fn a_message_the_heap_cannot_grow_a_buffer_for_is_joined_from_pieces() {
         let mut inbox = Inbox::new(64 * 1024, 16 * 1024, 100);
         inbox.refuse_growth_past = Some(150);
+        let bytes: Vec<u8> = (0..190u32).map(|i| (i * 7) as u8).collect();
+        let frag = |first, fin, at: usize, n: usize| Fragment {
+            chan: 1,
+            first,
+            fin,
+            data: &bytes[at..at + n],
+        };
+        inbox.push_fragment(frag(true, false, 0, 60)).unwrap();
+        inbox.push_fragment(frag(false, false, 60, 60)).unwrap();
+        // 180 B does not fit a buffer the heap can grow: pieces from here.
+        inbox.push_fragment(frag(false, false, 120, 60)).unwrap();
+        assert_eq!(inbox.spilled[1], 60);
+        assert_eq!(inbox.bytes(), 180);
+        inbox.push_fragment(frag(false, true, 180, 10)).unwrap();
+        assert_eq!(inbox.oversize_messages(), 0);
+        let Some(LinkEvent::Message { data, .. }) = inbox.pop() else {
+            panic!("no message");
+        };
+        assert_eq!(data, bytes);
+        assert_eq!((data.len(), data.capacity()), (190, 190));
+        assert_eq!(inbox.bytes(), 0);
+        assert_eq!(inbox.spill[1].capacity(), 0, "the pieces are freed");
+        assert_eq!(inbox.partials[1].capacity(), 0, "past keep, released");
+        // The next message starts clean, whole in its buffer.
+        inbox.push_fragment(frag(true, false, 0, 60)).unwrap();
+        inbox.push_fragment(frag(false, true, 60, 20)).unwrap();
+        assert!(
+            matches!(inbox.pop(), Some(LinkEvent::Message { data, .. }) if data == bytes[..80])
+        );
+    }
+
+    /// When even the joined block cannot be had, the message is dropped and
+    /// counted (`oversize_messages`), never an allocation failure; a message
+    /// after it is whole.
+    #[test]
+    fn a_message_the_heap_cannot_join_is_counted_not_fatal() {
+        let mut inbox = Inbox::new(64 * 1024, 16 * 1024, 100);
+        inbox.refuse_growth_past = Some(150);
+        inbox.refuse_join_past = Some(185);
         let frag = |first, fin, n| Fragment {
             chan: 1,
             first,
@@ -409,12 +533,11 @@ mod tests {
         };
         inbox.push_fragment(frag(true, false, 60)).unwrap();
         inbox.push_fragment(frag(false, false, 60)).unwrap();
-        // 180 B does not fit the heap: dropped here, and the rest with it.
         inbox.push_fragment(frag(false, false, 60)).unwrap();
         inbox.push_fragment(frag(false, true, 10)).unwrap();
         assert_eq!(inbox.oversize_messages(), 1);
         assert!(inbox.pop().is_none(), "nothing delivered");
-        // Doubling past the limit falls back to exactly what is needed.
+        assert_eq!((inbox.bytes(), inbox.open), (0, 0), "nothing left over");
         inbox.push_fragment(frag(true, false, 60)).unwrap();
         inbox.push_fragment(frag(false, false, 60)).unwrap();
         inbox.push_fragment(frag(false, true, 20)).unwrap();
@@ -423,7 +546,6 @@ mod tests {
             "a message the heap can hold is whole"
         );
     }
-
     #[test]
     fn an_oversize_message_is_dropped_to_its_end_and_counted() {
         let mut inbox = Inbox::new(64 * 1024, 100, 100);

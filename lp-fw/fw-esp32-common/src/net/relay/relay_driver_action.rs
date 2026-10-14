@@ -23,4 +23,13 @@ pub enum RelayDriverAction {
     Close,
     /// Tell the mux, through the port (`RadioLinkPort::announce`).
     Announce(RadioLinkEvent),
+    /// Ask the main thread for a picture (`RelayPictureSlot::ask`); it
+    /// answers through the slot, which the edge turns into
+    /// `RelayEvent::PictureReady`.
+    TakePicture,
+    /// Send the ready picture on the device leg, as one message, and give
+    /// its buffer back.
+    SendPicture,
+    /// Drop the ready picture; give its buffer back.
+    DropPicture,
 }

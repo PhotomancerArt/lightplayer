@@ -2417,6 +2417,25 @@ heap-budget-check margin_pct="0": install-rv32-target
 heap-budget-baseline project="": install-rv32-target
     scripts/heap-budget-check.sh baseline {{ project }}
 
+# Where every byte of a chip's SRAM goes, read off a linked firmware ELF: ROM
+# reserve, cache, code in RAM, the radio blobs by library, .data/.bss by crate,
+# each heap region, the stack, idle bytes. The rows sum to the chip's RAM or the
+# script exits non-zero. Pure Python, no build: point it at a CI image
+# (`just fetch-ci-images`, then target/ci-images/<sha>/<chip>/…) or your own ELF.
+#
+#   just ram-ledger target/ci-images/<sha>/esp32c6/tree/ESP32C6_SERVER_RADIO_SPLIT/p2.elf
+#   just ram-ledger <elf> --chip esp32s3 --json out.json
+#
+# Flags: scripts/ram-ledger.py --help; method and limits: docs/heap-budget-gate.md
+# ("The whole-RAM ledger"). `just test-ram-ledger` is its self-test.
+ram-ledger *args:
+    python3 scripts/ram-ledger.py {{ args }}
+
+# The ledger's own tests: a synthetic ELF always, and a smoke run on the newest
+# fetched CI image when there is one (it says so loudly when there is not).
+test-ram-ledger:
+    python3 scripts/test_ram_ledger.py
+
 # The heap-budget record's OTHER source: a shipped firmware image booted whole
 # on its own SoC emulator, read from the allocator figures its own first
 # heartbeat reports.
@@ -3220,7 +3239,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3345,6 +3364,24 @@ lint-red-main-needs:
 # changes. docs/debt/ci-runner-time-over-the-concurrency-cap.md.
 lint-ci-durations:
     python3 scripts/ci/job-durations.py --self-test
+
+# The defect registry's index, built from each entry's frontmatter when it is
+# read: there is no hand-written table, so two PRs that each file a defect
+# never touch a shared line (docs/debt/hand-written-defects-index.md).
+# Markdown on stdout, newest first. `--by-class` (classes by count, then each
+# one's entries; † marks a class missing from the vocabulary), `--open`,
+# `--class <name>`; they combine.
+defects-index *args:
+    python3 scripts/defects-index.py {{ args }}
+
+# Every docs/defects/ entry carries what the index reads (a dated file name,
+# status open/fixed/wontfix, found, area, a one-word class, a title), and no
+# hand-written row has come back to the README. Its own fixture tests first.
+# Offline, stdlib python, ~0.1 s. CI runs it in the Lint job and, because a
+# defect-only PR is docs-only and skips Lint, in its own "Defect registry" job.
+lint-defects:
+    python3 scripts/defects-index.py --self-test
+    python3 scripts/defects-index.py --check
 
 # Main push's version tagger, against throwaway git repos: each run tags its
 # own commit, a tagged commit is a no-op, and a lost tag race retries.
@@ -3564,11 +3601,12 @@ test-emu-c6-cli-link: install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
 
 # The boards half: whole boards over the link — the fragmented-heap reads,
-# the split image's boot and the LED seam on the split image. CI's `Emulator
-# C6 lp-cli (x64)` job runs it. No pinned figures here, so that job has no
+# the split image's boot, the LED seam on the split image, and a flash power
+# cut mid-upload power-cycled back to a serving board. CI's `Emulator C6
+# lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke -- --include-ignored --nocapture
 
 # The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
 # B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
@@ -3584,7 +3622,7 @@ test-emu-c6-cli-agent: install-rv32-target
 # The link half's test binaries, named once: the recipe above runs them and
 # CI's figure-patch step re-runs them as a bless (`just c6-cli-link-tests`
 # prints them), so a binary added here is blessed too.
-C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture"
+C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture --test emu_batch_push"
 
 c6-cli-link-tests:
     @echo {{ C6_CLI_LINK_TESTS }}
@@ -4860,7 +4898,9 @@ fixture-fw variant port="":
 # TWO LANES since emulator plan two M6. `run <id> --emu` runs the same
 # scenario with NO BOARD, against an `lp-cli emu serve` the runner starts
 # itself, in headless Chrome; `check-guard` proves the emulated lane cannot
-# write a silicon fixture's name.
+# write a silicon fixture's name. `--emu --serve-release` serves the release
+# bundle itself (after `just studio-web-story-build`): no dev server, no
+# prompt, one foreground command.
 device-scenario *args:
     node scripts/device-scenario.mjs {{ args }}
 
@@ -4900,14 +4940,30 @@ walk-migration-emu *args:
     node scripts/emu/walk-migration-emu.mjs {{ args }}
 
 # The Bluetooth twin (M5 of the BLE remote-control plan): add over Bluetooth
-# → identify → push → Play → idle → knob, over `?ble=emu` against an emulated
-# C6, and the idle bytes/s a connected Play-mode Studio puts on a `ble:` link.
+# → identify → push → the card's picture → Play → idle → knob, over `?ble=emu`
+# against an emulated C6, and the bytes/s the card and an idle Play-mode
+# Studio put on a `ble:` link (wire bytes over the emulated USB link, not air).
 # Needs a Studio on this worktree's port, like walk-no-board — or
 # `--serve-release` (after `just studio-web-story-build`), which serves the
 # release bundle itself. Not CI.
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
+
+# One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
+# profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
+# emulated C6 over `?emu=`. Tab A holds the board; tab B (`?emu-second-tab=1`:
+# the board's bytes, not its cable) shows its picture and "Open in another
+# tab"; Connect there takes it over; A takes it back; A's tab closes and B
+# opens the board only when asked. Every wait is the board's own words or the
+# page's. Serves the RELEASE bundle itself with `--serve-release` (after
+# `just studio-web-story-build`, `just studio-firmware-package-served` and
+# `cargo build -p lp-cli`); `--steps 1-3` / `--steps 4-6` run part. Proves the
+# hold protocol, the card and the take-over — not Chrome's real exclusive
+# open() across tabs, a hidden tab, or a taker with a cable. Not CI.
+# Report: target/walk-two-tabs-emu/report.md.
+walk-two-tabs-emu *args:
+    node scripts/emu/walk-two-tabs-emu.mjs {{ args }}
 
 # The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, setting,
 # reading back (after a reload) and forgetting an emulated C6's Wi‑Fi over
@@ -4932,8 +4988,18 @@ walk-ble-emu *args:
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
 # `lightplayer.app` through the LAN's uplink to an in-process relay), keeps
 # its log, and checks each step against the board's own `[relay]` words
-# (target/walk-wifi-emu/relay/). Studio's relay walk is M8's. Not CI (the
-# cell is, in `test-emu-serve`).
+# (target/walk-wifi-emu/relay/) — relay protocol 2's pictures among them: one
+# right after registering, the project's name and colours, watched then idle
+# by itself, lost at a deploy, kept while offline. Not CI (the cell is, in
+# `test-emu-serve`).
+#
+# `relay-p1` (pictures-through-the-cloud plan P6, the same script with
+# `--protocol-1`): a core built at the last relay protocol 1 commit (pinned
+# in the script) at this hub — registered, listed at protocol 1, routed,
+# never sent a protocol 2 frame (one leg across a minute of watching), back
+# after a deploy. The image: `LP_RELAY_P1_ELF`, else CI's artifact of that
+# commit (7 days), else a throwaway-worktree build
+# (target/walk-wifi-emu/relay-p1/). Not CI.
 #
 # `studio-lan` (network-transport plan P04,
 # scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
@@ -4967,7 +5033,8 @@ walk-wifi-emu lane *args:
 # and re-seated under the editor and under Play — the page must stay put
 # behind "Reconnecting…" and resume the same session (defect
 # 2026-10-02-a-dropped-link-sends-the-editor-to-devices). Needs a Studio on
-# this worktree's port; never a CI job.
+# this worktree's port, or `--serve-release` (after `just studio-web-story-build`),
+# which serves the release bundle itself; never a CI job.
 walk-drop-emu *args:
     node scripts/emu/walk-drop-emu.mjs {{ args }}
 
@@ -4996,13 +5063,17 @@ walk-drop-emu *args:
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
-# `records.jsonl` beside the report.
+# `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
+# image directory (not built here): the crossing walk's X built at the last
+# relay protocol 1 commit, updated through the relay to this build, which
+# then sends pictures (`WALK_OTA_X=target/walk-ota-emu/images/x-p1 just
+# walk-ota-emu --relay --steps update`; pictures-through-the-cloud plan P6).
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
     images=target/walk-ota-emu/images
-    if [[ ! -f "${images}/x/merged.bin" ]]; then
+    if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
     fi
     if [[ ! -f "${images}/mono/package/manifest.json" ]]; then

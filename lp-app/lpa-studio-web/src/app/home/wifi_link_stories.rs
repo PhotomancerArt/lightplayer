@@ -20,7 +20,7 @@ use crate::app::home::ble_access_stories::usb_card;
 use crate::app::home::device_offer_story_fixtures::StoryDeviceCard;
 
 #[story(
-    description = "A board on the LAN (reached at `ws://192.168.1.40/link` — its remembered address, an address typed into the add slot, or the `?lan=` dev shortcut), connected over a secure link that this browser's own key opened at edit: the device line leads with how it is reached — \"Wi‑Fi · 192.168.1.40\", the same word the editor header and every other surface use for the link — then \"Unlocked by Yona's MacBook\" and the freshness. No Connections group: its USB and Bluetooth rows would describe links this board is not on. Its preview, before a frame lands, says what a USB board's does (\"No picture yet — the live feed is coming.\"): the card's feed runs over a LAN link. Before PR B's fix it said \"No live picture over Bluetooth\", because the model blocks firmware on every network link and the card read that as Bluetooth. Everything else is the card every running board wears; the card's network look is M8's."
+    description = "A board on the LAN (reached at `ws://192.168.1.40/link` — its remembered address, an address typed into Connect a board's Network row, or the `?lan=` dev shortcut), connected over a secure link that this browser's own key opened at edit: the connection bar leads with how it is reached — \"Wi‑Fi · connected\", the same word the editor header and every other surface use for the link — and its details give the address and URL, with no USB line: a USB or Bluetooth fact would describe a link this board is not on. Before a frame lands its picture is dark, and the status corner's details say what a USB board's do (\"No picture yet — the live feed is coming.\"): the card's feed runs over a LAN link. Before PR B's fix it said \"No live picture over Bluetooth\", because the model blocks firmware on every network link and the card read that as Bluetooth. Everything else is the card every running board wears."
 )]
 fn wifi_card_connected() -> Element {
     rsx! {
@@ -39,7 +39,7 @@ fn wifi_card_connected() -> Element {
 }
 
 #[story(
-    description = "The same board the moment its socket dropped (it rebooted): \"Offline\", Reconnect and Forget, the project and firmware verbs gone, and the device line still \"Wi‑Fi · 192.168.1.40 · last heard 4 s ago\" — the address the page keeps dialling, with no gesture, until the board answers again and a new secure session says hello. (The drop's own words, \"wi-fi link lost: the board closed the link (code 1001: rebooting)\", are in the device journal; an offline card draws no terminal.)"
+    description = "The same board the moment its socket dropped (it rebooted): \"Offline\" on the connection bar, Connect as the primary, the address and \"last heard 4 s ago\" in its details — the address the page keeps dialling, with no gesture, until the board answers and a new secure session says hello. (The drop's own words, \"wi-fi link lost: the board closed the link (code 1001: rebooting)\", are in the device journal; an offline card draws no terminal.)"
 )]
 fn wifi_card_dropped() -> Element {
     let mut card = wifi_card();
@@ -89,5 +89,10 @@ fn unlocked() -> UiDeviceAccess {
         unlock: None,
         panel: None,
         account_key_refused: None,
+        grant: Some(lpa_studio_core::UiAccessGrant {
+            tier: lpa_studio_core::AccessTier::Edit,
+            key: Some("Yona's MacBook".to_string()),
+        }),
+        waiting: None,
     }
 }

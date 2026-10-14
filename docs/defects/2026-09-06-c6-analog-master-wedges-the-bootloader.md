@@ -1,5 +1,5 @@
 ---
-status: root-caused — needs one power cycle to confirm the cure
+status: open           # root-caused — needs one power cycle to confirm the cure
 found: 2026-09-06      # bench, L1 (the UART bridge harness), esp-emulator plan
 fixed: not fixed — the cure is a POWER CYCLE, which needs hands
 area: bench fixture (two XIAO ESP32-C6s), ESP-IDF second-stage bootloader, LP_I2C_ANA_MST

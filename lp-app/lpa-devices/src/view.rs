@@ -145,6 +145,11 @@ pub struct DeviceView {
     /// separate fact ([`crate::Evidence::announced_update_channel`]).
     #[serde(default)]
     pub update_blocked: Option<String>,
+    /// Another tab of this browser holds this board, and how: the board's
+    /// fact ([`crate::Evidence::held_elsewhere`]), independent of any link
+    /// this tab has to it. `None` = no other tab has said it holds it.
+    #[serde(default)]
+    pub held_elsewhere: Option<crate::held_elsewhere::HeldElsewhere>,
     /// Never empty (invariant I3).
     pub escapes: Vec<Escape>,
 }
@@ -246,6 +251,10 @@ pub struct PendingLinkView {
     /// restart request, which waits for the board to answer.)
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// This link's port is held by another tab of this browser, so it was
+    /// not opened here ([`crate::Event::LinkHeld`]).
+    #[serde(default)]
+    pub held_by_tab: bool,
     /// Dismiss, expressed as [`Escape::Forget`].
     pub escapes: Vec<Escape>,
 }
@@ -391,6 +400,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .filter(|endpoint| endpoint.is_network())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
         update_blocked: update_blocked(device),
+        held_elsewhere: device.evidence.held_elsewhere.clone(),
         escapes,
     }
 }
@@ -690,9 +700,14 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             None => words.to_string(),
         }
     });
+    let held_by_tab = entry.evidence().link_held_by_tab();
     let state_label = match entry.verdict() {
         _ if updating.is_some() => updating.clone().unwrap_or_default(),
         None => "New device found — identifying…".to_string(),
+        // Another tab of this browser said it holds this port, so it was
+        // never opened here: not a guess between "another app" and "another
+        // tab" (below), but the other tab's own word.
+        Some(_) if held_by_tab => "New device found — open in another Studio tab".to_string(),
         // Identify settled having heard nothing at all — the window's
         // classify() cascade bottoms out at `Unknown` (forced, if presence
         // ever lost attachment) or its own `Quiet` fallback, and either one
@@ -766,6 +781,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             .endpoint
             .is_bluetooth()
             .then(|| FIRMWARE_NEEDS_USB.to_string()),
+        held_by_tab,
         escapes: vec![Escape::Forget],
     }
 }

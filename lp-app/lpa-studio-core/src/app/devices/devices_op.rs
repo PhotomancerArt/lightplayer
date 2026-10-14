@@ -1,4 +1,4 @@
-//! The devices page's ONE verb: carry an [`Action`] to the roster.
+//! The device surfaces' ONE verb: carry an [`Action`] to the roster.
 //!
 //! Every device gesture in the UI is an `lpa-devices` [`Action`] and nothing
 //! else. There is deliberately no per-verb op enum here: the old system's

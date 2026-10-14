@@ -10,12 +10,9 @@ use crate::OfferPath;
 /// until it says which page it is.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiPage {
-    /// The landing page (`/`).
+    /// The home page (`/`): the boards, the projects and the catalog. The
+    /// old `/devices` and `/projects` addresses are this page too.
     Home,
-    /// The devices gallery (`/devices`).
-    Devices,
-    /// The projects library (`/projects`).
-    Projects,
     /// The explore section (`/explore`).
     Explore,
     /// The signed-in account's page (`/account`).
@@ -63,30 +60,25 @@ impl UiPage {
     }
 
     /// The offer area this page is about: `project` in the editor,
-    /// `devices` on the gallery pages, `None` where Studio offers nothing
-    /// (docs, the boards catalog, the board editor, the story book).
+    /// `devices` on the home page and the pages beside it (the home page
+    /// adds `project`, its own new and open, in `offer_focus`), `None`
+    /// where Studio offers nothing (docs, the boards catalog, the board
+    /// editor, the story book).
     pub fn offer_area(&self) -> Option<OfferPath> {
         match self {
             Self::Project { .. } | Self::Example { .. } | Self::Device { .. } => {
                 Some(OfferPath::project())
             }
-            Self::Home
-            | Self::Devices
-            | Self::Projects
-            | Self::Explore
-            | Self::Account
-            | Self::Unlock => Some(OfferPath::devices()),
+            Self::Home | Self::Explore | Self::Account | Self::Unlock => Some(OfferPath::devices()),
             Self::Docs { .. } | Self::Boards { .. } | Self::BoardEditor | Self::Stories => None,
         }
     }
 
     /// The page in a few plain words, for the agent's readout:
-    /// `project editor, patch view`, `devices page`, `docs: wiring`.
+    /// `project editor, patch view`, `home`, `docs: wiring`.
     pub fn describe(&self) -> String {
         match self {
             Self::Home => "home".to_string(),
-            Self::Devices => "devices page".to_string(),
-            Self::Projects => "projects library".to_string(),
             Self::Explore => "explore page".to_string(),
             Self::Account => "account page".to_string(),
             Self::Unlock => "unlock page (a shared device password)".to_string(),
@@ -129,7 +121,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_editor_is_about_the_project_and_the_galleries_about_devices() {
+    fn the_editor_is_about_the_project_and_the_home_page_about_devices() {
         let editor = UiPage::Project {
             uid: "prj123".to_string(),
             view: UiProjectView::Patch,
@@ -137,8 +129,8 @@ mod tests {
         assert!(editor.is_editor());
         assert_eq!(editor.offer_area(), Some(OfferPath::project()));
         assert_eq!(editor.describe(), "project editor, patch view");
-        assert_eq!(UiPage::Devices.offer_area(), Some(OfferPath::devices()));
         assert_eq!(UiPage::Home.offer_area(), Some(OfferPath::devices()));
+        assert_eq!(UiPage::Home.describe(), "home");
         assert_eq!(
             UiPage::Docs {
                 article: Some("wiring".to_string())

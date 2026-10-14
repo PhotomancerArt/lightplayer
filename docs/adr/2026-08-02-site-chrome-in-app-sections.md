@@ -49,6 +49,11 @@ embedded nodes as the teaching strategy — both point at in-app.
 > the bar changes — the logo is still the only way to Home, and it still
 > wears the you're-here underline there.
 
+> **Amended 2026-10-09** (the one home page): the Devices and Projects tabs
+> are retired; the logo is Home's only tab; `/devices` and `/projects` parse
+> as Home and heal to `/`. See
+> [2026-10-08-the-board-card-and-one-home-page.md](2026-10-08-the-board-card-and-one-home-page.md).
+
 - **One shared top bar** (`lpa-studio-web::app::layout::SiteChrome`) renders
   on the studio app, the boards catalog, and the docs section, with
   **Studio / Boards / Docs** nav tabs. Boards and docs are in-app sections,

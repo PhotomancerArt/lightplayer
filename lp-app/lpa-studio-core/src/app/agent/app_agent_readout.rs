@@ -28,7 +28,8 @@ use serde_json::Value;
 use crate::app::project::agent_focus::AgentNodeFocus;
 use crate::{
     ActionConsequence, ActionEnablement, DeviceRosterView, OfferArgError, OfferChoice,
-    OfferNearness, OfferParam, OfferParamKind, OfferPath, UiOffer, UiOfferFocus, UiPage, UiPlace,
+    OfferNearness, OfferParam, OfferParamKind, OfferPath, UiHomeBoard, UiHomeSection, UiHomeTab,
+    UiHomeView, UiOffer, UiOfferFocus, UiPage, UiPlace,
 };
 
 /// The readout as the controller builds it after a batch: where the user
@@ -549,10 +550,98 @@ pub fn device_lines(roster: &DeviceRosterView) -> String {
     text
 }
 
+/// The home page the way a person sees it (PD14): its tabs, then each
+/// section's contents by name — the boards online and off with what they
+/// play, the offers that connect a board, the projects no board plays, the
+/// patterns. A section with nothing says `none`; a long one names its first
+/// [`CHOICES_LISTED`] and counts the rest.
+///
+/// Read from [`UiHomeView::sections`], the same data the page draws, so
+/// the agent and the web cannot disagree about which section a thing is in.
+pub fn home_lines(home: &UiHomeView) -> String {
+    let sections = &home.sections;
+    let tabs: Vec<&str> = UiHomeTab::ALL.iter().map(|tab| tab.label()).collect();
+    let mut text = format!("home page (tabs: {}):\n", tabs.join(", "));
+    if sections.newcomer {
+        text.push_str(
+            "- a first visit: no board and no project yet; Connect a board comes first\n",
+        );
+    }
+    let board = |board: &UiHomeBoard| {
+        let plays = board
+            .project
+            .as_ref()
+            .map(|project| format!("; plays {project:?}"))
+            .unwrap_or_default();
+        format!("{:?} ({}{plays})", board.title, board.status)
+    };
+    let named = |uids: &[String]| -> Vec<String> {
+        uids.iter()
+            .filter_map(|uid| home.projects.iter().find(|card| card.uid == *uid))
+            .map(|card| format!("{:?}", card.slug))
+            .collect()
+    };
+    let _ = writeln!(
+        text,
+        "- {}: {}",
+        UiHomeSection::OnlineBoards.label().to_lowercase(),
+        counted(sections.online.iter().map(board).collect(), "; ")
+    );
+    let _ = writeln!(
+        text,
+        "- {}: {}",
+        UiHomeSection::OfflineBoards.label().to_lowercase(),
+        counted(sections.offline.iter().map(board).collect(), "; ")
+    );
+    let _ = writeln!(
+        text,
+        "- {}: {}",
+        UiHomeSection::ConnectBoard.label().to_lowercase(),
+        counted(
+            sections
+                .connect
+                .offers
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+            ", "
+        )
+    );
+    let _ = writeln!(
+        text,
+        "- {} (no board plays them): {}",
+        UiHomeSection::OtherProjects.label().to_lowercase(),
+        counted(named(&sections.other_projects), ", ")
+    );
+    let _ = writeln!(
+        text,
+        "- {}: {}",
+        UiHomeSection::YourPatterns.label().to_lowercase(),
+        counted(named(&sections.patterns), ", ")
+    );
+    text
+}
+
+/// `items` joined by `separator`, the first [`CHOICES_LISTED`] named and the
+/// rest counted ("and 4 more"); `none` for an empty list.
+fn counted(items: Vec<String>, separator: &str) -> String {
+    if items.is_empty() {
+        return "none".to_string();
+    }
+    let more = items.len().saturating_sub(CHOICES_LISTED);
+    let mut named: Vec<String> = items.into_iter().take(CHOICES_LISTED).collect();
+    if more > 0 {
+        named.push(format!("and {more} more"));
+    }
+    named.join(separator)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActionConfirmation, ControllerId, ProjectNodeAddress, ProjectOp, UiAction};
+    use crate::{
+        ActionConfirmation, ControllerId, ProjectNodeAddress, ProjectOp, UiAction, UiHomeBoardKind,
+    };
 
     fn snapshot() -> AppReadoutSnapshot {
         let project = ControllerId::new("studio|project");
@@ -932,6 +1021,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: Vec::new(),
             update_blocked: None,
             last_update_outcome: None,
@@ -953,5 +1043,175 @@ mod tests {
                 .render()
                 .contains("actions: none offered")
         );
+    }
+
+    #[test]
+    fn the_home_page_is_read_section_by_section() {
+        let mut home = home_fixture();
+        let fyeah = package("Fyeah Sign");
+        let rocaille = package("Rocaille");
+        home.projects = vec![
+            fyeah.clone(),
+            rocaille.clone(),
+            package("Untitled 4"),
+            pattern("Ember Drift"),
+        ];
+        home.sections.online = vec![home_board(
+            1,
+            UiHomeBoardKind::Connected,
+            "Desk C6",
+            "Ready",
+            Some("Fyeah Sign"),
+        )];
+        home.sections.offline = vec![home_board(
+            2,
+            UiHomeBoardKind::Remembered,
+            "Truck",
+            "last heard 2 weeks ago",
+            Some("Rocaille"),
+        )];
+        home.sections.other_projects = vec![home.projects[2].uid.clone()];
+        home.sections.patterns = vec![home.projects[3].uid.clone()];
+        assert_eq!(
+            home_lines(&home),
+            "home page (tabs: All, Boards, Projects, Patterns):\n\
+             - online boards: \"Desk C6\" (Ready; plays \"Fyeah Sign\")\n\
+             - offline boards: \"Truck\" (last heard 2 weeks ago; plays \"Rocaille\")\n\
+             - connect a board: devices/connect-usb, devices/connect-ble, \
+             devices/connect-wifi-address, devices/new-sim\n\
+             - other projects (no board plays them): \"Untitled 4\"\n\
+             - your patterns: \"Ember Drift\"\n"
+        );
+    }
+
+    #[test]
+    fn a_board_that_plays_nothing_known_is_named_by_its_status_alone() {
+        let mut home = home_fixture();
+        home.sections.online = vec![
+            home_board(
+                1,
+                UiHomeBoardKind::Pending,
+                "New board",
+                "Identifying…",
+                None,
+            ),
+            home_board(2, UiHomeBoardKind::Connected, "Desk C6", "Ready", None),
+        ];
+        let text = home_lines(&home);
+        assert!(
+            text.contains("- online boards: \"New board\" (Identifying…); \"Desk C6\" (Ready)\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_newcomer_page_says_so_and_names_every_section_none() {
+        let mut home = home_fixture();
+        home.sections.newcomer = true;
+        home.sections.connect.welcome = true;
+        assert_eq!(
+            home_lines(&home),
+            "home page (tabs: All, Boards, Projects, Patterns):\n\
+             - a first visit: no board and no project yet; Connect a board comes first\n\
+             - online boards: none\n\
+             - offline boards: none\n\
+             - connect a board: devices/connect-usb, devices/connect-ble, \
+             devices/connect-wifi-address, devices/new-sim\n\
+             - other projects (no board plays them): none\n\
+             - your patterns: none\n"
+        );
+    }
+
+    #[test]
+    fn twelve_projects_name_eight_and_count_the_rest() {
+        let mut home = home_fixture();
+        home.projects = (1..=12).map(|n| package(&format!("Project {n}"))).collect();
+        home.sections.other_projects = home.projects.iter().map(|p| p.uid.clone()).collect();
+        let text = home_lines(&home);
+        assert!(
+            text.contains(
+                "- other projects (no board plays them): \"Project 1\", \"Project 2\", \
+                 \"Project 3\", \"Project 4\", \"Project 5\", \"Project 6\", \"Project 7\", \
+                 \"Project 8\", and 4 more\n"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("Project 9"), "{text}");
+    }
+
+    #[test]
+    fn a_section_naming_a_project_the_library_lacks_skips_it() {
+        let mut home = home_fixture();
+        home.sections.other_projects = vec!["prj-gone".to_string()];
+        assert!(
+            home_lines(&home).contains("(no board plays them): none\n"),
+            "a uid with no card is not named"
+        );
+    }
+
+    fn home_fixture() -> UiHomeView {
+        UiHomeView {
+            projects: Vec::new(),
+            examples: Vec::new(),
+            devices: DeviceRosterView::default(),
+            sections: crate::UiHomeSections {
+                connect: crate::UiHomeConnect {
+                    offers: [
+                        "connect-usb",
+                        "connect-ble",
+                        "connect-wifi-address",
+                        "new-sim",
+                    ]
+                    .into_iter()
+                    .map(|verb| OfferPath::devices().child(verb))
+                    .collect(),
+                    welcome: false,
+                },
+                ..crate::UiHomeSections::default()
+            },
+            library_available: true,
+            opening: None,
+            issue: None,
+        }
+    }
+
+    fn home_board(
+        id: u64,
+        kind: UiHomeBoardKind,
+        title: &str,
+        status: &str,
+        project: Option<&str>,
+    ) -> UiHomeBoard {
+        UiHomeBoard {
+            id: crate::DeviceId(id),
+            kind,
+            title: title.to_string(),
+            status: status.to_string(),
+            project: project.map(str::to_string),
+            row_verbs: Vec::new(),
+        }
+    }
+
+    fn package(slug: &str) -> crate::UiPackageCard {
+        crate::UiPackageCard {
+            uid: format!("prj-{slug}"),
+            kind: "Module".to_string(),
+            project_kind: "General".to_string(),
+            exports: Vec::new(),
+            slug: slug.to_string(),
+            last_saved_at: None,
+            provenance: None,
+            on_boards: Vec::new(),
+            open_elsewhere: false,
+            target: None,
+            health: crate::app::library::PackageHealth::Ready,
+        }
+    }
+
+    fn pattern(slug: &str) -> crate::UiPackageCard {
+        crate::UiPackageCard {
+            project_kind: "Pattern".to_string(),
+            ..package(slug)
+        }
     }
 }

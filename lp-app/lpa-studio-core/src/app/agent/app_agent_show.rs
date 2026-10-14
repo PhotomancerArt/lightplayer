@@ -34,7 +34,7 @@ pub(crate) fn place_phrase(
             Some(name) => format!("on the {name} card"),
             None => "in the project header".to_string(),
         },
-        Some(OfferPath::DEVICES) if segments.len() <= 2 => "on the Devices page".to_string(),
+        Some(OfferPath::DEVICES) if segments.len() <= 2 => "in Connect a board".to_string(),
         Some(OfferPath::DEVICES) => match device_title {
             Some(title) => format!("on {title}'s card"),
             None => "on the board's card".to_string(),
@@ -148,7 +148,7 @@ mod tests {
         );
         assert_eq!(
             place_phrase(&OfferPath::devices().child("connect-usb"), None, None),
-            "on the Devices page"
+            "in Connect a board"
         );
     }
 

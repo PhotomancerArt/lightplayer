@@ -1,8 +1,8 @@
-//! The gallery pages (P09 split, vision D9/D10/D14): Devices (the
-//! runtime roster — being rebuilt, see [`devices_page`]), Projects (the
-//! library), Explore (examples), and the Home landing stub — plus the
-//! cards they share. One combined gallery page lived here until the
-//! chrome C reorg split it.
+//! The home page and the pages beside it: the home page itself ([`page`]:
+//! `/`, one page for the boards, the projects and the catalog — it took in
+//! the Devices page's roster and the Projects page's library), Explore
+//! (examples), and the pages a link lands on (Unlock, the opening frame) —
+//! plus the cards they share.
 
 pub(crate) mod access_added_toast;
 pub(crate) mod access_fields;
@@ -12,32 +12,30 @@ pub(crate) mod access_ui_context;
 #[cfg(feature = "stories")]
 pub(crate) mod ble_access_stories;
 pub(crate) mod ble_reach;
-pub(crate) mod brand_hero;
+pub(crate) mod boards_line;
 pub(crate) mod browser_identity;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
-pub(crate) mod connections_group;
+pub(crate) mod connect_board;
 pub(crate) mod device_access_panel;
 pub(crate) mod device_layout_sheet;
 #[cfg(feature = "stories")]
 pub(crate) mod device_offer_story_fixtures;
 pub(crate) mod device_pick_popover;
-pub(crate) mod device_roster_card;
+pub(crate) mod device_rename_section;
 pub(crate) mod device_terminal;
 #[cfg(feature = "stories")]
 pub(crate) mod device_update_stories;
-pub mod devices_page;
 pub(crate) mod example_card;
 pub mod explore_page;
 pub(crate) mod gallery_paste;
 pub(crate) mod gallery_preview;
 #[cfg(feature = "stories")]
 pub(crate) mod home_gallery_stories;
-pub mod home_landing;
 #[cfg(feature = "stories")]
 pub(crate) mod home_landing_stories;
 #[cfg(feature = "stories")]
-pub(crate) mod home_offer_story_fixtures;
+pub(crate) mod home_page_stories;
 /// The `catalog/logo-sign` mapping generator plus its drift gate. Test-only:
 /// the running app reads the committed document, never this.
 #[cfg(test)]
@@ -49,16 +47,16 @@ pub(crate) mod package_card;
 #[cfg(feature = "stories")]
 pub(crate) mod package_card_stories;
 pub mod package_export;
-pub(crate) mod play_feed_text;
+pub mod page;
 pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
-pub mod projects_page;
 pub(crate) mod reach_note;
 #[cfg(feature = "stories")]
 pub(crate) mod relay_connect_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod relay_link_stories;
+pub(crate) mod row_cta;
 pub(crate) mod share_words;
 pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render
@@ -83,18 +81,16 @@ pub(crate) mod wifi_panel;
 #[cfg(feature = "stories")]
 pub(crate) mod wifi_stories;
 
-pub use devices_page::DevicesPage;
 pub use explore_page::ExplorePage;
-pub use home_landing::HomePage;
+pub use page::HomePage;
 pub use project_opening_frame::ProjectOpeningFrame;
-pub use projects_page::ProjectsPage;
 
 /// Shared section-header treatment across the gallery pages.
 pub(crate) fn section_title_class() -> &'static str {
     "tw:m-0 tw:text-xs tw:font-extrabold tw:uppercase tw:leading-none tw:text-heading"
 }
 
-/// The compact card grid (Projects / Explore).
+/// The compact card grid (the home page's projects, Explore).
 pub(crate) fn card_grid_class() -> &'static str {
     "tw:grid tw:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] tw:gap-3.5"
 }

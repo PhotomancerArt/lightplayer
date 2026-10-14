@@ -20,6 +20,23 @@ pub enum ActionButtonVariant {
     Outline,
     /// A full-width left-aligned row inside a menu popup.
     MenuItem,
+    /// A flush section at a row's end (the board card's bar action): no
+    /// chip, the row's full height, a hairline on its leading edge, a wash
+    /// on hover. The row is one fixed line, so a refusal is the button's
+    /// title (and its hidden text), never a line under it.
+    RowEnd,
+    /// The row's one primary as a flush section (the board card's name
+    /// bar, `docs/style/ui.md` "The board card"): [`Self::RowEnd`]'s
+    /// geometry, bolder, and the iridescent ring answering hover.
+    RowPrimary,
+}
+
+impl ActionButtonVariant {
+    /// A flush section of a fixed-height row: it fills the row and says a
+    /// refusal in its title rather than under itself.
+    pub fn is_row_section(self) -> bool {
+        matches!(self, Self::RowEnd | Self::RowPrimary)
+    }
 }
 
 #[component]
@@ -56,9 +73,16 @@ pub fn ActionButton(
     // One look per consequence level, in every variant (D7, Q7): Routine is
     // plain, Undoable wears the error tint, Lasting wears it and arms.
     let class = action_class(variant, meta.priority, meta.consequence.wears_error_tint());
-    let disabled_reason = disabled_reason(&meta.enablement)
-        .filter(|_| !reason_said_elsewhere)
+    let row_section = variant.is_row_section();
+    let refusal = disabled_reason(&meta.enablement)
+        .filter(|reason| !reason.is_empty())
         .map(ToString::to_string);
+    // A flush row section has no line under it: its refusal is its title
+    // and its hidden text. Every other look says it under the button.
+    let disabled_reason = refusal
+        .clone()
+        .filter(|_| !reason_said_elsewhere && !row_section);
+    let row_refusal = refusal.filter(|_| row_section);
     let icon = action_icon_name(meta.icon.as_deref());
     let arms = arms_on_press(&meta.consequence, asked_by_surface);
     let copy = meta.consequence.copy().cloned();
@@ -69,6 +93,16 @@ pub fn ActionButton(
         ActionButtonVariant::Quiet
         | ActionButtonVariant::Outline
         | ActionButtonVariant::MenuItem => 14,
+        ActionButtonVariant::RowEnd => 11,
+        ActionButtonVariant::RowPrimary => 12,
+    };
+    let icon_box = match row_section {
+        true => "tw:inline-flex tw:flex-none tw:items-center tw:justify-center",
+        false => "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center",
+    };
+    let wrapper_class = match row_section {
+        true => ROW_SECTION_WRAPPER_CLASS,
+        false => "tw:grid tw:min-w-0 tw:gap-1",
     };
 
     // The two-click arm of a Lasting action: the first click ARMS the
@@ -85,7 +119,11 @@ pub fn ActionButton(
     let armed_title = copy.as_ref().map(|c| c.message.clone()).unwrap_or_default();
     let (rest_label, armed_label) =
         confirm_chip_labels(&label, copy.as_ref().map(|c| c.confirm_label.as_str()));
-    let shown_title = if arms && armed { armed_title } else { summary };
+    let shown_title = match (&row_refusal, arms && armed) {
+        (_, true) => armed_title,
+        (Some(reason), false) => reason.clone(),
+        (None, false) => summary,
+    };
     let shown_class = if arms {
         confirm_chip_class(class, armed)
     } else {
@@ -93,7 +131,7 @@ pub fn ActionButton(
     };
 
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-1",
+        div { class: wrapper_class,
             button {
                 class: shown_class,
                 r#type: "button",
@@ -110,7 +148,7 @@ pub fn ActionButton(
                     }
                 },
                 if let Some(icon) = icon {
-                    span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
+                    span { class: icon_box, aria_hidden: "true",
                         StudioIcon {
                             name: icon,
                             size: icon_px,
@@ -123,7 +161,7 @@ pub fn ActionButton(
                 // its neighbours. The armed label is hidden from AT — the
                 // armed `title` carries the confirmation message.
                 if arms {
-                    span { class: "ux-armed-labels",
+                    span { class: armed_labels_class(variant),
                         span { class: "ux-armed-label-rest", "{rest_label}" }
                         span { class: "ux-armed-label-armed", aria_hidden: "true", "{armed_label}" }
                     }
@@ -133,12 +171,31 @@ pub fn ActionButton(
             }
             // An empty reason is a verb whose reason is said once beside it
             // (a row of verbs disabled for the same cause).
-            if let Some(reason) = disabled_reason.as_ref().filter(|reason| !reason.is_empty()) {
+            if let Some(reason) = disabled_reason.as_ref() {
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground", "{reason}" }
+            }
+            // A row section's refusal, for a screen reader (its title says
+            // it to a pointer).
+            if let Some(reason) = row_refusal {
+                span { class: "tw:sr-only", "{reason}" }
             }
         }
     }
 }
+
+/// The two stacked labels' classes: a menu row's sit at its leading edge
+/// (`ux-armed-labels-start`, style.css), as its text does; every other look
+/// centres them in the reserved width.
+fn armed_labels_class(variant: ActionButtonVariant) -> &'static str {
+    match variant {
+        ActionButtonVariant::MenuItem => "ux-armed-labels ux-armed-labels-start",
+        _ => "ux-armed-labels",
+    }
+}
+
+/// A row section's own wrapper: it fills the row's height and never
+/// shrinks, so the section is flush top to bottom.
+const ROW_SECTION_WRAPPER_CLASS: &str = "tw:grid tw:min-w-0 tw:flex-none tw:self-stretch";
 
 /// Whether a press arms rather than acts: a Lasting action arms on its own
 /// button, unless the surface around it has already asked (see
@@ -189,8 +246,42 @@ fn action_class(
         ActionButtonVariant::Quiet => quiet_class(tinted),
         ActionButtonVariant::Outline => outline_action_class(tinted),
         ActionButtonVariant::MenuItem => menu_item_class(tinted),
+        ActionButtonVariant::RowEnd if tinted => ROW_END_TINTED_CLASS,
+        ActionButtonVariant::RowEnd => ROW_END_CLASS,
+        ActionButtonVariant::RowPrimary if tinted => ROW_PRIMARY_TINTED_CLASS,
+        ActionButtonVariant::RowPrimary => ROW_PRIMARY_CLASS,
     }
 }
+
+/// [`ActionButtonVariant::RowEnd`]: a flush section the row's height, its
+/// leading hairline (`ux-row-flush`, style.css: the row's own edge colour),
+/// a faint wash, and a stronger one on hover. Tailwind preflight is not
+/// loaded, so the UA button chrome is reset here.
+const ROW_END_CLASS: &str = concat!(
+    "tw:inline-flex tw:h-full tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:whitespace-nowrap tw:border-0 tw:border-l tw:border-solid tw:bg-white/[0.035] tw:px-[11px] tw:text-[11px] tw:font-extrabold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:bg-white/10 tw:disabled:cursor-not-allowed tw:disabled:bg-transparent tw:disabled:text-dim-foreground",
+    " ux-row-flush ux-focus-ring ux-press-flare"
+);
+
+/// [`ROW_END_CLASS`] wearing the error tint (Undoable, Lasting).
+const ROW_END_TINTED_CLASS: &str = concat!(
+    "tw:inline-flex tw:h-full tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:whitespace-nowrap tw:border-0 tw:border-l tw:border-solid tw:bg-transparent tw:px-[11px] tw:text-[11px] tw:font-extrabold tw:leading-none tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+    " ux-row-flush ux-focus-ring"
+);
+
+/// [`ActionButtonVariant::RowPrimary`]: the name bar's flush section — no
+/// fill at rest, the iridescent ring (inset, hugging the section's own
+/// edges) and a wash on hover.
+const ROW_PRIMARY_CLASS: &str = concat!(
+    "tw:inline-flex tw:h-full tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:whitespace-nowrap tw:border-0 tw:border-l tw:border-solid tw:bg-transparent tw:px-4 tw:text-[12.5px] tw:font-extrabold tw:leading-none tw:text-strong-foreground tw:transition-colors tw:hover:bg-white/[0.07] tw:disabled:cursor-not-allowed tw:disabled:text-dim-foreground",
+    " ux-row-flush ux-ir-ring ux-ir-ring-inset ux-focus-ring ux-press-flare"
+);
+
+/// [`ROW_PRIMARY_CLASS`] wearing the error tint: no ring (a status tone
+/// refuses the spectrum).
+const ROW_PRIMARY_TINTED_CLASS: &str = concat!(
+    "tw:inline-flex tw:h-full tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:whitespace-nowrap tw:border-0 tw:border-l tw:border-solid tw:bg-transparent tw:px-4 tw:text-[12.5px] tw:font-extrabold tw:leading-none tw:text-status-error-foreground tw:transition-colors tw:hover:bg-status-error-bg tw:disabled:cursor-not-allowed tw:disabled:opacity-60",
+    " ux-row-flush ux-focus-ring"
+);
 
 /// The solid tier wearing the error tint, whatever its priority: the same
 /// geometry as every tier, the error border and text, and no ring — a status
@@ -257,6 +348,13 @@ fn menu_item_class(destructive: bool) -> &'static str {
     } else {
         "tw:flex tw:w-full tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-2 tw:rounded tw:border-none tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:text-sm tw:text-muted-foreground tw:transition-colors tw:hover:bg-white/5 tw:hover:text-strong-foreground tw:disabled:cursor-not-allowed tw:disabled:opacity-60 ux-focus-ring"
     }
+}
+
+/// The classes `variant` draws a button with (its secondary tier where the
+/// variant has tiers), for a control that is not an [`ActionButton`] but
+/// must read as one: a picker's trigger in the same row as a press.
+pub fn action_variant_class(variant: ActionButtonVariant, tinted: bool) -> &'static str {
+    action_class(variant, ActionPriority::Secondary, tinted)
 }
 
 /// The quiet-chip classes, for toolbar controls that cannot be `UiAction`s
@@ -412,6 +510,8 @@ mod tests {
             ActionButtonVariant::Quiet,
             ActionButtonVariant::Outline,
             ActionButtonVariant::MenuItem,
+            ActionButtonVariant::RowEnd,
+            ActionButtonVariant::RowPrimary,
         ] {
             for priority in PRIORITIES {
                 let tinted = action_class(variant, priority, true);
@@ -435,6 +535,45 @@ mod tests {
         ] {
             assert!(class.contains("ux-focus-ring"), "{class}");
         }
+    }
+
+    /// A row section fills its fixed row and never grows it: the row's
+    /// height, no padding on the block axis, and no line under it (the
+    /// refusal is the title). Only the primary takes the ring, and never
+    /// tinted.
+    #[test]
+    fn a_row_section_is_flush_and_only_the_primary_takes_the_ring() {
+        for tinted in [false, true] {
+            for variant in [ActionButtonVariant::RowEnd, ActionButtonVariant::RowPrimary] {
+                let class = action_class(variant, ActionPriority::Secondary, tinted);
+                for token in ["tw:h-full", "tw:border-l", "ux-row-flush", "ux-focus-ring"] {
+                    assert!(class.contains(token), "{token} missing: {class}");
+                }
+                assert!(!class.contains("tw:py-"), "{class}");
+                assert!(!class.contains("rounded"), "{class}");
+            }
+            let end = action_class(ActionButtonVariant::RowEnd, ActionPriority::Primary, tinted);
+            assert!(!end.contains("ux-ir-ring"), "{end}");
+        }
+        assert!(
+            action_class(
+                ActionButtonVariant::RowPrimary,
+                ActionPriority::Primary,
+                false
+            )
+            .contains("ux-ir-ring ux-ir-ring-inset")
+        );
+        assert!(
+            !action_class(
+                ActionButtonVariant::RowPrimary,
+                ActionPriority::Primary,
+                true
+            )
+            .contains("ux-ir-ring")
+        );
+        assert!(ActionButtonVariant::RowEnd.is_row_section());
+        assert!(!ActionButtonVariant::MenuItem.is_row_section());
+        assert!(ROW_SECTION_WRAPPER_CLASS.contains("tw:self-stretch"));
     }
 
     #[test]
@@ -475,6 +614,35 @@ mod tests {
             assert!(!class.contains("ux-ir-ring"), "{class}");
             assert!(!class.contains("ux-spectrum-cta"), "{class}");
         }
+    }
+
+    /// A Lasting menu row keeps its words at its leading edge, armed or
+    /// not (`ux-armed-labels-start`, style.css); every other look centres
+    /// them in the reserved width.
+    #[test]
+    fn a_lasting_menu_rows_labels_sit_at_its_leading_edge() {
+        assert_eq!(
+            armed_labels_class(ActionButtonVariant::MenuItem),
+            "ux-armed-labels ux-armed-labels-start"
+        );
+        for variant in [
+            ActionButtonVariant::Solid,
+            ActionButtonVariant::Quiet,
+            ActionButtonVariant::Outline,
+            ActionButtonVariant::RowEnd,
+            ActionButtonVariant::RowPrimary,
+        ] {
+            assert_eq!(
+                armed_labels_class(variant),
+                "ux-armed-labels",
+                "{variant:?}"
+            );
+        }
+        let css = include_str!("../../style.css");
+        let rule = ".ux-armed-labels.ux-armed-labels-start > span {";
+        let at = css.find(rule).expect("the leading-edge rule");
+        let body = &css[at..at + css[at..].find('}').expect("closes")];
+        assert!(body.contains("justify-content: flex-start"), "{body}");
     }
 
     #[test]

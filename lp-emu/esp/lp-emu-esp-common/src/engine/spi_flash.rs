@@ -68,6 +68,7 @@
 //! to, so it reads the image back out through [`FlashImage::bytes`] and
 //! stores it wherever it keeps things.
 
+use alloc::borrow::Cow;
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -75,7 +76,10 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::periph::BusCx;
+use super::flash_cut::{self, CutGate, FlashCut, FlashCutReport, FlashCutter, FlashOpKind};
+use super::flash_op_census::FlashOpCensus;
+use super::flash_weak_bits::FlashWeakBits;
+use crate::periph::{BusCx, MachineRequest};
 
 /// A 4 KiB flash sector — the erase granule, and littlefs's block size.
 pub const SECTOR_LEN: u32 = 4096;
@@ -130,6 +134,16 @@ pub struct FlashImage {
     pub block_erases: u64,
     pub write_enables: u64,
     pub status_reads: u64,
+    /// The power-cut plan and the powered-off latch
+    /// ([`flash_cut`](super::flash_cut)). Inert unless a plan is armed.
+    cutter: FlashCutter,
+    /// Bits a torn erase left weak
+    /// ([`flash_weak_bits`](super::flash_weak_bits)). Empty unless a cut
+    /// tore an erase.
+    weak: FlashWeakBits,
+    /// The in-range op census
+    /// ([`flash_op_census`](super::flash_op_census)), when one was asked for.
+    census: Option<FlashOpCensus>,
 }
 
 /// A flash image several owners hold: the flash controller executes commands
@@ -150,6 +164,9 @@ impl FlashImage {
             block_erases: 0,
             write_enables: 0,
             status_reads: 0,
+            cutter: FlashCutter::default(),
+            weak: FlashWeakBits::default(),
+            census: None,
         }
     }
 
@@ -239,13 +256,23 @@ impl FlashImage {
     }
 
     /// `len` bytes at `addr`, or `None` if the range leaves the chip.
-    pub fn read(&mut self, addr: u32, len: u32) -> Option<&[u8]> {
+    ///
+    /// A weak bit a torn erase left reads as a fresh seeded value on every
+    /// read ([`flash_weak_bits`](super::flash_weak_bits)); with none in the
+    /// span, the bytes are borrowed as they are.
+    pub fn read(&mut self, addr: u32, len: u32) -> Option<Cow<'_, [u8]>> {
         let end = addr.checked_add(len)?;
         if end > self.len() {
             return None;
         }
         self.reads += 1;
-        Some(&self.bytes[addr as usize..end as usize])
+        let cells = &self.bytes[addr as usize..end as usize];
+        if !self.weak.touches(addr, len) {
+            return Some(Cow::Borrowed(cells));
+        }
+        let mut out = cells.to_vec();
+        self.weak.apply(addr, &mut out);
+        Some(Cow::Owned(out))
     }
 
     /// Read without counting it — what the cache fill uses, so the command
@@ -273,6 +300,8 @@ impl FlashImage {
         for (i, byte) in data.iter().enumerate() {
             self.bytes[addr as usize + i] &= byte;
         }
+        self.weak
+            .solidify(addr, &self.bytes[addr as usize..end as usize]);
         self.programs += 1;
         self.note_write(addr, data.len() as u32);
         true
@@ -289,6 +318,7 @@ impl FlashImage {
             return false;
         }
         self.bytes[addr as usize..end as usize].fill(0xff);
+        self.weak.clear(addr, len);
         match len {
             SECTOR_LEN => self.sector_erases += 1,
             BLOCK_LEN => self.block_erases += 1,
@@ -301,6 +331,7 @@ impl FlashImage {
     /// Erase the whole chip.
     pub fn erase_chip(&mut self) {
         self.bytes.fill(0xff);
+        self.weak.clear_all();
         let len = self.len();
         self.note_write(0, len);
     }
@@ -336,6 +367,9 @@ impl FlashImage {
         if !self.dirty && path.exists() {
             return Ok(false);
         }
+        // Weak bits stay in this process (plan Q8): the file gets the stored
+        // cells, and the run is told so once.
+        self.weak.warn_on_flush();
         std::fs::write(path, &self.bytes)?;
         self.dirty = false;
         Ok(true)
@@ -366,8 +400,139 @@ impl FlashImage {
             return false;
         }
         self.bytes[addr as usize..end as usize].copy_from_slice(data);
+        // A flasher erases the sectors it writes.
+        self.weak.clear(addr, data.len() as u32);
         self.note_write(addr, data.len() as u32);
         true
+    }
+
+    // ---- power cuts (`flash_cut`) ----------------------------------------
+
+    /// Arm a power cut ([`FlashCut`]); its `at` counts in-range commands
+    /// from now. Also starts an op census over the plan's range when none is
+    /// running, so a run can say what it counted.
+    pub fn arm_flash_cut(&mut self, plan: FlashCut) {
+        if self.census.is_none() {
+            self.census = Some(FlashOpCensus::new(plan.range.clone(), false));
+        }
+        self.cutter.arm(plan);
+    }
+
+    /// Drop an armed plan that has not fired.
+    pub fn disarm_flash_cut(&mut self) {
+        self.cutter.disarm();
+    }
+
+    /// The cut state: the armed plan, the count toward it, the latch, the
+    /// last cut.
+    pub fn flash_cutter(&self) -> &FlashCutter {
+        &self.cutter
+    }
+
+    /// The last cut that fired, if any.
+    pub fn last_flash_cut(&self) -> Option<&FlashCutReport> {
+        self.cutter.last_cut()
+    }
+
+    /// Did a cut take the power? Every program and erase is refused until
+    /// [`restore_power`](Self::restore_power).
+    pub fn is_powered_off(&self) -> bool {
+        self.cutter.is_powered_off()
+    }
+
+    /// The supply is back (a machine's power cycle): commands run again.
+    /// The cells, weak bits included, stay as the cut left them.
+    pub fn restore_power(&mut self) {
+        self.cutter.restore_power();
+    }
+
+    /// Count (and, with `trace`, record) every program and erase touching
+    /// `range` from now on, replacing any census running.
+    pub fn watch_flash_ops(&mut self, range: core::ops::Range<u32>, trace: bool) {
+        self.census = Some(FlashOpCensus::new(range, trace));
+    }
+
+    /// The in-range op census, when one is running.
+    pub fn flash_op_census(&self) -> Option<&FlashOpCensus> {
+        self.census.as_ref()
+    }
+
+    /// The weak bits torn erases left.
+    pub fn weak_bits(&self) -> &FlashWeakBits {
+        &self.weak
+    }
+
+    /// A program or erase the part is about to execute: count it, and say
+    /// whether it runs, is refused (no power) or is the one to cut.
+    fn gate(&mut self, kind: FlashOpKind, addr: u32, len: u32) -> CutGate {
+        if !self.cutter.is_powered_off()
+            && let Some(census) = self.census.as_mut()
+        {
+            census.note(kind, addr, len);
+        }
+        self.cutter.gate(addr, len)
+    }
+
+    /// Tear the program of `data` at `addr` per `plan` and record the cut.
+    /// `addr..addr + data.len()` is on the chip (the engine checked).
+    fn tear_program(
+        &mut self,
+        plan: &FlashCut,
+        addr: u32,
+        data: &[u8],
+        cycle: u64,
+    ) -> FlashCutReport {
+        let span = addr as usize..addr as usize + data.len();
+        flash_cut::tear_program(plan.tear, plan.seed, &mut self.bytes[span.clone()], data);
+        self.weak.solidify(addr, &self.bytes[span]);
+        self.programs += 1;
+        let len = data.len() as u32;
+        self.note_write(addr, len);
+        self.record_cut(plan, FlashOpKind::Program, addr, len, None, cycle)
+    }
+
+    /// Tear the erase of the `len`-byte granule at `addr` per `plan` and
+    /// record the cut. The granule is on the chip (the engine checked).
+    fn tear_erase(&mut self, plan: &FlashCut, addr: u32, len: u32, cycle: u64) -> FlashCutReport {
+        let span = addr as usize..(addr + len) as usize;
+        let mut weak = vec![0u8; len as usize];
+        let shape = flash_cut::tear_erase(plan.tear, plan.seed, &mut self.bytes[span], &mut weak);
+        self.weak.reseed(plan.seed);
+        self.weak.add(addr, &weak);
+        let kind = if len == BLOCK_LEN {
+            self.block_erases += 1;
+            FlashOpKind::BlockErase
+        } else {
+            self.sector_erases += 1;
+            FlashOpKind::SectorErase
+        };
+        self.note_write(addr, len);
+        self.record_cut(plan, kind, addr, len, shape, cycle)
+    }
+
+    fn record_cut(
+        &mut self,
+        plan: &FlashCut,
+        kind: FlashOpKind,
+        addr: u32,
+        len: u32,
+        erase_shape: Option<lp_nor_sim::EraseShape>,
+        cycle: u64,
+    ) -> FlashCutReport {
+        let report = FlashCutReport {
+            index: plan.at,
+            kind,
+            addr,
+            len,
+            tear: plan.tear,
+            erase_shape,
+            cycle,
+            range_start: plan.range.start,
+            range_len: plan.range.end - plan.range.start,
+            seed: plan.seed,
+        };
+        self.cutter.record(report);
+        report
     }
 
     /// The command census, for the run summary.
@@ -608,7 +773,19 @@ impl FlashEngine {
                 FlashOutcome::Nothing
             }
             FlashOp::EraseChip => {
-                self.flash.lock().unwrap().erase_chip();
+                // Never counted and never cut; refused, like everything else,
+                // once a cut has taken the power.
+                let refused = {
+                    let mut flash = self.flash.lock().unwrap();
+                    let refused = flash.cutter.refuse_when_off();
+                    if !refused {
+                        flash.erase_chip();
+                    }
+                    refused
+                };
+                if refused {
+                    note_refused(cx, name, "chip erase", 0);
+                }
                 self.status &= !SR_WEL;
                 FlashOutcome::Nothing
             }
@@ -682,12 +859,36 @@ impl FlashEngine {
                 cx.now, cx.pc
             ));
         }
-        if !self.flash.lock().unwrap().program(addr, &buffer[..len]) {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} {name} page program of {len} bytes at {addr:#010x} leaves \
-                 the chip; nothing was written",
-                cx.now, cx.pc
-            ));
+        let data = &buffer[..len];
+        let mut flash = self.flash.lock().unwrap();
+        let on_chip = (addr as usize)
+            .checked_add(len)
+            .is_some_and(|end| end <= flash.len() as usize);
+        let gate = if on_chip && len > 0 {
+            flash.gate(FlashOpKind::Program, addr, len as u32)
+        } else {
+            CutGate::Run
+        };
+        match gate {
+            CutGate::Run => {
+                if !flash.program(addr, data) {
+                    drop(flash);
+                    cx.trace.note(&format!(
+                        "cyc={} pc={:#010x} {name} page program of {len} bytes at {addr:#010x} \
+                         leaves the chip; nothing was written",
+                        cx.now, cx.pc
+                    ));
+                }
+            }
+            CutGate::Refused => {
+                drop(flash);
+                note_refused(cx, name, "page program", addr);
+            }
+            CutGate::Cut(plan) => {
+                let report = flash.tear_program(&plan, addr, data, cx.now);
+                drop(flash);
+                power_cut(cx, report);
+            }
         }
         self.status &= !SR_WEL;
     }
@@ -702,12 +903,40 @@ impl FlashEngine {
         }
         // The part erases the granule the address falls in.
         let aligned = addr & !(len - 1);
-        if !self.flash.lock().unwrap().erase(aligned, len) {
-            cx.trace.note(&format!(
-                "cyc={} pc={:#010x} {name} erase of {len} bytes at {aligned:#010x} leaves the \
-                 chip; nothing was erased",
-                cx.now, cx.pc
-            ));
+        let mut flash = self.flash.lock().unwrap();
+        let on_chip = aligned
+            .checked_add(len)
+            .is_some_and(|end| end <= flash.len());
+        let kind = if len == BLOCK_LEN {
+            FlashOpKind::BlockErase
+        } else {
+            FlashOpKind::SectorErase
+        };
+        let gate = if on_chip {
+            flash.gate(kind, aligned, len)
+        } else {
+            CutGate::Run
+        };
+        match gate {
+            CutGate::Run => {
+                if !flash.erase(aligned, len) {
+                    drop(flash);
+                    cx.trace.note(&format!(
+                        "cyc={} pc={:#010x} {name} erase of {len} bytes at {aligned:#010x} \
+                         leaves the chip; nothing was erased",
+                        cx.now, cx.pc
+                    ));
+                }
+            }
+            CutGate::Refused => {
+                drop(flash);
+                note_refused(cx, name, "erase", aligned);
+            }
+            CutGate::Cut(plan) => {
+                let report = flash.tear_erase(&plan, aligned, len, cx.now);
+                drop(flash);
+                power_cut(cx, report);
+            }
         }
         self.status &= !SR_WEL;
     }
@@ -731,6 +960,24 @@ impl FlashEngine {
     pub fn restore(&mut self, status: u16) {
         self.status = status;
     }
+}
+
+/// A command the part refused because a cut took its power.
+fn note_refused(cx: &mut BusCx<'_>, name: &str, what: &str, addr: u32) {
+    cx.trace.note(&format!(
+        "cyc={} pc={:#010x} {name} {what} at {addr:#010x} after a flash power cut; the part \
+         has no power and does nothing",
+        cx.now, cx.pc
+    ));
+}
+
+/// The cut fired: tell the machine, and end the slice here so the guest runs
+/// no further instruction on this power.
+fn power_cut(cx: &mut BusCx<'_>, report: FlashCutReport) {
+    cx.trace
+        .note(&format!("cyc={} pc={:#010x} {report}", cx.now, cx.pc));
+    cx.request(MachineRequest::PowerCut { report });
+    cx.yield_to_machine();
 }
 
 #[cfg(test)]
@@ -1067,6 +1314,385 @@ mod tests {
         assert!(
             FlashEngine::load_status(&blob[..1]).is_none(),
             "a short blob loads nothing"
+        );
+    }
+
+    // ---- power cuts -------------------------------------------------------
+
+    /// A 128 KiB chip whose second 64 KiB block is the cut's range, filled
+    /// with seeded "old" bytes so a tear has something to tear.
+    const RANGE: core::ops::Range<u32> = BLOCK_LEN..2 * BLOCK_LEN;
+
+    fn cut_rig() -> (Sandbox, FlashEngine, FlashHandle, Vec<u8>) {
+        let (sb, engine, flash) = rig(2 * BLOCK_LEN);
+        let mut rng = lp_nor_sim::SimRng::new(99);
+        let old: Vec<u8> = (0..2 * BLOCK_LEN).map(|_| rng.next_u8()).collect();
+        flash.lock().unwrap().stage(0, &old);
+        (sb, engine, flash, old)
+    }
+
+    fn arm(flash: &FlashHandle, at: u64, tear: lp_nor_sim::TearModel, seed: u64) {
+        flash.lock().unwrap().arm_flash_cut(FlashCut {
+            range: RANGE,
+            at,
+            tear,
+            seed,
+        });
+    }
+
+    fn program(sb: &mut Sandbox, engine: &mut FlashEngine, addr: u32, data: &[u8]) {
+        let mut buffer = [0xffu8; BUFFER_LEN];
+        buffer[..data.len()].copy_from_slice(data);
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(
+            FlashOp::Program {
+                addr,
+                len: data.len() as u32,
+            },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
+    }
+
+    fn erase(sb: &mut Sandbox, engine: &mut FlashEngine, addr: u32, len: u32) {
+        let mut buffer = [0u8; BUFFER_LEN];
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(
+            FlashOp::Erase { addr, len },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
+    }
+
+    fn read(sb: &mut Sandbox, engine: &mut FlashEngine, addr: u32, len: u32) -> Vec<u8> {
+        let mut buffer = [0u8; BUFFER_LEN];
+        engine.execute(
+            FlashOp::Read { addr, len },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
+        buffer[..len as usize].to_vec()
+    }
+
+    fn cut_report(sb: &Sandbox) -> FlashCutReport {
+        match sb.request {
+            Some(MachineRequest::PowerCut { report }) => report,
+            other => panic!("no power-cut request: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_clean_cut_tears_nothing_posts_the_request_and_yields() {
+        use lp_nor_sim::TearModel;
+        for (kind, addr, len) in [
+            (FlashOpKind::Program, RANGE.start + 0x40, 32),
+            (
+                FlashOpKind::SectorErase,
+                RANGE.start + SECTOR_LEN,
+                SECTOR_LEN,
+            ),
+            (FlashOpKind::BlockErase, RANGE.start, BLOCK_LEN),
+        ] {
+            let (mut sb, mut engine, flash, old) = cut_rig();
+            sb.now = 777;
+            arm(&flash, 0, TearModel::Clean, 5);
+            match kind {
+                FlashOpKind::Program => program(&mut sb, &mut engine, addr, &[0u8; 32]),
+                _ => erase(&mut sb, &mut engine, addr, len),
+            }
+            assert_eq!(
+                flash.lock().unwrap().bytes(),
+                &old[..],
+                "{kind}: a clean cut lands nothing"
+            );
+            let report = cut_report(&sb);
+            assert_eq!(
+                (
+                    report.index,
+                    report.kind,
+                    report.addr,
+                    report.len,
+                    report.cycle
+                ),
+                (0, kind, addr, len, 777)
+            );
+            assert!(
+                sb.yield_now,
+                "{kind}: the guest runs no further instruction"
+            );
+            assert!(flash.lock().unwrap().is_powered_off());
+            assert_eq!(engine.status() & SR_WEL, 0, "the command consumed WEL");
+        }
+    }
+
+    #[test]
+    fn a_cut_replaces_a_reset_already_asked_for_in_the_slice() {
+        use crate::{ResetSource, Strap};
+        let (mut sb, mut engine, flash, _) = cut_rig();
+        sb.request = Some(MachineRequest::Reset {
+            source: "a watchdog",
+            at: 1,
+            strap: Strap::App,
+            cause: ResetSource::Software,
+        });
+        arm(&flash, 0, lp_nor_sim::TearModel::Clean, 1);
+        erase(&mut sb, &mut engine, RANGE.start, SECTOR_LEN);
+        assert_eq!(
+            cut_report(&sb).index,
+            0,
+            "the power went; nothing is left to reset"
+        );
+    }
+
+    #[test]
+    fn a_calibrated_cut_lands_the_nor_sim_tear_in_the_chip() {
+        use lp_nor_sim::{SimRng, TearMix, TearModel, calibrated_tear};
+        for seed in 0..12 {
+            // A program.
+            let (mut sb, mut engine, flash, old) = cut_rig();
+            let addr = RANGE.start + 0x100;
+            let data: Vec<u8> = (0..32u8).map(|i| i.wrapping_mul(29)).collect();
+            arm(&flash, 0, TearModel::Calibrated, seed);
+            program(&mut sb, &mut engine, addr, &data);
+            let mut want = old.clone();
+            calibrated_tear::tear_program(
+                &TearMix::CX1,
+                &mut SimRng::new(seed),
+                &mut want[addr as usize..addr as usize + 32],
+                0,
+                &data,
+            );
+            assert_eq!(flash.lock().unwrap().bytes(), &want[..], "seed {seed}");
+            assert_eq!(cut_report(&sb).erase_shape, None);
+
+            // A sector erase, its weak bits beside the cells.
+            let (mut sb, mut engine, flash, old) = cut_rig();
+            let addr = RANGE.start + 3 * SECTOR_LEN;
+            arm(&flash, 0, TearModel::Calibrated, seed);
+            erase(&mut sb, &mut engine, addr, SECTOR_LEN);
+            let mut want = old.clone();
+            let mut weak = vec![0u8; SECTOR_LEN as usize];
+            let span = addr as usize..(addr + SECTOR_LEN) as usize;
+            calibrated_tear::tear_erase(
+                &TearMix::CX1,
+                &mut SimRng::new(seed),
+                &mut want[span],
+                &mut weak,
+            );
+            let f = flash.lock().unwrap();
+            assert_eq!(f.bytes(), &want[..], "seed {seed}");
+            let stored: Vec<u8> = (0..SECTOR_LEN)
+                .map(|i| f.weak_bits().mask_at(addr + i))
+                .collect();
+            assert_eq!(stored, weak, "seed {seed}: the weak mask is nor-sim's");
+            assert!(cut_report(&sb).erase_shape.is_some());
+        }
+    }
+
+    #[test]
+    fn a_torn_block_erase_tears_the_whole_block() {
+        use lp_nor_sim::TearModel;
+        let (mut sb, mut engine, flash, old) = cut_rig();
+        arm(&flash, 0, TearModel::CalibratedAllZero, 1);
+        erase(&mut sb, &mut engine, RANGE.start + 0x1234, BLOCK_LEN);
+        let f = flash.lock().unwrap();
+        assert!(f.bytes()[RANGE.start as usize..].iter().all(|&b| b == 0));
+        assert_eq!(
+            &f.bytes()[..RANGE.start as usize],
+            &old[..RANGE.start as usize]
+        );
+        assert_eq!(f.block_erases, 1);
+        let report = cut_report(&sb);
+        assert_eq!(
+            (report.kind, report.addr),
+            (FlashOpKind::BlockErase, RANGE.start)
+        );
+    }
+
+    #[test]
+    fn the_cut_counts_in_range_programs_and_erases_only() {
+        use lp_nor_sim::TearModel;
+        let (mut sb, mut engine, flash, old) = cut_rig();
+        arm(&flash, 2, TearModel::CalibratedAllZero, 1);
+        let mut buffer = [0u8; BUFFER_LEN];
+        // None of these count: out of range, reads, status, WREN, a
+        // program with WEL clear (the part ignores it).
+        program(&mut sb, &mut engine, 0x40, &[0u8; 32]);
+        erase(&mut sb, &mut engine, 0, SECTOR_LEN);
+        read(&mut sb, &mut engine, RANGE.start, 64);
+        engine.execute(FlashOp::ReadStatus, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(FlashOp::WriteDisable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(
+            FlashOp::Program {
+                addr: RANGE.start,
+                len: 32,
+            },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
+        assert_eq!(flash.lock().unwrap().flash_cutter().seen(), 0);
+        // In range: 0 and 1 run, 2 is the cut.
+        program(&mut sb, &mut engine, RANGE.start, &[0u8; 32]);
+        erase(&mut sb, &mut engine, RANGE.start + SECTOR_LEN, SECTOR_LEN);
+        assert!(sb.request.is_none(), "not yet");
+        let erased = RANGE.start + 5 * SECTOR_LEN;
+        erase(&mut sb, &mut engine, erased, SECTOR_LEN);
+        let report = cut_report(&sb);
+        assert_eq!((report.index, report.addr), (2, erased));
+        let f = flash.lock().unwrap();
+        assert!(
+            f.bytes()[erased as usize..(erased + SECTOR_LEN) as usize]
+                .iter()
+                .all(|&b| b == 0),
+            "the third in-range command is the one torn"
+        );
+        assert_eq!(
+            &f.bytes()[RANGE.start as usize + 32..(RANGE.start + SECTOR_LEN) as usize],
+            &old[RANGE.start as usize + 32..(RANGE.start + SECTOR_LEN) as usize],
+            "the first ran, and only over its 32 bytes"
+        );
+        let census = f.flash_op_census().expect("arming starts a census");
+        assert_eq!((census.programs, census.sector_erases), (1, 2));
+    }
+
+    #[test]
+    fn after_a_cut_nothing_lands_until_the_power_is_back() {
+        use lp_nor_sim::TearModel;
+        let (mut sb, mut engine, flash, old) = cut_rig();
+        arm(&flash, 0, TearModel::Clean, 1);
+        erase(&mut sb, &mut engine, RANGE.start, SECTOR_LEN);
+        assert!(flash.lock().unwrap().is_powered_off());
+        let (programs, erases) = {
+            let f = flash.lock().unwrap();
+            (f.programs, f.sector_erases)
+        };
+        // Programs and erases anywhere, and a chip erase: all refused.
+        program(&mut sb, &mut engine, 0x80, &[0u8; 32]);
+        program(&mut sb, &mut engine, RANGE.start + 0x80, &[0u8; 32]);
+        erase(&mut sb, &mut engine, 0, BLOCK_LEN);
+        let mut buffer = [0u8; BUFFER_LEN];
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(FlashOp::EraseChip, &mut buffer, "FLASH", &mut sb.cx());
+        {
+            let f = flash.lock().unwrap();
+            assert_eq!(f.bytes(), &old[..], "nothing landed without power");
+            assert_eq!((f.programs, f.sector_erases), (programs, erases));
+            assert_eq!(f.flash_cutter().refused(), 4);
+        }
+        // The power cycle: commands run again, and the spent plan cuts no more.
+        flash.lock().unwrap().restore_power();
+        program(&mut sb, &mut engine, RANGE.start + 0x80, &[0u8; 32]);
+        let f = flash.lock().unwrap();
+        assert!(!f.is_powered_off());
+        assert!(f.flash_cutter().armed().is_none());
+        let at = (RANGE.start + 0x80) as usize;
+        assert_eq!(&f.bytes()[at..at + 32], &[0u8; 32]);
+    }
+
+    #[test]
+    fn weak_bits_read_seeded_noise_survive_the_power_and_go_with_an_erase() {
+        use lp_nor_sim::TearModel;
+        let addr = RANGE.start + 2 * SECTOR_LEN;
+        let reads_after_cut = |seed: u64| {
+            let (mut sb, mut engine, flash, _) = cut_rig();
+            arm(&flash, 0, TearModel::CalibratedReadsFfWeak, seed);
+            erase(&mut sb, &mut engine, addr, SECTOR_LEN);
+            flash.lock().unwrap().restore_power();
+            let weak_at = (0..SECTOR_LEN)
+                .find(|&i| flash.lock().unwrap().weak_bits().mask_at(addr + i) != 0)
+                .expect("reads-FF-with-weak-bits leaves some");
+            let reads: Vec<Vec<u8>> = (0..24)
+                .map(|_| read(&mut sb, &mut engine, addr + weak_at, 1))
+                .collect();
+            (sb, engine, flash, weak_at, reads)
+        };
+        let (mut sb, mut engine, flash, weak_at, reads) = reads_after_cut(4);
+        assert!(
+            reads.iter().any(|r| r != &reads[0]),
+            "a weak cell reads differently from read to read: {reads:?}"
+        );
+        assert_eq!(reads_after_cut(4).4, reads, "one seed, one read sequence");
+        // `peek` and `bytes` are the stored cells, untouched by the noise.
+        assert_eq!(
+            flash.lock().unwrap().peek(addr + weak_at, 1).unwrap(),
+            &[0xff]
+        );
+
+        // Survives the flush, which warns once and writes the stored cells.
+        let dir = std::env::temp_dir().join(format!("lp-emu-flash-weak-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("flash.bin");
+        {
+            let mut f = flash.lock().unwrap();
+            f.backing = FlashBacking::File(path.clone());
+            assert!(f.flush().unwrap());
+            assert!(f.weak_bits().flush_warned());
+            assert!(!f.weak_bits().is_empty(), "weak bits stay in the process");
+        }
+        assert_eq!(
+            std::fs::read(&path).unwrap()[(addr + weak_at) as usize],
+            0xff
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A finished erase of the sector is what clears them.
+        erase(&mut sb, &mut engine, addr, SECTOR_LEN);
+        assert!(flash.lock().unwrap().weak_bits().is_empty());
+        let reads: Vec<Vec<u8>> = (0..8)
+            .map(|_| read(&mut sb, &mut engine, addr + weak_at, 1))
+            .collect();
+        assert!(reads.iter().all(|r| r == &[0xff]), "{reads:?}");
+    }
+
+    #[test]
+    fn with_no_plan_nothing_is_counted_and_nothing_tears() {
+        let (mut sb, mut engine, flash) = rig(2 * BLOCK_LEN);
+        program(&mut sb, &mut engine, RANGE.start, &[0x0f; 32]);
+        erase(&mut sb, &mut engine, RANGE.start, SECTOR_LEN);
+        program(&mut sb, &mut engine, RANGE.start, &[0xf0; 16]);
+        let got = read(&mut sb, &mut engine, RANGE.start, 16);
+        assert_eq!(got, vec![0xf0; 16]);
+        let f = flash.lock().unwrap();
+        assert!(f.flash_op_census().is_none(), "no census unless asked");
+        assert!(f.last_flash_cut().is_none());
+        assert!(f.weak_bits().is_empty());
+        assert!(sb.request.is_none() && !sb.yield_now);
+        assert_eq!(
+            f.command_census(),
+            FlashCensus {
+                reads: 1,
+                programs: 2,
+                sector_erases: 1,
+                block_erases: 0,
+                write_enables: 3,
+                status_reads: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn a_traced_census_lists_each_in_range_command() {
+        let (mut sb, mut engine, flash) = rig(2 * BLOCK_LEN);
+        flash.lock().unwrap().watch_flash_ops(RANGE, true);
+        program(&mut sb, &mut engine, 0, &[0u8; 32]);
+        erase(&mut sb, &mut engine, RANGE.start, SECTOR_LEN);
+        program(&mut sb, &mut engine, RANGE.start + 64, &[0u8; 32]);
+        let f = flash.lock().unwrap();
+        let trace = f.flash_op_census().unwrap().trace().unwrap();
+        assert_eq!(
+            trace
+                .iter()
+                .map(|r| (r.index, r.kind, r.addr, r.len))
+                .collect::<Vec<_>>(),
+            vec![
+                (0, FlashOpKind::SectorErase, RANGE.start, SECTOR_LEN),
+                (1, FlashOpKind::Program, RANGE.start + 64, 32),
+            ]
         );
     }
 }

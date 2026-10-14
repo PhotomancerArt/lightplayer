@@ -4,7 +4,10 @@ A deterministic, sans-IO model of SPI NOR flash that loses power on demand.
 It is the ground the storage testbed (`tools/lp-store-bench`) runs every
 candidate store on, so its own correctness matters more than its speed.
 `no_std` + `alloc`, no dependencies beyond `embedded-storage`'s traits.
-Nothing here is linked into firmware.
+Nothing here is linked into firmware. The emulated ESP32-C6's flash chip
+also tears with these models: `lp-emu-esp-common`'s `engine::flash_cut`
+calls the calibrated functions directly on the chip's bytes and runs the
+guessed models through a scratch `NorFlashSim` (`--flash-cut`).
 
 MIT, as a unit with the rest of `lp-emu/` (see `../LICENSE-MIT`): the host
 testbed and the emulated C6's flash share this one model, and nothing in this
@@ -76,6 +79,13 @@ crate may depend on an AGPL workspace crate (`just lint-emu-fence`).
   runs a workload prefix once and forks it per cut point.
 - **Read watchdog** (`set_read_budget`): reads fail with `Watchdog` past a
   budget, so a store looping on bad flash ends instead of hanging a sweep.
+- **Injected wear-out** (`WearOut`, `add_wear_out`, `wear_out.rs`): a
+  chosen sector that, after `N` erases from when the plan was installed,
+  either erases with a seeded sprinkling of bits stuck at 0
+  (`EraseFails`) or programs with a seeded subset of its clears undone
+  (`ProgramFails`). Both report success, as real NOR does, so only a store
+  that reads back can tell. Off unless installed; with none installed every
+  operation and tear is byte-for-byte unchanged.
 - **`embedded-storage`** `ReadNorFlash`/`NorFlash`/`MultiwriteNorFlash`
   (READ_SIZE 1, WRITE_SIZE 1, ERASE_SIZE 4096), plus the plain `read` /
   `program` / `erase_sector` API.
@@ -85,7 +95,8 @@ same calls, same bytes.
 
 ## What it does not model
 
-Timing of any kind, read disturb, retention / bit rot, wear-out (erases are
-counted, never fail), multi-plane or suspend/resume, the cache and XIP
-mapping, and the SPI bus. A cut between two operations and a cut that tears
+Timing of any kind, read disturb, retention / bit rot, wear-out as it
+happens (erases are counted and never fail by themselves — only an
+installed `WearOut` makes one sector fail), multi-plane or
+suspend/resume, the cache and XIP mapping, and the SPI bus. A cut between two operations and a cut that tears
 one are the only failures.

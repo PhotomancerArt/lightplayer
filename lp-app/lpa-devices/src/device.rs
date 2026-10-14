@@ -991,10 +991,14 @@ impl Device {
                 // response" while the intent is still Connected: re-ask on
                 // a fresh window, up to the configured cap. Any verdict —
                 // welcome or not — resets the budget.
+                // A port another tab holds is not a flaky boot window:
+                // re-asking would only knock on it again. It stays settled
+                // until something changes (the holder lets go, or Connect).
                 if cell.kind == ActivityKind::Identify {
                     if failed
                         && self.intent.connection == ConnectionIntent::Connected
                         && self.link().is_some()
+                        && !self.evidence.link_held_by_tab()
                         && self.identify_retries < ctx.config.identify_auto_retries
                     {
                         self.identify_retries += 1;

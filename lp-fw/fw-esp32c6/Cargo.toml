@@ -201,6 +201,12 @@ desk_ble_params = ["ble"]
 # an unparseable packet does, so a desk board can prove that a runner restart
 # closes its links and advertises again. See `src/ble/hci_transport.rs`.
 desk_ble_fault = ["ble"]
+# LP SRAM above the recovery region (15,360 B in this image) as the heap's
+# last region, untagged so only Rust's global allocator reaches it, after
+# main, dram2_seg and the radio region (`src/board/esp32c6/lp_sram_heap.rs`).
+# Off: held for a memory-layout decision (research/ram-e03). Turning it on
+# moves the chip's heap figures: `just bless-chips esp32c6`.
+lp_sram_heap = []
 heap_map_diag = ["lpc-shared"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]

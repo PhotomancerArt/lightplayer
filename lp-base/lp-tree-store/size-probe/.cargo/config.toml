@@ -1,0 +1,20 @@
+# The probe builds the way `fw-esp32c6` builds (`lp-fw/fw-esp32c6/.cargo/config.toml`):
+# core and alloc rebuilt with `optimize_for_size` (and `compiler-builtins-mem`),
+# frame pointers forced, panic locations and `{:?}` formatting compiled out.
+# Without these the probe's numbers mislead in both directions (the size
+# study, plan `2026-10-08-1017-tree-store-device-round`, "Method"): core's
+# sort and formatting look kilobytes bigger than on the C6, and the store
+# itself ~4.5 KB smaller. The C6's linker flags (`-Tlinkall.x`, its memory
+# map) are not here: the probe is a plain ELF.
+
+[target.'cfg(target_arch = "riscv32")']
+rustflags = [
+  "-C", "panic=abort",
+  "-C", "force-frame-pointers",
+  "-Z", "location-detail=none",
+  "-Z", "fmt-debug=none",
+]
+
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem", "optimize_for_size"]

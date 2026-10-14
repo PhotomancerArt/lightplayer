@@ -69,7 +69,7 @@ use lpc_cloud_api::Access;
 
 use crate::app::affordance::affordance_trigger_style;
 use crate::app::agent::AgentMark;
-use crate::app::home::device_roster_card::DeviceRenameSection;
+use crate::app::home::device_rename_section::DeviceRenameSection;
 use crate::app::home::package_export::ExportTarget;
 use crate::app::project::pending_edit_section::{
     PendingEditBucket, PendingEditList, bucket_section_tint, entries_in,

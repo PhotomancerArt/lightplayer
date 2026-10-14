@@ -550,7 +550,8 @@ pub fn split_slug(image: &FwImage) -> String {
 /// `LP_EMU_C6_IMAGE_DIR` replaces 2 and 3 with `tree/<SLUG>_SPLIT/`. Only a
 /// default-features image can be split (the pipeline keeps the defaults on).
 /// The shipped set is built as the target `esp32c6-4mb`, so its manifest core
-/// says what the packaged image's does.
+/// says what the packaged image's does, and as a figure build (version
+/// `0000000`, stamped clean), so it is the heap ratchet's bytes.
 pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
     assert!(
         image.default_features,
@@ -631,7 +632,14 @@ fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
         .arg("--features")
         .arg(image.features.join(","));
     if *image == FwImage::SHIPPED {
-        cmd.args(["--target", "esp32c6-4mb"]);
+        // A figure build (`LP_FIGURE_BUILD=1`, `tools/lp-app-version`): a
+        // fixed version and a clean stamp, as `scripts/heap-budget-check.sh`
+        // builds the C6 heap ratchet's image. The version's length is a heap
+        // figure, so this is what makes the image CI uploads from this suite
+        // (`just fetch-ci-images`) the ratchet's bytes, and a desk's build
+        // CI's.
+        cmd.args(["--target", "esp32c6-4mb"])
+            .env("LP_FIGURE_BUILD", "1");
     }
     let status = cmd
         .status()

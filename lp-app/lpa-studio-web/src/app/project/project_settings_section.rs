@@ -22,8 +22,8 @@
 //!   shown here and editable only on a card two pages away. Read-only when
 //!   nothing backs the project (the demo path, a device-hosted project).
 //! - **Hardware** — the target the project declares (D41): Desktop or a
-//!   catalog board, behind the same two-group menu the Devices page's add
-//!   slot opens. Editable on the same terms as the name, and read-only for
+//!   catalog board, behind the same two-group menu Connect a board's
+//!   "start a board here" opens. Editable on the same terms as the name, and read-only for
 //!   the same reason when nothing backs the project.
 //! - **Format / UID** — read-only, from the manifest. UID keeps its copy
 //!   button (identity is the thing you actually want on your clipboard when

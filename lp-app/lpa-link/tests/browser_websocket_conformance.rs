@@ -27,6 +27,7 @@
 //! | a wrong key is reported back and never presented there again | [`a_wrong_key_is_reported_and_the_walk_moves_on`] |
 //! | a plain-link board is named, never downgraded to | [`a_board_that_runs_a_plain_link_is_named`] |
 //! | a drop is a departure, then a reconnect with no gesture | [`a_drop_is_a_departure_and_the_session_reconnects_by_itself`] |
+//! | a close by request (the link's `Close`) is never redialled; the session stays listed, closed | [`a_close_by_request_is_never_redialled`] |
 //! | a connect someone asked for waits for the board's answer (a frame, a busy 1013, a socket that never opens) | [`a_connect_someone_asked_for_settles_on_the_boards_answer`] |
 //! | a busy board (1013) is said once, never announced again until it answers, and redialled slowly | [`a_busy_board_is_said_once_and_not_announced_until_it_answers`] |
 //! | the update channel flows both ways once a core-only board announces it with its `M` | [`the_update_channel_flows_both_ways_once_the_board_announces_it`] |
@@ -356,8 +357,46 @@ async fn a_drop_is_a_departure_and_the_session_reconnects_by_itself() {
     assert_eq!(js_sockets_opened(url), 2);
 }
 
+/// A close by request — the link's `Close`, what Studio's `Disconnect` sends,
+/// and what a tab does when it lets a board go to another tab of the same
+/// browser — is not a drop: no reconnect follows, however long the page
+/// waits, and the session stays listed (closed) so the link can open again
+/// when someone asks. The one-tab-holds-a-board yield leans on exactly this
+/// (`lpa-studio-core`, `board_hold_flow.rs`).
+#[wasm_bindgen_test]
+async fn a_close_by_request_is_never_redialled() {
+    let url = "ws://10.0.0.13/link";
+    TestKeys::install(Vec::new());
+    let mut bench = Bench::new(url, BoardDouble::secure(Opens::Edit, Vec::new()));
+    let session = bench.connect().await;
+    let mut link = open_link(&session).await;
+    let pump = bench.spawn_board_loop();
+    let hello = wait_for(&mut link, |event| matches!(event, LinkEvent::Frame(_))).await;
+    assert!(hello.is_some(), "the hello reached the model's link");
+    assert_eq!(js_sockets_opened(url), 1);
+
+    link.submit(LinkCommand::Close);
+    let closed = wait_for(&mut link, |event| matches!(event, LinkEvent::Closed { .. })).await;
+    assert!(closed.is_some(), "the link says it closed");
+
+    // Well past the drop loop's first redial (250 ms), with the board
+    // taking connects.
+    for _ in 0..60 {
+        tick(20).await;
+    }
+    pump.set(false);
+    assert_eq!(js_sockets_opened(url), 1, "nothing redialled");
+    assert!(
+        lan::present_sessions()
+            .iter()
+            .any(|present| present.url == url && !present.connected),
+        "still listed, closed: {:?}",
+        lan::present_sessions()
+    );
+}
+
 /// A connect a person asked for ("Connect over Wi‑Fi", an address typed into
-/// the add slot) waits for the board's answer, not just the upgrade: a busy
+/// Connect a board's Network row) waits for the board's answer, not just the upgrade: a busy
 /// board takes the upgrade and closes with 1013 at once, and that is the
 /// answer the caller hears, in the socket's words; a board that sends its
 /// first frame has answered; a socket that never opens says so.

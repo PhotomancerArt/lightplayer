@@ -46,11 +46,10 @@
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
-    AccessCommand, ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
-    DeviceWaitReason, OfferPath, OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
+    ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason, OfferPath,
+    OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
 };
 
-use crate::app::home::access_ui_context::access_handler;
 use crate::core::{
     quiet_action_class, solid_action_class, use_device_verbs, use_offers, verb_named,
 };
@@ -657,7 +656,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
             }
         }
         crate::route_recording::note_route_reason("open-cancelled");
-        crate::router::navigate_push(&StudioRoute::Devices);
+        crate::router::navigate_push(&StudioRoute::Home);
     };
     rsx! {
         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2.5 tw:pt-1",
@@ -680,7 +679,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
                     r#type: "button",
                     class: solid_action_class(ActionPriority::Secondary),
                     disabled: !reset.meta().enablement.is_enabled(),
-                    title: "{reset_title(&reset, \"Stop opening, reset the board's hardware, and go to Devices.\")}",
+                    title: "{reset_title(&reset, \"Stop opening, reset the board's hardware, and go home.\")}",
                     onclick: move |_| cancel_and(Some(reset.clone())),
                     "Reset the board"
                 }
@@ -688,7 +687,7 @@ fn DeviceOpenExits(state: OpeningState, on_action: Option<EventHandler<UiAction>
             button {
                 r#type: "button",
                 class: quiet_action_class(),
-                title: "Stop opening this project and go to Devices.",
+                title: "Stop opening this project and go home.",
                 onclick: move |_| cancel_and(None),
                 "Cancel"
             }
@@ -793,7 +792,7 @@ pub(crate) fn OpenFailureNotice(
     message: String,
     retry: UiAction,
     /// The board the open failed on: the notice then offers to reset it,
-    /// and the way back is Devices rather than Explore.
+    /// and the way back is Home rather than Explore.
     #[props(default)]
     device: Option<OpenDevice>,
     /// The board refused the link's tier (a Bluetooth link unlocked for
@@ -804,16 +803,15 @@ pub(crate) fn OpenFailureNotice(
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let (back_href, back_label) = match device {
-        Some(_) => (StudioRoute::Devices.path(), "Back to devices"),
+        Some(_) => (StudioRoute::Home.path(), "Back home"),
         None => (StudioRoute::Explore.path(), "Back to Explore"),
     };
     let board = device.as_ref().and_then(|device| device.id);
-    let unlock = board.filter(|_| needs_unlock);
-    // The board's own `reset-board` offer (M3).
+    // The board's own `reset-board` and `unlock` offers (M3, P02).
     let verbs = use_device_verbs(board)();
+    let unlock: Option<UiOffer> = verb_named(&verbs, "unlock").filter(|_| needs_unlock);
     let reset: Option<UiOffer> = verb_named(&verbs, "reset-board").filter(|_| !needs_unlock);
     let reset = reset.map(|offer| offer.action);
-    let on_access = access_handler();
     rsx! {
         section { class: "tw:grid tw:max-w-[560px] tw:gap-3.5",
             div { class: "tw:grid tw:gap-2 tw:rounded-lg tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-4",
@@ -835,13 +833,24 @@ pub(crate) fn OpenFailureNotice(
                     },
                     "Retry"
                 }
-                if let Some(device) = unlock {
+                // The board's own `unlock` offer: pressed bare, it raises
+                // the sheet.
+                if let Some(unlock) = unlock {
                     button {
                         r#type: "button",
                         class: solid_action_class(ActionPriority::Secondary),
+                        disabled: !unlock.is_enabled(),
                         title: "Unlock with an edit password; Retry once it is unlocked.",
-                        onclick: move |_| on_access.call(AccessCommand::LogIn { device }),
-                        "Unlock"
+                        "data-offer-path": "{unlock.path}",
+                        onclick: {
+                            let press = unlock.action.clone();
+                            move |_| {
+                                if let Some(on_action) = on_action {
+                                    on_action.call(press.clone());
+                                }
+                            }
+                        },
+                        "{unlock.label()}"
                     }
                 }
                 if let Some(reset) = reset {

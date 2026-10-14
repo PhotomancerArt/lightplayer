@@ -1,5 +1,5 @@
-//! Stories for the shared site chrome (chrome C: split-weight families,
-//! ⋯ overflow at narrow).
+//! Stories for the shared site chrome (chrome C: the logo is Home's tab,
+//! the world's sections ride the right cluster, ⋯ overflow at narrow).
 //!
 //! The chrome is presentational (its standalone hashchange listener is
 //! route-guarded and never installs under the story book), so these mount
@@ -31,28 +31,23 @@ use crate::app::story_fixtures::project_editor_fixture;
 use crate::base::{LogoLockup, LogoMark};
 
 #[story(
-    description = "Wide bar, one row per section: primary family (Devices, Projects) full weight by the brand; secondary family (Boards, Docs) lighter on the right; Home lights no tab — the logo is its affordance."
+    description = "Wide bar, one row per section: the world's sections (Boards, Docs) lighter on the right; Home has no tab — the logo is its affordance, and at Home it wears the you're-here underline. The boards and projects live on the home page, so the bar carries no Devices or Projects tab."
 )]
 pub(crate) fn sections_active() -> Element {
     rsx! {
         div { class: "tw:grid tw:gap-2",
-            for section in [
-                SiteSection::Devices,
-                SiteSection::Projects,
-                SiteSection::Boards,
-                SiteSection::Docs,
-                SiteSection::Home,
-            ]
-            {
+            for section in [SiteSection::Boards, SiteSection::Docs, SiteSection::Home] {
                 {frame(1000, section, branch_chip(), false)}
             }
         }
     }
 }
 
-#[story(description = "Devices section active, dev-branch chip on the right.")]
+#[story(
+    description = "Home active (the home page, where the boards and projects live): the logo wears the underline, dev-branch chip on the right."
+)]
 pub(crate) fn devices_active() -> Element {
-    frame(1000, SiteSection::Devices, branch_chip(), false)
+    frame(1000, SiteSection::Home, branch_chip(), false)
 }
 
 #[story(description = "Docs section active (secondary family), deployed version chip.")]
@@ -67,12 +62,12 @@ pub(crate) fn docs_active() -> Element {
 
 #[story(
     label = "Narrow (390px)",
-    description = "Phone width: brand word hidden, secondary family folded into the ⋯ menu, dirty build icon in warning tone."
+    description = "Phone width: brand word hidden, the world's sections folded into the ⋯ menu, dirty build icon in warning tone."
 )]
 pub(crate) fn narrow() -> Element {
     frame(
         390,
-        SiteSection::Devices,
+        SiteSection::Home,
         BuildChip::Branch {
             name: "claude/settings-provenance-rework-b6680f".to_string(),
             dirty: true,
@@ -83,7 +78,7 @@ pub(crate) fn narrow() -> Element {
 
 #[story(
     label = "Narrow, ⋯ menu open",
-    description = "The ONE merged \u{22ef} menu (G3 ruling): Sections and Tools groups in a single popup; active section marked (Docs is current here). Plain route, so the primary tabs stay inline and out of the menu."
+    description = "The ONE merged \u{22ef} menu (G3 ruling): Sections and Tools groups in a single popup; active section marked (Docs is current here). Home is the logo, never a row."
 )]
 pub(crate) fn narrow_menu_open() -> Element {
     rsx! {
@@ -378,7 +373,7 @@ pub(crate) fn logo_sizes() -> Element {
 
 #[story(
     label = "Lens bar — the narrow ladder",
-    description = "The crowded bar (three-segment session control + Save + mode toggles aboard) folds EARLIER than the plain one — the cut is where things stop fitting, and this bar stops fitting ~220px sooner. Top to bottom: ≥900 everything; <900 the world nav retreats to ⋯, Patch/Play and Share go icon-only, the version chip hides, the device name and the relationship word fold to their glyphs; <680 the brand word yields; <560 the phone bar — Devices/Projects become ⋯ rows, Patch a menu row, the changes segment goes count-only, and the project name is the one flexible truncator. Nothing overlaps or wraps at any rung."
+    description = "The crowded bar (three-segment session control + Save + mode toggles aboard) folds EARLIER than the plain one — the cut is where things stop fitting, and this bar stops fitting ~220px sooner. Top to bottom: ≥900 everything; <900 the world nav retreats to ⋯, Patch/Play and Share go icon-only, the version chip hides, the device name and the relationship word fold to their glyphs; <680 the brand word yields; <560 the phone bar — gaps tighten, the changes segment goes count-only, and the project name is the one flexible truncator. Nothing overlaps or wraps at any rung."
 )]
 pub(crate) fn lens_bar_ladder() -> Element {
     rsx! {
@@ -392,7 +387,7 @@ pub(crate) fn lens_bar_ladder() -> Element {
 
 #[story(
     label = "Lens bar phone ⋯ menu",
-    description = "The phone rung's ⋯ menu (crowded bar <560): the Project group leads with its one Archive row, and the Sections group carries ALL FIVE sections — Devices and Projects join the world's three, because the phone bar keeps no inline tabs at all."
+    description = "The crowded bar's narrow ⋯ menu (<900, here at phone width): the Project group leads with its one Archive row, and the Sections group carries the world's sections (Boards, Docs), which the phone bar keeps no inline tabs for. Home is the logo."
 )]
 pub(crate) fn lens_bar_phone_menu_open() -> Element {
     rsx! {

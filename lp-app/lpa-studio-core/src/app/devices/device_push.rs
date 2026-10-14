@@ -18,7 +18,6 @@
 //!   refused is worse than saying why it is not offered.
 
 use lpa_devices::identity::DeviceId;
-use lpa_devices::view::DeviceView;
 
 use crate::app::home::embedded_example::embedded_example;
 use crate::app::home::{UiExampleCard, UiPackageCard};
@@ -94,15 +93,17 @@ pub struct PushOffer {
     pub unavailable: Option<String>,
 }
 
-/// The picker for one board.
+/// The picker for one board, by the board id its hello carried (`None`
+/// when it has not said): the id is all the picker reads of the board — it
+/// decides whether a starter can be generated for it.
 pub fn push_offer(
-    card: &DeviceView,
+    board_id: Option<&str>,
     projects: &[UiPackageCard],
     examples: &[UiExampleCard],
 ) -> PushOffer {
     let mut choices = Vec::new();
     let mut new_project_unavailable = None;
-    match starter_board(card.board_id.as_deref()) {
+    match starter_board(board_id) {
         Ok(board_id) => choices.push(PushSourceChoice {
             key: format!("new:{board_id}"),
             title: "Start something new".to_string(),
@@ -286,37 +287,6 @@ impl crate::ControllerOp for DevicePushOp {
 mod tests {
     use super::*;
     use crate::app::home::embedded_example::embedded_examples;
-    use lpa_devices::view::LoadedProject;
-
-    fn card(board_id: Option<&str>) -> DeviceView {
-        DeviceView {
-            id: DeviceId(1),
-            title: "Bench board".to_string(),
-            status: lpa_devices::device::DeviceStatus::Ready,
-            state_label: "Ready".to_string(),
-            detail: None,
-            freshness_label: None,
-            identity_label: None,
-            detected_chip: None,
-            board_id: board_id.map(str::to_string),
-            firmware_face: lpa_devices::view::FirmwareFace::Unknown,
-            remembered_firmware: None,
-            degraded: None,
-            loaded_project: LoadedProject::Empty,
-            engine_fps: None,
-            link_counters: None,
-            can_receive_project: true,
-            can_remove_project: false,
-            activity: None,
-            last_outcome: None,
-            terminal: Vec::new(),
-            terminal_dropped: 0,
-            firmware_blocked: None,
-            escapes: vec![lpa_devices::view::Escape::Forget],
-            update_blocked: None,
-            last_update_outcome: None,
-        }
-    }
 
     fn example(id: &str, name: &str) -> UiExampleCard {
         UiExampleCard {
@@ -336,7 +306,7 @@ mod tests {
             slug: slug.to_string(),
             last_saved_at: None,
             provenance: None,
-            on_device: None,
+            on_boards: Vec::new(),
             open_elsewhere: false,
             target: None,
             health: crate::app::library::PackageHealth::Ready,
@@ -348,7 +318,7 @@ mod tests {
     #[test]
     fn an_unknown_board_offers_examples_and_the_library_but_says_why_not_new() {
         let offer = push_offer(
-            &card(None),
+            None,
             &[project("prj_1", "2026-08-30-porch")],
             &[example("catalog/plasma", "Plasma")],
         );
@@ -379,7 +349,7 @@ mod tests {
             .find(|board| board.default_led_wire().is_some())
             .expect("the catalog ships a board with a default wire");
 
-        let offer = push_offer(&card(Some(&board.board_id)), &[], &[]);
+        let offer = push_offer(Some(&board.board_id), &[], &[]);
 
         assert_eq!(offer.choices.len(), 1, "{offer:?}");
         assert_eq!(offer.choices[0].group, PushSourceGroup::New);
@@ -402,7 +372,7 @@ mod tests {
     /// loud, not silently dropped.
     #[test]
     fn an_uncatalogued_board_id_reads_honestly() {
-        let offer = push_offer(&card(Some("some-board-from-the-future")), &[], &[]);
+        let offer = push_offer(Some("some-board-from-the-future"), &[], &[]);
 
         assert!(offer.choices.is_empty());
         assert!(
@@ -428,7 +398,7 @@ mod tests {
             .map(|example| self::example(example.id, example.name))
             .collect();
 
-        let offer = push_offer(&card(None), &[], &examples);
+        let offer = push_offer(None, &[], &examples);
 
         assert_eq!(offer.choices.len(), examples.len());
         let mut keys: Vec<&str> = offer.choices.iter().map(|c| c.key.as_str()).collect();

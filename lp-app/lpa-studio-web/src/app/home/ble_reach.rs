@@ -1,5 +1,5 @@
-//! Asking the browser whether "via Bluetooth" can work here, and what the
-//! add slot says under the disabled button when it cannot (M5 S4, AC7; G3
+//! Asking the browser whether Bluetooth can work here, and what Connect a
+//! board says under the disabled square when it cannot (M5 S4, AC7; G3
 //! copy).
 //!
 //! The answer itself — [`BluetoothReach`], the decision from what the

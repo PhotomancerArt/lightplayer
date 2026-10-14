@@ -1233,6 +1233,16 @@ pub(crate) fn ble_init(config: &Config) -> PhyInitGuard<'static> {
             core::ptr::null(),
         );
 
+        // LP fork (third diff, README-LP.md): IDF's `BT_CTRL_RUN_IN_FLASH_ONLY`
+        // tells the controller its code is slower, before it is enabled.
+        #[cfg(ble_controller_flash_only_params)]
+        {
+            unsafe extern "C" {
+                fn esp_ble_controller_flash_only_param_config();
+            }
+            esp_ble_controller_flash_only_param_config();
+        }
+
         #[cfg(esp32c2)]
         let res = ble_controller_enable(1); // 1 = BLE
         #[cfg(not(esp32c2))]
