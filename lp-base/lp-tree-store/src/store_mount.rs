@@ -7,7 +7,9 @@
 //! the one before it — no further, README defect 12) by indexing its
 //! closure (pass 2, `mount_walk.rs`: the index holds only live records, so
 //! mount's RAM does not grow with the garbage on flash); resume each head
-//! only if its tail reads all `0xFF`.
+//! only if its tail reads all `0xFF`. The newest sector of each kind has its
+//! tail settled during pass 1, before the walk or a resume trusts it
+//! (`record_scan.rs`: a torn record can read whole on one read only).
 
 use alloc::vec::Vec;
 
@@ -46,10 +48,21 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             }
         }
         heap_sort_by(&mut valid, |a, b| (a.0, a.1) < (b.0, b.1));
+        // The newest sector of each kind: the only place a cut can have torn
+        // the last program, and the head a resume would append to.
+        let newest = HeadKind::ALL.map(|kind| {
+            valid
+                .iter()
+                .rev()
+                .find(|v| v.2 == kind)
+                .map(|v| v.1)
+                .filter(|&s| !closed[s as usize])
+        });
         // Pass 1: every trusted record, CRC-checked; roots kept apart.
         let mut roots = RootCandidates::default();
         for &(_, s, _) in &valid {
-            let scan = scan_sector(&mut self.log, s, &mut roots, &mut residue)?;
+            let settle = newest.contains(&Some(s));
+            let scan = scan_sector(&mut self.log, s, &mut roots, &mut residue, settle)?;
             self.log.sectors.end[s as usize] = scan.end as u16;
             closed[s as usize] |= scan.closed;
         }
@@ -99,11 +112,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.committed = Some(Committed { id, root });
 
         for kind in HeadKind::ALL {
-            let cand = valid
-                .iter()
-                .rev()
-                .find(|v| v.2 == kind)
-                .map(|v| v.1)
+            let cand = newest[kind.index()]
                 .filter(|&s| !closed[s as usize] && !self.log.sectors.is_retired(s));
             if let Some(s) = cand {
                 let end = u32::from(self.log.sectors.end[s as usize]);

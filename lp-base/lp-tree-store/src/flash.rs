@@ -3,8 +3,11 @@
 /// A NOR part as the store sees it.
 ///
 /// `program` may only clear bits; the store never programs over bytes it has
-/// not erased itself, except to *kill* a sector header (programming zeros,
-/// which only clears). Every error is treated as "power lost": the store that
+/// not erased itself, except to *kill* a sector header or a record header
+/// that did not check (programming zeros, which only clears), and to program
+/// a write head's last record (or its header) again with the bytes it read
+/// and checked (`record_scan.rs`, settling a head's tail: nothing that reads
+/// 1 is cleared). Every error is treated as "power lost": the store that
 /// saw it must be dropped, never reused.
 pub trait Flash {
     type Error: core::fmt::Debug;

@@ -53,10 +53,13 @@ pub enum Mutant {
     NewerVersionUntrusted,
     /// A sector is opened without reading its erase back as all `0xFF`.
     OpenWithoutReadBack,
+    /// Mount trusts the newest sectors' last programs on one read: their
+    /// tail is not settled (no re-program, no kill of a record that failed).
+    TrustTailOnce,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 11] = [
+    pub const ALL: [Mutant; 12] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -68,6 +71,7 @@ impl Mutant {
         Mutant::MagicFirst,
         Mutant::NewerVersionUntrusted,
         Mutant::OpenWithoutReadBack,
+        Mutant::TrustTailOnce,
     ];
 
     pub fn name(self) -> &'static str {
@@ -83,6 +87,7 @@ impl Mutant {
             Mutant::MagicFirst => "magic_first",
             Mutant::NewerVersionUntrusted => "newer_version_untrusted",
             Mutant::OpenWithoutReadBack => "open_without_read_back",
+            Mutant::TrustTailOnce => "trust_tail_once",
         }
     }
 
