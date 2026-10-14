@@ -5594,6 +5594,8 @@ version = "40.0.0"
 dependencies = [
  "dioxus",
  "lab-mapping-model",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
