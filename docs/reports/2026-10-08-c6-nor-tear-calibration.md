@@ -769,7 +769,7 @@ next. The aligned batches add cuts 201–500; the unaligned ones (200; two
 batches if time is short, which meets the brief's ≥ 100) go to section 8's
 table.
 
-**What `--check-model` decides (DD29).** Shares within sampling noise, not
+**What `--check-model` decides (DD29, corrected by DD32).** Shares within sampling noise, not
 raw counts: 500 cuts have other counts than 200, so a count comparison would
 say "differs" whatever the part did. The rule, which `--help` repeats:
 
@@ -781,14 +781,20 @@ say "differs" whatever the part did. The rule, which `--help` repeats:
    shapes are compared among the torn erases and program shapes among the
    torn programs, each at its own observed n. A cut after the program
    finished is not a torn operation and is left out.
-3. **Confirmed** when every shape's observed share lies inside its 95 %
-   Wilson score interval around the *model's* share at that n.
+3. **Confirmed** when every shape's observed share lies inside its Wilson
+   score interval around the *model's* share at that n. **Bonferroni per
+   family (DD32):** a family tested in k cells (counted after pooling) puts
+   each cell's interval at the 1 − 0.05/k level, so an honest sample misses
+   somewhere in that family about one time in twenty. On the first 200 cuts
+   the erase family is 4 cells, each at 98.75 %, and the program family 2,
+   each at 97.5 %.
 4. **Pooling.** A shape expected fewer than 5 times at that n (model share
    times n) is pooled with the other such shapes; a pool, or a lone thin
    shape, still under 5 joins the thinnest remaining cell. On the first 200
    cuts the one weak-bit cut (expected 1.0) pools with zeroing.
 5. **A class the model has no shape for** (untouched, old data left,
-   scattered, ...) is never pooled away: seeing one fails the check.
+   scattered, ...) is never pooled away: seeing one fails the check. It is
+   not a test at a level, so it does not count towards k.
 6. **Otherwise** it prints the re-fit table (`--model-table`) and exits 1:
    re-fit `TearMix::CX1`, re-run the t1/f2/f3 sweeps under it, and say so.
    Exit 0 prints `CONFIRMED` and is "confirmed at 500".
@@ -798,10 +804,21 @@ cell can fail; that pins the arithmetic, not the part). `--self-test` also
 checks that a doubled shape fails and that pooling works. Only shares are
 judged: the `CX1_ERASING` and `CX1_READS_FF_WEAK` residue tables are drawn
 values, so a re-fit refreshes them from `--model-table` but the check never
-fails on them. At the 5 % level each cell can miss on an honest sample, and with
-six cells (no multiple-comparison correction, as DD29 says) roughly one
-honest sample in four misses somewhere: a miss is a reason to look at the table, and the
-re-fit is cheap.
+fails on them.
+
+**Why the correction (DD32, before any data).** DD29 judged each of the six
+cells at a plain 95 %, so roughly one honest sample in four missed somewhere
+and "MODEL DIFFERS" would have said more about the test than the part.
+`--self-test` measures it: 2,000 honest samples of 500 cuts drawn from the
+200-cut model (415 torn erases, 82 torn programs, fixed seed) miss somewhere
+more than 15 % of the time uncorrected, and each family misses about 6 % (erase)
+and 3 % (program) of the time corrected. Wilson around a small discrete count
+is approximate, which is why the erase family sits a little over 5 %; the
+self-test's bar is 7.5 % per family. It also checks that a share outside 95 %
+but inside 99 % confirms a five-cell family and fails without the correction,
+and that a real difference (the same shape further out, or a doubled shape)
+still fails. The rule was changed before the sitting's first cut, not to fit
+a result. `just lint-flash-tears-analyze` runs the self-test in `check-lint`.
 
 **What happened on 2026-10-08 night** (the sitting that did not run). CX1
 was leased (`direct: tree-store M4`) on `/dev/cu.usbmodem1301`, hub `0-1`

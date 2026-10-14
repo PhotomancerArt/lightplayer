@@ -49,7 +49,7 @@ in PATH; the prose around it is left alone. Re-run it after every batch.
 from __future__ import annotations
 
 CHECK_MODEL_RULE = """\
---check-model (DD29) -- is lp-nor-sim's TearMix::CX1 confirmed by the silicon cuts?
+--check-model (DD29, corrected by DD32) -- is lp-nor-sim's TearMix::CX1 confirmed by the silicon cuts?
 
   1. Per payload. Only the page-aligned `flash-tears` silicon cuts feed the
      model's shares. `flash-tears-unaligned` silicon cuts are counted and
@@ -58,8 +58,12 @@ CHECK_MODEL_RULE = """\
      shapes are compared among the torn erases and the program shapes among
      the torn programs. A cut after the program finished ("complete") is not
      a torn operation and is left out.
-  3. Confirmed when EVERY shape's observed share lies inside its 95 % Wilson
-     score interval around the MODEL's share, at the observed n of its family.
+  3. Confirmed when EVERY shape's observed share lies inside its Wilson score
+     interval around the MODEL's share, at the observed n of its family.
+     Bonferroni per family (DD32): a family tested in k cells puts each cell's
+     interval at the 1 - 0.05/k level, so an honest sample of that family
+     misses somewhere about 5 % of the time (k = 1 is the plain 95 %).
+     k counts the cells after pooling (rule 4), not the NOT MODELLED ones.
   4. Pooling: a shape expected fewer than 5 times at that n (model share x n)
      is pooled with the other such shapes into one cell. A pool (or a lone thin
      shape) still under 5 joins the thinnest remaining cell, so no cell is
@@ -1038,6 +1042,56 @@ def check_model_self_test() -> None:
     # The interval itself: Wilson at p = 0.5, n = 100 is 40.4 % - 59.6 %.
     lo, hi = wilson(0.5, 100)
     assert abs(lo - 0.4038) < 1e-3 and abs(hi - 0.5962) < 1e-3, (lo, hi)
+    bonferroni_self_test()
+
+
+def bonferroni_self_test() -> None:
+    """DD32: each of a family's k cells at 1 - 0.05/k, k after pooling."""
+    # The quantiles: k = 1 is the plain 95 %; k = 5 puts each cell at 99 %.
+    assert abs(bonferroni_z(1) - Z95) < 1e-5, bonferroni_z(1)
+    assert abs(bonferroni_z(5) - 2.575829) < 1e-5, bonferroni_z(5)
+    # k is counted after pooling: CX1's 200 erases pool reads-ff-weak away, so
+    # the erase family is 4 cells at 98.75 %, the program family 2 at 97.5 %.
+    ok, lines = judge_model(synthetic_rows(CX1_200_CUTS), CX1_200_RS)
+    assert any("torn erases" in l and "4 tested cell(s)" in l and "98.75%" in l for l in lines), lines
+    assert any("torn programs" in l and "2 tested cell(s)" in l and "97.50%" in l for l in lines), lines
+    # A NOT MODELLED cell does not raise k (it is not a test at a level) and
+    # still fails when seen.
+    cells = judge_family({"a": 50, "b": 49, "x": 1}, {"a": 1, "b": 1})
+    assert {c["k"] for c in cells if not c.get("unmodelled")} == {2}, cells
+    assert not all(c["ok"] for c in cells), cells
+    # An honest-looking miss: five equal shapes at n = 500 (100 expected each,
+    # 95 % band 83 - 118); one at 120 is outside 95 % but inside 99 %. Without
+    # the correction it fails; with it (k = 5) the family is confirmed.
+    weights = {s: 1 for s in "abcde"}
+    seen = {"a": 120, "b": 95, "c": 95, "d": 95, "e": 95}
+    assert not all(c["ok"] for c in judge_family(seen, weights, alpha=None))
+    assert all(c["ok"] for c in judge_family(seen, weights))
+    # ... and a real difference still fails corrected: the same shape at 135.
+    seen = {"a": 135, "b": 92, "c": 91, "d": 91, "e": 91}
+    assert not all(c["ok"] for c in judge_family(seen, weights))
+    # The point of DD32, measured: honest samples of 500 cuts (415 torn
+    # erases, 82 torn programs) drawn from the model itself. Uncorrected,
+    # about one in five misses somewhere (DD32's premise: ~1 in 4 at 200);
+    # corrected, each family misses about one time in twenty. Wilson around a
+    # discrete count is approximate, so the bar is 7.5 %, not 5 %.
+    import random
+
+    rng = random.Random(32)
+    fields = read_weights(CX1_200_RS)
+    trials = 2000
+    any_plain = [False] * trials
+    for shapes in MODEL_SHAPES.values():
+        w = {cls: fields[f] for cls, f in shapes}
+        n = round(sum(CX1_200_CUTS[c] for c in w) * 2.5)
+        miss_dd32 = 0
+        for t in range(trials):
+            draw = Counter(rng.choices(list(w), weights=list(w.values()), k=n))
+            obs = {c: draw.get(c, 0) for c in w}
+            any_plain[t] = any_plain[t] or not all(c["ok"] for c in judge_family(obs, w, alpha=None))
+            miss_dd32 += not all(c["ok"] for c in judge_family(obs, w))
+        assert miss_dd32 / trials < 0.075, (n, miss_dd32 / trials)
+    assert sum(any_plain) / trials > 0.15, sum(any_plain) / trials
 
 
 MODEL_RS = "lp-emu/lp-nor-sim/src/calibrated_tear.rs"
@@ -1098,10 +1152,22 @@ NOT_TORN = {"complete"}
 # DD29: a shape expected fewer times than this at the observed n is pooled.
 POOL_BELOW = 5.0
 Z95 = 1.959964
+# DD32: the family-wise miss rate an honest sample may have. Each of a
+# family's k tested cells is judged at the 1 - FAMILY_ALPHA/k level.
+FAMILY_ALPHA = 0.05
+
+
+def bonferroni_z(k: int, alpha: float = FAMILY_ALPHA) -> float:
+    """The two-sided normal quantile for one of `k` cells judged together at
+    family-wise level `alpha`: each cell at 1 - alpha/k (DD32)."""
+    from statistics import NormalDist
+
+    return NormalDist().inv_cdf(1 - alpha / (2 * max(1, k)))
 
 
 def wilson(p: float, n: int, z: float = Z95) -> tuple[float, float]:
-    """The 95 % Wilson score interval for a binomial share `p` at `n` trials.
+    """The Wilson score interval for a binomial share `p` at `n` trials, at
+    the level `z` gives (95 % by default; `bonferroni_z` for a family's cells).
 
     Here `p` is the MODEL's share, not an observed one: the interval is the
     band an honest sample of `n` cuts from the model lands in."""
@@ -1113,10 +1179,14 @@ def wilson(p: float, n: int, z: float = Z95) -> tuple[float, float]:
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
-def judge_family(observed: dict[str, int], weights: dict[str, int]) -> list[dict]:
-    """DD29, for one family of shapes: pool the thin shapes, test each cell.
+def judge_family(observed: dict[str, int], weights: dict[str, int],
+                 alpha: float | None = FAMILY_ALPHA) -> list[dict]:
+    """DD29, for one family of shapes: pool the thin shapes, test each cell,
+    each at the 1 - 0.05/k level for the family's k tested cells (DD32).
 
-    `observed` maps a class to its cut count (unmodelled classes too);
+    `alpha` is the family-wise level; `alpha=None` judges every cell at a
+    plain 95 % (no correction) — only the self-test uses that, to show what
+    the correction changes. `observed` maps a class to its cut count (unmodelled classes too);
     `weights` maps each MODELLED class to its model weight. Every cell has
     `ok` and the `classes` it stands for. A class the model has no weight for
     is a cell of its own that fails whenever it was seen: a shape the model
@@ -1146,11 +1216,18 @@ def judge_family(observed: dict[str, int], weights: dict[str, int]) -> list[dict
         rest["model"] += thin[0]["model"]
         rest["seen"] += thin[0]["seen"]
         cells.remove(thin[0])
+    # DD32: k is the number of cells tested here, after pooling. A NOT
+    # MODELLED cell (below) is not a test at a level; it fails when seen.
+    k = len(cells)
+    z = Z95 if alpha is None else bonferroni_z(k, alpha)
+    level = 0.95 if alpha is None else 1 - alpha / k
     for c in cells:
         c["n"] = n
+        c["k"] = k
+        c["level"] = level
         c["expected"] = c["model"] * n
         c["share"] = c["seen"] / n if n else 0.0
-        c["lo"], c["hi"] = wilson(c["model"], n)
+        c["lo"], c["hi"] = wilson(c["model"], n, z)
         c["ok"] = n == 0 or c["lo"] <= c["share"] <= c["hi"]
     for cls, k in sorted(observed.items()):
         if cls not in weights and k:
@@ -1193,10 +1270,14 @@ def judge_model(rows: list[dict], rs: str) -> tuple[bool, list[str]]:
         n = sum(observed.values())
         weights = {cls: fields[f] for cls, f in shapes}
         cells = judge_family(observed, weights)
+        tested = [c for c in cells if not c.get("unmodelled")]
+        k = len(tested)
+        level = tested[0]["level"] if tested else 1 - FAMILY_ALPHA
         out += [
-            f"torn {family}s: {n} cut(s) (page-aligned `{PAYLOAD}`, silicon)",
+            f"torn {family}s: {n} cut(s) (page-aligned `{PAYLOAD}`, silicon); {k} tested cell(s), "
+            f"each at the {level:.2%} level (Bonferroni: 1 - 0.05/{k}, DD32)",
             "",
-            "| shape | cuts | share | model share | 95 % Wilson interval at n | expected | |",
+            f"| shape | cuts | share | model share | {level:.2%} Wilson interval at n | expected | |",
             "|---|---:|---:|---:|---|---:|---|",
         ]
         for c in cells:
@@ -1242,10 +1323,12 @@ def check_model(rows: list[dict], table: str, rs_path: str) -> int:
     confirmed, lines = judge_model(rows, rs)
     print("\n".join(lines))
     if confirmed:
-        print(f"CONFIRMED: every shape's share lies inside its 95 % Wilson interval around {rs_path} "
+        print(f"CONFIRMED: every shape's share lies inside its Bonferroni-corrected Wilson interval "
+              f"(each family at 5 % overall, DD32) around {rs_path} "
               f"({table.splitlines()[0][3:].rstrip(".")})")
         return 0
-    print(f"MODEL DIFFERS: a shape lies outside its 95 % Wilson interval. Re-fit {rs_path} from this table "
+    print(f"MODEL DIFFERS: a shape lies outside its Bonferroni-corrected Wilson interval (DD32), or the "
+          f"silicon shows a shape the model has none of. Re-fit {rs_path} from this table "
           "(and its doc comment's counts), then re-run the t1/f2/f3 sweeps under it:\n")
     sys.stdout.write(table)
     return 1
