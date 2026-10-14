@@ -14,9 +14,9 @@
 
 use crate::camera::Camera;
 use crate::component::ComponentKind;
-use crate::fixture::Fixture;
-use crate::geom::{Vec2, distance_to_segment};
+use crate::geom::{Rect, Vec2, distance_to_segment};
 use crate::object::{ObjectShape, objects_of};
+use crate::project::Project;
 use crate::target::Target;
 
 pub const LAMP_PAD_PX: f64 = 7.0;
@@ -24,6 +24,10 @@ pub const LINE_PAD_PX: f64 = 10.0;
 pub const RING_PAD_PX: f64 = 8.0;
 pub const CIRCLE_PAD_PX: f64 = 10.0;
 pub const GROUP_PAD_PX: f64 = 14.0;
+/// A fixture is picked by its border, within this many pixels…
+pub const FRAME_EDGE_PX: f64 = 5.0;
+/// …or by its title tab above the box, this tall.
+pub const FRAME_TITLE_PX: f64 = 18.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Area {
@@ -32,6 +36,9 @@ pub enum Area {
     Hull { points: Vec<Vec2>, pad: f64 },
     /// Everything within `pad` of a circle's line.
     Band { center: Vec2, radius: f64, pad: f64 },
+    /// A fixture: its border and its title tab, NOT its inside — the inside
+    /// belongs to what's drawn in it, and to the selection box.
+    Frame { rect: Rect, title: Rect },
 }
 
 impl Area {
@@ -50,6 +57,9 @@ impl Area {
                 radius,
                 pad,
             } => (p.distance(*center) - radius).abs() <= *pad,
+            Area::Frame { rect, title } => {
+                title.contains(p) || edge_distance(rect, p) <= FRAME_EDGE_PX
+            }
         }
     }
 
@@ -59,6 +69,13 @@ impl Area {
         match self {
             Area::Hull { points, .. } => hull_distance(points, p),
             Area::Band { center, radius, .. } => (p.distance(*center) - radius).abs(),
+            Area::Frame { rect, title } => {
+                if title.contains(p) {
+                    0.0
+                } else {
+                    edge_distance(rect, p)
+                }
+            }
         }
     }
 
@@ -78,6 +95,7 @@ impl Area {
                 radius,
                 pad,
             } => Vec2::new(center.x, center.y - radius - pad),
+            Area::Frame { title, .. } => title.min,
         }
     }
 
@@ -98,15 +116,53 @@ impl Area {
                     outer
                 }
             }
+            Area::Frame { rect, title } => format!("{} {}", rect_path(rect), rect_path(title)),
         }
     }
 }
 
-impl Fixture {
+fn rect_path(r: &Rect) -> String {
+    format!(
+        "M{},{} H{} V{} H{} Z",
+        r.min.x, r.min.y, r.max.x, r.max.y, r.min.x
+    )
+}
+
+/// Distance from `p` to a rectangle's border (inside or out).
+fn edge_distance(r: &Rect, p: Vec2) -> f64 {
+    let a = r.min;
+    let b = Vec2::new(r.max.x, r.min.y);
+    let c = r.max;
+    let d = Vec2::new(r.min.x, r.max.y);
+    [(a, b), (b, c), (c, d), (d, a)]
+        .iter()
+        .map(|(u, v)| distance_to_segment(p, *u, *v))
+        .fold(f64::INFINITY, f64::min)
+}
+
+impl Project {
     /// The area of one target on screen.
     pub fn area(&self, camera: &Camera, t: &Target) -> Option<Area> {
         let screen = |p: Vec2| camera.to_screen(p);
+        // Components store their own fixture's coordinates.
+        let origin = t
+            .owner()
+            .and_then(|c| self.fixture_of(c))
+            .map(|f| self.origin(&f.id))
+            .unwrap_or_default();
+        let local = |p: Vec2| camera.to_screen(p + origin);
         match t {
+            Target::Fixture(id) => {
+                let f = self.fixture(id)?;
+                let b = self.world_bounds(id)?;
+                let rect = Rect::from_corners(screen(b.min), screen(b.max));
+                let width = 14.0 + 7.0 * f.name.chars().count() as f64;
+                let title = Rect::new(
+                    Vec2::new(rect.min.x, rect.min.y - FRAME_TITLE_PX - 2.0),
+                    Vec2::new(rect.min.x + width, rect.min.y - 2.0),
+                );
+                Some(Area::Frame { rect, title })
+            }
             Target::Lamp { .. } => {
                 let p = *self.lamps_under(t).first()?;
                 Some(Area::hull(&[screen(p)], LAMP_PAD_PX))
@@ -125,11 +181,11 @@ impl Fixture {
                 let c = self.component(id)?;
                 match &c.kind {
                     ComponentKind::Line { from, to, .. } => {
-                        Some(Area::hull(&[screen(*from), screen(*to)], LINE_PAD_PX))
+                        Some(Area::hull(&[local(*from), local(*to)], LINE_PAD_PX))
                     }
                     ComponentKind::Circle { center, rings, .. } => {
                         let r = rings.iter().map(|r| r.radius).fold(0.0, f64::max) * camera.scale;
-                        Some(Area::hull(&[screen(*center)], r + CIRCLE_PAD_PX))
+                        Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))
                     }
                     ComponentKind::Group { .. } => {
                         let mut points: Vec<Vec2> =
@@ -137,6 +193,7 @@ impl Fixture {
                         // Circles inside a group count by their whole disc.
                         for o in collect_objects(self, c) {
                             if let ObjectShape::Ring { center, radius } = o.shape {
+                                let center = center + origin;
                                 points.extend(ring_points(screen(center), radius * camera.scale));
                             }
                         }
@@ -152,8 +209,14 @@ impl Fixture {
     /// this.
     pub fn things_at(&self, camera: &Camera, p: Vec2) -> Vec<Target> {
         let mut out = Vec::new();
-        for t in self.children(None) {
-            self.collect_at(camera, p, &t, &mut out);
+        // A fixture's area is only its frame, so look inside every one.
+        for f in self.children(None) {
+            if self.area(camera, &f).is_some_and(|a| a.contains(p)) {
+                out.push(f.clone());
+            }
+            for t in self.children(Some(&f)) {
+                self.collect_at(camera, p, &t, &mut out);
+            }
         }
         out
     }
@@ -179,7 +242,7 @@ impl Fixture {
     }
 }
 
-fn collect_objects(f: &Fixture, c: &crate::Component) -> Vec<crate::Object> {
+fn collect_objects(f: &Project, c: &crate::Component) -> Vec<crate::Object> {
     let mut out = objects_of(c);
     for child in c.children() {
         out.extend(collect_objects(f, child));

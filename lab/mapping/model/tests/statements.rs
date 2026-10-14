@@ -3,9 +3,15 @@
 //! Each test's doc comment IS the statement. Read this file as the list.
 //! When a statement changes, change the sentence first, then the code.
 //!
-//! The fixture is `Fixture::seed()`: a `tail` group (group1: line1 out,
-//! line2 back), circle1 with rings r1 (outer, 40 lamps) and r2 (inner,
-//! 24 lamps), and line3 along the bottom.
+//! The project is `Project::seed()`, four fixtures in a grid:
+//! - `tail`: group1 (line1 out, line2 back), lines at x = 14 and 22;
+//! - `ring display`: circle1 at (35, 35), rings r1 (outer, 40 lamps) and r2
+//!   (inner, 24 lamps);
+//! - `strip`: line3, (6, 10) → (74, 10), 30 lamps;
+//! - `scarf`: empty, to draw into.
+//!
+//! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
+//! turns them into the canvas's.
 
 use lab_mapping_model::*;
 
@@ -17,26 +23,40 @@ fn select_all_then_delete_deletes_everything() {
     let mut e = editor();
     key(&mut e, Key::Char('a'), cmd());
     key(&mut e, Key::Delete, none());
-    assert!(
-        e.fixture.components.is_empty(),
-        "{:?}",
-        e.fixture.components
-    );
-    assert_eq!(e.fixture.lamp_count(), 0);
+    assert_eq!(e.project.lamp_count(), 0);
+    assert!(e.project.fixtures.iter().all(|f| f.components.is_empty()));
+    assert_eq!(e.project.fixtures.len(), 4, "the fixtures themselves stay");
 }
 
-/// ⌘A climbs: from a lamp deep inside, pressing it until it stops changing
-/// selects the whole top level, and delete then empties the fixture.
+/// ⌘A climbs a level each time: from a lamp, every lamp of its ring, then
+/// every ring, then everything in its fixture, then everything you drew in
+/// every fixture, then the fixtures themselves.
 #[test]
 fn select_all_climbs_to_everything_from_anywhere() {
     let mut e = editor();
     e.select(vec![lamp("circle1", "r2", 3)]);
-    for _ in 0..4 {
-        key(&mut e, Key::Char('a'), cmd());
-    }
-    assert_eq!(e.selection, e.fixture.children(None));
+    key(&mut e, Key::Char('a'), cmd());
+    assert_eq!(e.selection.len(), 24, "every lamp of r2");
+    key(&mut e, Key::Char('a'), cmd());
+    assert_eq!(
+        e.selection,
+        vec![ring("circle1", "r1"), ring("circle1", "r2")]
+    );
+    key(&mut e, Key::Char('a'), cmd());
+    assert_eq!(
+        e.selection,
+        vec![comp("circle1")],
+        "everything in ring display"
+    );
+    key(&mut e, Key::Char('a'), cmd());
+    assert_eq!(
+        e.selection,
+        vec![comp("group1"), comp("circle1"), comp("line3")]
+    );
+    key(&mut e, Key::Char('a'), cmd());
+    assert_eq!(e.selection, e.project.children(None), "the fixtures");
     key(&mut e, Key::Delete, none());
-    assert!(e.fixture.components.is_empty());
+    assert!(e.project.fixtures.is_empty());
 }
 
 /// Deleting a lamp is refused, and the refusal says why and what to do.
@@ -50,7 +70,7 @@ fn deleting_a_lamp_is_refused_with_a_reason() {
     assert!(n.why.unwrap().contains("line3"));
     assert!(n.help.unwrap().contains("−"));
     assert_eq!(
-        e.fixture.lamp_count(),
+        e.project.lamp_count(),
         25 + 25 + 40 + 24 + 30,
         "nothing changed"
     );
@@ -63,8 +83,8 @@ fn deleting_a_ring_keeps_the_other_rings_ids() {
     let mut e = editor();
     e.select(vec![ring("circle1", "r1")]);
     key(&mut e, Key::Delete, none());
-    assert!(!e.fixture.exists(&ring("circle1", "r1")));
-    assert!(e.fixture.exists(&ring("circle1", "r2")));
+    assert!(!e.project.exists(&ring("circle1", "r1")));
+    assert!(e.project.exists(&ring("circle1", "r2")));
 }
 
 /// A circle's last ring can't be deleted on its own; the refusal points at
@@ -77,18 +97,18 @@ fn a_circles_last_ring_is_refused() {
     let n = e.notice.clone().unwrap();
     assert_eq!(n.kind, NoticeKind::Refused);
     assert!(n.help.unwrap().contains("circle1"));
-    assert!(e.fixture.exists(&comp("circle1")));
+    assert!(e.project.exists(&comp("circle1")));
 }
 
 /// Undo brings back what delete took.
 #[test]
 fn undo_restores_a_delete() {
     let mut e = editor();
-    let before = e.fixture.clone();
+    let before = e.project.clone();
     key(&mut e, Key::Char('a'), cmd());
     key(&mut e, Key::Delete, none());
     key(&mut e, Key::Char('z'), cmd());
-    assert_eq!(e.fixture, before);
+    assert_eq!(e.project, before);
 }
 
 // ---- selecting: the drill-down -------------------------------------------
@@ -136,7 +156,7 @@ fn command_click_selects_the_lamp_directly() {
 fn clicking_empty_space_deselects() {
     let mut e = editor();
     e.select(vec![comp("circle1")]);
-    let empty = e.camera.to_screen(Vec2::new(110.0, 5.0));
+    let empty = e.camera.to_screen(place(&e, "scarf", 50.0, 15.0));
     e.pointer_down(empty, Button::Primary, none());
     e.pointer_up(empty, none());
     assert!(e.selection.is_empty());
@@ -188,6 +208,8 @@ fn escape_goes_up_a_level() {
     key(&mut e, Key::Escape, none());
     assert_eq!(e.selection, vec![comp("circle1")]);
     key(&mut e, Key::Escape, none());
+    assert_eq!(e.selection, vec![fixture(&e, "ring display")]);
+    key(&mut e, Key::Escape, none());
     assert!(e.selection.is_empty());
 }
 
@@ -207,14 +229,12 @@ fn arrows_walk_the_lamps() {
 /// held, only what's fully inside.
 #[test]
 fn box_touches_and_option_encloses() {
-    // A box around the whole tail and the left end of line3 (not the circle).
-    for (mods, want) in [
-        (none(), vec![comp("group1"), comp("line3")]),
-        (alt(), vec![comp("group1")]),
-    ] {
+    // Around the top half of the tail: it touches group1 but does not hold
+    // all of it.
+    for (mods, want) in [(none(), vec![comp("group1")]), (alt(), vec![])] {
         let mut e = editor();
-        let a = e.camera.to_screen(Vec2::new(5.0, 5.0));
-        let b = e.camera.to_screen(Vec2::new(42.0, 78.0));
+        let a = e.camera.to_screen(place(&e, "tail", 2.0, 2.0));
+        let b = e.camera.to_screen(place(&e, "tail", 34.0, 40.0));
         e.pointer_down(a, Button::Primary, none());
         e.pointer_move(a + Vec2::new(10.0, 10.0), mods);
         e.pointer_move(b, mods);
@@ -230,7 +250,8 @@ fn box_touches_and_option_encloses() {
 fn empty_space_inside_a_group_selects_it() {
     let mut e = editor();
     // Between the tail's two lines, x = 14 and x = 22.
-    click_at(&mut e, Vec2::new(18.0, 40.0), none());
+    let p = place(&e, "tail", 18.0, 40.0);
+    click_at(&mut e, p, none());
     assert_eq!(e.selection, vec![comp("group1")]);
 }
 
@@ -238,7 +259,8 @@ fn empty_space_inside_a_group_selects_it() {
 #[test]
 fn the_middle_of_a_circle_selects_it() {
     let mut e = editor();
-    click_at(&mut e, Vec2::new(70.0, 40.0), none());
+    let p = place(&e, "ring display", 35.0, 35.0);
+    click_at(&mut e, p, none());
     assert_eq!(e.selection, vec![comp("circle1")]);
 }
 
@@ -250,17 +272,20 @@ fn the_outline_is_the_area_a_click_hits() {
     for start in [vec![], vec![comp("circle1")], vec![comp("line1")]] {
         let mut e = editor();
         e.select(start.clone());
-        for gx in 0..60 {
-            for gy in 0..40 {
-                let p = e
-                    .camera
-                    .to_screen(Vec2::new(gx as f64 * 2.0, gy as f64 * 2.0));
+        let x = e.project.extent();
+        for gx in 0..70 {
+            for gy in 0..50 {
+                let w = Vec2::new(
+                    x.min.x - 10.0 + gx as f64 * (x.width() + 20.0) / 70.0,
+                    x.min.y - 10.0 + gy as f64 * (x.height() + 20.0) / 50.0,
+                );
+                let p = e.camera.to_screen(w);
                 e.pointer_move(p, none());
-                let under = e.fixture.things_at(&e.camera, p);
+                let under = e.project.things_at(&e.camera, p);
                 match e.hover_target() {
                     Some(t) => {
                         let area = e
-                            .fixture
+                            .project
                             .area(&e.camera, &t)
                             .expect("hovered things have an area");
                         assert!(area.contains(p), "{t:?} hovered outside its area at {p:?}");
@@ -277,13 +302,9 @@ fn the_outline_is_the_area_a_click_hits() {
 #[test]
 fn option_click_cycles_through_overlaps() {
     let mut e = editor();
-    // A line crossing line3 at (60, 74).
-    e.fixture.add(ComponentKind::line(
-        Vec2::new(60.0, 66.0),
-        Vec2::new(60.0, 79.0),
-        6,
-    ));
-    let at = Vec2::new(60.0, 74.0);
+    // A line crossing line3 at (40, 10).
+    cross_line3(&mut e);
+    let at = place(&e, "strip", 40.0, 10.0);
     click_at(&mut e, at, alt());
     let first = e.selection.clone();
     click_at(&mut e, at, alt());
@@ -300,12 +321,8 @@ fn option_click_cycles_through_overlaps() {
 #[test]
 fn the_cursor_note_names_overlaps() {
     let mut e = editor();
-    e.fixture.add(ComponentKind::line(
-        Vec2::new(60.0, 66.0),
-        Vec2::new(60.0, 79.0),
-        6,
-    ));
-    e.pointer_move(e.camera.to_screen(Vec2::new(60.0, 74.0)), none());
+    cross_line3(&mut e);
+    e.pointer_move(e.camera.to_screen(place(&e, "strip", 40.0, 10.0)), none());
     let note = e.cursor_note().expect("a note");
     assert!(
         note.contains("2 lines here") && note.contains("⌥ click") && note.contains("right-click"),
@@ -350,6 +367,82 @@ fn right_click_lists_whats_here() {
     assert!(e.menu.is_none());
 }
 
+// ---- fixtures -------------------------------------------------------------
+
+/// Fixtures sit in a grid and never overlap.
+#[test]
+fn fixtures_never_overlap() {
+    let e = editor();
+    let boxes: Vec<Rect> = e
+        .project
+        .fixtures
+        .iter()
+        .map(|f| e.project.world_bounds(&f.id).unwrap())
+        .collect();
+    for (i, a) in boxes.iter().enumerate() {
+        for b in &boxes[i + 1..] {
+            let apart = a.max.x <= b.min.x
+                || b.max.x <= a.min.x
+                || a.max.y <= b.min.y
+                || b.max.y <= a.min.y;
+            assert!(apart, "{a:?} overlaps {b:?}");
+        }
+    }
+}
+
+/// Clicking a fixture's title selects the fixture; clicking inside it
+/// selects what's drawn there.
+#[test]
+fn a_fixtures_title_selects_it() {
+    let mut e = editor();
+    let corner = e.camera.to_screen(place(&e, "tail", 0.0, 0.0));
+    let title = corner + Vec2::new(12.0, -10.0);
+    e.pointer_move(title, none());
+    e.pointer_down(title, Button::Primary, none());
+    e.pointer_up(title, none());
+    assert_eq!(e.selection, vec![fixture(&e, "tail")]);
+}
+
+/// Dragging a fixture moves nothing and says why.
+#[test]
+fn dragging_a_fixture_is_refused() {
+    let mut e = editor();
+    let before = e.project.clone();
+    let corner = e.camera.to_screen(place(&e, "tail", 0.0, 0.0));
+    let title = corner + Vec2::new(12.0, -10.0);
+    e.pointer_down(title, Button::Primary, none());
+    e.pointer_move(title + Vec2::new(40.0, 0.0), none());
+    e.pointer_up(title + Vec2::new(40.0, 0.0), none());
+    assert_eq!(e.project, before);
+    assert_eq!(e.notice.unwrap().kind, NoticeKind::Refused);
+}
+
+/// A fixture's size is a property like any other.
+#[test]
+fn a_fixtures_size_is_a_property() {
+    let mut e = editor();
+    e.select(vec![fixture(&e, "scarf")]);
+    e.edit_selection_prop("width", PropEdit::SetNumber(140.0));
+    assert_eq!(e.project.fixtures[3].size.x, 140.0);
+}
+
+/// A box drag that leaves the canvas keeps going, and finishes where the
+/// pointer is let go.
+#[test]
+fn a_drag_survives_leaving_the_canvas() {
+    let mut e = editor();
+    // From the tail's bottom-left, up past the top of the canvas.
+    let a = e.camera.to_screen(place(&e, "tail", 2.0, 80.0));
+    e.pointer_down(a, Button::Primary, none());
+    e.pointer_move(a + Vec2::new(10.0, -10.0), none());
+    e.pointer_leave();
+    let outside = Vec2::new(e.camera.to_screen(place(&e, "tail", 30.0, 0.0)).x, -500.0);
+    e.pointer_move(outside, none());
+    assert!(e.selection_box().is_some(), "the box is still there");
+    e.pointer_up(outside, none());
+    assert_eq!(e.selection, vec![comp("group1")]);
+}
+
 // ---- editing ---------------------------------------------------------------
 
 /// Changing a line's count keeps the selected lamp selected.
@@ -360,7 +453,7 @@ fn selection_survives_a_count_change() {
     key(&mut e, Key::Char('='), none());
     assert_eq!(e.selection, vec![lamp("line3", "line", 7)]);
     assert_eq!(
-        e.fixture
+        e.project
             .object(&ObjectId::new(&ComponentId::new("line3"), "line"))
             .unwrap()
             .lamps
@@ -385,7 +478,7 @@ fn shrinking_past_the_selected_lamp_keeps_the_last_one() {
 fn inspector_edits_everything_selected() {
     let mut e = editor();
     e.select(vec![comp("line1"), comp("line3"), ring("circle1", "r2")]);
-    let props = common_props(&e.fixture, &e.selection);
+    let props = common_props(&e.project, &e.selection);
     let lamps = props
         .iter()
         .find(|p| p.desc.id == "lamps")
@@ -397,7 +490,7 @@ fn inspector_edits_everything_selected() {
     );
 
     e.edit_selection_prop("lamps", PropEdit::SetCount(12));
-    let props = common_props(&e.fixture, &e.selection);
+    let props = common_props(&e.project, &e.selection);
     assert_eq!(
         props
             .iter()
@@ -417,13 +510,13 @@ fn ring_edits_land_in_the_circle() {
     e.select(vec![ring("circle1", "r2")]);
     e.edit_selection_prop("ccw", PropEdit::SetFlag(true));
     assert!(
-        e.fixture
+        e.project
             .ring(&ComponentId::new("circle1"), "r2")
             .unwrap()
             .reversed
     );
     assert!(
-        !e.fixture
+        !e.project
             .ring(&ComponentId::new("circle1"), "r1")
             .unwrap()
             .reversed
@@ -456,24 +549,24 @@ fn dragging_a_ring_moves_its_circle() {
     e.pointer_move(at + by, none());
     e.pointer_up(at + by, none());
     let ComponentKind::Circle { center, .. } = &e
-        .fixture
+        .project
         .component(&ComponentId::new("circle1"))
         .unwrap()
         .kind
     else {
         panic!()
     };
-    assert!((center.x - 75.0).abs() < 1e-6, "{center:?}");
+    assert!((center.x - 40.0).abs() < 1e-6, "{center:?}");
 }
 
-/// Drawing a line gives it one lamp every `spacing` units, selects it, and
-/// goes back to the select tool.
+/// Drawing a line puts it in the fixture you start in, gives it one lamp
+/// every `spacing` units, selects it, and goes back to the select tool.
 #[test]
 fn drawing_a_line_counts_lamps_from_its_length() {
     let mut e = editor();
     key(&mut e, Key::Char('l'), none());
-    let a = e.camera.to_screen(Vec2::new(40.0, 10.0));
-    let b = e.camera.to_screen(Vec2::new(40.0 + 24.0, 10.0));
+    let a = e.camera.to_screen(place(&e, "scarf", 10.0, 15.0));
+    let b = e.camera.to_screen(place(&e, "scarf", 34.0, 15.0));
     e.pointer_down(a, Button::Primary, none());
     e.pointer_move(b, none());
     e.pointer_up(b, none());
@@ -481,8 +574,24 @@ fn drawing_a_line_counts_lamps_from_its_length() {
         panic!()
     };
     assert_eq!(id.as_str(), "line4", "ids are never reused");
-    assert_eq!(e.fixture.lamps_under(&e.selection[0]).len(), 11); // 24 / 2.4 + 1
+    assert_eq!(e.project.lamps_under(&e.selection[0]).len(), 11); // 24 / 2.4 + 1
     assert_eq!(e.tool, Tool::Select);
+    assert_eq!(e.project.fixture_of(&id).unwrap().name, "scarf");
+}
+
+/// Drawing that starts outside every fixture is refused, with where to
+/// start instead.
+#[test]
+fn drawing_outside_every_fixture_is_refused() {
+    let mut e = editor();
+    key(&mut e, Key::Char('l'), none());
+    let x = e.project.extent();
+    let a = e.camera.to_screen(Vec2::new(x.max.x + 20.0, x.min.y));
+    e.pointer_down(a, Button::Primary, none());
+    e.pointer_move(a + Vec2::new(80.0, 0.0), none());
+    e.pointer_up(a + Vec2::new(80.0, 0.0), none());
+    assert_eq!(e.notice.unwrap().kind, NoticeKind::Refused);
+    assert_eq!(e.project.lamp_count(), 144);
 }
 
 // ---- teaching ----------------------------------------------------------------
@@ -529,10 +638,10 @@ fn every_offered_key_does_something() {
             "{keys} is offered"
         );
         let mut probe = e.clone();
-        let before = (probe.fixture.clone(), probe.selection.clone());
+        let before = (probe.project.clone(), probe.selection.clone());
         probe.key_down(key_.clone(), none());
         assert_ne!(
-            (probe.fixture, probe.selection),
+            (probe.project, probe.selection),
             before,
             "{keys} changed something"
         );
@@ -542,7 +651,7 @@ fn every_offered_key_does_something() {
 // ---- helpers -------------------------------------------------------------------
 
 fn editor() -> Editor {
-    let mut e = Editor::new(Fixture::seed());
+    let mut e = Editor::new(Project::seed());
     e.resize(Vec2::new(1200.0, 800.0));
     e
 }
@@ -565,6 +674,38 @@ fn alt() -> Mods {
     }
 }
 
+/// A point in a fixture's own coordinates, on the canvas.
+fn place(e: &Editor, fixture_name: &str, x: f64, y: f64) -> Vec2 {
+    let f = e
+        .project
+        .fixtures
+        .iter()
+        .find(|f| f.name == fixture_name)
+        .unwrap();
+    e.project.origin(&f.id) + Vec2::new(x, y)
+}
+
+fn fixture(e: &Editor, name: &str) -> Target {
+    Target::Fixture(
+        e.project
+            .fixtures
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .id
+            .clone(),
+    )
+}
+
+/// A short line in `strip` crossing line3 at (40, 10).
+fn cross_line3(e: &mut Editor) {
+    let strip = e.project.fixtures[2].id.clone();
+    e.project.add(
+        &strip,
+        ComponentKind::line(Vec2::new(40.0, 2.0), Vec2::new(40.0, 18.0), 6),
+    );
+}
+
 fn comp(id: &str) -> Target {
     Target::Component(ComponentId::new(id))
 }
@@ -581,7 +722,7 @@ fn lamp(component: &str, key: &str, index: u32) -> Target {
 }
 
 fn lamp_pos(e: &Editor, component: &str, key: &str, index: u32) -> Vec2 {
-    e.fixture
+    e.project
         .object(&ObjectId::new(&ComponentId::new(component), key))
         .unwrap()
         .lamps[index as usize]

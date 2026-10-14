@@ -11,8 +11,8 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Camera, Component, ComponentId, Editor, Fixture, Gesture, Object, ObjectShape, Rect, Target,
-    Vec2, object::objects_of,
+    Camera, Component, ComponentId, Editor, FixtureId, Gesture, Object, ObjectShape, Project, Rect,
+    Target, Vec2, area::FRAME_TITLE_PX, object::objects_of,
 };
 
 use crate::input;
@@ -20,18 +20,44 @@ use crate::input;
 #[component]
 pub fn Canvas(ed: Signal<Editor>) -> Element {
     let mut ed = ed;
+    // Moves and releases come from the whole window, so a drag keeps going
+    // when the pointer leaves the canvas (or the window) and finishes right
+    // when it comes back.
+    use_hook(move || input::follow_window(ed));
     let e = ed.read();
-    let f = &e.fixture;
+    let f = &e.project;
     let cam = e.camera;
     let context = e.context();
     let hover = e.hover_target();
-    let bounds = screen_rect(&cam, f.bounds);
+    let frames: Vec<FrameView> = f
+        .fixtures
+        .iter()
+        .filter_map(|fx| {
+            let rect = screen_rect(&cam, f.world_bounds(&fx.id)?);
+            let dimmed = context
+                .as_ref()
+                .is_some_and(|c| !f.chain(&Target::Fixture(fx.id.clone())).contains(c));
+            Some(FrameView {
+                rect,
+                name: fx.name.clone(),
+                title_w: 14.0 + 7.0 * fx.name.chars().count() as f64,
+                dimmed,
+            })
+        })
+        .collect();
 
     let objects: Vec<ObjectView> = f
-        .objects()
+        .placed_objects()
         .into_iter()
-        .map(|o| object_view(f, &cam, &o, &e.selection, context.as_ref()))
+        .map(|(fid, o)| object_view(f, &cam, &fid, &o, &e.selection, context.as_ref()))
         .collect();
+    // A draft goes into the fixture it was started in.
+    let draft_bounds = match &e.gesture {
+        Gesture::Drawing { start_world } => f
+            .fixture_at(*start_world)
+            .and_then(|id| f.world_bounds(&id)),
+        _ => None,
+    };
     let draft: Vec<ObjectView> = e
         .draft()
         .map(|kind| {
@@ -40,7 +66,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 kind,
             })
             .iter()
-            .map(|o| draft_view(&cam, o, f.bounds))
+            .map(|o| draft_view(&cam, o, draft_bounds))
             .collect()
         })
         .unwrap_or_default();
@@ -57,10 +83,13 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         }
     };
     if let Some(c) = &context {
-        add(c, "outline-context", true);
+        // A fixture's title tab already names it.
+        add(c, "outline-context", !matches!(c, Target::Fixture(_)));
     }
     for t in &e.selection {
-        add(t, "outline-selected", !matches!(t, Target::Lamp { .. }));
+        // A fixture's title tab already names it.
+        let label = !matches!(t, Target::Lamp { .. } | Target::Fixture(_));
+        add(t, "outline-selected", label);
     }
     // In the right-click list, the item under the pointer is outlined;
     // otherwise, what a click would select.
@@ -111,13 +140,25 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 width: "{vw}",
                 height: "{vh}",
                 rect { class: "outside", x: "0", y: "0", width: "{vw}", height: "{vh}" }
-                rect {
-                    class: "bounds",
-                    x: "{bounds.min.x}", y: "{bounds.min.y}",
-                    width: "{bounds.width()}", height: "{bounds.height()}",
-                }
-                text { class: "bounds-label", x: "{bounds.min.x}", y: "{bounds.min.y - 8.0}",
-                    "{bounds_caption(f_name(&ed))}"
+                for (i, fr) in frames.iter().enumerate() {
+                    g { key: "f{i}", class: if fr.dimmed { "frame frame-dimmed" } else { "frame" },
+                        rect {
+                            class: "frame-box",
+                            x: "{fr.rect.min.x}", y: "{fr.rect.min.y}",
+                            width: "{fr.rect.width()}", height: "{fr.rect.height()}",
+                        }
+                        rect {
+                            class: "frame-tab",
+                            x: "{fr.rect.min.x}", y: "{fr.rect.min.y - FRAME_TITLE_PX - 2.0}",
+                            width: "{fr.title_w}", height: "{FRAME_TITLE_PX}",
+                            rx: "3",
+                        }
+                        text {
+                            class: "frame-title",
+                            x: "{fr.rect.min.x + 7.0}", y: "{fr.rect.min.y - 7.0}",
+                            "{fr.name}"
+                        }
+                    }
                 }
                 for (i, o) in objects.iter().chain(draft.iter()).enumerate() {
                     g { key: "{i}", class: "{o.class}",
@@ -152,9 +193,6 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         ed.write().pointer_down(input::point(&evt), b, input::mods(evt.modifiers()));
                     }
                 },
-                onmousemove: move |evt| ed.write().pointer_move(input::point(&evt), input::mods(evt.modifiers())),
-                onmouseup: move |evt| ed.write().pointer_up(input::point(&evt), input::mods(evt.modifiers())),
-                onmouseleave: move |_| ed.write().pointer_leave(),
                 onwheel: move |evt| {
                     evt.prevent_default();
                     let d = input::wheel_delta(&evt);
@@ -188,24 +226,13 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     }
 }
 
-fn f_name(ed: &Signal<Editor>) -> (String, f64, f64, usize) {
-    let e = ed.read();
-    let f = &e.fixture;
-    (
-        f.name.clone(),
-        f.bounds.width(),
-        f.bounds.height(),
-        f.lamps_outside().len(),
-    )
-}
-
-fn bounds_caption((name, w, h, outside): (String, f64, f64, usize)) -> String {
-    let tail = match outside {
-        0 => String::new(),
-        1 => " · 1 lamp outside (unlit)".into(),
-        n => format!(" · {n} lamps outside (unlit)"),
-    };
-    format!("{name} · {w} × {h}{tail}")
+/// One fixture's box on screen, with its title tab.
+struct FrameView {
+    rect: Rect,
+    name: String,
+    /// Matches the title rect in the fixture's hit area (`area.rs`).
+    title_w: f64,
+    dimmed: bool,
 }
 
 struct ObjectView {
@@ -247,8 +274,9 @@ struct Outline {
 }
 
 fn object_view(
-    f: &Fixture,
+    f: &Project,
     cam: &Camera,
+    fixture: &FixtureId,
     o: &Object,
     selection: &[Target],
     context: Option<&Target>,
@@ -263,20 +291,8 @@ fn object_view(
         (false, true) => "obj obj-dimmed",
         _ => "obj",
     };
-    let lamps = o
-        .lamps
-        .iter()
-        .map(|l| {
-            (
-                cam.to_screen(l.pos),
-                if f.bounds.contains(l.pos) {
-                    "lamp"
-                } else {
-                    "lamp lamp-outside"
-                },
-            )
-        })
-        .collect();
+    let bounds = f.world_bounds(fixture);
+    let lamps = lamp_views(cam, o, bounds);
     ObjectView {
         class,
         shape: shape_view(cam, &o.shape),
@@ -285,27 +301,27 @@ fn object_view(
     }
 }
 
-fn draft_view(cam: &Camera, o: &Object, bounds: Rect) -> ObjectView {
-    let lamps = o
-        .lamps
-        .iter()
-        .map(|l| {
-            (
-                cam.to_screen(l.pos),
-                if bounds.contains(l.pos) {
-                    "lamp"
-                } else {
-                    "lamp lamp-outside"
-                },
-            )
-        })
-        .collect();
+fn draft_view(cam: &Camera, o: &Object, bounds: Option<Rect>) -> ObjectView {
     ObjectView {
         class: "obj obj-draft",
         shape: shape_view(cam, &o.shape),
-        lamps,
+        lamps: lamp_views(cam, o, bounds),
         lamp_r: lamp_radius(cam),
     }
+}
+
+/// Lamps on screen; one outside its own fixture's box is drawn hollow.
+fn lamp_views(cam: &Camera, o: &Object, bounds: Option<Rect>) -> Vec<(Vec2, &'static str)> {
+    o.lamps
+        .iter()
+        .map(|l| {
+            let inside = bounds.is_some_and(|b| b.contains(l.pos));
+            (
+                cam.to_screen(l.pos),
+                if inside { "lamp" } else { "lamp lamp-outside" },
+            )
+        })
+        .collect()
 }
 
 fn shape_view(cam: &Camera, s: &ObjectShape) -> ShapeView {

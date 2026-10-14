@@ -12,7 +12,7 @@
 //!
 //! Lamps have no properties of their own; a lamp's count is its line's.
 
-use crate::fixture::Fixture;
+use crate::project::Project;
 use crate::target::Target;
 
 /// What a property is: the data the inspector lays out.
@@ -112,7 +112,7 @@ pub struct Prop {
 }
 
 /// Properties every target in `selection` has, in the first one's order.
-pub fn common_props(fixture: &Fixture, selection: &[Target]) -> Vec<Prop> {
+pub fn common_props(fixture: &Project, selection: &[Target]) -> Vec<Prop> {
     let Some(first) = selection.first() else {
         return Vec::new();
     };

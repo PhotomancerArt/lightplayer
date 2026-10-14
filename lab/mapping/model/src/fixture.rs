@@ -1,54 +1,41 @@
-//! The fixture: a bounding box and the component tree. The one thing that
-//! is authored and kept; everything else is derived from it.
+//! A fixture: one physical thing (a tail, a ring display, a dome), with its
+//! own bounding box and component tree. Its coordinates are its own:
+//! `(0, 0)` is the top-left of its box, wherever the canvas lays it out.
 
-use crate::component::{Component, ComponentId, ComponentKind};
+use crate::component::{Component, ComponentId};
 use crate::geom::{Rect, Vec2};
-use crate::object::{Object, ObjectId, objects_of};
+
+/// A fixture's id, minted by the project (`fixture1`, …) and never reused.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FixtureId(pub String);
+
+impl FixtureId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+}
+
+impl std::fmt::Display for FixtureId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Fixture {
+    pub id: FixtureId,
     pub name: String,
-    /// The fixture's extent. Lamps outside it are never lit (D4).
-    pub bounds: Rect,
+    /// The fixture's extent, from `(0, 0)`. Lamps outside it are never lit
+    /// (D4).
+    pub size: Vec2,
     /// Top-level components, in authoring order.
     pub components: Vec<Component>,
-    /// Per kind, the next number to mint. Never decremented, so an id is
-    /// never handed out twice.
-    next_line: u32,
-    next_circle: u32,
-    next_group: u32,
 }
 
 impl Fixture {
-    pub fn new(name: impl Into<String>, bounds: Rect) -> Self {
-        Self {
-            name: name.into(),
-            bounds,
-            components: Vec::new(),
-            next_line: 1,
-            next_circle: 1,
-            next_group: 1,
-        }
-    }
-
-    /// Mint an id for a new component of this kind and wrap it.
-    pub fn mint(&mut self, kind: ComponentKind) -> Component {
-        let (word, counter) = match kind {
-            ComponentKind::Line { .. } => ("line", &mut self.next_line),
-            ComponentKind::Circle { .. } => ("circle", &mut self.next_circle),
-            ComponentKind::Group { .. } => ("group", &mut self.next_group),
-        };
-        let id = ComponentId::new(format!("{word}{counter}"));
-        *counter += 1;
-        Component { id, kind }
-    }
-
-    /// Mint and append a top-level component; returns its id.
-    pub fn add(&mut self, kind: ComponentKind) -> ComponentId {
-        let component = self.mint(kind);
-        let id = component.id.clone();
-        self.components.push(component);
-        id
+    /// The box in the fixture's own coordinates.
+    pub fn bounds(&self) -> Rect {
+        Rect::new(Vec2::default(), self.size)
     }
 
     pub fn component(&self, id: &ComponentId) -> Option<&Component> {
@@ -64,77 +51,9 @@ impl Fixture {
         parent_of(&self.components, id, None)
     }
 
-    /// The list `id` lives in — the top level or a group's children.
-    pub fn siblings_of(&self, id: &ComponentId) -> &[Component] {
-        match self.parent_group(id).cloned() {
-            Some(group) => self.component(&group).map(|g| g.children()).unwrap_or(&[]),
-            None => &self.components,
-        }
-    }
-
     /// Remove a component (and everything under it) wherever it lives.
     pub fn remove(&mut self, id: &ComponentId) -> Option<Component> {
         remove_from(&mut self.components, id)
-    }
-
-    /// Every object, in authoring order (depth-first through groups).
-    pub fn objects(&self) -> Vec<Object> {
-        let mut out = Vec::new();
-        collect_objects(&self.components, &mut out);
-        out
-    }
-
-    pub fn object(&self, id: &ObjectId) -> Option<Object> {
-        let component = self.component(&id.component)?;
-        objects_of(component).into_iter().find(|o| &o.id == id)
-    }
-
-    /// Lamps that fall outside the bounding box, as (object, lamp index).
-    pub fn lamps_outside(&self) -> Vec<(ObjectId, u32)> {
-        let mut out = Vec::new();
-        for object in self.objects() {
-            for (i, lamp) in object.lamps.iter().enumerate() {
-                if !self.bounds.contains(lamp.pos) {
-                    out.push((object.id.clone(), i as u32));
-                }
-            }
-        }
-        out
-    }
-
-    pub fn lamp_count(&self) -> usize {
-        self.objects().iter().map(|o| o.lamps.len()).sum()
-    }
-
-    /// The lab's starting fixture: something like Yona's desk. A tail that
-    /// runs out and back, a two-ring circle, and a lone strip.
-    pub fn seed() -> Self {
-        let mut f = Fixture::new(
-            "desk",
-            Rect::new(Vec2::new(0.0, 0.0), Vec2::new(120.0, 80.0)),
-        );
-        let out = f.mint(ComponentKind::line(
-            Vec2::new(14.0, 70.0),
-            Vec2::new(14.0, 12.0),
-            25,
-        ));
-        let back = f.mint(ComponentKind::line(
-            Vec2::new(22.0, 12.0),
-            Vec2::new(22.0, 70.0),
-            25,
-        ));
-        let tail = ComponentKind::group(vec![out, back]);
-        f.add(tail);
-        f.add(ComponentKind::circle(
-            Vec2::new(70.0, 40.0),
-            &[(26.0, 40), (16.0, 24)],
-        ));
-        f.add(ComponentKind::line(
-            Vec2::new(40.0, 74.0),
-            Vec2::new(108.0, 74.0),
-            30,
-        ));
-        f
     }
 }
 
@@ -192,11 +111,4 @@ fn remove_from(list: &mut Vec<Component>, id: &ComponentId) -> Option<Component>
         }
     }
     None
-}
-
-fn collect_objects(list: &[Component], out: &mut Vec<Object>) {
-    for c in list {
-        out.extend(objects_of(c));
-        collect_objects(c.children(), out);
-    }
 }

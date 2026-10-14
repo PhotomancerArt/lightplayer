@@ -9,7 +9,7 @@
 //! visible in the hint bar.
 
 use crate::editor::{Editor, Gesture, Tool};
-use crate::fixture::Fixture;
+use crate::project::Project;
 use crate::props::common_props;
 use crate::target::Target;
 
@@ -38,7 +38,7 @@ fn h(keys: &str, does: impl Into<String>) -> Hint {
 
 impl Editor {
     pub fn hint_bar(&self) -> HintBar {
-        let f = &self.fixture;
+        let f = &self.project;
         let view = vec![
             h("scroll", "pan"),
             h("⌘ scroll · pinch", "zoom"),
@@ -116,7 +116,7 @@ impl Editor {
     }
 
     fn select_hints(&self) -> Vec<Hint> {
-        let f = &self.fixture;
+        let f = &self.project;
         let mut out = Vec::new();
 
         // What a click would do, first: the hover outline in words.
@@ -171,13 +171,15 @@ impl Editor {
 
         let first = &self.selection[0];
         let owners = self.move_owners();
-        out.push(h(
-            "drag",
-            format!(
-                "move {}",
-                list(&owners.iter().map(|o| o.to_string()).collect::<Vec<_>>())
-            ),
-        ));
+        if !owners.is_empty() {
+            out.push(h(
+                "drag",
+                format!(
+                    "move {}",
+                    list(&owners.iter().map(|o| o.to_string()).collect::<Vec<_>>())
+                ),
+            ));
+        }
         match f.parent(first) {
             Some(p) => out.push(h("Esc", format!("up to {}", f.label(&p)))),
             None => out.push(h("Esc", "deselect")),
@@ -221,7 +223,7 @@ impl Editor {
                 ),
             ));
         }
-        if word != "group" {
+        if word != "group" && word != "fixture" {
             out.push(h("r", "reverse the data direction"));
         }
         out.push(h("⌘A", self.select_all_hint()));
@@ -230,7 +232,7 @@ impl Editor {
 
     /// The note beside the cursor during a gesture.
     pub fn cursor_note(&self) -> Option<String> {
-        let f = &self.fixture;
+        let f = &self.project;
         match &self.gesture {
             Gesture::Boxing { .. } => {
                 let n = self.selection.len();
@@ -295,9 +297,14 @@ impl Editor {
     }
 }
 
-fn selection_lead(f: &Fixture, selection: &[Target]) -> String {
+fn selection_lead(f: &Project, selection: &[Target]) -> String {
     match selection {
-        [] => format!("Nothing selected · {} · {} lamps", f.name, f.lamp_count()),
+        [] => format!(
+            "Nothing selected · {} · {} fixtures · {} lamps",
+            f.name,
+            f.fixtures.len(),
+            f.lamp_count()
+        ),
         [one] => format!("{} selected", f.long_label(one)),
         many => {
             let word = f.kind_word(&many[0]);
@@ -311,7 +318,7 @@ fn selection_lead(f: &Fixture, selection: &[Target]) -> String {
     }
 }
 
-fn delete_hint(f: &Fixture, selection: &[Target]) -> String {
+fn delete_hint(f: &Project, selection: &[Target]) -> String {
     if selection.iter().all(|t| matches!(t, Target::Lamp { .. })) {
         return "lamps can't be deleted — − shortens their line".into();
     }

@@ -6,10 +6,10 @@
 
 use crate::camera::Camera;
 use crate::component::{ComponentId, ComponentKind};
-use crate::fixture::Fixture;
 use crate::geom::{Rect, Vec2};
 use crate::notice::Notice;
 use crate::pick::{PickMode, level_candidates, pick};
+use crate::project::Project;
 use crate::target::Target;
 
 /// Modifier keys held during an event. `command` is ⌘ on a Mac (Ctrl
@@ -80,7 +80,7 @@ pub enum Gesture {
     /// move is always "base + total delta" and never drifts.
     Moving {
         start_world: Vec2,
-        base: Box<Fixture>,
+        base: Box<Project>,
         owners: Vec<ComponentId>,
     },
     /// Dragging a selection box from empty space.
@@ -121,7 +121,7 @@ const UNDO_LIMIT: usize = 200;
 
 #[derive(Debug, Clone)]
 pub struct Editor {
-    pub fixture: Fixture,
+    pub project: Project,
     /// The one selection (D15): a set of targets, usually at one level.
     pub selection: Vec<Target>,
     pub camera: Camera,
@@ -136,17 +136,17 @@ pub struct Editor {
     pub spacing: f64,
     pub notice: Option<Notice>,
     pub menu: Option<ContextMenu>,
-    undo: Vec<(Fixture, Vec<Target>)>,
-    redo: Vec<(Fixture, Vec<Target>)>,
+    undo: Vec<(Project, Vec<Target>)>,
+    redo: Vec<(Project, Vec<Target>)>,
     fitted: bool,
 }
 
 impl Editor {
-    pub fn new(fixture: Fixture) -> Self {
+    pub fn new(project: Project) -> Self {
         let viewport = Vec2::new(900.0, 600.0);
-        let camera = Camera::fit(fixture.bounds, viewport, 40.0);
+        let camera = Camera::fit(project.extent(), viewport, 40.0);
         Self {
-            fixture,
+            project,
             selection: Vec::new(),
             camera,
             viewport,
@@ -180,7 +180,7 @@ impl Editor {
     pub fn hover_target(&self) -> Option<Target> {
         let p = self.hover_point()?;
         pick(
-            &self.fixture,
+            &self.project,
             &self.camera,
             &self.selection,
             p,
@@ -192,7 +192,7 @@ impl Editor {
     pub fn hover_deep(&self) -> Option<Target> {
         let p = self.hover_point()?;
         pick(
-            &self.fixture,
+            &self.project,
             &self.camera,
             &self.selection,
             p,
@@ -204,7 +204,7 @@ impl Editor {
     /// more than one means ⌥-click has somewhere to go.
     pub fn hover_candidates(&self) -> Vec<Target> {
         match self.hover_point() {
-            Some(p) => level_candidates(&self.fixture, &self.camera, &self.selection, p),
+            Some(p) => level_candidates(&self.project, &self.camera, &self.selection, p),
             None => Vec::new(),
         }
     }
@@ -212,7 +212,7 @@ impl Editor {
     /// The level the selection lives in: its parent, or `None` for the
     /// fixture's top level.
     pub fn context(&self) -> Option<Target> {
-        self.selection.first().and_then(|s| self.fixture.parent(s))
+        self.selection.first().and_then(|s| self.project.parent(s))
     }
 
     /// The selection box, in fixture units, while one is being dragged.
@@ -254,7 +254,7 @@ impl Editor {
     }
 
     pub fn fit(&mut self) {
-        self.camera = Camera::fit(self.fixture.bounds, self.viewport, 40.0);
+        self.camera = Camera::fit(self.project.extent(), self.viewport, 40.0);
     }
 
     pub fn pointer_down(&mut self, at: Vec2, button: Button, mods: Mods) {
@@ -280,14 +280,14 @@ impl Editor {
                 };
             }
             Tool::Select => {
-                let under = self.fixture.things_at(&self.camera, at);
+                let under = self.project.things_at(&self.camera, at);
                 let over = !under.is_empty();
                 let on_selection = under.iter().any(|t| self.selection.contains(t));
                 let mut decided = false;
                 if over && mods.alt {
                     // ⌥: the next overlapping thing at this level.
                     if let Some(t) = pick(
-                        &self.fixture,
+                        &self.project,
                         &self.camera,
                         &self.selection,
                         at,
@@ -301,7 +301,7 @@ impl Editor {
                     // drag moves it. Pressing the selection waits: it may be
                     // a drag (move it) or a click (go into it).
                     if let Some(t) = pick(
-                        &self.fixture,
+                        &self.project,
                         &self.camera,
                         &self.selection,
                         at,
@@ -381,7 +381,7 @@ impl Editor {
                 if over && on_selection {
                     // A click on the selection: go in, add/remove, or go deep.
                     if let Some(t) = pick(
-                        &self.fixture,
+                        &self.project,
                         &self.camera,
                         &self.selection,
                         at,
@@ -409,18 +409,19 @@ impl Editor {
     }
 
     /// The pointer left the canvas: finish whatever it was doing.
+    /// The pointer left the canvas. Hover stops; a drag in progress does
+    /// NOT — the page keeps sending moves from the whole window, and the
+    /// drag carries on (or finishes) when the pointer comes back.
     pub fn pointer_leave(&mut self) {
-        if let Some(at) = self.pointer {
-            if matches!(
-                self.gesture,
-                Gesture::Press { .. } | Gesture::Drawing { .. }
-            ) {
-                self.gesture = Gesture::None;
-            } else {
-                self.pointer_up(at, self.mods);
-            }
+        if matches!(self.gesture, Gesture::None) {
+            self.pointer = None;
         }
-        self.pointer = None;
+    }
+
+    /// Whether a drag is in progress, so the page knows to follow the
+    /// pointer outside the canvas.
+    pub fn dragging(&self) -> bool {
+        !matches!(self.gesture, Gesture::None)
     }
 
     /// Scroll pans; ⌘-scroll or a pinch (Ctrl-scroll) zooms at the cursor.
@@ -513,12 +514,15 @@ impl Editor {
     // ---- the right-click menu ---------------------------------------------
 
     pub fn open_menu(&mut self, at: Vec2) {
-        let f = &self.fixture;
-        let items: Vec<MenuItem> = f
-            .things_at(&self.camera, at)
+        let f = &self.project;
+        let found = f.things_at(&self.camera, at);
+        // Indent from the shallowest thing listed, so the list reads like a
+        // little tree of its own.
+        let top = found.iter().map(|t| f.chain(t).len()).min().unwrap_or(1);
+        let items: Vec<MenuItem> = found
             .into_iter()
             .map(|t| MenuItem {
-                depth: f.chain(&t).len() - 1,
+                depth: f.chain(&t).len() - top,
                 label: f.label(&t),
                 target: t,
             })
@@ -588,7 +592,7 @@ impl Editor {
     pub fn escape(&mut self) {
         match std::mem::replace(&mut self.gesture, Gesture::None) {
             Gesture::Moving { base, .. } => {
-                self.fixture = *base;
+                self.project = *base;
                 self.undo.pop();
                 return;
             }
@@ -604,7 +608,7 @@ impl Editor {
             return;
         }
         if let Some(first) = self.selection.first().cloned() {
-            self.selection = self.fixture.parent(&first).into_iter().collect();
+            self.selection = self.project.parent(&first).into_iter().collect();
         }
     }
 
@@ -612,12 +616,12 @@ impl Editor {
         let Some(first) = self.selection.first().cloned() else {
             return;
         };
-        match self.fixture.children(Some(&first)).into_iter().next() {
+        match self.project.children(Some(&first)).into_iter().next() {
             Some(child) => self.selection = vec![child],
             None => {
                 self.notice = Some(Notice::info(format!(
                     "{} is as deep as it goes",
-                    self.fixture.long_label(&first)
+                    self.project.long_label(&first)
                 )))
             }
         }
@@ -626,10 +630,10 @@ impl Editor {
     /// Arrow keys: the previous or next sibling at the selection's level.
     pub fn step(&mut self, dir: i64) {
         let Some(first) = self.selection.first().cloned() else {
-            self.selection = self.fixture.children(None).into_iter().take(1).collect();
+            self.selection = self.project.children(None).into_iter().take(1).collect();
             return;
         };
-        let sibs = self.fixture.siblings(&first);
+        let sibs = self.project.siblings(&first);
         let Some(i) = sibs.iter().position(|s| *s == first) else {
             return;
         };
@@ -638,7 +642,7 @@ impl Editor {
             let end = if dir < 0 { "first" } else { "last" };
             self.notice = Some(Notice::info(format!(
                 "{} is the {end} one here",
-                self.fixture.long_label(&first)
+                self.project.long_label(&first)
             )));
             self.selection = vec![first];
             return;
@@ -651,17 +655,28 @@ impl Editor {
     /// at the whole fixture — and ⌘A ⌫ from nothing selected deletes
     /// everything.
     pub fn select_all(&mut self) {
+        // The levels ⌘A can select, from where you are outward. The last
+        // two are "everything you drew, in every fixture" and "the
+        // fixtures themselves".
+        let mut levels: Vec<Vec<Target>> = Vec::new();
         let mut context = self.context();
-        loop {
-            let level = self.fixture.children(context.as_ref());
-            let all_there = !level.is_empty() && level.iter().all(|t| self.selection.contains(t));
-            match (&context, all_there) {
-                (Some(c), true) => context = self.fixture.parent(c),
-                _ => {
-                    self.selection = level;
-                    return;
-                }
-            }
+        while let Some(c) = context {
+            levels.push(self.project.children(Some(&c)));
+            context = self.project.parent(&c);
+        }
+        let contents: Vec<Target> = self
+            .project
+            .pick_level(None)
+            .into_iter()
+            .filter(|t| !matches!(t, Target::Fixture(_)))
+            .collect();
+        levels.push(contents);
+        levels.push(self.project.children(None));
+        let next = levels
+            .into_iter()
+            .find(|level| !level.is_empty() && !level.iter().all(|t| self.selection.contains(t)));
+        if let Some(level) = next {
+            self.selection = level;
         }
     }
 
@@ -669,19 +684,34 @@ impl Editor {
     pub fn select_all_hint(&self) -> String {
         let mut probe = self.clone();
         probe.select_all();
+        let p = &probe.project;
         if probe.selection.is_empty() {
             return "nothing to select yet".into();
         }
         if probe.selection == self.selection {
             return "everything is selected".into();
         }
-        match probe.context() {
-            None => "select everything".into(),
-            Some(c) => format!(
+        if probe
+            .selection
+            .iter()
+            .all(|t| matches!(t, Target::Fixture(_)))
+        {
+            return "select the fixtures themselves".into();
+        }
+        let mut parents: Vec<Option<Target>> = Vec::new();
+        for t in &probe.selection {
+            let parent = p.parent(t);
+            if !parents.contains(&parent) {
+                parents.push(parent);
+            }
+        }
+        match parents.as_slice() {
+            [Some(c)] => format!(
                 "select every {} in {}",
-                probe.fixture.kind_word(&probe.selection[0]),
-                self.fixture.label(&c)
+                p.kind_word(&probe.selection[0]),
+                p.label(c)
             ),
+            _ => "select everything you drew, in every fixture".into(),
         }
     }
 
@@ -695,10 +725,16 @@ impl Editor {
         let mut selection = base_selection.clone();
         let enclosed = self.mods.alt;
         // The box works at the level you are in: lamps inside a ring,
-        // components at the top.
-        let context = base_selection.first().and_then(|s| self.fixture.parent(s));
-        for t in self.fixture.children(context.as_ref()) {
-            let lamps = self.fixture.lamps_under(&t);
+        // what's drawn at the top (fixtures are see-through to it).
+        let context = base_selection.first().and_then(|s| self.project.parent(s));
+        let level: Vec<Target> = self
+            .project
+            .pick_level(context.as_ref())
+            .into_iter()
+            .filter(|t| !matches!(t, Target::Fixture(_)))
+            .collect();
+        for t in level {
+            let lamps = self.project.lamps_under(&t);
             let caught = if enclosed {
                 !lamps.is_empty() && lamps.iter().all(|p| rect.contains(*p))
             } else {
@@ -715,7 +751,7 @@ impl Editor {
     /// line becomes its last lamp (the selection stays where you were
     /// working), and anything else that no longer exists is dropped.
     fn prune_selection(&mut self) {
-        let f = &self.fixture;
+        let f = &self.project;
         for t in &mut self.selection {
             if let Target::Lamp { object, index } = t {
                 let n = f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0);
@@ -736,11 +772,19 @@ impl Editor {
     // ---- moving --------------------------------------------------------
 
     fn begin_move(&mut self, start_world: Vec2) {
-        self.checkpoint();
         let owners = self.move_owners();
+        if owners.is_empty() {
+            self.notice = Some(Notice::refused(
+                "Fixtures don't move by dragging",
+                "the canvas lays fixtures out in a grid",
+                "drag what's inside a fixture, or change its size in the inspector",
+            ));
+        } else {
+            self.checkpoint();
+        }
         self.gesture = Gesture::Moving {
             start_world,
-            base: Box::new(self.fixture.clone()),
+            base: Box::new(self.project.clone()),
             owners,
         };
     }
@@ -750,12 +794,13 @@ impl Editor {
     pub fn move_owners(&self) -> Vec<ComponentId> {
         let mut owners: Vec<ComponentId> = Vec::new();
         for t in &self.selection {
-            let o = t.owner().clone();
-            if !owners.contains(&o) {
-                owners.push(o);
+            if let Some(o) = t.owner()
+                && !owners.contains(o)
+            {
+                owners.push(o.clone());
             }
         }
-        let f = &self.fixture;
+        let f = &self.project;
         owners
             .iter()
             .filter(|o| {
@@ -788,7 +833,7 @@ impl Editor {
                 c.translate(delta);
             }
         }
-        self.fixture = f;
+        self.project = f;
     }
 
     // ---- drawing -------------------------------------------------------
@@ -817,16 +862,31 @@ impl Editor {
     fn finish_drawing(&mut self, start: Vec2, end: Vec2) {
         if start.distance(end) * self.camera.scale < 4.0 {
             self.notice = Some(Notice::refused(
-                format!("Nothing drawn"),
+                "Nothing drawn",
                 "a click alone doesn't say how long it is",
                 format!("press and drag to draw a {}", self.tool.word()),
             ));
             return;
         }
-        let kind = self.drawn(start, end);
+        // A drawing goes into the fixture it starts in, in that fixture's
+        // own coordinates.
+        let Some(fixture) = self.project.fixture_at(start) else {
+            self.notice = Some(Notice::refused(
+                "Nothing drawn",
+                "a drawing starts inside a fixture's box",
+                format!(
+                    "press inside a fixture, then drag to draw a {}",
+                    self.tool.word()
+                ),
+            ));
+            return;
+        };
+        let origin = self.project.origin(&fixture);
+        let kind = self.drawn(start - origin, end - origin);
         self.checkpoint();
-        let id = self.fixture.add(kind);
-        self.selection = vec![Target::Component(id)];
+        if let Some(id) = self.project.add(&fixture, kind) {
+            self.selection = vec![Target::Component(id)];
+        }
         self.tool = Tool::Select;
     }
 
@@ -835,7 +895,7 @@ impl Editor {
     /// Record the state before an edit.
     pub(crate) fn checkpoint(&mut self) {
         self.undo
-            .push((self.fixture.clone(), self.selection.clone()));
+            .push((self.project.clone(), self.selection.clone()));
         if self.undo.len() > UNDO_LIMIT {
             self.undo.remove(0);
         }
@@ -846,7 +906,7 @@ impl Editor {
         match self.undo.pop() {
             Some((f, s)) => {
                 self.redo.push((
-                    std::mem::replace(&mut self.fixture, f),
+                    std::mem::replace(&mut self.project, f),
                     std::mem::replace(&mut self.selection, s),
                 ));
                 self.prune_selection();
@@ -859,7 +919,7 @@ impl Editor {
         match self.redo.pop() {
             Some((f, s)) => {
                 self.undo.push((
-                    std::mem::replace(&mut self.fixture, f),
+                    std::mem::replace(&mut self.project, f),
                     std::mem::replace(&mut self.selection, s),
                 ));
                 self.prune_selection();

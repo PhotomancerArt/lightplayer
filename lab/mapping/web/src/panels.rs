@@ -10,18 +10,18 @@ use lab_mapping_model::{
 pub fn TreePane(ed: Signal<Editor>) -> Element {
     let mut ed = ed;
     let e = ed.read();
-    let rows = e.fixture.tree_rows();
+    let rows = e.project.tree_rows();
     let selection = e.selection.clone();
     // A selected lamp lights its line or ring's row.
     let lit: Vec<Target> = selection
         .iter()
         .map(|t| match t {
-            Target::Lamp { object, .. } => e.fixture.object_target(object),
+            Target::Lamp { object, .. } => e.project.object_target(object),
             other => other.clone(),
         })
         .collect();
     let context = e.context();
-    let name = e.fixture.name.clone();
+    let name = e.project.name.clone();
     drop(e);
 
     rsx! {
@@ -43,6 +43,9 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
                 }
                 if row.derived {
                     class.push_str(" row-derived");
+                }
+                if matches!(t, Target::Fixture(_)) {
+                    class.push_str(" row-fixture");
                 }
                 let pad = 10 + row.depth * 16;
                 rsx! {
@@ -71,7 +74,7 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
 pub fn Inspector(ed: Signal<Editor>) -> Element {
     let mut ed = ed;
     let e = ed.read();
-    let f = &e.fixture;
+    let f = &e.project;
     let selection = e.selection.clone();
     // One thing: the path down to it. Several: the path to the level they
     // are in, then how many.
@@ -90,7 +93,7 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
         .unwrap_or_default();
     let many = (selection.len() > 1).then(|| format!("{} selected", selection.len()));
     let props = common_props(f, &selection);
-    let fixture_name = f.name.clone();
+    let project_name = f.name.clone();
     let summary: Vec<String> = selection.iter().take(8).map(|t| f.long_label(t)).collect();
     let more = selection.len().saturating_sub(8);
     let lamp_info: Option<String> = match selection.as_slice() {
@@ -116,14 +119,14 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
     };
     let fixture_facts = if selection.is_empty() {
         let outside = f.lamps_outside().len();
+        let n = f.fixtures.len();
         Some(vec![
-            format!("Box {} × {}", f.bounds.width(), f.bounds.height()),
-            format!("{} top-level things", f.components.len()),
+            format!("{n} fixture{}", if n == 1 { "" } else { "s" }),
             format!("{} lamps", f.lamp_count()),
             if outside == 0 {
-                "every lamp inside the box".into()
+                "every lamp inside its fixture's box".into()
             } else {
-                format!("{outside} lamps outside the box — never lit")
+                format!("{outside} lamps outside their fixture's box — never lit")
             },
         ])
     } else {
@@ -140,7 +143,7 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
                 tabindex: "-1",
                 onmousedown: move |evt| evt.prevent_default(),
                 onclick: move |_| ed.write().select(vec![]),
-                "{fixture_name}"
+                "{project_name}"
             }
             for (i, (t, label)) in crumbs.into_iter().enumerate() {
                 span { key: "c{i}", class: "crumb-step",
@@ -162,7 +165,7 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
             }
         }
         if let Some(facts) = fixture_facts {
-            div { class: "section-title", "Fixture" }
+            div { class: "section-title", "Project" }
             for (i, fact) in facts.into_iter().enumerate() {
                 div { key: "{i}", class: "fact", "{fact}" }
             }

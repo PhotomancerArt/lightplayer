@@ -19,7 +19,7 @@ impl Editor {
             ));
             return;
         }
-        let f = &self.fixture;
+        let f = &self.project;
         let selection = self.selection.clone();
         // Things whose parent is also selected go with it.
         let roots: Vec<Target> = selection
@@ -32,11 +32,13 @@ impl Editor {
             .cloned()
             .collect();
 
+        let mut fixtures = Vec::new();
         let mut components = Vec::new();
         let mut rings = Vec::new();
         let mut refused: Vec<(Target, String, String)> = Vec::new();
         for t in &roots {
             match t {
+                Target::Fixture(id) => fixtures.push(id.clone()),
                 Target::Component(id) => components.push(id.clone()),
                 Target::Object(o) => {
                     let total = match f.component(&o.component).map(|c| &c.kind) {
@@ -72,9 +74,10 @@ impl Editor {
             }
         }
 
-        let deleted: Vec<String> = components
+        let deleted: Vec<String> = fixtures
             .iter()
-            .map(|c| c.to_string())
+            .map(|x| f.label(&Target::Fixture(x.clone())))
+            .chain(components.iter().map(|c| c.to_string()))
             .chain(
                 rings
                     .iter()
@@ -83,11 +86,14 @@ impl Editor {
             .collect();
         if !deleted.is_empty() {
             self.checkpoint();
+            for x in &fixtures {
+                self.project.remove_fixture(x);
+            }
             for c in &components {
-                self.fixture.remove(c);
+                self.project.remove(c);
             }
             for o in &rings {
-                if let Some(c) = self.fixture.component_mut(&o.component)
+                if let Some(c) = self.project.component_mut(&o.component)
                     && let ComponentKind::Circle { rings, .. } = &mut c.kind
                 {
                     rings.retain(|r| r.key != o.key);
@@ -102,9 +108,9 @@ impl Editor {
             (false, None) => Notice::info(format!("Deleted {}", join(&deleted))),
             (deleted_none, Some((t, why, help))) => {
                 let what = if refused.len() == 1 {
-                    self.fixture.long_label(t)
+                    self.project.long_label(t)
                 } else {
-                    format!("{} {}s", refused.len(), self.fixture.kind_word(t))
+                    format!("{} {}s", refused.len(), self.project.kind_word(t))
                 };
                 let text = if deleted_none {
                     format!("Can't delete {what}")
@@ -123,7 +129,7 @@ impl Editor {
         let mut out = Vec::new();
         for t in &self.selection {
             let t = match t {
-                Target::Lamp { object, .. } => self.fixture.object_target(object),
+                Target::Lamp { object, .. } => self.project.object_target(object),
                 other => other.clone(),
             };
             if !out.contains(&t) {
@@ -144,13 +150,13 @@ impl Editor {
             ));
             return;
         }
-        let props = common_props(&self.fixture, &targets);
+        let props = common_props(&self.project, &targets);
         let Some(prop) = props.iter().find(|p| p.desc.nudge) else {
             let t = &targets[0];
             self.notice = Some(if targets.len() == 1 {
                 Notice::refused(
-                    format!("{} has no count of its own", self.fixture.long_label(t)),
-                    format!("a {} is made of other things", self.fixture.kind_word(t)),
+                    format!("{} has no count of its own", self.project.long_label(t)),
+                    format!("a {} is made of other things", self.project.kind_word(t)),
                     "Enter goes into it; select a line or ring there",
                 )
             } else {
@@ -164,7 +170,7 @@ impl Editor {
         };
         let id = prop.desc.id;
         self.edit_selected(&targets, id, PropEdit::Nudge(steps));
-        let now = common_props(&self.fixture, &targets);
+        let now = common_props(&self.project, &targets);
         if let Some(p) = now.iter().find(|p| p.desc.id == id) {
             self.notice = Some(Notice::info(format!(
                 "{}: {}",
@@ -188,11 +194,14 @@ impl Editor {
         }
         if let Some(t) = targets
             .iter()
-            .find(|t| self.fixture.kind_word(t) == "group")
+            .find(|t| matches!(self.project.kind_word(t), "group" | "fixture"))
         {
             self.notice = Some(Notice::refused(
-                format!("Can't reverse {}", self.fixture.long_label(t)),
-                "a group has no direction of its own",
+                format!("Can't reverse {}", self.project.long_label(t)),
+                format!(
+                    "a {} has no direction of its own",
+                    self.project.kind_word(t)
+                ),
                 "Enter goes into it; select its lines to reverse them",
             ));
             return;
@@ -201,7 +210,7 @@ impl Editor {
         for t in &targets {
             match t {
                 Target::Component(id) => {
-                    match self.fixture.component_mut(id).map(|c| &mut c.kind) {
+                    match self.project.component_mut(id).map(|c| &mut c.kind) {
                         Some(ComponentKind::Line { from, to, .. }) => std::mem::swap(from, to),
                         Some(ComponentKind::Circle { rings, .. }) => {
                             rings.iter_mut().for_each(|r| r.reversed = !r.reversed)
@@ -210,15 +219,15 @@ impl Editor {
                     }
                 }
                 Target::Object(o) => {
-                    if let Some(r) = self.fixture.ring_mut(&o.component, &o.key) {
+                    if let Some(r) = self.project.ring_mut(&o.component, &o.key) {
                         r.reversed = !r.reversed;
                     }
                 }
-                Target::Lamp { .. } => {}
+                Target::Lamp { .. } | Target::Fixture(_) => {}
             }
         }
         // Keep each selected lamp on the same physical lamp.
-        let f = &self.fixture;
+        let f = &self.project;
         for t in &mut self.selection {
             if let Target::Lamp { object, index } = t {
                 let n = f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0);
@@ -253,7 +262,7 @@ impl Editor {
         self.checkpoint();
         let spacing = self.spacing;
         for t in targets {
-            self.fixture.edit_prop(t, prop_id, edit, spacing);
+            self.project.edit_prop(t, prop_id, edit, spacing);
         }
         self.after_edit();
     }
@@ -270,6 +279,6 @@ fn join(items: &[String]) -> String {
 }
 
 fn join_targets(e: &Editor, targets: &[Target]) -> String {
-    let labels: Vec<String> = targets.iter().map(|t| e.fixture.long_label(t)).collect();
+    let labels: Vec<String> = targets.iter().map(|t| e.project.long_label(t)).collect();
     join(&labels)
 }

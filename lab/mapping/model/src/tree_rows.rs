@@ -2,7 +2,7 @@
 //! under a circle. Lamps are reached on the canvas, not listed here.
 
 use crate::component::ComponentKind;
-use crate::fixture::Fixture;
+use crate::project::Project;
 use crate::target::Target;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,7 +16,7 @@ pub struct TreeRow {
     pub derived: bool,
 }
 
-impl Fixture {
+impl Project {
     pub fn tree_rows(&self) -> Vec<TreeRow> {
         let mut rows = Vec::new();
         for t in self.children(None) {
@@ -31,6 +31,10 @@ impl Fixture {
         }
         let lamps = self.lamps_under(t).len();
         let detail = match t {
+            Target::Fixture(id) => match self.fixture(id) {
+                Some(f) => format!("{} × {} · {lamps} lamps", f.size.x, f.size.y),
+                None => String::new(),
+            },
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
                 Some(ComponentKind::Circle { rings, .. }) => {
                     format!("{} rings · {lamps} lamps", rings.len())

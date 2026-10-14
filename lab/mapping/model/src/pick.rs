@@ -17,8 +17,8 @@
 //! teaching device, so it is ONE function used by both.
 
 use crate::camera::Camera;
-use crate::fixture::Fixture;
 use crate::geom::Vec2;
+use crate::project::Project;
 use crate::target::Target;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,12 +35,12 @@ pub enum PickMode {
 }
 
 /// The things at the click's level under `p`, nearest first.
-pub fn level_candidates(f: &Fixture, cam: &Camera, selection: &[Target], p: Vec2) -> Vec<Target> {
+pub fn level_candidates(f: &Project, cam: &Camera, selection: &[Target], p: Vec2) -> Vec<Target> {
     let under = f.things_at(cam, p);
     let mut level = selection.first().and_then(|s| f.parent(s));
     loop {
         let mut cands: Vec<Target> = f
-            .children(level.as_ref())
+            .pick_level(level.as_ref())
             .into_iter()
             .filter(|t| under.contains(t))
             .collect();
@@ -59,7 +59,7 @@ pub fn level_candidates(f: &Fixture, cam: &Camera, selection: &[Target], p: Vec2
 }
 
 pub fn pick(
-    f: &Fixture,
+    f: &Project,
     cam: &Camera,
     selection: &[Target],
     p: Vec2,
@@ -89,7 +89,7 @@ pub fn pick(
     }
 }
 
-fn nearest_child(f: &Fixture, cam: &Camera, t: &Target, p: Vec2) -> Option<Target> {
+fn nearest_child(f: &Project, cam: &Camera, t: &Target, p: Vec2) -> Option<Target> {
     let under = f.things_at(cam, p);
     f.children(Some(t))
         .into_iter()
@@ -100,7 +100,7 @@ fn nearest_child(f: &Fixture, cam: &Camera, t: &Target, p: Vec2) -> Option<Targe
         })
 }
 
-fn deepest_from(f: &Fixture, cam: &Camera, mut t: Target, p: Vec2) -> Target {
+fn deepest_from(f: &Project, cam: &Camera, mut t: Target, p: Vec2) -> Target {
     while let Some(child) = nearest_child(f, cam, &t, p) {
         t = child;
     }

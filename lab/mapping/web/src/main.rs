@@ -7,7 +7,7 @@ mod input;
 mod panels;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{Editor, Fixture, Tool};
+use lab_mapping_model::{Editor, Project, Tool};
 
 const LAB_CSS: &str = include_str!("lab.css");
 
@@ -17,7 +17,7 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let mut ed = use_signal(|| Editor::new(Fixture::seed()));
+    let mut ed = use_signal(|| Editor::new(Project::seed()));
     let tool = ed.read().tool;
     let (can_undo, can_redo) = {
         let e = ed.read();

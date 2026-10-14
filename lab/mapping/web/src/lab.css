@@ -51,6 +51,7 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .row-selected { background: var(--selection-bg); border-left-color: var(--selection); }
 .row-lit { border-left-color: var(--selection); }
 .row-context .row-label { text-decoration: underline dashed var(--text-subtle); text-underline-offset: 3px; }
+.row-fixture .row-label { font-weight: 600; color: var(--text); }
 .row-derived .row-label { color: var(--text-subtle); font-style: italic; }
 .row-detail { color: var(--text-subtle); font-size: 12px; white-space: nowrap; }
 .empty, .hint-inline { color: var(--text-subtle); padding: 8px 12px; font-size: 12px; }
@@ -61,8 +62,10 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .canvas-svg { position: absolute; inset: 0; pointer-events: none; }
 .canvas-input { position: absolute; inset: 0; }
 .outside { fill: var(--outside); }
-.bounds { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1; }
-.bounds-label { fill: var(--text-subtle); font: 11px var(--font); }
+.frame-box { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1; }
+.frame-tab { fill: var(--surface-raised); stroke: var(--border); stroke-width: 1; }
+.frame-title { fill: var(--text-muted); font: 11px var(--font); }
+.frame-dimmed { opacity: 0.4; }
 
 .obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; }
 .obj .arrow { fill: var(--text-subtle); }

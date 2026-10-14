@@ -7,7 +7,7 @@
 //! circle.
 
 use crate::component::{ComponentKind, Ring};
-use crate::fixture::Fixture;
+use crate::project::Project;
 use crate::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 use crate::target::Target;
 
@@ -32,6 +32,24 @@ pub const RADIUS: PropDesc = PropDesc {
     },
     nudge: false,
 };
+pub const WIDTH: PropDesc = PropDesc {
+    id: "width",
+    label: "Width",
+    kind: PropKind::Number {
+        min: 4.0,
+        step: 1.0,
+    },
+    nudge: false,
+};
+pub const HEIGHT: PropDesc = PropDesc {
+    id: "height",
+    label: "Height",
+    kind: PropKind::Number {
+        min: 4.0,
+        step: 1.0,
+    },
+    nudge: false,
+};
 pub const COUNTER_CLOCKWISE: PropDesc = PropDesc {
     id: "ccw",
     label: "Counter-clockwise",
@@ -39,10 +57,17 @@ pub const COUNTER_CLOCKWISE: PropDesc = PropDesc {
     nudge: false,
 };
 
-impl Fixture {
+impl Project {
     /// The properties of one target, with its values, in display order.
     pub fn props_of(&self, t: &Target) -> Vec<(PropDesc, PropRaw)> {
         match t {
+            Target::Fixture(id) => match self.fixture(id) {
+                Some(f) => vec![
+                    (WIDTH, PropRaw::Number(f.size.x)),
+                    (HEIGHT, PropRaw::Number(f.size.y)),
+                ],
+                None => Vec::new(),
+            },
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
                 Some(ComponentKind::Line { lamps, .. }) => {
                     vec![(LAMPS, PropRaw::Count(*lamps as i64))]
@@ -77,6 +102,16 @@ impl Fixture {
         };
         let new = edited(&desc, current, edit);
         match t {
+            Target::Fixture(id) => {
+                let Some(f) = self.fixture_mut(id) else {
+                    return false;
+                };
+                match (prop_id, new) {
+                    ("width", PropRaw::Number(v)) => f.size.x = v,
+                    ("height", PropRaw::Number(v)) => f.size.y = v,
+                    _ => return false,
+                }
+            }
             Target::Component(id) => {
                 match (self.component_mut(id).map(|c| &mut c.kind), prop_id, new) {
                     (Some(ComponentKind::Line { lamps, .. }), "lamps", PropRaw::Count(n)) => {
