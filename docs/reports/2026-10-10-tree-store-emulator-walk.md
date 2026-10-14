@@ -193,21 +193,41 @@ critical section with interrupts masked; 68 ms of CPU on the emulator, which
 cannot see the rest. Accepted for M5 (first boot only, before the radios and
 the server); M7 measures it on CX1, including whether a watchdog fires.
 
-## Adoption conditions M5 hands on
+## G-M5, answered (Yona, 2026-10-14: "all leans")
 
-1. **littlefs and the legacy probe leave the image, or the store shrinks by
-   ~10 KB (D7).** Measured, the `fs-tree` image already clears the 64 KB
-   floor with the probe (gate 81,114 B, core +10.3 KB), so this condition
-   as written is met by the numbers; what remains of it is the D8 hazard (below) and the probe's
-   own question (the legacy layout it protects is not reachable on today's
-   image).
-2. **A lazy or incremental format (D4).** Yona, 2026-10-10: "not the end of
-   the world, but might be worth trying to improve before it goes live."
-   The store already erases and verifies a sector before opening it, which
-   is where a lazy format would land its erase; decided on M7's number.
-3. **The two-way littlefs/tree-store guard in the product image (D8):** a
+1. **Cuts:** the emulated cut evidence is enough to move on to CX1 (M7).
+2. **RAM:** not called fine yet. Measure the **at-rest largest free block on
+   CX1 with Wi-Fi joined** first (the emulated −8.6 KB was taken with no
+   radio).
+3. **Perf:** measure **mount** and the **first-boot format** on CX1; the
+   emulated figures are CPU only.
+4. **Size:** "littlefs must leave the image" is **demoted to a
+   nice-to-have**, not an adoption condition (the `fs-tree` image already
+   clears the 64 KB floor with littlefs's probe linked).
+5. **The list:** complete with the additions below.
+
+## Adoption checklist M5 hands on
+
+1. **A lazy or incremental format (D4), before it goes live.** Yona,
+   2026-10-10: "not the end of the world, but might be worth trying to
+   improve before it goes live." The ~4 s first-boot format (176 erases,
+   interrupts masked) must become lazy before `fs-tree` is the default. The
+   store already erases and verifies a sector before opening it, which is
+   where a lazy format would land its erase; decided on M7's number.
+2. **The two-way littlefs/tree-store guard in the product image (D8):** a
    littlefs image that holds on tree-store magic instead of formatting.
    This PR guards only the other direction.
+3. **Mount time, measured on CX1** (emulated: 278 ms CPU at c40), and the
+   first-boot format's time there.
+4. **The at-rest largest free block, measured on CX1 with Wi-Fi joined**
+   (emulated, no radio: 8.6 KB smaller than littlefs).
+5. **The unreachable legacy-layout guard.** The probe-and-hold path cannot
+   fire on today's image (the app overwrites the old superblock pair at
+   `0x310000`, see "Legacy layout" above): make it reachable, or drop it
+   with the probe.
+6. *Nice-to-have, no longer a condition (G-M5, 2026-10-14):* littlefs and
+   the legacy probe leave the image (D7). Measured, the `fs-tree` image
+   clears the 64 KB floor with the probe (gate 81,114 B, core +10.3 KB).
 
 ## What none of this proves
 
