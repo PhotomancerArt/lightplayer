@@ -215,7 +215,8 @@ const PRESSABLE = `((mark) => { if (!mark) return null; const all = mark.querySe
 
 /// Page-side: a bar's line as it reads — its pieces (summary, aside, or the
 /// work's words) each trimmed and joined by one space, so "USB · connected"
-/// and its aside "also cloud" read "USB · connected also cloud".
+/// and its aside "editor open" read "Open in another tab editor open". A
+/// mark (the cloud) is an icon with no text, and reads as nothing.
 const LINE_TEXT = `((el) => [...el.children].map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
 
 /// Page-side test for a text: includes a string, or matches a RegExp.
@@ -795,7 +796,7 @@ export class StudioDriver {
   }
 
   /// What the board says it runs, as core reads it: `"empty"` once its
-  /// project bar offers `push` ("Add a project"), `"running"` once its
+  /// primary offers `push` ("Add a project"), `"running"` once its
   /// project bar's Edit can be pressed. Waits for one of the two — the card is
   /// ready either way.
   async boardRuns({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
@@ -803,7 +804,7 @@ export class StudioDriver {
     return this.waitFor(
       `(() => { const card = ${scope}; if (!card) return false;
                 const push = ${FIND_MARK}(card, 'push', false);
-                if (push?.closest('[data-bar="project"]') && ${PRESSABLE}(push)) return 'empty';
+                if (push?.closest('[data-name-bar]') && ${PRESSABLE}(push)) return 'empty';
                 const edit = ${PRESSABLE}(${FIND_MARK}(card, 'edit', false));
                 return edit && !edit.disabled ? 'running' : false; })()`,
       { timeoutMs, what: `the board to say what it runs (\`push\` or \`edit\` offered)` },

@@ -285,8 +285,8 @@ async function main() {
       await driver.closeDetails();
       await driver.waitFor(
         `(() => { const card = document.querySelector('[data-board-card]');
-                  return Boolean(card?.querySelector('[data-bar="project"] > [data-offer-path$="/push"]')); })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the empty board (`push` on the project bar)" },
+                  return Boolean(card?.querySelector('[data-name-bar] [data-offer-path$="/push"]')); })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the empty board (`push`, Add a project, as the primary)" },
       );
       return "the board reported nothing loaded";
     });

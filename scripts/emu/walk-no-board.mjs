@@ -461,8 +461,8 @@ async function main() {
 
     // 4. UPLOAD — through Studio, as the criterion says, not the CLI.
     await step("upload", `push ${WALK_PROJECT} onto the board from the gallery`, async () => {
-      // `push`: the empty board's project bar action, "Add a project", drawn
-      // as the project pick.
+      // `push`: the empty board's primary, "Add a project", drawn as the
+      // project pick.
       await driver.pressOffer("push", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`Boolean(${PANEL})`, {
         timeoutMs: STEP_DEADLINE_MS,

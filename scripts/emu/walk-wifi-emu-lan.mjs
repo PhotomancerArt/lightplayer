@@ -706,7 +706,7 @@ export class Page {
   /// Leave the board at `forward` running nothing, from its card, as a person
   /// does: a board that runs something has it removed (Remove project, the
   /// project details' Lasting verb: the first click arms, the second is the
-  /// press) until core offers `push` on its project bar again. Returns what
+  /// press) until core offers `push` as its primary again. Returns what
   /// it ran before (`"empty"` or `"running"`).
   async clearProject(forward) {
     const board = await this.boardAt(forward);
@@ -716,16 +716,16 @@ export class Page {
       await this.driver.closeDetails({ board });
       const scope = await this.driver.card({ board });
       await this.driver.waitFor(
-        `[...(${scope}?.querySelectorAll('[data-bar="project"] [data-offer-path$="/push"]') ?? [])]
+        `[...(${scope}?.querySelectorAll('[data-name-bar] [data-offer-path$="/push"]') ?? [])]
            .some((mark) => !mark.closest('.ux-popover-layer'))`,
-        { timeoutMs: STEP_MS, what: `the board at ${forward} to run nothing (\`push\` on its project bar)` },
+        { timeoutMs: STEP_MS, what: `the board at ${forward} to run nothing (\`push\`, Add a project, as its primary)` },
       );
     }
     return before;
   }
 
   /// Push `project` to the board at `forward`, which runs nothing: `push`
-  /// ("Add a project", its project bar's action) opens the project pick,
+  /// ("Add a project", its primary) opens the project pick,
   /// `project` is chosen in it, and its "Put it on the board" (core's words,
   /// `device_push.rs`) is pressed. It only presses: the board's console says
   /// what happened.

@@ -213,7 +213,7 @@ async function main() {
 
     await step("push", `put ${PROJECT} on the board`, async () => {
       // `remove-project` (the project details' danger zone) is the running
-      // signal; `push` on the project bar ("Add a project") the empty one.
+      // signal; `push` as the card's primary ("Add a project") the empty one.
       const face = await driver.boardRuns({ timeoutMs: STEP_DEADLINE_MS });
       if (face === "running") {
         // Lasting: its first click arms, the second is the press.
@@ -221,8 +221,8 @@ async function main() {
         await driver.closeDetails();
         await driver.waitFor(
           `(() => { const card = document.querySelector('[data-board-card]');
-                    return Boolean(card?.querySelector('[data-bar="project"] > [data-offer-path$="/push"]')); })()`,
-          { timeoutMs: STEP_DEADLINE_MS, what: "the board to say it runs nothing (`push` on the project bar)" },
+                    return Boolean(card?.querySelector('[data-name-bar] [data-offer-path$="/push"]')); })()`,
+          { timeoutMs: STEP_DEADLINE_MS, what: "the board to say it runs nothing (`push`, Add a project, as the primary)" },
         );
       }
       await driver.pressOffer("push", { timeoutMs: STEP_DEADLINE_MS });

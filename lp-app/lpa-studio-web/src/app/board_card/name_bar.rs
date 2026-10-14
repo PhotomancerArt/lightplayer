@@ -3,6 +3,9 @@
 //! and the one primary as a flush section at the bar's end — icon before
 //! word, the spectrum ring on hover (`docs/style/ui.md` "The board card").
 //!
+//! The bar carries `data-name-bar`, the walks' hook for the primary (an
+//! empty board's Add a project is pressed there).
+//!
 //! An unavailable primary ([`UiPrimary::Unavailable`]) is the same section,
 //! disabled, its word the reason itself ("Connecting…", "Updating · 42%",
 //! "Offline · 2 weeks"), never a greyed verb: "why can't I?" is answered
@@ -32,7 +35,7 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
         None => rsx! {},
     };
     rsx! {
-        div { class: NAME_BAR_CLASS,
+        div { class: NAME_BAR_CLASS, "data-name-bar": "true",
             div { class: NAME_BLOCK_CLASS,
                 h3 { class: TITLE_CLASS, title: "{bar.title}", "{bar.title}" }
                 if let Some(place) = bar.place {
