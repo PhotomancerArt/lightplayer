@@ -31,8 +31,23 @@ html, body, #main { margin: 0; height: 100%; background: var(--bg); color: var(-
     grid-template-columns: 240px 1fr 280px;
     grid-template-rows: auto 1fr auto;
     grid-template-areas: "top top top" "tree canvas inspector" "hints hints hints";
-    height: 100vh;
+    height: 100%;
     outline: none;
+}
+
+/* Narrow screens (a phone): one column. The canvas comes first, then the
+   inspector, then the tree; the page scrolls. */
+@media (max-width: 760px) {
+    .lab {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 58vh auto auto auto;
+        grid-template-areas: "top" "canvas" "inspector" "tree" "hints";
+        height: auto;
+        min-height: 100%;
+    }
+    .top { flex-wrap: wrap; gap: 8px 12px; }
+    .tree, .inspector { border: none; border-top: 1px solid var(--border); max-height: none; }
+    .canvas-wrap { touch-action: none; }
 }
 
 .top { grid-area: top; display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
