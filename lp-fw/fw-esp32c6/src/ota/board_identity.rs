@@ -1,14 +1,14 @@
 //! What the core says about itself to the update session: the facts of
 //! `lpc_update`'s `BoardFacts`, every one read from the image or the boot
 //! state — never re-typed — and the core's own SHA-256 (DM24, the core hash
-//! rule), computed once and cached — on the SHA accelerator ([`super::hw_sha`]).
+//! rule), computed once and cached — on the SHA accelerator ([`crate::hw_sha`]).
 
 use core::cell::Cell;
 
 use super::boot_state::BootState;
 use super::engine_window::ScratchWindow;
-use super::hw_sha::{self, BootSha256};
 use super::split_flash::SplitFlash;
+use crate::hw_sha::{self, BootSha256};
 use critical_section::Mutex;
 use lp_bootctl::REGION_START;
 use lpc_update::board::{BoardFacts, EngineStatus, SessionMode};

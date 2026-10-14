@@ -89,9 +89,10 @@ pub fn mount(flash: NorFlashSim, cfg: &StoreConfig) -> Store {
 
 /// A formatted flash.
 pub fn formatted(geom: NorGeometry, cfg: &StoreConfig) -> NorFlashSim {
-    let mut f = NorFlashSim::new(geom);
-    TreeStore::format(&mut f, &mut SoftSha256, cfg).expect("format");
-    f
+    match TreeStore::format(NorFlashSim::new(geom), SoftSha256, cfg.clone()) {
+        Ok(st) => st.into_flash(),
+        Err((e, _, _)) => panic!("format failed: {e:?}"),
+    }
 }
 
 /// What a sweep did.

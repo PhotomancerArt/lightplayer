@@ -1,8 +1,11 @@
 //! What the store knows about each sector, in RAM only: four compact
-//! columns (12 B per sector) and the retired list.
+//! columns (12 B per sector), a bit for its head kind, and the retired
+//! list.
 
 use alloc::vec;
 use alloc::vec::Vec;
+
+use crate::sector_header::HeadKind;
 
 /// `end` value: no valid header — whatever it reads, it must be erased.
 pub const NEEDS_ERASE: u16 = 0;
@@ -21,6 +24,9 @@ pub struct SectorTable {
     pub erase_count: Vec<u32>,
     /// The header's sequence (GC age).
     pub seq: Vec<u32>,
+    /// Bit `s`: sector `s`'s header names the hot head (from the header at
+    /// mount, or when the sector is opened).
+    pub hot: Vec<u32>,
     /// Retired sectors, ascending: never opened, erased or collected again.
     pub retired: Vec<u16>,
 }
@@ -33,12 +39,33 @@ impl SectorTable {
             live: vec![0; n],
             erase_count: vec![0; n],
             seq: vec![0; n],
+            hot: vec![0; n.div_ceil(32)],
             retired: Vec::new(),
         }
     }
 
     pub fn is_written(&self, s: u32) -> bool {
         self.end[s as usize] > ERASED
+    }
+
+    /// The head kind sector `s` was opened for: a sector holds records of
+    /// that kind only (each head writes its own; GC copies to the same
+    /// kind).
+    pub fn kind(&self, s: u32) -> HeadKind {
+        if self.hot[s as usize / 32] & (1 << (s % 32)) != 0 {
+            HeadKind::Hot
+        } else {
+            HeadKind::Cold
+        }
+    }
+
+    pub fn set_kind(&mut self, s: u32, kind: HeadKind) {
+        let (w, bit) = (&mut self.hot[s as usize / 32], 1 << (s % 32));
+        if kind == HeadKind::Hot {
+            *w |= bit;
+        } else {
+            *w &= !bit;
+        }
     }
 
     pub fn is_retired(&self, s: u32) -> bool {
@@ -62,6 +89,7 @@ impl SectorTable {
             + self.live.capacity() * core::mem::size_of::<u16>()
             + self.erase_count.capacity() * core::mem::size_of::<u32>()
             + self.seq.capacity() * core::mem::size_of::<u32>()
+            + self.hot.capacity() * core::mem::size_of::<u32>()
             + self.retired.capacity() * core::mem::size_of::<u16>()
     }
 }
