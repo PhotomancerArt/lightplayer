@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-10-14      # hardware-walk (the CX1 sitting: 500 aligned power cuts, `just flash-tears-analyze --check-model`)
-fixed: this change
+fixed: 09f6ad6e9 (model), c452b79a8, ed63bb129 (emulator), 10ed7b383 (analyzer)
 area: lp-emu/lp-nor-sim (calibrated_tear.rs, TearModel::Calibrated) and scripts/emu/flash-tears-analyze.py
 class: fidelity
 related:
