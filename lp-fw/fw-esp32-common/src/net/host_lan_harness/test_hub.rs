@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use lpc_relay::{RelayFrame, RouteCloseReason};
+use lpc_relay::{PictureRate, RelayFrame, RelayPicture, RelayProject, RouteCloseReason};
 use tungstenite::{Message, WebSocket};
 
 /// What the board did, as the hub saw it.
@@ -31,10 +31,16 @@ pub enum HubEvent {
     },
     /// The device leg ended.
     LegClosed,
+    /// The board's picture (relay protocol 2).
+    Picture(RelayPicture),
+    /// The board's project report (relay protocol 2).
+    Project(Option<RelayProject>),
 }
 
 enum HubCommand {
     Send(RelayFrame),
+    /// Close the board's device leg (the board dials again).
+    DropLeg,
     Stop,
 }
 
@@ -85,6 +91,17 @@ impl TestHub {
             route,
             reason: RouteCloseReason::Gone,
         });
+    }
+
+    /// Close the board's device leg, as a hub that lost it would.
+    pub fn drop_leg(&self) {
+        let _ = self.commands.send(HubCommand::DropLeg);
+    }
+
+    /// Tell the board how fast to send pictures, as the real hub does after
+    /// `Registered` and while someone watches.
+    pub fn send_rate(&self, rate: PictureRate) {
+        self.send(RelayFrame::PictureRate(rate));
     }
 
     fn send(&self, frame: RelayFrame) {
@@ -179,6 +196,11 @@ fn serve_leg(
                         return true;
                     }
                 }
+                HubCommand::DropLeg => {
+                    let _ = ws.close(None);
+                    let _ = ws.flush();
+                    return true;
+                }
                 HubCommand::Stop => {
                     let _ = ws.close(None);
                     let _ = ws.flush();
@@ -205,6 +227,14 @@ fn serve_leg(
                     }
                     Ok(RelayFrame::Close { route, reason }) => {
                         let _ = events.send(HubEvent::Closed { route, reason });
+                        None
+                    }
+                    Ok(RelayFrame::Picture(picture)) => {
+                        let _ = events.send(HubEvent::Picture(picture));
+                        None
+                    }
+                    Ok(RelayFrame::Project(project)) => {
+                        let _ = events.send(HubEvent::Project(project));
                         None
                     }
                     _ => None,

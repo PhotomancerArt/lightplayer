@@ -31,6 +31,8 @@ mod harness_server;
 pub mod lan_harness;
 pub mod no_usb;
 #[cfg(test)]
+mod relay_picture_tests;
+#[cfg(test)]
 mod relay_slot_tests;
 pub mod std_tcp_byte_stream;
 #[cfg(test)]

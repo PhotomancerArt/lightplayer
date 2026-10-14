@@ -80,5 +80,9 @@ real port and server over std sockets; its relay tests are `relay_slot_tests`).
 `net/ws/` has both halves of the WebSocket (server for the LAN, client for the
 relay) over `ByteStream`, the seam a TLS wrapper would slot into. The relay
 leg allocates its buffers only while the board may dial (`try_zeroed_bytes`:
-no room is a failed dial, never a reset). Decisions:
-`docs/adr/2026-10-06-cloud-relay.md` ("Device side").
+no room is a failed dial, never a reset). Relay protocol 2: the board sends
+its picture and its project's name to the relay — the main thread makes
+them (`serve_relay`, engine-side) and hands them to the leg through
+`RelayBoard` (`RelayPictureSlot`, one buffer going back and forth); the
+heartbeat says `pictures N idle|watched|off` (`relay_picture_tests`).
+Decisions: `docs/adr/2026-10-06-cloud-relay.md` ("Device side").

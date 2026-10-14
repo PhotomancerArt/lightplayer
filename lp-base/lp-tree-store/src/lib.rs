@@ -22,7 +22,24 @@ macro_rules! stat {
     };
 }
 
+/// Whether the named [`mutants::Mutant`] is switched on: `false` (and the
+/// mutant code compiled out) without the test-only `mutants` feature.
+#[cfg(feature = "mutants")]
+macro_rules! mutant {
+    ($m:ident) => {
+        crate::mutants::on(crate::mutants::Mutant::$m)
+    };
+}
+#[cfg(not(feature = "mutants"))]
+macro_rules! mutant {
+    ($m:ident) => {
+        false
+    };
+}
+
 mod blob_codec;
+#[cfg(feature = "deflate-plan")]
+mod deflate_plan;
 mod dir_node;
 mod dir_rebuild;
 mod flash;
@@ -38,6 +55,8 @@ mod image_inspect;
 mod lp_fs_tree;
 mod mount_walk;
 mod multi_node;
+#[cfg(feature = "mutants")]
+pub mod mutants;
 mod node_read;
 mod node_write;
 mod object_hasher;
@@ -63,7 +82,11 @@ mod tree_walk;
 mod vec_growth;
 
 #[cfg(test)]
+mod counter_wrap_tests;
+#[cfg(test)]
 mod cut_sweep_tests;
+#[cfg(test)]
+mod edge_gc_tests;
 #[cfg(test)]
 mod format_extension_tests;
 #[cfg(all(test, feature = "lpfs"))]
@@ -78,6 +101,8 @@ mod test_support;
 mod txn_tests;
 
 pub use blob_codec::MAX_LOGICAL_CHUNK;
+#[cfg(feature = "deflate-plan")]
+pub use deflate_plan::{DEFAULT_DEFLATE_LEVEL, PlannedChunk, plan_deflated_chunks};
 pub use flash::Flash;
 #[cfg(feature = "host-deflate")]
 pub use host_deflate::{HostChunk, host_deflate_chunks};

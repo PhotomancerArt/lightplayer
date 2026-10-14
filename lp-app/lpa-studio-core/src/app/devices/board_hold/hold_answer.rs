@@ -11,13 +11,20 @@
 //!    limit, so the tab that takes it over shows the newest frame;
 //! 3. the link is disconnected (intent Disconnected: no sweep, retry or
 //!    hotplug reopens it);
-//! 4. the port's close is awaited ([`RELEASE_CLOSE_PATIENCE_SECS`] at most);
+//! 4. the port's close is awaited;
 //! 5. the lock is released;
 //! 6. `Released` is said to the asker, then `Gone` to everyone, and this
 //!    tab's board wears "taken by another tab".
 //!
 //! Steps 1 and 2 to 3 run in the controller (the frame write is async);
 //! [`PendingRelease`] is what it keeps between them.
+//!
+//! The whole release is one budget, [`RELEASE_PATIENCE_SECS`], counted from
+//! the ask: the lock goes by then whether or not the port has closed. The
+//! asker's patience (`take_over_state::ASK_PATIENCE_SECS`) is this budget
+//! with room to spare, never only its first step: a fallback counted from
+//! after the picture write could outlast it on a slow machine
+//! (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`).
 
 use lpa_devices::{DeviceId, HoldLevel};
 
@@ -25,9 +32,10 @@ use super::hold_key::HoldKey;
 use super::hold_note::AskRefusal;
 use super::tab_id::TabId;
 
-/// How long a holder waits for the port to close before it lets the lock
-/// go anyway.
-pub const RELEASE_CLOSE_PATIENCE_SECS: f64 = 3.0;
+/// The most a holder takes from hearing an ask to letting the lock go: the
+/// picture, the disconnect and the port's close fit inside it, and when the
+/// port has not closed by then the lock goes anyway.
+pub const RELEASE_PATIENCE_SECS: f64 = 3.0;
 
 /// What the holder does with one `Ask`.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,25 +67,46 @@ pub struct PendingRelease {
     /// The roster device whose port this is, when this tab still has it.
     pub device: Option<DeviceId>,
     pub stage: ReleaseStage,
+    /// When the lock goes even if the port has not closed (epoch seconds):
+    /// [`RELEASE_PATIENCE_SECS`] after the ask was heard.
+    pub deadline: f64,
 }
 
 /// Where a release stands.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReleaseStage {
     /// The lens is closed; the final picture and the disconnect are next.
     WriteFrame,
-    /// Disconnected; waiting for the port to close, until `deadline`
-    /// (epoch seconds).
-    WaitClose { deadline: f64 },
+    /// Disconnected; waiting for the port to close.
+    WaitClose,
 }
 
 impl PendingRelease {
-    /// Whether the lock may go now: the port has closed (`closed`), or the
-    /// close was waited on long enough.
+    /// Letting go of `key` (on `device`) for `asker`'s ask number `request`,
+    /// heard at `now`.
+    pub fn new(
+        request: u64,
+        asker: TabId,
+        key: HoldKey,
+        device: Option<DeviceId>,
+        now: f64,
+    ) -> Self {
+        Self {
+            request,
+            asker,
+            key,
+            device,
+            stage: ReleaseStage::WriteFrame,
+            deadline: now + RELEASE_PATIENCE_SECS,
+        }
+    }
+
+    /// Whether the lock may go now: disconnected, and the port has closed
+    /// (`closed`) or the release's budget ran out.
     pub fn ready_to_release(&self, closed: bool, now: f64) -> bool {
         match self.stage {
             ReleaseStage::WriteFrame => false,
-            ReleaseStage::WaitClose { deadline } => closed || now >= deadline,
+            ReleaseStage::WaitClose => closed || now >= self.deadline,
         }
     }
 }
@@ -120,27 +149,45 @@ mod tests {
 
     #[test]
     fn the_lock_goes_once_the_port_closed_or_the_wait_ran_out() {
-        let mut release = PendingRelease {
-            request: 1,
-            asker: TabId::new("b"),
-            key: HoldKey::usb(
+        let mut release = release_heard_at(7.0);
+        assert!(
+            !release.ready_to_release(true, 7.0),
+            "the frame comes first"
+        );
+
+        release.stage = ReleaseStage::WaitClose;
+        assert!(!release.ready_to_release(false, 9.0));
+        assert!(release.ready_to_release(true, 9.0));
+        assert!(release.ready_to_release(false, 7.0 + RELEASE_PATIENCE_SECS));
+    }
+
+    /// The budget runs from the ask, not from the disconnect: a picture
+    /// write that took most of it leaves the close only what remains.
+    #[test]
+    fn a_slow_picture_write_does_not_stretch_the_release() {
+        let mut release = release_heard_at(100.0);
+        // The write took 2.5 s; the port is now closing.
+        release.stage = ReleaseStage::WaitClose;
+        assert!(!release.ready_to_release(false, 102.5));
+        assert!(
+            release.ready_to_release(false, 100.0 + RELEASE_PATIENCE_SECS),
+            "not {RELEASE_PATIENCE_SECS} s after the write"
+        );
+    }
+
+    fn release_heard_at(now: f64) -> PendingRelease {
+        PendingRelease::new(
+            1,
+            TabId::new("b"),
+            HoldKey::usb(
                 BoardKey::parse("a0:f2:62:87:b4:8c").expect("a mac"),
                 UsbPair {
                     vendor: 0x303a,
                     product: 0x1001,
                 },
             ),
-            device: Some(DeviceId(3)),
-            stage: ReleaseStage::WriteFrame,
-        };
-        assert!(
-            !release.ready_to_release(true, 0.0),
-            "the frame comes first"
-        );
-
-        release.stage = ReleaseStage::WaitClose { deadline: 10.0 };
-        assert!(!release.ready_to_release(false, 9.0));
-        assert!(release.ready_to_release(true, 9.0));
-        assert!(release.ready_to_release(false, 10.0));
+            Some(DeviceId(3)),
+            now,
+        )
     }
 }

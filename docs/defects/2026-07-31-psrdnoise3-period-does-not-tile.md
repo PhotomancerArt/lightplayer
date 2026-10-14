@@ -1,3 +1,9 @@
+---
+status: open           # reproduced, pinned by a test, deliberately not fixed
+found: 2026-07-31      # the f32 builtin transliteration (roadmap M5)
+area: lps-builtins psrdnoise3 (canonical GLSL, Q32, f32)
+class: untested-path   # the 2D sibling wraps only the hash indices; the 3D path was never checked for tiling
+---
 # `lpfn_psrdnoise(vec3)` does not tile when given a period
 
 **Found:** 2026-07-31, during the f32 builtin transliteration (roadmap M5).

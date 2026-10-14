@@ -35,8 +35,8 @@ change has to be readable, or cleanly refused, by the core before it.
 - The tree is a **cold** directory tree (path-copied on change) and a flat
   **hot** directory of every `…/.lp/panel.json` by full path; the **root**
   names both and carries the retired-sector list. Two write heads: hot
-  (panel files, the hot directory, roots) and cold (everything else, GC
-  copies).
+  (panel files, the hot directory, roots) and cold (everything else); GC
+  copies a sector's live records to the head of its own kind.
 - **Per-call commits.** `put`, `append`, `put_chunk_deflated`, `delete`,
   `delete_prefix` each write their records, path-copy their directories and
   write a root before returning.
@@ -56,6 +56,20 @@ change has to be readable, or cleanly refused, by the core before it.
   to its length or its id, and stores the deflated bytes as they came (or
   the logical bytes, when the stream does not fit a record or does not
   shrink — same id). Device writes are stored.
+- **The wire contract** (wire 42, `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`).
+  `LpFsTree` is the one `LpFs` whose `batches_are_atomic()` is `true`, so a
+  server answers `BeginBatch` with `atomic: true` and a push is one
+  transaction, committed after the board has loaded and hashed it. An
+  aborted batch also puts `LpFsTree`'s change log back as it was at
+  `begin_batch` (the version counter stays monotonic). `WriteChunkDeflated`
+  reaches `put_chunk_deflated` (no expected id: the board computes it)
+  through `LpFs::write_deflated_chunk`. A full store says "no space left on
+  device", littlefs's words, which a pushing client matches to make room.
+  The client plans its chunks with the hasher-free `plan_deflated_chunks`
+  (feature `deflate-plan`, miniz_oxide level 10) for the wire's constant
+  record hint (1,024 B); `host_deflate_chunks` is that plan plus ids. A
+  deflated chunk dedupes against another deflated push of the same bytes,
+  not against a plain write of them (the boundaries differ).
 - **Verify after write, retire.** Every program is read back; every erase
   is read back as all `0xFF`, then its sector header programmed and read
   back. A mismatch retires the sector (never opened, erased or collected
@@ -79,8 +93,11 @@ change has to be readable, or cleanly refused, by the core before it.
   records and the write's, against the usable sectors) refuses before any
   write,
   then victims are collected — sectors with garbage first (greedy or
-  LFS cost-benefit), then sectors whose only waste is a tail, and GC stops
-  when collections stop freeing sectors.
+  LFS cost-benefit), every one of them if need be, then sectors whose only
+  waste is a tail (the largest record that fits the head's tail copied
+  first), until those stop freeing sectors; last, a head whose own
+  garbage would let the write open fewer sectors is renewed (its live
+  records copied to a new head of its kind).
 
 ## Invariants (hold after every operation and every cut)
 
@@ -94,6 +111,17 @@ change has to be readable, or cleanly refused, by the core before it.
   index holds, after a mark, exactly the live records, and between marks
   those plus every record written since; nothing it names is erased before
   the next mark prunes it.
+
+## Limits
+
+- **At the reserve, a re-run after a power cut may be refused `NoSpace`.**
+  A step that fitted fault-free can be refused when run again after a cut,
+  because the cut leaves the same live set in a layout a few bytes worse,
+  and the packing bound (a byte sum) admits what GC cannot always place.
+  Nothing committed is lost; the store mounts at the old or the new state
+  and accepts the write once space is freed. Accepted for the device round,
+  to be revisited in the adoption round
+  (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`).
 
 ## RAM
 
@@ -134,11 +162,13 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`
-as the transaction), `host-deflate` (`host_deflate_chunks`, miniz_oxide —
+as the transaction), `deflate-plan` (`plan_deflated_chunks`, miniz_oxide, no
+hasher — a client's push, native and wasm), `host-deflate` (`host_deflate_chunks`, the plan with ids —
 host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`), `stats`
 (`TreeStore::stats`, `TreeStoreStats`, `reset_transient_peak`: the counters
 and the RAM-peak accounting, ~1.2 KB of RV32 code; off in firmware, on for
-the crate's tests and `lp-store-bench`).
+the crate's tests and `lp-store-bench`), `mutants` (test-only: the mutation
+switches below; no product build turns it on).
 
 ## API
 
@@ -236,8 +266,26 @@ test --release -p lp-tree-store cut_sweep` runs every cut point;
 `LP_TREE_STORE_SWEEP_TEARS=calibrated` (or any of `lp-nor-sim`'s
 `TearModel::NAMED`, comma-separated) picks the tear models — the torn-header
 test (`a_torn_kill_erase_or_header_program_never_reads_as_newer`) follows the
-same dial — and `LP_TREE_STORE_SWEEP_SECTORS=128` the geometry of every sweep
-but the GC one, whose point is a small flash.
+same dial (its run floor scales with the number of models) — and
+`LP_TREE_STORE_SWEEP_SECTORS=128` the geometry of every sweep but the GC one,
+whose point is a small flash.
+
+**Counter wrap** (`counter_wrap_tests.rs`, a test-only start value): the
+sector sequence (u32) wraps safely under cuts; the root sequence (u64) does
+not — a commit past `u64::MAX` mounts as the one before it, pinned by
+`the_root_sequence_does_not_wrap`
+(`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
+commits, not reachable in practice).
+
+**Mutants** (feature `mutants`, `mutants.rs`): eleven switches, each
+breaking one guarantee — skip the kill before an erase; trust record headers
+without the payload CRC; dedup against every indexed id; GC erasing its
+victim before its copies; the root before the directories; resume a head
+without its tail check; `NoSpace` checked after writing; GC forgetting the
+pending set; the sector header magic first; a newer version read as
+untrusted; open a sector without the erase read-back. `lp-store-bench
+mutants` runs each through a fixed driver set and requires every one caught
+and the unmutated store clean (its README has the table).
 
 ## Code size (RV32)
 
@@ -348,6 +396,45 @@ logical bytes, stored or deflated.)
    ~33 KB. Mount now indexes only the chosen root's closure, found by
    header scans (`mount_walk.rs`): ~14 KB, garbage or not, for ~30 % more
    bytes read (see "Mount" under the G1 figures).
+
+### Found by M3's long walks (fixed after G1)
+
+`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`:
+on a nearly full flash, a step that fitted was refused `NoSpace` when run
+again after a power cut. Nothing committed was lost; the store refused a
+write it could hold. Five causes, each pinned by `edge_gc_tests.rs`:
+
+1. **GC gave up early.** It stopped after `reserve + 2` collections that
+   freed no sector, although garbage spread thin over many sectors frees
+   one only once enough of it is collected. It now collects every victim
+   with garbage (each wins its garbage back, so the run ends) and applies
+   the stall rule to tail-only compaction alone.
+2. **A cut closes the head it was programming** (a record that fails its
+   CRC ends what mount trusts in that sector), so the re-run needs a new
+   sector for that head. Collecting the closed hot sector copied its live
+   records — the root, the hot directory, panels — into the full cold head,
+   opening a sector for the one it freed. GC now copies to the head of the
+   victim's own kind, which gives the hot head its room back.
+3. **The packing bound refused what a layout held.** It took a sector off
+   for the second head, so a write the heads' room took fault-free was
+   refused after a cut by the bound on the same live set. The bound is now
+   the reserve alone (what it always claimed: a write it rejects cannot fit).
+4. **A head's garbage was never collected.** A full hot head is mostly old
+   roots and hot directories, and no victim rule reaches a head; GC now
+   renews a head (its live records to a new head of its kind) when that
+   lets the write open fewer sectors.
+5. **Compaction could cycle without gaining a byte.** Copying a tail-only
+   sector in record order, a first record that did not fit the head's tail
+   opened a head at once and left that tail unused, so near full GC went
+   round the same few sectors. Compaction now copies the largest record
+   that fits the head's tail first, and opens a sector only when none does.
+
+Still open, accepted for the device round
+(`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`):
+packed to the reserve, a re-run after a cut can still be refused where the
+step fitted, by a few bytes of layout (11 of 792 re-runs of an in-crate cut
+walk near full, lp-nor-sim; M3's drivers run clean). Pinned by
+`a_rerun_near_full_can_still_be_refused`. See "Limits".
 
 ## G1 figures (2026-10-08)
 

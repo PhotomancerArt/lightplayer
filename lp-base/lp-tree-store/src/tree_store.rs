@@ -80,6 +80,9 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     /// Records a flush has written (or names) that nothing reachable names
     /// yet: marked live while it runs.
     pub(crate) inflight: Vec<(ObjectId, crate::gc_mark::MarkRole)>,
+    /// `mutants`: a flush that computes ids and writes nothing.
+    #[cfg(feature = "mutants")]
+    pub(crate) dry: bool,
 }
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
@@ -341,6 +344,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             stats: TreeStoreStats::default(),
             live_after_mark: 0,
             inflight: Vec::new(),
+            #[cfg(feature = "mutants")]
+            dry: false,
         }
     }
 
@@ -372,6 +377,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
 
     /// Write the delta's directories, then a root if anything changed.
     pub(crate) fn commit_inner(&mut self) -> Res<(), F> {
+        #[cfg(feature = "mutants")]
+        if mutant!(RootBeforeDirs) && !self.delta.is_empty() {
+            return self.commit_root_first();
+        }
         self.flush()?;
         let unchanged = self.committed.as_ref().is_some_and(|c| {
             c.root.cold_dir == self.work.cold

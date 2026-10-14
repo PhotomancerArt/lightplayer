@@ -118,8 +118,8 @@ Writing and killing:
   of weak bits.
 - Head kind says which write head opened the sector: **hot** sectors hold
   `…/.lp/panel.json` files, the hot directory and roots; **cold** sectors
-  hold everything else and GC copies. A reader does not need it except to
-  resume appending.
+  hold everything else. GC copies a sector's live records to a sector of
+  the same kind. A reader does not need it except to resume appending.
 
 ## Record
 

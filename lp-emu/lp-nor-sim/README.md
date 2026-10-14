@@ -4,7 +4,10 @@ A deterministic, sans-IO model of SPI NOR flash that loses power on demand.
 It is the ground the storage testbed (`tools/lp-store-bench`) runs every
 candidate store on, so its own correctness matters more than its speed.
 `no_std` + `alloc`, no dependencies beyond `embedded-storage`'s traits.
-Nothing here is linked into firmware.
+Nothing here is linked into firmware. The emulated ESP32-C6's flash chip
+also tears with these models: `lp-emu-esp-common`'s `engine::flash_cut`
+calls the calibrated functions directly on the chip's bytes and runs the
+guessed models through a scratch `NorFlashSim` (`--flash-cut`).
 
 MIT, as a unit with the rest of `lp-emu/` (see `../LICENSE-MIT`): the host
 testbed and the emulated C6's flash share this one model, and nothing in this
