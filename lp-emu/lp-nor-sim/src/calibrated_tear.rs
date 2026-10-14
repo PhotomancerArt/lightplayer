@@ -284,8 +284,11 @@ pub const CX1_READS_FF_WEAK: [u32; 4] = [1, 2, 3, 8];
 /// The torn programs that stopped inside a word, as (clears of that word
 /// landed, clears it asked for, weak bits), sorted by the landed share. A
 /// draw interpolates the landed share and the weak count between
-/// neighbours, as [`CX1_ERASING`] does, and applies them to the drawn word.
-/// In both cuts the weak bit sat on a clear that had not landed.
+/// neighbours, as [`CX1_ERASING`] does, and applies them to the drawn word
+/// (a word asking two or more clears; at least one lands, at least one does
+/// not). In both cuts the weak bit sat on a clear that had not landed — in
+/// the second, on the only one: that word reads exactly as asked on the
+/// reads where its weak bit reads 0.
 pub const CX1_MID_WORD: [(u32, u32, u32); 2] = [(3, 17, 1), (14, 15, 1)];
 
 /// Tear an erase of `cells` (whose old content is still in it) into `shape`.
@@ -349,7 +352,10 @@ pub fn tear_program(
     let ends = data.len().div_ceil(TEAR_WORD) as u64; // word ends in 0..len
     let commands = data.len().div_ceil(TEAR_COMMAND) as u64; // of them, on a command
     let mid = ends - commands;
-    // A word can be caught part-way only if it asks for a clear.
+    // A word caught part-way lands some of its clears and not all, so it
+    // must ask for two or more: both silicon words did (17 and 15), and
+    // both landed some (3 and 14). A word left with weak bits and no
+    // landed clear would read erased on some reads; no cut showed one.
     let clears = |w: usize| -> Vec<usize> {
         let (lo, hi) = (w * TEAR_WORD, ((w + 1) * TEAR_WORD).min(data.len()));
         (lo * 8..hi * 8)
@@ -362,7 +368,7 @@ pub fn tear_program(
     }
     let candidates: Vec<usize> = match shape {
         ProgramShape::MidWord => (0..ends as usize)
-            .filter(|&w| !clears(w).is_empty())
+            .filter(|&w| clears(w).len() >= 2)
             .collect(),
         _ => Vec::new(),
     };
@@ -387,7 +393,7 @@ pub fn tear_program(
                 .map(|&(l, i, wk)| (l * 1024 / i.max(1), wk))
                 .collect();
             let (share, weaks) = interpolate(rng, &rows);
-            let landed = ((share * k + 512) / 1024).min(k.saturating_sub(1));
+            let landed = ((share * k + 512) / 1024).clamp(1, k - 1);
             let weaks = weaks.min(k - landed);
             for i in 0..(landed + weaks) as usize {
                 let j = i + rng.below((bits.len() - i) as u64) as usize;
