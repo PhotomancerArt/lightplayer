@@ -145,7 +145,7 @@ fn TemplateRow(
     let press = offer.press(&args);
     let summary = match &press {
         Ok(action) => action.meta().summary.clone(),
-        Err(refused) => refused.to_string(),
+        Err(refused) => refused.shown(),
     };
     let close = try_consume_context::<PopoverCloseHandle>();
 
