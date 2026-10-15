@@ -12,9 +12,11 @@
 //! loader boots) and `engine.bin` (raw bytes the core maps), the loader is
 //! built, and everything is laid out for the app partition (`app.bin`) and
 //! for the whole chip (`merged.bin`) with `lp-bootctl`'s own format and
-//! constants. See `README.md`.
+//! constants. Every segment of the core image must be one the loader can
+//! place (`core_segments`): the build refuses one it cannot. See `README.md`.
 
 pub mod app_image;
+pub mod core_segments;
 pub mod elf_symbol;
 pub mod engine_script;
 pub mod headroom;
