@@ -6,8 +6,10 @@ sessions can run the repo skill `lp-review-handoff` to execute it; other
 harnesses follow it directly.
 
 A **review gate** is any point where work pauses for human judgment: a
-visual/feel gate on UI work, a hardware walk, a plan approval, or the final
-pre-merge review of a PR. The chronic failure mode this document exists to
+visual/feel gate on UI work, a hardware walk, a plan approval, or a final
+pre-merge review. A gate exists because a plan declared it, or because the
+next step is Lasting (AGENTS.md "What you may do without asking"). A change
+being user-visible does not make one. The chronic failure mode this document exists to
 prevent: work is "done", but the reviewer has to ask for a dev server, gets a
 link to the wrong port, or reviews a branch that is stale against `main`.
 
@@ -60,9 +62,12 @@ the request explicitly scopes it smaller:
 
 1. Implement and validate (CI-parity checks locally).
 2. Push, create/update the PR, watch CI to green.
-3. If the change is user-visible or the prompt asks for review, run the
-   handoff checklist above — server started, link posted, PNGs posted, gate
-   questions stated.
+3. Merge and deploy (`yona-ship`): merging a green PR is Undoable and
+   standing-authorized (AGENTS.md "What you may do without asking"). Stop
+   instead, and run the handoff checklist above, only when a plan declared a
+   gate, the prompt asked for review, or the next step is Lasting. A
+   user-visible change with no open design question merges; its screenshots
+   go in the ship report.
 
 This holds for every session, including ones started from a task chip, a
 handoff prompt, or another agent's delegation — the human clicked the chip
@@ -73,16 +78,18 @@ include this definition of done in the prompt.
 **Stop only at a gate.** The stopping points are the gates this document
 defines, plus the genuine blockers in the implementing skill's Stop And Ask
 list — ambiguity that must be resolved now, validation failing twice with no
-new signal, a fix that would expand scope past the plan, an action needing
-human authority. That list is closed. A phase boundary with no gate is not a
+new signal, a fix that would expand scope past the plan, a Lasting action.
+That list is closed. A question you would end with "Lean: yes" about
+something a revert can undo is not a gate: decide it and report it. A phase boundary with no gate is not a
 stopping point. Neither is finishing a commit, nor finishing implementation
 and asking whether to push, nor a CI run you could be watching.
 
 **Open the PR early.** The PR is part of the pipeline, not a follow-up step.
 Open it as a draft at the first commit, before validation passes, so the
 path-gated CI starts giving signal while there is still time to react. It
-stays draft while work remains, a gate is pending, or CI is red, and goes
-ready when all three clear. Work that ends at a gate hands over a draft PR —
+stays draft while work remains or a gate is pending, and goes ready when
+both clear, *whether or not CI is green* — draft tracks how complete the
+work is; keep fixing CI on the ready PR. Work that ends at a gate hands over a draft PR —
 marking it ready is the human's call, never a way to satisfy the gate.
 
 ## Where the pieces live
