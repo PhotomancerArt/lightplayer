@@ -34,10 +34,11 @@ pub const MODULE_PAD: f64 = 10.0;
 pub const MODULE_PAD_TOP: f64 = 18.0;
 /// An empty module's inside.
 pub const EMPTY_MODULE: Vec2 = Vec2::new(40.0, 20.0);
-/// An output card: its width, its title header, and one row per port.
+/// An output card: its width, its title header, and one row per port. A
+/// row holds the port's name over its pixels, as the board shows them.
 pub const CARD_WIDTH: f64 = 60.0;
 pub const CARD_HEADER: f64 = 11.0;
-pub const CARD_ROW: f64 = 9.0;
+pub const CARD_ROW: f64 = 14.0;
 pub const CARD_FOOT: f64 = 2.0;
 
 /// Every node's box, in world units.

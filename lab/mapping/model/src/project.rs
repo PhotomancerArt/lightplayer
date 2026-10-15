@@ -320,7 +320,8 @@ impl Project {
     /// The lab's starting project: Yona's desk. A tail rig (the tail that
     /// runs out and back, and its own output), a two-ring circle display
     /// and a strip sharing the main output, and an empty fixture to draw a
-    /// scarf into.
+    /// scarf into, already patched to its own output — so drawing in it
+    /// lights pixels at once.
     pub fn seed() -> Self {
         let mut p = Project::new("desk");
         let grb = PixelFormat::Grb;
@@ -342,10 +343,18 @@ impl Project {
         let ring = p.add_fixture(None, "ring display", Vec2::new(70.0, 70.0));
         let strip = p.add_fixture(None, "strip", Vec2::new(80.0, 20.0));
         let main = p.add_output(None, "main", &[("D0", 64, grb), ("D1", 30, grb)]);
-        p.add_fixture(None, "scarf", Vec2::new(100.0, 30.0));
+        let scarf = p.add_fixture(None, "scarf", Vec2::new(100.0, 30.0));
+        let scarf_out = p.add_output(None, "scarf out", &[("D10", 60, grb)]);
 
-        let (Some(tail), Some(tail_out), Some(ring), Some(strip), Some(main)) =
-            (tail, tail_out, ring, strip, main)
+        let (
+            Some(tail),
+            Some(tail_out),
+            Some(ring),
+            Some(strip),
+            Some(main),
+            Some(scarf),
+            Some(scarf_out),
+        ) = (tail, tail_out, ring, strip, main, scarf, scarf_out)
         else {
             unreachable!("the seed's parents are modules")
         };
@@ -361,6 +370,7 @@ impl Project {
         p.auto_patch(&tail, &tail_out);
         p.auto_patch(&ring, &main);
         p.auto_patch(&strip, &main);
+        p.auto_patch(&scarf, &scarf_out);
         p
     }
 }

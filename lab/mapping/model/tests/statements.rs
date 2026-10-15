@@ -13,7 +13,11 @@
 //! - fixture `strip`: line3, (6, 10) → (74, 10), 30 lamps, auto-patched to
 //!   `main` after the ring display;
 //! - output `main`: ports D0 (64 px) and D1 (30 px);
-//! - fixture `scarf`: empty, no rule, to draw into.
+//! - fixture `scarf`: empty, to draw into, auto-patched to
+//! - output `scarf out`: one port, D10, 60 px.
+//!
+//! The board is simulated (`device_frame`): times are in seconds, and
+//! `CREST` is the top of the selection's breath.
 //!
 //! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
 //! turns them into the canvas's.
@@ -40,7 +44,7 @@ fn select_all_then_delete_deletes_everything() {
         4,
         "the fixtures themselves stay"
     );
-    assert_eq!(e.project.outputs().len(), 2, "and the outputs");
+    assert_eq!(e.project.outputs().len(), 3, "and the outputs");
 }
 
 /// ⌘A climbs a level each time: from a lamp, every lamp of its ring, then
@@ -685,7 +689,10 @@ fn a_selected_port_highlights_its_lamps() {
 #[test]
 fn only_edges_on_the_selection_are_labelled() {
     let mut e = editor();
-    assert!(e.edges().iter().all(|x| !x.labelled), "nothing selected, no labels");
+    assert!(
+        e.edges().iter().all(|x| !x.labelled),
+        "nothing selected, no labels"
+    );
 
     let main = node_id(&e, "main");
     e.select(vec![port(&main, "p2")]);
@@ -697,7 +704,10 @@ fn only_edges_on_the_selection_are_labelled() {
     // to a selected ring, so only the selected ring's edge is labelled.
     e.select(vec![ring("circle1", "r2")]);
     let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
-    assert!(labelled.iter().all(|x| x.from == ring("circle1", "r2")), "{labelled:?}");
+    assert!(
+        labelled.iter().all(|x| x.from == ring("circle1", "r2")),
+        "{labelled:?}"
+    );
 }
 
 /// Enter on a fixture frames the fixture together with its outputs.
@@ -953,7 +963,291 @@ fn every_offered_key_does_something() {
     }
 }
 
+// ---- the simulated board ----------------------------------------------------
+
+/// With nothing selected, the board shows the pattern on every patched pixel
+/// and black on unpatched ones.
+#[test]
+fn the_board_shows_the_pattern_on_patched_pixels_only() {
+    let e = editor();
+    let frame = e.device_frame(0.0);
+    let tail_out = node_id(&e, "tail out");
+    let gpio10 = frame.port(&tail_out, "p1").unwrap();
+    assert_eq!(gpio10.len(), 60);
+    assert!(
+        gpio10[..50].iter().all(|px| !px.is_black()),
+        "the tail's 50 lamps"
+    );
+    assert!(
+        gpio10[50..].iter().all(|px| px.is_black()),
+        "10 spare pixels"
+    );
+    let main = node_id(&e, "main");
+    for key in ["p1", "p2"] {
+        assert!(
+            frame
+                .port(&main, key)
+                .unwrap()
+                .iter()
+                .all(|px| !px.is_black())
+        );
+    }
+    let scarf_out = node_id(&e, "scarf out");
+    assert!(
+        frame
+            .port(&scarf_out, "p1")
+            .unwrap()
+            .iter()
+            .all(|px| px.is_black()),
+        "nothing is drawn in the scarf yet"
+    );
+    assert!(!e.board_animates(), "nothing moves on its own");
+}
+
+/// Selecting a lamp lights exactly its pixel; every other patched pixel
+/// dims.
+#[test]
+fn selecting_a_lamp_lights_exactly_its_pixel() {
+    let mut e = editor();
+    let plain = e.device_frame(CREST);
+    e.select(vec![lamp("line3", "line", 4)]);
+    assert!(e.board_animates());
+    let frame = e.device_frame(CREST);
+    let main = node_id(&e, "main");
+    let d1 = frame.port(&main, "p2").unwrap();
+    assert_eq!(d1[4], Rgb::WHITE);
+    for (port, plain_port) in frame.ports.iter().zip(&plain.ports) {
+        for (i, (px, was)) in port.pixels.iter().zip(&plain_port.pixels).enumerate() {
+            if port.output == main && port.key == "p2" && i == 4 {
+                continue;
+            }
+            assert!(
+                !bright(*px),
+                "{} {} pixel {i} stays dim",
+                port.output,
+                port.key
+            );
+            if !was.is_black() {
+                assert!(
+                    !px.is_black() && px.level() < was.level(),
+                    "{} {} pixel {i} dims, not off",
+                    port.output,
+                    port.key
+                );
+            }
+        }
+    }
+    // It breathes: dimmer at the start of a breath than at its crest, but
+    // even then brighter than anything dimmed.
+    let low = e.device_frame(0.0);
+    let lowest = low.port(&main, "p2").unwrap()[4];
+    assert!(lowest.level() < Rgb::WHITE.level());
+    let dimmed = low
+        .ports
+        .iter()
+        .flat_map(|p| p.pixels.iter())
+        .filter(|px| **px != lowest)
+        .map(|px| px.level())
+        .max()
+        .unwrap();
+    assert!(lowest.level() > dimmed, "never as dark as the rest");
+}
+
+/// A lamp outside its fixture's box is never lit, even when it is
+/// selected.
+#[test]
+fn a_lamp_outside_its_box_is_never_lit() {
+    let mut e = editor();
+    // A line in the tail running out past its right side (the tail is 36
+    // wide): lamps at x = 30, 35 inside; 40, 45, 50 outside. They land on
+    // GPIO 10 at pixels 50–54.
+    let tail = node_id(&e, "tail");
+    let id = e
+        .project
+        .add(
+            &tail,
+            ComponentKind::line(Vec2::new(30.0, 40.0), Vec2::new(50.0, 40.0), 5),
+        )
+        .unwrap();
+    let outside: Vec<u32> = e
+        .project
+        .lamps_outside()
+        .into_iter()
+        .filter(|(o, _)| o.component == id)
+        .map(|(_, i)| i)
+        .collect();
+    assert_eq!(outside, vec![2, 3, 4]);
+    let tail_out = node_id(&e, "tail out");
+    let object = ObjectId::new(&id, "line");
+    for selection in [
+        vec![],
+        vec![Target::Component(id.clone())],
+        vec![Target::Lamp {
+            object: object.clone(),
+            index: 3,
+        }],
+    ] {
+        e.select(selection.clone());
+        let frame = e.device_frame(CREST);
+        let gpio10 = frame.port(&tail_out, "p1").unwrap();
+        assert!(
+            !gpio10[50].is_black() && !gpio10[51].is_black(),
+            "{selection:?}"
+        );
+        for px in 52..55 {
+            assert!(gpio10[px].is_black(), "pixel {px} dark with {selection:?}");
+        }
+    }
+}
+
+/// While drawing a line into the scarf, the scarf's port shows exactly the
+/// draft's lamps, lit, at the right pixels — the ones the line takes when
+/// the drag is let go — and everything else is off.
+#[test]
+fn drawing_into_the_scarf_lights_the_drafts_pixels() {
+    let mut e = editor();
+    let scarf_out = node_id(&e, "scarf out");
+    // A first line, 11 lamps, takes pixels 0–10.
+    draw_line(&mut e, "scarf", (10.0, 15.0), (34.0, 15.0));
+    // The second, mid-drag: 11 more lamps.
+    key(&mut e, Key::Char('l'), none());
+    let a = e.camera.to_screen(place(&e, "scarf", 40.0, 15.0));
+    let b = e.camera.to_screen(place(&e, "scarf", 64.0, 15.0));
+    e.pointer_down(a, Button::Primary, none());
+    e.pointer_move(b, none());
+    assert!(e.board_animates());
+    let frame = e.device_frame(0.0);
+    let d10 = frame.port(&scarf_out, "p1").unwrap();
+    let lit: Vec<usize> = (0..d10.len()).filter(|i| !d10[*i].is_black()).collect();
+    assert_eq!(lit, (11..22).collect::<Vec<_>>());
+    assert!(lit.iter().all(|i| d10[*i] == Rgb::WHITE));
+    for port in &frame.ports {
+        if port.output != scarf_out {
+            assert!(
+                port.pixels.iter().all(|px| px.is_black()),
+                "{} is off",
+                port.output
+            );
+        }
+    }
+    // Let go: the line lands exactly where the draft showed.
+    e.pointer_up(b, none());
+    let Target::Component(id) = e.selection[0].clone() else {
+        panic!()
+    };
+    let landed: Vec<usize> = e
+        .project
+        .effective_patch()
+        .spans
+        .iter()
+        .filter(|s| s.object.component == id)
+        .flat_map(|s| s.start_pixel as usize..(s.start_pixel + s.lamps.len() as u32) as usize)
+        .collect();
+    assert_eq!(landed, lit);
+}
+
+/// Pressing = on a selected line lights one more pixel on its port at once.
+#[test]
+fn pressing_equals_lights_one_more_pixel() {
+    let mut e = editor();
+    let tail_out = node_id(&e, "tail out");
+    e.select(vec![comp("line1")]);
+    let count = |e: &Editor| {
+        let frame = e.device_frame(CREST);
+        let gpio10 = frame.port(&tail_out, "p1").unwrap().to_vec();
+        (
+            gpio10.iter().filter(|px| bright(**px)).count(),
+            gpio10.iter().filter(|px| !px.is_black()).count(),
+        )
+    };
+    assert_eq!(count(&e), (25, 50));
+    key(&mut e, Key::Char('='), none());
+    assert_eq!(
+        count(&e),
+        (26, 51),
+        "line1 has 26 lamps, line2 moved up one"
+    );
+}
+
+/// A selected line shows its direction on the board: its first lamps blue,
+/// its last lamps red, and a white dot running from its start to its end.
+#[test]
+fn a_selected_line_shows_its_direction() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    e.select(vec![comp("line3")]);
+    let dot = |t: f64| {
+        let frame = e.device_frame(t);
+        let d1 = frame.port(&main, "p2").unwrap().to_vec();
+        assert!(d1[..3].iter().all(|px| *px == device_frame::START_COLOUR));
+        assert!(d1[27..].iter().all(|px| *px == device_frame::END_COLOUR));
+        let white: Vec<usize> = (0..30).filter(|i| d1[*i] == Rgb::WHITE).collect();
+        assert_eq!(white.len(), 1, "one dot at {t}: {white:?}");
+        white[0]
+    };
+    assert!(
+        dot(0.5) < dot(1.0) && dot(1.0) < dot(1.5),
+        "the dot runs start → end"
+    );
+}
+
+/// Deleting a line takes its pixels off the board at once; what came after
+/// it moves up.
+#[test]
+fn deleting_a_line_changes_the_next_frame() {
+    let mut e = editor();
+    let tail_out = node_id(&e, "tail out");
+    let before = e.device_frame(0.0).port(&tail_out, "p1").unwrap().to_vec();
+    e.select(vec![comp("line1")]);
+    key(&mut e, Key::Delete, none());
+    let after = e.device_frame(0.0).port(&tail_out, "p1").unwrap().to_vec();
+    assert_eq!(
+        after[..25],
+        before[25..50],
+        "line2's lamps, now from pixel 0"
+    );
+    assert!(after[25..].iter().all(|px| px.is_black()));
+}
+
+/// Selecting a port lights its whole range, patched or not.
+#[test]
+fn selecting_a_port_lights_its_whole_range() {
+    for (name, unpatched) in [("tail out", 10), ("scarf out", 60)] {
+        let mut e = editor();
+        let out = node_id(&e, name);
+        e.select(vec![port(&out, "p1")]);
+        let frame = e.device_frame(CREST);
+        let pixels = frame.port(&out, "p1").unwrap();
+        assert_eq!(pixels.len(), 60);
+        assert!(
+            pixels.iter().all(|px| bright(*px)),
+            "all of {name}, {unpatched} unpatched"
+        );
+        for p in frame.ports.iter().filter(|p| p.output != out) {
+            assert!(p.pixels.iter().all(|px| !bright(*px)), "{} dims", p.output);
+        }
+    }
+}
+
 // ---- helpers -------------------------------------------------------------------
+
+/// The top of the selection's breath.
+const CREST: f64 = device_frame::BREATH_SECONDS / 2.0;
+
+/// Lit by the selection (at the crest), as opposed to dimmed or off.
+fn bright(px: Rgb) -> bool {
+    px.level() > 100
+}
+
+/// Draw a line with the line tool, in a fixture's own coordinates.
+fn draw_line(e: &mut Editor, fixture: &str, from: (f64, f64), to: (f64, f64)) {
+    key(e, Key::Char('l'), none());
+    let a = e.camera.to_screen(place(e, fixture, from.0, from.1));
+    let b = e.camera.to_screen(place(e, fixture, to.0, to.1));
+    e.pointer_down(a, Button::Primary, none());
+    e.pointer_move(b, none());
+    e.pointer_up(b, none());
+}
 
 fn editor() -> Editor {
     let mut e = Editor::new(Project::seed());

@@ -28,6 +28,8 @@
 //!   one thing or many.
 //! - [`Editor`] — the state, driven by input events, with no IO.
 //! - [`hints`] — what the screen says you can do right now.
+//! - [`device_frame`] — the simulated board: what every port's pixels
+//!   show, from the pattern, the patch, the selection and the time.
 //!
 //! The behaviour is pinned by `tests/statements.rs`: one sentence, one test.
 //!
@@ -38,6 +40,7 @@ pub mod camera;
 pub mod commands;
 pub mod component;
 pub mod component_props;
+pub mod device_frame;
 pub mod edges;
 pub mod editor;
 pub mod fixture;
@@ -53,12 +56,14 @@ pub mod patch;
 pub mod pick;
 pub mod project;
 pub mod props;
+pub mod rgb;
 pub mod target;
 pub mod tree_rows;
 
 pub use area::Area;
 pub use camera::Camera;
 pub use component::{Component, ComponentId, ComponentKind, Ring};
+pub use device_frame::{DeviceFrame, PortFrame};
 pub use edges::Edge;
 pub use editor::{Button, ContextMenu, Editor, Gesture, Key, MenuItem, Mods, Tool};
 pub use fixture::Fixture;
@@ -73,5 +78,6 @@ pub use patch::{EffectivePatch, PatchProblem, PatchRule, Span, Unpatched};
 pub use pick::{PickMode, pick};
 pub use project::Project;
 pub use props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
+pub use rgb::Rgb;
 pub use target::Target;
 pub use tree_rows::TreeRow;

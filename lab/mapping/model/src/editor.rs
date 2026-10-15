@@ -7,6 +7,7 @@
 use crate::camera::Camera;
 use crate::component::{ComponentId, ComponentKind};
 use crate::geom::{Rect, Vec2};
+use crate::node::NodeId;
 use crate::notice::Notice;
 use crate::pick::{PickMode, level_candidates, pick};
 use crate::project::{Project, union};
@@ -171,7 +172,7 @@ impl Editor {
 
     /// The pointer, if hovering means anything right now (select tool, no
     /// gesture, no menu, not panning).
-    fn hover_point(&self) -> Option<Vec2> {
+    pub(crate) fn hover_point(&self) -> Option<Vec2> {
         let idle = matches!(self.gesture, Gesture::None) && self.tool == Tool::Select;
         if !idle || self.space_held || self.menu.is_some() {
             return None;
@@ -915,6 +916,17 @@ impl Editor {
         }
     }
 
+    /// Where a drag from `start` to `end` (world units) puts its drawing:
+    /// the fixture it starts in, and the component in that fixture's own
+    /// coordinates. `None` when it starts outside every fixture. Finishing
+    /// a drag and the simulated board's preview of it (`device_frame.rs`)
+    /// both ask here, so the preview is exactly what the release makes.
+    pub(crate) fn drawn_into(&self, start: Vec2, end: Vec2) -> Option<(NodeId, ComponentKind)> {
+        let fixture = self.project.fixture_at(start)?;
+        let origin = self.project.origin(&fixture);
+        Some((fixture, self.drawn(start - origin, end - origin)))
+    }
+
     fn finish_drawing(&mut self, start: Vec2, end: Vec2) {
         if start.distance(end) * self.camera.scale < 4.0 {
             self.notice = Some(Notice::refused(
@@ -924,9 +936,7 @@ impl Editor {
             ));
             return;
         }
-        // A drawing goes into the fixture it starts in, in that fixture's
-        // own coordinates.
-        let Some(fixture) = self.project.fixture_at(start) else {
+        let Some((fixture, kind)) = self.drawn_into(start, end) else {
             self.notice = Some(Notice::refused(
                 "Nothing drawn",
                 "a drawing starts inside a fixture's box",
@@ -937,8 +947,6 @@ impl Editor {
             ));
             return;
         };
-        let origin = self.project.origin(&fixture);
-        let kind = self.drawn(start - origin, end - origin);
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
             self.selection = vec![Target::Component(id)];
