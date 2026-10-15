@@ -1473,3 +1473,146 @@ here against none of 418 aligned is a little surprising (about 1 in 40 if
 both sets come from the same part behaving the same way). The erase itself
 is the same command. Filed open, not fixed, and the model not re-fitted:
 `docs/defects/2026-10-14-the-calibrated-nor-model-never-tears-an-erase-inside-a-word-or-at-its-first-lift.md`.
+
+## 13. Does programming a torn word again settle it? (2026-10-14, 600 cuts)
+
+**Yes, on CX1, every time it was tried.** Every weak bit that was
+programmed again with what it was meant to hold read solid and correct
+straight away. It still did after the next power cut. This held for 5
+torn program words (9 weak bits) and for 49 torn-erase sectors (26,198
+weak bits in 64 reads), all programmed to `0x00`. The bits that were
+left alone kept flickering. So the assumption behind PR #1136's settle
+step holds on this part. That assumption is `lp-nor-sim`'s model:
+a weak bit programmed to 0 becomes a solid 0, `nor_flash_sim.rs`
+`program`. No defect is filed against the tree store's settle step or
+against `lp-nor-sim`.
+
+**The payload.** `flash-reprogram`
+(`lp-fw/fw-checks/src/checks/flash_reprogram/`, harness
+`lp-fw/fw-esp32c6/src/tests/flash_reprogram.rs`) owns all of CX1's
+`lpfs`. Each boot works in five steps:
+
+1. It re-reads the words or sectors the previous boot re-programmed. The
+   cut that started this boot is their "further power cycle".
+2. It finds what this cut tore.
+3. It reads each torn word 4,096 times left alone: 8 chunks of 512,
+   20 ms apart. This is the control.
+4. It programs the word's write again with the intended bytes, from the
+   write's start through its last dirty word, in one program call, as
+   the settle step does.
+5. It reads the word 4,096 times again.
+
+A bit is **weak** if it reads both ways, whether in the 64 reads around
+the frontier or in the control's 4,096. It is a sibling of `flash-tears`
+with its own name, so `flash-tears-analyze.py` never reads its
+transcripts. Read them with `scripts/emu/flash-reprogram-analyze.py`.
+
+**How the cuts were biased toward programs.** In `flash-tears`, 83 % of
+cuts landed in an erase, because erasing is 81 % of a work cycle. Here
+every erase runs *before* the scan-done line, so the work loop does
+nothing but program: 2,784 writes of 256 bytes, filling the region in
+about 0.91 s. The cut window was then made short enough that every cut
+lands inside that fill. `board power-cycle` cuts 455–736 ms after the cut
+driver's own wait (measured on the first 50 cuts). With the wait at
+0–120 ms, the cut lands 334–911 ms in (median 536 ms). **All 425
+program-loop cuts landed in a program**, and none found the region
+already full.
+
+That is still not many torn words. The part stops on a whole word almost
+every time. Of the 425 program-loop cuts, 103 stopped on a 256-byte
+write boundary, 225 on a 32-byte command boundary and 91 inside a command
+on a word. Only **6 stopped inside a word (1.4 %)**. That matches
+`flash-tears` (2 of 79). After 250 cuts it was clear that 600 cuts would
+give a handful of torn words. So the image built from `89674b8c5`
+alternates. Odd generations still program. Even generations **erase**
+the 64 sectors their boot programmed: 64 × 24 ms, the cut 15–40 sectors
+in. A torn erase leaves cells part-lifted, which is the same question for
+far more cells. Such a sector is read 64 times, 512 times left alone
+(8 chunks of 64, 20 ms apart), programmed to `0x00`, and read 512 times
+again. `0x00` is what the erase's own pre-program writes, the brief's
+"torn erase pre-program". That gave 175 erase-loop cuts and 175 more
+program-loop cuts.
+
+**The sitting.** CX1 (`c6-expendable`, `14:C1:9F:E6:54:90`) was on hub
+`1-1.2` port 2, leased as `direct: tree-store M7`, resolved by MAC, with
+no probing. Power was cut only through `board power-cycle`. There were
+**600 cuts in 12 batches of 50**, each batch its own transcript in
+`lp-emu/transcripts/esp32c6/flash-reprogram/`. **All 600 boots after a
+power cycle reported reset `poweron`**. The 12 post-flash boots
+(`usb-uart`) are left out. Every boot read JEDEC `0x464016`. Batch 1 was
+cut with a 0–300 ms wait, and the rest with 0–120 ms. Batches 1–5 ran the
+program-only image (`lp-fw/` at `812d12f4c`). Batches 6–12 ran the
+alternating image (`89674b8c5`). No cut ever touched anything outside the
+operation in flight. Every re-programmed write's tail still read erased.
+Every sector the boots erased read back blank.
+
+**Torn program words** (the direct question):
+
+| transcript, boot | byte in write | clears landed | weak bits; how often each read 0 left alone (4,096 reads) | after re-program (4,096 reads) | after the next cut (4,096 reads) |
+|---|---:|---:|---|---|---|
+| `812d12f4c` 12 | 224 | 15 of 17 | bit 19: 1 | stable, correct | stable, correct |
+| `843127cd4` 37 | 40 | 10 of 13 | bit 23: 38 | stable, correct | stable, correct |
+| `843127cd4` 38 | 44 | 13 of 15 | bit 6: 3,926; bit 22: 512 | stable, correct | stable, correct |
+| `e2a83a6bb` 27 | 224 | 0 of 14 | bit 24: 3,946 | stable, correct | stable, correct |
+| `e382cd382` 4 | 148 | 1 of 19 | bit 10: 55; bit 23: 658; bit 24: 9; bit 29: 3,069 | stable, correct | stable, correct |
+| `e382cd382` 20 | 4 | 1 of 13 | none (12 clears stably not landed) | stable, correct | stable, correct |
+
+The other bits of each torn word read stably, and the clears that never
+landed read a stable 1. The weak bits do not settle on their own. Every
+weak word was still weak after 4,096 reads, at about the same rate in
+each 512-read chunk (bit 6: 94.5–97.1 % zeros a chunk; bit 23: 14.1–18.6
+%). Some are rare: bit 19 read 0 once in 4,096, and 64 reads missed
+three of the five weak words entirely. Each was re-programmed with the
+other bits of its write. Then none read any other way in 4,096 reads,
+and none did after the next power cut.
+
+**Torn-erase sectors** (175 erase-loop cuts):
+
+| shape | sectors | weak bits (64 reads) |
+|---|---:|---:|
+| erasing (zeros spread over the sector, part-lifted) | 35 | 26,152 |
+| reads erased, with weak bits | 8 | 35 |
+| zeroing (a `0x00` run from the front, old data after) | 9 | 4 |
+| all zero, with weak bits | 4 | 7 |
+| all zero | 26 | 0 |
+
+In the other 93 cuts, the sector in flight still read its old pattern and
+the one before it read erased whole, with no weak bit.
+
+| sectors with weak bits | weak, 64 reads | weak, 512 reads left alone | 64-read weak bits that held still for all 512 | zeroed and stable after re-program (512 reads) | still weak, or a stable 1, after it | zeroed and stable after the next cut |
+|---:|---:|---:|---:|---:|---:|---:|
+| 49 | 26,198 | 34,823 | 758 (2.9 %) | 49 of 49 | 0 bits | 48 of 48 |
+
+Left alone, the weak cells stay weak. Reading more finds more of them:
+34,823 in 512 reads against 26,198 in 64. Only 2.9 % of the bits that
+flickered in the first 64 reads held still for the next 512. After one
+program to `0x00`, **not one of the 34,823 bits read 1 even once** in 512
+reads, and none did after the next cut. One sector, the last cut of batch
+6, has no re-check: the next boot was a reflash. The two zeroing sectors
+with weak bits (`9409cd6d7` boots 23 and 39, 2 weak bits each) are most
+likely the torn pre-program; both read all zero after it.
+
+**What this does not show.**
+
+- *"Stable" has a resolution: 4,096 reads a word, 512 a sector.* The
+  control shows bits as rare as 1 in 4,096. A cell left that marginal by
+  the re-program would be missed. But the erase sectors put 34,823 cells
+  through the same step, and not one flicker came back in 512 reads.
+- *The time scale is seconds.* The re-check is the next boot, one power
+  cut and a few seconds later. Retention over days, heat, or many power
+  cycles is not measured.
+- *One board, one part* (JEDEC `0x464016`, manufacturer not identified).
+  Another part's program algorithm could skip a cell that already
+  verifies. Nothing here says it would not.
+- *The erase sectors are a proxy.* Their cells were part-way through an
+  erase, not a program. They test the same thing (a cell between states,
+  programmed to 0) and are reported apart from the program words.
+- *The settle step programs the bytes it read, not the intended bytes.*
+  For a record whose CRC checked, those are the same: every weak bit read
+  as meant on that read. A weak bit that read the wrong way fails the CRC.
+  That record takes the other path: its header is programmed to zeros,
+  which is the case the erase sectors test.
+
+Batches 1–5 and 6–12 ran different images. The program-loop cuts are one
+population: the program loop did not change, only the generations it runs
+on.
