@@ -1,6 +1,7 @@
 ---
-status: open           # guarded (#1143): no such core builds, packages or ships; a core that crosses the page still cannot boot until the image-side fix
+status: fixed          # guarded by #1143 (no such core builds or ships); fixed by #1144 (the padding goes to .bss)
 found: 2026-10-14      # hardware smoke: RAM research V3 (#1110 merged with main) on c6-expendable (CX1)
+fixed: this change     # #1144
 area: fw-esp32c6-loader esp_image::load × lp-fw-split's core image (espflash 3.3.0's image builder) × the C6 core's rodata/text page boundary
 class: config-masked-defect   # the loader is correct only while the core's RAM segments are big enough to fill the gap before flash .text; #1092 shrank them
 related:
@@ -83,13 +84,48 @@ segments.
 The emulator now faults a store where the C6 has nothing, as silicon does
 (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
 
-**Still open.** The guard stops such a core from shipping. It does not make a
-core that crosses the page boot. That needs the image-side fix. Options:
+**The fix (#1144).** `lp-fw-split` gives each padding segment a **load
+address in the core's `.bss`**: a run from `_bss_start`, read from the
+pass-2 ELF (`tools/lp-fw-split/src/core_padding.rs`). The segment's bytes stay
+where they are, so every later segment keeps its offset and its page
+alignment. The loader then copies zeros into `.bss`, which riscv-rt zeroes
+before Rust runs. Nothing is kept there across a reset (`.noinit` and
+`.rtc_fast.persistent` sit outside it). A run that would leave `.bss`, reach
+the loader's RAM, or overlap another segment is refused, and the guard still
+checks the result. The image's appended SHA-256 is recomputed. Nothing changes
+in the loader, the boot records or any format, so boards already fielded with
+today's loader boot the new cores. A core whose rodata does not cross a page
+has no padding, and its image is unchanged.
 
-- `lp-fw-split` refuses a core with an address-0 segment (a build-time check,
-  so the image never ships);
-- the image builder points the leftover at RAM the core zeroes anyway;
-- the layout keeps flash `.text` from needing a gap.
+The other two options were rejected. Refusing the core only moves the
+failure into whichever PR next adds ~224 B of core rodata. A layout that never
+needs a gap would mean changing esp-hal's `.text_gap` or espflash's 64 KiB
+alignment. Both are wider changes than this, and both depend on how much RAM
+there is.
 
-#1110 is held in draft until one of them lands. Until then the guard
-refuses its image.
+Proof, #1110 + main with the fix (core 1,443,952 B, padding 26,452 B at
+`0x40809848`), on CX1 (`c6-expendable`, 14:C1:9F:E6:54:90):
+
+- over USB: `[LOADER] core @0x18000 (proven)`, then the engine and the
+  project, at 33–35 fps;
+- over the air on USB from release 2026.10.14-13: the new core at the high
+  offset `0x1e8000`, on trial, then proven, the engine healed,
+  `done: UpToDate (32.4 s)`;
+- real power cuts (`board power-cycle`) mid-core and mid-engine: both
+  resumed (`resuming core at …`, `resuming engine at 1609728`) and ended on
+  the new core, proven, with its engine.
+
+Emulated (`lp-emu:esp32c6:t1`, at this change's tree): `split_boot.rs` on the
+crossing image (ROM-up to the engine, strict bus), and a cut sweep from main
+to the crossing image (4 of 4). `just test-emu-c6-split-boot` and
+`just test-emu-c6-ota` pass on main's images.
+
+**Regression coverage.** `core_padding` unit tests (#1110 + main's segment
+table, two paddings, every refusal); `core_segments`, the guard, on every
+build; the emulator's `a_core_segment_at_address_0_faults_the_loader_as_on_silicon`.
+
+**Lesson.** A format the bootloader tolerates by convention (skip an
+address-0 segment) is not one our own reader tolerates, unless something
+holds the image to what that reader accepts. Here it was "page-congruent,
+and RAM or flash". The loader cannot change after it ships, so that check
+belongs in the build, and the image is where any fix has to happen.

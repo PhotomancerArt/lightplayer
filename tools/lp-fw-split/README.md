@@ -63,8 +63,13 @@ come from `lp-bootctl` itself.
    page crossing leaves a gap the RAM segments cannot fill: on silicon that
    copy faulted before the core ran
    (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
-   The build refuses such a core, and `lp-cli firmware package` checks the
-   bytes it ships the same way.
+   So first each such padding segment's load address becomes a run at the
+   start of the core's `.bss` (`core_padding`; `_bss_start.._bss_end` from
+   the pass-2 ELF). Its bytes stay where they are, so every later segment
+   keeps its offset, and the loader copies zeros that riscv-rt zeroes again
+   before Rust runs. The appended SHA-256 is recomputed. Then any segment the
+   loader still cannot place fails the build, and `lp-cli firmware package`
+   checks the bytes it ships the same way.
 8. **Loader.** Built from its own directory; its ESP image by espflash. The
    build refuses a loader image without this tree's version word
    (`lp_bootctl::loader_identity`) or longer than `LOADER_MAX_LEN`.

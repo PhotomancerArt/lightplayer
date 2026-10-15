@@ -13,9 +13,12 @@
 //! built, and everything is laid out for the app partition (`app.bin`) and
 //! for the whole chip (`merged.bin`) with `lp-bootctl`'s own format and
 //! constants. Every segment of the core image must be one the loader can
-//! place (`core_segments`): the build refuses one it cannot. See `README.md`.
+//! place (`core_segments`): espflash's address-0 padding is re-aimed at the
+//! core's `.bss` (`core_padding`), and the build refuses any segment the
+//! loader still cannot place. See `README.md`.
 
 pub mod app_image;
+pub mod core_padding;
 pub mod core_segments;
 pub mod elf_symbol;
 pub mod engine_script;
