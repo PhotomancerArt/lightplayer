@@ -68,13 +68,22 @@ impl Editor {
             h("⌘Z", "undo"),
         ];
         let (lead, hints) = match &self.gesture {
-            Gesture::Moving { owners, .. } => (
-                format!(
-                    "Moving {}",
-                    list(&owners.iter().map(|o| o.to_string()).collect::<Vec<_>>())
-                ),
-                vec![h("release", "drop it here"), h("Esc", "put it back")],
-            ),
+            Gesture::Moving { owners, nodes, .. } => {
+                let names: Vec<String> = owners
+                    .iter()
+                    .map(|o| o.to_string())
+                    .chain(nodes.iter().map(|(id, _)| self.project.node_name(id)))
+                    .collect();
+                let release = if owners.is_empty() && !nodes.is_empty() {
+                    h("release", "pin it here")
+                } else {
+                    h("release", "drop it here")
+                };
+                (
+                    format!("Moving {}", list(&names)),
+                    vec![release, h("Esc", "put it back")],
+                )
+            }
             Gesture::Boxing { .. } => {
                 let mut hints = vec![];
                 if self.mods.alt {
@@ -240,13 +249,35 @@ impl Editor {
 
         let first = &self.selection[0];
         let owners = self.move_owners();
-        if !owners.is_empty() && handle.is_none() {
+        let nodes = self.move_nodes();
+        if handle.is_none() {
+            if !owners.is_empty() {
+                out.push(h(
+                    "drag",
+                    format!(
+                        "move {}",
+                        list(&owners.iter().map(|o| o.to_string()).collect::<Vec<_>>())
+                    ),
+                ));
+            } else if !nodes.is_empty() {
+                out.push(h(
+                    "drag",
+                    format!(
+                        "pin {} where you drop it",
+                        list(&nodes.iter().map(|n| f.node_name(n)).collect::<Vec<_>>())
+                    ),
+                ));
+            }
+        }
+        let pinned: Vec<String> = nodes
+            .iter()
+            .filter(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))
+            .map(|n| f.node_name(n))
+            .collect();
+        if !pinned.is_empty() {
             out.push(h(
-                "drag",
-                format!(
-                    "move {}",
-                    list(&owners.iter().map(|o| o.to_string()).collect::<Vec<_>>())
-                ),
+                "U",
+                format!("unpin {} — back to the layout", list(&pinned)),
             ));
         }
         match f.parent(first) {
@@ -373,8 +404,19 @@ impl Editor {
                     None
                 }
             }
-            Gesture::Moving { .. } => {
-                if self.selection.iter().any(|t| !t.is_authored()) {
+            Gesture::Moving { owners, nodes, .. } => {
+                if owners.is_empty()
+                    && let [(id, _)] = nodes.as_slice()
+                {
+                    Some(format!(
+                        "Dropping pins {} here · U gives it back to the layout",
+                        f.node_name(id)
+                    ))
+                } else if self
+                    .selection
+                    .iter()
+                    .any(|t| matches!(t, Target::Object(_) | Target::Lamp { .. }))
+                {
                     Some("rings and lamps move with the thing that makes them".into())
                 } else {
                     None

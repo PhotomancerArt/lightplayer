@@ -113,6 +113,9 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .edge-quiet .edge-label { opacity: 0.45; }
 .lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
 /* A selected lamp's pixel, ringed on its port (D47). */
+/* A pinned node's mark (D48). */
+.pin-mark line { stroke: var(--text-subtle); stroke-width: 1.3; }
+.pin-mark circle { fill: var(--text-muted); }
 .px-mark { fill: none; stroke: var(--bound); stroke-width: 1.6; rx: 1.5; pointer-events: none; }
 
 .obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
@@ -212,3 +215,6 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .menu-foot { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 6px; }
 .menu-item { padding: 4px 10px; cursor: pointer; color: var(--text-muted); }
 .menu-item.on { background: var(--selection-bg); color: var(--text); }
+/* What the menu can do here, above what's under the cursor. */
+.menu-item.menu-action { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--text); }
+.menu-item.menu-action:hover { background: var(--selection-bg); }

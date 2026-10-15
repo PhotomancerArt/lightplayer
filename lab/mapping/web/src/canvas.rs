@@ -99,7 +99,8 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             NodeKind::Module { .. } | NodeKind::Fixture(_) => frames.push(FrameView {
                 rect,
                 name: n.name.clone(),
-                title_w: title_width(&n.name),
+                title_w: title_width(&n.name, n.pinned.is_some()),
+                pinned: n.pinned.is_some(),
                 dimmed,
                 module: matches!(n.kind, NodeKind::Module { .. }),
             }),
@@ -148,6 +149,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     name: n.name.clone(),
                     rows,
                     dimmed,
+                    pinned: n.pinned.is_some(),
                 });
             }
         }
@@ -310,9 +312,18 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     {
         add(&h, "outline-hover", false);
     }
-    let menu: Option<(Vec2, Vec<(usize, String, Option<usize>)>)> = e.menu.as_ref().map(|m| {
+    type MenuView = (
+        Vec2,
+        Vec<(String, String)>,
+        Vec<(usize, String, Option<usize>)>,
+    );
+    let menu: Option<MenuView> = e.menu.as_ref().map(|m| {
         (
             m.at,
+            m.actions
+                .iter()
+                .map(|a| (a.label.clone(), a.keys.clone()))
+                .collect(),
             m.items
                 .iter()
                 .enumerate()
@@ -386,6 +397,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                             x: "{fr.rect.min.x + 7.0}", y: "{fr.rect.min.y - 7.0}",
                             "{fr.name}"
                         }
+                        if fr.pinned {
+                            {pin_mark(Vec2::new(fr.rect.min.x + fr.title_w - 9.0, fr.rect.min.y - 11.0))}
+                        }
                     }
                 }
                 for (i, c) in cards.iter().enumerate() {
@@ -395,6 +409,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                             x: "{c.rect.min.x}", y: "{c.rect.min.y}",
                             width: "{c.rect.width()}", height: "{c.rect.height()}",
                             rx: "4",
+                        }
+                        if c.pinned {
+                            {pin_mark(Vec2::new(c.rect.max.x - font * 1.2, c.rect.min.y + font * 1.2))}
                         }
                         if font > 4.5 {
                             text {
@@ -562,12 +579,24 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     ed.write().wheel(input::wheel_point(&evt), d, input::mods(evt.modifiers()));
                 },
             }
-            if let Some((at, items)) = menu {
+            if let Some((at, actions, items)) = menu {
                 div {
                     class: "menu",
                     style: "{menu_place(at, vw, vh)}",
                     onmouseleave: move |_| ed.write().menu_hover(None),
-                    div { class: "menu-title", "Under the cursor" }
+                    for (i, (label, keys)) in actions.into_iter().enumerate() {
+                        div {
+                            key: "a{i}",
+                            class: "menu-item menu-action",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| ed.write().menu_act(i),
+                            span { "{label}" }
+                            kbd { "{keys}" }
+                        }
+                    }
+                    if !items.is_empty() {
+                        div { class: "menu-title", "Under the cursor" }
+                    }
                     for (i, (depth, label, hovered)) in items.into_iter().enumerate() {
                         div {
                             key: "{i}",
@@ -597,6 +626,8 @@ struct FrameView {
     title_w: f64,
     dimmed: bool,
     module: bool,
+    /// Placed where it was dropped, not by the layout (D48).
+    pinned: bool,
 }
 
 /// An output's card: its title, then one row per port.
@@ -605,6 +636,17 @@ struct CardView {
     name: String,
     rows: Vec<PortRow>,
     dimmed: bool,
+    pinned: bool,
+}
+
+/// The pinned mark: a small pin, its head at `at` (screen).
+fn pin_mark(at: Vec2) -> Element {
+    rsx! {
+        g { class: "pin-mark",
+            line { x1: "{at.x}", y1: "{at.y}", x2: "{at.x}", y2: "{at.y + 6.0}" }
+            circle { cx: "{at.x}", cy: "{at.y}", r: "2.6" }
+        }
+    }
 }
 
 struct PortRow {

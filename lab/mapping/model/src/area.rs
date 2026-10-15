@@ -211,7 +211,10 @@ impl Project {
                 }
                 let title = Rect::new(
                     Vec2::new(rect.min.x, rect.min.y - FRAME_TITLE_PX - 2.0),
-                    Vec2::new(rect.min.x + title_width(&n.name), rect.min.y - 2.0),
+                    Vec2::new(
+                        rect.min.x + title_width(&n.name, n.pinned.is_some()),
+                        rect.min.y - 2.0,
+                    ),
                 );
                 Some(Area::Frame { rect, title })
             }
@@ -308,10 +311,14 @@ impl Project {
     }
 }
 
-/// A frame's title tab, in pixels: wide enough for its name.
-pub fn title_width(name: &str) -> f64 {
-    14.0 + 7.0 * name.chars().count() as f64
+/// A frame's title tab, in pixels: wide enough for its name, and for the
+/// pinned mark after it when the node is pinned (D48).
+pub fn title_width(name: &str, pinned: bool) -> f64 {
+    14.0 + 7.0 * name.chars().count() as f64 + if pinned { PIN_MARK_PX } else { 0.0 }
 }
+
+/// The room a pinned node's mark takes in its title tab, in pixels.
+pub const PIN_MARK_PX: f64 = 12.0;
 
 fn collect_objects(f: &Project, c: &crate::Component) -> Vec<crate::Object> {
     let mut out = objects_of(c);

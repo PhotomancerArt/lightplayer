@@ -75,7 +75,9 @@ pub use component::{Component, ComponentId, ComponentKind, Ring};
 pub use data_path::{DataEntry, DataPath};
 pub use device_frame::{DeviceFrame, PortFrame};
 pub use edges::Edge;
-pub use editor::{Button, ContextMenu, Editor, Gesture, Key, MenuItem, Mods, Tool};
+pub use editor::{
+    Button, ContextMenu, Editor, Gesture, Key, MenuAction, MenuCommand, MenuItem, Mods, Tool,
+};
 pub use fixture::Fixture;
 pub use geom::{Rect, Vec2};
 pub use handle::{Handle, HandleKind, SizeEdge};

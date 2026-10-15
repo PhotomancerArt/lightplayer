@@ -3,7 +3,8 @@
 //! Each test's doc comment IS the statement. Read this file as the list.
 //! When a statement changes, change the sentence first, then the code.
 //!
-//! The project is `Project::seed()`, "desk", laid out in columns:
+//! The project is `Project::seed()`, "desk", laid out with each output
+//! beside the fixture that feeds it:
 //! - module `tail rig`, holding
 //!   - fixture `tail` (82 square): group1 (path1 out, path2 back),
 //!     straight paths at x = 37 and 45 from y = 12 to 70, auto-patched to
@@ -407,18 +408,70 @@ fn a_fixtures_title_selects_it() {
     assert_eq!(e.selection, vec![fixture(&e, "tail")]);
 }
 
-/// Dragging a fixture moves nothing and says why.
+/// Dragging a node pins it where it's dropped; unpinning returns it to the
+/// layout; nodes never overlap.
 #[test]
-fn dragging_a_fixture_is_refused() {
+fn dragging_a_node_pins_it() {
     let mut e = editor();
-    let before = e.project.clone();
-    let corner = e.camera.to_screen(place(&e, "tail", 0.0, 0.0));
-    let title = corner + Vec2::new(12.0, -10.0);
-    e.pointer_down(title, Button::Primary, none());
-    e.pointer_move(title + Vec2::new(40.0, 0.0), none());
-    e.pointer_up(title + Vec2::new(40.0, 0.0), none());
-    assert_eq!(e.project, before);
-    assert_eq!(e.notice.unwrap().kind, NoticeKind::Refused);
+    let ring = node_id(&e, "ring display");
+    let before = e.project.node_rect(&ring).unwrap();
+    let lamp_before = lamp_pos(&e, "circle1", "r1", 0);
+    // By its title, 40 units right.
+    let title = e.camera.to_screen(before.min) + Vec2::new(12.0, -10.0);
+    let to = title + Vec2::new(40.0, 0.0) * e.camera.scale;
+    drag(&mut e, title, to, none());
+    assert_eq!(e.selection, vec![fixture(&e, "ring display")]);
+    let moved = before.min + Vec2::new(40.0, 0.0);
+    let after = e.project.node_rect(&ring).unwrap();
+    assert!(after.min.distance(moved) < 1e-9, "{after:?}");
+    assert!(e.project.node(&ring).unwrap().pinned.is_some(), "pinned");
+    assert!(
+        lamp_pos(&e, "circle1", "r1", 0).distance(lamp_before + Vec2::new(40.0, 0.0)) < 1e-9,
+        "what's drawn in it comes along"
+    );
+    assert_eq!(overlaps(&e.project), Vec::<String>::new());
+    // Undo puts it back under the layout; redo pins it again.
+    key(&mut e, Key::Char('z'), cmd());
+    assert!(e.project.node(&ring).unwrap().pinned.is_none());
+    assert_eq!(e.project.node_rect(&ring).unwrap(), before);
+    key(
+        &mut e,
+        Key::Char('z'),
+        Mods {
+            shift: true,
+            ..cmd()
+        },
+    );
+    assert!(e.project.node_rect(&ring).unwrap().min.distance(moved) < 1e-9);
+    // U gives it back to the layout.
+    key(&mut e, Key::Char('u'), none());
+    assert!(e.project.node(&ring).unwrap().pinned.is_none());
+    assert_eq!(e.project.node_rect(&ring).unwrap(), before);
+
+    // An output drags by its card. Dropped right on top of the strip, it
+    // stays where it was dropped and the strip makes room.
+    let scarf_out = node_id(&e, "scarf out");
+    let strip = node_id(&e, "strip");
+    let card = e.project.node_rect(&scarf_out).unwrap();
+    let grab = card.min + Vec2::new(20.0, 3.0);
+    let onto = e.project.node_rect(&strip).unwrap().min + Vec2::new(20.0, 3.0);
+    e.select(vec![]);
+    let (from, to) = (e.camera.to_screen(grab), e.camera.to_screen(onto));
+    drag(&mut e, from, to, none());
+    assert_eq!(e.selection, vec![Target::Node(scarf_out.clone())]);
+    let card = e.project.node_rect(&scarf_out).unwrap();
+    assert!(
+        card.min.distance(onto - Vec2::new(20.0, 3.0)) < 1e-9,
+        "{card:?}"
+    );
+    assert_eq!(overlaps(&e.project), Vec::<String>::new());
+    // The right-click menu offers to unpin it.
+    let at = e.camera.to_screen(onto);
+    e.pointer_down(at, Button::Secondary, none());
+    let menu = e.menu.clone().unwrap();
+    assert_eq!(menu.actions[0].label, "Unpin scarf out");
+    e.menu_act(0);
+    assert!(e.project.node(&scarf_out).unwrap().pinned.is_none());
 }
 
 /// A fixture's size is a property like any other.
@@ -460,28 +513,13 @@ fn layout_never_overlaps_nodes() {
     e.project
         .add_fixture_sized(Some(&inner), "spare strip", Vec2::new(30.0, 10.0));
     let p = &e.project;
-    let mut levels: Vec<Vec<&Node>> = vec![p.nodes.iter().collect()];
-    for n in p.all_nodes() {
-        if !n.children().is_empty() {
-            levels.push(n.children().iter().collect());
-        }
-    }
-    assert!(levels.len() >= 3);
-    for level in levels {
-        let boxes: Vec<(String, Rect)> = level
+    assert_eq!(overlaps(p), Vec::<String>::new());
+    assert!(
+        p.all_nodes()
             .iter()
-            .map(|n| (n.name.clone(), p.node_rect(&n.id).unwrap()))
-            .collect();
-        for (i, (na, a)) in boxes.iter().enumerate() {
-            for (nb, b) in &boxes[i + 1..] {
-                let apart = a.max.x <= b.min.x
-                    || b.max.x <= a.min.x
-                    || a.max.y <= b.min.y
-                    || b.max.y <= a.min.y;
-                assert!(apart, "{na} {a:?} overlaps {nb} {b:?}");
-            }
-        }
-    }
+            .any(|n| n.children().iter().any(|c| !c.children().is_empty())),
+        "three levels"
+    );
     // And a module's frame holds everything in it.
     for n in p.all_nodes() {
         let frame = p.node_rect(&n.id).unwrap();
@@ -495,6 +533,42 @@ fn layout_never_overlaps_nodes() {
             );
         }
     }
+}
+
+/// An output sits beside the fixture that feeds it — the first one, when
+/// several do — a fixed gap to its right, level with its top.
+#[test]
+fn an_output_sits_beside_the_fixture_that_feeds_it() {
+    let mut e = editor();
+    let p = &e.project;
+    let rect = |name: &str| p.node_rect(&node_id(&e, name)).unwrap();
+    for (output, fixture) in [
+        ("tail out", "tail"),
+        ("main", "ring display"),
+        ("scarf out", "scarf"),
+    ] {
+        let (o, f) = (rect(output), rect(fixture));
+        assert_eq!(
+            o.min,
+            Vec2::new(f.max.x + layout::OUTPUT_GAP, f.min.y),
+            "{output} beside {fixture}"
+        );
+    }
+    // One that nothing feeds goes to the right of everything.
+    let spare = e
+        .project
+        .add_output(None, "spare", &[("D5", 10, PixelFormat::Grb)])
+        .unwrap();
+    let r = e.project.node_rect(&spare).unwrap();
+    let others = e
+        .project
+        .nodes
+        .iter()
+        .filter(|n| n.id != spare)
+        .map(|n| e.project.node_rect(&n.id).unwrap().max.x)
+        .fold(0.0, f64::max);
+    assert!(r.min.x > others, "{r:?}");
+    assert_eq!(overlaps(&e.project), Vec::<String>::new());
 }
 
 /// A node of any kind (module, fixture, output) selects, deletes and
@@ -1858,6 +1932,45 @@ fn a_selected_pixel_lights_and_marks_its_lamp() {
 }
 
 // ---- helpers -------------------------------------------------------------------
+
+/// Every pair of nodes at one level whose boxes overlap, in words: empty
+/// when the layout is clean.
+fn overlaps(p: &Project) -> Vec<String> {
+    let mut levels: Vec<Vec<&Node>> = vec![p.nodes.iter().collect()];
+    for n in p.all_nodes() {
+        if !n.children().is_empty() {
+            levels.push(n.children().iter().collect());
+        }
+    }
+    let mut out = Vec::new();
+    for level in levels {
+        let boxes: Vec<(String, Rect)> = level
+            .iter()
+            .map(|n| (n.name.clone(), p.node_rect(&n.id).unwrap()))
+            .collect();
+        for (i, (na, a)) in boxes.iter().enumerate() {
+            for (nb, b) in &boxes[i + 1..] {
+                let apart = a.max.x <= b.min.x
+                    || b.max.x <= a.min.x
+                    || a.max.y <= b.min.y
+                    || b.max.y <= a.min.y;
+                if !apart {
+                    out.push(format!("{na} {a:?} overlaps {nb} {b:?}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Press at `from`, drag to `to` (screen), let go.
+fn drag(e: &mut Editor, from: Vec2, to: Vec2, mods: Mods) {
+    e.pointer_move(from, mods);
+    e.pointer_down(from, Button::Primary, mods);
+    e.pointer_move(from.lerp(to, 0.5), mods);
+    e.pointer_move(to, mods);
+    e.pointer_up(to, mods);
+}
 
 /// The top of the selection's breath.
 const CREST: f64 = device_frame::BREATH_SECONDS / 2.0;

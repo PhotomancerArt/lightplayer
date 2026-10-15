@@ -16,6 +16,7 @@
 //! the way modules were.
 
 use crate::fixture::Fixture;
+use crate::geom::Vec2;
 use crate::output::Output;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -42,6 +43,9 @@ pub struct Node {
     pub id: NodeId,
     pub name: String,
     pub kind: NodeKind,
+    /// Where you dropped it, in its container's coordinates — `None` while
+    /// the layout places it (D48). Authored, so in the app it is saved.
+    pub pinned: Option<Vec2>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -83,12 +83,15 @@ pub enum Gesture {
         /// ordinary click on what's beneath.
         handle: Option<HandleKind>,
     },
-    /// Dragging the selection. `base` is the fixture before the drag, so the
-    /// move is always "base + total delta" and never drifts.
+    /// Dragging the selection. `base` is the project before the drag, so
+    /// the move is always "base + total delta" and never drifts. Components
+    /// move; nodes are pinned where they are dropped (D48), each from where
+    /// it was, in its container's coordinates.
     Moving {
         start_world: Vec2,
         base: Box<Project>,
         owners: Vec<ComponentId>,
+        nodes: Vec<(NodeId, Vec2)>,
     },
     /// Dragging a selection box from empty space.
     Boxing {
@@ -110,15 +113,32 @@ pub enum Gesture {
     },
 }
 
-/// The right-click menu: everything under the cursor, every level, in tree
-/// order. Opened only when asked for.
+/// The right-click menu: what you can do right here, then everything under
+/// the cursor, every level, in tree order. Opened only when asked for.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextMenu {
     /// Where it opened, in screen pixels.
     pub at: Vec2,
+    /// What you can do here: unpin a node, add or remove a path's point.
+    pub actions: Vec<MenuAction>,
     pub items: Vec<MenuItem>,
     /// The item under the pointer: outlined on the canvas.
     pub hover: Option<usize>,
+}
+
+/// One thing the menu can do, with the key or gesture that does the same.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuAction {
+    pub label: String,
+    /// The shortcut, as the hint bar writes it: `U`, `double-click`.
+    pub keys: String,
+    pub command: MenuCommand,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MenuCommand {
+    /// Give a pinned node back to the layout.
+    Unpin(NodeId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -628,6 +648,7 @@ impl Editor {
             ('-' | '_', false, _) => self.nudge(-1),
             ('=' | '+', false, _) => self.nudge(1),
             ('r', false, _) => self.reverse(),
+            ('u', false, _) => self.unpin_selection(),
             ('1' | '!', false, true) => self.fit(),
             ('2' | '@', false, true) => self.frame_selection(),
             _ => return false,
@@ -663,17 +684,46 @@ impl Editor {
                 target: t,
             })
             .collect();
+        let actions = self.menu_actions(at);
         self.gesture = Gesture::None;
-        if items.is_empty() {
+        if items.is_empty() && actions.is_empty() {
             self.menu = None;
             self.notice = Some(Notice::info("Nothing under the cursor here"));
             return;
         }
         self.menu = Some(ContextMenu {
             at,
+            actions,
             items,
             hover: None,
         });
+    }
+
+    /// What the menu offers to do at `at` (screen): unpin each pinned node
+    /// the cursor is on.
+    fn menu_actions(&self, at: Vec2) -> Vec<MenuAction> {
+        let p = &self.project;
+        let world = self.camera.to_world(at);
+        let mut out = Vec::new();
+        for n in p.all_nodes() {
+            if n.pinned.is_some() && p.node_rect(&n.id).is_some_and(|r| r.contains(world)) {
+                out.push(MenuAction {
+                    label: format!("Unpin {}", n.name),
+                    keys: "U".into(),
+                    command: MenuCommand::Unpin(n.id.clone()),
+                });
+            }
+        }
+        out
+    }
+
+    /// Do one of the menu's actions.
+    pub fn menu_act(&mut self, i: usize) {
+        let Some(m) = self.menu.take() else { return };
+        let Some(a) = m.actions.get(i) else { return };
+        match a.command.clone() {
+            MenuCommand::Unpin(id) => self.unpin(&[id]),
+        }
     }
 
     pub fn menu_hover(&mut self, item: Option<usize>) {
@@ -992,20 +1042,88 @@ impl Editor {
 
     fn begin_move(&mut self, start_world: Vec2) {
         let owners = self.move_owners();
-        if owners.is_empty() {
-            self.notice = Some(Notice::refused(
-                "Nodes don't move by dragging",
-                "the canvas lays nodes out by itself, in columns",
-                "drag what's inside a fixture, or change its size in the inspector",
-            ));
-        } else {
+        let nodes: Vec<(NodeId, Vec2)> = self
+            .move_nodes()
+            .into_iter()
+            .filter_map(|id| Some((id.clone(), self.project.node_position(&id)?)))
+            .collect();
+        if !owners.is_empty() || !nodes.is_empty() {
             self.checkpoint();
         }
         self.gesture = Gesture::Moving {
             start_world,
             base: Box::new(self.project.clone()),
             owners,
+            nodes,
         };
+    }
+
+    /// The nodes a move of the selection pins (D48): each selected node,
+    /// and the output of a selected port or pixel — minus any inside a
+    /// module that is also moving.
+    pub fn move_nodes(&self) -> Vec<NodeId> {
+        let p = &self.project;
+        let mut nodes: Vec<NodeId> = Vec::new();
+        for t in &self.selection {
+            let id = match t {
+                Target::Node(id) => id,
+                Target::Port { output, .. } | Target::Pixel { output, .. } => output,
+                _ => continue,
+            };
+            if !nodes.contains(id) {
+                nodes.push(id.clone());
+            }
+        }
+        nodes
+            .iter()
+            .filter(|n| {
+                let mut cur = p.parent_module(n).cloned();
+                while let Some(m) = cur {
+                    if nodes.contains(&m) {
+                        return false;
+                    }
+                    cur = p.parent_module(&m).cloned();
+                }
+                true
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// U: give the selected nodes (or the outputs of selected ports and
+    /// pixels) back to the automatic layout.
+    pub fn unpin_selection(&mut self) {
+        let ids = self.move_nodes();
+        self.unpin(&ids);
+    }
+
+    fn unpin(&mut self, ids: &[NodeId]) {
+        let pinned: Vec<NodeId> = ids
+            .iter()
+            .filter(|id| self.project.node(id).is_some_and(|n| n.pinned.is_some()))
+            .cloned()
+            .collect();
+        if pinned.is_empty() {
+            self.notice = Some(Notice::refused(
+                "Nothing to unpin",
+                if ids.is_empty() {
+                    "no node is selected"
+                } else {
+                    "the layout already places it"
+                },
+                "drag a node by its title (or an output by its card) to pin it",
+            ));
+            return;
+        }
+        self.checkpoint();
+        for id in &pinned {
+            self.project.unpin(id);
+        }
+        let names: Vec<String> = pinned.iter().map(|id| self.project.node_name(id)).collect();
+        self.notice = Some(Notice::info(format!(
+            "Unpinned {} — the layout places it again",
+            names.join(", ")
+        )));
     }
 
     /// The authored components a move of the selection moves: each target's
@@ -1041,6 +1159,7 @@ impl Editor {
             start_world,
             base,
             owners,
+            nodes,
         } = &self.gesture
         else {
             return;
@@ -1051,6 +1170,9 @@ impl Editor {
             if let Some(c) = f.component_mut(o) {
                 c.translate(delta);
             }
+        }
+        for (id, from) in nodes {
+            f.pin(id, *from + delta);
         }
         self.project = f;
     }

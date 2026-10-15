@@ -89,6 +89,7 @@ impl Project {
             id: id.clone(),
             name: name.into(),
             kind,
+            pinned: None,
         };
         let list = match parent {
             None => &mut self.nodes,
