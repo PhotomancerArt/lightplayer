@@ -507,10 +507,8 @@ pub fn HintBar(ed: Signal<Editor>) -> Element {
     rsx! {
         if let Some(n) = notice {
             div { class: if n.kind == NoticeKind::Refused { "notice refused" } else { "notice" },
-                div { class: "notice-text",
-                    if n.kind == NoticeKind::Refused { span { class: "notice-tag", "can't: " } }
-                    "{n.text}"
-                }
+                // The text already says "Can't …": no tag repeating it.
+                div { class: "notice-text", "{n.text}" }
                 if let Some(why) = n.why {
                     div { class: "notice-line", span { class: "notice-eq", "= why: " } "{why}" }
                 }

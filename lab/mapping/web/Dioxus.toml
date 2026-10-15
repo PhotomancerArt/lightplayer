@@ -9,4 +9,4 @@ title = "Mapping lab"
 base_path = "/"
 
 [web.watcher]
-watch_path = ["lab/mapping/web/src", "lab/mapping/model/src"]
+watch_path = ["lab/mapping/web/src", "lab/mapping/model/src", "lab/mapping/files/src"]

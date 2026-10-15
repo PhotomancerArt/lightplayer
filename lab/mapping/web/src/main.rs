@@ -1,13 +1,18 @@
 //! The mapping design lab's page. It forwards input to the model
 //! (`lab-mapping-model`) and draws what the model says — no editor logic
 //! lives here.
+//!
+//! The project picker opens the lab's own desk, or one of the real
+//! projects baked in by `lab-mapping-files` (the PLAYFUL choker, the zook
+//! dome, the radiance dome), and fits the view to it.
 
 mod canvas;
 mod input;
 mod panels;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{Editor, Project, Tool};
+use lab_mapping_files::{Opened, embedded};
+use lab_mapping_model::{Editor, Notice, Project, Tool};
 
 const LAB_CSS: &str = include_str!("lab.css");
 
@@ -18,6 +23,7 @@ fn main() {
 #[component]
 fn App() -> Element {
     let mut ed = use_signal(|| Editor::new(Project::seed()));
+    let mut project = use_signal(|| DESK.to_string());
     let tool = ed.read().tool;
     let move_draw = ed.read().move_draw;
     let (can_undo, can_redo) = {
@@ -39,7 +45,19 @@ fn App() -> Element {
                 span { class: "brand", "Mapping lab" }
                 label { class: "fixture-picker",
                     "Project "
-                    select { tabindex: "-1", option { "desk" } }
+                    select {
+                        tabindex: "-1",
+                        value: "{project}",
+                        onchange: move |evt| {
+                            let key = evt.value();
+                            open_project(&mut ed, &key);
+                            project.set(key);
+                        },
+                        option { value: DESK, "desk" }
+                        for p in embedded::ALL {
+                            option { value: p.key, "{p.title}" }
+                        }
+                    }
                 }
                 div { class: "tools",
                     // Named for what's ON (D50): moving, drawing, reshaping.
@@ -83,6 +101,40 @@ fn App() -> Element {
             main { class: "canvas-wrap", canvas::Canvas { ed } }
             aside { class: "inspector", panels::Inspector { ed } }
             footer { class: "hints", panels::HintBar { ed } }
+        }
+    }
+}
+
+/// The picker's key for the lab's own starting project.
+const DESK: &str = "desk";
+
+/// Open a project in the editor and fit the view to it. A project that
+/// won't open leaves the current one and says why.
+fn open_project(ed: &mut Signal<Editor>, key: &str) {
+    let project = if key == DESK {
+        Ok(Project::seed())
+    } else {
+        match embedded::ALL.iter().find(|p| p.key == key) {
+            Some(p) => Opened::open(&p.files())
+                .map(|o| o.project)
+                .map_err(|e| e.to_string()),
+            None => Err(format!("no project called {key}")),
+        }
+    };
+    match project {
+        Ok(project) => {
+            let viewport = ed.peek().viewport;
+            let mut e = Editor::new(project);
+            e.resize(viewport);
+            e.fit();
+            ed.set(e);
+        }
+        Err(why) => {
+            ed.write().notice = Some(Notice::refused(
+                format!("Couldn't open {key}"),
+                why,
+                "pick another project; this one is unchanged",
+            ));
         }
     }
 }

@@ -207,7 +207,7 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .hint-row.quiet .hint { color: var(--text-subtle); }
 .hint-row.quiet kbd { opacity: 0.75; }
 .notice { font: 12px/1.5 var(--mono); padding: 8px 12px 0; color: var(--text-muted); }
-.notice.refused .notice-text { color: var(--text); }
+.notice.refused .notice-text { color: var(--refused); font-weight: 700; }
 .notice-tag { color: var(--refused); font-weight: 700; }
 .notice-line { padding-left: 2ch; }
 .notice-eq { color: var(--hover); }
