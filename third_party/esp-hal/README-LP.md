@@ -1,6 +1,6 @@
 # esp-hal — LP fork
 
-Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the four diffs below.
+Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the five diffs below.
 Patched in through the root `Cargo.toml`'s `[patch.crates-io]`, the same way
 `third_party/esp-alloc` and `third_party/esp-storage` are. The version stays
 `1.1.1` on purpose: `esp-rtos`, `esp-radio`, `esp-storage` and the three
@@ -123,6 +123,49 @@ same order, at the same runlevel, with nesting enabled on the same
 priorities. Check it with `rust-nm -C -n` and `rust-objdump -d`, not by
 reading the attributes.
 
+## The fifth diff: switches for the radio blobs' optional IRAM classes (research)
+
+`esp_config.yml` gains three C6-only bools, all **default `false`**, and
+`ld/sections/rwtext.x` / `ld/sections/text.x` gain `#IF` blocks keyed on
+them. With every switch off the generated scripts place exactly what
+upstream places (the `#IF`/`#ELSE` lines and comments are all the diff), so
+the default image is upstream's layout.
+
+| switch (`ESP_HAL_CONFIG_…`) | input sections it sends from `.rwtext.wifi` (RAM) to `.text` (flash) | ESP-IDF 5.5.3 equivalent | bytes on the shipped C6 split image (`fa62f4c6c`) |
+|---|---|---|---:|
+| `PLACE_WIFI_IRAM_IN_FLASH` | `.wifi0iram*`, `.wifiextrairam.*`, `.coexiram.*` | `ESP_WIFI_IRAM_OPT=n`, `ESP_WIFI_EXTRA_IRAM_OPT=n` | 28,436 |
+| `PLACE_WIFI_RX_SLP_IRAM_IN_FLASH` | `.wifirxiram*`, `.wifislprxiram*`, `.wifislpiram*` | `ESP_WIFI_RX_IRAM_OPT=n`, `ESP_WIFI_SLP_IRAM_OPT=n` | 20,104 |
+| `PLACE_BLE_CONTROLLER_IRAM_IN_FLASH` | `libble_app.a`'s `.iram1*` only (an `EXCLUDE_FILE` on the generic `.iram1` rule, and an archive-qualified rule in `.text`) | `BT_CTRL_RUN_IN_FLASH_ONLY=y`, **link half only** (see below) | see the E2 report |
+
+What stays in RAM whatever the switches say: every other archive's `.iram1`
+(the Wi-Fi interrupt top half `wDev_ProcessFiq` and friends in `libpp`, the
+PHY in `libphy`, `libcoexist`), `.high_perf_code_iram*`, `.phyiram`,
+`.coexsleepiram`, `.wifiorslpiram`, `.isr_iram*`, `.conn_iram*`,
+`.sleep_iram*` (the last five match nothing in the C6 blobs).
+
+Set them as environment variables at build time (esp-config reads
+`ESP_HAL_CONFIG_*`, and its build script reruns when one changes), e.g.
+`ESP_HAL_CONFIG_PLACE_WIFI_IRAM_IN_FLASH=true`. Nothing in the repo turns
+them on: this is the RAM research program's experiment E2
+(`lp2025/2026-10-09-1203-ram-research`, `research/ram-e02`), and whether a
+product image should is held for Yona as a memory-layout change.
+
+Why it is safe to *link* this way, and what is not proven by linking: the
+classes are the ones ESP-IDF itself links to flash under those Kconfig
+options (the blobs are IDF 5.5.3's, and IDF's linker fragments, not the
+blobs, choose the placement). IDF keeps flash-resident radio code safe by
+disabling the cache and masking non-IRAM interrupts during a flash write;
+here `esp-storage` clears `mstatus.MIE` around every ROM flash call, so no
+code of any kind runs during one. The BLE switch is only the link half of
+IDF's `BT_CTRL_RUN_IN_FLASH_ONLY`: IDF also calls the blob's
+`esp_ble_controller_flash_only_param_config` (three timing values) and
+allocates the radio interrupt without the IRAM flag. See the E2 report for
+what was measured.
+
+**Drop with the research** if the program decides against it; on a
+re-sync, re-apply by searching `grep -n 'LP fork (fifth diff' ld/sections/*.x`
+and the three `place_*` entries in `esp_config.yml`.
+
 ## Nothing else
 
 No other linker-script edits, no feature changes.
@@ -149,4 +192,6 @@ too — `grep -n INT_ENA_LOCK src/usb_serial_jtag.rs` finds it here):
 * the fourth diff — `grep -n 'LP fork' src/interrupt/riscv.rs` finds both
   hunks (`change_current_runlevel`'s attribute and `rt::dispatch`);
 * `links = "esp-hal"` in `Cargo.toml` and the `cargo::metadata=linker-scripts`
-  line in `build.rs` — `grep -n 'linker-scripts' build.rs`.
+  line in `build.rs` — `grep -n 'linker-scripts' build.rs`;
+* the fifth diff, if it is still wanted — `grep -n 'LP fork (fifth diff'
+  ld/sections/*.x` and the `place_*` entries in `esp_config.yml`.

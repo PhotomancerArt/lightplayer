@@ -1228,13 +1228,16 @@ fn syncs_over_usb(device: &Device) -> bool {
 /// add would land in a store that exists only until the next reboot, and a
 /// list read from it is not the board's (G1 rehearsal, 2026-10-03: "Who has
 /// access 1" on a board whose own list held 16). The firmware keeps
-/// Bluetooth off on such a board for the same reason.
+/// Bluetooth off on such a board for the same reason. A board that refused
+/// its file store (`refused`, an `fs-tree` build) is the same: its store
+/// waits on the flash it would not mount.
 pub(crate) fn holds_its_files(device: &Device) -> bool {
-    device
-        .evidence
-        .classification
-        .hello()
-        .is_some_and(|hello| hello.fs == lpa_devices::wire::BoardFs::LegacyHeld)
+    device.evidence.classification.hello().is_some_and(|hello| {
+        matches!(
+            hello.fs,
+            lpa_devices::wire::BoardFs::LegacyHeld | lpa_devices::wire::BoardFs::Refused
+        )
+    })
 }
 
 /// The device's current connection window, when its link is open and has

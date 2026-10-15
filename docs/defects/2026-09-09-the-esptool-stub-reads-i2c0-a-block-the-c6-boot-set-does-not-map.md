@@ -1,5 +1,5 @@
 ---
-status: OPEN — documented and pinned by a gate; not fixed, and the fix is a director call
+status: open           # documented and pinned by a gate; not fixed, and the fix is a director call
 found: 2026-09-09      # M3 P2 of the c6-emulator-rounding-out roadmap, on the stub half of G2-2
 area: lp-emu/esp/lp-emu-esp32c6/src/periph/ (the C6 boot set's block list)
 class: unmapped-block-on-a-new-path

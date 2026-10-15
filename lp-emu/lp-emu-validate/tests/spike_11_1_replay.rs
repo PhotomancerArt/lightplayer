@@ -372,7 +372,22 @@ fn every_committed_transcript_is_filed_where_its_header_says() {
         }
         let t =
             Transcript::load(path).unwrap_or_else(|e| panic!("loading {}: {e:#}", path.display()));
-        let want = root.join(t.header.relative_path().unwrap());
+        let mut want = root.join(t.header.relative_path().unwrap());
+        // A second recording of a stem is filed beside the first with the
+        // recorder's additive suffix (`<stem>-r2.txt`, `-r3`, …;
+        // `run.rs` `additive_destination`): the same place, renamed only
+        // so nothing is overwritten.
+        let stem = t.header.file_stem().unwrap();
+        if let Some(n) = path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .and_then(|f| f.strip_prefix(&format!("{stem}-r")))
+            .and_then(|f| f.strip_suffix(".txt"))
+            .and_then(|n| n.parse::<u32>().ok())
+            .filter(|&n| n >= 2)
+        {
+            want = want.with_file_name(format!("{stem}-r{n}.txt"));
+        }
         assert_eq!(
             path.canonicalize().unwrap(),
             want.canonicalize().unwrap_or(want.clone()),

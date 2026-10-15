@@ -27,12 +27,10 @@ use crate::client::ClientOutcome;
 use crate::client_error::ClientError;
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
-use crate::project_deploy::{
-    ProjectDeployFile, project_deploy_requests, project_write_requests,
-    validate_project_deploy_response,
-};
+use crate::project_deploy::ProjectDeployFile;
 use crate::protocol_session::{PendingAsk, ProtocolSession, ResponseDisposition};
 use crate::pull_loop::{NeverCancel, ProgressDeadline, PullIo, PullOutcome, run_project_read};
+use crate::push_files::{BatchUse, DeployOutcome, DeployPlan, FileRequestSink, deploy_files};
 use crate::transport::ClientTransport;
 
 pub type SharedClientTransport = Arc<Mutex<Box<dyn ClientTransport>>>;
@@ -517,32 +515,62 @@ impl TokioLpClient {
         }
     }
 
+    /// Write `files` over the project: one batch on a board that has them,
+    /// deflated where that shrinks them ([`crate::push_files`]). No stop,
+    /// no load.
     pub async fn push_project_files(
         &self,
         project_id: &str,
         files: impl IntoIterator<Item = ProjectDeployFile>,
     ) -> Result<()> {
-        for request in project_write_requests(project_id, files) {
-            let response = self.send_request(request.clone()).await?;
-            validate_project_deploy_response(&request, &response.value.msg)
-                .map_err(|error| Error::msg(error.to_string()))?;
-        }
-        Ok(())
+        let plan = DeployPlan {
+            stop: false,
+            batch: BatchUse::Begin,
+            clear: false,
+            deflate: true,
+            load: false,
+            expected_hash: None,
+        };
+        self.deploy(project_id, files, plan).await.map(drop)
     }
 
+    /// Stop what runs, write `files` over the project and load it: one batch
+    /// on a board that has them (committed after the load), deflated where
+    /// that shrinks them ([`crate::push_files`]). `lp-cli upload` and `dev`.
     pub async fn deploy_project_files(
         &self,
         project_id: &str,
         files: impl IntoIterator<Item = ProjectDeployFile>,
     ) -> Result<WireProjectHandle> {
-        let mut handle = None;
-        for request in project_deploy_requests(project_id, files) {
-            let response = self.send_request(request.clone()).await?;
-            handle = validate_project_deploy_response(&request, &response.value.msg)
-                .map_err(|error| Error::msg(error.to_string()))?
-                .or(handle);
-        }
-        handle.ok_or_else(|| Error::msg("project deploy did not return a project handle"))
+        let plan = DeployPlan {
+            stop: true,
+            batch: BatchUse::Begin,
+            clear: false,
+            deflate: true,
+            load: true,
+            expected_hash: None,
+        };
+        self.deploy(project_id, files, plan)
+            .await?
+            .handle
+            .ok_or_else(|| Error::msg("project deploy did not return a project handle"))
+    }
+
+    /// [`crate::push_files::deploy_files`] over this client.
+    pub async fn deploy(
+        &self,
+        project_id: &str,
+        files: impl IntoIterator<Item = ProjectDeployFile>,
+        plan: DeployPlan<'_>,
+    ) -> Result<DeployOutcome> {
+        let files: Vec<(String, Vec<u8>)> = files
+            .into_iter()
+            .map(|file| (file.relative_path().to_string(), file.bytes().to_vec()))
+            .collect();
+        let mut sink = TokioSink(self);
+        deploy_files(&mut sink, project_id, &files, plan, &mut |_| {})
+            .await
+            .map_err(|error| Error::msg(error.to_string()))
     }
 
     pub async fn close(&self) -> Result<()> {
@@ -596,6 +624,27 @@ impl TokioLpClient {
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// A [`TokioLpClient`] as a [`FileRequestSink`].
+struct TokioSink<'a>(&'a TokioLpClient);
+
+#[async_trait::async_trait(?Send)]
+impl FileRequestSink for TokioSink<'_> {
+    async fn exchange(
+        &mut self,
+        request: ClientRequest,
+    ) -> crate::client_error::ClientResult<WireServerMsgBody> {
+        let outcome = self
+            .0
+            .send_request(request)
+            .await
+            .map_err(|error| ClientError::Transport(error.to_string()))?;
+        match outcome.value.msg {
+            WireServerMsgBody::NotPermitted { needs } => Err(ClientError::NotPermitted { needs }),
+            body => Ok(body),
         }
     }
 }

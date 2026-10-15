@@ -8,14 +8,16 @@
 //! 3. `Released` — or the holder's `Gone`, whichever comes first — opens
 //!    the board here: every port of the hold's kind that the hold kept shut
 //!    leaves the gate, the board's own link (when one was merged onto its
-//!    card) connects, and each nameless held port re-identifies. Only the
-//!    freed port can open, and its hello says which board it is, so no
-//!    pairing of ports to boards is ever needed. A board held by its
-//!    network slot is reached by the board's ordinary connect instead: its
-//!    own network link here (one this tab let go reopens), else over Wi‑Fi
-//!    at the address this browser remembers, else through lightplayer.app
-//!    when someone is signed in ([`NetworkRoad`]); with none of them the
-//!    offer says "No way to reach it from here".
+//!    card) connects, and each nameless port of the kind this tab could not
+//!    open — kept shut, read as held, refused, or refused after the release
+//!    — re-identifies, once ([`FreedPorts`]). Only the freed port can open,
+//!    and its hello says which board it is, so no pairing of ports to
+//!    boards is ever needed. A board held by its network slot is reached
+//!    by the board's ordinary connect instead: its own network link here
+//!    (one this tab let go reopens), else over Wi‑Fi at the address this
+//!    browser remembers, else through lightplayer.app when someone is
+//!    signed in ([`NetworkRoad`]); with none of them the offer says "No way
+//!    to reach it from here".
 //! 4. A busy holder's refusal, "not held" while another tab has it, no
 //!    answer, a network connect that fails (in its own words), or a board
 //!    that does not open in time end the take-over with the reason
@@ -24,15 +26,13 @@
 //! The offer's words and level are `take_over_offer`'s; WHEN it is offered
 //! is decided here ([`StudioController::take_over_offer_for`]).
 
-use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use lpa_devices::link::LinkId;
 use lpa_devices::{BoardKey, DeviceStatus, HoldVia};
 
 use super::StudioController;
 use crate::app::devices::board_hold::{
-    AskOutcome, AskRefusal, HoldKey, is_network_road, usb_pair_of,
+    AskOutcome, AskRefusal, FreedPorts, HoldKey, is_network_road, usb_pair_of,
 };
 use crate::app::devices::take_over_state::{
     ASK_PATIENCE_SECS, NETWORK_OPEN_PATIENCE_SECS, OPEN_PATIENCE_SECS, TAKE_OVER_ANOTHER_TAB,
@@ -206,7 +206,9 @@ impl StudioController {
     ///
     /// For a USB hold, every port of its kind the hold kept shut leaves the
     /// gate; the board's own link connects when its card has one, and each
-    /// nameless held port re-identifies. The OS lets only the freed one
+    /// nameless port of the kind this tab could not open re-identifies
+    /// ([`StudioController::open_ports_take_overs_free`]), as does one
+    /// whose refusal is heard after this. The OS lets only the freed one
     /// open. With no hold named (it came free before the ask), the board's
     /// own link connects, and the ports of its link's kind are freed the
     /// same way. A board held by its network slot is reached by its
@@ -243,21 +245,12 @@ impl StudioController {
                 .and_then(|link| roster.link_info(link))
                 .and_then(usb_pair_of)
         });
-        let mut ports: BTreeSet<LinkId> = BTreeSet::new();
         if let Some(pair) = pair {
             let gate = Rc::clone(self.devices.effects().hold_gate());
-            ports.extend(gate.borrow_mut().release_pair(pair));
-            ports.extend(
-                self.devices
-                    .roster()
-                    .pending()
-                    .iter()
-                    .filter(|pending| {
-                        pending.evidence().link_held_by_tab()
-                            && usb_pair_of(&pending.info) == Some(pair)
-                    })
-                    .map(|pending| pending.link),
-            );
+            gate.borrow_mut().release_pair(pair);
+            self.board_hold_flow
+                .freeing
+                .insert(device, FreedPorts::new(pair));
         }
         let has_link = self
             .devices
@@ -267,19 +260,7 @@ impl StudioController {
         if has_link {
             self.fold_device_input(DeviceInput::Action(DeviceAction::Connect { device }));
         }
-        let nameless: Vec<crate::DeviceId> = self
-            .devices
-            .roster()
-            .pending()
-            .iter()
-            .filter(|pending| ports.contains(&pending.link))
-            .map(|pending| pending.device_id())
-            .collect();
-        for pending in nameless {
-            self.fold_device_input(DeviceInput::Action(DeviceAction::Identify {
-                device: pending,
-            }));
-        }
+        self.open_ports_take_overs_free();
     }
 
     /// The board's ordinary connect, once its holder let go of its network

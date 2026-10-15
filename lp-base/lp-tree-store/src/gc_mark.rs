@@ -42,6 +42,10 @@ pub struct Marked {
     pub bits: Vec<u32>,
     /// Exact live bytes per sector.
     pub live: Vec<u16>,
+    /// When asked for: each index position's record length (0 = not live);
+    /// after [`prune`], one per index entry, in index order (the packing
+    /// bound's sizes and GC's).
+    pub lens: Vec<u16>,
 }
 
 impl Marked {
@@ -54,11 +58,13 @@ impl Marked {
 pub fn mark<F: Flash>(
     log: &mut RecordLog<F>,
     roots: &[(ObjectId, MarkRole)],
+    want_lens: bool,
 ) -> Result<Marked, StoreError<F::Error>> {
     let n = log.index.len();
     let mut m = Marked {
         bits: vec![0u32; n.div_ceil(32)],
         live: vec![0u16; log.sector_count as usize],
+        lens: vec![0u16; if want_lens { n } else { 0 }],
     };
     let mut stack: Vec<(ObjectId, MarkRole)> =
         roots.iter().copied().filter(|r| !r.0.is_none()).collect();
@@ -77,10 +83,14 @@ pub fn mark<F: Flash>(
         let h = visit(log, id, role, loc, &mut stack, &mut dir_bytes, None)?;
         let l = &mut m.live[loc.sector as usize];
         *l = l.saturating_add(h.total_len() as u16);
+        if want_lens {
+            m.lens[pos] = h.total_len() as u16;
+        }
         peak = peak.max(stack.capacity());
     }
     log.note(
         m.bits.len() * 4
+            + m.lens.capacity() * 2
             + peak * core::mem::size_of::<(ObjectId, MarkRole)>()
             + dir_bytes.capacity(),
     );
@@ -161,10 +171,12 @@ fn push_entries<E>(dir: &[u8], stack: &mut Vec<(ObjectId, MarkRole)>) -> Result<
     Ok(())
 }
 
-/// Keep only the marked records in the index, and adopt the exact live
+/// Keep only the marked records in the index (and their lengths, when the
+/// mark took them: a live record's is never 0), and adopt the exact live
 /// bytes.
-pub fn prune<F: Flash>(log: &mut RecordLog<F>, m: Marked) {
+pub fn prune<F: Flash>(log: &mut RecordLog<F>, m: &mut Marked) {
     log.index.retain_positions(|i| m.is_live(i));
     log.index.shrink();
-    log.sectors.live = m.live;
+    m.lens.retain(|&l| l != 0);
+    log.sectors.live = core::mem::take(&mut m.live);
 }

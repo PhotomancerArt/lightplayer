@@ -123,6 +123,41 @@ fn board_card_every_state() -> Element {
     }
 }
 
+// --- Work with no percent ---------------------------------------------------
+
+#[story(
+    description = "Work with no percent on a bar (\"Identifying…\"), the iridescent sweep along its foot, at the two ends of its pass. A capture freezes every animation, so a sweep would only ever be seen at its first frame, at the bar's left edge; these park it as it is entering (the fill reaching 20 % of the bar's width past the card's left edge) and leaving (reaching 20 % past its right edge), with a third card at the first frame for comparison. The fill lives in a track the bar's width and is clipped to it: no pixel of it may land outside the card, and the card's border, its rounded corner and the status corner's notch stay whole. (Yona found it on lightplayer.app, 2026-10-10: the fill ran past the card's right edge into the page.) The picture, the name bar and the other bars are the connecting card's, unchanged."
+)]
+fn board_card_sweep_stays_inside_the_card() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "entering",
+                StoryBoardCard {
+                    card: identifying(),
+                    previews: CardPreviews {
+                        sweep_parked_at: Some(-20),
+                        ..CardPreviews::default()
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "leaving",
+                StoryBoardCard {
+                    card: identifying(),
+                    previews: CardPreviews {
+                        sweep_parked_at: Some(85),
+                        ..CardPreviews::default()
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "at its first frame",
+                StoryBoardCard { card: identifying(), on_action: |_| {} }
+            }
+        }
+    }
+}
+
 // --- A board another tab holds ----------------------------------------------
 
 #[story(

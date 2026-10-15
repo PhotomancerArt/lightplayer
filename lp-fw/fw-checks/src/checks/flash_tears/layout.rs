@@ -1,5 +1,6 @@
-//! Where the payload's sectors are.
+//! Where the payload's sectors are, and how a cycle lays its writes into one.
 
+use super::program_plan::ProgramMode;
 use super::{JOURNAL_COPIES, LAYOUT_SECTORS, REGION_SECTORS, SECTOR_SIZE};
 
 /// The payload's sectors, from the start of `lpfs`.
@@ -7,6 +8,10 @@ use super::{JOURNAL_COPIES, LAYOUT_SECTORS, REGION_SECTORS, SECTOR_SIZE};
 pub struct TearsLayout {
     /// Absolute flash address of the first sector (the start of `lpfs`).
     pub base: u32,
+    /// How a work cycle lays its writes into a region sector
+    /// ([`super::program_plan`]). [`ProgramMode::Pages`] unless
+    /// [`Self::with_mode`] says otherwise.
+    pub mode: ProgramMode,
 }
 
 impl TearsLayout {
@@ -18,7 +23,15 @@ impl TearsLayout {
         if (partition_len as usize) < LAYOUT_SECTORS as usize * SECTOR_SIZE {
             return None;
         }
-        Some(Self { base })
+        Some(Self {
+            base,
+            mode: ProgramMode::Pages,
+        })
+    }
+
+    /// The same sectors, programmed by `mode`'s plan.
+    pub const fn with_mode(self, mode: ProgramMode) -> Self {
+        Self { mode, ..self }
     }
 
     /// Address of journal copy `copy`.

@@ -118,6 +118,25 @@ fn every_served_build_has_a_build_def() {
     }
 }
 
+/// `fs-tree` (the tree store as `lpfs`) is never shipped: no served build
+/// def turns it on, so no release or `firmware/<id>/` carries it. A board
+/// flashed with a littlefs image would format a tree store, and an `fs-tree`
+/// one would format littlefs (plan
+/// `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, Q22, D8).
+#[test]
+fn no_served_build_turns_on_fs_tree() {
+    let on_disk = build_defs_on_disk();
+    for id in lpa_boards::served_build_ids() {
+        let features = on_disk[id]["cargoFeatures"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id}: cargoFeatures"));
+        assert!(
+            !features.iter().any(|f| f == "fs-tree"),
+            "served build {id} turns on fs-tree, which never ships"
+        );
+    }
+}
+
 /// `provisioning_build` compares its `normalized_chip` argument against
 /// these two fields verbatim, so they have to already BE normalized —
 /// lowercase alphanumerics, the form `lpa_link::normalize_chip_name`

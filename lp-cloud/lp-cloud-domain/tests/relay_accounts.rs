@@ -3,7 +3,10 @@
 
 use lp_cloud_domain::{CloudService, verify_board_accounts};
 use lp_cloud_store_mem::{MemClock, MemIdMint, MemMetaStore};
-use lpc_cloud_api::{AccountAccessInfo, Actor, BoardList, CloudError, CloudRequest, CloudResponse};
+use lpc_cloud_api::{
+    AccountAccessInfo, Actor, BoardList, BoardPictureList, BoardPictures, CloudError, CloudRequest,
+    CloudResponse,
+};
 use lpc_history::PrefixedUid;
 use lpc_relay::{relay_auth_key, relay_proof};
 
@@ -88,6 +91,22 @@ fn list_boards_shows_an_account_its_own_a_guest_none_and_refuses_anonymous() {
     );
     assert_eq!(
         svc.handle(Actor::Anonymous, CloudRequest::ListBoards),
+        Err(CloudError::NotAuthenticated)
+    );
+}
+
+#[test]
+fn board_pictures_alone_knows_no_picture_and_refuses_anonymous() {
+    let mut svc = service();
+    let alice = signed_in(&mut svc, "g-alice");
+    let request = || CloudRequest::BoardPictures(BoardPictures::default());
+    assert_eq!(
+        svc.handle(alice, request()),
+        Ok(CloudResponse::BoardPictureList(BoardPictureList::default())),
+        "pictures are the relay's, in the edge"
+    );
+    assert_eq!(
+        svc.handle(Actor::Anonymous, request()),
         Err(CloudError::NotAuthenticated)
     );
 }

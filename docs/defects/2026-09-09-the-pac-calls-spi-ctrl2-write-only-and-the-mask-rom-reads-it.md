@@ -1,5 +1,5 @@
 ---
-status: FIXED 2026-09-09 for SPI1 — graded by hand in `periph/spi1.rs`; SPI0 is latent
+status: fixed          # 2026-09-09 for SPI1 — graded by hand in `periph/spi1.rs`; SPI0 is latent
 found: 2026-09-09      # M3 P2 of the c6-emulator-rounding-out roadmap, on the first strict-graded flashing run
 fixed: lp-emu/esp/lp-emu-esp32c6/src/periph/spi1.rs (`ctrl2` → `documented`, with the ROM disassembly as its source)
 area: lp-emu/esp/lp-emu-esp32c6/src/regs/ (the generated ACCESS tables) and every `with_pac_grades()` caller

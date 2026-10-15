@@ -27,8 +27,16 @@ use lpa_devices::DeviceId;
 use super::board_hold::HoldKey;
 use super::take_over_offer::TAKE_OVER_ASKING;
 
-/// How long the holder has to answer an ask.
+/// How long the holder has to answer an ask. It is the holder's whole
+/// release ([`RELEASE_PATIENCE_SECS`]: the picture, the disconnect, the
+/// port's close) with room for a slow machine, not only its first step.
+///
+/// [`RELEASE_PATIENCE_SECS`]: super::board_hold::RELEASE_PATIENCE_SECS
 pub const ASK_PATIENCE_SECS: f64 = 5.0;
+/// Two timeouts in series are one budget, checked when this compiles: the
+/// holder lets go within its release patience of the ask, and the asker
+/// waits that long and two seconds more.
+const _: () = assert!(super::board_hold::RELEASE_PATIENCE_SECS + 2.0 <= ASK_PATIENCE_SECS);
 /// How long the freed board has to open here and say hello.
 pub const OPEN_PATIENCE_SECS: f64 = 10.0;
 /// How long a board freed from another tab's network slot has to be

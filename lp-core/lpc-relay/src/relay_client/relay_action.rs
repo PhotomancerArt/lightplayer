@@ -29,4 +29,16 @@ pub enum RelayAction {
     /// `route` is gone (its browser left, or the device leg closed): drop
     /// that route's link.
     RouteClosed(u16),
+    /// Take a picture of the board's lamps now. Answer with
+    /// [`RelayEvent::PictureReady`](super::RelayEvent::PictureReady) when
+    /// it is taken, or never (a core with no engine has none). The
+    /// picture's bytes never pass through the client.
+    TakePicture,
+    /// Send the picture you hold on the device leg, as one
+    /// [`RelayFrame::Picture`](crate::RelayFrame::Picture) message, encoded
+    /// where its buffer is.
+    SendPicture,
+    /// The picture you hold is not wanted (the leg went away, or nobody
+    /// asked); keep its buffer if you like.
+    DropPicture,
 }

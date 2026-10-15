@@ -32,6 +32,12 @@
 //! - nobody holds the wire — a coarse effect or the editor lens pauses the
 //!   pump, and a pull then could never be answered (design pin: never pull
 //!   under a borrow);
+//! - the port is not being closed: once a Disconnect has folded (the
+//!   person's, or a hold let go to another tab) the port still reads open
+//!   until its close comes back, and a request on it then is never
+//!   answered — the pull would wait out its reply budget, five seconds,
+//!   with the actor and everything queued behind it
+//!   (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`);
 //! - the card is WANTED (mounted on the home page) and the page is
 //!   visible — a picture nobody can see is serial time the board would
 //!   rather spend on the wire's other traffic;
@@ -68,7 +74,7 @@ use lpa_client::{CancelSignal, LpClient, ProgressDeadline, PullOutcome};
 use lpa_devices::identity::DeviceId;
 use lpa_devices::link::LinkId;
 use lpa_devices::time::Millis;
-use lpa_devices::{Device, Roster};
+use lpa_devices::{ConnectionIntent, Device, Roster};
 use lpc_wire::{ClientRequest, ServerMsgBody, WireProjectHandle};
 
 use super::device_effects::DeviceEffects;
@@ -104,6 +110,7 @@ pub(crate) struct FeedTarget {
 pub(crate) fn feed_target(device: &Device, effects: &DeviceEffects) -> Option<FeedTarget> {
     let evidence = &device.evidence;
     if !evidence.presence.is_open()
+        || device.intent.connection == ConnectionIntent::Disconnected
         || !evidence.classification.is_light_player()
         || !evidence.has_hello()
         || device.activity.is_some()

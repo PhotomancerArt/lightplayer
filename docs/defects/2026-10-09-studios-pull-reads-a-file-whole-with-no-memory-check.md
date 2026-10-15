@@ -62,3 +62,10 @@ and `a_refusal_names_the_file_it_reached_not_the_whole_project` (PR #1091).
 **Lesson** — a gate added for one request kind does not guard the job:
 every path that reads a whole file needs the same rule, or none should
 read a whole file.
+
+**2026-10-10, same family** — #1091 merged (`afa288b66`) and gates the
+pull, but the Edit press still reset the choker on the same 27,091 B SVG:
+Studio asks for `FsRequest::HashPackage` (the library bind) before it
+pulls, and the hash read every file whole with no gate.
+`2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md` gates
+it with the same rule.

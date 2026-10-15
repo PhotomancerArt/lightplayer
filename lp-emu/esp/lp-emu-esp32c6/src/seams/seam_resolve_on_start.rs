@@ -134,10 +134,17 @@ impl Esp32C6Machine {
     }
 
     /// The run's configuration name, with one `+<seam>=<impl>` atom per
-    /// engaged seam, then `@pace=<mode>` when the run's pace was set
-    /// ([`crate::machine::Esp32C6Builder::pace`]). Exactly the time grade's
-    /// name when none is engaged and no pace was set.
+    /// engaged seam, then `+flash-cut` when a flash power-cut plan was armed
+    /// ([`crate::machine::Esp32C6Builder::flash_cut`]; a fault injection,
+    /// not a seam, so it is never sorted among them), then `@pace=<mode>`
+    /// when the run's pace was set ([`crate::machine::Esp32C6Builder::pace`]).
+    /// Exactly the time grade's name when none of those applies.
     pub fn configuration_label(&self) -> String {
-        self.seams.label(self.time_grade().configuration())
+        let suffix = if self.flash_cut_armed() {
+            crate::flash_cut_spec::FLASH_CUT_MARKER
+        } else {
+            ""
+        };
+        self.seams.label(self.time_grade().configuration(), suffix)
     }
 }

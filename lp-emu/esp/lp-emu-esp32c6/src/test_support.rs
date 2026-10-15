@@ -195,6 +195,29 @@ impl FwImage {
         default_features: true,
     };
 
+    /// The shipped image with `lpfs` as the tree store (`fw-esp32c6`'s
+    /// `fs-tree`; plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`).
+    /// Never shipped: the tree-store walks (`lp-cli/tests/emu_tree_store_*`)
+    /// build it, unsplit, and its split twin through [`split_image`].
+    pub const FS_TREE: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "fs-tree"],
+        default_features: true,
+    };
+
+    /// [`FwImage::FS_TREE`] with the `[heap] peak=…` line
+    /// (`heap_peak_diag`): the tree store's RAM figures.
+    pub const FS_TREE_HEAP_PEAK: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "fs-tree", "heap_peak_diag"],
+        default_features: true,
+    };
+
+    /// [`FwImage::SHIPPED`] (littlefs) with the same `[heap] peak=…` line:
+    /// the RAM figures' comparison.
+    pub const SHIPPED_HEAP_PEAK: FwImage = FwImage {
+        features: &["esp32c6", "server", "radio", "heap_peak_diag"],
+        default_features: true,
+    };
+
     pub fn slug(&self) -> String {
         slug(self.features)
     }
@@ -270,6 +293,10 @@ const SOURCE_PATHS: &[&str] = &[
     "lp-base",
     "lp-shader",
     "lp-gfx",
+    // The server the image links (`ci-images.py`'s list names it too): an
+    // edit there moved the image and not this key, and a test ran the stale
+    // ELF (2026-10-10, the tree-store walks).
+    "lp-app/lpa-server",
     // The version every build stamps, and the split pipeline that links and
     // lays out a split image.
     "tools/lp-app-version",
@@ -550,7 +577,8 @@ pub fn split_slug(image: &FwImage) -> String {
 /// `LP_EMU_C6_IMAGE_DIR` replaces 2 and 3 with `tree/<SLUG>_SPLIT/`. Only a
 /// default-features image can be split (the pipeline keeps the defaults on).
 /// The shipped set is built as the target `esp32c6-4mb`, so its manifest core
-/// says what the packaged image's does.
+/// says what the packaged image's does, and as a figure build (version
+/// `0000000`, stamped clean), so it is the heap ratchet's bytes.
 pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
     assert!(
         image.default_features,
@@ -631,7 +659,14 @@ fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
         .arg("--features")
         .arg(image.features.join(","));
     if *image == FwImage::SHIPPED {
-        cmd.args(["--target", "esp32c6-4mb"]);
+        // A figure build (`LP_FIGURE_BUILD=1`, `tools/lp-app-version`): a
+        // fixed version and a clean stamp, as `scripts/heap-budget-check.sh`
+        // builds the C6 heap ratchet's image. The version's length is a heap
+        // figure, so this is what makes the image CI uploads from this suite
+        // (`just fetch-ci-images`) the ratchet's bytes, and a desk's build
+        // CI's.
+        cmd.args(["--target", "esp32c6-4mb"])
+            .env("LP_FIGURE_BUILD", "1");
     }
     let status = cmd
         .status()

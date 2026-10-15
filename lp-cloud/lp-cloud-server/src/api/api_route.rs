@@ -30,8 +30,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use lp_cloud_domain::{Caller, session_token_hash};
 use lpc_cloud_api::{
-    BoardList, CLOUD_API_VERSION, CloudCall, CloudError, CloudReply, CloudRequest, CloudResponse,
-    check_version,
+    BoardList, BoardPictureList, BoardPictures, CLOUD_API_VERSION, CloudCall, CloudError,
+    CloudReply, CloudRequest, CloudResponse, check_version,
 };
 use serde::Deserialize;
 
@@ -71,24 +71,23 @@ pub async fn post_api(
     };
 
     let token = session_token(&headers);
-    if call.request == CloudRequest::ListBoards {
-        return Json(CloudReply {
-            version: CLOUD_API_VERSION,
-            result: list_boards(&state, token, ip).await,
-        })
-        .into_response();
-    }
-    let result = state
-        .with_service(move |core| {
-            let actor = core.actor_for(token.as_deref());
-            // The caller cannot report its own session id itself (the token
-            // lives in an HttpOnly cookie it never reads), so
-            // `ListSessions`/`RevokeSession` need it threaded through here —
-            // see `lp_cloud_domain::Caller`.
-            let session = token.as_deref().map(session_token_hash);
-            core.service.handle(Caller { actor, session }, call.request)
-        })
-        .await;
+    let result = match call.request {
+        CloudRequest::ListBoards => list_boards(&state, token, ip).await,
+        CloudRequest::BoardPictures(request) => board_pictures(&state, token, request).await,
+        request => {
+            state
+                .with_service(move |core| {
+                    let actor = core.actor_for(token.as_deref());
+                    // The caller cannot report its own session id itself (the
+                    // token lives in an HttpOnly cookie it never reads), so
+                    // `ListSessions`/`RevokeSession` need it threaded through
+                    // here — see `lp_cloud_domain::Caller`.
+                    let session = token.as_deref().map(session_token_hash);
+                    core.service.handle(Caller { actor, session }, request)
+                })
+                .await
+        }
+    };
 
     Json(CloudReply {
         version: CLOUD_API_VERSION,
@@ -115,6 +114,31 @@ async fn list_boards(
         .map(|user| state.relay().boards_for(user, ip))
         .unwrap_or_default();
     Ok(BoardList { boards }.into())
+}
+
+/// `BoardPictures`: the relay's last pictures, in this process's memory, so
+/// answered here like `ListBoards`, for the same viewer. A guest reads
+/// nothing and watches nothing; a board the viewer may not read, or with no
+/// picture, is simply absent (no oracle about other people's boards).
+async fn board_pictures(
+    state: &AppState,
+    token: Option<Vec<u8>>,
+    request: BoardPictures,
+) -> Result<CloudResponse, CloudError> {
+    let viewer = state
+        .with_service(move |core| {
+            let actor = core.actor_for(token.as_deref());
+            core.service.board_list_viewer(actor)
+        })
+        .await?;
+    let pictures = viewer
+        .map(|user| {
+            state
+                .relay()
+                .pictures_for(user, &request.boards, request.watch)
+        })
+        .unwrap_or_default();
+    Ok(BoardPictureList { pictures }.into())
 }
 
 /// Just the envelope's version, for the pre-decode above. Every other field
