@@ -260,7 +260,14 @@ fn observe(rec: &mut Recorder, board: &C6Board) {
     }
 }
 
-/// The files (and, for the tree store, the root sequence) on `region`.
+/// The hidden name the shipped firmware writes a new file under before it
+/// renames it into place (`fw_esp32_common::lp_fs::CREATE_TEMP_SUFFIX`; a
+/// firmware crate, so mirrored here). A cut can leave one; the firmware's
+/// `LpFs` never lists it, so neither does this reading of a littlefs image.
+const LITTLEFS_CREATE_TEMP_SUFFIX: &str = "#lp-new";
+
+/// The files (and, for the tree store, the root sequence) on `region`: what
+/// the firmware's `LpFs` serves from it.
 pub fn state_of(fs: Fs, region: &[u8]) -> Result<(Files, u64), String> {
     match fs {
         Fs::Tree => host_mount(region)
@@ -275,6 +282,7 @@ pub fn state_of(fs: Fs, region: &[u8]) -> Result<(Files, u64), String> {
                 .map(|(tree, _)| {
                     (
                         tree.files()
+                            .filter(|(p, _)| !p.ends_with(LITTLEFS_CREATE_TEMP_SUFFIX))
                             .map(|(p, b)| (p.to_string(), b.to_vec()))
                             .collect(),
                         0,

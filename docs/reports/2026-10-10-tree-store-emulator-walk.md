@@ -3,13 +3,14 @@
 Plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, milestone M5
 of `lp2025/2026-10-08-1017-tree-store-device-round`. PR B (#1131).
 
-**Everything here is emulated** — `lp-emu:esp32c6:t1+net=lan` (cuts:
+**Everything here is emulated, except the section "On CX1"**, which holds
+silicon numbers from 2026-10-14. The rest is `lp-emu:esp32c6:t1+net=lan` (cuts:
 `…+flash-cut`), lp-emu at `535f7d135` (its flash engine and flash-cut
 injection as merged in `5c78fcd06`, PR A), firmware built from this branch,
 an M2 Max host. **Nothing here is hardware-validated.** The emulator's flash
 commands take no time (`docs/debt/emulated-flash-commands-take-no-time.md`):
 every emulated time below is CPU only, and every flash-time figure is a
-labelled silicon **estimate**. M7 measures on CX1.
+labelled silicon **estimate**. M7 measured on CX1 (see "On CX1" below).
 
 ## What `fs-tree` is
 
@@ -101,6 +102,13 @@ threads; CI's 4-core runner should take roughly twice that.
 
 The control's push-c40 was not run (littlefs cannot hold two c40 copies;
 see RAM), nor format.
+
+**Amendment, 2026-10-14:** the empty-file residue is fixed in today's
+littlefs firmware (PR #1134: a new file is written under a hidden name and
+renamed into place within its directory). Re-run on one machine: `main`
+`dc5164ef1` panel 9/30 (CI form) and 21/184 (long), push 0/649 (it no
+longer reproduced there); with the fix, push 736, save 292, switch 70, panel
+37 and 196 cuts, **0 failures**. The defect entry has the table.
 
 ## RAM (`emu_tree_store_ram`, P8, D5)
 
@@ -229,9 +237,102 @@ the server); M7 measures it on CX1, including whether a watchdog fires.
    the legacy probe leave the image (D7). Measured, the `fs-tree` image
    clears the 64 KB floor with the probe (gate 81,114 B, core +10.3 KB).
 
+## On CX1: mount, first-boot format and free block (silicon, 2026-10-14)
+
+**These numbers are silicon**, not emulated. They answer G-M5's items 2 and 3
+and checklist items 3 and 4.
+
+- **Board:** CX1 `c6-expendable`, MAC `14:C1:9F:E6:54:90`. A generic ESP32-C6
+  (not a XIAO), chip v0.2, 4 MiB flash at DIO 40 MHz, flashed with
+  `lp-fw/fw-esp32c6/partitions.csv` (`lpfs` = 176 sectors at `0x350000`). With
+  no `/hardware.json` it runs the compiled-in manifest.
+- **Images:** `main` `dc5164ef1d05` (PR #1131), clean. Both are monolithic dev
+  images built in `lp-fw/fw-esp32c6` with `--profile release-esp32` and the
+  default features plus `esp32c6,server,radio,heap_peak_diag`. That is the
+  emulated walk's `SHIPPED_HEAP_PEAK` / `FS_TREE_HEAP_PEAK` pair, unsplit like
+  that walk.
+  - littlefs: ELF sha256 `9db1bfba…b73b68f`, app 3,226,176 B.
+  - `+fs-tree`: `45387c1c…7e00d8`, app 3,241,072 B.
+- **Project:** the walk's c40 shape, `c40_files()` ported byte for byte:
+  `projects/test/basic` plus 124 seeded documents, 132 files, 215,150 B. It
+  was uploaded with `lp-cli upload` as `demo` and is the startup project.
+- **Wi-Fi: joined.** Every free-block boot joined the desk's test AP over the
+  board's own network file (`lp-cli wifi add … --password-stdin`). Each logged
+  `[wifi] connected … -34 to -36 dBm` before the lines that were read. No
+  credential is in the repo or the captures.
+- **Method:** only lines the firmware already prints. `[perf] fs mount <us> us`
+  is the mount timer, and it includes a first-boot format. `[heap] peak=…
+  live=… max_usage=… largest=…` is one line per 5 s heartbeat. No logging was
+  added.
+  - **Format:** `espflash erase-region 0x350000 0xB0000`, then
+    `scripts/emu/reset-and-capture.py` (a chip reset with the port held open).
+  - **Mount:** chip resets the same way, plus `lp-cli link capture --request
+    reboot` software reboots.
+  - **Free block:** two protocols.
+    - *Host from boot:* `link capture --request reboot`, 100 s, so the host
+      is on the link the whole time.
+    - *Host late:* a chip reset with nothing on the link, 40 s idle, then a
+      40 s `link capture`.
+  - In both, a boot's figure is the median `largest` of its `[heap]` lines after
+    `[wifi] connected`. The first line after it is skipped, because its window
+    still holds the boot's load.
+- **Data:** the captures are in `docs/reports/2026-10-14-tree-store-cx1/`, one
+  file per boot. `python3 docs/reports/2026-10-14-tree-store-cx1/summarize.py`
+  reproduces every figure below.
+
+| CX1, silicon | littlefs | `fs-tree` | `fs-tree` − littlefs | emulated (no radio) |
+|---|---:|---:|---:|---|
+| **(b) first-boot format**, from erased `lpfs` | 7.38 ms (7.31–11.37, n=6) | **3.316 s** (3.290–3.340, n=5) | +3.31 s | 68 ms CPU; **3.704 s silicon estimate** |
+| **(a) mount, c40** (all boots) | 7.47 ms (7.46–8.74, n=20) | **92.70 ms** (92.68–93.97, n=20) | +85 ms (12.4x) | 278 ms vs 3.1 ms (89x) |
+| mount, empty (after the format) | 0.74 ms (n=3) | 7.63 ms (n=3) | +6.9 ms | 3.7 ms vs 0.23 ms |
+| **(c) largest free block at rest, joined**, host from boot | 33,296 B (19,924–34,980, n=7) | **39,676 B** (39,604–39,876, n=7) | **+6,380 B** | 37,656 vs 46,288: **−8,632 B** |
+| (c) the same, host late | 40,952 B (23,692–41,624, n=7) | 38,828 B (35,488–39,512, n=7) | −2,124 B | |
+| live (requested) at rest, host from boot | 218,944 B | 221,702 B | +2,758 B | +5,644 B |
+| live at rest, host late | 218,934 B | 221,738 B | +2,804 B | |
+
+Medians, then range and count, across boots. The mount timer starts after the
+partition table and boot-control reads, so it times only the filesystem.
+
+- **(b) Format: 3.3 s, inside the estimate.** The estimate was 3.7 s (176
+  erases at 21 ms). Measured, it is 3.32 s with CPU and erase-verify included,
+  about 18.8 ms a sector. No boot reset. The capture has one `rst:` line, and
+  the RTC watchdog's boot window is 30 s (`[RECOVERY] RWDT armed: boot 30000
+  ms`). Interrupts are masked one erase at a time (~19 ms each, inside
+  esp-storage's critical section), not for the whole 3.3 s. The five formats
+  grew steadily from 3.290 to 3.340 s. The cause is not known. Checklist item 1
+  (a lazy format before going live) stands on this number.
+- **(a) Mount: 93 ms at c40, 12x littlefs, not 89x.** Steady to ±15 µs across
+  chip resets. A software reboot occasionally adds ~1.3 ms. The emulator
+  over-charges it 3x: it reports 278 ms of CPU alone, against silicon's 93 ms
+  of CPU and flash. That is filed as
+  `docs/defects/2026-10-14-the-emulated-c6-mounts-a-c40-tree-store-three-times-slower-than-silicon.md`.
+  The emulated mount figures in "Perf" above should not be read as silicon
+  estimates.
+- **(c) Free block: the emulated −8.6 KB does not appear on silicon with Wi-Fi
+  joined.** The tree store's at-rest largest block is the steadier of the two
+  (39.6–39.9 KB in every host-from-boot boot).
+  - *Host from boot:* the tree store is 6.4 KB larger than littlefs.
+  - *Host late:* it is 2.1 KB smaller, inside littlefs's own spread.
+  - littlefs's largest block depends on when the host link comes up (33 vs
+    41 KB). One boot under each protocol fell to 20–24 KB.
+  - Both images sit in the 38–46 KB band quoted for a joined C6, or below it.
+  - The tree store's resident cost is +2.8 KB live on silicon (+5.6 KB
+    emulated). The emulated gap was layout, not size. Wi-Fi's allocations
+    change where things land.
+  - This is not an emulator fidelity defect. The emulated run had no radio by
+    design, and it said so.
+
+No other board was touched. The lease was taken, renewed and dropped through
+`board`. The power was never switched.
+
 ## What none of this proves
 
-No radio (Wi-Fi not joined, so the heap is not silicon's), no flash timing,
-no silicon, no real USB stack, no CX1. The emulator's weak bits persist in
-process only (Q8). A fidelity gap found on the way:
-`docs/defects/2026-10-10-the-emulated-c6-has-no-amomin-or-amomax.md`.
+The emulated sections prove nothing about the radio: Wi-Fi was not joined,
+so their heap is not silicon's. They also prove nothing about flash timing,
+silicon or a real USB stack. "On CX1" covers mount, format and the joined
+heap at rest on one board. It does not cover cuts, transient RAM or the
+overlap on silicon. The emulator's weak bits persist in process only (Q8).
+Fidelity gaps found on the way:
+`docs/defects/2026-10-10-the-emulated-c6-has-no-amomin-or-amomax.md`, and,
+on CX1,
+`docs/defects/2026-10-14-the-emulated-c6-mounts-a-c40-tree-store-three-times-slower-than-silicon.md`.
