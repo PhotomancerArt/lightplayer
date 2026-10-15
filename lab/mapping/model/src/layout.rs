@@ -63,9 +63,15 @@ pub struct Layout {
 }
 
 impl Project {
-    /// Lay the whole project out, the root's inside at `(0, 0)`.
-    pub fn layout(&self) -> Layout {
-        let (rects, _) = self.lay_out(&self.nodes, false);
+    /// The whole project laid out, the root's inside at `(0, 0)`. Kept
+    /// until the project changes (`derived.rs`).
+    pub fn layout(&self) -> &Layout {
+        self.kept_layout()
+    }
+
+    /// Lay the whole project out, afresh.
+    pub(crate) fn compute_layout(&self) -> Layout {
+        let (rects, _) = self.lay_out(self.nodes(), false);
         Layout {
             rects: rects.into_iter().collect(),
         }
@@ -133,7 +139,7 @@ impl Project {
 
     /// Everything on the canvas, for "fit".
     pub fn extent(&self) -> Rect {
-        union(self.layout().rects.into_values())
+        union(self.layout().rects.values().copied())
             .unwrap_or(Rect::new(Vec2::default(), Vec2::new(100.0, 60.0)))
     }
 

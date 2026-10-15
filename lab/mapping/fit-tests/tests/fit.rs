@@ -368,7 +368,7 @@ fn lab_wire(opened: &Opened) -> Wire {
         }
     }
     let mut wire = Wire::new();
-    for s in p.effective_patch().spans {
+    for s in &p.effective_patch().spans {
         let out = p.output(&s.output).unwrap();
         let port_start = out.port_start(&s.port).unwrap();
         let first = starts[&(s.fixture.clone(), s.object.clone())];

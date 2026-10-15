@@ -180,11 +180,11 @@ fn page_frame(e: &Editor) {
     let _ = e.hint_bar();
 }
 
-/// The project as if just opened: nothing derived yet.
+/// The project as if just opened: nothing derived yet (a `&mut` way in
+/// forgets what was worked out).
 fn fresh(p: &Project) -> Project {
     let mut q = p.clone();
-    q.name.push(' ');
-    q.name.pop();
+    q.nodes_mut();
     q
 }
 

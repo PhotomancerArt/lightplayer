@@ -78,7 +78,7 @@ fn select_all_climbs_to_everything_from_anywhere() {
     key(&mut e, Key::Char('a'), cmd());
     assert_eq!(e.selection, e.project.children(None), "the nodes");
     key(&mut e, Key::Delete, none());
-    assert!(e.project.nodes.is_empty());
+    assert!(e.project.nodes().is_empty());
 }
 
 /// Deleting a lamp is refused, and the refusal says why and what to do.
@@ -559,7 +559,7 @@ fn an_output_sits_beside_the_fixture_that_feeds_it() {
     let r = e.project.node_rect(&spare).unwrap();
     let others = e
         .project
-        .nodes
+        .nodes()
         .iter()
         .filter(|n| n.id != spare)
         .map(|n| e.project.node_rect(&n.id).unwrap().max.x)
@@ -671,7 +671,7 @@ fn the_auto_rule_fills_ports_in_order() {
 fn patch_edges_match_the_effective_patch() {
     let e = editor();
     let edges = e.edges();
-    let spans = e.project.effective_patch().spans;
+    let spans = e.project.effective_patch().spans.clone();
     assert_eq!(edges.len(), spans.len());
     let got: Vec<(Target, Target, String)> = edges
         .iter()
@@ -2561,7 +2561,7 @@ fn a_node_the_lab_doesnt_edit_is_a_plain_card() {
     assert!(!e.project.is_frame(&t));
     assert!(e.project.children(Some(&t)).is_empty());
     let card = e.project.node_rect(&shader).unwrap();
-    for n in e.project.nodes.iter().filter(|n| !n.is_card()) {
+    for n in e.project.nodes().iter().filter(|n| !n.is_card()) {
         assert!(
             card.max.x < e.project.node_rect(&n.id).unwrap().min.x,
             "{}",
@@ -2590,12 +2590,89 @@ fn minting_skips_ids_already_taken() {
     assert_eq!(next.as_str(), "path2");
 }
 
+// ---- kept answers --------------------------------------------------------------
+
+/// What the model works out about a project — where every node sits, every
+/// lamp, the patch, which pixel each lamp lights — is kept between
+/// questions, and an edit shows at once: after a count change, a resize, a
+/// move, a deleted output and an undo, every answer is what working it out
+/// afresh gives.
+#[test]
+fn kept_answers_are_never_stale() {
+    let mut e = Editor::new(Project::seed());
+    let main = node_id(&e, "main");
+    let ring_display = node_id(&e, "ring display");
+    let same_as_afresh = |e: &Editor| {
+        let mut afresh = e.project.clone();
+        afresh.nodes_mut(); // a `&mut` way in forgets what was kept
+        assert_eq!(e.project.layout(), afresh.layout());
+        assert_eq!(e.project.objects(), afresh.objects());
+        assert_eq!(e.project.effective_patch(), afresh.effective_patch());
+        assert_eq!(
+            e.project.device_frame(&[], 0.5),
+            afresh.device_frame(&[], 0.5)
+        );
+        let ring = ObjectId::new(&ComponentId::new("circle1"), "r1");
+        for i in 0..44 {
+            assert_eq!(
+                e.project.device_frame(&[], 0.5).lamp(&ring, i),
+                afresh.device_frame(&[], 0.5).lamp(&ring, i)
+            );
+        }
+    };
+    same_as_afresh(&e);
+    let lamps = e.project.lamp_count();
+    let patch = e.project.effective_patch().clone();
+
+    // A count: four more lamps on the outer ring, on the patch at once (the
+    // strip after it moves along the wire).
+    e.select(vec![ring("circle1", "r1")]);
+    e.edit_selection_prop("lamps", PropEdit::Nudge(4));
+    assert_eq!(e.project.lamp_count(), lamps + 4);
+    assert_ne!(*e.project.effective_patch(), patch);
+    same_as_afresh(&e);
+
+    // A resize: the fixture's box, and the output beside it, move.
+    let card = e.project.node_rect(&main).unwrap();
+    e.select(vec![Target::Node(ring_display.clone())]);
+    e.edit_selection_prop("width", PropEdit::SetNumber(120.0));
+    assert_eq!(e.project.node_rect(&ring_display).unwrap().width(), 120.0);
+    assert!(e.project.node_rect(&main).unwrap().min.x > card.min.x);
+    same_as_afresh(&e);
+
+    // A move: the circle's lamps go with it.
+    let before = lamp_pos(&e, "circle1", "r1", 0);
+    e.select(vec![comp("circle1")]);
+    let at = e.camera.to_screen(before);
+    e.pointer_move(at, none());
+    e.pointer_down(at, Button::Primary, none());
+    e.pointer_move(at + Vec2::new(30.0, 0.0), none());
+    e.pointer_up(at + Vec2::new(30.0, 0.0), none());
+    assert!(lamp_pos(&e, "circle1", "r1", 0).x > before.x);
+    same_as_afresh(&e);
+
+    // A deleted output: its patch is a problem, its pixels gone.
+    e.select(vec![Target::Node(main.clone())]);
+    key(&mut e, Key::Delete, none());
+    assert!(e.project.output(&main).is_none());
+    assert!(!e.project.effective_patch().problems.is_empty());
+    same_as_afresh(&e);
+
+    // Undo all the way back: the first answers again.
+    while e.can_undo() {
+        e.undo();
+        same_as_afresh(&e);
+    }
+    assert_eq!(e.project.lamp_count(), lamps);
+    assert_eq!(*e.project.effective_patch(), patch);
+}
+
 // ---- helpers -------------------------------------------------------------------
 
 /// Every pair of nodes at one level whose boxes overlap, in words: empty
 /// when the layout is clean.
 fn overlaps(p: &Project) -> Vec<String> {
-    let mut levels: Vec<Vec<&Node>> = vec![p.nodes.iter().collect()];
+    let mut levels: Vec<Vec<&Node>> = vec![p.nodes().iter().collect()];
     for n in p.all_nodes() {
         if !n.children().is_empty() {
             levels.push(n.children().iter().collect());

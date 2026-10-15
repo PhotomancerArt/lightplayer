@@ -132,7 +132,7 @@ impl Editor {
                 })
             }))
             .collect();
-        let problems_before = f.effective_patch().problems;
+        let problems_before = f.effective_patch().problems.clone();
         if !deleted.is_empty() {
             self.checkpoint();
             for x in &nodes {
@@ -162,7 +162,7 @@ impl Editor {
             .project
             .effective_patch()
             .problems
-            .into_iter()
+            .iter()
             .filter(|p| !problems_before.contains(p))
             .map(|p| self.project.node_name(&p.fixture))
             .collect();

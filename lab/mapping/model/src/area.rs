@@ -261,14 +261,14 @@ impl Project {
                 let p = *self.lamps_under(t).first()?;
                 Some(Area::hull(&[screen(p)], LAMP_PAD_PX))
             }
-            Target::Object(o) => match self.object(o)?.shape {
+            Target::Object(o) => match &self.object(o)?.shape {
                 ObjectShape::Ring { center, radius } => Some(Area::Band {
-                    center: screen(center),
+                    center: screen(*center),
                     radius: radius * camera.scale,
                     pad: RING_PAD_PX,
                 }),
                 ObjectShape::Polyline { points } => Some(Area::Polyline {
-                    points: points.into_iter().map(screen).collect(),
+                    points: points.iter().map(|p| screen(*p)).collect(),
                     pad: PATH_PAD_PX,
                 }),
             },

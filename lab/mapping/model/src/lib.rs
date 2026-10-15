@@ -56,6 +56,7 @@ pub mod commands;
 pub mod component;
 pub mod component_props;
 pub mod data_path;
+pub mod derived;
 pub mod device_frame;
 pub mod edges;
 pub mod editor;

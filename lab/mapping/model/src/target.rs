@@ -156,7 +156,7 @@ impl Project {
     pub fn children(&self, t: Option<&Target>) -> Vec<Target> {
         let Some(t) = t else {
             return self
-                .nodes
+                .nodes()
                 .iter()
                 .map(|n| Target::Node(n.id.clone()))
                 .collect();
@@ -284,7 +284,7 @@ impl Project {
                 let mut out: Vec<Vec2> = objects_of(c)
                     .iter()
                     .filter_map(|o| self.object(&o.id))
-                    .flat_map(|o| o.lamps.into_iter().map(|l| l.pos))
+                    .flat_map(|o| o.lamps.iter().map(|l| l.pos))
                     .collect();
                 for child in c.children() {
                     out.extend(self.lamps_under(&Target::Component(child.id.clone())));

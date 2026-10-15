@@ -40,14 +40,14 @@
 //! its own. Its lamps fall to the next rule, or are left unpatched. Two
 //! place rules for one object: the first wins (one object, one window).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Range;
 
 use crate::color_order::ColorOrder;
 use crate::node::{Node, NodeId};
 use crate::notice::Notice;
 use crate::object::ObjectId;
-use crate::project::{Project, collect_objects};
+use crate::project::Project;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PatchRule {
@@ -217,15 +217,15 @@ impl Run {
 struct FixtureLamps {
     id: NodeId,
     objects: Vec<(ObjectId, u32, u32)>,
+    /// Where each object sits in `objects`.
+    by_id: HashMap<ObjectId, usize>,
     total: u32,
 }
 
 impl FixtureLamps {
     fn object(&self, id: &ObjectId) -> Option<(u32, u32)> {
-        self.objects
-            .iter()
-            .find(|(o, _, _)| o == id)
-            .map(|(_, start, n)| (*start, *n))
+        let (_, start, n) = &self.objects[*self.by_id.get(id)?];
+        Some((*start, *n))
     }
 
     /// The object holding fixture lamp `lamp`, and its index there.
@@ -240,9 +240,17 @@ impl FixtureLamps {
 }
 
 impl Project {
-    pub fn effective_patch(&self) -> EffectivePatch {
+    /// What the rules make. Kept until the project changes (`derived.rs`),
+    /// so it is derived afresh after every edit and never stored.
+    pub fn effective_patch(&self) -> &EffectivePatch {
+        self.kept_patch()
+    }
+
+    /// Work the patch out from the rules.
+    pub(crate) fn compute_patch(&self) -> EffectivePatch {
         let mut patch = EffectivePatch::default();
-        let fixtures: Vec<FixtureLamps> = self.fixtures().iter().map(|n| lamps_of(n)).collect();
+        let fixtures: Vec<FixtureLamps> =
+            self.fixtures().iter().map(|n| lamps_of(self, n)).collect();
         let by_id: BTreeMap<&NodeId, &FixtureLamps> = fixtures.iter().map(|f| (&f.id, f)).collect();
 
         let mut runs: Vec<Run> = Vec::new();
@@ -350,7 +358,7 @@ impl Project {
             }
         }
         let mut out = Vec::new();
-        walk(&self.nodes, &mut out);
+        walk(self.nodes(), &mut out);
         out
     }
 
@@ -488,7 +496,7 @@ impl Project {
     /// patch order: one is the usual; two on one strip is worth a look.
     pub fn color_orders_on(&self, output: &NodeId, port: &str) -> Vec<ColorOrder> {
         let mut out = Vec::new();
-        for s in self.effective_patch().spans {
+        for s in &self.effective_patch().spans {
             if &s.output == output
                 && s.port == port
                 && let Some(f) = self.fixture(&s.fixture)
@@ -546,21 +554,20 @@ impl Project {
 }
 
 /// A fixture's lamps, objects end to end, in authoring order.
-fn lamps_of(n: &Node) -> FixtureLamps {
+fn lamps_of(p: &Project, n: &Node) -> FixtureLamps {
     let mut objects = Vec::new();
+    let mut by_id = HashMap::new();
     let mut total = 0u32;
-    if let Some(f) = n.fixture() {
-        let mut all = Vec::new();
-        collect_objects(&f.components, &mut all);
-        for o in all {
-            let count = o.lamps.len() as u32;
-            objects.push((o.id, total, count));
-            total += count;
-        }
+    for o in p.objects_in(&n.id) {
+        let count = o.lamps.len() as u32;
+        by_id.insert(o.id.clone(), objects.len());
+        objects.push((o.id.clone(), total, count));
+        total += count;
     }
     FixtureLamps {
         id: n.id.clone(),
         objects,
+        by_id,
         total,
     }
 }

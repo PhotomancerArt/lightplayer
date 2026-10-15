@@ -90,12 +90,12 @@ impl<'a> Writer<'a> {
     }
 
     fn run(mut self) -> Result<Saved, FilesError> {
-        self.place("module.json", &self.project.nodes);
+        self.place("module.json", self.project.nodes());
         self.choose_channels()?;
         self.choose_labels();
-        let root = self.module_value(&self.files.root, "module.json", &self.project.nodes);
+        let root = self.module_value(&self.files.root, "module.json", self.project.nodes());
         self.emit("module.json", Some(&self.files.root), &root);
-        self.nodes(&self.project.nodes)?;
+        self.nodes(self.project.nodes())?;
         for (id, f) in &self.files.nodes {
             if self.project.node(id).is_none() {
                 self.saved.removed.push(f.path.clone());

@@ -131,7 +131,7 @@ impl Opened {
             taken_components: BTreeSet::new(),
             taken_nodes: BTreeSet::new(),
         };
-        project.nodes = reader.module("module.json", &root, None)?;
+        *project.nodes_mut() = reader.module("module.json", &root, None)?;
         // Rules, now that every output is known.
         for (fixture, path, doc) in patches {
             let rules = rules_of(&project, &files, &fixture, Some(&doc))

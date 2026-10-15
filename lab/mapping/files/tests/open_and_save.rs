@@ -13,7 +13,7 @@ fn the_choker_opens() {
     let o = open(&CHOKER);
     let p = &o.project;
     assert_eq!(p.name, "PLAYFUL Choker");
-    let names: Vec<&str> = p.nodes.iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = p.nodes().iter().map(|n| n.name.as_str()).collect();
     assert_eq!(names, ["clock", "fixture", "output", "power", "shader"]);
     let fixture = NodeId::new("fixture");
     let f = p.fixture(&fixture).unwrap();
@@ -212,9 +212,9 @@ fn the_desk_saves_as_a_new_project() {
     // where the lamp is in its fixture). Names as the product spells them.
     let wire = |p: &Project| {
         let mut w: Vec<(String, String, u32, String, i64, i64)> = Vec::new();
-        for s in p.effective_patch().spans {
+        for s in &p.effective_patch().spans {
             let origin = p.origin(&s.fixture);
-            let lamps = p.object(&s.object).unwrap().lamps;
+            let lamps = &p.object(&s.object).unwrap().lamps;
             for lamp in s.lamps.clone() {
                 let at = lamps[lamp as usize].pos - origin;
                 w.push((

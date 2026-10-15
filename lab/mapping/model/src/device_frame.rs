@@ -38,10 +38,10 @@
 //!
 //! The model never reads a clock: the caller passes the time, in seconds.
 
-use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use crate::derived::Wiring;
 use crate::editor::{Editor, Gesture, Tool};
-use crate::geom::{Rect, Vec2};
 use crate::node::NodeId;
 use crate::object::ObjectId;
 use crate::patch::{EffectivePatch, Span};
@@ -78,12 +78,20 @@ const PATTERN_SWEEP: f64 = 120.0;
 
 /// Every port's pixels, in output then port order — and, for the canvas,
 /// which pixel each lamp is, so a lamp can be drawn in its pixel's colour.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DeviceFrame {
     pub ports: Vec<PortFrame>,
-    /// (object, lamp index) → (index into `ports`, pixel). Only lamps that
-    /// light: patched, and inside their fixture's box.
-    lamps: BTreeMap<(ObjectId, u32), (usize, usize)>,
+    /// Which pixel each lamp lights (only lamps that light: patched, and
+    /// inside their fixture's box). Worked out once per project and shared
+    /// by every frame made from it (`derived.rs`).
+    wiring: Arc<Wiring>,
+}
+
+impl PartialEq for DeviceFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.ports == other.ports
+            && (Arc::ptr_eq(&self.wiring, &other.wiring) || self.wiring == other.wiring)
+    }
 }
 
 /// One port's pixels: one colour per pixel of the strip on it.
@@ -105,8 +113,27 @@ impl DeviceFrame {
     /// The colour a lamp shows: its pixel's, in this frame. `None` for a
     /// lamp that lights nothing (unpatched, or outside its box).
     pub fn lamp(&self, object: &ObjectId, index: u32) -> Option<Rgb> {
-        let (port, pixel) = *self.lamps.get(&(object.clone(), index))?;
+        let (port, pixel) = self.wiring.lamp(object, index)?;
         self.ports.get(port)?.pixels.get(pixel).copied()
+    }
+
+    /// The colours of an object's first `lamps` lamps, lamp 0 first, as
+    /// [`DeviceFrame::lamp`] gives them: what the canvas draws, one lookup
+    /// per object rather than per lamp.
+    pub fn object_lamps<'a>(
+        &'a self,
+        object: &ObjectId,
+        lamps: usize,
+    ) -> impl Iterator<Item = Option<Rgb>> + 'a {
+        let first = self.wiring.first_lamp.get(object).copied();
+        (0..lamps).map(move |i| {
+            let (port, pixel) = (*self.wiring.lit.get(first? + i)?)?;
+            self.ports
+                .get(port as usize)?
+                .pixels
+                .get(pixel as usize)
+                .copied()
+        })
     }
 
     fn port_mut(&mut self, output: &NodeId, key: &str) -> Option<&mut Vec<Rgb>> {
@@ -143,14 +170,19 @@ impl Editor {
     /// white, everything else off. A draft that starts outside every
     /// fixture lands nowhere, so every pixel is off.
     fn draft_frame(&self) -> DeviceFrame {
-        let mut frame = self.project.dark_frame();
+        let dark = self.project.dark_frame();
         let Some((fixture, kind)) = self.draft_into() else {
-            return frame;
+            return dark;
         };
         let mut p = self.project.clone();
         let Some(draft) = p.add(&fixture, kind) else {
-            return frame;
+            return dark;
         };
+        // The board as it is: the draft lights only pixels it already has.
+        let mut frame = p.dark_frame();
+        for (port, now) in frame.ports.iter_mut().zip(&dark.ports) {
+            port.pixels.resize(now.pixels.len(), Rgb::BLACK);
+        }
         let patch = p.effective_patch();
         p.paint_lamps(&patch, &mut frame, |_, s, _, _| {
             if s.object.component == draft {
@@ -216,68 +248,47 @@ impl Project {
 
     /// Every port, every pixel black: a board with nothing to show.
     pub fn dark_frame(&self) -> DeviceFrame {
-        let mut ports = Vec::new();
-        let patch = self.effective_patch();
-        for n in self.outputs() {
-            let Some(o) = n.output() else { continue };
-            for p in &o.ports {
-                let pixels = p.pixels.unwrap_or_else(|| patch.extent(&n.id, &p.key));
-                ports.push(PortFrame {
-                    output: n.id.clone(),
-                    key: p.key.clone(),
-                    pixels: vec![Rgb::BLACK; pixels as usize],
-                });
-            }
-        }
+        let wiring = self.wiring();
         DeviceFrame {
-            ports,
-            lamps: BTreeMap::new(),
+            ports: wiring
+                .ports
+                .iter()
+                .map(|(output, key, pixels)| PortFrame {
+                    output: output.clone(),
+                    key: key.clone(),
+                    pixels: vec![Rgb::BLACK; *pixels],
+                })
+                .collect(),
+            wiring,
         }
     }
 
     /// Paint every patched lamp onto its pixel, with the colour `colour`
     /// gives it from (span index, span, lamp index, lamps in its object).
     /// A lamp outside its own fixture's box stays black, whatever it is
-    /// given (D4).
+    /// given (D4). Which pixel each lamp lands on is worked out once per
+    /// project (`derived.rs`); this only colours them.
     fn paint_lamps(
         &self,
         patch: &EffectivePatch,
         frame: &mut DeviceFrame,
         mut colour: impl FnMut(usize, &Span, u32, usize) -> Rgb,
     ) {
-        let layout = self.layout();
-        let objects: BTreeMap<ObjectId, (NodeId, Vec<Vec2>)> = self
-            .placed_objects()
-            .into_iter()
-            .map(|(f, o)| (o.id, (f, o.lamps.iter().map(|l| l.pos).collect())))
-            .collect();
-        for (i, s) in patch.spans.iter().enumerate() {
-            let Some((fixture, lamps)) = objects.get(&s.object) else {
+        let wiring = frame.wiring.clone();
+        for (i, (s, w)) in patch.spans.iter().zip(&wiring.spans).enumerate() {
+            let Some(w) = w else { continue };
+            let Some(port) = frame.ports.get_mut(w.port) else {
                 continue;
             };
-            let bounds: Option<Rect> = layout.rects.get(fixture).copied();
-            let n = lamps.len();
-            let Some(port) = frame
-                .ports
-                .iter()
-                .position(|p| p.output == s.output && p.key == s.port)
-            else {
-                continue;
-            };
-            for lamp in s.lamps.clone() {
-                let pixel = s.pixel(lamp) as usize;
-                let inside = lamps
-                    .get(lamp as usize)
-                    .is_some_and(|p| bounds.is_some_and(|b| b.contains(*p)));
-                let Some(px) = frame.ports[port].pixels.get_mut(pixel) else {
+            for &(lamp, pixel, inside) in &w.lamps {
+                let Some(px) = port.pixels.get_mut(pixel as usize) else {
                     continue;
                 };
-                if inside {
-                    *px = colour(i, s, lamp, n);
-                    frame.lamps.insert((s.object.clone(), lamp), (port, pixel));
+                *px = if inside {
+                    colour(i, s, lamp, w.object_lamps)
                 } else {
-                    *px = Rgb::BLACK;
-                }
+                    Rgb::BLACK
+                };
             }
         }
     }
