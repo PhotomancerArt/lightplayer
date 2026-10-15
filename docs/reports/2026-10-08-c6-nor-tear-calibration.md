@@ -1616,3 +1616,184 @@ likely the torn pre-program; both read all zero after it.
 Batches 1–5 and 6–12 ran different images. The program-loop cuts are one
 population: the program loop did not change, only the generations it runs
 on.
+
+## 14. The two erase states as shapes; the model re-fitted on all 700 (2026-10-14)
+
+No board was touched for this section. It reads the committed transcripts
+and runs `lp-nor-sim`, `lp-store-bench` and the emulator. It closes
+`docs/defects/2026-10-14-the-calibrated-nor-model-never-tears-an-erase-inside-a-word-or-at-its-first-lift.md`.
+
+**The analyzer's two new classes.**
+
+- `erase:zeroing-mid-word`: whole `0x00` words from the front, then one word
+  with only part of its pre-program clears landed, then the old pattern
+  whole. Old and new are complements, so a pre-program's clears are the new
+  pattern's zeros, and `landed_new_zeros` counts the clears that landed
+  exactly. The per-page counts and the `0xFF` and `0x00` byte counts must
+  fit too. A weak bit may sit only on a clear that did not land, in the
+  word's page.
+- `erase:first-lift`: every bit a stable 0 but at most 32 (1 in 1024 of
+  the sector), each a stable 1 or weak. The two silicon ones had one bit.
+  The least-lifted `erasing` cut had 571.
+
+**Reading the landed count found two more.** The old zeroing path checked
+only where the `0x00` run stopped and the `0xFF` count. It never checked
+that the word after the run was untouched. Two cuts it had filed
+`erase:zeroing` had clears landed in the next word, with no weak bit:
+
+| cut | payload | word at | clears landed | of | weak bits |
+|---|---|---:|---:|---:|---:|
+| `41e96eead-r6.txt` boot 32 (sector 12, cycle 18268) | aligned | 3,092 | 3 | 14 | 0 |
+| `609f0e4c9-r3.txt` boot 10 (sector 5, cycle 6837) | unaligned | 764 | 17 | 21 | 2 |
+| `609f0e4c9-r3.txt` boot 38 (sector 11, cycle 7915) | unaligned | 2,364 | 2 | 16 | 0 |
+
+The record places landed clears only to their page. That they sit in the
+word the run had reached is the reading, the one the part's front-to-back
+pre-program makes likely. **So the aligned set was not clean.** It had 1 of
+418 against 2 of 173 unaligned, plus the unaligned set's two first lifts
+(`609f0e4c9.txt` boot 50, one weak bit; `-r4.txt` boot 17, one stable 1).
+Section 12's "3 of 172 against 0 of 418, about 1 in 40" no longer stands:
+it is 5 of 591 cuts at an erase, 1 of them aligned. Section 7 is
+regenerated with both classes and their tables.
+
+`just lint-flash-tears-analyze` rebuilds all five sectors from the pattern,
+checks that each record counts exactly what the silicon record counted, and
+checks the class. The payload's own flow on `lp-nor-sim`
+(`flash_tears_on_nor_sim`, 300 cuts each) under each new forced model sorts
+248 of 248 erase cuts into the class it names, aligned and unaligned.
+
+**Section 13's erase-only loop saw both states again.** Among its 82
+torn-erase sectors are 4 "all zero, with weak bits" (7 weak bits in all:
+under these classes, first lifts) and two zeroing runs with 2 weak bits
+each (likely zeroing caught inside a word). That loop cuts erases by design,
+so its cut timing is not the payload's. It is **not** folded into the
+weights. It is evidence that the two states are real and recur.
+
+**The model.** Two new `EraseShape`s, drawn the way the part was caught:
+
+- `ZeroingMidWord`: whole `0x00` words, then one word asking two or more
+  clears with some landed (at least one, not all), weak bits possible on
+  others, old data after. `CX1_ZEROING_MID_WORD` = (2 of 16, 0 weak), (3 of
+  14, 0 weak), (17 of 21, 2 weak). A draw interpolates the landed share and
+  the weak count between rows, as `CX1_MID_WORD` does. One helper
+  (`land_part_of_word`) serves both.
+- `FirstLift`: all zero but one bit. `CX1_FIRST_LIFT` = (0 stable 1s,
+  1 weak), (1 stable 1, 0 weak). A draw takes one row.
+
+**The re-fit, on all 700 cuts.** Same estimator (counts). `--model-table`
+and `--check-model` now read both payloads' silicon cuts (rule 1 in
+`--help`). The erase is the same command in both. An unaligned torn program
+is read the `rom` way, which is how `lp-nor-sim` tears a page op (section
+12). A prefix that stopped where a write starts would count as that op's
+offset 0, a command boundary. None of the 25 did.
+
+| family | shape | 500-cut weight | 700-cut weight |
+|---|---|---:|---:|
+| cut at an erase | zeroing | 17 | 20 |
+| | **zeroing caught inside a word** | — | **3** |
+| | all zero | 63 | 87 |
+| | **first lift** | — | **2** |
+| | erasing | 69 | 101 |
+| | reads `0xFF`, weak | 4 | 7 |
+| | reads `0xFF` | 264 | 370 |
+| | before the erase started | 1 | 1 |
+| torn program | command boundary | 58 | 74 |
+| | mid-command (on a word) | 19 | 28 |
+| | mid-word | 2 | 2 |
+
+`CX1_ERASING` grows from 69 rows to 101, and `CX1_READS_FF_WEAK` from 4 to
+7 (`[1, 1, 1, 2, 2, 3, 8]`). The forced models `calibrated_zeroing_mid_word`
+and `calibrated_first_lift` make every torn erase meet that state. They are
+appended to `TearModel`, so the existing models' seeds keep their values.
+The emulator's flash cut draws the same shapes and names them on its cut
+line (`shape=zeroing_mid_word`, `shape=first_lift`).
+
+**`--check-model`.** Against the 500-cut model, the 700 said **MODEL
+DIFFERS**. Every modelled share was inside its interval, and the two new
+classes were NOT MODELLED (`erase:zeroing-mid-word` 3, `erase:first-lift`
+2). Against the re-fit: **CONFIRMED**. Erase family 591 cuts, 6 cells at
+99.17 %, with `zeroing-mid-word` + `first-lift` + `before-erase` pooled.
+Program family 104 cuts, 2 cells at 97.5 %. This is **in-sample**: the
+model is fitted on the cuts it is checked against, so the shares match by
+construction. The next sitting is the next out-of-sample test.
+
+**The tree store under the re-fitted model.** Simulator numbers
+(`lp-nor-sim`), release builds, every cut point. The store is main's after
+#1136 (mount re-programs each head's tail record and kills a failed one).
+
+*In-crate* (`LP_TREE_STORE_SWEEP_CUTS=1000000 LP_TREE_STORE_SWEEP_STEPS=12
+LP_TREE_STORE_SWEEP_TEARS=<model>`, `cut_sweep*`,
+`a_torn_kill_erase_or_header_program_never_reads_as_newer` and
+`cut_remounts_read_one_state`, at the sweeps' own geometry and at
+`LP_TREE_STORE_SWEEP_SECTORS` 128 and 176): **all 8 tests pass under every
+model at every geometry**: `calibrated` (re-fitted),
+`calibrated_zeroing_mid_word`, `calibrated_first_lift`, and
+`calibrated_mid_word` again. At 176 sectors the cut sweeps make 3,393
+cuts under each model, 71 or 72 of them torn erases. The remount sweep makes 7,290 cuts with
+36,450 mounts. Cuts that left a weak bit: 152 (`calibrated`), 161
+(`calibrated_zeroing_mid_word`), 179 (`calibrated_first_lift`). Both new
+models joined the in-crate default tear list.
+
+*`lp-store-bench`*: `sweep` (every cut point, seeds 1 and 2) and `double`
+(seed 1), `t1` and `t1@codec=host_deflate`, workloads as in section 11:
+
+| model | sectors | exhaustive cases | its torn erases | double-cut cases | its torn erases | failures |
+|---|---:|---:|---:|---:|---:|---:|
+| `calibrated` (re-fitted) | 128 | 14,370 | 324 | 22,186 | 298 | 0 |
+| | 176 | 14,370 | 324 | 22,186 | 298 | 0 |
+| `calibrated_zeroing_mid_word` | 128 | 14,370 | 326 | 22,186 | 298 | 0 |
+| | 176 | 14,370 | 326 | 22,186 | 298 | 0 |
+| `calibrated_first_lift` | 128 | 14,370 | 326 | 22,186 | 298 | 0 |
+| | 176 | 14,370 | 326 | 22,186 | 298 | 0 |
+
+**0 failures in 219,336 cases.** The store never trusts a sector it did not
+erase and read back in this session, and these two states change nothing
+for it, as the defect predicted.
+
+*The long emulated cut walk* (`just walk-tree-store-cuts-emu`, on
+`21ca95a53`: this branch with main merged, the store fix #1136 and the
+littlefs create fix #1134 included). Emulated:
+`lp-emu:esp32c6:t1+net=lan+flash-cut`, direct load, 176 sectors, the
+`fs-tree` image. Never hardware-validated. Emulated flash commands take no
+time. The long form now also forces `calibrated_zeroing_mid_word` and
+`calibrated_first_lift` on every erase; CI's subset keeps its five forced
+shapes. `calibrated` is the re-fitted mix.
+
+| scenario | T (ops) | forced | erases | cuts | failures | landed old/between/new |
+|---|---:|---:|---:|---:|---:|---|
+| format | 364 | 180 | 176 | 2,084 | 0 | 2,076/0/8 |
+| push | 173 | 24 | 1 | 334 | 0 | 61/273/0 |
+| push-c40 | 9,644 | 336 | 65 | 2,150 | 0 | 31/2,119/0 |
+| save | 186 | 5 | 2 | 298 | 0 | 298/0/0 |
+| panel | 21 | 5 | 0 | 68 | 0 | 67/0/1 |
+| switch | 8 | 3 | 0 | 27 | 0 | 27/0/0 |
+| **total** | | | | **4,961** | **0** | |
+
+Each of the seven forced erase shapes cut every erase (176 in `format`,
+65 in `push-c40`), and `calibrated`, `byte_prefix` and `random_bits` cut the
+sampled set. **0 failures under every model.**
+
+*The littlefs control* (report-only, today's shipped image, the same
+scenarios but `format`): **0 failures in 7,755 cuts.**
+
+| scenario | T (ops) | erases | cuts | failures | landed old/between/new |
+|---|---:|---:|---:|---:|---|
+| push | 1,157 | 45 | 826 | 0 | 111/674/41 |
+| push-c40 | 22,752 | 545 | 6,347 | 0 | 99/6,219/29 |
+| save | 182 | 3 | 298 | 0 | 298/0/0 |
+| panel | 66 | 6 | 208 | 0 | 208/0/0 |
+| switch | 17 | 3 | 76 | 0 | 75/0/1 |
+
+This run includes the littlefs create fix (#1134): a cut while littlefs
+creates a file no longer leaves the file empty. The control has no failures
+under any model, the two new forced shapes included. The tree store needs about 40 % of littlefs's flash operations for `push-c40`
+(9,644 against 22,752) and 4 % of its erases (65 against 545). The whole
+walk took 4.9 hours of host time (17,509 s).
+
+One thing to know before re-running it: the walk's test process runs from
+the shared build cache, and its command line names no worktree path. The
+desk's hourly `cargo-clean.sh` does not see a test like that as using the
+worktree. One run here lost its `target/` (with the firmware ELFs) 2.7
+hours in. The run above passes both ELFs from outside `target/`
+(`LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO_FS_TREE`,
+`LP_EMU_C6_ELF_ESP32C6_SERVER_RADIO`).

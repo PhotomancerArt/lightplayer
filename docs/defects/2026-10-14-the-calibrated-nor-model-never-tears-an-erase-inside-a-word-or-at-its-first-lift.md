@@ -86,8 +86,12 @@ is re-fitted on all 700 cuts.
   in-crate cut sweep, the torn-header test and `cut_remounts_read_one_state`
   pass, and `lp-store-bench` sweep + double (t1, t1@codec=host_deflate) has
   0 failures, at 128 and 176 sectors. The two models joined the in-crate
-  default tear list. Report section 13 has the numbers and the long
-  emulated walk.
+  default tear list. The long emulated cut walk, which now forces both
+  shapes on every erase, has 0 failures in 4,961 cuts, and its littlefs
+  control has 0 in 7,755. Report section 14 has the numbers.
+- *Seen again elsewhere*: section 13's erase-only loop (#1139) has 4 "all
+  zero, with weak bits" sectors (first lifts, under these classes) and 2
+  zeroing runs with weak bits. Another workload, so not in the weights.
 
 **Regression coverage.** `erase_word_and_lift_self_test` (`just
 lint-flash-tears-analyze`) rebuilds all five silicon cuts from the pattern,
