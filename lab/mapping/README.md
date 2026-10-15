@@ -6,10 +6,13 @@ planning workspace: `lp2025/2026-10-10-1853-mapping-design-lab/vision.md`.
 
 ```bash
 just lab-mapping        # serves the canvas; the printed URL is the source of truth
-cargo test -p lab-mapping-model
+cargo test -p lab-mapping-model        # the statements
+cargo test -p lab-mapping-files        # opening and saving real projects
+cargo test -p lab-mapping-fit-tests    # the proof against the product (slow: runs its engine)
+cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 ```
 
-## The two crates
+## The crates
 
 - **`model/`** (`lab-mapping-model`): the editor's whole behaviour. Nodes
   (modules, fixtures, outputs), components, objects, layout, the patch and
@@ -20,12 +23,68 @@ cargo test -p lab-mapping-model
   lets it drop into the app later.
 - **`web/`** (`lab-mapping-web`): a Dioxus page that forwards events to the
   model and draws what it says. No editor logic lives here.
+- **`files/`** (`lab-mapping-files`): opens real LightPlayer projects into
+  the model and saves them back, in the product's own formats (vision D51,
+  fit-check §6). Fenced like the model: the model and `serde_json` only,
+  no product crate — the product's documents it needs are re-created
+  there. It carries what the lab doesn't model (shaders and other nodes,
+  unknown fields) through untouched, writes only the files it owns and
+  only when what they say changed, so saving an unedited project writes
+  nothing. It also bakes the three test projects in for the page.
+- **`fit-tests/`** (`lab-mapping-fit-tests`): the proof, and the only lab
+  crate that depends on product crates. For each test project: an
+  unedited save leaves every file byte for byte; every file the lab would
+  write reads back through the product's readers as the original does;
+  every lamp is `lpc_mapping::resolve`'s bit for bit; and every output
+  carries the same lamp on every wire lamp as the product's engine,
+  loaded headless from the same files. Plus edited-then-saved round trips.
+- **`radiance-gen/`** (`lab-mapping-radiance-gen`): writes
+  `projects/radiance-dome/`, the radiance dome in the product's formats,
+  from lp2014's geodesic geometry. **Its lamp counts and patch are
+  placeholders** (80 lamps a panel, 10 outputs × 32 ports, one panel a
+  port); the project's README says what is unknown.
 
 ## Statements
 
 `model/tests/statements.rs` holds the behaviour as sentences, one test
 each. The doc comment is the statement. To change how something behaves,
 change the sentence first, then the code.
+
+## Real projects
+
+The toolbar's **Project** picker opens the desk (the lab's own seed) or
+one of the test projects, and fits the view:
+
+- **PLAYFUL choker** (`catalog/projects/playful-choker`): 12 paths, 73
+  lamps, one output whose one port takes the rest; its clock, power
+  button and shader are plain cards at the left.
+- **Zook dome** (`catalog/projects/zook-dome`): one repeat — five copies
+  of a 300-lamp zigzag path with a jumper — on five ports.
+- **Radiance dome** (`projects/radiance-dome`, generated): 55 panel
+  shapes × 5 copies, 22,000 lamps, ten named outputs of 32 ports, every
+  panel placed by hand. It loads in about a second and draws, but every
+  interaction re-renders the whole SVG — 50,000 elements — so panning
+  and hovering take about half a second each in the dev build. Making it
+  interactive is the next piece.
+
+What the model took from the product to open them (each with its
+statement, fit-check's resolutions applied): lamps resolved in the
+product's own f32 arithmetic (`resolve.rs`, bit for bit); paths with
+gaps and a `reversed` flag; polygons; repeats (copy *k* turned
+*k*·360°/count, keyed `2` like `/sector/2`); place rules (an object on a
+port's pixel, reversed, turned in its window) beside auto; an output's
+ports as one flat wire, the last one free to take the rest; auto flow in
+the product's attach order (each module's nodes by name); colour order
+on the fixture; nodes the lab doesn't edit as plain cards; output names.
+
+On disk (`files/src/save.rs`): an auto rule is the fixture writing the
+channel its output reads; a place rule is a patch row, its port and
+pixel flattened onto the wire; a lab circle is one ring shape per ring
+and a group is its children (both lose their grouping until the product
+has addressable rings and groups); a lab name the product refuses
+(`tail rig`) is written as one it accepts (`tail_rig`). The lab doesn't
+open grids, filled polygons, multi-ring rings, or patch rows that place
+part of an object or a plain lamp range — it refuses them by name.
 
 ## What it covers
 
@@ -46,10 +105,12 @@ A 2D canvas with selection, and the start of the whole node graph on it
   themselves out around it, and nothing overlaps. A pinned node shows a
   pin on its title; U, or "Unpin" in the right-click menu, gives it back
   to the layout. One drag, one undo.
-- **The auto patch rule.** A fixture's lamps fill an output's ports in
-  order, after earlier fixtures on the same output. The effective patch is
-  derived and never stored. A rule whose output was deleted shows as a
-  problem and is never retargeted.
+- **Patch rules** (`patch.rs`): place (one object on a port's pixel,
+  reversed, turned) and auto (what no place rule claims fills the
+  output's ports in order, after every placed run and after fixtures
+  before it in the product's attach order). The effective patch is
+  derived and never stored. A rule whose output, port or object is gone
+  shows as a problem and is never retargeted.
 - **Edges are the patch** (D42, D45, D46): violet, one per object (per
   span, when an object runs on into the next port), leaving the object's
   FIRST lamp toward the output and landing — from the left, with an
@@ -138,7 +199,9 @@ A 2D canvas with selection, and the start of the whole node graph on it
   lead says what you're doing ("Drawing a path", "Moving circle1"), never
   what's selected — the breadcrumb says that.
 
-Not covered yet: rules other than auto, choosing a rule's output, routes,
+Not covered yet: editing place rules on the canvas (they open, show,
+save and light the board, but there is no gesture for them yet), choosing
+a rule's output, saving from the page, routes,
 other node kinds (patterns), a level above the
 project, and a real board (the simulated one stands in until the lab moves
 into Studio).
