@@ -1560,8 +1560,8 @@ flickered in the first 64 reads held still for the next 512. After one
 program to `0x00`, **not one of the 34,823 bits read 1 even once** in 512
 reads, and none did after the next cut. One sector, the last cut of batch
 6, has no re-check: the next boot was a reflash. The two zeroing sectors
-with weak bits (`9409cd6d7` boots 23 and 39, 2 weak bits each) are the
-torn pre-program; both read all zero after it.
+with weak bits (`9409cd6d7` boots 23 and 39, 2 weak bits each) are most
+likely the torn pre-program; both read all zero after it.
 
 **What this does not show.**
 
@@ -1569,9 +1569,9 @@ torn pre-program; both read all zero after it.
   control shows bits as rare as 1 in 4,096. A cell left that marginal by
   the re-program would be missed. But the erase sectors put 34,823 cells
   through the same step, and not one flicker came back in 512 reads.
-- *The time scale is seconds to minutes.* The re-check is one power cut
-  later, 5–15 s. Retention over days, heat, or many power cycles is not
-  measured.
+- *The time scale is seconds.* The re-check is the next boot, one power
+  cut and a few seconds later. Retention over days, heat, or many power
+  cycles is not measured.
 - *One board, one part* (JEDEC `0x464016`, manufacturer not identified).
   Another part's program algorithm could skip a cell that already
   verifies. Nothing here says it would not.
