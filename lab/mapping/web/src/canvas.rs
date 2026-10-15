@@ -11,10 +11,11 @@
 //!
 //! Nodes (D42, D43): modules are faint dashed frames, fixtures solid
 //! frames, outputs cards with a row per port. The patch is drawn as violet
-//! edges — violet is the product's colour for what is bound — from a
-//! fixture (or, inside one, each object) to the port row it lands on, with
-//! an arrowhead where the data arrives. The curve is the model's
-//! (`Edge::curve`), so hovering finds exactly what is drawn.
+//! edges — violet is the product's colour for what is bound — from each
+//! object's first lamp to the pixel its span starts on (or, for a crowded
+//! fixture, one bundle from its frame), with an arrowhead where the data
+//! arrives. The curve is the model's (`Edge::curve`), so hovering finds
+//! exactly what is drawn.
 //!
 //! The board (D16, D44): each port row shows its pixels as the simulated
 //! board has them (`Editor::device_frame`), and every lamp on the canvas is
