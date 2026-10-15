@@ -385,7 +385,7 @@ def main() -> int:
     )
     p()
     writes_after = [r for b in cuts for r in of(b, "fr-write", stage="after")]
-    writes_re = [r for b in cuts for r in of(b, "fr-write", stage="recheck")]
+    writes_re = [r for b in every_cut for r in of(b, "fr-write", stage="recheck")]
     for name, ws in (("after re-program", writes_after), ("at the next boot's re-check", writes_re)):
         if ws:
             ok = sum(1 for r in ws if r["span_ok"] and r["tail_ok"])
