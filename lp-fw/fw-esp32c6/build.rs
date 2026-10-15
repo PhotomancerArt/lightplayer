@@ -40,10 +40,14 @@ fn emit_build_provenance() {
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = match git_output(&["status", "--porcelain"]) {
-        Some(status) => !status.is_empty(),
-        None => false,
-    };
+    // A figure build is stamped clean, as it is stamped with a fixed version
+    // (`lp_app_version::figure_build`): the tree's state must not reach the
+    // image whose memory figures are recorded.
+    let dirty = !lp_app_version::figure_build()
+        && match git_output(&["status", "--porcelain"]) {
+            Some(status) => !status.is_empty(),
+            None => false,
+        };
     let profile = profile_dir_name()
         .or_else(|| std::env::var("PROFILE").ok())
         .unwrap_or_else(|| "unknown".into());

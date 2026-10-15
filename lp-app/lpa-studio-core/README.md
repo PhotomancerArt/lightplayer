@@ -642,6 +642,13 @@ release the lock, then announce (`hold_reconcile`). The gate
 without opening them when the other tabs' claims for their vendor:product
 account for all of them, reads a refused open against the same claims, and
 names the board when exactly one claim and one port of the kind are in play.
+A port picked in the chooser is not gated (it may be another board of the
+kind), so it is opened and refused; that refusal is read when it is heard,
+against the claims standing then, not when the identify gives up five
+seconds later (`BoardHoldFlow.refused`). A take-over whose holder let go
+opens every port of its kind this tab could not open — kept shut, read as
+held, or refused — once each (`FreedPorts`), and a refusal heard after the
+release is that hold's and opens again too.
 A holder announces `Watching`, `Open` (its editor is on the board) or
 `Busy(label)`; it refuses an ask while busy and otherwise closes the editor,
 writes the last picture, disconnects, waits for the close, releases, then

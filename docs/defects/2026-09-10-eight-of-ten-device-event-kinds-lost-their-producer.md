@@ -1,5 +1,5 @@
 ---
-status: OPEN — found by the emulated scenario lane; no lane can satisfy the affected `expect` matchers
+status: open           # found by the emulated scenario lane; no lane can satisfy the affected `expect` matchers
 found: 2026-09-10      # emulator plan two, M6 (the walk with no board)
 area: lp-app/lpa-studio-core/src/app/studio/studio_controller.rs, scripts/device-scenarios, lp-app/lpa-link/tests/trace_replay.rs
 class: instrument-rot

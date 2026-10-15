@@ -245,9 +245,11 @@ impl<F: Flash> RecordLog<F> {
             // reads back: a torn or worn header never shows the magic in
             // front of a wrong version (FORMAT.md "Sector": a reader refuses
             // the magic + a newer version).
-            self.program(addr + 4, &bytes[4..])?;
-            let mut ok = self.verify(addr + 4, &bytes[4..], &[])?;
-            if ok {
+            // (The `MagicFirst` mutant programs and verifies it whole.)
+            let first = if mutant!(MagicFirst) { 0 } else { 4 };
+            self.program(addr + first, &bytes[first as usize..])?;
+            let mut ok = self.verify(addr + first, &bytes[first as usize..], &[])?;
+            if ok && first == 4 {
                 self.program(addr, &bytes[..4])?;
                 ok = self.verify(addr, &bytes, &[])?;
             }
@@ -259,6 +261,7 @@ impl<F: Flash> RecordLog<F> {
             self.sectors.end[pick as usize] = SECTOR_HEADER_LEN as u16;
             self.sectors.live[pick as usize] = 0;
             self.sectors.seq[pick as usize] = header.seq;
+            self.sectors.set_kind(pick, kind);
             self.heads[kind.index()] = Some(pick);
             stat!(self.counters.sectors_opened += 1);
             return Ok(pick);
@@ -272,12 +275,14 @@ impl<F: Flash> RecordLog<F> {
         self.sectors.end[s as usize] = NEEDS_ERASE;
         self.sectors.live[s as usize] = 0;
         let addr = self.addr(s, 0);
-        self.program(addr, &KILLED_SECTOR_HEADER)?;
+        if !mutant!(SkipKill) {
+            self.program(addr, &KILLED_SECTOR_HEADER)?;
+        }
         self.flash.erase_sector(s).map_err(StoreError::Flash)?;
         stat!(self.counters.erases += 1);
         let c = &mut self.sectors.erase_count[s as usize];
         *c = c.wrapping_add(1);
-        if !self.reads_erased(s, 0)? {
+        if !mutant!(OpenWithoutReadBack) && !self.reads_erased(s, 0)? {
             stat!(self.counters.verify_failures += 1);
             self.retire(s);
             return Ok(false);
@@ -314,6 +319,28 @@ impl<F: Flash> RecordLog<F> {
             off += n as u32;
         }
         Ok(true)
+    }
+
+    /// Program `first ++ parts…` at `addr` again — bytes that already read
+    /// back so, CRC-checked — and read them back. Program only clears bits,
+    /// so this changes no bit that reads 1 and finishes a clear a torn
+    /// program left weak: the bytes then read as they did on every read
+    /// (`record_scan.rs`, "settling a head's tail").
+    pub fn reprogram(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
+        self.program(addr, first)?;
+        let mut a = addr + first.len() as u32;
+        for p in parts {
+            self.program(a, p)?;
+            a += p.len() as u32;
+        }
+        self.verify(addr, first, parts)
+    }
+
+    /// Program the record header at `offset` of `s` — one that did not
+    /// check — to zeros: it then fails to parse on every read, so a torn
+    /// record that read bad once can never read whole later.
+    pub fn kill_record(&mut self, s: u32, offset: u32) -> R<(), F> {
+        self.program(self.addr(s, offset), &[0u8; RECORD_HEADER_LEN as usize])
     }
 
     fn program(&mut self, addr: u32, data: &[u8]) -> R<(), F> {

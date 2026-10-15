@@ -339,10 +339,27 @@ cross-target firmware build." >&2
     fi
     case "$CHIP_ID" in
     esp32c6)
-        # The split image, exactly as the size check and the packager build
-        # it (the shipped features, the target embedded): two link passes.
-        just fw-esp32c6-split >&2 || return 1
-        echo "target/fw-split/shipped/p2.elf"
+        # The split image, as the size check and the packager build it (the
+        # shipped features, the target embedded; two link passes), but as a
+        # FIGURE BUILD (`LP_FIGURE_BUILD=1`, tools/lp-app-version): stamped
+        # with a fixed version and clean, whatever the tree's state. The C6's
+        # build stamps the version afresh on every split build, and the
+        # version's length is a heap figure, so before the pin the re-check
+        # after a re-baseline — on the tree the re-baseline had just written
+        # to — was stamped `<sha>-dirty-<time>` and read ~32 B more than the
+        # boot it was meant to confirm (CI's "Figure moves" step called it
+        # "not a figure move" every time), and a desk's 9-character sha read
+        # 8 B off CI's 7. The emulator suite's shipped split image is a
+        # figure build too (`test_support::build_split`), so the image CI
+        # uploads for `just fetch-ci-images` is these bytes.
+        #
+        # Its own directory, not `target/fw-split/shipped`: that one keeps
+        # the tree's real version, for the manifest check and anyone who
+        # flashes it.
+        LP_FIGURE_BUILD=1 cargo run -q -p lp-fw-split --release -- build \
+            --out target/fw-split/figures --features esp32c6,server --target esp32c6-4mb >&2 \
+            || return 1
+        echo "target/fw-split/figures/p2.elf"
         ;;
     esp32v3)
         # Through the justfile recipe, and not `cd … && cargo build` like the

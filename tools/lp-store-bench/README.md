@@ -78,6 +78,77 @@ cargo run --release -p lp-store-bench -- endurance --candidates 'f1,f1@block_cyc
 cargo run --release -p lp-store-bench -- replay failure.json      # one scoreboard line
 ```
 
+### Long histories, the edge, fuzzing and mutants (M3)
+
+```bash
+cargo run --release -p lp-store-bench -- long --candidates t1 --sectors 48 --corpora c13 --edit-mix \
+  --tears clean,byte_prefix,random_bits,calibrated --piece-steps 5000 --checkpoint-dir <dir> --until +8m
+cargo run --release -p lp-store-bench -- full-flash --candidates t1 --sectors 48 --corpus-name c13 --seeds 8
+cargo run --release -p lp-store-bench -- fuzz --candidates t1 --cases 40000 --histories 16
+cargo run --release -p lp-store-bench -- gc-dials --candidates t1
+cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip_kill,…]
+```
+
+- **`long`** (`driver_long.rs`): one store kept mounted for ≥ 100k steps,
+  a full cut case every `--cut-every` steps, a full-state check and a
+  remount every `--check-every`; `--edit-mix` fills the three slots once and
+  then only saves, panel writes and re-pushes, so the live set sits near
+  full and GC copies. Each walk reports its GC runs (the walk's own mounts),
+  and stops at its first failure. `--piece-steps` + `--checkpoint-dir` +
+  `--until` run it as resumable foreground pieces. The check also fails a
+  walk on any program that asks a cleared bit to become 1
+  (`program_over_unerased`, `lp-nor-sim`'s `violations_0_to_1`; weak bits a
+  tear left are not counted): a store that programs cells it never read
+  back as erased.
+- **`full-flash`** (`driver_full_flash.rs`): unique copies of a project
+  until the store refuses, then saves, panel writes, re-pushes and deletes
+  at the edge with sampled cuts in every step, then space freed and a push
+  again (`recovered`).
+- **`fuzz`** (`driver_fuzz.rs`): mount on `garbage`, `mutated` (bit flips,
+  0x00/0xFF runs, swapped or duplicated sectors, a scrambled body) and `cut`
+  images, and for T1 `newer_version` (must refuse `Unsupported`) and
+  `stale_tail` (**non-physical**: stale bytes in the erased tail of the two
+  newest sectors, as a bad erase or a foreign writer would leave; it must
+  mount at that committed state, take the next step without programming
+  over them, and then format). A mounted image must read one committed
+  state with no read error — littlefs mounts lazily and reports damage at
+  read time, which this scores as `read_error_after_mount`.
+- **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
+  partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
+- **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
+  store, then each of `lp-tree-store`'s twelve mutants, through one fixed set
+  (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
+  walk with one sector worn on erases and one on programs), every driver
+  under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
+  `calibrated_mid_word`. A catch is a failure kind the unmutated store does
+  not show in that driver; pass = every mutant caught. Last run (the
+  single-read-trust fix, 2026-10-14, lp-nor-sim simulator):
+
+  | mutant | caught by | failures |
+  |---|---|---|
+  | `skip_kill` | wear | 1 (`unmountable`) |
+  | `trust_record_headers` | sweep | 853 |
+  | `dedup_against_all_records` | long | 6 |
+  | `gc_erase_before_copy` | sweep_gc | 338 |
+  | `root_before_dirs` | double | 222 |
+  | `resume_without_tail_check` | fuzz (`stale_tail`) | 70 |
+  | `no_space_after_write` | sweep | 409 |
+  | `gc_forgets_pending` | sweep | 105 |
+  | `magic_first` | sweep_gc | 4 |
+  | `newer_version_untrusted` | fuzz (`newer_version`) | 120 |
+  | `open_without_read_back` | wear (`program_over_unerased`) | 2 |
+  | `trust_tail_once` | double | 1 (`remount_failed`) |
+
+  The unmutated store: 0 failures in all seven drivers (6,115 cases).
+  Before `calibrated_mid_word` joined the set, `skip_kill` survived it
+  (10 of 11 caught at `609f0e4c9`).
+
+`overnight` also runs, every round, `long` (4 walks × 10k steps), one
+`full-flash` and one `fuzz` per candidate (P8–P10) and the GC dials once
+(P4b); `--tears` names the models every unit uses, `--rounds N` stops after
+N rounds, and `--resume` skips the units the scoreboard already has and runs
+each unit whole — the overnight run as foreground pieces.
+
 ### Overnight
 
 ```bash
@@ -118,14 +189,19 @@ names; default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s
 --tears <names>` runs every driver of the smoke under those models; without
 it the smoke is what it always was (the sweeps under the three guessed
 models, the double cut under `random_bits`).
-`calibrated` is the model measured on a real part (CX1, 200 cuts:
+`calibrated` is the model measured on a real part (CX1, 500 cuts:
 `docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
-read `0x00` from the front or throughout, or silently read erased; it runs
-only when named, and a reproducer that names it replays under it.
+read `0x00` from the front or throughout, or silently read erased; rarely a
+cut that lands before an erase starts, or a program torn inside a 4-byte
+word with a weak bit; it runs only when named, and a reproducer that names
+it replays under it (under the weights of the build that replays it).
 `calibrated_zeroing`, `calibrated_all_zero`, `calibrated_erasing`,
 `calibrated_reads_ff_weak` and `calibrated_reads_ff` force every torn erase
-to that one measured state (programs keep the calibrated mix). A sweep
-summary's `torn_erases` counts the cases whose cut tore an erase.
+to that one measured state (programs keep the calibrated mix);
+`calibrated_before_erase` lands every erase cut before its erase and
+`calibrated_mid_word` tears every program inside a word (the other family
+keeps the mix). A sweep summary's `torn_erases` counts the cases whose cut
+tore an erase (an erase cut before it started is not one).
 
 `--corpus` defaults to the spike's `measurements/corpus`; `--out` to
 `target/lp-store-bench/<cmd>`; `--threads` 8; `--sectors` 128.
@@ -142,7 +218,12 @@ which:
 | `min_sectors` | `candidate`, `config`, `workload`, `min_sectors` (null = does not fit in 512) |
 | `sweep_summary` | `driver` (`exhaustive` / `double_cut`), `candidate`, `config`, `workload`, `tear`, `cases`, `landed`, `torn_erases`, `failures`, `non_atomic`, `kinds {failure kind: count}`, `steps_swept`, `steps_skipped`, `max_cuts_per_step`, `error` |
 | `random_summary` | `candidate`, `config`, `seed`, `steps_run`, `steps_no_space`, `cuts`, `failures`, `non_atomic`, `kinds`, `first_failure`, `error` |
-| `failure` | `driver`, `failure {kind, detail}`, `reproducer` (`{"case": {candidate, config, workload, step, cut_after, tear, seed, second}}` or `{"random": {…, stop_at_cut}}`) — feed the line to `replay` |
+| `failure` | `driver`, `failure {kind, detail}`, `reproducer` (`{"case": {candidate, config, workload, step, cut_after, tear, seed, second}}` or `{"random": {…, stop_at_cut}}`, `{"long": …}`, `{"fuzz": …}`) — feed the line to `replay` |
+| `long_summary` | `candidate`, `config`, `seed`, `edit_mix`, `steps_run`, `steps_no_space`, `cuts`, `landed`, `torn_erases`, `checks`, `failures`, `non_atomic`, `kinds`, `first_failure`, `gc {gc_runs, gc_copies, retired_sectors, erases_total, erases_max}`, `failed_case`, `error` |
+| `full_flash_summary` | `candidate`, `config`, `corpus`, `seed`, `fill_slots`, `refusals`, `edge_steps`, `edge_refused`, `cases`, `refused_cases`, `landed`, `failures`, `kinds`, `recovered`, `gc` |
+| `fuzz_summary` | `candidate`, `config`, `seed`, `cases`, `by_kind {kind: {cases, mounted, refused, failures}}`, `mutations`, `failures`, `kinds`, `first_failure`, `first_failing_case` |
+| `gc_dial_row` | `candidate`, `config`, `workload`, `ok`, `gc_runs`, `gc_copies`, `write_amp`, `erases_{median,max}`, `cut_cases`, `cut_failures`, `cut_kinds` |
+| `mutant_result` | `mutant` (`none` = unmutated), `drivers [{driver, cases, failures, kinds, new_kinds, first}]`, `failures`, `caught_by` |
 
 At most 20 full failure records are written per (sweep, tear) and 5 per
 random walk; the summaries count all of them.

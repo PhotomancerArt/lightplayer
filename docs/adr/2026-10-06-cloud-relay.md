@@ -76,7 +76,9 @@ https fly sent before (checked against the live service: same status, same
 `Location`, no HSTS). A route-walk test over every route in the router, and a
 post-deploy smoke in `deploy-cloud.yml`, hold it. Nothing is lost in the
 clear that matters: the board authenticates in-band, and the sessions inside
-are sealed. TLS can be added later on chips that can afford it, as a wrapper
+are sealed. (Since relay protocol 2 a board's picture and its project's name
+also cross this leg in the clear, by decision: see the 2026-10-09
+amendment.) TLS can be added later on chips that can afford it, as a wrapper
 on the board's `ByteStream` (D3), without changing what runs over it.
 
 ### 2. `lpc-relay`: the device leg's own protocol, version-and-refuse
@@ -93,7 +95,9 @@ versions it lists in `SUPPORTED_RELAY_PROTO_VERSIONS`; any other is a named
 refusal (`VersionTooOld` / `VersionTooNew`) the board reports. This is the
 cloud API's policy, not the wire's: a board in the field cannot be upgraded
 in lockstep, so the hub keeps an old version listed while boards speak it.
-A board refused for its version asks again after an hour.
+A board refused for its version asks again after an hour. (A protocol 2
+board asks again after 5 minutes when it is refused `VersionTooNew`: see the
+2026-10-09 amendment.)
 
 ### 3. The board proves which accounts it holds keys for
 
@@ -412,6 +416,197 @@ cable and no Studio on its network has no other way to be updated, so:
 
 No version moves in PR C: nothing about the relay's bytes changed.
 
+## Amendment (2026-10-09): relay protocol 2 — pictures through the cloud
+
+Plan `lp2025/2026-10-08-2050-pictures-through-the-cloud` (the
+boards-and-projects roadmap's M8), PR #1066. A board on the relay now sends
+its LED colours, and the project it runs, to lightplayer.app. The hub keeps
+the latest picture beside presence, so anyone in the board's accounts can
+see what it shows without taking its one network slot. This is **relay
+protocol 2**, added beside protocol 1. Nothing earlier in this ADR changes
+except the two sentences that now point here.
+
+### Protocol 2 beside protocol 1
+
+`SUPPORTED_RELAY_PROTO_VERSIONS` is `[1, 2]` (a test fails if 1 ever leaves
+it), and `RELAY_PROTO_VERSION`, what a new board speaks, is 2. Protocol 1's
+nine tags (`0x01`–`0x09`) are unchanged, and `RelayHello::new` is still the
+protocol 1 hello (protocol 1's goldens build their hellos with it).
+
+| Tag | Frame | Direction | Fields after the tag |
+|---|---|---|---|
+| `0x01` | Hello at `relay_proto` 2 | board → hub | protocol 1's fields, then `firmware`: `len u8` (≤ 40), ASCII (`RelayHello::with_firmware`) |
+| `0x0a` | `Project` | board → hub | `0` = no project; or `1`, `name` (`len u8` ≤ 32, UTF-8), `uid_tag` (`0` / `1` + 16 B), `content_tag` (`0` / `1` + 16 B) |
+| `0x0b` | `Picture` | board → hub | `n u8` (≤ 16 outputs), `n × lamps u32`, `count u16`, `count × [r g b]` |
+| `0x0c` | `PictureRate` | hub → board | `idle_s u16`, `watched_ms u16`, `watched_for_s u16` |
+
+Protocol 2's bytes, and the tag derivations' vectors, are pinned in
+`lpc-relay/tests/relay_frame_golden_v2.rs`. The board links only its
+direction's half of the codec (`RelayFrame::decode_from_hub`,
+`encode_to_hub`: the same bytes, pinned against the full codec by a test).
+That cut is worth 3.9 KB of C6 core (3,888 B, measured on the split image):
+it took this change's core growth from about +7.2 KB to +3.3 KB.
+
+### What a picture means
+
+Lamps per output, in the project's tree order; with `T` their sum, sample
+`i` is lamp `⌊i·T/count⌋` of the outputs concatenated. `count` is 0 exactly
+when `T` is 0, otherwise `1 ≤ count ≤ T`. Each sample is R, G, B as the
+sRGB8 display codes Studio's card draws: a `U16` sample goes through
+`linear16_to_srgb8`, and a `U8` one is widened ×257 first, so the codes mean
+one thing whatever the output publishes. The colour order is undone by the
+`RgbPixels` span covering the lamp; a lamp no span covers is read in wire
+order. The samples are the published, finished output (after the engine's
+finalize). A board sends at most 256 samples (`DEFAULT_PICTURE_SAMPLES`);
+the hub takes any count that fits a frame. `RelayPicture`'s doc is the
+normative text; the engine's sampler (`Engine::append_output_picture`,
+`&self`, reading the published buffers in place) follows it rule by rule,
+each with a test.
+
+### The project, by keyed tags
+
+A project's uid and its package hash are read capabilities: a link-viewable
+project opens by its uid, and blobs and trees are served by hash
+(`2026-08-08-project-url-identity-and-sharing.md`, `blob_route.rs`). The
+device leg is plain HTTP. So a board sends its project's **name** in the
+clear and the uid only as a tag:
+
+```text
+tag_key     = HMAC-SHA256(K, "lp-relay project/1")
+uid_tag     = HMAC-SHA256(tag_key, "uid\0" ‖ uid)[..16]
+content_tag = HMAC-SHA256(tag_key, "content\0" ‖ package_hash)[..16]
+```
+
+`K` is the stored entry key of the first account the hub verified (the
+lowest bit of `Registered.accounts_ok`, the hub's `BoardAccounts.users[0]`).
+The cloud holds `K`, so it can match a tag to a project of that account;
+anyone on the path learns nothing they could open. A board reports its
+project after every `Registered` and whenever it changes. `content_tag` is
+defined and pinned, and no board sends it yet. The firmware's version
+rides the hello. That answers the vision's "which project, which version"
+with no further protocol bump.
+
+### What crosses the device leg in the clear, and why (Yona, 2026-10-08)
+
+Pictures and project names cross the plain-HTTP device leg **unencrypted**.
+Anyone on the path (an open Wi‑Fi, the ISP) can see what a board's lamps
+show, sampled, and when, and the name of the project it plays — as they can
+already see the board's own name in its hello. Sealing them to the account
+key would cost core flash the C6 barely has and a more complex format. The
+capabilities never cross: no uid, no package hash, no key, only the tags
+above. A later protocol can seal pictures and names, or the leg can gain
+TLS on chips that afford it (section 1's path).
+
+### The cadence: the hub decides, the board clamps
+
+The hub sends `PictureRate` right after `Registered` (protocol 2 only), and
+a board sends a picture at once on every rate it gets. The hub's defaults:
+**idle**, one every 60 s; **watched**, one every 500 ms, for a lease of 15 s
+that a member's read renews (the board is sent a new rate only when less
+than half the lease is left). The board clamps what it is told — at least
+250 ms between pictures, idle 10–3600 s (or 0, none), a watch of at most
+300 s — and falls back to idle by itself when the watch runs out, so a
+closed tab costs nothing. At most one picture is in flight. Two knobs
+(`lp-cloud-server`'s `config.rs`): `LP_CLOUD_RELAY_PICTURE_IDLE_S` (60;
+0 = none) and `LP_CLOUD_RELAY_PICTURE_WATCHED_MS` (500; 0 = never fast). A
+home page that watches every board keeps every visible board at two
+pictures a second while it is open.
+
+### The cache: memory only, members only
+
+The hub keeps each board's last picture and project beside presence
+(`picture_cache.rs`), and keeps it — marked offline — after the board
+leaves, until the next deploy. A deploy loses the cache; online boards
+refill it within seconds, because each sends a picture as soon as the new
+hub asks. At most 4,096 boards (the oldest offline entry goes first); a
+picture less than 0.2 s after the board's last is dropped (a guard against a
+broken board, never a close). Readers are the accounts the board proved:
+guests, visitors and other accounts read nothing and cannot make a board
+fast. Persisting the last picture is new persisted cloud data and belongs
+with the account's board list (M7).
+
+### Cloud API v6
+
+`BoardPictures { boards: [{ id, seq? }], watch }` →
+`BoardPictureList { pictures: [{ id, online, seq, at, outputs, colors? }] }`
+(colours left out when the caller's `seq` is current; at most 16 boards a
+call; `watch` renews the lease). `BoardPresence` (in `ListBoards`) gains
+`relayProto`, `firmware` and `project` (the name). A tab on v5 is refused by
+name until it reloads (the API's version-and-refuse).
+
+### The per-version rule
+
+**The hub never sends a protocol 2 frame to a protocol 1 leg.** A protocol 1
+client treats any frame it does not expect as a protocol error and drops
+its leg, so one stray frame would put every fielded board into a reconnect
+loop. Every send to a board goes through one function (`to_board`) that
+compares `frame_protocol` with the board's: a frame above it is dropped and
+logged, and a debug build fails outright. Hub tests assert it on every
+action path; a protocol 1 board that sends a picture is closed.
+
+### Never-break, now for two versions
+
+Protocol 1's bytes stay pinned by `tests/relay_frame_golden.rs`, which this
+change did not touch (`git diff --exit-code origin/main --` on it is
+empty). Protocol 2's are pinned by `tests/relay_frame_golden_v2.rs` and
+become never-break from the first release whose core speaks them. From that
+day, **rolling the cloud back past the protocol 2 hub is a never-break
+violation**: a board updated to protocol 2 would be refused `VersionTooNew`
+by the old hub.
+
+### The deploy window and the retry
+
+A merge marks its firmware release Latest a few minutes before the hub that
+accepts its protocol deploys (the deploy waits for the release). A board
+updated in that window is refused `VersionTooNew`: over the relay its trial
+core cannot confirm and it returns to the old core by itself; over USB or
+the LAN it waits. So a protocol 2 board asks again after **5 minutes** when
+refused `VersionTooNew` (the hub is behind and will catch up), and keeps the
+hour for `VersionTooOld`. The post-deploy smoke in `deploy-cloud.yml` sends
+the live hub a protocol 1 hello and a protocol 2 hello (no accounts) and
+expects a `Challenge` for each.
+
+### What it costs the C6
+
+CI's own builds of the split image (`just fw-esp32c6-size-check`'s
+figures):
+
+| | Core | Engine | Gated headroom | Core → next 32 KiB page |
+|---|---:|---:|---:|---:|
+| `main` at `f5039fb93` (run 37905412888) | 1,426,368 B | 1,845,046 B | 88,266 B | 15,424 B |
+| PR #1066's merge commit `2a42c672f` (run 37917190206) | 1,429,648 B (+3,280) | 1,848,476 B (+3,430) | 84,836 B | 12,144 B |
+
+Local builds read the same growth (core +3,280 B, engine +3,412 B). The
+plan's targets (core and engine ≤ 4 KB each, no page crossed) hold; the
+engine still starts at `0x178000`. No new log line is in the core.
+
+Heap, emulated (`lp-emu:esp32c6:t1+net=lan@d1efe5028`, the board's own
+heartbeat): with `projects/test/basic` loaded, the relay registered, the
+board **watched** and a relay session open, **63,232 B free, 17,644 B
+largest block**, over the C6 read gate (40 KiB / 8 KiB); being watched costs
+68 B of free heap and nothing of the largest block. Against `main` (CI's
+runs of the same cell, `f5039fb93` and this PR), protocol 2 costs a
+registered board 1,084–1,196 B of free heap and 1,196 B of its largest
+block, and a board with no account key 184 B. A registered board
+keeps one 836 B picture buffer (`MAX_BOARD_PICTURE_FRAME`) while its leg is
+up, released when the leg ends, and none while it may not dial. The boot
+heap ratchet sits inside `main`'s own spread (CI: 105,716 B used on the
+PR's merge commit; 105,708 and 105,740 B in one run on `main`). Every row
+is in the walk record.
+
+### What is emulated only
+
+Every claim here was walked on the emulator, recorded in
+`docs/reports/2026-10-09-relay-pictures-emulator-walk.md`: the relay walk
+(13/13, in the board's own words), **the protocol 1 lane** — CI's image of
+the last protocol 1 commit (`f5039fb93`) at the new hub, registered, routed,
+listed at `relayProto` 1, one leg across a minute of being watched, and its
+received bytes unchanged throughout — and **the crossing walk**, that core
+updated to this build through the relay, which then sent pictures. The
+frame-rate cost on silicon (the radio budget's idle row) is queued for a
+desk sitting and does not block; the radio budget ADR is not amended, as no
+silicon number lands here.
+
 ## Consequences
 
 - lightplayer.app serves one plain-HTTP path, and the redirect that keeps
@@ -434,6 +629,12 @@ No version moves in PR C: nothing about the relay's bytes changed.
 - A board reachable through the relay is reachable by anyone who learns its
   id and its password. That is the point (helping Sean set up his board), and
   why "Anyone" never applies there.
+- (2026-10-09, relay protocol 2) Cloud API v6 (`BoardPictures`; a tab on v5
+  is refused by name until reload). A board's pictures and its project's
+  name cross the device leg in the clear; its uid and package hash never
+  do. The hub holds every board's last picture in memory, lost at a deploy.
+  The hub now speaks two protocols, and must never send protocol 1 a frame
+  it does not know.
 
 ## Alternatives Considered
 
@@ -469,3 +670,9 @@ No version moves in PR C: nothing about the relay's bytes changed.
   linkability).
 - The relay from beta channels (cross-origin, no cookie): a token, later.
 - Relay metrics (fly has no APM by choice).
+- (Relay protocol 2) Draw a board's cloud picture on its card in Studio (M7,
+  or the director's small follow-on); persist the last picture with M7's
+  board list; fill `content_tag` when something needs "which version of the
+  project"; seal pictures and names (a later protocol) or TLS on chips that
+  afford it; a `LabelChanged` frame, since the hub's board name goes stale
+  until the board registers again.

@@ -103,6 +103,11 @@ pub fn init_board() -> (
         ));
     }
 
+    // LP SRAM above the recovery region, the region Rust's allocator tries
+    // last of all (`lp_sram_heap`, off by default).
+    #[cfg(feature = "lp_sram_heap")]
+    super::lp_sram_heap::install();
+
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
     let usb_device = peripherals.USB_DEVICE;
