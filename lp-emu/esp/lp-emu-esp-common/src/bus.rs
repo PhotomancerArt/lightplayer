@@ -423,6 +423,10 @@ pub struct SocBus {
     alias_sites: BTreeSet<(u32, u8)>,
 
     strict: bool,
+    /// Whether a store to an address in no region and no declared MMIO
+    /// window faults even outside strict mode. See
+    /// [`SocBus::set_fault_stores_to_nothing`].
+    fault_stores_to_nothing: bool,
     /// Whether this chip's contract for publishing code is a guest barrier
     /// (`fence.i`), so `--strict-bus` should also run the missing-fence
     /// checker. See [`SocBus::set_fence_contract`].
@@ -670,6 +674,7 @@ impl SocBus {
             has_ram_alias: false,
             alias_sites: BTreeSet::new(),
             strict: false,
+            fault_stores_to_nothing: false,
             fence_contract: true,
             strict_fences: false,
             strict_grade: None,
@@ -1170,6 +1175,19 @@ impl SocBus {
     pub fn set_strict(&mut self, strict: bool) {
         self.strict = strict;
         self.strict_fences = self.strict && self.fence_contract;
+    }
+
+    /// A store to an address that is in no region and no declared MMIO
+    /// window — where the chip has nothing at all — takes the architectural
+    /// store access fault, strict mode or not. Silicon does: the C6 split
+    /// loader's store to address 0 faulted on a board (`Store/AMO access
+    /// fault`) while this bus took 26,452 of them and the core booted
+    /// (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
+    /// An unmapped store inside a declared window (an unmodelled block) and
+    /// every unmapped load keep the logged, permissive answer unless strict.
+    /// Off by default; a chip that has declared its windows turns it on.
+    pub fn set_fault_stores_to_nothing(&mut self, on: bool) {
+        self.fault_stores_to_nothing = on;
     }
 
     /// Whether code is published by a guest barrier on this chip — and so
@@ -2893,7 +2911,10 @@ impl SocBus {
                 .unmapped(self.now, self.pc, access, width, address, value);
         }
 
-        if self.strict {
+        let to_nothing = access == Access::Write
+            && self.fault_stores_to_nothing
+            && !self.in_mmio_window(address);
+        if self.strict || to_nothing {
             return Err(MemoryError::InvalidAccess {
                 address,
                 size: width.bytes() as usize,
@@ -3639,6 +3660,31 @@ mod tests {
         // Still counted, so a strict run reports the same numbers.
         assert_eq!(bus.unmapped_reads(), 1);
         assert_eq!(bus.unmapped_writes(), 1);
+    }
+
+    #[test]
+    fn a_store_to_nothing_faults_when_asked_and_nothing_else_changes() {
+        let mut bus = bus_with_ram();
+        bus.add_mmio_window(0x6000_0000, 0x0010_0000);
+        bus.set_fault_stores_to_nothing(true);
+        // Address 0, where the C6 split loader stored on silicon.
+        assert!(matches!(
+            bus.write_byte(0, 0).unwrap_err(),
+            MemoryError::InvalidAccess {
+                address: 0,
+                kind: MemoryAccessKind::Write,
+                ..
+            }
+        ));
+        // A load there, and a store inside a declared window, keep the
+        // permissive answer.
+        assert_eq!(bus.read_word(0).unwrap(), 0);
+        bus.write_word(0x6000_5000, 1).unwrap();
+        // Counted as before, and not a strict violation.
+        assert_eq!(bus.unmapped_writes(), 2);
+        assert!(bus.first_strict_violation().is_none());
+        bus.set_fault_stores_to_nothing(false);
+        bus.write_byte(0, 0).unwrap();
     }
 
     #[test]

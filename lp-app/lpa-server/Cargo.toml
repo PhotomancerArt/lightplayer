@@ -125,6 +125,8 @@ log = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+# read_cost's tests parse Studio's request JSON.
+serde_json = { workspace = true }
 # Concrete CPU graphics backend for tests and doc examples (the server takes
 # an injected `Arc<dyn LpGraphics>`; hosts construct the backend).
 lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }

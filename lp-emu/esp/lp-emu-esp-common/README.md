@@ -219,6 +219,15 @@ Three policies:
 - **Strict mode makes it fatal.** `set_strict(true)` turns the same access
   into `MemoryError::InvalidAccess` — the vision's honest-peripheral policy,
   available to a run that must not guess.
+- **A store to nothing faults.** `set_fault_stores_to_nothing(true)` makes a
+  store outside every region and every declared MMIO window take the store
+  access fault, strict or not: there is nothing there on the chip, and
+  silicon faults. The C6 turns it on. Its split loader once copied a segment
+  to address 0; the board faulted while this bus dropped 26,452 stores and
+  booted
+  (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
+  An unmapped store inside a window is an unmodelled block and is still
+  dropped.
 - **Watchpoints fire before the access.** esp-rtos's stack guard is a
   trigger on the guard word; a bus that performed the write and trapped
   afterwards would have already destroyed the evidence. NAPOT decodes as the
