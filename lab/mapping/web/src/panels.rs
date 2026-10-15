@@ -13,7 +13,7 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
     let e = ed.read();
     let rows = e.project.tree_rows();
     let selection = e.selection.clone();
-    // A selected lamp lights its line or ring's row.
+    // A selected lamp lights its path or ring's row.
     let lit: Vec<Target> = selection
         .iter()
         .map(|t| match t {
@@ -36,7 +36,7 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
     rsx! {
         div { class: "pane-title", "{name}" }
         if rows.is_empty() {
-            div { class: "empty", "Nothing here yet. Press L to draw a line." }
+            div { class: "empty", "Nothing here yet. Press P to draw a path." }
         }
         for (row, kind) in rows.into_iter().zip(kinds) {
             {
@@ -247,7 +247,7 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
                     PropRow { ed, prop: p }
                 }
             } else if only_lamps {
-                div { class: "hint-inline", "A lamp's count belongs to its line or ring — Esc selects it." }
+                div { class: "hint-inline", "A lamp's count belongs to its path or ring — Esc selects it." }
             } else if selection.len() > 1 {
                 div { class: "hint-inline", "These share no properties. Select things of one kind to edit them together." }
             }

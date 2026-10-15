@@ -176,7 +176,7 @@ impl Editor {
     }
 
     /// The things a count or direction edit applies to: a selected lamp
-    /// stands for its line or ring.
+    /// stands for its path or ring.
     fn edit_targets(&self) -> Vec<Target> {
         let mut out = Vec::new();
         for t in &self.selection {
@@ -198,7 +198,7 @@ impl Editor {
             self.notice = Some(Notice::refused(
                 "Nothing to change",
                 "nothing is selected",
-                "select a line, a ring or a circle; − and = change its count",
+                "select a path, a ring or a circle; − and = change its count",
             ));
             return;
         }
@@ -209,13 +209,13 @@ impl Editor {
                 Notice::refused(
                     format!("{} has no count of its own", self.project.long_label(t)),
                     format!("a {} is made of other things", self.project.kind_word(t)),
-                    "Enter goes into it; select a line or ring there",
+                    "Enter goes into it; select a path or ring there",
                 )
             } else {
                 Notice::refused(
                     "These don't share a count",
-                    "lines and rings count lamps, circles count rings",
-                    "select only lines and rings (or only circles) to change them together",
+                    "paths and rings count lamps, circles count rings",
+                    "select only paths and rings (or only circles) to change them together",
                 )
             });
             return;
@@ -232,15 +232,15 @@ impl Editor {
         }
     }
 
-    /// r: reverse the data direction. A line swaps its ends; a ring runs the
-    /// other way round. A selected lamp stays the same physical lamp.
+    /// r: reverse the data direction. A path runs from its last point to
+    /// its first; a ring runs the other way round. A selected lamp stays the same physical lamp.
     pub fn reverse(&mut self) {
         let targets = self.edit_targets();
         if targets.is_empty() {
             self.notice = Some(Notice::refused(
                 "Nothing to reverse",
                 "nothing is selected",
-                "select a line or a ring; r reverses which end the data enters",
+                "select a path or a ring; r reverses which end the data enters",
             ));
             return;
         }
@@ -251,7 +251,7 @@ impl Editor {
                     "a {} has no direction of its own",
                     self.project.kind_word(t)
                 ),
-                "select a line or a ring; r reverses which end the data enters",
+                "select a path or a ring; r reverses which end the data enters",
             ));
             return;
         }
@@ -260,7 +260,7 @@ impl Editor {
             match t {
                 Target::Component(id) => {
                     match self.project.component_mut(id).map(|c| &mut c.kind) {
-                        Some(ComponentKind::Line { from, to, .. }) => std::mem::swap(from, to),
+                        Some(ComponentKind::Path { points, .. }) => points.reverse(),
                         Some(ComponentKind::Circle { rings, .. }) => {
                             rings.iter_mut().for_each(|r| r.reversed = !r.reversed)
                         }
@@ -283,10 +283,10 @@ impl Editor {
                 if n == 0 {
                     continue;
                 }
-                let line = f
+                let path = f
                     .component(&object.component)
                     .is_some_and(|c| c.is_single_object());
-                *index = if line {
+                *index = if path {
                     n - 1 - *index
                 } else {
                     (n - *index) % n
@@ -318,7 +318,7 @@ impl Editor {
 }
 
 impl crate::Project {
-    /// Lines, circles, rings and lamps have a data direction; groups,
+    /// Paths, circles, rings and lamps have a data direction; groups,
     /// nodes and ports don't.
     pub fn has_direction(&self, t: &Target) -> bool {
         match t {

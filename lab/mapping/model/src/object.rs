@@ -1,11 +1,11 @@
 //! Objects: what components produce. Derived, never stored.
 //!
 //! An object has lamps. Its id is its component's id plus a key the
-//! component chose (`circle1` + `r2`). A line's object key is `line`, and
-//! since a line is its own object the user never sees that key.
+//! component chose (`circle1` + `r2`). A path's object key is `path`, and
+//! since a path is its own object the user never sees that key.
 
 use crate::component::{Component, ComponentId, ComponentKind};
-use crate::geom::Vec2;
+use crate::geom::{Vec2, along_polyline, polyline_length};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ObjectId {
@@ -39,8 +39,14 @@ pub struct Object {
 /// The drawn geometry of an object, for strokes and hit testing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectShape {
-    Segment { from: Vec2, to: Vec2 },
-    Ring { center: Vec2, radius: f64 },
+    /// A path's points, first to last.
+    Polyline {
+        points: Vec<Vec2>,
+    },
+    Ring {
+        center: Vec2,
+        radius: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -51,29 +57,13 @@ pub struct Lamp {
 /// The objects one component makes, in authoring order. Groups make none.
 pub fn objects_of(component: &Component) -> Vec<Object> {
     match &component.kind {
-        ComponentKind::Line { from, to, lamps } => {
-            let n = *lamps;
-            let lamps = (0..n)
-                .map(|i| {
-                    let t = if n == 1 {
-                        0.5
-                    } else {
-                        i as f64 / (n - 1) as f64
-                    };
-                    Lamp {
-                        pos: from.lerp(*to, t),
-                    }
-                })
-                .collect();
-            vec![Object {
-                id: ObjectId::new(&component.id, "line"),
-                lamps,
-                shape: ObjectShape::Segment {
-                    from: *from,
-                    to: *to,
-                },
-            }]
-        }
+        ComponentKind::Path { points, lamps } => vec![Object {
+            id: ObjectId::new(&component.id, "path"),
+            lamps: lamps_along(points, *lamps),
+            shape: ObjectShape::Polyline {
+                points: points.clone(),
+            },
+        }],
         ComponentKind::Circle { center, rings, .. } => rings
             .iter()
             .map(|ring| {
@@ -101,4 +91,20 @@ pub fn objects_of(component: &Component) -> Vec<Object> {
             .collect(),
         ComponentKind::Group { .. } => Vec::new(),
     }
+}
+
+/// `n` lamps spread evenly along a polyline by arc length: the first on its
+/// first point, the last on its last. One lamp sits halfway along.
+pub fn lamps_along(points: &[Vec2], n: u32) -> Vec<Lamp> {
+    let length = polyline_length(points);
+    (0..n)
+        .filter_map(|i| {
+            let t = if n == 1 {
+                0.5
+            } else {
+                i as f64 / (n - 1) as f64
+            };
+            along_polyline(points, t * length).map(|(pos, _)| Lamp { pos })
+        })
+        .collect()
 }

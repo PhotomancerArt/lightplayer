@@ -17,15 +17,24 @@
 //! (`Edge::curve`), so hovering finds exactly what is drawn.
 //!
 //! The board (D16, D44): each port row shows its pixels as the simulated
-//! board has them (`Editor::device_frame`). While they move on their own —
-//! a breathing selection, a drag being drawn — a clock ticks at ~30 fps and
-//! only the pixel layer redraws.
+//! board has them (`Editor::device_frame`), and every lamp on the canvas is
+//! drawn in its own pixel's colour from the same frame, so the drawing and
+//! the strip read as one. While they move on their own — a selection's
+//! pattern, a drawing in progress — a clock ticks at ~30 fps and only the
+//! pixel and lamp layers redraw.
+//!
+//! Inside each fixture its wiring is drawn too (`Project::data_path`): a
+//! quiet dashed wire from each object's last lamp to the next one's first,
+//! and an "in" where a port's data enters. Handles (`handle.rs`) are small
+//! squares on the selection.
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Camera, Component, ComponentId, Editor, Gesture, NodeId, NodeKind, Object, ObjectShape,
-    Project, Rect, Target, Vec2,
+    Camera, Component, ComponentId, DeviceFrame, Editor, Gesture, HandleKind, NodeId, NodeKind,
+    Object, ObjectId, ObjectShape, Project, Rect, SizeEdge, Target, Tool, Vec2,
     area::{FRAME_TITLE_PX, title_width},
+    geom::{along_polyline, polyline_length},
+    handle::HANDLE_PX,
     layout::{CARD_HEADER, CARD_ROW},
     object::objects_of,
 };
@@ -45,6 +54,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     // The board's clock. It only advances while the pixels move, so a
     // still board costs no redraws.
     let mut now = use_signal(|| 0.0_f64);
+    // One frame for both layers that show it (the port rows and the
+    // lamps). Canvas never reads it, so a tick redraws only those layers.
+    let frame = use_memo(move || ed.read().device_frame(now()));
     use_future(move || async move {
         loop {
             gloo_timers::future::TimeoutFuture::new(TICK_MS).await;
@@ -193,18 +205,64 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         }
     }
 
-    let objects: Vec<ObjectView> = f
-        .placed_objects()
-        .into_iter()
-        .map(|(fid, o)| object_view(f, &cam, &fid, &o, &e.selection, context.as_ref()))
+    let placed = f.placed_objects();
+    let objects: Vec<ObjectView> = placed
+        .iter()
+        .map(|(fid, o)| object_view(f, &cam, fid, o, &e.selection, context.as_ref()))
         .collect();
-    // A draft goes into the fixture it was started in.
-    let draft_bounds = match &e.gesture {
-        Gesture::Drawing { start_world } => {
-            f.fixture_at(*start_world).and_then(|id| f.node_rect(&id))
+    // Every lamp, drawn by the board layer in its pixel's colour.
+    let lamp_r = lamp_radius(&cam);
+    let mut lamp_dots: Vec<LampDot> = Vec::new();
+    for ((fid, o), view) in placed.iter().zip(&objects) {
+        let bounds = f.node_rect(fid);
+        for (i, l) in o.lamps.iter().enumerate() {
+            lamp_dots.push(LampDot {
+                object: o.id.clone(),
+                index: i as u32,
+                at: cam.to_screen(l.pos),
+                inside: bounds.is_some_and(|b| b.contains(l.pos)),
+                dimmed: view.class.contains("obj-dimmed"),
+            });
         }
-        _ => None,
-    };
+    }
+    // The wiring inside each fixture; bright where you're working.
+    let mut wires: Vec<WireView> = Vec::new();
+    for n in f.fixtures() {
+        let on = open.contains(&n.id) || e.selection.contains(&Target::Node(n.id.clone()));
+        let dp = f.data_path(&n.id);
+        for (a, b) in dp.links {
+            wires.push(WireView::link(
+                cam.to_screen(a),
+                cam.to_screen(b),
+                lamp_r,
+                on,
+            ));
+        }
+        for entry in dp.entries {
+            wires.push(WireView::entry(
+                cam.to_screen(entry.at),
+                entry.along,
+                lamp_r,
+                on,
+            ));
+        }
+    }
+    // A draft goes into the fixture it starts in.
+    let draft_bounds = e.draft_fixture().and_then(|id| f.node_rect(&id));
+    // The points of a path being clicked out.
+    let draft_points: Vec<Vec2> = e.path_draft.iter().map(|p| cam.to_screen(*p)).collect();
+    // The selection's handles, the hovered or dragged one marked.
+    let hovered_handle = e.hover_handle().map(|h| h.kind);
+    let dragged_handle = e.dragged_handle().cloned();
+    let handles: Vec<(Rect, &'static str)> = e
+        .handles()
+        .into_iter()
+        .map(|h| {
+            let on = Some(&h.kind) == hovered_handle.as_ref()
+                || Some(&h.kind) == dragged_handle.as_ref();
+            (h.rect(&cam), if on { "handle handle-on" } else { "handle" })
+        })
+        .collect();
     let draft: Vec<ObjectView> = e
         .draft()
         .map(|kind| {
@@ -224,6 +282,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             let top = a.top();
             outlines.push(Outline {
                 path: a.outline_path(),
+                stroke: a.stroke_width(),
                 class,
                 label: label.then(|| (f.label(t), top)),
             });
@@ -265,11 +324,24 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     });
     let box_rect = e.selection_box().map(|r| screen_rect(&cam, r));
     let note = e.cursor_note().zip(e.pointer);
+    let handle_cursor = dragged_handle
+        .as_ref()
+        .or(hovered_handle.as_ref())
+        .map(|k| match k {
+            HandleKind::PathPoint { .. } => "move",
+            HandleKind::RingRadius { .. } => "ew-resize",
+            HandleKind::FixtureSize { edge, .. } => match edge {
+                SizeEdge::Corner => "nwse-resize",
+                SizeEdge::Right => "ew-resize",
+                SizeEdge::Bottom => "ns-resize",
+            },
+        });
     let cursor = match (&e.gesture, e.space_held, e.tool) {
         (Gesture::Panning { .. }, _, _) => "grabbing",
         (_, true, _) => "grab",
+        _ if handle_cursor.is_some() => handle_cursor.unwrap_or_default(),
         (Gesture::Moving { .. }, _, _) => "move",
-        (_, _, lab_mapping_model::Tool::Line | lab_mapping_model::Tool::Circle) => "crosshair",
+        (_, _, Tool::Path | Tool::Circle) => "crosshair",
         _ => "default",
     };
     let vw = e.viewport.x;
@@ -370,7 +442,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         }
                     }
                 }
-                BoardPixels { ed, now, rows: pixel_rows }
+                BoardPixels { frame, rows: pixel_rows }
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
@@ -385,27 +457,79 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         }
                     }
                 }
-                for (i, o) in objects.iter().chain(draft.iter()).enumerate() {
+                for (i, w) in wires.iter().enumerate() {
+                    g { key: "w{i}", class: if w.on { "wire wire-on" } else { "wire" },
+                        path { class: "wire-line", d: "{w.line}" }
+                        path { class: "wire-arrow", d: "{w.arrow}" }
+                        if let Some(at) = w.label {
+                            text { class: "wire-in", x: "{at.x}", y: "{at.y}", text_anchor: "middle", "in" }
+                        }
+                    }
+                }
+                for (i, o) in objects.iter().enumerate() {
                     g { key: "{i}", class: "{o.class}",
                         {stroke(o)}
                         {arrow(o)}
-                        for (j, (p, c)) in o.lamps.iter().enumerate() {
-                            circle { key: "{j}", class: "{c}", cx: "{p.x}", cy: "{p.y}", r: "{o.lamp_r}" }
-                        }
                         if let Some(p) = o.lamps.first() {
                             circle { class: "lamp-start", cx: "{p.0.x}", cy: "{p.0.y}", r: "{o.lamp_r + 3.0}" }
                         }
                     }
                 }
+                BoardLamps { frame, lamps: lamp_dots, r: lamp_r }
+                for (i, o) in draft.iter().enumerate() {
+                    g { key: "d{i}", class: "{o.class}",
+                        {stroke(o)}
+                        {arrow(o)}
+                        for (j, (p, c)) in o.lamps.iter().enumerate() {
+                            circle { key: "{j}", class: "{c}", cx: "{p.x}", cy: "{p.y}", r: "{o.lamp_r}" }
+                        }
+                    }
+                }
+                for (i, p) in draft_points.iter().enumerate() {
+                    rect {
+                        key: "dp{i}",
+                        class: "draft-point",
+                        x: "{p.x - HANDLE_PX}", y: "{p.y - HANDLE_PX}",
+                        width: "{2.0 * HANDLE_PX}", height: "{2.0 * HANDLE_PX}",
+                    }
+                }
                 for (i, p) in carried.iter().enumerate() {
-                    circle { key: "k{i}", class: "lamp-ring-port", cx: "{p.x}", cy: "{p.y}", r: "{lamp_radius(&cam) + 2.5}" }
+                    circle { key: "k{i}", class: "lamp-ring-port", cx: "{p.x}", cy: "{p.y}", r: "{lamp_r + 2.5}" }
                 }
                 for (i, o) in outlines.iter().enumerate() {
                     g { key: "o{i}",
-                        path { class: "{o.class}", d: "{o.path}", fill_rule: "evenodd" }
+                        if let Some(w) = o.stroke {
+                            // A path's area: a band round its polyline. The
+                            // band is one stroke; its edge is a wider stroke
+                            // with the band masked out of it.
+                            mask {
+                                id: "om{i}",
+                                mask_units: "userSpaceOnUse",
+                                x: "0", y: "0", width: "{vw}", height: "{vh}",
+                                rect { x: "0", y: "0", width: "{vw}", height: "{vh}", fill: "white" }
+                                path { class: "outline-mask", d: "{o.path}", style: "stroke-width: {w}px" }
+                            }
+                            path { class: "{o.class}-band", d: "{o.path}", style: "stroke-width: {w}px" }
+                            path {
+                                class: "{o.class}-edge",
+                                d: "{o.path}",
+                                mask: "url(#om{i})",
+                                style: "stroke-width: {w + 3.0}px",
+                            }
+                        } else {
+                            path { class: "{o.class}", d: "{o.path}", fill_rule: "evenodd" }
+                        }
                         if let Some((label, at)) = &o.label {
                             text { class: "{o.class}-label", x: "{at.x}", y: "{at.y - 5.0}", text_anchor: "middle", "{label}" }
                         }
+                    }
+                }
+                for (i, (r, class)) in handles.iter().enumerate() {
+                    rect {
+                        key: "h{i}",
+                        class: "{class}",
+                        x: "{r.min.x}", y: "{r.min.y}",
+                        width: "{r.width()}", height: "{r.height()}",
                     }
                 }
                 if let Some(r) = box_rect {
@@ -419,6 +543,11 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     if let Some(b) = input::button(&evt) {
                         evt.prevent_default();
                         ed.write().pointer_down(input::point(&evt), b, input::mods(evt.modifiers()));
+                    }
+                },
+                ondoubleclick: move |evt| {
+                    if ed.write().double_click(input::point(&evt), input::mods(evt.modifiers())) {
+                        evt.prevent_default();
                     }
                 },
                 onwheel: move |evt| {
@@ -510,8 +639,8 @@ const GAP_PIXEL_PX: f64 = 4.0;
 /// component, so the clock's ticks redraw only this layer, not the canvas.
 /// Drawn over the cards and never dimmed with them: the LEDs are the truth.
 #[component]
-fn BoardPixels(ed: Signal<Editor>, now: Signal<f64>, rows: Vec<PixelRow>) -> Element {
-    let frame = ed.read().device_frame(now());
+fn BoardPixels(frame: Memo<DeviceFrame>, rows: Vec<PixelRow>) -> Element {
+    let frame = frame.read();
     let mut squares: Vec<(Rect, String)> = Vec::new();
     for row in &rows {
         let Some(pixels) = frame.port(&row.output, &row.key) else {
@@ -547,6 +676,106 @@ fn BoardPixels(ed: Signal<Editor>, now: Signal<f64>, rows: Vec<PixelRow>) -> Ele
     }
 }
 
+/// One lamp on the canvas, for the board layer to colour.
+#[derive(Clone, PartialEq)]
+struct LampDot {
+    object: ObjectId,
+    index: u32,
+    at: Vec2,
+    /// Inside its fixture's box: only these ever light (D4).
+    inside: bool,
+    /// Outside the level you're working in.
+    dimmed: bool,
+}
+
+/// Every lamp, in its pixel's colour in the same frame the port rows show.
+/// A lamp that lights nothing (unpatched, or outside its box) is a dim
+/// hollow dot.
+#[component]
+fn BoardLamps(frame: Memo<DeviceFrame>, lamps: Vec<LampDot>, r: f64) -> Element {
+    let frame = frame.read();
+    let dots: Vec<(Vec2, Option<String>, bool)> = lamps
+        .iter()
+        .map(|l| {
+            let fill = l
+                .inside
+                .then(|| frame.lamp(&l.object, l.index))
+                .flatten()
+                .map(|px| format!("rgb({},{},{})", px.r, px.g, px.b));
+            (l.at, fill, l.dimmed)
+        })
+        .collect();
+    rsx! {
+        g { class: "board-lamps",
+            for (i, (at, fill, dimmed)) in dots.into_iter().enumerate() {
+                if let Some(fill) = fill {
+                    circle {
+                        key: "{i}",
+                        class: if dimmed { "lamp-lit lamp-dimmed" } else { "lamp-lit" },
+                        cx: "{at.x}", cy: "{at.y}", r: "{r}",
+                        fill: "{fill}",
+                    }
+                } else {
+                    circle {
+                        key: "{i}",
+                        class: if dimmed { "lamp-dark lamp-dimmed" } else { "lamp-dark" },
+                        cx: "{at.x}", cy: "{at.y}", r: "{r}",
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One stretch of a fixture's wiring, on screen: a dashed wire from one
+/// object's last lamp to the next one's first, or the short lead where a
+/// port's data comes in.
+struct WireView {
+    line: String,
+    arrow: String,
+    /// Where "in" goes, for an entry.
+    label: Option<Vec2>,
+    /// The fixture you're working in: drawn brighter.
+    on: bool,
+}
+
+impl WireView {
+    fn link(a: Vec2, b: Vec2, lamp_r: f64, on: bool) -> Self {
+        let d = b - a;
+        let len = d.length().max(1e-9);
+        let u = d * (1.0 / len);
+        // Stop short of the lamps, so the wire reads as between them.
+        let from = a + u * (lamp_r + 1.5).min(len / 3.0);
+        let tip = b - u * (lamp_r + 1.5).min(len / 3.0);
+        WireView {
+            line: format!("M{},{} L{},{}", from.x, from.y, tip.x, tip.y),
+            arrow: arrowhead(tip, u),
+            label: None,
+            on,
+        }
+    }
+
+    fn entry(at: Vec2, along: Vec2, lamp_r: f64, on: bool) -> Self {
+        let tip = at - along * (lamp_r + 1.5);
+        let tail = at - along * (lamp_r + 16.0);
+        let label = at - along * (lamp_r + 23.0) + Vec2::new(0.0, 3.5);
+        WireView {
+            line: format!("M{},{} L{},{}", tail.x, tail.y, tip.x, tip.y),
+            arrow: arrowhead(tip, along),
+            label: Some(label),
+            on,
+        }
+    }
+}
+
+/// A small arrowhead with its tip at `tip`, pointing along `u`.
+fn arrowhead(tip: Vec2, u: Vec2) -> String {
+    let n = Vec2::new(-u.y, u.x);
+    let l = tip - u * 5.0 + n * 2.6;
+    let r = tip - u * 5.0 - n * 2.6;
+    format!("M{},{} L{},{} L{},{} Z", tip.x, tip.y, l.x, l.y, r.x, r.y)
+}
+
 /// Seconds since the page started: the board's clock.
 fn seconds() -> f64 {
     web_sys::window()
@@ -567,7 +796,7 @@ struct ObjectView {
 }
 
 enum ShapeView {
-    Segment(Vec2, Vec2),
+    Polyline(Vec<Vec2>),
     Ring(Vec2, f64),
 }
 
@@ -592,6 +821,8 @@ fn menu_place(at: Vec2, vw: f64, vh: f64) -> String {
 /// A selected, hovered or context outline: the thing's area as a path.
 struct Outline {
     path: String,
+    /// A path's area is its polyline stroked this wide (`Area::stroke_width`).
+    stroke: Option<f64>,
     class: &'static str,
     /// Its name, and the top of its area to put it at.
     label: Option<(String, Vec2)>,
@@ -616,6 +847,8 @@ fn object_view(
         _ => "obj",
     };
     let bounds = f.node_rect(fixture);
+    // The lamps themselves are drawn by the board layer; these place the
+    // start ring and the direction arrow.
     let lamps = lamp_views(cam, o, bounds);
     ObjectView {
         class,
@@ -650,8 +883,8 @@ fn lamp_views(cam: &Camera, o: &Object, bounds: Option<Rect>) -> Vec<(Vec2, &'st
 
 fn shape_view(cam: &Camera, s: &ObjectShape) -> ShapeView {
     match s {
-        ObjectShape::Segment { from, to } => {
-            ShapeView::Segment(cam.to_screen(*from), cam.to_screen(*to))
+        ObjectShape::Polyline { points } => {
+            ShapeView::Polyline(points.iter().map(|p| cam.to_screen(*p)).collect())
         }
         ObjectShape::Ring { center, radius } => {
             ShapeView::Ring(cam.to_screen(*center), radius * cam.scale)
@@ -665,9 +898,14 @@ fn lamp_radius(cam: &Camera) -> f64 {
 }
 
 fn stroke(o: &ObjectView) -> Element {
-    match o.shape {
-        ShapeView::Segment(a, b) => {
-            rsx! { line { class: "stroke", x1: "{a.x}", y1: "{a.y}", x2: "{b.x}", y2: "{b.y}" } }
+    match &o.shape {
+        ShapeView::Polyline(points) => {
+            let d: String = points
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("{}{},{} ", if i == 0 { "M" } else { "L" }, p.x, p.y))
+                .collect();
+            rsx! { path { class: "stroke", d: "{d}" } }
         }
         ShapeView::Ring(c, r) => {
             rsx! { circle { class: "stroke", cx: "{c.x}", cy: "{c.y}", r: "{r}" } }
@@ -675,15 +913,20 @@ fn stroke(o: &ObjectView) -> Element {
     }
 }
 
-/// A small arrowhead showing which way the data runs: halfway along a line,
-/// just after lamp 0 on a ring.
+/// A small arrowhead showing which way the data runs: halfway along a
+/// path, just after the top on a ring.
 fn arrow(o: &ObjectView) -> Element {
-    let (at, dir) = match (&o.shape, o.lamps.as_slice()) {
-        (ShapeView::Segment(a, b), _) => (a.lerp(*b, 0.5), *b - *a),
-        (ShapeView::Ring(..), [first, second, ..]) => {
-            (first.0.lerp(second.0, 0.5), second.0 - first.0)
+    let (at, dir) = match &o.shape {
+        ShapeView::Polyline(points) => {
+            match along_polyline(points, polyline_length(points) / 2.0) {
+                Some(p) => p,
+                None => return rsx! {},
+            }
         }
-        _ => return rsx! {},
+        ShapeView::Ring(..) => match o.lamps.as_slice() {
+            [first, second, ..] => (first.0.lerp(second.0, 0.5), second.0 - first.0),
+            _ => return rsx! {},
+        },
     };
     let len = dir.length();
     if len < 1e-6 {

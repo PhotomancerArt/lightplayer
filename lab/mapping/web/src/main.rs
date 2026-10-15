@@ -42,7 +42,7 @@ fn App() -> Element {
                 }
                 div { class: "tools",
                     ToolButton { ed, tool: Tool::Select, key_label: "V", current: tool }
-                    ToolButton { ed, tool: Tool::Line, key_label: "L", current: tool }
+                    ToolButton { ed, tool: Tool::Path, key_label: "P", current: tool }
                     ToolButton { ed, tool: Tool::Circle, key_label: "O", current: tool }
                 }
                 div { class: "tools",

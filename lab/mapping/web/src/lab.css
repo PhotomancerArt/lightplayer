@@ -113,23 +113,55 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .edge-quiet .edge-label { opacity: 0.45; }
 .lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
 
-.obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; }
+.obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .obj .arrow { fill: var(--text-subtle); }
-.obj .lamp { fill: var(--lamp); opacity: 0.8; }
-.obj .lamp-outside { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.6; }
 .obj .lamp-start { fill: none; stroke: var(--text-subtle); stroke-width: 1; }
 .obj-selected .stroke { stroke: var(--selection); }
-.obj-selected .lamp { fill: #fff6dc; opacity: 1; }
 .obj-selected .arrow { fill: var(--selection); }
 .obj-dimmed { opacity: 0.28; }
+/* A draft's lamps light white on the board, so here too. */
 .obj-draft .stroke { stroke: var(--hover); stroke-dasharray: 4 3; }
-.obj-draft .lamp { fill: var(--lamp); opacity: 1; }
+.obj-draft .lamp { fill: #fff; }
+.obj-draft .lamp-outside { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.6; }
+.draft-point { fill: var(--bg); stroke: var(--hover); stroke-width: 1.2; }
 
-.outline-selected { fill: var(--selection-bg); stroke: var(--selection); stroke-width: 1.5; }
+/* Lamps, in their pixel's colour. A faint rim keeps an unlit (black) lamp
+   visible; a lamp that lights nothing is a dim hollow dot. */
+.lamp-lit { stroke: rgba(255, 255, 255, 0.3); stroke-width: 0.6; }
+.lamp-dark { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.5; }
+.lamp-dimmed { opacity: 0.28; }
+.lamp-dark.lamp-dimmed { opacity: 0.18; }
+
+/* The data path inside a fixture: quiet, brighter where you're working. */
+.wire-line { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.45; }
+.wire-arrow { fill: var(--text-subtle); opacity: 0.45; }
+.wire-in { fill: var(--text-subtle); font: 9px var(--mono); opacity: 0.55; }
+.wire-on .wire-line { stroke: var(--text-muted); opacity: 0.95; }
+.wire-on .wire-arrow { fill: var(--text-muted); opacity: 0.95; }
+.wire-on .wire-in { fill: var(--text-muted); opacity: 0.95; }
+
+/* Handles: small squares on the selection; the one under the pointer (or
+   being dragged) outlined. */
+.handle { fill: var(--bg); stroke: var(--selection); stroke-width: 1.2; }
+.handle-on { stroke: var(--hover); stroke-width: 2; fill: rgba(140, 170, 255, 0.25); }
+
+/* Outlines sit over coloured lamps: a dark halo keeps them readable. */
+.outline-selected { fill: var(--selection-bg); stroke: var(--selection); stroke-width: 1.5; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
 .outline-selected-label { fill: var(--selection); font: 600 11px var(--font); }
 .outline-context { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 5 4; }
 .outline-context-label { fill: var(--text-subtle); font: 11px var(--font); }
 .outline-hover { fill: rgba(140, 170, 255, 0.07); stroke: var(--hover); stroke-width: 1; }
+/* A path's area: its polyline stroked wide (the band), and a wider stroke
+   with the band masked out (the edge). */
+.outline-mask { fill: none; stroke: #000; stroke-linecap: round; stroke-linejoin: round; }
+.outline-selected-band, .outline-hover-band, .outline-context-band { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.outline-selected-edge, .outline-hover-edge, .outline-context-edge { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.outline-selected-band { stroke: var(--selection-bg); }
+.outline-selected-edge { stroke: var(--selection); filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.9)); }
+.outline-hover-band { stroke: rgba(140, 170, 255, 0.07); }
+.outline-hover-edge { stroke: var(--hover); }
+.outline-context-band { stroke: none; }
+.outline-context-edge { stroke: var(--text-subtle); stroke-dasharray: 5 4; }
 
 .lamp-ring-selected { fill: none; stroke: var(--selection); stroke-width: 2; }
 .lamp-ring-hover { fill: none; stroke: var(--hover); stroke-width: 1.2; }

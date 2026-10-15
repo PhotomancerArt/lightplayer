@@ -2,15 +2,15 @@
 //!
 //! A component *describes* the properties of each thing it makes — an id, a
 //! label, a kind (count, number, flag) — and reads and writes their values.
-//! The inspector knows nothing about lines or circles: it lays out whatever
+//! The inspector knows nothing about paths or circles: it lays out whatever
 //! descriptors it is handed. A new component kind adds descriptors, never
 //! inspector code.
 //!
 //! **Many things selected:** the inspector shows the properties they ALL
 //! have (same id), with a combined value ("mixed 24–40"), and an edit
-//! applies to every one. Select five lines, press +, and each gains a lamp.
+//! applies to every one. Select five paths, press +, and each gains a lamp.
 //!
-//! Lamps have no properties of their own; a lamp's count is its line's.
+//! Lamps have no properties of their own; a lamp's count is its path's.
 
 use crate::project::Project;
 use crate::target::Target;

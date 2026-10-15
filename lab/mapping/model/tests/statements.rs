@@ -5,19 +5,21 @@
 //!
 //! The project is `Project::seed()`, "desk", laid out in columns:
 //! - module `tail rig`, holding
-//!   - fixture `tail`: group1 (line1 out, line2 back), lines at x = 14 and
-//!     22, auto-patched to `tail out`;
+//!   - fixture `tail` (82 square): group1 (path1 out, path2 back),
+//!     straight paths at x = 37 and 45 from y = 12 to 70, auto-patched to
+//!     `tail out`;
 //!   - output `tail out`: one port, GPIO 10, 60 px;
-//! - fixture `ring display`: circle1 at (35, 35), rings r1 (outer, 40
-//!   lamps) and r2 (inner, 24 lamps), auto-patched to `main`;
-//! - fixture `strip`: line3, (6, 10) → (74, 10), 30 lamps, auto-patched to
-//!   `main` after the ring display;
+//! - fixture `ring display` (70 square): circle1 at (35, 35), rings r1
+//!   (outer, 40 lamps) and r2 (inner, 24 lamps), auto-patched to `main`;
+//! - fixture `strip` (80 square): path3, (6, 40) → (74, 40), 30 lamps,
+//!   auto-patched to `main` after the ring display;
 //! - output `main`: ports D0 (64 px) and D1 (30 px);
-//! - fixture `scarf`: empty, to draw into, auto-patched to
+//! - fixture `scarf` (100 square, as every new fixture is): empty, to draw
+//!   into, auto-patched to
 //! - output `scarf out`: one port, D10, 60 px.
 //!
 //! The board is simulated (`device_frame`): times are in seconds, and
-//! `CREST` is the top of the selection's breath.
+//! `CREST` is the top of a selected lamp's breath.
 //!
 //! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
 //! turns them into the canvas's.
@@ -70,7 +72,7 @@ fn select_all_climbs_to_everything_from_anywhere() {
     key(&mut e, Key::Char('a'), cmd());
     assert_eq!(
         e.selection,
-        vec![comp("group1"), comp("circle1"), comp("line3")]
+        vec![comp("group1"), comp("circle1"), comp("path3")]
     );
     key(&mut e, Key::Char('a'), cmd());
     assert_eq!(e.selection, e.project.children(None), "the nodes");
@@ -82,11 +84,11 @@ fn select_all_climbs_to_everything_from_anywhere() {
 #[test]
 fn deleting_a_lamp_is_refused_with_a_reason() {
     let mut e = editor();
-    e.select(vec![lamp("line3", "line", 4)]);
+    e.select(vec![lamp("path3", "path", 4)]);
     key(&mut e, Key::Delete, none());
     let n = e.notice.clone().expect("a notice");
     assert_eq!(n.kind, NoticeKind::Refused);
-    assert!(n.why.unwrap().contains("line3"));
+    assert!(n.why.unwrap().contains("path3"));
     assert!(n.help.unwrap().contains("−"));
     assert_eq!(
         e.project.lamp_count(),
@@ -157,17 +159,17 @@ fn clicking_again_goes_in_one_level() {
 #[test]
 fn inside_a_group_a_click_selects_a_sibling() {
     let mut e = editor();
-    e.select(vec![comp("line1")]);
-    click_lamp(&mut e, "line2", "line", 10, none());
-    assert_eq!(e.selection, vec![comp("line2")]);
+    e.select(vec![comp("path1")]);
+    click_lamp(&mut e, "path2", "path", 10, none());
+    assert_eq!(e.selection, vec![comp("path2")]);
 }
 
 /// ⌘-click selects the lamp directly, from anywhere.
 #[test]
 fn command_click_selects_the_lamp_directly() {
     let mut e = editor();
-    click_lamp(&mut e, "line2", "line", 10, cmd());
-    assert_eq!(e.selection, vec![lamp("line2", "line", 10)]);
+    click_lamp(&mut e, "path2", "path", 10, cmd());
+    assert_eq!(e.selection, vec![lamp("path2", "path", 10)]);
 }
 
 /// Clicking empty space clears the selection.
@@ -189,13 +191,13 @@ fn hover_shows_what_a_click_selects() {
         vec![comp("circle1")],
         vec![ring("circle1", "r1")],
         vec![lamp("circle1", "r1", 2)],
-        vec![comp("line1")],
+        vec![comp("path1")],
     ];
     let probes = [
         ("circle1", "r2", 5),
         ("circle1", "r1", 2),
-        ("line1", "line", 3),
-        ("line3", "line", 0),
+        ("path1", "path", 3),
+        ("path3", "path", 0),
     ];
     for start in starts {
         for (c, k, i) in probes {
@@ -232,16 +234,16 @@ fn escape_goes_up_a_level() {
     assert!(e.selection.is_empty());
 }
 
-/// Arrow keys walk the lamps of a line one at a time.
+/// Arrow keys walk the lamps of a path one at a time.
 #[test]
 fn arrows_walk_the_lamps() {
     let mut e = editor();
-    e.select(vec![lamp("line3", "line", 0)]);
+    e.select(vec![lamp("path3", "path", 0)]);
     key(&mut e, Key::Right, none());
     key(&mut e, Key::Right, none());
-    assert_eq!(e.selection, vec![lamp("line3", "line", 2)]);
+    assert_eq!(e.selection, vec![lamp("path3", "path", 2)]);
     key(&mut e, Key::Left, none());
-    assert_eq!(e.selection, vec![lamp("line3", "line", 1)]);
+    assert_eq!(e.selection, vec![lamp("path3", "path", 1)]);
 }
 
 /// A box selects everything at the current level that it touches; with ⌥
@@ -252,8 +254,8 @@ fn box_touches_and_option_encloses() {
     // all of it.
     for (mods, want) in [(none(), vec![comp("group1")]), (alt(), vec![])] {
         let mut e = editor();
-        let a = e.camera.to_screen(place(&e, "tail", 5.0, 5.0));
-        let b = e.camera.to_screen(place(&e, "tail", 34.0, 40.0));
+        let a = e.camera.to_screen(place(&e, "tail", 28.0, 5.0));
+        let b = e.camera.to_screen(place(&e, "tail", 57.0, 40.0));
         e.pointer_down(a, Button::Primary, none());
         e.pointer_move(a + Vec2::new(10.0, 10.0), mods);
         e.pointer_move(b, mods);
@@ -268,8 +270,8 @@ fn box_touches_and_option_encloses() {
 #[test]
 fn empty_space_inside_a_group_selects_it() {
     let mut e = editor();
-    // Between the tail's two lines, x = 14 and x = 22.
-    let p = place(&e, "tail", 18.0, 40.0);
+    // Between the tail's two paths, x = 37 and x = 45.
+    let p = place(&e, "tail", 41.0, 40.0);
     click_at(&mut e, p, none());
     assert_eq!(e.selection, vec![comp("group1")]);
 }
@@ -288,7 +290,7 @@ fn the_middle_of_a_circle_selects_it() {
 /// it, nothing is hovered.
 #[test]
 fn the_outline_is_the_area_a_click_hits() {
-    for start in [vec![], vec![comp("circle1")], vec![comp("line1")]] {
+    for start in [vec![], vec![comp("circle1")], vec![comp("path1")]] {
         let mut e = editor();
         e.select(start.clone());
         let x = e.project.extent();
@@ -321,9 +323,9 @@ fn the_outline_is_the_area_a_click_hits() {
 #[test]
 fn option_click_cycles_through_overlaps() {
     let mut e = editor();
-    // A line crossing line3 at (40, 10).
-    cross_line3(&mut e);
-    let at = place(&e, "strip", 40.0, 10.0);
+    // A path crossing path3 at (40, 40).
+    cross_path3(&mut e);
+    let at = place(&e, "strip", 40.0, 40.0);
     click_at(&mut e, at, alt());
     let first = e.selection.clone();
     click_at(&mut e, at, alt());
@@ -331,7 +333,7 @@ fn option_click_cycles_through_overlaps() {
     click_at(&mut e, at, alt());
     assert_ne!(first, second);
     assert_eq!(e.selection, first, "round again");
-    let both = [comp("line3"), comp("line4")];
+    let both = [comp("path3"), comp("path4")];
     assert!(both.contains(&first[0]) && both.contains(&second[0]));
 }
 
@@ -340,11 +342,11 @@ fn option_click_cycles_through_overlaps() {
 #[test]
 fn the_cursor_note_names_overlaps() {
     let mut e = editor();
-    cross_line3(&mut e);
-    e.pointer_move(e.camera.to_screen(place(&e, "strip", 40.0, 10.0)), none());
+    cross_path3(&mut e);
+    e.pointer_move(e.camera.to_screen(place(&e, "strip", 40.0, 40.0)), none());
     let note = e.cursor_note().expect("a note");
     assert!(
-        note.contains("2 lines here") && note.contains("⌥ click") && note.contains("right-click"),
+        note.contains("2 paths here") && note.contains("⌥ click") && note.contains("right-click"),
         "{note}"
     );
 }
@@ -355,6 +357,10 @@ fn the_cursor_note_names_overlaps() {
 #[test]
 fn right_click_lists_whats_here() {
     let mut e = editor();
+    // Close enough that r2's lamps don't overlap on screen.
+    e.select(vec![fixture(&e, "ring display")]);
+    key(&mut e, Key::Char('2'), shift());
+    e.select(vec![]);
     let at = lamp_screen(&e, "circle1", "r2", 5);
     e.pointer_down(at, Button::Secondary, none());
     let menu = e.menu.clone().expect("a menu");
@@ -431,11 +437,11 @@ fn a_fixtures_size_is_a_property() {
 fn a_drag_survives_leaving_the_canvas() {
     let mut e = editor();
     // From the tail's bottom-left, up past the top of the canvas.
-    let a = e.camera.to_screen(place(&e, "tail", 5.0, 77.0));
+    let a = e.camera.to_screen(place(&e, "tail", 28.0, 77.0));
     e.pointer_down(a, Button::Primary, none());
     e.pointer_move(a + Vec2::new(10.0, -10.0), none());
     e.pointer_leave();
-    let outside = Vec2::new(e.camera.to_screen(place(&e, "tail", 30.0, 0.0)).x, -500.0);
+    let outside = Vec2::new(e.camera.to_screen(place(&e, "tail", 55.0, 0.0)).x, -500.0);
     e.pointer_move(outside, none());
     assert!(e.selection_box().is_some(), "the box is still there");
     e.pointer_up(outside, none());
@@ -452,7 +458,7 @@ fn layout_never_overlaps_nodes() {
     let rig = node_id(&e, "tail rig");
     let inner = e.project.add_module(Some(&rig), "spare").unwrap();
     e.project
-        .add_fixture(Some(&inner), "spare strip", Vec2::new(30.0, 10.0));
+        .add_fixture_sized(Some(&inner), "spare strip", Vec2::new(30.0, 10.0));
     let p = &e.project;
     let mut levels: Vec<Vec<&Node>> = vec![p.nodes.iter().collect()];
     for n in p.all_nodes() {
@@ -523,9 +529,9 @@ fn every_kind_of_node_selects_deletes_and_climbs_alike() {
 #[test]
 fn a_module_is_see_through() {
     let mut e = editor();
-    // Between the tail's two lines: group1, through the module and the
+    // Between the tail's two paths: group1, through the module and the
     // fixture.
-    let between = place(&e, "tail", 18.0, 40.0);
+    let between = place(&e, "tail", 41.0, 40.0);
     click_at(&mut e, between, none());
     assert_eq!(e.selection, vec![comp("group1")]);
     // The tail out card, inside the module.
@@ -581,7 +587,7 @@ fn the_auto_rule_fills_ports_in_order() {
     // One more lamp on the strip has nowhere to go: it is unpatched, not
     // squeezed in.
     let mut e = editor();
-    e.select(vec![comp("line3")]);
+    e.select(vec![comp("path3")]);
     key(&mut e, Key::Char('='), none());
     let patch = e.project.effective_patch();
     assert_eq!(patch.unpatched.len(), 1);
@@ -616,8 +622,8 @@ fn patch_edges_match_the_effective_patch() {
     );
     assert!(edges.iter().all(|x| x.bundled && x.active));
 
-    // Inside the tail: one edge per span, from each line to its port.
-    e.select(vec![comp("line2")]);
+    // Inside the tail: one edge per span, from each path to its port.
+    e.select(vec![comp("path2")]);
     let spans = e.project.effective_patch().spans;
     let tail = node_id(&e, "tail");
     let tail_out = node_id(&e, "tail out");
@@ -625,7 +631,7 @@ fn patch_edges_match_the_effective_patch() {
     let inside: Vec<&Edge> = all.iter().filter(|x| !x.bundled).collect();
     let tail_spans: Vec<_> = spans.iter().filter(|s| s.fixture == tail).collect();
     assert_eq!(inside.len(), tail_spans.len());
-    assert_eq!(inside[0].from, comp("line1"));
+    assert_eq!(inside[0].from, comp("path1"));
     assert_eq!(inside[0].to, port(&tail_out, "p1"));
     assert_eq!(inside[1].label, "lamps 0–24 → GPIO 10 @25");
     // The other fixtures stay bundled.
@@ -672,8 +678,8 @@ fn a_selected_port_highlights_its_lamps() {
     let e = editor();
     let main = node_id(&e, "main");
     let d1 = e.project.lamps_on_port(&main, "p2");
-    let line3 = ObjectId::new(&ComponentId::new("line3"), "line");
-    assert_eq!(d1, (0..30).map(|i| (line3.clone(), i)).collect::<Vec<_>>());
+    let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
+    assert_eq!(d1, (0..30).map(|i| (path3.clone(), i)).collect::<Vec<_>>());
     let d0 = e.project.lamps_on_port(&main, "p1");
     assert_eq!(d0.len(), 64);
     assert!(d0.iter().all(|(o, _)| o.component.as_str() == "circle1"));
@@ -740,16 +746,16 @@ fn enter_on_a_fixture_frames_it_with_its_outputs() {
 
 // ---- editing ---------------------------------------------------------------
 
-/// Changing a line's count keeps the selected lamp selected.
+/// Changing a path's count keeps the selected lamp selected.
 #[test]
 fn selection_survives_a_count_change() {
     let mut e = editor();
-    e.select(vec![lamp("line3", "line", 7)]);
+    e.select(vec![lamp("path3", "path", 7)]);
     key(&mut e, Key::Char('='), none());
-    assert_eq!(e.selection, vec![lamp("line3", "line", 7)]);
+    assert_eq!(e.selection, vec![lamp("path3", "path", 7)]);
     assert_eq!(
         e.project
-            .object(&ObjectId::new(&ComponentId::new("line3"), "line"))
+            .object(&ObjectId::new(&ComponentId::new("path3"), "path"))
             .unwrap()
             .lamps
             .len(),
@@ -757,14 +763,14 @@ fn selection_survives_a_count_change() {
     );
 }
 
-/// Shrinking a line past the selected lamp moves the selection to the new
+/// Shrinking a path past the selected lamp moves the selection to the new
 /// last lamp; it never vanishes.
 #[test]
 fn shrinking_past_the_selected_lamp_keeps_the_last_one() {
     let mut e = editor();
-    e.select(vec![lamp("line3", "line", 29)]);
+    e.select(vec![lamp("path3", "path", 29)]);
     key(&mut e, Key::Char('-'), none());
-    assert_eq!(e.selection, vec![lamp("line3", "line", 28)]);
+    assert_eq!(e.selection, vec![lamp("path3", "path", 28)]);
 }
 
 /// With many things selected, the inspector shows what they share, mixed
@@ -772,7 +778,7 @@ fn shrinking_past_the_selected_lamp_keeps_the_last_one() {
 #[test]
 fn inspector_edits_everything_selected() {
     let mut e = editor();
-    e.select(vec![comp("line1"), comp("line3"), ring("circle1", "r2")]);
+    e.select(vec![comp("path1"), comp("path3"), ring("circle1", "r2")]);
     let props = common_props(&e.project, &e.selection);
     let lamps = props
         .iter()
@@ -781,7 +787,7 @@ fn inspector_edits_everything_selected() {
     assert_eq!(lamps.value.describe(), "mixed 24–30");
     assert!(
         props.iter().all(|p| p.desc.id != "radius"),
-        "lines have no radius"
+        "paths have no radius"
     );
 
     e.edit_selection_prop("lamps", PropEdit::SetCount(12));
@@ -818,18 +824,18 @@ fn ring_edits_land_in_the_circle() {
     );
 }
 
-/// Reversing a line keeps the selected lamp on the same physical lamp.
+/// Reversing a path keeps the selected lamp on the same physical lamp.
 #[test]
 fn reverse_keeps_the_same_physical_lamp() {
     let mut e = editor();
-    e.select(vec![lamp("line3", "line", 2)]);
-    let before = lamp_pos(&e, "line3", "line", 2);
+    e.select(vec![lamp("path3", "path", 2)]);
+    let before = lamp_pos(&e, "path3", "path", 2);
     key(&mut e, Key::Char('r'), none());
     let Target::Lamp { index, .. } = e.selection[0].clone() else {
         panic!()
     };
     assert_eq!(index, 27);
-    assert!(lamp_pos(&e, "line3", "line", index).distance(before) < 1e-9);
+    assert!(lamp_pos(&e, "path3", "path", index).distance(before) < 1e-9);
 }
 
 /// Dragging a ring moves its whole circle.
@@ -854,24 +860,108 @@ fn dragging_a_ring_moves_its_circle() {
     assert!((center.x - 40.0).abs() < 1e-6, "{center:?}");
 }
 
-/// Drawing a line puts it in the fixture you start in, gives it one lamp
-/// every `spacing` units, selects it, and goes back to the select tool.
+/// Drawing a path puts it in the fixture its first point is in, gives it
+/// one lamp every `spacing` units of its length, selects it, and goes back
+/// to the select tool.
 #[test]
-fn drawing_a_line_counts_lamps_from_its_length() {
+fn drawing_a_path_counts_lamps_from_its_length() {
     let mut e = editor();
-    key(&mut e, Key::Char('l'), none());
-    let a = e.camera.to_screen(place(&e, "scarf", 10.0, 15.0));
-    let b = e.camera.to_screen(place(&e, "scarf", 34.0, 15.0));
-    e.pointer_down(a, Button::Primary, none());
-    e.pointer_move(b, none());
-    e.pointer_up(b, none());
+    draw_path(&mut e, "scarf", &[(10.0, 15.0), (34.0, 15.0)]);
     let Target::Component(id) = e.selection[0].clone() else {
         panic!()
     };
-    assert_eq!(id.as_str(), "line4", "ids are never reused");
+    assert_eq!(id.as_str(), "path4", "ids are never reused");
     assert_eq!(e.project.lamps_under(&e.selection[0]).len(), 11); // 24 / 2.4 + 1
     assert_eq!(e.tool, Tool::Select);
     assert_eq!(e.project.fixture_of(&id).unwrap().name, "scarf");
+}
+
+/// Clicking points with the path tool builds a path; double-click (or
+/// Enter) finishes it; Esc takes back one point.
+#[test]
+fn clicking_points_builds_a_path() {
+    let mut e = editor();
+    key(&mut e, Key::Char('p'), none());
+    assert_eq!(e.tool, Tool::Path);
+    for (x, y) in [(10.0, 10.0), (50.0, 10.0), (50.0, 50.0), (90.0, 90.0)] {
+        let at = place(&e, "scarf", x, y);
+        click_at(&mut e, at, none());
+    }
+    assert_eq!(e.path_draft.len(), 4);
+    // Esc takes back the last point; the rest stay.
+    key(&mut e, Key::Escape, none());
+    assert_eq!(e.path_draft.len(), 3);
+    assert_eq!(e.tool, Tool::Path, "still drawing");
+    // A double-click on the last point finishes: its two presses are one
+    // point.
+    let last = e.camera.to_screen(place(&e, "scarf", 50.0, 50.0));
+    e.pointer_down(last, Button::Primary, none());
+    e.pointer_up(last, none());
+    assert!(e.double_click(last, none()));
+    let Target::Component(id) = e.selection[0].clone() else {
+        panic!("the new path is selected")
+    };
+    let points = e.project.path_points(&id).unwrap();
+    let want = [(10.0, 10.0), (50.0, 10.0), (50.0, 50.0)];
+    assert_eq!(points.len(), want.len(), "{points:?}");
+    for (p, (x, y)) in points.iter().zip(want) {
+        assert!(p.distance(Vec2::new(x, y)) < 1e-9, "{points:?}");
+    }
+    assert_eq!(e.tool, Tool::Select);
+    assert!(e.path_draft.is_empty());
+
+    // Enter finishes too; L is the same tool as P.
+    key(&mut e, Key::Char('l'), none());
+    assert_eq!(e.tool, Tool::Path);
+    let at = place(&e, "scarf", 10.0, 80.0);
+    click_at(&mut e, at, none());
+    let at = place(&e, "scarf", 40.0, 80.0);
+    click_at(&mut e, at, none());
+    key(&mut e, Key::Enter, none());
+    assert_eq!(e.selection, vec![comp("path5")]);
+
+    // One point is no path: refused, and the draft is kept to go on from.
+    key(&mut e, Key::Char('p'), none());
+    let at = e.camera.to_screen(place(&e, "scarf", 70.0, 70.0));
+    e.pointer_down(at, Button::Primary, none());
+    e.pointer_down(at, Button::Primary, none());
+    e.double_click(at, none());
+    assert_eq!(e.notice.clone().unwrap().kind, NoticeKind::Refused);
+    assert_eq!(e.path_draft.len(), 1);
+    assert_eq!(e.tool, Tool::Path);
+    // Esc takes back that point, and Esc again leaves the tool.
+    key(&mut e, Key::Escape, none());
+    assert!(e.path_draft.is_empty());
+    key(&mut e, Key::Escape, none());
+    assert_eq!(e.tool, Tool::Select);
+}
+
+/// A path's lamps are spread evenly along its length, first on its first
+/// point and last on its last.
+#[test]
+fn a_paths_lamps_are_spread_along_its_length() {
+    let mut e = editor();
+    // An L: 30 across, then 18 down — 48 long, so 21 lamps 2.4 apart.
+    draw_path(&mut e, "scarf", &[(10.0, 10.0), (40.0, 10.0), (40.0, 28.0)]);
+    let Target::Component(id) = e.selection[0].clone() else {
+        panic!()
+    };
+    let lamps = e
+        .project
+        .object(&ObjectId::new(&id, "path"))
+        .unwrap()
+        .lamps
+        .iter()
+        .map(|l| l.pos)
+        .collect::<Vec<_>>();
+    assert_eq!(lamps.len(), 21);
+    let origin = place(&e, "scarf", 0.0, 0.0);
+    assert!(lamps[0].distance(origin + Vec2::new(10.0, 10.0)) < 1e-9);
+    assert!(lamps[20].distance(origin + Vec2::new(40.0, 28.0)) < 1e-9);
+    // Evenly along the path: lamp 12 is 28.8 along, on the first leg;
+    // lamp 13 is 31.2 along, 1.2 down the second.
+    assert!(lamps[12].distance(origin + Vec2::new(38.8, 10.0)) < 1e-9);
+    assert!(lamps[13].distance(origin + Vec2::new(40.0, 11.2)) < 1e-9);
 }
 
 /// Drawing that starts outside every fixture is refused, with where to
@@ -879,14 +969,135 @@ fn drawing_a_line_counts_lamps_from_its_length() {
 #[test]
 fn drawing_outside_every_fixture_is_refused() {
     let mut e = editor();
-    key(&mut e, Key::Char('l'), none());
+    key(&mut e, Key::Char('p'), none());
     let x = e.project.extent();
-    let a = e.camera.to_screen(Vec2::new(x.max.x + 20.0, x.min.y));
-    e.pointer_down(a, Button::Primary, none());
-    e.pointer_move(a + Vec2::new(80.0, 0.0), none());
-    e.pointer_up(a + Vec2::new(80.0, 0.0), none());
-    assert_eq!(e.notice.unwrap().kind, NoticeKind::Refused);
+    click_at(&mut e, Vec2::new(x.max.x + 20.0, x.min.y), none());
+    assert_eq!(e.notice.clone().unwrap().kind, NoticeKind::Refused);
+    assert!(e.path_draft.is_empty(), "no point was added");
     assert_eq!(e.project.lamp_count(), 144);
+}
+
+/// Dragging a path's end point moves it and keeps its lamp count; one undo
+/// puts it back.
+#[test]
+fn dragging_a_paths_end_keeps_its_count() {
+    let mut e = editor();
+    e.select(vec![comp("path3")]);
+    let end = handle_at(
+        &e,
+        |k| matches!(k, HandleKind::PathPoint { path, index: 1 } if path.as_str() == "path3"),
+    );
+    e.pointer_move(end, none());
+    let hint = e.hint_bar();
+    assert_eq!(hint.hints[0].keys, "drag");
+    assert!(
+        hint.hints[0].does.contains("move this end"),
+        "{:?}",
+        hint.hints[0]
+    );
+    let before = e.project.clone();
+    let by = Vec2::new(0.0, 20.0) * e.camera.scale;
+    e.pointer_down(end, Button::Primary, none());
+    e.pointer_move(end + by * 0.5, none());
+    e.pointer_move(end + by, none());
+    assert!(
+        e.cursor_note()
+            .unwrap()
+            .starts_with("Dragging an end keeps 30 lamps"),
+        "{:?}",
+        e.cursor_note()
+    );
+    e.pointer_up(end + by, none());
+    let points = e.project.path_points(&ComponentId::new("path3")).unwrap();
+    assert!(
+        points[1].distance(Vec2::new(74.0, 60.0)) < 1e-9,
+        "{points:?}"
+    );
+    assert_eq!(points[0], Vec2::new(6.0, 40.0), "the other end stays");
+    assert_eq!(e.project.lamps_under(&comp("path3")).len(), 30);
+    assert_eq!(e.selection, vec![comp("path3")], "still selected");
+    key(&mut e, Key::Char('z'), cmd());
+    assert_eq!(e.project, before, "one drag, one undo");
+}
+
+/// A click on a handle is a click on what's under it: clicking a selected
+/// path's end goes into the path, like clicking its first lamp anywhere.
+#[test]
+fn a_click_on_a_handle_clicks_whats_under_it() {
+    let mut e = editor();
+    e.select(vec![comp("path3")]);
+    let start = handle_at(&e, |k| matches!(k, HandleKind::PathPoint { index: 0, .. }));
+    let before = e.project.clone();
+    e.pointer_down(start, Button::Primary, none());
+    e.pointer_up(start, none());
+    assert_eq!(e.selection, vec![lamp("path3", "path", 0)]);
+    assert_eq!(e.project, before);
+}
+
+/// Dragging a ring's handle changes its radius, and the ring keeps its
+/// lamps.
+#[test]
+fn dragging_a_rings_handle_changes_its_radius() {
+    let mut e = editor();
+    e.select(vec![comp("circle1")]);
+    let r2 = handle_at(
+        &e,
+        |k| matches!(k, HandleKind::RingRadius { ring, .. } if ring == "r2"),
+    );
+    let by = Vec2::new(-6.0, 0.0) * e.camera.scale;
+    e.pointer_down(r2, Button::Primary, none());
+    e.pointer_move(r2 + by * 0.5, none());
+    e.pointer_move(r2 + by, none());
+    assert_eq!(
+        e.hint_bar().lead,
+        "Changing the radius of ring r2 of circle1"
+    );
+    e.pointer_up(r2 + by, none());
+    let circle = ComponentId::new("circle1");
+    let ring = e.project.ring(&circle, "r2").unwrap();
+    assert!((ring.radius - 10.0).abs() < 1e-9, "{}", ring.radius);
+    assert_eq!(ring.lamps, 24);
+    assert_eq!(e.project.ring(&circle, "r1").unwrap().radius, 26.0);
+}
+
+/// A new fixture is square; dragging its corner handle resizes it; ⇧ keeps
+/// it square.
+#[test]
+fn a_new_fixture_is_square_and_its_corner_resizes_it() {
+    let mut e = editor();
+    let id = e.project.add_fixture(None, "new").unwrap();
+    let size = e.project.fixture(&id).unwrap().size;
+    assert_eq!(size.x, size.y, "square");
+    assert_eq!(size.x, Fixture::DEFAULT_SIDE);
+
+    let scarf = node_id(&e, "scarf");
+    e.select(vec![Target::Node(scarf.clone())]);
+    let corner = handle_at(&e, |k| {
+        matches!(
+            k,
+            HandleKind::FixtureSize {
+                edge: SizeEdge::Corner,
+                ..
+            }
+        )
+    });
+    let by = Vec2::new(20.0, 10.0) * e.camera.scale;
+    for (mods, want) in [(none(), (120.0, 110.0)), (shift(), (120.0, 120.0))] {
+        e.pointer_down(corner, Button::Primary, mods);
+        e.pointer_move(corner + by * 0.5, mods);
+        e.pointer_move(corner + by, mods);
+        e.pointer_up(corner + by, mods);
+        let size = e.project.fixture(&scarf).unwrap().size;
+        assert!(
+            (size.x - want.0).abs() < 1e-9 && (size.y - want.1).abs() < 1e-9,
+            "{mods:?}: {size:?}"
+        );
+        key(&mut e, Key::Char('z'), cmd());
+        assert_eq!(
+            e.project.fixture(&scarf).unwrap().size,
+            Vec2::new(100.0, 100.0)
+        );
+    }
 }
 
 // ---- teaching ----------------------------------------------------------------
@@ -1010,7 +1221,7 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
 fn selecting_a_lamp_lights_exactly_its_pixel() {
     let mut e = editor();
     let plain = e.device_frame(CREST);
-    e.select(vec![lamp("line3", "line", 4)]);
+    e.select(vec![lamp("path3", "path", 4)]);
     assert!(e.board_animates());
     let frame = e.device_frame(CREST);
     let main = node_id(&e, "main");
@@ -1058,15 +1269,15 @@ fn selecting_a_lamp_lights_exactly_its_pixel() {
 #[test]
 fn a_lamp_outside_its_box_is_never_lit() {
     let mut e = editor();
-    // A line in the tail running out past its right side (the tail is 36
-    // wide): lamps at x = 30, 35 inside; 40, 45, 50 outside. They land on
+    // A path in the tail running out past its right side (the tail is 82
+    // wide): lamps at x = 74, 79 inside; 84, 89, 94 outside. They land on
     // GPIO 10 at pixels 50–54.
     let tail = node_id(&e, "tail");
     let id = e
         .project
         .add(
             &tail,
-            ComponentKind::line(Vec2::new(30.0, 40.0), Vec2::new(50.0, 40.0), 5),
+            ComponentKind::path(vec![Vec2::new(74.0, 40.0), Vec2::new(94.0, 40.0)], 5),
         )
         .unwrap();
     let outside: Vec<u32> = e
@@ -1078,7 +1289,7 @@ fn a_lamp_outside_its_box_is_never_lit() {
         .collect();
     assert_eq!(outside, vec![2, 3, 4]);
     let tail_out = node_id(&e, "tail out");
-    let object = ObjectId::new(&id, "line");
+    let object = ObjectId::new(&id, "path");
     for selection in [
         vec![],
         vec![Target::Component(id.clone())],
@@ -1100,20 +1311,21 @@ fn a_lamp_outside_its_box_is_never_lit() {
     }
 }
 
-/// While drawing a line into the scarf, the scarf's port shows exactly the
-/// draft's lamps, lit, at the right pixels — the ones the line takes when
-/// the drag is let go — and everything else is off.
+/// While drawing a path into the scarf, the scarf's port shows exactly the
+/// draft's lamps, lit, at the right pixels — the ones the path takes when
+/// it is finished — and everything else is off.
 #[test]
 fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     let mut e = editor();
     let scarf_out = node_id(&e, "scarf out");
-    // A first line, 11 lamps, takes pixels 0–10.
-    draw_line(&mut e, "scarf", (10.0, 15.0), (34.0, 15.0));
-    // The second, mid-drag: 11 more lamps.
-    key(&mut e, Key::Char('l'), none());
-    let a = e.camera.to_screen(place(&e, "scarf", 40.0, 15.0));
+    // A first path, 11 lamps, takes pixels 0–10.
+    draw_path(&mut e, "scarf", &[(10.0, 15.0), (34.0, 15.0)]);
+    // The second, one point clicked and the cursor 24 units on: 11 more
+    // lamps.
+    key(&mut e, Key::Char('p'), none());
+    let at = place(&e, "scarf", 40.0, 15.0);
+    click_at(&mut e, at, none());
     let b = e.camera.to_screen(place(&e, "scarf", 64.0, 15.0));
-    e.pointer_down(a, Button::Primary, none());
     e.pointer_move(b, none());
     assert!(e.board_animates());
     let frame = e.device_frame(0.0);
@@ -1130,8 +1342,13 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
             );
         }
     }
-    // Let go: the line lands exactly where the draft showed.
+    // Click there and double-click: the path lands exactly where the draft
+    // showed.
+    e.pointer_down(b, Button::Primary, none());
     e.pointer_up(b, none());
+    e.pointer_down(b, Button::Primary, none());
+    e.pointer_up(b, none());
+    e.double_click(b, none());
     let Target::Component(id) = e.selection[0].clone() else {
         panic!()
     };
@@ -1146,65 +1363,195 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     assert_eq!(landed, lit);
 }
 
-/// Pressing = on a selected line lights one more pixel on its port at once.
+/// Pressing = on a selected path lights one more pixel on its port at once.
 #[test]
 fn pressing_equals_lights_one_more_pixel() {
     let mut e = editor();
     let tail_out = node_id(&e, "tail out");
-    e.select(vec![comp("line1")]);
-    let count = |e: &Editor| {
+    e.select(vec![comp("path1")]);
+    // path1's red lead-out ends on its last pixel; path2's dimmed lamps
+    // start on the next.
+    let ends = |e: &Editor| {
         let frame = e.device_frame(CREST);
         let gpio10 = frame.port(&tail_out, "p1").unwrap().to_vec();
-        (
-            gpio10.iter().filter(|px| bright(**px)).count(),
-            gpio10.iter().filter(|px| !px.is_black()).count(),
-        )
+        let last_red = gpio10
+            .iter()
+            .rposition(|px| *px == device_frame::END_COLOUR)
+            .unwrap();
+        let lit = gpio10.iter().rposition(|px| !px.is_black()).unwrap() + 1;
+        (last_red, lit)
     };
-    assert_eq!(count(&e), (25, 50));
+    assert_eq!(ends(&e), (24, 50));
     key(&mut e, Key::Char('='), none());
-    assert_eq!(
-        count(&e),
-        (26, 51),
-        "line1 has 26 lamps, line2 moved up one"
-    );
+    assert_eq!(ends(&e), (25, 51), "path1 has 26 lamps, path2 moved up one");
 }
 
-/// A selected line shows its direction on the board: its first lamps blue,
-/// its last lamps red, and a white dot running from its start to its end.
+/// A selected object shows lp2014's pattern on the board: blue lead-in,
+/// red lead-out, a white band sweeping start to end.
 #[test]
-fn a_selected_line_shows_its_direction() {
+fn a_selected_object_shows_lp2014s_pattern() {
     let mut e = editor();
     let main = node_id(&e, "main");
-    e.select(vec![comp("line3")]);
-    let dot = |t: f64| {
+    // path3: 30 lamps on D1, so 3 lamps (an eighth, at least one, at most
+    // 15) at each end.
+    e.select(vec![comp("path3")]);
+    let band = |t: f64| {
         let frame = e.device_frame(t);
         let d1 = frame.port(&main, "p2").unwrap().to_vec();
         assert!(d1[..3].iter().all(|px| *px == device_frame::START_COLOUR));
         assert!(d1[27..].iter().all(|px| *px == device_frame::END_COLOUR));
-        let white: Vec<usize> = (0..30).filter(|i| d1[*i] == Rgb::WHITE).collect();
-        assert_eq!(white.len(), 1, "one dot at {t}: {white:?}");
-        white[0]
+        let middle = &d1[3..27];
+        assert!(
+            middle.iter().all(|px| px.r == px.g && px.g == px.b),
+            "black and white between the ends at {t}"
+        );
+        let lit: Vec<usize> = (0..middle.len())
+            .filter(|i| !middle[*i].is_black())
+            .map(|i| i + 3)
+            .collect();
+        assert!(
+            !lit.is_empty() && lit.len() <= 9,
+            "a band, not the whole object, at {t}: {lit:?}"
+        );
+        assert!(
+            lit.windows(2).all(|w| w[1] == w[0] + 1),
+            "one band at {t}: {lit:?}"
+        );
+        let brightest = (3..27).max_by_key(|i| d1[*i].level()).unwrap();
+        (lit[0], brightest)
     };
+    let (a, a_peak) = band(0.5);
+    let (b, b_peak) = band(1.0);
+    let (c, c_peak) = band(1.5);
+    assert!(a < b && b < c, "the band sweeps start → end");
+    assert!(a_peak < b_peak && b_peak < c_peak);
+    // The lead scales with the object: the tail's group, two paths of 25,
+    // shows it on each — 3 at each end of both.
+    e.select(vec![comp("group1")]);
+    let frame = e.device_frame(0.5);
+    let gpio10 = frame.port(&node_id(&e, "tail out"), "p1").unwrap().to_vec();
+    for start in [0, 25] {
+        assert!(
+            gpio10[start..start + 3]
+                .iter()
+                .all(|px| *px == device_frame::START_COLOUR)
+        );
+        assert!(
+            gpio10[start + 22..start + 25]
+                .iter()
+                .all(|px| *px == device_frame::END_COLOUR)
+        );
+    }
+    // And with lp2014's panels of 120, 15.
+    assert_eq!(device_frame::lead_lamps(120), 15);
+    assert_eq!(device_frame::lead_lamps(400), 15);
+    assert_eq!(device_frame::lead_lamps(4), 1);
+}
+
+/// Every patched lamp on the canvas shows the same colour as its pixel on
+/// the board; a lamp that lights nothing has no colour.
+#[test]
+fn every_patched_lamp_shows_its_pixels_colour() {
+    let mut e = editor();
+    // A path in the tail whose last lamps run outside its box.
+    let tail = node_id(&e, "tail");
+    let out = e
+        .project
+        .add(
+            &tail,
+            ComponentKind::path(vec![Vec2::new(74.0, 40.0), Vec2::new(94.0, 40.0)], 5),
+        )
+        .unwrap();
+    // And 20 more lamps on the strip than D1 has pixels for.
+    e.select(vec![comp("path3")]);
+    e.edit_selection_prop("lamps", PropEdit::SetCount(50));
+    let main = node_id(&e, "main");
+    for (selection, t) in [
+        (vec![], 0.0),
+        (vec![comp("path3")], 0.7),
+        (vec![lamp("circle1", "r2", 3)], CREST),
+        (vec![port(&main, "p1")], CREST),
+    ] {
+        e.select(selection.clone());
+        let frame = e.device_frame(t);
+        let patch = e.project.effective_patch();
+        for s in &patch.spans {
+            let pixels = frame.port(&s.output, &s.port).unwrap();
+            for lamp in s.lamps.clone() {
+                let pixel = pixels[(s.start_pixel + lamp - s.lamps.start) as usize];
+                let shown = frame.lamp(&s.object, lamp);
+                if s.object.component == out && lamp >= 2 {
+                    assert_eq!(shown, None, "outside its box: no colour");
+                } else {
+                    assert_eq!(shown, Some(pixel), "{selection:?} {} {lamp}", s.object);
+                }
+            }
+        }
+        let strip = ObjectId::new(&ComponentId::new("path3"), "path");
+        assert_eq!(frame.lamp(&strip, 30), None, "unpatched: no colour");
+    }
+}
+
+/// Inside a fixture, the data path runs from the last lamp of each object
+/// to the first lamp of the next, in patch order; data comes in where a
+/// port starts.
+#[test]
+fn the_data_path_runs_object_to_object_in_patch_order() {
+    let e = editor();
+    let pos = |c: &str, k: &str, i: u32| lamp_pos(&e, c, k, i);
+    let tail = e.project.data_path(&node_id(&e, "tail"));
+    assert_eq!(
+        tail.links,
+        vec![(pos("path1", "path", 24), pos("path2", "path", 0))]
+    );
+    assert_eq!(tail.entries.len(), 1);
+    assert_eq!(tail.entries[0].at, pos("path1", "path", 0));
     assert!(
-        dot(0.5) < dot(1.0) && dot(1.0) < dot(1.5),
-        "the dot runs start → end"
+        tail.entries[0].along.distance(Vec2::new(0.0, -1.0)) < 1e-9,
+        "path1 runs up"
+    );
+    let ring = e.project.data_path(&node_id(&e, "ring display"));
+    assert_eq!(
+        ring.links,
+        vec![(pos("circle1", "r1", 39), pos("circle1", "r2", 0))]
+    );
+    // The strip starts D1 on its own: data comes in, and goes nowhere else.
+    let strip = e.project.data_path(&node_id(&e, "strip"));
+    assert!(strip.links.is_empty());
+    assert_eq!(strip.entries.len(), 1);
+
+    // Reverse path1, and the wire runs from its new last lamp.
+    let mut e = editor();
+    e.select(vec![comp("path1")]);
+    key(&mut e, Key::Char('r'), none());
+    let tail = e.project.data_path(&node_id(&e, "tail"));
+    assert_eq!(
+        tail.links,
+        vec![(
+            lamp_pos(&e, "path1", "path", 24),
+            lamp_pos(&e, "path2", "path", 0)
+        )]
+    );
+    assert!(
+        tail.links[0].0.y > tail.links[0].1.y,
+        "from the bottom of path1 now"
     );
 }
 
-/// Deleting a line takes its pixels off the board at once; what came after
+/// Deleting a path takes its pixels off the board at once; what came after
 /// it moves up.
 #[test]
-fn deleting_a_line_changes_the_next_frame() {
+fn deleting_a_path_changes_the_next_frame() {
     let mut e = editor();
     let tail_out = node_id(&e, "tail out");
     let before = e.device_frame(0.0).port(&tail_out, "p1").unwrap().to_vec();
-    e.select(vec![comp("line1")]);
+    e.select(vec![comp("path1")]);
     key(&mut e, Key::Delete, none());
     let after = e.device_frame(0.0).port(&tail_out, "p1").unwrap().to_vec();
     assert_eq!(
         after[..25],
         before[25..50],
-        "line2's lamps, now from pixel 0"
+        "path2's lamps, now from pixel 0"
     );
     assert!(after[25..].iter().all(|px| px.is_black()));
 }
@@ -1252,18 +1599,18 @@ fn hovering_an_edge_says_what_it_carries() {
     assert!(e.selection.is_empty(), "hovering selects nothing");
 
     // Inside the tail, one edge per object.
-    e.select(vec![comp("line2")]);
+    e.select(vec![comp("path2")]);
     let edge = e
         .edges()
         .into_iter()
-        .find(|x| x.from == comp("line1"))
+        .find(|x| x.from == comp("path1"))
         .unwrap();
     e.pointer_move(edge.point_at(&e.camera, 0.5), none());
     assert_eq!(
         e.cursor_note().as_deref(),
-        Some("line1 → GPIO 10 · lamps 0–24 at pixel 0")
+        Some("path1 → GPIO 10 · lamps 0–24 at pixel 0")
     );
-    assert_eq!(e.selection, vec![comp("line2")]);
+    assert_eq!(e.selection, vec![comp("path2")]);
 
     // Away from every edge, no note.
     e.pointer_move(e.camera.to_screen(place(&e, "scarf", 50.0, 15.0)), none());
@@ -1279,7 +1626,7 @@ fn the_bar_lead_says_what_youre_doing() {
     for selection in [
         vec![],
         vec![comp("circle1")],
-        vec![lamp("line3", "line", 2)],
+        vec![lamp("path3", "path", 2)],
     ] {
         e.select(selection.clone());
         assert_eq!(e.hint_bar().lead, "", "{selection:?}");
@@ -1299,17 +1646,35 @@ fn the_bar_lead_says_what_youre_doing() {
     e.pointer_up(empty + Vec2::new(20.0, 20.0), none());
     // Choosing from the right-click list.
     e.pointer_down(
-        lamp_screen(&e, "line3", "line", 3),
+        lamp_screen(&e, "path3", "path", 3),
         Button::Secondary,
         none(),
     );
     assert_eq!(e.hint_bar().lead, "Choosing what's under the cursor");
     key(&mut e, Key::Escape, none());
-    // Drawing a line.
-    key(&mut e, Key::Char('l'), none());
+    // Drawing a path.
+    key(&mut e, Key::Char('p'), none());
+    assert_eq!(e.hint_bar().lead, "Path tool");
     e.pointer_down(empty, Button::Primary, none());
+    e.pointer_up(empty, none());
     e.pointer_move(empty + Vec2::new(30.0, 0.0), none());
-    assert_eq!(e.hint_bar().lead, "Drawing a line");
+    assert_eq!(e.hint_bar().lead, "Drawing a path");
+    key(&mut e, Key::Escape, none());
+    key(&mut e, Key::Escape, none());
+    // Resizing a fixture by its corner.
+    e.select(vec![fixture(&e, "scarf")]);
+    let corner = handle_at(&e, |k| {
+        matches!(
+            k,
+            HandleKind::FixtureSize {
+                edge: SizeEdge::Corner,
+                ..
+            }
+        )
+    });
+    e.pointer_down(corner, Button::Primary, none());
+    e.pointer_move(corner + Vec2::new(20.0, 20.0), none());
+    assert_eq!(e.hint_bar().lead, "Resizing scarf");
 }
 
 // ---- helpers -------------------------------------------------------------------
@@ -1322,14 +1687,27 @@ fn bright(px: Rgb) -> bool {
     px.level() > 100
 }
 
-/// Draw a line with the line tool, in a fixture's own coordinates.
-fn draw_line(e: &mut Editor, fixture: &str, from: (f64, f64), to: (f64, f64)) {
-    key(e, Key::Char('l'), none());
-    let a = e.camera.to_screen(place(e, fixture, from.0, from.1));
-    let b = e.camera.to_screen(place(e, fixture, to.0, to.1));
-    e.pointer_down(a, Button::Primary, none());
-    e.pointer_move(b, none());
-    e.pointer_up(b, none());
+/// Draw a path with the path tool, clicking each point (a fixture's own
+/// coordinates), then finishing with Enter.
+fn draw_path(e: &mut Editor, fixture: &str, points: &[(f64, f64)]) {
+    key(e, Key::Char('p'), none());
+    for (x, y) in points {
+        let at = e.camera.to_screen(place(e, fixture, *x, *y));
+        e.pointer_move(at, none());
+        e.pointer_down(at, Button::Primary, none());
+        e.pointer_up(at, none());
+    }
+    key(e, Key::Enter, none());
+}
+
+/// Where the handle `which` picks sits on screen.
+fn handle_at(e: &Editor, which: impl Fn(&HandleKind) -> bool) -> Vec2 {
+    let h = e
+        .handles()
+        .into_iter()
+        .find(|h| which(&h.kind))
+        .expect("the handle is shown");
+    e.camera.to_screen(h.at)
 }
 
 fn editor() -> Editor {
@@ -1384,12 +1762,12 @@ fn fixture(e: &Editor, name: &str) -> Target {
     Target::Node(node_id(e, name))
 }
 
-/// A short line in `strip` crossing line3 at (40, 10).
-fn cross_line3(e: &mut Editor) {
+/// A short path in `strip` crossing path3 at (40, 40).
+fn cross_path3(e: &mut Editor) {
     let strip = node_id(e, "strip");
     e.project.add(
         &strip,
-        ComponentKind::line(Vec2::new(40.0, 2.0), Vec2::new(40.0, 18.0), 6),
+        ComponentKind::path(vec![Vec2::new(40.0, 32.0), Vec2::new(40.0, 48.0)], 6),
     );
 }
 

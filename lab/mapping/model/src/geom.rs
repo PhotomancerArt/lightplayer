@@ -98,6 +98,44 @@ impl Rect {
     }
 }
 
+/// The length of a polyline: the sum of its segments.
+pub fn polyline_length(points: &[Vec2]) -> f64 {
+    points.windows(2).map(|w| w[0].distance(w[1])).sum()
+}
+
+/// The point `d` units along a polyline from its first point, and the
+/// direction of the segment it lies on. Past either end it stops at the
+/// end. `None` for no points.
+pub fn along_polyline(points: &[Vec2], d: f64) -> Option<(Vec2, Vec2)> {
+    let first = *points.first()?;
+    let mut left = d.max(0.0);
+    let mut dir = Vec2::new(1.0, 0.0);
+    for w in points.windows(2) {
+        let len = w[0].distance(w[1]);
+        if len <= 1e-12 {
+            continue;
+        }
+        dir = (w[1] - w[0]) * (1.0 / len);
+        if left <= len {
+            return Some((w[0].lerp(w[1], left / len), dir));
+        }
+        left -= len;
+    }
+    Some((*points.last().unwrap_or(&first), dir))
+}
+
+/// Distance from `p` to a polyline (to its one point, if it has one).
+pub fn distance_to_polyline(p: Vec2, points: &[Vec2]) -> f64 {
+    match points {
+        [] => f64::INFINITY,
+        [one] => p.distance(*one),
+        _ => points
+            .windows(2)
+            .map(|w| distance_to_segment(p, w[0], w[1]))
+            .fold(f64::INFINITY, f64::min),
+    }
+}
+
 /// Distance from `p` to the segment `a`–`b`.
 pub fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let ab = b - a;

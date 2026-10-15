@@ -3,7 +3,8 @@
 //! click hits.**
 //!
 //! - lamp: a small disc;
-//! - line: a capsule around its segment;
+//! - path: everything near its polyline — a capsule round each segment,
+//!   joined with round corners (a two-point path is one capsule);
 //! - ring: a band around its circle;
 //! - circle: a disc out past its outer ring;
 //! - group: a rounded hull around its children — the shape you'd draw
@@ -11,18 +12,18 @@
 //! - module, fixture: a frame — its border and title tab, not its inside;
 //! - output: its whole card; a port: its row on the card.
 //!
-//! Areas are in screen pixels, because their padding is: a line is as easy
+//! Areas are in screen pixels, because their padding is: a path is as easy
 //! to hit zoomed out as zoomed in.
 
 use crate::camera::Camera;
 use crate::component::ComponentKind;
-use crate::geom::{Rect, Vec2, distance_to_segment};
+use crate::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
 use crate::object::{ObjectShape, objects_of};
 use crate::project::Project;
 use crate::target::Target;
 
 pub const LAMP_PAD_PX: f64 = 7.0;
-pub const LINE_PAD_PX: f64 = 10.0;
+pub const PATH_PAD_PX: f64 = 10.0;
 pub const RING_PAD_PX: f64 = 8.0;
 pub const CIRCLE_PAD_PX: f64 = 10.0;
 pub const GROUP_PAD_PX: f64 = 14.0;
@@ -36,6 +37,9 @@ pub enum Area {
     /// Everything within `pad` of a convex hull (a capsule for two points, a
     /// disc for one). `points` IS the hull: build it with [`Area::hull`].
     Hull { points: Vec<Vec2>, pad: f64 },
+    /// Everything within `pad` of a polyline: a path's shape. Not convex —
+    /// an L-shaped path does not own the corner it turns round.
+    Polyline { points: Vec<Vec2>, pad: f64 },
     /// Everything within `pad` of a circle's line.
     Band { center: Vec2, radius: f64, pad: f64 },
     /// A frame: its border and its title tab, NOT its inside — the inside
@@ -56,6 +60,7 @@ impl Area {
     pub fn contains(&self, p: Vec2) -> bool {
         match self {
             Area::Hull { points, pad } => hull_distance(points, p) <= *pad,
+            Area::Polyline { points, pad } => distance_to_polyline(p, points) <= *pad,
             Area::Band {
                 center,
                 radius,
@@ -68,11 +73,12 @@ impl Area {
         }
     }
 
-    /// How far `p` is from the thing itself (its lamps, its line, the inside
+    /// How far `p` is from the thing itself (its lamps, its path, the inside
     /// of its hull) — "nearest wins" when areas overlap.
     pub fn distance(&self, p: Vec2) -> f64 {
         match self {
             Area::Hull { points, .. } => hull_distance(points, p),
+            Area::Polyline { points, .. } => distance_to_polyline(p, points),
             Area::Band { center, radius, .. } => (p.distance(*center) - radius).abs(),
             Area::Frame { rect, title } => {
                 if title.contains(p) {
@@ -94,7 +100,7 @@ impl Area {
     /// The top of the area: where a name label goes.
     pub fn top(&self) -> Vec2 {
         match self {
-            Area::Hull { points, pad } => {
+            Area::Hull { points, pad } | Area::Polyline { points, pad } => {
                 let top = points
                     .iter()
                     .copied()
@@ -113,10 +119,13 @@ impl Area {
     }
 
     /// The outline as an SVG path. A band is two circles (fill it with
-    /// `evenodd`).
+    /// `evenodd`). A polyline's outline is NOT a closed shape: it is the
+    /// polyline itself, and [`Area::stroke_width`] says how wide to stroke
+    /// it — round caps and joins — to cover exactly the area.
     pub fn outline_path(&self) -> String {
         match self {
             Area::Hull { points, pad } => rounded_hull_path(points, *pad),
+            Area::Polyline { points, .. } => polyline_path(points),
             Area::Band {
                 center,
                 radius,
@@ -133,6 +142,32 @@ impl Area {
             Area::Box { rect } => rect_path(rect),
         }
     }
+
+    /// For an area drawn as a stroke (a path's): the stroke's width, with
+    /// round caps and joins. `None` for an area whose outline is closed.
+    pub fn stroke_width(&self) -> Option<f64> {
+        match self {
+            Area::Polyline { pad, .. } => Some(2.0 * pad),
+            _ => None,
+        }
+    }
+}
+
+fn polyline_path(points: &[Vec2]) -> String {
+    let mut d = String::new();
+    for (i, p) in points.iter().enumerate() {
+        d.push_str(&format!(
+            "{}{},{} ",
+            if i == 0 { "M" } else { "L" },
+            p.x,
+            p.y
+        ));
+    }
+    // A path whose points all coincide still shows as a dot.
+    if points.len() == 1 {
+        d.push_str("l0.01,0");
+    }
+    d
 }
 
 fn rect_path(r: &Rect) -> String {
@@ -195,16 +230,18 @@ impl Project {
                     radius: radius * camera.scale,
                     pad: RING_PAD_PX,
                 }),
-                ObjectShape::Segment { from, to } => {
-                    Some(Area::hull(&[screen(from), screen(to)], LINE_PAD_PX))
-                }
+                ObjectShape::Polyline { points } => Some(Area::Polyline {
+                    points: points.into_iter().map(screen).collect(),
+                    pad: PATH_PAD_PX,
+                }),
             },
             Target::Component(id) => {
                 let c = self.component(id)?;
                 match &c.kind {
-                    ComponentKind::Line { from, to, .. } => {
-                        Some(Area::hull(&[local(*from), local(*to)], LINE_PAD_PX))
-                    }
+                    ComponentKind::Path { points, .. } => Some(Area::Polyline {
+                        points: points.iter().map(|p| local(*p)).collect(),
+                        pad: PATH_PAD_PX,
+                    }),
                     ComponentKind::Circle { center, rings, .. } => {
                         let r = rings.iter().map(|r| r.radius).fold(0.0, f64::max) * camera.scale;
                         Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))
@@ -238,7 +275,7 @@ impl Project {
     }
 
     /// Every child's area lies inside its parent's (a lamp's disc inside its
-    /// line's capsule, a ring's band inside its circle's disc, everything
+    /// path's area, a ring's band inside its circle's disc, everything
     /// inside its group's hull, a port's row inside its card), so a thing
     /// the cursor is outside of has nothing under the cursor inside it
     /// either. Frames are the exception: a frame's area is only its border,

@@ -32,7 +32,7 @@ pub struct Project {
 
 #[derive(Debug, Clone, PartialEq)]
 struct Counters {
-    line: u32,
+    path: u32,
     circle: u32,
     group: u32,
     module: u32,
@@ -46,7 +46,7 @@ impl Project {
             name: name.into(),
             nodes: Vec::new(),
             counters: Counters {
-                line: 1,
+                path: 1,
                 circle: 1,
                 group: 1,
                 module: 1,
@@ -61,7 +61,7 @@ impl Project {
     /// Mint an id for a new component of this kind and wrap it.
     pub fn mint(&mut self, kind: ComponentKind) -> Component {
         let (word, counter) = match kind {
-            ComponentKind::Line { .. } => ("line", &mut self.counters.line),
+            ComponentKind::Path { .. } => ("path", &mut self.counters.path),
             ComponentKind::Circle { .. } => ("circle", &mut self.counters.circle),
             ComponentKind::Group { .. } => ("group", &mut self.counters.group),
         };
@@ -107,7 +107,14 @@ impl Project {
         self.add_node(parent, name, NodeKind::Module { children: vec![] })
     }
 
-    pub fn add_fixture(
+    /// A new fixture is square ([`Fixture::DEFAULT_SIDE`] each way) until
+    /// you say otherwise: drag its corner, or set its width and height.
+    pub fn add_fixture(&mut self, parent: Option<&NodeId>, name: &str) -> Option<NodeId> {
+        self.add_node(parent, name, NodeKind::Fixture(Fixture::square()))
+    }
+
+    /// A fixture of a given size, for when the shape is known up front.
+    pub fn add_fixture_sized(
         &mut self,
         parent: Option<&NodeId>,
         name: &str,
@@ -322,28 +329,31 @@ impl Project {
     /// and a strip sharing the main output, and an empty fixture to draw a
     /// scarf into, already patched to its own output — so drawing in it
     /// lights pixels at once.
+    ///
+    /// Every fixture is square, as a new one is, sized to hold its drawing
+    /// with room around it. The tail is two straight paths, out and back,
+    /// the way the choker was built.
     pub fn seed() -> Self {
         let mut p = Project::new("desk");
         let grb = PixelFormat::Grb;
+        let side = |s: f64| Vec2::new(s, s);
 
         let rig = p.add_module(None, "tail rig");
-        let tail = p.add_fixture(rig.as_ref(), "tail", Vec2::new(36.0, 82.0));
+        let tail = p.add_fixture_sized(rig.as_ref(), "tail", side(82.0));
         let tail_out = p.add_output(rig.as_ref(), "tail out", &[("GPIO 10", 60, grb)]);
-        let out = p.mint(ComponentKind::line(
-            Vec2::new(14.0, 70.0),
-            Vec2::new(14.0, 12.0),
+        let out = p.mint(ComponentKind::path(
+            vec![Vec2::new(37.0, 70.0), Vec2::new(37.0, 12.0)],
             25,
         ));
-        let back = p.mint(ComponentKind::line(
-            Vec2::new(22.0, 12.0),
-            Vec2::new(22.0, 70.0),
+        let back = p.mint(ComponentKind::path(
+            vec![Vec2::new(45.0, 12.0), Vec2::new(45.0, 70.0)],
             25,
         ));
 
-        let ring = p.add_fixture(None, "ring display", Vec2::new(70.0, 70.0));
-        let strip = p.add_fixture(None, "strip", Vec2::new(80.0, 20.0));
+        let ring = p.add_fixture_sized(None, "ring display", side(70.0));
+        let strip = p.add_fixture_sized(None, "strip", side(80.0));
         let main = p.add_output(None, "main", &[("D0", 64, grb), ("D1", 30, grb)]);
-        let scarf = p.add_fixture(None, "scarf", Vec2::new(100.0, 30.0));
+        let scarf = p.add_fixture(None, "scarf");
         let scarf_out = p.add_output(None, "scarf out", &[("D10", 60, grb)]);
 
         let (
@@ -365,7 +375,7 @@ impl Project {
         );
         p.add(
             &strip,
-            ComponentKind::line(Vec2::new(6.0, 10.0), Vec2::new(74.0, 10.0), 30),
+            ComponentKind::path(vec![Vec2::new(6.0, 40.0), Vec2::new(74.0, 40.0)], 30),
         );
         p.auto_patch(&tail, &tail_out);
         p.auto_patch(&ring, &main);
@@ -389,9 +399,8 @@ fn placed(mut o: Object, origin: Vec2) -> Object {
         l.pos = l.pos + origin;
     }
     o.shape = match o.shape {
-        ObjectShape::Segment { from, to } => ObjectShape::Segment {
-            from: from + origin,
-            to: to + origin,
+        ObjectShape::Polyline { points } => ObjectShape::Polyline {
+            points: points.into_iter().map(|p| p + origin).collect(),
         },
         ObjectShape::Ring { center, radius } => ObjectShape::Ring {
             center: center + origin,

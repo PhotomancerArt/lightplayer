@@ -5,8 +5,9 @@
 //! crate, so it can be read, changed and tested without a browser.
 
 use crate::camera::Camera;
-use crate::component::{ComponentId, ComponentKind};
-use crate::geom::{Rect, Vec2};
+use crate::component::{Component, ComponentId, ComponentKind};
+use crate::geom::{Rect, Vec2, polyline_length};
+use crate::handle::{Handle, HandleKind};
 use crate::node::NodeId;
 use crate::notice::Notice;
 use crate::pick::{PickMode, level_candidates, pick};
@@ -48,7 +49,9 @@ pub enum Key {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Select,
-    Line,
+    /// Click point after point; double-click or Enter finishes.
+    Path,
+    /// Drag from the centre.
     Circle,
 }
 
@@ -56,7 +59,7 @@ impl Tool {
     pub fn word(self) -> &'static str {
         match self {
             Tool::Select => "select",
-            Tool::Line => "line",
+            Tool::Path => "path",
             Tool::Circle => "circle",
         }
     }
@@ -76,6 +79,9 @@ pub enum Gesture {
         /// The press already chose (⌥-click); releasing does nothing more.
         decided: bool,
         mods: Mods,
+        /// It landed on a handle: a drag drags the handle; a click is an
+        /// ordinary click on what's beneath.
+        handle: Option<HandleKind>,
     },
     /// Dragging the selection. `base` is the fixture before the drag, so the
     /// move is always "base + total delta" and never drifts.
@@ -92,8 +98,15 @@ pub enum Gesture {
     Panning {
         last: Vec2,
     },
+    /// Dragging out a circle from its centre.
     Drawing {
         start_world: Vec2,
+    },
+    /// Dragging a handle. Like a move, always "base + total drag".
+    Handle {
+        handle: HandleKind,
+        start_world: Vec2,
+        base: Box<Project>,
     },
 }
 
@@ -121,6 +134,9 @@ pub struct MenuItem {
 const FRAME_PAD: f64 = 6.0;
 /// How far, in screen pixels, a press moves before it is a drag.
 pub const DRAG_THRESHOLD_PX: f64 = 3.0;
+/// Path points closer than this on screen are one point: the two presses
+/// of a double-click land on the same spot.
+pub const SAME_POINT_PX: f64 = 3.0;
 const UNDO_LIMIT: usize = 200;
 
 #[derive(Debug, Clone)]
@@ -140,6 +156,8 @@ pub struct Editor {
     pub spacing: f64,
     pub notice: Option<Notice>,
     pub menu: Option<ContextMenu>,
+    /// The path being clicked out, in world units, before it exists.
+    pub path_draft: Vec<Vec2>,
     undo: Vec<(Project, Vec<Target>)>,
     redo: Vec<(Project, Vec<Target>)>,
     fitted: bool,
@@ -162,6 +180,7 @@ impl Editor {
             spacing: 2.4,
             notice: None,
             menu: None,
+            path_draft: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             fitted: false,
@@ -230,13 +249,56 @@ impl Editor {
         }
     }
 
-    /// The component being drawn, before it exists.
+    /// The component being drawn, before it exists, in world units: a
+    /// circle being dragged, or a path's clicked points plus the segment
+    /// to the cursor.
     pub fn draft(&self) -> Option<ComponentKind> {
-        let Gesture::Drawing { start_world } = &self.gesture else {
-            return None;
+        let (fixture, kind) = self.draft_into()?;
+        let mut c = Component {
+            id: ComponentId::new("draft"),
+            kind,
         };
-        let now = self.camera.to_world(self.pointer?);
-        Some(self.drawn(*start_world, now))
+        c.translate(self.project.origin(&fixture));
+        Some(c.kind)
+    }
+
+    /// The fixture the draft goes into.
+    pub fn draft_fixture(&self) -> Option<NodeId> {
+        self.draft_into().map(|(f, _)| f)
+    }
+
+    /// The handles the selection shows (none while a tool is drawing).
+    pub fn handles(&self) -> Vec<Handle> {
+        if self.tool != Tool::Select {
+            return Vec::new();
+        }
+        self.project.handles(&self.selection)
+    }
+
+    /// The handle a press right now would grab.
+    pub fn handle_at(&self, at: Vec2) -> Option<Handle> {
+        let cam = &self.camera;
+        self.handles()
+            .into_iter()
+            .filter(|h| h.hit(cam, at))
+            .min_by(|a, b| {
+                let d = |h: &Handle| cam.to_screen(h.at).distance(at);
+                d(a).total_cmp(&d(b))
+            })
+    }
+
+    /// The handle under the pointer, while hovering means anything — the
+    /// page outlines it and the hint bar says what dragging it does.
+    pub fn hover_handle(&self) -> Option<Handle> {
+        self.handle_at(self.hover_point()?)
+    }
+
+    /// The handle being dragged right now.
+    pub fn dragged_handle(&self) -> Option<&HandleKind> {
+        match &self.gesture {
+            Gesture::Handle { handle, .. } => Some(handle),
+            _ => None,
+        }
     }
 
     pub fn can_undo(&self) -> bool {
@@ -316,17 +378,22 @@ impl Editor {
             return;
         }
         match self.tool {
-            Tool::Line | Tool::Circle => {
+            Tool::Circle => {
                 self.gesture = Gesture::Drawing {
                     start_world: self.camera.to_world(at),
                 };
             }
+            Tool::Path => self.path_click(at),
             Tool::Select => {
                 let under = self.project.things_at(&self.camera, at);
                 let over = !under.is_empty();
                 let on_selection = under.iter().any(|t| self.selection.contains(t));
+                let handle = self.handle_at(at).map(|h| h.kind);
                 let mut decided = false;
-                if over && mods.alt {
+                if handle.is_some() {
+                    // A handle waits: a drag drags it, a click falls through
+                    // to what's beneath on release.
+                } else if over && mods.alt {
                     // ⌥: the next overlapping thing at this level.
                     if let Some(t) = pick(
                         &self.project,
@@ -342,19 +409,7 @@ impl Editor {
                     // Pressing something new selects it straight away, so a
                     // drag moves it. Pressing the selection waits: it may be
                     // a drag (move it) or a click (go into it).
-                    if let Some(t) = pick(
-                        &self.project,
-                        &self.camera,
-                        &self.selection,
-                        at,
-                        self.press_mode(mods),
-                    ) {
-                        if mods.shift {
-                            self.toggle(t);
-                        } else {
-                            self.selection = vec![t];
-                        }
-                    }
+                    self.press_select(at, mods);
                 }
                 self.gesture = Gesture::Press {
                     start: at,
@@ -362,6 +417,7 @@ impl Editor {
                     on_selection: on_selection || decided,
                     decided,
                     mods,
+                    handle,
                 };
             }
         }
@@ -375,13 +431,22 @@ impl Editor {
                 start,
                 over,
                 mods: press_mods,
+                handle,
                 ..
             } => {
                 if start.distance(at) < DRAG_THRESHOLD_PX {
                     return;
                 }
                 let start_world = self.camera.to_world(start);
-                if over && !self.selection.is_empty() {
+                if let Some(handle) = handle {
+                    self.checkpoint();
+                    self.gesture = Gesture::Handle {
+                        handle,
+                        start_world,
+                        base: Box::new(self.project.clone()),
+                    };
+                    self.drag_handle_to(at);
+                } else if over && !self.selection.is_empty() {
                     self.begin_move(start_world);
                     self.drag_to(at);
                 } else {
@@ -398,6 +463,7 @@ impl Editor {
                 }
             }
             Gesture::Moving { .. } => self.drag_to(at),
+            Gesture::Handle { .. } => self.drag_handle_to(at),
             Gesture::Boxing { .. } => self.update_box(),
             Gesture::Panning { last } => {
                 self.camera.pan(at - last);
@@ -418,9 +484,14 @@ impl Editor {
                 over,
                 on_selection,
                 mods: press_mods,
+                handle,
                 ..
             } => {
-                if over && on_selection {
+                if handle.is_some() && over && !on_selection {
+                    // A click on a handle over something new: what a press
+                    // there would have selected.
+                    self.press_select(at, press_mods);
+                } else if over && on_selection {
                     // A click on the selection: go in, add/remove, or go deep.
                     if let Some(t) = pick(
                         &self.project,
@@ -444,10 +515,23 @@ impl Editor {
                 self.finish_drawing(start_world, self.camera.to_world(at))
             }
             Gesture::Moving { .. }
+            | Gesture::Handle { .. }
             | Gesture::Boxing { .. }
             | Gesture::Panning { .. }
             | Gesture::None => {}
         }
+    }
+
+    /// A double-click: with the path tool, finish the path (its two presses
+    /// have already landed as one point). Returns whether it did anything.
+    pub fn double_click(&mut self, at: Vec2, mods: Mods) -> bool {
+        self.pointer = Some(at);
+        self.mods = mods;
+        if self.tool == Tool::Path {
+            self.finish_path();
+            return true;
+        }
+        false
     }
 
     /// The pointer left the canvas: finish whatever it was doing.
@@ -479,6 +563,10 @@ impl Editor {
 
     pub fn modifiers(&mut self, mods: Mods) {
         self.mods = mods;
+        // ⇧ pressed or let go mid-resize changes the shape at once.
+        if let (Gesture::Handle { .. }, Some(p)) = (&self.gesture, self.pointer) {
+            self.drag_handle_to(p);
+        }
     }
 
     /// Returns true when the key did something (the page then stops the
@@ -498,7 +586,11 @@ impl Editor {
                 true
             }
             Key::Enter => {
-                self.enter();
+                if self.tool == Tool::Path {
+                    self.finish_path();
+                } else {
+                    self.enter();
+                }
                 true
             }
             Key::Delete => {
@@ -530,7 +622,7 @@ impl Editor {
             ('z', true, true) => self.redo(),
             ('a', true, _) => self.select_all(),
             ('v', false, _) => self.set_tool(Tool::Select),
-            ('l', false, _) => self.set_tool(Tool::Line),
+            ('p' | 'l', false, _) => self.set_tool(Tool::Path),
             ('o', false, _) => self.set_tool(Tool::Circle),
             ('-' | '_', false, _) => self.nudge(-1),
             ('=' | '+', false, _) => self.nudge(1),
@@ -612,6 +704,24 @@ impl Editor {
         }
     }
 
+    /// What pressing at `at` selects straight away: the thing there (⇧ adds
+    /// or removes it).
+    fn press_select(&mut self, at: Vec2, mods: Mods) {
+        if let Some(t) = pick(
+            &self.project,
+            &self.camera,
+            &self.selection,
+            at,
+            self.press_mode(mods),
+        ) {
+            if mods.shift {
+                self.toggle(t);
+            } else {
+                self.selection = vec![t];
+            }
+        }
+    }
+
     fn toggle(&mut self, t: Target) {
         if let Some(i) = self.selection.iter().position(|s| *s == t) {
             self.selection.remove(i);
@@ -634,7 +744,7 @@ impl Editor {
 
     pub fn escape(&mut self) {
         match std::mem::replace(&mut self.gesture, Gesture::None) {
-            Gesture::Moving { base, .. } => {
+            Gesture::Moving { base, .. } | Gesture::Handle { base, .. } => {
                 self.project = *base;
                 self.undo.pop();
                 return;
@@ -645,6 +755,11 @@ impl Editor {
             }
             Gesture::Drawing { .. } => return,
             Gesture::Press { .. } | Gesture::Panning { .. } | Gesture::None => {}
+        }
+        // Drawing a path, Esc takes back one point; with none left, it
+        // leaves the tool.
+        if self.path_draft.pop().is_some() {
+            return;
         }
         if self.tool != Tool::Select {
             self.tool = Tool::Select;
@@ -808,7 +923,7 @@ impl Editor {
     }
 
     /// After an edit or undo: a selected lamp past the end of a shortened
-    /// line becomes its last lamp (the selection stays where you were
+    /// path becomes its last lamp (the selection stays where you were
     /// working), and anything else that no longer exists is dropped.
     fn prune_selection(&mut self) {
         let f = &self.project;
@@ -901,60 +1016,162 @@ impl Editor {
     pub fn set_tool(&mut self, tool: Tool) {
         self.tool = tool;
         self.gesture = Gesture::None;
+        self.path_draft.clear();
     }
 
-    /// The lamp count a drawn line of this length gets: one every `spacing`.
+    /// The lamp count a drawn path of this length gets: one every `spacing`.
     pub fn lamps_for_length(&self, length: f64) -> u32 {
         ((length / self.spacing).round() as u32 + 1).max(2)
     }
 
-    fn drawn(&self, start: Vec2, now: Vec2) -> ComponentKind {
-        match self.tool {
-            Tool::Circle => {
-                let r = start.distance(now).max(0.5);
-                let lamps = ((std::f64::consts::TAU * r / self.spacing).round() as u32).max(3);
-                ComponentKind::circle(start, &[(r, lamps)])
-            }
-            _ => ComponentKind::line(start, now, self.lamps_for_length(start.distance(now))),
-        }
+    /// A circle dragged from `start` to `now`, in one fixture's coordinates.
+    fn drawn_circle(&self, start: Vec2, now: Vec2) -> ComponentKind {
+        let r = start.distance(now).max(0.5);
+        let lamps = ((std::f64::consts::TAU * r / self.spacing).round() as u32).max(3);
+        ComponentKind::circle(start, &[(r, lamps)])
     }
 
-    /// Where a drag from `start` to `end` (world units) puts its drawing:
-    /// the fixture it starts in, and the component in that fixture's own
-    /// coordinates. `None` when it starts outside every fixture. Finishing
-    /// a drag and the simulated board's preview of it (`device_frame.rs`)
-    /// both ask here, so the preview is exactly what the release makes.
-    pub(crate) fn drawn_into(&self, start: Vec2, end: Vec2) -> Option<(NodeId, ComponentKind)> {
-        let fixture = self.project.fixture_at(start)?;
+    /// A path through these points (one fixture's coordinates), its lamp
+    /// count from its length.
+    fn drawn_path(&self, points: Vec<Vec2>) -> ComponentKind {
+        let lamps = self.lamps_for_length(polyline_length(&points));
+        ComponentKind::path(points, lamps)
+    }
+
+    /// Where the draft goes, and what it is in that fixture's own
+    /// coordinates: a circle being dragged, or the clicked-out path with the
+    /// cursor as its next point. `None` when there's no draft or it starts
+    /// outside every fixture. Finishing a drawing and the simulated board's
+    /// preview of it (`device_frame.rs`) both ask here, so the preview is
+    /// exactly what finishing makes.
+    pub(crate) fn draft_into(&self) -> Option<(NodeId, ComponentKind)> {
+        if let Gesture::Drawing { start_world } = &self.gesture {
+            let now = self.camera.to_world(self.pointer?);
+            let fixture = self.project.fixture_at(*start_world)?;
+            let origin = self.project.origin(&fixture);
+            return Some((
+                fixture,
+                self.drawn_circle(*start_world - origin, now - origin),
+            ));
+        }
+        if self.tool != Tool::Path {
+            return None;
+        }
+        let mut points = self.path_draft.clone();
+        if let Some(p) = self.pointer {
+            points.push(self.camera.to_world(p));
+        }
+        let points = self.distinct(points);
+        if points.len() < 2 {
+            return None;
+        }
+        let fixture = self.project.fixture_at(points[0])?;
         let origin = self.project.origin(&fixture);
-        Some((fixture, self.drawn(start - origin, end - origin)))
+        let local = points.into_iter().map(|p| p - origin).collect();
+        Some((fixture, self.drawn_path(local)))
+    }
+
+    /// Points with any that sit on the one before (on screen) dropped.
+    fn distinct(&self, points: Vec<Vec2>) -> Vec<Vec2> {
+        let mut out: Vec<Vec2> = Vec::new();
+        for p in points {
+            let same = out
+                .last()
+                .is_some_and(|q| q.distance(p) * self.camera.scale < SAME_POINT_PX);
+            if !same {
+                out.push(p);
+            }
+        }
+        out
+    }
+
+    /// A click with the path tool: the first point must be in a fixture;
+    /// every click after it adds a point.
+    fn path_click(&mut self, at: Vec2) {
+        let p = self.camera.to_world(at);
+        if self.path_draft.is_empty() && self.project.fixture_at(p).is_none() {
+            self.notice = Some(Notice::refused(
+                "Nothing drawn",
+                "a path starts inside a fixture's box",
+                "click inside a fixture for the path's first point",
+            ));
+            return;
+        }
+        self.path_draft.push(p);
+    }
+
+    /// Double-click or Enter: make the clicked-out path. It needs two
+    /// different points; with fewer it is refused and the draft stays.
+    fn finish_path(&mut self) {
+        let draft = std::mem::take(&mut self.path_draft);
+        let points = self.distinct(draft);
+        if points.len() < 2 {
+            self.path_draft = points;
+            self.notice = Some(Notice::refused(
+                "Nothing drawn",
+                "a path needs two different points",
+                "click where it starts, click where it ends, then double-click or press Enter",
+            ));
+            return;
+        }
+        let Some(fixture) = self.project.fixture_at(points[0]) else {
+            return;
+        };
+        let origin = self.project.origin(&fixture);
+        let kind = self.drawn_path(points.into_iter().map(|p| p - origin).collect());
+        self.checkpoint();
+        if let Some(id) = self.project.add(&fixture, kind) {
+            self.selection = vec![Target::Component(id)];
+        }
+        self.tool = Tool::Select;
     }
 
     fn finish_drawing(&mut self, start: Vec2, end: Vec2) {
         if start.distance(end) * self.camera.scale < 4.0 {
             self.notice = Some(Notice::refused(
                 "Nothing drawn",
-                "a click alone doesn't say how long it is",
-                format!("press and drag to draw a {}", self.tool.word()),
+                "a click alone doesn't say how big it is",
+                "press at the centre and drag out to draw a circle",
             ));
             return;
         }
-        let Some((fixture, kind)) = self.drawn_into(start, end) else {
+        let Some(fixture) = self.project.fixture_at(start) else {
             self.notice = Some(Notice::refused(
                 "Nothing drawn",
                 "a drawing starts inside a fixture's box",
-                format!(
-                    "press inside a fixture, then drag to draw a {}",
-                    self.tool.word()
-                ),
+                "press inside a fixture, then drag to draw a circle",
             ));
             return;
         };
+        let origin = self.project.origin(&fixture);
+        let kind = self.drawn_circle(start - origin, end - origin);
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
             self.selection = vec![Target::Component(id)];
         }
         self.tool = Tool::Select;
+    }
+
+    // ---- handles -------------------------------------------------------
+
+    fn drag_handle_to(&mut self, at: Vec2) {
+        let Gesture::Handle {
+            handle,
+            start_world,
+            base,
+        } = &self.gesture
+        else {
+            return;
+        };
+        let mut p = (**base).clone();
+        p.drag_handle(
+            base,
+            handle,
+            *start_world,
+            self.camera.to_world(at),
+            self.mods.shift,
+        );
+        self.project = p;
     }
 
     // ---- history -------------------------------------------------------

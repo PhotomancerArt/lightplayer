@@ -10,8 +10,8 @@
 
 use crate::geom::Vec2;
 
-/// A component's id, minted by the fixture when the component is created
-/// (`line1`, `circle2`, `group1`) and never reused or rewritten.
+/// A component's id, minted by the project when the component is created
+/// (`path1`, `circle2`, `group1`) and never reused or rewritten.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ComponentId(pub String);
 
@@ -39,9 +39,12 @@ pub struct Component {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComponentKind {
-    /// A straight run of lamps. Data runs `from` → `to`; reversing a line
-    /// swaps its ends. Makes exactly one object.
-    Line { from: Vec2, to: Vec2, lamps: u32 },
+    /// A run of lamps along a polyline of two or more points, the way a
+    /// strip is laid: clicked out point by point. Data runs from the first
+    /// point to the last; reversing a path reverses its points. The lamp
+    /// count is its own property — moving a point respaces the lamps, it
+    /// never adds or removes one. Makes exactly one object.
+    Path { points: Vec<Vec2>, lamps: u32 },
     /// Concentric rings around one centre. Makes one object per ring.
     Circle {
         center: Vec2,
@@ -67,17 +70,17 @@ impl Component {
     /// What the user calls this kind of thing.
     pub fn kind_word(&self) -> &'static str {
         match self.kind {
-            ComponentKind::Line { .. } => "line",
+            ComponentKind::Path { .. } => "path",
             ComponentKind::Circle { .. } => "circle",
             ComponentKind::Group { .. } => "group",
         }
     }
 
-    /// A line is its own object: the tree shows it as ONE row, and its
+    /// A path is its own object: the tree shows it as ONE row, and its
     /// lamps sit directly under it (D18's 1:1 case). Decided by kind, not
     /// by the current count, so the tree never changes shape under you.
     pub fn is_single_object(&self) -> bool {
-        matches!(self.kind, ComponentKind::Line { .. })
+        matches!(self.kind, ComponentKind::Path { .. })
     }
 
     pub fn children(&self) -> &[Component] {
@@ -97,9 +100,10 @@ impl Component {
     /// Move every point of this component (and any children) by `delta`.
     pub fn translate(&mut self, delta: Vec2) {
         match &mut self.kind {
-            ComponentKind::Line { from, to, .. } => {
-                *from = *from + delta;
-                *to = *to + delta;
+            ComponentKind::Path { points, .. } => {
+                for p in points {
+                    *p = *p + delta;
+                }
             }
             ComponentKind::Circle { center, .. } => *center = *center + delta,
             ComponentKind::Group { children } => {
@@ -112,10 +116,10 @@ impl Component {
 }
 
 impl ComponentKind {
-    pub fn line(from: Vec2, to: Vec2, lamps: u32) -> Self {
-        ComponentKind::Line {
-            from,
-            to,
+    /// A path through `points`, first to last, with `lamps` lamps.
+    pub fn path(points: Vec<Vec2>, lamps: u32) -> Self {
+        ComponentKind::Path {
+            points,
             lamps: lamps.max(1),
         }
     }

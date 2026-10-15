@@ -22,6 +22,17 @@ pub struct Fixture {
 }
 
 impl Fixture {
+    /// A new fixture's side: it starts square, this big each way, until
+    /// you resize it.
+    pub const DEFAULT_SIDE: f64 = 100.0;
+    /// The smallest a fixture gets, either way.
+    pub const MIN_SIDE: f64 = 4.0;
+
+    /// A new, empty, square fixture.
+    pub fn square() -> Self {
+        Self::new(Vec2::new(Self::DEFAULT_SIDE, Self::DEFAULT_SIDE))
+    }
+
     pub fn new(size: Vec2) -> Self {
         Self {
             size,

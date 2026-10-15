@@ -8,7 +8,9 @@
 //! The rule they serve: every action available in the current state is
 //! visible in the hint bar.
 
+use crate::component::ComponentKind;
 use crate::editor::{Editor, Gesture, Tool};
+use crate::handle::{HandleKind, SizeEdge};
 use crate::project::Project;
 use crate::props::common_props;
 use crate::target::Target;
@@ -30,7 +32,7 @@ pub enum HintKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBar {
-    /// What you're doing, in words: "Drawing a line", "Moving circle1",
+    /// What you're doing, in words: "Drawing a path", "Moving circle1",
     /// "Box-selecting". Empty while you are plainly selecting: the
     /// breadcrumb already says what's selected, and the bar never repeats
     /// it.
@@ -89,6 +91,26 @@ impl Editor {
                 format!("Drawing a {}", self.tool.word()),
                 vec![h("release", "finish it"), h("Esc", "cancel")],
             ),
+            Gesture::Handle { handle, .. } => {
+                let mut hints = vec![h("release", "drop it here"), h("Esc", "put it back")];
+                if matches!(handle, HandleKind::FixtureSize { .. }) {
+                    hints.insert(
+                        1,
+                        if self.mods.shift {
+                            h("let go of ⇧", "any shape")
+                        } else {
+                            h("hold ⇧", "keep it square")
+                        },
+                    );
+                }
+                if matches!(
+                    handle,
+                    HandleKind::PathPoint { .. } | HandleKind::RingRadius { .. }
+                ) {
+                    hints.push(h("− =", "change the lamp count after"));
+                }
+                (handle_lead(&self.project, handle), hints)
+            }
             Gesture::Press { .. } | Gesture::None => {
                 if self.menu.is_some() {
                     (
@@ -109,13 +131,24 @@ impl Editor {
                     )
                 } else {
                     match self.tool {
-                        Tool::Line => (
-                            "Line tool".into(),
+                        Tool::Path if self.path_draft.is_empty() => (
+                            "Path tool".into(),
                             vec![
-                                h("drag", "draw a line — the lamp count follows its length"),
+                                h("click", "the path's first point, inside a fixture"),
                                 h("Esc · V", "back to selecting"),
                             ],
                         ),
+                        Tool::Path => {
+                            let lamps = self.draft_lamps();
+                            (
+                                "Drawing a path".into(),
+                                vec![
+                                    h("click", "add a point"),
+                                    h("double-click · Enter", format!("finish it ({lamps} lamps)")),
+                                    h("Esc", "take back the last point"),
+                                ],
+                            )
+                        }
                         Tool::Circle => (
                             "Circle tool".into(),
                             vec![
@@ -137,6 +170,12 @@ impl Editor {
     fn select_hints(&self) -> Vec<Hint> {
         let f = &self.project;
         let mut out = Vec::new();
+
+        // A handle under the pointer: dragging it is what's on offer.
+        let handle = self.hover_handle();
+        if let Some(handle) = &handle {
+            out.push(h("drag", handle.kind.does(f)));
+        }
 
         // What a click would do, first: the hover outline in words.
         if let Some(target) = self.hover_target() {
@@ -184,13 +223,13 @@ impl Editor {
             }
             out.push(h("drag on empty space", "box-select"));
             out.push(h("⌘A", "select everything"));
-            out.push(h("L · O", "draw a line · a circle"));
+            out.push(h("P · O", "draw a path · a circle"));
             return out;
         }
 
         let first = &self.selection[0];
         let owners = self.move_owners();
-        if !owners.is_empty() {
+        if !owners.is_empty() && handle.is_none() {
             out.push(h(
                 "drag",
                 format!(
@@ -286,16 +325,22 @@ impl Editor {
                 ))
             }
             Gesture::Drawing { .. } => {
-                let kind = self.draft()?;
-                let lamps: usize = crate::object::objects_of(&crate::Component {
-                    id: crate::ComponentId::new("draft"),
-                    kind,
-                })
-                .iter()
-                .map(|o| o.lamps.len())
-                .sum();
-                Some(format!("{lamps} lamps · one every {} units", self.spacing))
+                self.draft()?;
+                Some(format!(
+                    "{} lamps · one every {} units",
+                    self.draft_lamps(),
+                    self.spacing
+                ))
             }
+            Gesture::None if self.tool == Tool::Path && !self.path_draft.is_empty() => {
+                self.draft()?;
+                Some(format!(
+                    "{} lamps · one every {} units · double-click or Enter to finish",
+                    self.draft_lamps(),
+                    self.spacing
+                ))
+            }
+            Gesture::Handle { handle, .. } => Some(self.handle_note(handle)),
             Gesture::None if self.menu.is_none() => {
                 if let Some(edge) = self.hovered_edge() {
                     return Some(edge.carries);
@@ -328,9 +373,80 @@ impl Editor {
     }
 }
 
+impl Editor {
+    /// How many lamps the draft has.
+    fn draft_lamps(&self) -> usize {
+        self.draft()
+            .map(|kind| {
+                crate::object::objects_of(&crate::Component {
+                    id: crate::ComponentId::new("draft"),
+                    kind,
+                })
+                .iter()
+                .map(|o| o.lamps.len())
+                .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    /// The note beside the cursor while a handle is dragged: what it's
+    /// changing, and that a count stays put.
+    fn handle_note(&self, handle: &HandleKind) -> String {
+        let f = &self.project;
+        match handle {
+            HandleKind::PathPoint { path, index } => {
+                let (n, lamps) = match f.component(path).map(|c| &c.kind) {
+                    Some(ComponentKind::Path { points, lamps }) => (points.len(), *lamps),
+                    _ => (0, 0),
+                };
+                let what = if *index == 0 || *index + 1 == n {
+                    "an end"
+                } else {
+                    "a point"
+                };
+                format!("Dragging {what} keeps {lamps} lamps · − = changes the count")
+            }
+            HandleKind::RingRadius { circle, ring } => match f.ring(circle, ring) {
+                Some(r) => format!(
+                    "Radius {:.1} · ring {ring} keeps {} lamps · − = changes the count",
+                    r.radius, r.lamps
+                ),
+                None => String::new(),
+            },
+            HandleKind::FixtureSize { fixture, edge } => {
+                let size = f.fixture(fixture).map(|x| x.size).unwrap_or_default();
+                let tail = match (edge, self.mods.shift) {
+                    (_, true) => "square",
+                    (SizeEdge::Corner, false) => "hold ⇧ to keep it square",
+                    (_, false) => "hold ⇧ to make it square",
+                };
+                format!("{:.0} × {:.0} · {tail}", size.x, size.y)
+            }
+        }
+    }
+}
+
+/// The bar's lead while a handle is dragged: "Moving an end of path1".
+fn handle_lead(f: &Project, handle: &HandleKind) -> String {
+    match handle {
+        HandleKind::PathPoint { path, index } => {
+            let n = f.path_points(path).map_or(0, |p| p.len());
+            if *index == 0 || *index + 1 == n {
+                format!("Moving an end of {path}")
+            } else {
+                format!("Moving a point of {path}")
+            }
+        }
+        HandleKind::RingRadius { circle, ring } => {
+            format!("Changing the radius of ring {ring} of {circle}")
+        }
+        HandleKind::FixtureSize { fixture, .. } => format!("Resizing {}", f.node_name(fixture)),
+    }
+}
+
 fn delete_hint(f: &Project, selection: &[Target]) -> String {
     if selection.iter().all(|t| matches!(t, Target::Lamp { .. })) {
-        return "lamps can't be deleted — − shortens their line".into();
+        return "lamps can't be deleted — − shortens their path or ring".into();
     }
     match selection {
         [Target::Object(o)] => format!("remove ring {} from {}", o.key, o.component),

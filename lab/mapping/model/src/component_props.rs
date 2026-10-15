@@ -1,5 +1,5 @@
 //! What each kind of thing says about its properties. This is the ONLY
-//! place that knows a line has a lamp count, a ring has a radius and a
+//! place that knows a path has a lamp count, a ring has a radius and a
 //! port has pixels; the inspector reads the descriptors (`props.rs`).
 //!
 //! Note the object-level controls (D11): a ring's lamps, radius and
@@ -7,6 +7,7 @@
 //! circle.
 
 use crate::component::{ComponentKind, Ring};
+use crate::fixture::Fixture;
 use crate::project::Project;
 use crate::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 use crate::target::Target;
@@ -36,7 +37,7 @@ pub const WIDTH: PropDesc = PropDesc {
     id: "width",
     label: "Width",
     kind: PropKind::Number {
-        min: 4.0,
+        min: Fixture::MIN_SIDE,
         step: 1.0,
     },
     nudge: false,
@@ -45,7 +46,7 @@ pub const HEIGHT: PropDesc = PropDesc {
     id: "height",
     label: "Height",
     kind: PropKind::Number {
-        min: 4.0,
+        min: Fixture::MIN_SIDE,
         step: 1.0,
     },
     nudge: false,
@@ -80,7 +81,7 @@ impl Project {
                 None => Vec::new(),
             },
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
-                Some(ComponentKind::Line { lamps, .. }) => {
+                Some(ComponentKind::Path { lamps, .. }) => {
                     vec![(LAMPS, PropRaw::Count(*lamps as i64))]
                 }
                 Some(ComponentKind::Circle { rings, .. }) => vec![
@@ -134,7 +135,7 @@ impl Project {
             }
             Target::Component(id) => {
                 match (self.component_mut(id).map(|c| &mut c.kind), prop_id, new) {
-                    (Some(ComponentKind::Line { lamps, .. }), "lamps", PropRaw::Count(n)) => {
+                    (Some(ComponentKind::Path { lamps, .. }), "lamps", PropRaw::Count(n)) => {
                         *lamps = n as u32
                     }
                     (

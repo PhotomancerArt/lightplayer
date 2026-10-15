@@ -3,7 +3,7 @@
 //! The UI shows ONE tree (D18): the project holds nodes, a module holds
 //! nodes, a fixture holds components, groups hold components, a circle
 //! holds its rings, a ring holds its lamps; an output holds its ports. A
-//! line is its own object, so its lamps sit directly under it. Lamps are
+//! path is its own object, so its lamps sit directly under it. Lamps are
 //! part of the tree for navigation (Enter, arrows, drill-down) but the tree
 //! *pane* stops above them.
 //!
@@ -14,7 +14,7 @@
 //! selects the output, and the next goes into its ports.
 //!
 //! A target is a path of stable ids, so a selection survives edits: change a
-//! line's count and lamp 7 is still lamp 7.
+//! path's count and lamp 7 is still lamp 7.
 
 use crate::component::ComponentId;
 use crate::geom::Vec2;
@@ -26,7 +26,7 @@ use crate::project::Project;
 pub enum Target {
     /// A node: a module, a fixture, an output.
     Node(NodeId),
-    /// An authored component: a line, a circle, a group.
+    /// An authored component: a path, a circle, a group.
     Component(ComponentId),
     /// A derived object of a multi-object component (a ring).
     Object(ObjectId),
@@ -106,7 +106,7 @@ impl Project {
     }
 
     /// The target that stands for an object in the tree: the component for
-    /// a line (1:1), the object itself for a ring.
+    /// a path (1:1), the object itself for a ring.
     pub fn object_target(&self, o: &ObjectId) -> Target {
         match self.component(&o.component) {
             Some(c) if c.is_single_object() => Target::Component(o.component.clone()),
@@ -299,7 +299,7 @@ impl Project {
     }
 
     /// The word for a target's kind, plural-able: "module", "fixture",
-    /// "output", "port", "group", "circle", "line", "ring", "lamp".
+    /// "output", "port", "group", "circle", "path", "ring", "lamp".
     pub fn kind_word(&self, t: &Target) -> &'static str {
         match t {
             Target::Node(id) => self.node(id).map(|n| n.kind_word()).unwrap_or("node"),
