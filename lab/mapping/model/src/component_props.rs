@@ -17,12 +17,14 @@ pub const LAMPS: PropDesc = PropDesc {
     label: "Lamps",
     kind: PropKind::Count { min: 1 },
     nudge: true,
+    reshapes: true,
 };
 pub const RINGS: PropDesc = PropDesc {
     id: "rings",
     label: "Rings",
     kind: PropKind::Count { min: 1 },
     nudge: true,
+    reshapes: true,
 };
 pub const RADIUS: PropDesc = PropDesc {
     id: "radius",
@@ -32,6 +34,7 @@ pub const RADIUS: PropDesc = PropDesc {
         step: 0.5,
     },
     nudge: false,
+    reshapes: true,
 };
 pub const WIDTH: PropDesc = PropDesc {
     id: "width",
@@ -41,6 +44,7 @@ pub const WIDTH: PropDesc = PropDesc {
         step: 1.0,
     },
     nudge: false,
+    reshapes: true,
 };
 pub const HEIGHT: PropDesc = PropDesc {
     id: "height",
@@ -50,18 +54,21 @@ pub const HEIGHT: PropDesc = PropDesc {
         step: 1.0,
     },
     nudge: false,
+    reshapes: true,
 };
 pub const PIXELS: PropDesc = PropDesc {
     id: "pixels",
     label: "Pixels",
     kind: PropKind::Count { min: 1 },
     nudge: true,
+    reshapes: false,
 };
 pub const COUNTER_CLOCKWISE: PropDesc = PropDesc {
     id: "ccw",
     label: "Counter-clockwise",
     kind: PropKind::Flag,
     nudge: false,
+    reshapes: false,
 };
 
 impl Project {

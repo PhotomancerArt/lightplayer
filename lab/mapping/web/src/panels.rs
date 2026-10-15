@@ -155,6 +155,7 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
     } else {
         None
     };
+    let move_draw = e.move_draw;
     let only_lamps =
         !selection.is_empty() && selection.iter().all(|t| matches!(t, Target::Lamp { .. }));
     let node = match selection.as_slice() {
@@ -248,7 +249,7 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
                     if selection.len() > 1 { "Shared properties" } else { "Properties" }
                 }
                 for p in props {
-                    PropRow { ed, prop: p }
+                    PropRow { ed, locked: !move_draw && p.desc.reshapes, prop: p }
                 }
             } else if only_lamps {
                 div { class: "hint-inline", "A lamp's count belongs to its path or ring — Esc selects it." }
@@ -386,7 +387,7 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
 
 /// One property, laid out from its descriptor alone.
 #[component]
-fn PropRow(ed: Signal<Editor>, prop: Prop) -> Element {
+fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
     let mut ed = ed;
     let id = prop.desc.id;
     let value = prop.value.describe();
@@ -403,12 +404,14 @@ fn PropRow(ed: Signal<Editor>, prop: Prop) -> Element {
                 div { class: "num",
                     button {
                         tabindex: "-1",
+                        disabled: locked,
                         onmousedown: move |evt| evt.prevent_default(),
                         onclick: move |_| ed.write().edit_selection_prop(id, PropEdit::Nudge(-1)),
                         "−"
                     }
                     input {
                         r#type: "number",
+                        disabled: locked,
                         step: "{step}",
                         value: "{shown}",
                         placeholder: "{value}",
@@ -423,6 +426,7 @@ fn PropRow(ed: Signal<Editor>, prop: Prop) -> Element {
                     }
                     button {
                         tabindex: "-1",
+                        disabled: locked,
                         onmousedown: move |evt| evt.prevent_default(),
                         onclick: move |_| ed.write().edit_selection_prop(id, PropEdit::Nudge(1)),
                         "+"
@@ -454,7 +458,9 @@ fn PropRow(ed: Signal<Editor>, prop: Prop) -> Element {
         }
     };
     rsx! {
-        div { class: "prop",
+        div {
+            class: "prop",
+            title: if locked { "Move & draw is off · M turns it on" } else { "" },
             span { class: "prop-label", "{prop.desc.label}" }
             {control}
             if mixed {

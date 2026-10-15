@@ -24,6 +24,10 @@ pub struct PropDesc {
     pub kind: PropKind,
     /// The − / = keys nudge this property.
     pub nudge: bool,
+    /// Changing it moves lamps or reshapes what's drawn (a lamp count
+    /// respaces a path's lamps; a radius, a fixture's size): refused while
+    /// Move & draw is off (D50). A port's pixel count, a direction, don't.
+    pub reshapes: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

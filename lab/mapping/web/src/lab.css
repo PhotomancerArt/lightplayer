@@ -58,6 +58,8 @@ html, body, #main { margin: 0; height: 100%; background: var(--bg); color: var(-
 button { font: inherit; color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
 button:disabled { opacity: 0.4; cursor: default; }
+.toggle-box { display: inline-block; width: 12px; height: 12px; line-height: 11px; font-size: 10px; text-align: center; border: 1px solid var(--border-strong); border-radius: 3px; vertical-align: -1px; }
+.tool.toggle.on .toggle-box { border-color: var(--selection); color: var(--text); }
 .tool.on { border-color: var(--selection); color: var(--text); background: var(--selection-bg); }
 kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 

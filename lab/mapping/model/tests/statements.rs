@@ -1987,6 +1987,84 @@ fn the_bar_lead_says_what_youre_doing() {
     assert_eq!(e.hint_bar().lead, "Resizing scarf");
 }
 
+// ---- Move & draw -------------------------------------------------------------
+
+/// With Move & draw off, nothing moves, draws or reshapes, and each try
+/// says the toggle is off and how to turn it on; selection, pixels and the
+/// board still work.
+#[test]
+fn with_move_and_draw_off_nothing_moves() {
+    let mut e = editor();
+    key(&mut e, Key::Char('m'), none());
+    assert!(!e.move_draw);
+    let before = e.project.clone();
+    let refused = |e: &Editor| {
+        let n = e.notice.clone().expect("a notice");
+        n.kind == NoticeKind::Refused
+            && n.why.as_deref() == Some("Move & draw is off")
+            && n.help.unwrap_or_default().starts_with("M turns it on")
+    };
+
+    // Selecting works: a click selects circle1, and again its ring.
+    click_lamp(&mut e, "circle1", "r1", 3, none());
+    assert_eq!(e.selection, vec![comp("circle1")]);
+    assert!(e.handles().is_empty(), "no handles");
+    // Dragging it moves nothing.
+    let at = lamp_screen(&e, "circle1", "r1", 3);
+    drag(&mut e, at, at + Vec2::new(40.0, 0.0), none());
+    assert!(refused(&e), "{:?}", e.notice);
+    assert_eq!(e.project, before);
+    // Nor does dragging a node by its title: nothing is pinned.
+    let title = e.camera.to_screen(place(&e, "strip", 0.0, 0.0)) + Vec2::new(12.0, -10.0);
+    drag(&mut e, title, title + Vec2::new(0.0, 60.0), none());
+    assert!(refused(&e));
+    assert_eq!(e.project, before);
+    // No drawing tools.
+    key(&mut e, Key::Char('p'), none());
+    assert_eq!(e.tool, Tool::Select);
+    assert!(refused(&e));
+    // No count or size that moves lamps.
+    e.select(vec![comp("path3")]);
+    key(&mut e, Key::Char('='), none());
+    assert!(refused(&e));
+    e.select(vec![fixture(&e, "scarf")]);
+    e.edit_selection_prop("width", PropEdit::SetNumber(140.0));
+    assert!(refused(&e));
+    // No points added by double-click.
+    e.select(vec![comp("path3")]);
+    let at = e.camera.to_screen(place(&e, "strip", 30.0, 40.0));
+    double_click(&mut e, at);
+    assert!(refused(&e));
+    assert_eq!(e.project, before, "nothing changed");
+    let bar = e.hint_bar();
+    assert!(
+        bar.hints
+            .iter()
+            .all(|h| h.keys != "drag" && h.keys != "P · O"),
+        "the bar offers no moving: {:?}",
+        bar.hints
+    );
+    assert!(bar.hints.iter().any(|h| h.keys == "M"));
+
+    // A pixel still lights; a port's own count is patching, not drawing.
+    let main = node_id(&e, "main");
+    e.select(vec![pixel(&main, "p2", 3)]);
+    assert!(bright(e.device_frame(CREST).port(&main, "p2").unwrap()[3]));
+    e.select(vec![port(&main, "p2")]);
+    key(&mut e, Key::Char('='), none());
+    assert_eq!(e.project.port_fill(&main, "p2"), (30, 31));
+
+    // M turns it back on, and a drag moves again.
+    key(&mut e, Key::Char('m'), none());
+    e.select(vec![comp("circle1")]);
+    let at = lamp_screen(&e, "circle1", "r1", 3);
+    drag(&mut e, at, at + Vec2::new(40.0, 0.0), none());
+    assert_ne!(
+        e.project.component(&ComponentId::new("circle1")),
+        before.component(&ComponentId::new("circle1"))
+    );
+}
+
 // ---- pixels --------------------------------------------------------------------
 
 /// Clicking into a port selects one of its pixels; the arrow keys walk the

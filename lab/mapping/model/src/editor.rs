@@ -186,6 +186,10 @@ pub struct Editor {
     pub menu: Option<ContextMenu>,
     /// The path being clicked out, in world units, before it exists.
     pub path_draft: Vec<Vec2>,
+    /// "Move & draw" (D50): on, the drawing can be moved, drawn and
+    /// reshaped; off, it holds still and only selection and patching work
+    /// (the dome). M toggles it.
+    pub move_draw: bool,
     /// The selection before each of the last two presses: a double-click
     /// adds a point to a path that was shaped BEFORE its two clicks went
     /// into it.
@@ -213,6 +217,7 @@ impl Editor {
             notice: None,
             menu: None,
             path_draft: Vec::new(),
+            move_draw: true,
             press_log: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
@@ -300,9 +305,10 @@ impl Editor {
         self.draft_into().map(|(f, _)| f)
     }
 
-    /// The handles the selection shows (none while a tool is drawing).
+    /// The handles the selection shows (none while a tool is drawing, or
+    /// with Move & draw off).
     pub fn handles(&self) -> Vec<Handle> {
-        if self.tool != Tool::Select {
+        if self.tool != Tool::Select || !self.move_draw {
             return Vec::new();
         }
         self.project.handles(&self.selection)
@@ -628,6 +634,10 @@ impl Editor {
     /// select the path so its new handle shows. Refused on top of a point
     /// it already has.
     pub fn add_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) {
+        if !self.move_draw {
+            self.refuse_move_draw(&format!("add a point to {path}"));
+            return;
+        }
         let origin = self.project.component_origin(path);
         let near = self.project.path_points(path).is_some_and(|ps| {
             ps.iter()
@@ -653,6 +663,10 @@ impl Editor {
 
     /// Take a point away from a path; refused below two points.
     pub fn remove_point(&mut self, path: &ComponentId, index: usize) {
+        if !self.move_draw {
+            self.refuse_move_draw(&format!("remove a point of {path}"));
+            return;
+        }
         let n = self.project.path_points(path).map_or(0, |p| p.len());
         if n <= 2 {
             self.notice = Some(Notice::refused(
@@ -766,6 +780,7 @@ impl Editor {
             ('=' | '+', false, _) => self.nudge(1),
             ('r', false, _) => self.reverse(),
             ('u', false, _) => self.unpin_selection(),
+            ('m', false, _) => self.set_move_draw(!self.move_draw),
             ('1' | '!', false, true) => self.fit(),
             ('2' | '@', false, true) => self.frame_selection(),
             _ => return false,
@@ -823,6 +838,10 @@ impl Editor {
         let p = &self.project;
         let world = self.camera.to_world(at);
         let mut out = Vec::new();
+        // Every one of them moves or reshapes something.
+        if !self.move_draw {
+            return out;
+        }
         if let Some(Handle {
             kind: HandleKind::PathPoint { path, index },
             ..
@@ -1187,12 +1206,23 @@ impl Editor {
     // ---- moving --------------------------------------------------------
 
     fn begin_move(&mut self, start_world: Vec2) {
-        let owners = self.move_owners();
-        let nodes: Vec<(NodeId, Vec2)> = self
+        let mut owners = self.move_owners();
+        let mut nodes: Vec<(NodeId, Vec2)> = self
             .move_nodes()
             .into_iter()
             .filter_map(|id| Some((id.clone(), self.project.node_position(&id)?)))
             .collect();
+        if !self.move_draw {
+            // Nothing moves: the drag runs, and does nothing.
+            let names: Vec<String> = owners
+                .iter()
+                .map(|o| o.to_string())
+                .chain(nodes.iter().map(|(id, _)| self.project.node_name(id)))
+                .collect();
+            self.refuse_move_draw(&format!("move {}", names.join(", ")));
+            owners.clear();
+            nodes.clear();
+        }
         if !owners.is_empty() || !nodes.is_empty() {
             self.checkpoint();
         }
@@ -1239,6 +1269,10 @@ impl Editor {
     /// U: give the selected nodes (or the outputs of selected ports and
     /// pixels) back to the automatic layout.
     pub fn unpin_selection(&mut self) {
+        if !self.move_draw {
+            self.refuse_move_draw("unpin");
+            return;
+        }
         let ids = self.move_nodes();
         self.unpin(&ids);
     }
@@ -1326,9 +1360,38 @@ impl Editor {
     // ---- drawing -------------------------------------------------------
 
     pub fn set_tool(&mut self, tool: Tool) {
+        if tool != Tool::Select && !self.move_draw {
+            self.refuse_move_draw(&format!("draw a {}", tool.word()));
+            return;
+        }
         self.tool = tool;
         self.gesture = Gesture::None;
         self.path_draft.clear();
+    }
+
+    /// M, or the toolbar's "Move & draw": turn moving, drawing and
+    /// reshaping on or off (D50). Off leaves any drawing tool.
+    pub fn set_move_draw(&mut self, on: bool) {
+        self.move_draw = on;
+        if !on {
+            self.tool = Tool::Select;
+            self.path_draft.clear();
+            self.gesture = Gesture::None;
+        }
+        self.notice = Some(Notice::info(if on {
+            "Move & draw on — drag to move, P and O draw"
+        } else {
+            "Move & draw off — select and patch only; nothing moves · M turns it back on"
+        }));
+    }
+
+    /// Say that Move & draw is off, naming the toggle.
+    pub(crate) fn refuse_move_draw(&mut self, what: &str) {
+        self.notice = Some(Notice::refused(
+            format!("Can't {what}"),
+            "Move & draw is off",
+            "M turns it on (or Move & draw in the toolbar)",
+        ));
     }
 
     /// The lamp count a drawn path of this length gets: one every `spacing`.

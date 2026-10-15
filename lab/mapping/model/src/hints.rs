@@ -192,7 +192,9 @@ impl Editor {
                 alt_removes = true;
                 out.push(h("⌥ click", "remove this point"));
             }
-        } else if let Some(p) = self.hover_point() {
+        } else if let Some(p) = self.hover_point()
+            && self.move_draw
+        {
             // On a shaped path's segment: a double-click adds a point.
             if let Some(path) = self
                 .shaped_paths(&self.selection)
@@ -260,14 +262,17 @@ impl Editor {
             }
             out.push(h("drag on empty space", "box-select"));
             out.push(h("⌘A", "select everything"));
-            out.push(h("P · O", "draw a path · a circle"));
+            if self.move_draw {
+                out.push(h("P · O", "draw a path · a circle"));
+            }
+            out.push(self.move_draw_hint());
             return out;
         }
 
         let first = &self.selection[0];
         let owners = self.move_owners();
         let nodes = self.move_nodes();
-        if handle.is_none() {
+        if handle.is_none() && self.move_draw {
             if !owners.is_empty() {
                 out.push(h(
                     "drag",
@@ -291,7 +296,7 @@ impl Editor {
             .filter(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))
             .map(|n| f.node_name(n))
             .collect();
-        if !pinned.is_empty() {
+        if !pinned.is_empty() && self.move_draw {
             out.push(h(
                 "U",
                 format!("unpin {} — back to the layout", list(&pinned)),
@@ -331,7 +336,10 @@ impl Editor {
                 other => other.clone(),
             })
             .collect();
-        if let Some(p) = common_props(f, &edit).iter().find(|p| p.desc.nudge) {
+        if let Some(p) = common_props(f, &edit)
+            .iter()
+            .find(|p| p.desc.nudge && (self.move_draw || !p.desc.reshapes))
+        {
             let whose = if self
                 .selection
                 .iter()
@@ -354,7 +362,20 @@ impl Editor {
             out.push(h("r", "reverse the data direction"));
         }
         out.push(h("⌘A", self.select_all_hint()));
+        out.push(self.move_draw_hint());
         out
+    }
+
+    /// M, in words: what turning Move & draw over would do (D50).
+    fn move_draw_hint(&self) -> Hint {
+        if self.move_draw {
+            h("M", "Move & draw off — select and patch only")
+        } else {
+            h(
+                "M",
+                "Move & draw is off: turn it on to move, draw and reshape",
+            )
+        }
     }
 
     /// The note beside the cursor during a gesture.

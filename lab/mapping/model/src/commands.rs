@@ -220,22 +220,13 @@ impl Editor {
         }
         let props = common_props(&self.project, &targets);
         let Some(prop) = props.iter().find(|p| p.desc.nudge) else {
-            let t = &targets[0];
-            self.notice = Some(if targets.len() == 1 {
-                Notice::refused(
-                    format!("{} has no count of its own", self.project.long_label(t)),
-                    format!("a {} is made of other things", self.project.kind_word(t)),
-                    "Enter goes into it; select a path or ring there",
-                )
-            } else {
-                Notice::refused(
-                    "These don't share a count",
-                    "paths and rings count lamps, circles count rings",
-                    "select only paths and rings (or only circles) to change them together",
-                )
-            });
-            return;
+            return self.refuse_no_count(&targets);
         };
+        if prop.desc.reshapes && !self.move_draw {
+            let label = prop.desc.label.to_lowercase();
+            self.refuse_move_draw(&format!("change the {label}"));
+            return;
+        }
         let id = prop.desc.id;
         self.edit_selected(&targets, id, PropEdit::Nudge(steps));
         let now = common_props(&self.project, &targets);
@@ -246,6 +237,24 @@ impl Editor {
                 p.value.describe()
             )));
         }
+    }
+
+    /// − / = on something with no count of its own: say what to do.
+    fn refuse_no_count(&mut self, targets: &[Target]) {
+        let t = &targets[0];
+        self.notice = Some(if targets.len() == 1 {
+            Notice::refused(
+                format!("{} has no count of its own", self.project.long_label(t)),
+                format!("a {} is made of other things", self.project.kind_word(t)),
+                "Enter goes into it; select a path or ring there",
+            )
+        } else {
+            Notice::refused(
+                "These don't share a count",
+                "paths and rings count lamps, circles count rings",
+                "select only paths and rings (or only circles) to change them together",
+            )
+        });
     }
 
     /// r: reverse the data direction. A path runs from its last point to
@@ -323,6 +332,15 @@ impl Editor {
     pub fn edit_selection_prop(&mut self, prop_id: &str, edit: PropEdit) {
         let targets = self.selection.clone();
         self.notice = None;
+        let reshapes = common_props(&self.project, &targets)
+            .into_iter()
+            .find(|p| p.desc.id == prop_id && p.desc.reshapes);
+        if let Some(p) = reshapes
+            && !self.move_draw
+        {
+            self.refuse_move_draw(&format!("change the {}", p.desc.label.to_lowercase()));
+            return;
+        }
         self.edit_selected(&targets, prop_id, edit);
     }
 

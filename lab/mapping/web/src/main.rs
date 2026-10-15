@@ -19,6 +19,7 @@ fn main() {
 fn App() -> Element {
     let mut ed = use_signal(|| Editor::new(Project::seed()));
     let tool = ed.read().tool;
+    let move_draw = ed.read().move_draw;
     let (can_undo, can_redo) = {
         let e = ed.read();
         (e.can_undo(), e.can_redo())
@@ -41,9 +42,25 @@ fn App() -> Element {
                     select { tabindex: "-1", option { "desk" } }
                 }
                 div { class: "tools",
-                    ToolButton { ed, tool: Tool::Select, key_label: "V", current: tool }
-                    ToolButton { ed, tool: Tool::Path, key_label: "P", current: tool }
-                    ToolButton { ed, tool: Tool::Circle, key_label: "O", current: tool }
+                    // Named for what's ON (D50): moving, drawing, reshaping.
+                    button {
+                        class: if move_draw { "tool toggle on" } else { "tool toggle" },
+                        tabindex: "-1",
+                        title: if move_draw { "On: drag moves and pins, P and O draw. Off: select and patch only." } else { "Off: select and patch only. Turn on to move, draw and reshape." },
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| {
+                            let on = ed.read().move_draw;
+                            ed.write().set_move_draw(!on);
+                        },
+                        span { class: "toggle-box", if move_draw { "✓" } else { "" } }
+                        " Move & draw "
+                        kbd { "M" }
+                    }
+                }
+                div { class: "tools",
+                    ToolButton { ed, tool: Tool::Select, key_label: "V", current: tool, enabled: true }
+                    ToolButton { ed, tool: Tool::Path, key_label: "P", current: tool, enabled: move_draw }
+                    ToolButton { ed, tool: Tool::Circle, key_label: "O", current: tool, enabled: move_draw }
                 }
                 div { class: "tools",
                     button {
@@ -71,13 +88,20 @@ fn App() -> Element {
 }
 
 #[component]
-fn ToolButton(ed: Signal<Editor>, tool: Tool, key_label: &'static str, current: Tool) -> Element {
+fn ToolButton(
+    ed: Signal<Editor>,
+    tool: Tool,
+    key_label: &'static str,
+    current: Tool,
+    enabled: bool,
+) -> Element {
     let mut ed = ed;
     let class = if tool == current { "tool on" } else { "tool" };
     rsx! {
         button {
             class,
             tabindex: "-1",
+            disabled: !enabled,
             onmousedown: move |evt| evt.prevent_default(),
             onclick: move |_| ed.write().set_tool(tool),
             "{tool.word()} "

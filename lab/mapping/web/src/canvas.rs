@@ -349,6 +349,9 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         (Gesture::Panning { .. }, _, _) => "grabbing",
         (_, true, _) => "grab",
         _ if handle_cursor.is_some() => handle_cursor.unwrap_or_default(),
+        (Gesture::Moving { owners, nodes, .. }, _, _) if owners.is_empty() && nodes.is_empty() => {
+            "not-allowed"
+        }
         (Gesture::Moving { .. }, _, _) => "move",
         (_, _, Tool::Path | Tool::Circle) => "crosshair",
         _ => "default",
