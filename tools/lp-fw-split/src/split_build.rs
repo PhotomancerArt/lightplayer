@@ -188,9 +188,11 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         bail!("the core's digest slot does not hold engine.bin's SHA-256 after patching");
     }
     let mut core = split_artifacts::app_image(&split_artifacts::core_elf(&p2_elf)?)?;
-    // espflash's address-0 padding (a rodata page crossing leaves a gap the
-    // RAM segments cannot fill) goes to the core's .bss, which the core
-    // zeroes before it reads it; the loader would copy it to address 0.
+    // espflash's address-0 padding, if a core ever has any, goes to the
+    // core's .bss, which the core zeroes before it reads it; the loader would
+    // copy it to address 0. (A rodata page crossing used to leave a gap the
+    // RAM segments could not fill; with `.text` following rodata there is no
+    // gap — `engine_script::TEXT_FOLLOWS_RODATA`.)
     let bss =
         elf_symbol::value(&p2_elf, BSS_START_SYMBOL)?..elf_symbol::value(&p2_elf, BSS_END_SYMBOL)?;
     for p in core_padding::aim_padding_at_bss(&mut core, bss.clone())? {
