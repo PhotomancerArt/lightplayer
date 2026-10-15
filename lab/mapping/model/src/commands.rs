@@ -10,8 +10,8 @@ use crate::target::Target;
 impl Editor {
     /// ⌫: delete what you authored — a node (a module with everything in
     /// it), a component; a ring goes through its circle and a port through
-    /// its output; a lamp is refused with a reason and a way to do it (D18,
-    /// D20). Deleting an output leaves the rules that named it as problems,
+    /// its output; a lamp or a pixel is refused with a reason and a way to
+    /// do it (D18, D20). Deleting an output leaves the rules that named it as problems,
     /// said out loud; nothing is retargeted.
     pub fn delete_selection(&mut self) {
         if self.selection.is_empty() {
@@ -76,6 +76,21 @@ impl Editor {
                     } else {
                         rings.push(o.clone());
                     }
+                }
+                Target::Pixel { output, key, .. } => {
+                    let n = f
+                        .output(output)
+                        .and_then(|o| o.port(key))
+                        .map_or(0, |p| p.pixels);
+                    let port = t.port_of_pixel().unwrap_or_else(|| t.clone());
+                    refused.push((
+                        t.clone(),
+                        format!("{} makes its pixels from a count", f.long_label(&port)),
+                        format!(
+                            "press − to make it {} (pixels come off the end)",
+                            n.saturating_sub(1).max(1)
+                        ),
+                    ));
                 }
                 Target::Lamp { object, .. } => {
                     let owner = f.object_target(object);
@@ -176,12 +191,13 @@ impl Editor {
     }
 
     /// The things a count or direction edit applies to: a selected lamp
-    /// stands for its path or ring.
+    /// stands for its path or ring, a selected pixel for its port.
     fn edit_targets(&self) -> Vec<Target> {
         let mut out = Vec::new();
         for t in &self.selection {
             let t = match t {
                 Target::Lamp { object, .. } => self.project.object_target(object),
+                Target::Pixel { .. } => t.port_of_pixel().unwrap_or_else(|| t.clone()),
                 other => other.clone(),
             };
             if !out.contains(&t) {
@@ -272,7 +288,10 @@ impl Editor {
                         r.reversed = !r.reversed;
                     }
                 }
-                Target::Lamp { .. } | Target::Node(_) | Target::Port { .. } => {}
+                Target::Lamp { .. }
+                | Target::Node(_)
+                | Target::Port { .. }
+                | Target::Pixel { .. } => {}
             }
         }
         // Keep each selected lamp on the same physical lamp.
@@ -324,7 +343,7 @@ impl crate::Project {
         match t {
             Target::Component(_) => !matches!(self.kind_word(t), "group"),
             Target::Object(_) | Target::Lamp { .. } => true,
-            Target::Node(_) | Target::Port { .. } => false,
+            Target::Node(_) | Target::Port { .. } | Target::Pixel { .. } => false,
         }
     }
 }

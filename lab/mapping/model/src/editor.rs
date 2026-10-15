@@ -354,6 +354,7 @@ impl Editor {
             ),
             Target::Node(id) => p.node_rect(id),
             Target::Port { output, key } => p.port_rect(output, key),
+            Target::Pixel { output, key, index } => p.pixel_rect(output, key, *index),
             other => p.lamps_rect(other).map(|r| {
                 let pad = Vec2::new(FRAME_PAD, FRAME_PAD);
                 Rect::new(r.min - pad, r.max + pad)
@@ -501,7 +502,7 @@ impl Editor {
                         self.click_mode(press_mods),
                     ) {
                         if press_mods.shift {
-                            self.toggle(t);
+                            self.shift_add(t);
                         } else {
                             self.selection = vec![t];
                         }
@@ -715,11 +716,43 @@ impl Editor {
             self.press_mode(mods),
         ) {
             if mods.shift {
-                self.toggle(t);
+                self.shift_add(t);
             } else {
                 self.selection = vec![t];
             }
         }
+    }
+
+    /// ⇧-click: add or remove — except on a port's pixels, where ⇧-click
+    /// selects the run from the first pixel you picked to this one (D47).
+    fn shift_add(&mut self, t: Target) {
+        if let Target::Pixel { output, key, index } = &t {
+            let anchor = self.selection.iter().find_map(|s| match s {
+                Target::Pixel {
+                    output: o,
+                    key: k,
+                    index: i,
+                } if o == output && k == key => Some(*i),
+                _ => None,
+            });
+            if let Some(a) = anchor {
+                let run: Vec<u32> = if a <= *index {
+                    (a..=*index).collect()
+                } else {
+                    (*index..=a).rev().collect()
+                };
+                self.selection = run
+                    .into_iter()
+                    .map(|i| Target::Pixel {
+                        output: output.clone(),
+                        key: key.clone(),
+                        index: i,
+                    })
+                    .collect();
+                return;
+            }
+        }
+        self.toggle(t);
     }
 
     fn toggle(&mut self, t: Target) {
@@ -923,16 +956,27 @@ impl Editor {
     }
 
     /// After an edit or undo: a selected lamp past the end of a shortened
-    /// path becomes its last lamp (the selection stays where you were
-    /// working), and anything else that no longer exists is dropped.
+    /// path becomes its last lamp, and a pixel past the end of a shortened
+    /// port its last pixel (the selection stays where you were working);
+    /// anything else that no longer exists is dropped.
     fn prune_selection(&mut self) {
         let f = &self.project;
         for t in &mut self.selection {
-            if let Target::Lamp { object, index } = t {
-                let n = f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0);
-                if n > 0 && *index >= n {
-                    *index = n - 1;
-                }
+            let (n, index) = match t {
+                Target::Lamp { object, index } => (
+                    f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0),
+                    index,
+                ),
+                Target::Pixel { output, key, index } => (
+                    f.output(output)
+                        .and_then(|o| o.port(key))
+                        .map_or(0, |p| p.pixels),
+                    index,
+                ),
+                _ => continue,
+            };
+            if n > 0 && *index >= n {
+                *index = n - 1;
             }
         }
         self.selection.retain(|t| f.exists(t));

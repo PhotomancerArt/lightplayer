@@ -112,6 +112,8 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .edge-label { fill: var(--bound); font: 10px var(--font); paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; }
 .edge-quiet .edge-label { opacity: 0.45; }
 .lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
+/* A selected lamp's pixel, ringed on its port (D47). */
+.px-mark { fill: none; stroke: var(--bound); stroke-width: 1.6; rx: 1.5; pointer-events: none; }
 
 .obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .obj .arrow { fill: var(--text-subtle); }

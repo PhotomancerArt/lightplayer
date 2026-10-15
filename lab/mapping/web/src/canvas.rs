@@ -31,7 +31,7 @@
 use dioxus::prelude::*;
 use lab_mapping_model::{
     Camera, Component, ComponentId, DeviceFrame, Editor, Gesture, HandleKind, NodeId, NodeKind,
-    Object, ObjectId, ObjectShape, Project, Rect, SizeEdge, Target, Tool, Vec2,
+    Object, ObjectId, ObjectShape, PixelGrid, Project, Rect, SizeEdge, Target, Tool, Vec2,
     area::{FRAME_TITLE_PX, title_width},
     geom::{along_polyline, polyline_length},
     handle::HANDLE_PX,
@@ -125,17 +125,15 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                             output: n.id.clone(),
                             key: p.key.clone(),
                         };
-                        // The name on top, the pixels below it.
-                        let pad = font * 0.7;
-                        let h = row.height();
-                        pixel_rows.push(PixelRow {
-                            output: n.id.clone(),
-                            key: p.key.clone(),
-                            area: Rect::new(
-                                Vec2::new(row.min.x + pad, row.min.y + h * 0.5),
-                                Vec2::new(row.max.x - pad, row.max.y - h * 0.1),
-                            ),
-                        });
+                        // The name on top, the pixels below it, where the
+                        // model puts them (they are selectable).
+                        if let Some(grid) = f.pixel_grid(&n.id, &p.key) {
+                            pixel_rows.push(PixelRow {
+                                output: n.id.clone(),
+                                key: p.key.clone(),
+                                grid,
+                            });
+                        }
                         PortRow {
                             rect: row,
                             name: p.name.clone(),
@@ -187,23 +185,22 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             }
         })
         .collect();
-    // The lamps a selected port carries.
-    let mut carried: Vec<Vec2> = Vec::new();
-    for t in &e.selection {
-        if let Target::Port { output, key } = t {
-            for (o, i) in f.lamps_on_port(output, key) {
-                if let Some(p) = f
-                    .lamps_under(&Target::Lamp {
-                        object: o,
-                        index: i,
-                    })
-                    .first()
-                {
-                    carried.push(cam.to_screen(*p));
-                }
-            }
-        }
-    }
+    // The lamps a selected port or pixel carries, ringed; and the pixel of
+    // each selected lamp, ringed on its port (D47).
+    let carried: Vec<Vec2> = e
+        .marked_lamps()
+        .iter()
+        .filter_map(|l| f.lamps_under(l).first().map(|p| cam.to_screen(*p)))
+        .collect();
+    let marked_pixels: Vec<Rect> = e
+        .marked_pixels()
+        .iter()
+        .filter_map(|t| match t {
+            Target::Pixel { output, key, index } => f.pixel_rect(output, key, *index),
+            _ => None,
+        })
+        .map(|r| screen_rect(&cam, r))
+        .collect();
 
     let placed = f.placed_objects();
     let objects: Vec<ObjectView> = placed
@@ -442,7 +439,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         }
                     }
                 }
-                BoardPixels { frame, rows: pixel_rows }
+                BoardPixels { frame, rows: pixel_rows, cam }
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
@@ -495,6 +492,14 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 }
                 for (i, p) in carried.iter().enumerate() {
                     circle { key: "k{i}", class: "lamp-ring-port", cx: "{p.x}", cy: "{p.y}", r: "{lamp_r + 2.5}" }
+                }
+                for (i, r) in marked_pixels.iter().enumerate() {
+                    rect {
+                        key: "mp{i}",
+                        class: "px-mark",
+                        x: "{r.min.x - 1.5}", y: "{r.min.y - 1.5}",
+                        width: "{r.width() + 3.0}", height: "{r.height() + 3.0}",
+                    }
                 }
                 for (i, o) in outlines.iter().enumerate() {
                     g { key: "o{i}",
@@ -621,42 +626,41 @@ struct EdgeView {
     class: String,
 }
 
-/// Where one port's pixels go on its card, on screen.
+/// Where one port's pixels go on its card: the model's grid, in world
+/// units.
 #[derive(Clone, PartialEq)]
 struct PixelRow {
     output: NodeId,
     key: String,
-    area: Rect,
+    grid: PixelGrid,
 }
 
-/// Below this many screen pixels a square is too small to read: the row
-/// wraps onto two lines.
-const MIN_PIXEL_PX: f64 = 6.0;
-/// Squares this big get a hairline gap between them.
+/// Squares this big on screen get a hairline gap between them.
 const GAP_PIXEL_PX: f64 = 4.0;
 
 /// Every port's pixels, as the simulated board shows them now. Its own
 /// component, so the clock's ticks redraw only this layer, not the canvas.
 /// Drawn over the cards and never dimmed with them: the LEDs are the truth.
 #[component]
-fn BoardPixels(frame: Memo<DeviceFrame>, rows: Vec<PixelRow>) -> Element {
+fn BoardPixels(frame: Memo<DeviceFrame>, rows: Vec<PixelRow>, cam: Camera) -> Element {
     let frame = frame.read();
     let mut squares: Vec<(Rect, String)> = Vec::new();
     for row in &rows {
         let Some(pixels) = frame.port(&row.output, &row.key) else {
             continue;
         };
-        let n = pixels.len().max(1);
-        let w = row.area.width();
-        let h = row.area.height();
-        let lines = if w / n as f64 >= MIN_PIXEL_PX { 1 } else { 2 };
-        let cols = n.div_ceil(lines);
-        let s = (w / cols as f64).min(h / lines as f64).max(0.5);
-        let gap = if s >= GAP_PIXEL_PX { 1.0 } else { 0.0 };
+        let gap = if row.grid.side * cam.scale >= GAP_PIXEL_PX {
+            1.0
+        } else {
+            0.0
+        };
         for (i, px) in pixels.iter().enumerate() {
-            let at = row.area.min + Vec2::new((i % cols) as f64 * s, (i / cols) as f64 * s);
+            let Some(world) = row.grid.rect(i as u32) else {
+                continue;
+            };
+            let r = screen_rect(&cam, world);
             squares.push((
-                Rect::new(at, at + Vec2::new(s - gap, s - gap)),
+                Rect::new(r.min, r.max - Vec2::new(gap, gap)),
                 format!("rgb({},{},{})", px.r, px.g, px.b),
             ));
         }

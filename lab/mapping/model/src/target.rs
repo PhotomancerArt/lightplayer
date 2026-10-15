@@ -2,16 +2,17 @@
 //!
 //! The UI shows ONE tree (D18): the project holds nodes, a module holds
 //! nodes, a fixture holds components, groups hold components, a circle
-//! holds its rings, a ring holds its lamps; an output holds its ports. A
-//! path is its own object, so its lamps sit directly under it. Lamps are
-//! part of the tree for navigation (Enter, arrows, drill-down) but the tree
-//! *pane* stops above them.
+//! holds its rings, a ring holds its lamps; an output holds its ports, and
+//! a port its pixels. A path is its own object, so its lamps sit directly
+//! under it. Lamps and pixels are part of the tree for navigation (Enter,
+//! arrows, drill-down) but the tree *pane* stops above them.
 //!
 //! On the canvas a frame — a module, a fixture — is see-through, like a
 //! frame in Figma: a click inside it selects what is in it. A frame itself
 //! is picked by its title or border, from the tree, or with Esc
 //! ([`Project::pick_level`]). An output card is not a frame: a click on it
-//! selects the output, and the next goes into its ports.
+//! selects the output, the next goes into its ports, and the next into the
+//! port's pixels (D47) — the hardware, reachable like anything else.
 //!
 //! A target is a path of stable ids, so a selection survives edits: change a
 //! path's count and lamp 7 is still lamp 7.
@@ -34,6 +35,13 @@ pub enum Target {
     Lamp { object: ObjectId, index: u32 },
     /// One port of an output, by the key its output minted.
     Port { output: NodeId, key: String },
+    /// One pixel of a port, by its index on the strip (D47). Like a lamp,
+    /// it comes from a count: the port's.
+    Pixel {
+        output: NodeId,
+        key: String,
+        index: u32,
+    },
 }
 
 impl Target {
@@ -42,7 +50,7 @@ impl Target {
     /// layout places them.
     pub fn owner(&self) -> Option<&ComponentId> {
         match self {
-            Target::Node(_) | Target::Port { .. } => None,
+            Target::Node(_) | Target::Port { .. } | Target::Pixel { .. } => None,
             Target::Component(id) => Some(id),
             Target::Object(o) | Target::Lamp { object: o, .. } => Some(&o.component),
         }
@@ -54,6 +62,17 @@ impl Target {
             self,
             Target::Component(_) | Target::Node(_) | Target::Port { .. }
         )
+    }
+
+    /// The port a pixel is on, as a target.
+    pub fn port_of_pixel(&self) -> Option<Target> {
+        match self {
+            Target::Pixel { output, key, .. } => Some(Target::Port {
+                output: output.clone(),
+                key: key.clone(),
+            }),
+            _ => None,
+        }
     }
 
     pub fn node(&self) -> Option<&NodeId> {
@@ -77,6 +96,10 @@ impl Project {
             Target::Port { output, key } => {
                 self.output(output).is_some_and(|o| o.port(key).is_some())
             }
+            Target::Pixel { output, key, index } => self
+                .output(output)
+                .and_then(|o| o.port(key))
+                .is_some_and(|p| *index < p.pixels),
         }
     }
 
@@ -100,7 +123,7 @@ impl Project {
     pub fn fixture_of_target(&self, t: &Target) -> Option<NodeId> {
         match t {
             Target::Node(id) => self.fixture(id).map(|_| id.clone()),
-            Target::Port { .. } => None,
+            Target::Port { .. } | Target::Pixel { .. } => None,
             other => self.fixture_of(other.owner()?).map(|n| n.id.clone()),
         }
     }
@@ -125,6 +148,7 @@ impl Project {
             Target::Object(o) => Some(Target::Component(o.component.clone())),
             Target::Lamp { object, .. } => Some(self.object_target(object)),
             Target::Port { output, .. } => Some(Target::Node(output.clone())),
+            Target::Pixel { .. } => t.port_of_pixel(),
         }
     }
 
@@ -183,7 +207,20 @@ impl Project {
                 .object(o)
                 .map(|obj| lamp_targets(o, obj.lamps.len()))
                 .unwrap_or_default(),
-            Target::Lamp { .. } | Target::Port { .. } => Vec::new(),
+            Target::Port { output, key } => {
+                let n = self
+                    .output(output)
+                    .and_then(|o| o.port(key))
+                    .map_or(0, |p| p.pixels);
+                (0..n)
+                    .map(|index| Target::Pixel {
+                        output: output.clone(),
+                        key: key.clone(),
+                        index,
+                    })
+                    .collect()
+            }
+            Target::Lamp { .. } | Target::Pixel { .. } => Vec::new(),
         }
     }
 
@@ -262,12 +299,12 @@ impl Project {
                 .iter()
                 .flat_map(|c| self.lamps_under(c))
                 .collect(),
-            Target::Port { .. } => Vec::new(),
+            Target::Port { .. } | Target::Pixel { .. } => Vec::new(),
         }
     }
 
     /// What the user calls this target, short: `tail`, `circle1`, `ring r2`,
-    /// `lamp 14`, `D0`.
+    /// `lamp 14`, `D0`, `pixel 7`.
     pub fn label(&self, t: &Target) -> String {
         match t {
             Target::Node(id) => self.node_name(id),
@@ -279,11 +316,12 @@ impl Project {
                 .and_then(|o| o.port(key))
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| key.clone()),
+            Target::Pixel { index, .. } => format!("pixel {index}"),
         }
     }
 
     /// The label with enough context to stand alone: `ring r2 of circle1`,
-    /// `lamp 14 of line3`, `D0 of main`.
+    /// `lamp 14 of line3`, `D0 of main`, `pixel 7 of D0 of main`.
     pub fn long_label(&self, t: &Target) -> String {
         match t {
             Target::Node(_) | Target::Component(_) => self.label(t),
@@ -295,11 +333,15 @@ impl Project {
             Target::Port { output, .. } => {
                 format!("{} of {}", self.label(t), self.node_name(output))
             }
+            Target::Pixel { .. } => match t.port_of_pixel() {
+                Some(port) => format!("{} of {}", self.label(t), self.long_label(&port)),
+                None => self.label(t),
+            },
         }
     }
 
     /// The word for a target's kind, plural-able: "module", "fixture",
-    /// "output", "port", "group", "circle", "path", "ring", "lamp".
+    /// "output", "port", "pixel", "group", "circle", "path", "ring", "lamp".
     pub fn kind_word(&self, t: &Target) -> &'static str {
         match t {
             Target::Node(id) => self.node(id).map(|n| n.kind_word()).unwrap_or("node"),
@@ -307,6 +349,7 @@ impl Project {
             Target::Object(_) => "ring",
             Target::Lamp { .. } => "lamp",
             Target::Port { .. } => "port",
+            Target::Pixel { .. } => "pixel",
         }
     }
 }

@@ -20,8 +20,9 @@
 //!    selected on its own breathes white instead, like the product's
 //!    `highlight`.
 //! 3. **Output overrides, in channel space.** A selected port (or output)
-//!    breathes across its whole pixel range, patched or not — the user can
-//!    always reach the hardware (D13).
+//!    breathes across its whole pixel range, and a selected pixel on its
+//!    own, patched or not — the user can always reach the hardware (D13,
+//!    D47).
 //!
 //! **While drawing** (a path being clicked out, a circle being dragged),
 //! the draft counts as already added to the fixture it starts in, under
@@ -195,10 +196,19 @@ impl Project {
         });
 
         // 3: a selected port, or every port of a selected output, breathes
-        // across its whole range.
+        // across its whole range; a selected pixel on its own.
         for (output, key) in self.selected_ports(selection) {
             if let Some(pixels) = frame.port_mut(&output, &key) {
                 pixels.fill(breath);
+            }
+        }
+        for t in selection {
+            if let Target::Pixel { output, key, index } = t
+                && let Some(px) = frame
+                    .port_mut(output, key)
+                    .and_then(|p| p.get_mut(*index as usize))
+            {
+                *px = breath;
             }
         }
         frame
@@ -308,7 +318,7 @@ impl SpanShown {
         for t in selection {
             match t {
                 Target::Lamp { object: o, index } if *o == s.object => out.lamps.push(*index),
-                Target::Lamp { .. } | Target::Port { .. } => {}
+                Target::Lamp { .. } | Target::Port { .. } | Target::Pixel { .. } => {}
                 _ => {
                     if p.is_ancestor_or_self(t, &object) {
                         out.whole = true;

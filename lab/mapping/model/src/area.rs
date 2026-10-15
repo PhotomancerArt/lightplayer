@@ -10,7 +10,8 @@
 //! - group: a rounded hull around its children — the shape you'd draw
 //!   around them by hand;
 //! - module, fixture: a frame — its border and title tab, not its inside;
-//! - output: its whole card; a port: its row on the card.
+//! - output: its whole card; a port: its row on the card; a pixel: its
+//!   square in the row (`pixel_grid.rs`).
 //!
 //! Areas are in screen pixels, because their padding is: a path is as easy
 //! to hit zoomed out as zoomed in.
@@ -220,6 +221,12 @@ impl Project {
                     rect: Rect::from_corners(screen(b.min), screen(b.max)),
                 })
             }
+            Target::Pixel { output, key, index } => {
+                let b = self.pixel_rect(output, key, *index)?;
+                Some(Area::Box {
+                    rect: Rect::from_corners(screen(b.min), screen(b.max)),
+                })
+            }
             Target::Lamp { .. } => {
                 let p = *self.lamps_under(t).first()?;
                 Some(Area::hull(&[screen(p)], LAMP_PAD_PX))
@@ -276,7 +283,8 @@ impl Project {
 
     /// Every child's area lies inside its parent's (a lamp's disc inside its
     /// path's area, a ring's band inside its circle's disc, everything
-    /// inside its group's hull, a port's row inside its card), so a thing
+    /// inside its group's hull, a port's row inside its card, a pixel's
+    /// square inside its port's row), so a thing
     /// the cursor is outside of has nothing under the cursor inside it
     /// either. Frames are the exception: a frame's area is only its border,
     /// so look inside every one.

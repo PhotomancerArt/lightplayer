@@ -119,8 +119,12 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
                 } else {
                     format!("{index} from the start")
                 };
+                let pixel = match f.pixel_of_lamp(object, *index) {
+                    Some(px) => format!(" On {} (ringed).", f.long_label(&px)),
+                    None => " On no pixel: it lights nothing.".into(),
+                };
                 format!(
-                    "Lamp {index} of {n} on {owner} — {place}. At ({:.1}, {:.1}).",
+                    "Lamp {index} of {n} on {owner} — {place}. At ({:.1}, {:.1}).{pixel}",
                     p.x, p.y
                 )
             })
@@ -353,6 +357,27 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
                 out.facts.push("Nothing is patched here yet".into());
             }
             out.facts.extend(by);
+        }
+        Target::Pixel { output, key, index } => {
+            let port = f.output(output)?.port(key)?;
+            out.facts.push(format!(
+                "Pixel {index} of {} on {} · {}",
+                port.pixels,
+                f.long_label(&Target::Port {
+                    output: output.clone(),
+                    key: key.clone(),
+                }),
+                port.format.word()
+            ));
+            out.facts.push(match f.lamp_on_pixel(output, key, *index) {
+                Some(lamp) => format!(
+                    "{} is patched here — ringed on the canvas",
+                    f.long_label(&lamp)
+                ),
+                None => {
+                    "Nothing is patched to this pixel; it lights anyway, so you can find it".into()
+                }
+            });
         }
         _ => return None,
     }

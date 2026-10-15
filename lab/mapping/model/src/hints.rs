@@ -213,7 +213,18 @@ impl Editor {
             if here > 1 && !self.mods.alt {
                 out.push(h("⌥ click", format!("the next of the {here} here")));
             }
-            out.push(h("⇧ click", "add or remove"));
+            let run = matches!(&target, Target::Pixel { .. })
+                && self.selection.iter().any(|s| {
+                    matches!(s, Target::Pixel { .. }) && s.port_of_pixel() == target.port_of_pixel()
+                });
+            out.push(h(
+                "⇧ click",
+                if run {
+                    "select the pixels from the first one picked to here"
+                } else {
+                    "add or remove"
+                },
+            ));
             out.push(h("right-click", "what's here"));
         }
 
@@ -268,6 +279,7 @@ impl Editor {
             .iter()
             .map(|t| match t {
                 Target::Lamp { object, .. } => f.object_target(object),
+                Target::Pixel { .. } => t.port_of_pixel().unwrap_or_else(|| t.clone()),
                 other => other.clone(),
             })
             .collect();
@@ -275,7 +287,7 @@ impl Editor {
             let whose = if self
                 .selection
                 .iter()
-                .any(|t| matches!(t, Target::Lamp { .. }))
+                .any(|t| matches!(t, Target::Lamp { .. } | Target::Pixel { .. }))
             {
                 format!(" of {}", f.label(&edit[0]))
             } else {
@@ -447,6 +459,9 @@ fn handle_lead(f: &Project, handle: &HandleKind) -> String {
 fn delete_hint(f: &Project, selection: &[Target]) -> String {
     if selection.iter().all(|t| matches!(t, Target::Lamp { .. })) {
         return "lamps can't be deleted — − shortens their path or ring".into();
+    }
+    if selection.iter().all(|t| matches!(t, Target::Pixel { .. })) {
+        return "pixels can't be deleted — − shortens their port".into();
     }
     match selection {
         [Target::Object(o)] => format!("remove ring {} from {}", o.key, o.component),

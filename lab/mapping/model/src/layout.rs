@@ -40,6 +40,12 @@ pub const CARD_WIDTH: f64 = 60.0;
 pub const CARD_HEADER: f64 = 11.0;
 pub const CARD_ROW: f64 = 14.0;
 pub const CARD_FOOT: f64 = 2.0;
+/// A port's pixels sit in its row under its name (`pixel_grid.rs`): this far
+/// in from each side, from this far below the row's top, and this far above
+/// its bottom.
+pub const PIXEL_PAD_X: f64 = 2.7;
+pub const PIXEL_TOP: f64 = 7.0;
+pub const PIXEL_BOTTOM: f64 = 1.4;
 
 /// Every node's box, in world units.
 #[derive(Debug, Clone, PartialEq, Default)]

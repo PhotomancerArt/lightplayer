@@ -15,11 +15,14 @@
 //! - [`Object`] — what a component makes (a path, a ring), with lamps.
 //!   Derived, never stored.
 //! - [`Target`] — anything you can select, in ONE tree: module → fixture →
-//!   group → path → lamp, fixture → circle → ring → lamp, output → port.
+//!   group → path → lamp, fixture → circle → ring → lamp, output → port →
+//!   pixel.
 //! - [`patch`] — a fixture's rules, and the effective patch they make
 //!   (derived, never stored).
 //! - [`edges`] — the patch drawn as edges, bundled or per object;
 //!   [`highlight`] — what a selection lights up across it.
+//! - [`pixel_grid`] — where a port's pixels sit on its card: each one a
+//!   square you can select.
 //! - [`area`] — each thing's shape on screen: what's outlined is what a
 //!   click hits.
 //! - [`handle`] — the squares you drag to reshape the selection: a path's
@@ -59,6 +62,7 @@ pub mod object;
 pub mod output;
 pub mod patch;
 pub mod pick;
+pub mod pixel_grid;
 pub mod project;
 pub mod props;
 pub mod rgb;
@@ -83,6 +87,7 @@ pub use object::{Lamp, Object, ObjectId, ObjectShape};
 pub use output::{Output, PixelFormat, Port};
 pub use patch::{EffectivePatch, PatchProblem, PatchRule, Span, Unpatched};
 pub use pick::{PickMode, pick};
+pub use pixel_grid::PixelGrid;
 pub use project::Project;
 pub use props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
 pub use rgb::Rgb;

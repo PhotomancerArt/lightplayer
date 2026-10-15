@@ -1677,6 +1677,68 @@ fn the_bar_lead_says_what_youre_doing() {
     assert_eq!(e.hint_bar().lead, "Resizing scarf");
 }
 
+// ---- pixels --------------------------------------------------------------------
+
+/// Clicking into a port selects one of its pixels; the arrow keys walk the
+/// pixels, and ⇧-click selects the run from the first one picked.
+#[test]
+fn clicking_into_a_port_selects_a_pixel() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    let at = pixel_centre(&e, &main, "p2", 3);
+    click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![Target::Node(main.clone())]);
+    click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![port(&main, "p2")]);
+    click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![pixel(&main, "p2", 3)]);
+    assert_eq!(
+        e.project.long_label(&e.selection[0]),
+        "pixel 3 of D1 of main"
+    );
+    key(&mut e, Key::Right, none());
+    assert_eq!(e.selection, vec![pixel(&main, "p2", 4)]);
+    let at = pixel_centre(&e, &main, "p2", 8);
+    click_at(&mut e, at, shift());
+    assert_eq!(
+        e.selection,
+        (4..=8).map(|i| pixel(&main, "p2", i)).collect::<Vec<_>>()
+    );
+    // A pixel comes from its port's count: it can't be deleted on its own.
+    key(&mut e, Key::Delete, none());
+    assert_eq!(e.notice.clone().unwrap().kind, NoticeKind::Refused);
+}
+
+/// Selecting a port pixel lights it on the board, even with nothing patched
+/// to it; the lamp patched to it is marked, and the other way round.
+#[test]
+fn a_selected_pixel_lights_and_marks_its_lamp() {
+    let mut e = editor();
+    // Nothing is drawn in the scarf: pixel 5 of D10 is patched to nothing.
+    let scarf_out = node_id(&e, "scarf out");
+    e.select(vec![pixel(&scarf_out, "p1", 5)]);
+    let frame = e.device_frame(CREST);
+    let d10 = frame.port(&scarf_out, "p1").unwrap();
+    assert!(bright(d10[5]), "it lights");
+    for (i, px) in d10.iter().enumerate() {
+        assert!(i == 5 || !bright(*px), "only pixel 5 of D10, not {i}");
+    }
+    assert!(e.marked_lamps().is_empty(), "no lamp to mark");
+
+    // Pixel 3 of D1 carries lamp 3 of path3: that lamp is marked.
+    let main = node_id(&e, "main");
+    e.select(vec![pixel(&main, "p2", 3)]);
+    assert_eq!(e.marked_lamps(), vec![lamp("path3", "path", 3)]);
+    let frame = e.device_frame(CREST);
+    assert!(bright(frame.port(&main, "p2").unwrap()[3]));
+    // And the other way round: select the lamp, and its pixel is marked.
+    e.select(vec![lamp("path3", "path", 3)]);
+    assert_eq!(e.marked_pixels(), vec![pixel(&main, "p2", 3)]);
+    // r2's first lamp lands on D0 after r1's 40.
+    e.select(vec![lamp("circle1", "r2", 0)]);
+    assert_eq!(e.marked_pixels(), vec![pixel(&main, "p1", 40)]);
+}
+
 // ---- helpers -------------------------------------------------------------------
 
 /// The top of the selection's breath.
@@ -1739,6 +1801,20 @@ fn port(output: &NodeId, key: &str) -> Target {
         output: output.clone(),
         key: key.into(),
     }
+}
+
+fn pixel(output: &NodeId, key: &str, index: u32) -> Target {
+    Target::Pixel {
+        output: output.clone(),
+        key: key.into(),
+        index,
+    }
+}
+
+/// The middle of a pixel's square on its card, in world units.
+fn pixel_centre(e: &Editor, output: &NodeId, key: &str, index: u32) -> Vec2 {
+    let r = e.project.pixel_rect(output, key, index).unwrap();
+    r.min.lerp(r.max, 0.5)
 }
 
 fn alt() -> Mods {

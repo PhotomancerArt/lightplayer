@@ -1,6 +1,6 @@
 //! The tree pane's rows: one tree (D18). Nodes — modules, fixtures,
 //! outputs and their ports — then components, and the derived rings under
-//! a circle. Lamps are reached on the canvas, not listed here.
+//! a circle. Lamps and pixels are reached on the canvas, not listed here.
 
 use crate::component::ComponentKind;
 use crate::node::NodeKind;
@@ -28,7 +28,7 @@ impl Project {
     }
 
     fn push_rows(&self, t: &Target, depth: usize, rows: &mut Vec<TreeRow>) {
-        if matches!(t, Target::Lamp { .. }) {
+        if matches!(t, Target::Lamp { .. } | Target::Pixel { .. }) {
             return;
         }
         let lamps = self.lamps_under(t).len();
@@ -70,7 +70,7 @@ impl Project {
                 };
                 format!("{lamps} lamps{dir}")
             }
-            Target::Lamp { .. } => String::new(),
+            Target::Lamp { .. } | Target::Pixel { .. } => String::new(),
         };
         rows.push(TreeRow {
             target: t.clone(),
