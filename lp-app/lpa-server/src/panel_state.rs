@@ -125,10 +125,22 @@ pub fn snapshot(engine: &Engine, auto_save: bool) -> PanelStateFile {
 }
 
 /// Read the panel-state file. Missing, unparseable, or wrong-version →
-/// `None` (boot clean).
+/// `None` (boot clean). An empty or unparseable one (a power cut during
+/// its write, on firmware older than the littlefs create fix) is said once
+/// in plain words.
 pub fn read(fs: &dyn LpFs) -> Option<PanelStateFile> {
     let bytes = fs.read_file(PANEL_STATE_PATH.as_path()).ok()?;
-    let file = lpc_wire::json::from_slice::<PanelStateFile>(&bytes).ok()?;
+    let Ok(file) = lpc_wire::json::from_slice::<PanelStateFile>(&bytes) else {
+        log::warn!(
+            "panel state: /.lp/panel.json is {}; starting with no saved panel values",
+            if bytes.is_empty() {
+                "empty"
+            } else {
+                "not readable panel state"
+            }
+        );
+        return None;
+    };
     if file.version != PANEL_STATE_VERSION {
         log::warn!(
             "panel state: ignoring /.lp/panel.json with unknown version {} (expected {})",
@@ -298,4 +310,22 @@ fn is_under_dormant_entry(playlists: &[AuthoredPlaylist], path: &str) -> bool {
                     .is_some_and(|after| after.starts_with('.'))
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use lpfs::LpFsMemory;
+
+    use super::*;
+
+    /// What a power cut during the file's first write left on flash before
+    /// the littlefs create fix: read as no panel state, never a failed load.
+    #[test]
+    fn an_empty_or_unparseable_file_reads_as_none() {
+        let fs = LpFsMemory::new();
+        for bytes in [&b""[..], b"{\"version\":1,"] {
+            fs.write_file(PANEL_STATE_PATH.as_path(), bytes).unwrap();
+            assert_eq!(read(&fs), None);
+        }
+    }
 }
