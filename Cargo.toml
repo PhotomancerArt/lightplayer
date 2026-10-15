@@ -36,6 +36,7 @@ members = [
     # The mapping design lab (lab/mapping/README.md)
     "lab/mapping/model",
     "lab/mapping/web",
+    "lab/mapping/radiance-gen",
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",
