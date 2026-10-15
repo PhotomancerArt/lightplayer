@@ -353,10 +353,16 @@ impl Project {
         Rect::around(self.lamps_under(t))
     }
 
-    /// The left middle of a pixel's square: where an edge arrives.
+    /// Where an edge arrives: the left side of the outline around the run
+    /// that starts at this pixel — on the run, never on top of a square.
     fn pixel_left(&self, output: &NodeId, key: &str, index: u32) -> Vec2 {
-        self.pixel_rect(output, key, index)
-            .or_else(|| self.port_rect(output, key))
+        if let Some(grid) = self.pixel_grid(output, key)
+            && let Some(r) = grid.rect(index)
+        {
+            let pad = grid.side * crate::pixel_grid::RUN_OUTLINE_PAD;
+            return Vec2::new(r.min.x - pad, (r.min.y + r.max.y) / 2.0);
+        }
+        self.port_rect(output, key)
             .map(|r| Vec2::new(r.min.x, (r.min.y + r.max.y) / 2.0))
             .unwrap_or_default()
     }

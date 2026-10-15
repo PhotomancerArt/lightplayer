@@ -709,16 +709,18 @@ fn patch_edges_match_the_effective_patch() {
 }
 
 /// A per-object edge leaves from the object's first lamp and lands on the
-/// pixel where its span starts: it leaves heading toward the output and
-/// arrives from the left.
+/// outline of its run, just left of the pixel where its span starts: it
+/// leaves heading toward the output and arrives from the left.
 #[test]
 fn an_edge_runs_from_the_first_lamp_to_its_pixel() {
     let mut e = editor();
     let tail_out = node_id(&e, "tail out");
     let main = node_id(&e, "main");
     let left_of = |e: &Editor, out: &NodeId, key: &str, i: u32| {
-        let r = e.project.pixel_rect(out, key, i).unwrap();
-        Vec2::new(r.min.x, (r.min.y + r.max.y) / 2.0)
+        let grid = e.project.pixel_grid(out, key).unwrap();
+        let r = grid.rect(i).unwrap();
+        let pad = grid.side * lab_mapping_model::pixel_grid::RUN_OUTLINE_PAD;
+        Vec2::new(r.min.x - pad, (r.min.y + r.max.y) / 2.0)
     };
     let edge = |e: &Editor, from: Target| e.edges().into_iter().find(|x| x.from == from).unwrap();
     // path2 enters at its top (its first point) and lands on pixel 25.
@@ -2674,6 +2676,57 @@ fn kept_answers_are_never_stale() {
     assert_eq!(e.project.lamp_count(), lamps);
     assert_eq!(*e.project.effective_patch(), patch);
     assert_eq!(e.project.revision(), start, "undo gives back what it held");
+}
+
+// ---- port runs ------------------------------------------------------------
+
+/// A port's pixels split into runs, one per object patched to it, with the
+/// unpatched pixels as runs of their own; every pixel is in exactly one run.
+#[test]
+fn a_ports_pixels_split_into_runs_per_object() {
+    let e = editor();
+    let out = node_id(&e, "tail out");
+    let runs = e.project.port_runs(&out, "0");
+    // The tail's two paths, 25 lamps each, then 10 spare pixels.
+    let sizes: Vec<(u32, bool)> = runs
+        .iter()
+        .map(|r| (r.pixels.len() as u32, r.object.is_some()))
+        .collect();
+    assert_eq!(sizes, vec![(25, true), (25, true), (10, false)]);
+    let mut covered: Vec<u32> = runs.iter().flat_map(|r| r.pixels.clone()).collect();
+    covered.sort();
+    assert_eq!(covered, (0..60).collect::<Vec<_>>());
+}
+
+/// Each run starts on a fresh square after a gap, and a patch edge lands on
+/// the run's outline, just left of its first square — never on a square.
+#[test]
+fn an_edge_lands_on_its_run_not_on_a_square() {
+    let e = editor();
+    let out = node_id(&e, "tail out");
+    let grid = e.project.pixel_grid(&out, "0").unwrap();
+    let last_of_first = grid.rect(24).unwrap();
+    let first_of_second = grid.rect(25).unwrap();
+    if (first_of_second.min.y - last_of_first.min.y).abs() < 1e-9 {
+        assert!(
+            first_of_second.min.x - last_of_first.max.x > grid.side * 0.9,
+            "a gap between runs"
+        );
+    }
+    for edge in e
+        .edges()
+        .iter()
+        .filter(|x| matches!(x.to, Target::Port { .. } | Target::Pixel { .. }))
+    {
+        let on_square = (0..60).any(|i| {
+            let r = grid.rect(i).unwrap();
+            edge.to_at.x > r.min.x
+                && edge.to_at.x < r.max.x
+                && edge.to_at.y > r.min.y
+                && edge.to_at.y < r.max.y
+        });
+        assert!(!on_square, "{edge:?}");
+    }
 }
 
 // ---- helpers -------------------------------------------------------------------

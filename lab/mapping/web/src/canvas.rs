@@ -86,6 +86,16 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     let patch = f.effective_patch();
     let font = card_font(&cam);
     let mut pixel_rows: Vec<PixelRow> = Vec::new();
+    // Each object's run of pixels gets an outline (lp2014's channel groups),
+    // lit while its object, or anything around it, is hovered or selected.
+    let mut runs: Vec<RunView> = Vec::new();
+    let lit_by = |object: &ObjectId| {
+        let t = f.object_target(object);
+        hover
+            .iter()
+            .chain(e.selection.iter())
+            .any(|s| f.is_ancestor_or_self(s, &t) || f.is_ancestor_or_self(&t, s))
+    };
     for n in f.all_nodes() {
         let Some(world) = f.node_rect(&n.id) else {
             continue;
@@ -130,6 +140,17 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         // The name on top, the pixels below it, where the
                         // model puts them (they are selectable).
                         if let Some(grid) = f.pixel_grid(&n.id, &p.key) {
+                            for run in f.port_runs(&n.id, &p.key) {
+                                runs.push(RunView {
+                                    rects: grid
+                                        .run_outline(run.pixels.clone())
+                                        .into_iter()
+                                        .map(|r| screen_rect(&cam, r))
+                                        .collect(),
+                                    patched: run.object.is_some(),
+                                    lit: run.object.as_ref().is_some_and(|o| lit_by(o)),
+                                });
+                            }
                             pixel_rows.push(PixelRow {
                                 output: n.id.clone(),
                                 key: p.key.clone(),
@@ -488,6 +509,19 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     }
                 }
                 BoardPixels { frame, rows: pixel_rows, cam }
+                for (i, run) in runs.iter().enumerate() {
+                    g { key: "run{i}",
+                        class: if run.lit { "run lit" } else if run.patched { "run" } else { "run unpatched" },
+                        for (j, r) in run.rects.iter().enumerate() {
+                            rect {
+                                key: "{j}",
+                                x: "{r.min.x}", y: "{r.min.y}",
+                                width: "{r.width()}", height: "{r.height()}",
+                                rx: "{(r.height() * 0.2).min(3.0)}",
+                            }
+                        }
+                    }
+                }
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
@@ -697,6 +731,15 @@ struct EdgeView {
     label: Option<String>,
     mid: Vec2,
     class: String,
+}
+
+/// The outline around one run of a port's pixels, on screen: one box per
+/// line it covers.
+#[derive(Clone, PartialEq)]
+struct RunView {
+    rects: Vec<Rect>,
+    patched: bool,
+    lit: bool,
 }
 
 /// Where one port's pixels go on its card: the model's grid, in world

@@ -221,3 +221,8 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .menu-item.menu-action { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--text); }
 .menu-item.menu-action:hover { background: var(--selection-bg); }
 .menu-item.menu-action kbd { white-space: nowrap; }
+
+/* A port's pixels in runs, one per object (lp2014's channel groups). */
+.run rect { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-opacity: 0.55; }
+.run.unpatched rect { stroke-dasharray: 2 2; stroke-opacity: 0.35; }
+.run.lit rect { stroke: var(--selection); stroke-opacity: 1; stroke-width: 1.5; }
