@@ -13,6 +13,11 @@
 //! frames, outputs cards with a row per port. The patch is drawn as violet
 //! edges — violet is the product's colour for what is bound — from a
 //! fixture (or, inside one, each object) to the port row it lands on.
+//!
+//! The board (D16, D44): each port row shows its pixels as the simulated
+//! board has them (`Editor::device_frame`). While they move on their own —
+//! a breathing selection, a drag being drawn — a clock ticks at ~30 fps and
+//! only the pixel layer redraws.
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
@@ -25,6 +30,9 @@ use lab_mapping_model::{
 
 use crate::input;
 
+/// How often the board's clock ticks while its pixels move, in ms.
+const TICK_MS: u32 = 33;
+
 #[component]
 pub fn Canvas(ed: Signal<Editor>) -> Element {
     let mut ed = ed;
@@ -32,6 +40,17 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     // when the pointer leaves the canvas (or the window) and finishes right
     // when it comes back.
     use_hook(move || input::follow_window(ed));
+    // The board's clock. It only advances while the pixels move, so a
+    // still board costs no redraws.
+    let mut now = use_signal(|| 0.0_f64);
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(TICK_MS).await;
+            if ed.peek().board_animates() {
+                now.set(seconds());
+            }
+        }
+    });
     let e = ed.read();
     let f = &e.project;
     let cam = e.camera;
@@ -50,6 +69,8 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         }
     }
     let patch = f.effective_patch();
+    let font = card_font(&cam);
+    let mut pixel_rows: Vec<PixelRow> = Vec::new();
     for n in f.all_nodes() {
         let Some(world) = f.node_rect(&n.id) else {
             continue;
@@ -90,11 +111,21 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                             output: n.id.clone(),
                             key: p.key.clone(),
                         };
+                        // The name on top, the pixels below it.
+                        let pad = font * 0.7;
+                        let h = row.height();
+                        pixel_rows.push(PixelRow {
+                            output: n.id.clone(),
+                            key: p.key.clone(),
+                            area: Rect::new(
+                                Vec2::new(row.min.x + pad, row.min.y + h * 0.5),
+                                Vec2::new(row.max.x - pad, row.max.y - h * 0.1),
+                            ),
+                        });
                         PortRow {
                             rect: row,
                             name: p.name.clone(),
                             fill: format!("{used}/{} px", p.pixels),
-                            ratio: (used as f64 / p.pixels.max(1) as f64).min(1.0),
                             tinted: tinted.contains(&pt),
                         }
                     })
@@ -110,7 +141,6 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     }
     // A module's frame goes under the frames inside it.
     frames.sort_by_key(|fr| !fr.module);
-    let font = card_font(&cam);
     // Edges landing on the same port stack their labels.
     let mut landed: Vec<Target> = Vec::new();
     let edges: Vec<EdgeView> = e
@@ -325,36 +355,23 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                                         class: "port-name",
                                         style: "font-size: {font}px",
                                         x: "{r.rect.min.x + font * 0.7}",
-                                        y: "{r.rect.min.y + r.rect.height() * 0.55}",
+                                        y: "{r.rect.min.y + r.rect.height() * 0.28}",
                                         "{r.name}"
                                     }
                                     text {
                                         class: "port-fill",
                                         style: "font-size: {font * 0.9}px",
                                         x: "{r.rect.max.x - font * 0.7}",
-                                        y: "{r.rect.min.y + r.rect.height() * 0.55}",
+                                        y: "{r.rect.min.y + r.rect.height() * 0.28}",
                                         text_anchor: "end",
                                         "{r.fill}"
                                     }
-                                }
-                                rect {
-                                    class: "port-bar-bg",
-                                    x: "{r.rect.min.x + font * 0.7}",
-                                    y: "{r.rect.max.y - r.rect.height() * 0.22}",
-                                    width: "{(r.rect.width() - font * 1.4).max(0.0)}",
-                                    height: "{(r.rect.height() * 0.09).max(1.0)}",
-                                }
-                                rect {
-                                    class: "port-bar",
-                                    x: "{r.rect.min.x + font * 0.7}",
-                                    y: "{r.rect.max.y - r.rect.height() * 0.22}",
-                                    width: "{(r.rect.width() - font * 1.4).max(0.0) * r.ratio}",
-                                    height: "{(r.rect.height() * 0.09).max(1.0)}",
                                 }
                             }
                         }
                     }
                 }
+                BoardPixels { ed, now, rows: pixel_rows }
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
@@ -460,8 +477,6 @@ struct PortRow {
     name: String,
     /// `50/60 px`.
     fill: String,
-    /// Used ÷ pixels, for the bar.
-    ratio: f64,
     /// The selection lands here.
     tinted: bool,
 }
@@ -473,6 +488,68 @@ struct EdgeView {
     label: Option<String>,
     mid: Vec2,
     class: &'static str,
+}
+
+/// Where one port's pixels go on its card, on screen.
+#[derive(Clone, PartialEq)]
+struct PixelRow {
+    output: NodeId,
+    key: String,
+    area: Rect,
+}
+
+/// Below this many screen pixels a square is too small to read: the row
+/// wraps onto two lines.
+const MIN_PIXEL_PX: f64 = 6.0;
+/// Squares this big get a hairline gap between them.
+const GAP_PIXEL_PX: f64 = 4.0;
+
+/// Every port's pixels, as the simulated board shows them now. Its own
+/// component, so the clock's ticks redraw only this layer, not the canvas.
+/// Drawn over the cards and never dimmed with them: the LEDs are the truth.
+#[component]
+fn BoardPixels(ed: Signal<Editor>, now: Signal<f64>, rows: Vec<PixelRow>) -> Element {
+    let frame = ed.read().device_frame(now());
+    let mut squares: Vec<(Rect, String)> = Vec::new();
+    for row in &rows {
+        let Some(pixels) = frame.port(&row.output, &row.key) else {
+            continue;
+        };
+        let n = pixels.len().max(1);
+        let w = row.area.width();
+        let h = row.area.height();
+        let lines = if w / n as f64 >= MIN_PIXEL_PX { 1 } else { 2 };
+        let cols = n.div_ceil(lines);
+        let s = (w / cols as f64).min(h / lines as f64).max(0.5);
+        let gap = if s >= GAP_PIXEL_PX { 1.0 } else { 0.0 };
+        for (i, px) in pixels.iter().enumerate() {
+            let at = row.area.min + Vec2::new((i % cols) as f64 * s, (i / cols) as f64 * s);
+            squares.push((
+                Rect::new(at, at + Vec2::new(s - gap, s - gap)),
+                format!("rgb({},{},{})", px.r, px.g, px.b),
+            ));
+        }
+    }
+    rsx! {
+        g { class: "board-pixels",
+            for (i, (r, fill)) in squares.into_iter().enumerate() {
+                rect {
+                    key: "{i}",
+                    class: "px",
+                    x: "{r.min.x}", y: "{r.min.y}",
+                    width: "{r.width()}", height: "{r.height()}",
+                    fill: "{fill}",
+                }
+            }
+        }
+    }
+}
+
+/// Seconds since the page started: the board's clock.
+fn seconds() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map_or(0.0, |p| p.now() / 1000.0)
 }
 
 /// Card text is sized in world units, so it zooms with the card.

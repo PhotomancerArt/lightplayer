@@ -263,7 +263,9 @@ impl Editor {
     }
 
     /// ⇧2: the selection. A fixture is framed with the outputs it feeds,
-    /// so you see both ends of its patch; anything else, on its own.
+    /// or its rules name (an empty fixture still shows where its lamps
+    /// will go), so you see both ends of its patch; anything else, on its
+    /// own.
     pub fn frame_selection(&mut self) {
         let rects = self.selection.iter().filter_map(|t| self.framing_rect(t));
         match union(rects) {
@@ -282,9 +284,10 @@ impl Editor {
     pub fn framing_rect(&self, t: &Target) -> Option<Rect> {
         let p = &self.project;
         match t {
-            Target::Node(id) if p.fixture(id).is_some() => union(
+            Target::Node(id) if let Some(f) = p.fixture(id) => union(
                 std::iter::once(id.clone())
                     .chain(p.outputs_of(id))
+                    .chain(f.rules.iter().map(|r| r.output().clone()))
                     .filter_map(|n| p.node_rect(&n)),
             ),
             Target::Node(id) => p.node_rect(id),

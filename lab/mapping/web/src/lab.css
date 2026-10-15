@@ -96,8 +96,7 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .port-sep { stroke: var(--border); stroke-width: 1; }
 .port-name { fill: var(--text-muted); font-family: var(--font); dominant-baseline: middle; }
 .port-fill { fill: var(--text-subtle); font-family: var(--mono); dominant-baseline: middle; }
-.port-bar-bg { fill: var(--bg); }
-.port-bar { fill: var(--bound); }
+.px { stroke: rgba(255, 255, 255, 0.09); stroke-width: 0.5; }
 .port-tint { fill: var(--bound-bg); }
 
 .edge-line { fill: none; stroke: var(--bound); stroke-width: 1.4; opacity: 0.75; }
