@@ -27,6 +27,12 @@
 //!   would reach it is refused, as is one that overlaps any other segment of
 //!   the image, which the loader copies before or after this one.
 //!
+//! Since the core's `.text` follows its rodata (`engine_script.rs`,
+//! `TEXT_FOLLOWS_RODATA`, 2026-10-15) there is no such gap in a core link,
+//! and a core built from this tree carries no padding to aim. This stays as
+//! the second line behind that one: whatever else ever makes espflash pad a
+//! core, the loader copies the zeros into `.bss` rather than to address 0.
+//!
 //! The image's appended SHA-256 is recomputed (its checksum byte covers
 //! segment data only, which does not change). Nothing at boot checks either
 //! one; the image stays well-formed for every reader of it.

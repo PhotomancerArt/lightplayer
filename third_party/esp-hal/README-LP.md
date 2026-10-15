@@ -1,6 +1,6 @@
 # esp-hal — LP fork
 
-Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the five diffs below.
+Vendored from crates.io **esp-hal 1.1.1**, verbatim except for the six diffs below.
 Patched in through the root `Cargo.toml`'s `[patch.crates-io]`, the same way
 `third_party/esp-alloc` and `third_party/esp-storage` are. The version stays
 `1.1.1` on purpose: `esp-rtos`, `esp-radio`, `esp-storage` and the three
@@ -166,6 +166,29 @@ what was measured.
 re-sync, re-apply by searching `grep -n 'LP fork (fifth diff' ld/sections/*.x`
 and the three `place_*` entries in `esp_config.yml`.
 
+## The sixth diff: the C6 split core's `.text` follows its rodata
+
+`ld/esp32c6/esp32c6.x`'s `.text_gap` moves flash `.text` to the next 64 KiB
+page (+ `0x20`) after rodata, because the IDF second-stage bootloader wants
+the two in separate segments (the comment above it). Both of its lines become
+`. = DEFINED(_lp_text_follows_rodata) ? . : <upstream's expression>;`. A link
+that never defines the symbol — every image the IDF bootloader loads, the
+C6 single image included — gets upstream's gap, byte for byte.
+
+`tools/lp-fw-split` defines it in both of its link passes' scripts
+(`engine_script.rs`, `TEXT_FOLLOWS_RODATA`). The IDF bootloader never loads
+that core: the split loader does (`lp-fw/fw-esp32c6-loader/src/esp_image.rs`),
+and it maps every page a flash segment touches, asking only that a
+segment's bytes sit at its address's offset in a page. So `.text` starts
+right after rodata, espflash merges the two into one flash segment, and the
+gap is gone. Before, espflash filled that gap with the core's RAM segments
+(~45 KB) and, once rodata crossed a 64 KiB page, up to ~20 KB of zero
+padding on top: RAM research L2 (`lp2025/2026-10-09-1203-ram-research`,
+`docs/adr/2026-07-28-esp32c6-flash-budget.md`'s 2026-10-15 amendment).
+
+Re-apply on a re-sync with `grep -n 'LP fork (sixth diff' ld/esp32c6/esp32c6.x`;
+`lp-fw-split`'s `both_passes_take_the_text_gap_out…` test fails if it is lost.
+
 ## Nothing else
 
 No other linker-script edits, no feature changes.
@@ -194,4 +217,5 @@ too — `grep -n INT_ENA_LOCK src/usb_serial_jtag.rs` finds it here):
 * `links = "esp-hal"` in `Cargo.toml` and the `cargo::metadata=linker-scripts`
   line in `build.rs` — `grep -n 'linker-scripts' build.rs`;
 * the fifth diff, if it is still wanted — `grep -n 'LP fork (fifth diff'
-  ld/sections/*.x` and the `place_*` entries in `esp_config.yml`.
+  ld/sections/*.x` and the `place_*` entries in `esp_config.yml`;
+* the sixth diff — `grep -n 'LP fork (sixth diff' ld/esp32c6/esp32c6.x`.
