@@ -9,11 +9,13 @@
 //! not tagged `sacrificial` with the allocated MAC is refused (M4's DD6).
 //! Nothing here probes the bus or runs `uhubctl`.
 //!
-//! A power cycle's cut is timed by the port: a watcher polls the device node
-//! every 2 ms and stamps when it went and when it came back, and the boot
-//! after it is read from the first byte (the link is opened the moment the
-//! node is back, so the board's own `[RECOVERY] boot: cause=…` and
-//! `[FS] tree store mounted (…)` lines are on the console).
+//! macOS keeps a powered-off port's device node until power comes back (the
+//! node goes and returns at power-up, `lp-board-bench`'s `power.ts` measured
+//! it too), so a watcher polling the node every 2 ms stamps the power-up,
+//! not the cut; the cut is bounded by the link's last answer
+//! ([`StampedIo`]). The link is opened the moment the node is back, so the
+//! board's own `[RECOVERY] boot: cause=…` and `[FS] tree store mounted (…)`
+//! lines are on the console.
 
 #![allow(dead_code, reason = "each test file uses part of this")]
 
