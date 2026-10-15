@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::app_image::{self, PAGE};
+use crate::core_segments;
 use crate::elf_symbol;
 use crate::engine_script::{ENGINE_BASE, EngineRules, pass1_script};
 use crate::merged_image;
@@ -182,6 +183,16 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         bail!("the core's digest slot does not hold engine.bin's SHA-256 after patching");
     }
     let core = split_artifacts::app_image(&split_artifacts::core_elf(&p2_elf)?)?;
+    // Every segment must be one the loader can place: a core it cannot is
+    // never written, so nothing downstream can package or ship it.
+    let segments = core_segments::check(&core)?;
+    eprintln!(
+        "    core.bin: {} segments, every one placeable",
+        segments.len()
+    );
+    for s in &segments {
+        eprintln!("{}", s.line());
+    }
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
 
