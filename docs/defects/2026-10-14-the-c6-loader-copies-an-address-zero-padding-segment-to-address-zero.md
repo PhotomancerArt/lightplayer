@@ -1,10 +1,11 @@
 ---
-status: open
+status: open           # guarded (#1143): no such core builds, packages or ships; a core that crosses the page still cannot boot until the image-side fix
 found: 2026-10-14      # hardware smoke: RAM research V3 (#1110 merged with main) on c6-expendable (CX1)
 area: fw-esp32c6-loader esp_image::load × lp-fw-split's core image (espflash 3.3.0's image builder) × the C6 core's rodata/text page boundary
 class: config-masked-defect   # the loader is correct only while the core's RAM segments are big enough to fill the gap before flash .text; #1092 shrank them
 related:
   - 2026-10-04-c6-split-link-firmware-loader-and-boot-records   # ADR: the loader is never updated over the air
+  - docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md
   - lp2025/2026-10-09-1203-ram-research   # V3's report and evidence/step1/
 ---
 # The C6 split loader copies an address-0 padding segment to address 0, and the core never starts
@@ -64,11 +65,31 @@ ignores each write, and boots the core (`[LOADER] core @0x18000 (proven)`).
 That PC is the one that faulted on silicon. A green emulator job on such an
 image says nothing about whether it boots (`--strict-bus` would fault).
 
-**Not done here.** No fix. Options for whoever takes it:
+**The guard (#1143).** `lp-fw-split` now lists `core.bin`'s segments and
+refuses the build when the loader cannot place one
+(`tools/lp-fw-split/src/core_segments.rs`). A segment must lie inside the
+core's flash (`0x4200_0000` up to the engine region, at its page offset) or
+inside the core's RAM (esp-hal's C6 `RAM` region, `0x4080_0000..0x4086_E610`)
+less the loader's own (`LOADER_RAM`, `0x4085_0000..0x4086_0000`). The whole
+class is refused, not only address 0. `lp-cli firmware package` checks the
+same thing on the bytes it ships. So `just fw-esp32c6-split`,
+`just fw-esp32c6-size-check` (pre-merge CI) and
+`scripts/release/release-firmware.sh` all fail on #1110 + main, and pass on
+main. A test pins those ranges to the loader's source. A scan of every
+release since #1092 (2026.10.10-24 through 2026.10.14-13) found no shipped
+core with such a segment. `lp-fw-split segments <core.bin>` lists any image's
+segments.
+
+The emulator now faults a store where the C6 has nothing, as silicon does
+(`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
+
+**Still open.** The guard stops such a core from shipping. It does not make a
+core that crosses the page boot. That needs the image-side fix. Options:
 
 - `lp-fw-split` refuses a core with an address-0 segment (a build-time check,
   so the image never ships);
 - the image builder points the leftover at RAM the core zeroes anyway;
 - the layout keeps flash `.text` from needing a gap.
 
-#1110 is held in draft until one of them lands.
+#1110 is held in draft until one of them lands. Until then the guard
+refuses its image.

@@ -218,6 +218,81 @@ fn a_direct_load_over_the_flashed_image_agrees_with_rom_up() {
     );
 }
 
+#[test]
+#[ignore = "needs a split fw-esp32c6 build; `just test-emu-c6`"]
+fn a_core_segment_at_address_0_faults_the_loader_as_on_silicon() {
+    let split = match split_image(&FwImage::SHIPPED) {
+        Ok(s) => s,
+        Err(reason) => {
+            skip_notice(
+                "a_core_segment_at_address_0_faults_the_loader_as_on_silicon",
+                &reason,
+            );
+            return;
+        }
+    };
+    // The shipped chip, with the core's first segment (a RAM one) re-aimed
+    // at address 0: what espflash's padding segment is, and what the loader
+    // copied to address 0 on a board, where the store faulted
+    // (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md).
+    // Not strict: the fault is the chip's, not the checker's.
+    let mut chip = std::fs::read(split.merged()).unwrap();
+    let first_segment = CORE_OFFSET + 24;
+    let addr = u32::from_le_bytes(chip[first_segment..first_segment + 4].try_into().unwrap());
+    assert!(
+        (0x4080_0000..0x4088_0000).contains(&addr),
+        "the core's first segment is a RAM one: {addr:#x}"
+    );
+    chip[first_segment..first_segment + 4].copy_from_slice(&0u32.to_le_bytes());
+    let len = chip.len() as u32;
+    let mut m = Esp32C6Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .app(AppSource::Path(split.p2_elf()))
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Bytes(chip))
+        .flash_len(len)
+        .reset_cause(ResetCause::UsbUartHpSys)
+        .strap(Strap::App)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(UsbHost::Attached { draining: true })
+        .build()
+        .expect("the ROM-up machine builds");
+    let outcome = m.run_until(&StopCondition::after_micros(GATE_US).exit_on(CORE_FIRST));
+    assert!(
+        !matches!(outcome, Outcome::ExitMatched { .. }),
+        "the core started over an address-0 segment: {outcome:?}\n{}",
+        consoles(&m)
+    );
+    assert!(!m.usb_sj().text().contains(CORE_FIRST), "{}", consoles(&m));
+    assert!(
+        !m.uart0().text().contains("[LOADER] core @0x18000 (proven)"),
+        "the loader said it booted the core:\n{}",
+        consoles(&m)
+    );
+    assert!(
+        m.bus.unmapped_writes() >= 1,
+        "the loader's store to 0 was seen"
+    );
+    // Silicon's words for it (CX1, 2026-10-14): `Guru Meditation Error:
+    // Core 0 panic'ed (Store/AMO access fault)`, then the registers.
+    let rom = m.uart0().text();
+    let said: Vec<&str> = rom
+        .lines()
+        .filter(|l| l.contains("Guru Meditation") || l.starts_with("PC ") || l.contains("MCAUSE"))
+        .collect();
+    assert!(
+        rom.contains("Store/AMO access fault"),
+        "the ROM named no store fault:\n{rom}"
+    );
+    println!(
+        "address-0 segment: the loader faulted ({outcome:?}); {} unmapped store(s):\n{}",
+        m.bus.unmapped_writes(),
+        said.join("\n")
+    );
+}
+
+/// Where the flashed image puts the core (`lp_bootctl::REGION_START`).
+const CORE_OFFSET: usize = 0x1_8000;
+
 /// The ROM-up machine: the merged image in the chip, nothing placed, the
 /// second link as the symbol table.
 fn rom_up(split: &SplitImage, strict: bool) -> Esp32C6Machine {
