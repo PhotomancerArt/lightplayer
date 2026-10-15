@@ -242,6 +242,7 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             lpc_wire::FsBootState::Formatted => BoardFs::Formatted,
             lpc_wire::FsBootState::Memory => BoardFs::Memory,
             lpc_wire::FsBootState::LegacyHeld => BoardFs::LegacyHeld,
+            lpc_wire::FsBootState::Refused => BoardFs::Refused,
         },
         // The board manifest a split image's hello carries (update protocol
         // Part B, wire proto 38): proof the board speaks channel 3, and its

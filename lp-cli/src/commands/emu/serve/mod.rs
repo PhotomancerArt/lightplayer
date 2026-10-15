@@ -304,6 +304,7 @@ fn parse_board(
     let mut seams_prefer: Option<String> = None;
     let mut lan: Option<String> = None;
     let mut pace: Option<lp_emu_esp_common::seam::net::Pace> = None;
+    let mut flash_cut: Option<lp_emu_esp32c6::flash_cut_spec::FlashCutSpec> = None;
     for option in parts {
         let option = option.trim();
         if option.is_empty() {
@@ -327,10 +328,20 @@ fn parse_board(
                         .pace(),
                 );
             }
+            // `run --flash-cut`'s spec, its own options joined with `;`
+            // (`flash_cut=40:calibrated:7;then=power-cycle`): a `,` here
+            // already ends a board option.
+            Some(("flash_cut", value)) => {
+                flash_cut = Some(
+                    lp_emu_esp32c6::flash_cut_spec::FlashCutSpec::parse(value)
+                        .map_err(|e| anyhow::anyhow!("--board `{text}`: flash_cut=: {e}"))?,
+                );
+            }
             _ => bail!(
                 "--board `{text}`: `{option}` is not a board option — mac=<aa:bb:cc:dd:ee:ff>, \
                  kind=elf|merged|rom-up, seams=<atoms|none>, seams_prefer=<atoms>, \
-                 lan=<name> or pace=realtime|max"
+                 lan=<name>, pace=realtime|max or \
+                 flash_cut=<n>:<model>:<seed>[;range=<off>+<len>][;then=stop|power-cycle]"
             ),
         }
     }
@@ -383,6 +394,7 @@ fn parse_board(
         seams,
         lan,
         pace,
+        flash_cut,
         flash,
         console: console_dir.map(|dir| dir.join(format!("{id}.console.log"))),
     })
@@ -472,6 +484,32 @@ mod tests {
         assert_eq!(max.pace, Some(Pace::Max));
         let err = parse_board("c6-a=fw,pace=fast", 0, None, None).unwrap_err();
         assert!(format!("{err:#}").contains("realtime or max"), "{err:#}");
+    }
+
+    #[test]
+    fn a_board_may_arm_a_flash_cut_with_its_options_joined_by_semicolons() {
+        use lp_emu_esp32c6::flash_cut_spec::{AfterCut, FlashCutSpec};
+        assert_eq!(
+            parse_board("c6-a=fw", 0, None, None).unwrap().flash_cut,
+            None
+        );
+        let cut = parse_board(
+            "c6-a=fw,flash_cut=40:calibrated:7;then=power-cycle,seams=none",
+            0,
+            None,
+            None,
+        )
+        .expect("parses");
+        let mut want = FlashCutSpec::new(
+            40,
+            lp_emu_esp_common::engine::flash_cut::TearModel::Calibrated,
+            7,
+        );
+        want.then = AfterCut::PowerCycle;
+        assert_eq!(cut.flash_cut, Some(want));
+        assert!(cut.seams.is_empty(), "the next board option still parses");
+        let err = parse_board("c6-a=fw,flash_cut=1:gentle:1", 0, None, None).unwrap_err();
+        assert!(format!("{err:#}").contains("no tear model"), "{err:#}");
     }
 
     #[test]

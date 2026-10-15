@@ -4,6 +4,16 @@
 //! `littlefs_rust::Storage` implementation and implements the `LpFs` trait
 //! for use with LpServer. The chip crate owns the flash adapter and the
 //! partition-derived littlefs `Config`.
+//!
+//! **What a power cut leaves.** An overwrite is one littlefs metadata commit
+//! (at close), so a cut leaves the old bytes or the new. A create is two (the
+//! empty entry at open, the data at close), so [`LpFs::write_file`] creates a
+//! file under a hidden name in the same directory and renames it into place
+//! — one commit — and a cut leaves no file or the whole one
+//! (`docs/defects/2026-10-10-a-cut-during-a-littlefs-file-create-leaves-it-empty.md`).
+//! Only ever a rename within one directory: littlefs-rust loses an unrelated
+//! entry when a rename across directories is cut
+//! (`docs/defects/2026-10-08-littlefs-rust-cross-directory-rename-cut-loses-the-next-entry.md`).
 
 use alloc::{format, rc::Rc, string::ToString, vec, vec::Vec};
 use core::cell::RefCell;
@@ -200,6 +210,42 @@ impl<S: Storage> LpFsFlash<S> {
     }
 }
 
+/// The suffix of the hidden name a new file is written under before it takes
+/// its own (`clock.json#lp-new`). A cut can leave one behind; it is never
+/// listed, a later create of the same file overwrites it, and removing the
+/// directory removes it. Not a format: an older firmware just sees one more
+/// file. `#` sorts below letters, digits, `.`, `-` and `_`, so nothing falls
+/// between a name and its temporary and the two share a metadata pair (a
+/// rename between pairs takes littlefs's move path).
+pub const CREATE_TEMP_SUFFIX: &str = "#lp-new";
+
+fn is_create_temp(name: &str) -> bool {
+    name.ends_with(CREATE_TEMP_SUFFIX)
+}
+
+/// A listing never shows a create's temporary (see [`CREATE_TEMP_SUFFIX`]).
+fn is_hidden(entry: &littlefs_rust::DirEntry) -> bool {
+    entry.file_type == LfsFileType::File && is_create_temp(&entry.name)
+}
+
+/// Open `path` created or truncated, write all of `data`, and close it,
+/// reporting the close: the commit happens there, and littlefs-rust's own
+/// `write_file` drops the file and with it any error the close returns.
+fn write_whole<S: Storage>(fs: &Filesystem<S>, path: &str, data: &[u8]) -> Result<(), LfsError> {
+    let file = fs.open(
+        path,
+        OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNC,
+    )?;
+    let mut offset = 0;
+    while offset < data.len() {
+        match file.write(&data[offset..])? {
+            0 => return Err(LfsError::Io),
+            n => offset += n as usize,
+        }
+    }
+    file.close()
+}
+
 fn map_lfs_read_error(path: &LpPath, error: LfsError) -> FsError {
     match error {
         LfsError::NoEntry => FsError::NotFound(path.as_str().to_string()),
@@ -261,17 +307,40 @@ impl<S: Storage + 'static> LpFs for LpFsFlash<S> {
         if lfs_path.is_empty() {
             return Err(FsError::InvalidPath("Cannot write to root".to_string()));
         }
+        if is_create_temp(lfs_path) {
+            return Err(FsError::InvalidPath(format!(
+                "{}: names ending in `{CREATE_TEMP_SUFFIX}` are reserved",
+                path.as_str()
+            )));
+        }
         self.ensure_parent_dirs(lfs_path)?;
         let existed = {
             let inner = self.inner.borrow();
             inner.fs.exists(lfs_path)
         };
-        let inner = self.inner.borrow_mut();
-        inner
-            .fs
-            .write_file(lfs_path, data)
-            .map_err(|e| FsError::Filesystem(format!("write {}: {e}", path.as_str())))?;
-        drop(inner);
+        let write_error =
+            |e: LfsError| FsError::Filesystem(format!("write {}: {e}", path.as_str()));
+        {
+            let inner = self.inner.borrow_mut();
+            if existed {
+                // An overwrite is one metadata commit at close: a cut leaves
+                // the old bytes or the new.
+                write_whole(&inner.fs, lfs_path, data).map_err(write_error)?;
+            } else {
+                // A create is two commits (the empty entry at open, the data
+                // at close), so a cut between them would leave the file on
+                // flash, empty. Write it whole under a hidden name beside it,
+                // then give it its name: a same-directory rename is one
+                // commit, so a cut leaves no file or the whole one (this
+                // module's docs).
+                let temp = format!("{lfs_path}{CREATE_TEMP_SUFFIX}");
+                write_whole(&inner.fs, &temp, data).map_err(write_error)?;
+                if let Err(e) = inner.fs.rename(&temp, lfs_path) {
+                    let _ = inner.fs.remove(&temp);
+                    return Err(write_error(e));
+                }
+            }
+        }
         let kind = if existed {
             FsEventKind::Modify
         } else {
@@ -404,6 +473,9 @@ impl<S: Storage + 'static> LpFs for LpFsFlash<S> {
                     .list_dir(path)
                     .map_err(|e| FsError::Filesystem(format!("list_dir {path}: {e}")))?;
                 for item in items {
+                    if is_hidden(&item) {
+                        continue;
+                    }
                     let full_lfs = if path.is_empty() {
                         item.name.clone()
                     } else {
@@ -432,6 +504,9 @@ impl<S: Storage + 'static> LpFs for LpFsFlash<S> {
                 .list_dir(lfs_path)
                 .map_err(|e| FsError::Filesystem(format!("list_dir {}: {e}", path.as_str())))?;
             for item in items {
+                if is_hidden(&item) {
+                    continue;
+                }
                 let full_lp = if prefix == "/" {
                     format!("/{}", item.name)
                 } else if prefix.ends_with('/') {
@@ -693,5 +768,214 @@ mod tests {
         .unwrap();
         assert!(matches!(outcome, FlashFsInit::Mounted(_)));
         assert!(!asked, "a filesystem that mounts never asks for a verdict");
+    }
+
+    /// The defect's mechanism, cut at every flash operation of the create:
+    /// the file is absent or whole, never on flash empty or short, its
+    /// sibling is kept, and no listing shows the temporary. Both an inline
+    /// file and one past littlefs's 512 B inline limit.
+    #[test]
+    fn a_cut_anywhere_in_a_create_leaves_no_file_or_the_whole_one() {
+        let base = base_image();
+        for data in [b"{\"f32\":1.5}".to_vec(), vec![0x5Au8; 5_000]] {
+            let path = "/projects/demo/.lp/panel.json".as_path();
+            let write = |fs: &LpFsFlash<CutStorage>| {
+                let _ = fs.write_file(path, &data);
+            };
+            let ops = ops_of(&base, write);
+            assert!(ops > 2, "a create takes more than two flash operations");
+            for cut in 0..ops {
+                let fs = mount(cut_at(&base, cut, write));
+                match fs.read_file(path) {
+                    Err(FsError::NotFound(_)) => {}
+                    Ok(bytes) => assert_eq!(bytes, data, "cut at op {cut} of {ops}"),
+                    Err(e) => panic!("cut at op {cut} of {ops}: {e}"),
+                }
+                assert_eq!(
+                    fs.read_file("/projects/demo/project.json".as_path())
+                        .unwrap(),
+                    b"{\"name\":\"demo\"}"
+                );
+                let listed = fs.list_dir("/projects".as_path(), true).unwrap();
+                assert!(
+                    listed.iter().all(|p| !is_create_temp(p.as_str())),
+                    "cut at op {cut}: a listing shows the temporary: {listed:?}"
+                );
+            }
+        }
+    }
+
+    /// An overwrite was already one commit; it stays one: old or new.
+    #[test]
+    fn a_cut_anywhere_in_an_overwrite_leaves_the_old_bytes_or_the_new() {
+        let base = base_image();
+        let path = "/projects/demo/project.json".as_path();
+        let new = b"{\"name\":\"demo, renamed\"}".to_vec();
+        let write = |fs: &LpFsFlash<CutStorage>| {
+            let _ = fs.write_file(path, &new);
+        };
+        let ops = ops_of(&base, write);
+        for cut in 0..ops {
+            let bytes = mount(cut_at(&base, cut, write)).read_file(path).unwrap();
+            assert!(
+                bytes == new || bytes == b"{\"name\":\"demo\"}",
+                "cut at op {cut} of {ops}: {bytes:?}"
+            );
+        }
+    }
+
+    /// A temporary a cut left behind is never listed, and the next create of
+    /// that file takes it over.
+    #[test]
+    fn a_left_temporary_is_hidden_and_the_next_create_takes_it_over() {
+        let fs = mount(base_image());
+        {
+            let inner = fs.inner.borrow();
+            inner
+                .fs
+                .write_file("projects/demo/clock.json#lp-new", b"")
+                .unwrap();
+        }
+        assert_eq!(
+            fs.list_dir("/projects/demo".as_path(), false).unwrap(),
+            vec![LpPathBuf::from("/projects/demo/project.json")]
+        );
+        fs.write_file("/projects/demo/clock.json".as_path(), b"{}")
+            .unwrap();
+        assert_eq!(
+            fs.read_file("/projects/demo/clock.json".as_path()).unwrap(),
+            b"{}"
+        );
+        let inner = fs.inner.borrow();
+        let names: Vec<_> = inner
+            .fs
+            .list_dir("projects/demo")
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(names, ["clock.json", "project.json"]);
+    }
+
+    #[test]
+    fn a_reserved_name_is_refused() {
+        let fs = mount(base_image());
+        assert!(matches!(
+            fs.write_file("/projects/demo/x#lp-new".as_path(), b"{}"),
+            Err(FsError::InvalidPath(_))
+        ));
+    }
+
+    // ---- helpers ----
+
+    use core::cell::Cell;
+    use lpfs::lp_path::AsLpPath;
+
+    const CUT_BLOCKS: u32 = 64;
+
+    fn cut_config() -> Config {
+        config(CUT_BLOCKS)
+    }
+
+    /// RAM flash that counts its programs and erases and fails the
+    /// `cut_at`-th and every one after it without changing a byte: a clean
+    /// power cut, the bytes left being the flash at the cut.
+    struct CutStorage {
+        bytes: Rc<RefCell<Vec<u8>>>,
+        ops: Rc<Cell<u64>>,
+        cut_at: u64,
+    }
+
+    impl CutStorage {
+        fn cut(&self) -> bool {
+            let n = self.ops.get();
+            self.ops.set(n + 1);
+            n >= self.cut_at
+        }
+    }
+
+    impl Storage for CutStorage {
+        fn read(&mut self, block: u32, offset: u32, buf: &mut [u8]) -> Result<(), LfsError> {
+            let at = (block * BLOCK + offset) as usize;
+            buf.copy_from_slice(&self.bytes.borrow()[at..at + buf.len()]);
+            Ok(())
+        }
+        fn write(&mut self, block: u32, offset: u32, data: &[u8]) -> Result<(), LfsError> {
+            if self.cut() {
+                return Err(LfsError::Io);
+            }
+            let at = (block * BLOCK + offset) as usize;
+            self.bytes.borrow_mut()[at..at + data.len()].copy_from_slice(data);
+            Ok(())
+        }
+        fn erase(&mut self, block: u32) -> Result<(), LfsError> {
+            if self.cut() {
+                return Err(LfsError::Io);
+            }
+            let at = (block * BLOCK) as usize;
+            self.bytes.borrow_mut()[at..at + BLOCK as usize].fill(0xFF);
+            Ok(())
+        }
+    }
+
+    /// `bytes` as flash that is cut at its `cut_at`-th program or erase.
+    fn storage(bytes: Vec<u8>, cut_at: u64) -> (CutStorage, Rc<RefCell<Vec<u8>>>, Rc<Cell<u64>>) {
+        let bytes = Rc::new(RefCell::new(bytes));
+        let ops = Rc::new(Cell::new(0));
+        let storage = CutStorage {
+            bytes: bytes.clone(),
+            ops: ops.clone(),
+            cut_at,
+        };
+        (storage, bytes, ops)
+    }
+
+    /// Mount `bytes`, which must hold a filesystem (never formats).
+    fn mount(bytes: Vec<u8>) -> LpFsFlash<CutStorage> {
+        let (storage, _, _) = storage(bytes, u64::MAX);
+        match LpFsFlash::init_guarded(storage, cut_config, |_| FormatVerdict::Hold).unwrap() {
+            FlashFsInit::Mounted(fs) => fs,
+            _ => panic!("the image does not mount"),
+        }
+    }
+
+    /// A filesystem holding `/projects/demo/project.json`.
+    fn base_image() -> Vec<u8> {
+        let (storage, bytes, _) = storage(vec![0xFF; (CUT_BLOCKS * BLOCK) as usize], u64::MAX);
+        let (fs, formatted) = LpFsFlash::init(storage, cut_config).unwrap();
+        assert!(formatted);
+        fs.write_file(
+            "/projects/demo/project.json".as_path(),
+            b"{\"name\":\"demo\"}",
+        )
+        .unwrap();
+        drop(fs);
+        bytes.take()
+    }
+
+    /// How many programs and erases `step` takes on `base`.
+    fn ops_of(base: &[u8], step: impl Fn(&LpFsFlash<CutStorage>)) -> u64 {
+        let (storage, _, ops) = storage(base.to_vec(), u64::MAX);
+        let fs = LpFsFlash::from_fs(
+            Filesystem::mount(storage, cut_config())
+                .map_err(|(e, _)| e)
+                .unwrap(),
+        );
+        let before = ops.get();
+        step(&fs);
+        ops.get() - before
+    }
+
+    /// The flash after `step` on `base` is cut at its `cut`-th operation.
+    fn cut_at(base: &[u8], cut: u64, step: impl Fn(&LpFsFlash<CutStorage>)) -> Vec<u8> {
+        let (storage, bytes, _) = storage(base.to_vec(), cut);
+        let fs = LpFsFlash::from_fs(
+            Filesystem::mount(storage, cut_config())
+                .map_err(|(e, _)| e)
+                .unwrap(),
+        );
+        step(&fs);
+        drop(fs);
+        bytes.take()
     }
 }

@@ -16,10 +16,15 @@ pub struct NorStats {
     pub read_bytes: u64,
     /// Programs that asked to turn a 0 bit back into 1 (real NOR cannot).
     pub violations_0_to_1: u64,
-    /// Operations torn by a power cut.
+    /// Operations torn by a power cut (a cut that landed before an erase
+    /// started counts: the op was cut).
     pub torn_ops: u64,
-    /// Of those, sector erases (the rest are program pages).
+    /// Of those, sector erases that were torn (the rest are program pages
+    /// and the erases cut before they started).
     pub torn_erases: u64,
+    /// Cuts at an erase that landed before it started (the calibrated
+    /// models' `cut_before_erase`): the sector was left as it was.
+    pub erase_cuts_before_start: u64,
 }
 
 impl NorStats {

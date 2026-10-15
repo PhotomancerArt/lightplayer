@@ -31,6 +31,7 @@ pub use registry::entry_residency_error::EntryResidencyError;
 pub use registry::load_result::LoadResult;
 pub use registry::node_authoring::{CreateNodeOutcome, RemoveNodeOutcome};
 pub use registry::parse_ctx::ParseCtx;
+pub use registry::project_identity::ProjectIdentity;
 pub use registry::project_registry::ProjectRegistry;
 pub use registry::registry_error::RegistryError;
 #[cfg(feature = "diff")]

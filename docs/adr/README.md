@@ -55,7 +55,9 @@ to read them in.
    node; with `2026-10-07-project-loads-are-tried-and-recovered` (a joined
    board's heap) and `2026-10-05-emulator-seams` section 11 (the emulated
    LAN).
-6. `2026-10-06-cloud-relay` (M7): boards reachable through lightplayer.app.
+6. `2026-10-06-cloud-relay` (M7): boards reachable through lightplayer.app;
+   its 2026-10-09 amendment adds relay protocol 2, a board's picture through
+   the cloud.
 7. `2026-10-06-radio-frame-rate-budget`: the ceilings every radio feature
    stays under.
 
@@ -238,6 +240,10 @@ holds the full context.
 | 80–230 ms slow frames were observed even with Wi‑Fi off while taking the budget's first data point; the source is unidentified and predates Wi‑Fi | `2026-10-06-radio-frame-rate-budget` | Someone investigates frame-time outliers unrelated to radio |
 | Firmware release channels (`stable`, `beta`, …): every non-digit `<release>` but `latest` is reserved in `/firmware/<target>/<release>/<file>`, nothing more | `2026-10-06-firmware-distribution` | A second release channel is asked for |
 | An lp-cli engine cache and `lp-cli firmware fetch`; lookup by engine hash; single-flight in the `/firmware/` proxy; a retention policy for release assets | `2026-10-06-firmware-distribution` | A host tool needs released engines offline; the proxy's double cold fetch shows up; GitHub objects to the asset volume |
+| Relay protocol 2's `content_tag` (which version of the project a board plays) is defined and pinned, but no board sends it | `2026-10-06-cloud-relay` (2026-10-09 amendment) | Something needs "which version of the project" from a board on the relay: a package hash at load, on the engine side |
+| Pictures and project names cross the relay's device leg unsealed (Yona, 2026-10-08); only the uid and package hash are protected, as keyed tags | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A chip affords TLS on the device leg, or a privacy need for what a board shows: seal them in a later relay protocol |
+| The relay's last picture of a board lives in the hub's memory and is lost at every deploy | `2026-10-06-cloud-relay` (2026-10-09 amendment) | M7's board list (new persisted cloud data, with its own migration) |
+| No `LabelChanged` relay frame: the hub's board name goes stale until the board registers again | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A renamed board's stale name shows up on cloud cards, unless M7 makes the account own the name |
 
 ## Relationship To Shared Planning
 

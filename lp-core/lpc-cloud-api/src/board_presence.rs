@@ -27,6 +27,19 @@ pub struct BoardPresence {
     pub same_network: bool,
     /// When the board registered, f64 epoch seconds.
     pub since: f64,
+    /// The relay protocol the board speaks (`1`: the first relay; `2`:
+    /// pictures through the cloud). A protocol 1 board sends no pictures,
+    /// no firmware and no project.
+    pub relay_proto: u16,
+    /// The firmware version the board said in its hello (protocol 2 and
+    /// later; empty when it said "unknown"). The board's word, unchecked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<String>,
+    /// The name of the project the board plays, as it last reported it
+    /// (protocol 2 and later). Absent before it reports one, or when no
+    /// project is loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// Answers [`crate::request::ListBoards`]: at most
@@ -56,12 +69,39 @@ mod tests {
                 lan: Some("192.168.4.20:80".to_string()),
                 same_network: true,
                 since: 1.5,
+                relay_proto: 1,
+                firmware: None,
+                project: None,
             }],
         };
         let json = serde_json::to_string(&list).unwrap();
         assert_eq!(
             json,
-            r#"{"boards":[{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":"192.168.4.20:80","sameNetwork":true,"since":1.5}]}"#
+            r#"{"boards":[{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":"192.168.4.20:80","sameNetwork":true,"since":1.5,"relayProto":1}]}"#
+        );
+        assert_eq!(serde_json::from_str::<BoardList>(&json).unwrap(), list);
+    }
+
+    /// v6: a protocol 2 board's firmware and project name.
+    #[test]
+    fn pinned_json_literal_with_firmware_and_project() {
+        let list = BoardList {
+            boards: vec![BoardPresence {
+                id: "10bda3b08e30".to_string(),
+                label: "Lamp".to_string(),
+                wire_proto: 39,
+                lan: None,
+                same_network: false,
+                since: 1.5,
+                relay_proto: 2,
+                firmware: Some("2026.10.09-1".to_string()),
+                project: Some("Rocaille".to_string()),
+            }],
+        };
+        let json = serde_json::to_string(&list).unwrap();
+        assert_eq!(
+            json,
+            r#"{"boards":[{"id":"10bda3b08e30","label":"Lamp","wireProto":39,"lan":null,"sameNetwork":false,"since":1.5,"relayProto":2,"firmware":"2026.10.09-1","project":"Rocaille"}]}"#
         );
         assert_eq!(serde_json::from_str::<BoardList>(&json).unwrap(), list);
     }

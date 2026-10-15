@@ -9,7 +9,9 @@
 //! levels, crash, the answer, no edge) and the asker's side (Z1–Z10: the
 //! `take-over` offer pressed by path, refusals, no answer, levels, taking it
 //! back, two of a kind, two askers, pictures, the Online rule, a crash;
-//! Z9's unit row is `device_roster.rs`'s).
+//! Z9's unit row is `device_roster.rs`'s), and a port picked in the
+//! chooser (G1–G3: read when refused, a Connect right after the pick, a
+//! release heard before the refusal).
 
 use std::collections::BTreeMap;
 
@@ -513,6 +515,116 @@ fn t7_an_idle_holder_lets_go_in_order() {
         a.step();
     }
     assert_eq!(desk.attempts(0, "A"), opens, "nothing reopened the port");
+}
+
+/// T7, prompt: a holder whose card is showing the board's picture answers
+/// within a second of the ask, on the injected clock. Each turn runs in the
+/// actor's order — the note and the release's first half (the picture, the
+/// disconnect), then the tick's card feed — so the feed comes due between
+/// the disconnect and the port's close reaching the fold. Its pull must
+/// not start on the link being let go: a request on a closing port is
+/// never answered, and the actor (the close, the release) would wait out
+/// its five-second budget behind it
+/// (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`).
+#[test]
+fn t7_a_feeding_holder_answers_within_a_second() {
+    let desk = Desk::new(&[("dev000000holdt7cc", MAC_A)]);
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let asker = desk.bus.tab();
+    a.run_a_project_alone(MAC_A);
+    a.feed_a_frame(MAC_A);
+    // The feed is due again by the time the ask lands.
+    for _ in 0..60 {
+        a.step();
+    }
+    asker.take_inbox();
+
+    let asked_at = desk.clock.get();
+    asker.post(&HoldNote::Ask {
+        request: 2,
+        key: usb_key(MAC_A),
+        holder: None,
+    });
+    let released = HoldNote::Answer {
+        request: 2,
+        asker: asker.tab_id(),
+        outcome: crate::AskOutcome::Released,
+    };
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT;
+    let answered_at = loop {
+        a.step();
+        feed_tick(&mut a.bench, &a.tasks, 5.0);
+        if asker.take_inbox().iter().any(|(_, note)| *note == released) {
+            break desk.clock.get();
+        }
+        assert!(std::time::Instant::now() < deadline, "no answer");
+    };
+    assert!(
+        answered_at - asked_at < 1.0,
+        "the holder took {:.2} s to answer",
+        answered_at - asked_at
+    );
+    assert!(!a.holds(MAC_A));
+}
+
+/// T7, budget: the holder's whole release fits inside the asker's
+/// patience. A port whose close never comes back still lets the lock go
+/// [`RELEASE_PATIENCE_SECS`] after the ask, and the asker hears `Released`
+/// with two seconds to spare before it would say "That tab didn't answer".
+///
+/// [`RELEASE_PATIENCE_SECS`]: crate::app::devices::board_hold::RELEASE_PATIENCE_SECS
+#[test]
+fn t7_a_holder_whose_port_never_closes_answers_inside_the_askers_patience() {
+    use crate::app::devices::board_hold::RELEASE_PATIENCE_SECS;
+    use crate::app::devices::take_over_state::ASK_PATIENCE_SECS;
+
+    let desk = Desk::new(&[("dev000000holdt7dd", MAC_A)]);
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let asker = desk.bus.tab();
+    a.run_a_project_alone(MAC_A);
+    a.feed_a_frame(MAC_A);
+    asker.take_inbox();
+    desk.boards[0].state.borrow_mut().close_hangs = true;
+
+    let asked_at = desk.clock.get();
+    asker.post(&HoldNote::Ask {
+        request: 2,
+        key: usb_key(MAC_A),
+        holder: None,
+    });
+    let released = HoldNote::Answer {
+        request: 2,
+        asker: asker.tab_id(),
+        outcome: crate::AskOutcome::Released,
+    };
+    let deadline = std::time::Instant::now() + REAL_TIME_LIMIT * 4;
+    let answered_at = loop {
+        a.step();
+        if asker.take_inbox().iter().any(|(_, note)| *note == released) {
+            break desk.clock.get();
+        }
+        assert!(std::time::Instant::now() < deadline, "no answer");
+    };
+    let took = answered_at - asked_at;
+    assert!(
+        took >= RELEASE_PATIENCE_SECS,
+        "the lock went at {took:.2} s, before the close was waited on"
+    );
+    assert!(
+        took < RELEASE_PATIENCE_SECS + 0.5 && took + 1.5 < ASK_PATIENCE_SECS,
+        "the holder took {took:.2} s of the asker's {ASK_PATIENCE_SECS} s"
+    );
+    assert!(
+        desk.log_of(&["close:A"]).is_empty(),
+        "the port never closed"
+    );
+    assert!(!a.holds(MAC_A));
 }
 
 /// T8: without an edge every flow is as before holds existed: the sweep
@@ -1213,6 +1325,185 @@ fn f3_a_freed_port_stops_saying_another_tab_holds_it() {
 }
 
 // ---------------------------------------------------------------------
+// A port picked in the chooser (G1–G3)
+// ---------------------------------------------------------------------
+
+/// G1: B's browser has granted no port, and B picks the board A holds in
+/// the USB chooser. A chooser pick is not gated (the person may have picked
+/// another board of the kind), so B opens it and the OS refuses — and B
+/// reads that refusal against A's claim the moment it arrives, not at the
+/// identify deadline: one card, the board's own, "Open in another tab".
+/// When A lets go by itself, the board is B's to Connect, and nothing opens
+/// it until the press (R3).
+#[test]
+fn g1_a_picked_port_another_tab_holds_reads_as_held_at_once() {
+    let desk = Desk::new(&[("dev000000holdg1aa", MAC_A)]);
+    let (mut a, mut b) = holder_and_picker(&desk);
+
+    b.will_pick(&desk, 0);
+    let picked_at = desk.clock.get();
+    b.bench
+        .press("devices/connect-usb", OfferArgs::new())
+        .expect("the chooser press never fails loudly");
+    run_until(
+        &mut [&mut a, &mut b],
+        "B to read its refused open",
+        |tabs| merged_onto_its_card(tabs[1], MAC_A),
+    );
+
+    assert!(
+        desk.clock.get() - picked_at < 0.5,
+        "read when the refusal came, not at the 5 s identify deadline ({} s)",
+        desk.clock.get() - picked_at
+    );
+    assert_eq!(desk.log_of(&["refused:B", "open:B"]), ["refused:B"]);
+    let card = b.ui_card(MAC_A);
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).summary,
+        "Open in another tab"
+    );
+    assert_eq!(b.fact(MAC_A), Some(held(HoldLevel::Watching, false)));
+    b.bench.offered(b.verb(MAC_A, "take-over"));
+
+    // A lets go by itself: B's port is the board's, and Connect opens it.
+    let board = a.device_id(MAC_A);
+    a.bench.press_device(board, "disconnect", OfferArgs::new());
+    run_until(&mut [&mut a, &mut b], "the fact to clear in B", |tabs| {
+        tabs[1].fact(MAC_A).is_none()
+    });
+    for _ in 0..200 {
+        step(&mut [&mut a, &mut b]);
+    }
+    assert_eq!(desk.attempts(0, "B"), 1, "nothing opened it on its own");
+    b.bench.not_offered(b.verb(MAC_A, "take-over"));
+    b.bench
+        .press(b.verb(MAC_A, "connect"), OfferArgs::new())
+        .expect("press");
+    run_until(&mut [&mut a, &mut b], "B to have the board", |tabs| {
+        tabs[1]
+            .card(MAC_A)
+            .is_some_and(|card| card.status == DeviceStatus::Ready)
+            && tabs[1].holds(MAC_A)
+    });
+    assert_eq!(
+        desk.log_of(&["refused:B", "open:B"]),
+        ["refused:B", "open:B"]
+    );
+    assert!(b.bench.view().pending.is_empty());
+}
+
+/// G2, the walk's order (the defect's symptom): B picks the held port and
+/// presses Connect the moment its open is refused — well inside the five
+/// seconds the identify used to wait before the refusal was read. The
+/// refusal is read against A's claim while A lets go; A's release then
+/// opens the port here, and B ends Ready on the board's own card, never
+/// "No response".
+#[test]
+fn g2_connect_right_after_the_pick_takes_the_board_over() {
+    let desk = Desk::new(&[("dev000000holdg2aa", MAC_A)]);
+    let (mut a, mut b) = holder_and_picker(&desk);
+
+    b.will_pick(&desk, 0);
+    b.bench
+        .press("devices/connect-usb", OfferArgs::new())
+        .expect("the chooser press never fails loudly");
+    run_until(&mut [&mut a, &mut b], "B's open to be refused", |_| {
+        desk.attempts(0, "B") == 1
+    });
+    b.bench
+        .press(b.verb(MAC_A, "take-over"), OfferArgs::new())
+        .expect("the take-over press runs");
+    run_until(
+        &mut [&mut a, &mut b],
+        "B to take the board over",
+        took_it_over(MAC_A),
+    );
+
+    assert_eq!(
+        desk.log_of(&["open:", "close:", "refused:"]),
+        ["open:A", "refused:B", "close:A", "open:B"]
+    );
+    assert!(b.bench.view().pending.is_empty(), "one card for the board");
+    assert_eq!(b.take_over_words(MAC_A), None, "done: nothing to say");
+}
+
+/// G3: the release is heard before the refusal. B's open of the picked port
+/// is refused while A still holds it, B presses Connect, and A lets go —
+/// all before B has folded the refusal, so by then no claim of the kind
+/// stands to read it against. It is the hold B's take-over was just let go
+/// of, so B opens the port again at once, and it opens.
+#[test]
+fn g3_a_refusal_heard_after_the_release_opens_again() {
+    let desk = Desk::new(&[("dev000000holdg3aa", MAC_A)]);
+    let (mut a, mut b) = holder_and_picker(&desk);
+
+    b.will_pick(&desk, 0);
+    b.bench
+        .press("devices/connect-usb", OfferArgs::new())
+        .expect("the chooser press never fails loudly");
+    run_until(&mut [&mut b], "B's open to be refused", |_| {
+        desk.attempts(0, "B") == 1
+    });
+    assert!(
+        b.card(MAC_A)
+            .is_some_and(|card| card.status != DeviceStatus::Attached),
+        "the refusal is not read yet"
+    );
+    b.bench
+        .press(b.verb(MAC_A, "take-over"), OfferArgs::new())
+        .expect("the take-over press runs");
+    run_until(&mut [&mut a], "A to let the board go", |_| {
+        !desk.log_of(&["close:A"]).is_empty() && desk.bus.holder_of(&usb_key(MAC_A)).is_none()
+    });
+
+    run_until(
+        &mut [&mut a, &mut b],
+        "B to take the board over",
+        took_it_over(MAC_A),
+    );
+    assert_eq!(
+        desk.log_of(&["open:", "close:", "refused:"]),
+        ["open:A", "refused:B", "close:A", "open:B"]
+    );
+    assert!(b.bench.view().pending.is_empty(), "one card for the board");
+}
+
+/// A holder (A) and a tab (B) whose browser has granted no port yet, which
+/// remembers the board and wears the fact on it.
+fn holder_and_picker(desk: &Desk) -> (Tab, Tab) {
+    let mut a = desk.tab("A", &[0]);
+    run_until(&mut [&mut a], "A to hold the board", |tabs| {
+        tabs[0].holds(MAC_A)
+    });
+    let mut b = desk.tab("B", &[]);
+    b.library_changed();
+    run_until(&mut [&mut a, &mut b], "B to see the board held", |tabs| {
+        tabs[1].fact(MAC_A) == Some(held(HoldLevel::Watching, false))
+    });
+    (a, b)
+}
+
+/// Whether `tab`'s port for the board with `mac` sits on the board's own
+/// card (not a "new device found"), not open.
+fn merged_onto_its_card(tab: &Tab, mac: &str) -> bool {
+    tab.bench.view().pending.is_empty()
+        && tab
+            .card(mac)
+            .is_some_and(|card| card.status == DeviceStatus::Attached)
+}
+
+/// B has the board Ready and holds it, and A's card says it was taken.
+fn took_it_over(mac: &'static str) -> impl Fn(&[&mut Tab]) -> bool {
+    move |tabs| {
+        tabs[1]
+            .card(mac)
+            .is_some_and(|card| card.status == DeviceStatus::Ready)
+            && tabs[1].holds(mac)
+            && tabs[0].fact(mac).is_some_and(|fact| fact.taken_from_here)
+    }
+}
+
+// ---------------------------------------------------------------------
 // The desk: boards shared by tabs
 // ---------------------------------------------------------------------
 
@@ -1231,6 +1522,9 @@ struct SharedBoardState {
     holder: Option<&'static str>,
     /// Every open each tab attempted, refused ones included.
     attempts: BTreeMap<&'static str, usize>,
+    /// A close never comes back (one stuck behind a pending write): the
+    /// port stays open in the tab that holds it.
+    close_hangs: bool,
 }
 
 /// One tab's port onto a [`SharedUsbBoard`]: the fake's link exists only
@@ -1277,6 +1571,9 @@ impl Link for SharedPortLink {
                 self.inner = Some(link);
             }
             LinkCommand::Close => {
+                if self.board.state.borrow().close_hangs {
+                    return;
+                }
                 if let Some(inner) = self.inner.as_mut() {
                     inner.submit(LinkCommand::Close);
                 }
@@ -1301,22 +1598,45 @@ impl Link for SharedPortLink {
     }
 }
 
-/// One tab's transport over the desk: the ports its browser has granted.
+/// One tab's transport over the desk: the ports its browser has granted,
+/// at load and through its chooser.
 struct DeskTransport {
     tab: &'static str,
     ports: Vec<(String, SharedUsbBoard)>,
+    /// The port the chooser hands back on its next press
+    /// ([`Tab::will_pick`]); `None` is a dismissed chooser.
+    chooser: Rc<RefCell<Option<(String, SharedUsbBoard)>>>,
+    /// Every port the chooser has handed back: granted from then on.
+    picked: RefCell<Vec<(String, SharedUsbBoard)>>,
     log: Rc<RefCell<Vec<String>>>,
     push_plan: Rc<Cell<PushPlan>>,
 }
 
 impl DeskTransport {
-    fn board_at(&self, info: &LinkInfo) -> &SharedUsbBoard {
-        &self
-            .ports
+    fn board_at(&self, info: &LinkInfo) -> SharedUsbBoard {
+        self.ports
             .iter()
+            .chain(self.picked.borrow().iter())
             .find(|(endpoint, _)| *endpoint == info.endpoint.0)
             .expect("a port of this tab")
             .1
+            .clone()
+    }
+
+    /// This tab's port onto `board`, closed.
+    fn port_link(&self, endpoint: &str, board: &SharedUsbBoard) -> GrantedLink {
+        let info = fake_link_info(endpoint);
+        GrantedLink {
+            link: Box::new(SharedPortLink {
+                info: info.clone(),
+                board: board.clone(),
+                tab: self.tab,
+                log: Rc::clone(&self.log),
+                inner: None,
+                queued: VecDeque::new(),
+            }),
+            info,
+        }
     }
 
     /// The bench's scripted effects, over the board at `info`.
@@ -1345,26 +1665,20 @@ impl DeviceTransport for DeskTransport {
         let granted = self
             .ports
             .iter()
-            .map(|(endpoint, board)| {
-                let info = fake_link_info(endpoint);
-                GrantedLink {
-                    link: Box::new(SharedPortLink {
-                        info: info.clone(),
-                        board: board.clone(),
-                        tab: self.tab,
-                        log: Rc::clone(&self.log),
-                        inner: None,
-                        queued: VecDeque::new(),
-                    }),
-                    info,
-                }
-            })
+            .chain(self.picked.borrow().iter())
+            .map(|(endpoint, board)| self.port_link(endpoint, board))
             .collect();
         Box::pin(core::future::ready(Ok(granted)))
     }
 
+    /// The chooser: whatever [`Tab::will_pick`] put there, once.
     fn request_grant(&self) -> DeviceTransportFuture<Result<Option<GrantedLink>, String>> {
-        Box::pin(core::future::ready(Ok(None)))
+        let picked = self.chooser.borrow_mut().take().map(|(endpoint, board)| {
+            let link = self.port_link(&endpoint, &board);
+            self.picked.borrow_mut().push((endpoint, board));
+            link
+        });
+        Box::pin(core::future::ready(Ok(picked)))
     }
 
     fn revoke_grant(&self, info: LinkInfo) -> DeviceTransportFuture<Result<(), String>> {
@@ -1450,19 +1764,17 @@ impl Desk {
             self.wire.clone(),
         );
         let push_plan = Rc::new(Cell::new(PushPlan::default()));
+        let chooser = Rc::new(RefCell::new(None));
         bench
             .controller
             .set_device_transport(Rc::new(DeskTransport {
                 tab: name,
                 ports: boards
                     .iter()
-                    .map(|index| {
-                        (
-                            format!("{name}-usb-{index}").to_ascii_lowercase(),
-                            self.boards[*index].clone(),
-                        )
-                    })
+                    .map(|index| (port_name(name, *index), self.boards[*index].clone()))
                     .collect(),
+                chooser: Rc::clone(&chooser),
+                picked: RefCell::new(Vec::new()),
                 log: Rc::clone(&self.log),
                 push_plan: Rc::clone(&push_plan),
             }));
@@ -1472,6 +1784,7 @@ impl Desk {
             tasks,
             hold: None,
             push_plan,
+            chooser,
         }
     }
 
@@ -1531,6 +1844,8 @@ struct Tab {
     tasks: TaskPool,
     hold: Option<MemoryBoardHold>,
     push_plan: Rc<Cell<PushPlan>>,
+    /// What this tab's chooser hands back on its next press.
+    chooser: Rc<RefCell<Option<(String, SharedUsbBoard)>>>,
 }
 
 impl Tab {
@@ -1561,6 +1876,13 @@ impl Tab {
 
     fn tab_id(&self) -> TabId {
         self.hold.as_ref().expect("a tab with an edge").tab_id()
+    }
+
+    /// The person will pick board `index` of `desk` in this tab's USB
+    /// chooser, the next time it opens (`devices/connect-usb`).
+    fn will_pick(&self, desk: &Desk, index: usize) {
+        *self.chooser.borrow_mut() =
+            Some((port_name(self.name, index), desk.boards[index].clone()));
     }
 
     /// Whether this tab holds the board with `mac` over USB.
@@ -1837,6 +2159,11 @@ fn desk_board(uid: &str, mac: &str) -> FakeEsp32Device {
 
 const MAC_A: &str = "60:55:f9:0a:0b:0c";
 const MAC_B: &str = "60:55:f9:0a:0b:0d";
+
+/// The endpoint tab `tab`'s browser gives board `index`'s port.
+fn port_name(tab: &str, index: usize) -> String {
+    format!("{tab}-usb-{index}").to_ascii_lowercase()
+}
 
 const C6: UsbPair = UsbPair {
     vendor: 0x303a,

@@ -9,12 +9,12 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lp_nor_sim::NorGeometry;
+use lp_nor_sim::{NorGeometry, TearModel};
 
 extern crate std;
 
 use crate::StoreConfig;
-use crate::test_support::{Step, deflate, dial, noise, sweep, sweep_geometry, text};
+use crate::test_support::{Step, deflate, dial, noise, remount_sweep, sweep, sweep_geometry, text};
 
 fn cfg(record_max: u32) -> StoreConfig {
     StoreConfig {
@@ -127,6 +127,43 @@ fn cut_sweep_deflated_push() {
     assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
 }
 
+/// The one-slot push the wire runs, at the store: one batch that removes
+/// the old project and writes the new one as planned deflated chunks (one
+/// file of many chunks among them), the project's panel save joining it.
+fn one_slot_deflated_push_workload() -> Vec<Step> {
+    fn push(seed: u64) -> Step {
+        Box::new(move |st| {
+            st.begin()?;
+            st.delete_prefix("/projects/a/")?;
+            for (i, len) in [(0u64, 300usize), (1, 3_000), (2, 14_000)] {
+                let bytes = text(seed + i, len);
+                let path = alloc::format!("/projects/a/f{i}.glsl");
+                let plan = crate::plan_deflated_chunks(&bytes, 1024, crate::DEFAULT_DEFLATE_LEVEL);
+                for chunk in plan {
+                    st.put_chunk_deflated(
+                        &path,
+                        chunk.logical_range.start as u32,
+                        chunk.logical_range.len() as u32,
+                        None,
+                        &chunk.deflated,
+                    )?;
+                }
+            }
+            st.put("/projects/a/.lp/panel.json", &text(seed + 9, 90))?;
+            st.commit()
+        })
+    }
+    vec![push(10), push(20)]
+}
+
+#[test]
+fn cut_sweep_one_slot_deflated_push() {
+    let workload = one_slot_deflated_push_workload();
+    let r = sweep(sweep_geometry(24), &cfg(1024), &workload, 48);
+    std::println!("{}: {r:?}", line!());
+    assert!(r.landed_old > 0 && r.landed_new > 0, "{r:?}");
+}
+
 /// GC inside the cut range: churn on a small flash.
 fn gc_workload() -> Vec<Step> {
     let mut steps: Vec<Step> = Vec::new();
@@ -157,4 +194,35 @@ fn cut_sweep_through_gc() {
         assert!(r.gc_runs > 0, "{rm}: no GC ran: {r:?}");
         assert!(r.landed_old > 0 && r.landed_new > 0, "{rm}: {r:?}");
     }
+}
+
+/// Every mount after a cut reads the state the first one read: a torn
+/// record that reads whole on one read only is settled by the first mount
+/// (re-programmed, or killed when it read bad), so no later mount reads it
+/// the other way. Under `calibrated_mid_word`, with many tear seeds a cut:
+/// a mid-word tear leaves its one missing clear weak only for some, and the
+/// record must then be the last thing the program would have changed. (40
+/// seeds of the per-call workload is where a mount that settles only a
+/// record it read whole, never one it read bad, first fails.)
+#[test]
+fn cut_remounts_read_one_state() {
+    let mid = [TearModel::CalibratedMidWord];
+    let seeds = dial("LP_TREE_STORE_SWEEP_SEEDS", 40);
+    let g = sweep_geometry(16);
+    let r = remount_sweep(g, &cfg(256), &per_call_workload(), 24, &mid, seeds, 4);
+    std::println!("{}: {r:?}", line!());
+    assert!(r.cuts > 1000 && r.weak > 0, "{r:?}");
+    let mut steps = gc_workload();
+    steps.truncate(4);
+    let r = remount_sweep(
+        NorGeometry::c6(10),
+        &cfg(1024),
+        &steps,
+        12,
+        &mid,
+        seeds / 4,
+        4,
+    );
+    std::println!("{}: {r:?}", line!());
+    assert!(r.cuts > 100 && r.weak > 0, "{r:?}");
 }

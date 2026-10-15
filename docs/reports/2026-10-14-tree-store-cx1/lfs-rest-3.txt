@@ -1,0 +1,232 @@
+[link] up (session 0)
+[INFO] fw_esp32_common::server_loop: [perf] frame=3748 fps=37 elapsed=5005ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 439 out 15 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=228517 live=219018 max_usage=255468 largest=34180
+[INFO] fw_esp32_common::serial::packed_link: packed link: replies are JSON again
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link reset (); now session 1
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 1)
+M!{"id":0,"msg":{"hello":{"proto":43,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.power-button","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","version":"2026.10.14-2","commit":"dc5164ef1d05","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"14:c1:9f:e6:54:90","chipRevision":"0.2","eui64":"14:c1:9f:e6:54:90:fe:ff","fs":"mounted"},"deviceUid":null,"packFormat":2,"auth":{"required":false,"granted":"edit"}}}}
+[link] wire: replies packed (JSON Pack v2, learned)
+[INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 2)
+M!{"id":1000000,"msg":"reboot"}
+[INFO] lpa_server::server: tick_and_send: reboot acked, resetting
+[INFO] fw_esp32c6: [REBOOT] client requested a restart
+ESP-ROM:esp32c6-20220919
+Build:Sep 19 2022
+rst:0x3 (LP_SW_HPSYS),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4001974a
+SPIWP:0xee
+mode:DIO, clock div:2
+load:0x4086c410,len:0xd48
+load:0x4086e610,len:0x2d68
+load:0x40875720,len:0x1800
+entry 0x4086c410
+[0;32mI (22) boot: ESP-IDF v5.1-beta1-378-gea5e0ff298-dirt 2nd stage bootloader[0m
+[0;32mI (23) boot: compile time Jun  7 2023 08:02:08[0m
+[0;32mI (24) boot: chip revision: v0.2[0m
+[0;32mI (27) boot.esp32c6: SPI Speed      : 40MHz[0m
+[0;32mI (32) boot.esp32c6: SPI Mode       : DIO[0m
+[0;32mI (37) boot.esp32c6: SPI Flash Size : 4MB[0m
+[0;32mI (42) boot: Enabling RNG early entropy source...[0m
+[0;32mI (47) boot: Partition Table:[0m
+[0;32mI (51) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (58) boot:  0 nvs              WiFi data        01 02 00009000 00005000[0m
+[0;32mI (65) boot:  1 bootctl          Unknown data     01 06 0000e000 00001000[0m
+[0;32mI (73) boot:  2 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (80) boot:  3 factory          factory app      00 00 00010000 00340000[0m
+[0;32mI (88) boot:  4 lpfs             Unknown data     01 82 00350000 000b0000[0m
+[0;32mI (95) boot: End of partition table[0m
+[0;32mI (100) esp_image: segment 0: paddr=00010020 vaddr=40800000 size=00018h (    24) load[0m
+[0;32mI (108) esp_image: segment 1: paddr=00010040 vaddr=42000040 size=53cd8h (343256) map[0m
+[0;32mI (185) esp_image: segment 2: paddr=00063d20 vaddr=40800018 size=05294h ( 21140) load[0m
+[0;32mI (191) esp_image: segment 3: paddr=00068fbc vaddr=408052b0 size=053fch ( 21500) load[0m
+[0;32mI (197) esp_image: segment 4: paddr=0006e3c0 vaddr=4080a6b0 size=002f0h (   752) load[0m
+[0;32mI (200) esp_image: segment 5: paddr=0006e6b8 vaddr=00000000 size=01960h (  6496) [0m
+[0;32mI (209) esp_image: segment 6: paddr=00070020 vaddr=42060020 size=2b39f4h (2832884) map[0m
+[0;32mI (793) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (794) boot: Disabling RNG early entropy source...[0m
+[INIT] Initializing board...
+[INIT] Board initialized, starting runtime... (main stack 118352 B)
+[RECOVERY] boot: cause=software-reset level=green safe_mode=false prior_boot_complete=true
+[RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+[INIT] Runtime started
+[INIT] fw-esp32 starting...
+[INIT] io thread: stack 3072 B, priority 1
+[link] reset (PeerRestarted)
+[link] up (session 1)
+[INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+[INIT] Flash filesystem mounted
+[perf] fs mount 7476 us
+[INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+[INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+[INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+[INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+[INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+[INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82160 B (slots 2)
+[INFO] fw_esp32c6: [wifi] 1 network(s) saved, Wi-Fi on, Cloud relay on
+[INIT] net thread: stack 8192 B, priority 1
+[INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+[INIT] Initializing RMT peripheral at 80MHz...
+[INIT] RMT peripheral initialized
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+[INIT] Creating output provider...
+[INIT] Output provider created
+[INIT] Creating LpServer instance...
+[INIT] LpServer created
+[INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+[INFO] fw_esp32_common::boot: Boot: found configured startup project: Basic
+[INFO] fw_esp32_common::boot: Boot: auto-loading /projects/Basic
+[INFO] fw_esp32_common::boot: [mem] boot auto_load before: 187272 B free / 114264 B used (182k / 111k)
+[INFO] lpa_server::project: [mem] project new start: 182k free / 111k used
+[INFO] lpa_server::project: [mem] project new after root path: 182k free / 111k used
+[INFO] lpa_server::project: [mem] project new after services: 182k free / 111k used
+[INFO] fw_esp32c6::net::station_task: [wifi] trying lp-bench-ap
+[INFO] lpa_server::project: [mem] project new after core project: 149k free / 145k used
+[INFO] lpa_server::project: [mem] project new after graphics: 149k free / 145k used
+[INFO] lpa_server::project: [mem] project new after wrapper: 149k free / 145k used
+[INFO] lpa_server::project_manager: Project loaded: Basic
+[INFO] fw_esp32_common::boot: [mem] boot auto_load after: 148788 B free / 152748 B used (145k / 149k)
+[INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/Basic
+[INIT] Creating time provider...
+[INIT] Time provider created
+[INIT] fw-esp32 initialized, starting server loop... proto=43 commit=dc5164ef1d05 dirty=false
+[INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+M!{"id":0,"msg":{"hello":{"proto":43,"build":{"features":["node.button","node.clock","node.fluid","node.fixture","node.playlist","node.power-button","node.radio","node.shader","node.texture","svc.button","svc.radio-espnow","gfx.lpvm"],"package":"fw-esp32c6","version":"2026.10.14-2","commit":"dc5164ef1d05","dirty":false,"profile":"release-esp32"},"hardware":{"radio":true,"totalLedBudget":null,"button":true,"boardId":"seeed/xiao-esp32-c6","baseMac":"14:c1:9f:e6:54:90","chipRevision":"0.2","eui64":"14:c1:9f:e6:54:90:fe:ff","fs":"mounted"},"deviceUid":null,"packFormat":2,"auth":{"required":false,"granted":"edit"}}}}
+[link] wire: replies packed (JSON Pack v2, learned)
+[INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 1)
+[INFO] fw_esp32c6::net::station_task: [wifi] associated with lp-bench-ap in 963 ms
+[WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+[INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+[INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:D10, byte_count=723
+[INFO] fw_esp32_common::server_loop: [RECOVERY] boot complete (first frame served)
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 4365 bytes)
+[INFO] lpc_shared::memory: [mem] shader compile before: 94k free / 200k used
+[INFO] lpc_shared::memory: [mem] shader compile after: 79k free / 214k used
+[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=137ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=
+[INFO] trouble_host::host: [host] using packet pool with MTU 251 capacity 16
+[INFO] fw_esp32c6::net::station_task: [wifi] address 192.168.0.112
+[INFO] fw_esp32c6::net::mdns_task: [mdns] answering for lp-5490.local at 192.168.0.112
+[INFO] trouble_host::host: [host] filter accept list size: 1
+[INFO] trouble_host::host: [host] setting txq to 24, fragmenting at 255
+[INFO] trouble_host::host: [host] configuring host buffers (1 packets of size 255)
+[INFO] trouble_host::host: [host] initialized
+[INFO] trouble_host::host: [host] Device Address 16:C1:9F:E6:54:91
+[INFO] fw_esp32c6::ble::advertising: [ble] advertising as LP-Basic
+[INFO] fw_esp32_common::server_loop: [perf] frame=174 fps=34 elapsed=5022ms recv=0ms tick=25ms send=0ms total=26ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤150ms max=179ms(recv=0 tick=176 send=0 resp=0) >100ms=2 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":34.647552,"sdev":0,"min":34.647552,"max":34.647552},"frame_count":174,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":5022,"memory":{"freeBytes":80528,"usedBytes":221008,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":71,"framesRx":28,"bytesTx":5370,"bytesRx":431,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 29096 B of 118352 B (89256 B headroom)
+[INFO] fw_esp32c6::c_heap: [radio-heap] heartbeat: high-water 48444 B of 49152 B, 35232 B live, 11112 B overflowed to main
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -34 dBm · 192.168.0.112 (lp-5490.local) · frames in 192 out 9 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=250799 live=218858 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=362 fps=37 elapsed=5023ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=40ms(recv=0 tick=25 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":36.03783,"sdev":0,"min":36.03783,"max":36.03783},"frame_count":362,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":10045,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":101,"framesRx":49,"bytesTx":7190,"bytesRx":663,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -34 dBm · 192.168.0.112 (lp-5490.local) · frames in 202 out 9 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224445 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=548 fps=37 elapsed=5006ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":36.409542,"sdev":0,"min":36.409542,"max":36.409542},"frame_count":548,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":15051,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":126,"framesRx":70,"bytesTx":8283,"bytesRx":894,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 214 out 10 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=228233 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=736 fps=37 elapsed=5024ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=35 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":36.662514,"sdev":0,"min":36.662514,"max":36.662514},"frame_count":736,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":20075,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":152,"framesRx":91,"bytesTx":9339,"bytesRx":1125,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 224 out 10 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224529 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=924 fps=37 elapsed=5000ms recv=0ms tick=32ms send=0ms total=32ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":36.849453,"sdev":0,"min":36.662514,"max":36.849453},"frame_count":924,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":25075,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":177,"framesRx":111,"bytesTx":10385,"bytesRx":1345,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 238 out 11 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=228025 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=1114 fps=38 elapsed=5000ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=44ms(recv=0 tick=32 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.040733,"sdev":0,"min":36.849453,"max":37.040733},"frame_count":1114,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":30075,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":202,"framesRx":131,"bytesTx":11432,"bytesRx":1565,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 246 out 11 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224562 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=1301 fps=37 elapsed=5006ms recv=0ms tick=23ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=36 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.0856,"sdev":0,"min":37.0856,"max":37.0856},"frame_count":1301,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":35081,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":227,"framesRx":151,"bytesTx":12480,"bytesRx":1785,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 261 out 12 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=226173 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=1488 fps=37 elapsed=5008ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=40ms(recv=0 tick=38 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.117413,"sdev":0,"min":37.117413,"max":37.117413},"frame_count":1488,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":40089,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":252,"framesRx":171,"bytesTx":13525,"bytesRx":2005,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 272 out 12 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=222811 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=1676 fps=37 elapsed=5011ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=38ms(recv=0 tick=25 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.16186,"sdev":0,"min":37.16186,"max":37.16186},"frame_count":1676,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":45100,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":277,"framesRx":191,"bytesTx":14573,"bytesRx":2225,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -34 dBm · 192.168.0.112 (lp-5490.local) · frames in 286 out 13 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=222677 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=1866 fps=37 elapsed=5018ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.232132,"sdev":0,"min":37.232132,"max":37.232132},"frame_count":1866,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":50118,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":302,"framesRx":212,"bytesTx":15621,"bytesRx":2456,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -34 dBm · 192.168.0.112 (lp-5490.local) · frames in 296 out 13 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=226392 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=2056 fps=37 elapsed=5007ms recv=1ms tick=24ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=41ms(recv=0 tick=38 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.29705,"sdev":0,"min":37.29705,"max":37.29705},"frame_count":2056,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":55125,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":327,"framesRx":232,"bytesTx":16670,"bytesRx":2676,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -34 dBm · 192.168.0.112 (lp-5490.local) · frames in 310 out 14 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224493 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=2244 fps=37 elapsed=5029ms recv=1ms tick=32ms send=0ms total=33ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=1 tick=24 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.304253,"sdev":0,"min":37.304253,"max":37.304253},"frame_count":2244,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":60154,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":353,"framesRx":253,"bytesTx":17731,"bytesRx":2907,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -34 dBm · 192.168.0.112 (lp-5490.local) · frames in 317 out 14 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=223183 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=2432 fps=37 elapsed=5002ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=45ms(recv=1 tick=32 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.3258,"sdev":0,"min":37.3258,"max":37.3258},"frame_count":2432,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":65156,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":378,"framesRx":273,"bytesTx":18780,"bytesRx":3127,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 330 out 15 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=228105 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=2620 fps=37 elapsed=5017ms recv=0ms tick=24ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=36 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.336296,"sdev":0,"min":37.336296,"max":37.336296},"frame_count":2620,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":70173,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":403,"framesRx":294,"bytesTx":19827,"bytesRx":3358,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 340 out 15 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224765 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=2810 fps=37 elapsed=5021ms recv=0ms tick=24ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=38ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.370003,"sdev":0,"min":37.370003,"max":37.370003},"frame_count":2810,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":75194,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":429,"framesRx":314,"bytesTx":20887,"bytesRx":3578,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 352 out 16 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=226381 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=2998 fps=37 elapsed=5021ms recv=0ms tick=27ms send=0ms total=27ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=39ms(recv=0 tick=38 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.374557,"sdev":0,"min":37.374557,"max":37.374557},"frame_count":2998,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":80215,"memory":{"freeBytes":80528,"usedBytes":221008,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":455,"framesRx":335,"bytesTx":21947,"bytesRx":3809,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 372 out 17 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224637 live=218858 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=3188 fps=37 elapsed=5022ms recv=0ms tick=26ms send=0ms total=26ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=39ms(recv=0 tick=27 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.401596,"sdev":0,"min":37.401596,"max":37.401596},"frame_count":3188,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":85237,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":481,"framesRx":356,"bytesTx":23007,"bytesRx":4040,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 386 out 19 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=228233 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=3373 fps=36 elapsed=5008ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=38ms(recv=0 tick=26 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.376034,"sdev":0,"min":37.376034,"max":37.376034},"frame_count":3373,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":90245,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":506,"framesRx":376,"bytesTx":24056,"bytesRx":4260,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -35 dBm · 192.168.0.112 (lp-5490.local) · frames in 397 out 20 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=223149 live=218734 max_usage=253340 largest=19924
+[INFO] fw_esp32_common::server_loop: [perf] frame=3560 fps=37 elapsed=5023ms recv=1ms tick=24ms send=0ms total=25ms responses=0
+[INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=39ms(recv=0 tick=34 send=0 resp=0) >100ms=0 >1s=0
+M!{"id":0,"msg":{"heartbeat":{"fps":{"avg":37.368267,"sdev":0,"min":37.368267,"max":37.368267},"frame_count":3560,"loaded_projects":[{"handle":1,"path":"/projects/Basic"}],"uptime_ms":95268,"memory":{"freeBytes":80652,"usedBytes":220884,"totalBytes":301536,"largestFreeBlock":19924},"recovery":{"level":"green","resetReason":"software-reset","bootCount":17,"safeMode":false,"outputClamp":null,"lastCrash":null,"paths":[]},"outputs":null,"link":{"framesTx":532,"framesRx":396,"bytesTx":25116,"bytesRx":4480,"resends":0,"damaged":0,"staleSession":0,"stalePartials":0,"duplicates":0,"rxNoRoom":0,"datagramsLost":0,"datagramsDropped":0,"ups":1,"resets":{"total":0,"peerRestarted":0,"retryLimit":0,"protocolError":0,"requested":0},"stalls":0,"payloadErrors":0},"identity":{"baseMac":"14:c1:9f:e6:54:90"}}}}
+[INFO] fw_esp32c6::net::net_heartbeat: [wifi] connected to lp-bench-ap · -43 dBm · 192.168.0.112 (lp-5490.local) · frames in 411 out 22 · rx drops not counted
+[INFO] fw_esp32c6::net::net_heartbeat: [relay] state=no account routes=0 rx=0 tx=0 · takeovers 0 busy 0 · pictures 0 off
+[INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224290 live=218734 max_usage=253340 largest=19924

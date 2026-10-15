@@ -11,9 +11,10 @@ use lpc_cloud_api::response::{
     Events, Heads, MissingBlobs, ProjectInfo, ProjectList, PushResult, UserInfo,
 };
 use lpc_cloud_api::{
-    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, BoardList, CloudError,
-    CloudRequest, CloudResponse, DevChoice, DevPickerOptions, HeadInfo, LoginOptionsInfo, MeInfo,
-    MemberInfo, MemberRole, OidcOption, SessionInfo, SessionList, SidecarMeta,
+    Access, AccountAccessInfo, AccountPasswordTier, Ack, Actor, BoardList, BoardPictureList,
+    CloudError, CloudRequest, CloudResponse, DevChoice, DevPickerOptions, HeadInfo,
+    LoginOptionsInfo, MeInfo, MemberInfo, MemberRole, OidcOption, SessionInfo, SessionList,
+    SidecarMeta,
 };
 use lpc_history::{ContentHash, PrefixedUid, UidPrefix};
 
@@ -160,6 +161,11 @@ impl<S: MetaStore, C: Clock, I: IdMint> CloudService<S, C, I> {
             CloudRequest::ListBoards => self
                 .board_list_viewer(actor)
                 .map(|_| BoardList::default().into()),
+            // Pictures are the relay's too, and answered by the edge the
+            // same way: a service with no relay holds none.
+            CloudRequest::BoardPictures(_) => self
+                .board_list_viewer(actor)
+                .map(|_| BoardPictureList::default().into()),
         }
     }
 

@@ -73,6 +73,13 @@ impl SeamOverlay {
 /// and no overlay ever answers for one.
 pub const PACE_MARKER: &str = "@pace=";
 
+/// The label's marker for a run with a flash power-cut plan armed, after
+/// its seam atoms and before its pace: `lp-emu:esp32c6:t1+flash-cut`. The
+/// emulator writes it (`lp_emu_esp32c6::flash_cut_spec::FLASH_CUT_MARKER`);
+/// `lp-cli` owns the test that the two spellings agree. A `+` atom with no
+/// `=`: it is a fault injection, not a seam, and no overlay answers for it.
+pub const FLASH_CUT_MARKER: &str = "+flash-cut";
+
 /// A run's pace, as a label names it (`@pace=<word>`). An unset pace names
 /// nothing, and is every transcript's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -165,6 +172,11 @@ pub struct ConfigurationEntry {
     /// entry `validate.toml` names directly, and for every transcript.
     #[serde(skip)]
     pub pace: Option<LabelPace>,
+    /// The name carried `+flash-cut`: a run whose flash a power cut tore.
+    /// `false` for every entry `validate.toml` names directly, and for every
+    /// transcript.
+    #[serde(skip)]
+    pub flash_cut: bool,
 }
 
 impl ConfigurationEntry {
@@ -173,8 +185,8 @@ impl ConfigurationEntry {
     }
 
     /// The configuration label: the base name plus one `+<seam>=<impl>` per
-    /// composed seam, then `@pace=<mode>` when a pace was set. Exactly `name`
-    /// with neither.
+    /// composed seam, then `+flash-cut` when the name carried it, then
+    /// `@pace=<mode>` when a pace was set. Exactly `name` with none.
     pub fn label(&self) -> String {
         let mut out = self.seam_label();
         if let Some(pace) = self.pace {
@@ -184,7 +196,8 @@ impl ConfigurationEntry {
         out
     }
 
-    /// The label without its pace: the base name and its seam atoms.
+    /// The label without its pace: the base name, its seam atoms and its
+    /// flash-cut marker.
     pub fn seam_label(&self) -> String {
         let mut out = self.name.clone();
         for s in &self.seams {
@@ -192,6 +205,9 @@ impl ConfigurationEntry {
             out.push_str(&s.seam);
             out.push('=');
             out.push_str(&s.implementation);
+        }
+        if self.flash_cut {
+            out.push_str(FLASH_CUT_MARKER);
         }
         out
     }
@@ -315,10 +331,11 @@ impl ValidateConfig {
     }
 
     /// The configuration `name` names: an entry of the table, or a composite
-    /// `<base>+<seam>=<impl>…[@pace=<mode>]` — the base entry with each
-    /// atom's `[[seam]]` overlay laid over its trust, in label order, and the
-    /// run's pace when one was set (it moves no grade). A name with no `+`
-    /// and no `@` is exactly the table's entry, as it always was.
+    /// `<base>+<seam>=<impl>…[+flash-cut][@pace=<mode>]` — the base entry
+    /// with each atom's `[[seam]]` overlay laid over its trust, in label
+    /// order, the flash-cut mark, and the run's pace when one was set
+    /// (neither moves a grade). A name with no `+` and no `@` is exactly the
+    /// table's entry, as it always was.
     pub fn configuration(&self, name: &str) -> Result<Cow<'_, ConfigurationEntry>> {
         // The pace comes off first, so the seam atoms never see it.
         let (seamed, pace) = match name.split_once('@') {
@@ -354,11 +371,16 @@ impl ValidateConfig {
         // configuration, composed the same way and labelled the same.
         let mut atoms: Vec<&str> = parts.collect();
         atoms.sort_unstable();
-        if atoms.is_empty() && pace.is_none() {
+        // `+flash-cut` is not a seam: it marks the run, and no overlay
+        // answers for it (`refuse_a_flash_cut` is what reads it).
+        let flash_cut = atoms.iter().any(|a| *a == &FLASH_CUT_MARKER[1..]);
+        atoms.retain(|a| *a != &FLASH_CUT_MARKER[1..]);
+        if atoms.is_empty() && pace.is_none() && !flash_cut {
             return Ok(Cow::Borrowed(base));
         }
         let mut composed = base.clone();
         composed.pace = pace;
+        composed.flash_cut = flash_cut;
         for atom in atoms {
             let overlay = self
                 .seams

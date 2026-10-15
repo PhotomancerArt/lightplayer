@@ -23,7 +23,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[cfg(not(feature = "soft-sha"))]
 use lp_tree_store::ObjectHasher;
-use lp_tree_store::{Flash, StoreConfig, TreeStore};
+use lp_tree_store::{Flash, StoreConfig, StoreError, TreeStore};
 
 const SECTORS: u32 = 16;
 const SECTOR: u32 = 4096;
@@ -98,28 +98,21 @@ type ProbeHasher = lp_tree_store::SoftSha256;
 #[allow(non_upper_case_globals)]
 const ProbeHasher: ProbeHasher = lp_tree_store::SoftSha256;
 
-fn hasher() -> &'static mut ProbeHasher {
-    static mut H: ProbeHasher = ProbeHasher;
-    // SAFETY: single-threaded probe.
-    unsafe { &mut *addr_of_mut!(H) }
-}
-
-fn flash() -> &'static mut RamFlash {
-    static mut FLASH: RamFlash = RamFlash;
-    // SAFETY: single-threaded probe.
-    unsafe { &mut *addr_of_mut!(FLASH) }
-}
-
-type ProbeStore = TreeStore<&'static mut RamFlash, &'static mut ProbeHasher>;
+type ProbeStore = TreeStore<RamFlash, ProbeHasher>;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start() -> ! {
+    // The firmware's boot: mount by value, and format by value what a
+    // `NoStore` mount handed back, so both name one `TreeStore<RamFlash,
+    // ProbeHasher>` (`rust-nm` shows each store symbol once).
     let cfg = StoreConfig::default();
-    // Format and mount through `&mut` both, so they share one
-    // `TreeStore<&mut RamFlash, &mut ProbeHasher>` (a by-value mount would
-    // link the whole store twice).
-    let _ = black_box(TreeStore::format(flash(), hasher(), &cfg));
-    if let Ok(st) = TreeStore::mount(flash(), hasher(), cfg) {
+    let st = match TreeStore::mount(RamFlash, ProbeHasher, black_box(cfg.clone())) {
+        Ok(st) => Some(st),
+        Err((StoreError::NoStore, flash, hasher)) => TreeStore::format(flash, hasher, cfg).ok(),
+        Err(_) => None,
+    };
+    if let Some(st) = st {
+        black_box(st.summary());
         calls(st);
     }
     loop {}

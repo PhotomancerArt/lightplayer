@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::candidates::parse_candidate_spec;
 use crate::cut_case::{CutCase, prepare_fixtures, run_case};
+use crate::driver_full_flash::{FullFlashParams, full_flash};
+use crate::driver_fuzz::{FuzzParams, fuzz};
+use crate::driver_long::{LongParams, long_walk};
 use crate::driver_random::{RandomParams, random_walk};
 use crate::oracle::Failure;
 use crate::{CorpusSet, Scoreboard};
@@ -17,6 +20,12 @@ pub enum Reproducer {
     Case(CutCase),
     /// A random walk: run it again up to its `stop_at_cut`-th cut.
     Random(RandomParams),
+    /// A long walk: run it again to its first failure.
+    Long(LongParams),
+    /// A full-flash run: run it again to its first failure.
+    FullFlash(FullFlashParams),
+    /// A fuzz case: its params with `only_case` set.
+    Fuzz(FuzzParams),
 }
 
 /// Replay `r`; `Ok(Some(failure))` when it fails again, `Ok(None)` when it now
@@ -36,6 +45,21 @@ pub fn replay(r: &Reproducer, corpora: &CorpusSet) -> Result<Option<Failure>, St
             let (cand, _) = parse_candidate_spec(&p.candidate, p.config.sectors)?;
             let sink = Scoreboard::memory();
             let s = random_walk(cand.as_ref(), p, corpora, &sink);
+            Ok(s.first_failure)
+        }
+        Reproducer::Long(p) => {
+            let (cand, _) = parse_candidate_spec(&p.candidate, p.config.sectors)?;
+            let s = long_walk(cand.as_ref(), p, corpora, &Scoreboard::memory());
+            Ok(s.first_failure)
+        }
+        Reproducer::FullFlash(p) => {
+            let (cand, _) = parse_candidate_spec(&p.candidate, p.config.sectors)?;
+            let s = full_flash(cand.as_ref(), p, corpora, &Scoreboard::memory());
+            Ok(s.first_failure)
+        }
+        Reproducer::Fuzz(p) => {
+            let (cand, _) = parse_candidate_spec(&p.candidate, p.config.sectors)?;
+            let s = fuzz(cand.as_ref(), p, corpora, &Scoreboard::memory());
             Ok(s.first_failure)
         }
     }

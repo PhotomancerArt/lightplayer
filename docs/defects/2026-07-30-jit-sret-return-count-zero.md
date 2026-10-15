@@ -1,3 +1,9 @@
+---
+status: fixed
+found: 2026-07-30      # writing the ESP32-S3 hardware corpus' sret case (M1)
+area: lpvm-native/rt_jit (module.rs)
+class: split-source-of-truth
+---
 # Defect: the JIT's cached sret return count was zero
 
 - **Date:** 2026-07-30

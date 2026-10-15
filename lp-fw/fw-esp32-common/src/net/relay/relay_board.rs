@@ -1,17 +1,21 @@
 //! What the relay task and the server share across threads: the twin of
 //! `net::StationBoard` for the cloud relay.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use critical_section::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
+use lp_link::Micros;
 use lpc_access::{DeviceAccessFile, NetworkFile};
-use lpc_relay::{RefuseReason, RelayAccount, RelayState};
+use lpc_relay::{RefuseReason, RelayAccount, RelayProjectFacts, RelayState};
 use lpc_wire::{RelayRefusal, RelayState as WireRelayState};
 
 use super::relay_driver::{RelayCounters, RelayDriver};
+use super::relay_picture_mode::RelayPictureMode;
+use super::relay_picture_slot::RelayPictureSlot;
 
 /// The board between the relay task (on `lp-net` on the C6) and the server
 /// (on the main thread): one `static` per image.
@@ -22,25 +26,42 @@ use super::relay_driver::{RelayCounters, RelayDriver};
 ///   whenever the device store changes ([`Self::access_changed`], from the
 ///   `AccessChanged` hook and once at boot), and reads the relay's state
 ///   back for the network status ([`Self::wire_state`]) and the heartbeat.
-///   **Only the server's thread touches the filesystem.**
+///   **Only the server's thread touches the filesystem.** For relay
+///   protocol 2 it also hands over the project's facts when they change
+///   ([`Self::project_changed`]) and the pictures the relay asks for
+///   ([`Self::pictures`], [`Self::picture_ready`]), both from
+///   `relay_picture_source::serve_relay`.
 /// - The **relay side** takes what changed ([`Self::take_cloud_relay`],
-///   [`Self::take_accounts`]), publishes the driver after every pass
-///   ([`Self::publish`]), and waits on [`Self::wait`].
+///   [`Self::take_accounts`], [`Self::take_project`], the picture slot's
+///   news), publishes the driver after every pass ([`Self::publish`]), and
+///   waits on [`Self::wait`].
 ///
-/// Every access is a short critical section (a clone at most). The account
-/// entries hold keys: they live here in RAM for the relay's proof and are
-/// never logged (`RelayAccount`'s `Debug` prints none).
+/// Every access is a short critical section (a clone or a pointer move at
+/// most). The account entries hold keys: they live here in RAM for the
+/// relay's proof and are never logged (`RelayAccount`'s `Debug` prints
+/// none). The project's facts hold its uid, a read capability: never
+/// logged either (`RelayProjectFacts`' `Debug` prints none). Static RAM
+/// comes out of the C6's main stack, so the facts wait here boxed (two
+/// words), not inline; "nothing loaded" needs no box at all, so an idle
+/// board allocates nothing for it.
 pub struct RelayBoard {
     inner: Mutex<RefCell<Inner>>,
     wake: Signal<CriticalSectionRawMutex, ()>,
+    /// The picture between the main thread and the relay
+    /// ([`RelayPictureSlot`]).
+    pub pictures: RelayPictureSlot,
 }
 
 struct Inner {
     cloud_relay: Option<bool>,
     accounts: Option<Vec<RelayAccount>>,
+    /// The project's facts handed over since the last take (`Some(None)`:
+    /// nothing is loaded now).
+    project: Option<Option<Box<RelayProjectFacts>>>,
     state: RelayState,
     counters: RelayCounters,
     routes: usize,
+    pictures: RelayPictureMode,
 }
 
 impl RelayBoard {
@@ -51,6 +72,7 @@ impl RelayBoard {
             inner: Mutex::new(RefCell::new(Inner {
                 cloud_relay: None,
                 accounts: None,
+                project: None,
                 state: RelayState::Off,
                 counters: RelayCounters {
                     rx_bytes: 0,
@@ -58,10 +80,13 @@ impl RelayBoard {
                     routes: 0,
                     takeovers: 0,
                     busy: 0,
+                    pictures: 0,
                 },
                 routes: 0,
+                pictures: RelayPictureMode::Off,
             })),
             wake: Signal::new(),
+            pictures: RelayPictureSlot::new(),
         }
     }
 
@@ -84,6 +109,24 @@ impl RelayBoard {
         self.wake.signal(());
     }
 
+    /// The server's project as it now stands (`None`: nothing loaded). Any
+    /// time, whatever the relay is doing: a name and a uid, the project's
+    /// identity (the board reports it after every registration).
+    pub fn project_changed(&self, facts: Option<RelayProjectFacts>) {
+        let facts = facts.map(Box::new);
+        let replaced =
+            critical_section::with(|cs| self.inner.borrow_ref_mut(cs).project.replace(facts));
+        drop(replaced);
+        self.wake.signal(());
+    }
+
+    /// The picture the relay asked for is made: hand it over and wake the
+    /// relay ([`RelayPictureSlot::put_ready`]).
+    pub fn picture_ready(&self, buf: Vec<u8>) {
+        self.pictures.put_ready(buf);
+        self.wake.signal(());
+    }
+
     /// The relay's state, in the wire's words.
     #[must_use]
     pub fn wire_state(&self) -> WireRelayState {
@@ -96,13 +139,13 @@ impl RelayBoard {
         critical_section::with(|cs| self.inner.borrow_ref(cs).state)
     }
 
-    /// The driver's counters and how many routes it holds, for the
-    /// heartbeat's `[relay]` line.
+    /// The driver's counters, how many routes it holds and what its
+    /// pictures are doing, for the heartbeat's `[relay]` line.
     #[must_use]
-    pub fn heartbeat(&self) -> (RelayState, RelayCounters, usize) {
+    pub fn heartbeat(&self) -> (RelayState, RelayCounters, usize, RelayPictureMode) {
         critical_section::with(|cs| {
             let inner = self.inner.borrow_ref(cs);
-            (inner.state, inner.counters, inner.routes)
+            (inner.state, inner.counters, inner.routes, inner.pictures)
         })
     }
 
@@ -118,18 +161,26 @@ impl RelayBoard {
         critical_section::with(|cs| self.inner.borrow_ref_mut(cs).accounts.take())
     }
 
-    /// Publish the driver's state and counters.
-    pub fn publish(&self, driver: &RelayDriver) {
-        let (state, counters, routes) = (
+    /// The project's facts handed over since the last take.
+    pub fn take_project(&self) -> Option<Option<RelayProjectFacts>> {
+        let taken = critical_section::with(|cs| self.inner.borrow_ref_mut(cs).project.take());
+        taken.map(|facts| facts.map(|facts| *facts))
+    }
+
+    /// Publish the driver's state, counters and picture mode at `now_us`.
+    pub fn publish(&self, driver: &RelayDriver, now_us: Micros) {
+        let (state, counters, routes, pictures) = (
             driver.state(),
             driver.counters(),
             usize::from(driver.route().is_some()),
+            driver.picture_mode(now_us),
         );
         critical_section::with(|cs| {
             let mut inner = self.inner.borrow_ref_mut(cs);
             inner.state = state;
             inner.counters = counters;
             inner.routes = routes;
+            inner.pictures = pictures;
         });
     }
 
@@ -209,6 +260,28 @@ mod tests {
         assert_eq!(accounts[0].salt, [2; 16]);
         assert!(board.take_accounts().is_none());
         assert_eq!(board.wire_state(), WireRelayState::Off);
+    }
+
+    #[test]
+    fn the_project_reaches_the_relay_once_per_change() {
+        let board = RelayBoard::new();
+        assert_eq!(board.take_project(), None, "nothing handed over yet");
+        board.project_changed(None);
+        assert_eq!(board.take_project(), Some(None), "nothing loaded");
+        assert_eq!(board.take_project(), None);
+        let facts = |name: &str| RelayProjectFacts {
+            name: String::from(name),
+            uid: Some(String::from("prj7m3qk2x9z4w8v6t5r1n0p2a4c")),
+            content_hash: None,
+        };
+        board.project_changed(Some(facts("Basic")));
+        board.project_changed(Some(facts("Porch")));
+        assert_eq!(
+            board.take_project(),
+            Some(Some(facts("Porch"))),
+            "the latest wins"
+        );
+        assert_eq!(board.take_project(), None);
     }
 
     #[test]
