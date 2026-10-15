@@ -466,7 +466,9 @@ pub fn HintBar(ed: Signal<Editor>) -> Element {
             }
         }
         div { class: "bar",
-            div { class: "lead", "{bar.lead}" }
+            if !bar.lead.is_empty() {
+                div { class: "lead", "{bar.lead}" }
+            }
             HintRow { label: "mouse", hints: mouse, quiet: false }
             HintRow { label: "keys", hints: keys, quiet: false }
             HintRow { label: "view", hints: bar.view, quiet: true }

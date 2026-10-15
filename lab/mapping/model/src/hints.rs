@@ -30,7 +30,10 @@ pub enum HintKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HintBar {
-    /// Where you are, in words: "circle1 selected", "Drawing a line".
+    /// What you're doing, in words: "Drawing a line", "Moving circle1",
+    /// "Box-selecting". Empty while you are plainly selecting: the
+    /// breadcrumb already says what's selected, and the bar never repeats
+    /// it.
     pub lead: String,
     pub hints: Vec<Hint>,
     /// Canvas navigation, shown on the right of the bar.
@@ -54,7 +57,6 @@ fn h(keys: &str, does: impl Into<String>) -> Hint {
 
 impl Editor {
     pub fn hint_bar(&self) -> HintBar {
-        let f = &self.project;
         let view = vec![
             h("scroll", "pan"),
             h("⌘ scroll · pinch", "zoom"),
@@ -124,7 +126,7 @@ impl Editor {
                                 h("Esc · V", "back to selecting"),
                             ],
                         ),
-                        Tool::Select => (selection_lead(f, &self.selection), self.select_hints()),
+                        Tool::Select => (String::new(), self.select_hints()),
                     }
                 }
             }
@@ -295,6 +297,9 @@ impl Editor {
                 Some(format!("{lamps} lamps · one every {} units", self.spacing))
             }
             Gesture::None if self.menu.is_none() => {
+                if let Some(edge) = self.hovered_edge() {
+                    return Some(edge.carries);
+                }
                 let here = self.hover_candidates();
                 if here.len() > 1 {
                     let word = f.kind_word(&here[0]);
@@ -319,23 +324,6 @@ impl Editor {
                 }
             }
             _ => None,
-        }
-    }
-}
-
-fn selection_lead(f: &Project, selection: &[Target]) -> String {
-    match selection {
-        // The counts live in the inspector; the bar says only where you are.
-        [] => "Nothing selected".into(),
-        [one] => format!("{} selected", f.long_label(one)),
-        many => {
-            let word = f.kind_word(&many[0]);
-            let same = many.iter().all(|t| f.kind_word(t) == word);
-            if same {
-                format!("{} {word}s selected", many.len())
-            } else {
-                format!("{} things selected", many.len())
-            }
         }
     }
 }

@@ -104,6 +104,11 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .edge-selected .edge-line { opacity: 1; stroke-width: 2; }
 .edge-bundled.edge-selected .edge-line { stroke-width: 3.2; }
 .edge-quiet .edge-line { opacity: 0.32; }
+.edge-arrow { fill: var(--bound); opacity: 0.85; }
+.edge-quiet .edge-arrow { opacity: 0.35; }
+.edge-selected .edge-arrow { opacity: 1; }
+.edge-hover .edge-line { opacity: 1; stroke-width: 3; }
+.edge-hover .edge-arrow { opacity: 1; }
 .edge-label { fill: var(--bound); font: 10px var(--font); paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; }
 .edge-quiet .edge-label { opacity: 0.45; }
 .lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }

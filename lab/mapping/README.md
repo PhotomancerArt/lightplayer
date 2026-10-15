@@ -13,8 +13,9 @@ cargo test -p lab-mapping-model
 
 - **`model/`** (`lab-mapping-model`): the editor's whole behaviour. Nodes
   (modules, fixtures, outputs), components, objects, layout, the patch and
-  its edges, selection, properties, hints. It has no IO, and its
-  input is events. Yona reads and edits this crate, so keep it small and
+  its edges, selection, properties, hints, and the simulated board. It has
+  no IO, and its input is events; it never reads a clock, so the page
+  passes the time in. Yona reads and edits this crate, so keep it small and
   plain. **It depends on no workspace crate.** That keeps it abstract and
   lets it drop into the app later.
 - **`web/`** (`lab-mapping-web`): a Dioxus page that forwards events to the
@@ -45,10 +46,26 @@ A 2D canvas with selection, and the start of the whole node graph on it
   derived and never stored. A rule whose output was deleted shows as a
   problem and is never retargeted.
 - **Edges are the patch** (D42): violet, one bundled edge per fixture and
-  output from outside, one per object and port from inside a fixture.
-  Opening a fixture (Enter) frames it with its outputs; ⇧2 frames the
-  selection. A selected port rings the lamps it carries, and a selected
-  object tints the ports it lands on.
+  output from outside, one per object and port from inside a fixture,
+  with an arrowhead where the data lands. Hovering an edge lights it and
+  says what it carries ("tail → GPIO 10 · lamps 0–49 at pixel 0"); it
+  never selects. Opening a fixture (Enter) frames it with its outputs; ⇧2
+  frames the selection (an empty fixture with the outputs its rules name).
+  A selected port rings the lamps it carries, and a selected object tints
+  the ports it lands on.
+- **A simulated board** (D12, D16, D44): the lab is always attached to a
+  board, and for now the model simulates it (`device_frame.rs`). Every
+  port row on an output card shows its pixels as the board has them: a
+  stand-in pattern (a hue sweep per object), then the selection in lamp
+  space (everything else dims to a quarter, the selection breathes, a
+  selected line or ring shows its direction — blue start, red end, a
+  white dot running start to end), then a selected port or output in
+  channel space (its whole range breathes, patched or not — D13). While
+  you drag a line or circle, only the draft's lamps light, on the pixels
+  it will take when you let go. Lamps outside their fixture's box never
+  light (D4). The page ticks at ~30 fps only while something moves. The
+  seed's scarf is patched to "scarf out" (D10, 60 px), so drawing in it
+  lights pixels at once.
 - **Drill-down selection:** click selects the outermost thing, clicking
   again goes in, ⌘-click selects the lamp, Esc goes up, Enter goes down,
   and the arrow keys move between siblings. ⌥-click cycles overlaps, and
@@ -66,8 +83,11 @@ A 2D canvas with selection, and the start of the whole node graph on it
   fixtures, outputs and ports. The inspector shows the properties
   everything selected shares, a fixture's rules and problems, and an
   output's ports with how full each one is.
-- **A hint bar** that says what every key does in the current state.
+- **A hint bar** that says what every key does in the current state. Its
+  lead says what you're doing ("Drawing a line", "Moving circle1"), never
+  what's selected — the breadcrumb says that.
 
 Not covered yet: rules other than auto, choosing a rule's output, routes,
-hand-placed nodes, other node kinds (patterns), and a level above the
-project.
+hand-placed nodes, other node kinds (patterns), a level above the
+project, and a real board (the simulated one stands in until the lab moves
+into Studio).

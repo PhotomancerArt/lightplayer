@@ -1229,6 +1229,89 @@ fn selecting_a_port_lights_its_whole_range() {
     }
 }
 
+/// Hovering an edge says what it carries, lights that edge and selects
+/// nothing — bundled from outside a fixture, per object from inside.
+#[test]
+fn hovering_an_edge_says_what_it_carries() {
+    let mut e = editor();
+    let tail = fixture(&e, "tail");
+    let edge = e.edges().into_iter().find(|x| x.from == tail).unwrap();
+    let at = edge.point_at(&e.camera, 0.5);
+    e.pointer_move(at, none());
+    assert_eq!(
+        e.cursor_note().as_deref(),
+        Some("tail → GPIO 10 · lamps 0–49 at pixel 0")
+    );
+    let hovered: Vec<Target> = e
+        .edges()
+        .into_iter()
+        .filter(|x| x.hovered)
+        .map(|x| x.from)
+        .collect();
+    assert_eq!(hovered, vec![tail]);
+    assert!(e.selection.is_empty(), "hovering selects nothing");
+
+    // Inside the tail, one edge per object.
+    e.select(vec![comp("line2")]);
+    let edge = e
+        .edges()
+        .into_iter()
+        .find(|x| x.from == comp("line1"))
+        .unwrap();
+    e.pointer_move(edge.point_at(&e.camera, 0.5), none());
+    assert_eq!(
+        e.cursor_note().as_deref(),
+        Some("line1 → GPIO 10 · lamps 0–24 at pixel 0")
+    );
+    assert_eq!(e.selection, vec![comp("line2")]);
+
+    // Away from every edge, no note.
+    e.pointer_move(e.camera.to_screen(place(&e, "scarf", 50.0, 15.0)), none());
+    assert!(e.edges().iter().all(|x| !x.hovered));
+    assert_eq!(e.cursor_note(), None);
+}
+
+/// The bar's lead says what you're doing, never what's selected: empty
+/// while you are plainly selecting.
+#[test]
+fn the_bar_lead_says_what_youre_doing() {
+    let mut e = editor();
+    for selection in [
+        vec![],
+        vec![comp("circle1")],
+        vec![lamp("line3", "line", 2)],
+    ] {
+        e.select(selection.clone());
+        assert_eq!(e.hint_bar().lead, "", "{selection:?}");
+    }
+    // Moving circle1.
+    e.select(vec![comp("circle1")]);
+    let at = lamp_screen(&e, "circle1", "r1", 0);
+    e.pointer_down(at, Button::Primary, none());
+    e.pointer_move(at + Vec2::new(20.0, 0.0), none());
+    assert_eq!(e.hint_bar().lead, "Moving circle1");
+    key(&mut e, Key::Escape, none());
+    // Box-selecting.
+    let empty = e.camera.to_screen(place(&e, "scarf", 50.0, 15.0));
+    e.pointer_down(empty, Button::Primary, none());
+    e.pointer_move(empty + Vec2::new(20.0, 20.0), none());
+    assert_eq!(e.hint_bar().lead, "Box-selecting");
+    e.pointer_up(empty + Vec2::new(20.0, 20.0), none());
+    // Choosing from the right-click list.
+    e.pointer_down(
+        lamp_screen(&e, "line3", "line", 3),
+        Button::Secondary,
+        none(),
+    );
+    assert_eq!(e.hint_bar().lead, "Choosing what's under the cursor");
+    key(&mut e, Key::Escape, none());
+    // Drawing a line.
+    key(&mut e, Key::Char('l'), none());
+    e.pointer_down(empty, Button::Primary, none());
+    e.pointer_move(empty + Vec2::new(30.0, 0.0), none());
+    assert_eq!(e.hint_bar().lead, "Drawing a line");
+}
+
 // ---- helpers -------------------------------------------------------------------
 
 /// The top of the selection's breath.

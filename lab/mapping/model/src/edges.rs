@@ -12,9 +12,16 @@
 //!
 //! Every edge carries `active`. All of today's are: the field is there for
 //! routes, later, which may switch a patch on and off.
+//!
+//! Data flows from the fixture (or object) to the port, so an edge is drawn
+//! as a curve with an arrowhead where it lands. The curve is defined here,
+//! once ([`Edge::curve`]): the page draws it and hovering hit-tests it, so
+//! what you see is what the pointer finds. Hovering an edge says what it
+//! carries in the cursor note, and lights the edge; it never selects.
 
+use crate::camera::Camera;
 use crate::editor::Editor;
-use crate::geom::{Rect, Vec2};
+use crate::geom::{Rect, Vec2, distance_to_segment};
 use crate::node::NodeId;
 use crate::patch::Span;
 use crate::project::Project;
@@ -39,10 +46,108 @@ pub struct Edge {
     /// it comes from, the left edge of the port row it lands on.
     pub from_at: Vec2,
     pub to_at: Vec2,
+    /// What it carries, in words, for the hover note:
+    /// `tail → GPIO 10 · lamps 0–49 at pixel 0`.
+    pub carries: String,
+    /// The pointer is on it.
+    pub hovered: bool,
+}
+
+/// How near, in screen pixels, the pointer must be to an edge to hover it.
+pub const EDGE_HOVER_PX: f64 = 6.0;
+/// The arrowhead where an edge lands: its length and half its width, in
+/// screen pixels.
+pub const ARROW_LEN_PX: f64 = 7.0;
+pub const ARROW_HALF_PX: f64 = 3.5;
+/// Samples along the curve when hit-testing it.
+const CURVE_SAMPLES: usize = 32;
+
+impl Edge {
+    /// The curve on screen: a cubic Bézier `[start, c1, c2, end]` that leaves
+    /// and lands horizontally, so the arrowhead at its end points right,
+    /// into the port.
+    pub fn curve(&self, cam: &Camera) -> [Vec2; 4] {
+        let a = cam.to_screen(self.from_at);
+        let b = cam.to_screen(self.to_at);
+        let dx = ((b.x - a.x).abs() * 0.5).max(30.0);
+        [a, a + Vec2::new(dx, 0.0), b - Vec2::new(dx, 0.0), b]
+    }
+
+    /// The point `t` (0–1) along the curve, on screen.
+    pub fn point_at(&self, cam: &Camera, t: f64) -> Vec2 {
+        let [a, c1, c2, b] = self.curve(cam);
+        let u = 1.0 - t;
+        a * (u * u * u) + c1 * (3.0 * u * u * t) + c2 * (3.0 * u * t * t) + b * (t * t * t)
+    }
+
+    /// How far `p` (screen) is from the curve.
+    pub fn distance(&self, cam: &Camera, p: Vec2) -> f64 {
+        let points: Vec<Vec2> = (0..=CURVE_SAMPLES)
+            .map(|i| self.point_at(cam, i as f64 / CURVE_SAMPLES as f64))
+            .collect();
+        points
+            .windows(2)
+            .map(|w| distance_to_segment(p, w[0], w[1]))
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// The curve as an SVG path.
+    pub fn path(&self, cam: &Camera) -> String {
+        let [a, c1, c2, b] = self.curve(cam);
+        format!(
+            "M{},{} C{},{} {},{} {},{}",
+            a.x, a.y, c1.x, c1.y, c2.x, c2.y, b.x, b.y
+        )
+    }
+
+    /// The arrowhead where it lands, as an SVG path: a small triangle whose
+    /// tip is the curve's end.
+    pub fn arrow_path(&self, cam: &Camera) -> String {
+        let b = cam.to_screen(self.to_at);
+        let back = b.x - ARROW_LEN_PX;
+        format!(
+            "M{},{} L{},{} L{},{} Z",
+            b.x,
+            b.y,
+            back,
+            b.y - ARROW_HALF_PX,
+            back,
+            b.y + ARROW_HALF_PX
+        )
+    }
 }
 
 impl Editor {
+    /// The patch, drawn: every edge, with the hovered one marked.
     pub fn edges(&self) -> Vec<Edge> {
+        let mut edges = self.patch_edges();
+        if let Some(i) = self.hovered_edge_of(&edges) {
+            edges[i].hovered = true;
+        }
+        edges
+    }
+
+    /// The edge under the pointer, if hovering means anything right now and
+    /// no thing is under it (things win: an edge's ends touch them).
+    pub fn hovered_edge(&self) -> Option<Edge> {
+        self.edges().into_iter().find(|e| e.hovered)
+    }
+
+    fn hovered_edge_of(&self, edges: &[Edge]) -> Option<usize> {
+        let p = self.hover_point()?;
+        if self.hover_target().is_some() {
+            return None;
+        }
+        edges
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (i, e.distance(&self.camera, p)))
+            .filter(|(_, d)| *d <= EDGE_HOVER_PX)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    }
+
+    fn patch_edges(&self) -> Vec<Edge> {
         let p = &self.project;
         let patch = p.effective_patch();
         let open = self.open_fixtures();
@@ -64,6 +169,14 @@ impl Editor {
                         p.label(&to),
                         s.start_pixel
                     ),
+                    carries: format!(
+                        "{} → {} · {} at pixel {}",
+                        p.label(&from),
+                        p.label(&to),
+                        lamp_range(s.lamps.start, s.lamps.end),
+                        s.start_pixel
+                    ),
+                    hovered: false,
                     from_at: right_middle(p.lamps_rect(&from)),
                     to_at: p.port_left(&s.output, &s.port),
                     selected: self.touches_selection(&from, &to),
@@ -87,8 +200,11 @@ impl Editor {
             let lamps: u32 = spans.iter().map(|s| s.lamps.len() as u32).sum();
             let from = Target::Node(fixture.clone());
             let to = Target::Node(output.clone());
+            let carries = bundle_carries(p, &fixture, &spans);
             out.push(Edge {
                 label: format!("{lamps} lamp{}", if lamps == 1 { "" } else { "s" }),
+                carries,
+                hovered: false,
                 from_at: right_middle(p.node_rect(&fixture)),
                 to_at: p.port_left(&output, &spans[0].port),
                 // Lit when the selection touches one of its spans — a port
@@ -160,4 +276,42 @@ impl Project {
 fn right_middle(r: Option<Rect>) -> Vec2 {
     r.map(|r| Vec2::new(r.max.x, (r.min.y + r.max.y) / 2.0))
         .unwrap_or_default()
+}
+
+/// What a bundled edge carries: the fixture's lamps, numbered across the
+/// whole fixture, per port they land on, runs that continue on the next
+/// pixel merged: `tail → GPIO 10 · lamps 0–49 at pixel 0`.
+fn bundle_carries(p: &Project, fixture: &NodeId, spans: &[&Span]) -> String {
+    // (port label, first lamp, end lamp, first pixel, next pixel)
+    let mut runs: Vec<(String, u32, u32, u32, u32)> = Vec::new();
+    let mut lamp = 0;
+    for s in spans {
+        let n = s.lamps.len() as u32;
+        let port = p.label(&Target::Port {
+            output: s.output.clone(),
+            key: s.port.clone(),
+        });
+        match runs.last_mut() {
+            Some(r) if r.0 == port && r.2 == lamp && r.4 == s.start_pixel => {
+                r.2 += n;
+                r.4 += n;
+            }
+            _ => runs.push((port, lamp, lamp + n, s.start_pixel, s.start_pixel + n)),
+        }
+        lamp += n;
+    }
+    let runs: Vec<String> = runs
+        .into_iter()
+        .map(|(port, a, b, px, _)| format!("{port} · {} at pixel {px}", lamp_range(a, b)))
+        .collect();
+    format!("{} → {}", p.node_name(fixture), runs.join("; "))
+}
+
+/// Lamps `start..end` in words: `lamps 0–24`, or `lamp 3` for one.
+fn lamp_range(start: u32, end: u32) -> String {
+    if end <= start + 1 {
+        format!("lamp {start}")
+    } else {
+        format!("lamps {start}–{}", end - 1)
+    }
 }

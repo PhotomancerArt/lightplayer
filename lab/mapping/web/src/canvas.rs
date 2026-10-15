@@ -12,7 +12,9 @@
 //! Nodes (D42, D43): modules are faint dashed frames, fixtures solid
 //! frames, outputs cards with a row per port. The patch is drawn as violet
 //! edges — violet is the product's colour for what is bound — from a
-//! fixture (or, inside one, each object) to the port row it lands on.
+//! fixture (or, inside one, each object) to the port row it lands on, with
+//! an arrowhead where the data arrives. The curve is the model's
+//! (`Edge::curve`), so hovering finds exactly what is drawn.
 //!
 //! The board (D16, D44): each port row shows its pixels as the simulated
 //! board has them (`Editor::device_frame`). While they move on their own —
@@ -151,26 +153,23 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             if x.labelled {
                 landed.push(x.to.clone());
             }
-            let a = cam.to_screen(x.from_at);
-            let b = cam.to_screen(x.to_at);
-            let dx = ((b.x - a.x).abs() * 0.5).max(30.0);
-            let c1 = a + Vec2::new(dx, 0.0);
-            let c2 = b - Vec2::new(dx, 0.0);
-            let mid = (a + c1 * 3.0 + c2 * 3.0 + b) * 0.125 + Vec2::new(0.0, stack * 12.0);
-            let class = match (x.selected, x.bundled, e.selection.is_empty()) {
-                (true, true, _) => "edge edge-bundled edge-selected",
-                (true, false, _) => "edge edge-selected",
-                (false, true, true) => "edge edge-bundled",
-                (false, false, true) => "edge",
-                (false, true, false) => "edge edge-bundled edge-quiet",
-                (false, false, false) => "edge edge-quiet",
-            };
+            let mid = x.point_at(&cam, 0.5) + Vec2::new(0.0, stack * 12.0);
+            let mut class = String::from("edge");
+            if x.bundled {
+                class.push_str(" edge-bundled");
+            }
+            if x.selected {
+                class.push_str(" edge-selected");
+            } else if !e.selection.is_empty() {
+                class.push_str(" edge-quiet");
+            }
+            if x.hovered {
+                class.push_str(" edge-hover");
+            }
             EdgeView {
-                d: format!(
-                    "M{},{} C{},{} {},{} {},{}",
-                    a.x, a.y, c1.x, c1.y, c2.x, c2.y, b.x, b.y
-                ),
-                label: x.labelled.then_some(x.label),
+                d: x.path(&cam),
+                arrow: x.arrow_path(&cam),
+                label: x.labelled.then_some(x.label.clone()),
                 mid,
                 class,
             }
@@ -375,6 +374,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
+                        path { class: "edge-arrow", d: "{x.arrow}" }
                         if let Some(label) = &x.label {
                             text {
                                 class: "edge-label",
@@ -481,13 +481,15 @@ struct PortRow {
     tinted: bool,
 }
 
-/// One patch edge: a cubic from what it leaves to the port row it reaches.
+/// One patch edge: a cubic from what it leaves to the port row it reaches,
+/// and the arrowhead where it lands.
 struct EdgeView {
     d: String,
+    arrow: String,
     /// Only for edges attached to a selected thing itself.
     label: Option<String>,
     mid: Vec2,
-    class: &'static str,
+    class: String,
 }
 
 /// Where one port's pixels go on its card, on screen.
