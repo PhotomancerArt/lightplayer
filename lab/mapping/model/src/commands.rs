@@ -58,6 +58,18 @@ impl Editor {
                     }
                 }
                 Target::Component(id) => components.push(id.clone()),
+                // A repeat's copies come from its count (D11): one can't
+                // go on its own.
+                Target::Object(o) if f.ring(&o.component, &o.key).is_none() => {
+                    refused.push((
+                        t.clone(),
+                        format!("{} makes its copies from a count", o.component),
+                        format!(
+                            "set {}'s Copies in the inspector (Esc selects it), or delete it whole",
+                            o.component
+                        ),
+                    ));
+                }
                 Target::Object(o) => {
                     let total = match f.component(&o.component).map(|c| &c.kind) {
                         Some(ComponentKind::Circle { rings, .. }) => rings.len(),

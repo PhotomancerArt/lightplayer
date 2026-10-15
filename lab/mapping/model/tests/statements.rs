@@ -799,8 +799,9 @@ fn edges_bundle_by_density_not_selection() {
         "leaves the frame's side facing the output"
     );
 
-    // Ten paths in the scarf stay ten edges — until zoomed all the way
-    // out, where the scarf is too small on screen to tell them apart.
+    // Ten paths in the scarf stay ten edges — until zoomed far out (half
+    // a pixel a unit), where the scarf is too small on screen to tell them
+    // apart.
     let mut e = editor();
     let scarf = node_id(&e, "scarf");
     for i in 0..10 {
@@ -819,8 +820,8 @@ fn edges_bundle_by_density_not_selection() {
     };
     assert!(bundled(&e).is_empty());
     let middle = e.viewport * 0.5;
-    for _ in 0..100 {
-        e.wheel(middle, Vec2::new(0.0, 100.0), cmd());
+    while e.camera.scale > 0.5 {
+        e.wheel(middle, Vec2::new(0.0, 5.0), cmd());
     }
     assert_eq!(
         bundled(&e),
@@ -2245,6 +2246,31 @@ fn a_repeat_makes_one_copy_per_turn() {
     assert_eq!(p.lamps_under(&t).len(), 12);
 }
 
+/// A repeat's area is its copies' outlines, not the space between them:
+/// round a dome, the middle belongs to whatever is there.
+#[test]
+fn a_repeat_is_picked_by_its_copies() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let sector = add(
+        &mut p,
+        &f,
+        ComponentKind::repeat(
+            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+            Vec2::new(50.0, 50.0),
+            4,
+        ),
+    );
+    let mut e = Editor::new(p);
+    e.resize(Vec2::new(1200.0, 800.0));
+    e.fit();
+    let origin = e.project.origin(&f);
+    let t = Target::Component(sector);
+    let on_copy = e.camera.to_screen(origin + Vec2::new(50.0, 20.0));
+    let middle = e.camera.to_screen(origin + Vec2::new(50.0, 50.0));
+    assert!(e.project.area(&e.camera, &t).unwrap().contains(on_copy));
+    assert!(!e.project.area(&e.camera, &t).unwrap().contains(middle));
+}
+
 /// A copy's lamps live in its repeat (D11): changing them on one copy
 /// changes every copy.
 #[test]
@@ -2264,6 +2290,31 @@ fn a_copys_lamps_live_in_its_repeat() {
     for k in 0..4 {
         assert_eq!(local_lamps(&p, &sector, k).len(), 7);
     }
+}
+
+/// A copy can't be deleted on its own: ⌫ says it comes from its repeat's
+/// count, and how to change that.
+#[test]
+fn a_copy_cant_be_deleted_on_its_own() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let sector = add(
+        &mut p,
+        &f,
+        ComponentKind::repeat(
+            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+            Vec2::new(50.0, 50.0),
+            4,
+        ),
+    );
+    let mut e = Editor::new(p);
+    e.select(vec![Target::Object(ObjectId::new(&sector, "2"))]);
+    key(&mut e, Key::Delete, none());
+    assert_eq!(
+        e.project.children(Some(&Target::Component(sector))).len(),
+        4
+    );
+    let n = e.notice.clone().unwrap();
+    assert!(n.why.unwrap().contains("copies from a count"));
 }
 
 /// A place rule puts one object's lamps on a port, starting on a pixel.

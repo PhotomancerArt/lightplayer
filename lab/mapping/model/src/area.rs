@@ -8,7 +8,8 @@
 //! - ring: a band around its circle;
 //! - polygon: everything near its closed outline;
 //! - circle: a disc out past its outer ring;
-//! - repeat: a rounded hull around its copies;
+//! - repeat: everything near any of its copies' outlines (each copy is
+//!   its own strand, often far from the next);
 //! - group: a rounded hull around its children — the shape you'd draw
 //!   around them by hand;
 //! - module, fixture: a frame — its border and title tab, not its inside;
@@ -43,6 +44,9 @@ pub enum Area {
     /// Everything within `pad` of a polyline: a path's shape. Not convex —
     /// an L-shaped path does not own the corner it turns round.
     Polyline { points: Vec<Vec2>, pad: f64 },
+    /// Everything within `pad` of any of several polylines: a repeat's
+    /// copies, each its own strand.
+    Polylines { lines: Vec<Vec<Vec2>>, pad: f64 },
     /// Everything within `pad` of a circle's line.
     Band { center: Vec2, radius: f64, pad: f64 },
     /// A frame: its border and its title tab, NOT its inside — the inside
@@ -64,6 +68,9 @@ impl Area {
         match self {
             Area::Hull { points, pad } => hull_distance(points, p) <= *pad,
             Area::Polyline { points, pad } => distance_to_polyline(p, points) <= *pad,
+            Area::Polylines { lines, pad } => {
+                lines.iter().any(|l| distance_to_polyline(p, l) <= *pad)
+            }
             Area::Band {
                 center,
                 radius,
@@ -82,6 +89,10 @@ impl Area {
         match self {
             Area::Hull { points, .. } => hull_distance(points, p),
             Area::Polyline { points, .. } => distance_to_polyline(p, points),
+            Area::Polylines { lines, .. } => lines
+                .iter()
+                .map(|l| distance_to_polyline(p, l))
+                .fold(f64::INFINITY, f64::min),
             Area::Band { center, radius, .. } => (p.distance(*center) - radius).abs(),
             Area::Frame { rect, title } => {
                 if title.contains(p) {
@@ -111,6 +122,15 @@ impl Area {
                     .unwrap_or_default();
                 Vec2::new(top.x, top.y - pad)
             }
+            Area::Polylines { lines, pad } => {
+                let top = lines
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .min_by(|a, b| a.y.total_cmp(&b.y))
+                    .unwrap_or_default();
+                Vec2::new(top.x, top.y - pad)
+            }
             Area::Band {
                 center,
                 radius,
@@ -129,6 +149,11 @@ impl Area {
         match self {
             Area::Hull { points, pad } => rounded_hull_path(points, *pad),
             Area::Polyline { points, .. } => polyline_path(points),
+            Area::Polylines { lines, .. } => lines
+                .iter()
+                .map(|l| polyline_path(l))
+                .collect::<Vec<_>>()
+                .join(" "),
             Area::Band {
                 center,
                 radius,
@@ -150,7 +175,7 @@ impl Area {
     /// round caps and joins. `None` for an area whose outline is closed.
     pub fn stroke_width(&self) -> Option<f64> {
         match self {
-            Area::Polyline { pad, .. } => Some(2.0 * pad),
+            Area::Polyline { pad, .. } | Area::Polylines { pad, .. } => Some(2.0 * pad),
             _ => None,
         }
     }
@@ -262,20 +287,26 @@ impl Project {
                             .collect(),
                         pad: PATH_PAD_PX,
                     }),
-                    // Its copies' outlines, hulled: like a group of them.
-                    ComponentKind::Repeat { .. } => {
-                        let points: Vec<Vec2> = objects_of(c)
+                    // Each copy's own outline: a repeat's copies are apart
+                    // (round a dome), and a hull round them would cover
+                    // everything between.
+                    ComponentKind::Repeat { .. } => Some(Area::Polylines {
+                        lines: objects_of(c)
                             .iter()
-                            .flat_map(|o| match &o.shape {
-                                ObjectShape::Polyline { points } => points.clone(),
+                            .map(|o| match &o.shape {
+                                ObjectShape::Polyline { points } => {
+                                    points.iter().map(|p| local(*p)).collect()
+                                }
                                 ObjectShape::Ring { center, radius } => {
-                                    ring_points(*center, *radius)
+                                    let mut ring =
+                                        ring_points(local(*center), radius * camera.scale);
+                                    ring.extend(ring.first().copied());
+                                    ring
                                 }
                             })
-                            .map(local)
-                            .collect();
-                        (!points.is_empty()).then(|| Area::hull(&points, GROUP_PAD_PX))
-                    }
+                            .collect(),
+                        pad: PATH_PAD_PX,
+                    }),
                     ComponentKind::Circle { center, rings, .. } => {
                         let r = rings.iter().map(|r| r.radius).fold(0.0, f64::max) * camera.scale;
                         Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))

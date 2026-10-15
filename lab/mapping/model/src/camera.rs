@@ -10,7 +10,9 @@ pub struct Camera {
     pub scale: f64,
 }
 
-pub const MIN_SCALE: f64 = 0.5;
+/// How far out you can zoom: far enough to fit a dome with its ten
+/// output cards (thousands of units tall) on one screen.
+pub const MIN_SCALE: f64 = 0.02;
 pub const MAX_SCALE: f64 = 200.0;
 
 impl Camera {

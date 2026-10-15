@@ -545,6 +545,9 @@ fn delete_hint(f: &Project, selection: &[Target]) -> String {
         return "pixels can't be deleted — − shortens their port".into();
     }
     match selection {
+        [Target::Object(o)] if f.ring(&o.component, &o.key).is_none() => {
+            format!("copies can't be deleted — set {}'s Copies", o.component)
+        }
         [Target::Object(o)] => format!("remove ring {} from {}", o.key, o.component),
         [t @ Target::Port { output, .. }] => {
             format!("remove {} from {}", f.label(t), f.node_name(output))
