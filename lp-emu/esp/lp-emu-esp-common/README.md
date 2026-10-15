@@ -106,7 +106,7 @@ command (`engine/flash_cut.rs`, plan
 program and erase commands the part executes whose target touches `range`
 (never reads, WREN or status polls), and tears the `at`-th (0-based) with one
 of `lp-nor-sim`'s tear models: the calibrated CX1 mix and its forced
-models (five erase shapes, a cut before the erase, a program torn inside a
+models (seven erase shapes, a cut before the erase, a program torn inside a
 word) called directly on the chip's bytes, the guessed models through
 a scratch `NorFlashSim`. The chip then latches **powered off** and refuses
 every later program and erase until `restore_power`; the engine posts

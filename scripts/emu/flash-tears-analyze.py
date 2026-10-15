@@ -33,8 +33,8 @@ Two things are reconstructed here rather than read:
 `flash-tears-unaligned` programs it as a 20-byte write and then 16-1040-byte
 writes starting at `20 + k*4`, never on a 32-byte boundary (`program_plan.rs`, mirrored by `plan()`
 here and checked against the `writes` its in-flight records list). Their
-transcripts sit in sibling directories and are reported apart: only the
-page-aligned silicon cuts give `--model-table` its numbers. For the
+transcripts sit in sibling directories and are reported apart; the
+silicon cuts of both give `--model-table` its numbers (`--help`, rule 1). For the
 unaligned payload a torn program is judged by where its prefix stops against
 the write it was in: on a command counted from the write's address inside its
 first page and from the page after it (the split the emulated mask ROM makes,
@@ -51,9 +51,13 @@ from __future__ import annotations
 CHECK_MODEL_RULE = """\
 --check-model (DD29, corrected by DD32) -- is lp-nor-sim's TearMix::CX1 confirmed by the silicon cuts?
 
-  1. Per payload. Only the page-aligned `flash-tears` silicon cuts feed the
-     model's shares. `flash-tears-unaligned` silicon cuts are counted and
-     printed apart; they neither confirm nor refute the erase mix.
+  1. Silicon cuts of both payloads feed the model's shares (since the
+     2026-10-14 re-fit on all 700 of CX1's cuts). The erase is the same
+     command in both, and an unaligned torn program is read the `rom` way
+     (32 B from the write's address in its first page, then from the page),
+     which is how lp-nor-sim tears a page op; a prefix ending where a write
+     starts (`program:between-writes`) is that op's offset 0, a command
+     boundary. Emulated cuts feed nothing.
   2. Per family. Which operation a cut tore is the workload's, so the erase
      shapes are compared among the cuts at an erase and the program shapes
      among the torn programs. The erase family also holds `cut:before-erase`
@@ -114,6 +118,10 @@ END = "<!-- flash-tears-analyze:end -->"
 # A sector whose stable zeros are at most this fraction of its bits is an
 # erase's tail: too few to be a program's prefix, too spread to be old data.
 RESIDUE_FRACTION = 0.01
+# A sector all `0x00` but for at most this many bits (1 in 1024 of them, each
+# a stable 1 or weak) is an erase caught as its first cells lift. The two
+# silicon ones had one bit; the least-lifted `erasing` cut had 571.
+FIRST_LIFT_BITS = SECTOR * 8 // 1024
 
 M64 = (1 << 64) - 1
 
@@ -340,7 +348,13 @@ PHASE_ORDER = [
      "pattern whole (the cut landed between the journal write and the erase command)"),
     ("untouched", "erase", "untouched: the old pattern, whole, and the journal does not say where the cut landed"),
     ("erase:zeroing", "erase", "torn erase, zeroing: a run of `0x00` from the front, old after it"),
+    ("erase:zeroing-mid-word", "erase",
+     "torn erase, zeroing caught inside a word: whole `0x00` words from the front, then one word with only "
+     "part of its pre-program clears landed (maybe weak bits on the others), old after it"),
     ("erase:all-zero", "erase", "torn erase, all `0x00`"),
+    ("erase:first-lift", "erase",
+     f"torn erase, first lift: all `0x00` but a handful of bits (at most {FIRST_LIFT_BITS}), each a stable "
+     "1 or weak"),
     ("erase:erasing", "erase", "torn erase, erasing: stable zeros spread over old **and** new zero positions"),
     ("erase:old-left", "erase", "torn erase, old data left (only old zeros, more than a residue)"),
     ("erase:reads-ff-weak", "erase", "torn erase that reads all `0xFF` but has weak bits"),
@@ -514,6 +528,62 @@ def mid_word(r: dict, new: bytes) -> dict | None:
     }
 
 
+def zeroing_word(r: dict, old: bytes, new: bytes) -> dict | None:
+    """An erase's pre-program read off an exact record (`leading_zero_bytes`):
+    whole `0x00` bytes from the front up to the word the run stops in, that
+    word with `k` of its clears landed, and the old pattern whole after it.
+    `None` when the record is not that.
+
+    Old and new are complements, so a pre-program's clears (the old pattern's
+    ones) are exactly the new pattern's zeros: `landed_new_zeros` counts the
+    clears that landed, and every one past the word must be absent. Every
+    old zero stays (`remaining_old_zeros` whole), and a weak bit can only sit
+    on a clear that did not land, in the word's page."""
+    if "leading_zero_bytes" not in r or r["remaining_old_zeros"] != r["old_zero_bits"]:
+        return None
+    n = r["leading_zero_bytes"]
+    at = n - n % WORD
+    if at >= SECTOR:
+        return None
+    page = at // PAGE
+    before = sum(zeros(b) for b in new[:at])
+    k = r["landed_new_zeros"] - before
+    clears = sum(zeros(b) for b in new[at : at + WORD])
+    if not 0 <= k <= clears or r.get("weak_at_old_zeros", 0):
+        return None
+    full = [sum(zeros(b) for b in new[p * PAGE : (p + 1) * PAGE]) for p in range(PAGES)]
+    if "page_landed" in r:
+        landed = r["page_landed"]
+        if any(landed[p] != full[p] for p in range(page)) or any(landed[p] for p in range(page + 1, PAGES)):
+            return None
+    if "page_weak" in r and any(w for p, w in enumerate(r["page_weak"]) if p != page):
+        return None
+    # The bytes the record counted must fit too: `0xFF` and `0x00` bytes past
+    # the word are the old pattern's; inside it, only bytes the run covered
+    # are `0x00`, and a byte is `0xFF` only where the old one was and no
+    # clear landed in it.
+    tail = old[at + WORD :]
+    ff_in_word = r["ff_bytes"] - sum(1 for b in tail if b == 0xFF)
+    zero_in_word = r["zero_bytes"] - at - sum(1 for b in tail if b == 0x00)
+    if not 0 <= ff_in_word <= sum(1 for b in old[at : at + WORD] if b == 0xFF):
+        return None
+    if not n - at <= zero_in_word <= WORD - 1:
+        return None
+    return {"zero_run": (n, n), "exact": True, "word_at": at, "word_landed_bits": k,
+            "word_intended_bits": clears}
+
+
+def first_lift(r: dict) -> dict | None:
+    """An erase caught as its first cells lift: every bit a stable 0 but at
+    most `FIRST_LIFT_BITS`, each a stable 1 or weak. `None` otherwise."""
+    bits = SECTOR * 8
+    off = bits - r["remaining_old_zeros"] - r["landed_new_zeros"]
+    if not 0 < off <= FIRST_LIFT_BITS:
+        return None
+    return {"lifted_bits": off - r["weak_bits"], "first_lift_weak_bits": r["weak_bits"],
+            "residual_zero_bits": bits - off}
+
+
 def classify(r: dict, payload: str = PAYLOAD) -> Phase:
     sector, wrote = r["sector"], r["wrote"]
     old = pattern(sector, wrote - REGION)
@@ -600,7 +670,31 @@ def classify(r: dict, payload: str = PAYLOAD) -> Phase:
     if v == "mixed":
         if rem == old_zero and land == new_zero and weak == 0:
             return Phase("erase:all-zero", "erase", d)
+        word = zeroing_word(r, old, new)
+        if word is not None:
+            # The run stops on a whole word, nothing weak: plain zeroing.
+            # Anything else (some of the word's clears, or a weak bit on
+            # one) caught the pre-program inside the word.
+            at = word["word_at"]
+            whole = word["word_landed_bits"] == 0 and weak == 0
+            d.update(
+                zero_run=(at, at) if whole else word["zero_run"],
+                exact=True,
+                on_word_boundary=whole,
+                on_command_boundary=whole and at % COMMAND == 0,
+                on_page_boundary=whole and at % PAGE == 0,
+            )
+            if whole:
+                return Phase("erase:zeroing", "erase", d)
+            d.update({k: v for k, v in word.items() if k not in ("zero_run", "exact")})
+            return Phase("erase:zeroing-mid-word", "erase", d)
+        lift = first_lift(r)
+        if lift is not None:
+            d.update(lift)
+            return Phase("erase:first-lift", "erase", d)
         if rem == old_zero and weak == 0:
+            if "leading_zero_bytes" in r:
+                return Phase("unknown", "none", d)  # exact, and no zero run explains it
             run = leading_zero_run(r, new)
             # The reconstruction must also explain the record's `ff_bytes`:
             # after the run the sector is old, so its `0xFF` bytes are the
@@ -610,7 +704,7 @@ def classify(r: dict, payload: str = PAYLOAD) -> Phase:
                 ends = range(lo, hi + 1)
                 d.update(
                     zero_run=run,
-                    exact="leading_zero_bytes" in r,
+                    exact=False,
                     on_word_boundary=any(n % WORD == 0 for n in ends),
                     on_command_boundary=any(n % COMMAND == 0 for n in ends),
                     on_page_boundary=any(n % PAGE == 0 for n in ends),
@@ -847,6 +941,32 @@ def analyze(paths: list[str]) -> tuple[str, list[dict]]:
               f"**{sum(1 for _, ph in zr if ph.detail['on_page_boundary'])}** |")
             w("")
 
+        zm = [(b, ph) for b, ph in cuts if ph.cls == "erase:zeroing-mid-word"]
+        if zm:
+            w("**Zeroing caught inside a word**: the word the run stopped in, and how many of its clears "
+              "(the old pattern's ones in it) had landed. The record places the landed clears only to their "
+              "page (`page_landed`); that they sit in the word the run had reached is the reading.")
+            w("")
+            w("| cut | word at | clears landed | of | weak bits |")
+            w("|---|---:|---:|---:|---:|")
+            for b, ph in zm:
+                d = ph.detail
+                w(f"| `{os.path.basename(b.transcript)}` boot {b.index} (cycle {b.in_flight['wrote']}) | "
+                  f"{d['word_at']} | {d['word_landed_bits']} | {d['word_intended_bits']} | {d['weak_bits']} |")
+            w("")
+        fl = [(b, ph) for b, ph in cuts if ph.cls == "erase:first-lift"]
+        if fl:
+            w("**First lift**: the bits that were not a stable `0`.")
+            w("")
+            w("| cut | stable 1s | weak bits | leading `0x00` bytes |")
+            w("|---|---:|---:|---:|")
+            for b, ph in fl:
+                d = ph.detail
+                w(f"| `{os.path.basename(b.transcript)}` boot {b.index} (cycle {b.in_flight['wrote']}) | "
+                  f"{d['lifted_bits']} | {d['first_lift_weak_bits']} | "
+                  f"{b.in_flight.get('leading_zero_bytes', '—')} |")
+            w("")
+
         # Erasing: is it positional, or every cell at once?
         er = [(b, ph) for b, ph in cuts if ph.cls == "erase:erasing"]
         if er:
@@ -1031,7 +1151,10 @@ def assumptions(cuts, reads_ff, reads_ff_weak, prog, zr, er, erase_cuts, lifted_
     before_erase = sum(1 for _, ph in cuts if ph.cls == "cut:before-erase")
     mid_word = sum(1 for _, ph in cuts if ph.cls == "program:mid-word")
     journal_ops = Counter(ph.cls for _, ph in cuts if ph.phase == "journal")
-    zero_states = sum(1 for _, ph in cuts if ph.cls in ("erase:zeroing", "erase:all-zero"))
+    zero_states = sum(1 for _, ph in cuts if ph.cls in ("erase:zeroing", "erase:zeroing-mid-word", "erase:all-zero",
+                                                         "erase:first-lift"))
+    zeroing_mid_word = sum(1 for _, ph in cuts if ph.cls == "erase:zeroing-mid-word")
+    first_lift = sum(1 for _, ph in cuts if ph.cls == "erase:first-lift")
     weak_cuts = [ph for _, ph in cuts if ph.detail["weak_bits"] > 0]
     weak_in_erase = sum(1 for ph in weak_cuts if ph.phase == "erase")
     n_erase = len(erase_cuts)
@@ -1086,6 +1209,13 @@ def assumptions(cuts, reads_ff, reads_ff_weak, prog, zr, er, erase_cuts, lifted_
          "weak bits possible); the model draws them as `program_mid_word`",
          verdict(mid_word == 0, n_prog + scattered, ("held", "not always: the part's program unit can be caught part-way",
                                                      "not yet seen"))),
+        ("An erase's pre-program stops on a whole 4-byte word, and its lift moves many cells at once",
+         f"{zeroing_mid_word} of {n_erase} erase cuts caught the pre-program inside a word (some of its clears "
+         f"landed); {first_lift} caught the sector all `0x00` but a handful of bits; the model draws them as "
+         "`erase_zeroing_mid_word` and `erase_first_lift`",
+         verdict(zeroing_mid_word == 0 and first_lift == 0, n_erase,
+                 ("held", "not always: the pre-program word, and the lift's first cells, can be caught",
+                  "not yet seen"))),
         ("A cut damages only the operation in flight",
          f"{unexpected} settled sectors damaged, {settled_weak} weak bits in them, {journal_bad} journal slots "
          f"damaged outside the operation in flight (journal ops in flight: "
@@ -1123,6 +1253,7 @@ def self_test() -> int:
     assert plan(6, 246)[:3] == [(0, 20), (20, 944), (964, 56)], plan(6, 246)[:3]
     check_model_self_test()
     mid_word_self_test()
+    erase_word_and_lift_self_test()
     journal_self_test()
     print("self-test ok")
     return 0
@@ -1218,6 +1349,154 @@ def mid_word_self_test() -> None:
     assert classify(program_record(sector, cycle, bytes(far))).cls == "program:scattered"
 
 
+def erase_record(sector: int, cycle: int, cells: bytes, weak: bytes | None = None) -> dict:
+    """An in-flight `ft-sector` record for a sector that reads `cells`, with
+    the bits in `weak` reading both ways, as the firmware's
+    `analyze_in_flight` would count it (`analysis.rs`). Old and new are
+    complements, as there."""
+    old, new = pattern(sector, cycle - REGION), pattern(sector, cycle)
+    weak = weak or bytes(SECTOR)
+    r = {"sector": sector, "wrote": cycle, "old_zero_bits": 0, "remaining_old_zeros": 0, "weak_at_old_zeros": 0,
+         "new_zero_bits": 0, "landed_new_zeros": 0, "weak_at_new_zeros": 0, "weak_bits": 0, "weak_bytes": 0,
+         "ff_bytes": 0, "zero_bytes": 0, "leading_zero_bytes": 0, "page_remaining": [0] * PAGES,
+         "page_landed": [0] * PAGES, "page_weak": [0] * PAGES, "program": None}
+    leading = True
+    for i in range(SECTOR):
+        w = weak[i]
+        a, o = cells[i] & ~w & 0xFF, (cells[i] | w) & 0xFF  # every read's AND and OR
+        stable_zero, old_zero, new_zero = ~o & 0xFF, ~old[i] & 0xFF, ~new[i] & 0xFF
+        rem, land = bin(stable_zero & old_zero).count("1"), bin(stable_zero & new_zero).count("1")
+        p = i // PAGE
+        r["weak_bits"] += bin(w).count("1")
+        r["weak_bytes"] += int(w != 0)
+        r["old_zero_bits"] += bin(old_zero).count("1")
+        r["new_zero_bits"] += bin(new_zero).count("1")
+        r["remaining_old_zeros"] += rem
+        r["landed_new_zeros"] += land
+        r["weak_at_old_zeros"] += bin(w & old_zero).count("1")
+        r["weak_at_new_zeros"] += bin(w & new_zero).count("1")
+        r["page_remaining"][p] += rem
+        r["page_landed"][p] += land
+        r["page_weak"][p] += bin(w).count("1")
+        r["zero_bytes"] += int(o == 0)
+        leading = leading and o == 0
+        r["leading_zero_bytes"] += int(leading)
+        r["ff_bytes"] += int(w == 0 and a == 0xFF)
+    rm, ld, wk = r["remaining_old_zeros"], r["landed_new_zeros"], r["weak_bits"]
+    if wk == 0 and ld == 0 and rm == r["old_zero_bits"]:
+        r["verdict"] = "old"
+    elif wk == 0 and rm == 0 and ld == r["new_zero_bits"]:
+        r["verdict"] = "complete"
+    elif rm == 0 and ld == 0:
+        r["verdict"] = "erased" if wk == 0 else "erased-weak"
+    elif ld == 0:
+        r["verdict"] = "torn-erase"
+    elif rm == 0:
+        r["verdict"] = "torn-program"
+    else:
+        r["verdict"] = "mixed"
+    return r
+
+
+def erase_word_and_lift_self_test() -> None:
+    """The erase caught inside a pre-program word, and as its first cell
+    lifts, rebuilt from the silicon cuts: each sector below is built from the
+    pattern, its record must count exactly what the cut's record counted, and
+    it must sort into the class that names it."""
+
+    def pre_program(sector: int, cycle: int, at: int, land: dict[int, int], weak: dict[int, int] | None = None):
+        """`0x00` up to `at`, then in the word at `at` the lowest `land[i]`
+        clears (old ones) of byte `at + i` landed, and the next `weak[i]`
+        clears of it weak; the old pattern after."""
+        old = pattern(sector, cycle - REGION)
+        cells, wk = bytearray(bytes(at) + old[at:]), bytearray(SECTOR)
+        for i in range(WORD):
+            ones = [b for b in range(8) if old[at + i] >> b & 1]
+            n, k = land.get(i, 0), (weak or {}).get(i, 0)
+            assert n + k <= len(ones), (i, n, k, ones)
+            for b in ones[:n]:
+                cells[at + i] &= ~(1 << b) & 0xFF
+            for b in ones[n : n + k]:
+                wk[at + i] |= 1 << b
+        return erase_record(sector, cycle, bytes(cells), bytes(wk))
+
+    def lifted(sector: int, cycle: int, at: int, weak: bool):
+        """All `0x00` but one bit of byte `at`, where the new pattern has a 0
+        (the old a 1): a stable 1, or weak."""
+        new = pattern(sector, cycle)
+        bit = 1 << next(b for b in range(8) if not new[at] >> b & 1)
+        cells, wk = bytearray(SECTOR), bytearray(SECTOR)
+        cells[at] |= bit
+        if weak:
+            wk[at] |= bit
+        return erase_record(sector, cycle, bytes(cells), bytes(wk))
+
+    def counts_as(r: dict, silicon: dict) -> None:
+        got = {k: r[k] for k in silicon}
+        assert got == silicon, (got, silicon)
+
+    # `flash-tears-unaligned` -r3 boot 10 (sector 5, cycle 6837): 765 bytes of
+    # `0x00`, then 17 of the word's 21 clears and 2 weak bits on the others.
+    r = pre_program(5, 6837, 764, {0: 5, 1: 3, 2: 4, 3: 5}, {2: 1, 3: 1})
+    counts_as(r, {"verdict": "mixed", "remaining_old_zeros": 16192, "landed_new_zeros": 3145, "weak_bits": 2,
+                  "weak_at_old_zeros": 0, "leading_zero_bytes": 765, "ff_bytes": 12, "zero_bytes": 775,
+                  "page_landed": [1045, 1076, 1024] + [0] * 13, "page_weak": [0, 0, 2] + [0] * 13})
+    ph = classify(r)
+    assert ph.cls == "erase:zeroing-mid-word", ph
+    assert (ph.detail["word_at"], ph.detail["word_landed_bits"], ph.detail["word_intended_bits"]) == (764, 17, 21), ph
+    # `flash-tears` -r6 boot 32 (sector 12, cycle 18268, page-aligned): the run
+    # stops on the word at 3,092, and 3 of that word's 14 clears landed, no
+    # weak bit. Read as plain zeroing before this class: the end is a whole
+    # word, but the landed count says the word was being programmed.
+    r = pre_program(12, 18268, 3092, {0: 1, 1: 1, 2: 1})
+    counts_as(r, {"verdict": "mixed", "landed_new_zeros": 12282, "weak_bits": 0, "leading_zero_bytes": 3092,
+                  "ff_bytes": 2, "zero_bytes": 3097,
+                  "page_landed": [1021, 1011, 962, 999, 1014, 1005, 1018, 1047, 1050, 1000, 1044, 1035, 76, 0, 0, 0]})
+    ph = classify(r)
+    assert ph.cls == "erase:zeroing-mid-word", ph
+    assert (ph.detail["word_at"], ph.detail["word_landed_bits"], ph.detail["word_intended_bits"]) == (3092, 3, 14), ph
+    # `flash-tears-unaligned` -r3 boot 38 (sector 11, cycle 7915): 2 of 16.
+    r = pre_program(11, 7915, 2364, {0: 1, 1: 1})
+    counts_as(r, {"landed_new_zeros": 9518, "leading_zero_bytes": 2364, "ff_bytes": 7, "zero_bytes": 2369,
+                  "page_landed": [1018, 1020, 1052, 981, 1057, 1065, 1061, 990, 1038, 236] + [0] * 6})
+    assert classify(r).cls == "erase:zeroing-mid-word", classify(r)
+    # The same sector with the word untouched is plain zeroing, on the word.
+    ph = classify(pre_program(12, 18268, 3092, {}))
+    assert ph.cls == "erase:zeroing" and ph.detail["on_word_boundary"] and ph.detail["zero_run"] == (3092, 3092), ph
+    # ... and with a clear past the word's page as well it is no zero run.
+    old = pattern(12, 18268 - REGION)
+    cells = bytearray(bytes(3092) + old[3092:])
+    cells[3092] &= cells[3092] - 1  # the word's lowest clear
+    far = next(i for i in range(3328, SECTOR) if cells[i] not in (0, 0xFF))
+    cells[far] &= cells[far] - 1
+    assert classify(erase_record(12, 18268, bytes(cells))).cls == "unknown"
+
+    # `flash-tears-unaligned` boot 50 (sector 3, cycle 2179): all `0x00` but
+    # one weak bit, in byte 2,154.
+    r = lifted(3, 2179, 2154, weak=True)
+    counts_as(r, {"verdict": "mixed", "remaining_old_zeros": 16243, "landed_new_zeros": 16524, "weak_bits": 1,
+                  "weak_at_new_zeros": 1, "leading_zero_bytes": 2154, "zero_bytes": 4095, "ff_bytes": 0,
+                  "page_weak": [0] * 8 + [1] + [0] * 7})
+    ph = classify(r)
+    assert ph.cls == "erase:first-lift" and (ph.detail["lifted_bits"], ph.detail["first_lift_weak_bits"]) == (0, 1), ph
+    # -r4 boot 17 (sector 8, cycle 10184): one stable 1, in byte 2,530, no weak
+    # bit (filed `unknown` before this class).
+    r = lifted(8, 10184, 2530, weak=False)
+    counts_as(r, {"verdict": "mixed", "remaining_old_zeros": 16512, "landed_new_zeros": 16255, "weak_bits": 0,
+                  "leading_zero_bytes": 2530, "zero_bytes": 4095, "ff_bytes": 0})
+    ph = classify(r)
+    assert ph.cls == "erase:first-lift" and (ph.detail["lifted_bits"], ph.detail["first_lift_weak_bits"]) == (1, 0), ph
+    # All zero is all zero; past FIRST_LIFT_BITS lifted it is erasing.
+    assert classify(erase_record(8, 10184, bytes(SECTOR))).cls == "erase:all-zero"
+    cells = bytearray(SECTOR)
+    for i in range(FIRST_LIFT_BITS + 1):
+        cells[64 + 97 * i] = 0x10
+    ph = classify(erase_record(8, 10184, bytes(cells)))
+    assert ph.cls == "erase:erasing", ph
+    cells[64 + 97 * FIRST_LIFT_BITS] = 0
+    assert classify(erase_record(8, 10184, bytes(cells))).cls == "erase:first-lift"
+
+
 def journal_self_test() -> None:
     """Which operation was in flight, read off the two journal copies."""
 
@@ -1298,11 +1577,21 @@ def check_model_self_test() -> None:
 };"""
     ok, lines = judge_model(synthetic_rows(cx1_500), cx1_500_rs)
     assert ok and any("torn erases: 418 cut(s)" in l for l in lines) and any("torn programs: 79" in l for l in lines), lines
-    # Per payload: unaligned silicon cuts (any shape) and emulated cuts feed nothing.
-    extra = synthetic_rows({"erase:all-zero": 90, "program:scattered": 9}, payload=PAYLOAD_UNALIGNED)
-    extra += synthetic_rows({"erase:all-zero": 90}, config="lp-emu:esp32c6:t1")
+    # Emulated cuts (any shape) feed nothing.
+    emulated = synthetic_rows({"erase:all-zero": 90, "program:scattered": 9}, config="lp-emu:esp32c6:t1")
+    assert judge_model(synthetic_rows(CX1_200_CUTS) + emulated, CX1_200_RS)[0]
+    # Unaligned silicon cuts feed both families (rule 1): a second 200 like
+    # the first confirms, counted per payload, with a prefix that stopped
+    # where a write starts counted as a command boundary ...
+    twin = dict(CX1_200_CUTS, **{"program:command-boundary": 25, "program:between-writes": 1})
+    ok, lines = judge_model(synthetic_rows(CX1_200_CUTS) + synthetic_rows(twin, payload=PAYLOAD_UNALIGNED),
+                            CX1_200_RS)
+    assert ok and any("torn erases: 332 cut(s)" in l and "166 `flash-tears-unaligned`" in l for l in lines), lines
+    assert any("torn programs: 66 cut(s)" in l for l in lines), lines
+    # ... and 90 more all-zero erases there move the share outside.
+    extra = synthetic_rows({"erase:all-zero": 90}, payload=PAYLOAD_UNALIGNED)
     ok, lines = judge_model(synthetic_rows(CX1_200_CUTS) + extra, CX1_200_RS)
-    assert ok and any("flash-tears-unaligned" in l and "99 silicon" in l for l in lines), lines
+    assert not ok and any("OUTSIDE" in l and "erase:all-zero" in l for l in lines), lines
     # Pooling: c and d are each expected 1 time in 200; alone, "c seen 0" would
     # fall outside its own Wilson interval, pooled it does not.
     weights = {"a": 900, "b": 90, "c": 5, "d": 5}
@@ -1376,23 +1665,33 @@ def model_table(rows: list[dict]) -> str:
     """`lp-nor-sim`'s calibrated model (`TearMix::CX1`, `CX1_ERASING`,
     `CX1_READS_FF_WEAK`) as these silicon cuts give it, in the Rust the
     model file holds."""
-    rows = [r for r in rows if r["configuration"].startswith("silicon") and r["payload"] == PAYLOAD]
-    n = Counter(r["class"] for r in rows)
+    rows = [r for r in rows if r["configuration"].startswith("silicon") and r["payload"] in MODEL_PAYLOADS]
+    n = Counter(model_class(r["class"]) for r in rows)
     erasing = sorted(
         ((r["residual_zero_bits"], r["weak_bits"]) for r in rows if r["class"] == "erase:erasing"),
         key=lambda t: t,
     )
     ff_weak = sorted(r["weak_bits"] for r in rows if r["class"] == "erase:reads-ff-weak")
-    mid_word = sorted(
-        ((r["word_landed_bits"], r["word_intended_bits"], r["weak_bits"]) for r in rows
-         if r["class"] == "program:mid-word"),
-        key=lambda t: (t[0] / t[1], t),
-    )
+    def by_share(cls: str) -> list[tuple[int, int, int]]:
+        # A sub-word tear as (clears landed, clears asked, weak bits). An
+        # unaligned program's has no word reading: it is counted, not drawn.
+        return sorted(
+            ((r["word_landed_bits"], r["word_intended_bits"], r["weak_bits"]) for r in rows
+             if r["class"] == cls and "word_landed_bits" in r),
+            key=lambda t: (t[0] / t[1], t),
+        )
+
+    mid_word = by_share("program:mid-word")
+    zeroing_mid_word = by_share("erase:zeroing-mid-word")
+    first_lift = sorted((r["lifted_bits"], r["first_lift_weak_bits"]) for r in rows if r["class"] == "erase:first-lift")
+    per_payload = Counter(r["payload"] for r in rows)
     out = [
-        f"// {len(rows)} silicon cuts.",
+        f"// {len(rows)} silicon cuts ({', '.join(f'{per_payload[p]} {p}' for p in MODEL_PAYLOADS)}).",
         "pub const CX1: TearMix = TearMix {",
         f"    erase_zeroing: {n['erase:zeroing']},",
+        f"    erase_zeroing_mid_word: {n['erase:zeroing-mid-word']},",
         f"    erase_all_zero: {n['erase:all-zero']},",
+        f"    erase_first_lift: {n['erase:first-lift']},",
         f"    erase_erasing: {n['erase:erasing']},",
         f"    erase_reads_ff_weak: {n['erase:reads-ff-weak']},",
         f"    erase_reads_ff: {n['erased']},",
@@ -1408,6 +1707,12 @@ def model_table(rows: list[dict]) -> str:
         f"pub const CX1_MID_WORD: [(u32, u32, u32); {len(mid_word)}] = [",
         *[f"    ({a}, {b}, {c})," for a, b, c in mid_word],
         "];",
+        f"pub const CX1_ZEROING_MID_WORD: [(u32, u32, u32); {len(zeroing_mid_word)}] = [",
+        *[f"    ({a}, {b}, {c})," for a, b, c in zeroing_mid_word],
+        "];",
+        f"pub const CX1_FIRST_LIFT: [(u32, u32); {len(first_lift)}] = [",
+        *[f"    ({a}, {b})," for a, b in first_lift],
+        "];",
     ]
     for shape in ("untouched", "erase:old-left", "program:scattered", "unknown"):
         if n[shape]:
@@ -1422,7 +1727,9 @@ def model_table(rows: list[dict]) -> str:
 MODEL_SHAPES = {
     "erase": [
         ("erase:zeroing", "erase_zeroing"),
+        ("erase:zeroing-mid-word", "erase_zeroing_mid_word"),
         ("erase:all-zero", "erase_all_zero"),
+        ("erase:first-lift", "erase_first_lift"),
         ("erase:erasing", "erase_erasing"),
         ("erase:reads-ff-weak", "erase_reads_ff_weak"),
         ("erased", "erase_reads_ff"),
@@ -1442,6 +1749,17 @@ def model_weights(fields: dict[str, int], shapes: list[tuple[str, str]]) -> dict
     """A family's weights by class. A shape the model file does not weigh
     (no field, or 0) is not modelled: it is left out, so seeing it fails."""
     return {cls: fields[f] for cls, f in shapes if fields.get(f, 0) > 0}
+
+
+# The payloads whose silicon cuts fit and judge the model (rule 1).
+MODEL_PAYLOADS = (PAYLOAD, PAYLOAD_UNALIGNED)
+
+
+def model_class(cls: str) -> str:
+    """The class a cut counts as in the model's families: a prefix that
+    stopped where an unaligned write starts is the page op's offset 0, the
+    model's command boundary (rule 1)."""
+    return "program:command-boundary" if cls == "program:between-writes" else cls
 # A class that is not a torn operation: a cut after the program finished.
 NOT_TORN = {"complete"}
 # DD29: a shape expected fewer times than this at the observed n is pooled.
@@ -1534,11 +1852,11 @@ def judge_family(observed: dict[str, int], weights: dict[str, int],
     return cells
 
 
-def family_counts(rows: list[dict], family: str, payload: str = PAYLOAD) -> dict[str, int]:
-    """The silicon cuts of `payload` that tore an operation of `family`."""
+def family_counts(rows: list[dict], family: str, payloads: tuple[str, ...] = MODEL_PAYLOADS) -> dict[str, int]:
+    """The silicon cuts of `payloads` that tore an operation of `family`."""
     return dict(Counter(
-        r["class"] for r in rows
-        if r["configuration"].startswith("silicon") and r["payload"] == payload
+        model_class(r["class"]) for r in rows
+        if r["configuration"].startswith("silicon") and r["payload"] in payloads
         and PHASE_OF.get(r["class"], "none") == family and r["class"] not in NOT_TORN
     ))
 
@@ -1553,10 +1871,10 @@ def read_weights(rs: str) -> dict[str, int]:
 
 
 def judge_model(rows: list[dict], rs: str) -> tuple[bool, list[str]]:
-    """The check: the page-aligned silicon cuts against `TearMix::CX1`.
+    """The check: the silicon cuts of both payloads against `TearMix::CX1`.
 
-    Returns (confirmed, lines). Only `flash-tears` (page-aligned) cuts feed
-    the model's shares; `flash-tears-unaligned` is reported apart, below."""
+    Returns (confirmed, lines). Each payload's share of a family is printed
+    beside the verdict (`payload_report`); emulated cuts feed nothing."""
     fields = read_weights(rs)
     out = []
     confirmed = True
@@ -1569,7 +1887,7 @@ def judge_model(rows: list[dict], rs: str) -> tuple[bool, list[str]]:
         k = len(tested)
         level = tested[0]["level"] if tested else 1 - FAMILY_ALPHA
         out += [
-            f"torn {family}s: {n} cut(s) (page-aligned `{PAYLOAD}`, silicon); {k} tested cell(s), "
+            f"torn {family}s: {n} cut(s) (silicon, {per_payload(rows, family)}); {k} tested cell(s), "
             f"each at the {level:.2%} level (Bonferroni: 1 - 0.05/{k}, DD32)",
             "",
             f"| shape | cuts | share | model share | {level:.2%} Wilson interval at n | expected | |",
@@ -1588,27 +1906,16 @@ def judge_model(rows: list[dict], rs: str) -> tuple[bool, list[str]]:
                 )
             confirmed = confirmed and c["ok"]
         out.append("")
-    out += unaligned_report(rows)
     return confirmed, out
 
 
-def unaligned_report(rows: list[dict]) -> list[str]:
-    """`flash-tears-unaligned` silicon cuts: counted, never judged. They
-    neither confirm nor refute the erase mix (the program is not what tore
-    it); section 8 of the report is where their program shapes are read."""
-    counts = Counter(
-        r["class"] for r in rows
-        if r["configuration"].startswith("silicon") and r["payload"] == PAYLOAD_UNALIGNED
-    )
-    if not counts:
-        return ["`flash-tears-unaligned`: no silicon cuts yet (reported apart; never part of this verdict)", ""]
-    return [
-        f"`flash-tears-unaligned`: {sum(counts.values())} silicon cut(s), reported apart, NOT part of the verdict "
-        "(they neither confirm nor refute the erase mix)",
-        "",
-        *[f"- `{cls}`: {k}" for cls, k in sorted(counts.items())],
-        "",
-    ]
+def per_payload(rows: list[dict], family: str) -> str:
+    """How many of a family's judged cuts each payload gave."""
+    parts = []
+    for p in MODEL_PAYLOADS:
+        k = sum(family_counts(rows, family, (p,)).values())
+        parts.append(f"{k} `{p}`")
+    return " + ".join(parts)
 
 
 def check_model(rows: list[dict], table: str, rs_path: str) -> int:
