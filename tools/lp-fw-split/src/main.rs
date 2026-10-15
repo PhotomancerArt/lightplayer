@@ -4,6 +4,7 @@
 //!   lp-fw-split reach <elf> <map> --emit-ld <engine.x>
 //!   lp-fw-split verify <elf> <map>
 //!   lp-fw-split headroom <out>/split.json [--margin 65536]
+//!   lp-fw-split segments <core.bin>...
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -66,6 +67,12 @@ enum Command {
     },
     /// Check one (pass-2) link: no core section in the engine region.
     Verify { elf: PathBuf, map: PathBuf },
+    /// List core images' segments and fail when the loader cannot place one
+    /// (an address-0 padding segment, or any outside the core's flash and RAM).
+    Segments {
+        #[arg(required = true)]
+        images: Vec<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -142,6 +149,23 @@ fn run(command: Command) -> Result<bool> {
                 return Ok(false);
             }
             Ok(true)
+        }
+        Command::Segments { images } => {
+            let mut ok = true;
+            for path in images {
+                let segs = lp_fw_split::core_segments::segments(&std::fs::read(&path)?)?;
+                let refused = segs.iter().filter(|s| s.placement().is_err()).count();
+                println!(
+                    "{}: {} segments, {refused} the loader cannot place",
+                    path.display(),
+                    segs.len()
+                );
+                for s in &segs {
+                    println!("{}", s.line());
+                }
+                ok &= refused == 0;
+            }
+            Ok(ok)
         }
         Command::Verify { elf, map } => {
             let v = lp_fw_split::verify(&elf, &map)?;

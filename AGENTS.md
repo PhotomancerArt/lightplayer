@@ -53,6 +53,52 @@ avoided. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
   specs) over any implementation.
 - If unsure whether a source is safe to copy from: **ask; do not copy.**
 
+## What you may do without asking
+
+Yona answers yes to nearly every question agents ask here. On 2026-10-14 he
+said that what should reach him is the Lasting calls, product and UX
+direction, and hardware sittings. Everything else ships, and he reads it
+afterwards. Sort every action by what a wrong call costs:
+
+- **Routine — do it.** Edit, commit, push, open and ready a PR, watch and
+  fix CI, file defects, debt entries and ADRs.
+- **Undoable — do it, and say what you did.** A revert or the next release
+  puts it back. **Merging your own PR to `main` is Undoable, and you are
+  authorized to do it** once every check on its head is green. When the diff
+  touches a firmware-linked crate (`lp-base/`, `lp-core/`, `lp-shader/`,
+  `lp-fw/`, `lp-riscv/`), the emulator jobs and the "Heap budget" job must
+  have *run* and passed. Skipped by the path filter does not count: run
+  them yourself (`just test-emu-c6`, `just heap-budget-check-chips`) or hand
+  the merge over. The deploy that rides the merge is Undoable too: Main push,
+  Release firmware, Deploy Cloud Service, `/healthz`. Watch it. So are wire
+  changes with their `WIRE_PROTO_VERSION` bump (no compatibility during
+  development), public API changes, CI and justfile edits, new dependencies
+  whose license fits, and UI changes with no open design question.
+- **Lasting — ask.** A revert cannot put it back:
+  - persisted bytes: project/package files and `PROJECT_FORMAT_VERSION`,
+    the cloud store, stamped device identity, the access and network files
+    (see "Persisted-format compatibility");
+  - the never-break pins: lp-link's plain, secure and update-channel
+    goldens, `lpc-update`'s v1 golden, the LAN endpoint contract,
+    `RELAY_PROTO_VERSION` and the relay goldens;
+  - released-firmware formats (the ota-manifest, the release index), the
+    boot records and the loader;
+  - deleting user data, anywhere;
+  - anything outward: other repos, upstream issues, posts, messages;
+  - spending money.
+
+Whatever the cost, also ask about:
+
+- product or UX direction the plan did not settle;
+- loosening a budget, ratchet or acceptance number;
+- license provenance you are unsure of (above);
+- anything that needs hands or a desk board;
+- any call where you have no confident lean.
+
+**A question you would end with "Lean: yes" about something Undoable is a
+decision you have already made.** Make it, and list it under "Decided
+without you" in your report. The `yona-*` skills carry the same sort.
+
 ## How to Handle `no_std` Issues
 
 When a dependency in the GLSL → LPIR → machine code path does not support
@@ -774,8 +820,10 @@ A plan that ends at a review gate keeps its PR in draft. Title it
 `<type>: <plan title>` from the plan's H1 and open the body with
 `Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
 
-The pipeline does not end at the PR. `yona-ship` takes the green PR through
-merge and deploy: merging to `main` runs "Main push" (tag + release, not
+The pipeline does not end at the PR. `yona-implement` runs `yona-ship` in the
+same session when no gate is pending, and ship takes the green PR through
+merge and deploy without asking unless the plan declared a ship gate or the
+work did something Lasting (see "What you may do without asking"): merging to `main` runs "Main push" (tag + release, not
 marked Latest), and a green run triggers both **"Release firmware"**
 (`release-firmware.yml`: builds every served firmware package once, checks
 it, attaches it to the release, marks Latest) and "Deploy Cloud Service" to
@@ -1197,9 +1245,11 @@ approval, or final pre-merge review — follow
   server to see it".
 - Always state the exact gate questions.
 - Every session runs the full pipeline by default: implement → validate →
-  PR → CI green → review handoff when the change is user-visible. That
-  includes sessions started from a task chip or a delegation prompt, and
-  prompts that file task chips must say so too.
+  PR → CI green → merge and deploy (`yona-ship`), stopping only at a gate a
+  plan declared or before something Lasting. A user-visible change with no
+  open design question is not a gate: it merges, and its screenshots go in
+  the ship report. That includes sessions started from a task chip or a
+  delegation prompt, and prompts that file task chips must say so too.
 
 Claude sessions: the repo skill `lp-review-handoff` executes this checklist.
 

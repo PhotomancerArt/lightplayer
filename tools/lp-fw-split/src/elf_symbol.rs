@@ -41,6 +41,23 @@ pub fn find_opt(elf: &[u8], name: &str) -> Result<Option<SymbolBytes>> {
     find(elf, name).map(Some)
 }
 
+/// The value of the defined symbol `name`, absolute or in a section: a
+/// linker-script address such as `_bss_start`.
+pub fn value(elf: &[u8], name: &str) -> Result<u32> {
+    let header = object::elf::FileHeader32::<Endianness>::parse(elf)?;
+    let endian = header.endian()?;
+    let sections = header.sections(endian, elf)?;
+    let symbols = sections.symbols(endian, elf, object::elf::SHT_SYMTAB)?;
+    let sym = symbols
+        .iter()
+        .find(|s| s.name(endian, symbols.strings()).ok() == Some(name.as_bytes()))
+        .with_context(|| format!("no symbol `{name}` in the ELF"))?;
+    if sym.st_shndx(endian) == object::elf::SHN_UNDEF {
+        bail!("`{name}` is not defined");
+    }
+    Ok(sym.st_value(endian))
+}
+
 /// The defined, file-backed symbol `name`.
 pub fn find(elf: &[u8], name: &str) -> Result<SymbolBytes> {
     let header = object::elf::FileHeader32::<Endianness>::parse(elf)?;

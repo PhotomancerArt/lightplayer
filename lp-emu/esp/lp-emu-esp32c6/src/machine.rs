@@ -1921,6 +1921,11 @@ impl Esp32C6Builder {
         for span in memmap::MMIO_WINDOWS {
             bus.add_mmio_window(span.base, span.len);
         }
+        // A store where the C6 has nothing (no region above, no window)
+        // faults, as on silicon: the split loader's copy to address 0 took a
+        // `Store/AMO access fault` on a board while this bus ignored 26,452
+        // of them and booted the core.
+        bus.set_fault_stores_to_nothing(true);
         bus
     }
 
