@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# flash-tears-soak.sh [--unaligned] [--batches N] [--date YYYY-MM-DD] [--keep-lease] [--dry-run]
+# flash-tears-soak.sh [--unaligned|--reprogram] [--batches N] [--date YYYY-MM-DD] [--keep-lease] [--dry-run]
 #
 # The tree-store M4 desk sitting in one command: power cuts on the SACRIFICIAL
 # C6, recorded through the validation system. Each batch is one
@@ -19,6 +19,14 @@
 # image gates and cuts, every program started off a 32-byte boundary
 # (`lp-fw/fw-checks/src/checks/flash_tears/program_plan.rs`); its transcripts
 # land under `lp-emu/transcripts/esp32c6/flash-tears-unaligned/`.
+#
+# `--reprogram` records the `flash-reprogram` payload (tree-store M7): the
+# same board, gates and cut driver; a work loop that only programs, and a
+# boot that programs each torn word again and reads it back
+# (`lp-fw/fw-checks/src/checks/flash_reprogram/`). It owns the WHOLE `lpfs`
+# partition. Its transcripts land under
+# `lp-emu/transcripts/esp32c6/flash-reprogram/`; read them with
+# `scripts/emu/flash-reprogram-analyze.py`.
 #
 # The first cut of every batch proves itself: `flash-tears-cuts.py` stops
 # (exit 5) when the boot after a power cycle does not say reset `poweron`,
@@ -61,6 +69,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --batches) batches="$2"; shift 2 ;;
         --unaligned) payload="flash-tears-unaligned"; shift ;;
+        --reprogram) payload="flash-reprogram"; shift ;;
         --date) date="$2"; shift 2 ;;
         --keep-lease) keep_lease=1; shift ;;
         --dry-run) dry_run=1; shift ;;

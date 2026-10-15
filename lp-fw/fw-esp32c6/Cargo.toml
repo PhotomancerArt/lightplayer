@@ -317,6 +317,12 @@ test_flash_tears = ["dep:fw-checks", "fw-checks/check-flash-tears"]
 # commands count from the write's address or from absolute boundaries. Same
 # board, same gates; never built together with `test_flash_tears`.
 test_flash_tears_unaligned = ["dep:fw-checks", "fw-checks/check-flash-tears"]
+# The `flash-reprogram` payload's harness (tree-store M7): power cuts on the
+# same SACRIFICIAL board, every one while the part programs, and each torn
+# word programmed again with its intended value and read back — does that
+# make its weak bits solid? It owns the WHOLE `lpfs` partition. The flow
+# lives in fw-checks as `checks::flash_reprogram`.
+test_flash_reprogram = ["dep:fw-checks", "fw-checks/check-flash-reprogram"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,

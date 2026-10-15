@@ -184,11 +184,13 @@ use fw_esp32_common::time;
 mod bench;
 #[cfg(all(not(feature = "memory_fs"), not(fw_harness),))]
 mod bootctl;
-// The `flash-tears` harness reads the same table to find `lpfs`.
+// The `flash-tears` and `flash-reprogram` harnesses read the same table to
+// find `lpfs`.
 #[cfg(any(
     all(not(feature = "memory_fs"), not(fw_harness)),
     feature = "test_flash_tears",
-    feature = "test_flash_tears_unaligned"
+    feature = "test_flash_tears_unaligned",
+    feature = "test_flash_reprogram"
 ))]
 mod flash_layout;
 // Not in the size measurement's build (`measure_no_legacy_probe`): with the
@@ -256,6 +258,8 @@ mod tests {
     pub mod espnow_broadcast;
     #[cfg(feature = "test_f32_softfloat")]
     pub mod f32_softfloat;
+    #[cfg(feature = "test_flash_reprogram")]
+    pub mod flash_reprogram;
     #[cfg(any(feature = "test_flash_tears", feature = "test_flash_tears_unaligned"))]
     pub mod flash_tears;
     #[cfg(feature = "test_fluid_demo")]
@@ -1464,6 +1468,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::flash_tears::run_flash_tears;
         run_flash_tears(spawner).await;
+    }
+
+    #[cfg(feature = "test_flash_reprogram")]
+    {
+        use tests::flash_reprogram::run_flash_reprogram;
+        run_flash_reprogram(spawner).await;
     }
 
     #[cfg(feature = "test_gpio_input")]
