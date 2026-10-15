@@ -153,6 +153,10 @@ impl Editor {
     /// The edge under the pointer, if hovering means anything right now and
     /// no thing is under it (things win: an edge's ends touch them).
     pub fn hovered_edge(&self) -> Option<Edge> {
+        // Cheap questions first: no edge is hovered while a thing is.
+        if self.hover_point().is_none() || self.hover_target().is_some() {
+            return None;
+        }
         self.edges().into_iter().find(|e| e.hovered)
     }
 

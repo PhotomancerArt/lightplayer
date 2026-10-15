@@ -21,22 +21,39 @@
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use crate::component::{Component, ComponentId};
+use crate::geom::{Rect, Vec2};
 use crate::layout::Layout;
 use crate::node::NodeId;
-use crate::object::{Object, ObjectId};
+use crate::object::{Object, ObjectId, ObjectShape};
 use crate::patch::EffectivePatch;
 use crate::project::Project;
 
 /// The kept answers. Each is worked out the first time it is asked for.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct Derived {
+    /// Names what the project holds right now: see [`Project::revision`].
+    revision: u64,
     layout: OnceLock<Arc<Layout>>,
     placed: OnceLock<Arc<Placed>>,
     patch: OnceLock<Arc<EffectivePatch>>,
     wiring: OnceLock<Arc<Wiring>>,
+}
+
+impl Default for Derived {
+    fn default() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Derived {
+            revision: NEXT.fetch_add(1, Ordering::Relaxed),
+            layout: OnceLock::new(),
+            placed: OnceLock::new(),
+            patch: OnceLock::new(),
+            wiring: OnceLock::new(),
+        }
+    }
 }
 
 /// Two projects are equal by what they hold, never by what they have
@@ -61,6 +78,10 @@ pub struct Placed {
     /// Where each object's lamp 0 sits among all the lamps, `list` order.
     first_lamp: Vec<usize>,
     lamps: usize,
+    /// The box round each object's lamps and drawn shape, `list` order…
+    bounds: Vec<Rect>,
+    /// …and round everything under each component (a group's children too).
+    component_bounds: HashMap<ComponentId, Rect>,
 }
 
 impl Placed {
@@ -93,6 +114,17 @@ impl Placed {
 
     pub fn lamp_count(&self) -> usize {
         self.lamps
+    }
+
+    /// The box round an object's lamps and its drawn shape, world units.
+    pub fn object_bounds(&self, id: &ObjectId) -> Option<Rect> {
+        Some(self.bounds[*self.by_id.get(id)?])
+    }
+
+    /// The box round everything under a component, world units; `None`
+    /// for one with nothing under it.
+    pub fn component_bounds(&self, id: &ComponentId) -> Option<Rect> {
+        self.component_bounds.get(id).copied()
     }
 }
 
@@ -138,6 +170,14 @@ impl Project {
         self.derived = Derived::default();
     }
 
+    /// A number naming what the project holds right now. Every edit gives
+    /// it a new one, never used before by any project; a clone keeps its
+    /// original's (it holds the same). So a page can keep anything it
+    /// draws from the project — the tree's rows, say — until this moves.
+    pub fn revision(&self) -> u64 {
+        self.derived.revision
+    }
+
     /// Every node's box, kept.
     pub(crate) fn kept_layout(&self) -> &Layout {
         self.derived
@@ -180,8 +220,14 @@ impl Project {
             p.by_id.insert(o.id.clone(), i);
             p.first_lamp.push(lamps);
             lamps += o.lamps.len();
+            p.bounds.push(object_bounds(o));
         }
         p.lamps = lamps;
+        for n in self.fixtures() {
+            if let Some(f) = n.fixture() {
+                bound_components(&f.components, &mut p);
+            }
+        }
         p
     }
 
@@ -243,15 +289,40 @@ impl Project {
     }
 }
 
+/// The box round an object's lamps and its drawn shape (a ring's whole
+/// circle).
+fn object_bounds(o: &Object) -> Rect {
+    let shape: Vec<Vec2> = match &o.shape {
+        ObjectShape::Polyline { points } => points.clone(),
+        ObjectShape::Ring { center, radius } => {
+            let r = Vec2::new(*radius, *radius);
+            vec![*center - r, *center + r]
+        }
+    };
+    Rect::around(shape.into_iter().chain(o.lamps.iter().map(|l| l.pos)))
+        .unwrap_or(Rect::new(Vec2::default(), Vec2::default()))
+}
+
+/// Each component's box: its own objects' and its children's. Returns the
+/// box round the whole list.
+fn bound_components(list: &[Component], p: &mut Placed) -> Option<Rect> {
+    let mut all: Option<Rect> = None;
+    for c in list {
+        let own = p.by_component.get(&c.id).cloned().unwrap_or_default();
+        let mut boxes: Vec<Rect> = p.bounds[own].to_vec();
+        boxes.extend(bound_components(c.children(), p));
+        if let Some(b) = Rect::around(boxes.iter().flat_map(|r| [r.min, r.max])) {
+            p.component_bounds.insert(c.id.clone(), b);
+            all = Rect::around(all.into_iter().chain([b]).flat_map(|r| [r.min, r.max]));
+        }
+    }
+    all
+}
+
 /// Index a fixture's components: each one's fixture, and its objects placed
 /// in world units, in authoring order (a component's own objects, then its
 /// children's).
-fn index_components(
-    list: &[Component],
-    fixture: &NodeId,
-    origin: crate::geom::Vec2,
-    p: &mut Placed,
-) {
+fn index_components(list: &[Component], fixture: &NodeId, origin: Vec2, p: &mut Placed) {
     for c in list {
         p.fixture_of.insert(c.id.clone(), fixture.clone());
         let start = p.list.len();

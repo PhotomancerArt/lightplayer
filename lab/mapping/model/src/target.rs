@@ -20,7 +20,7 @@
 use crate::component::ComponentId;
 use crate::geom::Vec2;
 use crate::node::{NodeId, NodeKind};
-use crate::object::{ObjectId, objects_of};
+use crate::object::ObjectId;
 use crate::project::Project;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -193,14 +193,14 @@ impl Project {
                         .map(|c| Target::Component(c.id.clone()))
                         .collect();
                 }
-                let objects = objects_of(c);
+                let mut objects = self.objects_of(id);
                 if c.is_single_object() {
                     objects
-                        .first()
+                        .next()
                         .map(|o| lamp_targets(&o.id, o.lamps.len()))
                         .unwrap_or_default()
                 } else {
-                    objects.into_iter().map(|o| Target::Object(o.id)).collect()
+                    objects.map(|o| Target::Object(o.id.clone())).collect()
                 }
             }
             Target::Object(o) => self
@@ -277,26 +277,33 @@ impl Project {
                 .object(o)
                 .map(|o| o.lamps.iter().map(|l| l.pos).collect())
                 .unwrap_or_default(),
-            Target::Component(id) => {
-                let Some(c) = self.component(id) else {
-                    return Vec::new();
-                };
-                let mut out: Vec<Vec2> = objects_of(c)
-                    .iter()
-                    .filter_map(|o| self.object(&o.id))
-                    .flat_map(|o| o.lamps.iter().map(|l| l.pos))
-                    .collect();
-                for child in c.children() {
-                    out.extend(self.lamps_under(&Target::Component(child.id.clone())));
-                }
-                out
-            }
+            Target::Component(id) => self
+                .objects_under(id)
+                .into_iter()
+                .flat_map(|o| o.lamps.iter().map(|l| l.pos))
+                .collect(),
             Target::Node(_) => self
                 .children(Some(t))
                 .iter()
                 .flat_map(|c| self.lamps_under(c))
                 .collect(),
             Target::Port { .. } | Target::Pixel { .. } => Vec::new(),
+        }
+    }
+
+    /// How many lamps are under a target: `lamps_under(t).len()`, counted
+    /// without gathering them.
+    pub fn lamp_count_under(&self, t: &Target) -> usize {
+        match t {
+            Target::Lamp { .. } => self.lamps_under(t).len(),
+            Target::Object(o) => self.object(o).map_or(0, |o| o.lamps.len()),
+            Target::Component(id) => self.objects_under(id).iter().map(|o| o.lamps.len()).sum(),
+            Target::Node(_) => self
+                .children(Some(t))
+                .iter()
+                .map(|c| self.lamp_count_under(c))
+                .sum(),
+            Target::Port { .. } | Target::Pixel { .. } => 0,
         }
     }
 

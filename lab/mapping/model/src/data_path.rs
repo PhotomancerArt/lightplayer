@@ -9,6 +9,8 @@
 //! Like everything read off the patch, it is derived, never stored, so an
 //! edit — a reversed path, a count, a deleted ring — redraws it at once.
 
+use std::collections::HashMap;
+
 use crate::geom::Vec2;
 use crate::node::NodeId;
 use crate::patch::Span;
@@ -36,11 +38,8 @@ impl Project {
     /// The data path through one fixture.
     pub fn data_path(&self, fixture: &NodeId) -> DataPath {
         let patch = self.effective_patch();
-        let objects = self.objects_in(fixture);
         let lamp = |object: &crate::ObjectId, i: u32| -> Option<Vec2> {
-            objects
-                .iter()
-                .find(|o| &o.id == object)
+            self.object(object)
                 .and_then(|o| o.lamps.get(i as usize))
                 .map(|l| l.pos)
         };
@@ -51,6 +50,14 @@ impl Project {
             .iter()
             .filter(|s| &s.fixture == fixture)
             .collect();
+        // Where each span starts: (output, port, first pixel) → its spans.
+        let mut starting: HashMap<(&NodeId, &str, u32), Vec<&Span>> = HashMap::new();
+        for s in &mine {
+            starting
+                .entry((&s.output, s.port.as_str(), s.pixels().start))
+                .or_default()
+                .push(s);
+        }
         for s in &mine {
             let pixels = s.pixels();
             if pixels.start == 0
@@ -69,12 +76,10 @@ impl Project {
                 });
             }
             // The span that carries on from this one's last pixel.
-            let Some(next) = mine.iter().find(|n| {
-                n.output == s.output
-                    && n.port == s.port
-                    && n.pixels().start == pixels.end
-                    && n.object != s.object
-            }) else {
+            let Some(next) = starting
+                .get(&(&s.output, s.port.as_str(), pixels.end))
+                .and_then(|ns| ns.iter().find(|n| n.object != s.object))
+            else {
                 continue;
             };
             if let (Some(a), Some(b)) = (on(s, pixels.end - 1), on(next, pixels.end)) {

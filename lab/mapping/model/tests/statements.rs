@@ -2596,7 +2596,8 @@ fn minting_skips_ids_already_taken() {
 /// lamp, the patch, which pixel each lamp lights — is kept between
 /// questions, and an edit shows at once: after a count change, a resize, a
 /// move, a deleted output and an undo, every answer is what working it out
-/// afresh gives.
+/// afresh gives. The project's revision — what a page keeps its drawing by —
+/// moves with every edit, and with nothing else.
 #[test]
 fn kept_answers_are_never_stale() {
     let mut e = Editor::new(Project::seed());
@@ -2620,7 +2621,11 @@ fn kept_answers_are_never_stale() {
             );
         }
     };
+    let start = e.project.revision();
     same_as_afresh(&e);
+    let _ = e.hint_bar();
+    let _ = e.edges();
+    assert_eq!(e.project.revision(), start, "questions are not edits");
     let lamps = e.project.lamp_count();
     let patch = e.project.effective_patch().clone();
 
@@ -2630,6 +2635,8 @@ fn kept_answers_are_never_stale() {
     e.edit_selection_prop("lamps", PropEdit::Nudge(4));
     assert_eq!(e.project.lamp_count(), lamps + 4);
     assert_ne!(*e.project.effective_patch(), patch);
+    let counted = e.project.revision();
+    assert_ne!(counted, start);
     same_as_afresh(&e);
 
     // A resize: the fixture's box, and the output beside it, move.
@@ -2638,6 +2645,7 @@ fn kept_answers_are_never_stale() {
     e.edit_selection_prop("width", PropEdit::SetNumber(120.0));
     assert_eq!(e.project.node_rect(&ring_display).unwrap().width(), 120.0);
     assert!(e.project.node_rect(&main).unwrap().min.x > card.min.x);
+    assert_ne!(e.project.revision(), counted);
     same_as_afresh(&e);
 
     // A move: the circle's lamps go with it.
@@ -2665,6 +2673,7 @@ fn kept_answers_are_never_stale() {
     }
     assert_eq!(e.project.lamp_count(), lamps);
     assert_eq!(*e.project.effective_patch(), patch);
+    assert_eq!(e.project.revision(), start, "undo gives back what it held");
 }
 
 // ---- helpers -------------------------------------------------------------------

@@ -22,7 +22,7 @@
 use crate::camera::Camera;
 use crate::component::ComponentKind;
 use crate::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
-use crate::object::{ObjectShape, objects_of};
+use crate::object::ObjectShape;
 use crate::project::Project;
 use crate::target::Target;
 
@@ -291,15 +291,15 @@ impl Project {
                     // (round a dome), and a hull round them would cover
                     // everything between.
                     ComponentKind::Repeat { .. } => Some(Area::Polylines {
-                        lines: objects_of(c)
-                            .iter()
+                        lines: self
+                            .objects_of(id)
                             .map(|o| match &o.shape {
                                 ObjectShape::Polyline { points } => {
-                                    points.iter().map(|p| local(*p)).collect()
+                                    points.iter().map(|p| screen(*p)).collect()
                                 }
                                 ObjectShape::Ring { center, radius } => {
                                     let mut ring =
-                                        ring_points(local(*center), radius * camera.scale);
+                                        ring_points(screen(*center), radius * camera.scale);
                                     ring.extend(ring.first().copied());
                                     ring
                                 }
@@ -315,9 +315,8 @@ impl Project {
                         let mut points: Vec<Vec2> =
                             self.lamps_under(t).into_iter().map(screen).collect();
                         // Circles inside a group count by their whole disc.
-                        for o in collect_objects(self, c) {
+                        for o in self.objects_under(id) {
                             if let ObjectShape::Ring { center, radius } = o.shape {
-                                let center = center + origin;
                                 points.extend(ring_points(screen(center), radius * camera.scale));
                             }
                         }
@@ -347,6 +346,21 @@ impl Project {
     /// either. Frames are the exception: a frame's area is only its border,
     /// so look inside every one.
     fn collect_at(&self, camera: &Camera, p: Vec2, t: &Target, out: &mut Vec<Target>) {
+        // Nowhere near what's drawn: nothing here, nor inside it. Every
+        // area lies within its lamps' and shape's box, padded by at most
+        // `GROUP_PAD_PX`, so this answers as the area would, without
+        // building it — the dome's 22,000 lamps are not all asked.
+        if let Some(b) = self.drawn_bounds(t) {
+            let pad = (GROUP_PAD_PX + 1.0) / camera.scale;
+            let w = camera.to_world(p);
+            if w.x < b.min.x - pad
+                || w.x > b.max.x + pad
+                || w.y < b.min.y - pad
+                || w.y > b.max.y + pad
+            {
+                return;
+            }
+        }
         let hit = self.area(camera, t).is_some_and(|a| a.contains(p));
         if !hit && !self.is_frame(t) {
             return;
@@ -356,6 +370,17 @@ impl Project {
         }
         for child in self.children(Some(t)) {
             self.collect_at(camera, p, &child, out);
+        }
+    }
+
+    /// The box round what a drawn thing is made of — its lamps and shape —
+    /// in world units. `None` for nodes, ports and pixels.
+    fn drawn_bounds(&self, t: &Target) -> Option<Rect> {
+        let placed = self.placed();
+        match t {
+            Target::Component(id) => placed.component_bounds(id),
+            Target::Object(o) | Target::Lamp { object: o, .. } => placed.object_bounds(o),
+            _ => None,
         }
     }
 
@@ -374,14 +399,6 @@ pub fn title_width(name: &str, pinned: bool) -> f64 {
 
 /// The room a pinned node's mark takes in its title tab, in pixels.
 pub const PIN_MARK_PX: f64 = 12.0;
-
-fn collect_objects(f: &Project, c: &crate::Component) -> Vec<crate::Object> {
-    let mut out = objects_of(c);
-    for child in c.children() {
-        out.extend(collect_objects(f, child));
-    }
-    out
-}
 
 fn ring_points(center: Vec2, radius: f64) -> Vec<Vec2> {
     (0..24)

@@ -38,7 +38,7 @@ impl Project {
         if matches!(t, Target::Lamp { .. } | Target::Pixel { .. }) {
             return;
         }
-        let lamps = self.lamps_under(t).len();
+        let lamps = self.lamp_count_under(t);
         let detail = match t {
             Target::Node(id) => match self.node(id).map(|n| &n.kind) {
                 Some(NodeKind::Fixture(f)) => {
@@ -90,6 +90,16 @@ impl Project {
             detail,
             derived: !t.is_authored(),
         });
+        // A port's children are pixels and an object's are lamps, never
+        // listed: don't make the dome's 44,000 of them only to skip them.
+        let leaves = match t {
+            Target::Port { .. } | Target::Object(_) => true,
+            Target::Component(id) => self.component(id).is_some_and(|c| c.is_single_object()),
+            _ => false,
+        };
+        if leaves {
+            return;
+        }
         for child in self.children(Some(t)) {
             self.push_rows(&child, depth + 1, patch, rows);
         }

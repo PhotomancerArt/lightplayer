@@ -319,6 +319,18 @@ impl Project {
         self.placed().of_component(id).iter().map(|(_, o)| o)
     }
 
+    /// Every object under a component — its own, then its children's — in
+    /// world units.
+    pub fn objects_under(&self, id: &ComponentId) -> Vec<&Object> {
+        let mut out: Vec<&Object> = self.objects_of(id).collect();
+        if let Some(c) = self.component(id) {
+            for child in c.children() {
+                out.extend(self.objects_under(&child.id));
+            }
+        }
+        out
+    }
+
     /// Lamps outside their own fixture's box, as (object, lamp index).
     pub fn lamps_outside(&self) -> Vec<(ObjectId, u32)> {
         let mut out = Vec::new();

@@ -36,7 +36,18 @@ pub enum PickMode {
 
 /// The things at the click's level under `p`, nearest first.
 pub fn level_candidates(f: &Project, cam: &Camera, selection: &[Target], p: Vec2) -> Vec<Target> {
-    let under = f.things_at(cam, p);
+    candidates_among(f, cam, selection, p, &f.things_at(cam, p))
+}
+
+/// [`level_candidates`], given everything under `p` (`Project::things_at`),
+/// worked out once for the whole pick.
+fn candidates_among(
+    f: &Project,
+    cam: &Camera,
+    selection: &[Target],
+    p: Vec2,
+    under: &[Target],
+) -> Vec<Target> {
     let mut level = selection.first().and_then(|s| f.parent(s));
     loop {
         let mut cands: Vec<Target> = f
@@ -65,14 +76,16 @@ pub fn pick(
     p: Vec2,
     mode: PickMode,
 ) -> Option<Target> {
-    let cands = level_candidates(f, cam, selection, p);
+    // Everything under the cursor, every level: asked once, read at each.
+    let under = f.things_at(cam, p);
+    let cands = candidates_among(f, cam, selection, p, &under);
     let nearest = cands.first()?.clone();
     match mode {
         PickMode::Press => Some(nearest),
-        PickMode::Deep => Some(deepest_from(f, cam, nearest, p)),
+        PickMode::Deep => Some(deepest_from(f, cam, nearest, p, &under)),
         PickMode::Click => {
             if selection.len() == 1 && selection[0] == nearest {
-                Some(nearest_child(f, cam, &nearest, p).unwrap_or(nearest))
+                Some(nearest_child(f, cam, &nearest, p, &under).unwrap_or(nearest))
             } else {
                 Some(nearest)
             }
@@ -89,8 +102,13 @@ pub fn pick(
     }
 }
 
-fn nearest_child(f: &Project, cam: &Camera, t: &Target, p: Vec2) -> Option<Target> {
-    let under = f.things_at(cam, p);
+fn nearest_child(
+    f: &Project,
+    cam: &Camera,
+    t: &Target,
+    p: Vec2,
+    under: &[Target],
+) -> Option<Target> {
     f.children(Some(t))
         .into_iter()
         .filter(|c| under.contains(c))
@@ -100,8 +118,8 @@ fn nearest_child(f: &Project, cam: &Camera, t: &Target, p: Vec2) -> Option<Targe
         })
 }
 
-fn deepest_from(f: &Project, cam: &Camera, mut t: Target, p: Vec2) -> Target {
-    while let Some(child) = nearest_child(f, cam, &t, p) {
+fn deepest_from(f: &Project, cam: &Camera, mut t: Target, p: Vec2, under: &[Target]) -> Target {
+    while let Some(child) = nearest_child(f, cam, &t, p, under) {
         t = child;
     }
     t
