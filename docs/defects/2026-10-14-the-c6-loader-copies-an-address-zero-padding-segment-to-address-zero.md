@@ -129,3 +129,13 @@ address-0 segment) is not one our own reader tolerates, unless something
 holds the image to what that reader accepts. Here it was "page-congruent,
 and RAM or flash". The loader cannot change after it ships, so that check
 belongs in the build, and the image is where any fix has to happen.
+
+**Later (2026-10-15): the gap itself is gone.** The "layout that never needs
+a gap" rejected above turned out to need neither esp-hal nor espflash to
+change for every image: `lp-fw-split` links the core with esp-hal's
+`.text_gap` switched off (the esp-hal fork's sixth diff), because the split
+loader maps every page a segment touches and the IDF bootloader never loads
+the core. A crossing core is now one flash segment with no padding, and the
+~20 KB it cost is back (RAM research L2;
+`docs/adr/2026-07-28-esp32c6-flash-budget.md`, 2026-10-15 amendment). The
+`.bss` re-aim stays as the second line behind it.

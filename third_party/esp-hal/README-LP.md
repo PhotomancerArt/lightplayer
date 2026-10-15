@@ -173,7 +173,7 @@ page (+ `0x20`) after rodata, because the IDF second-stage bootloader wants
 the two in separate segments (the comment above it). Both of its lines become
 `. = DEFINED(_lp_text_follows_rodata) ? . : <upstream's expression>;`. A link
 that never defines the symbol — every image the IDF bootloader loads, the
-C6 single image included — gets upstream's gap, byte for byte.
+C6 single image included — gets upstream's expressions unchanged (the 2026-10-15 single image: `.text` at `0x42060020`).
 
 `tools/lp-fw-split` defines it in both of its link passes' scripts
 (`engine_script.rs`, `TEXT_FOLLOWS_RODATA`). The IDF bootloader never loads
