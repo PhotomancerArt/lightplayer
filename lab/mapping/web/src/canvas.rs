@@ -289,14 +289,19 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         }
     };
     if let Some(c) = &context {
-        // A node's title already names it.
-        add(c, "outline-context", !matches!(c, Target::Node(_)));
+        // A node's title already names it; a port's row too.
+        add(
+            c,
+            "outline-context",
+            !matches!(c, Target::Node(_) | Target::Port { .. }),
+        );
     }
     for t in &e.selection {
-        // A node's title already names it; a port's row too.
+        // A node's title already names it; a port's row too; a pixel is
+        // named in the inspector.
         let label = !matches!(
             t,
-            Target::Lamp { .. } | Target::Node(_) | Target::Port { .. }
+            Target::Lamp { .. } | Target::Node(_) | Target::Port { .. } | Target::Pixel { .. }
         );
         add(t, "outline-selected", label);
     }

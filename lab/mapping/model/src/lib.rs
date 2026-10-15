@@ -9,7 +9,8 @@
 //! - [`Fixture`] — one physical thing: its own box, component tree and
 //!   patch rules.
 //! - [`Output`] — where pixels leave the board: a card of ports.
-//! - [`layout`] — where every node sits: automatic, inside-out, derived.
+//! - [`layout`] — where every node sits: automatic and inside-out, outputs
+//!   beside what feeds them, except where you pinned a node by dragging it.
 //! - [`Component`] — what you draw: a path, a circle, a group. It hands out
 //!   the ids of what it makes, and it holds every geometry edit.
 //! - [`Object`] — what a component makes (a path, a ring), with lamps.
@@ -19,19 +20,21 @@
 //!   pixel.
 //! - [`patch`] — a fixture's rules, and the effective patch they make
 //!   (derived, never stored).
-//! - [`edges`] — the patch drawn as edges, bundled or per object;
+//! - [`edges`] — the patch drawn as edges, first lamp to pixel, one per
+//!   object, bundled only where they would crowd;
 //!   [`highlight`] — what a selection lights up across it.
 //! - [`pixel_grid`] — where a port's pixels sit on its card: each one a
 //!   square you can select.
 //! - [`area`] — each thing's shape on screen: what's outlined is what a
 //!   click hits.
 //! - [`handle`] — the squares you drag to reshape the selection: a path's
-//!   points, a ring's radius, a fixture's size.
+//!   points (added and removed too), a ring's radius, a fixture's size.
 //! - [`pick`] — which thing a click selects (the Figma-style drill-down,
 //!   ⌥-click through overlaps).
 //! - [`props`] — properties as data; the inspector is drawn from them, for
 //!   one thing or many.
-//! - [`Editor`] — the state, driven by input events, with no IO.
+//! - [`Editor`] — the state, driven by input events, with no IO; "Move &
+//!   draw" off holds the drawing still.
 //! - [`hints`] — what the screen says you can do right now.
 //! - [`device_frame`] — the simulated board: what every port's pixels
 //!   show, from the pattern, the patch, the selection and the time;

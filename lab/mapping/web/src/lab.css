@@ -220,3 +220,4 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 /* What the menu can do here, above what's under the cursor. */
 .menu-item.menu-action { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--text); }
 .menu-item.menu-action:hover { background: var(--selection-bg); }
+.menu-item.menu-action kbd { white-space: nowrap; }

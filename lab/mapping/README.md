@@ -37,22 +37,37 @@ A 2D canvas with selection, and the start of the whole node graph on it
   are cards with one row per port. Frames are see-through: a click inside
   one selects what's in it, and the frame itself is picked by its title or
   border. An output card is not a frame: click it to select it, click again
-  for the port under the cursor.
-- **Automatic layout** (D37), inside-out: in every container the fixtures
-  and modules stack on the left and the outputs sit on the right, each at
-  the height of the first fixture patched to it.
+  for the port under the cursor, and again for the pixel (D47).
+- **Layout** (D37, D48), inside-out: in every container the fixtures and
+  modules stack top to bottom, and each output sits just to the right of
+  the first fixture that feeds it, a fixed gap away, level with its top.
+  **Dragging a node pins it** where you drop it — by its title or border,
+  an output by its card (or a port or pixel of it). The rest lay
+  themselves out around it, and nothing overlaps. A pinned node shows a
+  pin on its title; U, or "Unpin" in the right-click menu, gives it back
+  to the layout. One drag, one undo.
 - **The auto patch rule.** A fixture's lamps fill an output's ports in
   order, after earlier fixtures on the same output. The effective patch is
   derived and never stored. A rule whose output was deleted shows as a
   problem and is never retargeted.
-- **Edges are the patch** (D42): violet, one bundled edge per fixture and
-  output from outside, one per object and port from inside a fixture,
-  with an arrowhead where the data lands. Hovering an edge lights it and
-  says what it carries ("tail → GPIO 10 · lamps 0–49 at pixel 0"); it
+- **Edges are the patch** (D42, D45, D46): violet, one per object (per
+  span, when an object runs on into the next port), leaving the object's
+  FIRST lamp toward the output and landing — from the left, with an
+  arrowhead — on the PIXEL where its span starts, inside the card. They
+  don't change with the selection. A (fixture, output) pair bundles into
+  one edge only by density: more than 24 objects (the dome), or zoomed out
+  until the fixture has under 8 screen pixels per object. A bundle leaves
+  the frame's side nearest where it lands. Hovering an edge lights it and
+  says what it carries ("path1 → GPIO 10 · lamps 0–24 at pixel 0"); it
   never selects. Opening a fixture (Enter) frames it with its outputs; ⇧2
   frames the selection (an empty fixture with the outputs its rules name).
   A selected port rings the lamps it carries, and a selected object tints
   the ports it lands on.
+- **Pixels** (D47): a port's pixels are squares on its row, laid out by
+  the model (`pixel_grid.rs`), each selectable. Arrows walk them, ⇧-click
+  selects a run from the first one picked. A selected pixel breathes on
+  the board even with nothing patched to it, and the lamp on it is ringed
+  on the canvas; select a lamp and its pixel is ringed on its port.
 - **A simulated board** (D12, D16, D44): the lab is always attached to a
   board, and for now the model simulates it (`device_frame.rs`). Every
   port row on an output card shows its pixels as the board has them: a
@@ -63,7 +78,8 @@ A 2D canvas with selection, and the start of the whole node graph on it
   black but for a white band sweeping start to end every two seconds; a
   lamp selected on its own breathes white), then a selected port or
   output in channel space (its whole range breathes, patched or not —
-  D13). While you draw a path or circle, only the draft's lamps light, on
+  D13), and a selected pixel on its own (D47). While you draw a path or
+  circle, only the draft's lamps light, on
   the pixels it will take when it's finished. Lamps outside their
   fixture's box never light (D4). The page ticks at ~30 fps only while
   something moves. The seed's scarf is patched to "scarf out" (D10,
@@ -84,16 +100,27 @@ A 2D canvas with selection, and the start of the whole node graph on it
   takes what it touches, or with ⌥ only what is fully inside.
 - **⌘A climbs** a level each time you press it, out to everything you drew
   and then the nodes themselves, so ⌘A ⌫ always empties every fixture.
-- **Editing:** drag moves what's drawn, ⌫ deletes, with refusals in rustc
-  style. − and = change a count (a port's pixels too), r reverses
+- **Editing:** drag moves what's drawn (and pins a node), ⌫ deletes,
+  with refusals in rustc style. − and = change a count (a port's pixels too), r reverses
   direction, and ⌘Z undoes.
 - **Handles** (`handle.rs`): small squares on the selection — one on each
-  point of a selected path, one on each ring of a selected circle (its
-  radius), and a selected fixture's corner and right and bottom edges
-  (its size; ⇧ keeps it square). Only a drag grabs a handle; a click on
-  one is a click on what's under it. Dragging changes geometry, never a
-  count: a path keeps its lamps and respaces them, and the cursor note
-  says so. One drag, one undo.
+  point of a path, one on each ring of a circle (its radius), and a
+  selected fixture's corner and right and bottom edges (its size; ⇧ keeps
+  it square). A path's or ring's handles show while it OR anything inside
+  it is selected, a lamp included (D49). Only a drag grabs a handle — even
+  from under a selected lamp; a click on one is a click on what's under
+  it. Dragging changes geometry, never a count: a path keeps its lamps and
+  respaces them, and the cursor note says so. One drag, one undo.
+  **Points:** double-click a shaped path's segment, or right-click "Add a
+  point to … here", to add one there; ⌥-click a point's handle, or
+  right-click "Remove point N", to take one away. A path keeps at least
+  two. Handles are never assumed to sit on lamps (Béziers are coming).
+- **Move & draw** (D50): a toolbar toggle, named for what's on, and M.
+  Off, nothing moves, pins, draws or reshapes (no handles, no tools, no
+  counts or sizes that move lamps — `PropDesc::reshapes`); each try says
+  "Move & draw is off · M turns it on". Selection, pixels, the board, a
+  port's own count and reverse still work — select and patch only, for
+  the dome.
 - **Drawing:** a path tool (P, or L) and a circle tool (O). A path is
   clicked out point by point, like the product's: each click adds a
   point, the draft runs on to the cursor with its lamps lit on the board,
@@ -112,6 +139,6 @@ A 2D canvas with selection, and the start of the whole node graph on it
   what's selected — the breadcrumb says that.
 
 Not covered yet: rules other than auto, choosing a rule's output, routes,
-hand-placed nodes, other node kinds (patterns), a level above the
+other node kinds (patterns), a level above the
 project, and a real board (the simulated one stands in until the lab moves
 into Studio).
