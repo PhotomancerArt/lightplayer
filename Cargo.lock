@@ -5587,6 +5587,9 @@ dependencies = [
 [[package]]
 name = "lab-mapping-model"
 version = "40.0.0"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "lab-mapping-web"

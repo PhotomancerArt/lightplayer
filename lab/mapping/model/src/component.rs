@@ -6,7 +6,13 @@
 //! as `r3` and nothing that pointed at it moves (vision D10).
 //!
 //! Every edit to geometry lands here, even when the user makes it with an
-//! object selected — a ring's lamp count lives in its circle (D11).
+//! object selected — a ring's lamp count lives in its circle, a copy's in
+//! its repeat (D11).
+//!
+//! The kinds follow the product's shapes where it has them (D52): a path
+//! (with gaps and a `reversed` flag), a polygon, and a repeat are the
+//! product's `path`, `polygon` and `repeat`; a circle with its own rings,
+//! and a group, are the lab's (fit-check §4).
 
 use crate::geom::Vec2;
 
@@ -41,15 +47,36 @@ pub struct Component {
 pub enum ComponentKind {
     /// A run of lamps along a polyline of two or more points, the way a
     /// strip is laid: clicked out point by point. Data runs from the first
-    /// point to the last; reversing a path reverses its points. The lamp
-    /// count is its own property — moving a point respaces the lamps, it
-    /// never adds or removes one. Makes exactly one object.
-    Path { points: Vec<Vec2>, lamps: u32 },
+    /// point to the last, or from the last to the first when `reversed` —
+    /// reversing never moves a point. The lamp count is its own property —
+    /// moving a point respaces the lamps, it never adds or removes one.
+    /// `gaps` are segments of jumper wire (by index: segment `i` runs from
+    /// point `i` to the next): they carry no lamps, and the lamps keep one
+    /// pitch across the rest. Makes exactly one object.
+    Path {
+        points: Vec<Vec2>,
+        lamps: u32,
+        reversed: bool,
+        gaps: Vec<u32>,
+    },
+    /// A closed outline of three or more points (a dome's panel): lamp 0 on
+    /// the first point, the rest evenly round it. Makes exactly one object.
+    Polygon { points: Vec<Vec2>, lamps: u32 },
     /// Concentric rings around one centre. Makes one object per ring.
     Circle {
         center: Vec2,
         rings: Vec<Ring>,
         next_ring: u32,
+    },
+    /// `count` copies of one shape, turned evenly round `center`: copy `k`
+    /// is the shape turned `k · 360° / count`, clockwise. Each copy is its
+    /// own object — its own strand of wire — keyed by its number (`2`), the
+    /// product's `/sector/2`. The copies are derived: an edit to one is an
+    /// edit to the shape, so it lands on every copy (D11).
+    Repeat {
+        shape: Box<ComponentKind>,
+        center: Vec2,
+        count: u32,
     },
     /// Authored grouping: a group holds components and makes no objects of
     /// its own.
@@ -69,18 +96,17 @@ pub struct Ring {
 impl Component {
     /// What the user calls this kind of thing.
     pub fn kind_word(&self) -> &'static str {
-        match self.kind {
-            ComponentKind::Path { .. } => "path",
-            ComponentKind::Circle { .. } => "circle",
-            ComponentKind::Group { .. } => "group",
-        }
+        self.kind.word()
     }
 
     /// A path is its own object: the tree shows it as ONE row, and its
     /// lamps sit directly under it (D18's 1:1 case). Decided by kind, not
     /// by the current count, so the tree never changes shape under you.
     pub fn is_single_object(&self) -> bool {
-        matches!(self.kind, ComponentKind::Path { .. })
+        matches!(
+            self.kind,
+            ComponentKind::Path { .. } | ComponentKind::Polygon { .. }
+        )
     }
 
     pub fn children(&self) -> &[Component] {
@@ -99,19 +125,7 @@ impl Component {
 
     /// Move every point of this component (and any children) by `delta`.
     pub fn translate(&mut self, delta: Vec2) {
-        match &mut self.kind {
-            ComponentKind::Path { points, .. } => {
-                for p in points {
-                    *p = *p + delta;
-                }
-            }
-            ComponentKind::Circle { center, .. } => *center = *center + delta,
-            ComponentKind::Group { children } => {
-                for child in children {
-                    child.translate(delta);
-                }
-            }
-        }
+        self.kind.translate(delta);
     }
 }
 
@@ -121,6 +135,84 @@ impl ComponentKind {
         ComponentKind::Path {
             points,
             lamps: lamps.max(1),
+            reversed: false,
+            gaps: Vec::new(),
+        }
+    }
+
+    /// A closed outline through `points`, with `lamps` lamps round it.
+    pub fn polygon(points: Vec<Vec2>, lamps: u32) -> Self {
+        ComponentKind::Polygon {
+            points,
+            lamps: lamps.max(1),
+        }
+    }
+
+    /// `count` copies of `shape`, turned evenly round `center`.
+    pub fn repeat(shape: ComponentKind, center: Vec2, count: u32) -> Self {
+        ComponentKind::Repeat {
+            shape: Box::new(shape),
+            center,
+            count: count.max(1),
+        }
+    }
+
+    /// What the user calls this kind of thing.
+    pub fn word(&self) -> &'static str {
+        match self {
+            ComponentKind::Path { .. } => "path",
+            ComponentKind::Polygon { .. } => "polygon",
+            ComponentKind::Circle { .. } => "circle",
+            ComponentKind::Repeat { .. } => "repeat",
+            ComponentKind::Group { .. } => "group",
+        }
+    }
+
+    /// The points you drag, for a path or a polygon.
+    pub fn points(&self) -> Option<&Vec<Vec2>> {
+        match self {
+            ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. } => {
+                Some(points)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn points_mut(&mut self) -> Option<&mut Vec<Vec2>> {
+        match self {
+            ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. } => {
+                Some(points)
+            }
+            _ => None,
+        }
+    }
+
+    /// The fewest points it keeps: a path two, a polygon three.
+    pub fn min_points(&self) -> usize {
+        match self {
+            ComponentKind::Polygon { .. } => 3,
+            _ => 2,
+        }
+    }
+
+    /// Move every point of this shape (and any children) by `delta`.
+    pub fn translate(&mut self, delta: Vec2) {
+        match self {
+            ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. } => {
+                for p in points {
+                    *p = *p + delta;
+                }
+            }
+            ComponentKind::Circle { center, .. } => *center = *center + delta,
+            ComponentKind::Repeat { shape, center, .. } => {
+                *center = *center + delta;
+                shape.translate(delta);
+            }
+            ComponentKind::Group { children } => {
+                for child in children {
+                    child.translate(delta);
+                }
+            }
         }
     }
 

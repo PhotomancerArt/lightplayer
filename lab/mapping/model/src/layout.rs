@@ -10,9 +10,11 @@
 //!    or left of its inside. Pinned nodes are placed first, in authoring
 //!    order; one dropped on top of an earlier one moves down until it's
 //!    clear.
-//! 2. **fixtures and modules** stack top to bottom in authoring order, a
+//! 2. **nodes the lab doesn't edit** (a shader, a clock: `OtherNode`) stack
+//!    in a column at the left, since they feed what is to their right;
+//! 3. **fixtures and modules** stack top to bottom in authoring order, a
 //!    gap between each, stepping down past anything pinned in the way;
-//! 3. **each output** sits just to the right of the first fixture that
+//! 4. **each output** sits just to the right of the first fixture that
 //!    feeds it, a fixed gap away, level with its top — so a patch edge is
 //!    short and mostly runs left to right. An output fed by several
 //!    fixtures sits beside the first; one fed by none goes to the right of
@@ -157,17 +159,30 @@ impl Project {
                 placed[i] = Some(Rect::new(at, at + blocks[i].size));
             }
         }
-        // 2. Fixtures and modules, stacked.
+        // 2. Nodes the lab doesn't edit (a shader, a clock), in a column
+        //    at the left: they feed what's to their right.
         let mut y = 0.0;
+        let mut left = 0.0_f64;
         for (i, n) in nodes.iter().enumerate() {
-            if placed[i].is_some() || n.output().is_some() {
+            if placed[i].is_some() || n.other().is_none() {
                 continue;
             }
             let at = clear_of(Vec2::new(0.0, y), blocks[i].size, &taken(&placed));
             placed[i] = Some(Rect::new(at, at + blocks[i].size));
             y = at.y + blocks[i].size.y + NODE_GAP;
+            left = left.max(at.x + blocks[i].size.x + OUTPUT_GAP);
         }
-        // 3. Outputs, beside what feeds them.
+        // 3. Fixtures and modules, stacked.
+        let mut y = 0.0;
+        for (i, n) in nodes.iter().enumerate() {
+            if placed[i].is_some() || n.is_card() {
+                continue;
+            }
+            let at = clear_of(Vec2::new(left, y), blocks[i].size, &taken(&placed));
+            placed[i] = Some(Rect::new(at, at + blocks[i].size));
+            y = at.y + blocks[i].size.y + NODE_GAP;
+        }
+        // 4. Outputs, beside what feeds them.
         let right = taken(&placed)
             .iter()
             .map(|r| r.max.x)
@@ -211,7 +226,7 @@ impl Project {
                 size: f.size,
                 inner: Vec::new(),
             },
-            NodeKind::Output(_) => Block {
+            NodeKind::Output(_) | NodeKind::Other(_) => Block {
                 size: card_size(n),
                 inner: Vec::new(),
             },
@@ -300,9 +315,10 @@ fn clear_of(want: Vec2, size: Vec2, taken: &[Rect]) -> Vec2 {
     }
 }
 
-/// An output card's size: a header and one row per port.
+/// A card's size: a header and one row per port (a node the lab doesn't
+/// edit has one row, saying what it is).
 fn card_size(n: &Node) -> Vec2 {
-    let ports = n.output().map_or(0, |o| o.ports.len());
+    let ports = n.output().map_or(1, |o| o.ports.len());
     Vec2::new(
         CARD_WIDTH,
         CARD_HEADER + CARD_ROW * ports as f64 + CARD_FOOT,

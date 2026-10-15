@@ -124,15 +124,15 @@ impl Project {
             Target::Component(id) => {
                 let origin = self.component_origin(id);
                 match self.component(id).map(|c| &c.kind) {
-                    Some(ComponentKind::Path { points, .. }) => {
-                        out.extend(points.iter().enumerate().map(|(index, p)| Handle {
-                            kind: HandleKind::PathPoint {
-                                path: id.clone(),
-                                index,
-                            },
-                            at: *p + origin,
-                        }))
-                    }
+                    Some(
+                        ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. },
+                    ) => out.extend(points.iter().enumerate().map(|(index, p)| Handle {
+                        kind: HandleKind::PathPoint {
+                            path: id.clone(),
+                            index,
+                        },
+                        at: *p + origin,
+                    })),
                     Some(ComponentKind::Circle { center, rings, .. }) => {
                         out.extend(rings.iter().map(|r| Handle {
                             kind: HandleKind::RingRadius {
@@ -191,8 +191,8 @@ impl Project {
     /// to the next), at `at` in world units. The path keeps its lamps.
     pub fn insert_path_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) -> bool {
         let origin = self.component_origin(path);
-        match self.component_mut(path).map(|c| &mut c.kind) {
-            Some(ComponentKind::Path { points, .. }) if segment + 1 < points.len() => {
+        match self.component_mut(path).and_then(|c| c.kind.points_mut()) {
+            Some(points) if segment + 1 < points.len() => {
                 points.insert(segment + 1, at - origin);
                 true
             }
@@ -200,12 +200,15 @@ impl Project {
         }
     }
 
-    /// Take one point away from a path. Refused (false) below two points.
+    /// Take one point away from a path (or a polygon). Refused (false)
+    /// below two points (a polygon: three).
     pub fn remove_path_point(&mut self, path: &ComponentId, index: usize) -> bool {
-        match self.component_mut(path).map(|c| &mut c.kind) {
-            Some(ComponentKind::Path { points, .. })
-                if points.len() > 2 && index < points.len() =>
-            {
+        let Some(kind) = self.component_mut(path).map(|c| &mut c.kind) else {
+            return false;
+        };
+        let min = kind.min_points();
+        match kind.points_mut() {
+            Some(points) if points.len() > min && index < points.len() => {
                 points.remove(index);
                 true
             }
@@ -241,10 +244,7 @@ impl Project {
 
     /// A path's points, in its fixture's own coordinates.
     pub fn path_points(&self, id: &ComponentId) -> Option<&[Vec2]> {
-        match &self.component(id)?.kind {
-            ComponentKind::Path { points, .. } => Some(points),
-            _ => None,
-        }
+        self.component(id)?.kind.points().map(|p| p.as_slice())
     }
 
     /// Where a component's fixture puts its `(0, 0)`, in world units.
@@ -272,8 +272,7 @@ impl Project {
                 else {
                     return;
                 };
-                if let Some(ComponentKind::Path { points, .. }) =
-                    self.component_mut(path).map(|c| &mut c.kind)
+                if let Some(points) = self.component_mut(path).and_then(|c| c.kind.points_mut())
                     && let Some(p) = points.get_mut(*index)
                 {
                     *p = start + delta;

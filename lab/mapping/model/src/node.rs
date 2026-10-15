@@ -9,7 +9,9 @@
 //! A node's id is minted by the project (`module1`, `fixture2`, `output1`)
 //! and never reused, so a patch rule that names an output keeps naming it
 //! — even after the output is gone, when the rule becomes a problem rather
-//! than quietly pointing somewhere else.
+//! than quietly pointing somewhere else. A node opened from a real project
+//! keeps the product's name as its id (unique in the project; fit-check
+//! §5.6).
 //!
 //! Nothing here assumes there is only one project (D44): ids are unique
 //! within their project, and a level above the project can be added later
@@ -17,6 +19,7 @@
 
 use crate::fixture::Fixture;
 use crate::geom::Vec2;
+use crate::other_node::OtherNode;
 use crate::output::Output;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -56,6 +59,9 @@ pub enum NodeKind {
     Fixture(Fixture),
     /// Where pixels leave the board: a card with ports.
     Output(Output),
+    /// Anything else in a real project (a shader, a clock): a plain card,
+    /// carried along, never edited here.
+    Other(OtherNode),
 }
 
 impl Node {
@@ -65,6 +71,7 @@ impl Node {
             NodeKind::Module { .. } => "module",
             NodeKind::Fixture(_) => "fixture",
             NodeKind::Output(_) => "output",
+            NodeKind::Other(_) => "node",
         }
     }
 
@@ -114,6 +121,19 @@ impl Node {
             NodeKind::Output(o) => Some(o),
             _ => None,
         }
+    }
+
+    pub fn other(&self) -> Option<&OtherNode> {
+        match &self.kind {
+            NodeKind::Other(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// Drawn as a card (an output, or a node the lab doesn't edit), not a
+    /// frame.
+    pub fn is_card(&self) -> bool {
+        matches!(self.kind, NodeKind::Output(_) | NodeKind::Other(_))
     }
 }
 

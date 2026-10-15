@@ -76,8 +76,8 @@ impl Project {
     /// One port's pixel grid, in world units.
     pub fn pixel_grid(&self, output: &NodeId, key: &str) -> Option<PixelGrid> {
         let row = self.port_rect(output, key)?;
-        let pixels = self.output(output)?.port(key)?.pixels;
-        Some(PixelGrid::in_row(row, pixels))
+        self.output(output)?.port(key)?;
+        Some(PixelGrid::in_row(row, self.port_pixels(output, key)))
     }
 
     /// One pixel's square, in world units.

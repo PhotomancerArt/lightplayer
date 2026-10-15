@@ -661,17 +661,23 @@ impl Editor {
         }
     }
 
-    /// Take a point away from a path; refused below two points.
+    /// Take a point away from a path (or a polygon); refused below two
+    /// points (three).
     pub fn remove_point(&mut self, path: &ComponentId, index: usize) {
         if !self.move_draw {
             self.refuse_move_draw(&format!("remove a point of {path}"));
             return;
         }
         let n = self.project.path_points(path).map_or(0, |p| p.len());
-        if n <= 2 {
+        let (min, word) = match self.project.component(path) {
+            Some(c) => (c.kind.min_points(), c.kind_word()),
+            None => (2, "path"),
+        };
+        if n <= min {
+            let least = if min == 3 { "three" } else { "two" };
             self.notice = Some(Notice::refused(
                 format!("Can't remove a point of {path}"),
-                "a path needs at least two points",
+                format!("a {word} needs at least {least} points"),
                 format!("delete {path} itself (select it, then ⌫), or drag this point instead"),
             ));
             return;
@@ -1182,12 +1188,7 @@ impl Editor {
                     f.object(object).map(|o| o.lamps.len() as u32).unwrap_or(0),
                     index,
                 ),
-                Target::Pixel { output, key, index } => (
-                    f.output(output)
-                        .and_then(|o| o.port(key))
-                        .map_or(0, |p| p.pixels),
-                    index,
-                ),
+                Target::Pixel { output, key, index } => (f.port_pixels(output, key), index),
                 _ => continue,
             };
             if n > 0 && *index >= n {

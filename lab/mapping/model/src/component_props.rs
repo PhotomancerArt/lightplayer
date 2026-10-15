@@ -26,6 +26,14 @@ pub const RINGS: PropDesc = PropDesc {
     nudge: true,
     reshapes: true,
 };
+/// A repeat's copies. Not on −/=, which change its lamps.
+pub const COPIES: PropDesc = PropDesc {
+    id: "copies",
+    label: "Copies",
+    kind: PropKind::Count { min: 1 },
+    nudge: false,
+    reshapes: true,
+};
 pub const RADIUS: PropDesc = PropDesc {
     id: "radius",
     label: "Radius",
@@ -84,12 +92,19 @@ impl Project {
                 None => Vec::new(),
             },
             Target::Port { output, key } => match self.output(output).and_then(|o| o.port(key)) {
-                Some(p) => vec![(PIXELS, PropRaw::Count(p.pixels as i64))],
+                Some(_) => vec![(PIXELS, PropRaw::Count(self.port_pixels(output, key) as i64))],
                 None => Vec::new(),
             },
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
-                Some(ComponentKind::Path { lamps, .. }) => {
+                Some(ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. }) => {
                     vec![(LAMPS, PropRaw::Count(*lamps as i64))]
+                }
+                Some(ComponentKind::Repeat { shape, count, .. }) => {
+                    let mut props = shape_lamps(shape)
+                        .map(|n| vec![(LAMPS, PropRaw::Count(n as i64))])
+                        .unwrap_or_default();
+                    props.push((COPIES, PropRaw::Count(*count as i64)));
+                    props
                 }
                 Some(ComponentKind::Circle { rings, .. }) => vec![
                     (RINGS, PropRaw::Count(rings.len() as i64)),
@@ -106,7 +121,13 @@ impl Project {
                     (RADIUS, PropRaw::Number(r.radius)),
                     (COUNTER_CLOCKWISE, PropRaw::Flag(r.reversed)),
                 ],
-                None => Vec::new(),
+                // A copy's lamps are its repeat's shape's (D11).
+                None => match self.component(&o.component).map(|c| &c.kind) {
+                    Some(ComponentKind::Repeat { shape, .. }) => shape_lamps(shape)
+                        .map(|n| vec![(LAMPS, PropRaw::Count(n as i64))])
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                },
             },
             Target::Lamp { .. } | Target::Pixel { .. } => Vec::new(),
         }
@@ -126,7 +147,7 @@ impl Project {
                     return false;
                 };
                 match (prop_id, new) {
-                    ("pixels", PropRaw::Count(n)) => p.pixels = n as u32,
+                    ("pixels", PropRaw::Count(n)) => p.pixels = Some(n as u32),
                     _ => return false,
                 }
             }
@@ -142,8 +163,19 @@ impl Project {
             }
             Target::Component(id) => {
                 match (self.component_mut(id).map(|c| &mut c.kind), prop_id, new) {
-                    (Some(ComponentKind::Path { lamps, .. }), "lamps", PropRaw::Count(n)) => {
-                        *lamps = n as u32
+                    (
+                        Some(
+                            ComponentKind::Path { lamps, .. }
+                            | ComponentKind::Polygon { lamps, .. },
+                        ),
+                        "lamps",
+                        PropRaw::Count(n),
+                    ) => *lamps = n as u32,
+                    (Some(ComponentKind::Repeat { shape, .. }), "lamps", PropRaw::Count(n)) => {
+                        set_shape_lamps(shape, n as u32)
+                    }
+                    (Some(ComponentKind::Repeat { count, .. }), "copies", PropRaw::Count(n)) => {
+                        *count = n as u32
                     }
                     (
                         Some(ComponentKind::Circle {
@@ -159,6 +191,19 @@ impl Project {
                 }
             }
             Target::Object(o) => {
+                if self.ring(&o.component, &o.key).is_none() {
+                    return match (
+                        self.component_mut(&o.component).map(|c| &mut c.kind),
+                        prop_id,
+                        new,
+                    ) {
+                        (Some(ComponentKind::Repeat { shape, .. }), "lamps", PropRaw::Count(n)) => {
+                            set_shape_lamps(shape, n as u32);
+                            true
+                        }
+                        _ => false,
+                    };
+                }
                 let Some(r) = self.ring_mut(&o.component, &o.key) else {
                     return false;
                 };
@@ -186,6 +231,24 @@ impl Project {
             ComponentKind::Circle { rings, .. } => rings.iter_mut().find(|r| r.key == key),
             _ => None,
         }
+    }
+}
+
+/// The lamps of a repeat's shape, when it has one count (a path, a
+/// polygon, a repeat of one).
+fn shape_lamps(kind: &ComponentKind) -> Option<u32> {
+    match kind {
+        ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. } => Some(*lamps),
+        ComponentKind::Repeat { shape, .. } => shape_lamps(shape),
+        _ => None,
+    }
+}
+
+fn set_shape_lamps(kind: &mut ComponentKind, n: u32) {
+    match kind {
+        ComponentKind::Path { lamps, .. } | ComponentKind::Polygon { lamps, .. } => *lamps = n,
+        ComponentKind::Repeat { shape, .. } => set_shape_lamps(shape, n),
+        _ => {}
     }
 }
 

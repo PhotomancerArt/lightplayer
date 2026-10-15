@@ -279,11 +279,20 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
             Some(NodeKind::Output(o)) => {
                 for p in &o.ports {
                     let used = patch.used(id, &p.key);
+                    let pixels = f.port_pixels(id, &p.key);
+                    let rest = if p.pixels.is_none() {
+                        " (the rest)"
+                    } else {
+                        ""
+                    };
                     out.ports.push((
                         p.name.clone(),
-                        format!("{used}/{} px · {}", p.pixels, p.format.word()),
-                        (used as f64 / p.pixels.max(1) as f64).min(1.0),
+                        format!("{used}/{pixels} px{rest}{}", orders(f, id, &p.key)),
+                        (used as f64 / pixels.max(1) as f64).min(1.0),
                     ));
+                }
+                if let Some(label) = &o.label {
+                    out.facts.push(format!("Patches name it “{label}”"));
                 }
                 let feeds: Vec<String> = f
                     .fixtures()
@@ -296,6 +305,8 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
                 }
             }
             Some(NodeKind::Fixture(fx)) => {
+                out.facts
+                    .push(format!("Colour order {}", fx.color_order.word()));
                 if fx.rules.is_empty() {
                     out.patch.push("No rule: its lamps go nowhere yet".into());
                 }
@@ -330,14 +341,25 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
                     children.len()
                 ));
             }
+            Some(NodeKind::Other(o)) => {
+                out.facts.push(format!(
+                    "A {} node: on the canvas, carried along, not edited here",
+                    o.kind_words()
+                ));
+            }
             None => return None,
         },
         Target::Port { output, key } => {
             let port = f.output(output)?.port(key)?;
             let (used, pixels) = f.port_fill(output, key);
+            let rest = if port.pixels.is_none() {
+                " · takes the rest"
+            } else {
+                ""
+            };
             out.facts.push(format!(
-                "{used} of {pixels} px used · {} · on {}",
-                port.format.word(),
+                "{used} of {pixels} px used{rest}{} · on {}",
+                orders(f, output, key),
                 f.node_name(output)
             ));
             let mut by: Vec<String> = Vec::new();
@@ -347,11 +369,12 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
                 .filter(|s| &s.output == output && &s.port == key)
             {
                 by.push(format!(
-                    "{} lamps {}–{} at {}",
+                    "{} lamps {}–{} at {}{}",
                     f.long_label(&f.object_target(&s.object)),
                     s.lamps.start,
                     s.lamps.end - 1,
-                    s.start_pixel
+                    s.start_pixel,
+                    if s.reversed { " (running down)" } else { "" }
                 ));
             }
             if by.is_empty() {
@@ -360,15 +383,15 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
             out.facts.extend(by);
         }
         Target::Pixel { output, key, index } => {
-            let port = f.output(output)?.port(key)?;
+            f.output(output)?.port(key)?;
             out.facts.push(format!(
-                "Pixel {index} of {} on {} · {}",
-                port.pixels,
+                "Pixel {index} of {} on {}{}",
+                f.port_pixels(output, key),
                 f.long_label(&Target::Port {
                     output: output.clone(),
                     key: key.clone(),
                 }),
-                port.format.word()
+                orders(f, output, key)
             ));
             out.facts.push(match f.lamp_on_pixel(output, key, *index) {
                 Some(lamp) => format!(
@@ -523,5 +546,20 @@ fn HintRow(label: &'static str, hints: Vec<Hint>, quiet: bool) -> Element {
                 }
             }
         }
+    }
+}
+
+/// The colour orders landing on a port, for its line: ` · GRB`, or
+/// ` · GRB + RGB (mixed)` when two fixtures disagree.
+fn orders(f: &Project, output: &lab_mapping_model::NodeId, key: &str) -> String {
+    let words: Vec<&str> = f
+        .color_orders_on(output, key)
+        .into_iter()
+        .map(|c| c.word())
+        .collect();
+    match words.len() {
+        0 => String::new(),
+        1 => format!(" · {}", words[0]),
+        _ => format!(" · {} (mixed)", words.join(" + ")),
     }
 }

@@ -21,18 +21,24 @@ pub struct TreeRow {
 impl Project {
     pub fn tree_rows(&self) -> Vec<TreeRow> {
         let mut rows = Vec::new();
+        let patch = self.effective_patch();
         for t in self.children(None) {
-            self.push_rows(&t, 0, &mut rows);
+            self.push_rows(&t, 0, &patch, &mut rows);
         }
         rows
     }
 
-    fn push_rows(&self, t: &Target, depth: usize, rows: &mut Vec<TreeRow>) {
+    fn push_rows(
+        &self,
+        t: &Target,
+        depth: usize,
+        patch: &crate::EffectivePatch,
+        rows: &mut Vec<TreeRow>,
+    ) {
         if matches!(t, Target::Lamp { .. } | Target::Pixel { .. }) {
             return;
         }
         let lamps = self.lamps_under(t).len();
-        let patch = self.effective_patch();
         let detail = match t {
             Target::Node(id) => match self.node(id).map(|n| &n.kind) {
                 Some(NodeKind::Fixture(f)) => {
@@ -43,15 +49,17 @@ impl Project {
                 }
                 Some(NodeKind::Output(o)) => {
                     let used: u32 = o.ports.iter().map(|p| patch.used(id, &p.key)).sum();
-                    format!("{} ports · {used}/{} px", o.ports.len(), o.pixels())
+                    format!(
+                        "{} ports · {used}/{} px",
+                        o.ports.len(),
+                        self.output_pixels(id)
+                    )
                 }
+                Some(NodeKind::Other(o)) => o.kind_words(),
                 None => String::new(),
             },
             Target::Port { output, key } => {
-                let pixels = self
-                    .output(output)
-                    .and_then(|o| o.port(key))
-                    .map_or(0, |p| p.pixels);
+                let pixels = self.port_pixels(output, key);
                 format!("{}/{pixels} px", patch.used(output, key))
             }
             Target::Component(id) => match self.component(id).map(|c| &c.kind) {
@@ -60,6 +68,9 @@ impl Project {
                 }
                 Some(ComponentKind::Group { children }) => {
                     format!("{} parts · {lamps} lamps", children.len())
+                }
+                Some(ComponentKind::Repeat { count, .. }) => {
+                    format!("{count} copies · {lamps} lamps")
                 }
                 _ => format!("{lamps} lamps"),
             },
@@ -80,7 +91,7 @@ impl Project {
             derived: !t.is_authored(),
         });
         for child in self.children(Some(t)) {
-            self.push_rows(&child, depth + 1, rows);
+            self.push_rows(&child, depth + 1, patch, rows);
         }
     }
 }

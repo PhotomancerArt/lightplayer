@@ -8,17 +8,22 @@
 //!   One canvas for the whole graph (D36, D43).
 //! - [`Fixture`] — one physical thing: its own box, component tree and
 //!   patch rules.
-//! - [`Output`] — where pixels leave the board: a card of ports.
+//! - [`Output`] — where pixels leave the board: a card of ports that make
+//!   one flat wire. [`OtherNode`] — anything else a real project holds (a
+//!   shader, a clock): a plain card, never edited here.
 //! - [`layout`] — where every node sits: automatic and inside-out, outputs
 //!   beside what feeds them, except where you pinned a node by dragging it.
-//! - [`Component`] — what you draw: a path, a circle, a group. It hands out
-//!   the ids of what it makes, and it holds every geometry edit.
+//! - [`Component`] — what you draw: a path, a polygon, a circle, a repeat,
+//!   a group. It hands out the ids of what it makes, and it holds every
+//!   geometry edit. [`resolve`] — where its lamps land, in the product's
+//!   own f32 arithmetic, so they are the device's lamps bit for bit.
 //! - [`Object`] — what a component makes (a path, a ring), with lamps.
 //!   Derived, never stored.
 //! - [`Target`] — anything you can select, in ONE tree: module → fixture →
 //!   group → path → lamp, fixture → circle → ring → lamp, output → port →
 //!   pixel.
-//! - [`patch`] — a fixture's rules, and the effective patch they make
+//! - [`patch`] — a fixture's rules (auto, and place: this object on that
+//!   port's pixel, reversed, turned), and the effective patch they make
 //!   (derived, never stored).
 //! - [`edges`] — the patch drawn as edges, first lamp to pixel, one per
 //!   object, bundled only where they would crowd;
@@ -46,6 +51,7 @@
 
 pub mod area;
 pub mod camera;
+pub mod color_order;
 pub mod commands;
 pub mod component;
 pub mod component_props;
@@ -62,18 +68,21 @@ pub mod layout;
 pub mod node;
 pub mod notice;
 pub mod object;
+pub mod other_node;
 pub mod output;
 pub mod patch;
 pub mod pick;
 pub mod pixel_grid;
 pub mod project;
 pub mod props;
+pub mod resolve;
 pub mod rgb;
 pub mod target;
 pub mod tree_rows;
 
 pub use area::Area;
 pub use camera::Camera;
+pub use color_order::ColorOrder;
 pub use component::{Component, ComponentId, ComponentKind, Ring};
 pub use data_path::{DataEntry, DataPath};
 pub use device_frame::{DeviceFrame, PortFrame};
@@ -89,8 +98,9 @@ pub use layout::Layout;
 pub use node::{Node, NodeId, NodeKind};
 pub use notice::{Notice, NoticeKind};
 pub use object::{Lamp, Object, ObjectId, ObjectShape};
-pub use output::{Output, PixelFormat, Port};
-pub use patch::{EffectivePatch, PatchProblem, PatchRule, Span, Unpatched};
+pub use other_node::OtherNode;
+pub use output::{Output, Port};
+pub use patch::{EffectivePatch, Gone, PatchProblem, PatchRule, Span, Unpatched};
 pub use pick::{PickMode, pick};
 pub use pixel_grid::PixelGrid;
 pub use project::Project;

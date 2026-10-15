@@ -78,10 +78,7 @@ impl Editor {
                     }
                 }
                 Target::Pixel { output, key, .. } => {
-                    let n = f
-                        .output(output)
-                        .and_then(|o| o.port(key))
-                        .map_or(0, |p| p.pixels);
+                    let n = f.port_pixels(output, key);
                     let port = t.port_of_pixel().unwrap_or_else(|| t.clone());
                     refused.push((
                         t.clone(),
@@ -258,7 +255,9 @@ impl Editor {
     }
 
     /// r: reverse the data direction. A path runs from its last point to
-    /// its first; a ring runs the other way round. A selected lamp stays the same physical lamp.
+    /// its first (its `reversed` flag: no point moves); a ring runs the
+    /// other way round; a repeat of a path reverses the path, so every copy.
+    /// A selected lamp stays the same physical lamp.
     pub fn reverse(&mut self) {
         let targets = self.edit_targets();
         if targets.is_empty() {
@@ -281,20 +280,23 @@ impl Editor {
             return;
         }
         self.checkpoint();
+        // A repeat's copies share one shape: reverse it once.
+        let mut whole: Vec<crate::ComponentId> = Vec::new();
         for t in &targets {
             match t {
                 Target::Component(id) => {
-                    match self.project.component_mut(id).map(|c| &mut c.kind) {
-                        Some(ComponentKind::Path { points, .. }) => points.reverse(),
-                        Some(ComponentKind::Circle { rings, .. }) => {
-                            rings.iter_mut().for_each(|r| r.reversed = !r.reversed)
-                        }
-                        _ => {}
+                    if let Some(c) = self.project.component_mut(id) {
+                        reverse_kind(&mut c.kind);
                     }
                 }
                 Target::Object(o) => {
                     if let Some(r) = self.project.ring_mut(&o.component, &o.key) {
                         r.reversed = !r.reversed;
+                    } else if !whole.contains(&o.component)
+                        && let Some(c) = self.project.component_mut(&o.component)
+                    {
+                        reverse_kind(&mut c.kind);
+                        whole.push(o.component.clone());
                     }
                 }
                 Target::Lamp { .. }
@@ -311,13 +313,11 @@ impl Editor {
                 if n == 0 {
                     continue;
                 }
-                let path = f
-                    .component(&object.component)
-                    .is_some_and(|c| c.is_single_object());
-                *index = if path {
-                    n - 1 - *index
-                } else {
+                let ring = f.ring(&object.component, &object.key).is_some();
+                *index = if ring {
                     (n - *index) % n
+                } else {
+                    n - 1 - *index
                 };
             }
         }
@@ -358,11 +358,38 @@ impl crate::Project {
     /// Paths, circles, rings and lamps have a data direction; groups,
     /// nodes and ports don't.
     pub fn has_direction(&self, t: &Target) -> bool {
+        let kind_has = |id: &crate::ComponentId| {
+            self.component(id)
+                .is_some_and(|c| kind_has_direction(&c.kind))
+        };
         match t {
-            Target::Component(_) => !matches!(self.kind_word(t), "group"),
-            Target::Object(_) | Target::Lamp { .. } => true,
+            Target::Component(id) => kind_has(id),
+            Target::Object(o) | Target::Lamp { object: o, .. } => kind_has(&o.component),
             Target::Node(_) | Target::Port { .. } | Target::Pixel { .. } => false,
         }
+    }
+}
+
+/// A path and a ring have a direction of their own; a polygon (as in the
+/// product) and a group don't; a repeat has its shape's.
+fn kind_has_direction(kind: &ComponentKind) -> bool {
+    match kind {
+        ComponentKind::Path { .. } | ComponentKind::Circle { .. } => true,
+        ComponentKind::Repeat { shape, .. } => kind_has_direction(shape),
+        ComponentKind::Polygon { .. } | ComponentKind::Group { .. } => false,
+    }
+}
+
+/// Reverse a whole component's direction: a path's flag, every ring of a
+/// circle, a repeat's shape.
+fn reverse_kind(kind: &mut ComponentKind) {
+    match kind {
+        ComponentKind::Path { reversed, .. } => *reversed = !*reversed,
+        ComponentKind::Circle { rings, .. } => {
+            rings.iter_mut().for_each(|r| r.reversed = !r.reversed)
+        }
+        ComponentKind::Repeat { shape, .. } => reverse_kind(shape),
+        ComponentKind::Polygon { .. } | ComponentKind::Group { .. } => {}
     }
 }
 

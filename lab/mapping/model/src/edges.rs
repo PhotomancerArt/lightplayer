@@ -221,7 +221,7 @@ impl Editor {
             output: s.output.clone(),
             key: s.port.clone(),
         };
-        let pixels = s.start_pixel..s.start_pixel + s.lamps.len() as u32;
+        let pixels = s.pixels();
         let from_at = p
             .object(&s.object)
             .and_then(|o| o.lamps.get(s.lamps.start as usize).map(|l| l.pos))
@@ -274,7 +274,7 @@ impl Editor {
             output: s.output.clone(),
             key: s.port.clone(),
         };
-        let span_pixels = |s: &Span| s.start_pixel..s.start_pixel + s.lamps.len() as u32;
+        let span_pixels = |s: &Span| s.pixels();
         Edge {
             label: format!("{lamps} lamp{}", if lamps == 1 { "" } else { "s" }),
             carries: bundle_carries(p, fixture, spans),
@@ -403,7 +403,7 @@ fn bundle_carries(p: &Project, fixture: &NodeId, spans: &[&Span]) -> String {
             key: s.port.clone(),
         });
         match runs.last_mut() {
-            Some(r) if r.0 == port && r.2 == lamp && r.4 == s.start_pixel => {
+            Some(r) if r.0 == port && r.2 == lamp && r.4 == s.start_pixel && !s.reversed => {
                 r.2 += n;
                 r.4 += n;
             }

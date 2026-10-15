@@ -555,10 +555,7 @@ fn an_output_sits_beside_the_fixture_that_feeds_it() {
         );
     }
     // One that nothing feeds goes to the right of everything.
-    let spare = e
-        .project
-        .add_output(None, "spare", &[("D5", 10, PixelFormat::Grb)])
-        .unwrap();
+    let spare = e.project.add_output(None, "spare", &[("D5", 10)]).unwrap();
     let r = e.project.node_rect(&spare).unwrap();
     let others = e
         .project
@@ -628,12 +625,12 @@ fn a_module_is_see_through() {
 fn clicking_an_output_then_again_selects_a_port() {
     let mut e = editor();
     let main = node_id(&e, "main");
-    let d1 = e.project.port_rect(&main, "p2").unwrap();
+    let d1 = e.project.port_rect(&main, "1").unwrap();
     let at = d1.min.lerp(d1.max, 0.5);
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![Target::Node(main.clone())]);
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![port(&main, "p2")]);
+    assert_eq!(e.selection, vec![port(&main, "1")]);
     assert_eq!(e.project.label(&e.selection[0]), "D1");
 }
 
@@ -645,16 +642,16 @@ fn the_auto_rule_fills_ports_in_order() {
     let p = &e.project;
     let main = node_id(&e, "main");
     let tail_out = node_id(&e, "tail out");
-    assert_eq!(p.port_fill(&main, "p1"), (64, 64));
-    assert_eq!(p.port_fill(&main, "p2"), (30, 30));
-    assert_eq!(p.port_fill(&tail_out, "p1"), (50, 60));
+    assert_eq!(p.port_fill(&main, "0"), (64, 64));
+    assert_eq!(p.port_fill(&main, "1"), (30, 30));
+    assert_eq!(p.port_fill(&tail_out, "0"), (50, 60));
     let patch = p.effective_patch();
     assert!(patch.unpatched.is_empty() && patch.problems.is_empty());
     // The ring display's lamps: r1 then r2, in data order, from pixel 0.
     let d0: Vec<(String, std::ops::Range<u32>, u32)> = patch
         .spans
         .iter()
-        .filter(|s| s.output == main && s.port == "p1")
+        .filter(|s| s.output == main && s.port == "0")
         .map(|s| (s.object.key.clone(), s.lamps.clone(), s.start_pixel))
         .collect();
     assert_eq!(d0, vec![("r1".into(), 0..40, 0), ("r2".into(), 0..24, 40)]);
@@ -687,29 +684,25 @@ fn patch_edges_match_the_effective_patch() {
         vec![
             (
                 comp("path1"),
-                port(&tail_out, "p1"),
+                port(&tail_out, "0"),
                 "lamps 0–24 → GPIO 10 @0".into()
             ),
             (
                 comp("path2"),
-                port(&tail_out, "p1"),
+                port(&tail_out, "0"),
                 "lamps 0–24 → GPIO 10 @25".into()
             ),
             (
                 ring("circle1", "r1"),
-                port(&main, "p1"),
+                port(&main, "0"),
                 "lamps 0–39 → D0 @0".into()
             ),
             (
                 ring("circle1", "r2"),
-                port(&main, "p1"),
+                port(&main, "0"),
                 "lamps 0–23 → D0 @40".into()
             ),
-            (
-                comp("path3"),
-                port(&main, "p2"),
-                "lamps 0–29 → D1 @0".into()
-            ),
+            (comp("path3"), port(&main, "1"), "lamps 0–29 → D1 @0".into()),
         ]
     );
     assert!(edges.iter().all(|x| !x.bundled && x.active));
@@ -731,11 +724,11 @@ fn an_edge_runs_from_the_first_lamp_to_its_pixel() {
     // path2 enters at its top (its first point) and lands on pixel 25.
     let x = edge(&e, comp("path2"));
     assert_eq!(x.from_at, lamp_pos(&e, "path2", "path", 0));
-    assert_eq!(x.to_at, left_of(&e, &tail_out, "p1", 25));
+    assert_eq!(x.to_at, left_of(&e, &tail_out, "0", 25));
     // r2 from its lamp 0, onto pixel 40 of D0, after r1's 40.
     let x = edge(&e, ring("circle1", "r2"));
     assert_eq!(x.from_at, lamp_pos(&e, "circle1", "r2", 0));
-    assert_eq!(x.to_at, left_of(&e, &main, "p1", 40));
+    assert_eq!(x.to_at, left_of(&e, &main, "0", 40));
     // The curve heads for the output and comes in from the left.
     let [a, c1, c2, b] = x.curve(&e.camera);
     assert!((c1 - a).x > 0.0, "leaves toward the output, on its right");
@@ -769,8 +762,8 @@ fn edges_bundle_by_density_not_selection() {
         vec![fixture(&e, "tail")],
         vec![comp("path2")],
         vec![lamp("circle1", "r2", 4)],
-        vec![port(&main, "p1")],
-        vec![pixel(&main, "p2", 7)],
+        vec![port(&main, "0")],
+        vec![pixel(&main, "1", 7)],
     ] {
         e.select(selection.clone());
         assert_eq!(shape(&e), before, "{selection:?}");
@@ -875,16 +868,16 @@ fn deleting_an_output_leaves_problems_not_retargets() {
 fn a_selected_port_highlights_its_lamps() {
     let e = editor();
     let main = node_id(&e, "main");
-    let d1 = e.project.lamps_on_port(&main, "p2");
+    let d1 = e.project.lamps_on_port(&main, "1");
     let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
     assert_eq!(d1, (0..30).map(|i| (path3.clone(), i)).collect::<Vec<_>>());
-    let d0 = e.project.lamps_on_port(&main, "p1");
+    let d0 = e.project.lamps_on_port(&main, "0");
     assert_eq!(d0.len(), 64);
     assert!(d0.iter().all(|(o, _)| o.component.as_str() == "circle1"));
     // And the other way: the ring display lands on D0 only.
     assert_eq!(
         e.project.ports_of(&fixture(&e, "ring display")),
-        vec![port(&main, "p1")]
+        vec![port(&main, "0")]
     );
 }
 
@@ -899,7 +892,7 @@ fn only_edges_on_the_selection_are_labelled() {
     );
 
     let main = node_id(&e, "main");
-    e.select(vec![port(&main, "p2")]);
+    e.select(vec![port(&main, "1")]);
     let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
     assert_eq!(labelled.len(), 1, "only the strip's edge lands on D1");
     assert_eq!(labelled[0].from, comp("path3"));
@@ -1157,9 +1150,10 @@ fn a_paths_lamps_are_spread_along_its_length() {
     assert!(lamps[0].distance(origin + Vec2::new(10.0, 10.0)) < 1e-9);
     assert!(lamps[20].distance(origin + Vec2::new(40.0, 28.0)) < 1e-9);
     // Evenly along the path: lamp 12 is 28.8 along, on the first leg;
-    // lamp 13 is 31.2 along, 1.2 down the second.
-    assert!(lamps[12].distance(origin + Vec2::new(38.8, 10.0)) < 1e-9);
-    assert!(lamps[13].distance(origin + Vec2::new(40.0, 11.2)) < 1e-9);
+    // lamp 13 is 31.2 along, 1.2 down the second. (To f32: the product's
+    // arithmetic.)
+    assert!(lamps[12].distance(origin + Vec2::new(38.8, 10.0)) < 1e-4);
+    assert!(lamps[13].distance(origin + Vec2::new(40.0, 11.2)) < 1e-4);
 }
 
 /// Drawing that starts outside every fixture is refused, with where to
@@ -1451,7 +1445,7 @@ fn every_offered_key_does_something() {
     let main = node_id(&e0, "main");
     let starts = [
         ring("circle1", "r2"),
-        port(&main, "p1"),
+        port(&main, "0"),
         Target::Node(main.clone()),
         fixture(&e0, "tail rig"),
         fixture(&e0, "strip"),
@@ -1499,7 +1493,7 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
     let e = editor();
     let frame = e.device_frame(0.0);
     let tail_out = node_id(&e, "tail out");
-    let gpio10 = frame.port(&tail_out, "p1").unwrap();
+    let gpio10 = frame.port(&tail_out, "0").unwrap();
     assert_eq!(gpio10.len(), 60);
     assert!(
         gpio10[..50].iter().all(|px| !px.is_black()),
@@ -1510,7 +1504,7 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
         "10 spare pixels"
     );
     let main = node_id(&e, "main");
-    for key in ["p1", "p2"] {
+    for key in ["0", "1"] {
         assert!(
             frame
                 .port(&main, key)
@@ -1522,7 +1516,7 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
     let scarf_out = node_id(&e, "scarf out");
     assert!(
         frame
-            .port(&scarf_out, "p1")
+            .port(&scarf_out, "0")
             .unwrap()
             .iter()
             .all(|px| px.is_black()),
@@ -1541,11 +1535,11 @@ fn selecting_a_lamp_lights_exactly_its_pixel() {
     assert!(e.board_animates());
     let frame = e.device_frame(CREST);
     let main = node_id(&e, "main");
-    let d1 = frame.port(&main, "p2").unwrap();
+    let d1 = frame.port(&main, "1").unwrap();
     assert_eq!(d1[4], Rgb::WHITE);
     for (port, plain_port) in frame.ports.iter().zip(&plain.ports) {
         for (i, (px, was)) in port.pixels.iter().zip(&plain_port.pixels).enumerate() {
-            if port.output == main && port.key == "p2" && i == 4 {
+            if port.output == main && port.key == "1" && i == 4 {
                 continue;
             }
             assert!(
@@ -1567,7 +1561,7 @@ fn selecting_a_lamp_lights_exactly_its_pixel() {
     // It breathes: dimmer at the start of a breath than at its crest, but
     // even then brighter than anything dimmed.
     let low = e.device_frame(0.0);
-    let lowest = low.port(&main, "p2").unwrap()[4];
+    let lowest = low.port(&main, "1").unwrap()[4];
     assert!(lowest.level() < Rgb::WHITE.level());
     let dimmed = low
         .ports
@@ -1616,7 +1610,7 @@ fn a_lamp_outside_its_box_is_never_lit() {
     ] {
         e.select(selection.clone());
         let frame = e.device_frame(CREST);
-        let gpio10 = frame.port(&tail_out, "p1").unwrap();
+        let gpio10 = frame.port(&tail_out, "0").unwrap();
         assert!(
             !gpio10[50].is_black() && !gpio10[51].is_black(),
             "{selection:?}"
@@ -1645,7 +1639,7 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     e.pointer_move(b, none());
     assert!(e.board_animates());
     let frame = e.device_frame(0.0);
-    let d10 = frame.port(&scarf_out, "p1").unwrap();
+    let d10 = frame.port(&scarf_out, "0").unwrap();
     let lit: Vec<usize> = (0..d10.len()).filter(|i| !d10[*i].is_black()).collect();
     assert_eq!(lit, (11..22).collect::<Vec<_>>());
     assert!(lit.iter().all(|i| d10[*i] == Rgb::WHITE));
@@ -1689,7 +1683,7 @@ fn pressing_equals_lights_one_more_pixel() {
     // start on the next.
     let ends = |e: &Editor| {
         let frame = e.device_frame(CREST);
-        let gpio10 = frame.port(&tail_out, "p1").unwrap().to_vec();
+        let gpio10 = frame.port(&tail_out, "0").unwrap().to_vec();
         let last_red = gpio10
             .iter()
             .rposition(|px| *px == device_frame::END_COLOUR)
@@ -1713,7 +1707,7 @@ fn a_selected_object_shows_lp2014s_pattern() {
     e.select(vec![comp("path3")]);
     let band = |t: f64| {
         let frame = e.device_frame(t);
-        let d1 = frame.port(&main, "p2").unwrap().to_vec();
+        let d1 = frame.port(&main, "1").unwrap().to_vec();
         assert!(d1[..3].iter().all(|px| *px == device_frame::START_COLOUR));
         assert!(d1[27..].iter().all(|px| *px == device_frame::END_COLOUR));
         let middle = &d1[3..27];
@@ -1745,7 +1739,7 @@ fn a_selected_object_shows_lp2014s_pattern() {
     // shows it on each — 3 at each end of both.
     e.select(vec![comp("group1")]);
     let frame = e.device_frame(0.5);
-    let gpio10 = frame.port(&node_id(&e, "tail out"), "p1").unwrap().to_vec();
+    let gpio10 = frame.port(&node_id(&e, "tail out"), "0").unwrap().to_vec();
     for start in [0, 25] {
         assert!(
             gpio10[start..start + 3]
@@ -1786,7 +1780,7 @@ fn every_patched_lamp_shows_its_pixels_colour() {
         (vec![], 0.0),
         (vec![comp("path3")], 0.7),
         (vec![lamp("circle1", "r2", 3)], CREST),
-        (vec![port(&main, "p1")], CREST),
+        (vec![port(&main, "0")], CREST),
     ] {
         e.select(selection.clone());
         let frame = e.device_frame(t);
@@ -1860,10 +1854,10 @@ fn the_data_path_runs_object_to_object_in_patch_order() {
 fn deleting_a_path_changes_the_next_frame() {
     let mut e = editor();
     let tail_out = node_id(&e, "tail out");
-    let before = e.device_frame(0.0).port(&tail_out, "p1").unwrap().to_vec();
+    let before = e.device_frame(0.0).port(&tail_out, "0").unwrap().to_vec();
     e.select(vec![comp("path1")]);
     key(&mut e, Key::Delete, none());
-    let after = e.device_frame(0.0).port(&tail_out, "p1").unwrap().to_vec();
+    let after = e.device_frame(0.0).port(&tail_out, "0").unwrap().to_vec();
     assert_eq!(
         after[..25],
         before[25..50],
@@ -1878,9 +1872,9 @@ fn selecting_a_port_lights_its_whole_range() {
     for (name, unpatched) in [("tail out", 10), ("scarf out", 60)] {
         let mut e = editor();
         let out = node_id(&e, name);
-        e.select(vec![port(&out, "p1")]);
+        e.select(vec![port(&out, "0")]);
         let frame = e.device_frame(CREST);
-        let pixels = frame.port(&out, "p1").unwrap();
+        let pixels = frame.port(&out, "0").unwrap();
         assert_eq!(pixels.len(), 60);
         assert!(
             pixels.iter().all(|px| bright(*px)),
@@ -2048,11 +2042,11 @@ fn with_move_and_draw_off_nothing_moves() {
 
     // A pixel still lights; a port's own count is patching, not drawing.
     let main = node_id(&e, "main");
-    e.select(vec![pixel(&main, "p2", 3)]);
-    assert!(bright(e.device_frame(CREST).port(&main, "p2").unwrap()[3]));
-    e.select(vec![port(&main, "p2")]);
+    e.select(vec![pixel(&main, "1", 3)]);
+    assert!(bright(e.device_frame(CREST).port(&main, "1").unwrap()[3]));
+    e.select(vec![port(&main, "1")]);
     key(&mut e, Key::Char('='), none());
-    assert_eq!(e.project.port_fill(&main, "p2"), (30, 31));
+    assert_eq!(e.project.port_fill(&main, "1"), (30, 31));
 
     // M turns it back on, and a drag moves again.
     key(&mut e, Key::Char('m'), none());
@@ -2073,24 +2067,24 @@ fn with_move_and_draw_off_nothing_moves() {
 fn clicking_into_a_port_selects_a_pixel() {
     let mut e = editor();
     let main = node_id(&e, "main");
-    let at = pixel_centre(&e, &main, "p2", 3);
+    let at = pixel_centre(&e, &main, "1", 3);
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![Target::Node(main.clone())]);
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![port(&main, "p2")]);
+    assert_eq!(e.selection, vec![port(&main, "1")]);
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![pixel(&main, "p2", 3)]);
+    assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
     assert_eq!(
         e.project.long_label(&e.selection[0]),
         "pixel 3 of D1 of main"
     );
     key(&mut e, Key::Right, none());
-    assert_eq!(e.selection, vec![pixel(&main, "p2", 4)]);
-    let at = pixel_centre(&e, &main, "p2", 8);
+    assert_eq!(e.selection, vec![pixel(&main, "1", 4)]);
+    let at = pixel_centre(&e, &main, "1", 8);
     click_at(&mut e, at, shift());
     assert_eq!(
         e.selection,
-        (4..=8).map(|i| pixel(&main, "p2", i)).collect::<Vec<_>>()
+        (4..=8).map(|i| pixel(&main, "1", i)).collect::<Vec<_>>()
     );
     // A pixel comes from its port's count: it can't be deleted on its own.
     key(&mut e, Key::Delete, none());
@@ -2104,9 +2098,9 @@ fn a_selected_pixel_lights_and_marks_its_lamp() {
     let mut e = editor();
     // Nothing is drawn in the scarf: pixel 5 of D10 is patched to nothing.
     let scarf_out = node_id(&e, "scarf out");
-    e.select(vec![pixel(&scarf_out, "p1", 5)]);
+    e.select(vec![pixel(&scarf_out, "0", 5)]);
     let frame = e.device_frame(CREST);
-    let d10 = frame.port(&scarf_out, "p1").unwrap();
+    let d10 = frame.port(&scarf_out, "0").unwrap();
     assert!(bright(d10[5]), "it lights");
     for (i, px) in d10.iter().enumerate() {
         assert!(i == 5 || !bright(*px), "only pixel 5 of D10, not {i}");
@@ -2115,16 +2109,434 @@ fn a_selected_pixel_lights_and_marks_its_lamp() {
 
     // Pixel 3 of D1 carries lamp 3 of path3: that lamp is marked.
     let main = node_id(&e, "main");
-    e.select(vec![pixel(&main, "p2", 3)]);
+    e.select(vec![pixel(&main, "1", 3)]);
     assert_eq!(e.marked_lamps(), vec![lamp("path3", "path", 3)]);
     let frame = e.device_frame(CREST);
-    assert!(bright(frame.port(&main, "p2").unwrap()[3]));
+    assert!(bright(frame.port(&main, "1").unwrap()[3]));
     // And the other way round: select the lamp, and its pixel is marked.
     e.select(vec![lamp("path3", "path", 3)]);
-    assert_eq!(e.marked_pixels(), vec![pixel(&main, "p2", 3)]);
+    assert_eq!(e.marked_pixels(), vec![pixel(&main, "1", 3)]);
     // r2's first lamp lands on D0 after r1's 40.
     e.select(vec![lamp("circle1", "r2", 0)]);
-    assert_eq!(e.marked_pixels(), vec![pixel(&main, "p1", 40)]);
+    assert_eq!(e.marked_pixels(), vec![pixel(&main, "0", 40)]);
+}
+
+// ---- the product's shapes and rules (real projects) ---------------------------
+
+/// A path's gaps are jumper wire: they carry no lamps, and the lamps keep
+/// one pitch across the rest, as on the device.
+#[test]
+fn a_paths_gaps_carry_no_lamps() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    // Out along the top, a jumper down (segment 1), on along the bottom:
+    // 20 units that carry lamps, so 5 lamps sit 5 apart.
+    let path = add(
+        &mut p,
+        &f,
+        ComponentKind::Path {
+            points: pts(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (20.0, 10.0)]),
+            lamps: 5,
+            reversed: false,
+            gaps: vec![1],
+        },
+    );
+    assert_eq!(
+        local_lamps(&p, &path, 0),
+        pts(&[
+            (0.0, 0.0),
+            (5.0, 0.0),
+            (10.0, 0.0),
+            (15.0, 10.0),
+            (20.0, 10.0)
+        ])
+    );
+}
+
+/// Reversing a path flips which end its data enters, and never moves a
+/// point: its lamp 0 is now on its last point.
+#[test]
+fn reversing_a_path_never_moves_a_point() {
+    let mut e = editor();
+    let path3 = ComponentId::new("path3");
+    let before = e.project.path_points(&path3).unwrap().to_vec();
+    e.select(vec![comp("path3")]);
+    key(&mut e, Key::Char('r'), none());
+    assert_eq!(e.project.path_points(&path3).unwrap(), before.as_slice());
+    assert!(matches!(
+        e.project.component(&path3).unwrap().kind,
+        ComponentKind::Path { reversed: true, .. }
+    ));
+    assert!(lamp_pos(&e, "path3", "path", 0).distance(place(&e, "strip", 74.0, 40.0)) < 1e-9);
+}
+
+/// A one-lamp path's lamp sits on its first point, where the device puts
+/// it.
+#[test]
+fn a_one_lamp_paths_lamp_sits_on_its_start() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let path = add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(10.0, 10.0), (30.0, 10.0)]), 1),
+    );
+    assert_eq!(local_lamps(&p, &path, 0), pts(&[(10.0, 10.0)]));
+}
+
+/// A polygon is closed: lamp 0 sits on its first point and the rest go
+/// evenly round it, the side back to the start included — a square of 8
+/// has 2 a side, one on each corner.
+#[test]
+fn a_polygon_is_closed_and_starts_on_its_first_point() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let square = add(
+        &mut p,
+        &f,
+        ComponentKind::polygon(
+            pts(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]),
+            8,
+        ),
+    );
+    assert_eq!(
+        local_lamps(&p, &square, 0),
+        pts(&[
+            (0.0, 0.0),
+            (5.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 5.0),
+            (10.0, 10.0),
+            (5.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 5.0)
+        ])
+    );
+    assert_eq!(p.kind_word(&Target::Component(square)), "polygon");
+}
+
+/// A repeat makes one object per copy, keyed by its number (the product's
+/// `/sector/2`): copy k is its shape turned k · 360° / count, clockwise,
+/// about its centre. Each copy is its own strand.
+#[test]
+fn a_repeat_makes_one_copy_per_turn() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let sector = add(
+        &mut p,
+        &f,
+        ComponentKind::repeat(
+            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+            Vec2::new(50.0, 50.0),
+            4,
+        ),
+    );
+    let t = Target::Component(sector.clone());
+    let copies = p.children(Some(&t));
+    let keys: Vec<String> = copies
+        .iter()
+        .map(|c| match c {
+            Target::Object(o) => o.key.clone(),
+            _ => panic!("a copy is an object"),
+        })
+        .collect();
+    assert_eq!(keys, ["0", "1", "2", "3"]);
+    assert_eq!(p.label(&copies[2]), "copy 2");
+    // Copy 1 is turned a quarter clockwise: from above the centre to its
+    // right.
+    let first = local_lamps(&p, &sector, 1)[0];
+    assert!(first.distance(Vec2::new(90.0, 50.0)) < 1e-4, "{first:?}");
+    assert_eq!(p.lamps_under(&t).len(), 12);
+}
+
+/// A copy's lamps live in its repeat (D11): changing them on one copy
+/// changes every copy.
+#[test]
+fn a_copys_lamps_live_in_its_repeat() {
+    let (mut p, f, _) = bare(&[("D0", 60)]);
+    let sector = add(
+        &mut p,
+        &f,
+        ComponentKind::repeat(
+            ComponentKind::path(pts(&[(50.0, 10.0), (50.0, 30.0)]), 3),
+            Vec2::new(50.0, 50.0),
+            4,
+        ),
+    );
+    let copy = Target::Object(ObjectId::new(&sector, "2"));
+    assert!(p.edit_prop(&copy, "lamps", PropEdit::SetCount(7), 2.4));
+    for k in 0..4 {
+        assert_eq!(local_lamps(&p, &sector, k).len(), 7);
+    }
+}
+
+/// A place rule puts one object's lamps on a port, starting on a pixel.
+/// Reversed lays them end first, and a turn rotates them inside their own
+/// window: orientation first, then rotation, as on the device — five
+/// lamps at pixel 10 turned 2 land on 12, 13, 14, 10, 11; reversed too, on
+/// 11, 10, 14, 13, 12.
+#[test]
+fn a_place_rule_puts_an_object_on_a_pixel() {
+    for (reversed, want) in [(false, [12, 13, 14, 10, 11]), (true, [11, 10, 14, 13, 12])] {
+        let (mut p, f, out) = bare(&[("D0", 40)]);
+        let path = add(
+            &mut p,
+            &f,
+            ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 5),
+        );
+        let object = ObjectId::new(&path, "path");
+        p.fixture_mut(&f).unwrap().rules.push(PatchRule::Place {
+            object: object.clone(),
+            output: out.clone(),
+            port: "0".into(),
+            pixel: 10,
+            reversed,
+            rotation: 2,
+        });
+        let got: Vec<u32> = (0..5)
+            .map(|i| match p.pixel_of_lamp(&object, i) {
+                Some(Target::Pixel { index, .. }) => index,
+                other => panic!("lamp {i}: {other:?}"),
+            })
+            .collect();
+        assert_eq!(got, want, "reversed: {reversed}");
+    }
+}
+
+/// An output's ports make one flat wire, in key order: a run that passes
+/// the end of one port carries on into the next.
+#[test]
+fn a_run_carries_on_into_the_next_port() {
+    let (mut p, f, out) = bare(&[("D0", 4), ("D1", 10)]);
+    add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 6),
+    );
+    p.auto_patch(&f, &out);
+    let spans: Vec<(String, std::ops::Range<u32>, u32)> = p
+        .effective_patch()
+        .spans
+        .iter()
+        .map(|s| (s.port.clone(), s.lamps.clone(), s.start_pixel))
+        .collect();
+    assert_eq!(spans, vec![("0".into(), 0..4, 0), ("1".into(), 4..6, 0)]);
+}
+
+/// The last port may have no count: it takes the rest — as many pixels as
+/// land on it.
+#[test]
+fn a_last_port_without_a_count_takes_the_rest() {
+    let (mut p, f, out) = bare(&[("D0", 4)]);
+    let key = p.output_mut(&out).unwrap().add_port("D1", None);
+    add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 10),
+    );
+    p.auto_patch(&f, &out);
+    assert_eq!(p.port_fill(&out, &key), (6, 6));
+    assert!(p.effective_patch().unpatched.is_empty());
+}
+
+/// Auto flows on after every placed run on its output. A fixture with
+/// place rules too flows its other lamps on after its own runs; a fixture
+/// with only an auto rule, after everything.
+#[test]
+fn auto_flows_after_placed_runs() {
+    let (mut p, a, out) = bare(&[("D0", 40)]);
+    let a1 = add(
+        &mut p,
+        &a,
+        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
+    );
+    let a2 = add(
+        &mut p,
+        &a,
+        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
+    );
+    p.fixture_mut(&a).unwrap().rules = vec![
+        PatchRule::Place {
+            object: ObjectId::new(&a2, "path"),
+            output: out.clone(),
+            port: "0".into(),
+            pixel: 10,
+            reversed: false,
+            rotation: 0,
+        },
+        PatchRule::Auto {
+            output: out.clone(),
+        },
+    ];
+    let b = p.add_fixture(None, "b").unwrap();
+    let b1 = add(
+        &mut p,
+        &b,
+        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 2),
+    );
+    p.auto_patch(&b, &out);
+    let at = |c: &ComponentId| {
+        p.effective_patch()
+            .spans
+            .iter()
+            .find(|s| &s.object.component == c)
+            .map(|s| s.start_pixel)
+    };
+    assert_eq!(at(&a2), Some(10));
+    assert_eq!(at(&a1), Some(12), "after a's own run");
+    assert_eq!(at(&b1), Some(15), "after every run");
+}
+
+/// A fixture with no auto rule is manual: a lamp no rule places is dark.
+#[test]
+fn without_an_auto_rule_unplaced_lamps_are_dark() {
+    let (mut p, f, out) = bare(&[("D0", 40)]);
+    let a1 = add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
+    );
+    let a2 = add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
+    );
+    p.fixture_mut(&f).unwrap().rules = vec![PatchRule::Place {
+        object: ObjectId::new(&a2, "path"),
+        output: out.clone(),
+        port: "0".into(),
+        pixel: 0,
+        reversed: false,
+        rotation: 0,
+    }];
+    let patch = p.effective_patch();
+    assert_eq!(patch.spans.len(), 1);
+    assert_eq!(patch.unpatched.len(), 1);
+    assert_eq!(patch.unpatched[0].object, ObjectId::new(&a1, "path"));
+}
+
+/// Fixtures sharing an output fill it in the product's order — each
+/// module's nodes by name, depth first — not the order they were added in.
+#[test]
+fn fixtures_share_an_output_in_name_order() {
+    let mut p = Project::new("t");
+    let zebra = p.add_fixture(None, "zebra").unwrap();
+    let apple = p.add_fixture(None, "apple").unwrap();
+    let out = p.add_output(None, "out", &[("D0", 40)]).unwrap();
+    for f in [&zebra, &apple] {
+        add(
+            &mut p,
+            f,
+            ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
+        );
+        p.auto_patch(f, &out);
+    }
+    let start = |f: &NodeId| {
+        p.effective_patch()
+            .spans
+            .iter()
+            .find(|s| &s.fixture == f)
+            .map(|s| s.start_pixel)
+    };
+    assert_eq!(start(&apple), Some(0));
+    assert_eq!(start(&zebra), Some(3));
+}
+
+/// A rule placing lamps on a port that's gone is a problem; it is never
+/// moved to another port, and its lamps fall to the next rule.
+#[test]
+fn a_rule_on_a_gone_port_is_a_problem() {
+    let (mut p, f, out) = bare(&[("D0", 40)]);
+    let a1 = add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
+    );
+    p.fixture_mut(&f).unwrap().rules = vec![
+        PatchRule::Place {
+            object: ObjectId::new(&a1, "path"),
+            output: out.clone(),
+            port: "7".into(),
+            pixel: 0,
+            reversed: false,
+            rotation: 0,
+        },
+        PatchRule::Auto {
+            output: out.clone(),
+        },
+    ];
+    let patch = p.effective_patch();
+    assert_eq!(patch.problems.len(), 1);
+    assert_eq!(patch.problems[0].gone, Gone::Port("7".into()));
+    assert_eq!(patch.spans.len(), 1, "auto still places it");
+    assert!(patch.problems[0].notice(&p).why.is_some());
+}
+
+/// The colour order belongs to the fixture, as in the product; a port
+/// shows every order that lands on it.
+#[test]
+fn colour_order_belongs_to_the_fixture() {
+    let mut p = Project::new("t");
+    let a = p.add_fixture(None, "a").unwrap();
+    let b = p.add_fixture(None, "b").unwrap();
+    let out = p.add_output(None, "out", &[("D0", 40)]).unwrap();
+    for f in [&a, &b] {
+        add(
+            &mut p,
+            f,
+            ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
+        );
+        p.auto_patch(f, &out);
+    }
+    assert_eq!(
+        p.fixture(&a).unwrap().color_order,
+        ColorOrder::Grb,
+        "the default"
+    );
+    p.fixture_mut(&b).unwrap().color_order = ColorOrder::Rgb;
+    assert_eq!(
+        p.color_orders_on(&out, "0"),
+        vec![ColorOrder::Grb, ColorOrder::Rgb]
+    );
+}
+
+/// A node the lab doesn't edit (a shader, a clock) is a plain card at the
+/// left of what it feeds: it selects and deletes like any node, and holds
+/// nothing.
+#[test]
+fn a_node_the_lab_doesnt_edit_is_a_plain_card() {
+    let mut e = editor();
+    let shader = e
+        .project
+        .add_node(None, "shader", NodeKind::Other(OtherNode::new("Shader")))
+        .unwrap();
+    let t = Target::Node(shader.clone());
+    assert!(!e.project.is_frame(&t));
+    assert!(e.project.children(Some(&t)).is_empty());
+    let card = e.project.node_rect(&shader).unwrap();
+    for n in e.project.nodes.iter().filter(|n| !n.is_card()) {
+        assert!(
+            card.max.x < e.project.node_rect(&n.id).unwrap().min.x,
+            "{}",
+            n.name
+        );
+    }
+    e.select(vec![t]);
+    key(&mut e, Key::Delete, none());
+    assert!(e.project.node(&shader).is_none());
+}
+
+/// Minting never hands out an id already in the project — one opened from
+/// a file, say.
+#[test]
+fn minting_skips_ids_already_taken() {
+    let (mut p, f, _) = bare(&[("D0", 40)]);
+    p.fixture_mut(&f).unwrap().components.push(Component {
+        id: ComponentId::new("path1"),
+        kind: ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
+    });
+    let next = add(
+        &mut p,
+        &f,
+        ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 3),
+    );
+    assert_eq!(next.as_str(), "path2");
 }
 
 // ---- helpers -------------------------------------------------------------------
@@ -2338,4 +2750,30 @@ fn click_at(e: &mut Editor, world: Vec2, mods: Mods) {
 fn key(e: &mut Editor, k: Key, mods: Mods) {
     e.key_down(k.clone(), mods);
     e.key_up(k, mods);
+}
+
+/// A bare project: one 100-square fixture `f` and one output `out` with
+/// these ports.
+fn bare(ports: &[(&str, u32)]) -> (Project, NodeId, NodeId) {
+    let mut p = Project::new("t");
+    let f = p.add_fixture(None, "f").unwrap();
+    let out = p.add_output(None, "out", ports).unwrap();
+    (p, f, out)
+}
+
+fn add(p: &mut Project, fixture: &NodeId, kind: ComponentKind) -> ComponentId {
+    p.add(fixture, kind).unwrap()
+}
+
+fn pts(points: &[(f64, f64)]) -> Vec<Vec2> {
+    points.iter().map(|&(x, y)| Vec2::new(x, y)).collect()
+}
+
+/// A component's `k`th object's lamps, in its fixture's own coordinates.
+fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
+    object::objects_of(p.component(id).unwrap())[k]
+        .lamps
+        .iter()
+        .map(|l| l.pos)
+        .collect()
 }

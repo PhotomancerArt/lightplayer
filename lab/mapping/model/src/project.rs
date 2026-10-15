@@ -17,7 +17,7 @@ use crate::fixture::Fixture;
 use crate::geom::{Rect, Vec2};
 use crate::node::{self, Node, NodeId, NodeKind};
 use crate::object::{Object, ObjectId, ObjectShape, objects_of};
-use crate::output::{Output, PixelFormat};
+use crate::output::Output;
 use crate::patch::PatchRule;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,11 +33,14 @@ pub struct Project {
 #[derive(Debug, Clone, PartialEq)]
 struct Counters {
     path: u32,
+    polygon: u32,
     circle: u32,
+    repeat: u32,
     group: u32,
     module: u32,
     fixture: u32,
     output: u32,
+    node: u32,
 }
 
 impl Project {
@@ -47,27 +50,38 @@ impl Project {
             nodes: Vec::new(),
             counters: Counters {
                 path: 1,
+                polygon: 1,
                 circle: 1,
+                repeat: 1,
                 group: 1,
                 module: 1,
                 fixture: 1,
                 output: 1,
+                node: 1,
             },
         }
     }
 
     // ---- minting ---------------------------------------------------------
 
-    /// Mint an id for a new component of this kind and wrap it.
+    /// Mint an id for a new component of this kind and wrap it. An id
+    /// already in the project (one opened from a file, say) is skipped.
     pub fn mint(&mut self, kind: ComponentKind) -> Component {
-        let (word, counter) = match kind {
-            ComponentKind::Path { .. } => ("path", &mut self.counters.path),
-            ComponentKind::Circle { .. } => ("circle", &mut self.counters.circle),
-            ComponentKind::Group { .. } => ("group", &mut self.counters.group),
-        };
-        let id = ComponentId::new(format!("{word}{counter}"));
-        *counter += 1;
-        Component { id, kind }
+        let word = kind.word();
+        loop {
+            let counter = match kind {
+                ComponentKind::Path { .. } => &mut self.counters.path,
+                ComponentKind::Polygon { .. } => &mut self.counters.polygon,
+                ComponentKind::Circle { .. } => &mut self.counters.circle,
+                ComponentKind::Repeat { .. } => &mut self.counters.repeat,
+                ComponentKind::Group { .. } => &mut self.counters.group,
+            };
+            let id = ComponentId::new(format!("{word}{counter}"));
+            *counter += 1;
+            if self.component(&id).is_none() {
+                return Component { id, kind };
+            }
+        }
     }
 
     /// Mint a node id and put the node in `parent` (a module), or at the
@@ -79,12 +93,19 @@ impl Project {
         name: impl Into<String>,
         kind: NodeKind,
     ) -> Option<NodeId> {
-        let (word, n) = match kind {
-            NodeKind::Module { .. } => ("module", self.counters.module),
-            NodeKind::Fixture(_) => ("fixture", self.counters.fixture),
-            NodeKind::Output(_) => ("output", self.counters.output),
+        let id = loop {
+            let (word, counter) = match kind {
+                NodeKind::Module { .. } => ("module", &mut self.counters.module),
+                NodeKind::Fixture(_) => ("fixture", &mut self.counters.fixture),
+                NodeKind::Output(_) => ("output", &mut self.counters.output),
+                NodeKind::Other(_) => ("node", &mut self.counters.node),
+            };
+            let id = NodeId::new(format!("{word}{counter}"));
+            *counter += 1;
+            if self.node(&id).is_none() {
+                break id;
+            }
         };
-        let id = NodeId::new(format!("{word}{n}"));
         let node = Node {
             id: id.clone(),
             name: name.into(),
@@ -96,11 +117,6 @@ impl Project {
             Some(p) => self.node_mut(p)?.children_mut()?,
         };
         list.push(node);
-        match word {
-            "module" => self.counters.module += 1,
-            "fixture" => self.counters.fixture += 1,
-            _ => self.counters.output += 1,
-        }
         Some(id)
     }
 
@@ -128,7 +144,7 @@ impl Project {
         &mut self,
         parent: Option<&NodeId>,
         name: &str,
-        ports: &[(&str, u32, PixelFormat)],
+        ports: &[(&str, u32)],
     ) -> Option<NodeId> {
         self.add_node(parent, name, NodeKind::Output(Output::new(ports)))
     }
@@ -336,12 +352,11 @@ impl Project {
     /// the way the choker was built.
     pub fn seed() -> Self {
         let mut p = Project::new("desk");
-        let grb = PixelFormat::Grb;
         let side = |s: f64| Vec2::new(s, s);
 
         let rig = p.add_module(None, "tail rig");
         let tail = p.add_fixture_sized(rig.as_ref(), "tail", side(82.0));
-        let tail_out = p.add_output(rig.as_ref(), "tail out", &[("GPIO 10", 60, grb)]);
+        let tail_out = p.add_output(rig.as_ref(), "tail out", &[("GPIO 10", 60)]);
         let out = p.mint(ComponentKind::path(
             vec![Vec2::new(37.0, 70.0), Vec2::new(37.0, 12.0)],
             25,
@@ -353,9 +368,9 @@ impl Project {
 
         let ring = p.add_fixture_sized(None, "ring display", side(70.0));
         let strip = p.add_fixture_sized(None, "strip", side(80.0));
-        let main = p.add_output(None, "main", &[("D0", 64, grb), ("D1", 30, grb)]);
+        let main = p.add_output(None, "main", &[("D0", 64), ("D1", 30)]);
         let scarf = p.add_fixture(None, "scarf");
-        let scarf_out = p.add_output(None, "scarf out", &[("D10", 60, grb)]);
+        let scarf_out = p.add_output(None, "scarf out", &[("D10", 60)]);
 
         let (
             Some(tail),

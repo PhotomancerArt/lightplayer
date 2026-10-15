@@ -16,12 +16,19 @@ use crate::target::Target;
 impl Project {
     /// Every lamp one port carries, as (object, lamp index), in pixel order.
     pub fn lamps_on_port(&self, output: &NodeId, key: &str) -> Vec<(ObjectId, u32)> {
-        self.effective_patch()
+        let mut on: Vec<(u32, ObjectId, u32)> = self
+            .effective_patch()
             .spans
             .iter()
             .filter(|s| &s.output == output && s.port == key)
-            .flat_map(|s| s.lamps.clone().map(move |i| (s.object.clone(), i)))
-            .collect()
+            .flat_map(|s| {
+                s.lamps
+                    .clone()
+                    .map(move |i| (s.pixel(i), s.object.clone(), i))
+            })
+            .collect();
+        on.sort_by_key(|(pixel, _, _)| *pixel);
+        on.into_iter().map(|(_, o, i)| (o, i)).collect()
     }
 
     /// The ports a target's lamps land on, in patch order. A port or an
@@ -61,7 +68,7 @@ impl Project {
             .into_iter()
             .find(|s| &s.object == object && s.lamps.contains(&index))
             .map(|s| Target::Pixel {
-                index: s.start_pixel + index - s.lamps.start,
+                index: s.pixel(index),
                 output: s.output,
                 key: s.port,
             })
@@ -72,14 +79,12 @@ impl Project {
         self.effective_patch()
             .spans
             .into_iter()
-            .find(|s| {
-                &s.output == output
-                    && s.port == key
-                    && (s.start_pixel..s.start_pixel + s.lamps.len() as u32).contains(&index)
-            })
-            .map(|s| Target::Lamp {
-                index: s.lamps.start + index - s.start_pixel,
-                object: s.object,
+            .filter(|s| &s.output == output && s.port == key)
+            .find_map(|s| {
+                Some(Target::Lamp {
+                    index: s.lamp_at(index)?,
+                    object: s.object,
+                })
             })
     }
 

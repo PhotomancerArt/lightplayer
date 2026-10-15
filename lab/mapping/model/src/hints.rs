@@ -488,7 +488,8 @@ impl Editor {
         match handle {
             HandleKind::PathPoint { path, index } => {
                 let (n, lamps) = match f.component(path).map(|c| &c.kind) {
-                    Some(ComponentKind::Path { points, lamps }) => (points.len(), *lamps),
+                    Some(ComponentKind::Path { points, lamps, .. })
+                    | Some(ComponentKind::Polygon { points, lamps }) => (points.len(), *lamps),
                     _ => (0, 0),
                 };
                 let what = if *index == 0 || *index + 1 == n {

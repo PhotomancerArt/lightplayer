@@ -5,6 +5,7 @@
 //! A fixture is one kind of node (`node.rs`); its id and name live on the
 //! node. What it carries of its own is its drawing and its patch rules.
 
+use crate::color_order::ColorOrder;
 use crate::component::{Component, ComponentId};
 use crate::geom::{Rect, Vec2};
 use crate::patch::PatchRule;
@@ -19,6 +20,8 @@ pub struct Fixture {
     /// Where its lamps go, in order. The patch they make is derived
     /// (`patch.rs`), never stored.
     pub rules: Vec<PatchRule>,
+    /// Which byte of each of its pixels is red, green and blue.
+    pub color_order: ColorOrder,
 }
 
 impl Fixture {
@@ -38,6 +41,7 @@ impl Fixture {
             size,
             components: Vec::new(),
             rules: Vec::new(),
+            color_order: ColorOrder::default(),
         }
     }
 

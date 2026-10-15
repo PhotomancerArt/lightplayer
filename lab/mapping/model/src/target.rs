@@ -96,10 +96,10 @@ impl Project {
             Target::Port { output, key } => {
                 self.output(output).is_some_and(|o| o.port(key).is_some())
             }
-            Target::Pixel { output, key, index } => self
-                .output(output)
-                .and_then(|o| o.port(key))
-                .is_some_and(|p| *index < p.pixels),
+            Target::Pixel { output, key, index } => {
+                self.output(output).and_then(|o| o.port(key)).is_some()
+                    && *index < self.port_pixels(output, key)
+            }
         }
     }
 
@@ -180,7 +180,7 @@ impl Project {
                         key: p.key.clone(),
                     })
                     .collect(),
-                None => Vec::new(),
+                Some(NodeKind::Other(_)) | None => Vec::new(),
             },
             Target::Component(id) => {
                 let Some(c) = self.component(id) else {
@@ -208,10 +208,7 @@ impl Project {
                 .map(|obj| lamp_targets(o, obj.lamps.len()))
                 .unwrap_or_default(),
             Target::Port { output, key } => {
-                let n = self
-                    .output(output)
-                    .and_then(|o| o.port(key))
-                    .map_or(0, |p| p.pixels);
+                let n = self.port_pixels(output, key);
                 (0..n)
                     .map(|index| Target::Pixel {
                         output: output.clone(),
@@ -309,7 +306,7 @@ impl Project {
         match t {
             Target::Node(id) => self.node_name(id),
             Target::Component(id) => id.to_string(),
-            Target::Object(o) => format!("ring {}", o.key),
+            Target::Object(o) => format!("{} {}", self.object_word(o), o.key),
             Target::Lamp { index, .. } => format!("lamp {index}"),
             Target::Port { output, key } => self
                 .output(output)
@@ -325,7 +322,7 @@ impl Project {
     pub fn long_label(&self, t: &Target) -> String {
         match t {
             Target::Node(_) | Target::Component(_) => self.label(t),
-            Target::Object(o) => format!("ring {} of {}", o.key, o.component),
+            Target::Object(o) => format!("{} {} of {}", self.object_word(o), o.key, o.component),
             Target::Lamp { object, .. } => {
                 let parent = self.object_target(object);
                 format!("{} of {}", self.label(t), self.long_label(&parent))
@@ -340,13 +337,23 @@ impl Project {
         }
     }
 
+    /// What one of a component's objects is called: a circle's are rings,
+    /// a repeat's are copies.
+    pub fn object_word(&self, o: &ObjectId) -> &'static str {
+        match self.component(&o.component).map(|c| &c.kind) {
+            Some(crate::ComponentKind::Repeat { .. }) => "copy",
+            _ => "ring",
+        }
+    }
+
     /// The word for a target's kind, plural-able: "module", "fixture",
-    /// "output", "port", "pixel", "group", "circle", "path", "ring", "lamp".
+    /// "output", "port", "pixel", "group", "circle", "path", "polygon",
+    /// "repeat", "ring", "copy", "lamp".
     pub fn kind_word(&self, t: &Target) -> &'static str {
         match t {
             Target::Node(id) => self.node(id).map(|n| n.kind_word()).unwrap_or("node"),
             Target::Component(id) => self.component(id).map(|c| c.kind_word()).unwrap_or("thing"),
-            Target::Object(_) => "ring",
+            Target::Object(o) => self.object_word(o),
             Target::Lamp { .. } => "lamp",
             Target::Port { .. } => "port",
             Target::Pixel { .. } => "pixel",

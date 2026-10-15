@@ -217,13 +217,15 @@ impl Project {
     /// Every port, every pixel black: a board with nothing to show.
     pub fn dark_frame(&self) -> DeviceFrame {
         let mut ports = Vec::new();
+        let patch = self.effective_patch();
         for n in self.outputs() {
             let Some(o) = n.output() else { continue };
             for p in &o.ports {
+                let pixels = p.pixels.unwrap_or_else(|| patch.extent(&n.id, &p.key));
                 ports.push(PortFrame {
                     output: n.id.clone(),
                     key: p.key.clone(),
-                    pixels: vec![Rgb::BLACK; p.pixels as usize],
+                    pixels: vec![Rgb::BLACK; pixels as usize],
                 });
             }
         }
@@ -263,7 +265,7 @@ impl Project {
                 continue;
             };
             for lamp in s.lamps.clone() {
-                let pixel = (s.start_pixel + lamp - s.lamps.start) as usize;
+                let pixel = s.pixel(lamp) as usize;
                 let inside = lamps
                     .get(lamp as usize)
                     .is_some_and(|p| bounds.is_some_and(|b| b.contains(*p)));

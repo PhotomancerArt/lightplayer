@@ -6,12 +6,14 @@
 //! - path: everything near its polyline — a capsule round each segment,
 //!   joined with round corners (a two-point path is one capsule);
 //! - ring: a band around its circle;
+//! - polygon: everything near its closed outline;
 //! - circle: a disc out past its outer ring;
+//! - repeat: a rounded hull around its copies;
 //! - group: a rounded hull around its children — the shape you'd draw
 //!   around them by hand;
 //! - module, fixture: a frame — its border and title tab, not its inside;
-//! - output: its whole card; a port: its row on the card; a pixel: its
-//!   square in the row (`pixel_grid.rs`).
+//! - output (and any other card): its whole card; a port: its row on the
+//!   card; a pixel: its square in the row (`pixel_grid.rs`).
 //!
 //! Areas are in screen pixels, because their padding is: a path is as easy
 //! to hit zoomed out as zoomed in.
@@ -252,6 +254,28 @@ impl Project {
                         points: points.iter().map(|p| local(*p)).collect(),
                         pad: PATH_PAD_PX,
                     }),
+                    ComponentKind::Polygon { points, .. } => Some(Area::Polyline {
+                        points: points
+                            .iter()
+                            .chain(points.first())
+                            .map(|p| local(*p))
+                            .collect(),
+                        pad: PATH_PAD_PX,
+                    }),
+                    // Its copies' outlines, hulled: like a group of them.
+                    ComponentKind::Repeat { .. } => {
+                        let points: Vec<Vec2> = objects_of(c)
+                            .iter()
+                            .flat_map(|o| match &o.shape {
+                                ObjectShape::Polyline { points } => points.clone(),
+                                ObjectShape::Ring { center, radius } => {
+                                    ring_points(*center, *radius)
+                                }
+                            })
+                            .map(local)
+                            .collect();
+                        (!points.is_empty()).then(|| Area::hull(&points, GROUP_PAD_PX))
+                    }
                     ComponentKind::Circle { center, rings, .. } => {
                         let r = rings.iter().map(|r| r.radius).fold(0.0, f64::max) * camera.scale;
                         Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))

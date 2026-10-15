@@ -139,7 +139,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         PortRow {
                             rect: row,
                             name: p.name.clone(),
-                            fill: format!("{used}/{} px", p.pixels),
+                            fill: format!("{used}/{} px", f.port_pixels(&n.id, &p.key)),
                             tinted: tinted.contains(&pt),
                         }
                     })
@@ -148,6 +148,28 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     rect,
                     name: n.name.clone(),
                     rows,
+                    dimmed,
+                    pinned: n.pinned.is_some(),
+                });
+            }
+            // A node the lab doesn't edit: a card that says what it is.
+            NodeKind::Other(o) => {
+                let row = screen_rect(
+                    &cam,
+                    Rect::new(
+                        Vec2::new(world.min.x, world.min.y + CARD_HEADER),
+                        Vec2::new(world.max.x, world.min.y + CARD_HEADER + CARD_ROW),
+                    ),
+                );
+                cards.push(CardView {
+                    rect,
+                    name: n.name.clone(),
+                    rows: vec![PortRow {
+                        rect: row,
+                        name: o.kind_words(),
+                        fill: String::new(),
+                        tinted: false,
+                    }],
                     dimmed,
                     pinned: n.pinned.is_some(),
                 });

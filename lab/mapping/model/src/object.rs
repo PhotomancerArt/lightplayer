@@ -1,11 +1,13 @@
 //! Objects: what components produce. Derived, never stored.
 //!
 //! An object has lamps. Its id is its component's id plus a key the
-//! component chose (`circle1` + `r2`). A path's object key is `path`, and
-//! since a path is its own object the user never sees that key.
+//! component chose (`circle1` + `r2`, `sector` + `2`). A path's object key
+//! is `path` (a polygon's `polygon`), and since a path is its own object the
+//! user never sees that key.
 
 use crate::component::{Component, ComponentId, ComponentKind};
-use crate::geom::{Vec2, along_polyline, polyline_length};
+use crate::geom::Vec2;
+use crate::resolve::{self, Rotation};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ObjectId {
@@ -39,7 +41,8 @@ pub struct Object {
 /// The drawn geometry of an object, for strokes and hit testing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectShape {
-    /// A path's points, first to last.
+    /// A path's points, first to last; a polygon's, with its first point
+    /// again at the end.
     Polyline {
         points: Vec<Vec2>,
     },
@@ -55,56 +58,96 @@ pub struct Lamp {
 }
 
 /// The objects one component makes, in authoring order. Groups make none.
+/// Positions come from the product's own arithmetic (`resolve.rs`).
 pub fn objects_of(component: &Component) -> Vec<Object> {
-    match &component.kind {
-        ComponentKind::Path { points, lamps } => vec![Object {
-            id: ObjectId::new(&component.id, "path"),
-            lamps: lamps_along(points, *lamps),
+    objects_of_kind(&component.id, &component.kind)
+}
+
+/// The key of a single-object component's one object. The user never sees
+/// it: a path or a polygon is its own object.
+pub const PATH_KEY: &str = "path";
+pub const POLYGON_KEY: &str = "polygon";
+
+fn objects_of_kind(id: &ComponentId, kind: &ComponentKind) -> Vec<Object> {
+    match kind {
+        ComponentKind::Path {
+            points,
+            lamps,
+            reversed,
+            gaps,
+        } => vec![Object {
+            id: ObjectId::new(id, PATH_KEY),
+            lamps: lamps_at(resolve::path_lamps(points, *lamps, *reversed, gaps)),
             shape: ObjectShape::Polyline {
                 points: points.clone(),
             },
         }],
+        ComponentKind::Polygon { points, lamps } => vec![Object {
+            id: ObjectId::new(id, POLYGON_KEY),
+            lamps: lamps_at(resolve::polygon_lamps(points, *lamps)),
+            shape: ObjectShape::Polyline {
+                points: points.iter().chain(points.first()).copied().collect(),
+            },
+        }],
         ComponentKind::Circle { center, rings, .. } => rings
             .iter()
-            .map(|ring| {
-                let dir = if ring.reversed { -1.0 } else { 1.0 };
-                // Lamp 0 sits at the top; y-down screen space makes a
-                // positive angle run clockwise.
-                let lamps = (0..ring.lamps)
-                    .map(|i| {
-                        let a = -std::f64::consts::FRAC_PI_2
-                            + dir * std::f64::consts::TAU * i as f64 / ring.lamps as f64;
-                        Lamp {
-                            pos: *center + Vec2::new(a.cos(), a.sin()) * ring.radius,
-                        }
-                    })
-                    .collect();
-                Object {
-                    id: ObjectId::new(&component.id, ring.key.clone()),
-                    lamps,
-                    shape: ObjectShape::Ring {
-                        center: *center,
-                        radius: ring.radius,
-                    },
-                }
+            .map(|ring| Object {
+                id: ObjectId::new(id, ring.key.clone()),
+                lamps: lamps_at(resolve::ring_lamps(
+                    *center,
+                    ring.radius,
+                    ring.lamps,
+                    ring.reversed,
+                )),
+                shape: ObjectShape::Ring {
+                    center: *center,
+                    radius: ring.radius,
+                },
             })
             .collect(),
+        ComponentKind::Repeat {
+            shape,
+            center,
+            count,
+        } => {
+            let inner = objects_of_kind(id, shape);
+            let single = inner.len() == 1;
+            let mut out = Vec::with_capacity(inner.len() * *count as usize);
+            for k in 0..*count {
+                let turn = Rotation::instance(*center, k, *count);
+                for o in &inner {
+                    let key = if single {
+                        k.to_string()
+                    } else {
+                        format!("{k}/{}", o.id.key)
+                    };
+                    out.push(Object {
+                        id: ObjectId::new(id, key),
+                        lamps: o
+                            .lamps
+                            .iter()
+                            .map(|l| Lamp {
+                                pos: turn.apply(l.pos),
+                            })
+                            .collect(),
+                        shape: match &o.shape {
+                            ObjectShape::Polyline { points } => ObjectShape::Polyline {
+                                points: points.iter().map(|p| turn.apply(*p)).collect(),
+                            },
+                            ObjectShape::Ring { center, radius } => ObjectShape::Ring {
+                                center: turn.apply(*center),
+                                radius: *radius,
+                            },
+                        },
+                    });
+                }
+            }
+            out
+        }
         ComponentKind::Group { .. } => Vec::new(),
     }
 }
 
-/// `n` lamps spread evenly along a polyline by arc length: the first on its
-/// first point, the last on its last. One lamp sits halfway along.
-pub fn lamps_along(points: &[Vec2], n: u32) -> Vec<Lamp> {
-    let length = polyline_length(points);
-    (0..n)
-        .filter_map(|i| {
-            let t = if n == 1 {
-                0.5
-            } else {
-                i as f64 / (n - 1) as f64
-            };
-            along_polyline(points, t * length).map(|(pos, _)| Lamp { pos })
-        })
-        .collect()
+fn lamps_at(positions: Vec<Vec2>) -> Vec<Lamp> {
+    positions.into_iter().map(|pos| Lamp { pos }).collect()
 }
