@@ -180,10 +180,27 @@ impl Editor {
         let f = &self.project;
         let mut out = Vec::new();
 
-        // A handle under the pointer: dragging it is what's on offer.
+        // A handle under the pointer: dragging it is what's on offer, and
+        // ⌥-clicking a path's point takes it away (it keeps two).
         let handle = self.hover_handle();
+        let mut alt_removes = false;
         if let Some(handle) = &handle {
             out.push(h("drag", handle.kind.does(f)));
+            if let HandleKind::PathPoint { path, .. } = &handle.kind
+                && f.path_points(path).is_some_and(|p| p.len() > 2)
+            {
+                alt_removes = true;
+                out.push(h("⌥ click", "remove this point"));
+            }
+        } else if let Some(p) = self.hover_point() {
+            // On a shaped path's segment: a double-click adds a point.
+            if let Some(path) = self
+                .shaped_paths(&self.selection)
+                .into_iter()
+                .find(|path| f.segment_at(&self.camera, path, p).is_some())
+            {
+                out.push(h("double-click", format!("add a point to {path} here")));
+            }
         }
 
         // What a click would do, first: the hover outline in words.
@@ -195,7 +212,7 @@ impl Editor {
                     "⌘ click",
                     format!("select {} directly", f.long_label(&target)),
                 ));
-            } else if self.mods.alt {
+            } else if self.mods.alt && !alt_removes {
                 out.push(h(
                     "⌥ click",
                     format!("select {} — the next one here", f.long_label(&target)),
@@ -219,7 +236,7 @@ impl Editor {
                 out.push(h("⌘ click", format!("select {} directly", f.label(&deep))));
             }
             let here = self.hover_candidates().len();
-            if here > 1 && !self.mods.alt {
+            if here > 1 && !self.mods.alt && !alt_removes {
                 out.push(h("⌥ click", format!("the next of the {here} here")));
             }
             let run = matches!(&target, Target::Pixel { .. })

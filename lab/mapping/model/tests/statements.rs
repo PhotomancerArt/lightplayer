@@ -1232,6 +1232,124 @@ fn a_click_on_a_handle_clicks_whats_under_it() {
     assert_eq!(e.project, before);
 }
 
+/// A path's handles show while one of its lamps is selected, and dragging
+/// from a handle moves the point — even from under a selected lamp. A plain
+/// click there still selects the lamp.
+#[test]
+fn a_paths_handles_show_while_a_lamp_of_it_is_selected() {
+    let mut e = editor();
+    e.select(vec![lamp("path3", "path", 0)]);
+    let shown: Vec<HandleKind> = e.handles().into_iter().map(|h| h.kind).collect();
+    let point = |index| HandleKind::PathPoint {
+        path: ComponentId::new("path3"),
+        index,
+    };
+    assert_eq!(shown, vec![point(0), point(1)]);
+    // Lamp 0 sits on point 0, and is selected: a drag from there moves the
+    // point, not the lamp's path.
+    let start = handle_at(&e, |k| *k == point(0));
+    let to = start + Vec2::new(0.0, 15.0) * e.camera.scale;
+    drag(&mut e, start, to, none());
+    let points = e.project.path_points(&ComponentId::new("path3")).unwrap();
+    assert!(
+        points[0].distance(Vec2::new(6.0, 55.0)) < 1e-9,
+        "{points:?}"
+    );
+    assert_eq!(points[1], Vec2::new(74.0, 40.0), "the other end stays");
+    assert_eq!(e.selection, vec![lamp("path3", "path", 0)]);
+    key(&mut e, Key::Char('z'), cmd());
+    // A click on the far end's handle selects the lamp there.
+    let end = handle_at(&e, |k| *k == point(1));
+    e.pointer_down(end, Button::Primary, none());
+    e.pointer_up(end, none());
+    assert_eq!(e.selection, vec![lamp("path3", "path", 29)]);
+    // A ring's lamp shows its ring's handle.
+    e.select(vec![lamp("circle1", "r2", 3)]);
+    let shown: Vec<HandleKind> = e.handles().into_iter().map(|h| h.kind).collect();
+    assert_eq!(
+        shown,
+        vec![HandleKind::RingRadius {
+            circle: ComponentId::new("circle1"),
+            ring: "r2".into()
+        }]
+    );
+}
+
+/// Adding a point from the menu or by double-clicking a segment adds one
+/// point there and keeps the lamps; ⌥-click or the menu takes one away;
+/// removing one below two points is refused.
+#[test]
+fn adding_and_removing_a_paths_points() {
+    let mut e = editor();
+    let path3 = ComponentId::new("path3");
+    let points = |e: &Editor| e.project.path_points(&path3).unwrap().to_vec();
+    let near = |a: &[Vec2], b: &[(f64, f64)]| {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(p, (x, y))| p.distance(Vec2::new(*x, *y)) < 1e-9)
+    };
+    // A double-click on an unshaped path only selects, as two clicks do.
+    let at = e.camera.to_screen(place(&e, "strip", 30.0, 40.0));
+    double_click(&mut e, at);
+    assert_eq!(points(&e).len(), 2);
+
+    // On the selected path's segment, it adds a point there.
+    e.select(vec![comp("path3")]);
+    double_click(&mut e, at);
+    assert!(
+        near(&points(&e), &[(6.0, 40.0), (30.0, 40.0), (74.0, 40.0)]),
+        "{:?}",
+        points(&e)
+    );
+    assert_eq!(e.selection, vec![comp("path3")]);
+    assert_eq!(
+        e.project.lamps_under(&comp("path3")).len(),
+        30,
+        "same lamps"
+    );
+
+    // Right-click on the second segment: "Add a point to path3 here".
+    let at = e.camera.to_screen(place(&e, "strip", 50.0, 40.0));
+    e.pointer_down(at, Button::Secondary, none());
+    let menu = e.menu.clone().unwrap();
+    let add = menu
+        .actions
+        .iter()
+        .position(|a| a.label == "Add a point to path3 here")
+        .expect("offered");
+    e.menu_act(add);
+    assert!(near(
+        &points(&e),
+        &[(6.0, 40.0), (30.0, 40.0), (50.0, 40.0), (74.0, 40.0)]
+    ));
+
+    // Right-click on a point's handle: "Remove point 2 of path3".
+    let second = handle_at(&e, |k| matches!(k, HandleKind::PathPoint { index: 1, .. }));
+    e.pointer_down(second, Button::Secondary, none());
+    let menu = e.menu.clone().unwrap();
+    assert_eq!(menu.actions[0].label, "Remove point 2 of path3");
+    e.menu_act(0);
+    assert!(near(
+        &points(&e),
+        &[(6.0, 40.0), (50.0, 40.0), (74.0, 40.0)]
+    ));
+
+    // ⌥-click on a point's handle takes it away…
+    let middle = handle_at(&e, |k| matches!(k, HandleKind::PathPoint { index: 1, .. }));
+    let w = e.camera.to_world(middle);
+    click_at(&mut e, w, alt());
+    assert!(near(&points(&e), &[(6.0, 40.0), (74.0, 40.0)]));
+    // …but never below two.
+    let end = handle_at(&e, |k| matches!(k, HandleKind::PathPoint { index: 1, .. }));
+    let w = e.camera.to_world(end);
+    click_at(&mut e, w, alt());
+    assert_eq!(points(&e).len(), 2);
+    let n = e.notice.clone().unwrap();
+    assert_eq!(n.kind, NoticeKind::Refused);
+    assert!(n.why.unwrap().contains("at least two points"));
+}
+
 /// Dragging a ring's handle changes its radius, and the ring keeps its
 /// lamps.
 #[test]
@@ -1961,6 +2079,16 @@ fn overlaps(p: &Project) -> Vec<String> {
         }
     }
     out
+}
+
+/// A double-click as the browser sends it: two clicks, then the event.
+fn double_click(e: &mut Editor, at: Vec2) {
+    for _ in 0..2 {
+        e.pointer_move(at, none());
+        e.pointer_down(at, Button::Primary, none());
+        e.pointer_up(at, none());
+    }
+    e.double_click(at, none());
 }
 
 /// Press at `from`, drag to `to` (screen), let go.

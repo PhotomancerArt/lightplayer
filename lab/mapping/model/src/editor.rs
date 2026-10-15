@@ -139,6 +139,14 @@ pub struct MenuAction {
 pub enum MenuCommand {
     /// Give a pinned node back to the layout.
     Unpin(NodeId),
+    /// Add a point to a path on segment `segment`, at `at` (world units).
+    AddPoint {
+        path: ComponentId,
+        segment: usize,
+        at: Vec2,
+    },
+    /// Take a point away from a path.
+    RemovePoint { path: ComponentId, index: usize },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -178,6 +186,10 @@ pub struct Editor {
     pub menu: Option<ContextMenu>,
     /// The path being clicked out, in world units, before it exists.
     pub path_draft: Vec<Vec2>,
+    /// The selection before each of the last two presses: a double-click
+    /// adds a point to a path that was shaped BEFORE its two clicks went
+    /// into it.
+    press_log: Vec<Vec<Target>>,
     undo: Vec<(Project, Vec<Target>)>,
     redo: Vec<(Project, Vec<Target>)>,
     fitted: bool,
@@ -201,6 +213,7 @@ impl Editor {
             notice: None,
             menu: None,
             path_draft: Vec::new(),
+            press_log: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             fitted: false,
@@ -406,11 +419,29 @@ impl Editor {
             }
             Tool::Path => self.path_click(at),
             Tool::Select => {
+                self.press_log.push(self.selection.clone());
+                if self.press_log.len() > 2 {
+                    self.press_log.remove(0);
+                }
                 let under = self.project.things_at(&self.camera, at);
                 let over = !under.is_empty();
                 let on_selection = under.iter().any(|t| self.selection.contains(t));
                 let handle = self.handle_at(at).map(|h| h.kind);
                 let mut decided = false;
+                if let (true, Some(HandleKind::PathPoint { path, index })) = (mods.alt, &handle) {
+                    // ⌥-click on a point's handle takes the point away.
+                    let (path, index) = (path.clone(), *index);
+                    self.remove_point(&path, index);
+                    self.gesture = Gesture::Press {
+                        start: at,
+                        over,
+                        on_selection: true,
+                        decided: true,
+                        mods,
+                        handle: None,
+                    };
+                    return;
+                }
                 if handle.is_some() {
                     // A handle waits: a drag drags it, a click falls through
                     // to what's beneath on release.
@@ -544,7 +575,10 @@ impl Editor {
     }
 
     /// A double-click: with the path tool, finish the path (its two presses
-    /// have already landed as one point). Returns whether it did anything.
+    /// have already landed as one point). Selecting, on a segment of a path
+    /// that was shaped before the double-click (selected, or a lamp of it),
+    /// add a point there — the product's grammar. Returns whether it did
+    /// anything.
     pub fn double_click(&mut self, at: Vec2, mods: Mods) -> bool {
         self.pointer = Some(at);
         self.mods = mods;
@@ -552,7 +586,90 @@ impl Editor {
             self.finish_path();
             return true;
         }
-        false
+        let before = match self.press_log.as_slice() {
+            [first, _] => first.clone(),
+            _ => self.selection.clone(),
+        };
+        let shaped = self.shaped_paths(&before);
+        let hit = shaped
+            .iter()
+            .filter_map(|p| {
+                let (segment, q) = self.project.segment_at(&self.camera, p, at)?;
+                Some((p.clone(), segment, q))
+            })
+            .min_by(|a, b| {
+                let d = |q: Vec2| self.camera.to_screen(q).distance(at);
+                d(a.2).total_cmp(&d(b.2))
+            });
+        match hit {
+            Some((path, segment, q)) => {
+                self.add_point(&path, segment, q);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The paths whose points show handles for this selection: a selected
+    /// path, or one a selected lamp is on.
+    pub fn shaped_paths(&self, selection: &[Target]) -> Vec<ComponentId> {
+        let mut out: Vec<ComponentId> = Vec::new();
+        for h in self.project.handles(selection) {
+            if let HandleKind::PathPoint { path, .. } = h.kind
+                && !out.contains(&path)
+            {
+                out.push(path);
+            }
+        }
+        out
+    }
+
+    /// Add a point to a path at `at` (world) on segment `segment`, and
+    /// select the path so its new handle shows. Refused on top of a point
+    /// it already has.
+    pub fn add_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) {
+        let origin = self.project.component_origin(path);
+        let near = self.project.path_points(path).is_some_and(|ps| {
+            ps.iter()
+                .any(|q| (*q + origin).distance(at) * self.camera.scale < SAME_POINT_PX)
+        });
+        if near {
+            self.notice = Some(Notice::refused(
+                format!("No point added to {path}"),
+                "it already has a point right there",
+                "double-click further along a segment; drag the point to move it",
+            ));
+            return;
+        }
+        self.checkpoint();
+        if self.project.insert_path_point(path, segment, at) {
+            self.selection = vec![Target::Component(path.clone())];
+            let n = self.project.path_points(path).map_or(0, |p| p.len());
+            self.notice = Some(Notice::info(format!(
+                "Added a point to {path} — {n} points, the same lamps"
+            )));
+        }
+    }
+
+    /// Take a point away from a path; refused below two points.
+    pub fn remove_point(&mut self, path: &ComponentId, index: usize) {
+        let n = self.project.path_points(path).map_or(0, |p| p.len());
+        if n <= 2 {
+            self.notice = Some(Notice::refused(
+                format!("Can't remove a point of {path}"),
+                "a path needs at least two points",
+                format!("delete {path} itself (select it, then ⌫), or drag this point instead"),
+            ));
+            return;
+        }
+        self.checkpoint();
+        if self.project.remove_path_point(path, index) {
+            self.after_edit();
+            self.notice = Some(Notice::info(format!(
+                "Removed a point of {path} — {} points, the same lamps",
+                n - 1
+            )));
+        }
     }
 
     /// The pointer left the canvas: finish whatever it was doing.
@@ -699,12 +816,39 @@ impl Editor {
         });
     }
 
-    /// What the menu offers to do at `at` (screen): unpin each pinned node
-    /// the cursor is on.
+    /// What the menu offers to do at `at` (screen): remove the point whose
+    /// handle is there, add a point to a path's segment there, unpin each
+    /// pinned node the cursor is on.
     fn menu_actions(&self, at: Vec2) -> Vec<MenuAction> {
         let p = &self.project;
         let world = self.camera.to_world(at);
         let mut out = Vec::new();
+        if let Some(Handle {
+            kind: HandleKind::PathPoint { path, index },
+            ..
+        }) = self.handle_at(at)
+        {
+            out.push(MenuAction {
+                label: format!("Remove point {} of {path}", index + 1),
+                keys: "⌥ click".into(),
+                command: MenuCommand::RemovePoint { path, index },
+            });
+        }
+        for t in p.things_at(&self.camera, at) {
+            if let Target::Component(id) = &t
+                && let Some((segment, q)) = p.segment_at(&self.camera, id, at)
+            {
+                out.push(MenuAction {
+                    label: format!("Add a point to {id} here"),
+                    keys: "double-click".into(),
+                    command: MenuCommand::AddPoint {
+                        path: id.clone(),
+                        segment,
+                        at: q,
+                    },
+                });
+            }
+        }
         for n in p.all_nodes() {
             if n.pinned.is_some() && p.node_rect(&n.id).is_some_and(|r| r.contains(world)) {
                 out.push(MenuAction {
@@ -723,6 +867,8 @@ impl Editor {
         let Some(a) = m.actions.get(i) else { return };
         match a.command.clone() {
             MenuCommand::Unpin(id) => self.unpin(&[id]),
+            MenuCommand::AddPoint { path, segment, at } => self.add_point(&path, segment, at),
+            MenuCommand::RemovePoint { path, index } => self.remove_point(&path, index),
         }
     }
 

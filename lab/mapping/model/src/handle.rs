@@ -1,14 +1,24 @@
 //! Handles: the small squares you drag to reshape what's selected.
 //!
-//! A selected path has one on each of its points, a selected circle one on
-//! each ring (a selected ring, on itself), and a selected fixture one at
-//! its bottom-right corner and one on its right and bottom edges.
+//! A path has one on each of its points, a circle one on each ring (a
+//! ring, on itself), and a fixture one at its bottom-right corner and one
+//! on its right and bottom edges. A path's or ring's handles show while it
+//! OR anything inside it is selected — a lamp included (D49) — so you can
+//! walk its lamps and still reshape it.
 //!
-//! A handle is its own small area, always hit before whatever is under it
-//! — but only by a **drag**. A click on a handle is an ordinary click on
-//! what's beneath (the end point of a path is also its first lamp, and
-//! clicking it still goes into the path), so handles never get in the way
-//! of selecting.
+//! A handle is its own small area, hit before whatever is under it — but
+//! only by a **drag**. A drag that starts on a handle moves the handle,
+//! even when a selected lamp sits under it (lamps can't move on their own).
+//! A click on a handle is an ordinary click on what's beneath (the end
+//! point of a path is also its first lamp, and clicking it still goes into
+//! the path), so handles never get in the way of selecting. Handles are
+//! never assumed to sit on lamps: Béziers are coming, whose control points
+//! sit on none.
+//!
+//! Points come and go too: double-click a shaped path's segment (or
+//! right-click it, "Add a point here") to add one there, and ⌥-click a
+//! point's handle (or right-click it, "Remove this point") to take it
+//! away. A path keeps at least two.
 //!
 //! Dragging a handle changes geometry, never a count: a path's lamps
 //! respace along its new length, a ring keeps its lamps at the new radius.
@@ -94,74 +104,139 @@ impl HandleKind {
 }
 
 impl Project {
-    /// The handles the selection shows, in selection order.
+    /// The handles the selection shows, in selection order: a selected
+    /// thing's own, and those of the path or ring a selected lamp is on.
     pub fn handles(&self, selection: &[Target]) -> Vec<Handle> {
-        let mut out = Vec::new();
+        let mut out: Vec<Handle> = Vec::new();
         for t in selection {
-            match t {
-                Target::Component(id) => {
-                    let origin = self.component_origin(id);
-                    match self.component(id).map(|c| &c.kind) {
-                        Some(ComponentKind::Path { points, .. }) => {
-                            out.extend(points.iter().enumerate().map(|(index, p)| Handle {
-                                kind: HandleKind::PathPoint {
-                                    path: id.clone(),
-                                    index,
-                                },
-                                at: *p + origin,
-                            }))
-                        }
-                        Some(ComponentKind::Circle { center, rings, .. }) => {
-                            out.extend(rings.iter().map(|r| Handle {
-                                kind: HandleKind::RingRadius {
-                                    circle: id.clone(),
-                                    ring: r.key.clone(),
-                                },
-                                at: *center + origin + Vec2::new(r.radius, 0.0),
-                            }))
-                        }
-                        _ => {}
-                    }
+            for h in self.handles_of(t) {
+                if !out.iter().any(|o| o.kind == h.kind) {
+                    out.push(h);
                 }
-                Target::Object(o) => {
-                    if let (Some(r), Some(ComponentKind::Circle { center, .. })) = (
-                        self.ring(&o.component, &o.key),
-                        self.component(&o.component).map(|c| &c.kind),
-                    ) {
-                        out.push(Handle {
-                            kind: HandleKind::RingRadius {
-                                circle: o.component.clone(),
-                                ring: o.key.clone(),
-                            },
-                            at: *center
-                                + self.component_origin(&o.component)
-                                + Vec2::new(r.radius, 0.0),
-                        });
-                    }
-                }
-                Target::Node(id) if self.fixture(id).is_some() => {
-                    let Some(r) = self.node_rect(id) else {
-                        continue;
-                    };
-                    let mid = r.min.lerp(r.max, 0.5);
-                    for (edge, at) in [
-                        (SizeEdge::Right, Vec2::new(r.max.x, mid.y)),
-                        (SizeEdge::Bottom, Vec2::new(mid.x, r.max.y)),
-                        (SizeEdge::Corner, r.max),
-                    ] {
-                        out.push(Handle {
-                            kind: HandleKind::FixtureSize {
-                                fixture: id.clone(),
-                                edge,
-                            },
-                            at,
-                        });
-                    }
-                }
-                _ => {}
             }
         }
         out
+    }
+
+    fn handles_of(&self, t: &Target) -> Vec<Handle> {
+        let mut out = Vec::new();
+        match t {
+            Target::Component(id) => {
+                let origin = self.component_origin(id);
+                match self.component(id).map(|c| &c.kind) {
+                    Some(ComponentKind::Path { points, .. }) => {
+                        out.extend(points.iter().enumerate().map(|(index, p)| Handle {
+                            kind: HandleKind::PathPoint {
+                                path: id.clone(),
+                                index,
+                            },
+                            at: *p + origin,
+                        }))
+                    }
+                    Some(ComponentKind::Circle { center, rings, .. }) => {
+                        out.extend(rings.iter().map(|r| Handle {
+                            kind: HandleKind::RingRadius {
+                                circle: id.clone(),
+                                ring: r.key.clone(),
+                            },
+                            at: *center + origin + Vec2::new(r.radius, 0.0),
+                        }))
+                    }
+                    _ => {}
+                }
+            }
+            Target::Object(o) => {
+                if let (Some(r), Some(ComponentKind::Circle { center, .. })) = (
+                    self.ring(&o.component, &o.key),
+                    self.component(&o.component).map(|c| &c.kind),
+                ) {
+                    out.push(Handle {
+                        kind: HandleKind::RingRadius {
+                            circle: o.component.clone(),
+                            ring: o.key.clone(),
+                        },
+                        at: *center
+                            + self.component_origin(&o.component)
+                            + Vec2::new(r.radius, 0.0),
+                    });
+                }
+            }
+            // A lamp shows the handles of the path or ring it is on.
+            Target::Lamp { object, .. } => return self.handles_of(&self.object_target(object)),
+            Target::Node(id) if self.fixture(id).is_some() => {
+                let Some(r) = self.node_rect(id) else {
+                    return out;
+                };
+                let mid = r.min.lerp(r.max, 0.5);
+                for (edge, at) in [
+                    (SizeEdge::Right, Vec2::new(r.max.x, mid.y)),
+                    (SizeEdge::Bottom, Vec2::new(mid.x, r.max.y)),
+                    (SizeEdge::Corner, r.max),
+                ] {
+                    out.push(Handle {
+                        kind: HandleKind::FixtureSize {
+                            fixture: id.clone(),
+                            edge,
+                        },
+                        at,
+                    });
+                }
+            }
+            _ => {}
+        }
+        out
+    }
+
+    /// Add a point to a path on its segment `segment` (from point `segment`
+    /// to the next), at `at` in world units. The path keeps its lamps.
+    pub fn insert_path_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) -> bool {
+        let origin = self.component_origin(path);
+        match self.component_mut(path).map(|c| &mut c.kind) {
+            Some(ComponentKind::Path { points, .. }) if segment + 1 < points.len() => {
+                points.insert(segment + 1, at - origin);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Take one point away from a path. Refused (false) below two points.
+    pub fn remove_path_point(&mut self, path: &ComponentId, index: usize) -> bool {
+        match self.component_mut(path).map(|c| &mut c.kind) {
+            Some(ComponentKind::Path { points, .. })
+                if points.len() > 2 && index < points.len() =>
+            {
+                points.remove(index);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The segment of a path nearest `p` (screen), within its area, and the
+    /// point on it nearest `p` (world): where a new point would go.
+    pub fn segment_at(&self, cam: &Camera, path: &ComponentId, p: Vec2) -> Option<(usize, Vec2)> {
+        let origin = self.component_origin(path);
+        let points = self.path_points(path)?;
+        let world = cam.to_world(p);
+        points
+            .windows(2)
+            .enumerate()
+            .map(|(i, w)| {
+                let (a, b) = (w[0] + origin, w[1] + origin);
+                let ab = b - a;
+                let len2 = ab.x * ab.x + ab.y * ab.y;
+                let t = if len2 == 0.0 {
+                    0.0
+                } else {
+                    (((world.x - a.x) * ab.x + (world.y - a.y) * ab.y) / len2).clamp(0.0, 1.0)
+                };
+                (i, a.lerp(b, t))
+            })
+            .map(|(i, q)| (i, q, cam.to_screen(q).distance(p)))
+            .filter(|(_, _, d)| *d <= crate::area::PATH_PAD_PX)
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(i, q, _)| (i, q))
     }
 
     /// A path's points, in its fixture's own coordinates.
