@@ -84,7 +84,7 @@ pub use placed_label::{PlacedLabel, TextAnchor, TextBaseline};
 pub use placement::Placement;
 pub use polyline::Polyline;
 pub use rect::Rect;
-pub use route::{Bend, Route};
+pub use route::{Bend, Gutter, Route};
 pub use side::Side;
 pub use text_measure::{AverageCharWidth, TextMeasure};
 pub use vec2::Vec2;

@@ -13,8 +13,8 @@
 use std::fmt::Write;
 
 use lab_arrows::{
-    Arrow, ArrowGeometry, AverageCharWidth, Bend, EndDirection, Head, Label, LabelFit, LabelRole,
-    LayoutOptions, Route, Side, Vec2, layout_arrows,
+    Arrow, ArrowGeometry, AverageCharWidth, Bend, EndDirection, Gutter, Head, Label, LabelFit,
+    LabelRole, LayoutOptions, Route, Side, Vec2, layout_arrows,
 };
 
 const W: f64 = 380.0;
@@ -163,7 +163,24 @@ fn edge(from: Vec2, to: Vec2) -> Arrow {
 }
 
 fn cases() -> Vec<(&'static str, Vec<Arrow>)> {
+    let lane = |x: f64| {
+        Route::Gutter(Gutter {
+            lane_x: x,
+            radius: 8.0,
+        })
+    };
     vec![
+        (
+            "gutter: the stack's edges, out and in on lanes",
+            vec![
+                Arrow::new(v(320.0, 40.0), v(320.0, 150.0))
+                    .route(lane(60.0))
+                    .label(Label::quiet("visual.out")),
+                Arrow::new(v(320.0, 150.0), v(320.0, 220.0))
+                    .route(lane(90.0))
+                    .label(Label::quiet("control.out")),
+            ],
+        ),
         (
             "straight",
             vec![

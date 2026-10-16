@@ -15,11 +15,12 @@
 //! `Crowded`. Nothing depends on anything but the
 //! input, so the same input always gives the same geometry.
 
+use crate::arrow::gutter_path;
 use crate::label_candidates::{MOVED_HEIGHTS, crosses, label_candidates};
 use crate::{
-    Arrow, ArrowEnd, ArrowGeometry, Cubic, DropReason, HeadGeometry, LabelFit, LabelGeometry,
-    LayoutOptions, OrientedBox, Path, PlacedLabel, Polyline, Rect, Route, TextAnchor, TextBaseline,
-    TextMeasure, Vec2,
+    Arrow, ArrowEnd, ArrowGeometry, Cubic, DropReason, Gutter, HeadGeometry, LabelFit,
+    LabelGeometry, LayoutOptions, OrientedBox, Path, PlacedLabel, Polyline, Rect, Route,
+    TextAnchor, TextBaseline, TextMeasure, Vec2,
 };
 
 /// Lay out every arrow; one geometry per arrow, in the same order.
@@ -137,6 +138,9 @@ pub fn layout_arrows<M: TextMeasure + ?Sized>(
 /// The arrow's line, trimmed at its heads, the heads themselves, and its
 /// whole centreline measured for placing labels.
 fn line_and_heads(arrow: &Arrow) -> (Path, Vec<HeadGeometry>, Polyline) {
+    if let Route::Gutter(g) = arrow.route {
+        return gutter_line_and_heads(arrow, g);
+    }
     let curve = arrow.centreline();
     let straight = arrow.route == Route::Straight;
     let centreline = Path::of_cubic(&curve, straight).polyline();
@@ -175,6 +179,40 @@ fn line_and_heads(arrow: &Arrow) -> (Path, Vec<HeadGeometry>, Polyline) {
         Path::default()
     };
     (path, heads, centreline)
+}
+
+/// A gutter route's line, heads and centreline. Its ends are sideways
+/// stretches, so a head sits on one, pointing along it, and the line stops
+/// at the head's base.
+fn gutter_line_and_heads(arrow: &Arrow, g: Gutter) -> (Path, Vec<HeadGeometry>, Polyline) {
+    let centreline = gutter_path(arrow.from, arrow.to, g).polyline();
+    let out = Vec2::new((g.lane_x - arrow.from.x).signum(), 0.0);
+    let inward = Vec2::new((arrow.to.x - g.lane_x).signum(), 0.0);
+    let (mut from, mut to) = (arrow.from, arrow.to);
+    let mut heads = Vec::new();
+    if let Some(h) = arrow.start_head {
+        heads.push(HeadGeometry::new(
+            ArrowEnd::Start,
+            h.shape,
+            arrow.from,
+            -out,
+            h.length,
+            h.width,
+        ));
+        from = from + out * h.inset();
+    }
+    if let Some(h) = arrow.end_head {
+        heads.push(HeadGeometry::new(
+            ArrowEnd::End,
+            h.shape,
+            arrow.to,
+            inward,
+            h.length,
+            h.width,
+        ));
+        to = to - inward * h.inset();
+    }
+    (gutter_path(from, to, g), heads, centreline)
 }
 
 fn trimmed(curve: &Cubic, t0: f64, t1: f64) -> Cubic {

@@ -390,6 +390,77 @@ fn an_arrow_to_its_own_start_draws_nothing() {
     }
 }
 
+// ---- the gutter route --------------------------------------------------------------
+
+/// A gutter edge leaves its start sideways, runs straight along its lane,
+/// and enters its end sideways, with rounded corners between: its line is
+/// level at both ends and upright on the lane.
+#[test]
+fn a_gutter_edge_runs_out_along_its_lane_and_back_in() {
+    let a = gutter(Vec2::new(100.0, 40.0), Vec2::new(100.0, 260.0), 20.0);
+    let line = a.line().polyline();
+    let pts = line.points();
+    assert_eq!(pts.first(), Some(&a.from));
+    assert_eq!(pts.last(), Some(&a.to));
+    assert!(line.tangent_at(1.0).y.abs() < 1e-9, "leaves level");
+    assert!(
+        line.tangent_at(line.length() - 1.0).y.abs() < 1e-9,
+        "arrives level"
+    );
+    let mid = line.point_at(line.length() / 2.0);
+    assert!((mid.x - 20.0).abs() < 1e-9, "on the lane: {mid:?}");
+    assert!(
+        line.tangent_at(line.length() / 2.0).x.abs() < 1e-9,
+        "upright there"
+    );
+    assert!(
+        pts.iter()
+            .all(|p| p.x >= 20.0 - 1e-9 && p.x <= 100.0 + 1e-9),
+        "never past its lane"
+    );
+}
+
+/// A gutter edge's head points into its end, across from the lane, and
+/// the line stops at the head's base.
+#[test]
+fn a_gutter_edges_head_points_into_its_end() {
+    let a = gutter(Vec2::new(100.0, 40.0), Vec2::new(100.0, 260.0), 20.0);
+    let g = layout(&a);
+    let head = &g.heads[0];
+    assert_eq!(head.tip, a.to);
+    let line = g.path.polyline();
+    let end = *line.points().last().unwrap();
+    assert!(
+        end.x < a.to.x && (end.y - a.to.y).abs() < 1e-9,
+        "the line stops short: {end:?}"
+    );
+}
+
+/// A gutter edge's words lie on the lane, turned to run along it, upright.
+#[test]
+fn a_gutter_edges_label_lies_on_its_lane() {
+    let a = gutter(Vec2::new(100.0, 40.0), Vec2::new(100.0, 360.0), 20.0)
+        .label(Label::quiet("visual.out"));
+    let p = placed(&layout(&a), 0);
+    assert!(
+        (p.frame.centre.x - 20.0).abs() < 1e-6,
+        "{:?}",
+        p.frame.centre
+    );
+    assert!((p.angle_deg.abs() - 90.0).abs() < 1e-6, "{}", p.angle_deg);
+    assert!(p.angle_deg > -90.0 && p.angle_deg <= 90.0);
+}
+
+/// Where the legs are too short for the corners, the corners are smaller;
+/// level ends make a straight line along the lane and back.
+#[test]
+fn a_gutter_edges_corners_shrink_to_fit() {
+    let a = gutter(Vec2::new(30.0, 40.0), Vec2::new(30.0, 50.0), 20.0);
+    let line = a.line().polyline();
+    assert!(line.points().iter().all(|p| p.x >= 20.0 - 1e-9));
+    assert_eq!(line.points().last(), Some(&a.to));
+}
+
 // ---- helpers ---------------------------------------------------------------------
 
 fn layout(a: &Arrow) -> ArrowGeometry {
@@ -423,4 +494,13 @@ fn upright(deg: f64) -> f64 {
         d += 180.0;
     }
     d
+}
+
+/// The stack's edge: out of a card's left side at `from`, along the lane
+/// at `lane_x`, into the target's left side at `to`.
+fn gutter(from: Vec2, to: Vec2, lane_x: f64) -> Arrow {
+    Arrow::new(from, to).route(Route::Gutter(Gutter {
+        lane_x,
+        radius: 8.0,
+    }))
 }
