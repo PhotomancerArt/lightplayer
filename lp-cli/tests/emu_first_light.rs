@@ -104,28 +104,16 @@ fn time_to_first_light_on_the_emulated_c6() {
                 host = power_cycle(host, 0x7EE1_0100 + boot as u32);
                 let t0 = host.board.machine.micros();
                 let said = line(&mut host, "[perf] first light ");
-                // The frames on every pad the guest routed; the first lit one.
-                let lit_us = host
-                    .board
-                    .machine
-                    .routed_pads()
-                    .iter()
-                    .filter_map(|(pad, _)| {
-                        host.board
-                            .machine
-                            .frames(pad.0)
-                            .iter()
-                            .find(|f| f.wire.iter().any(|b| *b != 0))
-                            .map(|f| f.start as f64 / CYCLES_PER_US as f64)
-                    })
-                    .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.min(b))));
-                let lit_us = lit_us.map(|us| us - t0 as f64);
-                if lit_us.is_none() && files.is_some() {
-                    println!(
-                        "{label}/{project}: t0 {t0} us; pads {:?}",
-                        host.board.machine.routed_pads()
-                    );
+                // The decoder closes a frame on its reset low, after the
+                // firmware has said the line: step on until the lit one is
+                // there (a project), at most a second.
+                let mut lit_us = first_lit_us(&host);
+                let until = host.board.machine.micros() + 1_000_000;
+                while files.is_some() && lit_us.is_none() && host.board.machine.micros() < until {
+                    host.step().expect("the run");
+                    lit_us = first_lit_us(&host);
                 }
+                let lit_us = lit_us.map(|us| us - t0 as f64);
                 if files.is_some() {
                     assert!(
                         said.contains("first light at "),
@@ -199,6 +187,21 @@ fn line(host: &mut EmuLinkHost<C6Board>, needle: &str) -> String {
             panic!("the boot failed before {needle:?} ({e}):\n{}", tail(host));
         }
     }
+}
+
+/// The first lit WS281x frame decoded on any pad the guest routed: when its
+/// first bit left the chip, guest µs (the `--dump-frames` `start_us`).
+fn first_lit_us(host: &EmuLinkHost<C6Board>) -> Option<f64> {
+    let m = &host.board.machine;
+    m.routed_pads()
+        .iter()
+        .filter_map(|(pad, _)| {
+            m.frames(pad.0)
+                .iter()
+                .find(|f| f.wire.iter().any(|b| *b != 0))
+                .map(|f| f.start as f64 / CYCLES_PER_US as f64)
+        })
+        .reduce(f64::min)
 }
 
 fn tail(host: &EmuLinkHost<C6Board>) -> String {

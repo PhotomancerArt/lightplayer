@@ -11,12 +11,17 @@
 //! The first lit frame — the first buffer handed to the RMT with any byte
 //! that is not zero ([`on_frame`]) — also reads the **LP timer**, the
 //! slow-clock counter that starts at power-on, the mask ROM and the
-//! bootloader included (what `Rtc::time_since_power_up` reads). The offset
-//! between the two clocks puts every stamp on the power-up clock, so the
-//! parts sum to the total. One `log` line, once per boot:
+//! bootloader included (what `Rtc::time_since_power_up` reads) — and it read
+//! it at the app's entry too. The LP timer's lead over the system timer at
+//! the entry (the time before the CPU's reset was released) puts every stamp
+//! on the power-up clock, so the parts sum to the total. The stamps
+//! themselves stay on the system timer: it runs off the crystal, the LP
+//! timer off the RC slow clock, whose calibration is good to a few tenths
+//! of a percent (CX1: ~1 ms slow over half a second). One `log` line, once
+//! per boot:
 //!
 //! ```text
-//! [perf] first light at 612 ms: boot 85 init 20 fs 136 radio 90 split 2 server 15 load 134 frame1 40 lit 90 (lp-sys 2900/2930 us)
+//! [perf] first light at 612 ms: boot 85 init 20 fs 136 radio 90 split 2 server 15 load 134 frame1 40 lit 90 (lp-sys 990/-1100 us)
 //! ```
 //!
 //! - `boot`: power-on to the app's entry — the supply's ramp, the mask ROM,
@@ -44,10 +49,10 @@
 //! software, USB or watchdog reset does not reset it, so on those boots its
 //! count is not this boot's (the C6 TRM's reset scopes: a CPU or core reset
 //! leaves the LP system alone). `lp-sys` is the LP timer less the system
-//! timer at the app's entry and at first light: the time before the CPU's
-//! reset was released, which the two readings agree on when the slow clock's
-//! calibration is right. An emulator that models no LP timer reads it as 0,
-//! and the figures are then from reset.
+//! timer at the app's entry (the offset used) and again at the line: the two
+//! differ by the slow clock's calibration error over the boot. An emulator
+//! that models no LP timer reads it as 0, and the figures are then from
+//! reset.
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
@@ -129,13 +134,14 @@ fn report(lit: bool) {
     if esp_hal::system::reset_reason() != Some(esp_hal::rtc_cntl::SocResetReason::ChipPowerOn) {
         return;
     }
-    let sys_now = u64::from(sys_us());
-    let lp_now = lp_us(lp_ticks());
+    let sys_now = i64::from(sys_us());
+    let lp_now = lp_us(lp_ticks()) as i64;
     let lp_app = lp_us(u64::from(LP_APP.load(Relaxed)));
     let app = u64::from(AT[Mark::App as usize].load(Relaxed));
-    // The power-up clock's lead over the system timer, at both ends.
-    let lead_app = lp_app.saturating_sub(app);
-    let lead = lp_now.saturating_sub(sys_now);
+    // The power-up clock's lead over the system timer at the app's entry
+    // (the offset), and again now (the calibration check).
+    let lead = lp_app.saturating_sub(app);
+    let lead_now = lp_now - sys_now;
     // Each stage on the power-up clock, ms; a stage that did not run takes
     // the one before's, so its part is 0 and the parts still sum.
     let mut at = [0u32; MARKS];
@@ -162,8 +168,8 @@ fn report(lit: bool) {
         d(6),
         d(7),
         d(8),
-        lead_app,
         lead,
+        lead_now,
     );
 }
 
