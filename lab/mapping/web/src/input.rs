@@ -86,13 +86,33 @@ pub fn key_up(ed: &mut Signal<Editor>, evt: KeyboardEvent) {
     }
 }
 
-/// Listen for `mousemove` and `mouseup` on the window, once, for the page's
-/// life. A drag follows the pointer anywhere; a release outside the window
-/// is noticed on the first move back (no button held).
-pub fn follow_window(ed: Signal<Editor>) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
+/// The window's `mousemove` and `mouseup` listeners for one canvas. They
+/// are taken off the window when this is dropped: the canvas is mounted
+/// again when the size class changes, and a listener left behind would run
+/// in a scope that is gone.
+pub struct WindowListeners {
+    window: web_sys::Window,
+    on_move: Closure<dyn FnMut(web_sys::MouseEvent)>,
+    on_up: Closure<dyn FnMut(web_sys::MouseEvent)>,
+}
+
+impl Drop for WindowListeners {
+    fn drop(&mut self) {
+        let _ = self.window.remove_event_listener_with_callback(
+            "mousemove",
+            self.on_move.as_ref().unchecked_ref(),
+        );
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("mouseup", self.on_up.as_ref().unchecked_ref());
+    }
+}
+
+/// Listen for `mousemove` and `mouseup` on the window while the canvas is
+/// mounted. A drag follows the pointer anywhere; a release outside the
+/// window is noticed on the first move back (no button held).
+pub fn follow_window(ed: Signal<Editor>) -> Option<WindowListeners> {
+    let window = web_sys::window()?;
     let runtime = Runtime::current();
     let scope = current_scope_id();
 
@@ -138,8 +158,11 @@ pub fn follow_window(ed: Signal<Editor>) {
     };
     let _ = window.add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
     let _ = window.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
-    on_move.forget();
-    on_up.forget();
+    Some(WindowListeners {
+        window,
+        on_move,
+        on_up,
+    })
 }
 
 /// The event's point relative to the canvas, and whether it is over it.

@@ -66,8 +66,8 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
     let mut ed = ed;
     // Moves and releases come from the whole window, so a drag keeps going
     // when the pointer leaves the canvas (or the window) and finishes right
-    // when it comes back.
-    use_hook(move || input::follow_window(ed));
+    // when it comes back. The listeners go when this canvas does.
+    use_hook(move || std::rc::Rc::new(input::follow_window(ed)));
 
     // Layout, in the view: what there is (core's), laid out (lab-layout's),
     // handed back to the editor as a fact. The input is compared, so this
