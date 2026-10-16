@@ -291,6 +291,9 @@ impl Editor {
                 ));
             }
         }
+        if !self.debug.pinning && self.move_draw && owners.is_empty() && !self.dragged_nodes().is_empty() {
+            out.push(h("drag", "nothing: the layout places nodes · pinning is under Debug"));
+        }
         let pinned: Vec<String> = nodes
             .iter()
             .filter(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))

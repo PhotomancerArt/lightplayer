@@ -881,7 +881,7 @@ impl Editor {
                 });
             }
         }
-        for n in p.all_nodes() {
+        for n in p.all_nodes().into_iter().filter(|_| self.debug.pinning) {
             if n.pinned.is_some() && p.node_rect(&n.id).is_some_and(|r| r.contains(world)) {
                 out.push(MenuAction {
                     label: format!("Unpin {}", n.name),
@@ -1233,6 +1233,10 @@ impl Editor {
         }
         if !owners.is_empty() || !nodes.is_empty() {
             self.checkpoint();
+        } else if self.move_draw && !self.dragged_nodes().is_empty() {
+            self.notice = Some(Notice::info(
+                "The layout places nodes — dragging one moves nothing · pinning is under Debug",
+            ));
         }
         self.gesture = Gesture::Moving {
             start_world,
@@ -1244,8 +1248,17 @@ impl Editor {
 
     /// The nodes a move of the selection pins (D48): each selected node,
     /// and the output of a selected port or pixel — minus any inside a
-    /// module that is also moving.
+    /// module that is also moving. None while pinning is off (D64).
     pub fn move_nodes(&self) -> Vec<NodeId> {
+        if !self.debug.pinning {
+            return Vec::new();
+        }
+        self.dragged_nodes()
+    }
+
+    /// The nodes a drag of the selection takes hold of, whether or not
+    /// pinning lets it move them.
+    pub(crate) fn dragged_nodes(&self) -> Vec<NodeId> {
         let p = &self.project;
         let mut nodes: Vec<NodeId> = Vec::new();
         for t in &self.selection {
@@ -1277,6 +1290,14 @@ impl Editor {
     /// U: give the selected nodes (or the outputs of selected ports and
     /// pixels) back to the automatic layout.
     pub fn unpin_selection(&mut self) {
+        if !self.debug.pinning {
+            self.notice = Some(Notice::refused(
+                "Nothing to unpin",
+                "pinning is off: the layout places every node",
+                "turn on pinning under Debug to place nodes by hand",
+            ));
+            return;
+        }
         if !self.move_draw {
             self.refuse_move_draw("unpin");
             return;
@@ -1390,6 +1411,18 @@ impl Editor {
             "Move & draw on — drag to move, P and O draw"
         } else {
             "Move & draw off — select and patch only; nothing moves · M turns it back on"
+        }));
+    }
+
+    /// Debug's "Pinning": on, dragging a node pins it and the layout
+    /// honours pins; off, the layout places every node (D64). Pins stay in
+    /// the project either way.
+    pub fn set_pinning(&mut self, on: bool) {
+        self.debug.pinning = on;
+        self.notice = Some(Notice::info(if on {
+            "Pinning on — drag a node to pin it, U unpins it"
+        } else {
+            "Pinning off — the layout places every node"
         }));
     }
 

@@ -412,11 +412,47 @@ fn a_fixtures_title_selects_it() {
     assert_eq!(e.selection, vec![fixture(&e, "tail")]);
 }
 
-/// Dragging a node pins it where it's dropped; unpinning returns it to the
-/// layout; nodes never overlap.
+/// The layout places every node by itself (D64): dragging a node by its
+/// title selects it and moves nothing, U unpins nothing, and the hint bar
+/// says pinning is under Debug.
+#[test]
+fn the_layout_places_every_node_while_pinning_is_off() {
+    let mut e = editor();
+    assert!(!e.debug.pinning, "off by default");
+    let ring = node_id(&e, "ring display");
+    let before = e.project.node_rect(&ring).unwrap();
+    let title = e.camera.to_screen(before.min) + Vec2::new(12.0, -10.0);
+    let to = title + Vec2::new(40.0, 0.0) * e.camera.scale;
+    e.pointer_down(title, Button::Primary, none());
+    e.pointer_move(title + Vec2::new(10.0, 0.0), none());
+    assert!(
+        e.notice.as_ref().is_some_and(|n| n.text.contains("pinning is under Debug")),
+        "{:?}",
+        e.notice
+    );
+    e.pointer_move(to, none());
+    e.pointer_up(to, none());
+    lay_out(&mut e);
+    assert_eq!(e.selection, vec![fixture(&e, "ring display")]);
+    assert_eq!(e.project.node_rect(&ring).unwrap(), before, "nothing moved");
+    assert!(e.project.node(&ring).unwrap().pinned.is_none(), "nothing pinned");
+    assert!(
+        e.hint_bar()
+            .hints
+            .iter()
+            .any(|h| h.does.contains("pinning is under Debug"))
+    );
+    key(&mut e, Key::Char('u'), none());
+    assert!(e.notice.as_ref().is_some_and(|n| n.text == "Nothing to unpin"));
+}
+
+/// With pinning on (under Debug), dragging a node pins it where it's
+/// dropped; unpinning returns it to the layout; nodes never overlap. The
+/// layout ignores pins again when pinning goes off.
 #[test]
 fn dragging_a_node_pins_it() {
     let mut e = editor();
+    e.set_pinning(true);
     let ring = node_id(&e, "ring display");
     let before = e.project.node_rect(&ring).unwrap();
     let lamp_before = lamp_pos(&e, "circle1", "r1", 0);
@@ -481,6 +517,16 @@ fn dragging_a_node_pins_it() {
     assert_eq!(menu.actions[0].label, "Unpin scarf out");
     e.menu_act(0);
     assert!(e.project.node(&scarf_out).unwrap().pinned.is_none());
+
+    // Pinned again, then pinning off: the layout places it as if it weren't.
+    lay_out(&mut e);
+    let card = e.project.node_rect(&scarf_out).unwrap();
+    let from = e.camera.to_screen(card.min + Vec2::new(20.0, 3.0));
+    drag(&mut e, from, from + Vec2::new(0.0, 40.0), none());
+    lay_out(&mut e);
+    assert!(e.project.node(&scarf_out).unwrap().pinned.is_some());
+    e.set_pinning(false);
+    assert!(e.layout_input().pins.is_empty());
 }
 
 /// A fixture's size is a property like any other.
