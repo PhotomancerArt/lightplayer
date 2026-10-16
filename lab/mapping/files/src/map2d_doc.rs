@@ -18,7 +18,7 @@
 //! it (ids, strides and polygons need 3, gaps and repeats 2, an `align`
 //! other than `on` 4).
 
-use lab_mapping_model::component::Ring;
+use lab_mapping_model::domain::component::Ring;
 use lab_mapping_model::{ComponentKind, Vec2};
 use serde_json::{Map, Value};
 

@@ -489,8 +489,8 @@ fn object_of(
         .iter()
         .find(|(_, o)| o.product_id == product_id)?;
     let key = match (&project.component(id)?.kind, instances) {
-        (ComponentKind::Path { .. }, []) => lab_mapping_model::object::PATH_KEY.to_string(),
-        (ComponentKind::Polygon { .. }, []) => lab_mapping_model::object::POLYGON_KEY.to_string(),
+        (ComponentKind::Path { .. }, []) => lab_mapping_model::domain::object::PATH_KEY.to_string(),
+        (ComponentKind::Polygon { .. }, []) => lab_mapping_model::domain::object::POLYGON_KEY.to_string(),
         (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => rings[0].key.clone(),
         (ComponentKind::Repeat { shape, count, .. }, [k])
             if *k < *count && !matches!(**shape, ComponentKind::Repeat { .. }) =>
@@ -559,7 +559,7 @@ pub(crate) fn scopes(
 fn derived_box(components: &[Component]) -> Vec2 {
     let mut max = Vec2::new(1.0, 1.0);
     for c in components {
-        for o in lab_mapping_model::object::objects_of(c) {
+        for o in lab_mapping_model::domain::object::objects_of(c) {
             for l in o.lamps {
                 max = Vec2::new(max.x.max(l.pos.x), max.y.max(l.pos.y));
             }

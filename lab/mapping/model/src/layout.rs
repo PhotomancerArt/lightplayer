@@ -29,10 +29,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::geom::{Rect, Vec2};
-use crate::node::{Node, NodeId, NodeKind};
-use crate::patch::PatchRule;
-use crate::project::{Project, union};
+use crate::domain::geom::{Rect, Vec2};
+use crate::domain::node::{Node, NodeId, NodeKind};
+use crate::domain::patch::PatchRule;
+use crate::domain::project::{Project, union};
 
 /// Between nodes stacked in a column.
 pub const NODE_GAP: f64 = 24.0;
@@ -272,7 +272,7 @@ impl Project {
             }
             let Some(r) = placed[i] else { continue };
             let mut all = Vec::new();
-            crate::node::walk(std::slice::from_ref(n), &mut all);
+            crate::domain::node::walk(std::slice::from_ref(n), &mut all);
             let Some(f) = all.into_iter().find(|x| {
                 x.fixture().is_some_and(|f| {
                     f.rules

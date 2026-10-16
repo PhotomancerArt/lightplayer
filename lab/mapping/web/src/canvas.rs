@@ -36,11 +36,11 @@ use dioxus::prelude::*;
 use lab_mapping_model::{
     BoardFrame, Camera, Component, ComponentId, Editor, Gesture, HandleKind, NodeId, NodeKind,
     Object, ObjectId, ObjectShape, PixelGrid, Project, Rect, SizeEdge, Target, Tool, Vec2,
-    area::{FRAME_TITLE_PX, title_width},
-    geom::{along_polyline, polyline_length},
-    handle::HANDLE_PX,
+    domain::geom::{along_polyline, polyline_length},
+    domain::object::objects_of,
+    ux::area::{FRAME_TITLE_PX, title_width},
+    ux::handle::HANDLE_PX,
     layout::{CARD_HEADER, CARD_ROW},
-    object::objects_of,
 };
 
 use crate::input;

@@ -28,6 +28,7 @@
 //! turns them into the canvas's.
 
 use lab_mapping_model::*;
+use lab_mapping_model::domain::*;
 
 // ---- deleting ------------------------------------------------------------
 

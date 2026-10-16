@@ -322,7 +322,7 @@ fn lab_objects(p: &Project, fixture: &NodeId) -> Vec<(String, lab_mapping_model:
     let f = p.fixture(fixture).unwrap();
     let mut out = Vec::new();
     for c in &f.components {
-        for o in lab_mapping_model::object::objects_of(c) {
+        for o in lab_mapping_model::domain::object::objects_of(c) {
             let path = match &c.kind {
                 ComponentKind::Repeat { .. } => format!("/{}/{}", c.id, o.id.key),
                 _ => format!("/{}", c.id),
