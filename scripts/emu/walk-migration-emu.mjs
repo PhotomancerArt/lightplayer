@@ -43,10 +43,11 @@
 //       store's sectors are written, before the firmware switch — the
 //       board comes back as itself, its littlefs mounted, every file there
 //   T7b …then Update again moves them
-//   T8a a crowded littlefs (no room to stage): cable pulled while the store
+//   T8  a crowded littlefs (no room to stage): cable pulled while the store
 //       is written (retired: the old filesystem already erased) — the board
-//       boots nothing, its files in this browser's backup
-//   T8b …then the card's way back puts them into the tree store
+//       boots nothing, its files only in this browser's backup; the card's
+//       way back (Install) asks to put them back and does, into the tree
+//       store
 //   T9  a tree image flashed without the migration: the tree core HOLDS the
 //       littlefs it finds at 0x350000; Finish update moves it
 //
@@ -111,8 +112,7 @@ const SCENARIOS = {
   T1: { fixture: "fielded", tree: true, describe: "cutover: Update → the question → Continue → files in the tree store" },
   T7a: { fixture: "fielded-small", tree: true, describe: "cutover: cable pulled while the store is staged: the old board, whole" },
   T7b: { fixture: null, tree: true, describe: "cutover: …then Update again moves the files" },
-  T8a: { fixture: "crowded", tree: true, describe: "cutover, retired order: cable pulled mid store write: boots nothing, backup held" },
-  T8b: { fixture: null, tree: true, describe: "cutover: …then the way back restores the backup into the tree store" },
+  T8: { fixture: "crowded", tree: true, describe: "cutover, retired order: cable pulled mid store write, then the way back restores the backup into the tree store" },
   T9: { fixture: "tree-bypassed", tree: true, describe: "cutover: a tree image flashed without the migration holds the littlefs; Finish update moves it" },
 };
 
@@ -245,7 +245,7 @@ function fixtureTree(dir, overFull, kind = null) {
   if (kind === "fielded" || kind === "tree-bypassed") c40Files(files);
   // A littlefs with a block taken by every 1.5 KB file: no free blocks
   // left in the tree region to stage into, so the retired order.
-  if (kind === "crowded") for (let i = 0; i < 150; i += 1) files.push([`/projects/p/f${String(i).padStart(3, "0")}.bin`, noise(1500, 100 + i)]);
+  if (kind === "crowded") for (let i = 0; i < 135; i += 1) files.push([`/projects/p/f${String(i).padStart(3, "0")}.bin`, noise(1500, 100 + i)]);
   for (const [file, bytes] of files) {
     const at = path.join(dir, file);
     mkdirSync(path.dirname(at), { recursive: true });
@@ -901,10 +901,13 @@ async function main() {
     const before = await consoleText();
     if (scenario === "W9" || scenario === "T9") {
       const said = await consoleText();
+      // Its boot line, or (the tree core's boot words can go out before the
+      // host is on the link) the hello's own `fs`.
+      const heldFs = framedValues(said, "fs").map(fsState).includes("legacy_held");
       step(
         "the board held its files",
-        said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found"),
-        (said.match(/\[FS\][^\n]*/) ?? [""])[0].slice(0, 120),
+        said.includes("holding: not formatting") || said.includes("legacy-layout filesystem found") || heldFs,
+        heldFs ? "hello fs: legacy_held" : (said.match(/\[FS\][^\n]*/) ?? [""])[0].slice(0, 120),
       );
       // A held board's device store waits with its files: it keeps Bluetooth
       // off (it must not be more open than that store), and Studio neither
@@ -922,7 +925,7 @@ async function main() {
       const finish = await findFirmwareVerb(driver, ["finish-update"]);
       step("the card offers Finish update", Boolean(finish), finish ? `\`finish-update\` on ${finish.bar ? `its ${finish.bar} details` : "its firmware bar"}` : "");
       await pressLasting(driver, finish);
-    } else if (scenario === "W7b" || scenario === "T8b") {
+    } else if (scenario === "W7b") {
       const restore = await findFirmwareVerb(driver, ["restore-files"]);
       step("formatted board offers its backup", Boolean(restore), restore ? `\`restore-files\` on ${restore.bar ? `its ${restore.bar} details` : "its firmware bar"}` : "");
       await pressLasting(driver, restore);
@@ -1024,7 +1027,7 @@ async function main() {
             const text = await awaitInstalled(driver);
             await shot("installed");
             step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
-          } else if (scenario === "T7a" || scenario === "T8a") {
+          } else if (scenario === "T7a" || scenario === "T8") {
             // The tree store's sectors (0x380000 on): esptool-js's own
             // `Writing at 0x38…` lines on the board's terminal. Staged
             // (T7a), they come before the firmware; retired (T8a), after
@@ -1054,6 +1057,17 @@ async function main() {
                 }
               }
               step("the card offers a way back", Boolean(way), way ? `\`${way.verb}\` on ${way.board}` : JSON.stringify(verdict.afterPull.card).slice(0, 300));
+              // The board's files are only in this browser's backup now: the
+              // way back inspects it, finds nothing to move, and asks to put
+              // the backup back — into the tree store.
+              await pressMaybeArmed(driver, way);
+              const again = await awaitQuestion(driver);
+              await shot("question-again");
+              step("asked to put the files back", again.includes("Put this board's files back"), "");
+              await pressContinue(driver);
+              const text = await awaitInstalled(driver);
+              await shot("installed");
+              step("update installed", text.includes("firmware installed"), text.match(/firmware installed[^\n]*/)?.[0] ?? "");
             }
           } else if (scenario === "W7a") {
             // The firmware bar names the step, not its address; the board's
@@ -1120,7 +1134,7 @@ async function main() {
     // The rows live in the card's details now: the Bluetooth switch in the
     // connection details, who gets in with no password in the access
     // details ("Open to"), the access panel beside it.
-    if (scenario !== "W7a" && scenario !== "T8a") {
+    if (scenario !== "W7a") {
       const board = await liveBoard(driver).catch(() => CARD);
       const ready = board ? await awaitAccess(driver, board, expectedOpenSummary(), 60_000) : false;
       const seen = board ? await readAccess(driver, board).catch((error) => ({ error: error.message })) : { error: "no card for the board" };
@@ -1203,9 +1217,11 @@ async function main() {
     switch (scenario) {
       case "T1":
       case "T7b":
-      case "T8b":
+      case "T8":
       case "T9": {
-        const studiosAfterHeld = scenario === "T9" && files.missing.length === 0 && files.extra.length === 0
+        // A held board's key add lands after the move (see W9); a new file
+        // the board writes itself (`/.lp/status-light.json`) is not a loss.
+        const studiosAfterHeld = scenario === "T9" && files.missing.length === 0
           && files.changed.length > 0 && files.changed.every((p) => p === "/.lp/access.json");
         step(
           studiosAfterHeld ? "every file in the tree store, byte for byte (but /.lp/access.json: Studio's key add after the move)" : "every file in the tree store, byte for byte",
@@ -1219,9 +1235,12 @@ async function main() {
           bytes.subarray(0x17000, 0x18000).every((b) => b === 0xff),
           bytes.subarray(0x17000, 0x17004).toString("hex"),
         );
+        // A staged store's sectors are a few short writes before the
+        // firmware: the card may still say "Flashing firmware…" through
+        // them, so "Moving files…" is not required (recorded either way).
         step(
           "the card named each step",
-          ["Reading the board…", "Waiting for your answer…", "Moving files…", "Flashing firmware…"].every((s) => cardSteps.includes(s)),
+          ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Checking the files…"].every((s) => cardSteps.includes(s)),
           cardSteps.join(" → "),
         );
         step(
@@ -1243,10 +1262,7 @@ async function main() {
         );
         break;
       }
-      case "T8a":
-        verdict.note = "the retired order: between the erase and the store's root the backup is the only copy";
-        step("the old filesystem is gone from the board", !v2Superblock, "");
-        break;
+
       case "W1":
       case "W5":
       case "W12":

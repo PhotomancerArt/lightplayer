@@ -18,7 +18,10 @@
 //! says `fs: legacy_held` in its hello. Studio's Update firmware (or
 //! `lp-cli hardware lpfs migrate`) then carries the files across.
 
-/// Where the pre-repartition `lpfs` starts.
+/// Where the pre-repartition `lpfs` starts. Read by the littlefs build's
+/// held line and by the probe, which the size measurement's build leaves
+/// out.
+#[cfg(not(feature = "measure_no_legacy_probe"))]
 pub const LEGACY_LPFS_V1_OFFSET: u32 = 0x0031_0000;
 /// How many 4 KB littlefs blocks it holds (`0xF0000` bytes). Read by the
 /// probe only, which the size measurement's build leaves out.
