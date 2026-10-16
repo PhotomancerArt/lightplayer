@@ -891,7 +891,7 @@ mod tests {
             config: CandidateConfig::new(16),
             corpora: vec!["syn:2:300".into(), "syn:3:500".into()],
             seed: 7,
-            cases: 160,
+            cases: 192,
             histories: 3,
             history_steps: 10,
             tears: vec![],
@@ -910,10 +910,12 @@ mod tests {
             &Scoreboard::memory(),
         );
         assert_eq!(s.failures, 0, "{s:#?}");
-        assert_eq!(s.by_kind.len(), 5, "{s:?}");
+        assert_eq!(s.by_kind.len(), 6, "{s:?}");
         assert!(s.by_kind.values().all(|k| k.cases >= 30), "{s:?}");
         assert!(
-            s.by_kind["mutated"].mounted > 0 && s.by_kind["cut"].mounted > 0,
+            s.by_kind["mutated"].mounted > 0
+                && s.by_kind["cut"].mounted > 0
+                && s.by_kind["shadowed_copy"].mounted > 0,
             "{s:?}"
         );
         assert_eq!(s.by_kind["newer_version"].mounted, 0, "{s:?}");
