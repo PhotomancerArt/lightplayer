@@ -50,6 +50,8 @@ html, body, #main { margin: 0; height: 100%; background: var(--bg); color: var(-
     .canvas-wrap { touch-action: none; }
 }
 
+.debug { position: relative; margin-left: auto; }
+.debug-menu { position: absolute; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 10; white-space: nowrap; }
 .top { grid-area: top; display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .brand { font-weight: 600; }
 .fixture-picker { color: var(--text-subtle); }
@@ -80,27 +82,46 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .hint-inline { padding: 10px 0; }
 
 .canvas-wrap { grid-area: canvas; position: relative; overflow: hidden; }
-.canvas { position: absolute; inset: 0; }
-.canvas-svg { position: absolute; inset: 0; pointer-events: none; }
-.canvas-input { position: absolute; inset: 0; }
-.outside { fill: var(--outside); }
-.frame-box { fill: var(--bg); stroke: var(--border-strong); stroke-width: 1; }
+
+/* The canvas container: it clips and takes every pointer event; nothing
+   inside does, except a control inside a face (Q1). */
+.canvas { position: absolute; inset: 0; overflow: hidden; background: var(--outside); }
+.canvas .dots, .canvas .world, .canvas .overlay, .canvas .cursor-note { pointer-events: none; }
+.face-control { pointer-events: auto; }
+.dots { position: absolute; inset: 0; width: 100%; height: 100%; }
+.overlay { position: absolute; left: 0; top: 0; overflow: visible; }
+
+/* The world layer: the camera's transform, and every node a flat sibling
+   inside it, in world units. Lines and borders that must stay one width on
+   screen divide by --zoom (the camera's scale) or don't scale at all. */
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.node { position: absolute; left: 0; top: 0; transition: transform 180ms ease, width 180ms ease, height 180ms ease; }
+.node-box, .node-face { position: absolute; inset: 0; }
+.card .node-box { background: var(--surface-raised); border: calc(1px / var(--zoom)) solid var(--border-strong); border-radius: calc(4px / var(--zoom)); }
+.frame.fixture .node-box { background: var(--bg); border: calc(1px / var(--zoom)) solid var(--border-strong); }
+.frame.module .node-box { background: rgba(255, 255, 255, 0.018); border: calc(1px / var(--zoom)) dashed var(--border-strong); border-radius: calc(6px / var(--zoom)); }
+.face-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.face-svg * { vector-effect: non-scaling-stroke; }
+.face-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* Emphasis: one meaning, one look, everywhere (core decides which). */
+.emph-dimmed { opacity: 0.3; }
+
+/* A frame's title tab, at one size in the overlay: it is what picks it. */
 .frame-tab { fill: var(--surface-raised); stroke: var(--border); stroke-width: 1; }
 .frame-title { fill: var(--text-muted); font: 11px var(--font); }
-.frame-dimmed { opacity: 0.4; }
-.module .frame-box { fill: rgba(255, 255, 255, 0.018); stroke: var(--border-strong); stroke-dasharray: 6 4; }
-.module .frame-tab { fill: none; stroke: var(--border); stroke-dasharray: 3 3; }
-.module .frame-title { fill: var(--text-subtle); font-style: italic; }
+.frame-title-tab.module .frame-tab { fill: none; stroke: var(--border); stroke-dasharray: 3 3; }
+.frame-title-tab.module .frame-title { fill: var(--text-subtle); font-style: italic; }
 
-.card-box { fill: var(--surface-raised); stroke: var(--border-strong); stroke-width: 1; }
 .card-title { fill: var(--text); font-family: var(--font); font-weight: 600; }
-.card-dimmed { opacity: 0.4; }
 .port-sep { stroke: var(--border); stroke-width: 1; }
 .port-name { fill: var(--text-muted); font-family: var(--font); dominant-baseline: middle; }
 .port-fill { fill: var(--text-subtle); font-family: var(--mono); dominant-baseline: middle; }
-.px { stroke: rgba(255, 255, 255, 0.09); stroke-width: 0.5; }
 .port-tint { fill: var(--bound-bg); }
 
+/* Edges fade while the cards ease to new places, then come back. */
+.edges { transition: opacity 140ms ease; }
+.edges.settling { opacity: 0; }
 .edge-line { fill: none; stroke: var(--bound); stroke-width: 1.4; opacity: 0.75; }
 .edge-selected .edge-line { opacity: 1; stroke-width: 2; }
 .edge-quiet .edge-line { opacity: 0.32; }
@@ -128,23 +149,17 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .obj .stroke { stroke: var(--border-strong); stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .obj .arrow { fill: var(--text-subtle); }
 .obj .lamp-start { fill: none; stroke: var(--text-subtle); stroke-width: 1; }
-.obj-selected .stroke { stroke: var(--selection); }
-.obj-selected .arrow { fill: var(--selection); }
-.obj-dimmed { opacity: 0.28; }
+.obj.emph-lit .stroke { stroke: var(--selection); }
+.obj.emph-lit .arrow { fill: var(--selection); }
 /* A draft's lamps light white on the board, so here too. */
 .obj-draft .stroke { stroke: var(--hover); stroke-dasharray: 4 3; }
 .obj-draft .lamp { fill: #fff; }
 .obj-draft .lamp-outside { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.6; }
 .draft-point { fill: var(--bg); stroke: var(--hover); stroke-width: 1.2; }
 
-/* Lamps, in their control product's colour. A faint rim keeps an unlit
-   (black) lamp visible; one patched to no pixel is fainter; a lamp with no
-   colour is a dim hollow dot. */
-.lamp-lit { stroke: rgba(255, 255, 255, 0.3); stroke-width: 0.6; }
-.lamp-unpatched { opacity: 0.45; }
-.lamp-dark { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.5; }
-.lamp-dimmed { opacity: 0.28; }
-.lamp-dark.lamp-dimmed { opacity: 0.18; }
+/* Lamps and pixels are drawn on canvases (dense_canvas.rs), with these
+   looks in code: a faint rim keeps an unlit (black) lamp visible, one
+   patched to no pixel is fainter, a lamp with no colour a dim hollow dot. */
 
 /* The data path inside a fixture: quiet, brighter where you're working. */
 .wire-line { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.45; }

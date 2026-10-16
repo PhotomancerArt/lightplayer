@@ -1,61 +1,40 @@
-//! The tree, the inspector and the hint bar. All three are drawn from
-//! model data: tree rows, property descriptors, hints.
+//! The tree, the inspector and the hint bar, drawn from the view tree as
+//! core gives them: rows, sections, hints. Nothing here decides what to
+//! say.
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Editor, Hint, HintKind, NodeKind, Notice, NoticeKind, Project, Prop, PropEdit, PropKind,
-    PropValue, Target, common_props,
+    Editor, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind, PropValue,
+    UiInspector, UiItem, UiTree,
 };
 
 #[component]
-pub fn TreePane(ed: Signal<Editor>) -> Element {
+pub fn TreePane(ed: Signal<Editor>, tree: Memo<UiTree>) -> Element {
     let mut ed = ed;
-    let e = ed.read();
-    let rows = e.project.tree_rows();
-    let selection = e.selection.clone();
-    // A selected lamp lights its path or ring's row.
-    let lit: Vec<Target> = selection
-        .iter()
-        .map(|t| match t {
-            Target::Lamp { object, .. } => e.project.object_target(object),
-            other => other.clone(),
-        })
-        .collect();
-    let context = e.context();
-    let name = e.project.name.clone();
-    let kinds: Vec<&'static str> = rows
-        .iter()
-        .map(|r| match &r.target {
-            Target::Node(_) => e.project.kind_word(&r.target),
-            Target::Port { .. } => "port",
-            _ => "",
-        })
-        .collect();
-    drop(e);
-
+    let tree = tree.read().clone();
     rsx! {
-        div { class: "pane-title", "{name}" }
-        if rows.is_empty() {
-            div { class: "empty", "Nothing here yet. Press P to draw a path." }
+        div { class: "pane-title", "{tree.title}" }
+        if let Some(empty) = tree.empty {
+            div { class: "empty", "{empty}" }
         }
-        for (row, kind) in rows.into_iter().zip(kinds) {
+        for row in tree.rows.into_iter() {
             {
                 let t = row.target.clone();
                 let mut class = String::from("row");
-                if selection.contains(&t) {
+                if row.selected {
                     class.push_str(" row-selected");
-                } else if lit.contains(&t) {
+                } else if row.lit {
                     class.push_str(" row-lit");
                 }
-                if context.as_ref() == Some(&t) {
+                if row.context {
                     class.push_str(" row-context");
                 }
                 if row.derived {
                     class.push_str(" row-derived");
                 }
-                if !kind.is_empty() {
+                if !row.kind.is_empty() {
                     class.push_str(" row-");
-                    class.push_str(kind);
+                    class.push_str(row.kind);
                 }
                 let pad = 10 + row.depth * 16;
                 rsx! {
@@ -81,369 +60,73 @@ pub fn TreePane(ed: Signal<Editor>) -> Element {
 }
 
 #[component]
-pub fn Inspector(ed: Signal<Editor>) -> Element {
+pub fn Inspector(ed: Signal<Editor>, inspector: Memo<UiInspector>) -> Element {
     let mut ed = ed;
-    let e = ed.read();
-    let f = &e.project;
-    let selection = e.selection.clone();
-    // One thing: the path down to it. Several: the path to the level they
-    // are in, then how many.
-    let crumb_end = if selection.len() > 1 {
-        e.context()
-    } else {
-        selection.first().cloned()
-    };
-    let crumbs: Vec<(Target, String)> = crumb_end
-        .map(|t| {
-            f.chain(&t)
-                .into_iter()
-                .map(|c| (c.clone(), f.label(&c)))
-                .collect()
-        })
-        .unwrap_or_default();
-    let many = (selection.len() > 1).then(|| format!("{} selected", selection.len()));
-    let props = common_props(f, &selection);
-    let project_name = f.name.clone();
-    let summary: Vec<String> = selection.iter().take(8).map(|t| f.long_label(t)).collect();
-    let more = selection.len().saturating_sub(8);
-    let lamp_info: Option<String> = match selection.as_slice() {
-        [t @ Target::Lamp { object, index }] => {
-            let pos = f.lamps_under(t).first().copied();
-            let n = f.object(object).map(|o| o.lamps.len()).unwrap_or(0);
-            let owner = f.long_label(&f.object_target(object));
-            pos.map(|p| {
-                let place = if *index == 0 {
-                    "where the data enters".to_string()
-                } else if *index as usize + 1 == n {
-                    "the last lamp".to_string()
-                } else {
-                    format!("{index} from the start")
-                };
-                let pixel = match f.pixel_of_lamp(object, *index) {
-                    Some(px) => format!(" On {} (ringed).", f.long_label(&px)),
-                    None => " On no pixel: it lights nothing.".into(),
-                };
-                format!(
-                    "Lamp {index} of {n} on {owner} — {place}. At ({:.1}, {:.1}).{pixel}",
-                    p.x, p.y
-                )
-            })
-        }
-        _ => None,
-    };
-    let fixture_facts = if selection.is_empty() {
-        let outside = f.lamps_outside().len();
-        let n = f.fixtures().len();
-        let outputs = f.outputs().len();
-        let patch = f.effective_patch();
-        let unpatched: usize = patch.unpatched.iter().map(|u| u.lamps.len()).sum();
-        Some(vec![
-            format!("{n} fixture{}", if n == 1 { "" } else { "s" }),
-            format!("{outputs} output{}", if outputs == 1 { "" } else { "s" }),
-            format!("{} lamps", f.lamp_count()),
-            if unpatched == 0 {
-                "every lamp patched to a port".into()
-            } else {
-                format!("{unpatched} lamps on no port — they light nothing")
-            },
-            if outside == 0 {
-                "every lamp inside its fixture's box".into()
-            } else {
-                format!("{outside} lamps outside their fixture's box — never lit")
-            },
-        ])
-    } else {
-        None
-    };
-    let move_draw = e.move_draw;
-    let only_lamps =
-        !selection.is_empty() && selection.iter().all(|t| matches!(t, Target::Lamp { .. }));
-    let node = match selection.as_slice() {
-        [t] => node_facts(f, t),
-        _ => None,
-    };
-    drop(e);
-
+    let inspector = inspector.read().clone();
     rsx! {
         div { class: "crumbs",
-            button {
-                class: "crumb",
-                tabindex: "-1",
-                onmousedown: move |evt| evt.prevent_default(),
-                onclick: move |_| ed.write().select(vec![]),
-                "{project_name}"
-            }
-            for (i, (t, label)) in crumbs.into_iter().enumerate() {
+            for (i, c) in inspector.crumbs.into_iter().enumerate() {
                 span { key: "c{i}", class: "crumb-step",
-                    span { class: "crumb-sep", "›" }
+                    if i > 0 {
+                        span { class: "crumb-sep", "›" }
+                    }
                     button {
                         class: "crumb",
                         tabindex: "-1",
                         onmousedown: move |evt| evt.prevent_default(),
-                        onclick: move |_| ed.write().select(vec![t.clone()]),
-                        "{label}"
+                        onclick: move |_| ed.write().select(c.target.iter().cloned().collect()),
+                        "{c.label}"
                     }
                 }
             }
-            if let Some(many) = many {
+            if let Some(many) = inspector.many {
                 span { class: "crumb-step",
                     span { class: "crumb-sep", "›" }
                     span { class: "crumb crumb-many", "{many}" }
                 }
             }
         }
-        if let Some(facts) = fixture_facts {
-            div { class: "section-title", "Project" }
-            for (i, fact) in facts.into_iter().enumerate() {
-                div { key: "{i}", class: "fact", "{fact}" }
-            }
-            div { class: "hint-inline", "Click something on the canvas or in the tree to see it here." }
-        } else {
-            if selection.len() > 1 {
-                div { class: "section-title", "{selection.len()} selected" }
-                for (i, s) in summary.into_iter().enumerate() {
-                    div { key: "{i}", class: "fact", "{s}" }
+        for (i, section) in inspector.sections.into_iter().enumerate() {
+            div { key: "s{i}",
+                if let Some(title) = section.title {
+                    div { class: "section-title", "{title}" }
                 }
-                if more > 0 {
-                    div { class: "fact", "… and {more} more" }
+                for (j, item) in section.items.into_iter().enumerate() {
+                    InspectorItem { key: "{j}", ed, item }
                 }
-            }
-            if let Some(n) = node {
-                if !n.ports.is_empty() {
-                    div { class: "section-title", "Ports" }
-                    for (i, (name, fill, ratio)) in n.ports.into_iter().enumerate() {
-                        div { key: "p{i}", class: "port-fact",
-                            span { "{name}" }
-                            span { class: "port-fact-fill", "{fill}" }
-                            div { class: "port-fact-bar", div { class: "port-fact-bar-in", style: "width: {ratio * 100.0}%" } }
-                        }
-                    }
-                }
-                if !n.patch.is_empty() || !n.problems.is_empty() {
-                    div { class: "section-title", "Patch" }
-                    for (i, fact) in n.patch.into_iter().enumerate() {
-                        div { key: "r{i}", class: "fact patch-rule", "{fact}" }
-                    }
-                    for (i, pr) in n.problems.into_iter().enumerate() {
-                        div { key: "x{i}", class: "notice refused problem",
-                            div { class: "notice-text", span { class: "notice-tag", "problem: " } "{pr.text}" }
-                            if let Some(why) = pr.why {
-                                div { class: "notice-line", span { class: "notice-eq", "= why: " } "{why}" }
-                            }
-                            if let Some(help) = pr.help {
-                                div { class: "notice-line", span { class: "notice-eq", "= help: " } "{help}" }
-                            }
-                        }
-                    }
-                }
-                for (i, fact) in n.facts.into_iter().enumerate() {
-                    div { key: "n{i}", class: "fact", "{fact}" }
-                }
-                if let Some(code) = n.code {
-                    pre { class: "glsl", "{code}" }
-                }
-            }
-            if let Some(info) = lamp_info {
-                div { class: "section-title", "Lamp" }
-                div { class: "fact", "{info}" }
-            }
-            if !props.is_empty() {
-                div { class: "section-title",
-                    if selection.len() > 1 { "Shared properties" } else { "Properties" }
-                }
-                for p in props {
-                    PropRow { ed, locked: !move_draw && p.desc.reshapes, prop: p }
-                }
-            } else if only_lamps {
-                div { class: "hint-inline", "A lamp's count belongs to its path or ring — Esc selects it." }
-            } else if selection.len() > 1 {
-                div { class: "hint-inline", "These share no properties. Select things of one kind to edit them together." }
             }
         }
     }
 }
 
-/// What the inspector says about one node or port, beyond its properties.
-#[derive(Default)]
-struct NodeFacts {
-    /// An output's ports: name, `50/60 px`, how full.
-    ports: Vec<(String, String, f64)>,
-    /// A fixture's rules, then where its lamps land.
-    patch: Vec<String>,
-    problems: Vec<Notice>,
-    facts: Vec<String>,
-    /// A shader's GLSL, shown as it is.
-    code: Option<String>,
-}
-
-fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
-    let mut out = NodeFacts::default();
-    let patch = f.effective_patch();
-    match t {
-        Target::Node(id) => match f.node(id).map(|n| &n.kind) {
-            Some(NodeKind::Output(o)) => {
-                for p in &o.ports {
-                    let used = patch.used(id, &p.key);
-                    let pixels = f.port_pixels(id, &p.key);
-                    let rest = if p.pixels.is_none() {
-                        " (the rest)"
-                    } else {
-                        ""
-                    };
-                    out.ports.push((
-                        p.name.clone(),
-                        format!("{used}/{pixels} px{rest}{}", orders(f, id, &p.key)),
-                        (used as f64 / pixels.max(1) as f64).min(1.0),
-                    ));
-                }
-                if let Some(label) = &o.label {
-                    out.facts.push(format!("Patches name it “{label}”"));
-                }
-                let feeds: Vec<String> = f
-                    .fixtures()
-                    .iter()
-                    .filter(|n| f.outputs_of(&n.id).contains(id))
-                    .map(|n| n.name.clone())
-                    .collect();
-                if !feeds.is_empty() {
-                    out.facts.push(format!("Fed by {}", feeds.join(", ")));
-                }
-                out.facts.push(format!(
-                    "Reads {}: each fixture on it arrives as its own control product",
-                    o.reads
-                ));
+/// One line of the inspector, as core gives it.
+#[component]
+fn InspectorItem(ed: Signal<Editor>, item: UiItem) -> Element {
+    match item {
+        UiItem::Fact(text) => rsx! { div { class: "fact", "{text}" } },
+        UiItem::Rule(text) => rsx! { div { class: "fact patch-rule", "{text}" } },
+        UiItem::Hint(text) => rsx! { div { class: "hint-inline", "{text}" } },
+        UiItem::Code(code) => rsx! { pre { class: "glsl", "{code}" } },
+        UiItem::Port { name, fill, ratio } => rsx! {
+            div { class: "port-fact",
+                span { "{name}" }
+                span { class: "port-fact-fill", "{fill}" }
+                div { class: "port-fact-bar", div { class: "port-fact-bar-in", style: "width: {ratio * 100.0}%" } }
             }
-            Some(NodeKind::Fixture(fx)) => {
-                out.facts
-                    .push(format!("Colour order {}", fx.color_order.word()));
-                out.facts.push(match f.visual_source(id) {
-                    Some(src) => {
-                        format!("Samples {} on {} at its lamps", f.node_name(&src), fx.reads)
-                    }
-                    None => format!("Nothing writes {}: its lamps have no colour", fx.reads),
-                });
-                if fx.rules.is_empty() {
-                    out.patch.push("No rule: its lamps go nowhere yet".into());
-                }
-                for r in &fx.rules {
-                    out.patch.push(f.rule_label(r));
-                }
-                let ports: Vec<String> = f.ports_of(t).iter().map(|p| f.long_label(p)).collect();
-                if !ports.is_empty() {
-                    out.patch.push(format!("Lands on {}", ports.join(", ")));
-                }
-                let left: usize = patch
-                    .unpatched
-                    .iter()
-                    .filter(|u| &u.fixture == id)
-                    .map(|u| u.lamps.len())
-                    .sum();
-                let working = fx.rules.iter().any(|r| f.node(r.output()).is_some());
-                if left > 0 && working {
-                    out.patch
-                        .push(format!("{left} lamps past the end of its ports"));
-                }
-                out.problems = patch
-                    .problems
-                    .iter()
-                    .filter(|p| &p.fixture == id)
-                    .map(|p| p.notice(f))
-                    .collect();
-            }
-            Some(NodeKind::Module { children }) => {
-                out.facts.push(format!(
-                    "A module: {} nodes inside, laid out by themselves",
-                    children.len()
-                ));
-            }
-            Some(NodeKind::Source(src)) => {
-                let feeds: Vec<String> = f
-                    .bindings()
-                    .iter()
-                    .filter(|b| &b.from == id)
-                    .map(|b| f.node_name(&b.to))
-                    .collect();
-                out.facts.push(format!(
-                    "A {} writing its picture to {}{}",
-                    src.kind_words(),
-                    src.writes,
-                    if feeds.is_empty() {
-                        String::new()
-                    } else {
-                        format!(", read by {}", feeds.join(", "))
-                    }
-                ));
-                out.facts.push(format!(
-                    "The lab doesn't run GLSL: it shows a stand-in, the {} pattern",
-                    src.pattern.words()
-                ));
-                out.code = src.glsl.clone();
-            }
-            Some(NodeKind::Other(o)) => {
-                out.facts.push(format!(
-                    "A {} node: on the canvas, carried along, not edited here",
-                    o.kind_words()
-                ));
-            }
-            None => return None,
         },
-        Target::Port { output, key } => {
-            let port = f.output(output)?.port(key)?;
-            let (used, pixels) = f.port_fill(output, key);
-            let rest = if port.pixels.is_none() {
-                " · takes the rest"
-            } else {
-                ""
-            };
-            out.facts.push(format!(
-                "{used} of {pixels} px used{rest}{} · on {}",
-                orders(f, output, key),
-                f.node_name(output)
-            ));
-            let mut by: Vec<String> = Vec::new();
-            for s in patch
-                .spans
-                .iter()
-                .filter(|s| &s.output == output && &s.port == key)
-            {
-                by.push(format!(
-                    "{} lamps {}–{} at {}{}",
-                    f.long_label(&f.object_target(&s.object)),
-                    s.lamps.start,
-                    s.lamps.end - 1,
-                    s.start_pixel,
-                    if s.reversed { " (running down)" } else { "" }
-                ));
-            }
-            if by.is_empty() {
-                out.facts.push("Nothing is patched here yet".into());
-            }
-            out.facts.extend(by);
-        }
-        Target::Pixel { output, key, index } => {
-            f.output(output)?.port(key)?;
-            out.facts.push(format!(
-                "Pixel {index} of {} on {}{}",
-                f.port_pixels(output, key),
-                f.long_label(&Target::Port {
-                    output: output.clone(),
-                    key: key.clone(),
-                }),
-                orders(f, output, key)
-            ));
-            out.facts.push(match f.lamp_on_pixel(output, key, *index) {
-                Some(lamp) => format!(
-                    "{} is patched here — ringed on the canvas",
-                    f.long_label(&lamp)
-                ),
-                None => {
-                    "Nothing is patched to this pixel; it lights anyway, so you can find it".into()
+        UiItem::Problem(pr) => rsx! {
+            div { class: "notice refused problem",
+                div { class: "notice-text", span { class: "notice-tag", "problem: " } "{pr.text}" }
+                if let Some(why) = pr.why {
+                    div { class: "notice-line", span { class: "notice-eq", "= why: " } "{why}" }
                 }
-            });
-        }
-        _ => return None,
+                if let Some(help) = pr.help {
+                    div { class: "notice-line", span { class: "notice-eq", "= help: " } "{help}" }
+                }
+            }
+        },
+        UiItem::Prop { prop, locked } => rsx! { PropRow { ed, prop, locked } },
     }
-    Some(out)
 }
 
 /// One property, laid out from its descriptor alone.
@@ -532,11 +215,8 @@ fn PropRow(ed: Signal<Editor>, prop: Prop, locked: bool) -> Element {
 }
 
 #[component]
-pub fn HintBar(ed: Signal<Editor>) -> Element {
-    let e = ed.read();
-    let bar = e.hint_bar();
-    let notice = e.notice.clone();
-    drop(e);
+pub fn HintBar(hints: Memo<(Bar, Option<Notice>)>) -> Element {
+    let (bar, notice) = hints.read().clone();
     let (mouse, keys): (Vec<Hint>, Vec<Hint>) = bar
         .hints
         .iter()
@@ -582,20 +262,5 @@ fn HintRow(label: &'static str, hints: Vec<Hint>, quiet: bool) -> Element {
                 }
             }
         }
-    }
-}
-
-/// The colour orders landing on a port, for its line: ` · GRB`, or
-/// ` · GRB + RGB (mixed)` when two fixtures disagree.
-fn orders(f: &Project, output: &lab_mapping_model::NodeId, key: &str) -> String {
-    let words: Vec<&str> = f
-        .color_orders_on(output, key)
-        .into_iter()
-        .map(|c| c.word())
-        .collect();
-    match words.len() {
-        0 => String::new(),
-        1 => format!(" · {}", words[0]),
-        _ => format!(" · {} (mixed)", words.join(" + ")),
     }
 }

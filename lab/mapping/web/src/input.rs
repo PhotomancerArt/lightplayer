@@ -18,14 +18,17 @@ pub fn mods(m: Modifiers) -> Mods {
     }
 }
 
-pub fn point(evt: &MouseEvent) -> Vec2 {
-    let p = evt.element_coordinates();
-    Vec2::new(p.x, p.y)
+/// A mouse event's point relative to the canvas. Measured from the
+/// canvas's own box, whatever element the event landed on (a control inside
+/// a face may take events one day, Q1).
+pub fn client_point(evt: &MouseEvent) -> Option<Vec2> {
+    let p = evt.client_coordinates();
+    relative(p.x, p.y).map(|(at, _)| at)
 }
 
-pub fn wheel_point(evt: &WheelEvent) -> Vec2 {
-    let p = evt.element_coordinates();
-    Vec2::new(p.x, p.y)
+pub fn wheel_client_point(evt: &WheelEvent) -> Option<Vec2> {
+    let p = evt.client_coordinates();
+    relative(p.x, p.y).map(|(at, _)| at)
 }
 
 pub fn button(evt: &MouseEvent) -> Option<Button> {
@@ -141,13 +144,19 @@ pub fn follow_window(ed: Signal<Editor>) {
 
 /// The event's point relative to the canvas, and whether it is over it.
 fn canvas_point(evt: &web_sys::MouseEvent) -> Option<(Vec2, bool)> {
+    relative(evt.client_x() as f64, evt.client_y() as f64)
+}
+
+/// A point in the window, relative to the canvas, and whether it is over
+/// it.
+fn relative(client_x: f64, client_y: f64) -> Option<(Vec2, bool)> {
     let el = web_sys::window()?
         .document()?
-        .query_selector(".canvas-input")
+        .query_selector(".canvas")
         .ok()??;
     let r = el.get_bounding_client_rect();
-    let x = evt.client_x() as f64 - r.left();
-    let y = evt.client_y() as f64 - r.top();
+    let x = client_x - r.left();
+    let y = client_y - r.top();
     let inside = x >= 0.0 && y >= 0.0 && x < r.width() && y < r.height();
     Some((Vec2::new(x, y), inside))
 }

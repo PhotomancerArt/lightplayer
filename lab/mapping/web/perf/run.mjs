@@ -73,7 +73,7 @@ const evaluate = async (expression) => {
 await call("Page.enable");
 await call("Page.navigate", { url });
 // Wait for the page's canvas to exist.
-await evaluate(`new Promise((res) => { const t = setInterval(() => { if (document.querySelector('.canvas-input') && document.querySelector('.fixture-picker select')) { clearInterval(t); res(true); } }, 50); })`);
+await evaluate(`new Promise((res) => { const t = setInterval(() => { if (document.querySelector('.canvas') && document.querySelector('.fixture-picker select')) { clearInterval(t); res(true); } }, 50); })`);
 await evaluate(readFileSync(new URL("./harness.js", import.meta.url), "utf8"));
 
 const wanted = projects.length ? projects : ["playful-choker", "zook-dome", "radiance-dome"];

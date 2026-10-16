@@ -11,7 +11,7 @@
 // rAF to nothing).
 window.labPerf = (() => {
   const raf = () => new Promise((r) => requestAnimationFrame(r));
-  const canvas = () => document.querySelector(".canvas-input");
+  const canvas = () => document.querySelector(".canvas");
   const box = () => canvas().getBoundingClientRect();
 
   function stats(ts) {
@@ -131,12 +131,12 @@ window.labPerf = (() => {
   async function suite(project, { frames = 60, repeat = null } = {}) {
     const out = { project };
     out.open = await open(project);
-    out.elements = document.querySelectorAll(".canvas svg *").length;
+    out.elements = document.querySelectorAll(".canvas *").length;
     out.idle = await idle(30);
     out.hoverWhole = await hover(frames);
     out.panWhole = await pan(frames);
     out.zoomIn = await zoom(25, true);
-    out.elementsZoomed = document.querySelectorAll(".canvas svg *").length;
+    out.elementsZoomed = document.querySelectorAll(".canvas *").length;
     out.hoverZoomed = await hover(frames);
     out.panZoomed = await pan(frames);
     out.zoomOut = await zoom(25, false);

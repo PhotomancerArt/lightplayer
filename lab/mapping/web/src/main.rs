@@ -1,16 +1,24 @@
 //! The mapping design lab's page. It forwards input to the model
-//! (`lab-mapping-model`) and draws what the model says — no editor logic
-//! lives here.
+//! (`lab-mapping-model`), lays the nodes out (`lab-layout`), and draws the
+//! view tree the model emits (`Editor::view_tree`) — no editor logic and
+//! no detail decisions live here.
 //!
 //! The project picker opens the lab's own desk, or one of the real
 //! projects baked in by `lab-mapping-files` (the PLAYFUL choker, the zook
 //! dome, the radiance dome), and fits the view to it.
 
-mod canvas;
+mod canvas_container;
+mod dense_canvas;
+mod dots_layer;
 mod edge_layer;
+mod faces;
 mod input;
+mod node_card;
+mod overlay;
 mod panels;
 mod text_measure;
+mod view;
+mod world_layer;
 
 use dioxus::prelude::*;
 use lab_mapping_files::{Opened, embedded};
@@ -26,12 +34,11 @@ fn main() {
 fn App() -> Element {
     let mut ed = use_signal(|| Editor::new(Project::seed()));
     let mut project = use_signal(|| DESK.to_string());
-    let tool = ed.read().tool;
-    let move_draw = ed.read().move_draw;
-    let (can_undo, can_redo) = {
-        let e = ed.read();
-        (e.can_undo(), e.can_redo())
-    };
+    let view = view::use_view(ed);
+    let toolbar = view.toolbar.read().clone();
+    let tool = toolbar.tool;
+    let move_draw = toolbar.move_draw;
+    let (can_undo, can_redo) = (toolbar.can_undo, toolbar.can_redo);
 
     rsx! {
         style { {LAB_CSS} }
@@ -98,11 +105,12 @@ fn App() -> Element {
                         "Redo " kbd { "⇧⌘Z" }
                     }
                 }
+                DebugMenu { ed, pinning: toolbar.pinning }
             }
-            aside { class: "tree", panels::TreePane { ed } }
-            main { class: "canvas-wrap", canvas::Canvas { ed } }
-            aside { class: "inspector", panels::Inspector { ed } }
-            footer { class: "hints", panels::HintBar { ed } }
+            aside { class: "tree", panels::TreePane { ed, tree: view.tree } }
+            main { class: "canvas-wrap", canvas_container::Canvas { ed, view } }
+            aside { class: "inspector", panels::Inspector { ed, inspector: view.inspector } }
+            footer { class: "hints", panels::HintBar { hints: view.hints } }
         }
     }
 }
@@ -127,6 +135,7 @@ fn open_project(ed: &mut Signal<Editor>, key: &str) {
         Ok(project) => {
             let viewport = ed.peek().viewport;
             let mut e = Editor::new(project);
+            e.debug = ed.peek().debug;
             e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
             e.resize(viewport);
             e.fit();
@@ -161,6 +170,38 @@ fn ToolButton(
             onclick: move |_| ed.write().set_tool(tool),
             "{tool.word()} "
             kbd { "{key_label}" }
+        }
+    }
+}
+
+/// Debug, at the toolbar's right end: switches for things being tried,
+/// out of the way (D64). Open or shut is the page's own state.
+#[component]
+fn DebugMenu(ed: Signal<Editor>, pinning: bool) -> Element {
+    let mut ed = ed;
+    let mut open = use_signal(|| false);
+    rsx! {
+        div { class: "debug",
+            button {
+                class: if open() { "tool on" } else { "tool" },
+                tabindex: "-1",
+                onmousedown: move |evt| evt.prevent_default(),
+                onclick: move |_| open.toggle(),
+                "Debug ▾"
+            }
+            if open() {
+                div { class: "debug-menu",
+                    button {
+                        class: if pinning { "tool toggle on" } else { "tool toggle" },
+                        tabindex: "-1",
+                        title: "On: dragging a node pins it, U unpins it. Off: the layout places every node.",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| ed.write().set_pinning(!pinning),
+                        span { class: "toggle-box", if pinning { "✓" } else { "" } }
+                        " Pinning"
+                    }
+                }
+            }
         }
     }
 }
