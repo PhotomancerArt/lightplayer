@@ -176,28 +176,25 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         #[cfg(feature = "frame-pace-diag")]
         crate::frame_pace_diag::frame_start();
 
-        if hello_owed {
-            if hello_gate_open(!held_asks.is_empty())
-                || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS
-            {
-                hello_owed = false;
-                send_held_hello(
-                    &server,
-                    &mut transport,
-                    core::mem::take(&mut boot_links),
-                    core::mem::take(&mut held_links),
-                )
-                .await;
-            } else {
-                // A link that opens while the hello is held is owed its own
-                // hello, said when the gate opens.
-                held_links.extend(transport.take_opened_links());
-            }
-        }
-
         // A link that joined since the last frame (a radio connection) gets
-        // its own hello before anything else is sent to it.
-        send_owed_hellos(&server, &mut transport).await;
+        // its own hello before anything else is sent to it — once the hello
+        // is no longer held; until then it waits with the rest.
+        held_links.extend(transport.take_opened_links());
+        if hello_owed
+            && (hello_gate_open(!held_asks.is_empty())
+                || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS)
+        {
+            hello_owed = false;
+        }
+        if !hello_owed && !(boot_links.is_empty() && held_links.is_empty()) {
+            send_hellos(
+                &server,
+                &mut transport,
+                core::mem::take(&mut boot_links),
+                core::mem::take(&mut held_links),
+            )
+            .await;
+        }
 
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();
@@ -375,40 +372,21 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
     }
 }
 
-/// The unsolicited hello, once the gate is open: to every link that was open
-/// when the loop started (what `fw_core::send_unsolicited_hello` sends at
-/// once when no gate is set), then the owed hello of each link that opened
-/// while it was held — once each.
-async fn send_held_hello<T: ServerTransport>(
+/// The hellos due, once the gate is open: the unsolicited one to every link
+/// that was open when the loop started (`boot`; what
+/// `fw_core::send_unsolicited_hello` sends), then the one each newly opened
+/// link is owed (`opened`; a single-link transport's is its session's `Up`).
+/// A failure is logged and not retried: the link's own `Hello` request still
+/// gets an answer.
+async fn send_hellos<T: ServerTransport>(
     server: &LpServer,
     transport: &mut T,
     boot: Vec<Link>,
-    held: Vec<Link>,
+    opened: Vec<Link>,
 ) {
-    for link in hello_order(boot, held) {
+    for link in boot.into_iter().chain(opened) {
         if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
             note_send_failure("hello", &e);
-        }
-    }
-}
-
-/// `boot`, then each link of `held` not already said.
-fn hello_order(mut boot: Vec<Link>, held: Vec<Link>) -> Vec<Link> {
-    for link in held {
-        if !boot.contains(&link) {
-            boot.push(link);
-        }
-    }
-    boot
-}
-
-/// The hello each newly opened link is owed (a single-link transport never
-/// owes one). A failure is logged and not retried: the link's own `Hello`
-/// request still gets an answer.
-async fn send_owed_hellos<T: ServerTransport + LinkUpkeep>(server: &LpServer, transport: &mut T) {
-    for link in transport.take_opened_links() {
-        if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
-            note_send_failure("hello to a newly opened link", &e);
         }
     }
 }
@@ -575,28 +553,25 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
             frame_times.record(frame);
         }
 
-        if hello_owed {
-            if hello_gate_open(!held_asks.is_empty())
-                || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS
-            {
-                hello_owed = false;
-                send_held_hello(
-                    &server,
-                    &mut transport,
-                    core::mem::take(&mut boot_links),
-                    core::mem::take(&mut held_links),
-                )
-                .await;
-            } else {
-                // A link that opens while the hello is held is owed its own
-                // hello, said when the gate opens.
-                held_links.extend(transport.take_opened_links());
-            }
-        }
-
         // A link that joined since the last frame (a radio connection) gets
-        // its own hello before anything else is sent to it.
-        send_owed_hellos(&server, &mut transport).await;
+        // its own hello before anything else is sent to it — once the hello
+        // is no longer held; until then it waits with the rest.
+        held_links.extend(transport.take_opened_links());
+        if hello_owed
+            && (hello_gate_open(!held_asks.is_empty())
+                || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS)
+        {
+            hello_owed = false;
+        }
+        if !hello_owed && !(boot_links.is_empty() && held_links.is_empty()) {
+            send_hellos(
+                &server,
+                &mut transport,
+                core::mem::take(&mut boot_links),
+                core::mem::take(&mut held_links),
+            )
+            .await;
+        }
 
         // Collect incoming messages (non-blocking)
         let receive_start = time_provider.now_ms();

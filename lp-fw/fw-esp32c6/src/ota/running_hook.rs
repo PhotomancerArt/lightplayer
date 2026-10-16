@@ -157,16 +157,10 @@ pub fn hash_step() {
 /// Whether the unsolicited hello may go out (`server_loop::set_hello_gate`):
 /// the core's hash is known, so saying it costs the loop nothing; or a host
 /// is waiting on its `Hello` (`wanted`) and the boot has lit, so the rest of
-/// the hash is taken at once, for it, rather than a slice a frame. `true`
-/// too when no hook is installed, which has no hash to wait for.
+/// the hash is taken at once, for it, rather than a slice a frame. Set only
+/// once [`install`] has run (the engine's door, after it).
 pub fn hello_ready(wanted: bool) -> bool {
-    core_sha256_known().is_some()
-        || (wanted && crate::first_light::decided())
-        || RUNNING
-            .0
-            .try_borrow()
-            .map(|running| running.is_none())
-            .unwrap_or(false)
+    core_sha256_known().is_some() || (wanted && crate::first_light::decided())
 }
 
 /// DM13: a progress record beside a valid engine is stale (a cut between
