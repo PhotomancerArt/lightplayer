@@ -910,9 +910,13 @@ impl Engine {
         // the fixture resolves its visual input (where the shader compiles)
         // before `ensure_direct_points`/sample-buffer allocation. See
         // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
-        let window_wanted = self.tree.entries().any(|entry| {
-            matches!(entry.state.value(), NodeEntryState::Alive(node) if node.wants_compile_window())
-        });
+        // PROBE (A8 (d), not for merge): the first tick after a load opens the
+        // window up front, so the boot project's shaders compile in the frame
+        // that first renders them rather than one frame later.
+        let window_wanted = self.frame_num == FrameNum::new(1)
+            || self.tree.entries().any(|entry| {
+                matches!(entry.state.value(), NodeEntryState::Alive(node) if node.wants_compile_window())
+            });
         if window_wanted {
             self.broadcast_memory_pressure(crate::node::PressureLevel::High)?;
             let revision = self.revision;
