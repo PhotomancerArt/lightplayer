@@ -26,10 +26,12 @@
 //! executor refuses it unconfirmed. A restore from a stored backup is steps
 //! 3–6.
 
+use super::fs_kind::FsKind;
 use super::legacy_layout::LEGACY_C6_V1_LPFS;
 use super::lpfs_geometry::{LPFS_BLOCK_SIZE, LpfsGeometry};
 use super::lpfs_repack::{RepackedImage, repack};
 use super::lpfs_tree::{LpfsTree, LpfsTreeError};
+use super::tree_migration_plan::{TreeSource, WriteOrder, plan_tree_migration, read_source};
 use crate::provider::partition_table::PartitionTable;
 
 const SECTOR: u32 = 4096;
@@ -50,6 +52,10 @@ pub struct MigrationSummary {
     pub tight: bool,
     /// `/.lp/device.json`'s uid, which the board must come back with.
     pub device_uid: Option<String>,
+    /// The filesystem the files are written into.
+    pub target_fs: FsKind,
+    /// A tree-store move's write order (`None` for a littlefs re-pack).
+    pub order: Option<WriteOrder>,
 }
 
 /// Why a migration will not run. Nothing has been written.
@@ -75,6 +81,9 @@ pub enum Refusal {
     RepackFailed(String),
     /// The target image has no `lpfs` row.
     NoTargetFilesystem,
+    /// A file whose path the tree store cannot hold (deeper than 32
+    /// components, an empty component).
+    UnstorablePath(String),
 }
 
 impl core::fmt::Display for Refusal {
@@ -103,6 +112,11 @@ impl core::fmt::Display for Refusal {
             Self::SourceUnreadable(error) => write!(f, "the board's files cannot be read: {error}"),
             Self::RepackFailed(error) => write!(f, "re-packing the files failed: {error}"),
             Self::NoTargetFilesystem => f.write_str("the new firmware has no filesystem partition"),
+            Self::UnstorablePath(path) => write!(
+                f,
+                "the file {path} has a path the new filesystem cannot hold (at most 32 folders \
+                 deep, no empty names)"
+            ),
         }
     }
 }
@@ -242,6 +256,15 @@ pub fn decide(
     restore_requested: bool,
 ) -> Result<LayoutDecision, Refusal> {
     use super::layout_state::LayoutState;
+    if inspection.target_fs == FsKind::Tree {
+        return decide_tree(
+            inspection,
+            target_table,
+            target_image_len,
+            pending_backup,
+            restore_requested,
+        );
+    }
     match inspection.state {
         LayoutState::Legacy | LayoutState::CurrentLegacyPresent => {
             let Some((geometry, image)) = &inspection.source else {
@@ -278,7 +301,74 @@ pub fn decide(
         LayoutState::Blank
         | LayoutState::Foreign
         | LayoutState::CurrentMounts
+        | LayoutState::CurrentOtherFs
         | LayoutState::CurrentNothing => Ok(LayoutDecision::Plain(plan_plain_flash())),
+    }
+}
+
+/// [`decide`] for an image that mounts the tree store (the cutover).
+///
+/// - Files on the board — littlefs on an older layout or in place, or a
+///   tree store an interrupted migration finished — always move from the
+///   board: they are the truth.
+/// - A board whose region holds nothing readable (an interrupted
+///   migration's erased or rootless region) gets the pending backup back,
+///   when there is one; with none, the migration refuses and writes nothing.
+/// - The resume rule for a board already on the tree table is
+///   [`decide`]'s.
+fn decide_tree(
+    inspection: &super::layout_state::LayoutInspection,
+    target_table: &PartitionTable,
+    target_image_len: u32,
+    pending_backup: Option<&LpfsTree>,
+    restore_requested: bool,
+) -> Result<LayoutDecision, Refusal> {
+    use super::layout_state::LayoutState;
+    let restore = |tree: &LpfsTree, clear: Option<LpfsGeometry>| {
+        let (plan, summary, _) = plan_tree_migration(
+            target_table,
+            target_image_len,
+            TreeSource::StoredFiles { tree, clear },
+        )?;
+        Ok(LayoutDecision::Restore { plan, summary })
+    };
+    match inspection.state {
+        state if state.migrates() => {
+            let Some((geometry, image)) = &inspection.source else {
+                return Err(Refusal::SourceUnreadable(
+                    "the board's filesystem was not read".to_string(),
+                ));
+            };
+            match read_source(*geometry, inspection.source_fs, image) {
+                Ok(_) => {
+                    let (plan, summary, tree) = plan_tree_migration(
+                        target_table,
+                        target_image_len,
+                        TreeSource::Region {
+                            geometry: *geometry,
+                            fs: inspection.source_fs.expect("read_source read it"),
+                            image,
+                        },
+                    )?;
+                    Ok(LayoutDecision::Migrate {
+                        plan,
+                        summary,
+                        tree,
+                    })
+                }
+                Err(refusal) => match pending_backup {
+                    Some(tree) => restore(tree, Some(*geometry)),
+                    None => Err(refusal),
+                },
+            }
+        }
+        LayoutState::CurrentNothing | LayoutState::CurrentMounts
+            if pending_backup.is_some()
+                && (restore_requested || inspection.state == LayoutState::CurrentNothing) =>
+        {
+            restore(pending_backup.expect("checked"), None)
+        }
+        _ => Ok(LayoutDecision::Plain(plan_plain_flash())),
     }
 }
 
@@ -319,6 +409,8 @@ fn summarize(
         blocks_free: repacked.blocks_free,
         tight: repacked.tight,
         device_uid: tree.device_uid(),
+        target_fs: FsKind::Littlefs,
+        order: None,
     }
 }
 

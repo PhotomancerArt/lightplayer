@@ -437,8 +437,9 @@ const PARTITION_TABLE_LEN = 0xc00;
  * (plan lp2025/2026-10-01-1843-c6-repartition, the layout migration).
  *
  * A dumb executor (`docs/debt/web-serial-js-untestable.md`): WHAT to read
- * is decided in Rust. `nextRead(chipName, targetTable, lastReadBytes)` is
- * called first with `lastReadBytes = null`, then once after every read with
+ * is decided in Rust. `nextRead(chipName, targetTable, lastReadBytes,
+ * targetFs)` is called first with `lastReadBytes = null`, then once after
+ * every read with
  * that read's bytes, and answers `{offset, length}` or null when it has seen
  * enough. Rust keeps the bytes; this returns only what it alone knows.
  *
@@ -477,6 +478,9 @@ export async function inspectLayout(
     const targetImageLen = Math.max(
       ...imageFiles.map((image) => image.address + image.data.length),
     );
+    // What the image mounts: its manifest core lists `fs.tree` (the
+    // package's `core` is the image's own manifest core, verbatim).
+    const targetFs = packageMountsTreeStore(manifest) ? "tree" : "littlefs";
     const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
     const port = await getPort(portId);
     await releasePort(portId);
@@ -486,7 +490,12 @@ export async function inspectLayout(
       const chipName = await loader.main();
       assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
       const baseMac = await readBaseMac(loader);
-      let read = nextRead(chipName ? String(chipName) : "", new Uint8Array(targetTable), null);
+      let read = nextRead(
+        chipName ? String(chipName) : "",
+        new Uint8Array(targetTable),
+        null,
+        targetFs,
+      );
       while (read) {
         const label = read.length > 0x10000 ? "Reading the board's files" : "Reading the board's layout";
         const bytes = await readFlashSafely(loader, read.offset, read.length, (done, total) => {
@@ -503,7 +512,12 @@ export async function inspectLayout(
               `bytes, expected ${read.length}.`,
           );
         }
-        read = nextRead(chipName ? String(chipName) : "", new Uint8Array(targetTable), new Uint8Array(bytes));
+        read = nextRead(
+          chipName ? String(chipName) : "",
+          new Uint8Array(targetTable),
+          new Uint8Array(bytes),
+          targetFs,
+        );
       }
       return {
         chipName: chipName ? String(chipName) : null,
@@ -880,6 +894,12 @@ function emitEvent(onEvent, event) {
   if (typeof onEvent === "function") {
     onEvent(event);
   }
+}
+
+/** Does the package's image mount the tree store (`fs.tree` in its core)? */
+function packageMountsTreeStore(manifest) {
+  const features = manifest?.core?.features;
+  return Array.isArray(features) && features.includes("fs.tree");
 }
 
 async function loadFullManifest(manifestPath) {

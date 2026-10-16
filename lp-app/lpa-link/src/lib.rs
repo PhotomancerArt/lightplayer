@@ -38,6 +38,7 @@ pub use provider::endpoint::LinkEndpointStatus;
 pub use provider::error::LinkError;
 pub use provider::flash_plan::{FlashPlan, FlashStep, FlashStepTarget, PlanError, run_plan};
 pub use provider::flash_region::LinkFlashRegion;
+pub use provider::fs_kind::FsKind;
 pub use provider::log::{LinkLogEntry, LinkLogLevel};
 pub use provider::management_event::{
     LinkManagementEvent, LinkManagementEventSink, emit_management_result_events,

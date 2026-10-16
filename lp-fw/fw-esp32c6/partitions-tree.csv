@@ -1,0 +1,15 @@
+# Name,   Type,  SubType, Offset,   Size,     Flags
+# The tree-store table (plan lp2025/2026-10-16-0848-tree-store-adoption,
+# AD2): the 128-sector `lpfs` the tree store was designed for, at the END of
+# the chip, and the 192 KB it frees given to `factory` (0x340000 -> 0x370000).
+# What an `fs-tree` image is built with until the cutover's default switch
+# (A7) makes it `partitions.csv`. A board on the 176-sector table
+# (partitions.csv, frozen at lp-app/lpa-link/testdata/
+# partitions-esp32c6-legacy-v2.csv) moves to it — files kept — only through
+# `lp-cli hardware lpfs migrate --to tree` or Studio's USB update, never a
+# plain flash: docs/adr/2026-10-16-c6-tree-store-cutover-migration.md.
+nvs,      data,  nvs,     0x9000,   0x5000,
+bootctl,  data,  undefined, 0xe000, 0x1000,
+phy_init, data,  phy,     0xf000,   0x1000,
+factory,  app,   factory, 0x10000,  0x370000,
+lpfs,     data,  spiffs,  0x380000, 0x80000,

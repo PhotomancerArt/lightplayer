@@ -288,6 +288,7 @@ pub async fn inspect_layout_with_events(
         probe: Option<LayoutProbe>,
         asked: Option<LinkFlashRegion>,
         target_table: Vec<u8>,
+        target_fs: crate::FsKind,
         reads: Vec<(LinkFlashRegion, Vec<u8>)>,
         error: Option<String>,
     }
@@ -295,6 +296,7 @@ pub async fn inspect_layout_with_events(
         probe: None,
         asked: None,
         target_table: Vec::new(),
+        target_fs: crate::FsKind::Littlefs,
         reads: Vec::new(),
         error: None,
     }));
@@ -302,7 +304,7 @@ pub async fn inspect_layout_with_events(
     let next_read = {
         let state = Rc::clone(&state);
         Closure::wrap(Box::new(
-            move |chip: JsValue, target: JsValue, last: JsValue| -> JsValue {
+            move |chip: JsValue, target: JsValue, last: JsValue, target_fs: JsValue| -> JsValue {
                 let mut state = state.borrow_mut();
                 if state.probe.is_none() {
                     let table = js_sys::Uint8Array::new(&target).to_vec();
@@ -313,7 +315,13 @@ pub async fn inspect_layout_with_events(
                                 .as_deref()
                                 .and_then(crate::chip_id_from_reported)
                                 == Some("esp32c6");
-                            state.probe = Some(LayoutProbe::new(parsed, chip_is_c6));
+                            let fs = if target_fs.as_string().as_deref() == Some("tree") {
+                                crate::FsKind::Tree
+                            } else {
+                                crate::FsKind::Littlefs
+                            };
+                            state.probe = Some(LayoutProbe::new_for(parsed, fs, chip_is_c6));
+                            state.target_fs = fs;
                             state.target_table = table;
                         }
                         Err(error) => {
@@ -336,7 +344,7 @@ pub async fn inspect_layout_with_events(
                 next.map(region_to_js).unwrap_or(JsValue::NULL)
             },
         )
-            as Box<dyn FnMut(JsValue, JsValue, JsValue) -> JsValue>)
+            as Box<dyn FnMut(JsValue, JsValue, JsValue, JsValue) -> JsValue>)
     };
     let value = JsFuture::from(js_inspect_layout(
         port_id,
@@ -357,6 +365,7 @@ pub async fn inspect_layout_with_events(
         probed_mac: reflect_optional_string(&value, "baseMac")?,
         target_table: std::mem::take(&mut state.target_table),
         target_image_len: reflect_u32(&value, "targetImageLen")?,
+        target_fs: state.target_fs,
         reads: std::mem::take(&mut state.reads),
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?

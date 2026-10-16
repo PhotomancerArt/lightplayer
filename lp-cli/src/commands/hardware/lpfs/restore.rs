@@ -50,7 +50,13 @@ pub fn handle_restore(args: LpfsRestoreArgs) -> Result<()> {
                 .as_deref()
                 .and_then(lpa_link::chip_id_from_reported)
                 == Some("esp32c6");
-            let state = LayoutProbe::replay(target.clone(), chip_is_c6, &inspection.reads).state;
+            let state = LayoutProbe::replay_for(
+                target.clone(),
+                inspection.target_fs,
+                chip_is_c6,
+                &inspection.reads,
+            )
+            .state;
             if !matches!(
                 state,
                 LayoutState::CurrentMounts | LayoutState::CurrentNothing

@@ -78,6 +78,7 @@ impl FakeEsp32Device {
             probed_mac: efuse_mac,
             target_table: fake_target_table().to_bytes(),
             target_image_len: FAKE_FIRMWARE_LEN,
+            target_fs: crate::FsKind::Littlefs,
             reads,
             logs: vec!["fake layout inspection".to_string()],
             progress: vec![

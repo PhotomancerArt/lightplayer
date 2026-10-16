@@ -87,6 +87,9 @@ pub struct LinkLayoutInspection {
     /// The package's merged image length: whether the firmware write itself
     /// reaches the legacy filesystem.
     pub target_image_len: u32,
+    /// The filesystem the package's image mounts (its manifest core lists
+    /// `fs.tree`, or not) — what "the board's files are current" means.
+    pub target_fs: super::fs_kind::FsKind,
     /// Every read, `(region, bytes)`, in order.
     pub reads: Vec<(LinkFlashRegion, Vec<u8>)>,
     pub logs: Vec<String>,
