@@ -157,6 +157,12 @@ fn the_usb_flash_path_refuses_the_shipped_image_and_takes_a_tree_one() {
 
     let manifest_of = |elf: &std::path::Path| {
         let bytes = std::fs::read(elf).expect("the ELF");
+        // One blob, and no stray marker: a scan finds the FIRST begin marker,
+        // and the update guard's own needle once sat in `.rodata` in front of
+        // the blob (a package then failed: "not a ManifestCore").
+        let begin = lpc_model::manifest::MANIFEST_BLOB_BEGIN.as_bytes();
+        let markers = bytes.windows(begin.len()).filter(|w| *w == begin).count();
+        assert_eq!(markers, 1, "{}: begin markers", elf.display());
         embedded_manifest([bytes.as_slice()])
     };
     let littlefs = manifest_of(&shipped);
