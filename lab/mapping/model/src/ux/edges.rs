@@ -22,11 +22,11 @@
 //! hit-tests them and reports the one under the pointer as a fact
 //! ([`Editor::set_hovered_edge`]).
 
-use crate::ux::editor::Editor;
 use crate::domain::geom::Rect;
 use crate::domain::node::NodeId;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::editor::Editor;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {

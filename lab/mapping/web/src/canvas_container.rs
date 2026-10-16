@@ -82,7 +82,9 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
     // worked out again only when one of those, or the clock, moves.
     let board_key = use_memo(move || {
         let e = ed.read();
-        let draft = e.drawing().then(|| (e.pointer, e.path_draft.clone(), e.camera));
+        let draft = e
+            .drawing()
+            .then(|| (e.pointer, e.path_draft.clone(), e.camera));
         (e.project.revision(), e.selection.clone(), draft)
     });
     let frame = use_memo(move || {

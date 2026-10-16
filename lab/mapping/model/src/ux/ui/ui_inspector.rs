@@ -33,7 +33,11 @@ pub enum UiItem {
     /// One line of plain fact.
     Fact(String),
     /// A port, how full it is: `50/60 px`, and 0–1.
-    Port { name: String, fill: String, ratio: f64 },
+    Port {
+        name: String,
+        fill: String,
+        ratio: f64,
+    },
     /// A patch rule, or where the lamps land.
     Rule(String),
     Problem(Notice),
@@ -41,7 +45,10 @@ pub enum UiItem {
     Code(String),
     /// A property you can edit, locked while Move & draw is off and it
     /// reshapes.
-    Prop { prop: Prop, locked: bool },
+    Prop {
+        prop: Prop,
+        locked: bool,
+    },
     /// A quiet line saying what to do.
     Hint(String),
 }

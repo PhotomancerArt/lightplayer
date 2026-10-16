@@ -23,13 +23,24 @@ fn the_same_input_always_lays_out_the_same_way() {
 /// Nothing laid out overlaps anything else at its level.
 #[test]
 fn nothing_overlaps_anything_else_at_its_level() {
-    for input in [desk(), choker(), fyeah_sign(), two_modules(), many_outputs()] {
+    for input in [
+        desk(),
+        choker(),
+        fyeah_sign(),
+        two_modules(),
+        many_outputs(),
+    ] {
         for p in [canvas_layout(&input), stack_layout(&input, 300.0)] {
             for a in &input.nodes {
                 for b in &input.nodes {
                     if a.id < b.id && a.parent == b.parent {
                         let (ra, rb) = (rect(&p, &a.id), rect(&p, &b.id));
-                        assert!(!ra.overlaps(&rb), "{} {ra:?} overlaps {} {rb:?}", a.id, b.id);
+                        assert!(
+                            !ra.overlaps(&rb),
+                            "{} {ra:?} overlaps {} {rb:?}",
+                            a.id,
+                            b.id
+                        );
                     }
                 }
             }
@@ -43,7 +54,9 @@ fn nothing_overlaps_anything_else_at_its_level() {
 fn adding_a_node_inside_a_module_moves_only_what_is_below_it_and_as_one() {
     let before = two_modules();
     let mut after = before.clone();
-    after.nodes.push(fixture("rig a extra", 50.0, 40.0).in_module("rig a"));
+    after
+        .nodes
+        .push(fixture("rig a extra", 50.0, 40.0).in_module("rig a"));
     let (b, a) = (canvas_layout(&before), canvas_layout(&after));
 
     for id in ["shader", "strip", "strip out", "rig a"] {
@@ -53,9 +66,16 @@ fn adding_a_node_inside_a_module_moves_only_what_is_below_it_and_as_one() {
         assert_eq!(rect(&b, id), rect(&a, id), "{id}, inside the module, moved");
     }
     let shift = rect(&a, "rig b").min - rect(&b, "rig b").min;
-    assert!(shift.y > 0.0 && shift.x == 0.0, "rig b moves down: {shift:?}");
+    assert!(
+        shift.y > 0.0 && shift.x == 0.0,
+        "rig b moves down: {shift:?}"
+    );
     for id in ["rig b fixture", "rig b out"] {
-        assert_eq!(rect(&a, id).min - rect(&b, id).min, shift, "{id} moves with rig b");
+        assert_eq!(
+            rect(&a, id).min - rect(&b, id).min,
+            shift,
+            "{id} moves with rig b"
+        );
     }
 }
 
@@ -69,7 +89,11 @@ fn adding_a_fixture_moves_nothing_to_its_left() {
     let (b, a) = (canvas_layout(&before), canvas_layout(&after));
     assert_eq!(rect(&b, "rainbow"), rect(&a, "rainbow"));
     for id in ["ring", "strip", "scarf"] {
-        assert_eq!(rect(&b, id), rect(&a, id), "{id}, above it in its own column, moved");
+        assert_eq!(
+            rect(&b, id),
+            rect(&a, id),
+            "{id}, above it in its own column, moved"
+        );
     }
 }
 
@@ -85,7 +109,8 @@ fn a_pipeline_reads_left_to_right() {
             let (role_from, role_to) = (role(&input, from), role(&input, to));
             if matches!(
                 (role_from, role_to),
-                (LayoutRole::Source, LayoutRole::Fixture) | (LayoutRole::Fixture, LayoutRole::Output)
+                (LayoutRole::Source, LayoutRole::Fixture)
+                    | (LayoutRole::Fixture, LayoutRole::Output)
             ) {
                 assert!(
                     rect(&p, from).max.x <= rect(&p, to).min.x - COLUMN_GAP,
@@ -117,7 +142,9 @@ fn an_output_sits_level_with_what_feeds_it() {
 fn outputs_keep_the_order_of_what_feeds_them() {
     let input = many_outputs();
     let p = canvas_layout(&input);
-    let tops: Vec<f64> = (1..=6).map(|i| rect(&p, &format!("out {i}")).min.y).collect();
+    let tops: Vec<f64> = (1..=6)
+        .map(|i| rect(&p, &format!("out {i}")).min.y)
+        .collect();
     assert!(tops.windows(2).all(|w| w[0] < w[1]), "in order: {tops:?}");
 }
 
@@ -127,11 +154,20 @@ fn controls_sit_in_a_row_above_the_pipeline() {
     let input = fyeah_sign();
     let p = canvas_layout(&input);
     let controls = ["clock", "button", "radio"].map(|id| rect(&p, id));
-    assert!(controls.iter().all(|r| r.min.y == controls[0].min.y), "one row");
-    assert!(controls.windows(2).all(|w| w[0].max.x < w[1].min.x), "in order");
+    assert!(
+        controls.iter().all(|r| r.min.y == controls[0].min.y),
+        "one row"
+    );
+    assert!(
+        controls.windows(2).all(|w| w[0].max.x < w[1].min.x),
+        "in order"
+    );
     let row_bottom = controls.iter().map(|r| r.max.y).fold(0.0, f64::max);
     for id in ["shader a", "shader b", "playlist", "sign", "sign out"] {
-        assert!(rect(&p, id).min.y >= row_bottom + NODE_GAP, "{id} is below the row");
+        assert!(
+            rect(&p, id).min.y >= row_bottom + NODE_GAP,
+            "{id} is below the row"
+        );
     }
 }
 
@@ -141,7 +177,11 @@ fn a_module_wraps_its_children_with_room_for_their_titles() {
     let input = choker();
     let p = canvas_layout(&input);
     let module = rect(&p, "playful");
-    for n in input.nodes.iter().filter(|n| n.parent.as_deref() == Some("playful")) {
+    for n in input
+        .nodes
+        .iter()
+        .filter(|n| n.parent.as_deref() == Some("playful"))
+    {
         let r = rect(&p, &n.id);
         assert!(r.min.x >= module.min.x + MODULE_PAD, "{} left", n.id);
         assert!(r.min.y >= module.min.y + MODULE_PAD_TOP, "{} top", n.id);
@@ -175,7 +215,11 @@ fn free_nodes_go_in_a_column_at_the_right() {
     input.nodes.push(card("fluid sim", LayoutRole::Other));
     let p = canvas_layout(&input);
     let free = rect(&p, "fluid sim");
-    for n in input.nodes.iter().filter(|n| n.parent.is_none() && n.id != "fluid sim") {
+    for n in input
+        .nodes
+        .iter()
+        .filter(|n| n.parent.is_none() && n.id != "fluid sim")
+    {
         assert!(free.min.x >= rect(&p, &n.id).max.x, "right of {}", n.id);
     }
 }
@@ -221,12 +265,18 @@ fn the_stack_lists_nodes_in_tree_order_children_inset() {
         "rig b out",
     ];
     let tops: Vec<f64> = order.iter().map(|id| rect(&p, id).min.y).collect();
-    assert!(tops.windows(2).all(|w| w[0] < w[1]), "in tree order: {tops:?}");
+    assert!(
+        tops.windows(2).all(|w| w[0] < w[1]),
+        "in tree order: {tops:?}"
+    );
     assert_eq!(rect(&p, "shader").min.x, 0.0);
     assert_eq!(rect(&p, "rig a fixture").min.x, STACK_INSET);
     assert_eq!(rect(&p, "rig a fixture").width(), 300.0 - STACK_INSET);
     let rig = rect(&p, "rig a");
-    assert!(rig.max.y >= rect(&p, "rig a out").max.y, "the module covers its children");
+    assert!(
+        rig.max.y >= rect(&p, "rig a out").max.y,
+        "the module covers its children"
+    );
 }
 
 /// In the stack, a fixture keeps its box's shape at the column's width,
@@ -320,7 +370,12 @@ fn rect(p: &Placement, id: &str) -> Rect {
 }
 
 fn role(input: &LayoutInput, id: &str) -> LayoutRole {
-    input.nodes.iter().find(|n| n.id == id).map(|n| n.role).unwrap()
+    input
+        .nodes
+        .iter()
+        .find(|n| n.id == id)
+        .map(|n| n.role)
+        .unwrap()
 }
 
 /// The lab's own desk: a shader, three fixtures and two outputs at the

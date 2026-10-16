@@ -8,7 +8,13 @@ use lab_mapping_model::{DetailLevel, UiSourceFace};
 use crate::faces::{CardTitle, card_font};
 
 #[component]
-pub fn SourceFace(face: UiSourceFace, name: String, w: f64, h: f64, detail: DetailLevel) -> Element {
+pub fn SourceFace(
+    face: UiSourceFace,
+    name: String,
+    w: f64,
+    h: f64,
+    detail: DetailLevel,
+) -> Element {
     let row = card_row(0);
     let font = card_font();
     rsx! {

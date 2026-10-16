@@ -3,10 +3,10 @@
 //! board itself).
 
 use crate::domain::board::BoardFrame;
-use crate::ux::editor::{Editor, Gesture, Tool};
 use crate::domain::fixture_overrides::FixtureOverrides;
 use crate::domain::output_overrides::OutputOverrides;
 use crate::domain::rgb::Rgb;
+use crate::ux::editor::{Editor, Gesture, Tool};
 
 impl Editor {
     /// What the simulated board shows at `time` seconds.

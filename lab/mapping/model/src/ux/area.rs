@@ -19,12 +19,12 @@
 //! Areas are in screen pixels, because their padding is: a path is as easy
 //! to hit zoomed out as zoomed in.
 
-use crate::ux::camera::Camera;
 use crate::domain::component::ComponentKind;
 use crate::domain::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
 use crate::domain::object::ObjectShape;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::camera::Camera;
 
 pub const LAMP_PAD_PX: f64 = 7.0;
 pub const PATH_PAD_PX: f64 = 10.0;

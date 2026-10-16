@@ -25,8 +25,8 @@ use crate::domain::node::{self, Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
 use crate::domain::patch::PatchRule;
-use crate::domain::placement::Carried;
 use crate::domain::pattern::Pattern;
+use crate::domain::placement::Carried;
 use crate::domain::render_source::RenderSource;
 
 #[derive(Debug, Clone, PartialEq)]

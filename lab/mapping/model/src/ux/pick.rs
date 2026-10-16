@@ -16,10 +16,10 @@
 //! Hover shows exactly what a click would select. That is the whole
 //! teaching device, so it is ONE function used by both.
 
-use crate::ux::camera::Camera;
 use crate::domain::geom::Vec2;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::camera::Camera;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickMode {

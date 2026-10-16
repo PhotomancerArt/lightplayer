@@ -36,10 +36,7 @@ pub fn node_size(n: &Node) -> Vec2 {
 
 /// A card with `rows` rows.
 pub fn card_size(rows: usize) -> Vec2 {
-    Vec2::new(
-        CARD_WIDTH,
-        CARD_HEADER + CARD_ROW * rows as f64 + CARD_FOOT,
-    )
+    Vec2::new(CARD_WIDTH, CARD_HEADER + CARD_ROW * rows as f64 + CARD_FOOT)
 }
 
 /// Row `i` on a card, in card-local units.

@@ -6,8 +6,7 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    BoardFrame, Editor, Emphasis, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape, UiWire,
-    Vec2,
+    BoardFrame, Editor, Emphasis, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape, UiWire, Vec2,
 };
 
 use crate::dense_canvas::{Raster, Stamp, canvas_id, put_when_mounted};

@@ -95,7 +95,12 @@ impl Raster {
                     self.buf[at + 2] = c[2];
                     self.buf[at + 3] = a;
                 } else {
-                    self.blend(px, py, [c[0] as f64, c[1] as f64, c[2] as f64, 1.0], a as f64 / 255.0);
+                    self.blend(
+                        px,
+                        py,
+                        [c[0] as f64, c[1] as f64, c[2] as f64, 1.0],
+                        a as f64 / 255.0,
+                    );
                 }
             }
         }

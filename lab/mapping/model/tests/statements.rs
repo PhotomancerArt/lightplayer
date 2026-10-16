@@ -27,9 +27,9 @@
 //! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
 //! turns them into the canvas's.
 
-use lab_mapping_model::*;
 use lab_mapping_model::card_geometry::*;
 use lab_mapping_model::domain::*;
+use lab_mapping_model::*;
 
 // ---- deleting ------------------------------------------------------------
 
@@ -426,7 +426,9 @@ fn the_layout_places_every_node_while_pinning_is_off() {
     e.pointer_down(title, Button::Primary, none());
     e.pointer_move(title + Vec2::new(10.0, 0.0), none());
     assert!(
-        e.notice.as_ref().is_some_and(|n| n.text.contains("pinning is under Debug")),
+        e.notice
+            .as_ref()
+            .is_some_and(|n| n.text.contains("pinning is under Debug")),
         "{:?}",
         e.notice
     );
@@ -435,7 +437,10 @@ fn the_layout_places_every_node_while_pinning_is_off() {
     lay_out(&mut e);
     assert_eq!(e.selection, vec![fixture(&e, "ring display")]);
     assert_eq!(e.project.node_rect(&ring).unwrap(), before, "nothing moved");
-    assert!(e.project.node(&ring).unwrap().pinned.is_none(), "nothing pinned");
+    assert!(
+        e.project.node(&ring).unwrap().pinned.is_none(),
+        "nothing pinned"
+    );
     assert!(
         e.hint_bar()
             .hints
@@ -443,7 +448,11 @@ fn the_layout_places_every_node_while_pinning_is_off() {
             .any(|h| h.does.contains("pinning is under Debug"))
     );
     key(&mut e, Key::Char('u'), none());
-    assert!(e.notice.as_ref().is_some_and(|n| n.text == "Nothing to unpin"));
+    assert!(
+        e.notice
+            .as_ref()
+            .is_some_and(|n| n.text == "Nothing to unpin")
+    );
 }
 
 /// With pinning on (under Debug), dragging a node pins it where it's
@@ -618,9 +627,7 @@ fn the_layout_input_says_what_there_is_never_where() {
         lab_layout::Vec2::new(CARD_WIDTH, CARD_HEADER + 2.0 * CARD_ROW + CARD_FOOT),
         "a header and a row per port"
     );
-    let edge = |a: &str, b: &str| {
-        (node_id(&e, a).to_string(), node_id(&e, b).to_string())
-    };
+    let edge = |a: &str, b: &str| (node_id(&e, a).to_string(), node_id(&e, b).to_string());
     for (a, b) in [
         ("rainbow", "ring display"),
         ("glow", "tail"),
@@ -638,14 +645,24 @@ fn the_layout_input_says_what_there_is_never_where() {
 #[test]
 fn controls_and_playlists_have_their_roles() {
     let mut p = Project::new("t");
-    for kind in ["Clock", "PowerButton", "Button", "ControlRadio", "Playlist", "Fluid"] {
+    for kind in [
+        "Clock",
+        "PowerButton",
+        "Button",
+        "ControlRadio",
+        "Playlist",
+        "Fluid",
+    ] {
         p.add_node(None, kind, NodeKind::Other(OtherNode::new(kind)));
     }
     let e = editor_of(p);
     let roles: Vec<lab_layout::LayoutRole> =
         e.layout_input().nodes.iter().map(|n| n.role).collect();
     use lab_layout::LayoutRole::*;
-    assert_eq!(roles, vec![Control, Control, Control, Control, Source, Other]);
+    assert_eq!(
+        roles,
+        vec![Control, Control, Control, Control, Source, Other]
+    );
 }
 
 /// Where nodes sit is a fact the view hands over: before it does, no node
@@ -660,7 +677,11 @@ fn where_nodes_sit_is_a_fact_the_view_hands_over() {
     let unplaced = e.camera;
     lay_out(&mut e);
     for n in e.project.all_nodes() {
-        assert!(e.project.node_rect(&n.id).is_some(), "{} has a place", n.name);
+        assert!(
+            e.project.node_rect(&n.id).is_some(),
+            "{} has a place",
+            n.name
+        );
     }
     assert_ne!(e.camera, unplaced, "framed");
     let framed = e.camera;
@@ -2874,7 +2895,10 @@ fn a_node_the_lab_doesnt_edit_is_a_plain_card() {
     let t = Target::Node(shader.clone());
     assert!(!e.project.is_frame(&t));
     assert!(e.project.children(Some(&t)).is_empty());
-    assert!(e.project.node_rect(&shader).is_some(), "it is on the canvas");
+    assert!(
+        e.project.node_rect(&shader).is_some(),
+        "it is on the canvas"
+    );
     e.select(vec![t]);
     key(&mut e, Key::Delete, none());
     assert!(e.project.node(&shader).is_none());
@@ -2952,7 +2976,11 @@ fn kept_answers_are_never_stale() {
     e.edit_selection_prop("width", PropEdit::SetNumber(120.0));
     let edited = e.project.revision();
     lay_out(&mut e);
-    assert_eq!(e.project.revision(), edited, "a new placement is not an edit");
+    assert_eq!(
+        e.project.revision(),
+        edited,
+        "a new placement is not an edit"
+    );
     assert_eq!(e.project.node_rect(&ring_display).unwrap().width(), 120.0);
     assert!(e.project.node_rect(&main).unwrap().min.x > card.min.x);
     assert_ne!(e.project.revision(), counted);
@@ -3095,16 +3123,14 @@ fn a_fixtures_face_lights_the_selection_in_its_own_units() {
     let mut e = editor();
     e.select(vec![ring("circle1", "r1")]);
     let view = e.view_tree();
-    let face = |name: &str| {
-        match view
-            .nodes
-            .iter()
-            .find(|n| n.header.name == name)
-            .and_then(|n| n.face.clone())
-        {
-            Some(UiNodeFace::Fixture(f)) => f,
-            _ => panic!("{name} has a fixture's face"),
-        }
+    let face = |name: &str| match view
+        .nodes
+        .iter()
+        .find(|n| n.header.name == name)
+        .and_then(|n| n.face.clone())
+    {
+        Some(UiNodeFace::Fixture(f)) => f,
+        _ => panic!("{name} has a fixture's face"),
     };
     let ring_face = face("ring display");
     let emphasis = |key: &str| {
@@ -3118,14 +3144,21 @@ fn a_fixtures_face_lights_the_selection_in_its_own_units() {
     assert_eq!(emphasis("r1"), Emphasis::Lit);
     assert_eq!(emphasis("r2"), Emphasis::Full, "in the level you are in");
     assert!(
-        face("strip").objects.iter().all(|o| o.emphasis == Emphasis::Dimmed),
+        face("strip")
+            .objects
+            .iter()
+            .all(|o| o.emphasis == Emphasis::Dimmed),
         "another fixture is outside it"
     );
     let Some(UiShape::Ring { center, .. }) = ring_face.objects.first().map(|o| &o.shape) else {
         panic!("a ring")
     };
     assert_eq!(*center, Vec2::new(35.0, 35.0), "the ring's own centre");
-    assert_eq!(ring_face.wires_emphasis, Emphasis::Lit, "you work inside it");
+    assert_eq!(
+        ring_face.wires_emphasis,
+        Emphasis::Lit,
+        "you work inside it"
+    );
 }
 
 /// A card shows its words only when they would be at least 4.5 px on
@@ -3180,7 +3213,11 @@ fn an_outputs_face_shows_where_the_selection_lands() {
 #[test]
 fn the_selections_edges_are_lit_and_say_what_they_carry() {
     let mut e = editor();
-    assert!(e.view_edges().iter().all(|x| x.emphasis == Emphasis::Full && x.label.is_none()));
+    assert!(
+        e.view_edges()
+            .iter()
+            .all(|x| x.emphasis == Emphasis::Full && x.label.is_none())
+    );
     e.select(vec![fixture(&e, "tail")]);
     let tail = node_id(&e, "tail");
     for x in e.view_edges() {
@@ -3210,7 +3247,11 @@ fn the_overlay_outlines_selection_context_and_hover() {
     let kinds: Vec<OutlineKind> = e.view_overlay().outlines.iter().map(|o| o.kind).collect();
     assert_eq!(
         kinds,
-        vec![OutlineKind::Context, OutlineKind::Selected, OutlineKind::Hover]
+        vec![
+            OutlineKind::Context,
+            OutlineKind::Selected,
+            OutlineKind::Hover
+        ]
     );
     let hover = e.hover_target().unwrap();
     let area = e.project.area(&e.camera, &hover).unwrap();
@@ -3243,7 +3284,11 @@ fn the_inspector_says_whats_true_of_the_selection() {
         .find(|s| s.title.as_deref() == Some("Patch"))
         .unwrap()
         .items;
-    assert!(patch.iter().any(|i| matches!(i, UiItem::Rule(r) if r.starts_with("Lands on"))));
+    assert!(
+        patch
+            .iter()
+            .any(|i| matches!(i, UiItem::Rule(r) if r.starts_with("Lands on")))
+    );
 }
 
 /// The tree pane marks the selection and the level it is in, and a

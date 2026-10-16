@@ -2,10 +2,10 @@
 //! property. Each one does what it can and says why it didn't do the rest.
 
 use crate::domain::component::ComponentKind;
-use crate::ux::editor::Editor;
 use crate::domain::notice::Notice;
-use crate::ux::props::{PropEdit, common_props};
 use crate::domain::target::Target;
+use crate::ux::editor::Editor;
+use crate::ux::props::{PropEdit, common_props};
 
 impl Editor {
     /// ⌫: delete what you authored — a node (a module with everything in

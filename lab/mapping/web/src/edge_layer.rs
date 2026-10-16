@@ -116,7 +116,12 @@ fn edge_class(x: &UiCanvasEdge) -> String {
 /// One edge's arrow on screen: it leaves toward its target and arrives from
 /// the left, with a head on the target. Its words: the channel, always,
 /// near the end; what it carries, when core gives it a label.
-fn arrow(x: &UiCanvasEdge, ed: &Editor, rects: &BTreeMap<NodeId, Rect>, cam: &Camera) -> Option<Arrow> {
+fn arrow(
+    x: &UiCanvasEdge,
+    ed: &Editor,
+    rects: &BTreeMap<NodeId, Rect>,
+    cam: &Camera,
+) -> Option<Arrow> {
     let p = &ed.project;
     let target = *rects.get(&x.to)?;
     let source = *rects.get(&x.from)?;

@@ -60,7 +60,11 @@ pub fn canvas_layout(input: &LayoutInput) -> Placement {
     let name = |i: usize| input.nodes[i].id.clone();
     Placement {
         rects: block.inner.into_iter().map(|(i, r)| (name(i), r)).collect(),
-        insides: block.insides.into_iter().map(|(i, v)| (name(i), v)).collect(),
+        insides: block
+            .insides
+            .into_iter()
+            .map(|(i, v)| (name(i), v))
+            .collect(),
         extent: Rect::default(),
     }
     .with_extent()
@@ -104,7 +108,9 @@ struct Level<'b> {
 impl Level<'_> {
     /// Those of `ks` not placed yet, in order.
     fn unplaced(&self, ks: Vec<usize>) -> Vec<usize> {
-        ks.into_iter().filter(|&k| self.placed[k].is_none()).collect()
+        ks.into_iter()
+            .filter(|&k| self.placed[k].is_none())
+            .collect()
     }
 
     fn taken(&self) -> Vec<Rect> {
@@ -192,12 +198,8 @@ impl Canvas<'_> {
         }
 
         // 4. Outputs whose feeders are all in the columns, level with them.
-        let pipeline = |k: usize| {
-            matches!(
-                self.role(kids[k]),
-                LayoutRole::Source | LayoutRole::Fixture
-            )
-        };
+        let pipeline =
+            |k: usize| matches!(self.role(kids[k]), LayoutRole::Source | LayoutRole::Fixture);
         let output_x = level.right_of(pipeline).map_or(0.0, |r| r + COLUMN_GAP);
         let outputs: Vec<usize> = level.unplaced(of_role(LayoutRole::Output));
         let (now, later): (Vec<usize>, Vec<usize>) = outputs.into_iter().partition(|&k| {
@@ -339,7 +341,10 @@ impl Canvas<'_> {
             .map(|k| {
                 let rects = self.feeder_rects(level, container, k);
                 let span_top = rects.iter().map(|r| r.min.y).fold(f64::INFINITY, f64::min);
-                let span_bottom = rects.iter().map(|r| r.max.y).fold(f64::NEG_INFINITY, f64::max);
+                let span_bottom = rects
+                    .iter()
+                    .map(|r| r.max.y)
+                    .fold(f64::NEG_INFINITY, f64::max);
                 let middle = (span_top + span_bottom) / 2.0;
                 let y = (middle - level.blocks[k].size.y / 2.0).max(top);
                 let beside = self

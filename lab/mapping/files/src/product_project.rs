@@ -490,7 +490,9 @@ fn object_of(
         .find(|(_, o)| o.product_id == product_id)?;
     let key = match (&project.component(id)?.kind, instances) {
         (ComponentKind::Path { .. }, []) => lab_mapping_model::domain::object::PATH_KEY.to_string(),
-        (ComponentKind::Polygon { .. }, []) => lab_mapping_model::domain::object::POLYGON_KEY.to_string(),
+        (ComponentKind::Polygon { .. }, []) => {
+            lab_mapping_model::domain::object::POLYGON_KEY.to_string()
+        }
         (ComponentKind::Circle { rings, .. }, []) if rings.len() == 1 => rings[0].key.clone(),
         (ComponentKind::Repeat { shape, count, .. }, [k])
             if *k < *count && !matches!(**shape, ComponentKind::Repeat { .. }) =>

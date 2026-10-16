@@ -75,8 +75,13 @@
 pub mod domain;
 pub mod ux;
 
-pub use domain::{bindings, board, fixture_overrides, output_overrides, patch, port_runs, render_product, resolve};
-pub use ux::{area, board_view, card_geometry, data_path, edges, handle, highlight, hints, layout_input, pick, pixel_grid, props, ui, view_tree};
+pub use domain::{
+    bindings, board, fixture_overrides, output_overrides, patch, port_runs, render_product, resolve,
+};
+pub use ux::{
+    area, board_view, card_geometry, data_path, edges, handle, highlight, hints, layout_input,
+    pick, pixel_grid, props, ui, view_tree,
+};
 
 pub use domain::bindings::Binding;
 pub use domain::board::{BoardFrame, PortFrame};

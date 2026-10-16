@@ -9,8 +9,8 @@
 use crate::domain::component::{ComponentKind, Ring};
 use crate::domain::fixture::Fixture;
 use crate::domain::project::Project;
-use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 use crate::domain::target::Target;
+use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 
 pub const LAMPS: PropDesc = PropDesc {
     id: "lamps",

@@ -58,8 +58,8 @@ impl Editor {
                     !p.is_ancestor_or_self(c, &t) && !p.is_ancestor_or_self(&t, c)
                 });
                 // An output fed by a fixture you are working in stays lit.
-                let fed_by_open = n.output().is_some()
-                    && open.iter().any(|f| p.outputs_of(f).contains(&n.id));
+                let fed_by_open =
+                    n.output().is_some() && open.iter().any(|f| p.outputs_of(f).contains(&n.id));
                 let size = node_size(n);
                 UiCanvasNode {
                     id: n.id.clone(),

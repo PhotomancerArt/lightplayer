@@ -118,7 +118,11 @@ fn OutputPixels(face: UiOutputFace, w: f64, h: f64, zoom: f64, frame: Memo<Board
             let Some(pixels) = frame.port(&face.output, &p.key) else {
                 continue;
             };
-            let gap = if p.grid.side * zoom >= GAP_PIXEL_PX { 1.0 } else { 0.0 };
+            let gap = if p.grid.side * zoom >= GAP_PIXEL_PX {
+                1.0
+            } else {
+                0.0
+            };
             for (i, px) in pixels.iter().enumerate() {
                 if let Some(r) = p.grid.rect(i as u32) {
                     raster.rect((r.min.x, r.min.y), (r.max.x, r.max.y), gap, rgb(*px));

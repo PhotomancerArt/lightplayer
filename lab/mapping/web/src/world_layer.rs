@@ -33,7 +33,10 @@ pub fn WorldLayer(
         camera.to_world(viewport + margin),
     );
     let visible = |r: &Rect| {
-        r.max.x >= view.min.x && r.min.x <= view.max.x && r.max.y >= view.min.y && r.min.y <= view.max.y
+        r.max.x >= view.min.x
+            && r.min.x <= view.max.x
+            && r.max.y >= view.min.y
+            && r.min.y <= view.max.y
     };
     let shown: Vec<(UiCanvasNode, Rect)> = nodes
         .into_iter()

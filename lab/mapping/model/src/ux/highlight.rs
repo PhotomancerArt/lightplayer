@@ -6,12 +6,12 @@
 //! its pixel is ringed on its port (D47). All of it is read off the
 //! effective patch, so it is always what the patch really does.
 
-use crate::ux::editor::Editor;
 use crate::domain::node::NodeId;
 use crate::domain::object::ObjectId;
 use crate::domain::patch::Span;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::editor::Editor;
 
 impl Project {
     /// Every lamp one port carries, as (object, lamp index), in pixel order.

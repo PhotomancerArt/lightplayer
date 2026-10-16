@@ -9,11 +9,11 @@
 //! visible in the hint bar.
 
 use crate::domain::component::ComponentKind;
+use crate::domain::project::Project;
+use crate::domain::target::Target;
 use crate::ux::editor::{Editor, Gesture, Tool};
 use crate::ux::handle::{HandleKind, SizeEdge};
-use crate::domain::project::Project;
 use crate::ux::props::common_props;
-use crate::domain::target::Target;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hint {
@@ -291,8 +291,15 @@ impl Editor {
                 ));
             }
         }
-        if !self.debug.pinning && self.move_draw && owners.is_empty() && !self.dragged_nodes().is_empty() {
-            out.push(h("drag", "nothing: the layout places nodes · pinning is under Debug"));
+        if !self.debug.pinning
+            && self.move_draw
+            && owners.is_empty()
+            && !self.dragged_nodes().is_empty()
+        {
+            out.push(h(
+                "drag",
+                "nothing: the layout places nodes · pinning is under Debug",
+            ));
         }
         let pinned: Vec<String> = nodes
             .iter()

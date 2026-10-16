@@ -17,9 +17,9 @@
 //! (D45). In world units, so it zooms with the card.
 
 use crate::domain::geom::{Rect, Vec2};
-use crate::ux::card_geometry::{CARD_ROW, PIXEL_BOTTOM, PIXEL_PAD_X, PIXEL_TOP};
 use crate::domain::node::NodeId;
 use crate::domain::project::Project;
+use crate::ux::card_geometry::{CARD_ROW, PIXEL_BOTTOM, PIXEL_PAD_X, PIXEL_TOP};
 
 /// The most lines a port's pixels wrap onto.
 pub const MAX_PIXEL_LINES: u32 = 4;

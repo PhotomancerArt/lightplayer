@@ -6,9 +6,9 @@
 
 use lab_layout::{LayoutInput, LayoutNode, LayoutRole};
 
+use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::{Node, NodeKind};
 use crate::domain::placement::Placement;
-use crate::domain::geom::{Rect, Vec2};
 use crate::ux::card_geometry::node_size;
 use crate::ux::editor::Editor;
 

@@ -28,12 +28,12 @@
 //! Handles sit in world units; their squares are a fixed size on screen,
 //! like every area's padding.
 
-use crate::ux::camera::Camera;
 use crate::domain::component::{ComponentId, ComponentKind};
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::camera::Camera;
 
 /// Half the side of a handle's square as drawn, in screen pixels…
 pub const HANDLE_PX: f64 = 4.0;

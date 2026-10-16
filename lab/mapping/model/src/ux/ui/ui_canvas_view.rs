@@ -3,7 +3,9 @@
 use crate::domain::geom::Vec2;
 use crate::domain::notice::Notice;
 use crate::ux::hints::HintBar;
-use crate::ux::ui::{UiCanvasEdge, UiCanvasNode, UiInspector, UiMenu, UiOverlay, UiToolbar, UiTree};
+use crate::ux::ui::{
+    UiCanvasEdge, UiCanvasNode, UiInspector, UiMenu, UiOverlay, UiToolbar, UiTree,
+};
 
 /// Everything the page draws, in one tree. No positions: the page lays the
 /// nodes out (`layout_input.rs`) and places the cards itself.

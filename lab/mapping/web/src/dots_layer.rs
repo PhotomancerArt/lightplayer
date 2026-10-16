@@ -58,7 +58,10 @@ fn draw(id: &str, camera: Camera, viewport: Vec2) -> Option<()> {
     }
     let from = camera.to_world(Vec2::new(0.0, 0.0));
     let to = camera.to_world(viewport);
-    let (x0, y0) = ((from.x / step).floor() as i64, (from.y / step).floor() as i64);
+    let (x0, y0) = (
+        (from.x / step).floor() as i64,
+        (from.y / step).floor() as i64,
+    );
     let (x1, y1) = ((to.x / step).ceil() as i64, (to.y / step).ceil() as i64);
     ctx.set_fill_style_str("rgba(255, 255, 255, 0.09)");
     let r = DOT_PX * dpr;

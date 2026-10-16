@@ -101,8 +101,7 @@ impl Editor {
             at: local(e.at),
             along: e.along,
         }));
-        let working = cx.open.contains(id)
-            || self.selection.contains(&Target::Node(id.clone()));
+        let working = cx.open.contains(id) || self.selection.contains(&Target::Node(id.clone()));
         UiFixtureFace {
             fixture: id.clone(),
             objects,

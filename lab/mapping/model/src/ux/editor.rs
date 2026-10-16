@@ -4,17 +4,17 @@
 //! it finds. Everything that decides how the editor *feels* lives in this
 //! crate, so it can be read, changed and tested without a browser.
 
-use crate::ux::camera::Camera;
-use crate::ux::debug_flags::DebugFlags;
-use crate::ux::ui::LayoutKind;
 use crate::domain::component::{Component, ComponentId, ComponentKind};
 use crate::domain::geom::{Rect, Vec2, polyline_length};
-use crate::ux::handle::{Handle, HandleKind};
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
-use crate::ux::pick::{PickMode, level_candidates, pick};
 use crate::domain::project::{Project, union};
 use crate::domain::target::Target;
+use crate::ux::camera::Camera;
+use crate::ux::debug_flags::DebugFlags;
+use crate::ux::handle::{Handle, HandleKind};
+use crate::ux::pick::{PickMode, level_candidates, pick};
+use crate::ux::ui::LayoutKind;
 
 /// Modifier keys held during an event. `command` is ⌘ on a Mac (Ctrl
 /// elsewhere); a trackpad pinch arrives as a wheel event with Ctrl held, so
@@ -1150,11 +1150,7 @@ impl Editor {
             }
         }
         match parents.as_slice() {
-            [Some(c)] => format!(
-                "select every {} in {}",
-                p.kind_word(&next[0]),
-                p.label(c)
-            ),
+            [Some(c)] => format!("select every {} in {}", p.kind_word(&next[0]), p.label(c)),
             _ => "select everything you drew, in every fixture".into(),
         }
     }

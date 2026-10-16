@@ -4,8 +4,8 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Editor, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind, PropValue,
-    UiInspector, UiItem, UiTree,
+    Editor, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind,
+    PropValue, UiInspector, UiItem, UiTree,
 };
 
 #[component]
