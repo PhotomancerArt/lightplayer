@@ -1,0 +1,116 @@
+{
+  "board": "CX1 c6-expendable, MAC 14:C1:9F:E6:54:90",
+  "configuration": "silicon:esp32c6",
+  "label": "littlefs",
+  "rows": [
+    {
+      "boots": [
+        {
+          "compile": null,
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light none by 470 ms: boot 166 init 21 fs 1 radio 84 split 187 server 7 load 1 frame1 3 lit 0 (lp-sys 986/19 us)",
+          "port_back_s": 3.373499083,
+          "power_cycle_exited_s": 5.394295333,
+          "what": "first boot"
+        }
+      ],
+      "case": "first boot"
+    },
+    {
+      "boots": [
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 85 split 188 server 7 load 145 frame1 73 lit 188 (lp-sys 933/-1591 us)",
+          "port_back_s": 3.398661667,
+          "power_cycle_exited_s": 5.349896209,
+          "what": "basic #0"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 84 split 188 server 8 load 145 frame1 73 lit 188 (lp-sys 950/-1346 us)",
+          "port_back_s": 3.412026958,
+          "power_cycle_exited_s": 5.895539625,
+          "what": "basic #1"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 85 split 188 server 7 load 145 frame1 73 lit 188 (lp-sys 941/-1758 us)",
+          "port_back_s": 3.330374291,
+          "power_cycle_exited_s": 5.014069583,
+          "what": "basic #2"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 85 split 188 server 7 load 145 frame1 73 lit 188 (lp-sys 947/-1636 us)",
+          "port_back_s": 3.624969416,
+          "power_cycle_exited_s": 5.5637082079999995,
+          "what": "basic #3"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 884 ms: boot 166 init 21 fs 3 radio 85 split 188 server 7 load 147 frame1 79 lit 188 (lp-sys 922/-1703 us)",
+          "port_back_s": 3.4159315,
+          "power_cycle_exited_s": 5.493483,
+          "what": "basic #4"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 84 split 188 server 8 load 145 frame1 73 lit 188 (lp-sys 957/-1442 us)",
+          "port_back_s": 3.470088917,
+          "power_cycle_exited_s": 5.755665458,
+          "what": "basic #5"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 86 split 188 server 7 load 145 frame1 72 lit 188 (lp-sys 978/-1350 us)",
+          "port_back_s": 3.462087708,
+          "power_cycle_exited_s": 5.76700575,
+          "what": "basic #6"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 85 split 188 server 7 load 145 frame1 73 lit 188 (lp-sys 925/-1785 us)",
+          "port_back_s": 3.261833084,
+          "power_cycle_exited_s": 5.684760209,
+          "what": "basic #7"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 84 split 188 server 8 load 145 frame1 73 lit 188 (lp-sys 990/-1603 us)",
+          "port_back_s": 3.240739792,
+          "power_cycle_exited_s": 4.986399625,
+          "what": "basic #8"
+        },
+        {
+          "compile": "[INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=121ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=",
+          "fs": "mounted",
+          "fs_line": null,
+          "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 876 ms: boot 166 init 21 fs 3 radio 85 split 188 server 8 load 145 frame1 72 lit 188 (lp-sys 967/-1308 us)",
+          "port_back_s": 3.547248625,
+          "power_cycle_exited_s": 5.93367075,
+          "what": "basic #9"
+        }
+      ],
+      "case": "basic"
+    }
+  ]
+}
