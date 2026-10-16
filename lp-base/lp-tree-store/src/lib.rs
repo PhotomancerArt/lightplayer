@@ -119,7 +119,7 @@ pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
-pub use sector_header::FORMAT_VERSION;
+pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
 pub use store_config::{GcPolicy, StoreConfig};
 pub use store_error::StoreError;
 #[cfg(feature = "stats")]
