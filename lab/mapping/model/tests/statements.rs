@@ -442,10 +442,8 @@ fn the_layout_places_every_node_while_pinning_is_off() {
         "nothing pinned"
     );
     assert!(
-        e.hint_bar()
-            .hints
-            .iter()
-            .any(|h| h.does.contains("pinning is under Debug"))
+        e.hint_bar().hints.iter().all(|h| h.keys != "drag"),
+        "the bar offers no dragging"
     );
     key(&mut e, Key::Char('u'), none());
     assert!(
@@ -957,33 +955,6 @@ fn a_selected_port_highlights_its_lamps() {
     );
 }
 
-/// Edges stay quiet: with nothing selected none says what it carries (each
-/// shows only its channel's name); with something selected, only the edges
-/// belonging to it do — its own nodes, or what it feeds on an output.
-#[test]
-fn only_edges_on_the_selection_are_labelled() {
-    let mut e = editor();
-    assert!(
-        e.edges().iter().all(|x| !x.labelled),
-        "nothing selected, no labels"
-    );
-    let main = node_id(&e, "main");
-    e.select(vec![port(&main, "1")]);
-    let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
-    assert_eq!(labelled.len(), 1, "only the strip's edge feeds D1");
-    assert_eq!(labelled[0].from, fixture(&e, "strip"));
-
-    e.select(vec![fixture(&e, "ring display")]);
-    let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
-    assert!(
-        labelled
-            .iter()
-            .all(|x| x.from == fixture(&e, "ring display") || x.to == fixture(&e, "ring display")),
-        "{labelled:?}"
-    );
-    assert!(!labelled.is_empty());
-}
-
 /// Enter on a fixture frames the fixture together with its outputs.
 #[test]
 fn enter_on_a_fixture_frames_it_with_its_outputs() {
@@ -1257,13 +1228,9 @@ fn dragging_a_paths_end_keeps_its_count() {
         |k| matches!(k, HandleKind::PathPoint { path, index: 1 } if path.as_str() == "path3"),
     );
     e.pointer_move(end, none());
-    let hint = e.hint_bar();
-    assert_eq!(hint.hints[0].keys, "drag");
-    assert!(
-        hint.hints[0].does.contains("move this end"),
-        "{:?}",
-        hint.hints[0]
-    );
+    let bar = e.hint_bar();
+    let drag = bar.hints.iter().find(|h| h.keys == "drag").unwrap();
+    assert_eq!(drag.does, "move point");
     let before = e.project.clone();
     let by = Vec2::new(0.0, 20.0) * e.camera.scale;
     e.pointer_down(end, Button::Primary, none());
@@ -1435,10 +1402,7 @@ fn dragging_a_rings_handle_changes_its_radius() {
     e.pointer_down(r2, Button::Primary, none());
     e.pointer_move(r2 + by * 0.5, none());
     e.pointer_move(r2 + by, none());
-    assert_eq!(
-        e.hint_bar().lead,
-        "Changing the radius of ring r2 of circle1"
-    );
+    assert_eq!(e.hint_bar().lead, "Changing a radius");
     e.pointer_up(r2 + by, none());
     let circle = ComponentId::new("circle1");
     let ring = e.project.ring(&circle, "r2").unwrap();
@@ -1489,29 +1453,23 @@ fn a_new_fixture_is_square_and_its_corner_resizes_it() {
 
 // ---- teaching ----------------------------------------------------------------
 
-/// Hovering a lamp of the selected circle, the hint bar says a click goes
-/// into it.
+/// The hint bar names each action in a word or two, never what it acts
+/// on (the breadcrumb says what's selected), and it stays put while you
+/// point around or hold ⌘.
 #[test]
-fn hint_bar_says_a_click_goes_in() {
+fn the_hint_bar_names_actions_and_stays_put() {
     let mut e = editor();
     e.select(vec![comp("circle1")]);
+    e.pointer_move(Vec2::new(1.0, 1.0), none());
+    let still = e.hint_bar();
+    for h in &still.hints {
+        assert!(!h.does.contains("circle1"), "{h:?}");
+        assert!(h.does.split_whitespace().count() <= 3, "{h:?}");
+    }
     e.pointer_move(lamp_screen(&e, "circle1", "r1", 3), none());
-    let bar = e.hint_bar();
-    let click = bar.hints.iter().find(|h| h.keys == "click").unwrap();
-    assert!(click.does.contains("go into circle1"), "{}", click.does);
-}
-
-/// Holding ⌘ changes what the hint bar says a click does.
-#[test]
-fn holding_command_changes_the_click_hint() {
-    let mut e = editor();
+    assert_eq!(e.hint_bar(), still, "hovering a lamp");
     e.pointer_move(lamp_screen(&e, "circle1", "r1", 3), cmd());
-    let bar = e.hint_bar();
-    assert!(
-        bar.hints[0].keys == "⌘ click" && bar.hints[0].does.contains("lamp 3"),
-        "{:?}",
-        bar.hints[0]
-    );
+    assert_eq!(e.hint_bar(), still, "holding ⌘");
 }
 
 /// Every key the hint bar offers does something — for a selected ring, and
@@ -2295,7 +2253,7 @@ fn the_bar_lead_says_what_youre_doing() {
     let at = lamp_screen(&e, "circle1", "r1", 0);
     e.pointer_down(at, Button::Primary, none());
     e.pointer_move(at + Vec2::new(20.0, 0.0), none());
-    assert_eq!(e.hint_bar().lead, "Moving circle1");
+    assert_eq!(e.hint_bar().lead, "Moving");
     key(&mut e, Key::Escape, none());
     // Box-selecting.
     let empty = e.camera.to_screen(place(&e, "scarf", 50.0, 15.0));
@@ -2309,7 +2267,7 @@ fn the_bar_lead_says_what_youre_doing() {
         Button::Secondary,
         none(),
     );
-    assert_eq!(e.hint_bar().lead, "Choosing what's under the cursor");
+    assert_eq!(e.hint_bar().lead, "Choosing");
     key(&mut e, Key::Escape, none());
     // Drawing a path.
     key(&mut e, Key::Char('p'), none());
@@ -2333,7 +2291,7 @@ fn the_bar_lead_says_what_youre_doing() {
     });
     e.pointer_down(corner, Button::Primary, none());
     e.pointer_move(corner + Vec2::new(20.0, 20.0), none());
-    assert_eq!(e.hint_bar().lead, "Resizing scarf");
+    assert_eq!(e.hint_bar().lead, "Resizing");
 }
 
 // ---- Move & draw -------------------------------------------------------------
@@ -3226,16 +3184,12 @@ fn an_outputs_face_shows_where_the_selection_lands() {
 }
 
 /// An edge touching the selection is lit and the others step back while
-/// anything is selected; only the selection's own edges say what they
-/// carry. Every edge always says its channel.
+/// anything is selected. Every edge says its channel and nothing more: what
+/// one carries is the note beside the cursor while you hover it.
 #[test]
-fn the_selections_edges_are_lit_and_say_what_they_carry() {
+fn the_selections_edges_are_lit_and_say_their_channel() {
     let mut e = editor();
-    assert!(
-        e.view_edges()
-            .iter()
-            .all(|x| x.emphasis == Emphasis::Full && x.label.is_none())
-    );
+    assert!(e.view_edges().iter().all(|x| x.emphasis == Emphasis::Full));
     e.select(vec![fixture(&e, "tail")]);
     let tail = node_id(&e, "tail");
     for x in e.view_edges() {
@@ -3251,8 +3205,12 @@ fn the_selections_edges_are_lit_and_say_what_they_carry() {
         .into_iter()
         .find(|x| x.from == tail && e.project.output(&x.to).is_some())
         .unwrap();
-    assert_eq!(out.label.as_deref(), Some("50 lamps on GPIO 10"));
     assert_eq!(out.channel, "control.out");
+    assert!(
+        out.carries.contains("50 lamps on GPIO 10"),
+        "{}",
+        out.carries
+    );
 }
 
 /// The overlay outlines the selection, the level it is in, and what a

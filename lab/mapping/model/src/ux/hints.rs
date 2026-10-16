@@ -6,7 +6,10 @@
 //! like everything else, so a test can check them.
 //!
 //! The rule they serve: every action available in the current state is
-//! visible in the hint bar.
+//! visible in the hint bar. Each is named in a word or two ("select",
+//! "go in", "delete"), never with the name of what it acts on: the
+//! breadcrumb already says what's selected. A hint comes and goes only as
+//! its action does, so the bar stays still while you point around.
 
 use crate::domain::component::ComponentKind;
 use crate::domain::project::Project;
@@ -64,109 +67,69 @@ impl Editor {
             h("⌘ scroll · pinch", "zoom"),
             h("space-drag", "pan"),
             h("⇧1", "fit"),
-            h("⇧2", "frame the selection"),
+            h("⇧2", "frame selection"),
             h("⌘Z", "undo"),
         ];
         let (lead, hints) = match &self.gesture {
-            Gesture::Moving { owners, nodes, .. } => {
-                let names: Vec<String> = owners
-                    .iter()
-                    .map(|o| o.to_string())
-                    .chain(nodes.iter().map(|(id, _)| self.project.node_name(id)))
-                    .collect();
-                let release = if owners.is_empty() && !nodes.is_empty() {
-                    h("release", "pin it here")
-                } else {
-                    h("release", "drop it here")
-                };
-                (
-                    format!("Moving {}", list(&names)),
-                    vec![release, h("Esc", "put it back")],
-                )
-            }
-            Gesture::Boxing { .. } => {
-                let mut hints = vec![];
-                if self.mods.alt {
-                    hints.push(h("let go of ⌥", "take anything the box touches"));
-                } else {
-                    hints.push(h("hold ⌥", "take only what's fully inside"));
-                }
-                hints.push(h("⇧ at the start", "add to what's selected"));
-                hints.push(h("Esc", "cancel"));
-                ("Box-selecting".into(), hints)
-            }
+            Gesture::Moving { .. } => (
+                "Moving".into(),
+                vec![h("release", "drop"), h("Esc", "put back")],
+            ),
+            Gesture::Boxing { .. } => (
+                "Box-selecting".into(),
+                vec![
+                    h("hold ⌥", "only what's inside"),
+                    h("⇧ at the start", "add"),
+                    h("Esc", "cancel"),
+                ],
+            ),
             Gesture::Panning { .. } => ("Panning".into(), vec![h("release", "stop")]),
             Gesture::Drawing { .. } => (
                 format!("Drawing a {}", self.tool.word()),
-                vec![h("release", "finish it"), h("Esc", "cancel")],
+                vec![h("release", "finish"), h("Esc", "cancel")],
             ),
             Gesture::Handle { handle, .. } => {
-                let mut hints = vec![h("release", "drop it here"), h("Esc", "put it back")];
+                let mut hints = vec![h("release", "drop")];
                 if matches!(handle, HandleKind::FixtureSize { .. }) {
-                    hints.insert(
-                        1,
-                        if self.mods.shift {
-                            h("let go of ⇧", "any shape")
-                        } else {
-                            h("hold ⇧", "keep it square")
-                        },
-                    );
+                    hints.push(h("hold ⇧", "square"));
                 }
                 if matches!(
                     handle,
                     HandleKind::PathPoint { .. } | HandleKind::RingRadius { .. }
                 ) {
-                    hints.push(h("− =", "change the lamp count after"));
+                    hints.push(h("− =", "lamps, after"));
                 }
-                (handle_lead(&self.project, handle), hints)
+                hints.push(h("Esc", "put back"));
+                (handle.lead().into(), hints)
             }
             Gesture::Press { .. } | Gesture::None => {
                 if self.menu.is_some() {
                     (
-                        "Choosing what's under the cursor".into(),
-                        vec![
-                            h("click", "select it"),
-                            h("⇧ click", "add it"),
-                            h("Esc", "close the list"),
-                        ],
+                        "Choosing".into(),
+                        vec![h("click", "select"), h("⇧ click", "add"), h("Esc", "close")],
                     )
                 } else if self.space_held {
                     (
                         "Hand".into(),
-                        vec![
-                            h("drag", "pan the canvas"),
-                            h("let go of space", "back to selecting"),
-                        ],
+                        vec![h("drag", "pan"), h("let go of space", "back")],
                     )
                 } else {
                     match self.tool {
                         Tool::Path if self.path_draft.is_empty() => (
                             "Path tool".into(),
+                            vec![h("click", "first point"), h("Esc · V", "done")],
+                        ),
+                        Tool::Path => (
+                            "Drawing a path".into(),
                             vec![
-                                h("click", "the path's first point, inside a fixture"),
-                                h("Esc · V", "back to selecting"),
+                                h("click", "add point"),
+                                h("double-click · Enter", "finish"),
+                                h("Esc", "undo point"),
                             ],
                         ),
-                        Tool::Path => {
-                            let lamps = self.draft_lamps();
-                            (
-                                "Drawing a path".into(),
-                                vec![
-                                    h("click", "add a point"),
-                                    h("double-click · Enter", format!("finish it ({lamps} lamps)")),
-                                    h("Esc", "take back the last point"),
-                                ],
-                            )
-                        }
                         Tool::Circle => (
                             "Circle tool".into(),
-                            vec![
-                                h(
-                                    "drag",
-                                    "draw a circle from its centre — the lamp count follows its size",
-                                ),
-                                h("Esc · V", "back to selecting"),
-                            ],
+                            vec![h("drag", "draw"), h("Esc · V", "done")],
                         ),
                         Tool::Select => (String::new(), self.select_hints()),
                     }
@@ -178,214 +141,83 @@ impl Editor {
 
     fn select_hints(&self) -> Vec<Hint> {
         let f = &self.project;
-        let mut out = Vec::new();
+        let sel = &self.selection;
+        let mut out = vec![
+            h("click", "select"),
+            h("⇧ click", "add"),
+            h("⌘ click", "select deepest"),
+            h("⌥ click", "next one under"),
+        ];
 
-        // A handle under the pointer: dragging it is what's on offer, and
-        // ⌥-clicking a path's point takes it away (it keeps two).
-        let handle = self.hover_handle();
-        let mut alt_removes = false;
-        if let Some(handle) = &handle {
-            out.push(h("drag", handle.kind.does(f)));
+        // Dragging: a handle under the pointer, else the selection.
+        let movable =
+            !self.move_owners().is_empty() || (self.debug.pinning && !self.move_nodes().is_empty());
+        if let Some(handle) = self.hover_handle() {
+            out.push(h("drag", handle.kind.verb()));
             if let HandleKind::PathPoint { path, .. } = &handle.kind
                 && f.path_points(path).is_some_and(|p| p.len() > 2)
             {
-                alt_removes = true;
-                out.push(h("⌥ click", "remove this point"));
+                out.push(h("⌥ click", "remove point"));
             }
-        } else if let Some(p) = self.hover_point()
-            && self.move_draw
-        {
-            // On a shaped path's segment: a double-click adds a point.
-            if let Some(path) = self
-                .shaped_paths(&self.selection)
-                .into_iter()
-                .find(|path| f.segment_at(&self.camera, path, p).is_some())
-            {
-                out.push(h("double-click", format!("add a point to {path} here")));
-            }
+        } else if self.move_draw && movable {
+            out.push(h("drag", "move"));
         }
+        out.push(h("drag on empty space", "box-select"));
+        if self.move_draw && !self.shaped_paths(sel).is_empty() {
+            out.push(h("double-click", "add point"));
+        }
+        out.push(h("right-click", "what's here"));
 
-        // What a click would do, first: the hover outline in words.
-        if let Some(target) = self.hover_target() {
-            let going_in =
-                self.selection.len() == 1 && f.parent(&target).as_ref() == self.selection.first();
-            if self.mods.command {
-                out.push(h(
-                    "⌘ click",
-                    format!("select {} directly", f.long_label(&target)),
-                ));
-            } else if self.mods.alt && !alt_removes {
-                out.push(h(
-                    "⌥ click",
-                    format!("select {} — the next one here", f.long_label(&target)),
-                ));
-            } else if going_in {
-                out.push(h(
-                    "click",
-                    format!(
-                        "go into {} — selects {}",
-                        f.label(&self.selection[0]),
-                        f.label(&target)
-                    ),
-                ));
-            } else {
-                out.push(h("click", format!("select {}", f.long_label(&target))));
-            }
-            if !self.mods.command
-                && let Some(deep) = self.hover_deep()
-                && deep != target
-            {
-                out.push(h("⌘ click", format!("select {} directly", f.label(&deep))));
-            }
-            let here = self.hover_candidates().len();
-            if here > 1 && !self.mods.alt && !alt_removes {
-                out.push(h("⌥ click", format!("the next of the {here} here")));
-            }
-            let run = matches!(&target, Target::Pixel { .. })
-                && self.selection.iter().any(|s| {
-                    matches!(s, Target::Pixel { .. }) && s.port_of_pixel() == target.port_of_pixel()
-                });
+        if let Some(first) = sel.first() {
             out.push(h(
-                "⇧ click",
-                if run {
-                    "select the pixels from the first one picked to here"
+                "Esc",
+                if f.parent(first).is_some() {
+                    "up"
                 } else {
-                    "add or remove"
+                    "deselect"
                 },
             ));
-            out.push(h("right-click", "what's here"));
-        }
-
-        if self.selection.is_empty() {
-            if self.hover_target().is_none() {
-                out.push(h("click", "select something"));
+            if !f.children(Some(first)).is_empty() {
+                out.push(h("Enter", "go in"));
             }
-            out.push(h("drag on empty space", "box-select"));
-            out.push(h("⌘A", "select everything"));
-            if self.move_draw {
-                out.push(h("P · O", "draw a path · a circle"));
+            if f.siblings(first).len() > 1 {
+                out.push(h("← →", "previous · next"));
             }
-            out.push(self.move_draw_hint());
-            return out;
-        }
-
-        let first = &self.selection[0];
-        let owners = self.move_owners();
-        let nodes = self.move_nodes();
-        if handle.is_none() && self.move_draw {
-            if !owners.is_empty() {
-                out.push(h(
-                    "drag",
-                    format!(
-                        "move {}",
-                        list(&owners.iter().map(|o| o.to_string()).collect::<Vec<_>>())
-                    ),
-                ));
-            } else if !nodes.is_empty() {
-                out.push(h(
-                    "drag",
-                    format!(
-                        "pin {} where you drop it",
-                        list(&nodes.iter().map(|n| f.node_name(n)).collect::<Vec<_>>())
-                    ),
-                ));
+            if deletable(f, sel) {
+                out.push(h("⌫", "delete"));
             }
-        }
-        if !self.debug.pinning
-            && self.move_draw
-            && owners.is_empty()
-            && !self.dragged_nodes().is_empty()
-        {
-            out.push(h(
-                "drag",
-                "nothing: the layout places nodes · pinning is under Debug",
-            ));
-        }
-        let pinned: Vec<String> = nodes
-            .iter()
-            .filter(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))
-            .map(|n| f.node_name(n))
-            .collect();
-        if !pinned.is_empty() && self.move_draw {
-            out.push(h(
-                "U",
-                format!("unpin {} — back to the layout", list(&pinned)),
-            ));
-        }
-        match f.parent(first) {
-            Some(p) => out.push(h("Esc", format!("up to {}", f.label(&p)))),
-            None => out.push(h("Esc", "deselect")),
-        }
-        if let Some(child) = f.children(Some(first)).first() {
-            let framed = if f.is_fixture(first) && !f.outputs_of(first.node().unwrap()).is_empty() {
-                ", framed with its outputs"
-            } else {
-                ""
-            };
-            out.push(h(
-                "Enter",
-                format!(
-                    "into {} — selects {}{framed}",
-                    f.label(first),
-                    f.label(child)
-                ),
-            ));
-        }
-        let word = f.kind_word(first);
-        if f.siblings(first).len() > 1 {
-            out.push(h("← →", format!("previous · next {word}")));
-        }
-        out.push(h("⌫", delete_hint(f, &self.selection)));
-
-        let edit: Vec<Target> = self
-            .selection
-            .iter()
-            .map(|t| match t {
-                Target::Lamp { object, .. } => f.object_target(object),
-                Target::Pixel { .. } => t.port_of_pixel().unwrap_or_else(|| t.clone()),
-                other => other.clone(),
-            })
-            .collect();
-        if let Some(p) = common_props(f, &edit)
-            .iter()
-            .find(|p| p.desc.nudge && (self.move_draw || !p.desc.reshapes))
-        {
-            let whose = if self
-                .selection
+            let edit: Vec<Target> = sel
                 .iter()
-                .any(|t| matches!(t, Target::Lamp { .. } | Target::Pixel { .. }))
+                .map(|t| match t {
+                    Target::Lamp { object, .. } => f.object_target(object),
+                    Target::Pixel { .. } => t.port_of_pixel().unwrap_or_else(|| t.clone()),
+                    other => other.clone(),
+                })
+                .collect();
+            if let Some(p) = common_props(f, &edit)
+                .iter()
+                .find(|p| p.desc.nudge && (self.move_draw || !p.desc.reshapes))
             {
-                format!(" of {}", f.label(&edit[0]))
-            } else {
-                String::new()
-            };
-            out.push(h(
-                "− =",
-                format!(
-                    "{}{whose} ({})",
-                    p.desc.label.to_lowercase(),
-                    p.value.describe()
-                ),
-            ));
+                out.push(h("− =", p.desc.label.to_lowercase()));
+            }
+            if sel.iter().all(|t| f.has_direction(t)) {
+                out.push(h("r", "reverse"));
+            }
+            if self.move_draw
+                && self
+                    .move_nodes()
+                    .iter()
+                    .any(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))
+            {
+                out.push(h("U", "unpin"));
+            }
         }
-        if self.selection.iter().all(|t| f.has_direction(t)) {
-            out.push(h("r", "reverse the data direction"));
-        }
-        out.push(h("⌘A", self.select_all_hint()));
-        out.push(self.move_draw_hint());
-        out
-    }
-
-    /// M, in words: what turning Move & draw over would do (D50).
-    fn move_draw_hint(&self) -> Hint {
+        out.push(h("⌘A", "select all"));
         if self.move_draw {
-            h("M", "Move & draw off — select and patch only")
-        } else {
-            h(
-                "M",
-                "Move & draw is off: turn it on to move, draw and reshape",
-            )
+            out.push(h("P · O", "path · circle"));
         }
+        out.push(h("M", "move & draw"));
+        out
     }
 
     /// The note beside the cursor during a gesture.
@@ -521,71 +353,14 @@ impl Editor {
     }
 }
 
-/// The bar's lead while a handle is dragged: "Moving an end of path1".
-fn handle_lead(f: &Project, handle: &HandleKind) -> String {
-    match handle {
-        HandleKind::PathPoint { path, index } => {
-            let n = f.path_points(path).map_or(0, |p| p.len());
-            if *index == 0 || *index + 1 == n {
-                format!("Moving an end of {path}")
-            } else {
-                format!("Moving a point of {path}")
-            }
-        }
-        HandleKind::RingRadius { circle, ring } => {
-            format!("Changing the radius of ring {ring} of {circle}")
-        }
-        HandleKind::FixtureSize { fixture, .. } => format!("Resizing {}", f.node_name(fixture)),
+/// Whether ⌫ deletes the selection: lamps, pixels and an array's copies
+/// can't be (their count is the thing to change).
+fn deletable(f: &Project, selection: &[Target]) -> bool {
+    if selection
+        .iter()
+        .all(|t| matches!(t, Target::Lamp { .. } | Target::Pixel { .. }))
+    {
+        return false;
     }
-}
-
-fn delete_hint(f: &Project, selection: &[Target]) -> String {
-    if selection.iter().all(|t| matches!(t, Target::Lamp { .. })) {
-        return "lamps can't be deleted — − shortens their path or ring".into();
-    }
-    if selection.iter().all(|t| matches!(t, Target::Pixel { .. })) {
-        return "pixels can't be deleted — − shortens their port".into();
-    }
-    match selection {
-        [Target::Object(o)] if f.ring(&o.component, &o.key).is_none() => {
-            format!("copies can't be deleted — set {}'s Copies", o.component)
-        }
-        [Target::Object(o)] => format!("remove ring {} from {}", o.key, o.component),
-        [t @ Target::Port { output, .. }] => {
-            format!("remove {} from {}", f.label(t), f.node_name(output))
-        }
-        [Target::Node(id)] if f.output(id).is_some() => {
-            let fed = f
-                .fixtures()
-                .iter()
-                .filter(|n| {
-                    n.fixture()
-                        .is_some_and(|x| x.rules.iter().any(|r| r.output() == id))
-                })
-                .count();
-            if fed == 0 {
-                format!("delete {}", f.node_name(id))
-            } else {
-                format!(
-                    "delete {} — the {fed} fixture{} patched to it keep their rule, as a problem",
-                    f.node_name(id),
-                    if fed == 1 { "" } else { "s" }
-                )
-            }
-        }
-        [Target::Node(id)] if f.node(id).is_some_and(|n| !n.children().is_empty()) => {
-            format!("delete {} and everything in it", f.node_name(id))
-        }
-        [one] => format!("delete {}", f.label(one)),
-        many => format!("delete these {}", many.len()),
-    }
-}
-
-fn list(items: &[String]) -> String {
-    match items.len() {
-        0 => "nothing".into(),
-        1 => items[0].clone(),
-        2 => format!("{} and {}", items[0], items[1]),
-        n => format!("{n} things"),
-    }
+    !matches!(selection, [Target::Object(o)] if f.ring(&o.component, &o.key).is_none())
 }

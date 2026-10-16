@@ -201,13 +201,10 @@ fn ends(
     Some((cam.to_screen(from_at), cam.to_screen(to_at)))
 }
 
-/// An edge's head and words: the channel, always, near the end; what it
-/// carries, when core gives it a label.
+/// An edge's head and words: the channel, near the end. What it carries is
+/// the note beside the cursor while you hover it.
 fn words(arrow: Arrow, x: &UiCanvasEdge) -> Arrow {
     let mut arrow = arrow.end_head(Some(Head::triangle(ARROW_LEN_PX, ARROW_WIDTH_PX)));
-    if let Some(label) = &x.label {
-        arrow = arrow.label(Label::primary(label.clone()));
-    }
     if !x.channel.is_empty() {
         arrow = arrow.label(Label::quiet(x.channel.clone()).near_end());
     }

@@ -1142,39 +1142,6 @@ impl Editor {
             .find(|level| !level.is_empty() && !level.iter().all(|t| self.selection.contains(t)))
     }
 
-    /// What ⌘A would do now, in words.
-    pub fn select_all_hint(&self) -> String {
-        let p = &self.project;
-        let next = self
-            .select_all_next()
-            .unwrap_or_else(|| self.selection.clone());
-        if next.is_empty() {
-            return "nothing to select yet".into();
-        }
-        if next == self.selection {
-            return "everything is selected".into();
-        }
-        if next.iter().all(|t| matches!(t, Target::Node(_))) {
-            let parent = p.parent(&next[0]);
-            let one_parent = next.iter().all(|t| p.parent(t) == parent);
-            return match parent {
-                Some(m) if one_parent => format!("select everything in {}", p.label(&m)),
-                _ => "select the nodes themselves".into(),
-            };
-        }
-        let mut parents: Vec<Option<Target>> = Vec::new();
-        for t in &next {
-            let parent = p.parent(t);
-            if !parents.contains(&parent) {
-                parents.push(parent);
-            }
-        }
-        match parents.as_slice() {
-            [Some(c)] => format!("select every {} in {}", p.kind_word(&next[0]), p.label(c)),
-            _ => "select everything you drew, in every fixture".into(),
-        }
-    }
-
     fn update_box(&mut self) {
         let Some(rect) = self.selection_box() else {
             return;

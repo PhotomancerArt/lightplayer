@@ -104,7 +104,6 @@ impl Editor {
                 Some(UiCanvasEdge {
                     from: node(&x.from)?,
                     to: node(&x.to)?,
-                    label: (x.labelled && !x.label.is_empty()).then(|| x.label.clone()),
                     channel: x.channel,
                     carries: x.carries,
                     lands_on: x.lands_on,

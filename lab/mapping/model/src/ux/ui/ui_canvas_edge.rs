@@ -11,8 +11,6 @@ pub struct UiCanvasEdge {
     /// The channel it carries, always shown (D53); empty for a fixture
     /// reaching an output only by place rules.
     pub channel: String,
-    /// What it carries, shown while it belongs to the selection (D57).
-    pub label: Option<String>,
     /// What it carries in full, for the note beside the cursor.
     pub carries: String,
     /// The target's port rows it lands beside, by key (`edges.rs`).

@@ -82,24 +82,25 @@ impl Handle {
 }
 
 impl HandleKind {
-    /// What dragging it does, for the hint bar: "move this end".
-    pub fn does(&self, p: &Project) -> String {
+    /// What dragging it does, for the hint bar.
+    pub fn verb(&self) -> &'static str {
         match self {
-            HandleKind::PathPoint { path, index } => match p.path_points(path) {
-                Some(points) if *index == 0 || *index + 1 == points.len() => {
-                    "move this end — the lamp count stays".into()
-                }
-                _ => "move this point — the lamp count stays".into(),
+            HandleKind::PathPoint { .. } => "move point",
+            HandleKind::RingRadius { .. } => "radius",
+            HandleKind::FixtureSize { edge, .. } => match edge {
+                SizeEdge::Corner => "resize",
+                SizeEdge::Right => "width",
+                SizeEdge::Bottom => "height",
             },
-            HandleKind::RingRadius { ring, .. } => format!("change ring {ring}'s radius"),
-            HandleKind::FixtureSize { fixture, edge } => {
-                let name = p.node_name(fixture);
-                match edge {
-                    SizeEdge::Corner => format!("resize {name} — hold ⇧ to keep it square"),
-                    SizeEdge::Right => format!("change {name}'s width"),
-                    SizeEdge::Bottom => format!("change {name}'s height"),
-                }
-            }
+        }
+    }
+
+    /// The bar's lead while it is dragged.
+    pub fn lead(&self) -> &'static str {
+        match self {
+            HandleKind::PathPoint { .. } => "Moving a point",
+            HandleKind::RingRadius { .. } => "Changing a radius",
+            HandleKind::FixtureSize { .. } => "Resizing",
         }
     }
 }

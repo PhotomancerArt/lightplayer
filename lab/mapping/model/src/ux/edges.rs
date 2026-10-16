@@ -51,9 +51,6 @@ pub struct Edge {
     /// It touches the selection (something at either end, or inside
     /// either): drawn at full strength.
     pub selected: bool,
-    /// It belongs to the selection itself (one of its nodes is selected, or
-    /// something on the output it feeds): it shows what it carries.
-    pub labelled: bool,
     /// Every edge today is live; the field is there for routes, later.
     pub active: bool,
     /// The pointer is on it.
@@ -140,23 +137,8 @@ impl Editor {
                 .iter()
                 .any(|s| p.is_ancestor_or_self(s, t) || p.is_ancestor_or_self(t, s))
         };
-        // On the output side, only what this fixture feeds belongs to it.
-        let on_its_output = self.selection.iter().any(|s| match s {
-            Target::Port { output, key } => {
-                output == to
-                    && p.ports_of(&from_t).contains(&Target::Port {
-                        output: output.clone(),
-                        key: key.clone(),
-                    })
-            }
-            Target::Pixel { output, .. } => output == to,
-            _ => false,
-        });
         Edge {
             selected: touches(&from_t) || touches(&to_t),
-            labelled: self.selection.contains(&from_t)
-                || self.selection.contains(&to_t)
-                || on_its_output,
             from: from_t,
             to: to_t,
             channel: channel.to_string(),
