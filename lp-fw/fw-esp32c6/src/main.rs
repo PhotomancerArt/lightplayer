@@ -778,6 +778,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                              than this firmware reads — not formatting; files kept; using memory \
                              FS, access locked. Update the firmware."
                         );
+                        // Over the air it takes only a core that reads the
+                        // store (an older littlefs core would format it).
+                        #[cfg(lp_split)]
+                        crate::ota::hold_tree_store();
                         (Box::new(LpFsMemory::new()), FsBootState::Refused)
                     }
                     Err(e) => {
