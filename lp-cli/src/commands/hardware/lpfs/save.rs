@@ -6,7 +6,6 @@
 use anyhow::{Context, Result};
 use lpa_link::layout_migration::LpfsGeometry;
 use lpa_link::layout_migration::device_backup_archive::BackupPurpose;
-use lpa_link::layout_migration::lpfs_tree::LpfsTree;
 
 use super::super::args::LpfsSaveArgs;
 use super::lpfs_target::{BackupFacts, kb, now_secs, stderr_events, store_backup};
@@ -34,7 +33,7 @@ pub fn handle_save(args: LpfsSaveArgs) -> Result<()> {
         offset: read.region.offset,
         block_count: read.region.length / 4096,
     };
-    match LpfsTree::from_image(&read.image, geometry) {
+    match super::report::region_files(&read.image, geometry) {
         Ok((tree, used)) => {
             let path = store_backup(
                 &args.out,
@@ -48,7 +47,7 @@ pub fn handle_save(args: LpfsSaveArgs) -> Result<()> {
                 },
             )?;
             println!(
-                "backup: {} — {} files, {}, {used} of {} blocks in use",
+                "backup: {} — {} files, {}, {used} of {} blocks (or tree-store sectors) in use",
                 path.display(),
                 tree.file_count(),
                 kb(tree.total_bytes()),

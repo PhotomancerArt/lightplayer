@@ -268,9 +268,12 @@ fn tree_migrate_moves_every_file_into_the_tree_store_and_boots_them() {
     let (cli, early) = work.migrate_to_tree(&backups, &[]);
     assert!(early.is_none(), "the machine stopped early: {early:?}");
     assert!(cli.status.success(), "lpfs migrate failed:\n{}", told(&cli));
+    // A c40-sized littlefs takes nearly every block (a block a file), so
+    // there is no room in the tree region to stage into: the retired
+    // order, said as such.
     assert!(
-        told(&cli).contains("stays whole until the firmware is switched"),
-        "a c40-sized board stages its store:\n{}",
+        told(&cli).contains("the backup is the only copy"),
+        "a c40-sized board migrates in the retired order:\n{}",
         told(&cli)
     );
     assert!(dir_has_files(&backups), "the mandatory backup was stored");
@@ -381,13 +384,26 @@ fn a_dry_run_prints_the_plan_and_writes_nothing() {
 #[test]
 #[ignore = "needs built fw-esp32c6 images; `just test-emu-layout-migration` runs it"]
 fn a_cut_after_every_step_boots_the_old_board_or_the_new_one() {
-    let Some(work) = Work::cutover("t5", Cutover::Fielded) else {
+    // Both orders: the walk's own files leave room to stage (the old board
+    // whole until the switch); with a c40-sized project there is none (the
+    // retired order, the backup the only copy until the root lands).
+    for (name, start, order) in [
+        ("t5-staged", Cutover::FieldedSmall, "Staged"),
+        ("t5-retired", Cutover::Fielded, "Retired"),
+    ] {
+        cut_sweep(name, start, order);
+    }
+}
+
+fn cut_sweep(name: &str, start: Cutover, order: &str) {
+    let Some(work) = Work::cutover(name, start) else {
         return;
     };
     let start = std::fs::read(&work.chip).unwrap();
     let firmware = std::fs::read(&work.merged).unwrap();
     let backup = LpfsTree::from_files(work.files.clone());
-    let plan = tree_plan(&start, &firmware, None);
+    let (plan, got) = tree_plan_and_order(&start, &firmware);
+    assert_eq!(got, order, "{name}: the write order");
     let switch = plan
         .steps
         .iter()
@@ -431,10 +447,32 @@ fn a_cut_after_every_step_boots_the_old_board_or_the_new_one() {
         }
     }
     eprintln!(
-        "emu_layout_migration t5: {} steps, cut boots {seen:?} (lp-emu:esp32c6:t1, ROM-up)",
+        "emu_layout_migration {name}: {} steps, cut boots {seen:?} (lp-emu:esp32c6:t1, ROM-up)",
         plan.steps.len()
     );
     assert!(seen.contains_key("Old") && seen.contains_key("New"));
+    if order == "Staged" {
+        // Every cut before the disarm is the old board, working.
+        assert!(seen["Old"] >= 3, "{name}: {seen:?}");
+    }
+}
+
+/// The migration plan for a fielded `chip`, and its write order's name.
+fn tree_plan_and_order(chip: &[u8], firmware: &[u8]) -> (FlashPlan, String) {
+    let target = tree_table();
+    let inspection = inspect_flash_for(chip, target.clone(), FsKind::Tree, true);
+    match decide(&inspection, &target, firmware.len() as u32, None, false) {
+        Ok(LayoutDecision::Migrate {
+            mut plan, summary, ..
+        }) => {
+            plan.backup_confirmed = true;
+            (
+                plan,
+                format!("{:?}", summary.order.expect("a tree plan's order")),
+            )
+        }
+        other => panic!("not a migration: {other:?}"),
+    }
 }
 
 /// Where a cutover scenario's board starts.
@@ -442,6 +480,8 @@ fn a_cut_after_every_step_boots_the_old_board_or_the_new_one() {
 enum Cutover {
     /// The fielded littlefs board with the walk's files and a c40 project.
     Fielded,
+    /// The fielded board with the walk's files only (room to stage).
+    FieldedSmall,
     /// The same, plus ~380 KB of noise: fits 176 littlefs blocks, not 128
     /// tree sectors.
     FieldedOverFull,
@@ -504,7 +544,12 @@ impl Work {
         };
         let tree = dir.join("tree");
         let mut files = fixture_tree(&root, &tree, false);
-        for (rel, bytes) in c40_files() {
+        let c40 = if start == Cutover::FieldedSmall {
+            Vec::new()
+        } else {
+            c40_files()
+        };
+        for (rel, bytes) in c40 {
             let path = format!("/projects/c40/{rel}");
             let at = tree.join(path.trim_start_matches('/'));
             std::fs::create_dir_all(at.parent().unwrap()).unwrap();

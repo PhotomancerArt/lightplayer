@@ -133,6 +133,13 @@ tree store allows the write order to do.
 
 ## Consequences
 
+- **Staging needs free littlefs blocks in the target region, and a full
+  board has few.** littlefs spends a block on every file larger than its
+  inline limit, so a board carrying a c40-sized project (132 files) uses
+  nearly all 176 blocks and migrates in the retired order — measured on the
+  emulated walk's fixture. A board with a few small projects stages. The
+  write order is chosen per board and said before the user answers
+  (`lp-cli`'s summary; the backup is required either way).
 - **What fits shrinks.** 128 sectors of 4 KB hold about 340 KB of files that
   do not compress (records of 1 KB, three to a sector) and much more of what
   does (projects are JSON and GLSL); a c40-sized board (132 files, 216 KB)

@@ -37,10 +37,11 @@
 // the tree table (`LP_FW_IMAGE=split-tree just studio-firmware-package-esp32c6`):
 //
 //   T1  Update → the question → Continue → every file in the tree store at
-//       0x380000; the board boots it, as itself
-//   T7a cable pulled while the tree store's sectors are written (staged:
-//       before the firmware switch): the board comes back as itself, its
-//       littlefs mounted, every file there
+//       0x380000; the board boots it, as itself (a c40-sized littlefs takes
+//       nearly every block, so this is the retired order)
+//   T7a the walk's files only (room to stage): cable pulled while the tree
+//       store's sectors are written, before the firmware switch — the
+//       board comes back as itself, its littlefs mounted, every file there
 //   T7b …then Update again moves them
 //   T8a a crowded littlefs (no room to stage): cable pulled while the store
 //       is written (retired: the old filesystem already erased) — the board
@@ -108,7 +109,7 @@ const SCENARIOS = {
   W7b: { fixture: null, describe: "a new Chrome on the same profile restores the backup" },
   W12: { fixture: "legacy", tab: true, describe: "W1 with the board a Worker in the page (?emu=tab, no door)" },
   T1: { fixture: "fielded", tree: true, describe: "cutover: Update → the question → Continue → files in the tree store" },
-  T7a: { fixture: "fielded", tree: true, describe: "cutover: cable pulled while the store is staged: the old board, whole" },
+  T7a: { fixture: "fielded-small", tree: true, describe: "cutover: cable pulled while the store is staged: the old board, whole" },
   T7b: { fixture: null, tree: true, describe: "cutover: …then Update again moves the files" },
   T8a: { fixture: "crowded", tree: true, describe: "cutover, retired order: cable pulled mid store write: boots nothing, backup held" },
   T8b: { fixture: null, tree: true, describe: "cutover: …then the way back restores the backup into the tree store" },
@@ -266,7 +267,7 @@ function buildFixture(kind, out) {
   const tree = path.join(out, "fixture-tree");
   fixtureTree(tree, kind === "overfull", kind);
   const served = path.join(FIRMWARE, "esp32c6-4mb/fw-esp32c6-merged.bin");
-  const cutover = kind === "fielded" || kind === "crowded" || kind === "tree-bypassed";
+  const cutover = ["fielded", "fielded-small", "crowded", "tree-bypassed"].includes(kind);
   const merged = cutover ? fieldedMerged() : served;
   const chip = path.join(out, "fixture.bin");
   const cliArgs = ["hardware", "lpfs", "fixture", "--merged", merged, "--tree", tree, "--out", chip];

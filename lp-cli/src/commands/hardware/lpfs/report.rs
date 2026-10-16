@@ -89,7 +89,7 @@ pub fn handle_report(args: LpfsReportArgs) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
         let table = PartitionTable::parse(&read.partition_table).ok();
         let geometry = geometry_of(read.region);
-        let (tree, used) = LpfsTree::from_image(&read.image, geometry)
+        let (tree, used) = region_files(&read.image, geometry)
             .map_err(|e| anyhow::anyhow!("the board's filesystem: {e}"))?;
         let layout = table
             .as_ref()
@@ -284,7 +284,7 @@ fn from_image(path: &Path, offset: Option<u32>) -> Result<(String, LpfsTree, u32
 
 /// The files a region holds, by its magic: a tree store (the cutover's
 /// filesystem; its used sectors) or littlefs (its used blocks).
-fn region_files(region: &[u8], geometry: LpfsGeometry) -> Result<(LpfsTree, u32)> {
+pub fn region_files(region: &[u8], geometry: LpfsGeometry) -> Result<(LpfsTree, u32)> {
     use lpa_link::layout_migration::fs_kind::fs_in_region;
     use lpa_link::layout_migration::tree_image::used_sectors;
     if fs_in_region(region) == Some(lpa_link::FsKind::Tree) {
