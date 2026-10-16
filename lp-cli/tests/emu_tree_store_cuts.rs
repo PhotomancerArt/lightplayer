@@ -24,8 +24,9 @@
 //! (`calibrated_zeroing`, `_all_zero`, `_erasing`, `_reads_ff_weak`,
 //! `_reads_ff`) cuts every erase, `clean` (the control model) the forced
 //! set. The long form (`LP_TREE_CUTS=long`, `just
-//! walk-tree-store-cuts-emu`) adds a larger sample and `byte_prefix` and
-//! `random_bits`.
+//! walk-tree-store-cuts-emu`) adds a larger sample, `byte_prefix` and
+//! `random_bits`, and the two rare erase shapes
+//! (`calibrated_zeroing_mid_word`, `calibrated_first_lift`) on every erase.
 //!
 //! **littlefs control** (`LP_TREE_CUTS_CONTROL=1`; the long form sets it):
 //! the same scenarios but `format` on today's shipped image, report-only —
@@ -209,13 +210,26 @@ fn walk(elf: &Path, scenario: &Scenario, fs: Fs, long: bool, replay: Option<&str
     for &i in &indices {
         push(i, TearModel::Calibrated);
     }
-    for tear in [
+    // The two rare erase states (CX1's 700-cut re-fit) only in the long
+    // form: CI's subset keeps its five and its time.
+    let rare: &[TearModel] = if long {
+        &[
+            TearModel::CalibratedZeroingMidWord,
+            TearModel::CalibratedFirstLift,
+        ]
+    } else {
+        &[]
+    };
+    for &tear in [
         TearModel::CalibratedZeroing,
         TearModel::CalibratedAllZero,
         TearModel::CalibratedErasing,
         TearModel::CalibratedReadsFfWeak,
         TearModel::CalibratedReadsFf,
-    ] {
+    ]
+    .iter()
+    .chain(rare)
+    {
         for &i in &erases {
             push(i, tear);
         }

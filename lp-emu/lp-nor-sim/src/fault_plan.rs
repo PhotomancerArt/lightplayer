@@ -13,12 +13,13 @@ pub enum TearModel {
     /// A program: a random subset of the page's intended 1→0 clears lands,
     /// anywhere in the page.
     RandomBits,
-    /// Tears shaped and weighted the way a real part tore (CX1, 500 cuts):
+    /// Tears shaped and weighted the way a real part tore (CX1, 700 cuts):
     /// programs stop on a 32-byte command or a 4-byte word, or rarely inside
-    /// a word; erases leave a `0x00` run from the front, all `0x00`, a zero
-    /// residue with weak bits, or a sector reading `0xFF`, and rarely the cut
-    /// lands before the erase started (see [`crate::calibrated_tear`]). Not
-    /// in [`TearModel::ALL`]: name it to run it.
+    /// a word; erases leave a `0x00` run from the front (rarely ending inside
+    /// a word), all `0x00` (rarely but for one lifted bit), a zero residue
+    /// with weak bits, or a sector reading `0xFF`, and rarely the cut lands
+    /// before the erase started (see [`crate::calibrated_tear`]). Not in
+    /// [`TearModel::ALL`]: name it to run it.
     Calibrated,
     // [`TearModel::Calibrated`] with every torn erase forced to one shape
     // (programs keep the calibrated mix): a sweep in which every erase cut
@@ -40,6 +41,10 @@ pub enum TearModel {
     /// Calibrated, every torn program [`ProgramShape::MidWord`] (erases keep
     /// the calibrated mix).
     CalibratedMidWord,
+    /// Calibrated, every torn erase [`EraseShape::ZeroingMidWord`].
+    CalibratedZeroingMidWord,
+    /// Calibrated, every torn erase [`EraseShape::FirstLift`].
+    CalibratedFirstLift,
 }
 
 impl TearModel {
@@ -52,7 +57,7 @@ impl TearModel {
 
     /// Every model a name can select: [`TearModel::ALL`] and the calibrated
     /// one.
-    pub const NAMED: [TearModel; 11] = [
+    pub const NAMED: [TearModel; 13] = [
         TearModel::Clean,
         TearModel::BytePrefix,
         TearModel::RandomBits,
@@ -64,6 +69,8 @@ impl TearModel {
         TearModel::CalibratedReadsFf,
         TearModel::CalibratedBeforeErase,
         TearModel::CalibratedMidWord,
+        TearModel::CalibratedZeroingMidWord,
+        TearModel::CalibratedFirstLift,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -79,6 +86,8 @@ impl TearModel {
             TearModel::CalibratedReadsFf => "calibrated_reads_ff",
             TearModel::CalibratedBeforeErase => "calibrated_before_erase",
             TearModel::CalibratedMidWord => "calibrated_mid_word",
+            TearModel::CalibratedZeroingMidWord => "calibrated_zeroing_mid_word",
+            TearModel::CalibratedFirstLift => "calibrated_first_lift",
         }
     }
 
@@ -90,6 +99,8 @@ impl TearModel {
             TearModel::CalibratedErasing => Some(EraseShape::Erasing),
             TearModel::CalibratedReadsFfWeak => Some(EraseShape::ReadsFfWeak),
             TearModel::CalibratedReadsFf => Some(EraseShape::ReadsFf),
+            TearModel::CalibratedZeroingMidWord => Some(EraseShape::ZeroingMidWord),
+            TearModel::CalibratedFirstLift => Some(EraseShape::FirstLift),
             _ => None,
         }
     }

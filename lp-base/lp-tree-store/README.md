@@ -306,7 +306,9 @@ format golden.
 **The cut sweeps** (`test_support::sweep`): for each step, every sampled
 cut point × every tear model (by default the three guessed ones: clean,
 byte-prefix, random-bits; torn erases leave weak bits; and
-`calibrated_mid_word`, every torn program caught inside a word): cut, power-cycle,
+`calibrated_mid_word`, every torn program caught inside a word; and the two
+rare erase states CX1's 700 cuts added, `calibrated_zeroing_mid_word` and
+`calibrated_first_lift`, on every torn erase): cut, power-cycle,
 mount, the **whole state** must be the old or the new one; a step that did
 not land is re-run (every third with a second cut inside the recovery) and
 must reach the new state, also after a remount, with no sector retired (no
