@@ -5,7 +5,7 @@ use js_sys::{Array, Function, Promise, Reflect};
 use wasm_bindgen::{JsCast, closure::Closure, prelude::*};
 use wasm_bindgen_futures::JsFuture;
 
-use crate::layout_migration::LayoutProbe;
+use crate::layout_migration::{LayoutProbe, embedded_manifest};
 use crate::provider::flash_plan::{ExecutorStep as JsStep, FlashPlan};
 use crate::{
     LinkError, LinkFlashRegion, LinkLayoutInspection, LinkManagementEvent, LinkManagementEventSink,
@@ -357,6 +357,13 @@ pub async fn inspect_layout_with_events(
         probed_mac: reflect_optional_string(&value, "baseMac")?,
         target_table: std::mem::take(&mut state.target_table),
         target_image_len: reflect_u32(&value, "targetImageLen")?,
+        // The package's images cross once, for their embedded manifest (does
+        // this firmware read a tree store?); only the manifest is kept.
+        target_manifest: embedded_manifest(
+            reflect_bytes_array(&value, "images")?
+                .iter()
+                .map(Vec::as_slice),
+        ),
         reads: std::mem::take(&mut state.reads),
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?
@@ -566,6 +573,18 @@ fn reflect_string_array(value: &JsValue, key: &str) -> Result<Vec<String>, LinkE
     Ok(Array::from(&value)
         .iter()
         .filter_map(|value| value.as_string())
+        .collect())
+}
+
+/// An array of byte arrays (`Uint8Array`s), copied in; missing = empty.
+fn reflect_bytes_array(value: &JsValue, key: &str) -> Result<Vec<Vec<u8>>, LinkError> {
+    let value = reflect_value(value, key)?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(Vec::new());
+    }
+    Ok(Array::from(&value)
+        .iter()
+        .map(|bytes| js_sys::Uint8Array::new(&bytes).to_vec())
         .collect())
 }
 

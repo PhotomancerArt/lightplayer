@@ -7,7 +7,11 @@
 //!
 //! The reads are kept small on the common path. A board already on the
 //! target layout costs the 3 KB table and its filesystem's 8 KB superblock
-//! pair; only a board whose files must move is read in full.
+//! pair — the same 8 KB answer for a tree store whose first sectors are in
+//! use. A board whose files must move is read in full, and so is a target
+//! `lpfs` that shows neither a littlefs superblock nor a tree-store header
+//! up front: a tree store levels its wear, so its headers can be anywhere,
+//! and "no filesystem" is only said once every sector start has been seen.
 
 use crate::provider::partition_table::{
     PARTITION_TABLE_LEN, PARTITION_TABLE_OFFSET, PartitionTable, PartitionTableError,
@@ -17,6 +21,7 @@ pub use crate::provider::flash_region::LinkFlashRegion;
 
 use super::legacy_layout::{LEGACY_C6_V1_LPFS, is_legacy_c6_v1};
 use super::lpfs_geometry::{LPFS_BLOCK_SIZE, LpfsGeometry, has_superblock};
+use super::tree_store_magic::holds_tree_store_sector;
 
 /// What a board's flash holds, relative to the image about to be written.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -41,6 +46,14 @@ pub enum LayoutState {
     CurrentNothing,
     /// The frozen pre-repartition C6 table. Migrate from the legacy region.
     Legacy,
+    /// A tree store (the newer filesystem an `fs-tree` core writes) where
+    /// the probe looked: at the target's `lpfs`, or in the legacy region it
+    /// read. Never written a littlefs filesystem — no migration, no restore
+    /// — and flashed only with firmware that reads it, on the layout it is
+    /// already on; anything else is refused, nothing written (ADR
+    /// `2026-10-10-fs-tree-refused-state-and-update-guard`, amended
+    /// 2026-10-16).
+    TreeStore,
 }
 
 /// The finished classification and the source a migration would read.
@@ -131,9 +144,12 @@ impl LayoutProbe {
         let source = match state {
             LayoutState::Legacy | LayoutState::CurrentLegacyPresent => self
                 .reads
-                .pop()
-                .filter(|(read, _)| read.length == LEGACY_C6_V1_LPFS.len())
-                .map(|(_, bytes)| (LEGACY_C6_V1_LPFS, bytes)),
+                .iter()
+                .rposition(|(read, _)| {
+                    read.offset == LEGACY_C6_V1_LPFS.offset
+                        && read.length == LEGACY_C6_V1_LPFS.len()
+                })
+                .map(|at| (LEGACY_C6_V1_LPFS, self.reads.swap_remove(at).1)),
             _ => None,
         };
         LayoutInspection {
@@ -161,6 +177,11 @@ impl LayoutProbe {
         if self.chip_is_c6 && is_legacy_c6_v1(&device) && !target_is_legacy {
             return match self.reads.get(1) {
                 None => Step::Read(legacy_full),
+                // A littlefs superblock up front is littlefs (a tree store's
+                // format erases it); headers without one are a tree store.
+                Some((_, region)) if !has_superblock(region) && holds_tree_store_sector(region) => {
+                    Step::Done(LayoutState::TreeStore)
+                }
                 Some(_) => Step::Done(LayoutState::Legacy),
             };
         }
@@ -174,6 +195,19 @@ impl LayoutProbe {
             offset,
             length: 2 * LPFS_BLOCK_SIZE,
         };
+        // The rest of the target's `lpfs`, past its superblock pair: where a
+        // tree store's headers are when its first two sectors are free.
+        let target_rest = LinkFlashRegion {
+            offset: target_lpfs.offset + 2 * LPFS_BLOCK_SIZE,
+            length: target_lpfs.len().saturating_sub(2 * LPFS_BLOCK_SIZE),
+        };
+        let nothing_or_tree = |rest: &[u8]| {
+            Step::Done(if holds_tree_store_sector(rest) {
+                LayoutState::TreeStore
+            } else {
+                LayoutState::CurrentNothing
+            })
+        };
         // 2: the target's superblock pair.
         let Some((_, target_head)) = self.reads.get(1) else {
             return Step::Read(superblocks(target_lpfs.offset));
@@ -181,21 +215,51 @@ impl LayoutProbe {
         if has_superblock(target_head) {
             return Step::Done(LayoutState::CurrentMounts);
         }
+        if holds_tree_store_sector(target_head) {
+            return Step::Done(LayoutState::TreeStore);
+        }
         let may_hold_legacy =
             self.chip_is_c6 && !target_is_legacy && target_lpfs.offset != LEGACY_C6_V1_LPFS.offset;
         if !may_hold_legacy {
-            return Step::Done(LayoutState::CurrentNothing);
+            // 3: the rest of the target.
+            return match self.reads.get(2) {
+                None => Step::Read(target_rest),
+                Some((_, rest)) => nothing_or_tree(rest),
+            };
         }
-        // 3: the legacy superblock pair; 4: the whole legacy region.
+        // 3: the legacy superblock pair; 4: the whole legacy region (or,
+        // with no legacy filesystem, the rest of the target).
         let Some((_, legacy_head)) = self.reads.get(2) else {
             return Step::Read(superblocks(LEGACY_C6_V1_LPFS.offset));
         };
         if !has_superblock(legacy_head) {
-            return Step::Done(LayoutState::CurrentNothing);
+            return match self.reads.get(3) {
+                None => Step::Read(target_rest),
+                Some((_, rest)) => nothing_or_tree(rest),
+            };
         }
-        match self.reads.get(3) {
-            None => Step::Read(legacy_full),
+        let Some((_, legacy)) = self.reads.get(3) else {
+            return Step::Read(legacy_full);
+        };
+        // The legacy region holds the target's `lpfs` (the repartition moved
+        // it inside the old one): a tree store there is the board's live
+        // filesystem, newer than the old one left behind at `0x310000`.
+        let target_in_legacy = target_lpfs
+            .offset
+            .checked_sub(LEGACY_C6_V1_LPFS.offset)
+            .map(|from| from as usize..(from + target_lpfs.len()) as usize)
+            .and_then(|span| legacy.get(span));
+        match target_in_legacy {
+            Some(target) if holds_tree_store_sector(target) => Step::Done(LayoutState::TreeStore),
             Some(_) => Step::Done(LayoutState::CurrentLegacyPresent),
+            // A target outside the legacy region: read it too.
+            None => match self.reads.get(4) {
+                None => Step::Read(target_rest),
+                Some((_, rest)) if holds_tree_store_sector(rest) => {
+                    Step::Done(LayoutState::TreeStore)
+                }
+                Some(_) => Step::Done(LayoutState::CurrentLegacyPresent),
+            },
         }
     }
 }
@@ -358,5 +422,119 @@ mod tests {
         put_fs(&mut flash, LEGACY_C6_V1_LPFS);
         let inspection = inspect_flash(&flash, legacy_c6_v1_table(), true);
         assert_eq!(inspection.state, LayoutState::CurrentMounts);
+    }
+
+    /// A tree store whose first sectors are in use costs what a littlefs
+    /// board does: the table and 8 KB.
+    #[test]
+    fn a_tree_store_at_the_target_costs_two_small_reads() {
+        let mut flash = chip(Some(&d1_table()));
+        put_tree(&mut flash, target_lpfs(), 0);
+        let reads = reads_of(&flash, d1_table(), true);
+        assert_eq!(reads.iter().map(|r| r.length).sum::<u32>(), 0xC00 + 0x2000);
+        let inspection = inspect_flash(&flash, d1_table(), true);
+        assert_eq!(inspection.state, LayoutState::TreeStore);
+        assert_eq!(inspection.source, None, "nothing to migrate from");
+    }
+
+    /// The store levels its wear: with its first two sectors free, its
+    /// headers are found in the rest of the partition. Until 2026-10-16
+    /// this board read as `CurrentNothing`, and a pending backup would have
+    /// been restored over it as littlefs.
+    #[test]
+    fn a_tree_store_whose_first_sectors_are_free_is_found_in_the_rest() {
+        for c6 in [true, false] {
+            let mut flash = chip(Some(&d1_table()));
+            put_tree(&mut flash, target_lpfs(), 90);
+            let head = target_lpfs().offset as usize;
+            assert!(
+                !holds_tree_store_sector(&flash[head..head + 0x2000]),
+                "the premise: no header in the first two sectors"
+            );
+            let inspection = inspect_flash(&flash, d1_table(), c6);
+            assert_eq!(inspection.state, LayoutState::TreeStore, "c6: {c6}");
+        }
+    }
+
+    /// No filesystem is only said once every sector start was seen.
+    #[test]
+    fn nothing_is_said_after_the_whole_target_is_read() {
+        let flash = chip(Some(&d1_table()));
+        let reads = reads_of(&flash, d1_table(), true);
+        let target = target_lpfs();
+        assert!(reads.contains(&LinkFlashRegion {
+            offset: target.offset + 0x2000,
+            length: target.len() - 0x2000,
+        }));
+        assert_eq!(
+            inspect_flash(&flash, d1_table(), true).state,
+            LayoutState::CurrentNothing
+        );
+    }
+
+    /// A tree store at the target with an old filesystem's superblock still
+    /// at `0x310000` (the repartitioned app's tail left it): the store is the
+    /// board's live filesystem, and nothing is migrated over it.
+    #[test]
+    fn a_tree_store_beside_a_stale_legacy_filesystem_is_a_tree_store() {
+        let mut flash = chip(Some(&d1_table()));
+        put_fs(&mut flash, LEGACY_C6_V1_LPFS);
+        put_tree(&mut flash, target_lpfs(), 40);
+        let inspection = inspect_flash(&flash, d1_table(), true);
+        assert_eq!(inspection.state, LayoutState::TreeStore);
+        assert_eq!(inspection.source, None);
+    }
+
+    /// A tree store on the frozen legacy table (an `fs-tree` core flashed
+    /// before the repartition) is never migrated as littlefs.
+    #[test]
+    fn a_tree_store_on_the_legacy_table_is_a_tree_store() {
+        let mut flash = chip(Some(&legacy_c6_v1_table()));
+        put_tree(&mut flash, LEGACY_C6_V1_LPFS, 7);
+        let inspection = inspect_flash(&flash, d1_table(), true);
+        assert_eq!(inspection.state, LayoutState::TreeStore);
+        assert_eq!(inspection.source, None);
+    }
+
+    /// The new reads keep the replay honest: a provider's reads replay to
+    /// the same answer, and a missing one does not.
+    #[test]
+    fn a_replay_of_the_rest_read_agrees() {
+        let mut flash = chip(Some(&d1_table()));
+        put_tree(&mut flash, target_lpfs(), 90);
+        let reads: Vec<_> = reads_of(&flash, d1_table(), true)
+            .into_iter()
+            .map(|r| {
+                let at = r.offset as usize;
+                (r, flash[at..at + r.length as usize].to_vec())
+            })
+            .collect();
+        let replayed = LayoutProbe::replay(d1_table(), true, &reads);
+        assert_eq!(replayed.state, LayoutState::TreeStore);
+        let short = LayoutProbe::replay(d1_table(), true, &reads[..reads.len() - 1]);
+        assert_eq!(short.state, LayoutState::Foreign);
+    }
+
+    /// A tree store holding a file, built by `lp-tree-store` at `geometry`'s
+    /// size, its sectors moved `rotate` places on.
+    fn put_tree(flash: &mut [u8], geometry: LpfsGeometry, rotate: usize) {
+        let mut image = crate::layout_migration::tree_store_magic::tests::tree_store_image(
+            geometry.block_count,
+        );
+        image.rotate_right(rotate * LPFS_BLOCK_SIZE as usize);
+        let at = geometry.offset as usize;
+        flash[at..at + image.len()].copy_from_slice(&image);
+    }
+
+    /// Every read the probe asks for on `flash`.
+    fn reads_of(flash: &[u8], target: PartitionTable, c6: bool) -> Vec<LinkFlashRegion> {
+        let mut probe = LayoutProbe::new(target, c6);
+        let mut reads = Vec::new();
+        while let Some(read) = probe.next_read() {
+            reads.push(read);
+            let at = read.offset as usize;
+            probe.record(read, flash[at..at + read.length as usize].to_vec());
+        }
+        reads
     }
 }

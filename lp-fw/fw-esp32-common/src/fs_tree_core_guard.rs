@@ -12,7 +12,8 @@
 //! readable manifest is refused too: nothing says it keeps the store.
 //!
 //! The other half — a littlefs image that holds on tree-store magic instead
-//! of formatting — is product-image code and the adoption round's.
+//! of formatting — is `lp_fs::holds_tree_store`; while it holds one, that
+//! build's update session runs this guard too (ADR amended 2026-10-16).
 
 use lpc_model::LpFeature;
 use lpc_model::manifest::{MANIFEST_BLOB_BEGIN, MANIFEST_BLOB_END};
@@ -50,6 +51,40 @@ const STEP: usize = 512;
 /// The most manifest JSON read after its begin marker.
 const MANIFEST_MAX: usize = 4096;
 
+/// The markers this scan looks for, stored masked: an image that links this
+/// guard must not carry a contiguous copy of a marker outside its real blob
+/// (the manifest module's rule — "the only contiguous occurrences in an
+/// artifact are real blobs"). A plain `MANIFEST_BLOB_BEGIN` needle in
+/// `.rodata` was found first by every scan of the image — this one's, and
+/// `lp-cli firmware package`'s ("manifest payload … is not a ManifestCore").
+const MASK: u8 = 0xA5;
+const BEGIN_LEN: usize = MANIFEST_BLOB_BEGIN.len();
+const END_LEN: usize = MANIFEST_BLOB_END.len();
+const BEGIN_MASKED: [u8; BEGIN_LEN] = masked(MANIFEST_BLOB_BEGIN);
+const END_MASKED: [u8; END_LEN] = masked(MANIFEST_BLOB_END);
+
+const fn masked<const N: usize>(marker: &str) -> [u8; N] {
+    let bytes = marker.as_bytes();
+    let mut out = [0u8; N];
+    let mut i = 0;
+    while i < N {
+        out[i] = bytes[i] ^ MASK;
+        i += 1;
+    }
+    out
+}
+
+/// A marker unmasked at run time; `black_box` keeps the compiler from
+/// folding it back into a contiguous constant.
+fn unmasked<const N: usize>(masked: &[u8; N]) -> [u8; N] {
+    let key = core::hint::black_box(MASK);
+    let mut out = *masked;
+    for b in &mut out {
+        *b ^= key;
+    }
+    out
+}
+
 /// Scan the `len`-byte core image `read` serves (`read(offset, buf)` fills
 /// `buf` from the image at `offset`; `false` = a read failed) for its
 /// manifest core, and decide.
@@ -57,8 +92,8 @@ pub fn core_store_verdict(
     len: u32,
     mut read: impl FnMut(u32, &mut [u8]) -> bool,
 ) -> CoreStoreVerdict {
-    let begin = MANIFEST_BLOB_BEGIN.as_bytes();
-    let Some(json_at) = find_in_image(len, begin, &mut read).map(|at| at + begin.len() as u32)
+    let begin = unmasked(&BEGIN_MASKED);
+    let Some(json_at) = find_in_image(len, &begin, &mut read).map(|at| at + begin.len() as u32)
     else {
         return CoreStoreVerdict::NoManifest;
     };
@@ -68,7 +103,7 @@ pub fn core_store_verdict(
         return CoreStoreVerdict::NoManifest;
     }
 
-    let Some(end) = find(&json, MANIFEST_BLOB_END.as_bytes()) else {
+    let Some(end) = find(&json, &unmasked(&END_MASKED)) else {
         return CoreStoreVerdict::NoManifest;
     };
     // The `features` array only: `"features"`, its `[`, up to its `]` (no
