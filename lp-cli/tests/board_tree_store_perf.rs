@@ -23,7 +23,8 @@
 //! `LP_PERF_BOOT_ONLY=1` (the first boot and the empty mounts, then stop),
 //! `LP_PERF_FILL_PAUSE_MS=<ms>` (quiet time between the near-full fill's
 //! writes, the link polled meanwhile: what lets a board clean up on quiet
-//! ticks; default 0, back to back), `BOARD_HOLDER`.
+//! ticks; default 0, back to back) from the fill's file
+//! `LP_PERF_FILL_PAUSE_FROM=<n>` on (default 0), `BOARD_HOLDER`.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -352,8 +353,12 @@ async fn perf() {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
+    let pause_from = std::env::var("LP_PERF_FILL_PAUSE_FROM")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
     for i in 0..FILL_FILES {
-        if fill_pause > 0 {
+        if fill_pause > 0 && i >= pause_from {
             let until = Instant::now() + Duration::from_millis(fill_pause);
             while Instant::now() < until {
                 let _ = client.project_list_loaded().await;
@@ -382,7 +387,9 @@ async fn perf() {
         what: format!("new 4 KiB file (incompressible), each, filling to full ({written} files)"),
         samples: fill_rtt,
         baseline: Some(("read of a 4 KiB file".into(), read_4k_m)),
-        note: format!("stopped by: {stopped}; {fill_pause} ms quiet before each write"),
+        note: format!(
+            "stopped by: {stopped}; {fill_pause} ms quiet before each write from file {pause_from}"
+        ),
     });
     drop(client);
     for i in 0..3 {
