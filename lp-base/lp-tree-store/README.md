@@ -121,6 +121,20 @@ change has to be readable, or cleanly refused, by the core before it.
   head of its kind). When GC still cannot make room, the refusal is
   remembered (RAM): a write needing as many bytes is refused without GC
   until a write needs fewer or a sector more is free.
+- **Idle cleanup** (`collect_step`, `store_idle.rs`): the same GC, early and
+  a bounded piece at a time, for a caller with nothing else to do (the
+  server's quiet ticks, through `LpFs::idle_step`). Each step marks, then
+  does at most one thing: **forget** a garbage-only sector (kill its header,
+  no erase — a mount then reads 24 B of it instead of its records, and it is
+  erased when opened, as it would have been: an erase now would be repeated
+  after the next mount, which never trusts a sector to be erased);
+  **collect** one sector holding at least `idle_min_garbage` of garbage
+  while fewer than `idle_free_percent` of the sectors are free; or, near
+  full (fewer than `reserve + idle_pack_free` free), **pack**: GC's own next
+  victim, a pass at a time while passes shrink the waste. A step that finds
+  nothing **settles** the store: later steps return at once, with no mark,
+  until the next write. Never inside a transaction. A cut anywhere in a
+  step leaves the state it had (a step changes no file).
 
 ## Invariants (hold after every operation and every cut)
 
@@ -181,6 +195,9 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 | `gc_policy` | `CostBenefit` | `Greedy` (most garbage) or `CostBenefit` (LFS: `(1−u)·age/(1+u)`) |
 | `reserve` | 3 | sectors every write must leave free |
 | `txn_delta_max` | 2048 | RAM a transaction's directory delta may hold before it is written as pending directories |
+| `idle_free_percent` | 25 | the idle low water: below this share of sectors free, an idle step collects a sector with garbage (0 = never; forgetting goes on) |
+| `idle_min_garbage` | 1024 | the least garbage (bytes) an idle collection wins back |
+| `idle_pack_free` | 4 | near full: below `reserve` + this many free sectors, idle steps also pack (0 = never) |
 
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`
@@ -207,6 +224,7 @@ sequence — always on, for a boot line), `get`, `file_size`, `exists`, `list`
 `delete`, `delete_prefix` (`"<dir>/"` only: the directory and everything
 under it, one change; any other prefix is `InvalidPath`),
 `delete_file_and_tree`, `begin`, `commit`, `abort`, `in_transaction`,
+`collect_step` (the idle cleanup, above: `true` if it changed the flash),
 `stats` and `reset_transient_peak` (feature `stats`), `free_sectors`,
 `flash`/`flash_mut`, `into_flash`, `into_parts`. After `StoreError::Flash`
 the store must be dropped.
@@ -356,7 +374,22 @@ not — a commit past `u64::MAX` mounts as the one before it, pinned by
 (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
 commits, not reachable in practice).
 
-**Mutants** (feature `mutants`, `mutants.rs`): thirteen switches, each
+**Idle steps** (`idle_gc_tests.rs`): a step changes no file; steps settle
+until the next write (a settled step reads no byte) and never run in a
+transaction; forgetting makes the next mount read less (16 sectors of churn:
+67.6 KB over 16 trusted sectors → 19.3 KB over 4); steps keep the low water;
+cut sweeps and remount sweeps through idle steps (every tear model of the
+sweeps; `calibrated_mid_word` and `calibrated_first_lift` with 8 seeds a
+cut). And the soak's near-full fill on 176 sectors — about c40's content,
+then incompressible 4 KiB files and a panel save each until `NoSpace` —
+priced by a silicon model (an erase 19 ms, a program 0.5 ms per 256 B, a
+read 0.42 µs per byte; a host estimate, never a silicon claim): back to
+back, 6 of the 95 writes cost over 1 s, the worst 3.9 s (CX1 measured
+3.78 s); with idle steps (until settled) between writes, none before the
+last one (which takes the store's last room, 2.5 s), at 756 erases against
+770 — each idle step at most 62 ms.
+
+**Mutants** (feature `mutants`, `mutants.rs`): fourteen switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
@@ -364,7 +397,8 @@ without its tail check; `NoSpace` checked after writing; GC forgetting the
 pending set; the sector header magic first; a newer version read as
 untrusted; open a sector without the erase read-back; trust the newest
 sectors' last programs on one read (no settle); format leaving the
-headers it does not erase (no kill). `lp-store-bench
+headers it does not erase (no kill); an idle step forgetting a write head.
+`lp-store-bench
 mutants` runs each through a fixed driver set and requires every one caught
 and the unmutated store clean (its README has the table).
 
