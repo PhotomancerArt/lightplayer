@@ -4,10 +4,14 @@
 
 use lab_mapping_files::embedded::{CHOKER, Embedded, RADIANCE_DOME, ZOOK_DOME};
 use lab_mapping_files::{MemFiles, Opened};
-use lab_mapping_model::{ColorOrder, ComponentKind, NodeId, NodeKind, PatchRule, Project, Target};
+use lab_mapping_model::{
+    Channel, ColorOrder, ComponentKind, NodeId, NodeKind, PatchRule, Project, Target,
+};
 
 /// The choker opens with all five nodes, 12 paths and 73 lamps, its one
-/// port taking the rest, and its ids minted from its object names.
+/// port taking the rest, and its ids minted from its object names; its
+/// shader opens as a render source on `visual.out`, keeping its GLSL, and
+/// its fixture reads that channel.
 #[test]
 fn the_choker_opens() {
     let o = open(&CHOKER);
@@ -31,8 +35,20 @@ fn the_choker_opens() {
         }]
     );
     assert_eq!(p.port_fill(&out, "0"), (73, 73));
+    let shader = p.node(&NodeId::new("shader")).unwrap();
+    let NodeKind::Source(src) = &shader.kind else {
+        panic!("a render source");
+    };
+    assert_eq!(src.kind, "Shader");
+    assert_eq!(src.writes, Channel::visual_out());
+    assert!(src.glsl.as_deref().unwrap().contains("render_2d"));
+    assert_eq!(f.reads, Channel::visual_out());
+    assert_eq!(
+        p.render_product(&fixture).unwrap().source,
+        NodeId::new("shader")
+    );
     assert!(matches!(
-        p.node(&NodeId::new("shader")).unwrap().kind,
+        p.node(&NodeId::new("clock")).unwrap().kind,
         NodeKind::Other(_)
     ));
 }

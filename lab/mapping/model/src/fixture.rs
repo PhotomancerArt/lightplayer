@@ -3,8 +3,16 @@
 //! `(0, 0)` is the top-left of its box, wherever the layout puts it.
 //!
 //! A fixture is one kind of node (`node.rs`); its id and name live on the
-//! node. What it carries of its own is its drawing and its patch rules.
+//! node. What it carries of its own is its drawing, its patch rules and
+//! the visual channel it reads. Each frame it samples that channel's
+//! render product at its lamps and publishes their colours as its control
+//! product (`board.rs`), as the product's fixture node does.
+//!
+//! The control channel it writes is its auto rule, read the product's way:
+//! the fixture writes the channel its rule's output reads (fit-check §6,
+//! `bindings.rs`). So a fixture names no channel of its own for that.
 
+use crate::channel::Channel;
 use crate::color_order::ColorOrder;
 use crate::component::{Component, ComponentId};
 use crate::geom::{Rect, Vec2};
@@ -22,6 +30,9 @@ pub struct Fixture {
     pub rules: Vec<PatchRule>,
     /// Which byte of each of its pixels is red, green and blue.
     pub color_order: ColorOrder,
+    /// The visual channel whose render product it samples (the product's
+    /// `bindings.input.source`).
+    pub reads: Channel,
 }
 
 impl Fixture {
@@ -42,12 +53,20 @@ impl Fixture {
             components: Vec::new(),
             rules: Vec::new(),
             color_order: ColorOrder::default(),
+            reads: Channel::visual_out(),
         }
     }
 
     /// The box in the fixture's own coordinates.
     pub fn bounds(&self) -> Rect {
         Rect::new(Vec2::default(), self.size)
+    }
+
+    /// Where a point of the fixture (its own coordinates) falls in its box,
+    /// as the unit square a render product is sampled in: `(0, 0)` the
+    /// top-left, `(1, 1)` the bottom-right.
+    pub fn uv(&self, at: Vec2) -> Vec2 {
+        Vec2::new(at.x / self.size.x.max(1e-9), at.y / self.size.y.max(1e-9))
     }
 
     pub fn component(&self, id: &ComponentId) -> Option<&Component> {

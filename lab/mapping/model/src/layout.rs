@@ -10,8 +10,9 @@
 //!    or left of its inside. Pinned nodes are placed first, in authoring
 //!    order; one dropped on top of an earlier one moves down until it's
 //!    clear.
-//! 2. **nodes the lab doesn't edit** (a shader, a clock: `OtherNode`) stack
-//!    in a column at the left, since they feed what is to their right;
+//! 2. **render sources and nodes the lab doesn't simulate** (a shader, a
+//!    clock) stack in a column at the left, since they feed what is to
+//!    their right;
 //! 3. **fixtures and modules** stack top to bottom in authoring order, a
 //!    gap between each, stepping down past anything pinned in the way;
 //! 4. **each output** sits just to the right of the first fixture that
@@ -165,12 +166,13 @@ impl Project {
                 placed[i] = Some(Rect::new(at, at + blocks[i].size));
             }
         }
-        // 2. Nodes the lab doesn't edit (a shader, a clock), in a column
-        //    at the left: they feed what's to their right.
+        // 2. Render sources and nodes the lab doesn't simulate (a shader, a
+        //    clock), in a column at the left: they feed what's to their
+        //    right.
         let mut y = 0.0;
         let mut left = 0.0_f64;
         for (i, n) in nodes.iter().enumerate() {
-            if placed[i].is_some() || n.other().is_none() {
+            if placed[i].is_some() || !n.feeds_from_the_left() {
                 continue;
             }
             let at = clear_of(Vec2::new(0.0, y), blocks[i].size, &taken(&placed));
@@ -232,7 +234,7 @@ impl Project {
                 size: f.size,
                 inner: Vec::new(),
             },
-            NodeKind::Output(_) | NodeKind::Other(_) => Block {
+            NodeKind::Output(_) | NodeKind::Source(_) | NodeKind::Other(_) => Block {
                 size: card_size(n),
                 inner: Vec::new(),
             },
@@ -321,8 +323,8 @@ fn clear_of(want: Vec2, size: Vec2, taken: &[Rect]) -> Vec2 {
     }
 }
 
-/// A card's size: a header and one row per port (a node the lab doesn't
-/// edit has one row, saying what it is).
+/// A card's size: a header and one row per port (any other card has one
+/// row, saying what it is).
 fn card_size(n: &Node) -> Vec2 {
     let ports = n.output().map_or(1, |o| o.ports.len());
     Vec2::new(

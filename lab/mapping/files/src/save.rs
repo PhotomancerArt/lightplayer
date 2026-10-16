@@ -12,9 +12,13 @@
 //!
 //! - **an auto rule** → the fixture writes the channel its output reads.
 //!   If the output isn't the first reader of a channel the fixture can
-//!   write, saving refuses and says why; a new output reads a channel of
-//!   its own (`control.<name>`) when another output already reads
-//!   `control.out`.
+//!   write, saving refuses and says why. An output reads the channel the
+//!   model gives it (a new one its own, `control.<name>`, when another
+//!   output beside it already reads `control.out`); a fixture reads the
+//!   visual channel the model gives it.
+//! - **a render source** (a shader) the lab opened is never written: the
+//!   lab shows its GLSL and never edits it. One the lab made is written as
+//!   a shader node with a stand-in GLSL file (`stand_in_shader.rs`).
 //! - **a place rule** → a patch row: the object's path (`/sector/2`), the
 //!   output's name (minted, `"1"`, `"2"`…, for an output that has none and
 //!   isn't the default), and the port and pixel flattened onto the
@@ -138,31 +142,16 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// Outputs keep the channel they read; a new one reads `control.out`,
-    /// or a channel of its own when another output there already does.
-    /// A fixture with an auto rule writes the channel its output reads.
+    /// Every output reads the channel the model says (an opened one, the
+    /// channel its file named; a new one, `control.out` or a channel of its
+    /// own, minted by the model). A fixture with an auto rule writes the
+    /// channel its output reads.
     fn choose_channels(&mut self) -> Result<(), FilesError> {
         let p = self.project;
         for n in p.attach_order() {
-            if n.output().is_none() {
-                continue;
+            if let Some(o) = n.output() {
+                self.channels.insert(n.id.clone(), o.reads.to_string());
             }
-            let channel = match self.files.nodes.get(&n.id) {
-                Some(f) => crate::channels::output_reads(&f.value),
-                None => {
-                    let module = p.parent_module(&n.id);
-                    let shared = self
-                        .channels
-                        .iter()
-                        .any(|(o, c)| c == "control.out" && p.parent_module(o) == module);
-                    if shared {
-                        format!("control.{}", self.places[&n.id].0)
-                    } else {
-                        "control.out".to_string()
-                    }
-                }
-            };
-            self.channels.insert(n.id.clone(), channel);
         }
         for n in p.fixtures() {
             let carried = self.files.nodes.get(&n.id).map_or_else(
@@ -262,7 +251,16 @@ impl<'a> Writer<'a> {
                     let value = self.output_value(n, old);
                     self.emit(&path, old, &value);
                 }
-                NodeKind::Other(_) => {}
+                NodeKind::Source(src) if old.is_none() => {
+                    let name = &self.places[&n.id].0;
+                    let glsl_path = join(&path, &format!("./{name}.glsl"));
+                    let value = crate::stand_in_shader::node_value(src, &format!("{name}.glsl"));
+                    self.emit(&path, None, &value);
+                    self.saved
+                        .writes
+                        .push((glsl_path, crate::stand_in_shader::glsl(src)));
+                }
+                NodeKind::Source(_) | NodeKind::Other(_) => {}
             }
         }
         Ok(())
@@ -325,6 +323,8 @@ impl<'a> Writer<'a> {
                 "bindings".into(),
                 json!({"input": {"source": format!("bus:{channel}")}}),
             );
+        } else if old.is_some_and(|v| crate::channels::output_reads(v) != channel) {
+            set_binding(&mut value, "input", "source", &channel);
         }
         value
     }
@@ -340,7 +340,7 @@ impl<'a> Writer<'a> {
                 "kind": "Fixture",
                 "render_size": {"width": 64, "height": 64},
                 "bindings": {
-                    "input": {"source": "bus:visual.out"},
+                    "input": {"source": fx.reads.binding()},
                     "output": {"target": "bus:control.out"}
                 },
                 "sampling": "direct",
@@ -362,6 +362,9 @@ impl<'a> Writer<'a> {
         let channel = self.channels.get(&n.id).cloned().unwrap_or_default();
         if crate::channels::fixture_writes(&value) != channel {
             set_binding(&mut value, "output", "target", &channel);
+        }
+        if crate::channels::fixture_reads(&value) != fx.reads.as_str() {
+            set_binding(&mut value, "input", "source", fx.reads.as_str());
         }
 
         // The patch.

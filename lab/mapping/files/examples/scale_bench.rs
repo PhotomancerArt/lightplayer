@@ -67,7 +67,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
         let _ = p.effective_patch();
     });
     both("device frame (nothing selected)", &|p| {
-        let _ = p.device_frame(&[], 1.0);
+        let _ = p.board_frame(&[], 1.0);
     });
     let first_component = project
         .objects()
@@ -76,7 +76,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     if let Some(t) = &first_component {
         let sel = vec![t.clone()];
         both("device frame (a repeat selected)", &|p| {
-            let _ = p.device_frame(&sel, 1.0);
+            let _ = p.board_frame(&sel, 1.0);
         });
     }
     both("tree rows", &|p| {
@@ -173,7 +173,7 @@ fn page_frame(e: &Editor) {
         let _ = p.area(&e.camera, t);
     }
     let _ = e.cursor_note();
-    let _ = e.device_frame(1.0);
+    let _ = e.board_frame(1.0);
     // Panels.
     let _ = p.tree_rows();
     let _ = common_props(p, &e.selection);

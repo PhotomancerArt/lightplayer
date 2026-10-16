@@ -27,6 +27,7 @@ pub mod patch_doc;
 pub mod product_project;
 pub mod save;
 pub mod source;
+pub mod stand_in_shader;
 
 pub use error::FilesError;
 pub use product_project::{Opened, ProductProject};

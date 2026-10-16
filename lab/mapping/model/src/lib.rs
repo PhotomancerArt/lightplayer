@@ -4,13 +4,19 @@
 //!
 //! - [`Project`] — the one authored thing, and the root module: its nodes
 //!   are what's on the canvas.
-//! - [`Node`] — a module (a frame around nodes), a fixture, or an output.
-//!   One canvas for the whole graph (D36, D43).
+//! - [`Node`] — a module (a frame around nodes), a render source (a
+//!   shader), a fixture, or an output: the product's node kinds. One
+//!   canvas for the whole graph (D36, D43).
+//! - [`Channel`] — the bus channels nodes write and read, the product's
+//!   wiring; [`bindings`] — which node feeds which over them, the edges
+//!   between nodes.
 //! - [`Fixture`] — one physical thing: its own box, component tree and
 //!   patch rules.
 //! - [`Output`] — where pixels leave the board: a card of ports that make
-//!   one flat wire. [`OtherNode`] — anything else a real project holds (a
-//!   shader, a clock): a plain card, never edited here.
+//!   one flat wire. [`RenderSource`] — a shader or other node that makes a
+//!   picture, shown as a stand-in [`Pattern`]. [`OtherNode`] — anything
+//!   else a real project holds (a clock, a button): a plain card, never
+//!   edited here.
 //! - [`layout`] — where every node sits: automatic and inside-out, outputs
 //!   beside what feeds them, except where you pinned a node by dragging it.
 //! - [`Component`] — what you draw: a path, a polygon, a circle, a repeat,
@@ -41,26 +47,34 @@
 //! - [`Editor`] — the state, driven by input events, with no IO; "Move &
 //!   draw" off holds the drawing still.
 //! - [`hints`] — what the screen says you can do right now.
-//! - [`device_frame`] — the simulated board: what every port's pixels
-//!   show, from the pattern, the patch, the selection and the time;
-//!   [`data_path`] — the wiring order drawn inside a fixture.
+//! - [`board`] — the simulated board, a small recreation of the engine:
+//!   render products ([`render_product`]) sampled by fixtures, fixture
+//!   overrides ([`fixture_overrides`]), control products
+//!   ([`ControlProduct`]) placed by the patch onto outputs, output
+//!   overrides ([`output_overrides`]); [`data_path`] — the wiring order
+//!   drawn inside a fixture.
 //!
 //! The behaviour is pinned by `tests/statements.rs`: one sentence, one test.
 //!
 //! Vision: `~/.photomancer/planning/lp2025/2026-10-10-1853-mapping-design-lab/`.
 
 pub mod area;
+pub mod bindings;
+pub mod board;
+pub mod breath;
 pub mod camera;
+pub mod channel;
 pub mod color_order;
 pub mod commands;
 pub mod component;
 pub mod component_props;
+pub mod control_product;
 pub mod data_path;
 pub mod derived;
-pub mod device_frame;
 pub mod edges;
 pub mod editor;
 pub mod fixture;
+pub mod fixture_overrides;
 pub mod geom;
 pub mod handle;
 pub mod highlight;
@@ -71,23 +85,30 @@ pub mod notice;
 pub mod object;
 pub mod other_node;
 pub mod output;
+pub mod output_overrides;
 pub mod patch;
+pub mod pattern;
 pub mod pick;
 pub mod pixel_grid;
 pub mod port_runs;
 pub mod project;
 pub mod props;
+pub mod render_product;
+pub mod render_source;
 pub mod resolve;
 pub mod rgb;
 pub mod target;
 pub mod tree_rows;
 
 pub use area::Area;
+pub use bindings::Binding;
+pub use board::{BoardFrame, PortFrame};
 pub use camera::Camera;
+pub use channel::Channel;
 pub use color_order::ColorOrder;
 pub use component::{Component, ComponentId, ComponentKind, Ring};
+pub use control_product::ControlProduct;
 pub use data_path::{DataEntry, DataPath};
-pub use device_frame::{DeviceFrame, PortFrame};
 pub use edges::Edge;
 pub use editor::{
     Button, ContextMenu, Editor, Gesture, Key, MenuAction, MenuCommand, MenuItem, Mods, Tool,
@@ -103,11 +124,14 @@ pub use object::{Lamp, Object, ObjectId, ObjectShape};
 pub use other_node::OtherNode;
 pub use output::{Output, Port};
 pub use patch::{EffectivePatch, Gone, PatchProblem, PatchRule, Span, Unpatched};
+pub use pattern::Pattern;
 pub use pick::{PickMode, pick};
 pub use pixel_grid::PixelGrid;
 pub use port_runs::PortRun;
 pub use project::Project;
 pub use props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
+pub use render_product::RenderProduct;
+pub use render_source::RenderSource;
 pub use rgb::Rgb;
 pub use target::Target;
 pub use tree_rows::TreeRow;

@@ -1,5 +1,8 @@
-//! Nodes: the things on the canvas. A fixture is one kind of node; an
-//! output is another; a module holds nodes (D42, D43).
+//! Nodes: the things on the canvas, the product's node kinds (D52, D55).
+//! A render source (a shader) makes a picture; a fixture samples it at its
+//! lamps; an output sends lamps to pixels; a module holds nodes (D42,
+//! D43); anything else is a plain card. They are wired by bus channels
+//! (`channel.rs`, `bindings.rs`).
 //!
 //! The project is the root module: its `nodes` are the root's children, so
 //! the canvas is a view of the root module's insides. Any node that holds
@@ -21,6 +24,7 @@ use crate::fixture::Fixture;
 use crate::geom::Vec2;
 use crate::other_node::OtherNode;
 use crate::output::Output;
+use crate::render_source::RenderSource;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub String);
@@ -59,7 +63,10 @@ pub enum NodeKind {
     Fixture(Fixture),
     /// Where pixels leave the board: a card with ports.
     Output(Output),
-    /// Anything else in a real project (a shader, a clock): a plain card,
+    /// A shader, or another node that makes a picture: a card writing its
+    /// render product to a visual channel.
+    Source(RenderSource),
+    /// Anything else in a real project (a clock, a button): a plain card,
     /// carried along, never edited here.
     Other(OtherNode),
 }
@@ -67,10 +74,12 @@ pub enum NodeKind {
 impl Node {
     /// What the user calls this kind of node.
     pub fn kind_word(&self) -> &'static str {
-        match self.kind {
+        match &self.kind {
             NodeKind::Module { .. } => "module",
             NodeKind::Fixture(_) => "fixture",
             NodeKind::Output(_) => "output",
+            NodeKind::Source(s) if s.kind == "Shader" => "shader",
+            NodeKind::Source(_) => "render source",
             NodeKind::Other(_) => "node",
         }
     }
@@ -130,10 +139,26 @@ impl Node {
         }
     }
 
-    /// Drawn as a card (an output, or a node the lab doesn't edit), not a
-    /// frame.
+    pub fn source(&self) -> Option<&RenderSource> {
+        match &self.kind {
+            NodeKind::Source(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Drawn as a card (an output, a render source, a node the lab doesn't
+    /// simulate), not a frame.
     pub fn is_card(&self) -> bool {
-        matches!(self.kind, NodeKind::Output(_) | NodeKind::Other(_))
+        matches!(
+            self.kind,
+            NodeKind::Output(_) | NodeKind::Source(_) | NodeKind::Other(_)
+        )
+    }
+
+    /// A card that feeds what is to its right — a render source, or a node
+    /// the lab doesn't simulate — so the layout puts it at the left.
+    pub fn feeds_from_the_left(&self) -> bool {
+        matches!(self.kind, NodeKind::Source(_) | NodeKind::Other(_))
     }
 }
 

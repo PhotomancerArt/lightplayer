@@ -1418,7 +1418,7 @@ impl Editor {
     /// coordinates: a circle being dragged, or the clicked-out path with the
     /// cursor as its next point. `None` when there's no draft or it starts
     /// outside every fixture. Finishing a drawing and the simulated board's
-    /// preview of it (`device_frame.rs`) both ask here, so the preview is
+    /// preview of it (`board.rs`) both ask here, so the preview is
     /// exactly what finishing makes.
     pub(crate) fn draft_into(&self) -> Option<(NodeId, ComponentKind)> {
         if let Gesture::Drawing { start_world } = &self.gesture {

@@ -19,8 +19,10 @@
 //!   into, auto-patched to
 //! - output `scarf out`: one port, D10, 60 px.
 //!
-//! The board is simulated (`device_frame`): times are in seconds, and
-//! `CREST` is the top of a selected lamp's breath.
+//! The board is simulated (`board`): times are in seconds, and `CREST` is
+//! the top of a selected lamp's breath. A shader `rainbow` at the root
+//! feeds every fixture there through `visual.out`; the tail rig has its
+//! own shader, `glow`, which the tail reads instead (the nearer writer).
 //!
 //! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
 //! turns them into the canvas's.
@@ -670,7 +672,9 @@ fn the_auto_rule_fills_ports_in_order() {
 #[test]
 fn patch_edges_match_the_effective_patch() {
     let e = editor();
-    let edges = e.edges();
+    // The bindings that aren't the patch (shaders feeding fixtures, the
+    // empty scarf bound to its output) are edges too, node to node.
+    let edges: Vec<Edge> = e.edges().into_iter().filter(|x| !x.binding).collect();
     let spans = e.project.effective_patch().spans.clone();
     assert_eq!(edges.len(), spans.len());
     let got: Vec<(Target, Target, String)> = edges
@@ -1494,7 +1498,7 @@ fn every_offered_key_does_something() {
 #[test]
 fn the_board_shows_the_pattern_on_patched_pixels_only() {
     let e = editor();
-    let frame = e.device_frame(0.0);
+    let frame = e.board_frame(0.0);
     let tail_out = node_id(&e, "tail out");
     let gpio10 = frame.port(&tail_out, "0").unwrap();
     assert_eq!(gpio10.len(), 60);
@@ -1533,10 +1537,10 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
 #[test]
 fn selecting_a_lamp_lights_exactly_its_pixel() {
     let mut e = editor();
-    let plain = e.device_frame(CREST);
+    let plain = e.board_frame(CREST);
     e.select(vec![lamp("path3", "path", 4)]);
     assert!(e.board_animates());
-    let frame = e.device_frame(CREST);
+    let frame = e.board_frame(CREST);
     let main = node_id(&e, "main");
     let d1 = frame.port(&main, "1").unwrap();
     assert_eq!(d1[4], Rgb::WHITE);
@@ -1563,7 +1567,7 @@ fn selecting_a_lamp_lights_exactly_its_pixel() {
     }
     // It breathes: dimmer at the start of a breath than at its crest, but
     // even then brighter than anything dimmed.
-    let low = e.device_frame(0.0);
+    let low = e.board_frame(0.0);
     let lowest = low.port(&main, "1").unwrap()[4];
     assert!(lowest.level() < Rgb::WHITE.level());
     let dimmed = low
@@ -1612,7 +1616,7 @@ fn a_lamp_outside_its_box_is_never_lit() {
         }],
     ] {
         e.select(selection.clone());
-        let frame = e.device_frame(CREST);
+        let frame = e.board_frame(CREST);
         let gpio10 = frame.port(&tail_out, "0").unwrap();
         assert!(
             !gpio10[50].is_black() && !gpio10[51].is_black(),
@@ -1641,7 +1645,7 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     let b = e.camera.to_screen(place(&e, "scarf", 64.0, 15.0));
     e.pointer_move(b, none());
     assert!(e.board_animates());
-    let frame = e.device_frame(0.0);
+    let frame = e.board_frame(0.0);
     let d10 = frame.port(&scarf_out, "0").unwrap();
     let lit: Vec<usize> = (0..d10.len()).filter(|i| !d10[*i].is_black()).collect();
     assert_eq!(lit, (11..22).collect::<Vec<_>>());
@@ -1685,11 +1689,11 @@ fn pressing_equals_lights_one_more_pixel() {
     // path1's red lead-out ends on its last pixel; path2's dimmed lamps
     // start on the next.
     let ends = |e: &Editor| {
-        let frame = e.device_frame(CREST);
+        let frame = e.board_frame(CREST);
         let gpio10 = frame.port(&tail_out, "0").unwrap().to_vec();
         let last_red = gpio10
             .iter()
-            .rposition(|px| *px == device_frame::END_COLOUR)
+            .rposition(|px| *px == fixture_overrides::END_COLOUR)
             .unwrap();
         let lit = gpio10.iter().rposition(|px| !px.is_black()).unwrap() + 1;
         (last_red, lit)
@@ -1709,10 +1713,18 @@ fn a_selected_object_shows_lp2014s_pattern() {
     // 15) at each end.
     e.select(vec![comp("path3")]);
     let band = |t: f64| {
-        let frame = e.device_frame(t);
+        let frame = e.board_frame(t);
         let d1 = frame.port(&main, "1").unwrap().to_vec();
-        assert!(d1[..3].iter().all(|px| *px == device_frame::START_COLOUR));
-        assert!(d1[27..].iter().all(|px| *px == device_frame::END_COLOUR));
+        assert!(
+            d1[..3]
+                .iter()
+                .all(|px| *px == fixture_overrides::START_COLOUR)
+        );
+        assert!(
+            d1[27..]
+                .iter()
+                .all(|px| *px == fixture_overrides::END_COLOUR)
+        );
         let middle = &d1[3..27];
         assert!(
             middle.iter().all(|px| px.r == px.g && px.g == px.b),
@@ -1741,30 +1753,32 @@ fn a_selected_object_shows_lp2014s_pattern() {
     // The lead scales with the object: the tail's group, two paths of 25,
     // shows it on each — 3 at each end of both.
     e.select(vec![comp("group1")]);
-    let frame = e.device_frame(0.5);
+    let frame = e.board_frame(0.5);
     let gpio10 = frame.port(&node_id(&e, "tail out"), "0").unwrap().to_vec();
     for start in [0, 25] {
         assert!(
             gpio10[start..start + 3]
                 .iter()
-                .all(|px| *px == device_frame::START_COLOUR)
+                .all(|px| *px == fixture_overrides::START_COLOUR)
         );
         assert!(
             gpio10[start + 22..start + 25]
                 .iter()
-                .all(|px| *px == device_frame::END_COLOUR)
+                .all(|px| *px == fixture_overrides::END_COLOUR)
         );
     }
     // And with lp2014's panels of 120, 15.
-    assert_eq!(device_frame::lead_lamps(120), 15);
-    assert_eq!(device_frame::lead_lamps(400), 15);
-    assert_eq!(device_frame::lead_lamps(4), 1);
+    assert_eq!(fixture_overrides::lead_lamps(120), 15);
+    assert_eq!(fixture_overrides::lead_lamps(400), 15);
+    assert_eq!(fixture_overrides::lead_lamps(4), 1);
 }
 
-/// Every patched lamp on the canvas shows the same colour as its pixel on
-/// the board; a lamp that lights nothing has no colour.
+/// Every lamp on the canvas shows its colour in its fixture's control
+/// product, and a patched lamp's pixel shows the same colour while no
+/// output override paints over it; a lamp outside its box has no colour,
+/// and an unpatched lamp keeps its fixture's colour.
 #[test]
-fn every_patched_lamp_shows_its_pixels_colour() {
+fn every_lamp_shows_its_control_products_colour() {
     let mut e = editor();
     // A path in the tail whose last lamps run outside its box.
     let tail = node_id(&e, "tail");
@@ -1778,31 +1792,288 @@ fn every_patched_lamp_shows_its_pixels_colour() {
     // And 20 more lamps on the strip than D1 has pixels for.
     e.select(vec![comp("path3")]);
     e.edit_selection_prop("lamps", PropEdit::SetCount(50));
-    let main = node_id(&e, "main");
     for (selection, t) in [
         (vec![], 0.0),
         (vec![comp("path3")], 0.7),
         (vec![lamp("circle1", "r2", 3)], CREST),
-        (vec![port(&main, "0")], CREST),
     ] {
         e.select(selection.clone());
-        let frame = e.device_frame(t);
+        let frame = e.board_frame(t);
         let patch = e.project.effective_patch();
         for s in &patch.spans {
             let pixels = frame.port(&s.output, &s.port).unwrap();
+            let product = frame.control_product(&s.fixture).unwrap();
             for lamp in s.lamps.clone() {
                 let pixel = pixels[(s.start_pixel + lamp - s.lamps.start) as usize];
                 let shown = frame.lamp(&s.object, lamp);
                 if s.object.component == out && lamp >= 2 {
                     assert_eq!(shown, None, "outside its box: no colour");
+                    assert!(pixel.is_black(), "and a dark pixel");
                 } else {
                     assert_eq!(shown, Some(pixel), "{selection:?} {} {lamp}", s.object);
+                    assert!(product.lamps.contains(&shown));
                 }
             }
         }
         let strip = ObjectId::new(&ComponentId::new("path3"), "path");
-        assert_eq!(frame.lamp(&strip, 30), None, "unpatched: no colour");
+        assert!(
+            !frame.lands(&strip, 30),
+            "lamp 30 of the strip is unpatched"
+        );
+        assert!(
+            frame.lamp(&strip, 30).is_some(),
+            "unpatched, it keeps its fixture's colour"
+        );
     }
+}
+
+// ---- the engine: render products, control products, overrides ----------------
+
+/// A fixture's lamps take their colours from its render product, sampled
+/// at their positions.
+#[test]
+fn a_fixtures_lamps_sample_its_render_product() {
+    let e = editor();
+    let frame = e.board_frame(0.0);
+    for name in ["ring display", "strip", "tail"] {
+        let f = node_id(&e, name);
+        let product = e.project.render_product(&f).expect("a shader feeds it");
+        let fx = e.project.fixture(&f).unwrap();
+        let origin = e.project.origin(&f);
+        for o in e.project.objects_in(&f) {
+            for (i, l) in o.lamps.iter().enumerate() {
+                assert_eq!(
+                    frame.lamp(&o.id, i as u32),
+                    Some(product.sample(fx.uv(l.pos - origin), 0.0)),
+                    "{name} {} {i}",
+                    o.id
+                );
+            }
+        }
+    }
+    // Lamps in different places differ: it's a picture, not a fill.
+    let r1 = ObjectId::new(&ComponentId::new("circle1"), "r1");
+    assert_ne!(frame.lamp(&r1, 0), frame.lamp(&r1, 20));
+    // The ring display reads the root's shader; the tail reads its own
+    // rig's, the nearer writer of `visual.out` — and the two look
+    // different.
+    let source = |name: &str| e.project.render_product(&node_id(&e, name)).unwrap().source;
+    assert_eq!(source("ring display"), node_id(&e, "rainbow"));
+    assert_eq!(source("tail"), node_id(&e, "glow"));
+    let pattern = |name: &str| {
+        e.project
+            .node(&node_id(&e, name))
+            .unwrap()
+            .source()
+            .unwrap()
+            .pattern
+    };
+    assert_ne!(pattern("rainbow"), pattern("glow"));
+    // With no shader at all, nothing renders: lamps have no colour.
+    let mut e = editor();
+    for name in ["rainbow", "tail rig"] {
+        let id = node_id(&e, name);
+        e.project.remove_node(&id);
+    }
+    let frame = e.board_frame(0.0);
+    assert_eq!(frame.lamp(&r1, 0), None);
+}
+
+/// Selecting something inside a fixture changes its control product, and
+/// so its lamps on the canvas and its pixels on the output.
+#[test]
+fn a_selection_inside_a_fixture_changes_its_control_product() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    let strip = node_id(&e, "strip");
+    let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
+    let plain = e.board_frame(CREST);
+    e.select(vec![comp("path3")]);
+    let frame = e.board_frame(CREST);
+    assert_ne!(
+        plain.control_product(&strip).unwrap().lamps,
+        frame.control_product(&strip).unwrap().lamps
+    );
+    // path3's lamp 0 leads in blue: in the product, on the canvas, on D1.
+    assert_eq!(
+        frame.control_product(&strip).unwrap().lamps[0],
+        Some(fixture_overrides::START_COLOUR)
+    );
+    assert_eq!(frame.lamp(&path3, 0), Some(fixture_overrides::START_COLOUR));
+    assert_eq!(
+        frame.port(&main, "1").unwrap()[0],
+        fixture_overrides::START_COLOUR
+    );
+    // A lamp on its own breathes, and its pixel with it: r2's lamp 3 is
+    // pixel 43 of D0.
+    e.select(vec![lamp("circle1", "r2", 3)]);
+    let frame = e.board_frame(CREST);
+    let r2 = ObjectId::new(&ComponentId::new("circle1"), "r2");
+    assert_eq!(frame.lamp(&r2, 3), Some(Rgb::WHITE));
+    assert_eq!(frame.port(&main, "0").unwrap()[43], Rgb::WHITE);
+    assert!(frame.lamp(&path3, 0).unwrap().level() < plain.lamp(&path3, 0).unwrap().level());
+}
+
+/// Selecting an output, port, run or pixel changes only the output's
+/// pixels; no lamp's colour on the canvas changes.
+#[test]
+fn an_output_selection_changes_only_the_outputs_pixels() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    let tail_out = node_id(&e, "tail out");
+    let plain = e.board_frame(CREST);
+    for selection in [
+        vec![Target::Node(main.clone())],
+        vec![port(&main, "0")],
+        (4..=8).map(|i| pixel(&main, "1", i)).collect(),
+        vec![pixel(&tail_out, "0", 3)],
+    ] {
+        e.select(selection.clone());
+        let frame = e.board_frame(CREST);
+        for n in e.project.fixtures() {
+            assert_eq!(
+                frame.control_product(&n.id),
+                plain.control_product(&n.id),
+                "{} with {selection:?}",
+                n.name
+            );
+        }
+        for o in e.project.objects() {
+            for i in 0..o.lamps.len() as u32 {
+                assert_eq!(frame.lamp(&o.id, i), plain.lamp(&o.id, i));
+            }
+        }
+        assert_ne!(
+            frame.ports, plain.ports,
+            "{selection:?} shows on the pixels"
+        );
+    }
+    // The selected pixels breathe; the rest of the outputs dim.
+    e.select(vec![port(&main, "0")]);
+    let frame = e.board_frame(CREST);
+    assert!(frame.port(&main, "0").unwrap().iter().all(|px| bright(*px)));
+    assert!(
+        frame
+            .port(&main, "1")
+            .unwrap()
+            .iter()
+            .all(|px| !bright(*px))
+    );
+}
+
+/// A selected pixel's lamp is marked on the canvas, not recoloured.
+#[test]
+fn a_selected_pixels_lamp_is_marked_not_recoloured() {
+    let mut e = editor();
+    let main = node_id(&e, "main");
+    let path3 = ObjectId::new(&ComponentId::new("path3"), "path");
+    let plain = e.board_frame(CREST);
+    e.select(vec![pixel(&main, "1", 3)]);
+    let frame = e.board_frame(CREST);
+    assert_eq!(e.marked_lamps(), vec![lamp("path3", "path", 3)]);
+    assert_eq!(
+        frame.lamp(&path3, 3),
+        plain.lamp(&path3, 3),
+        "its own colour"
+    );
+    assert_eq!(
+        frame.port(&main, "1").unwrap()[3],
+        Rgb::WHITE,
+        "the pixel breathes"
+    );
+    assert_ne!(frame.lamp(&path3, 3), Some(Rgb::WHITE));
+}
+
+/// Every edge between nodes comes from a channel binding and is labelled
+/// with its channel's name.
+#[test]
+fn every_edge_is_a_channel_binding_with_its_name() {
+    let e = editor();
+    let p = &e.project;
+    let bindings = p.bindings();
+    let node_of = |t: &Target| match t {
+        Target::Node(id) => id.clone(),
+        Target::Port { output, .. } | Target::Pixel { output, .. } => output.clone(),
+        _ => p.fixture_of_target(t).unwrap(),
+    };
+    let edges = e.edges();
+    for x in &edges {
+        let (from, to) = (node_of(&x.from), node_of(&x.to));
+        let b = bindings
+            .iter()
+            .find(|b| b.from == from && b.to == to)
+            .unwrap_or_else(|| panic!("{x:?} is no binding"));
+        assert_eq!(x.channel, b.channel.as_str());
+    }
+    // Every binding is drawn, and says its name once.
+    let named: Vec<(String, String, String)> = edges
+        .iter()
+        .filter(|x| x.channel_shown)
+        .map(|x| {
+            (
+                p.node_name(&node_of(&x.from)),
+                p.node_name(&node_of(&x.to)),
+                x.channel.clone(),
+            )
+        })
+        .collect();
+    let mut want: Vec<(String, String, String)> = [
+        ("rainbow", "ring display", "visual.out"),
+        ("rainbow", "scarf", "visual.out"),
+        ("rainbow", "strip", "visual.out"),
+        ("glow", "tail", "visual.out"),
+        ("ring display", "main", "control.out"),
+        ("scarf", "scarf out", "control.scarf_out"),
+        ("strip", "main", "control.out"),
+        ("tail", "tail out", "control.out"),
+    ]
+    .iter()
+    .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+    .collect();
+    let mut got = named.clone();
+    got.sort();
+    want.sort();
+    assert_eq!(got, want);
+    assert_eq!(bindings.len(), want.len());
+    // The empty scarf has nothing placed yet: its binding is one plain
+    // edge, node to node.
+    let scarf = edges
+        .iter()
+        .find(|x| x.from == fixture(&e, "scarf"))
+        .unwrap();
+    assert!(scarf.binding && scarf.to == fixture(&e, "scarf out"));
+}
+
+/// Two fixtures on one output each arrive as their own control product,
+/// placed by the patch.
+#[test]
+fn two_fixtures_on_one_output_arrive_as_their_own_products() {
+    let e = editor();
+    let main = node_id(&e, "main");
+    let ring = node_id(&e, "ring display");
+    let strip = node_id(&e, "strip");
+    let frame = e.board_frame(0.0);
+    assert_eq!(frame.inputs(&main), [ring.clone(), strip.clone()]);
+    // The ring display's 64 lamps fill D0, in its data order; the strip's
+    // 30 fill D1.
+    let dark = |c: &Option<Rgb>| c.unwrap_or(Rgb::BLACK);
+    let ring_lamps: Vec<Rgb> = frame
+        .control_product(&ring)
+        .unwrap()
+        .lamps
+        .iter()
+        .map(dark)
+        .collect();
+    let strip_lamps: Vec<Rgb> = frame
+        .control_product(&strip)
+        .unwrap()
+        .lamps
+        .iter()
+        .map(dark)
+        .collect();
+    assert_eq!(frame.port(&main, "0").unwrap(), ring_lamps.as_slice());
+    assert_eq!(frame.port(&main, "1").unwrap(), strip_lamps.as_slice());
+    assert_ne!(ring_lamps[0], strip_lamps[0], "two products, two pictures");
 }
 
 /// Inside a fixture, the data path runs from the last lamp of each object
@@ -1857,10 +2128,10 @@ fn the_data_path_runs_object_to_object_in_patch_order() {
 fn deleting_a_path_changes_the_next_frame() {
     let mut e = editor();
     let tail_out = node_id(&e, "tail out");
-    let before = e.device_frame(0.0).port(&tail_out, "0").unwrap().to_vec();
+    let before = e.board_frame(0.0).port(&tail_out, "0").unwrap().to_vec();
     e.select(vec![comp("path1")]);
     key(&mut e, Key::Delete, none());
-    let after = e.device_frame(0.0).port(&tail_out, "0").unwrap().to_vec();
+    let after = e.board_frame(0.0).port(&tail_out, "0").unwrap().to_vec();
     assert_eq!(
         after[..25],
         before[25..50],
@@ -1876,7 +2147,7 @@ fn selecting_a_port_lights_its_whole_range() {
         let mut e = editor();
         let out = node_id(&e, name);
         e.select(vec![port(&out, "0")]);
-        let frame = e.device_frame(CREST);
+        let frame = e.board_frame(CREST);
         let pixels = frame.port(&out, "0").unwrap();
         assert_eq!(pixels.len(), 60);
         assert!(
@@ -2046,7 +2317,7 @@ fn with_move_and_draw_off_nothing_moves() {
     // A pixel still lights; a port's own count is patching, not drawing.
     let main = node_id(&e, "main");
     e.select(vec![pixel(&main, "1", 3)]);
-    assert!(bright(e.device_frame(CREST).port(&main, "1").unwrap()[3]));
+    assert!(bright(e.board_frame(CREST).port(&main, "1").unwrap()[3]));
     e.select(vec![port(&main, "1")]);
     key(&mut e, Key::Char('='), none());
     assert_eq!(e.project.port_fill(&main, "1"), (30, 31));
@@ -2102,7 +2373,7 @@ fn a_selected_pixel_lights_and_marks_its_lamp() {
     // Nothing is drawn in the scarf: pixel 5 of D10 is patched to nothing.
     let scarf_out = node_id(&e, "scarf out");
     e.select(vec![pixel(&scarf_out, "0", 5)]);
-    let frame = e.device_frame(CREST);
+    let frame = e.board_frame(CREST);
     let d10 = frame.port(&scarf_out, "0").unwrap();
     assert!(bright(d10[5]), "it lights");
     for (i, px) in d10.iter().enumerate() {
@@ -2114,7 +2385,7 @@ fn a_selected_pixel_lights_and_marks_its_lamp() {
     let main = node_id(&e, "main");
     e.select(vec![pixel(&main, "1", 3)]);
     assert_eq!(e.marked_lamps(), vec![lamp("path3", "path", 3)]);
-    let frame = e.device_frame(CREST);
+    let frame = e.board_frame(CREST);
     assert!(bright(frame.port(&main, "1").unwrap()[3]));
     // And the other way round: select the lamp, and its pixel is marked.
     e.select(vec![lamp("path3", "path", 3)]);
@@ -2612,14 +2883,14 @@ fn kept_answers_are_never_stale() {
         assert_eq!(e.project.objects(), afresh.objects());
         assert_eq!(e.project.effective_patch(), afresh.effective_patch());
         assert_eq!(
-            e.project.device_frame(&[], 0.5),
-            afresh.device_frame(&[], 0.5)
+            e.project.board_frame(&[], 0.5),
+            afresh.board_frame(&[], 0.5)
         );
         let ring = ObjectId::new(&ComponentId::new("circle1"), "r1");
         for i in 0..44 {
             assert_eq!(
-                e.project.device_frame(&[], 0.5).lamp(&ring, i),
-                afresh.device_frame(&[], 0.5).lamp(&ring, i)
+                e.project.board_frame(&[], 0.5).lamp(&ring, i),
+                afresh.board_frame(&[], 0.5).lamp(&ring, i)
             );
         }
     };
@@ -2781,7 +3052,7 @@ fn drag(e: &mut Editor, from: Vec2, to: Vec2, mods: Mods) {
 }
 
 /// The top of the selection's breath.
-const CREST: f64 = device_frame::BREATH_SECONDS / 2.0;
+const CREST: f64 = breath::BREATH_SECONDS / 2.0;
 
 /// Lit by the selection (at the crest), as opposed to dimmed or off.
 fn bright(px: Rgb) -> bool {

@@ -78,6 +78,12 @@ pub struct Placed {
     /// Where each object's lamp 0 sits among all the lamps, `list` order.
     first_lamp: Vec<usize>,
     lamps: usize,
+    /// Each fixture's lamps among all the lamps: its objects sit together
+    /// in `list`, so they are one stretch. Every fixture has one, empty or
+    /// not.
+    fixture_lamps: HashMap<NodeId, Range<usize>>,
+    /// Per lamp, among all the lamps: inside its fixture's box (D4).
+    inside: Vec<bool>,
     /// The box round each object's lamps and drawn shape, `list` order…
     bounds: Vec<Rect>,
     /// …and round everything under each component (a group's children too).
@@ -116,6 +122,18 @@ impl Placed {
         self.lamps
     }
 
+    /// A fixture's lamps among all the lamps (empty for a fixture with
+    /// none, `None` for a node that isn't one).
+    pub fn fixture_lamps(&self, fixture: &NodeId) -> Option<Range<usize>> {
+        self.fixture_lamps.get(fixture).cloned()
+    }
+
+    /// Whether each lamp sits inside its fixture's box, among all the
+    /// lamps.
+    pub fn inside(&self) -> &[bool] {
+        &self.inside
+    }
+
     /// The box round an object's lamps and its drawn shape, world units.
     pub fn object_bounds(&self, id: &ObjectId) -> Option<Rect> {
         Some(self.bounds[*self.by_id.get(id)?])
@@ -128,8 +146,8 @@ impl Placed {
     }
 }
 
-/// Which pixel each lamp lights, worked out from the patch once: a device
-/// frame then only colours them.
+/// Which pixel each lamp lands on, worked out from the patch once: a
+/// board frame then only colours them (`board.rs`).
 #[derive(Debug, Default, PartialEq)]
 pub struct Wiring {
     /// Every port in output then port order, and its pixel count: the
@@ -137,10 +155,10 @@ pub struct Wiring {
     pub ports: Vec<(NodeId, String, usize)>,
     /// Per span of the effective patch (same index): the port it lands on
     /// (an index into `ports`), and each of its lamps that lands on one of
-    /// that port's pixels, as (lamp index, pixel, inside its box).
+    /// that port's pixels, as (lamp index, pixel).
     pub spans: Vec<Option<SpanWiring>>,
-    /// Per lamp, in [`Placed`] order: the (port, pixel) it lights. Only
-    /// lamps that light — patched, on a real pixel, inside their box.
+    /// Per lamp, in [`Placed`] order: the (port, pixel) it lands on — only
+    /// lamps that are patched to a real pixel.
     pub lit: Vec<Option<(u32, u32)>>,
     /// Where each object's lamp 0 sits in `lit`.
     pub first_lamp: HashMap<ObjectId, usize>,
@@ -149,13 +167,13 @@ pub struct Wiring {
 #[derive(Debug, PartialEq)]
 pub struct SpanWiring {
     pub port: usize,
-    /// How many lamps the span's object has.
-    pub object_lamps: usize,
-    pub lamps: Vec<(u32, u32, bool)>,
+    /// Where the span's object's lamp 0 sits among all the lamps.
+    pub first_lamp: usize,
+    pub lamps: Vec<(u32, u32)>,
 }
 
 impl Wiring {
-    /// The (port, pixel) a lamp lights, if it lights one.
+    /// The (port, pixel) a lamp lands on, if it is patched to one.
     pub fn lamp(&self, object: &ObjectId, index: u32) -> Option<(usize, usize)> {
         let first = *self.first_lamp.get(object)?;
         let (port, pixel) = (*self.lit.get(first + index as usize)?)?;
@@ -198,7 +216,7 @@ impl Project {
             .get_or_init(|| Arc::new(self.compute_patch()))
     }
 
-    /// Which pixel each lamp lights, kept. Shared with every device frame
+    /// Which pixel each lamp lands on, kept. Shared with every board frame
     /// made from this project.
     pub(crate) fn wiring(&self) -> Arc<Wiring> {
         self.derived
@@ -216,13 +234,27 @@ impl Project {
             index_components(&f.components, &n.id, origin, &mut p);
         }
         let mut lamps = 0;
-        for (i, (_, o)) in p.list.iter().enumerate() {
+        for (i, (fixture, o)) in p.list.iter().enumerate() {
             p.by_id.insert(o.id.clone(), i);
             p.first_lamp.push(lamps);
+            let stretch = p
+                .fixture_lamps
+                .entry(fixture.clone())
+                .or_insert(lamps..lamps);
+            stretch.end = lamps + o.lamps.len();
+            let bounds = layout.rects.get(fixture);
+            p.inside.extend(
+                o.lamps
+                    .iter()
+                    .map(|l| bounds.is_some_and(|b| b.contains(l.pos))),
+            );
             lamps += o.lamps.len();
             p.bounds.push(object_bounds(o));
         }
         p.lamps = lamps;
+        for n in self.fixtures() {
+            p.fixture_lamps.entry(n.id.clone()).or_insert(lamps..lamps);
+        }
         for n in self.fixtures() {
             if let Some(f) = n.fixture() {
                 bound_components(&f.components, &mut p);
@@ -234,7 +266,6 @@ impl Project {
     fn compute_wiring(&self) -> Wiring {
         let patch = self.kept_patch();
         let placed = self.placed();
-        let layout = self.kept_layout();
         let mut w = Wiring::default();
         for n in self.outputs() {
             let Some(o) = n.output() else { continue };
@@ -252,7 +283,6 @@ impl Project {
                 w.spans.push(None);
                 continue;
             };
-            let (fixture, object) = &placed.list[at];
             let Some(port) = w
                 .ports
                 .iter()
@@ -261,7 +291,6 @@ impl Project {
                 w.spans.push(None);
                 continue;
             };
-            let bounds = layout.rects.get(fixture).copied();
             let len = w.ports[port].2;
             let first = placed.first_lamp(at);
             let mut lamps = Vec::with_capacity(s.lamps.len());
@@ -270,18 +299,14 @@ impl Project {
                 if pixel as usize >= len {
                     continue;
                 }
-                let inside = object
-                    .lamps
-                    .get(lamp as usize)
-                    .is_some_and(|l| bounds.is_some_and(|b| b.contains(l.pos)));
-                lamps.push((lamp, pixel, inside));
+                lamps.push((lamp, pixel));
                 if let Some(slot) = w.lit.get_mut(first + lamp as usize) {
-                    *slot = inside.then_some((port as u32, pixel));
+                    *slot = Some((port as u32, pixel));
                 }
             }
             w.spans.push(Some(SpanWiring {
                 port,
-                object_lamps: object.lamps.len(),
+                first_lamp: first,
                 lamps,
             }));
         }

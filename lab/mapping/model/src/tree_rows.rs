@@ -55,6 +55,7 @@ impl Project {
                         self.output_pixels(id)
                     )
                 }
+                Some(NodeKind::Source(s)) => format!("{} → {}", s.kind_words(), s.writes),
                 Some(NodeKind::Other(o)) => o.kind_words(),
                 None => String::new(),
             },

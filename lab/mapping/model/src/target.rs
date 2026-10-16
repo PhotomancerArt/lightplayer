@@ -180,7 +180,7 @@ impl Project {
                         key: p.key.clone(),
                     })
                     .collect(),
-                Some(NodeKind::Other(_)) | None => Vec::new(),
+                Some(NodeKind::Source(_) | NodeKind::Other(_)) | None => Vec::new(),
             },
             Target::Component(id) => {
                 let Some(c) = self.component(id) else {

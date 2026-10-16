@@ -17,8 +17,14 @@
 //! What a lamp's colour bytes look like (its colour order) belongs to its
 //! fixture, as in the product (fit-check §5.3, Q-A); a port card shows
 //! which orders land on it.
+//!
+//! An output reads one control channel (the product's
+//! `bindings.input.source`): each fixture writing it arrives as its own
+//! control product, and the patch places them on the wire (`board.rs`).
 
-#[derive(Debug, Clone, PartialEq, Default)]
+use crate::channel::Channel;
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Output {
     /// In key order: what's on the card, top to bottom, and the order
     /// they make the flat wire in.
@@ -26,6 +32,19 @@ pub struct Output {
     /// The product's output name ("Box 2", "1"): how patch documents name
     /// it. Rules here name the node; only saving writes this.
     pub label: Option<String>,
+    /// The control channel its fixtures' lamps arrive on.
+    pub reads: Channel,
+}
+
+impl Default for Output {
+    /// No ports, reading `control.out`.
+    fn default() -> Self {
+        Self {
+            ports: Vec::new(),
+            label: None,
+            reads: Channel::control_out(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

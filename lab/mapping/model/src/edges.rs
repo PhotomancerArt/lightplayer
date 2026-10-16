@@ -1,6 +1,19 @@
-//! Edges: the patch, drawn. An edge from a fixture to an output IS the
-//! patch (D42) — there is no separate output panel. Derived from the
-//! effective patch, never stored.
+//! Edges: the wiring between nodes, drawn. Every edge is a channel
+//! binding (`bindings.rs`) and carries its channel's name (D53, D55):
+//!
+//! - **render source → fixture**, over a visual channel (`visual.out`):
+//!   one edge, node to node, from the source's card to the fixture's
+//!   frame;
+//! - **fixture → output**, over a control channel (`control.out`): the
+//!   patch (D42) — there is no separate output panel — drawn per object
+//!   as below. A fixture bound to an output with nothing placed on it yet
+//!   (an empty fixture) gets one plain node-to-node edge, so the binding
+//!   still shows.
+//!
+//! The channel's name is always shown, small, once per pair of nodes (on
+//! the pair's first edge) — not on every per-object edge, which would
+//! repeat it. Derived from the nodes and the effective patch, never
+//! stored.
 //!
 //! **One edge per object** (per span, when an object runs on into the next
 //! port), always (D46). It leaves from the object's FIRST lamp — where its
@@ -30,6 +43,7 @@
 
 use std::ops::Range;
 
+use crate::bindings::Binding;
 use crate::camera::Camera;
 use crate::editor::Editor;
 use crate::geom::{Rect, Vec2, distance_to_segment};
@@ -40,10 +54,19 @@ use crate::target::Target;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
-    /// A fixture (bundled) or an object's target (per span).
+    /// A fixture (bundled, or a binding), an object's target (per span),
+    /// or a render source (a binding).
     pub from: Target,
-    /// An output (bundled) or a port (per span).
+    /// An output (bundled), a port (per span), or a fixture or output (a
+    /// binding).
     pub to: Target,
+    /// The channel it carries: `visual.out`, `control.out`.
+    pub channel: String,
+    /// It shows the channel's name: the first edge of each pair of nodes.
+    pub channel_shown: bool,
+    /// Node to node, with no patch spans: a render source feeding a
+    /// fixture, or a fixture bound to an output with nothing placed yet.
+    pub binding: bool,
     /// The pixels it lands on, on its first port.
     pub pixels: Range<u32>,
     pub label: String,
@@ -141,13 +164,38 @@ impl Edge {
 }
 
 impl Editor {
-    /// The patch, drawn: every edge, with the hovered one marked.
+    /// Every edge between nodes — each binding of a render source to a
+    /// fixture, then the patch — with the hovered one marked.
     pub fn edges(&self) -> Vec<Edge> {
-        let mut edges = self.patch_edges();
+        let bindings = self.project.bindings();
+        let mut edges: Vec<Edge> = bindings
+            .iter()
+            .filter(|b| self.project.fixture(&b.from).is_none())
+            .map(|b| self.binding_edge(b))
+            .collect();
+        edges.extend(self.patch_edges(&bindings));
+        let mut pairs: Vec<(NodeId, NodeId)> = Vec::new();
+        for e in &mut edges {
+            let pair = (self.node_of(&e.from), self.node_of(&e.to));
+            if !pairs.contains(&pair) {
+                e.channel_shown = true;
+                pairs.push(pair);
+            }
+        }
         if let Some(i) = self.hovered_edge_of(&edges) {
             edges[i].hovered = true;
         }
         edges
+    }
+
+    /// The node an edge's end belongs to.
+    fn node_of(&self, t: &Target) -> NodeId {
+        let p = &self.project;
+        match t {
+            Target::Node(id) => id.clone(),
+            Target::Port { output, .. } | Target::Pixel { output, .. } => output.clone(),
+            _ => p.fixture_of_target(t).unwrap_or_else(|| NodeId::new("")),
+        }
     }
 
     /// The edge under the pointer, if hovering means anything right now and
@@ -174,7 +222,9 @@ impl Editor {
             .map(|(i, _)| i)
     }
 
-    fn patch_edges(&self) -> Vec<Edge> {
+    /// The patch, drawn: per object, per span, bundled where crowded — and
+    /// a plain edge for a fixture bound to an output with nothing on it.
+    fn patch_edges(&self, bindings: &[Binding]) -> Vec<Edge> {
         let p = &self.project;
         let patch = p.effective_patch();
         // The spans of each (fixture, output) pair, in the order the pair's
@@ -190,14 +240,72 @@ impl Editor {
             }
         }
         let mut out: Vec<Edge> = Vec::new();
-        for (fixture, output, spans) in pairs {
-            if self.bundles(&fixture, &spans) {
-                out.push(self.bundled_edge(&fixture, &output, &spans));
+        for (fixture, output, spans) in &pairs {
+            if self.bundles(fixture, spans) {
+                out.push(self.bundled_edge(fixture, output, spans));
             } else {
                 out.extend(spans.iter().map(|s| self.span_edge(s)));
             }
         }
+        for b in bindings {
+            let placed = pairs.iter().any(|(f, o, _)| *f == b.from && *o == b.to);
+            if p.fixture(&b.from).is_some() && !placed {
+                out.push(self.binding_edge(b));
+            }
+        }
         out
+    }
+
+    /// A binding with no patch spans, node to node: from the right of a
+    /// render source's card, or a fixture's frame, to the left of a
+    /// fixture's frame or of an output's first port.
+    fn binding_edge(&self, b: &Binding) -> Edge {
+        let p = &self.project;
+        let from = Target::Node(b.from.clone());
+        let to = Target::Node(b.to.clone());
+        let to_at = match p.output(&b.to).and_then(|o| o.ports.first()) {
+            Some(port) => p.pixel_left(&b.to, &port.key, 0),
+            None => p
+                .node_rect(&b.to)
+                .map(|r| Vec2::new(r.min.x, r.min.y + (r.height() / 2.0).min(30.0)))
+                .unwrap_or_default(),
+        };
+        let from_at = match p.node_rect(&b.from) {
+            Some(r) if p.node(&b.from).is_some_and(|n| n.is_card()) => Vec2::new(
+                r.max.x,
+                r.min.y + crate::layout::CARD_HEADER + crate::layout::CARD_ROW / 2.0,
+            ),
+            Some(r) => nearest_on_border(r, to_at),
+            None => Vec2::default(),
+        };
+        let carries = format!(
+            "{} → {} · {}",
+            p.node_name(&b.from),
+            p.node_name(&b.to),
+            b.channel
+        );
+        Edge {
+            label: b.channel.to_string(),
+            channel: b.channel.to_string(),
+            channel_shown: false,
+            binding: true,
+            carries,
+            hovered: false,
+            from_at,
+            to_at,
+            leave: toward(from_at, to_at),
+            selected: self.selection.iter().any(|s| {
+                [&from, &to]
+                    .iter()
+                    .any(|e| p.is_ancestor_or_self(s, e) || p.is_ancestor_or_self(e, s))
+            }),
+            labelled: false,
+            from,
+            to,
+            pixels: 0..0,
+            active: true,
+            bundled: false,
+        }
     }
 
     /// Whether a (fixture, output) pair draws as one edge: too many objects,
@@ -232,6 +340,9 @@ impl Editor {
             .unwrap_or_default();
         let to_at = p.pixel_left(&s.output, &s.port, s.start_pixel);
         Edge {
+            channel: channel_of(p, &s.output),
+            channel_shown: false,
+            binding: false,
             label: format!(
                 "lamps {}–{} → {} @{}",
                 s.lamps.start,
@@ -280,6 +391,9 @@ impl Editor {
         };
         let span_pixels = |s: &Span| s.pixels();
         Edge {
+            channel: channel_of(p, output),
+            channel_shown: false,
+            binding: false,
             label: format!("{lamps} lamp{}", if lamps == 1 { "" } else { "s" }),
             carries: bundle_carries(p, fixture, spans),
             hovered: false,
@@ -355,7 +469,7 @@ impl Project {
 
     /// Where an edge arrives: the left side of the outline around the run
     /// that starts at this pixel — on the run, never on top of a square.
-    fn pixel_left(&self, output: &NodeId, key: &str, index: u32) -> Vec2 {
+    pub(crate) fn pixel_left(&self, output: &NodeId, key: &str, index: u32) -> Vec2 {
         if let Some(grid) = self.pixel_grid(output, key)
             && let Some(r) = grid.rect(index)
         {
@@ -386,6 +500,14 @@ fn nearest_on_border(r: Rect, p: Vec2) -> Vec2 {
         .into_iter()
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map_or(p, |s| s.1)
+}
+
+/// The control channel a patch edge carries: the one its output reads,
+/// which the fixture writes by its rule (`bindings.rs`).
+fn channel_of(p: &Project, output: &NodeId) -> String {
+    p.output(output)
+        .map(|o| o.reads.to_string())
+        .unwrap_or_default()
 }
 
 /// The unit vector from `a` toward `b` (rightward if they coincide).

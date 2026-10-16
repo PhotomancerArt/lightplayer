@@ -3,11 +3,14 @@
 //!
 //! What is read (fit-check §6): `project.json` → the root `module.json` →
 //! every node file it refers to, recursively. For a fixture, its mapping
-//! (`*.map2d.json`), its patch (`*.patch.json`, if any), the channel it
-//! writes and its colour order; for an output, its ports, its name and the
-//! channel it reads; for a module, its nodes and exports. Every other node
-//! (a shader, a clock, a button) opens as a plain card, and every file
-//! keeps its JSON — fields the lab knows nothing about included.
+//! (`*.map2d.json`), its patch (`*.patch.json`, if any), the channels it
+//! reads and writes and its colour order; for an output, its ports, its
+//! name and the channel it reads; for a module, its nodes and exports; for
+//! a shader (or another node writing a `visual.*` channel), the channel
+//! it writes and its GLSL, which the lab shows and never runs — it gets a
+//! stand-in pattern picked from its GLSL. Every other node (a clock, a
+//! button) opens as a plain card, and every file keeps its JSON — fields
+//! the lab knows nothing about included.
 //!
 //! Ids:
 //!
@@ -27,12 +30,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_mapping_model::{
-    ColorOrder, Component, ComponentId, ComponentKind, Fixture, Node, NodeId, NodeKind, ObjectId,
-    OtherNode, Output, PatchRule, Port, Project, Vec2,
+    Channel, ColorOrder, Component, ComponentId, ComponentKind, Fixture, Node, NodeId, NodeKind,
+    ObjectId, OtherNode, Output, PatchRule, Pattern, Port, Project, RenderSource, Vec2,
 };
 use serde_json::Value;
 
-use crate::channels::{exports, fixture_writes, output_reads};
+use crate::channels::{exports, fixture_reads, fixture_writes, output_reads, visual_writes};
 use crate::error::FilesError;
 use crate::map2d_doc::Map2dDoc;
 use crate::patch_doc::{PatchDoc, PatchSource, valid_object_id};
@@ -214,7 +217,21 @@ impl Reader<'_> {
                     NodeKind::Fixture(fixture)
                 }
                 "Output" => NodeKind::Output(output_of(&node_value)),
-                other => NodeKind::Other(OtherNode::new(other)),
+                other => match visual_writes(&node_value, other) {
+                    Some(writes) => {
+                        let glsl = node_value
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .and_then(|f| self.src.read(&join(&node_path, f)));
+                        NodeKind::Source(RenderSource {
+                            kind: other.to_string(),
+                            pattern: Pattern::pick(glsl.as_deref().unwrap_or(name)),
+                            glsl,
+                            writes: Channel::new(writes),
+                        })
+                    }
+                    None => NodeKind::Other(OtherNode::new(other)),
+                },
             };
             self.files.nodes.insert(id.clone(), file);
             out.push(Node {
@@ -320,6 +337,7 @@ impl Reader<'_> {
             .and_then(Value::as_str)
             .and_then(ColorOrder::from_key)
             .unwrap_or_default();
+        fixture.reads = Channel::new(fixture_reads(value));
         file.map = Some(MapFile {
             path: map_path,
             doc,
@@ -389,6 +407,7 @@ fn output_of(value: &Value) -> Output {
             .get("name")
             .and_then(Value::as_str)
             .map(str::to_string),
+        reads: Channel::new(output_reads(value)),
     }
 }
 

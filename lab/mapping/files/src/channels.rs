@@ -1,4 +1,6 @@
-//! Bus channels: how a fixture reaches an output in the product.
+//! Bus channels: how nodes reach each other in the product — a shader's
+//! picture reaches a fixture over a visual channel, a fixture's lamps an
+//! output over a control channel.
 //!
 //! A fixture writes its lamps to a bus channel (`bindings.output.target`,
 //! `bus:control.out` when it says nothing), and an output reads one
@@ -16,14 +18,40 @@
 
 use serde_json::Value;
 
-/// The channel a binding names: `bus:control.out` → `control.out`.
-pub fn channel_of(binding: Option<&Value>, key: &str) -> String {
+/// The channel a binding names (`bus:control.out` → `control.out`), or
+/// `default` when it names none.
+pub fn channel_of(binding: Option<&Value>, key: &str, default: &str) -> String {
     binding
         .and_then(|b| b.get(key))
         .and_then(Value::as_str)
         .and_then(|s| s.strip_prefix("bus:"))
-        .unwrap_or("control.out")
+        .unwrap_or(default)
         .to_string()
+}
+
+/// The visual channel a fixture reads its render product from.
+pub fn fixture_reads(fixture: &Value) -> String {
+    channel_of(
+        fixture.get("bindings").and_then(|b| b.get("input")),
+        "source",
+        "visual.out",
+    )
+}
+
+/// The visual channel a node writes, if it makes a picture: a shader
+/// always (`visual.out` when it says nothing), any other node when one of
+/// its bindings targets a `visual.*` channel.
+pub fn visual_writes(node: &Value, kind: &str) -> Option<String> {
+    let bindings = node.get("bindings").and_then(Value::as_object);
+    let named = bindings.into_iter().flatten().find_map(|(_, b)| {
+        let target = b.get("target")?.as_str()?.strip_prefix("bus:")?;
+        target.starts_with("visual.").then(|| target.to_string())
+    });
+    match (named, kind) {
+        (Some(c), _) => Some(c),
+        (None, "Shader") => Some("visual.out".to_string()),
+        (None, _) => None,
+    }
 }
 
 /// The channel a fixture writes.
@@ -31,6 +59,7 @@ pub fn fixture_writes(fixture: &Value) -> String {
     channel_of(
         fixture.get("bindings").and_then(|b| b.get("output")),
         "target",
+        "control.out",
     )
 }
 
@@ -39,6 +68,7 @@ pub fn output_reads(output: &Value) -> String {
     channel_of(
         output.get("bindings").and_then(|b| b.get("input")),
         "source",
+        "control.out",
     )
 }
 

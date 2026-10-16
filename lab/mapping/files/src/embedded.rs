@@ -9,7 +9,8 @@
 //!   `lab-mapping-radiance-gen`, placeholder counts): 55 panel shapes × 5,
 //!   22,000 lamps, 10 outputs × 32 ports, patched by hand.
 //!
-//! Only the JSON the lab reads is baked in; shaders are not.
+//! Only what the lab reads is baked in: the JSON, and each shader's GLSL,
+//! which the inspector shows (the lab never runs it).
 
 use crate::source::MemFiles;
 
@@ -37,7 +38,7 @@ pub const CHOKER: Embedded = Embedded {
     title: "PLAYFUL choker",
     files: files!("../../../../catalog/projects/playful-choker":
         "project.json", "module.json", "clock.json", "fixture.json", "output.json",
-        "power.json", "shader.json", "playful.map2d.json"),
+        "power.json", "shader.json", "shader.glsl", "playful.map2d.json"),
 };
 
 pub const ZOOK_DOME: Embedded = Embedded {
@@ -45,14 +46,14 @@ pub const ZOOK_DOME: Embedded = Embedded {
     title: "Zook dome",
     files: files!("../../../../catalog/projects/zook-dome":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
-        "output.json", "shader.json"),
+        "output.json", "shader.json", "shader.glsl"),
 };
 
 pub const RADIANCE_DOME: Embedded = Embedded {
     key: "radiance-dome",
     title: "Radiance dome",
     files: files!("../../projects/radiance-dome":
-        "project.json", "module.json", "clock.json", "shader.json", "dome.json",
+        "project.json", "module.json", "clock.json", "shader.json", "shader.glsl", "dome.json",
         "dome.map2d.json", "dome.patch.json", "out_1.json", "out_2.json", "out_3.json",
         "out_4.json", "out_5.json", "out_6.json", "out_7.json", "out_8.json", "out_9.json",
         "out_10.json"),

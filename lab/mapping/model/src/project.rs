@@ -16,6 +16,7 @@
 //! a door that forgets what was worked out about them (`derived.rs`): a
 //! kept layout, objects or patch is never stale.
 
+use crate::channel::Channel;
 use crate::component::{Component, ComponentId, ComponentKind};
 use crate::derived::Derived;
 use crate::fixture::Fixture;
@@ -24,6 +25,8 @@ use crate::node::{self, Node, NodeId, NodeKind};
 use crate::object::{Object, ObjectId, ObjectShape};
 use crate::output::Output;
 use crate::patch::PatchRule;
+use crate::pattern::Pattern;
+use crate::render_source::RenderSource;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Project {
@@ -48,6 +51,7 @@ struct Counters {
     module: u32,
     fixture: u32,
     output: u32,
+    source: u32,
     node: u32,
 }
 
@@ -65,6 +69,7 @@ impl Project {
                 module: 1,
                 fixture: 1,
                 output: 1,
+                source: 1,
                 node: 1,
             },
             derived: Derived::default(),
@@ -107,6 +112,7 @@ impl Project {
                 NodeKind::Module { .. } => ("module", &mut self.counters.module),
                 NodeKind::Fixture(_) => ("fixture", &mut self.counters.fixture),
                 NodeKind::Output(_) => ("output", &mut self.counters.output),
+                NodeKind::Source(_) => ("source", &mut self.counters.source),
                 NodeKind::Other(_) => ("node", &mut self.counters.node),
             };
             let id = NodeId::new(format!("{word}{counter}"));
@@ -149,13 +155,43 @@ impl Project {
         self.add_node(parent, name, NodeKind::Fixture(Fixture::new(size)))
     }
 
+    /// An output reads `control.out`, unless another output beside it
+    /// already does: then a channel of its own, from its name
+    /// (`control.scarf_out`) — the product's idiom, so each fixture's auto
+    /// rule is a channel only its output reads.
     pub fn add_output(
         &mut self,
         parent: Option<&NodeId>,
         name: &str,
         ports: &[(&str, u32)],
     ) -> Option<NodeId> {
-        self.add_node(parent, name, NodeKind::Output(Output::new(ports)))
+        let level = match parent {
+            None => self.nodes(),
+            Some(p) => self.node(p)?.children(),
+        };
+        let taken = level.iter().any(|n| {
+            n.output()
+                .is_some_and(|o| o.reads == Channel::control_out())
+        });
+        let mut output = Output::new(ports);
+        if taken {
+            output.reads = Channel::control_for(name);
+        }
+        self.add_node(parent, name, NodeKind::Output(output))
+    }
+
+    /// A shader showing `pattern`, writing `visual.out` where it is.
+    pub fn add_shader(
+        &mut self,
+        parent: Option<&NodeId>,
+        name: &str,
+        pattern: Pattern,
+    ) -> Option<NodeId> {
+        self.add_node(
+            parent,
+            name,
+            NodeKind::Source(RenderSource::shader(pattern)),
+        )
     }
 
     /// Mint and append a top-level component to a fixture; returns its id.
@@ -360,10 +396,12 @@ impl Project {
     }
 
     /// The lab's starting project: Yona's desk. A tail rig (the tail that
-    /// runs out and back, and its own output), a two-ring circle display
-    /// and a strip sharing the main output, and an empty fixture to draw a
-    /// scarf into, already patched to its own output — so drawing in it
-    /// lights pixels at once.
+    /// runs out and back, its own shader and its own output), a two-ring
+    /// circle display and a strip sharing the main output, and an empty
+    /// fixture to draw a scarf into, already patched to its own output — so
+    /// drawing in it lights pixels at once. A rainbow shader at the root
+    /// feeds every fixture there; the tail reads its own module's shader,
+    /// the nearer writer of `visual.out`.
     ///
     /// Every fixture is square, as a new one is, sized to hold its drawing
     /// with room around it. The tail is two straight paths, out and back,
@@ -372,7 +410,9 @@ impl Project {
         let mut p = Project::new("desk");
         let side = |s: f64| Vec2::new(s, s);
 
+        p.add_shader(None, "rainbow", Pattern::Rainbow);
         let rig = p.add_module(None, "tail rig");
+        p.add_shader(rig.as_ref(), "glow", Pattern::Gradient);
         let tail = p.add_fixture_sized(rig.as_ref(), "tail", side(82.0));
         let tail_out = p.add_output(rig.as_ref(), "tail out", &[("GPIO 10", 60)]);
         let out = p.mint(ComponentKind::path(

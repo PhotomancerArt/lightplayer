@@ -1,5 +1,6 @@
-//! A node the lab doesn't edit: a shader, a clock, a power button, a
-//! playlist… (fit-check §3, "other node kinds").
+//! A node the lab doesn't simulate: a clock, a power button, a playlist…
+//! (fit-check §3, "other node kinds"). Shaders are render sources
+//! (`render_source.rs`).
 //!
 //! A real project has them, and the canvas is the whole graph (D36), so
 //! they are on it — a plain card with its kind, which you can select,
@@ -9,7 +10,7 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OtherNode {
-    /// The product's kind, as written: `Shader`, `Clock`, `PowerButton`.
+    /// The product's kind, as written: `Clock`, `PowerButton`.
     pub kind: String,
 }
 
@@ -20,13 +21,18 @@ impl OtherNode {
 
     /// The kind in words for a card: `PowerButton` → `power button`.
     pub fn kind_words(&self) -> String {
-        let mut out = String::new();
-        for (i, c) in self.kind.chars().enumerate() {
-            if c.is_uppercase() && i > 0 {
-                out.push(' ');
-            }
-            out.extend(c.to_lowercase());
-        }
-        out
+        kind_words(&self.kind)
     }
+}
+
+/// A product kind in words: `PowerButton` → `power button`.
+pub fn kind_words(kind: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in kind.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push(' ');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
 }
