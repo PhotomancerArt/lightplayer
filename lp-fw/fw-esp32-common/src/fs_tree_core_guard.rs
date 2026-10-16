@@ -58,14 +58,26 @@ pub fn core_store_verdict(
     mut read: impl FnMut(u32, &mut [u8]) -> bool,
 ) -> CoreStoreVerdict {
     let begin = MANIFEST_BLOB_BEGIN.as_bytes();
-    let Some(json_at) = find_in_image(len, begin, &mut read).map(|at| at + begin.len() as u32)
-    else {
-        return CoreStoreVerdict::NoManifest;
-    };
-    let room = (len - json_at).min(MANIFEST_MAX as u32) as usize;
-    let mut json = alloc::vec![0u8; room];
-    if !read(json_at, &mut json) {
-        return CoreStoreVerdict::NoManifest;
+    // This very code holds the markers as string constants, so a core
+    // carrying it has a begin marker with no JSON after it: the blob is the
+    // first begin marker followed by a JSON object.
+    let mut from = 0u32;
+    let mut json = alloc::vec::Vec::new();
+    loop {
+        let Some(json_at) =
+            find_in_image(from, len, begin, &mut read).map(|at| at + begin.len() as u32)
+        else {
+            return CoreStoreVerdict::NoManifest;
+        };
+        let room = (len - json_at).min(MANIFEST_MAX as u32) as usize;
+        json.resize(room, 0);
+        if !read(json_at, &mut json) {
+            return CoreStoreVerdict::NoManifest;
+        }
+        if json.first() == Some(&b'{') {
+            break;
+        }
+        from = json_at;
     }
 
     let Some(end) = find(&json, MANIFEST_BLOB_END.as_bytes()) else {
@@ -97,16 +109,18 @@ pub fn core_store_verdict(
     }
 }
 
-/// The offset of `needle`'s first occurrence in the image, reading `STEP`
-/// bytes at a time with an overlap of `needle.len() - 1`.
+/// The offset of `needle`'s first occurrence in the image at or after
+/// `from`, reading `STEP` bytes at a time with an overlap of
+/// `needle.len() - 1`.
 fn find_in_image(
+    from: u32,
     len: u32,
     needle: &[u8],
     read: &mut impl FnMut(u32, &mut [u8]) -> bool,
 ) -> Option<u32> {
     let mut buf = alloc::vec![0u8; STEP];
     let keep = needle.len() - 1;
-    let mut at = 0u32;
+    let mut at = from;
     while at < len {
         let n = ((len - at) as usize).min(STEP);
         if !read(at, &mut buf[..n]) {
@@ -169,6 +183,19 @@ mod tests {
     fn a_name_that_only_contains_fs_tree_is_not_it() {
         let image = core(r#"{"features":["fs.tree-v2"],"note":"fs.tree"}"#, 100);
         assert_eq!(verdict(&image), CoreStoreVerdict::WouldFormat);
+    }
+
+    /// The guard's own markers (string constants in the same core) come
+    /// first in the image, with no JSON between them: the blob after them
+    /// is the one read.
+    #[test]
+    fn the_guards_own_marker_constants_are_skipped() {
+        let mut image = Vec::new();
+        image.extend_from_slice(&[0x11; 100]);
+        image.extend_from_slice(MANIFEST_BLOB_BEGIN.as_bytes());
+        image.extend_from_slice(MANIFEST_BLOB_END.as_bytes());
+        image.extend_from_slice(&core(r#"{"features":["server","fs.tree"]}"#, 700));
+        assert_eq!(verdict(&image), CoreStoreVerdict::KeepsTheStore);
     }
 
     #[test]

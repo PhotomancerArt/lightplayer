@@ -498,12 +498,26 @@ pub struct ManifestPlatform {
 /// Find the manifest-core JSON payload in raw artifact bytes (ELF, espflash
 /// merged image, or wasm module). Returns the JSON slice, or `None` when no
 /// well-formed blob is present.
+///
+/// The markers can appear more than once: code that SCANS for a blob (the
+/// `fs-tree` core's update guard, `fw_esp32_common::fs_tree_core_guard`)
+/// holds them as string constants, so an image carrying that code has a
+/// begin marker followed by the end marker with no JSON between. The blob
+/// is the first begin marker whose payload is a JSON object.
 pub fn find_manifest_core(artifact: &[u8]) -> Option<&[u8]> {
     let begin = MANIFEST_BLOB_BEGIN.as_bytes();
     let end = MANIFEST_BLOB_END.as_bytes();
-    let start = find(artifact, begin)? + begin.len();
-    let len = find(&artifact[start..], end)?;
-    Some(&artifact[start..start + len])
+    let mut from = 0;
+    while let Some(at) = find(&artifact[from..], begin) {
+        let start = from + at + begin.len();
+        let len = find(&artifact[start..], end)?;
+        let payload = &artifact[start..start + len];
+        if payload.first() == Some(&b'{') {
+            return Some(payload);
+        }
+        from = start;
+    }
+    None
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -622,6 +636,11 @@ mod tests {
         assert_eq!(found, json.as_bytes());
 
         assert_eq!(find_manifest_core(&[0u8; 64]), None);
+        // A scanner's own marker constants before the blob are skipped.
+        let mut scanned = MANIFEST_BLOB_BEGIN.as_bytes().to_vec();
+        scanned.extend_from_slice(MANIFEST_BLOB_END.as_bytes());
+        scanned.extend_from_slice(&artifact);
+        assert_eq!(find_manifest_core(&scanned), Some(json.as_bytes()));
         // Truncated artifact: BEGIN present, END missing.
         let cut = &artifact[..artifact.len() - 300];
         assert_eq!(find_manifest_core(cut), None);

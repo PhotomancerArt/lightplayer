@@ -544,7 +544,7 @@ impl Work {
         };
         let tree = dir.join("tree");
         let mut files = fixture_tree(&root, &tree, false);
-        let c40 = if start == Cutover::FieldedSmall {
+        let c40 = if matches!(start, Cutover::FieldedSmall | Cutover::FieldedOverFull) {
             Vec::new()
         } else {
             c40_files()
