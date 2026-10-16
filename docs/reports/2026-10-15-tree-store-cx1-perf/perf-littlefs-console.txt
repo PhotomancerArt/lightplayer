@@ -1,0 +1,687 @@
+    8.152 [first boot (format) +3.240] [host] state Booting
+    8.152 [first boot (format) +3.240] [link] readiness: engine start (budget 5s)
+    8.152 [first boot (format) +3.240] [link] readiness: hello request sent
+    8.152 [first boot (format) +3.364] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+    8.152 [first boot (format) +3.364] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+    8.152 [first boot (format) +3.387] [INIT] Initializing board...
+    8.152 [first boot (format) +3.387] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+    8.152 [first boot (format) +3.400] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+    8.152 [first boot (format) +3.400] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+    8.152 [first boot (format) +3.400] [INIT] Runtime started
+    8.152 [first boot (format) +3.400] [INIT] fw-esp32 starting...
+    8.152 [first boot (format) +3.400] [INIT] io thread: stack 3072 B, priority 1
+    8.152 [first boot (format) +3.400] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+    8.152 [first boot (format) +3.400] [WARN] fw_esp32_common::lp_fs: [FS] Mount failed (filesystem corrupt), formatting partition...
+    8.152 [first boot (format) +3.411] [INFO] fw_esp32_common::lp_fs: [FS] Formatted and mounted fresh filesystem
+    8.152 [first boot (format) +3.411] [INIT] Flash filesystem mounted
+    8.152 [first boot (format) +3.411] [perf] fs mount 8864 us
+    8.152 [first boot (format) +3.411] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+    8.152 [first boot (format) +3.411] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+    8.152 [first boot (format) +3.422] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+    8.152 [first boot (format) +3.470] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+    8.152 [first boot (format) +3.470] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+    8.152 [first boot (format) +3.495] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+    8.152 [first boot (format) +3.495] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+    8.152 [first boot (format) +3.495] [INIT] net thread: stack 8192 B, priority 1
+    8.152 [first boot (format) +3.495] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+    8.152 [first boot (format) +3.495] [INIT] Initializing RMT peripheral at 80MHz...
+    8.152 [first boot (format) +3.495] [INIT] RMT peripheral initialized
+    8.152 [first boot (format) +3.495] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+    8.152 [first boot (format) +3.495] [INIT] Creating output provider...
+    8.152 [first boot (format) +3.495] [INIT] Output provider created
+    8.152 [first boot (format) +3.495] [INIT] Creating LpServer instance...
+    8.152 [first boot (format) +3.508] [INIT] LpServer created
+    8.152 [first boot (format) +3.508] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+    8.152 [first boot (format) +3.508] [WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory
+    8.152 [first boot (format) +3.508] [INIT] Creating time provider...
+    8.152 [first boot (format) +3.508] [INIT] Time provider created
+    8.152 [first boot (format) +3.508] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+    8.152 [first boot (format) +3.508] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+    8.152 [first boot (format) +3.520] [INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 1)
+    8.152 [first boot (format) +3.521] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Formatted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+    8.152 [first boot (format) +3.521] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Formatted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   13.044 [mount, empty #0 +3.216] [host] state Booting
+   13.044 [mount, empty #0 +3.216] [link] readiness: engine start (budget 5s)
+   13.044 [mount, empty #0 +3.216] [link] readiness: hello request sent
+   13.044 [mount, empty #0 +3.343] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+   13.044 [mount, empty #0 +3.343] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+   13.044 [mount, empty #0 +3.356] [INIT] Initializing board...
+   13.044 [mount, empty #0 +3.368] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+   13.044 [mount, empty #0 +3.368] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+   13.044 [mount, empty #0 +3.368] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+   13.044 [mount, empty #0 +3.368] [INIT] Runtime started
+   13.044 [mount, empty #0 +3.368] [INIT] fw-esp32 starting...
+   13.044 [mount, empty #0 +3.368] [INIT] io thread: stack 3072 B, priority 1
+   13.044 [mount, empty #0 +3.381] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+   13.044 [mount, empty #0 +3.381] [INIT] Flash filesystem mounted
+   13.044 [mount, empty #0 +3.381] [perf] fs mount 739 us
+   13.044 [mount, empty #0 +3.381] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+   13.044 [mount, empty #0 +3.381] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+   13.044 [mount, empty #0 +3.381] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+   13.044 [mount, empty #0 +3.444] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+   13.044 [mount, empty #0 +3.444] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+   13.044 [mount, empty #0 +3.457] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+   13.044 [mount, empty #0 +3.457] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+   13.044 [mount, empty #0 +3.470] [INIT] net thread: stack 8192 B, priority 1
+   13.044 [mount, empty #0 +3.470] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+   13.044 [mount, empty #0 +3.470] [INIT] Initializing RMT peripheral at 80MHz...
+   13.044 [mount, empty #0 +3.470] [INIT] RMT peripheral initialized
+   13.044 [mount, empty #0 +3.470] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+   13.044 [mount, empty #0 +3.470] [INIT] Creating output provider...
+   13.044 [mount, empty #0 +3.470] [INIT] Output provider created
+   13.044 [mount, empty #0 +3.470] [INIT] Creating LpServer instance...
+   13.044 [mount, empty #0 +3.470] [INIT] LpServer created
+   13.044 [mount, empty #0 +3.470] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+   13.044 [mount, empty #0 +3.482] [WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory
+   13.044 [mount, empty #0 +3.482] [INIT] Creating time provider...
+   13.044 [mount, empty #0 +3.482] [INIT] Time provider created
+   13.044 [mount, empty #0 +3.482] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+   13.044 [mount, empty #0 +3.482] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+   13.044 [mount, empty #0 +3.482] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   13.044 [mount, empty #0 +3.482] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   18.493 [mount, empty #1 +3.149] [host] state Booting
+   18.493 [mount, empty #1 +3.149] [link] readiness: engine start (budget 5s)
+   18.493 [mount, empty #1 +3.149] [link] readiness: hello request sent
+   18.493 [mount, empty #1 +3.272] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+   18.493 [mount, empty #1 +3.272] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+   18.493 [mount, empty #1 +3.285] [INIT] Initializing board...
+   18.493 [mount, empty #1 +3.298] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+   18.493 [mount, empty #1 +3.298] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+   18.493 [mount, empty #1 +3.298] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+   18.493 [mount, empty #1 +3.298] [INIT] Runtime started
+   18.493 [mount, empty #1 +3.298] [INIT] fw-esp32 starting...
+   18.493 [mount, empty #1 +3.298] [INIT] io thread: stack 3072 B, priority 1
+   18.493 [mount, empty #1 +3.311] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+   18.493 [mount, empty #1 +3.311] [INIT] Flash filesystem mounted
+   18.493 [mount, empty #1 +3.311] [perf] fs mount 750 us
+   18.493 [mount, empty #1 +3.311] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+   18.493 [mount, empty #1 +3.311] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+   18.493 [mount, empty #1 +3.311] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+   18.493 [mount, empty #1 +3.375] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+   18.493 [mount, empty #1 +3.375] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+   18.493 [mount, empty #1 +3.388] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+   18.493 [mount, empty #1 +3.388] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+   18.493 [mount, empty #1 +3.388] [INIT] net thread: stack 8192 B, priority 1
+   18.493 [mount, empty #1 +3.401] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+   18.493 [mount, empty #1 +3.401] [INIT] Initializing RMT peripheral at 80MHz...
+   18.493 [mount, empty #1 +3.401] [INIT] RMT peripheral initialized
+   18.493 [mount, empty #1 +3.401] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+   18.493 [mount, empty #1 +3.401] [INIT] Creating output provider...
+   18.493 [mount, empty #1 +3.401] [INIT] Output provider created
+   18.493 [mount, empty #1 +3.401] [INIT] Creating LpServer instance...
+   18.493 [mount, empty #1 +3.401] [INIT] LpServer created
+   18.493 [mount, empty #1 +3.401] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+   18.493 [mount, empty #1 +3.414] [WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory
+   18.493 [mount, empty #1 +3.414] [INIT] Creating time provider...
+   18.493 [mount, empty #1 +3.414] [INIT] Time provider created
+   18.493 [mount, empty #1 +3.414] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+   18.493 [mount, empty #1 +3.414] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+   18.493 [mount, empty #1 +3.415] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   18.493 [mount, empty #1 +3.415] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   24.154 [mount, empty #2 +3.271] [host] state Booting
+   24.154 [mount, empty #2 +3.271] [link] readiness: engine start (budget 5s)
+   24.154 [mount, empty #2 +3.271] [link] readiness: hello request sent
+   24.154 [mount, empty #2 +3.399] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+   24.154 [mount, empty #2 +3.399] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+   24.154 [mount, empty #2 +3.412] [INIT] Initializing board...
+   24.154 [mount, empty #2 +3.425] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+   24.154 [mount, empty #2 +3.425] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+   24.154 [mount, empty #2 +3.425] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+   24.154 [mount, empty #2 +3.425] [INIT] Runtime started
+   24.154 [mount, empty #2 +3.425] [INIT] fw-esp32 starting...
+   24.154 [mount, empty #2 +3.425] [INIT] io thread: stack 3072 B, priority 1
+   24.154 [mount, empty #2 +3.425] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+   24.154 [mount, empty #2 +3.425] [INIT] Flash filesystem mounted
+   24.154 [mount, empty #2 +3.425] [perf] fs mount 748 us
+   24.154 [mount, empty #2 +3.438] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+   24.154 [mount, empty #2 +3.438] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+   24.154 [mount, empty #2 +3.438] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+   24.154 [mount, empty #2 +3.485] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+   24.154 [mount, empty #2 +3.498] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+   24.154 [mount, empty #2 +3.512] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+   24.154 [mount, empty #2 +3.512] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+   24.154 [mount, empty #2 +3.512] [INIT] net thread: stack 8192 B, priority 1
+   24.154 [mount, empty #2 +3.512] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+   24.154 [mount, empty #2 +3.524] [INIT] Initializing RMT peripheral at 80MHz...
+   24.154 [mount, empty #2 +3.524] [INIT] RMT peripheral initialized
+   24.154 [mount, empty #2 +3.524] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+   24.154 [mount, empty #2 +3.524] [INIT] Creating output provider...
+   24.154 [mount, empty #2 +3.524] [INIT] Output provider created
+   24.154 [mount, empty #2 +3.524] [INIT] Creating LpServer instance...
+   24.154 [mount, empty #2 +3.524] [INIT] LpServer created
+   24.154 [mount, empty #2 +3.524] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+   24.154 [mount, empty #2 +3.524] [WARN] fw_esp32_common::boot: Boot: failed to list /projects: Filesystem error: list_dir /projects: no such file or directory
+   24.154 [mount, empty #2 +3.524] [INIT] Creating time provider...
+   24.154 [mount, empty #2 +3.524] [INIT] Time provider created
+   24.154 [mount, empty #2 +3.537] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+   24.154 [mount, empty #2 +3.537] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+   24.154 [mount, empty #2 +3.537] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   24.154 [mount, empty #2 +3.537] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   24.168 [host] state Booting
+   24.168 [link] readiness: engine start (budget 5s)
+   24.168 [link] readiness: hello request sent
+   24.179 [INFO] fw_esp32_common::serial::packed_link: packed link: replies are JSON again
+   24.179 [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link reset (); now session 1
+   24.179 [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 1)
+   24.191 [INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 2)
+   24.191 [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   24.191 [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+   24.326 [INFO] lpa_server::handlers: Stopping all projects (0 loaded)
+   24.326 [INFO] lpa_server::handlers: [mem] stop_all_projects before: 189248 B free / 112288 B used (184k / 109k)
+   24.326 [INFO] lpa_server::handlers: [mem] stop_all_projects after: 189248 B free / 112288 B used (184k / 109k)
+   24.326 [INFO] lpa_server::handlers: Stopped all projects
+   27.152 [INFO] fw_esp32_common::server_loop: [perf] frame=1854 fps=362 elapsed=5109ms recv=0ms tick=192ms send=0ms total=193ms responses=1
+   27.152 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤8ms p99≤150ms max=190ms(recv=1 tick=183 send=0 resp=1) >100ms=19 >1s=0
+   27.351 [INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 25608 B of 118328 B (92720 B headroom)
+   27.351 [INFO] fw_esp32c6::c_heap: [radio-heap] heartbeat: high-water 34584 B of 49152 B, 34584 B live, 0 B overflowed to main
+   27.351 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=117902 live=113623 max_usage=217668 largest=103196
+   32.374 [INFO] fw_esp32_common::server_loop: [perf] frame=1872 fps=3 elapsed=5224ms recv=0ms tick=392ms send=0ms total=394ms responses=1
+   32.374 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤300ms p99≤500ms max=378ms(recv=0 tick=373 send=0 resp=1) >100ms=18 >1s=0
+   32.782 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=118808 live=115785 max_usage=217708 largest=101068
+   37.764 [INFO] fw_esp32_common::server_loop: [perf] frame=1883 fps=2 elapsed=5390ms recv=0ms tick=567ms send=0ms total=569ms responses=1
+   37.764 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤500ms p99≤1000ms max=555ms(recv=0 tick=549 send=0 resp=1) >100ms=11 >1s=0
+   38.359 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=119918 live=116356 max_usage=218360 largest=101076
+   43.083 [INFO] fw_esp32_common::server_loop: [perf] frame=1891 fps=1 elapsed=5319ms recv=0ms tick=729ms send=0ms total=730ms responses=1
+   43.083 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤1000ms p99≤1000ms max=711ms(recv=0 tick=705 send=0 resp=1) >100ms=8 >1s=0
+   43.841 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=124280 live=118793 max_usage=218360 largest=94068
+   48.861 [INFO] fw_esp32_common::server_loop: [perf] frame=1898 fps=1 elapsed=5779ms recv=0ms tick=884ms send=0ms total=886ms responses=1
+   48.861 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤1000ms p99≤1000ms max=872ms(recv=0 tick=866 send=0 resp=1) >100ms=7 >1s=0
+   48.861 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=122483 live=118439 max_usage=218360 largest=94068
+   54.746 [INFO] fw_esp32_common::server_loop: [perf] frame=1905 fps=1 elapsed=5884ms recv=0ms tick=1042ms send=0ms total=1044ms responses=1
+   54.746 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤1000ms p99≤2000ms max=1011ms(recv=0 tick=1007 send=0 resp=1) >100ms=6 >1s=1
+   55.821 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=122367 live=118969 max_usage=218360 largest=94068
+   59.907 [INFO] fw_esp32_common::server_loop: [perf] frame=1917 fps=2 elapsed=5161ms recv=0ms tick=386ms send=0ms total=388ms responses=1
+   59.907 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤8ms p99≤2000ms max=1118ms(recv=0 tick=1113 send=0 resp=1) >100ms=6 >1s=5
+   60.313 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=122897 live=119392 max_usage=218360 largest=94068
+   65.355 [INFO] fw_esp32_common::server_loop: [perf] frame=1928 fps=2 elapsed=5446ms recv=0ms tick=581ms send=0ms total=583ms responses=1
+   65.355 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤500ms p99≤1000ms max=568ms(recv=0 tick=562 send=0 resp=1) >100ms=11 >1s=0
+   65.954 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=122946 live=118912 max_usage=218360 largest=94076
+   70.750 [INFO] fw_esp32_common::server_loop: [perf] frame=1936 fps=1 elapsed=5398ms recv=0ms tick=746ms send=0ms total=748ms responses=1
+   70.750 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤1000ms p99≤1000ms max=727ms(recv=0 tick=721 send=0 resp=1) >100ms=8 >1s=0
+   71.512 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=123658 live=119733 max_usage=218360 largest=94068
+   76.615 [INFO] fw_esp32_common::server_loop: [perf] frame=1943 fps=1 elapsed=5864ms recv=0ms tick=907ms send=0ms total=909ms responses=1
+   76.615 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤1000ms p99≤1000ms max=880ms(recv=0 tick=876 send=0 resp=1) >100ms=7 >1s=0
+   77.552 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=123145 live=120071 max_usage=218360 largest=94076
+   82.613 [INFO] fw_esp32_common::server_loop: [perf] frame=1949 fps=1 elapsed=5998ms recv=1ms tick=1052ms send=0ms total=1054ms responses=1
+   82.613 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤1000ms p99≤2000ms max=1044ms(recv=0 tick=1039 send=0 resp=1) >100ms=6 >1s=2
+   83.696 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=124417 live=120221 max_usage=218360 largest=94068
+   87.757 [INFO] fw_esp32_common::server_loop: [perf] frame=1958 fps=1 elapsed=5143ms recv=0ms tick=467ms send=0ms total=469ms responses=1
+   87.757 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤500ms p99≤2000ms max=1083ms(recv=0 tick=1080 send=0 resp=1) >100ms=9 >1s=3
+   88.251 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=131273 live=124063 max_usage=218360 largest=85604
+   92.855 [INFO] fw_esp32_common::server_loop: [perf] frame=1972 fps=2 elapsed=5098ms recv=0ms tick=135ms send=0ms total=136ms responses=1
+   92.855 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤500ms p99≤1000ms max=615ms(recv=1 tick=610 send=0 resp=1) >100ms=13 >1s=0
+   93.010 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=128786 live=124689 max_usage=218360 largest=85612
+   93.395 [INFO] lpa_server::handlers: Loading project: projects/demo
+   93.395 [INFO] lpa_server::handlers: [mem] load_project before: 175556 B free / 125980 B used (171k / 123k)
+   93.395 [INFO] lpa_server::project: [mem] project new start: 171k free / 123k used
+   93.395 [INFO] lpa_server::project: [mem] project new after root path: 171k free / 123k used
+   93.395 [INFO] lpa_server::project: [mem] project new after services: 171k free / 123k used
+   93.395 [INFO] lpa_server::project: [mem] project new after core project: 138k free / 156k used
+   93.395 [INFO] lpa_server::project: [mem] project new after graphics: 138k free / 156k used
+   93.395 [INFO] lpa_server::project: [mem] project new after wrapper: 138k free / 156k used
+   93.395 [INFO] lpa_server::project_manager: Project loaded: demo
+   93.395 [INFO] lpa_server::handlers: [mem] load_project after: 137408 B free / 164128 B used (134k / 160k)
+   98.398 [WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+   98.398 [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+   98.398 [INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=1, endpoint=ws281x:local:D10, byte_count=723
+   98.398 [INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 4365 bytes)
+   98.398 [INFO] lpc_shared::memory: [mem] shader compile before: 92k free / 202k used
+   98.398 [INFO] lpc_shared::memory: [mem] shader compile after: 77k free / 217k used
+   98.398 [INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=124ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=
+   98.398 [INFO] lpa_server::handlers: load_project: startup_project set to demo
+   98.398 [INFO] fw_esp32_common::server_loop: [perf] frame=2136 fps=32 elapsed=5019ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+   98.398 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤200ms max=223ms(recv=1 tick=220 send=0 resp=1) >100ms=6 >1s=0
+   98.398 [INFO] fw_esp32c6::stack_probe: [stack] heartbeat: high-water 30636 B of 118328 B (87692 B headroom)
+   98.398 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=253042 live=220041 max_usage=255576 largest=32632
+   98.398 [INFO] fw_esp32c6::ble::advertising: [ble] advertising as LP-demo
+  102.872 [INFO] fw_esp32_common::server_loop: [perf] frame=2179 fps=8 elapsed=5000ms recv=0ms tick=265ms send=0ms total=266ms responses=1
+  102.872 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤50ms p99≤500ms max=363ms(recv=1 tick=359 send=0 resp=1) >100ms=11 >1s=0
+  102.945 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=252021 live=219101 max_usage=255576 largest=29048
+  107.887 [INFO] fw_esp32_common::server_loop: [perf] frame=2207 fps=5 elapsed=5015ms recv=0ms tick=52ms send=0ms total=53ms responses=1
+  107.887 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤300ms p99≤500ms max=407ms(recv=0 tick=404 send=0 resp=1) >100ms=15 >1s=0
+  107.915 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=258216 live=219133 max_usage=260980 largest=29056
+  108.241 [INFO] lpa_server::handlers: Stopping all projects (1 loaded)
+  108.241 [INFO] lpa_server::handlers: [mem] stop_all_projects before: 79804 B free / 221732 B used (77k / 216k)
+  108.241 [INFO] lpa_server::handlers: [mem] stop_all_projects after: 176472 B free / 125064 B used (172k / 122k)
+  108.241 [INFO] lpa_server::handlers: Stopped all projects
+  108.393 [INFO] lpa_server::handlers: Loading project: projects/demo
+  108.393 [INFO] lpa_server::handlers: [mem] load_project before: 176456 B free / 125080 B used (172k / 122k)
+  108.393 [INFO] lpa_server::project: [mem] project new start: 172k free / 122k used
+  108.393 [INFO] lpa_server::project: [mem] project new after root path: 172k free / 122k used
+  108.393 [INFO] lpa_server::project: [mem] project new after services: 172k free / 122k used
+  108.393 [INFO] lpa_server::project: [mem] project new after core project: 139k free / 155k used
+  108.393 [INFO] lpa_server::project: [mem] project new after graphics: 139k free / 155k used
+  108.393 [INFO] lpa_server::project: [mem] project new after wrapper: 139k free / 155k used
+  108.393 [INFO] lpa_server::project_manager: Project loaded: demo
+  108.393 [INFO] lpa_server::handlers: [mem] load_project after: 138308 B free / 163228 B used (135k / 159k)
+  108.494 [WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+  108.494 [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+  108.494 [INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=2, endpoint=ws281x:local:D10, byte_count=723
+  108.494 [INFO] lpa_server::handlers: Stopping all projects (1 loaded)
+  108.494 [INFO] lpa_server::handlers: [mem] stop_all_projects before: 94972 B free / 206564 B used (92k / 201k)
+  108.494 [INFO] lpa_server::handlers: [mem] stop_all_projects after: 176472 B free / 125064 B used (172k / 122k)
+  108.494 [INFO] lpa_server::handlers: Stopped all projects
+  108.645 [INFO] lpa_server::handlers: Loading project: projects/demo
+  108.645 [INFO] lpa_server::handlers: [mem] load_project before: 176456 B free / 125080 B used (172k / 122k)
+  108.645 [INFO] lpa_server::project: [mem] project new start: 172k free / 122k used
+  108.645 [INFO] lpa_server::project: [mem] project new after root path: 172k free / 122k used
+  108.645 [INFO] lpa_server::project: [mem] project new after services: 172k free / 122k used
+  108.645 [INFO] lpa_server::project: [mem] project new after core project: 139k free / 155k used
+  108.645 [INFO] lpa_server::project: [mem] project new after graphics: 139k free / 155k used
+  108.645 [INFO] lpa_server::project: [mem] project new after wrapper: 139k free / 155k used
+  108.645 [INFO] lpa_server::project_manager: Project loaded: demo
+  108.645 [INFO] lpa_server::handlers: [mem] load_project after: 138308 B free / 163228 B used (135k / 159k)
+  108.744 [WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+  108.744 [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+  108.744 [INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=3, endpoint=ws281x:local:D10, byte_count=723
+  108.744 [INFO] lpa_server::handlers: Stopping all projects (1 loaded)
+  108.744 [INFO] lpa_server::handlers: [mem] stop_all_projects before: 94972 B free / 206564 B used (92k / 201k)
+  108.744 [INFO] lpa_server::handlers: [mem] stop_all_projects after: 176472 B free / 125064 B used (172k / 122k)
+  108.744 [INFO] lpa_server::handlers: Stopped all projects
+  108.896 [INFO] lpa_server::handlers: Loading project: projects/demo
+  108.896 [INFO] lpa_server::handlers: [mem] load_project before: 176456 B free / 125080 B used (172k / 122k)
+  108.896 [INFO] lpa_server::project: [mem] project new start: 172k free / 122k used
+  108.896 [INFO] lpa_server::project: [mem] project new after root path: 172k free / 122k used
+  108.896 [INFO] lpa_server::project: [mem] project new after services: 172k free / 122k used
+  108.896 [INFO] lpa_server::project: [mem] project new after core project: 139k free / 155k used
+  108.896 [INFO] lpa_server::project: [mem] project new after graphics: 139k free / 155k used
+  108.896 [INFO] lpa_server::project: [mem] project new after wrapper: 139k free / 155k used
+  108.896 [INFO] lpa_server::project_manager: Project loaded: demo
+  108.896 [INFO] lpa_server::handlers: [mem] load_project after: 138308 B free / 163228 B used (135k / 159k)
+  111.919 [WARN] lpc_engine::nodes::shader::shader_node: [shader-node] sampling black fallback (node=, frame 1): shader not compiled
+  111.919 [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver::open: endpoint=esp32c6-rmt-ws281x:ws281x:local:D10 gpio=/gpio/18 ws281x_ch=0 rmt_slot=0 bytes=723
+  111.919 [INFO] fw_esp32_common::output::provider: Esp32OutputProvider::open: Opened port handle=4, endpoint=ws281x:local:D10, byte_count=723
+  111.919 [INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation starting (node=, 4365 bytes)
+  111.919 [INFO] lpc_shared::memory: [mem] shader compile before: 92k free / 201k used
+  111.919 [INFO] lpc_shared::memory: [mem] shader compile after: 78k free / 216k used
+  111.919 [INFO] lpc_engine::nodes::shader::shader_node: [shader-node] compilation succeeded (node=, elapsed=126ms, lpir_inst_count=573, lpir_func_count=12, lpir_import_count=7, final_inst_count=2048, final_code_size=
+  112.083 [WARN] lpc_engine::nodes::shader::shader_node: [visual-shader-node] bound inputs failed to resolve (node=): input  using its default: bus:time does not carry a time product (got ); input  using its default: 
+  113.124 [INFO] fw_esp32_common::server_loop: [perf] frame=2360 fps=30 elapsed=5015ms recv=0ms tick=33ms send=0ms total=33ms responses=0
+  113.124 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤300ms max=228ms(recv=0 tick=226 send=0 resp=1) >100ms=4 >1s=0
+  113.124 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=252130 live=218861 max_usage=260980 largest=32372
+  117.920 [INFO] fw_esp32_common::server_loop: [perf] frame=2548 fps=37 elapsed=5018ms recv=0ms tick=24ms send=0ms total=25ms responses=0
+  117.920 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=44ms(recv=0 tick=33 send=0 resp=0) >100ms=0 >1s=0
+  117.927 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219939 live=218413 max_usage=260980 largest=32380
+  123.224 [INFO] fw_esp32_common::server_loop: [perf] frame=2730 fps=36 elapsed=5020ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  123.224 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=166ms(recv=0 tick=164 send=0 resp=0) >100ms=1 >1s=0
+  123.224 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219811 live=218442 max_usage=260980 largest=32372
+  128.199 [INFO] fw_esp32_common::server_loop: [perf] frame=2914 fps=36 elapsed=5003ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+  128.199 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤75ms max=76ms(recv=1 tick=73 send=0 resp=1) >100ms=0 >1s=0
+  128.199 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224955 live=218442 max_usage=260980 largest=32372
+  133.014 [INFO] fw_esp32_common::server_loop: [perf] frame=3101 fps=37 elapsed=5020ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  133.014 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=52ms(recv=0 tick=50 send=0 resp=0) >100ms=0 >1s=0
+  133.014 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219763 live=218442 max_usage=260980 largest=32372
+  137.990 [INFO] fw_esp32_common::server_loop: [perf] frame=3286 fps=36 elapsed=5028ms recv=0ms tick=33ms send=0ms total=33ms responses=0
+  137.990 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=74ms(recv=0 tick=71 send=0 resp=1) >100ms=0 >1s=0
+  137.998 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224955 live=218442 max_usage=260980 largest=32372
+  143.354 [INFO] fw_esp32_common::server_loop: [perf] frame=3471 fps=37 elapsed=5000ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  143.354 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=60ms(recv=0 tick=58 send=0 resp=0) >100ms=0 >1s=0
+  143.354 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219800 live=218442 max_usage=260980 largest=32372
+  148.166 [INFO] fw_esp32_common::server_loop: [perf] frame=3659 fps=37 elapsed=5021ms recv=1ms tick=24ms send=0ms total=25ms responses=0
+  148.166 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=36 send=0 resp=0) >100ms=0 >1s=0
+  148.166 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  153.113 [INFO] fw_esp32_common::server_loop: [perf] frame=3844 fps=36 elapsed=5025ms recv=0ms tick=24ms send=1ms total=25ms responses=0
+  153.113 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=75ms(recv=0 tick=72 send=0 resp=1) >100ms=0 >1s=0
+  153.113 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224955 live=218442 max_usage=260980 largest=32372
+  158.458 [INFO] fw_esp32_common::server_loop: [perf] frame=4031 fps=37 elapsed=5008ms recv=0ms tick=24ms send=0ms total=25ms responses=0
+  158.458 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=1 tick=33 send=0 resp=1) >100ms=0 >1s=0
+  158.458 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  163.412 [INFO] fw_esp32_common::server_loop: [perf] frame=4214 fps=36 elapsed=5005ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  163.412 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤75ms max=74ms(recv=0 tick=71 send=0 resp=1) >100ms=0 >1s=0
+  163.412 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224955 live=218442 max_usage=260980 largest=32372
+  168.193 [INFO] fw_esp32_common::server_loop: [perf] frame=4402 fps=37 elapsed=5015ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  168.193 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+  168.193 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  173.538 [INFO] fw_esp32_common::server_loop: [perf] frame=4588 fps=37 elapsed=5009ms recv=1ms tick=32ms send=0ms total=33ms responses=1
+  173.538 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=55ms(recv=0 tick=54 send=0 resp=0) >100ms=0 >1s=0
+  173.538 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219763 live=218442 max_usage=260980 largest=32372
+  178.511 [INFO] fw_esp32_common::server_loop: [perf] frame=4773 fps=36 elapsed=5023ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  178.511 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=75ms(recv=0 tick=71 send=0 resp=1) >100ms=0 >1s=0
+  178.511 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=224955 live=218442 max_usage=260980 largest=32372
+  183.316 [INFO] fw_esp32_common::server_loop: [perf] frame=4960 fps=37 elapsed=5011ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+  183.316 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=52ms(recv=0 tick=50 send=0 resp=0) >100ms=0 >1s=0
+  183.316 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219763 live=218442 max_usage=260980 largest=32372
+  188.124 [INFO] fw_esp32_common::server_loop: [perf] frame=5148 fps=37 elapsed=5017ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  188.124 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=35ms(recv=0 tick=25 send=0 resp=0) >100ms=0 >1s=0
+  188.132 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218479 max_usage=260980 largest=32380
+  193.446 [INFO] fw_esp32_common::server_loop: [perf] frame=5335 fps=37 elapsed=5011ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  193.446 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+  193.446 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  198.241 [INFO] fw_esp32_common::server_loop: [perf] frame=5522 fps=37 elapsed=5001ms recv=0ms tick=24ms send=0ms total=25ms responses=0
+  198.241 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=35 send=0 resp=0) >100ms=0 >1s=0
+  198.241 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  203.583 [INFO] fw_esp32_common::server_loop: [perf] frame=5710 fps=37 elapsed=5025ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  203.583 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+  203.583 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  208.391 [INFO] fw_esp32_common::server_loop: [perf] frame=5898 fps=37 elapsed=5023ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+  208.391 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=35ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+  208.391 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  213.208 [INFO] fw_esp32_common::server_loop: [perf] frame=6086 fps=37 elapsed=5024ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  213.208 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=34 send=0 resp=0) >100ms=0 >1s=0
+  213.216 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218479 max_usage=260980 largest=32380
+  218.524 [INFO] fw_esp32_common::server_loop: [perf] frame=6273 fps=37 elapsed=5007ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+  218.524 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=33 send=0 resp=1) >100ms=0 >1s=0
+  218.524 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  223.359 [INFO] fw_esp32_common::server_loop: [perf] frame=6461 fps=37 elapsed=5013ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  223.359 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=25 send=0 resp=0) >100ms=0 >1s=0
+  223.359 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  228.677 [INFO] fw_esp32_common::server_loop: [perf] frame=6648 fps=37 elapsed=5008ms recv=0ms tick=22ms send=0ms total=22ms responses=0
+  228.677 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=35ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+  228.677 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  233.481 [INFO] fw_esp32_common::server_loop: [perf] frame=6836 fps=37 elapsed=5008ms recv=0ms tick=24ms send=0ms total=24ms responses=0
+  233.481 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=37ms(recv=0 tick=35 send=0 resp=1) >100ms=0 >1s=0
+  233.481 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  238.299 [INFO] fw_esp32_common::server_loop: [perf] frame=7023 fps=37 elapsed=5003ms recv=0ms tick=25ms send=0ms total=25ms responses=0
+  238.299 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=35ms(recv=0 tick=24 send=0 resp=0) >100ms=0 >1s=0
+  238.299 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  243.646 [INFO] fw_esp32_common::server_loop: [perf] frame=7210 fps=37 elapsed=5010ms recv=0ms tick=24ms send=0ms total=25ms responses=0
+  243.646 [INFO] fw_esp32_common::server_loop: [perf] frames p50≤33ms p99≤50ms max=36ms(recv=0 tick=25 send=0 resp=0) >100ms=0 >1s=0
+  243.646 [INFO] fw_esp32c6::heap_peak_diag: [heap] peak=219520 live=218442 max_usage=260980 largest=32372
+  246.854 [host] state Gone
+  252.709 [mount, c40 #0 +3.504] [host] state Booting
+  252.709 [mount, c40 #0 +3.504] [link] readiness: engine start (budget 5s)
+  252.709 [mount, c40 #0 +3.504] [link] readiness: hello request sent
+  252.709 [mount, c40 #0 +3.639] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+  252.709 [mount, c40 #0 +3.639] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+  252.709 [mount, c40 #0 +3.652] [INIT] Initializing board...
+  252.709 [mount, c40 #0 +3.652] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+  252.709 [mount, c40 #0 +3.652] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+  252.709 [mount, c40 #0 +3.665] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+  252.709 [mount, c40 #0 +3.665] [INIT] Runtime started
+  252.709 [mount, c40 #0 +3.665] [INIT] fw-esp32 starting...
+  252.709 [mount, c40 #0 +3.665] [INIT] io thread: stack 3072 B, priority 1
+  252.709 [mount, c40 #0 +3.665] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+  252.709 [mount, c40 #0 +3.665] [INIT] Flash filesystem mounted
+  252.709 [mount, c40 #0 +3.665] [perf] fs mount 7495 us
+  252.709 [mount, c40 #0 +3.679] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+  252.709 [mount, c40 #0 +3.679] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+  252.709 [mount, c40 #0 +3.679] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+  252.709 [mount, c40 #0 +3.742] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+  252.709 [mount, c40 #0 +3.742] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+  252.709 [mount, c40 #0 +3.755] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+  252.709 [mount, c40 #0 +3.755] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+  252.709 [mount, c40 #0 +3.755] [INIT] net thread: stack 8192 B, priority 1
+  252.709 [mount, c40 #0 +3.755] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+  252.709 [mount, c40 #0 +3.768] [INIT] Initializing RMT peripheral at 80MHz...
+  252.709 [mount, c40 #0 +3.768] [INIT] RMT peripheral initialized
+  252.709 [mount, c40 #0 +3.768] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+  252.709 [mount, c40 #0 +3.768] [INIT] Creating output provider...
+  252.709 [mount, c40 #0 +3.768] [INIT] Output provider created
+  252.709 [mount, c40 #0 +3.768] [INIT] Creating LpServer instance...
+  252.709 [mount, c40 #0 +3.768] [INIT] LpServer created
+  252.709 [mount, c40 #0 +3.768] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+  252.709 [mount, c40 #0 +3.780] [INFO] fw_esp32_common::boot: Boot: found configured startup project: demo
+  252.709 [mount, c40 #0 +3.780] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/demo
+  252.709 [mount, c40 #0 +3.780] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 198448 B free / 103088 B used (193k / 100k)
+  252.709 [mount, c40 #0 +3.780] [INFO] lpa_server::project: [mem] project new start: 193k free / 100k used
+  252.709 [mount, c40 #0 +3.780] [INFO] lpa_server::project: [mem] project new after root path: 193k free / 100k used
+  252.709 [mount, c40 #0 +3.780] [INFO] lpa_server::project: [mem] project new after services: 193k free / 100k used
+  252.709 [mount, c40 #0 +3.919] [INFO] lpa_server::project: [mem] project new after core project: 160k free / 133k used
+  252.709 [mount, c40 #0 +3.919] [INFO] lpa_server::project: [mem] project new after graphics: 160k free / 133k used
+  252.709 [mount, c40 #0 +3.932] [INFO] lpa_server::panel_state: panel state: restored 1 of 1 engaged control(s) (auto_save=true)
+  252.709 [mount, c40 #0 +3.932] [INFO] lpa_server::project: [mem] project new after wrapper: 160k free / 134k used
+  252.709 [mount, c40 #0 +3.932] [INFO] lpa_server::project_manager: Project loaded: demo
+  252.709 [mount, c40 #0 +3.932] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 159812 B free / 141724 B used (156k / 138k)
+  252.709 [mount, c40 #0 +3.932] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/demo
+  252.709 [mount, c40 #0 +3.932] [INIT] Creating time provider...
+  252.709 [mount, c40 #0 +3.932] [INIT] Time provider created
+  252.709 [mount, c40 #0 +3.932] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+  252.709 [mount, c40 #0 +3.932] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+  252.709 [mount, c40 #0 +3.932] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  252.709 [mount, c40 #0 +3.932] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  258.208 [mount, c40 #1 +3.277] [host] state Booting
+  258.208 [mount, c40 #1 +3.277] [link] readiness: engine start (budget 5s)
+  258.208 [mount, c40 #1 +3.277] [link] readiness: hello request sent
+  258.208 [mount, c40 #1 +3.403] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+  258.208 [mount, c40 #1 +3.403] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+  258.208 [mount, c40 #1 +3.416] [INIT] Initializing board...
+  258.208 [mount, c40 #1 +3.429] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+  258.208 [mount, c40 #1 +3.429] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+  258.208 [mount, c40 #1 +3.429] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+  258.208 [mount, c40 #1 +3.429] [INIT] Runtime started
+  258.208 [mount, c40 #1 +3.429] [INIT] fw-esp32 starting...
+  258.208 [mount, c40 #1 +3.429] [INIT] io thread: stack 3072 B, priority 1
+  258.208 [mount, c40 #1 +3.429] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+  258.208 [mount, c40 #1 +3.442] [INIT] Flash filesystem mounted
+  258.208 [mount, c40 #1 +3.442] [perf] fs mount 7503 us
+  258.208 [mount, c40 #1 +3.455] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+  258.208 [mount, c40 #1 +3.455] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+  258.208 [mount, c40 #1 +3.455] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+  258.208 [mount, c40 #1 +3.504] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+  258.208 [mount, c40 #1 +3.504] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+  258.208 [mount, c40 #1 +3.530] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+  258.208 [mount, c40 #1 +3.530] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+  258.208 [mount, c40 #1 +3.530] [INIT] net thread: stack 8192 B, priority 1
+  258.208 [mount, c40 #1 +3.530] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+  258.208 [mount, c40 #1 +3.530] [INIT] Initializing RMT peripheral at 80MHz...
+  258.208 [mount, c40 #1 +3.530] [INIT] RMT peripheral initialized
+  258.208 [mount, c40 #1 +3.530] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+  258.208 [mount, c40 #1 +3.530] [INIT] Creating output provider...
+  258.208 [mount, c40 #1 +3.530] [INIT] Output provider created
+  258.208 [mount, c40 #1 +3.530] [INIT] Creating LpServer instance...
+  258.208 [mount, c40 #1 +3.544] [INIT] LpServer created
+  258.208 [mount, c40 #1 +3.544] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+  258.208 [mount, c40 #1 +3.544] [INFO] fw_esp32_common::boot: Boot: found configured startup project: demo
+  258.208 [mount, c40 #1 +3.557] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/demo
+  258.208 [mount, c40 #1 +3.557] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 198448 B free / 103088 B used (193k / 100k)
+  258.208 [mount, c40 #1 +3.557] [INFO] lpa_server::project: [mem] project new start: 193k free / 100k used
+  258.208 [mount, c40 #1 +3.557] [INFO] lpa_server::project: [mem] project new after root path: 193k free / 100k used
+  258.208 [mount, c40 #1 +3.557] [INFO] lpa_server::project: [mem] project new after services: 193k free / 100k used
+  258.208 [mount, c40 #1 +3.684] [INFO] lpa_server::project: [mem] project new after core project: 160k free / 133k used
+  258.208 [mount, c40 #1 +3.684] [INFO] lpa_server::project: [mem] project new after graphics: 160k free / 133k used
+  258.208 [mount, c40 #1 +3.697] [INFO] lpa_server::panel_state: panel state: restored 1 of 1 engaged control(s) (auto_save=true)
+  258.208 [mount, c40 #1 +3.697] [INFO] lpa_server::project: [mem] project new after wrapper: 160k free / 134k used
+  258.208 [mount, c40 #1 +3.697] [INFO] lpa_server::project_manager: Project loaded: demo
+  258.208 [mount, c40 #1 +3.697] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 159812 B free / 141724 B used (156k / 138k)
+  258.208 [mount, c40 #1 +3.697] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/demo
+  258.208 [mount, c40 #1 +3.697] [INIT] Creating time provider...
+  258.208 [mount, c40 #1 +3.697] [INIT] Time provider created
+  258.208 [mount, c40 #1 +3.697] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+  258.208 [mount, c40 #1 +3.697] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+  258.208 [mount, c40 #1 +3.710] [INFO] fw_esp32_common::serial::packed_link: packed link: replies are now packed (table epoch 1)
+  258.208 [mount, c40 #1 +3.710] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  258.208 [mount, c40 #1 +3.710] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  264.006 [mount, c40 #2 +3.417] [host] state Booting
+  264.006 [mount, c40 #2 +3.417] [link] readiness: engine start (budget 5s)
+  264.006 [mount, c40 #2 +3.417] [link] readiness: hello request sent
+  264.006 [mount, c40 #2 +3.547] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+  264.006 [mount, c40 #2 +3.547] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+  264.006 [mount, c40 #2 +3.560] [INIT] Initializing board...
+  264.006 [mount, c40 #2 +3.571] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+  264.006 [mount, c40 #2 +3.571] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+  264.006 [mount, c40 #2 +3.571] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+  264.006 [mount, c40 #2 +3.571] [INIT] Runtime started
+  264.006 [mount, c40 #2 +3.571] [INIT] fw-esp32 starting...
+  264.006 [mount, c40 #2 +3.571] [INIT] io thread: stack 3072 B, priority 1
+  264.006 [mount, c40 #2 +3.584] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+  264.006 [mount, c40 #2 +3.584] [INIT] Flash filesystem mounted
+  264.006 [mount, c40 #2 +3.584] [perf] fs mount 7521 us
+  264.006 [mount, c40 #2 +3.597] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+  264.006 [mount, c40 #2 +3.597] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+  264.006 [mount, c40 #2 +3.597] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+  264.006 [mount, c40 #2 +3.649] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+  264.006 [mount, c40 #2 +3.649] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+  264.006 [mount, c40 #2 +3.674] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+  264.006 [mount, c40 #2 +3.674] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+  264.006 [mount, c40 #2 +3.674] [INIT] net thread: stack 8192 B, priority 1
+  264.006 [mount, c40 #2 +3.674] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+  264.006 [mount, c40 #2 +3.674] [INIT] Initializing RMT peripheral at 80MHz...
+  264.006 [mount, c40 #2 +3.674] [INIT] RMT peripheral initialized
+  264.006 [mount, c40 #2 +3.674] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+  264.006 [mount, c40 #2 +3.687] [INIT] Creating output provider...
+  264.006 [mount, c40 #2 +3.687] [INIT] Output provider created
+  264.006 [mount, c40 #2 +3.687] [INIT] Creating LpServer instance...
+  264.006 [mount, c40 #2 +3.687] [INIT] LpServer created
+  264.006 [mount, c40 #2 +3.687] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+  264.006 [mount, c40 #2 +3.687] [INFO] fw_esp32_common::boot: Boot: found configured startup project: demo
+  264.006 [mount, c40 #2 +3.687] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/demo
+  264.006 [mount, c40 #2 +3.687] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 198448 B free / 103088 B used (193k / 100k)
+  264.006 [mount, c40 #2 +3.700] [INFO] lpa_server::project: [mem] project new start: 193k free / 100k used
+  264.006 [mount, c40 #2 +3.700] [INFO] lpa_server::project: [mem] project new after root path: 193k free / 100k used
+  264.006 [mount, c40 #2 +3.700] [INFO] lpa_server::project: [mem] project new after services: 193k free / 100k used
+  264.006 [mount, c40 #2 +3.838] [INFO] lpa_server::project: [mem] project new after core project: 160k free / 133k used
+  264.006 [mount, c40 #2 +3.838] [INFO] lpa_server::project: [mem] project new after graphics: 160k free / 133k used
+  264.006 [mount, c40 #2 +3.838] [INFO] lpa_server::panel_state: panel state: restored 1 of 1 engaged control(s) (auto_save=true)
+  264.006 [mount, c40 #2 +3.838] [INFO] lpa_server::project: [mem] project new after wrapper: 160k free / 134k used
+  264.006 [mount, c40 #2 +3.851] [INFO] lpa_server::project_manager: Project loaded: demo
+  264.006 [mount, c40 #2 +3.852] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 159812 B free / 141724 B used (156k / 138k)
+  264.006 [mount, c40 #2 +3.852] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/demo
+  264.006 [mount, c40 #2 +3.852] [INIT] Creating time provider...
+  264.006 [mount, c40 #2 +3.852] [INIT] Time provider created
+  264.006 [mount, c40 #2 +3.852] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+  264.006 [mount, c40 #2 +3.852] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+  264.006 [mount, c40 #2 +3.852] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  264.006 [mount, c40 #2 +3.852] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.396] [host] state Booting
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.396] [link] readiness: engine start (budget 5s)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.396] [link] readiness: hello request sent
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.519] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.519] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.532] [INIT] Initializing board...
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [INIT] Runtime started
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [INIT] fw-esp32 starting...
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [INIT] io thread: stack 3072 B, priority 1
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.545] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.558] [INIT] Flash filesystem mounted
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.558] [perf] fs mount 7841 us
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.571] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.571] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.571] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.622] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.622] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INIT] net thread: stack 8192 B, priority 1
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INIT] Initializing RMT peripheral at 80MHz...
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INIT] RMT peripheral initialized
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INIT] Creating output provider...
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.647] [INIT] Output provider created
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INIT] Creating LpServer instance...
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INIT] LpServer created
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INFO] fw_esp32_common::boot: Boot: found configured startup project: demo
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/demo
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 198448 B free / 103088 B used (193k / 100k)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.661] [INFO] lpa_server::project: [mem] project new start: 193k free / 100k used
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.674] [INFO] lpa_server::project: [mem] project new after root path: 193k free / 100k used
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.674] [INFO] lpa_server::project: [mem] project new after services: 193k free / 100k used
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.813] [INFO] lpa_server::project: [mem] project new after core project: 160k free / 133k used
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.813] [INFO] lpa_server::project: [mem] project new after graphics: 160k free / 133k used
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.813] [INFO] lpa_server::panel_state: panel state: restored 1 of 1 engaged control(s) (auto_save=true)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.813] [INFO] lpa_server::project: [mem] project new after wrapper: 160k free / 134k used
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.813] [INFO] lpa_server::project_manager: Project loaded: demo
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.813] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 159812 B free / 141724 B used (156k / 138k)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/demo
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [INIT] Creating time provider...
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [INIT] Time provider created
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  272.064 [mount, full (c40 + 13 × 4 KiB) #0 +3.826] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.416] [host] state Booting
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.416] [link] readiness: engine start (budget 5s)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.416] [link] readiness: hello request sent
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.543] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.543] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.556] [INIT] Initializing board...
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [INIT] Runtime started
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [INIT] fw-esp32 starting...
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [INIT] io thread: stack 3072 B, priority 1
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.569] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.583] [INIT] Flash filesystem mounted
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.583] [perf] fs mount 7850 us
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.583] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.583] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.595] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.646] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.646] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.659] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INIT] net thread: stack 8192 B, priority 1
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INIT] Initializing RMT peripheral at 80MHz...
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INIT] RMT peripheral initialized
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INIT] Creating output provider...
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INIT] Output provider created
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.672] [INIT] Creating LpServer instance...
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INIT] LpServer created
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] fw_esp32_common::boot: Boot: found configured startup project: demo
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/demo
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 198448 B free / 103088 B used (193k / 100k)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] lpa_server::project: [mem] project new start: 193k free / 100k used
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] lpa_server::project: [mem] project new after root path: 193k free / 100k used
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.685] [INFO] lpa_server::project: [mem] project new after services: 193k free / 100k used
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.822] [INFO] lpa_server::project: [mem] project new after core project: 160k free / 133k used
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.822] [INFO] lpa_server::project: [mem] project new after graphics: 160k free / 133k used
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INFO] lpa_server::panel_state: panel state: restored 1 of 1 engaged control(s) (auto_save=true)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INFO] lpa_server::project: [mem] project new after wrapper: 160k free / 134k used
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INFO] lpa_server::project_manager: Project loaded: demo
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 159812 B free / 141724 B used (156k / 138k)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/demo
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INIT] Creating time provider...
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INIT] Time provider created
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.834] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.845] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.845] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  277.993 [mount, full (c40 + 13 × 4 KiB) #1 +3.845] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.481] [host] state Booting
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.481] [link] readiness: engine start (budget 5s)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.481] [link] readiness: hello request sent
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.605] [0;32mI (795) boot: Loaded app from partition at offset 0x10000[0m
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.619] [0;32mI (796) boot: Disabling RNG early entropy source...[0m
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.630] [INIT] Initializing board...
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.630] [INIT] Board initialized, starting runtime... (main stack 118328 B)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.643] [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.643] [RECOVERY] RWDT armed: boot 30000 ms, runtime 8000 ms
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.643] [INIT] Runtime started
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.643] [INIT] fw-esp32 starting...
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.643] [INIT] io thread: stack 3072 B, priority 1
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.643] [INFO] fw_esp32c6: [fw-esp32c6] Shader backend: native JIT (lpvm-native rt_jit)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.655] [INIT] Flash filesystem mounted
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.655] [perf] fs mount 7850 us
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.655] [INFO] fw_esp32c6: [fw-esp32c6] Hardware manifest: seeed/xiao-esp32-c6 (XIAO ESP32-C6)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.655] [INFO] fw_esp32c6::board::esp32c6::board_quirks: [fw-esp32c6] Board quirk applied: xiao-c6-rf-switch (GPIO3=LOW GPIO14=LOW)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.655] [INFO] fw_esp32c6::board::esp32c6::status_led: [fw-esp32c6] Status LED: GPIO15 (lit LOW)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.718] [INFO] fw_esp32c6: [fw-esp32c6] ESP-NOW radio ready: device_id= channel=11
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.718] [INFO] fw_esp32c6: [ble] enabled (device store, or none: on by default) — starting
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.732] [INFO] fw_esp32c6::ble::ble_task: [ble] up: controller +18372 B, host + GATT +3520 B, heap used 82204 B (slots 2)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.732] [INFO] fw_esp32c6: [wifi] 0 network(s) saved, Wi-Fi on, Cloud relay on
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.732] [INIT] net thread: stack 8192 B, priority 1
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INFO] fw_esp32c6::net::net_bringup: [wifi] network: the radio
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INIT] Initializing RMT peripheral at 80MHz...
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INIT] RMT peripheral initialized
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INFO] fw_esp32c6::output::rmt::esp32c6_rmt_ws281x_driver: Esp32C6RmtWs281xDriver: 2 WS281x channels for 2 declared (ch0_blocks=1 ch0_window_words=48 ch0_half_words=24)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INIT] Creating output provider...
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INIT] Output provider created
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INIT] Creating LpServer instance...
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INIT] LpServer created
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.745] [INFO] fw_esp32_common::boot: Boot: scanning /projects for projects
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.758] [INFO] fw_esp32_common::boot: Boot: found configured startup project: demo
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.758] [INFO] fw_esp32_common::boot: Boot: auto-loading /projects/demo
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.758] [INFO] fw_esp32_common::boot: [mem] boot auto_load before: 198448 B free / 103088 B used (193k / 100k)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.758] [INFO] lpa_server::project: [mem] project new start: 193k free / 100k used
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.758] [INFO] lpa_server::project: [mem] project new after root path: 193k free / 100k used
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.758] [INFO] lpa_server::project: [mem] project new after services: 193k free / 100k used
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.897] [INFO] lpa_server::project: [mem] project new after core project: 160k free / 133k used
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.897] [INFO] lpa_server::project: [mem] project new after graphics: 160k free / 133k used
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INFO] lpa_server::panel_state: panel state: restored 1 of 1 engaged control(s) (auto_save=true)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INFO] lpa_server::project: [mem] project new after wrapper: 160k free / 134k used
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INFO] lpa_server::project_manager: Project loaded: demo
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INFO] fw_esp32_common::boot: [mem] boot auto_load after: 159812 B free / 141724 B used (156k / 138k)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INFO] fw_esp32_common::boot: Boot: auto-loaded project /projects/demo
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INIT] Creating time provider...
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INIT] Time provider created
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INIT] fw-esp32 initialized, starting server loop... proto=43 commit=7a95d4d466a6 dirty=false
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [INFO] fw_esp32_common::usb_link::usb_link_transport: [usb_link] host link up (session 0)
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [host] state Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
+  283.580 [mount, full (c40 + 13 × 4 KiB) #2 +3.909] [link] readiness: settled at Ready { hello: ServerHello { proto: 43, build: BuildFacts { features: [NodeButton, NodeClock, NodeFluid, NodeFixture, NodePlaylist, NodePowerButton, NodeRadio, NodeShader, NodeTexture, SvcButton, SvcRadioEspnow, GfxLpvm], package: "fw-esp32c6", version: "7a95d4d46", commit: "7a95d4d466a6", dirty: false, profile: "release-esp32" }, hardware: HardwareFacts { radio: true, total_led_budget: None, button: true, board_id: Some("seeed/xiao-esp32-c6"), base_mac: Some("14:c1:9f:e6:54:90"), chip_revision: Some("0.2"), eui64: Some("14:c1:9f:e6:54:90:fe:ff"), fs: Mounted }, device_uid: None, pack_format: 2, auth: HelloAuth { required: false, granted: Some(Edit) }, firmware: None } }
