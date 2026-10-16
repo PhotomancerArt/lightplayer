@@ -45,3 +45,17 @@ also over-charges guest time on a load path.
 
 **Until fixed.** Do not quote emulated tree-store mount time as an estimate
 of silicon's. The silicon figure is in the walk report's CX1 section.
+
+**More silicon, 2026-10-15 (M7, CX1, `55422b0e8`).** The perf sitting read
+`[perf] fs mount` at these states:
+
+- empty: 8.16 ms;
+- a c40 pushed by `replace_and_load_project`: 136.0 ms (n=3; #1135's c40,
+  uploaded with `lp-cli upload`, read 92.7 ms);
+- nearly full (c40 plus 127 × 4 KiB, 3 sectors free): 780.8 ms;
+- a partition written out by the power-cut soak (two basic projects to a c40
+  live, the rest garbage and GC copies): 560 ms median.
+
+The emulated c40 figure (277.8 ms) is still about 2x silicon's. A sibling
+defect, which runs the other way for request and load paths, is
+`2026-10-15-the-emulated-c6-answers-saves-and-loads-two-to-three-times-faster-than-silicon.md`.
