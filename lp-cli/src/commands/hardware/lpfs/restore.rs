@@ -57,6 +57,13 @@ pub fn handle_restore(args: LpfsRestoreArgs) -> Result<()> {
                 &inspection.reads,
             )
             .state;
+            // A littlefs restore never goes over a tree store (a tree-store
+            // image's restore writes the store itself, below).
+            if state == LayoutState::TreeStore {
+                return Err(LinkError::other(refusal_text(
+                    &lpa_link::layout_migration::Refusal::TreeStoreWouldBeWritten,
+                )));
+            }
             if !matches!(
                 state,
                 LayoutState::CurrentMounts | LayoutState::CurrentNothing
@@ -66,8 +73,15 @@ pub fn handle_restore(args: LpfsRestoreArgs) -> Result<()> {
                      flash or migrate it first"
                 )));
             }
-            let (mut plan, summary) = plan_lpfs_restore(&target, &tree)
-                .map_err(|refusal| LinkError::other(refusal_text(&refusal)))?;
+            let (mut plan, summary) = match inspection.target_fs {
+                lpa_link::FsKind::Littlefs => plan_lpfs_restore(&target, &tree),
+                lpa_link::FsKind::Tree => {
+                    lpa_link::layout_migration::tree_migration_plan::plan_tree_restore(
+                        &target, &tree,
+                    )
+                }
+            }
+            .map_err(|refusal| LinkError::other(refusal_text(&refusal)))?;
             println!(
                 "Writing {} files to the filesystem at {:#x} ({} of {} blocks). This replaces \
                  every file on the board.",

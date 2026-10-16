@@ -90,6 +90,11 @@ pub struct LinkLayoutInspection {
     /// The filesystem the package's image mounts (its manifest core lists
     /// `fs.tree`, or not) — what "the board's files are current" means.
     pub target_fs: super::fs_kind::FsKind,
+    /// The package's embedded manifest core (its JSON, as found in its
+    /// images: `layout_migration::embedded_manifest`), or `None` when it
+    /// carries none. Whether that firmware reads a tree store on the board
+    /// is decided from it (`layout_migration::firmware_reads_tree_store`).
+    pub target_manifest: Option<Vec<u8>>,
     /// Every read, `(region, bytes)`, in order.
     pub reads: Vec<(LinkFlashRegion, Vec<u8>)>,
     pub logs: Vec<String>,

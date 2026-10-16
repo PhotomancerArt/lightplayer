@@ -523,6 +523,9 @@ export async function inspectLayout(
         chipName: chipName ? String(chipName) : null,
         baseMac,
         targetImageLen,
+        // The package's own bytes, for Rust to find its embedded manifest
+        // in (does this firmware read a tree store?). Copies, never views.
+        images: imageFiles.map((image) => image.data.slice()),
         logs,
         progress: compactProgress(progress),
       };

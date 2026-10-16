@@ -41,6 +41,22 @@ pub const HELD_BOARD_REFUSAL: &str =
 pub const REFUSED_STORE_REFUSAL: &str = "the board refused its file store (a newer or damaged \
      store header); its files are kept — read them with `lp-cli hardware tree extract`";
 
+/// The same refusal on a littlefs build that found a tree store (`fs:
+/// refused` from a build without `fs.tree`): the board's files are in the
+/// newer filesystem, kept, and a firmware that reads it brings them back.
+pub const NEWER_STORE_REFUSAL: &str = "the board refused its file store: its files are in the \
+     tree store, a newer filesystem than its firmware reads; they are kept — update the firmware";
+
+/// Which refusal a refused board gives: `fs_tree` is whether its build
+/// reads the tree store (the hello's `fs.tree`).
+pub fn refused_store_refusal(fs_tree: bool) -> &'static str {
+    if fs_tree {
+        REFUSED_STORE_REFUSAL
+    } else {
+        NEWER_STORE_REFUSAL
+    }
+}
+
 /// The network file at root `/.lp/network.json`: [`NetworkFile::none`] when
 /// there is none, and when it cannot be read (logged, never its bytes).
 ///

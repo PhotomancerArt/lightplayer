@@ -242,7 +242,15 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             lpc_wire::FsBootState::Formatted => BoardFs::Formatted,
             lpc_wire::FsBootState::Memory => BoardFs::Memory,
             lpc_wire::FsBootState::LegacyHeld => BoardFs::LegacyHeld,
-            lpc_wire::FsBootState::Refused => BoardFs::Refused,
+            // Which refusal it is follows from what the build reads: one
+            // with `fs.tree` refused its own store (newer or damaged); one
+            // without is a littlefs core that found a tree store.
+            lpc_wire::FsBootState::Refused
+                if hello.build.features.contains(&lpc_model::LpFeature::FsTree) =>
+            {
+                BoardFs::Refused
+            }
+            lpc_wire::FsBootState::Refused => BoardFs::TreeStoreHeld,
         },
         tree_store: hello.build.features.contains(&lpc_model::LpFeature::FsTree),
         // The board manifest a split image's hello carries (update protocol

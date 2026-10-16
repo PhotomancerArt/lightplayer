@@ -15,7 +15,7 @@ disassembly and counts the `l32r`s whose loaded *value* points into the
 flash-mapped rodata window. The output is a `function, count` table; the gate is
 that no function's count grows against a committed baseline.
 
-    scripts/iram-flash-literals.py <elf> [--objdump xtensa-esp32-elf-objdump]
+    scripts/iram-flash-literals.py <elf> [--chip esp32|esp32s3] [--objdump <objdump>]
                                          [--baseline <table>] [--write-baseline]
     scripts/iram-flash-literals.py <elf> --dump <function-substring>...
 
@@ -55,6 +55,13 @@ from pathlib import Path
 # here is a pointer into flash, which is the cache miss we are hunting.
 FLASH_RODATA_LO = 0x3F40_0000
 FLASH_RODATA_HI = 0x3F80_0000
+
+# The S3's: esp-hal's `ld/esp32s3/memory.x` maps `drom_seg` at 0x3C00_0020.
+# `--chip esp32s3` swaps the window (and the objdump) for it.
+CHIP_WINDOWS = {
+    "esp32": (0x3F40_0000, 0x3F80_0000, "xtensa-esp32-elf-objdump"),
+    "esp32s3": (0x3C00_0000, 0x3E00_0000, "xtensa-esp32s3-elf-objdump"),
+}
 
 # Text sections that are RAM-resident on this chip. `.rwtext` is where esp-hal
 # puts `#[ram]` functions and the interrupt plumbing; the vector sections are
@@ -198,7 +205,13 @@ def parse_table(text: str) -> dict[str, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("elf")
-    parser.add_argument("--objdump", default="xtensa-esp32-elf-objdump")
+    parser.add_argument(
+        "--chip",
+        choices=sorted(CHIP_WINDOWS),
+        default="esp32",
+        help="which chip's flash-mapped constant window to test literals against",
+    )
+    parser.add_argument("--objdump", help="default: the chip's xtensa-*-elf-objdump")
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--write-baseline", action="store_true")
     parser.add_argument(
@@ -208,6 +221,9 @@ def main() -> int:
         help="print the annotated disassembly of functions whose name contains FUNC",
     )
     args = parser.parse_args()
+    global FLASH_RODATA_LO, FLASH_RODATA_HI
+    FLASH_RODATA_LO, FLASH_RODATA_HI, default_objdump = CHIP_WINDOWS[args.chip]
+    args.objdump = args.objdump or default_objdump
 
     if shutil.which(args.objdump) is None:
         print(

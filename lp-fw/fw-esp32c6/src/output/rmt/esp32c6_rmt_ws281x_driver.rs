@@ -547,6 +547,8 @@ impl Ws281xOutput for Esp32C6RmtWs281xOutput {
             });
         }
 
+        // The boot's first lit frame says `[perf] first light` (once).
+        crate::first_light::on_frame(data);
         // Reported after the send, not before it: the transcript is evidence
         // about bytes that reached the wire, and a frame that timed out or was
         // refused is not one of them.

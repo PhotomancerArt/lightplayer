@@ -461,7 +461,14 @@ fn cut_sweep(name: &str, start: Cutover, order: &str) {
 fn tree_plan_and_order(chip: &[u8], firmware: &[u8]) -> (FlashPlan, String) {
     let target = tree_table();
     let inspection = inspect_flash_for(chip, target.clone(), FsKind::Tree, true);
-    match decide(&inspection, &target, firmware.len() as u32, None, false) {
+    match decide(
+        &inspection,
+        &target,
+        firmware.len() as u32,
+        None,
+        false,
+        true,
+    ) {
         Ok(LayoutDecision::Migrate {
             mut plan, summary, ..
         }) => {
@@ -614,8 +621,15 @@ impl Work {
 fn tree_plan(chip: &[u8], firmware: &[u8], backup: Option<&LpfsTree>) -> FlashPlan {
     let target = tree_table();
     let inspection = inspect_flash_for(chip, target.clone(), FsKind::Tree, true);
-    let decision = decide(&inspection, &target, firmware.len() as u32, backup, false)
-        .unwrap_or_else(|refusal| panic!("{refusal}"));
+    let decision = decide(
+        &inspection,
+        &target,
+        firmware.len() as u32,
+        backup,
+        false,
+        true,
+    )
+    .unwrap_or_else(|refusal| panic!("{refusal}"));
     let mut plan = match decision {
         LayoutDecision::Migrate { plan, .. }
         | LayoutDecision::Restore { plan, .. }

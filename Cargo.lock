@@ -6542,6 +6542,7 @@ dependencies = [
  "js-sys",
  "littlefs-rust",
  "lp-bootctl",
+ "lp-nor-sim",
  "lp-tree-store",
  "lpa-client",
  "lpa-devices",

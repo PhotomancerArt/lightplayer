@@ -15,6 +15,7 @@ use lpa_link::layout_migration::lpfs_geometry::LPFS_BLOCK_SIZE;
 use lpa_link::layout_migration::lpfs_tree::LpfsTree;
 use lpa_link::layout_migration::{
     FREE_BLOCK_FLOOR, LayoutDecision, LayoutProbe, LpfsGeometry, Refusal, decide,
+    firmware_reads_tree_store,
 };
 use lpa_link::{FlashPlan, LinkLayoutInspection, PartitionTable, normalize_base_mac};
 
@@ -106,6 +107,7 @@ pub fn stage_layout(
         inspection.target_image_len,
         pending.as_ref().map(|p| p.tree),
         restore_requested,
+        firmware_reads_tree_store(inspection.target_manifest.as_deref()),
     );
     let plain = || LayoutStaging {
         verdict: LayoutVerdict::Plain,
@@ -295,6 +297,7 @@ pub(crate) mod tests {
             target_table: target.to_bytes(),
             target_image_len: 0x2D_0000,
             target_fs: lpa_link::FsKind::Littlefs,
+            target_manifest: None,
             reads,
             logs: Vec::new(),
             progress: Vec::new(),
@@ -391,5 +394,47 @@ pub(crate) mod tests {
             staging.confirmed_plan().is_ok(),
             "a restore's backup is stored"
         );
+    }
+
+    /// A board whose files are in a tree store (its headers past the first
+    /// two sectors, where the probe once saw "nothing"): a littlefs firmware
+    /// is refused in words, and its pending backup is never restored over
+    /// the store; a firmware that reads the store is a plain flash.
+    #[test]
+    fn a_tree_store_board_takes_only_a_firmware_that_reads_it() {
+        let mut flash = vec![0xFFu8; 0x40_0000];
+        let table = d1().to_bytes();
+        flash[0x8000..0x8000 + table.len()].copy_from_slice(&table);
+        let header = 0x35_0000 + 60 * 0x1000;
+        flash[header..header + 4].copy_from_slice(b"LTS1");
+        let files = tree(2);
+        let entry = BackupEntry {
+            base_mac: "10:bd:a3:b0:8e:30".to_string(),
+            archive: "x.zip".to_string(),
+            captured_at_epoch_seconds: 5.0,
+            purpose: "layout-migration".to_string(),
+            status: BackupStatus::Pending,
+            file_count: 4,
+            total_bytes: 1,
+        };
+        let pending = || {
+            Some(PendingBackup {
+                entry: &entry,
+                tree: &files,
+            })
+        };
+        let littlefs = inspection_of(&flash);
+        let refused = stage_layout(&littlefs, pending(), false, 9.0).unwrap_err();
+        assert!(
+            refused.contains("tree store") && refused.contains("Nothing was written"),
+            "{refused}"
+        );
+        assert!(stage_layout(&littlefs, pending(), true, 9.0).is_err());
+
+        let mut reads_it = inspection_of(&flash);
+        reads_it.target_manifest = Some(br#"{"features":["gfx.lpvm","fs.tree"]}"#.to_vec());
+        let staging = stage_layout(&reads_it, pending(), false, 9.0).unwrap();
+        assert_eq!(staging.verdict, LayoutVerdict::Plain);
+        assert!(staging.plan.is_none() && staging.restoring.is_none());
     }
 }

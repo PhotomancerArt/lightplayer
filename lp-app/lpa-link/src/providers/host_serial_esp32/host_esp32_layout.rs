@@ -25,7 +25,7 @@ use super::host_esp32_flash::{
     EventRecorder, ProgressBridge, ResolvedImage, assert_chip_matches_manifest, chip_name, connect,
     load_manifest, manifest_chip, read_flash_region, restore_lp_analog_i2c_clock, write_verified,
 };
-use crate::layout_migration::LayoutProbe;
+use crate::layout_migration::{LayoutProbe, embedded_manifest};
 use crate::provider::flash_plan::{FlashPlan, FlashStepTarget, run_plan};
 use crate::{
     LinkError, LinkFirmwareFlashResult, LinkFirmwareManifest, LinkFlashRegion,
@@ -274,6 +274,7 @@ fn inspect_in_session(
         target_table: package.target_table.clone(),
         target_image_len: package.image_len,
         target_fs: package.target_fs,
+        target_manifest: embedded_manifest(package.images.iter().map(|(_, data)| data.as_slice())),
         reads,
         logs: recorder.logs.clone(),
         progress: recorder.progress.clone(),

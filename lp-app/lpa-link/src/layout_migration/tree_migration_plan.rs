@@ -192,6 +192,47 @@ pub fn plan_tree_migration(
     Ok((plan, summary, tree))
 }
 
+/// Put a stored backup's files back onto a board already on `target_table`'s
+/// layout, as a tree store (`lp-cli hardware lpfs restore` under a tree-store
+/// image): erase the region, write the store with its root last, read it
+/// back. No firmware, nothing to retire — the region's old content is the
+/// board's, replaced as asked.
+pub fn plan_tree_restore(
+    target_table: &PartitionTable,
+    tree: &LpfsTree,
+) -> Result<(FlashPlan, MigrationSummary), Refusal> {
+    let target = LpfsGeometry::from_table(target_table).ok_or(Refusal::NoTargetFilesystem)?;
+    let packed = pack_tree(tree, target)?;
+    let steps: Vec<FlashStep> = retired_steps(target, &packed, None)
+        .into_iter()
+        .filter(|step| {
+            !matches!(step, FlashStep::WriteFirmware)
+                && !matches!(step, FlashStep::Erase { offset, .. } if *offset == DISARM.0)
+        })
+        .collect();
+    let plan = FlashPlan {
+        steps,
+        requires_backup: true,
+        backup_confirmed: false,
+        lpfs_start: 0,
+        base_mac: None,
+    };
+    assert_aligned(&plan);
+    let summary = MigrationSummary {
+        file_count: tree.file_count(),
+        total_bytes: tree.total_bytes(),
+        source: None,
+        target,
+        blocks_used: packed.sectors_used,
+        blocks_free: packed.sectors_free,
+        tight: packed.tight,
+        device_uid: tree.device_uid(),
+        target_fs: FsKind::Tree,
+        order: Some(WriteOrder::Retired),
+    };
+    Ok((plan, summary))
+}
+
 /// The staged order, or `None` when the old filesystem leaves too few free
 /// sectors in the target region.
 fn staged_steps(

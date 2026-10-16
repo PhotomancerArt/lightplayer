@@ -28,10 +28,12 @@ take any core over the air, including another `fs-tree` one. No test caught
 it: the guard's tests build synthetic images, and no emulated OTA runs an
 `fs-tree` image.
 
-**Fixed so far (A6)** — `lpc_model::manifest::find_manifest_core` and the
-guard both take the first begin marker followed by a JSON object, so the
-packager and `image_fs_kind` find the engine's blob in a merged image. The
-guard still reads only the core, where there is no blob.
+**Fixed so far** — the stray marker: main's `48e158aee` (#1150, A5) stores
+the guard's markers masked, so no image carries a contiguous copy outside
+its real blob, and A6 makes `lpc_model::manifest::find_manifest_core` take
+the first begin marker followed by a JSON object as well. The packager and
+`image_fs_kind` find the engine's blob in a merged image. **The guard still
+reads only the core, where there is no blob.**
 
 **Owed (A7, the default switch)** — the guard must read what the new core
 will mount from something the core itself carries (a feature word beside the

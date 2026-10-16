@@ -10307,12 +10307,14 @@ struct AgentStartProbe {
 /// tree store) and did not hold its files for a migration: what lets a
 /// tree-store build go to it over the air. A held board's files are in an
 /// older littlefs that a core placed high in its app partition could write
-/// over; they move over USB first.
+/// over; they move over USB first. A littlefs core holding a tree store
+/// (`TreeStoreHeld`, A5) is on the store: a core that reads it is what it
+/// needs.
 fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> bool {
-    evidence
-        .classification
-        .hello()
-        .is_some_and(|hello| hello.tree_store && hello.fs != lpa_devices::wire::BoardFs::LegacyHeld)
+    use lpa_devices::wire::BoardFs;
+    evidence.classification.hello().is_some_and(|hello| {
+        (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld
+    })
 }
 
 /// The board a device press is aimed at, when it is one that changes what

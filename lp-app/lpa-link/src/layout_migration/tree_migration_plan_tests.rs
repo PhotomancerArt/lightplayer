@@ -79,7 +79,7 @@ fn fielded(files: &LpfsTree) -> Vec<u8> {
 
 fn plan_for(flash: &[u8], pending: Option<&LpfsTree>) -> Result<LayoutDecision, Refusal> {
     let inspection = inspect_flash_for(flash, t2_table(), FsKind::Tree, true);
-    decide(&inspection, &t2_table(), FW_LEN, pending, false)
+    decide(&inspection, &t2_table(), FW_LEN, pending, false, true)
 }
 
 fn migrate_plan(flash: &[u8]) -> FlashPlan {
@@ -354,7 +354,7 @@ fn a_migrated_board_is_a_plain_flash() {
     let inspection = inspect_flash_for(&flash, t2_table(), FsKind::Tree, true);
     assert_eq!(inspection.state, LayoutState::CurrentMounts);
     assert!(matches!(
-        decide(&inspection, &t2_table(), FW_LEN, None, false).unwrap(),
+        decide(&inspection, &t2_table(), FW_LEN, None, false, true).unwrap(),
         LayoutDecision::Plain(_)
     ));
     // Nothing of the old filesystem is left where a probe would read it.
