@@ -57,6 +57,11 @@ pub struct FilesEvidence {
     pub started_fresh: bool,
 }
 
+/// The card's line for a board that refused its file store (`fs: refused`,
+/// an `fs-tree` build). Never the layout migration's words.
+pub const REFUSED_STORE_LINE: &str = "This board's file store has a newer or damaged header; its files \
+     are kept — read them with `lp-cli hardware tree extract`.";
+
 /// The card's layout facts for one device.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceLayout {
@@ -239,6 +244,14 @@ pub fn device_layout_view(
     if view.activity.is_some() {
         return None;
     }
+    // A board that refused its file store (an `fs-tree` build): words only.
+    // Nothing here moves its files — a layout migration would be wrong (and
+    // a `migrate` over a store destroys it) — so no verb is offered; the
+    // way to the files is the CLI the line names.
+    if fs == BoardFs::Refused {
+        layout.line = Some(REFUSED_STORE_LINE.to_string());
+        return Some(layout);
+    }
     // A board holding its files for a migration: the Update verb finishes it.
     if fs == BoardFs::LegacyHeld {
         layout.line =
@@ -308,7 +321,7 @@ pub fn device_layout_view(
         && match fs {
             BoardFs::Formatted => pending.is_some() || evidence.remembered,
             BoardFs::Mounted => !has_uid && pending.is_some(),
-            BoardFs::Unknown | BoardFs::Memory | BoardFs::LegacyHeld => false,
+            BoardFs::Unknown | BoardFs::Memory | BoardFs::LegacyHeld | BoardFs::Refused => false,
         };
     if lost_files {
         layout.line = Some(match pending {
@@ -805,6 +818,41 @@ mod tests {
         let download = offers.get(&at(DOWNLOAD_BACKUP)).expect("download offered");
         assert!(download.consequence().is_routine());
         assert!(download.action.meta().needs_user_activation);
+    }
+
+    /// A board that refused its file store says so in words and offers no
+    /// verb: no Finish update (that is a migration, and a `migrate` over a
+    /// store destroys it), no Restore.
+    #[test]
+    fn a_refused_store_is_words_and_no_verb() {
+        let mut offers = UiOfferTree::new();
+        let layout = device_layout_view(
+            &running_c6(),
+            prefix(),
+            BoardFs::Refused,
+            true,
+            FilesEvidence::default(),
+            None,
+            None,
+            None,
+            &mut offers,
+        )
+        .expect("the refused line");
+        assert_eq!(layout.line.as_deref(), Some(REFUSED_STORE_LINE));
+        assert!(
+            layout
+                .line
+                .as_deref()
+                .unwrap()
+                .contains("lp-cli hardware tree extract")
+        );
+        assert!(layout.finish_update.is_none());
+        for verb in [FINISH_UPDATE, RESTORE_FILES, RESTORE_FROM_FILE] {
+            assert!(
+                offers.get(&prefix().child(verb)).is_none(),
+                "{verb} offered"
+            );
+        }
     }
 
     /// The layout facts carry the path their verbs were published at: the

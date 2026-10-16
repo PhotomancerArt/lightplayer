@@ -24,11 +24,28 @@ pub const ENGINE_BASE: u32 = 0x4240_0000;
 /// The window the engine may occupy.
 pub const ENGINE_WINDOW: u32 = 0x40_0000;
 
+/// The symbol that takes the 64 KiB `.text_gap` out of the core's link
+/// (the LP esp-hal fork's sixth diff, `third_party/esp-hal/ld/esp32c6/esp32c6.x`).
+///
+/// esp-hal moves flash `.text` to the next 64 KiB page (+ 0x20) after
+/// rodata because the IDF second-stage bootloader wants the two in separate
+/// segments. The IDF bootloader never loads the core: the split loader does
+/// (`fw-esp32c6-loader/src/esp_image.rs`), and it maps every page a flash
+/// segment touches, needing only that a segment's bytes sit at its address's
+/// offset in a page. So the core's `.text` follows its rodata in the same
+/// page, espflash merges the two into one flash segment, and the gap —
+/// filled with the core's RAM segments and then up to ~20 KB of padding
+/// once rodata crosses a page — is gone. Both passes define it, so pass 1
+/// lays the core out the way pass 2 will. The single image (no split) never
+/// defines it and keeps esp-hal's gap.
+pub const TEXT_FOLLOWS_RODATA: &str = "_lp_text_follows_rodata = 1;\n";
+
 /// The pass-1 script: only the header placed, so pass 1 links it where
 /// pass 2 will.
 pub fn pass1_script() -> String {
     format!(
-        "MEMORY {{\n  ENGINE : ORIGIN = {ENGINE_BASE:#x}, LENGTH = {ENGINE_WINDOW:#x}\n}}\n\
+        "{TEXT_FOLLOWS_RODATA}\
+         MEMORY {{\n  ENGINE : ORIGIN = {ENGINE_BASE:#x}, LENGTH = {ENGINE_WINDOW:#x}\n}}\n\
          SECTIONS {{\n  .engine_rodata : ALIGN(4) {{\n    KEEP(*(.engine_header))\n  }} > ENGINE\n}}\n\
          INSERT BEFORE .rodata;\n"
     )
@@ -74,6 +91,8 @@ impl EngineRules {
         s.push_str(
             "/* Engine region: mapped by the core at runtime, never by the bootloader. */\n",
         );
+        s.push_str("/* The core's flash .text follows its rodata: no 64 KiB .text_gap. */\n");
+        s.push_str(TEXT_FOLLOWS_RODATA);
         let _ = writeln!(
             s,
             "MEMORY {{\n  ENGINE : ORIGIN = {ENGINE_BASE:#x}, LENGTH = {ENGINE_WINDOW:#x}\n}}"
@@ -181,5 +200,40 @@ mod tests {
         assert!(header < s.find("*a.o(.rodata.x)").unwrap());
         assert!(s.contains("ORIGIN = 0x42400000"));
         assert!(s.ends_with("INSERT BEFORE .rodata;\n"));
+    }
+
+    #[test]
+    fn both_passes_take_the_text_gap_out_and_the_loader_still_maps_every_page() {
+        assert!(pass1_script().contains(TEXT_FOLLOWS_RODATA));
+        let rules = EngineRules {
+            rodata: vec![],
+            text: vec![],
+        };
+        assert!(rules.script().contains(TEXT_FOLLOWS_RODATA));
+        // The fork's gap is what the symbol switches off.
+        let esp32c6_x = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../third_party/esp-hal/ld/esp32c6/esp32c6.x"
+        ))
+        .unwrap();
+        assert_eq!(
+            esp32c6_x
+                .matches("DEFINED(_lp_text_follows_rodata) ? . :")
+                .count(),
+            2,
+            "the esp-hal fork's sixth diff (esp32c6.x .text_gap) moved: the core would \
+             get its 64 KiB gap back"
+        );
+        // What makes it safe: the loader maps every page a flash segment
+        // touches, needing only page congruence, so rodata and .text may
+        // share one page (and one segment).
+        let esp_image = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../lp-fw/fw-esp32c6-loader/src/esp_image.rs"
+        ))
+        .unwrap();
+        assert!(esp_image.contains("if data % page != addr % page {"));
+        assert!(esp_image.contains("let mut v = addr - addr % page;"));
+        assert!(esp_image.contains("while v < addr + len {"));
     }
 }

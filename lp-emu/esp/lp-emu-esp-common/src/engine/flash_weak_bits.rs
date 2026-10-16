@@ -11,9 +11,10 @@
 //!
 //! The lifecycle, which the tests pin:
 //!
-//! - **Set** only by a torn erase whose shape leaves them
+//! - **Set** only by a torn operation whose shape leaves them
 //!   ([`flash_cut`](super::flash_cut)): calibrated *erasing* and *reads
-//!   `0xFF` with weak bits*, and the guessed models' torn-erase shapes.
+//!   `0xFF` with weak bits*, a calibrated program torn inside a word, and
+//!   the guessed models' torn-erase shapes.
 //! - **Read** seeded: one [`SimRng`] seeded from the cut's seed, drawn once
 //!   per weak byte read, so a run is a function of `(seed, address, read
 //!   sequence)` and nothing else. No clock, no OS randomness.

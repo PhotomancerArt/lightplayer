@@ -1,8 +1,9 @@
 //! A nearly full store: a write GC can make room for is not refused, and a
 //! re-run after a power cut fits where the step fitted
-//! (`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`).
+//! (`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`,
+//! `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`).
 //! Small geometries on lp-nor-sim; each test fails on the store before
-//! that defect's fix.
+//! its defect's fix.
 
 extern crate std;
 
@@ -138,7 +139,10 @@ fn a_hot_head_full_of_old_roots_is_renewed() {
 /// record that did not fit the head's tail opened a head at once and left
 /// that tail unused, so compaction cycled over the same sectors and every
 /// one of these edits was refused. Filling the head's tail with the
-/// records that fit first wins those tails back.
+/// records that fit first wins those tails back. And every refusal is the
+/// admission rule's or the packing bound's, made before GC runs: none of
+/// these edits is refused after GC tried (the admission slack moved the
+/// edge, so 5 of the 12 fit, where 6 fitted at the byte-sum bound).
 #[test]
 fn compaction_near_full_wins_the_tails_back() {
     let cfg = StoreConfig::default();
@@ -147,39 +151,118 @@ fn compaction_near_full_wins_the_tails_back() {
         let (mut st, copies) = copies_until_refused(&cfg, seed);
         for i in 0..6u64 {
             fitted += push(&mut st, &edit_near_full(seed, i, copies)).is_ok() as u32;
+            assert_eq!(st.refused, None, "seed {seed} edit {i}: refused after GC");
         }
         let mut st = mount(st.into_flash(), &cfg);
         assert_eq!(snapshot(&mut st).len(), 12 * copies as usize);
     }
-    assert!(fitted >= 6, "{fitted} of 12 edits fitted");
+    assert!((4..12).contains(&fitted), "{fitted} of 12 edits fitted");
 }
 
-/// Pins the open defect
-/// `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`:
-/// on [`compaction_near_full_wins_the_tails_back`]'s store (seed 1), the
-/// second edit (two shaders saved) fits, but cut at op 197 of its 474 and
-/// run again it is refused: GC packs every sector to within 40 B of full
-/// and the re-run's last record is 41 B. When this fails, the defect's
-/// re-runs fit: close it.
+/// The 2026-10-10 defect's walk: 16 sectors of project copies until one is
+/// refused, then re-pushes and one- or two-shader saves, each cut at 12
+/// points under three tears and run again. At the byte-sum bound 11 of 792
+/// re-runs were refused `NoSpace` (4 seeds) where the step had fitted: GC
+/// compacted the cut's layout to within 40 B of full in every sector and
+/// the re-run's last record was 41 B. Admission now reads only the live set
+/// and the write, with a packing slack in every sector, so a step and its
+/// re-run get the same answer, and GC has the slack to reach it.
 #[test]
-fn a_rerun_near_full_can_still_be_refused() {
+fn a_rerun_near_full_fits_where_the_step_fitted() {
     let cfg = StoreConfig::default();
-    let (mut st, copies) = copies_until_refused(&cfg, 1);
-    push(&mut st, &edit_near_full(1, 0, copies)).unwrap();
+    let tears = [
+        TearModel::Clean,
+        TearModel::BytePrefix,
+        TearModel::RandomBits,
+    ];
+    let (mut reruns, mut fitted) = (0, 0);
+    for seed in 0..4u64 {
+        let (st, copies) = copies_until_refused(&cfg, seed);
+        let mut flash = st.into_flash();
+        for i in 0..6u64 {
+            let edit = edit_near_full(seed, i, copies);
+            let pre = flash.clone();
+            let mut st = mount(pre.clone(), &cfg);
+            let old = snapshot(&mut st);
+            st.flash_mut().set_plan(FaultPlan::none());
+            if push(&mut st, &edit).is_err() {
+                flash = st.into_flash();
+                continue;
+            }
+            fitted += 1;
+            let ops = st.flash().ops_since_plan();
+            let new = snapshot(&mut st);
+            flash = st.into_flash();
+            for k in 0..12u64 {
+                let cut = ops * k / 12;
+                let tear = tears[(k % 3) as usize];
+                let ctx = || format!("seed {seed} edit {i} cut {cut}/{ops} {tear:?}");
+                let mut st = mount(pre.clone(), &cfg);
+                st.flash_mut()
+                    .set_plan(FaultPlan::cut(cut, tear, seed * 1000 + k));
+                let _ = push(&mut st, &edit);
+                let mut f = st.into_flash();
+                f.power_cycle(FaultPlan::none());
+                let mut st = mount(f, &cfg);
+                let got = snapshot(&mut st);
+                if got == new {
+                    continue;
+                }
+                assert!(got == old, "{}: neither old nor new", ctx());
+                reruns += 1;
+                push(&mut st, &edit).unwrap_or_else(|e| panic!("{}: re-run: {e:?}", ctx()));
+                assert!(snapshot(&mut st) == new, "{}: re-run state", ctx());
+            }
+        }
+    }
+    assert!(
+        fitted >= 6 && reruns > 50,
+        "fitted {fitted} re-runs {reruns}"
+    );
+}
+
+/// A refusal is remembered (RAM only): once GC could not make room for a
+/// write, one needing as many bytes is refused without GC running again
+/// (no erase, no copy) until a write needs fewer or a sector more is free.
+/// A refused write retried in a loop used to run GC on every try: tens of
+/// thousands of erases on one sector over a long walk.
+#[test]
+fn a_refused_write_is_not_collected_for_again() {
+    let cfg = StoreConfig::default();
+    let (st, copies) = copies_until_refused(&cfg, 0);
     let pre = st.into_flash();
-    let edit = edit_near_full(1, 1, copies);
+    // An edit that fits, but only after GC.
+    let gc_edit = (0..6u64)
+        .map(|i| edit_near_full(0, i, copies))
+        .find(|edit| {
+            let mut st = mount(pre.clone(), &cfg);
+            let before = st.stats().gc_runs;
+            push(&mut st, edit).is_ok() && st.stats().gc_runs > before
+        })
+        .expect("an edit that needs GC");
+    let refusal = |bytes, free| Some(crate::store_space::Refusal { bytes, free });
+
+    // GC failed before for a write this big, with no more free since: no
+    // GC, no erase, NoSpace.
     let mut st = mount(pre.clone(), &cfg);
-    let old = snapshot(&mut st);
-    push(&mut st, &edit).unwrap();
+    st.refused = refusal(0, st.free_sectors());
+    let (erases, runs) = (st.stats().erases, st.stats().gc_runs);
+    assert!(matches!(push(&mut st, &gc_edit), Err(StoreError::NoSpace)));
+    assert_eq!((st.stats().erases, st.stats().gc_runs), (erases, runs));
+    // A write needing fewer bytes than the one GC failed for, or a sector
+    // more free than GC left, runs GC again.
+    for r in [
+        refusal(u64::MAX, u32::MAX),
+        refusal(0, st.free_sectors() - 1),
+    ] {
+        let mut st = mount(pre.clone(), &cfg);
+        st.refused = r;
+        push(&mut st, &gc_edit).unwrap();
+    }
+    // A write the layout has room for never asks.
     let mut st = mount(pre, &cfg);
-    st.flash_mut()
-        .set_plan(FaultPlan::cut(197, TearModel::Clean, 197));
-    assert!(push(&mut st, &edit).is_err());
-    let mut f = st.into_flash();
-    f.power_cycle(FaultPlan::none());
-    let mut st = mount(f, &cfg);
-    assert!(snapshot(&mut st) == old);
-    assert!(matches!(push(&mut st, &edit), Err(StoreError::NoSpace)));
+    st.refused = refusal(0, u32::MAX);
+    st.put("/projects/f0/.lp/panel.json", &text(5, 40)).unwrap();
 }
 
 type Files = Vec<(String, Vec<u8>)>;

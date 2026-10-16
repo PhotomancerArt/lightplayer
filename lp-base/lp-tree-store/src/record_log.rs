@@ -261,6 +261,7 @@ impl<F: Flash> RecordLog<F> {
             self.sectors.end[pick as usize] = SECTOR_HEADER_LEN as u16;
             self.sectors.live[pick as usize] = 0;
             self.sectors.seq[pick as usize] = header.seq;
+            self.sectors.set_kind(pick, kind);
             self.heads[kind.index()] = Some(pick);
             stat!(self.counters.sectors_opened += 1);
             return Ok(pick);
@@ -318,6 +319,28 @@ impl<F: Flash> RecordLog<F> {
             off += n as u32;
         }
         Ok(true)
+    }
+
+    /// Program `first ++ parts…` at `addr` again — bytes that already read
+    /// back so, CRC-checked — and read them back. Program only clears bits,
+    /// so this changes no bit that reads 1 and finishes a clear a torn
+    /// program left weak: the bytes then read as they did on every read
+    /// (`record_scan.rs`, "settling a head's tail").
+    pub fn reprogram(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
+        self.program(addr, first)?;
+        let mut a = addr + first.len() as u32;
+        for p in parts {
+            self.program(a, p)?;
+            a += p.len() as u32;
+        }
+        self.verify(addr, first, parts)
+    }
+
+    /// Program the record header at `offset` of `s` — one that did not
+    /// check — to zeros: it then fails to parse on every read, so a torn
+    /// record that read bad once can never read whole later.
+    pub fn kill_record(&mut self, s: u32, offset: u32) -> R<(), F> {
+        self.program(self.addr(s, offset), &[0u8; RECORD_HEADER_LEN as usize])
     }
 
     fn program(&mut self, addr: u32, data: &[u8]) -> R<(), F> {

@@ -10,8 +10,10 @@
 //!   status polls are not counted (`lp_emu_esp_common::engine::flash_cut`).
 //! - `<model>`: a `lp-nor-sim` tear model by name (`TearModel::NAMED`):
 //!   `clean`, `byte_prefix`, `random_bits`, `calibrated`,
-//!   `calibrated_zeroing`, `calibrated_all_zero`, `calibrated_erasing`,
-//!   `calibrated_reads_ff_weak`, `calibrated_reads_ff`.
+//!   `calibrated_zeroing`, `calibrated_zeroing_mid_word`,
+//!   `calibrated_all_zero`, `calibrated_first_lift`, `calibrated_erasing`,
+//!   `calibrated_reads_ff_weak`, `calibrated_reads_ff`,
+//!   `calibrated_before_erase`, `calibrated_mid_word`.
 //! - `<seed>`: every random choice of the tear and of the weak reads after
 //!   it. Decimal.
 //! - `range=<off>+<len>`: the flash bytes to count in, hex (`0x…`) or

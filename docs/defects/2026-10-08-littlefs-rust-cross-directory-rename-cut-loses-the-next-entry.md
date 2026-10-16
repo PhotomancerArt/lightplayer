@@ -26,9 +26,13 @@ the repair. A rename within one directory is not affected. Not yet checked
 against the C littlefs reference.
 
 **Fix** — none in the library. The testbed's F2 keeps every temporary beside
-its target (same-directory renames only). The product calls no `rename` on
-littlefs today (`/hardware.json.next` is settled by write + delete), so no
-shipped path is exposed.
+its target (same-directory renames only). The product's one `rename` on
+littlefs (since 2026-10-14: a new file written as `<name>#lp-new` and renamed
+into place, `fw-esp32-common/src/lp_fs.rs`, the fix for
+`2026-10-10-a-cut-during-a-littlefs-file-create-leaves-it-empty`) is within
+one directory, and its suffix sorts the temporary next to its target so the
+two share a metadata pair; `/hardware.json.next` is still settled by write +
+delete. No shipped path renames across directories.
 
 **Regression coverage** —
 `tools/lp-store-bench/src/candidates/littlefs_volume.rs`

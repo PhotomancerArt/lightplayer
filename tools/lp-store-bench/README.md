@@ -116,27 +116,32 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s eleven mutants, through one fixed set
+  store, then each of `lp-tree-store`'s twelve mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
-  walk with one sector worn on erases and one on programs). A catch is a
-  failure kind the unmutated store does not show in that driver; pass =
-  every mutant caught. Last run (commit `f8257303b`, lp-nor-sim simulator):
+  walk with one sector worn on erases and one on programs), every driver
+  under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
+  `calibrated_mid_word`. A catch is a failure kind the unmutated store does
+  not show in that driver; pass = every mutant caught. Last run (the
+  single-read-trust fix, 2026-10-14, lp-nor-sim simulator):
 
-  | mutant | caught first by | failures |
+  | mutant | caught by | failures |
   |---|---|---|
-  | `skip_kill` | wear | 1 (`unmountable`: a header reads newer) |
-  | `trust_record_headers` | sweep | 708 |
+  | `skip_kill` | wear | 1 (`unmountable`) |
+  | `trust_record_headers` | sweep | 853 |
   | `dedup_against_all_records` | long | 6 |
-  | `gc_erase_before_copy` | sweep_gc | 359 |
-  | `root_before_dirs` | double | 174 |
+  | `gc_erase_before_copy` | sweep_gc | 338 |
+  | `root_before_dirs` | double | 222 |
   | `resume_without_tail_check` | fuzz (`stale_tail`) | 70 |
-  | `no_space_after_write` | sweep | 337 |
-  | `gc_forgets_pending` | sweep | 104 |
-  | `magic_first` | sweep_gc | 2 |
+  | `no_space_after_write` | sweep | 409 |
+  | `gc_forgets_pending` | sweep | 105 |
+  | `magic_first` | sweep_gc | 4 |
   | `newer_version_untrusted` | fuzz (`newer_version`) | 120 |
   | `open_without_read_back` | wear (`program_over_unerased`) | 2 |
+  | `trust_tail_once` | double | 1 (`remount_failed`) |
 
-  The unmutated store: 0 failures in all seven drivers (5,164 cases).
+  The unmutated store: 0 failures in all seven drivers (6,115 cases).
+  Before `calibrated_mid_word` joined the set, `skip_kill` survived it
+  (10 of 11 caught at `609f0e4c9`).
 
 `overnight` also runs, every round, `long` (4 walks × 10k steps), one
 `full-flash` and one `fuzz` per candidate (P8–P10) and the GC dials once
@@ -184,14 +189,21 @@ names; default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s
 --tears <names>` runs every driver of the smoke under those models; without
 it the smoke is what it always was (the sweeps under the three guessed
 models, the double cut under `random_bits`).
-`calibrated` is the model measured on a real part (CX1, 200 cuts:
+`calibrated` is the model measured on a real part (CX1, 700 cuts:
 `docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
-read `0x00` from the front or throughout, or silently read erased; it runs
-only when named, and a reproducer that names it replays under it.
-`calibrated_zeroing`, `calibrated_all_zero`, `calibrated_erasing`,
-`calibrated_reads_ff_weak` and `calibrated_reads_ff` force every torn erase
-to that one measured state (programs keep the calibrated mix). A sweep
-summary's `torn_erases` counts the cases whose cut tore an erase.
+read `0x00` from the front or throughout, or silently read erased; rarely a
+cut that lands before an erase starts, an erase caught inside a pre-program
+word or with only its first bit lifted, or a program torn inside a 4-byte
+word with a weak bit; it runs only when named, and a reproducer that names
+it replays under it (under the weights of the build that replays it).
+`calibrated_zeroing`, `calibrated_zeroing_mid_word`, `calibrated_all_zero`,
+`calibrated_first_lift`, `calibrated_erasing`, `calibrated_reads_ff_weak`
+and `calibrated_reads_ff` force every torn erase to that one measured state
+(programs keep the calibrated mix);
+`calibrated_before_erase` lands every erase cut before its erase and
+`calibrated_mid_word` tears every program inside a word (the other family
+keeps the mix). A sweep summary's `torn_erases` counts the cases whose cut
+tore an erase (an erase cut before it started is not one).
 
 `--corpus` defaults to the spike's `measurements/corpus`; `--out` to
 `target/lp-store-bench/<cmd>`; `--threads` 8; `--sectors` 128.

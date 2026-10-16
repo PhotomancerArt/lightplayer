@@ -43,28 +43,43 @@ crate may depend on an AGPL workspace crate (`just lint-emu-fence`).
   realistic nasty case: a sector that "reads erased" may not be, so a store
   must only trust a sector it finished erasing *and then marked*.
 - **`Calibrated`** (`calibrated_tear.rs`) — tears shaped and weighted the
-  way a real part tore: 200 power cuts on CX1, a generic C6 board with flash
+  way a real part tore: 700 power cuts on CX1, a generic C6 board with flash
   JEDEC `0x464016` (`docs/reports/2026-10-08-c6-nor-tear-calibration.md`;
-  calibrated on 200 cuts, re-checked at 500). A torn **program** lands a
-  prefix of exactly what was asked, ending on the mask ROM's 32-byte command
-  (26 of 33) or on a 4-byte word inside one (7 of 33) — no partial byte, no
-  scatter. A torn **erase** is one of five states the part passes through
-  (it pre-programs the sector to `0x00`, then lifts it): a word-aligned
-  `0x00` run from the front with the old data after it (10 of 166), all
-  `0x00` (26), a residue of zeros spread over the sector with weak bits
-  (28, drawn from the observed table), reads `0xFF` with a couple of weak
-  bits (1), and reads `0xFF` with **no** weak bit (101). The weights are
-  `TearMix::CX1`; `NorFlashSim::set_tear_mix` replaces them (e.g.
-  `TearMix::CX1.erase_only(EraseShape::AllZero)` makes every torn erase read
-  `0x00`). `CalibratedZeroing` … `CalibratedReadsFf` — named `calibrated_zeroing`,
-  `calibrated_all_zero`, `calibrated_erasing`, `calibrated_reads_ff_weak`,
-  `calibrated_reads_ff` — forces every torn erase to one shape, so a sweep
-  meets that state at every erase cut instead of at about one in five. None
-  of these is in `TearModel::ALL` (the drivers' default list); name one
+  fitted on the first 200 aligned, re-fitted on 500 aligned, then on all
+  700 when the 200 unaligned cuts showed two erase states it could not
+  draw). A torn **program** lands a prefix of exactly what was asked, ending
+  on the mask ROM's 32-byte command (74 of 104) or on a 4-byte word inside
+  one (28 of 104) — or, rarely, **inside a word** (2 of 104): whole words,
+  then one word with only some of its clears landed and a weak bit on one
+  that did not, then nothing. A cut at an **erase** is one of seven states
+  the part passes through (it pre-programs the sector to `0x00`, then lifts
+  it): a word-aligned `0x00` run from the front with the old data after it
+  (20 of 591), the same run **caught inside its next word** (3: some of that
+  word's clears landed, sometimes a weak bit on one that did not), all
+  `0x00` (87), all `0x00` but **the first bit to lift** (2: a stable 1, or
+  weak), a residue of zeros spread over the sector with weak bits (101,
+  drawn from the observed table), reads `0xFF` with a few weak bits (7), and
+  reads `0xFF` with **no** weak bit (370) — or (1 of 591) the cut landed
+  **before the erase started**: the sector exactly as it was, not even
+  tainted (`cut_before_erase` is where the cut landed, not an erase shape;
+  `NorStats::erase_cuts_before_start` counts it, `torn_erases` does not).
+  The weights are `TearMix::CX1`; `NorFlashSim::set_tear_mix` replaces them
+  (e.g. `TearMix::CX1.erase_only(EraseShape::AllZero)` makes every torn
+  erase read `0x00`). `CalibratedZeroing` … `CalibratedReadsFf`,
+  `CalibratedZeroingMidWord` and `CalibratedFirstLift` — named
+  `calibrated_zeroing`, `calibrated_all_zero`, `calibrated_erasing`,
+  `calibrated_reads_ff_weak`, `calibrated_reads_ff`,
+  `calibrated_zeroing_mid_word`, `calibrated_first_lift` — force every torn
+  erase to one shape, so a sweep meets that state at every erase cut instead
+  of at a few in a hundred; `calibrated_before_erase` lands every erase cut
+  before its erase, and `calibrated_mid_word` tears every program inside a
+  word (the other family keeps the calibrated mix). None of these is in
+  `TearModel::ALL` (the drivers' default list); name one
   (`TearModel::from_name("calibrated")`, `TearModel::NAMED`) to run it. The
   three guessed models are unchanged.
 - **Counters** (`NorStats`): ops, program calls/pages/bytes, erases per
-  sector, read calls/bytes, violations, torn ops.
+  sector, read calls/bytes, violations, torn ops, torn erases, erase cuts
+  before the erase started.
 - **Cheap clones:** cells live in one `Arc` buffer per sector, so a sweep
   runs a workload prefix once and forks it per cut point.
 - **Read watchdog** (`set_read_budget`): reads fail with `Watchdog` past a

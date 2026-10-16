@@ -450,6 +450,9 @@ const fn catalog_note(feature: LpFeature) -> CatalogNote {
         LpFeature::ShaderF32 => CatalogNote::Extra {
             present: "f32 shader math",
         },
+        LpFeature::FsTree => CatalogNote::Extra {
+            present: "tree-store filesystem",
+        },
     }
 }
 
