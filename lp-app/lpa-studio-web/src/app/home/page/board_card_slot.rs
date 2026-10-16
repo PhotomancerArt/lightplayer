@@ -190,6 +190,7 @@ mod tests {
             projects: &[],
             lens: None,
             now: 0.0,
+            panel: None,
         })
     }
 
@@ -217,6 +218,7 @@ mod tests {
             frame_age_secs: Some(3.0 * 3_600.0),
             engine_fps: None,
             liveness: lpa_studio_core::FeedLiveness::Offline,
+            from_lens: false,
         }
     }
 

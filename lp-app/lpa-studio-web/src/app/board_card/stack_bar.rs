@@ -6,6 +6,11 @@
 //! bar's details ([`BarDetails`], the merged detail card). The action sits
 //! outside the trigger (DC14), so pressing it never opens the details.
 //!
+//! A mark ([`UiBarMark`]) is an icon alone at the line's end, after the
+//! aside — the cloud on a board also reachable through lightplayer.app —
+//! with its words as its accessible name and hover, and the live tone while
+//! it is lit.
+//!
 //! The bar's tone tints the row in its status family with the tone's icon
 //! leading — never colour alone (`docs/style/ui.md` "Icons"): Attention,
 //! Warning, Error (striped), Live (blue: Update), Good. Neutral is untinted.
@@ -13,7 +18,7 @@
 //! how each looks.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{BarWorkState, OfferPath, UiAction, UiStackBar, UiStatusKind};
+use lpa_studio_core::{BarWorkState, OfferPath, UiAction, UiBarMark, UiStackBar, UiStatusKind};
 
 use super::bar_details::BarDetails;
 use super::bar_work::{BarWork, work_state_name};
@@ -116,7 +121,6 @@ pub fn StackBar(
 fn bar_line(bar: &UiStackBar) -> Element {
     let toned = bar.tone != UiStatusKind::Neutral;
     let icon = tone_icon(bar.tone).or_else(|| action_icon_name(Some(bar.icon.as_str())));
-    let aside_icon = action_icon_name(bar.aside_icon.as_deref());
     rsx! {
         if let Some(icon) = icon {
             span { class: if toned { ICON_TONED_CLASS } else { ICON_CLASS }, aria_hidden: "true",
@@ -126,23 +130,45 @@ fn bar_line(bar: &UiStackBar) -> Element {
         span { class: if toned { SUMMARY_TONED_CLASS } else { SUMMARY_CLASS }, "{bar.summary}" }
         if let Some(aside) = bar.aside.clone() {
             span { class: if toned { ASIDE_TONED_CLASS } else { ASIDE_CLASS },
-                if let Some(icon) = aside_icon {
-                    span { class: "tw:inline-flex tw:flex-none", aria_hidden: "true",
-                        StudioIcon { name: icon, size: 11 }
-                    }
-                }
                 span { class: "tw:truncate", "{aside}" }
             }
+        }
+        if let Some(mark) = bar.mark.clone() {
+            {bar_mark(mark)}
         }
     }
 }
 
-/// The bar's hover title: its whole line, which the row may cut.
+/// The mark: its icon alone, its words the accessible name and the hover,
+/// in the live tone while lit.
+fn bar_mark(mark: UiBarMark) -> Element {
+    let Some(icon) = action_icon_name(Some(mark.icon.as_str())) else {
+        return rsx! {};
+    };
+    rsx! {
+        span {
+            class: if mark.lit { MARK_LIT_CLASS } else { MARK_CLASS },
+            role: "img",
+            aria_label: "{mark.label}",
+            title: "{mark.label}",
+            "data-bar-mark": "{mark.icon}",
+            "data-lit": if mark.lit { "true" } else { "false" },
+            StudioIcon { name: icon, size: 12 }
+        }
+    }
+}
+
+/// The bar's hover title: its whole line, which the row may cut, and its
+/// mark's words.
 fn bar_title(bar: &UiStackBar) -> String {
-    match (&bar.work, &bar.aside) {
+    let line = match (&bar.work, &bar.aside) {
         (Some(work), _) => work.words.clone(),
         (None, Some(aside)) => format!("{} · {aside}", bar.summary),
         (None, None) => bar.summary.clone(),
+    };
+    match (&bar.work, &bar.mark) {
+        (None, Some(mark)) => format!("{line} · {}", mark.label),
+        _ => line,
     }
 }
 
@@ -227,10 +253,51 @@ const ASIDE_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:max-w-[45%] tw:flex-none
 const ASIDE_TONED_CLASS: &str =
     "tw:inline-flex tw:min-w-0 tw:max-w-[45%] tw:flex-none tw:items-center tw:gap-1 tw:opacity-80";
 const CHEVRON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-dim-foreground";
+/// A mark at rest: set up, not holding yet (Cloud relay on, the board not
+/// registered).
+const MARK_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:text-dim-foreground";
+/// A lit mark: the live tone (the board reachable through lightplayer.app).
+const MARK_LIT_CLASS: &str =
+    "tw:inline-flex tw:flex-none tw:items-center tw:text-status-live-foreground";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cloud mark is the icon alone: no words on the bar, its label the
+    /// accessible name and the hover, lit in the live tone when the board is
+    /// reachable through lightplayer.app.
+    #[test]
+    fn a_mark_is_an_icon_alone_with_its_words_as_its_name() {
+        let bar = UiStackBar {
+            layer: lpa_studio_core::BarLayer::Connection,
+            icon: "usb".to_string(),
+            summary: "USB · connected".to_string(),
+            aside: None,
+            mark: Some(UiBarMark {
+                icon: "cloud".to_string(),
+                label: lpa_studio_core::ALSO_THROUGH_THE_CLOUD.to_string(),
+                lit: true,
+            }),
+            tone: UiStatusKind::Neutral,
+            action: None,
+            work: None,
+            details: lpa_studio_core::UiBarDetails::default(),
+        };
+        let html = dioxus_ssr::render_element(bar_line(&bar));
+        assert!(html.contains("data-bar-mark=\"cloud\""), "{html}");
+        assert!(html.contains("data-lit=\"true\""), "{html}");
+        assert!(
+            html.contains("aria-label=\"Also reachable through lightplayer.app\""),
+            "{html}"
+        );
+        assert!(!html.contains(">also cloud<"), "no words: {html}");
+        assert!(MARK_LIT_CLASS.contains("status-live"));
+        assert_eq!(
+            bar_title(&bar),
+            "USB · connected · Also reachable through lightplayer.app"
+        );
+    }
 
     const KINDS: [UiStatusKind; 7] = [
         UiStatusKind::Neutral,

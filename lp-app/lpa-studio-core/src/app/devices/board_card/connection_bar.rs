@@ -15,12 +15,15 @@
 //! | Identifying, or a Wi‑Fi or relay connect under way | (the work shows) | Neutral | the work's Cancel |
 //! | A Wi‑Fi connect turned away busy | "Someone else connected" | Attention | Retry (the same road) |
 //! | A take-over under way (asking the other tab, opening the board) | (the work shows) | Neutral | — |
+//! | A Connect under way (reaching the board, or its session opening) | (the work shows: "Connecting…") | Neutral | — |
+//! | The connected session's link dropped, held for the board | (the work shows: "Reconnecting…") | Neutral | — |
+//! | The last Connect failed | (the work, striped: "Couldn't connect"; the reason in the details) | — | Retry (`connect`) |
 //! | Another tab holds the board | "Open in another tab" ("editor open", or what it is busy with) | Attention | — (Connect, the primary, is the take-over) |
 //! | …a tab that let go on request | "Taken by another tab" | Attention | — |
 //! | …a take-over that failed | (the failure, striped) | — | Retry (`take-over`) |
 //! | A Wi‑Fi connect that failed otherwise | (the failure, striped) | — | Retry |
-//! | A stand-in, linked | "In this tab · live" | Neutral | — |
-//! | A stand-in, off | "In this tab · off" | Neutral | — (Power on is the primary) |
+//! | A stand-in, linked | "Simulated · running" / "Emulated · running" | Neutral | — |
+//! | A stand-in, off | "Simulated · off" / "Emulated · off" | Neutral | — (Power on is the primary) |
 //! | Not responding | "<link> · not responding" | Warning | Retry |
 //! | Port there, closed | "<link> · not connected" | Neutral | — (Connect is the primary) |
 //! | Offline | "Offline · <how long>" | Neutral | — (the primary reconnects) |
@@ -31,25 +34,29 @@
 //! how well it answers. "Someone else connected" is for a holder Studio
 //! cannot name (a stranger on the network slot); "Open in another tab" is a
 //! tab of this browser (`docs/style/language.md`). The held words are
-//! [`super::held_board`]'s. The aside says whether the board is also reached
-//! through lightplayer.app ("also cloud") or not ("direct only") — once its
-//! own Wi‑Fi status has been read (R20), and never on a relay link, which
-//! is the cloud.
+//! [`super::held_board`]'s. A stand-in says what it is ("Simulated",
+//! "Emulated"), never only where it lives. A board also reachable through
+//! lightplayer.app carries the cloud alone at the bar's end, no words
+//! ([`super::UiBarMark`]: "Also reachable through lightplayer.app" is its
+//! label and hover), lit while the board is registered there; a board
+//! reached only directly carries nothing. Only once its own Wi‑Fi status
+//! has been read (R20), and never on a relay link, which is the cloud.
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::PendingLinkView;
 
 use super::bar_work::bar_work;
 use super::board_card_input::{BoardCardInput, link_icon};
+use super::board_connection::BoardConnection;
 use super::detail_sections::{facts, notice, verbs, without_empty};
 use super::held_board::{held_aside, held_sentence, held_summary, take_over_work};
-use super::primary_action::{offline_words, primary_action};
+use super::primary_action::{CONNECTING, offline_words, primary_action};
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_bluetooth_switch::bluetooth_switch;
 use super::ui_card_action::UiCardAction;
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiPrimary;
-use super::ui_stack_bar::{BarLayer, UiBarDetails, UiStackBar};
+use super::ui_stack_bar::{BarLayer, UiBarDetails, UiBarMark, UiStackBar};
 use crate::app::devices::age_words::age_words;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::devices::wifi_connects::UiWifiConnect;
@@ -60,6 +67,21 @@ use crate::{ActionConsequence, RichLine, UiStatusKind};
 /// connection.
 pub const SOMEONE_ELSE_SENTENCE: &str =
     "Another device holds this board's network connection. Try again when it lets go.";
+
+/// The bar's work while a connected board's dropped link is held for it to
+/// come back.
+pub const RECONNECTING: &str = "Reconnecting\u{2026}";
+
+/// The bar's failed work when the last Connect did not open; the reason is
+/// in the bar's details.
+pub const COULDNT_CONNECT: &str = "Couldn't connect";
+
+/// The cloud mark's label while lightplayer.app can reach the board.
+pub const ALSO_THROUGH_THE_CLOUD: &str = "Also reachable through lightplayer.app";
+
+/// The cloud mark's label while Cloud relay is on and the board is not
+/// registered with lightplayer.app.
+pub const CLOUD_NOT_YET: &str = "Cloud relay is on; lightplayer.app can't reach it right now";
 
 /// The connection bar.
 pub(crate) fn connection_bar(input: &BoardCardInput<'_>) -> UiStackBar {
@@ -83,14 +105,14 @@ pub(crate) fn connection_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             UiStatusKind::Attention,
             None,
         )
-    } else if input.stand_in() {
+    } else if let Some(runtime) = input.runtime {
         icon = "play".to_string();
         let state = match input.linked() {
-            true => "live",
+            true => "running",
             false => "off",
         };
         (
-            format!("In this tab · {state}"),
+            format!("{} · {state}", runtime.kind_word()),
             UiStatusKind::Neutral,
             None,
         )
@@ -126,11 +148,12 @@ pub(crate) fn connection_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     };
     let work = bar_work(input, BarLayer::Connection)
         .or_else(|| take_over_work(input))
+        .or_else(|| session_work(input))
         .or_else(|| failed_connect(input));
     let quiet = work.is_some();
-    let (aside, aside_icon) = match held {
+    let (aside, mark) = match held {
         Some(held) => (held_aside(held), None),
-        None => cloud_aside(input, link),
+        None => (None, cloud_mark(input, link)),
     };
     UiStackBar {
         layer: BarLayer::Connection,
@@ -138,7 +161,7 @@ pub(crate) fn connection_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         details: details(input, &summary, tone),
         summary,
         aside,
-        aside_icon,
+        mark,
         tone: if quiet { UiStatusKind::Neutral } else { tone },
         action: if quiet { None } else { action },
         work,
@@ -158,7 +181,7 @@ pub(crate) fn pending_connection_bar(pending: &PendingLinkView, link: UiLinkKind
         icon: link_icon(link).to_string(),
         summary: format!("{} · new", link.label()),
         aside: None,
-        aside_icon: None,
+        mark: None,
         tone: UiStatusKind::Neutral,
         action: None,
         work: identifying.then(|| UiBarWork {
@@ -188,6 +211,42 @@ fn busy_retry(input: &BoardCardInput<'_>, connect: &UiWifiConnect) -> Option<UiC
         .map(|offer| UiCardAction::press(offer, "Retry").with_icon("retry"))
 }
 
+/// The session's state while it is not open on the card (CD7): Connecting
+/// (the board being reached, or its session opening), Reconnecting (the
+/// connected session's link dropped and the lens holds on), or the last
+/// Connect's failure — "Couldn't connect", striped, with Connect as its
+/// Retry and the reason in the details. Connected and watched boards do no
+/// session work.
+fn session_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
+    // A board that stopped answering says so, with its Retry, rather than a
+    // spinner over it: a Connect held for it attaches once Retry brings it
+    // back.
+    let answering = input.view.status != DeviceStatus::NotResponding;
+    let running = |words: &str| UiBarWork {
+        words: words.to_string(),
+        percent: None,
+        state: BarWorkState::Running,
+        cancel: None,
+        other_device: false,
+    };
+    match input.connection {
+        BoardConnection::Connecting => answering.then(|| running(CONNECTING)),
+        BoardConnection::Reconnecting => answering.then(|| running(RECONNECTING)),
+        BoardConnection::Failed { .. } => Some(UiBarWork {
+            words: COULDNT_CONNECT.to_string(),
+            percent: None,
+            state: BarWorkState::Failed {
+                retry: input
+                    .offer("connect")
+                    .map(|connect| UiCardAction::press(connect, "Retry").with_icon("retry")),
+            },
+            cancel: None,
+            other_device: false,
+        }),
+        BoardConnection::Watched | BoardConnection::Connected => None,
+    }
+}
+
 /// A Wi‑Fi or relay connect that failed (not turned away busy): the bar's
 /// failure, striped, with Retry on the same road.
 fn failed_connect(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
@@ -212,19 +271,28 @@ fn failed_connect(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
     })
 }
 
-/// "also cloud" (with the cloud icon) or "direct only", once the board's
-/// own Wi‑Fi status says whether Cloud relay is on; never on a relay link.
-fn cloud_aside(input: &BoardCardInput<'_>, link: UiLinkKind) -> (Option<String>, Option<String>) {
+/// The cloud alone at the bar's end, once the board's own Wi‑Fi status
+/// says Cloud relay is on: lit while lightplayer.app has the board
+/// registered, plain while it is on and not there yet. Nothing for a board
+/// reached only directly, and never on a relay link, which is the cloud.
+fn cloud_mark(input: &BoardCardInput<'_>, link: UiLinkKind) -> Option<UiBarMark> {
     if link == UiLinkKind::Relay {
-        return (None, None);
+        return None;
     }
-    match input.wifi.and_then(|wifi| wifi.status.as_ref()) {
-        Some(status) if status.cloud_relay => {
-            (Some("also cloud".to_string()), Some("cloud".to_string()))
+    let status = input
+        .wifi
+        .and_then(|wifi| wifi.status.as_ref())
+        .filter(|status| status.cloud_relay)?;
+    let lit = status.relay == lpc_wire::server::RelayState::Connected;
+    Some(UiBarMark {
+        icon: "cloud".to_string(),
+        label: match lit {
+            true => ALSO_THROUGH_THE_CLOUD,
+            false => CLOUD_NOT_YET,
         }
-        Some(_) => (Some("direct only".to_string()), None),
-        None => (None, None),
-    }
+        .to_string(),
+        lit,
+    })
 }
 
 /// The connection bar's details: the notice, how the board is reached, its
@@ -291,6 +359,9 @@ fn details(input: &BoardCardInput<'_>, summary: &str, tone: UiStatusKind) -> UiB
     if let Some(detail) = &view.detail {
         reach.push(RichLine::new("Detail", detail.clone()));
     }
+    if let BoardConnection::Failed { reason } = input.connection {
+        reach.push(RichLine::new(COULDNT_CONNECT, reason.clone()));
+    }
     sections.push(facts("Reach", reach));
 
     let mut links = Vec::new();
@@ -335,6 +406,17 @@ fn details(input: &BoardCardInput<'_>, summary: &str, tone: UiStatusKind) -> UiB
         Some(UiPrimary::Offer(action)) => Some(action.offer),
         _ => None,
     };
+    // The road the primary's Connect takes to an offline board: its own
+    // offer is the same reach, and is not offered twice.
+    let primary_road = input
+        .offer("connect")
+        .filter(|connect| Some(&connect.path) == primary.as_ref())
+        .and_then(|connect| match connect.action.op_as::<crate::RuntimeOp>() {
+            Some(crate::RuntimeOp::ConnectDevice {
+                reach: Some(reach), ..
+            }) => Some(road_verb(*reach)),
+            _ => None,
+        });
     let mut actions = Vec::new();
     if let Some(identify) = input.offer("identify") {
         actions.push(UiCardAction::press(identify, "Identify again").with_icon("info"));
@@ -347,6 +429,7 @@ fn details(input: &BoardCardInput<'_>, summary: &str, tone: UiStatusKind) -> UiB
         // A board another tab holds is reached by the take-over (the
         // primary); each of these would fight that tab for the board.
         if held.is_none()
+            && Some(verb) != primary_road
             && let Some(offer) = input
                 .offer(verb)
                 .filter(|offer| Some(&offer.path) != primary.as_ref())
@@ -362,6 +445,16 @@ fn details(input: &BoardCardInput<'_>, summary: &str, tone: UiStatusKind) -> UiB
         sections: without_empty(sections),
         panels,
         raised: false,
+    }
+}
+
+/// The verb of the offer that reaches an offline board by `reach`, the
+/// road a Connect takes there.
+fn road_verb(reach: crate::ConnectReach) -> &'static str {
+    match reach {
+        crate::ConnectReach::Wifi => "connect-wifi",
+        crate::ConnectReach::Relay => "connect-relay",
+        crate::ConnectReach::Usb => "reconnect",
     }
 }
 
@@ -461,7 +554,7 @@ mod tests {
             let bar = connection_bar(&fixture.input());
             assert_eq!(bar.summary, "Open in another tab", "{level:?}");
             assert_eq!(bar.aside.as_deref(), aside, "{level:?}");
-            assert_eq!(bar.aside_icon, None);
+            assert_eq!(bar.mark, None);
             assert_eq!(bar.icon, "usb");
             assert_eq!(bar.tone, UiStatusKind::Attention, "orange: someone has it");
             assert_eq!(bar.work, None);
@@ -605,16 +698,131 @@ mod tests {
         assert!(retry.offer.to_string().ends_with("/connect-wifi"));
     }
 
+    /// CD7: a Connect under way is the bar's work, "Connecting…" — the
+    /// board being reached, or its session opening.
     #[test]
-    fn a_stand_in_is_in_this_tab_live_or_off() {
-        let mut fixture = CardFixture::ready();
-        fixture.runtime = Some(crate::UiRuntimeBand::sim("seeed/xiao-esp32-c6", None));
+    fn a_connect_under_way_is_connecting_work() {
+        for session_on_it in [false, true] {
+            let mut fixture = CardFixture::ready();
+            fixture.editor_holds_it = session_on_it;
+            fixture.connection = BoardConnection::Connecting;
+            let bar = connection_bar(&fixture.input());
+            assert_eq!(
+                bar.work,
+                Some(UiBarWork {
+                    words: "Connecting\u{2026}".to_string(),
+                    percent: None,
+                    state: BarWorkState::Running,
+                    cancel: None,
+                    other_device: false,
+                }),
+                "session on it: {session_on_it}"
+            );
+            assert_eq!(bar.tone, UiStatusKind::Neutral);
+            assert_eq!(bar.action, None);
+        }
+        // A board that stopped answering under a held Connect says so, with
+        // its Retry, instead of a spinner over it.
+        let mut deaf = CardFixture::ready();
+        deaf.view.status = DeviceStatus::NotResponding;
+        deaf.view.escapes.insert(0, Escape::Retry);
+        deaf.connection = BoardConnection::Connecting;
+        let bar = connection_bar(&deaf.input());
+        assert_eq!(bar.work, None);
+        assert_eq!(bar.summary, "USB \u{b7} not responding");
+        assert_eq!(
+            bar.action.map(|retry| retry.word),
+            Some("Retry".to_string())
+        );
+    }
+
+    /// CD7: the connected session's dropped link, held for the board, is
+    /// the bar's work, "Reconnecting…".
+    #[test]
+    fn a_dropped_link_held_is_reconnecting_work() {
+        let mut fixture = CardFixture::offline();
+        fixture.editor_holds_it = true;
+        fixture.connection = BoardConnection::Reconnecting;
         let bar = connection_bar(&fixture.input());
-        assert_eq!(bar.summary, "In this tab · live");
-        assert_eq!(bar.icon, "play");
-        let mut off = CardFixture::offline();
-        off.runtime = Some(crate::UiRuntimeBand::sim("seeed/xiao-esp32-c6", None));
-        assert_eq!(connection_bar(&off.input()).summary, "In this tab · off");
+        assert_eq!(
+            bar.work,
+            Some(UiBarWork {
+                words: RECONNECTING.to_string(),
+                percent: None,
+                state: BarWorkState::Running,
+                cancel: None,
+                other_device: false,
+            })
+        );
+    }
+
+    /// CD7: a Connect that did not open is the bar's failure, "Couldn't
+    /// connect", with Connect as its Retry and the reason in the details;
+    /// the card is otherwise watched.
+    #[test]
+    fn a_failed_connect_couldnt_connect_with_connect_as_retry() {
+        let mut fixture = CardFixture::ready();
+        fixture.connection = BoardConnection::Failed {
+            reason: "the board did not answer".to_string(),
+        };
+        let bar = connection_bar(&fixture.input());
+        assert_eq!(bar.summary, "USB \u{b7} connected", "its facts");
+        let work = bar.work.clone().expect("the failure");
+        assert_eq!(work.words, COULDNT_CONNECT);
+        let BarWorkState::Failed { retry: Some(retry) } = work.state else {
+            panic!("Retry");
+        };
+        assert_eq!(retry.word, "Retry");
+        assert!(
+            retry.offer.to_string().ends_with("/connect"),
+            "{}",
+            retry.offer
+        );
+        assert_eq!(retry.refused, None);
+        assert_eq!(
+            line(&bar, COULDNT_CONNECT).as_deref(),
+            Some("the board did not answer"),
+            "the reason is in the details"
+        );
+    }
+
+    /// Connected and watched boards do no session work.
+    #[test]
+    fn a_connected_board_does_no_session_work() {
+        let mut fixture = CardFixture::ready();
+        fixture.editor_holds_it = true;
+        fixture.connection = BoardConnection::Connected;
+        fixture.feed = Some(super::super::card_fixtures::lens_feed());
+        let bar = connection_bar(&fixture.input());
+        assert_eq!(bar.work, None);
+        assert_eq!(bar.summary, "USB \u{b7} live", "the lens's picture is live");
+    }
+
+    /// A stand-in says what it is: simulated or emulated, running or off.
+    #[test]
+    fn a_stand_in_says_what_it_is_running_or_off() {
+        for (runtime, kind) in [
+            (
+                crate::UiRuntimeBand::sim("seeed/xiao-esp32-c6", None),
+                "Simulated",
+            ),
+            (
+                crate::UiRuntimeBand::emu("seeed/xiao-esp32-c6", None),
+                "Emulated",
+            ),
+        ] {
+            let mut fixture = CardFixture::ready();
+            fixture.runtime = Some(runtime.clone());
+            let bar = connection_bar(&fixture.input());
+            assert_eq!(bar.summary, format!("{kind} · running"));
+            assert_eq!(bar.icon, "play");
+            let mut off = CardFixture::offline();
+            off.runtime = Some(runtime);
+            assert_eq!(
+                connection_bar(&off.input()).summary,
+                format!("{kind} · off")
+            );
+        }
     }
 
     #[test]
@@ -706,6 +914,7 @@ mod tests {
         assert_eq!(bar.summary, "Wi\u{2011}Fi via lightplayer.app · connected");
         assert_eq!(bar.icon, "cloud");
         assert_eq!(bar.aside, None, "a relay link is the cloud");
+        assert_eq!(bar.mark, None, "a relay link is the cloud");
         let words = format!("{bar:?}");
         assert!(!words.contains("Bluetooth"), "{words}");
         assert!(!words.contains("\"USB\""), "{words}");
@@ -732,19 +941,37 @@ mod tests {
         );
     }
 
+    /// Also reachable through lightplayer.app: the cloud alone, no words on
+    /// the bar, lit while the board is registered there; a board reached
+    /// only directly carries nothing.
     #[test]
-    fn the_aside_says_also_cloud_or_direct_only_once_the_board_said() {
+    fn the_cloud_mark_says_also_reachable_through_lightplayer_app() {
         let mut fixture = CardFixture::ready();
         fixture.wifi = Some(UiDeviceWifi::new(fixture.view.id, true));
-        assert_eq!(connection_bar(&fixture.input()).aside, None, "not read yet");
+        let bar = connection_bar(&fixture.input());
+        assert_eq!((bar.aside.clone(), bar.mark), (None, None), "not read yet");
         fixture.wifi = Some(wifi_with_relay(true));
         let bar = connection_bar(&fixture.input());
-        assert_eq!(bar.aside.as_deref(), Some("also cloud"));
-        assert_eq!(bar.aside_icon.as_deref(), Some("cloud"));
+        assert_eq!(bar.summary, "USB · connected");
+        assert_eq!(bar.aside, None, "no words");
+        assert_eq!(
+            bar.mark,
+            Some(UiBarMark {
+                icon: "cloud".to_string(),
+                label: ALSO_THROUGH_THE_CLOUD.to_string(),
+                lit: true,
+            })
+        );
+        let mut on_not_there = wifi_with_relay(true);
+        on_not_there.status.as_mut().unwrap().relay = RelayState::Connecting;
+        fixture.wifi = Some(on_not_there);
+        let mark = connection_bar(&fixture.input()).mark.expect("the cloud");
+        assert!(!mark.lit, "on, not reachable yet");
+        assert_eq!(mark.label, CLOUD_NOT_YET);
         fixture.wifi = Some(wifi_with_relay(false));
         let bar = connection_bar(&fixture.input());
-        assert_eq!(bar.aside.as_deref(), Some("direct only"));
-        assert_eq!(bar.aside_icon, None);
+        assert_eq!(bar.aside, None, "direct only says nothing");
+        assert_eq!(bar.mark, None);
         assert_eq!(line(&bar, "Wi\u{2011}Fi").as_deref(), Some("home"));
         assert!(
             bar.details
@@ -806,7 +1033,10 @@ mod tests {
                     rssi: -50,
                     host: "lp-b48c.local".to_string(),
                 },
-                relay: RelayState::Off,
+                relay: match cloud_relay {
+                    true => RelayState::Connected,
+                    false => RelayState::Off,
+                },
             }),
             ..UiDeviceWifi::new(lpa_devices::DeviceId(7), true)
         }

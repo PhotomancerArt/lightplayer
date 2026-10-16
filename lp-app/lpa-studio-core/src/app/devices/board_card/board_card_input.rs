@@ -23,6 +23,9 @@ use crate::app::home::UiPackageCard;
 use crate::app::network::UiDeviceWifi;
 use crate::{OfferPath, UiOffer};
 
+use super::board_connection::BoardConnection;
+use super::ui_board_panel::UiBoardPanel;
+
 /// One board's card, as facts. See the module docs.
 #[derive(Clone, Copy, Debug)]
 pub struct BoardCardInput<'a> {
@@ -69,8 +72,17 @@ pub struct BoardCardInput<'a> {
     pub last_seen_at: Option<f64>,
     /// How the board's last activity ended, and when.
     pub ended: Option<&'a ActivityEnd>,
-    /// The editor's lens is on this board (the docked lens card).
+    /// This tab's session (the editor's lens) is on this board: on its
+    /// card while it is connected, or docked in the editor. Done is its
+    /// primary.
     pub editor_holds_it: bool,
+    /// Where this tab's session stands on the board: watched, connecting,
+    /// connected, reconnecting, or why the last Connect failed.
+    pub connection: &'a BoardConnection,
+    /// The board's panel picked from its project's root panel
+    /// ([`super::board_panel_picks`]), while it is connected and its
+    /// project is ready; the card draws it in the bars' place.
+    pub panel: Option<&'a UiBoardPanel>,
     /// Now, epoch seconds (the controller's clock).
     pub now: f64,
 }
@@ -113,6 +125,18 @@ impl<'a> BoardCardInput<'a> {
     pub fn play_only(&self) -> bool {
         self.access
             .is_some_and(|access| access.unlock == Some(UiUnlockOffer::PlayOnly))
+    }
+
+    /// The link holds the edit tier: a trusted link (USB, a stand-in), or
+    /// an untrusted one granted Edit — the same facts the access bar reads
+    /// its "You can edit" from.
+    pub fn can_edit(&self) -> bool {
+        self.stand_in()
+            || self.link_kind() == UiLinkKind::Usb
+            || self
+                .access
+                .and_then(|access| access.grant.as_ref())
+                .is_some_and(|grant| grant.tier == lpc_access::Tier::Edit)
     }
 
     /// The link's kind, USB when nothing has named one.

@@ -237,6 +237,8 @@ pub struct DeviceEffects {
     /// [`Event::GrantAnswered`] carries it, so a caller that opened a
     /// chooser can tell which answer is its own.
     last_grant_request: Option<LinkId>,
+    /// Which chooser that was.
+    last_grant_chooser: Option<GrantChooser>,
     /// The controller's clock (epoch seconds), for the update host.
     clock: Option<Rc<dyn Fn() -> f64>>,
     /// The over-the-air update's host (M7): one driver per device, fed the
@@ -275,6 +277,7 @@ impl DeviceEffects {
             layout: super::device_layout_effect::LayoutEffects::default(),
             firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
             last_grant_request: None,
+            last_grant_chooser: None,
             clock: None,
             update: super::update_host::UpdateHost::new(),
             update_legs: BTreeMap::new(),
@@ -521,6 +524,16 @@ impl DeviceEffects {
     /// [`Event::GrantAnswered`]); `None` until one was opened.
     pub fn last_grant_request(&self) -> Option<LinkId> {
         self.last_grant_request
+    }
+
+    /// The same, when the latest chooser was Web Serial's port chooser: the
+    /// only way back to a board on its cable, so a Connect that opened it
+    /// waits on its answer. A Bluetooth board also comes back by itself
+    /// (the browser watches its granted devices), so its chooser's answer
+    /// is not the whole story.
+    pub fn last_usb_grant_request(&self) -> Option<LinkId> {
+        self.last_grant_request
+            .filter(|_| self.last_grant_chooser == Some(GrantChooser::Usb))
     }
 
     /// Whether the seams a real device needs are all installed.
@@ -1112,6 +1125,7 @@ impl DeviceEffects {
         };
         let link = self.mint_link_id();
         self.last_grant_request = Some(link);
+        self.last_grant_chooser = Some(chooser);
         let register = self.registrar();
         spawn(Box::pin(async move {
             let picked = match chooser {
@@ -1482,7 +1496,7 @@ fn port_is_gone(message: &str) -> bool {
 }
 
 /// Which platform chooser a grant request pops.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GrantChooser {
     /// Web Serial's port chooser.
     Usb,

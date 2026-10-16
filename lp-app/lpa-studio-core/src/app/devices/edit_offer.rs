@@ -1,17 +1,27 @@
-//! `devices/<board>/edit`: open the board's project in the editor.
+//! `devices/<board>/edit`: show the board's project in the editor.
 //!
 //! Today's card drew this as an "Open in editor" link to `/device/<uid>`,
 //! which was not an offer, so the app agent could not see it and the board
-//! card's primary (one offer) could not be it. Here it is the offer the
-//! card's name bar presses until "connected" lands (director ruling Q1): the
-//! editor as a lens on the board, `RuntimeOp::OpenDeviceLens`. The web's
-//! lens sync then rewrites the address to `/device/<uid>` (`web_app.rs`, a
-//! lens change rewrites the route from anywhere) and opens nothing twice.
+//! card's primary (one offer) could not be it. Here it is an offer, and
+//! since "connected" (the board card ADR, §4) it means the editor on the
+//! session the home page holds, with nothing reopening —
+//! `RuntimeOp::EditDevice`:
+//!
+//! - on the connected board, while its session shows on its card: show the
+//!   editor on it, with no reattach and no fresh read;
+//! - on any other ready, running board: connect it first, then show the
+//!   editor.
+//!
+//! The web's lens sync then writes the session's address (`/p/…`, or
+//! `/device/<uid>` for a board whose project has none).
 //!
 //! Offered exactly when the old link was drawn: the board says it runs a
 //! project, it is Ready (or Degraded — a faulted show is exactly what the
 //! editor is for), its port is open and idle, and it has a registry row (a
-//! board still identifying has no honest address).
+//! board still identifying has no honest address). Never while the editor
+//! already shows the board, where there is nowhere further to go: that is
+//! the studio controller's to know (it holds the session and the place),
+//! so it does not ask for this offer then (`connect_flow.rs`).
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{DeviceView, Escape, LoadedProject};
@@ -22,7 +32,7 @@ use crate::{OfferPath, RuntimeOp, UiAction, UiOffer};
 pub const EDIT_VERB: &str = "edit";
 
 /// `devices/<board>/edit` for `view`, under `prefix`, when the board can be
-/// opened in the editor: running a project, Ready or Degraded, linked, idle,
+/// shown in the editor: running a project, Ready or Degraded, linked, idle,
 /// and registered as `uid`.
 pub fn device_edit_offer(
     prefix: &OfferPath,
@@ -33,16 +43,14 @@ pub fn device_edit_offer(
     let ready = matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded);
     let linked = view.escapes.contains(&Escape::Disconnect);
     let idle = view.activity.is_none();
-    let uid = uid?;
+    uid?;
     (running && ready && linked && idle).then(|| {
         UiOffer::new(
             prefix.clone().child(EDIT_VERB),
             "edit",
             UiAction::from_op(
                 RuntimeOp::NODE_ID,
-                RuntimeOp::OpenDeviceLens {
-                    uid: uid.to_string(),
-                },
+                RuntimeOp::EditDevice { device: view.id },
             )
             .with_label("Edit")
             .with_summary("Open this board's project in the editor.")
@@ -68,8 +76,8 @@ mod tests {
         assert!(offer.is_enabled());
         assert_eq!(
             offer.action.op_as::<RuntimeOp>(),
-            Some(&RuntimeOp::OpenDeviceLens {
-                uid: "devabc".to_string()
+            Some(&RuntimeOp::EditDevice {
+                device: DeviceId(7)
             })
         );
     }

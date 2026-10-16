@@ -296,6 +296,20 @@ project, or an offline board's project, starts on a stand-in from the home
 page is open: the roadmap's "Editing without the board" milestone
 (`lp2025/2026-10-06-1530-boards-and-projects-model`).
 
+## Amendment 2026-10-10 — `/device/<uid>` emitted, narrowly
+
+`/device/<uid>` stays a resolver, never the address a bound session shows
+(section 7, and the vision's D51). One exception, built by the "connected"
+milestone (`lp2025/2026-10-08-2330-connected-in-the-card`, Q3): when Edit
+shows the editor from the home page and the session has no project address
+(its board's project is not at the library head, or a play-only link could
+not stamp its identity), the lens sync navigates to `/device/<uid>`. The
+home page is outside the editor's shell, so the editor has nowhere else to
+show; and an unbound board opened by `/device/<uid>` cannot heal either, so
+the address is the one the bar would already show. See the 2026-10-10
+amendment of
+[2026-09-22-opening-a-board-adopts-its-project.md](2026-09-22-opening-a-board-adopts-its-project.md).
+
 ## Follow-ups
 
 - The `?on=` grammar, the `/device/<uid>` resolver and the mismatch page
