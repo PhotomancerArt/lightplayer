@@ -458,7 +458,11 @@ impl Editor {
                     self.press_log.remove(0);
                 }
                 let under = self.project.things_at(&self.camera, at);
-                let over = !under.is_empty();
+                // A fixture's empty inside is empty space to a drag: it
+                // draws a selection box. A click there selects the fixture.
+                let over = under
+                    .iter()
+                    .any(|t| !self.project.only_inside(&self.camera, t, at));
                 let on_selection = under.iter().any(|t| self.selection.contains(t));
                 let handle = self.handle_at(at).map(|h| h.kind);
                 let mut decided = false;
@@ -593,8 +597,21 @@ impl Editor {
                             self.selection = vec![t];
                         }
                     }
-                } else if !over && !press_mods.shift {
-                    self.selection.clear();
+                } else if !over {
+                    // Empty space, or a fixture's empty inside.
+                    let pick = pick(
+                        &self.project,
+                        &self.camera,
+                        &self.selection,
+                        at,
+                        self.click_mode(press_mods),
+                    );
+                    match pick {
+                        Some(f) if press_mods.shift => self.shift_add(f),
+                        Some(f) => self.selection = vec![f],
+                        None if !press_mods.shift => self.selection.clear(),
+                        None => {}
+                    }
                 }
                 // Otherwise it was selected on press.
             }

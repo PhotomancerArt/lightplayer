@@ -182,10 +182,29 @@ fn command_click_selects_the_lamp_directly() {
 fn clicking_empty_space_deselects() {
     let mut e = editor();
     e.select(vec![comp("circle1")]);
-    let empty = e.camera.to_screen(place(&e, "scarf", 50.0, 15.0));
+    let empty = e
+        .camera
+        .to_screen(e.project.extent().min - Vec2::new(20.0, 20.0));
     e.pointer_down(empty, Button::Primary, none());
     e.pointer_up(empty, none());
     assert!(e.selection.is_empty());
+}
+
+/// A click on a fixture's empty inside selects the fixture, and the hover
+/// says so; a drag from there still draws a selection box.
+#[test]
+fn a_fixtures_inside_selects_it_and_a_drag_there_boxes() {
+    let mut e = editor();
+    e.select(vec![comp("circle1")]);
+    let inside = e.camera.to_screen(place(&e, "scarf", 50.0, 15.0));
+    e.pointer_move(inside, none());
+    assert_eq!(e.hover_target(), Some(fixture(&e, "scarf")));
+    e.pointer_down(inside, Button::Primary, none());
+    e.pointer_up(inside, none());
+    assert_eq!(e.selection, vec![fixture(&e, "scarf")]);
+    e.pointer_down(inside, Button::Primary, none());
+    e.pointer_move(inside + Vec2::new(20.0, 20.0), none());
+    assert_eq!(e.hint_bar().lead, "Box-selecting");
 }
 
 /// What the hover outline shows is exactly what a click there selects.

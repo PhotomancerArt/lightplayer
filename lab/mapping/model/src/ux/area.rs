@@ -12,7 +12,9 @@
 //!   its own strand, often far from the next);
 //! - group: a rounded hull around its children — the shape you'd draw
 //!   around them by hand;
-//! - module, fixture: a frame — its border and title tab, not its inside;
+//! - module: a frame — its border and title tab, not its inside;
+//! - fixture: a frame whose inside picks it too, behind anything drawn in
+//!   it (`FRAME_INSIDE_DISTANCE`);
 //! - output (and any other card): its whole card; a port: its row on the
 //!   card; a pixel: its square in the row (`pixel_grid.rs`).
 //!
@@ -36,6 +38,9 @@ pub const GROUP_PAD_PX: f64 = 14.0;
 pub const FRAME_EDGE_PX: f64 = 5.0;
 /// …or by its title tab above the box, this tall.
 pub const FRAME_TITLE_PX: f64 = 18.0;
+/// How far a fixture's inside counts as from the cursor: farther than
+/// anything drawn in it, so a lamp or a path there always wins.
+pub const FRAME_INSIDE_DISTANCE: f64 = 1.0e6;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Area {
@@ -50,9 +55,13 @@ pub enum Area {
     Polylines { lines: Vec<Vec<Vec2>>, pad: f64 },
     /// Everything within `pad` of a circle's line.
     Band { center: Vec2, radius: f64, pad: f64 },
-    /// A frame: its border and its title tab, NOT its inside — the inside
-    /// belongs to what's in it, and to the selection box.
-    Frame { rect: Rect, title: Rect },
+    /// A frame: its border and its title tab. A module's inside belongs to
+    /// what's in it; a fixture's (`inside`) picks the fixture too, last.
+    Frame {
+        rect: Rect,
+        title: Rect,
+        inside: bool,
+    },
     /// A filled rectangle: an output card, a port's row.
     Box { rect: Rect },
 }
@@ -77,8 +86,14 @@ impl Area {
                 radius,
                 pad,
             } => (p.distance(*center) - radius).abs() <= *pad,
-            Area::Frame { rect, title } => {
-                title.contains(p) || edge_distance(rect, p) <= FRAME_EDGE_PX
+            Area::Frame {
+                rect,
+                title,
+                inside,
+            } => {
+                title.contains(p)
+                    || edge_distance(rect, p) <= FRAME_EDGE_PX
+                    || (*inside && rect.contains(p))
             }
             Area::Box { rect } => rect.contains(p),
         }
@@ -95,11 +110,18 @@ impl Area {
                 .map(|l| distance_to_polyline(p, l))
                 .fold(f64::INFINITY, f64::min),
             Area::Band { center, radius, .. } => (p.distance(*center) - radius).abs(),
-            Area::Frame { rect, title } => {
+            Area::Frame {
+                rect,
+                title,
+                inside,
+            } => {
+                let edge = edge_distance(rect, p);
                 if title.contains(p) {
                     0.0
+                } else if *inside && edge > FRAME_EDGE_PX && rect.contains(p) {
+                    FRAME_INSIDE_DISTANCE
                 } else {
-                    edge_distance(rect, p)
+                    edge
                 }
             }
             Area::Box { rect } => {
@@ -167,7 +189,7 @@ impl Area {
                     outer
                 }
             }
-            Area::Frame { rect, title } => format!("{} {}", rect_path(rect), rect_path(title)),
+            Area::Frame { rect, title, .. } => format!("{} {}", rect_path(rect), rect_path(title)),
             Area::Box { rect } => rect_path(rect),
         }
     }
@@ -247,7 +269,11 @@ impl Project {
                         rect.min.y - 2.0,
                     ),
                 );
-                Some(Area::Frame { rect, title })
+                Some(Area::Frame {
+                    rect,
+                    title,
+                    inside: n.fixture().is_some(),
+                })
             }
             Target::Port { output, key } => {
                 let b = self.port_rect(output, key)?;
@@ -340,6 +366,11 @@ impl Project {
         for t in self.children(None) {
             self.collect_at(camera, p, &t, &mut out);
         }
+        // A fixture's inside is there only when nothing else is: it is
+        // never one of the overlaps.
+        if out.iter().any(|t| !self.only_inside(camera, t, p)) {
+            out.retain(|t| !self.only_inside(camera, t, p));
+        }
         out
     }
 
@@ -387,6 +418,13 @@ impl Project {
             Target::Object(o) | Target::Lamp { object: o, .. } => placed.object_bounds(o),
             _ => None,
         }
+    }
+
+    /// Whether `p` meets `t` only through a fixture's empty inside: a press
+    /// there is on empty space for dragging (it draws a selection box), and
+    /// a click selects the fixture.
+    pub fn only_inside(&self, camera: &Camera, t: &Target, p: Vec2) -> bool {
+        self.distance_to(camera, t, p) >= FRAME_INSIDE_DISTANCE
     }
 
     /// How far `p` is from `t` on screen (`INFINITY` if it has no area).
