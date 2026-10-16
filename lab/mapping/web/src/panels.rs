@@ -239,6 +239,9 @@ pub fn Inspector(ed: Signal<Editor>) -> Element {
                 for (i, fact) in n.facts.into_iter().enumerate() {
                     div { key: "n{i}", class: "fact", "{fact}" }
                 }
+                if let Some(code) = n.code {
+                    pre { class: "glsl", "{code}" }
+                }
             }
             if let Some(info) = lamp_info {
                 div { class: "section-title", "Lamp" }
@@ -269,6 +272,8 @@ struct NodeFacts {
     patch: Vec<String>,
     problems: Vec<Notice>,
     facts: Vec<String>,
+    /// A shader's GLSL, shown as it is.
+    code: Option<String>,
 }
 
 fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
@@ -303,10 +308,20 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
                 if !feeds.is_empty() {
                     out.facts.push(format!("Fed by {}", feeds.join(", ")));
                 }
+                out.facts.push(format!(
+                    "Reads {}: each fixture on it arrives as its own control product",
+                    o.reads
+                ));
             }
             Some(NodeKind::Fixture(fx)) => {
                 out.facts
                     .push(format!("Colour order {}", fx.color_order.word()));
+                out.facts.push(match f.visual_source(id) {
+                    Some(src) => {
+                        format!("Samples {} on {} at its lamps", f.node_name(&src), fx.reads)
+                    }
+                    None => format!("Nothing writes {}: its lamps have no colour", fx.reads),
+                });
                 if fx.rules.is_empty() {
                     out.patch.push("No rule: its lamps go nowhere yet".into());
                 }
@@ -340,6 +355,29 @@ fn node_facts(f: &Project, t: &Target) -> Option<NodeFacts> {
                     "A module: {} nodes inside, laid out by themselves",
                     children.len()
                 ));
+            }
+            Some(NodeKind::Source(src)) => {
+                let feeds: Vec<String> = f
+                    .bindings()
+                    .iter()
+                    .filter(|b| &b.from == id)
+                    .map(|b| f.node_name(&b.to))
+                    .collect();
+                out.facts.push(format!(
+                    "A {} writing its picture to {}{}",
+                    src.kind_words(),
+                    src.writes,
+                    if feeds.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", read by {}", feeds.join(", "))
+                    }
+                ));
+                out.facts.push(format!(
+                    "The lab doesn't run GLSL: it shows a stand-in, the {} pattern",
+                    src.pattern.words()
+                ));
+                out.code = src.glsl.clone();
             }
             Some(NodeKind::Other(o)) => {
                 out.facts.push(format!(

@@ -10,19 +10,22 @@
 //! - everything outside that level: dimmed.
 //!
 //! Nodes (D42, D43): modules are faint dashed frames, fixtures solid
-//! frames, outputs cards with a row per port. The patch is drawn as violet
-//! edges — violet is the product's colour for what is bound — from each
-//! object's first lamp to the pixel its span starts on (or, for a crowded
-//! fixture, one bundle from its frame), with an arrowhead where the data
-//! arrives. The curve is the model's (`Edge::curve`), so hovering finds
-//! exactly what is drawn.
+//! frames, outputs and shaders cards. Every edge is a channel binding,
+//! drawn violet — the product's colour for what is bound — with its
+//! channel's name, small, once per pair of nodes (D53): a shader's card to
+//! each fixture it feeds, and the patch from each object's first lamp to
+//! the pixel its span starts on (or, for a crowded fixture, one bundle
+//! from its frame), with an arrowhead where the data arrives. The curve is
+//! the model's (`Edge::curve`), so hovering finds exactly what is drawn.
 //!
-//! The board (D16, D44): each port row shows its pixels as the simulated
-//! board has them (`Editor::device_frame`), and every lamp on the canvas is
-//! drawn in its own pixel's colour from the same frame, so the drawing and
-//! the strip read as one. While they move on their own — a selection's
-//! pattern, a drawing in progress — a clock ticks at ~30 fps and only the
-//! pixel and lamp layers redraw.
+//! The board (D16, D44, D55): each port row shows its pixels as the
+//! simulated board has them (`Editor::board_frame`), and every lamp on the
+//! canvas is drawn in its colour in its fixture's control product — never
+//! an output's override, so selecting a pixel changes the pixel, and its
+//! lamp is ringed, not recoloured. Faintly behind each fixture's lamps is
+//! the picture they sample (its render product). While they move on their
+//! own — a selection's pattern, a drawing in progress — a clock ticks at
+//! ~30 fps and only the pixel and lamp layers redraw.
 //!
 //! Inside each fixture its wiring is drawn too (`Project::data_path`): a
 //! quiet dashed wire from each object's last lamp to the next one's first,
@@ -31,7 +34,7 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    Camera, Component, ComponentId, DeviceFrame, Editor, Gesture, HandleKind, NodeId, NodeKind,
+    BoardFrame, Camera, Component, ComponentId, Editor, Gesture, HandleKind, NodeId, NodeKind,
     Object, ObjectId, ObjectShape, PixelGrid, Project, Rect, SizeEdge, Target, Tool, Vec2,
     area::{FRAME_TITLE_PX, title_width},
     geom::{along_polyline, polyline_length},
@@ -57,7 +60,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     let mut now = use_signal(|| 0.0_f64);
     // One frame for both layers that show it (the port rows and the
     // lamps). Canvas never reads it, so a tick redraws only those layers.
-    let frame = use_memo(move || ed.read().device_frame(now()));
+    let frame = use_memo(move || ed.read().board_frame(now()));
     use_future(move || async move {
         loop {
             gloo_timers::future::TimeoutFuture::new(TICK_MS).await;
@@ -173,7 +176,29 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                     pinned: n.pinned.is_some(),
                 });
             }
-            // A node the lab doesn't edit: a card that says what it is.
+            // A shader: a card saying what it is and the channel it writes.
+            NodeKind::Source(src) => {
+                let row = screen_rect(
+                    &cam,
+                    Rect::new(
+                        Vec2::new(world.min.x, world.min.y + CARD_HEADER),
+                        Vec2::new(world.max.x, world.min.y + CARD_HEADER + CARD_ROW),
+                    ),
+                );
+                cards.push(CardView {
+                    rect,
+                    name: n.name.clone(),
+                    rows: vec![PortRow {
+                        rect: row,
+                        name: src.kind_words(),
+                        fill: src.writes.to_string(),
+                        tinted: false,
+                    }],
+                    dimmed,
+                    pinned: n.pinned.is_some(),
+                });
+            }
+            // A node the lab doesn't simulate: a card that says what it is.
             NodeKind::Other(o) => {
                 let row = screen_rect(
                     &cam,
@@ -222,12 +247,19 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             if x.hovered {
                 class.push_str(" edge-hover");
             }
+            // The channel's name, once per pair: mid-curve on a binding, near
+            // the output on the patch, clear of the span label.
+            let channel = x.channel_shown.then(|| {
+                let t = if x.binding { 0.5 } else { 0.8 };
+                (x.channel.clone(), x.point_at(&cam, t))
+            });
             EdgeView {
                 d: x.path(&cam),
                 arrow: x.arrow_path(&cam),
                 label: x.labelled.then_some(x.label.clone()),
                 mid,
                 class,
+                channel,
             }
         })
         .collect();
@@ -253,21 +285,31 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
         .iter()
         .map(|(fid, o)| object_view(f, &cam, fid, o, &e.selection, context.as_ref()))
         .collect();
-    // Every lamp, drawn by the board layer in its pixel's colour.
+    // Every lamp, drawn by the board layer in its control product's colour.
     let lamp_r = lamp_radius(&cam);
     let mut lamp_dots: Vec<LampDot> = Vec::new();
-    for ((fid, o), view) in placed.iter().zip(&objects) {
-        let bounds = f.node_rect(fid);
+    for ((_, o), view) in placed.iter().zip(&objects) {
         for (i, l) in o.lamps.iter().enumerate() {
             lamp_dots.push(LampDot {
                 object: o.id.clone(),
                 index: i as u32,
                 at: cam.to_screen(l.pos),
-                inside: bounds.is_some_and(|b| b.contains(l.pos)),
                 dimmed: view.class.contains("obj-dimmed"),
             });
         }
     }
+    // The picture each fixture samples, faintly behind its lamps.
+    let pictures: Vec<(Rect, String)> = f
+        .fixtures()
+        .iter()
+        .flat_map(|n| f.render_preview(&n.id, PICTURE_CELLS, 0.0))
+        .map(|(r, c)| {
+            (
+                screen_rect(&cam, r),
+                format!("rgb({},{},{})", c.r, c.g, c.b),
+            )
+        })
+        .collect();
     // The wiring inside each fixture; bright where you're working.
     let mut wires: Vec<WireView> = Vec::new();
     for n in f.fixtures() {
@@ -453,6 +495,16 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                         }
                     }
                 }
+                g { class: "pictures",
+                    for (i, (r, fill)) in pictures.iter().enumerate() {
+                        rect {
+                            key: "{i}",
+                            x: "{r.min.x}", y: "{r.min.y}",
+                            width: "{r.width() + 0.5}", height: "{r.height() + 0.5}",
+                            fill: "{fill}",
+                        }
+                    }
+                }
                 for (i, c) in cards.iter().enumerate() {
                     g { key: "c{i}", class: if c.dimmed { "card card-dimmed" } else { "card" },
                         rect {
@@ -532,6 +584,14 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                                 x: "{x.mid.x}", y: "{x.mid.y - 4.0}",
                                 text_anchor: "middle",
                                 "{label}"
+                            }
+                        }
+                        if let Some((name, at)) = &x.channel {
+                            text {
+                                class: "edge-channel",
+                                x: "{at.x}", y: "{at.y - 3.0}",
+                                text_anchor: "middle",
+                                "{name}"
                             }
                         }
                     }
@@ -722,8 +782,8 @@ struct PortRow {
     tinted: bool,
 }
 
-/// One patch edge: a cubic from what it leaves to the port row it reaches,
-/// and the arrowhead where it lands.
+/// One edge: a cubic from what it leaves to what it reaches, and the
+/// arrowhead where it lands.
 struct EdgeView {
     d: String,
     arrow: String,
@@ -731,6 +791,8 @@ struct EdgeView {
     label: Option<String>,
     mid: Vec2,
     class: String,
+    /// Its channel's name and where it goes, on the first edge of a pair.
+    channel: Option<(String, Vec2)>,
 }
 
 /// The outline around one run of a port's pixels, on screen: one box per
@@ -751,6 +813,9 @@ struct PixelRow {
     grid: PixelGrid,
 }
 
+/// A fixture's picture behind its lamps: this many cells each way.
+const PICTURE_CELLS: u32 = 16;
+
 /// Squares this big on screen get a hairline gap between them.
 const GAP_PIXEL_PX: f64 = 4.0;
 
@@ -758,7 +823,7 @@ const GAP_PIXEL_PX: f64 = 4.0;
 /// component, so the clock's ticks redraw only this layer, not the canvas.
 /// Drawn over the cards and never dimmed with them: the LEDs are the truth.
 #[component]
-fn BoardPixels(frame: Memo<DeviceFrame>, rows: Vec<PixelRow>, cam: Camera) -> Element {
+fn BoardPixels(frame: Memo<BoardFrame>, rows: Vec<PixelRow>, cam: Camera) -> Element {
     let frame = frame.read();
     let mut squares: Vec<(Rect, String)> = Vec::new();
     for row in &rows {
@@ -802,43 +867,45 @@ struct LampDot {
     object: ObjectId,
     index: u32,
     at: Vec2,
-    /// Inside its fixture's box: only these ever light (D4).
-    inside: bool,
     /// Outside the level you're working in.
     dimmed: bool,
 }
 
-/// Every lamp, in its pixel's colour in the same frame the port rows show.
-/// A lamp that lights nothing (unpatched, or outside its box) is a dim
-/// hollow dot.
+/// Every lamp, in its colour in its fixture's control product, from the
+/// same frame the port rows show. A lamp patched to no pixel is drawn
+/// fainter; a lamp with no colour (outside its box, or nothing renders for
+/// its fixture) is a dim hollow dot.
 #[component]
-fn BoardLamps(frame: Memo<DeviceFrame>, lamps: Vec<LampDot>, r: f64) -> Element {
+fn BoardLamps(frame: Memo<BoardFrame>, lamps: Vec<LampDot>, r: f64) -> Element {
     let frame = frame.read();
-    let dots: Vec<(Vec2, Option<String>, bool)> = lamps
+    let dots: Vec<(Vec2, Option<String>, &'static str)> = lamps
         .iter()
         .map(|l| {
-            let fill = l
-                .inside
-                .then(|| frame.lamp(&l.object, l.index))
-                .flatten()
+            let fill = frame
+                .lamp(&l.object, l.index)
                 .map(|px| format!("rgb({},{},{})", px.r, px.g, px.b));
-            (l.at, fill, l.dimmed)
+            let class = match (l.dimmed, frame.lands(&l.object, l.index)) {
+                (true, _) => "lamp-lit lamp-dimmed",
+                (false, true) => "lamp-lit",
+                (false, false) => "lamp-lit lamp-unpatched",
+            };
+            (l.at, fill, class)
         })
         .collect();
     rsx! {
         g { class: "board-lamps",
-            for (i, (at, fill, dimmed)) in dots.into_iter().enumerate() {
+            for (i, (at, fill, class)) in dots.into_iter().enumerate() {
                 if let Some(fill) = fill {
                     circle {
                         key: "{i}",
-                        class: if dimmed { "lamp-lit lamp-dimmed" } else { "lamp-lit" },
+                        class: "{class}",
                         cx: "{at.x}", cy: "{at.y}", r: "{r}",
                         fill: "{fill}",
                     }
                 } else {
                     circle {
                         key: "{i}",
-                        class: if dimmed { "lamp-dark lamp-dimmed" } else { "lamp-dark" },
+                        class: if class.contains("dimmed") { "lamp-dark lamp-dimmed" } else { "lamp-dark" },
                         cx: "{at.x}", cy: "{at.y}", r: "{r}",
                     }
                 }

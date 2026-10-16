@@ -113,6 +113,11 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .edge-hover .edge-arrow { opacity: 1; }
 .edge-label { fill: var(--bound); font: 10px var(--font); paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; }
 .edge-quiet .edge-label { opacity: 0.45; }
+/* A channel's name on its edge (D53): always there, small and quiet. */
+.edge-channel { fill: var(--bound); font: 9px var(--mono); opacity: 0.7; paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.edge-quiet .edge-channel { opacity: 0.4; }
+/* A fixture's render product, faintly behind its lamps. */
+.pictures { opacity: 0.1; pointer-events: none; }
 .lamp-ring-port { fill: none; stroke: var(--bound); stroke-width: 1.6; }
 /* A selected lamp's pixel, ringed on its port (D47). */
 /* A pinned node's mark (D48). */
@@ -132,9 +137,11 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .obj-draft .lamp-outside { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.6; }
 .draft-point { fill: var(--bg); stroke: var(--hover); stroke-width: 1.2; }
 
-/* Lamps, in their pixel's colour. A faint rim keeps an unlit (black) lamp
-   visible; a lamp that lights nothing is a dim hollow dot. */
+/* Lamps, in their control product's colour. A faint rim keeps an unlit
+   (black) lamp visible; one patched to no pixel is fainter; a lamp with no
+   colour is a dim hollow dot. */
 .lamp-lit { stroke: rgba(255, 255, 255, 0.3); stroke-width: 0.6; }
+.lamp-unpatched { opacity: 0.45; }
 .lamp-dark { fill: none; stroke: var(--text-subtle); stroke-width: 1; opacity: 0.5; }
 .lamp-dimmed { opacity: 0.28; }
 .lamp-dark.lamp-dimmed { opacity: 0.18; }
@@ -226,3 +233,6 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .run rect { fill: none; stroke: var(--text-subtle); stroke-width: 1; stroke-opacity: 0.55; }
 .run.unpatched rect { stroke-dasharray: 2 2; stroke-opacity: 0.35; }
 .run.lit rect { stroke: var(--selection); stroke-opacity: 1; stroke-width: 1.5; }
+
+/* A shader's GLSL in the inspector: shown, never run. */
+.glsl { margin: 6px 0 0; padding: 6px 8px; max-height: 240px; overflow: auto; font: 10px/1.35 var(--mono); color: var(--text-muted); background: var(--surface-raised); border: 1px solid var(--border); border-radius: 4px; white-space: pre; }
