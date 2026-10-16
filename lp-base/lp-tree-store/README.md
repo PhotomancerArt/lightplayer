@@ -656,17 +656,15 @@ each, ±0.3 ms) and on `lp-emu:esp32c6:t1+net=lan` (CPU only: the
 emulator's flash commands take no time), the same five images written over
 `lpfs` for every build (`board_tree_store_mount.rs`,
 `emu_tree_store_mount.rs`). Monolithic `fs-tree` images with
-`heap_peak_diag`, CX1 (`c6-expendable`), 2026-10-16; CX1's "after" is the
-PR's mount as built before its last tidy, which changes no read (the
-counts above are the tidy's):
+`heap_peak_diag`, CX1 (`c6-expendable`), 2026-10-16, the PR's head:
 
 | store (176 sectors) | CX1 before | CX1 after | emulated before | emulated after |
 |---|---:|---:|---:|---:|
-| empty | 8.0 ms | 7.7 ms | 3.7 ms | 3.3 ms |
-| c40 | 112.5 ms | 29.8 ms | 65.7 ms | 13.3 ms |
-| used | 599.6 ms | 70.8 ms | 370.3 ms | 28.4 ms |
-| full | 792.5 ms | 99.3 ms | 516.6 ms | 44.3 ms |
-| soak | 554.2 ms | 56.4 ms | 354.9 ms | 22.5 ms |
+| empty | 8.0 ms | 7.8 ms | 3.7 ms | 3.3 ms |
+| c40 | 112.5 ms | 29.7 ms | 65.7 ms | 13.3 ms |
+| used | 599.6 ms | 70.6 ms | 370.3 ms | 28.4 ms |
+| full | 792.5 ms | 98.4 ms | 516.6 ms | 44.3 ms |
+| soak | 554.2 ms | 55.7 ms | 354.9 ms | 22.5 ms |
 
 What each lever bought (CX1, the soak / full images; each build adds one
 to the one before):
@@ -705,8 +703,9 @@ tail tag naming the first) written every `checkpoint_every` records lets a
 mount read the sector headers, the sectors written since, the checkpoint
 and the closure, verified by GC's mark. Counted at a checkpoint every 256
 records: used / 176 3,515 → 581 reads, c40 1,159 → 1,016; the full store
-fell back (no room left for a 12 KB checkpoint). Emulated: used 28.4 →
-18.1 ms. Its costs: `12L + 2S` bytes written per checkpoint (12 KB for the
+fell back (no room left for a 12 KB checkpoint). On CX1 (its own images,
+written with checkpoints): used 70.6 → 31.8 ms, c40 29.7 → 31.4, empty
+7.8 → 8.4, full 108 ms (fell back); emulated used 28.4 → 18.1 ms. Its costs: `12L + 2S` bytes written per checkpoint (12 KB for the
 full store), mount RAM up to ~29 KB on the used store (the checkpoint's
 entries plus the recent records, against the 16 KB budget — unoptimized),
 and a format allocation (kind 6, tag 1) that must be decided before
