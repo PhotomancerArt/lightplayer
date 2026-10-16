@@ -423,10 +423,15 @@ fn g4_4_the_shipped_image_crosses_no_modeled_usb_register() {
 /// flag measured how much of the chip had been graded rather than what a run
 /// was allowed to trust.
 ///
-/// The first one is `I2C_ANA_MST.i2c1_ctrl`: the analog transaction port,
+/// The first one is `LP_TIMER.main_buf0_high`: since the shipped image
+/// stamps its time to first light (2026-10-16), the app's first instruction
+/// reads the LP timer, a register block this machine accepts and does not
+/// count (it reads 0, and the firmware's line then reports from reset). The
+/// one before that was `I2C_ANA_MST.i2c1_ctrl`, the analog transaction port,
 /// which forces `busy` low and answers `regi2c` reads out of a store nobody
-/// has measured. A register a block pretends about is a register it
-/// modelled, and the grading rule says so without being told.
+/// has measured; the boot still reads it, later. A register a block pretends
+/// about is a register it modelled, and the grading rule says so without
+/// being told.
 #[test]
 #[ignore = "needs the fw-esp32c6 ELF; run through `just test-emu-c6`"]
 fn the_boot_reads_registers_we_only_modelled_and_this_is_which() {
@@ -472,7 +477,7 @@ fn the_boot_reads_registers_we_only_modelled_and_this_is_which() {
     // depends on being modelled — the point of the survey.
     assert_eq!(
         violation.address,
-        lp_emu_esp32c6::memmap::periph::I2C_ANA_MST + 0x004,
-        "the first modeled register the boot reads is the analog transaction port"
+        lp_emu_esp32c6::memmap::periph::LP_TIMER + 0x018,
+        "the first modeled register the boot reads is the LP timer's count (first light)"
     );
 }

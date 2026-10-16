@@ -1091,12 +1091,17 @@ hand. Nothing grades itself `measured`: that needs a transcript naming the
 register, and it is a promotion somebody makes by hand with a reason.
 
 Twenty-four blocks are in scope now rather than one, and the first thing the
-wider run says is worth reading: the shipped image's boot reaches a register
-we only modelled after **246,696 cycles**, and it is `I2C_ANA_MST.i2c1_ctrl`
+wider run said is worth reading: the shipped image's boot reached a register
+we only modelled after **246,696 cycles**, and it was `I2C_ANA_MST.i2c1_ctrl`
 — the analog transaction port, which forces `busy` low and answers `regi2c`
 reads out of a store nobody has measured. `tests/usb_attached.rs
 ::the_boot_reads_registers_we_only_modelled_and_this_is_which` pins it, and a
 change that moves it is a change to what this boot depends on being modelled.
+One did, on 2026-10-16: the image's time-to-first-light stamps read the **LP
+timer** at the app's first instruction, and `LP_TIMER` is an accepted block
+that does not count (it reads 0; the firmware's `[perf] first light` line is
+then from reset). That is the first modelled read now, `main_buf0_high`; the
+analog port is still read, after it.
 
 That is a survey, not a gate, and the two are now told apart by name.
 `--strict-grade-blocks NAME[,NAME]` narrows the level to the blocks a run

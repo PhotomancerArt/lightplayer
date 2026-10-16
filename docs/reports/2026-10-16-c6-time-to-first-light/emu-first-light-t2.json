@@ -1,0 +1,222 @@
+{
+  "boot": "ROM-up (mask ROM, IDF bootloader, split loader), power-on reset",
+  "configuration": "lp-emu:esp32c6:t2",
+  "rows": [
+    {
+      "boot": 0,
+      "image": "littlefs",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light none by 315 ms: boot 158 init 13 fs 0 radio 42 split 93 server 6 load 0 frame1 3 lit 0 (lp-sys 0/-383976 us)",
+      "pad_first_lit_start_ms": null,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 3,
+        "fs": 0,
+        "init": 13,
+        "lit": 0,
+        "load": 0,
+        "radio": 42,
+        "server": 6,
+        "split": 93
+      },
+      "project": "none"
+    },
+    {
+      "boot": 1,
+      "image": "littlefs",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light none by 314 ms: boot 158 init 13 fs 0 radio 42 split 93 server 5 load 1 frame1 2 lit 0 (lp-sys 0/-383797 us)",
+      "pad_first_lit_start_ms": null,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 2,
+        "fs": 0,
+        "init": 13,
+        "lit": 0,
+        "load": 1,
+        "radio": 42,
+        "server": 5,
+        "split": 93
+      },
+      "project": "none"
+    },
+    {
+      "boot": 0,
+      "image": "littlefs",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 539 ms: boot 158 init 13 fs 1 radio 41 split 94 server 5 load 72 frame1 37 lit 118 (lp-sys 0/-539900 us)",
+      "pad_first_lit_start_ms": 532.36451875,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 1,
+        "init": 13,
+        "lit": 118,
+        "load": 72,
+        "radio": 41,
+        "server": 5,
+        "split": 94
+      },
+      "project": "basic"
+    },
+    {
+      "boot": 1,
+      "image": "littlefs",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 537 ms: boot 158 init 13 fs 1 radio 42 split 94 server 5 load 72 frame1 37 lit 115 (lp-sys 0/-537608 us)",
+      "pad_first_lit_start_ms": 530.0727875,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 1,
+        "init": 13,
+        "lit": 115,
+        "load": 72,
+        "radio": 42,
+        "server": 5,
+        "split": 94
+      },
+      "project": "basic"
+    },
+    {
+      "boot": 0,
+      "image": "littlefs",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 575 ms: boot 158 init 13 fs 4 radio 41 split 94 server 5 load 72 frame1 37 lit 151 (lp-sys 0/-575061 us)",
+      "pad_first_lit_start_ms": 567.52529375,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 4,
+        "init": 13,
+        "lit": 151,
+        "load": 72,
+        "radio": 41,
+        "server": 5,
+        "split": 94
+      },
+      "project": "c40"
+    },
+    {
+      "boot": 1,
+      "image": "littlefs",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 540 ms: boot 158 init 13 fs 4 radio 42 split 94 server 5 load 73 frame1 37 lit 114 (lp-sys 0/-540757 us)",
+      "pad_first_lit_start_ms": 533.22128125,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 4,
+        "init": 13,
+        "lit": 114,
+        "load": 73,
+        "radio": 42,
+        "server": 5,
+        "split": 94
+      },
+      "project": "c40"
+    },
+    {
+      "boot": 0,
+      "image": "fs-tree",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light none by 320 ms: boot 158 init 13 fs 5 radio 41 split 94 server 6 load 0 frame1 3 lit 0 (lp-sys 0/-389594 us)",
+      "pad_first_lit_start_ms": null,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 3,
+        "fs": 5,
+        "init": 13,
+        "lit": 0,
+        "load": 0,
+        "radio": 41,
+        "server": 6,
+        "split": 94
+      },
+      "project": "none"
+    },
+    {
+      "boot": 1,
+      "image": "fs-tree",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light none by 320 ms: boot 158 init 13 fs 4 radio 42 split 94 server 6 load 0 frame1 3 lit 0 (lp-sys 0/-389379 us)",
+      "pad_first_lit_start_ms": null,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 3,
+        "fs": 4,
+        "init": 13,
+        "lit": 0,
+        "load": 0,
+        "radio": 42,
+        "server": 6,
+        "split": 94
+      },
+      "project": "none"
+    },
+    {
+      "boot": 0,
+      "image": "fs-tree",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 540 ms: boot 158 init 13 fs 7 radio 42 split 95 server 5 load 69 frame1 37 lit 114 (lp-sys 0/-540517 us)",
+      "pad_first_lit_start_ms": 532.9818,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 7,
+        "init": 13,
+        "lit": 114,
+        "load": 69,
+        "radio": 42,
+        "server": 5,
+        "split": 95
+      },
+      "project": "basic"
+    },
+    {
+      "boot": 1,
+      "image": "fs-tree",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 540 ms: boot 158 init 13 fs 7 radio 42 split 95 server 5 load 69 frame1 37 lit 114 (lp-sys 0/-540514 us)",
+      "pad_first_lit_start_ms": 532.97839375,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 7,
+        "init": 13,
+        "lit": 114,
+        "load": 69,
+        "radio": 42,
+        "server": 5,
+        "split": 95
+      },
+      "project": "basic"
+    },
+    {
+      "boot": 0,
+      "image": "fs-tree",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 612 ms: boot 158 init 13 fs 66 radio 42 split 94 server 6 load 81 frame1 37 lit 115 (lp-sys 0/-612202 us)",
+      "pad_first_lit_start_ms": 604.6669125,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 66,
+        "init": 13,
+        "lit": 115,
+        "load": 81,
+        "radio": 42,
+        "server": 6,
+        "split": 94
+      },
+      "project": "c40"
+    },
+    {
+      "boot": 1,
+      "image": "fs-tree",
+      "line": "[INFO] fw_esp32c6::first_light: [perf] first light at 612 ms: boot 158 init 13 fs 66 radio 42 split 94 server 6 load 81 frame1 37 lit 115 (lp-sys 0/-612204 us)",
+      "pad_first_lit_start_ms": 604.66890625,
+      "parts_ms": {
+        "boot": 158,
+        "frame1": 37,
+        "fs": 66,
+        "init": 13,
+        "lit": 115,
+        "load": 81,
+        "radio": 42,
+        "server": 6,
+        "split": 94
+      },
+      "project": "c40"
+    }
+  ]
+}
