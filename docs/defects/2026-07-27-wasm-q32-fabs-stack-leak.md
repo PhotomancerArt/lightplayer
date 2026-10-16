@@ -3,7 +3,7 @@ status: fixed
 found: 2026-07-27      # how: live shader-agent sessions (agent-written shaders as fuzzer)
 fixed: this change
 area: lpvm-wasm emit (+ lpvm-cranelift trunc semantics found by the new coverage)
-class: inline-emit stack imbalance masked by unreachable block ends
+class: inline-emit-stack-imbalance  # masked by unreachable block ends
 ---
 # Q32 `abs()` leaked a wasm stack value; blamed as "break/continue in nested loops"
 

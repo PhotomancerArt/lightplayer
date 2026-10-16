@@ -289,26 +289,43 @@ export class StudioDriver {
     );
     const exited = once(child, "exit").catch(() => {});
     const cdp = await Cdp.open(await devToolsUrl(child));
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    await cdp.send("Page.enable", {}, sessionId);
-    await cdp.send("Runtime.enable", {}, sessionId);
-    await cdp.send("Log.enable", {}, sessionId).catch(() => {});
-    await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: WAIT_HELPER }, sessionId);
-    // A headless target Chrome considers unfocused is throttled the way a
-    // background tab is, and the command-line flags above do not reach it —
-    // they are about backgrounded WINDOWS. This is the one that reaches a
-    // CDP-created target, and it matters far more now that the page may be
-    // hosting an emulator: a throttled Worker runs the guest at a fraction
-    // of a per cent of real time, which reads as a board that never answered.
-    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
-    return new StudioDriver({ cdp, sessionId, child, exited, userDataDir, keepProfile: profileDir !== null });
+    const { targetId, sessionId } = await attachNewTarget(cdp, {});
+    return new StudioDriver({ cdp, sessionId, targetId, child, exited, userDataDir, keepProfile: profileDir !== null });
   }
 
-  constructor({ cdp, sessionId, child, exited, userDataDir, keepProfile = false }) {
+  /// A SECOND TAB of the same browser: a new target in a new WINDOW of the
+  /// browser this driver launched, sharing its profile — so the two pages
+  /// share OPFS, Web Locks and `BroadcastChannel`, which is what "one tab
+  /// holds a board" is about. (Every other "second page" a walk has made is
+  /// another Chrome with a temporary profile, and shares none of them.)
+  ///
+  /// A new window, not a background tab: headless Chrome counts each window's
+  /// page as visible, and the card's frame feed and the picture's sidecar
+  /// write only run on a visible page. `tabVisible()` is how a walk checks.
+  ///
+  /// The returned driver shares this one's DevTools connection and browser;
+  /// its console is its own (the handlers filter by session). Its `close()`
+  /// closes only its target; this driver's `close()` still ends the browser.
+  async openTab() {
+    const { targetId, sessionId } = await attachNewTarget(this.cdp, { newWindow: true });
+    return new StudioDriver({
+      cdp: this.cdp,
+      sessionId,
+      targetId,
+      child: this.child,
+      exited: this.exited,
+      userDataDir: this.userDataDir,
+      keepProfile: true,
+      ownsBrowser: false,
+    });
+  }
+
+  constructor({ cdp, sessionId, targetId = null, child, exited, userDataDir, keepProfile = false, ownsBrowser = true }) {
     this.keepProfile = keepProfile;
+    this.ownsBrowser = ownsBrowser;
     this.cdp = cdp;
     this.sessionId = sessionId;
+    this.targetId = targetId;
     this.child = child;
     this.exited = exited;
     this.userDataDir = userDataDir;
@@ -355,6 +372,13 @@ export class StudioDriver {
       throw new Error(`page evaluation failed: ${exceptionDetails.exception?.description ?? exceptionDetails.text}`);
     }
     return result.value;
+  }
+
+  /// `document.visibilityState` of this page. A walk with two tabs asserts
+  /// `"visible"` for both before it starts: the card's frame feed and the
+  /// picture's sidecar write only run on a visible page.
+  async tabVisible() {
+    return this.evaluate("document.visibilityState");
   }
 
   /// Wait for a page-side predicate. `source` is a JS expression evaluated in
@@ -541,6 +565,47 @@ export class StudioDriver {
       `(() => { const card = ${scope}; if (!card) return false;
                 const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${inDetails}));
                 return Boolean(button) && (${!enabled} || !button.disabled); })()`,
+    );
+  }
+
+  /// The words on the control that presses the offer at
+  /// `devices/<ref>/<verb>` — "Connect" on a held board's `take-over` — read
+  /// off the card's face (or, with `inDetails`, an open details card); `null`
+  /// when the card draws no such offer. A read, never a press.
+  async offerWords(verb, { board = null, inDetails = false } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return null;
+                const button = ${PRESSABLE}(${FIND_MARK}(card, ${JSON.stringify(verb)}, ${inDetails}));
+                return button ? (button.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`,
+    );
+  }
+
+  /// Which home page section the board's card sits in: `"online"` (under
+  /// `#home-online-boards`), `"offline"` (`#home-offline-boards`), or `null`
+  /// when it is in neither (or not on the page).
+  async boardSection({ board = null } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return null;
+                if (card.closest('#home-online-boards')) return 'online';
+                if (card.closest('#home-offline-boards')) return 'offline';
+                return null; })()`,
+    );
+  }
+
+  /// The card's picture as its hooks name it: `{ source, frame }` —
+  /// `data-picture` (`link`, `lens`, `saved`, `none`) and whether a frame is
+  /// drawn — and whether it is dimmed (last known, not current). `null`
+  /// when the card or its picture is not there.
+  async pictureOf({ board = null } = {}) {
+    const scope = await this.card({ board });
+    return this.evaluate(
+      `(() => { const card = ${scope}; if (!card) return null;
+                const picture = card.querySelector('[data-picture]'); if (!picture) return null;
+                return { source: picture.getAttribute('data-picture'),
+                         frame: picture.getAttribute('data-picture-frame') === 'true',
+                         dim: picture.classList.contains('ux-play-frame-dim') }; })()`,
     );
   }
 
@@ -819,7 +884,23 @@ export class StudioDriver {
       .map((line) => `[${line.level}] ${line.text}`);
   }
 
+  /// Close THIS page's target and nothing else: the browser, and every other
+  /// tab of it, carry on. The page leaves the way a closed tab does — its
+  /// sockets go with its renderer and its Web Locks vanish — so this is the
+  /// walk's "the holder crashed or closed". After it this driver can no
+  /// longer evaluate anything; a walk that owns the browser still ends it
+  /// with `close()`.
+  async closeTab() {
+    if (!this.targetId) throw new Error("this driver has no target id to close");
+    await this.cdp.send("Target.closeTarget", { targetId: this.targetId });
+  }
+
   async close() {
+    if (!this.ownsBrowser) {
+      // A second tab: its target only. The browser is the first driver's.
+      await this.closeTab().catch(() => {});
+      return;
+    }
     try {
       try { await this.cdp.send("Browser.close"); } catch { this.cdp.close(); }
     } finally {
@@ -839,6 +920,28 @@ export class StudioDriver {
       }
     }
   }
+}
+
+/// A new page target (in a new window with `newWindow`), attached and
+/// prepared the way every walk page is: domains on, the wait helper in every
+/// document, and focus emulated.
+async function attachNewTarget(cdp, { newWindow = false }) {
+  const params = { url: "about:blank" };
+  if (newWindow) params.newWindow = true;
+  const { targetId } = await cdp.send("Target.createTarget", params);
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  await cdp.send("Page.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Log.enable", {}, sessionId).catch(() => {});
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: WAIT_HELPER }, sessionId);
+  // A headless target Chrome considers unfocused is throttled the way a
+  // background tab is, and the command-line flags above do not reach it —
+  // they are about backgrounded WINDOWS. This is the one that reaches a
+  // CDP-created target, and it matters far more now that the page may be
+  // hosting an emulator: a throttled Worker runs the guest at a fraction
+  // of a per cent of real time, which reads as a board that never answered.
+  await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }, sessionId).catch(() => {});
+  return { targetId, sessionId };
 }
 
 function devToolsUrl(child) {

@@ -205,8 +205,9 @@ with how.
   says so and offers the same take-over. The board allows a take-over
   only when the newcomer proves the holder's own key.
 
-Take-over is not offered on the card. Studio finds out when you press
-Connect, and offers it then.
+Take-over is not a button on the card. Studio knows from the holder's
+claim; Connect is itself the take-over, and its tint is the warning (see
+the Amendment 2026-10-09: how a port gets one holder tab).
 
 ### 6. No wire, persisted-format or firmware change
 
@@ -299,6 +300,11 @@ Each amended record carries a reciprocal note dated 2026-10-08.
   "Start a board here" stays in Connect a board. The runtime band's words
   move to the hardware bar. How a project starts on a stand-in from the
   home page is open (the roadmap's "Editing without the board").
+
+- **`2026-09-09-studio-device-stack-over-a-virtual-serial-port`** (note
+  dated 2026-10-09): a second page may install with `?emu-second-tab=1`,
+  holding a board's bytes and not its cable, for the one-tab-holds-a-board
+  walk. The door's one client per endpoint and rule 1 are unchanged.
 
 ## Amendment 2026-10-09: how the page is built
 
@@ -398,3 +404,98 @@ where this record and the build disagreed. It is not a new decision.
 - **One popover at a time.** A pick in a bar's details (the project pick,
   the board pick) is a row there; pressing it closes the details and opens
   the picker over the same bar.
+
+## Amendment 2026-10-09: how a port gets one holder tab (M5)
+
+Section 5 stands. This is how it was built (plan
+`lp2025/2026-10-08-2330-one-tab-holds-a-board`), and where the build
+departs from the section. It is not a new decision.
+
+The acceptance, in Yona's words of 2026-10-09:
+
+> One tab of this browser holds each board, over USB or Wi‑Fi. Other tabs
+> show its last picture and that another tab has it, and Connect there
+> takes it over. When someone else holds a board's Wi‑Fi connection, the
+> card says "Someone else connected" and offers Retry; taking a board over
+> from another person is sharing's question (step 3).
+
+- **The key.** The browser gives no serial number before a port opens
+  (Web Serial's `getInfo()` is vendor and product only), so the board's
+  lock cannot be named before its port is open. The lock is
+  `lp-board:usb:<vid>:<pid>:<mac>` (lowercase hex, the MAC without
+  colons), taken **after the hello** has said the MAC. The OS's own
+  exclusive `open()` is the mutex; the lock is the holder's name and its
+  liveness (a crashed tab's lock vanishes). The first design, a lock named
+  by the board before the port opens, was not possible. Two others were
+  weighed and left: a pre-open lock keyed by vendor:product and the port's
+  index in `getPorts()` (the order is unspecified, and a wrong index lets
+  go of the wrong board), and WebUSB serial numbers (a second permission
+  prompt, and nothing for the CH340 bridge).
+- **The order.** Claim: open the port, hello, take the lock, announce.
+  Release: close the port, release the lock, announce.
+- **The channel.** Tabs of one browser tell each other on a
+  `BroadcastChannel` named `lp-board-holds`. Each message is a JSON
+  envelope with `v: 1`, the sender's tab id and one note (`holds`, `gone`,
+  `ask`, `answer`, `who`). A message of another version, malformed text,
+  or the tab's own echo is ignored: lightplayer.app redeploys daily and a
+  tab can live for days, so a stale tab and a fresh one share the channel.
+  Nothing is persisted, and there is no compatibility code.
+- **Take-over.** One offer, `devices/<board ref>/take-over`, drawn as
+  **Connect**. It is Routine when the holder only watches, **Undoable**
+  when the holder has the editor open (or has not said), and disabled with
+  its reason ("Busy in the other tab: <what it is doing>") when the holder
+  is flashing, updating or pushing. The asker waits 5 s for an answer
+  ("That tab didn't answer", with Retry). The holder closes its editor,
+  writes its last picture, closes the port, releases the lock, then says
+  so. The offer names the board by its MAC and never pairs ports: the
+  asker opens the ports it was refused, and the one that opens is that
+  board.
+- **No tab opens a port on its own.** When a holder lets go or dies, the
+  other tabs' fact clears and the card offers the ordinary Connect.
+  Closing a tab must not make another tab grab a port that a flashing tool
+  was about to use.
+- **The network slot.** The board takes its one network slot silently for
+  a newcomer that proves the holder's key, and closes the holder with an
+  ordinary close; it refuses anyone else. Every tab of one browser
+  presents the same keys, so the slot is held the same way (the lock
+  `lp-board:net:<mac>`), the offer exists only where the holder is another
+  tab of this browser, and a tab that hears another tab take its network
+  board closes its own session by request instead of redialling. This
+  replaces section 5's third bullet, which read the firmware as offering a
+  take-over. A refusal from anyone else stays **Someone else connected**,
+  with Retry and nothing more; taking a board over from another person is
+  sharing's question (vision Q20). An older redial loop between two
+  clients with one key (a tab and lp-cli, or two browsers) is filed
+  (`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md`).
+- **Pictures.** A tab that holds a board writes its picture to the
+  library; another tab's card shows it, dimmed, with its age. A newer
+  sidecar frame replaces one that is not live, and a holder writes a final
+  frame when it lets go.
+- **Held boards are Online.** A board another tab holds is plugged in and
+  running, so it sits under Online boards (`split_roster` counts the fact
+  as connected), not Offline boards.
+- **What the emulator proves, and does not.** `just walk-two-tabs-emu`
+  walks two tabs of one headless Chrome against one emulated board: the
+  hold, the card, the take-over both ways, and a holder that closes. The
+  shim's `?emu-second-tab=1` gives the second page the board's bytes and
+  not its cable (the door admits one `/control` client). It does **not**
+  prove Chrome's real exclusive `open()` across tabs (the door's
+  one-client rule stands in for it), how a long-hidden holder behaves
+  (both pages are visible), or a taker with a cable. The network take-over
+  is proved by core tests with scripted LAN and relay sources, not by a
+  two-tab Wi‑Fi walk. No claim here is a hardware claim. The check on a
+  real Chrome and a leased board is queued, and it does not block merging.
+- **The chooser path, found by the walk.** A port granted at load is read
+  against the other tabs' claims and attached without being opened. A port
+  picked in the chooser is registered without that gate (it may be a
+  different board), so a tab that picks a port another tab holds asks for
+  it once, is refused, and reads the refusal against the claims after the
+  identify deadline. The card shows a second "new device" card for the
+  board until then. Filed in `docs/defects/`; no behaviour changed here.
+  *Fixed 2026-10-10:* the refusal is read against the claims when it
+  arrives, so the port sits on the board's card at once; and a take-over
+  whose holder let go opens every port of its kind the tab could not open,
+  once each, including a port whose refusal is heard after the release. A
+  holder that lets go by itself still opens nothing here. The pick still
+  asks for the port (the chooser stays ungated); see
+  `docs/defects/2026-10-09-a-chooser-pick-of-a-held-usb-port-is-not-gated.md`.

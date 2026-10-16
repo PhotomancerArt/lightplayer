@@ -1197,6 +1197,21 @@ iram-flash-literals-esp32v3 *args:
     python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
         --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
 
+# The ISR-in-RAM guard for fw-esp32c6: which lookup tables a RAM-resident
+# function reads out of FLASH.
+#
+# The C6 twin of `iram-flash-literals-esp32v3`, for the one decision the C6
+# makes about constants: esp-hal's `place-switch-tables-in-ram` is OFF and
+# `lp-fw/fw-esp32c6/rwdata_hook.x` names the tables that stay in RAM (the RMT
+# refill's). This resolves the addresses every `.trap`/`.rwtext`/`.rwtext.wifi`
+# function forms and fails, naming the function, when one lands on a
+# `.Lswitch.table.*` symbol in flash. Needs the image (`just build-fw-esp32c6`).
+#
+#   just iram-data-refs-esp32c6           # check; exit 1 names the regression
+#   just iram-data-refs-esp32c6 --list    # also print the references that are in RAM
+iram-data-refs-esp32c6 *args:
+    python3 scripts/iram-data-refs-rv32.py {{ fw_esp32c6_elf }} {{ args }}
+
 # Lint gate for fw-esp32v3, mirroring clippy-fw-esp32s3. Separate from
 # `clippy-host` for the same reason as the S3: the crate is excluded there
 # (it cross-compiles for Xtensa under a different toolchain), so nothing else
@@ -2199,11 +2214,21 @@ fw-esp32c6-split features="": install-rv32-target
 # The GATE is the smallest of the steady and update headrooms, against
 # `margin`. `unsplit=1` also builds the monolithic image and prints the code
 # and image deltas against it (informational; CI does not pay that build).
-fw-esp32c6-size-check margin="65536" unsplit="": install-rv32-target
+# `features` (the third, positional: `just fw-esp32c6-size-check 65536 ""
+# esp32c6,server,fs-tree`) measures another feature set the same way — the
+# tree store, never shipped. The default, empty, is the shipped image and is
+# what CI gates.
+fw-esp32c6-size-check margin="65536" unsplit="" features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    just fw-esp32c6-split
-    out=target/fw-split/shipped
+    if [[ -z "{{ features }}" ]]; then
+        just fw-esp32c6-split
+        out=target/fw-split/shipped
+    else
+        just fw-esp32c6-split "{{ features }}"
+        out="target/fw-split/$(echo "{{ features }}" | tr ',' '_')"
+        echo "features: {{ features }} (not the shipped image)"
+    fi
     verdict="$(head -1 "${out}/verify.txt")"
     echo "${verdict}"
     # The shader compiler lands in the engine: the evidence, by crate.
@@ -2214,7 +2239,7 @@ fw-esp32c6-size-check margin="65536" unsplit="": install-rv32-target
     fi
     cargo run -q -p lp-fw-split --release -- headroom "${out}/split.json" --margin {{ margin }}
     if [ -n "{{ unsplit }}" ]; then
-        (cd lp-fw/fw-esp32c6 && LP_FW_TARGET=esp32c6-4mb cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server)
+        (cd lp-fw/fw-esp32c6 && LP_FW_TARGET=esp32c6-4mb cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features "{{ if features == "" { "esp32c6,server" } else { features } }}")
         img="$(mktemp)"
         trap 'rm -f "${img}"' EXIT
         espflash save-image --chip esp32c6 --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "${img}" >/dev/null
@@ -2711,6 +2736,7 @@ clippy-host:
     # same gap `test-rust-features` closes below for the tests.
     cargo clippy -p fw-esp32-common --features usb-link,server --all-targets -- --no-deps -D warnings
     cargo clippy -p fw-esp32-common --features uart-link,server --all-targets -- --no-deps -D warnings
+    cargo clippy -p fw-esp32-common --features fs-tree --all-targets -- --no-deps -D warnings
     # lpa-update's `pack` feature (the one packer of OTA encoding 1, std +
     # flate2/zlib-rs) is off by default for the same reason.
     cargo clippy -p lpa-update --features pack --all-targets -- --no-deps -D warnings
@@ -2790,6 +2816,17 @@ clippy-fw-esp32c6: install-rv32-target
     echo "clippy: split (LP_SPLIT_LINK=1)"
     LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,server -- --no-deps -D warnings
+    # `fs-tree` (the tree store as `lpfs`; never shipped), plain and split:
+    # nothing else lints its mount, its shim's glue or its update guard.
+    # With it, its two measurement features: the heap-peak line and the
+    # probe-less build the size table's "littlefs removed" row comes from.
+    echo "clippy: --features fs-tree (plain with heap_peak_diag, probe-less, split)"
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,fs-tree,heap_peak_diag -- --no-deps -D warnings
+    cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,measure_no_legacy_probe -- --no-deps -D warnings
+    LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
+        --features esp32c6,server,fs-tree -- --no-deps -D warnings
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader
@@ -2810,7 +2847,8 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
     for feature in test_rmt test_rmt_rx test_dither test_gpio test_gpio_calibrate test_button \
                    test_usb test_json test_msafluid test_fluid_demo \
                    test_jit_math_perf test_shader_compile_incremental \
-                   test_cycle_probe test_gpio_input test_flash_tears; do
+                   test_cycle_probe test_gpio_input test_flash_tears \
+                   test_flash_tears_unaligned test_flash_reprogram; do
         echo "==> fw-esp32c6 harness: $feature"
         cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
             --features "$feature,esp32c6" -- --no-deps -D warnings
@@ -2994,6 +3032,9 @@ test-rust-features:
     # ...and the C6's Bluetooth links (feature `radio-link`, the mux and the
     # radio slots), with `json-pack` so the packed-session test runs too.
     cargo test -p fw-esp32-common --features radio-link,json-pack
+    # The tree store as the board's filesystem (`fs-tree`, never shipped):
+    # the mount verdict, the alignment shim and the update guard.
+    cargo test -p fw-esp32-common --features fs-tree
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
     # zlib-rs backend never unifies into espflash's in the workspace run.
@@ -3238,7 +3279,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3273,6 +3314,13 @@ lint-classic-capture:
 # --check comparison, on a synthetic three-lamp board built in memory.
 lint-pcb-export:
     python3 scripts/pcb-export-to-map2d.py --self-test
+
+# The flash-tears analyzer's own self-test, which needs no transcript: the
+# zero-run reconstruction, the unaligned program plan, and `--check-model`'s
+# rule (DD29) with its Bonferroni correction per family (DD32), including a
+# seeded Monte Carlo of honest samples drawn from the model. It opens no port.
+lint-flash-tears-analyze:
+    python3 scripts/emu/flash-tears-analyze.py --self-test
 
 # The control-flow torture corpus is generated; without this gate, hand edits to
 # those files are silently reverted by the next `--write` (that is how the
@@ -3356,6 +3404,24 @@ lint-red-main-needs:
 # changes. docs/debt/ci-runner-time-over-the-concurrency-cap.md.
 lint-ci-durations:
     python3 scripts/ci/job-durations.py --self-test
+
+# The defect registry's index, built from each entry's frontmatter when it is
+# read: there is no hand-written table, so two PRs that each file a defect
+# never touch a shared line (docs/debt/hand-written-defects-index.md).
+# Markdown on stdout, newest first. `--by-class` (classes by count, then each
+# one's entries; † marks a class missing from the vocabulary), `--open`,
+# `--class <name>`; they combine.
+defects-index *args:
+    python3 scripts/defects-index.py {{ args }}
+
+# Every docs/defects/ entry carries what the index reads (a dated file name,
+# status open/fixed/wontfix, found, area, a one-word class, a title), and no
+# hand-written row has come back to the README. Its own fixture tests first.
+# Offline, stdlib python, ~0.1 s. CI runs it in the Lint job and, because a
+# defect-only PR is docs-only and skips Lint, in its own "Defect registry" job.
+lint-defects:
+    python3 scripts/defects-index.py --self-test
+    python3 scripts/defects-index.py --check
 
 # Main push's version tagger, against throwaway git repos: each run tags its
 # own commit, a tagged commit is a no-op, and a lost tag race retries.
@@ -3575,11 +3641,25 @@ test-emu-c6-cli-link: install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
 
 # The boards half: whole boards over the link — the fragmented-heap reads,
-# the split image's boot and the LED seam on the split image. CI's `Emulator
-# C6 lp-cli (x64)` job runs it. No pinned figures here, so that job has no
+# the split image's boot, the LED seam on the split image, and a flash power
+# cut mid-upload power-cycled back to a serving board. CI's `Emulator C6
+# lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts -- --include-ignored --nocapture
+
+# The tree-store cut walk's long form (plan
+# lp2025/2026-10-08-2339-tree-store-firmware-and-emulator, P7): every erase
+# under every erase shape, a larger seeded sample, byte_prefix and
+# random_bits, a c40-class push, and the littlefs control (report-only).
+# Never CI (`test-emu-c6-cli-boards` runs the CI subset). `scenarios` is a
+# comma list (`format,push,push-c40,save,panel,switch`; empty: all);
+# `sectors=128` runs on a fixture table's 128-sector `lpfs` (the control
+# stays at 176 and is skipped there). Emulated, never hardware-validated.
+#   just walk-tree-store-cuts-emu
+#   just walk-tree-store-cuts-emu format 128
+walk-tree-store-cuts-emu scenarios="" sectors="176": install-rv32-target
+    LP_TREE_CUTS=long LP_TREE_CUTS_SCENARIOS={{ scenarios }} LP_TREE_CUTS_SECTORS={{ sectors }} LP_TREE_CUTS_CONTROL={{ if sectors == "176" { "1" } else { "0" } }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_tree_store_cuts -- --include-ignored --nocapture
 
 # The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
 # B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
@@ -3595,7 +3675,7 @@ test-emu-c6-cli-agent: install-rv32-target
 # The link half's test binaries, named once: the recipe above runs them and
 # CI's figure-patch step re-runs them as a bless (`just c6-cli-link-tests`
 # prints them), so a binary added here is blessed too.
-C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture"
+C6_CLI_LINK_TESTS := "--test emu_usb_link_pack --test emu_usb_free_lag --test emu_usb_link --test emu_usb_link_gates --test emu_wifi_settings --test link_capture --test emu_batch_push"
 
 c6-cli-link-tests:
     @echo {{ C6_CLI_LINK_TESTS }}
@@ -4430,8 +4510,9 @@ emu-c6 elf *args:
 bench-emu-c6 *args:
     scripts/emu/bench-c6.sh {{ args }}
 
-# The flash-tears calibration: every committed `flash-tears` transcript
-# (lp-emu/transcripts/esp32c6/flash-tears/) sorted into tear shapes, written
+# The flash-tears calibration: every committed `flash-tears` and
+# `flash-tears-unaligned` transcript (lp-emu/transcripts/esp32c6/flash-tears*/,
+# reported apart) sorted into tear shapes, written
 # into the report's generated block. Host only — reads transcripts, never a
 # port. Re-run after every batch of the CX1 sitting. `--json` for one line
 # per cut; with any argument the tables go to stdout instead.
@@ -4449,7 +4530,8 @@ flash-tears-analyze *args:
 # as the silicon transcripts: does a model reproduce CX1's tear histogram?
 # Simulator numbers, written under target/, never committed. Then
 # `just flash-tears-analyze --check-model` says whether lp-nor-sim's
-# calibrated weights still match every committed silicon cut.
+# calibrated shares are still within sampling noise of every committed
+# silicon cut (the rule is in its --help).
 flash-tears-sim cuts="200" seed="1":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -4458,6 +4540,21 @@ flash-tears-sim cuts="200" seed="1":
             --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --out "target/flash-tears-sim/$tear-{{ seed }}.txt"
     done
     scripts/emu/flash-tears-analyze.py target/flash-tears-sim/*-{{ seed }}.txt
+
+# The same, programming by the `flash-tears-unaligned` payload's plan: where
+# each model says an unaligned torn prefix stops (`lp-nor-sim` tears each
+# page op from its own start, which is the split the emulated mask ROM makes
+# — `scripts/emu/flash-tears-analyze.py --rom-split`). Simulator numbers,
+# never committed; the desk sitting is what says whether silicon agrees.
+flash-tears-sim-unaligned cuts="300" seed="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for tear in clean byte_prefix calibrated; do
+        cargo run -q -p fw-checks --features check-flash-tears --example flash_tears_on_nor_sim -- \
+            --tear "$tear" --cuts {{ cuts }} --seed {{ seed }} --unaligned \
+            --out "target/flash-tears-sim-unaligned/$tear-{{ seed }}.txt"
+    done
+    scripts/emu/flash-tears-analyze.py target/flash-tears-sim-unaligned/*-{{ seed }}.txt
 
 # The classic ESP32 (v3) machine's speed probe: three pinned reference images
 # at t1 — the only grade this machine has — both cores at the default
@@ -4906,6 +5003,21 @@ walk-migration-emu *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
+# One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
+# profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
+# emulated C6 over `?emu=`. Tab A holds the board; tab B (`?emu-second-tab=1`:
+# the board's bytes, not its cable) shows its picture and "Open in another
+# tab"; Connect there takes it over; A takes it back; A's tab closes and B
+# opens the board only when asked. Every wait is the board's own words or the
+# page's. Serves the RELEASE bundle itself with `--serve-release` (after
+# `just studio-web-story-build`, `just studio-firmware-package-served` and
+# `cargo build -p lp-cli`); `--steps 1-3` / `--steps 4-6` run part. Proves the
+# hold protocol, the card and the take-over — not Chrome's real exclusive
+# open() across tabs, a hidden tab, or a taker with a cable. Not CI.
+# Report: target/walk-two-tabs-emu/report.md.
+walk-two-tabs-emu *args:
+    node scripts/emu/walk-two-tabs-emu.mjs {{ args }}
+
 # The Wi‑Fi settings walk (Wi‑Fi roadmap M5): real Studio, headless, setting,
 # reading back (after a reload) and forgetting an emulated C6's Wi‑Fi over
 # the USB shim (`usb`) or `?ble=emu` (`ble`). Transport, UI and the board's
@@ -4929,8 +5041,18 @@ walk-ble-emu *args:
 # lp-cli-driven: it runs the `emu_relay_link` cell (one board dialing
 # `lightplayer.app` through the LAN's uplink to an in-process relay), keeps
 # its log, and checks each step against the board's own `[relay]` words
-# (target/walk-wifi-emu/relay/). Studio's relay walk is M8's. Not CI (the
-# cell is, in `test-emu-serve`).
+# (target/walk-wifi-emu/relay/) — relay protocol 2's pictures among them: one
+# right after registering, the project's name and colours, watched then idle
+# by itself, lost at a deploy, kept while offline. Not CI (the cell is, in
+# `test-emu-serve`).
+#
+# `relay-p1` (pictures-through-the-cloud plan P6, the same script with
+# `--protocol-1`): a core built at the last relay protocol 1 commit (pinned
+# in the script) at this hub — registered, listed at protocol 1, routed,
+# never sent a protocol 2 frame (one leg across a minute of watching), back
+# after a deploy. The image: `LP_RELAY_P1_ELF`, else CI's artifact of that
+# commit (7 days), else a throwaway-worktree build
+# (target/walk-wifi-emu/relay-p1/). Not CI.
 #
 # `studio-lan` (network-transport plan P04,
 # scripts/emu/walk-wifi-emu-studio-lan.mjs): the same two boards, Studio with
@@ -4994,13 +5116,17 @@ walk-drop-emu *args:
 # uplink, Studio with `?relay=` and a made-up account signed in — update, the
 # relay dropping the board mid-core, a power cut mid-engine.
 # `WALK_RECORD=1` records the page's session (`?record=`) into
-# `records.jsonl` beside the report.
+# `records.jsonl` beside the report. `WALK_OTA_X=<dir>` boards X from another
+# image directory (not built here): the crossing walk's X built at the last
+# relay protocol 1 commit, updated through the relay to this build, which
+# then sends pictures (`WALK_OTA_X=target/walk-ota-emu/images/x-p1 just
+# walk-ota-emu --relay --steps update`; pictures-through-the-cloud plan P6).
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build -q -p lp-cli
     images=target/walk-ota-emu/images
-    if [[ ! -f "${images}/x/merged.bin" ]]; then
+    if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
     fi
     if [[ ! -f "${images}/mono/package/manifest.json" ]]; then

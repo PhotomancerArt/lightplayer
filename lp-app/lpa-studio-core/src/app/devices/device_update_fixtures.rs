@@ -716,6 +716,7 @@ mod tests {
             terminal_dropped: 0,
             firmware_blocked: over_bluetooth.then(|| FIRMWARE_NEEDS_USB.to_string()),
             update_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
         }
     }

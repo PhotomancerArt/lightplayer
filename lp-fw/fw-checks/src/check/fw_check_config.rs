@@ -157,6 +157,32 @@ pub const ALL_CHECKS: &[FwCheckConfig] = &[
         emits_header: true,
     },
     FwCheckConfig {
+        check: FwCheck::FlashTearsUnaligned,
+        display_name: "Power cuts on a sacrificial board, programs started off every 32-byte \
+                       boundary: where a torn unaligned program stops",
+        firmware_features: &["test_flash_tears_unaligned"],
+        // The same harness and scan as `flash-tears`, so the same readiness
+        // line and no done marker.
+        done_marker: None,
+        trace_slug: "flash-tears-unaligned",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
+        check: FwCheck::FlashReprogram,
+        display_name: "Power cuts on a sacrificial board while it programs: does programming \
+                       a torn word again make its weak bits solid",
+        firmware_features: &["test_flash_reprogram"],
+        // Like `flash-tears`, it never finishes: a readiness line, no done
+        // marker (`the_flash_reprogram_scan_marker_is_the_modules`).
+        done_marker: None,
+        trace_slug: "flash-reprogram",
+        supported_targets: ESP32_ONLY,
+        emits_records: true,
+        emits_header: true,
+    },
+    FwCheckConfig {
         check: FwCheck::BootIdle,
         display_name: "Shipped image to the idle loop",
         // The shipped-image walk as a payload (vision Q1): no check module,
@@ -533,6 +559,16 @@ mod tests {
         assert_eq!(
             crate::checks::flash_tears::SCAN_DONE_MARKER,
             "[flash-tears] === SCAN DONE ==="
+        );
+    }
+
+    #[test]
+    fn the_flash_reprogram_scan_marker_is_the_modules() {
+        let check = find_check("flash-reprogram").expect("registered");
+        assert_eq!(check.done_marker, None, "it never finishes");
+        assert_eq!(
+            crate::checks::flash_reprogram::SCAN_DONE_MARKER,
+            "[flash-reprogram] === SCAN DONE ==="
         );
     }
 }

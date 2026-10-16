@@ -251,6 +251,11 @@ impl ActivityReducer for RemoveProjectActivity {
                 Event::Link { event, .. } => self.handle_link_event(now, event, ctx),
                 Event::IdentityObserved { .. }
                 | Event::GrantAnswered { .. }
+                // Another tab's hold is the roster's and the fold's news, never this
+                // reducer's: a link this activity runs on was opened here.
+                | Event::BoardHeld { .. }
+                | Event::LinkHeld { .. }
+                | Event::LinkFreed { .. }
                 | Event::LinkAttached { .. }
                 | Event::LinkDetached { .. }
                 | Event::LinkBorrow { .. } => ActivityStep::nothing(),

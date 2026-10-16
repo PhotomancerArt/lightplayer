@@ -159,7 +159,12 @@ records` (`scripts/ci/figures-patch.py`):
    and the S3 through the copies their boot recipes name in
    `target/lp-emu-esp32{v3,s3}/images.env`. No firmware is rebuilt; a heap
    re-baseline rebuilds incrementally, as its ratchet just did. A failed heap
-   ratchet is re-baselined and then **checked again**.
+   ratchet is re-baselined and then **checked again**. The C6 ratchet's image
+   is a figure build (`LP_FIGURE_BUILD=1`: version `0000000`, stamped clean),
+   so the re-check's rebuild, on the tree the re-baseline just wrote, is the
+   same bytes; before 2026-10-10 it was stamped `<sha>-dirty-<time>` and
+   could never pass ([heap-budget-gate.md](heap-budget-gate.md), "The second
+   source").
 3. **Only a clean bless is a patch.** A bless rewrites figures and asserts
    everything else, so a bless that passes proves every other assertion in
    those tests held; the heap re-check proves the same for the ratchet. If
@@ -203,6 +208,11 @@ S3's `stack_total_bytes` 37,256 → 37,192 and the classic's six moves (the
 `[INIT] main stack` line in three boot chains, `main_stack_bytes`, the
 single-core prefix's cycles and instructions); `just apply-ci-figures 829`
 applied both patches with no local build, and the next run was green.
+
+The C6's heap patch, proven on PR #1127 (#1126's figure build plus 64 B held
+at boot, never merged): the heap job failed on `usedBytes` 104,652 → 104,716,
+its re-check on the dirtied tree passed, it uploaded the patch, and
+`just apply-ci-figures 1127` applied it with a plain `git apply`.
 
 ## The inventory (2026-09-25)
 

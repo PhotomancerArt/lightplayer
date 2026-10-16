@@ -122,6 +122,7 @@ fn foreign_board() -> PendingLinkView {
         detected_chip: Some("esp32c6".to_string()),
         mac: None,
         firmware_blocked: None,
+        held_by_tab: false,
         escapes: vec![DeviceEscape::Forget],
     }
 }

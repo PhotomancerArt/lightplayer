@@ -15,6 +15,9 @@
 //!
 //! Resolution order:
 //!
+//! 0. [`FIGURE_VERSION`], for a **figure build** (`LP_FIGURE_BUILD=1`; see
+//!    [`figure_build`]): an image built only to have its memory figures read
+//!    and recorded, never one that ships.
 //! 1. `APP_VERSION`, when exported and non-empty. The deploy workflows
 //!    (`deploy-cloud.yml`, `deploy-pages-channel.yml`) resolve it right after
 //!    checkout, before the build writes generated files into the tree, so a
@@ -23,9 +26,9 @@
 //!    manifest directory.
 //! 3. `"unknown"`, when neither is available (a source tarball with no git).
 //!
-//! It reruns when `APP_VERSION` changes and when git's HEAD, the checked-out
-//! branch, the packed refs or the tag directory move — a commit, a checkout,
-//! a rebase or a new tag. It does NOT rerun when the working tree merely
+//! It reruns when `APP_VERSION` or `LP_FIGURE_BUILD` changes and when git's
+//! HEAD, the checked-out branch, the packed refs or the tag directory move —
+//! a commit, a checkout, a rebase or a new tag. It does NOT rerun when the working tree merely
 //! becomes dirty or clean (no file cargo can watch says so); `LP_BUILD_DIRTY`
 //! in the firmware build scripts has the same limit.
 //!
@@ -44,6 +47,39 @@ pub const CI_ENV: &str = "APP_VERSION";
 /// What a build reports when no version can be resolved.
 pub const UNKNOWN: &str = "unknown";
 
+/// The variable that makes a build a **figure build**: set to `1` by the
+/// builds whose memory figures are read and recorded — the C6 heap ratchet's
+/// image (`scripts/heap-budget-check.sh`) and the emulator suite's shipped
+/// split image (`lp_emu_esp32c6::test_support`), which CI uploads for
+/// `just fetch-ci-images`.
+pub const FIGURE_BUILD_ENV: &str = "LP_FIGURE_BUILD";
+
+/// The version a figure build carries, whatever the tree's state.
+///
+/// A version's length reaches the boot heap, so it is a heap figure: a
+/// `-dirty-HHMMSSPT` suffix measured +32 B on the C6, and a 9-character short
+/// sha (a full clone) +8 B over a 7-character one (CI's depth-1 checkout).
+/// Before the pin, CI's own re-check after a bless — on a tree the bless had
+/// just written to — was always stamped dirty and could never pass, and a
+/// desk and a runner read different figures off one commit
+/// (`docs/debt/heap-budget-record-churns-on-routine-changes.md`).
+///
+/// Seven lowercase hex digits: a dev version by `lpc-firmware-release`'s
+/// grammar (so nothing treats a figure build as malformed), and the length
+/// of CI's own short sha, so figures recorded from CI's clean builds before
+/// the pin still hold. Changing the length moves every recorded C6 heap
+/// figure.
+pub const FIGURE_VERSION: &str = "0000000";
+
+/// Whether this build is a figure build (`LP_FIGURE_BUILD=1`). A figure
+/// build is stamped [`FIGURE_VERSION`] and clean (the firmware build scripts
+/// report `LP_BUILD_DIRTY=false` for it), so nothing the tree's state can
+/// change reaches the image. The commit stays real: it is the same length
+/// on every machine (`--short=12`) and the same bytes on one commit.
+pub fn figure_build() -> bool {
+    std::env::var(FIGURE_BUILD_ENV).is_ok_and(|v| v.trim() == "1")
+}
+
 /// Resolve this build's version, set `LP_APP_VERSION` for the crate being
 /// compiled, and register the rerun triggers. Returns the version.
 ///
@@ -55,6 +91,7 @@ pub fn emit() -> String {
         std::env::var("CARGO_MANIFEST_DIR").expect("lp-app-version runs inside a build script"),
     );
     println!("cargo:rerun-if-env-changed={CI_ENV}");
+    println!("cargo:rerun-if-env-changed={FIGURE_BUILD_ENV}");
     emit_git_watches(&manifest_dir);
     if let Some(script) = find_script(&manifest_dir) {
         println!("cargo:rerun-if-changed={}", script.display());
@@ -67,6 +104,9 @@ pub fn emit() -> String {
 /// The version for a build rooted at `manifest_dir`, without printing
 /// anything.
 pub fn resolve(manifest_dir: &Path) -> String {
+    if figure_build() {
+        return FIGURE_VERSION.to_string();
+    }
     if let Some(version) = std::env::var(CI_ENV)
         .ok()
         .map(|v| v.trim().to_string())
@@ -188,5 +228,18 @@ mod tests {
     #[test]
     fn a_crate_outside_any_tree_finds_no_script() {
         assert_eq!(find_script(Path::new("/")), None);
+    }
+
+    #[test]
+    fn the_figure_version_is_a_seven_digit_dev_version() {
+        // `lpc_firmware_release::is_dev_version`'s sha half: 4–40 lowercase
+        // hex. Seven is CI's short-sha length, which the recorded figures
+        // were read at.
+        assert_eq!(FIGURE_VERSION.len(), 7);
+        assert!(
+            FIGURE_VERSION
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
     }
 }

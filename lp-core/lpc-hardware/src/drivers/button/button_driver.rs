@@ -88,6 +88,17 @@ pub trait ButtonDriver: HwDriver {
     /// List currently known button endpoints.
     fn endpoints(&self) -> alloc::vec::Vec<HwEndpoint>;
 
+    /// The endpoint a lookup should use among those `matches` selects: the
+    /// first available one, else the first match.
+    ///
+    /// The default builds [`Self::endpoints`] and filters it. A driver whose
+    /// list is long and costly to build overrides this to produce its
+    /// endpoints one at a time through [`crate::preferred_endpoint`], so a
+    /// lookup never holds the whole list.
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+        crate::preferred_endpoint(self.endpoints(), matches)
+    }
+
     /// Open one endpoint and claim the underlying input resource.
     fn open(
         &self,

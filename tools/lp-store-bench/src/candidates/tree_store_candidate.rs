@@ -73,7 +73,9 @@ impl Candidate for TreeStoreCandidate {
     }
 
     fn format(&self, flash: &mut NorFlashSim, cfg: &CandidateConfig) -> Result<(), StoreError> {
-        TreeStore::format(flash, &mut SoftSha256, &tree_store_config(cfg)?.0).map_err(map_err)
+        TreeStore::format(flash, SoftSha256, tree_store_config(cfg)?.0)
+            .map(drop)
+            .map_err(|(e, _, _)| map_err(e))
     }
 
     fn mount(

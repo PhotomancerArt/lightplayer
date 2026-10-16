@@ -61,11 +61,16 @@ export async function listBoards(baseUrl, { fetchImpl = null } = {}) {
 // there instead of standing a server up, so everything in this file and in
 // the polyfill above it is the code CI actually runs; only the socket is
 // scripted. Production passes nothing.
-export function nativeBacking(baseUrl, transport = {}) {
+//
+// `secondTab` is `?emu-second-tab=1` (see `EmulatorPort.connect`): a second
+// page of one browser may hold a board's bytes without its cable. Off, a
+// refused control channel is an install failure, as it always was.
+export function nativeBacking(baseUrl, transport = {}, { secondTab = false } = {}) {
   return {
     describe: () => `emu serve ${baseUrl}`,
     listBoards: () => listBoards(baseUrl, transport),
-    connect: (boardId, board) => EmulatorPort.connect(baseUrl, boardId, board, transport),
+    connect: (boardId, board) =>
+      EmulatorPort.connect(baseUrl, boardId, board, transport, { secondTab }),
   };
 }
 
@@ -75,9 +80,26 @@ export class EmulatorPort {
   // with `open()`/`close()`. That split is the door's coupling rule, not a
   // convention of ours: a byte client's connect IS the machine's `open` and
   // its disconnect IS the machine's `close`, so `open()` below sends no verb.
-  static async connect(baseUrl, boardId, board = null, transport = {}) {
+  //
+  // `secondTab` (`?emu-second-tab=1`): the page is a SECOND tab of one browser
+  // beside the page that holds this board's cable. Real Chrome lists a granted
+  // port in both tabs and refuses only the second `open()`; the door admits
+  // one `/control` client, so the second page's claim is refused (409). With
+  // the option that refusal is not an install failure: the port is made
+  // CABLE-LESS (`hasCable` false) — it can `open()` and `close()` the bytes,
+  // which is everything a tab needs to take a board over, and every cable verb
+  // rejects. Without it nothing changes: the loud 409 at install is what stops
+  // a reloading page from installing without its cable.
+  static async connect(baseUrl, boardId, board = null, transport = {}, { secondTab = false } = {}) {
     const port = new EmulatorPort(baseUrl, boardId, board, transport);
-    await port._openControl();
+    try {
+      await port._openControl();
+    } catch (error) {
+      if (!secondTab || error?.name !== "NetworkError") {
+        throw error;
+      }
+      port.hasCable = false;
+    }
     return port;
   }
 
@@ -102,6 +124,9 @@ export class EmulatorPort {
     // a board the emulator reset underneath us has re-enumerated.
     this._lastCycle = -1;
     this._disposed = false;
+    // Whether this page holds the board's cable (the `/control` channel).
+    // False only for a second tab (`connect`'s `secondTab`).
+    this.hasCable = true;
   }
 
   // --- point 3: bytes both ways -------------------------------------------
@@ -234,6 +259,9 @@ export class EmulatorPort {
   command(line) {
     if (this._disposed) {
       return Promise.reject(new Error(`emulated board ${this.boardId}: port disposed`));
+    }
+    if (!this.hasCable) {
+      return Promise.reject(otherPageHoldsTheCable(this.boardId, line));
     }
     const socket = this._control;
     if (!socket || socket.readyState !== SOCKET_OPEN) {
@@ -416,6 +444,17 @@ function unavailable(what) {
 // DOMException name so Rust can tell "in use elsewhere" from "unresponsive").
 function portBusy(message) {
   const error = new Error(message);
+  error.name = "NetworkError";
+  return error;
+}
+
+// A cable verb on a cable-less port (a second tab's). Named `NetworkError`
+// like the other thing the door says about a board somebody else holds.
+function otherPageHoldsTheCable(boardId, line) {
+  const error = new Error(
+    `emulated board ${boardId}: \`${line}\` needs the cable, and another page ` +
+      `holds this board's cable`,
+  );
   error.name = "NetworkError";
   return error;
 }

@@ -1076,7 +1076,9 @@ mod tests {
                 },
             }
         );
-        let MachineRequest::Reset { cause, .. } = request;
+        let MachineRequest::Reset { cause, .. } = request else {
+            unreachable!("asserted to be a reset above")
+        };
         let cause = crate::loader::ResetCause::for_source(cause);
         assert_eq!(cause.rom_code(), 0x7);
         assert_eq!(cause.rom_name(), "TG0_WDT_HPSYS");

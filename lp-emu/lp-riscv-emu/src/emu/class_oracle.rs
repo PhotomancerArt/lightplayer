@@ -28,6 +28,7 @@ use lp_emu_core::{Bus, InstClass, MemoryError};
 
 use crate::emu::executor::ExecutionResult;
 use crate::emu::fp_regs::FpRegs;
+use crate::emu::lr_reservation::LrReservation;
 use crate::emu::{LoggingDisabled, decode_execute};
 
 /// The pc the word is classified at.
@@ -97,9 +98,16 @@ pub fn class_of(word: u32) -> Option<(u8, InstClass)> {
     let mut regs = [0i32; 32];
     let mut bus = InfallibleBus;
     let mut fp = FpRegs::new();
-    let result: ExecutionResult =
-        decode_execute::<LoggingDisabled, _>(word, SCRATCH_PC, &mut regs, &mut bus, &mut fp)
-            .ok()?;
+    let mut reservation = LrReservation::new();
+    let result: ExecutionResult = decode_execute::<LoggingDisabled, _>(
+        word,
+        SCRATCH_PC,
+        &mut regs,
+        &mut bus,
+        &mut fp,
+        &mut reservation,
+    )
+    .ok()?;
     let class = match result.class {
         InstClass::BranchNotTaken => InstClass::BranchTaken,
         other => other,

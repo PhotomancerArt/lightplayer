@@ -122,7 +122,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         };
         self.multi_need(head, leaves.len() + chunks, false, &mut need);
         self.implicit_need(&mut need);
-        self.ensure_room(&need)?;
+        let late = mutant!(NoSpaceAfterWrite);
+        if !late {
+            self.ensure_room(&need)?;
+        }
         match coded {
             Some(c) => {
                 let len = (c.logical_len as u16).to_le_bytes();
@@ -142,6 +145,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             None => self.write_stored_chunks(head, a, b, &mut leaves)?,
         }
         let id = self.write_tree(head, &leaves, false)?;
+        if late {
+            self.ensure_room(&need)?;
+        }
         self.record_set(path, FileEntry { id, size });
         Ok(())
     }
@@ -263,6 +269,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     ) -> Res<(), F> {
         if self.log.index.contains(id) {
             stat!(self.stats.dedup_hits += 1);
+            return Ok(());
+        }
+        #[cfg(feature = "mutants")]
+        if self.dry {
             return Ok(());
         }
         self.log.append(head, kind, codec, id, parts)?;

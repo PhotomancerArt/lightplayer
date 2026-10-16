@@ -1,12 +1,14 @@
 //! Atomic instruction execution (A extension: LR.W, SC.W, AMOSWAP.W, AMOADD.W, AMOXOR.W, AMOAND.W, AMOOR.W)
 //!
-//! These instructions provide atomic memory operations. In single-threaded emulation,
-//! they are implemented as regular load/store operations.
+//! The AMOs are a read and a write with nothing in between, which is atomic on a
+//! single hart. `lr.w` / `sc.w` are not that simple: `sc.w` writes only while
+//! the reservation `lr.w` took still holds, and the caller ends that
+//! reservation when the hart takes a trap (see [`LrReservation`]).
 
 extern crate alloc;
 
 use super::{ExecutionResult, InstClass, LoggingMode, read_reg};
-use crate::emu::{error::EmulatorError, logging::InstLog};
+use crate::emu::{error::EmulatorError, logging::InstLog, lr_reservation::LrReservation};
 use lp_emu_core::Bus;
 use lp_riscv_inst::{Gpr, format::TypeR};
 
@@ -17,6 +19,7 @@ pub(super) fn decode_execute_atomic<M: LoggingMode, B: Bus>(
     pc: u32,
     regs: &mut [i32; 32],
     memory: &mut B,
+    reservation: &mut LrReservation,
 ) -> Result<ExecutionResult, EmulatorError> {
     let r = TypeR::from_riscv(inst_word);
     let rd = Gpr::new(r.rd);
@@ -36,8 +39,8 @@ pub(super) fn decode_execute_atomic<M: LoggingMode, B: Bus>(
     }
 
     match funct5 {
-        0x02 => execute_lr_w::<M, B>(rd, rs1, inst_word, pc, regs, memory),
-        0x03 => execute_sc_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
+        0x02 => execute_lr_w::<M, B>(rd, rs1, inst_word, pc, regs, memory, reservation),
+        0x03 => execute_sc_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory, reservation),
         0x01 => execute_amoswap_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
         0x00 => execute_amoadd_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
         0x04 => execute_amoxor_w::<M, B>(rd, rs1, rs2, inst_word, pc, regs, memory),
@@ -60,8 +63,9 @@ fn execute_lr_w<M: LoggingMode, B: Bus>(
     pc: u32,
     regs: &mut [i32; 32],
     memory: &mut B,
+    reservation: &mut LrReservation,
 ) -> Result<ExecutionResult, EmulatorError> {
-    // LR.W: Load reserved word (just a regular load in single-threaded)
+    // LR.W: load the word and reserve it for the SC.W that follows.
     let base = read_reg(regs, rs1);
     let address = base as u32;
 
@@ -74,6 +78,8 @@ fn execute_lr_w<M: LoggingMode, B: Bus>(
     if rd.num() != 0 {
         regs[rd.num() as usize] = value;
     }
+    // Only once the load has happened: a faulting LR.W reserves nothing.
+    reservation.reserve(address);
 
     let log = if M::ENABLED {
         Some(InstLog::Load {
@@ -110,8 +116,10 @@ fn execute_sc_w<M: LoggingMode, B: Bus>(
     pc: u32,
     regs: &mut [i32; 32],
     memory: &mut B,
+    reservation: &mut LrReservation,
 ) -> Result<ExecutionResult, EmulatorError> {
-    // SC.W: Store conditional word (always succeeds in single-threaded)
+    // SC.W: store only while LR.W's reservation holds and covers this word.
+    // Success or failure, the reservation is gone afterwards.
     let base = read_reg(regs, rs1);
     let value = read_reg(regs, rs2);
     let address = base as u32;
@@ -124,13 +132,16 @@ fn execute_sc_w<M: LoggingMode, B: Bus>(
     } else {
         0
     };
-    memory
-        .write_word(address, value)
-        .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
+    let stored = reservation.take_for_store(address);
+    if stored {
+        memory
+            .write_word(address, value)
+            .map_err(|e| EmulatorError::from_memory_error(e, pc, error_regs))?;
+    }
 
-    // Return 0 in rd to indicate success
+    // 0 for success; 1 is the spec's one defined failure code.
     if rd.num() != 0 {
-        regs[rd.num() as usize] = 0;
+        regs[rd.num() as usize] = if stored { 0 } else { 1 };
     }
 
     let log = if M::ENABLED {
@@ -142,7 +153,7 @@ fn execute_sc_w<M: LoggingMode, B: Bus>(
             rs2_val: value,
             addr: address,
             mem_old: old_value,
-            mem_new: value,
+            mem_new: if stored { value } else { old_value },
         })
     } else {
         None
@@ -504,9 +515,14 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_lr_w(Gpr::A0, Gpr::A0);
-        let result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let result = decode_execute_atomic::<LoggingEnabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 0x12345678);
         assert_eq!(result.new_pc, None);
@@ -515,23 +531,73 @@ mod tests {
     }
 
     #[test]
-    fn test_sc_w() {
-        let mut regs = [0i32; 32];
-        regs[10] = DEFAULT_RAM_START as i32; // x10 = base address
-        regs[11] = 0x12345678; // x11 = value to store
-        let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);
-        memory
-            .write_word(DEFAULT_RAM_START, 0xdeadbeefu32 as i32)
-            .unwrap();
+    fn sc_w_stores_and_reports_success_on_a_live_reservation() {
+        let (mut regs, mut memory, mut reservation) = lr_sc_setup();
 
-        let inst_word = encode_sc_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        lr(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[12], 0xdeadbeefu32 as i32, "lr.w loaded the word");
+        assert_eq!(reservation.held(), Some(DEFAULT_RAM_START));
 
-        assert_eq!(regs[10], 0); // SC.W returns 0 on success
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 0, "sc.w reports success");
         assert_eq!(memory.read_word(DEFAULT_RAM_START).unwrap(), 0x12345678);
-        assert_eq!(result.new_pc, None);
+        assert_eq!(reservation.held(), None, "a successful sc.w ends it too");
+    }
+
+    #[test]
+    fn sc_w_without_an_lr_w_fails_and_leaves_memory_alone() {
+        let (mut regs, mut memory, mut reservation) = lr_sc_setup();
+
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 1, "sc.w reports failure");
+        assert_eq!(
+            memory.read_word(DEFAULT_RAM_START).unwrap(),
+            0xdeadbeefu32 as i32
+        );
+    }
+
+    #[test]
+    fn a_second_sc_w_after_one_lr_w_fails() {
+        let (mut regs, mut memory, mut reservation) = lr_sc_setup();
+
+        lr(&mut regs, &mut memory, &mut reservation);
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 0);
+
+        regs[11] = 0x0bad_f00d;
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 1, "the first sc.w used the reservation up");
+        assert_eq!(memory.read_word(DEFAULT_RAM_START).unwrap(), 0x12345678);
+    }
+
+    #[test]
+    fn an_sc_w_to_another_word_fails_and_ends_the_reservation() {
+        let (mut regs, mut memory, mut reservation) = lr_sc_setup();
+
+        lr(&mut regs, &mut memory, &mut reservation);
+        regs[10] = (DEFAULT_RAM_START + 4) as i32;
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 1, "the word is outside the reservation set");
+        assert_eq!(memory.read_word(DEFAULT_RAM_START + 4).unwrap(), 0);
+
+        regs[10] = DEFAULT_RAM_START as i32;
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 1, "the failed sc.w still ended the reservation");
+    }
+
+    #[test]
+    fn sc_w_after_a_cleared_reservation_fails() {
+        // What the hart does when it takes a trap between the two.
+        let (mut regs, mut memory, mut reservation) = lr_sc_setup();
+
+        lr(&mut regs, &mut memory, &mut reservation);
+        reservation.clear();
+        sc(&mut regs, &mut memory, &mut reservation);
+        assert_eq!(regs[13], 1);
+        assert_eq!(
+            memory.read_word(DEFAULT_RAM_START).unwrap(),
+            0xdeadbeefu32 as i32
+        );
     }
 
     #[test]
@@ -543,9 +609,14 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_amoswap_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let result = decode_execute_atomic::<LoggingEnabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 0x12345678); // Returns old value
         assert_eq!(
@@ -564,9 +635,14 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 10).unwrap();
 
         let inst_word = encode_amoadd_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let result = decode_execute_atomic::<LoggingEnabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 10); // Returns old value
         assert_eq!(memory.read_word(DEFAULT_RAM_START).unwrap(), 15);
@@ -582,9 +658,14 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_amoxor_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let _result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let _result = decode_execute_atomic::<LoggingEnabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 0x12345678); // Returns old value
         assert_eq!(
@@ -602,9 +683,14 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_amoand_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let _result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let _result = decode_execute_atomic::<LoggingEnabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 0x12345678); // Returns old value
         assert_eq!(
@@ -622,9 +708,14 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12340000).unwrap();
 
         let inst_word = encode_amoor_w(Gpr::A0, Gpr::A0, Gpr::A1);
-        let _result =
-            decode_execute_atomic::<LoggingEnabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let _result = decode_execute_atomic::<LoggingEnabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 0x12340000); // Returns old value
         assert_eq!(
@@ -641,11 +732,43 @@ mod tests {
         memory.write_word(DEFAULT_RAM_START, 0x12345678).unwrap();
 
         let inst_word = encode_lr_w(Gpr::A0, Gpr::A0);
-        let result =
-            decode_execute_atomic::<LoggingDisabled, _>(inst_word, 0x1000, &mut regs, &mut memory)
-                .unwrap();
+        let result = decode_execute_atomic::<LoggingDisabled, _>(
+            inst_word,
+            0x1000,
+            &mut regs,
+            &mut memory,
+            &mut LrReservation::new(),
+        )
+        .unwrap();
 
         assert_eq!(regs[10], 0x12345678);
         assert!(result.log.is_none()); // Fast path has no logging
+    }
+
+    /// x10 = the word's address, x11 = the value sc.w stores; the word holds
+    /// 0xdeadbeef.
+    fn lr_sc_setup() -> ([i32; 32], Memory, LrReservation) {
+        let mut regs = [0i32; 32];
+        regs[10] = DEFAULT_RAM_START as i32;
+        regs[11] = 0x12345678;
+        let mut memory = Memory::with_default_addresses(vec![], vec![0u8; 1024]);
+        memory
+            .write_word(DEFAULT_RAM_START, 0xdeadbeefu32 as i32)
+            .unwrap();
+        (regs, memory, LrReservation::new())
+    }
+
+    /// `lr.w x12, (x10)`
+    fn lr(regs: &mut [i32; 32], memory: &mut Memory, reservation: &mut LrReservation) {
+        let word = encode_lr_w(Gpr::A2, Gpr::A0);
+        decode_execute_atomic::<LoggingEnabled, _>(word, 0x1000, regs, memory, reservation)
+            .unwrap();
+    }
+
+    /// `sc.w x13, x11, (x10)`
+    fn sc(regs: &mut [i32; 32], memory: &mut Memory, reservation: &mut LrReservation) {
+        let word = encode_sc_w(Gpr::A3, Gpr::A0, Gpr::A1);
+        decode_execute_atomic::<LoggingEnabled, _>(word, 0x1000, regs, memory, reservation)
+            .unwrap();
     }
 }

@@ -696,7 +696,7 @@ function framedValues(said, key) {
 /// whose letters it holds in order (the longest, should two fit).
 function fsState(value) {
   const letters = value.replace(/[^a-z_]/g, "");
-  return ["legacy_held", "formatted", "mounted", "memory"].find((state) => subsequence(state, letters));
+  return ["legacy_held", "formatted", "refused", "mounted", "memory"].find((state) => subsequence(state, letters));
 }
 
 /// Whether `needle`'s characters appear in `hay` in order.

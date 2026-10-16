@@ -7,12 +7,15 @@
 //! the one before it — no further, README defect 12) by indexing its
 //! closure (pass 2, `mount_walk.rs`: the index holds only live records, so
 //! mount's RAM does not grow with the garbage on flash); resume each head
-//! only if its tail reads all `0xFF`.
+//! only if its tail reads all `0xFF`. The newest sector of each kind has its
+//! tail settled during pass 1, before the walk or a resume trusts it
+//! (`record_scan.rs`: a torn record can read whole on one read only).
 
 use alloc::vec::Vec;
 
 use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
+use crate::mount_verdict::FormatResidue;
 use crate::mount_walk::index_closure;
 use crate::object_hasher::ObjectHasher;
 use crate::record_scan::{RootCandidates, scan_sector};
@@ -27,6 +30,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let mut valid: Vec<(u32, u32, HeadKind)> = Vec::new();
         // Closed to appends: a record failed to check, or an unknown compat flag.
         let mut closed = alloc::vec![false; n as usize];
+        let mut residue = FormatResidue::default();
         for s in 0..n {
             let mut h = [0u8; SECTOR_HEADER_LEN as usize];
             self.log.read(self.log.addr(s, 0), &mut h)?;
@@ -34,18 +38,31 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 SectorRead::Untrusted => {}
                 SectorRead::Unsupported(why) => return Err(StoreError::Unsupported(why)),
                 SectorRead::Trusted { header, appendable } => {
+                    residue.saw_trusted_sector();
                     valid.push((header.seq, s, header.kind));
                     self.log.sectors.erase_count[s as usize] = header.erase_count;
                     self.log.sectors.seq[s as usize] = header.seq;
+                    self.log.sectors.set_kind(s, header.kind);
                     closed[s as usize] = !appendable;
                 }
             }
         }
         heap_sort_by(&mut valid, |a, b| (a.0, a.1) < (b.0, b.1));
+        // The newest sector of each kind: the only place a cut can have torn
+        // the last program, and the head a resume would append to.
+        let newest = HeadKind::ALL.map(|kind| {
+            valid
+                .iter()
+                .rev()
+                .find(|v| v.2 == kind)
+                .map(|v| v.1)
+                .filter(|&s| !closed[s as usize])
+        });
         // Pass 1: every trusted record, CRC-checked; roots kept apart.
         let mut roots = RootCandidates::default();
         for &(_, s, _) in &valid {
-            let scan = scan_sector(&mut self.log, s, &mut roots)?;
+            let settle = newest.contains(&Some(s));
+            let scan = scan_sector(&mut self.log, s, &mut roots, &mut residue, settle)?;
             self.log.sectors.end[s as usize] = scan.end as u16;
             closed[s as usize] |= scan.closed;
         }
@@ -66,13 +83,17 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             }
         }
         let Some((id, walked)) = chosen else {
-            return Err(StoreError::Corrupt("no complete root"));
+            return Err(residue.no_root());
         };
         stat!(
             self.stats.marks += 1;
             self.stats.mount_scans = walked.scans;
         );
         self.log.sectors.live = walked.live;
+        #[cfg(feature = "mutants")]
+        if mutant!(DedupAgainstAllRecords) {
+            crate::mutants::index_every_record(&mut self.log, &valid)?;
+        }
         self.log.index.shrink();
         self.live_after_mark = self.log.index.len();
         // A closed sector is never appended to: its end is the sector size.
@@ -91,15 +112,11 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.committed = Some(Committed { id, root });
 
         for kind in HeadKind::ALL {
-            let cand = valid
-                .iter()
-                .rev()
-                .find(|v| v.2 == kind)
-                .map(|v| v.1)
+            let cand = newest[kind.index()]
                 .filter(|&s| !closed[s as usize] && !self.log.sectors.is_retired(s));
             if let Some(s) = cand {
                 let end = u32::from(self.log.sectors.end[s as usize]);
-                if self.log.reads_erased(s, end)? {
+                if mutant!(ResumeWithoutTailCheck) || self.log.reads_erased(s, end)? {
                     self.log.heads[kind.index()] = Some(s);
                 }
             }

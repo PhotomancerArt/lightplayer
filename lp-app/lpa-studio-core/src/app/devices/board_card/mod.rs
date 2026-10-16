@@ -14,10 +14,10 @@
 //!   [`ui_detail_panel`].
 //! - Building: [`board_card_input`], [`board_card_builder`], and one file
 //!   per decision: [`board_picture`], [`status_corner`], [`primary_action`],
-//!   [`bar_work`], and one per bar — [`project_bar`], [`connection_bar`],
-//!   [`access_bar`], [`firmware_bar`], [`hardware_bar`] — with
-//!   [`ui_bluetooth_switch`]; [`roster_board_cards`] builds every card on a
-//!   roster.
+//!   [`bar_work`], [`held_board`] (a board another tab holds), and one per
+//!   bar — [`project_bar`], [`connection_bar`], [`access_bar`],
+//!   [`firmware_bar`], [`hardware_bar`] — with [`ui_bluetooth_switch`];
+//!   [`roster_board_cards`] builds every card on a roster.
 
 pub mod access_bar;
 pub mod bar_work;
@@ -30,6 +30,7 @@ pub mod connection_bar;
 pub(crate) mod detail_sections;
 pub mod firmware_bar;
 pub mod hardware_bar;
+pub mod held_board;
 pub mod primary_action;
 pub mod project_bar;
 pub mod roster_board_cards;
@@ -51,6 +52,10 @@ pub use board_card_input::{BoardCardInput, link_icon};
 pub use board_picture::LOCKED_PREVIEW_SENTENCE;
 pub use connection_bar::SOMEONE_ELSE_SENTENCE;
 pub use hardware_bar::chip_words;
+pub use held_board::{
+    EDITOR_OPEN_ASIDE, HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE, OPEN_IN_ANOTHER_TAB,
+    TAKEN_BY_ANOTHER_TAB,
+};
 pub use primary_action::NOTHING_TO_EDIT;
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
 pub use ui_bar_work::{BarWorkState, UiBarWork};

@@ -36,6 +36,10 @@ use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
 
+/// Identify's outcome line when another tab of this browser holds the port
+/// ([`Event::LinkHeld`]).
+pub const HELD_BY_ANOTHER_TAB: &str = "held by another tab";
+
 /// Identify's own state: a cadence and a settle time. Everything it learns
 /// lives in the fold.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -227,6 +231,13 @@ impl IdentifyActivity {
     ) -> ActivityStep {
         match event {
             Event::Link { event, .. } => self.handle_link_event(event, ctx),
+            // Another tab holds the port: there is nothing to wait for and
+            // nothing to re-ask. The port was never opened (or the OS refused
+            // it), so there is no port to hand back either. The device does
+            // not retry this ending (see `Device::apply_step`).
+            Event::LinkHeld { .. } => ActivityStep::done(ActivityOutcome::Failed {
+                message: HELD_BY_ANOTHER_TAB.to_string(),
+            }),
             Event::TimerFired { .. } => {
                 if self.winding_down {
                     return ActivityStep::nothing();
@@ -250,6 +261,8 @@ impl IdentifyActivity {
             Event::LinkAttached { .. }
             | Event::LinkDetached { .. }
             | Event::LinkBorrow { .. }
+            | Event::BoardHeld { .. }
+            | Event::LinkFreed { .. }
             | Event::ActivityMarker { .. }
             | Event::IdentityObserved { .. }
             | Event::GrantAnswered { .. } => ActivityStep::nothing(),

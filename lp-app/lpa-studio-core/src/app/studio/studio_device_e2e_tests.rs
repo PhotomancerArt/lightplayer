@@ -177,6 +177,8 @@ mod ble_drop_tests;
 /// The board card, built in core, on real boards: its primary pressed by
 /// path, and every action it draws an offer the tree publishes.
 mod board_card_tests;
+/// One tab holds a board: two tabs on one in-memory hold bus.
+mod board_hold_tests;
 /// The home page's sections over this bench: a board plugged in is
 /// online, a detached one is offline, and the Connect a board section's
 /// offers are all published.
@@ -1146,6 +1148,10 @@ impl DeviceBench {
                     }
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
+                    }
+                    // The hold edge's answers (one tab holds a board).
+                    crate::StudioCommand::HoldEdge(event) => {
+                        self.controller.on_hold_edge_event(event);
                     }
                     _ => {}
                 }

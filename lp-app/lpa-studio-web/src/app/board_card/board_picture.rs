@@ -9,7 +9,7 @@
 //! card"); the status corner is cut out of it, not laid on it.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiBoardPicture, UpdateLight};
+use lpa_studio_core::{PictureSource, UiBoardPicture, UpdateLight};
 
 use crate::app::node::lamp_view::LampView;
 
@@ -22,15 +22,32 @@ pub fn BoardPicture(picture: UiBoardPicture) -> Element {
             UpdateLightSlot { light, frame_class: PICTURE_CLASS }
         };
     }
+    let source = source_name(picture.source);
     let frame = picture.frame.filter(|frame| frame.display_layout.is_some());
+    let drawn = frame.is_some();
     rsx! {
-        div { class: picture_class(picture.dim),
+        div {
+            class: picture_class(picture.dim),
+            "data-picture": source,
+            "data-picture-frame": "{drawn}",
             if let Some(frame) = frame {
                 div { class: "ux-play-lamps",
                     LampView { preview: frame }
                 }
             }
         }
+    }
+}
+
+/// The hook's word for where the picture comes from (`data-picture`):
+/// `link`, `lens`, `saved` or `none`. A walk reads it — a board another tab
+/// holds shows `saved`, the picture that tab left in the library.
+fn source_name(source: PictureSource) -> &'static str {
+    match source {
+        PictureSource::Link => "link",
+        PictureSource::Lens => "lens",
+        PictureSource::Saved => "saved",
+        PictureSource::None => "none",
     }
 }
 

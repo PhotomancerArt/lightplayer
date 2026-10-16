@@ -13,7 +13,7 @@
 //! covers the library pages and the live sim card.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{DeviceCardFeedView, FeedLiveness};
+use lpa_studio_core::{DeviceCardFeedView, FeedLiveness, HoldLevel};
 use lpa_studio_web_story_macros::story;
 use lpc_model::ProjectKind;
 
@@ -32,6 +32,7 @@ use lpa_studio_core::{
     DeviceView, OutcomeView, PendingLinkView, RosterView,
 };
 
+use crate::app::board_card::board_card_stories::{held_by_another_tab, saved_by_another_tab};
 use crate::app::home::card_thumb::CardThumb;
 use crate::app::home::connect_board::ConnectBoardSection;
 use crate::app::home::device_offer_story_fixtures::StoryHomePage;
@@ -555,6 +556,7 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
+        take_overs: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -598,6 +600,43 @@ fn devices_page_remembered_last_frame() -> Element {
             liveness: FeedLiveness::Offline,
         },
     );
+    let home = UiHomeView {
+        projects: packages(),
+        examples: examples(),
+        devices,
+        sections: Default::default(),
+        library_available: true,
+        opening: None,
+        issue: None,
+    };
+    rsx! {
+        section { class: "tw:p-4",
+            StoryHomePage {
+                home,
+                now_secs: Some(STORY_NOW),
+                initial_tab: Some(UiHomeTab::Boards),
+                on_action: |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    description = "A board another tab of this browser holds sits under ONLINE boards — it is plugged in and running, and \"Offline\" would be false — beside the board this tab has live. The held board's card: the picture the other tab saved (dimmed, \"5 min ago\" in the corner), \"Open in another tab\" in orange on its connection bar, and Connect as its primary, which takes the board over from that tab. The live board's card is as ever (\"58 fps\", Edit). Nothing is under Offline boards but the board Studio remembers and cannot see. Compare `board_card_held_by_another_tab`, the card alone in each state of the holder."
+)]
+fn devices_page_held_board() -> Element {
+    let mut devices = roster_page_fixture();
+    // The empty board is the one another tab holds.
+    let held = devices.roster.devices[1].id;
+    let title = devices.roster.devices[1].title.clone();
+    devices.roster.devices[1] = DeviceView {
+        id: held,
+        title,
+        ..held_by_another_tab(HoldLevel::Watching, false)
+    };
+    if let Some(feed) = saved_by_another_tab() {
+        devices.feeds.insert(held, feed);
+    }
     let home = UiHomeView {
         projects: packages(),
         examples: examples(),
@@ -1345,6 +1384,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
+        take_overs: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1376,6 +1416,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
                     firmware_blocked: None,
+                    held_by_tab: false,
                     escapes: vec![DeviceEscape::Forget],
                 },
                 PendingLinkView {
@@ -1391,6 +1432,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     detected_chip: Some("esp32c6".to_string()),
                     mac: None,
                     firmware_blocked: None,
+                    held_by_tab: false,
                     escapes: vec![DeviceEscape::Forget],
                 },
             ],
@@ -1454,6 +1496,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1513,6 +1556,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     update_blocked: None,
                     last_update_outcome: None,
+                    held_elsewhere: None,
                 },
                 DeviceView {
                     id: DeviceId(3),
@@ -1557,6 +1601,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1620,6 +1665,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     ],
                     terminal_dropped: 0,
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1656,6 +1702,7 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
                     terminal_dropped: 0,
                     // The two verbs an absent board can honestly offer.
                     firmware_blocked: None,
+                    held_elsewhere: None,
                     escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
                     update_blocked: None,
                     last_update_outcome: None,
@@ -1704,6 +1751,7 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
+        take_overs: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1901,6 +1949,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         )],
         terminal_dropped: 0,
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,
@@ -2015,6 +2064,7 @@ fn firmware_face_fixtures() -> Vec<(&'static str, DeviceView, Option<String>)> {
         // so the projection offers Disconnect — which is also what keeps
         // the terminal and the verb rows drawn at their fixed heights.
         firmware_blocked: None,
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,

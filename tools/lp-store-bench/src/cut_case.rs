@@ -270,8 +270,24 @@ fn run_case_inner(
             atomic &= judge_old_or_new(&state, &fx.old, &fx.new)?;
         }
         // Still writable: the interrupted step again, then one more.
-        run_step(store.as_mut(), &fx.step)
-            .map_err(|e| Failure::new("rerun_failed", e.to_string()))?;
+        if let Err(e) = run_step(store.as_mut(), &fx.step) {
+            // Still a failure; the detail says whether a second attempt,
+            // after a power cycle, would have fitted (a store that gave up
+            // early, or one the cut cost the room).
+            let mut flash = store.into_flash();
+            flash.power_cycle(FaultPlan::none());
+            let again = match cand.mount(flash, cfg) {
+                Ok(mut s) => match run_step(s.as_mut(), &fx.step) {
+                    Ok(()) => "fits".to_string(),
+                    Err(e2) => e2.to_string(),
+                },
+                Err((e2, _)) => format!("mount: {e2}"),
+            };
+            return Err(Failure::new(
+                "rerun_failed",
+                format!("{e} (a second attempt after a remount: {again})"),
+            ));
+        }
         let state = read_state(store.as_mut(), &paths)?;
         if state != fx.new {
             return Err(Failure::new(

@@ -4,6 +4,7 @@ found: 2026-08-29
 diagnosed: 2026-08-29
 fixed: 2026-08-29
 area: per-tick sample-out clone vs inbound-request transients on the classic heap
+class: misattributed-symptom  # read as a flash-write wedge; it was two OOM resets per write
 related:
   - 2026-08-29-shader-jit-compile-transient-starves-classic-heap.md
   - 2026-08-29-load-project-resets-instead-of-refusing.md
