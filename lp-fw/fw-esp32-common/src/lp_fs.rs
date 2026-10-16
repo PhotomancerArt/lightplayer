@@ -1013,7 +1013,8 @@ mod tests {
             Err((e, ..)) => panic!("format: {e:?}"),
         };
         st.put("/hardware.json", b"{\"board\":\"kept\"}").unwrap();
-        st.put("/projects/p/project.json", b"{\"name\":\"p\"}").unwrap();
+        st.put("/projects/p/project.json", b"{\"name\":\"p\"}")
+            .unwrap();
         st.put("/projects/p/.lp/panel.json", b"{}").unwrap();
         let mut out = vec![0u8; (sectors * BLOCK) as usize];
         st.flash().peek(0, &mut out);
