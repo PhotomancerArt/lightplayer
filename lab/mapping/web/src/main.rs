@@ -22,7 +22,7 @@ mod world_layer;
 
 use dioxus::prelude::*;
 use lab_mapping_files::{Opened, embedded};
-use lab_mapping_model::{Editor, Notice, Project, Tool};
+use lab_mapping_model::{Editor, LayoutKind, Notice, Project, SizeClass, Tool};
 
 const LAB_CSS: &str = include_str!("lab.css");
 
@@ -39,12 +39,39 @@ fn App() -> Element {
     let tool = toolbar.tool;
     let move_draw = toolbar.move_draw;
     let (can_undo, can_redo) = (toolbar.can_undo, toolbar.can_redo);
+    let class = toolbar.size_class;
+    // Page-local view state: the md tree drawer, the sm sheet.
+    let mut tree_open = use_signal(|| false);
+    let mut sheet = use_signal(|| Sheet::Half);
+    let has_selection = use_memo(move || !ed.read().selection.is_empty());
+    // The layout you chose last time, in this browser.
+    use_hook(move || {
+        if let Some(kind) = remembered_layout() {
+            ed.write().set_layout(Some(kind));
+        }
+    });
+    let lab_class = format!(
+        "lab size-{}{}",
+        class.word(),
+        if toolbar.forced_size_class.is_some() {
+            " forced"
+        } else {
+            ""
+        }
+    );
 
     rsx! {
         style { {LAB_CSS} }
         div {
-            class: "lab",
+            class: "{lab_class}",
             tabindex: "0",
+            // The size class, from the whole app's width: the chrome follows
+            // it, and the canvas's own width moves with the chrome.
+            onresize: move |evt| {
+                if let Ok(size) = evt.get_content_box_size() {
+                    ed.write().report_size_class(SizeClass::of_width(size.width));
+                }
+            },
             onmounted: move |evt| async move {
                 let _ = evt.set_focus(true).await;
             },
@@ -105,12 +132,74 @@ fn App() -> Element {
                         "Redo " kbd { "⇧⌘Z" }
                     }
                 }
-                DebugMenu { ed, pinning: toolbar.pinning }
+                div { class: "tools layout-switch",
+                    for (kind, word) in [(LayoutKind::Canvas, "Canvas"), (LayoutKind::Stack, "Stack")] {
+                        button {
+                            key: "{word}",
+                            class: if toolbar.layout == kind { "tool on" } else { "tool" },
+                            tabindex: "-1",
+                            title: "The layout: a canvas you pan and zoom, or one column in tree order",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                ed.write().set_layout(Some(kind));
+                                remember_layout(kind);
+                            },
+                            "{word}"
+                        }
+                    }
+                }
+                if class == SizeClass::Md {
+                    button {
+                        class: if tree_open() { "tool on" } else { "tool" },
+                        tabindex: "-1",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| tree_open.toggle(),
+                        "Tree"
+                    }
+                }
+                DebugMenu { ed, pinning: toolbar.pinning, forced: toolbar.forced_size_class }
             }
-            aside { class: "tree", panels::TreePane { ed, tree: view.tree } }
-            main { class: "canvas-wrap", canvas_container::Canvas { ed, view } }
-            aside { class: "inspector", panels::Inspector { ed, inspector: view.inspector } }
-            footer { class: "hints", panels::HintBar { hints: view.hints } }
+            match class {
+                SizeClass::Lg => rsx! {
+                    aside { class: "tree", panels::TreePane { ed, tree: view.tree } }
+                    main { class: "canvas-wrap", canvas_container::Canvas { ed, view } }
+                    aside { class: "inspector", panels::Inspector { ed, inspector: view.inspector } }
+                },
+                SizeClass::Md => rsx! {
+                    main { class: "canvas-wrap",
+                        canvas_container::Canvas { ed, view }
+                        if tree_open() {
+                            aside { class: "drawer drawer-left tree", panels::TreePane { ed, tree: view.tree } }
+                        }
+                        if has_selection() {
+                            aside { class: "drawer drawer-right inspector", panels::Inspector { ed, inspector: view.inspector } }
+                        }
+                    }
+                },
+                SizeClass::Sm => rsx! {
+                    main { class: "canvas-wrap",
+                        canvas_container::Canvas { ed, view }
+                        if has_selection() {
+                            div { class: "sheet sheet-{sheet().word()}",
+                                button {
+                                    class: "sheet-handle",
+                                    tabindex: "-1",
+                                    title: "Peek, half, full",
+                                    onmousedown: move |evt| evt.prevent_default(),
+                                    onclick: move |_| sheet.set(sheet().next()),
+                                    span { class: "sheet-grip" }
+                                }
+                                div { class: "sheet-body inspector",
+                                    panels::Inspector { ed, inspector: view.inspector }
+                                }
+                            }
+                        }
+                    }
+                },
+            }
+            footer { class: if class == SizeClass::Sm { "hints compact" } else { "hints" },
+                panels::HintBar { hints: view.hints }
+            }
         }
     }
 }
@@ -134,8 +223,7 @@ fn open_project(ed: &mut Signal<Editor>, key: &str) {
     match project {
         Ok(project) => {
             let viewport = ed.peek().viewport;
-            let mut e = Editor::new(project);
-            e.debug = ed.peek().debug;
+            let mut e = Editor::new(project).with_view_of(&ed.peek());
             e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
             e.resize(viewport);
             e.fit();
@@ -174,10 +262,58 @@ fn ToolButton(
     }
 }
 
+/// The bottom sheet's heights on a phone: its handle steps through them.
+#[derive(Clone, Copy, PartialEq)]
+enum Sheet {
+    Peek,
+    Half,
+    Full,
+}
+
+impl Sheet {
+    fn next(self) -> Sheet {
+        match self {
+            Sheet::Peek => Sheet::Half,
+            Sheet::Half => Sheet::Full,
+            Sheet::Full => Sheet::Peek,
+        }
+    }
+
+    fn word(self) -> &'static str {
+        match self {
+            Sheet::Peek => "peek",
+            Sheet::Half => "half",
+            Sheet::Full => "full",
+        }
+    }
+}
+
+/// Where this browser remembers the layout you chose; never the project.
+const LAYOUT_KEY: &str = "lab-mapping.layout";
+
+fn remembered_layout() -> Option<LayoutKind> {
+    let storage = web_sys::window()?.local_storage().ok()??;
+    match storage.get_item(LAYOUT_KEY).ok()??.as_str() {
+        "canvas" => Some(LayoutKind::Canvas),
+        "stack" => Some(LayoutKind::Stack),
+        _ => None,
+    }
+}
+
+fn remember_layout(kind: LayoutKind) {
+    let word = match kind {
+        LayoutKind::Canvas => "canvas",
+        LayoutKind::Stack => "stack",
+    };
+    if let Some(Ok(Some(storage))) = web_sys::window().map(|w| w.local_storage()) {
+        let _ = storage.set_item(LAYOUT_KEY, word);
+    }
+}
+
 /// Debug, at the toolbar's right end: switches for things being tried,
 /// out of the way (D64). Open or shut is the page's own state.
 #[component]
-fn DebugMenu(ed: Signal<Editor>, pinning: bool) -> Element {
+fn DebugMenu(ed: Signal<Editor>, pinning: bool, forced: Option<SizeClass>) -> Element {
     let mut ed = ed;
     let mut open = use_signal(|| false);
     rsx! {
@@ -199,6 +335,20 @@ fn DebugMenu(ed: Signal<Editor>, pinning: bool) -> Element {
                         onclick: move |_| ed.write().set_pinning(!pinning),
                         span { class: "toggle-box", if pinning { "✓" } else { "" } }
                         " Pinning"
+                    }
+                    div { class: "debug-row",
+                        span { class: "debug-label", "Size" }
+                        for (class, word) in [(None, "Auto"), (Some(SizeClass::Sm), "sm"), (Some(SizeClass::Md), "md"), (Some(SizeClass::Lg), "lg")] {
+                            button {
+                                key: "{word}",
+                                class: if forced == class { "tool on" } else { "tool" },
+                                tabindex: "-1",
+                                title: "Draw as if the screen were this size",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| ed.write().force_size_class(class),
+                                "{word}"
+                            }
+                        }
                     }
                 }
             }

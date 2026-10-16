@@ -15,11 +15,19 @@
 //! it, and hands the editor where everything landed. The page makes no
 //! detail decisions of its own: what's dimmed, lit or shown is the view
 //! tree's (`Editor::view_tree`).
+//!
+//! Two layouts (architecture §5). On the **canvas** the world layer's
+//! transform is the camera: pan and zoom. In the **stack** the nodes are one
+//! column in tree order at a fixed zoom, in a container that scrolls
+//! natively; the editor's camera follows the scroll so picks still land.
+//! Both put the same keyed cards in the same world layer, so switching
+//! eases every card to its new place while the world's own transform eases
+//! from the camera to the stack's, and the edges fade for the move.
 
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{Editor, NodeId, Rect, UiCursor, Vec2};
+use lab_mapping_model::{Camera, Editor, LayoutKind, NodeId, Rect, UiCursor, Vec2};
 
 use crate::dots_layer::DotsLayer;
 use crate::edge_layer;
@@ -33,6 +41,25 @@ const TICK_MS: u32 = 33;
 /// How long a relayout's cards take to ease to their new places (the CSS
 /// transition on `.node`), plus a frame: edges fade out for it.
 const SETTLE_MS: u32 = 200;
+/// How long switching layouts takes (`.world.switching` in `lab.css`).
+const SWITCH_MS: u32 = 320;
+
+/// The stack's fixed zoom: card text (3.9 world units) at 13 px.
+pub const STACK_ZOOM: f64 = 13.0 / 3.9;
+/// The stack's gutter at the column's left, where its edges run, and the
+/// room at its right and top, in screen pixels.
+pub const GUTTER_PX: f64 = 28.0;
+const STACK_RIGHT_PX: f64 = 12.0;
+pub const STACK_TOP_PX: f64 = 16.0;
+
+/// The stack's camera when it has scrolled `scroll_top` pixels: the column
+/// starts after the gutter, at the stack's zoom.
+fn stack_camera(scroll_top: f64) -> Camera {
+    Camera {
+        offset: Vec2::new(GUTTER_PX, STACK_TOP_PX - scroll_top),
+        scale: STACK_ZOOM,
+    }
+}
 
 #[component]
 pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
@@ -47,13 +74,44 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
     // runs only when it changes, and handing the placement back changes no
     // input, so it can't loop.
     let layout_input = use_memo(move || ed.read().layout_input());
-    let placement = use_memo(move || lab_layout::canvas_layout(&layout_input.read()));
+    let layout = use_memo(move || ed.read().layout());
+    // The stack's column, in world units, from the canvas's width.
+    let stack_width = use_memo(move || {
+        let w = ed.read().viewport.x;
+        ((w - GUTTER_PX - STACK_RIGHT_PX) / STACK_ZOOM).max(20.0)
+    });
+    let placement = use_memo(move || match layout() {
+        LayoutKind::Canvas => lab_layout::canvas_layout(&layout_input.read()),
+        LayoutKind::Stack => lab_layout::stack_layout(&layout_input.read(), stack_width()),
+    });
     let rects = use_memo(move || to_rects(&placement.read()));
+    let mut scroll_top = use_signal(|| 0.0_f64);
+    let mut switching = use_signal(|| false);
+    let mut placed_for = use_signal(|| None::<LayoutKind>);
     let mut settling = use_signal(|| false);
     let mut settles = use_signal(|| 0_u64);
     use_effect(move || {
         let p = placement.read();
+        let now = layout();
         ed.write().set_placement(&p);
+        // A switch: the canvas frames everything again; the stack starts at
+        // its top. The world's transform eases between them.
+        let was = *placed_for.peek();
+        if was.is_some_and(|w| w != now) {
+            match now {
+                LayoutKind::Canvas => ed.write().fit(),
+                LayoutKind::Stack => {
+                    set_scroll_top(0.0);
+                    scroll_top.set(0.0);
+                }
+            }
+            switching.set(true);
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(SWITCH_MS).await;
+                switching.set(false);
+            });
+        }
+        placed_for.set(Some(now));
         // Edges fade while the cards ease to their new places.
         let n = *settles.peek() + 1;
         settles.set(n);
@@ -93,9 +151,52 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
         ed.peek().board_frame(t)
     });
 
+    // In the stack the editor's camera follows the scroll.
+    use_effect(move || {
+        let want = stack_camera(scroll_top());
+        let e = ed.read();
+        if e.layout() == LayoutKind::Stack && e.camera != want {
+            drop(e);
+            ed.write().camera = want;
+        }
+    });
+    // In the stack, bring the card the selection is in into view.
+    let focus = use_memo(move || ed.read().focus_node());
+    use_effect(move || {
+        // Again when the column changes width: the cards move.
+        let _ = stack_width();
+        let Some(id) = focus() else { return };
+        if layout() != LayoutKind::Stack {
+            return;
+        }
+        let Some(r) = rects.peek().get(&id).copied() else {
+            return;
+        };
+        let cam = stack_camera(*scroll_top.peek());
+        let (top, bottom) = (cam.to_screen(r.min).y, cam.to_screen(r.max).y);
+        let h = ed.peek().viewport.y;
+        // In the upper part of the screen, clear of a sheet below.
+        if top < 0.0 || bottom > h * 0.55 {
+            let y = (*scroll_top.peek() + top - 24.0).max(0.0);
+            set_scroll_top(y);
+            scroll_top.set(y);
+        }
+    });
+
+    let stack = layout() == LayoutKind::Stack;
     let (camera, viewport, revision) = {
         let e = ed.read();
-        (e.camera, e.viewport, e.project.revision())
+        let camera = if stack {
+            stack_camera(scroll_top())
+        } else {
+            e.camera
+        };
+        (camera, e.viewport, e.project.revision())
+    };
+    let extent_px = if stack {
+        placement.read().extent.max.y * STACK_ZOOM + 2.0 * STACK_TOP_PX
+    } else {
+        0.0
     };
     let edges = edge_layer::route(&view.edges.read(), &ed.read(), &rects.read(), &camera);
     let (cursor, note) = view.cursor.read().clone();
@@ -128,14 +229,35 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
                 }
             },
             onwheel: move |evt| {
+                // The stack scrolls natively; only the canvas pans and zooms.
+                if stack {
+                    return;
+                }
                 evt.prevent_default();
                 let d = input::wheel_delta(&evt);
                 if let Some(at) = input::wheel_client_point(&evt) {
                     ed.write().wheel(at, d, input::mods(evt.modifiers()));
                 }
             },
-            DotsLayer { camera, viewport }
-            WorldLayer { nodes: nodes.clone(), rects, camera, viewport, revision, frame, ed }
+            if !stack {
+                DotsLayer { camera, viewport }
+            }
+            div {
+                class: if stack { "scroller stack" } else { "scroller" },
+                onscroll: move |_| scroll_top.set(read_scroll_top()),
+                div { class: "scroll-extent", style: "height: {extent_px}px" }
+                WorldLayer {
+                    nodes: nodes.clone(),
+                    rects,
+                    camera,
+                    viewport,
+                    stack,
+                    switching: switching(),
+                    revision,
+                    frame,
+                    ed,
+                }
+            }
             Overlay { nodes, rects, overlay, edges, settling: settling(), camera, viewport }
             if let Some(menu) = menu {
                 Menu { menu, viewport, ed }
@@ -145,6 +267,24 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
             }
         }
     }
+}
+
+/// The scroller's scroll, in pixels.
+fn read_scroll_top() -> f64 {
+    scroller().map_or(0.0, |el| el.scroll_top() as f64)
+}
+
+fn set_scroll_top(y: f64) {
+    if let Some(el) = scroller() {
+        el.set_scroll_top(y.round() as i32);
+    }
+}
+
+fn scroller() -> Option<web_sys::Element> {
+    web_sys::window()?
+        .document()?
+        .query_selector(".scroller")
+        .ok()?
 }
 
 /// The page's placement as the model's rects, by node.

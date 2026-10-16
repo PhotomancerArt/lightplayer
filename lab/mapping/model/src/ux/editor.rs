@@ -1449,6 +1449,29 @@ impl Editor {
         self.layout_choice.is_some()
     }
 
+    /// The node the selection is in: the selected node itself, or the
+    /// fixture or output something selected sits in. The stack scrolls it
+    /// into view.
+    pub fn focus_node(&self) -> Option<NodeId> {
+        let t = self.selection.first()?;
+        match t {
+            Target::Node(id) => Some(id.clone()),
+            Target::Port { output, .. } | Target::Pixel { output, .. } => Some(output.clone()),
+            other => self.project.fixture_of_target(other),
+        }
+    }
+
+    /// Take the view's choices from the editor this one replaces (opening
+    /// another project): the layout you chose, the screen, the viewport and
+    /// the Debug switches. The camera is new.
+    pub fn with_view_of(mut self, other: &Editor) -> Editor {
+        self.layout_choice = other.layout_choice;
+        self.screen_class = other.screen_class;
+        self.viewport = other.viewport;
+        self.debug = other.debug;
+        self
+    }
+
     /// The page says how big the screen is, as a size class.
     pub fn report_size_class(&mut self, class: SizeClass) {
         self.screen_class = class;

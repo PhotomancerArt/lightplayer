@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use dioxus::prelude::*;
 use lab_mapping_model::{BoardFrame, Camera, Editor, NodeId, Rect, UiCanvasNode, Vec2};
 
+use crate::canvas_container::STACK_TOP_PX;
 use crate::dense_canvas::zoom_step;
 use crate::node_card::NodeCard;
 
@@ -21,6 +22,10 @@ pub fn WorldLayer(
     rects: Memo<BTreeMap<NodeId, Rect>>,
     camera: Camera,
     viewport: Vec2,
+    /// In the stack the scroller moves the column; the world only scales.
+    stack: bool,
+    /// Switching layouts: the world's own transform eases too.
+    switching: bool,
     revision: u64,
     frame: Memo<BoardFrame>,
     ed: Signal<Editor>,
@@ -45,12 +50,19 @@ pub fn WorldLayer(
             visible(&r).then_some((n, r))
         })
         .collect();
+    let dy = if stack { STACK_TOP_PX } else { camera.offset.y };
     let style = format!(
-        "transform: translate({}px, {}px) scale({}); --zoom: {}",
-        camera.offset.x, camera.offset.y, camera.scale, camera.scale
+        "transform: translate({}px, {dy}px) scale({}); --zoom: {}",
+        camera.offset.x, camera.scale, camera.scale
     );
+    let class = match (stack, switching) {
+        (true, true) => "world in-stack switching",
+        (true, false) => "world in-stack",
+        (false, true) => "world switching",
+        (false, false) => "world",
+    };
     rsx! {
-        div { class: "world", style: "{style}",
+        div { class: "{class}", style: "{style}",
             for (node, rect) in shown {
                 NodeCard { key: "{node.id}", node, rect, zoom, revision, frame, ed }
             }

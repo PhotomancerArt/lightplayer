@@ -8,7 +8,7 @@ use crate::faces::{CardTitle, card_font};
 
 #[component]
 pub fn PlainFace(face: UiPlainFace, name: String, w: f64, h: f64, detail: DetailLevel) -> Element {
-    let row = card_row(0);
+    let row = card_row(0, w);
     let font = card_font();
     rsx! {
         svg { class: "face-svg", view_box: "0 0 {w} {h}", preserve_aspect_ratio: "none",

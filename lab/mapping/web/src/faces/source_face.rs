@@ -15,7 +15,7 @@ pub fn SourceFace(
     h: f64,
     detail: DetailLevel,
 ) -> Element {
-    let row = card_row(0);
+    let row = card_row(0, w);
     let font = card_font();
     rsx! {
         svg { class: "face-svg", view_box: "0 0 {w} {h}", preserve_aspect_ratio: "none",

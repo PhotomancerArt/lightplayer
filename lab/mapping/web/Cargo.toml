@@ -16,7 +16,7 @@ lab-arrows = { path = "../arrows" }
 lab-layout = { path = "../layout" }
 lab-mapping-model = { path = "../model" }
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "Performance", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics", "ImageData"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "Performance", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Storage"] }
 
 [lints]
 workspace = true

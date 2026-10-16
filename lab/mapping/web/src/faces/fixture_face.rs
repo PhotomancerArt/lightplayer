@@ -3,6 +3,10 @@
 //! wiring, and faintly behind them the picture its lamps sample — in SVG,
 //! in the fixture's own units — and its lamps on a canvas (Q4), each in its
 //! colour in the fixture's control product.
+//!
+//! A fixture is drawn in its own units, `size` its box; placed `w` wide
+//! (the stack fills the column with it) it is drawn that much bigger,
+//! whole.
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
@@ -15,8 +19,10 @@ use crate::faces::{emphasis_alpha, emphasis_class, lamp_radius_px, rgb};
 #[component]
 pub fn FixtureFace(
     face: UiFixtureFace,
+    /// Its own box, in its own units.
+    size: Vec2,
+    /// How wide it was placed, in world units.
     w: f64,
-    h: f64,
     zoom: f64,
     /// Where the fixture's `(0, 0)` is in world units, and the project's
     /// revision: the lamps, read by id, move when either does.
@@ -25,6 +31,11 @@ pub fn FixtureFace(
     frame: Memo<BoardFrame>,
     ed: Signal<Editor>,
 ) -> Element {
+    // Its units on screen: the camera's zoom times how much bigger than its
+    // box it is drawn.
+    let scale = w / size.x.max(1e-9);
+    let zoom = zoom * scale;
+    let (w, h) = (size.x, size.y);
     let px = 1.0 / zoom;
     let lamp_r = lamp_radius_px(zoom) * px;
     let dimmed: Vec<ObjectId> = face
@@ -150,6 +161,7 @@ fn FixtureLamps(
     w: f64,
     h: f64,
     zoom: f64,
+    /// Where it was placed: a move draws it again.
     origin: Vec2,
     revision: u64,
     dimmed: Vec<ObjectId>,
@@ -159,11 +171,14 @@ fn FixtureLamps(
     let id = use_hook(|| canvas_id("lamps"));
     // Read here, so a new frame draws again; the drawing reads the latest.
     let _ = frame.read();
-    let _ = revision;
+    let _ = (revision, origin);
     let canvas = id.clone();
     spawn(async move {
         let e = ed.peek();
         let frame = frame.peek();
+        // The lamps in the fixture's own units, through the editor's own
+        // frame for it: the same placement its lamps were put by.
+        let units = e.project.frame(&fixture);
         let r = lamp_radius_px(zoom) * crate::dense_canvas::device_pixel_ratio();
         let mut raster = Raster::new(w, h, zoom);
         let stamp = Stamp::disc(r, Some([255.0, 255.0, 255.0, 0.3]));
@@ -180,7 +195,7 @@ fn FixtureLamps(
                 .zip(frame.object_lamps(&o.id, o.lamps.len()))
                 .enumerate()
             {
-                let at = l.pos - origin;
+                let at = units.to_local(l.pos);
                 match c {
                     Some(c) => {
                         let mut c = rgb(c);

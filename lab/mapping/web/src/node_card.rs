@@ -51,7 +51,16 @@ pub fn NodeCard(
                 div { class: if node.frame == FrameKind::Card { "node-face {emphasis}" } else { "node-face" },
                     match face {
                         UiNodeFace::Fixture(face) => rsx! {
-                            FixtureFace { face, w, h, zoom, origin: Vec2::new(rect.min.x, rect.min.y), revision, frame, ed }
+                            FixtureFace {
+                                face,
+                                size: node.size,
+                                w,
+                                zoom,
+                                origin: Vec2::new(rect.min.x, rect.min.y),
+                                revision,
+                                frame,
+                                ed,
+                            }
                         },
                         UiNodeFace::Output(face) => rsx! {
                             OutputFace { face, name, w, h, detail, zoom, frame }

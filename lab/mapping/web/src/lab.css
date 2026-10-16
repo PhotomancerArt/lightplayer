@@ -35,22 +35,40 @@ html, body, #main { margin: 0; height: 100%; background: var(--bg); color: var(-
     outline: none;
 }
 
-/* Narrow screens (a phone): one column. The canvas comes first, then the
-   inspector, then the tree; the page scrolls. */
-@media (max-width: 760px) {
-    .lab {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto 58vh auto auto auto;
-        grid-template-areas: "top" "canvas" "inspector" "tree" "hints";
-        height: auto;
-        min-height: 100%;
-    }
-    .top { flex-wrap: wrap; gap: 8px 12px; }
-    .tree, .inspector { border: none; border-top: 1px solid var(--border); max-height: none; }
-    .canvas-wrap { touch-action: none; }
+/* Size classes (architecture §7), from the app's width or forced in Debug.
+   md and sm: one column; the tree and inspector come over the canvas. */
+.lab { background: var(--bg); }
+.lab.size-md, .lab.size-sm {
+    grid-template-columns: 1fr;
+    grid-template-areas: "top" "canvas" "hints";
 }
+.lab.size-md .top, .lab.size-sm .top { flex-wrap: wrap; gap: 6px 10px; }
+.lab.size-sm .top kbd { display: none; }
+/* Debug's forced class frames the app at that width, like device mode. */
+html:has(.lab.forced), body:has(.lab.forced) { background: var(--outside); }
+.lab.forced { margin: 0 auto; box-shadow: 0 0 0 1px var(--border-strong); }
+.lab.forced.size-sm { max-width: 390px; }
+.lab.forced.size-md { max-width: 820px; }
+
+/* md: drawers over the canvas. */
+.drawer { position: absolute; top: 0; bottom: 0; z-index: 6; overflow: auto; background: var(--surface); box-shadow: 0 0 24px rgba(0, 0, 0, 0.5); }
+.drawer-left { left: 0; width: 240px; border-right: 1px solid var(--border); }
+.drawer-right { right: 0; width: 280px; border-left: 1px solid var(--border); }
+
+/* sm: the inspector is a bottom sheet; its handle steps peek, half, full. */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; flex-direction: column; background: var(--surface); border-top: 1px solid var(--border-strong); border-radius: 12px 12px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45); transition: height 200ms ease; }
+.sheet-peek { height: 72px; }
+.sheet-half { height: 45%; }
+.sheet-full { height: calc(100% - 24px); }
+.sheet-handle { flex: none; display: flex; justify-content: center; padding: 8px 0 6px; border: none; border-radius: 12px 12px 0 0; background: none; cursor: pointer; }
+.sheet-grip { width: 40px; height: 4px; border-radius: 2px; background: var(--border-strong); }
+.sheet-body { flex: 1; overflow: auto; padding: 0 14px 12px; border: none; }
+/* sm: the hint bar is one line. */
+.hints.compact .bar > :not(:first-child) { display: none; }
 
 .debug { position: relative; margin-left: auto; }
+.debug-row { display: flex; align-items: center; gap: 4px; }
+.debug-label { color: var(--text-subtle); font-size: 12px; margin-right: 4px; }
 .debug-menu { position: absolute; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 10; white-space: nowrap; }
 .top { grid-area: top; display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .brand { font-weight: 600; }
@@ -90,6 +108,11 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .face-control { pointer-events: auto; }
 .dots { position: absolute; inset: 0; width: 100%; height: 100%; }
 .overlay { position: absolute; left: 0; top: 0; overflow: visible; }
+/* The world sits in a scroller: still on the canvas, scrolling natively in
+   the stack (momentum on a phone). */
+.scroller { position: absolute; inset: 0; overflow: hidden; }
+.scroller.stack { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.scroll-extent { width: 1px; }
 
 /* The world layer: the camera's transform, and every node a flat sibling
    inside it, in world units. Lines and borders that must stay one width on
@@ -100,6 +123,12 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .card .node-box { background: var(--surface-raised); border: calc(1px / var(--zoom)) solid var(--border-strong); border-radius: calc(4px / var(--zoom)); }
 .frame.fixture .node-box { background: var(--bg); border: calc(1px / var(--zoom)) solid var(--border-strong); }
 .frame.module .node-box { background: rgba(255, 255, 255, 0.018); border: calc(1px / var(--zoom)) dashed var(--border-strong); border-radius: calc(6px / var(--zoom)); }
+/* Switching layouts: the world's own transform eases with the cards. Pan
+   and zoom never transition. */
+.world.switching { transition: transform 320ms ease; }
+.world.switching .node { transition-duration: 320ms; }
+/* In the stack a module is a rail down its children's left. */
+.world.in-stack .frame.module .node-box { border: none; border-left: calc(2px / var(--zoom)) solid var(--border-strong); border-radius: 0; background: none; }
 .face-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .face-svg * { vector-effect: non-scaling-stroke; }
 .face-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }

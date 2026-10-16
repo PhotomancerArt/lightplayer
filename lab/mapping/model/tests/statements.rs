@@ -3381,6 +3381,21 @@ fn in_the_stack_only_the_selected_nodes_edges_show() {
     assert!(e.view_edges().iter().all(|x| x.shown));
 }
 
+/// The node the selection is in is the one the stack brings into view: a
+/// selected node, or the fixture or output holding what's selected.
+#[test]
+fn the_selection_has_a_node_it_is_in() {
+    let mut e = editor();
+    assert_eq!(e.focus_node(), None);
+    e.select(vec![lamp("circle1", "r1", 3)]);
+    assert_eq!(e.focus_node(), Some(node_id(&e, "ring display")));
+    let main = node_id(&e, "main");
+    e.select(vec![pixel(&main, "0", 2)]);
+    assert_eq!(e.focus_node(), Some(main));
+    e.select(vec![fixture(&e, "strip")]);
+    assert_eq!(e.focus_node(), Some(node_id(&e, "strip")));
+}
+
 /// In the stack a fixture fills the column, drawn bigger than its own box,
 /// and what's drawn in it comes along: its lamps land scaled with it, a
 /// click on a lamp picks that lamp, and a drag moves its object by the
