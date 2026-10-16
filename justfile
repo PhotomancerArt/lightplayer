@@ -1197,6 +1197,26 @@ iram-flash-literals-esp32v3 *args:
     python3 scripts/iram-flash-literals.py {{ fw_esp32v3_elf }} \
         --baseline {{ fw_esp32v3_dir }}/iram-flash-literals.baseline.txt {{ args }}
 
+# The ISR-in-RAM guard for fw-esp32s3: the same check as the classic's, against
+# the S3's own committed table (`lp-fw/fw-esp32s3/iram-flash-literals.baseline.txt`)
+# and its flash window (`--chip esp32s3`). esp-hal's `place-switch-tables-in-ram`
+# is OFF here and `rwdata_hook.x` names the tables that stay in RAM; the
+# `.rodata.cst*` pools moved to flash too, which is only safe while this check
+# keeps saying no RAM-resident function loads a literal that points into flash
+# that it did not load before. Run it after touching either key.
+#
+#   just iram-flash-literals-esp32s3                     # check against the baseline
+#   just iram-flash-literals-esp32s3 --write-baseline    # re-bless it, deliberately
+iram-flash-literals-esp32s3 *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GCC_BIN="$(just _xt-gcc-dir)"
+    if [[ -n "$GCC_BIN" ]]; then
+      export PATH="$GCC_BIN:$PATH"
+    fi
+    python3 scripts/iram-flash-literals.py {{ fw_esp32s3_elf }} --chip esp32s3 \
+        --baseline lp-fw/fw-esp32s3/iram-flash-literals.baseline.txt {{ args }}
+
 # The ISR-in-RAM guard for fw-esp32c6: which lookup tables a RAM-resident
 # function reads out of FLASH.
 #
@@ -3659,6 +3679,20 @@ test-emu-c6-cli-link: install-rv32-target
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts -- --include-ignored --nocapture
+
+# Time to first light on the emulated C6 (plan
+# lp2025/2026-10-16-0848-tree-store-adoption, A1;
+# `lp-cli/tests/emu_first_light.rs`): power-on to the first lit LED frame,
+# and its parts, from a ROM-up boot of the split image, for the shipped
+# (littlefs) and `fs-tree` images, with no project, `projects/test/basic` and
+# a c40-sized project. A REPORT, never a gate: emulated time, never compared
+# with silicon in ms (docs/reports/2026-10-16-c6-time-to-first-light.md has
+# the silicon figures). Never CI. `grade` is t1, t2 or t3; `dir` keeps the
+# JSON record.
+#   just report-first-light-emu
+#   just report-first-light-emu t3 target/first-light
+report-first-light-emu grade="t2" dir="": install-rv32-target
+    LP_FIRST_LIGHT_GRADE={{ grade }} LP_FIRST_LIGHT_DIR={{ dir }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_first_light -- --include-ignored --nocapture
 
 # The tree-store cut walk's long form (plan
 # lp2025/2026-10-08-2339-tree-store-firmware-and-emulator, P7): every erase
