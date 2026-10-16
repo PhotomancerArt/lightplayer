@@ -69,6 +69,16 @@ impl Editor {
                 .iter()
                 .map(|(id, v)| (ids(id), Vec2::new(v.x, v.y)))
                 .collect(),
+            // A fixture drawn wider than its box (the stack) is drawn that
+            // much bigger, whole.
+            scales: placement
+                .rects
+                .iter()
+                .filter_map(|(id, r)| {
+                    let f = self.project.fixture(&ids(id))?;
+                    Some((ids(id), r.width() / f.size.x.max(1e-9)))
+                })
+                .collect(),
         };
         let first = self.project.placement().rects.is_empty();
         self.project.set_placement(placement);

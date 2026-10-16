@@ -12,6 +12,7 @@ use crate::ux::ui::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiCanvasView {
     pub layout: LayoutKind,
+    pub size_class: SizeClass,
     /// Every node, flat, in tree order. Nesting (a module around its
     /// children) is each node's `parent`, never nested components, so a
     /// card is the same component in every layout.
@@ -31,6 +32,45 @@ pub struct UiCanvasView {
     pub cursor_note: Option<UiCursorNote>,
     /// What the pointer looks like over the canvas.
     pub cursor: UiCursor,
+}
+
+/// How big the screen is, as Studio's breakpoints (Tailwind's) name it:
+/// a phone, a tablet or narrow window, a desk (architecture §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SizeClass {
+    Sm,
+    Md,
+    #[default]
+    Lg,
+}
+
+impl SizeClass {
+    /// The class of a canvas `px` wide: sm below 640, md below 1024.
+    pub fn of_width(px: f64) -> SizeClass {
+        if px < 640.0 {
+            SizeClass::Sm
+        } else if px < 1024.0 {
+            SizeClass::Md
+        } else {
+            SizeClass::Lg
+        }
+    }
+
+    /// The layout a screen this size starts in: the stack on a phone.
+    pub fn default_layout(self) -> LayoutKind {
+        match self {
+            SizeClass::Sm => LayoutKind::Stack,
+            SizeClass::Md | SizeClass::Lg => LayoutKind::Canvas,
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            SizeClass::Sm => "sm",
+            SizeClass::Md => "md",
+            SizeClass::Lg => "lg",
+        }
+    }
 }
 
 /// Which layout the canvas is in (architecture §5).

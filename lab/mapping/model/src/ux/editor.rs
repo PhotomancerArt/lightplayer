@@ -8,13 +8,14 @@ use crate::domain::component::{Component, ComponentId, ComponentKind};
 use crate::domain::geom::{Rect, Vec2, polyline_length};
 use crate::domain::node::NodeId;
 use crate::domain::notice::Notice;
+use crate::domain::object::{Object, objects_of};
 use crate::domain::project::{Project, union};
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
 use crate::ux::debug_flags::DebugFlags;
 use crate::ux::handle::{Handle, HandleKind};
 use crate::ux::pick::{PickMode, level_candidates, pick};
-use crate::ux::ui::LayoutKind;
+use crate::ux::ui::{LayoutKind, SizeClass};
 
 /// Modifier keys held during an event. `command` is ⌘ on a Mac (Ctrl
 /// elsewhere); a trackpad pinch arrives as a wheel event with Ctrl held, so
@@ -193,8 +194,11 @@ pub struct Editor {
     /// (the dome). M toggles it.
     pub move_draw: bool,
     pub debug: DebugFlags,
-    /// Which layout the canvas is in.
-    pub layout: LayoutKind,
+    /// The layout you chose; `None` until you choose one, and the screen's
+    /// size class picks.
+    layout_choice: Option<LayoutKind>,
+    /// The screen's size class, as the page reports it.
+    screen_class: SizeClass,
     /// The edge under the pointer, as the view reports it
     /// (`edges.rs`).
     pub(crate) edge_hover: Option<(NodeId, NodeId)>,
@@ -227,7 +231,8 @@ impl Editor {
             path_draft: Vec::new(),
             move_draw: true,
             debug: DebugFlags::default(),
-            layout: LayoutKind::default(),
+            layout_choice: None,
+            screen_class: SizeClass::default(),
             edge_hover: None,
             press_log: Vec::new(),
             undo: Vec::new(),
@@ -298,17 +303,22 @@ impl Editor {
         }
     }
 
-    /// The component being drawn, before it exists, in world units: a
+    /// What's being drawn, before it exists, as objects in world units: a
     /// circle being dragged, or a path's clicked points plus the segment
     /// to the cursor.
-    pub fn draft(&self) -> Option<ComponentKind> {
+    pub fn draft(&self) -> Option<Vec<Object>> {
         let (fixture, kind) = self.draft_into()?;
-        let mut c = Component {
+        let frame = self.project.frame(&fixture);
+        let c = Component {
             id: ComponentId::new("draft"),
             kind,
         };
-        c.translate(self.project.origin(&fixture));
-        Some(c.kind)
+        Some(
+            objects_of(&c)
+                .into_iter()
+                .map(|o| crate::domain::project::placed(o, frame))
+                .collect(),
+        )
     }
 
     /// The fixture the draft goes into.
@@ -649,10 +659,10 @@ impl Editor {
             self.refuse_move_draw(&format!("add a point to {path}"));
             return;
         }
-        let origin = self.project.component_origin(path);
+        let frame = self.project.component_frame(path);
         let near = self.project.path_points(path).is_some_and(|ps| {
             ps.iter()
-                .any(|q| (*q + origin).distance(at) * self.camera.scale < SAME_POINT_PX)
+                .any(|q| frame.to_world(*q).distance(at) * self.camera.scale < SAME_POINT_PX)
         });
         if near {
             self.notice = Some(Notice::refused(
@@ -1381,8 +1391,10 @@ impl Editor {
         let delta = self.camera.to_world(at) - *start_world;
         let mut f = (**base).clone();
         for o in owners {
+            // The same move in the component's fixture's own units.
+            let d = base.component_frame(o).delta_local(delta);
             if let Some(c) = f.component_mut(o) {
-                c.translate(delta);
+                c.translate(d);
             }
         }
         for (id, from) in nodes {
@@ -1417,6 +1429,41 @@ impl Editor {
         } else {
             "Move & draw off — select and patch only; nothing moves · M turns it back on"
         }));
+    }
+
+    /// The size class the canvas is drawn for: Debug's forced one, or the
+    /// screen's.
+    pub fn size_class(&self) -> SizeClass {
+        self.debug.size_class.unwrap_or(self.screen_class)
+    }
+
+    /// The layout in use: the one you chose, or the size class's default
+    /// (the stack on a phone).
+    pub fn layout(&self) -> LayoutKind {
+        self.layout_choice
+            .unwrap_or_else(|| self.size_class().default_layout())
+    }
+
+    /// Whether the layout is one you chose.
+    pub fn layout_chosen(&self) -> bool {
+        self.layout_choice.is_some()
+    }
+
+    /// The page says how big the screen is, as a size class.
+    pub fn report_size_class(&mut self, class: SizeClass) {
+        self.screen_class = class;
+    }
+
+    /// Choose a layout (the toolbar's Canvas | Stack); `None` gives the
+    /// choice back to the screen size. The page remembers it per browser;
+    /// it is never saved in the project.
+    pub fn set_layout(&mut self, layout: Option<LayoutKind>) {
+        self.layout_choice = layout;
+    }
+
+    /// Debug: draw as if the screen were this size, or as it is.
+    pub fn force_size_class(&mut self, class: Option<SizeClass>) {
+        self.debug.size_class = class;
     }
 
     /// Debug's "Pinning": on, dragging a node pins it and the layout
@@ -1469,10 +1516,10 @@ impl Editor {
         if let Gesture::Drawing { start_world } = &self.gesture {
             let now = self.camera.to_world(self.pointer?);
             let fixture = self.project.fixture_at(*start_world)?;
-            let origin = self.project.origin(&fixture);
+            let frame = self.project.frame(&fixture);
             return Some((
                 fixture,
-                self.drawn_circle(*start_world - origin, now - origin),
+                self.drawn_circle(frame.to_local(*start_world), frame.to_local(now)),
             ));
         }
         if self.tool != Tool::Path {
@@ -1487,8 +1534,8 @@ impl Editor {
             return None;
         }
         let fixture = self.project.fixture_at(points[0])?;
-        let origin = self.project.origin(&fixture);
-        let local = points.into_iter().map(|p| p - origin).collect();
+        let frame = self.project.frame(&fixture);
+        let local = points.into_iter().map(|p| frame.to_local(p)).collect();
         Some((fixture, self.drawn_path(local)))
     }
 
@@ -1538,8 +1585,8 @@ impl Editor {
         let Some(fixture) = self.project.fixture_at(points[0]) else {
             return;
         };
-        let origin = self.project.origin(&fixture);
-        let kind = self.drawn_path(points.into_iter().map(|p| p - origin).collect());
+        let frame = self.project.frame(&fixture);
+        let kind = self.drawn_path(points.into_iter().map(|p| frame.to_local(p)).collect());
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
             self.selection = vec![Target::Component(id)];
@@ -1564,8 +1611,8 @@ impl Editor {
             ));
             return;
         };
-        let origin = self.project.origin(&fixture);
-        let kind = self.drawn_circle(start - origin, end - origin);
+        let frame = self.project.frame(&fixture);
+        let kind = self.drawn_circle(frame.to_local(start), frame.to_local(end));
         self.checkpoint();
         if let Some(id) = self.project.add(&fixture, kind) {
             self.selection = vec![Target::Component(id)];

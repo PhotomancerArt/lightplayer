@@ -39,22 +39,25 @@ pub fn card_size(rows: usize) -> Vec2 {
     Vec2::new(CARD_WIDTH, CARD_HEADER + CARD_ROW * rows as f64 + CARD_FOOT)
 }
 
-/// Row `i` on a card, in card-local units.
-pub fn card_row(i: usize) -> Rect {
+/// Row `i` on a card `width` wide, in card-local units. A card is
+/// [`CARD_WIDTH`] on the canvas; in the stack it is the column's width,
+/// and its rows span it.
+pub fn card_row(i: usize, width: f64) -> Rect {
     let top = CARD_HEADER + i as f64 * CARD_ROW;
-    Rect::new(Vec2::new(0.0, top), Vec2::new(CARD_WIDTH, top + CARD_ROW))
+    Rect::new(Vec2::new(0.0, top), Vec2::new(width, top + CARD_ROW))
 }
 
 impl Project {
     /// One port's row on its output's card, in world units.
     pub fn port_rect(&self, output: &NodeId, key: &str) -> Option<Rect> {
-        let origin = self.node_rect(output)?.min;
+        let card = self.node_rect(output)?;
+        let origin = card.min;
         let i = self
             .output(output)?
             .ports
             .iter()
             .position(|p| p.key == key)?;
-        let r = card_row(i);
+        let r = card_row(i, card.width());
         Some(Rect::new(r.min + origin, r.max + origin))
     }
 }

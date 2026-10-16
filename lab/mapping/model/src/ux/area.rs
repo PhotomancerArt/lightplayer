@@ -22,6 +22,7 @@
 use crate::domain::component::ComponentKind;
 use crate::domain::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
 use crate::domain::object::ObjectShape;
+use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
@@ -222,12 +223,15 @@ impl Project {
     pub fn area(&self, camera: &Camera, t: &Target) -> Option<Area> {
         let screen = |p: Vec2| camera.to_screen(p);
         // Components store their own fixture's coordinates.
-        let origin = t
+        let frame = t
             .owner()
             .and_then(|c| self.fixture_of(c))
-            .map(|n| self.origin(&n.id))
-            .unwrap_or_default();
-        let local = |p: Vec2| camera.to_screen(p + origin);
+            .map(|n| self.frame(&n.id))
+            .unwrap_or(Frame {
+                origin: Vec2::default(),
+                scale: 1.0,
+            });
+        let local = |p: Vec2| camera.to_screen(frame.to_world(p));
         match t {
             Target::Node(id) => {
                 let n = self.node(id)?;
@@ -308,7 +312,8 @@ impl Project {
                         pad: PATH_PAD_PX,
                     }),
                     ComponentKind::Circle { center, rings, .. } => {
-                        let r = rings.iter().map(|r| r.radius).fold(0.0, f64::max) * camera.scale;
+                        let r = frame.len_world(rings.iter().map(|r| r.radius).fold(0.0, f64::max))
+                            * camera.scale;
                         Some(Area::hull(&[local(*center)], r + CIRCLE_PAD_PX))
                     }
                     ComponentKind::Group { .. } => {

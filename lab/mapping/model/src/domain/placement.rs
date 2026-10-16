@@ -28,6 +28,38 @@ pub struct Placement {
     /// Where each module's inside starts, in world units: what a pin in
     /// that module is measured from.
     pub insides: BTreeMap<NodeId, Vec2>,
+    /// How much bigger than its own box each fixture is drawn: 1 on the
+    /// canvas; in the stack, a fixture fills the column's width.
+    pub scales: BTreeMap<NodeId, f64>,
+}
+
+/// Where a fixture's own units land in world units: its `(0, 0)` and how
+/// big one of its units is. Everything drawn in a fixture goes through
+/// this, both ways.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    pub origin: Vec2,
+    pub scale: f64,
+}
+
+impl Frame {
+    pub fn to_world(&self, p: Vec2) -> Vec2 {
+        self.origin + p * self.scale
+    }
+
+    pub fn to_local(&self, w: Vec2) -> Vec2 {
+        (w - self.origin) * (1.0 / self.scale)
+    }
+
+    /// A length in the fixture's units, in world units.
+    pub fn len_world(&self, l: f64) -> f64 {
+        l * self.scale
+    }
+
+    /// A move in world units, in the fixture's units.
+    pub fn delta_local(&self, d: Vec2) -> Vec2 {
+        d * (1.0 / self.scale)
+    }
 }
 
 /// The placement a project carries. Never compared: see the module docs.
@@ -66,6 +98,20 @@ impl Project {
     /// Where a fixture's `(0, 0)` lands in world units.
     pub fn origin(&self, id: &NodeId) -> Vec2 {
         self.node_rect(id).map(|r| r.min).unwrap_or_default()
+    }
+
+    /// Where a fixture's own units land in world units.
+    pub fn frame(&self, id: &NodeId) -> Frame {
+        Frame {
+            origin: self.origin(id),
+            scale: self
+                .placement()
+                .scales
+                .get(id)
+                .copied()
+                .filter(|s| *s > 0.0)
+                .unwrap_or(1.0),
+        }
     }
 
     /// Where the inside of the container holding `id` starts, in world

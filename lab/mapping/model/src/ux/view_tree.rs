@@ -15,8 +15,8 @@ use crate::ux::editor::{Editor, Gesture, Tool};
 use crate::ux::handle::{HandleKind, SizeEdge};
 use crate::ux::layout_input::layout_role;
 use crate::ux::ui::{
-    DetailLevel, Emphasis, FrameKind, UiCanvasEdge, UiCanvasNode, UiCanvasView, UiCursor,
-    UiCursorNote, UiMenu, UiMenuAction, UiMenuItem, UiNodeHeader, UiToolbar,
+    DetailLevel, Emphasis, FrameKind, LayoutKind, UiCanvasEdge, UiCanvasNode, UiCanvasView,
+    UiCursor, UiCursorNote, UiMenu, UiMenuAction, UiMenuItem, UiNodeHeader, UiToolbar,
 };
 
 /// A card at least this wide on screen shows its words: its text is then
@@ -29,7 +29,8 @@ impl Editor {
     /// Everything the page draws, for the editor as it is now.
     pub fn view_tree(&self) -> UiCanvasView {
         UiCanvasView {
-            layout: self.layout,
+            layout: self.layout(),
+            size_class: self.size_class(),
             nodes: self.view_nodes(),
             edges: self.view_edges(),
             overlay: self.view_overlay(),
@@ -74,7 +75,11 @@ impl Editor {
                         title_px: title_width(&n.name, n.pinned.is_some()),
                     },
                     face: self.view_face(n, &cx),
-                    detail: detail_level(size.x * self.camera.scale),
+                    // The stack always shows a card whole.
+                    detail: match self.layout() {
+                        LayoutKind::Canvas => detail_level(size.x * self.camera.scale),
+                        LayoutKind::Stack => DetailLevel::Full,
+                    },
                     emphasis: if outside && !fed_by_open {
                         Emphasis::Dimmed
                     } else {
@@ -88,9 +93,11 @@ impl Editor {
 
     /// Every edge, and what it says. On the canvas every edge shows; those
     /// touching the selection are lit, the rest step back while anything is
-    /// selected.
+    /// selected. In the stack only the selection's own edges show, in the
+    /// gutter (architecture §6.2).
     pub fn view_edges(&self) -> Vec<UiCanvasEdge> {
         let node = |t: &Target| t.node().cloned();
+        let stack = self.layout() == LayoutKind::Stack;
         self.edges()
             .into_iter()
             .filter_map(|x| {
@@ -101,7 +108,7 @@ impl Editor {
                     channel: x.channel,
                     carries: x.carries,
                     lands_on: x.lands_on,
-                    shown: true,
+                    shown: !stack || x.selected,
                     emphasis: if x.selected {
                         Emphasis::Lit
                     } else if !self.selection.is_empty() {
@@ -121,7 +128,10 @@ impl Editor {
             move_draw: self.move_draw,
             can_undo: self.can_undo(),
             can_redo: self.can_redo(),
-            layout: self.layout,
+            layout: self.layout(),
+            layout_chosen: self.layout_chosen(),
+            size_class: self.size_class(),
+            forced_size_class: self.debug.size_class,
             pinning: self.debug.pinning,
         }
     }

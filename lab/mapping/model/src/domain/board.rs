@@ -208,7 +208,7 @@ impl Board<'_> {
             return;
         };
         let render = p.render_product(fixture);
-        let origin = p.origin(fixture);
+        let frame = p.frame(fixture);
         for (i, (f, object)) in placed.list.iter().enumerate() {
             if f != fixture {
                 continue;
@@ -219,7 +219,7 @@ impl Board<'_> {
             let lamps = &mut self.lamps[first..first + n];
             for ((c, l), inside) in lamps.iter_mut().zip(&object.lamps).zip(inside) {
                 *c = match (&render, inside) {
-                    (Some(r), true) => Some(r.sample(fx.uv(l.pos - origin), self.time)),
+                    (Some(r), true) => Some(r.sample(fx.uv(frame.to_local(l.pos)), self.time)),
                     _ => None,
                 };
             }

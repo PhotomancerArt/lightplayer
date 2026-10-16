@@ -479,15 +479,7 @@ impl Editor {
     /// How many lamps the draft has.
     fn draft_lamps(&self) -> usize {
         self.draft()
-            .map(|kind| {
-                crate::domain::object::objects_of(&crate::Component {
-                    id: crate::ComponentId::new("draft"),
-                    kind,
-                })
-                .iter()
-                .map(|o| o.lamps.len())
-                .sum()
-            })
+            .map(|objects| objects.iter().map(|o| o.lamps.len()).sum())
             .unwrap_or(0)
     }
 

@@ -3323,6 +3323,99 @@ fn panning_changes_no_part_of_the_view_but_the_overlay() {
     assert!(keys(&e).0 != selected.0, "an edit");
 }
 
+// ---- the two layouts and the screen ----------------------------------------------
+
+/// On a phone-sized screen the canvas starts in the stack layout; on a
+/// tablet or a desk, in the canvas layout.
+#[test]
+fn a_phone_starts_in_the_stack() {
+    let mut e = editor();
+    assert_eq!(e.layout(), LayoutKind::Canvas, "a desk");
+    e.report_size_class(SizeClass::of_width(390.0));
+    assert_eq!(e.size_class(), SizeClass::Sm);
+    assert_eq!(e.layout(), LayoutKind::Stack);
+    e.report_size_class(SizeClass::of_width(820.0));
+    assert_eq!(e.size_class(), SizeClass::Md);
+    assert_eq!(e.layout(), LayoutKind::Canvas);
+}
+
+/// A layout you choose wins over the screen size's default, until you give
+/// the choice back. Debug can force a size class, as if the screen were
+/// that size.
+#[test]
+fn a_layout_you_choose_wins_over_the_screen() {
+    let mut e = editor();
+    e.set_layout(Some(LayoutKind::Stack));
+    assert_eq!(e.layout(), LayoutKind::Stack, "on a desk");
+    e.report_size_class(SizeClass::Sm);
+    e.set_layout(Some(LayoutKind::Canvas));
+    assert_eq!(e.layout(), LayoutKind::Canvas, "on a phone");
+    e.set_layout(None);
+    assert_eq!(e.layout(), LayoutKind::Stack, "the phone's own again");
+    e.report_size_class(SizeClass::Lg);
+    e.force_size_class(Some(SizeClass::Sm));
+    assert_eq!(e.size_class(), SizeClass::Sm);
+    assert_eq!(e.layout(), LayoutKind::Stack);
+    assert_eq!(e.view_toolbar().forced_size_class, Some(SizeClass::Sm));
+}
+
+/// In the stack layout only the selected node's edges show (in and out);
+/// with nothing selected, none do. On the canvas every edge shows.
+#[test]
+fn in_the_stack_only_the_selected_nodes_edges_show() {
+    let mut e = editor();
+    e.set_layout(Some(LayoutKind::Stack));
+    assert!(e.view_edges().iter().all(|x| !x.shown));
+    e.select(vec![fixture(&e, "strip")]);
+    let strip = node_id(&e, "strip");
+    for x in e.view_edges() {
+        assert_eq!(
+            x.shown,
+            x.from == strip || x.to == strip,
+            "{} → {}",
+            x.from,
+            x.to
+        );
+    }
+    e.set_layout(Some(LayoutKind::Canvas));
+    assert!(e.view_edges().iter().all(|x| x.shown));
+}
+
+/// In the stack a fixture fills the column, drawn bigger than its own box,
+/// and what's drawn in it comes along: its lamps land scaled with it, a
+/// click on a lamp picks that lamp, and a drag moves its object by the
+/// same amount in the fixture's own units.
+#[test]
+fn a_fixture_drawn_bigger_in_the_stack_still_picks_and_drags() {
+    let mut e = editor();
+    e.set_layout(Some(LayoutKind::Stack));
+    let placement = lab_layout::stack_layout(&e.layout_input(), 300.0);
+    e.set_placement(&placement);
+    e.fit();
+    let ring = node_id(&e, "ring display");
+    let box_ = e.project.node_rect(&ring).unwrap();
+    let k = box_.width() / 70.0;
+    assert!(k > 3.0, "the ring display is drawn {k}× its box");
+    let lamp0 = lamp_pos(&e, "circle1", "r1", 0);
+    let local = local_lamps(&e.project, &ComponentId::new("circle1"), 0)[0];
+    assert!((lamp0.x - (box_.min.x + local.x * k)).abs() < 1e-9);
+    click_lamp(&mut e, "circle1", "r1", 0, cmd());
+    assert_eq!(e.selection, vec![lamp("circle1", "r1", 0)]);
+    // Drag the circle 30 world units right: 30 / k in its own units.
+    e.select(vec![comp("circle1")]);
+    let at = e.camera.to_screen(lamp0);
+    let to = at + Vec2::new(30.0 * e.camera.scale, 0.0);
+    drag(&mut e, at, to, none());
+    let Some(ComponentKind::Circle { center, .. }) = e
+        .project
+        .component(&ComponentId::new("circle1"))
+        .map(|c| c.kind.clone())
+    else {
+        panic!("a circle")
+    };
+    assert!((center.x - (35.0 + 30.0 / k)).abs() < 1e-6, "{center:?}");
+}
+
 // ---- helpers -------------------------------------------------------------------
 
 /// Every pair of nodes at one level whose boxes overlap, in words: empty

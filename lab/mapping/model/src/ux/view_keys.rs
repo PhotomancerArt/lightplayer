@@ -13,6 +13,7 @@ use crate::domain::node::NodeId;
 use crate::domain::placement::Placement;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::ui::LayoutKind;
 
 /// What the nodes and their faces depend on (`Editor::view_nodes`).
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct NodesKey {
     hover: Option<Target>,
     scale: f64,
     pinning: bool,
+    layout: LayoutKind,
 }
 
 /// What the edges depend on (`Editor::view_edges`).
@@ -31,6 +33,7 @@ pub struct EdgesKey {
     revision: u64,
     selection: Vec<Target>,
     hovered: Option<(NodeId, NodeId)>,
+    layout: LayoutKind,
 }
 
 /// What the tree pane and the inspector depend on.
@@ -51,6 +54,7 @@ impl PartialEq for NodesKey {
             && self.hover == o.hover
             && self.scale == o.scale
             && self.pinning == o.pinning
+            && self.layout == o.layout
     }
 }
 
@@ -72,6 +76,7 @@ impl Editor {
             hover: self.hover_target(),
             scale: self.camera.scale,
             pinning: self.debug.pinning,
+            layout: self.layout(),
         }
     }
 
@@ -80,6 +85,7 @@ impl Editor {
             revision: self.project.revision(),
             selection: self.selection.clone(),
             hovered: self.edge_hover_now(),
+            layout: self.layout(),
         }
     }
 

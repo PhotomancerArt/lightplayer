@@ -26,7 +26,7 @@ use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
 use crate::domain::patch::PatchRule;
 use crate::domain::pattern::Pattern;
-use crate::domain::placement::Carried;
+use crate::domain::placement::{Carried, Frame};
 use crate::domain::render_source::RenderSource;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -476,17 +476,17 @@ impl Project {
 }
 
 /// An object moved from its fixture's coordinates to world units.
-pub(crate) fn placed(mut o: Object, origin: Vec2) -> Object {
+pub(crate) fn placed(mut o: Object, frame: Frame) -> Object {
     for l in &mut o.lamps {
-        l.pos = l.pos + origin;
+        l.pos = frame.to_world(l.pos);
     }
     o.shape = match o.shape {
         ObjectShape::Polyline { points } => ObjectShape::Polyline {
-            points: points.into_iter().map(|p| p + origin).collect(),
+            points: points.into_iter().map(|p| frame.to_world(p)).collect(),
         },
         ObjectShape::Ring { center, radius } => ObjectShape::Ring {
-            center: center + origin,
-            radius,
+            center: frame.to_world(center),
+            radius: frame.len_world(radius),
         },
     };
     o

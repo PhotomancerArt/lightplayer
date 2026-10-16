@@ -7,8 +7,9 @@
 use crate::domain::geom::{Rect, Vec2, along_polyline, polyline_length};
 use crate::domain::node::{Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
+use crate::domain::placement::Frame;
 use crate::domain::target::Target;
-use crate::ux::card_geometry::card_row;
+use crate::ux::card_geometry::{CARD_WIDTH, card_row};
 use crate::ux::editor::Editor;
 use crate::ux::pixel_grid::PixelGrid;
 use crate::ux::ui::{
@@ -70,8 +71,8 @@ impl Editor {
 
     fn fixture_face(&self, id: &NodeId, cx: &FaceContext) -> UiFixtureFace {
         let p = &self.project;
-        let origin = p.origin(id);
-        let local = |v: Vec2| v - origin;
+        let frame = p.frame(id);
+        let local = |v: Vec2| frame.to_local(v);
         let context = &cx.context;
         let objects = p
             .objects_in(id)
@@ -85,7 +86,7 @@ impl Editor {
                 } else {
                     Emphasis::Full
                 };
-                ui_object(o, emphasis, origin)
+                ui_object(o, emphasis, frame)
             })
             .collect();
         let dp = p.data_path(id);
@@ -139,12 +140,14 @@ impl Editor {
                 .any(|s| p.is_ancestor_or_self(s, &t) || p.is_ancestor_or_self(&t, s))
         };
         let marked = &cx.marked;
+        // The rows span the card as wide as it was placed.
+        let width = p.node_rect(id).map_or(CARD_WIDTH, |r| r.width());
         let ports = output
             .ports
             .iter()
             .enumerate()
             .filter_map(|(i, port)| {
-                let row = card_row(i);
+                let row = card_row(i, width);
                 let port_runs = p.port_runs(id, &port.key);
                 let pixels = p.port_pixels(id, &port.key);
                 let starts = port_runs.iter().skip(1).map(|r| r.pixels.start).collect();
@@ -195,15 +198,15 @@ impl Editor {
 
 /// An object as its fixture's face draws it, moved from world units to the
 /// fixture's own by `origin`.
-pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, origin: Vec2) -> UiObject {
-    let local = |v: Vec2| v - origin;
+pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, frame: Frame) -> UiObject {
+    let local = |v: Vec2| frame.to_local(v);
     let shape = match &o.shape {
         ObjectShape::Polyline { points } => {
             UiShape::Polyline(points.iter().map(|p| local(*p)).collect())
         }
         ObjectShape::Ring { center, radius } => UiShape::Ring {
             center: local(*center),
-            radius: *radius,
+            radius: radius / frame.scale,
         },
     };
     // Only the first two lamps matter here: where the data enters, and

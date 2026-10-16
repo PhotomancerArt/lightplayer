@@ -31,6 +31,7 @@
 use crate::domain::component::{ComponentId, ComponentKind};
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
+use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
@@ -122,7 +123,7 @@ impl Project {
         let mut out = Vec::new();
         match t {
             Target::Component(id) => {
-                let origin = self.component_origin(id);
+                let frame = self.component_frame(id);
                 match self.component(id).map(|c| &c.kind) {
                     Some(
                         ComponentKind::Path { points, .. } | ComponentKind::Polygon { points, .. },
@@ -131,7 +132,7 @@ impl Project {
                             path: id.clone(),
                             index,
                         },
-                        at: *p + origin,
+                        at: frame.to_world(*p),
                     })),
                     Some(ComponentKind::Circle { center, rings, .. }) => {
                         out.extend(rings.iter().map(|r| Handle {
@@ -139,7 +140,7 @@ impl Project {
                                 circle: id.clone(),
                                 ring: r.key.clone(),
                             },
-                            at: *center + origin + Vec2::new(r.radius, 0.0),
+                            at: frame.to_world(*center + Vec2::new(r.radius, 0.0)),
                         }))
                     }
                     _ => {}
@@ -155,9 +156,9 @@ impl Project {
                             circle: o.component.clone(),
                             ring: o.key.clone(),
                         },
-                        at: *center
-                            + self.component_origin(&o.component)
-                            + Vec2::new(r.radius, 0.0),
+                        at: self
+                            .component_frame(&o.component)
+                            .to_world(*center + Vec2::new(r.radius, 0.0)),
                     });
                 }
             }
@@ -190,10 +191,10 @@ impl Project {
     /// Add a point to a path on its segment `segment` (from point `segment`
     /// to the next), at `at` in world units. The path keeps its lamps.
     pub fn insert_path_point(&mut self, path: &ComponentId, segment: usize, at: Vec2) -> bool {
-        let origin = self.component_origin(path);
+        let frame = self.component_frame(path);
         match self.component_mut(path).and_then(|c| c.kind.points_mut()) {
             Some(points) if segment + 1 < points.len() => {
-                points.insert(segment + 1, at - origin);
+                points.insert(segment + 1, frame.to_local(at));
                 true
             }
             _ => false,
@@ -219,14 +220,14 @@ impl Project {
     /// The segment of a path nearest `p` (screen), within its area, and the
     /// point on it nearest `p` (world): where a new point would go.
     pub fn segment_at(&self, cam: &Camera, path: &ComponentId, p: Vec2) -> Option<(usize, Vec2)> {
-        let origin = self.component_origin(path);
+        let frame = self.component_frame(path);
         let points = self.path_points(path)?;
         let world = cam.to_world(p);
         points
             .windows(2)
             .enumerate()
             .map(|(i, w)| {
-                let (a, b) = (w[0] + origin, w[1] + origin);
+                let (a, b) = (frame.to_world(w[0]), frame.to_world(w[1]));
                 let ab = b - a;
                 let len2 = ab.x * ab.x + ab.y * ab.y;
                 let t = if len2 == 0.0 {
@@ -247,11 +248,14 @@ impl Project {
         self.component(id)?.kind.points().map(|p| p.as_slice())
     }
 
-    /// Where a component's fixture puts its `(0, 0)`, in world units.
-    pub fn component_origin(&self, id: &ComponentId) -> Vec2 {
+    /// Where a component's fixture puts its own units, in world units.
+    pub fn component_frame(&self, id: &ComponentId) -> Frame {
         self.fixture_of(id)
-            .map(|n| self.origin(&n.id))
-            .unwrap_or_default()
+            .map(|n| self.frame(&n.id))
+            .unwrap_or(Frame {
+                origin: Vec2::default(),
+                scale: 1.0,
+            })
     }
 
     /// Drag a handle: `base` is the project before the drag began, `from`
@@ -265,7 +269,13 @@ impl Project {
         to: Vec2,
         square: bool,
     ) {
-        let delta = to - from;
+        // The drag in the handle's fixture's own units.
+        let frame = match h {
+            HandleKind::PathPoint { path, .. } => base.component_frame(path),
+            HandleKind::RingRadius { circle, .. } => base.component_frame(circle),
+            HandleKind::FixtureSize { fixture, .. } => base.frame(fixture),
+        };
+        let delta = frame.delta_local(to - from);
         match h {
             HandleKind::PathPoint { path, index } => {
                 let Some(start) = base.path_points(path).and_then(|p| p.get(*index)).copied()
@@ -280,13 +290,11 @@ impl Project {
             }
             HandleKind::RingRadius { circle, ring } => {
                 let center = match base.component(circle).map(|c| &c.kind) {
-                    Some(ComponentKind::Circle { center, .. }) => {
-                        *center + base.component_origin(circle)
-                    }
+                    Some(ComponentKind::Circle { center, .. }) => *center,
                     _ => return,
                 };
                 if let Some(r) = self.ring_mut(circle, ring) {
-                    r.radius = to.distance(center).max(0.5);
+                    r.radius = frame.to_local(to).distance(center).max(0.5);
                 }
             }
             HandleKind::FixtureSize { fixture, edge } => {

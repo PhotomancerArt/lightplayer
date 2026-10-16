@@ -29,6 +29,7 @@ use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::NodeId;
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::patch::EffectivePatch;
+use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 
 /// The kept answers. Each is worked out the first time it is asked for.
@@ -231,8 +232,7 @@ impl Project {
         let layout = self.placement();
         for n in self.fixtures() {
             let Some(f) = n.fixture() else { continue };
-            let origin = layout.rects.get(&n.id).map(|r| r.min).unwrap_or_default();
-            index_components(&f.components, &n.id, origin, &mut p);
+            index_components(&f.components, &n.id, self.frame(&n.id), &mut p);
         }
         let mut lamps = 0;
         for (i, (fixture, o)) in p.list.iter().enumerate() {
@@ -348,16 +348,16 @@ fn bound_components(list: &[Component], p: &mut Placed) -> Option<Rect> {
 /// Index a fixture's components: each one's fixture, and its objects placed
 /// in world units, in authoring order (a component's own objects, then its
 /// children's).
-fn index_components(list: &[Component], fixture: &NodeId, origin: Vec2, p: &mut Placed) {
+fn index_components(list: &[Component], fixture: &NodeId, frame: Frame, p: &mut Placed) {
     for c in list {
         p.fixture_of.insert(c.id.clone(), fixture.clone());
         let start = p.list.len();
         p.list.extend(
             crate::domain::object::objects_of(c)
                 .into_iter()
-                .map(|o| (fixture.clone(), crate::domain::project::placed(o, origin))),
+                .map(|o| (fixture.clone(), crate::domain::project::placed(o, frame))),
         );
         p.by_component.insert(c.id.clone(), start..p.list.len());
-        index_components(c.children(), fixture, origin, p);
+        index_components(c.children(), fixture, frame, p);
     }
 }

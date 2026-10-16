@@ -2,9 +2,7 @@
 //! on screen, in screen pixels. Outlines are areas (`area.rs`), the same
 //! shapes a click hits, so what's outlined is what a click selects.
 
-use crate::domain::component::{Component, ComponentId};
 use crate::domain::geom::{Rect, Vec2};
-use crate::domain::object::objects_of;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
 use crate::ux::ui::{OutlineKind, UiDraftObject, UiHandle, UiOutline, UiOverlay, UiShape};
@@ -72,40 +70,39 @@ impl Editor {
         let bounds = self.draft_fixture().and_then(|id| p.node_rect(&id));
         let draft = self
             .draft()
-            .map(|kind| {
-                objects_of(&Component {
-                    id: ComponentId::new("draft"),
-                    kind,
-                })
-                .iter()
-                .map(|o| {
-                    let shape = match &o.shape {
-                        crate::domain::object::ObjectShape::Polyline { points } => {
-                            UiShape::Polyline(points.iter().map(|q| cam.to_screen(*q)).collect())
-                        }
-                        crate::domain::object::ObjectShape::Ring { center, radius } => {
-                            UiShape::Ring {
-                                center: cam.to_screen(*center),
-                                radius: radius * cam.scale,
+            .map(|objects| {
+                objects
+                    .iter()
+                    .map(|o| {
+                        let shape = match &o.shape {
+                            crate::domain::object::ObjectShape::Polyline { points } => {
+                                UiShape::Polyline(
+                                    points.iter().map(|q| cam.to_screen(*q)).collect(),
+                                )
                             }
+                            crate::domain::object::ObjectShape::Ring { center, radius } => {
+                                UiShape::Ring {
+                                    center: cam.to_screen(*center),
+                                    radius: radius * cam.scale,
+                                }
+                            }
+                        };
+                        let lamps: Vec<(Vec2, bool)> = o
+                            .lamps
+                            .iter()
+                            .map(|l| {
+                                let inside = bounds.is_some_and(|b| b.contains(l.pos));
+                                (cam.to_screen(l.pos), inside)
+                            })
+                            .collect();
+                        let at: Vec<Vec2> = lamps.iter().map(|(q, _)| *q).collect();
+                        UiDraftObject {
+                            arrow: direction_arrow(&shape, &at),
+                            shape,
+                            lamps,
                         }
-                    };
-                    let lamps: Vec<(Vec2, bool)> = o
-                        .lamps
-                        .iter()
-                        .map(|l| {
-                            let inside = bounds.is_some_and(|b| b.contains(l.pos));
-                            (cam.to_screen(l.pos), inside)
-                        })
-                        .collect();
-                    let at: Vec<Vec2> = lamps.iter().map(|(q, _)| *q).collect();
-                    UiDraftObject {
-                        arrow: direction_arrow(&shape, &at),
-                        shape,
-                        lamps,
-                    }
-                })
-                .collect()
+                    })
+                    .collect()
             })
             .unwrap_or_default();
 
