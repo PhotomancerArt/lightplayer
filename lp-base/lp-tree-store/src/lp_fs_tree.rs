@@ -326,6 +326,16 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         true
     }
 
+    /// The store's idle step (`TreeStore::collect_step`): a mark, then at
+    /// most one garbage-only sector forgotten or one victim collected.
+    fn idle_step(&self) -> Result<bool, FsError> {
+        self.inner
+            .borrow_mut()
+            .store
+            .collect_step()
+            .map_err(store_err)
+    }
+
     /// The store's own deflated write (`TreeStore::put_chunk_deflated`): it
     /// checks the length and offset, inflates to verify, and keeps the
     /// deflated bytes when they fit a record (plain bytes otherwise, same

@@ -388,7 +388,7 @@ mod tests {
                 .iter()
                 .filter_map(|op| match op {
                     crate::Op::Put { path, .. } => Some(path.as_str()),
-                    crate::Op::DeletePrefix(_) => None,
+                    crate::Op::DeletePrefix(_) | crate::Op::Idle(_) => None,
                 })
                 .collect();
             let distinct: std::collections::BTreeSet<&str> = paths.iter().copied().collect();

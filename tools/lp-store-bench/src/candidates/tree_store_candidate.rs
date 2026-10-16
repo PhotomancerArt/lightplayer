@@ -1,6 +1,7 @@
 //! T1: the content-addressed copy-on-write tree store (`lp-tree-store` v1).
 //! Dials: `record_max`, `gc_policy` (`greedy` | `cost_benefit`), `reserve`,
-//! `txn_delta_max`, `codec` (`stored` | `host_deflate`).
+//! `txn_delta_max`, `idle_free_percent`, `idle_min_garbage`, `idle_pack_free`,
+//! `codec` (`stored` | `host_deflate`).
 //!
 //! A workload step is one store transaction (`begin` at the step's first
 //! write, `commit` at its end), so T1 is scored step-atomic. With
@@ -36,6 +37,9 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
             "record_max" => c.record_max = num()?,
             "reserve" => c.reserve = num()?,
             "txn_delta_max" => c.txn_delta_max = num()?,
+            "idle_free_percent" => c.idle_free_percent = num()?,
+            "idle_min_garbage" => c.idle_min_garbage = num()?,
+            "idle_pack_free" => c.idle_pack_free = num()?,
             "gc_policy" => {
                 c.gc_policy = match v.as_str() {
                     "greedy" => GcPolicy::Greedy,
@@ -146,6 +150,10 @@ impl CandidateStore for TreeStoreAdapter {
             let _ = self.store.abort();
         }
         r
+    }
+
+    fn idle(&mut self) -> Result<bool, StoreError> {
+        self.store.collect_step().map_err(map_err)
     }
 
     fn into_flash(self: Box<Self>) -> NorFlashSim {

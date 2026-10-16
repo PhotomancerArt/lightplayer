@@ -74,6 +74,7 @@ mod sector_table;
 mod space_estimate;
 mod store_config;
 mod store_error;
+mod store_idle;
 mod store_mount;
 mod store_space;
 #[cfg(feature = "stats")]
@@ -91,6 +92,8 @@ mod cut_sweep_tests;
 mod edge_gc_tests;
 #[cfg(test)]
 mod format_extension_tests;
+#[cfg(test)]
+mod idle_gc_tests;
 #[cfg(all(test, feature = "lpfs"))]
 mod lp_fs_tree_tests;
 #[cfg(test)]
