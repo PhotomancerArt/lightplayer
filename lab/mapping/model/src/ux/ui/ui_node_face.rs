@@ -19,20 +19,36 @@ pub enum UiNodeFace {
     Plain(UiPlainFace),
 }
 
-/// A fixture's face is the mapping editor: what's drawn in it, its wiring,
-/// and the picture its lamps sample. Its lamps are dense: read them by
-/// `fixture` from `Project::objects_in` and colour them from the board.
+/// A fixture's face. While you work in it, it is the mapping editor: what's
+/// drawn in it, its wiring, and the picture its lamps sample. Otherwise it
+/// is Studio's live view: its lamps alone, each as a cell of light. Its
+/// lamps are dense: read them by `fixture` from `Project::objects_in` and
+/// colour them from the board.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiFixtureFace {
     pub fixture: NodeId,
+    pub look: FixtureLook,
+    /// Each object's line and marks, drawn while editing; their emphasis
+    /// dims a fixture's lamps outside the level you are in either way.
     pub objects: Vec<UiObject>,
-    /// The order the wire runs through its objects (`data_path.rs`).
+    /// The order the wire runs through its objects (`data_path.rs`); empty
+    /// in the live view.
     pub wires: Vec<UiWire>,
-    /// Bright while you work in this fixture, quiet otherwise.
-    pub wires_emphasis: Emphasis,
     /// The picture its lamps sample, as a coarse grid of cells, drawn
-    /// faintly behind them.
+    /// faintly behind them; empty in the live view.
     pub picture: Vec<(Rect, Rgb)>,
+}
+
+/// How a fixture's face is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FixtureLook {
+    /// Lamps as cells of light, as Studio's live view draws them: the
+    /// fixture as it looks lit.
+    Live,
+    /// The mapping editor: lines, where data enters, which way it runs,
+    /// the wiring, lamps as dots. While it or anything in it is selected,
+    /// or a drawing tool is out.
+    Editing,
 }
 
 /// One object drawn in a fixture.

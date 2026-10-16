@@ -1,20 +1,27 @@
-//! A fixture's face: the mapping editor, in place. What's drawn in it (each
-//! object's line, where its data enters and which way it runs), its
-//! wiring, and faintly behind them the picture its lamps sample — in SVG,
-//! in the fixture's own units — and its lamps on a canvas (Q4), each in its
-//! colour in the fixture's control product.
+//! A fixture's face. While you work in it, the mapping editor in place:
+//! what's drawn in it (each object's line, where its data enters and which
+//! way it runs), its wiring, and faintly behind them the picture its lamps
+//! sample — in SVG, in the fixture's own units — and its lamps as dots on a
+//! canvas (Q4), each in its colour in the fixture's control product.
+//! Otherwise Studio's live view: its lamps alone, as cells of light
+//! (`lamp_cells.rs`).
 //!
 //! A fixture is drawn in its own units, `size` its box; placed `w` wide
 //! (the stack fills the column with it) it is drawn that much bigger,
 //! whole.
 
 use dioxus::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use lab_mapping_model::{
-    BoardFrame, Editor, Emphasis, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape, UiWire, Vec2,
+    BoardFrame, Editor, Emphasis, FixtureLook, NodeId, ObjectId, UiFixtureFace, UiObject, UiShape,
+    UiWire, Vec2,
 };
 
 use crate::dense_canvas::{Raster, Stamp, canvas_id, put_when_mounted};
 use crate::faces::{emphasis_alpha, emphasis_class, lamp_radius_px, rgb};
+use crate::lamp_cells::CellMap;
 
 #[component]
 pub fn FixtureFace(
@@ -44,11 +51,7 @@ pub fn FixtureFace(
         .filter(|o| o.emphasis == Emphasis::Dimmed)
         .map(|o| o.id.clone())
         .collect();
-    let wire_class = if face.wires_emphasis == Emphasis::Lit {
-        "wire wire-on"
-    } else {
-        "wire"
-    };
+    let editing = face.look == FixtureLook::Editing;
     rsx! {
         svg { class: "face-svg", view_box: "0 0 {w} {h}", preserve_aspect_ratio: "none",
             g { class: "pictures",
@@ -62,13 +65,15 @@ pub fn FixtureFace(
                 }
             }
             for (i, wire) in face.wires.iter().enumerate() {
-                g { key: "w{i}", class: "{wire_class}", {wire_view(wire, lamp_r, px)} }
+                g { key: "w{i}", class: "wire wire-on", {wire_view(wire, lamp_r, px)} }
             }
-            for o in face.objects.iter() {
-                g { key: "{o.id}", class: "obj {emphasis_class(o.emphasis)}", {object_view(o, lamp_r, px)} }
+            if editing {
+                for o in face.objects.iter() {
+                    g { key: "{o.id}", class: "obj {emphasis_class(o.emphasis)}", {object_view(o, lamp_r, px)} }
+                }
             }
         }
-        FixtureLamps { fixture: face.fixture.clone(), w, h, zoom, origin, revision, dimmed, frame, ed }
+        FixtureLamps { fixture: face.fixture.clone(), look: face.look, w, h, zoom, origin, revision, dimmed, frame, ed }
     }
 }
 
@@ -153,11 +158,13 @@ fn arrowhead(tip: Vec2, u: Vec2, px: f64) -> String {
 }
 
 /// Every lamp of the fixture, in its control product's colour, from the
-/// board frame. A lamp patched to no pixel is fainter; one with no colour
-/// (outside its box, or nothing renders for its fixture) a dim hollow dot.
+/// board frame: a dot while editing, a cell in the live view. A lamp
+/// patched to no pixel is fainter; one with no colour (outside its box, or
+/// nothing renders for its fixture) a dim hollow dot, or a dim cell.
 #[component]
 fn FixtureLamps(
     fixture: NodeId,
+    look: FixtureLook,
     w: f64,
     h: f64,
     zoom: f64,
@@ -169,6 +176,8 @@ fn FixtureLamps(
     ed: Signal<Editor>,
 ) -> Element {
     let id = use_hook(|| canvas_id("lamps"));
+    // The live view's cells, kept while the layout and zoom stay put.
+    let cells = use_hook(|| Rc::new(RefCell::new(None::<(CellsKey, CellMap)>)));
     // Read here, so a new frame draws again; the drawing reads the latest.
     let _ = frame.read();
     let _ = (revision, origin);
@@ -181,6 +190,50 @@ fn FixtureLamps(
         let units = e.project.frame(&fixture);
         let r = lamp_radius_px(zoom) * crate::dense_canvas::device_pixel_ratio();
         let mut raster = Raster::new(w, h, zoom);
+        if look == FixtureLook::Live {
+            let mut seeds: Vec<(f64, f64)> = Vec::new();
+            let mut colours: Vec<[f64; 4]> = Vec::new();
+            for o in e.project.objects_in(&fixture) {
+                let dim = if dimmed.contains(&o.id) {
+                    emphasis_alpha(Emphasis::Dimmed)
+                } else {
+                    1.0
+                };
+                for (i, (l, c)) in o
+                    .lamps
+                    .iter()
+                    .zip(frame.object_lamps(&o.id, o.lamps.len()))
+                    .enumerate()
+                {
+                    let at = units.to_local(l.pos);
+                    seeds.push((at.x * raster.k, at.y * raster.k));
+                    colours.push(match c {
+                        Some(c) => {
+                            let mut c = rgb(c);
+                            c[3] = dim
+                                * if frame.lands(&o.id, i as u32) {
+                                    1.0
+                                } else {
+                                    0.45
+                                };
+                            c
+                        }
+                        None => [156.0, 156.0, 171.0, 0.25 * dim],
+                    });
+                }
+            }
+            let key = CellsKey::new(revision, origin, &raster);
+            let mut kept = cells.borrow_mut();
+            if kept.as_ref().is_none_or(|(k, _)| *k != key) {
+                *kept = Some((key, CellMap::new(raster.w, raster.h, &seeds, r)));
+            }
+            if let Some((_, map)) = kept.as_ref() {
+                map.paint(&mut raster, &colours);
+            }
+            drop((kept, e, frame));
+            put_when_mounted(raster, canvas).await;
+            return;
+        }
         let stamp = Stamp::disc(r, Some([255.0, 255.0, 255.0, 0.3]));
         let dark = [156.0, 156.0, 171.0, 1.0];
         for o in e.project.objects_in(&fixture) {
@@ -216,5 +269,26 @@ fn FixtureLamps(
     });
     rsx! {
         canvas { id: "{id}", class: "face-canvas" }
+    }
+}
+
+/// What a fixture's cells were worked out for: its lamps (by the project's
+/// revision and where it was placed) and its raster.
+#[derive(Clone, Copy, PartialEq)]
+struct CellsKey {
+    revision: u64,
+    origin: (u64, u64),
+    raster: (u32, u32),
+    k: u64,
+}
+
+impl CellsKey {
+    fn new(revision: u64, origin: Vec2, raster: &Raster) -> CellsKey {
+        CellsKey {
+            revision,
+            origin: (origin.x.to_bits(), origin.y.to_bits()),
+            raster: (raster.w, raster.h),
+            k: raster.k.to_bits(),
+        }
     }
 }

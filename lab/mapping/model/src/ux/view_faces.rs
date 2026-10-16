@@ -10,11 +10,11 @@ use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::placement::Frame;
 use crate::domain::target::Target;
 use crate::ux::card_geometry::{CARD_WIDTH, card_row};
-use crate::ux::editor::Editor;
+use crate::ux::editor::{Editor, Tool};
 use crate::ux::pixel_grid::PixelGrid;
 use crate::ux::ui::{
-    Emphasis, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace, UiPortRow, UiRun,
-    UiShape, UiSourceFace, UiWire,
+    Emphasis, FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace,
+    UiPortRow, UiRun, UiShape, UiSourceFace, UiWire,
 };
 
 /// A fixture's picture behind its lamps: this many cells each way.
@@ -89,6 +89,18 @@ impl Editor {
                 ui_object(o, emphasis, frame)
             })
             .collect();
+        let working = cx.open.contains(id)
+            || self.selection.contains(&Target::Node(id.clone()))
+            || self.tool != Tool::Select;
+        if !working {
+            return UiFixtureFace {
+                fixture: id.clone(),
+                look: FixtureLook::Live,
+                objects,
+                wires: Vec::new(),
+                picture: Vec::new(),
+            };
+        }
         let dp = p.data_path(id);
         let mut wires: Vec<UiWire> = dp
             .links
@@ -102,16 +114,11 @@ impl Editor {
             at: local(e.at),
             along: e.along,
         }));
-        let working = cx.open.contains(id) || self.selection.contains(&Target::Node(id.clone()));
         UiFixtureFace {
             fixture: id.clone(),
+            look: FixtureLook::Editing,
             objects,
             wires,
-            wires_emphasis: if working {
-                Emphasis::Lit
-            } else {
-                Emphasis::Quiet
-            },
             picture: p
                 .render_preview(id, PICTURE_CELLS, 0.0)
                 .into_iter()

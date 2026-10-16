@@ -21,8 +21,8 @@ pub use ui_canvas_view::{LayoutKind, SizeClass, UiCanvasView, UiCursor, UiCursor
 pub use ui_inspector::{UiCrumb, UiInspector, UiItem, UiSection};
 pub use ui_menu::{UiMenu, UiMenuAction, UiMenuItem};
 pub use ui_node_face::{
-    UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace, UiPortRow, UiRun, UiShape,
-    UiSourceFace, UiWire,
+    FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace, UiPortRow, UiRun,
+    UiShape, UiSourceFace, UiWire,
 };
 pub use ui_node_header::UiNodeHeader;
 pub use ui_overlay::{OutlineKind, UiDraftObject, UiHandle, UiOutline, UiOverlay};

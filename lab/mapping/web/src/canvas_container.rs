@@ -135,15 +135,22 @@ pub fn Canvas(ed: Signal<Editor>, view: View) -> Element {
             }
         }
     });
-    // What the board shows depends on the project, the selection and a
-    // drawing in progress — not on the pointer or the camera — so it is
-    // worked out again only when one of those, or the clock, moves.
+    // What the board shows depends on the project, where its fixtures were
+    // placed, the selection and a drawing in progress — not on the pointer
+    // or the camera — so it is worked out again only when one of those, or
+    // the clock, moves. Handing over a placement keeps the revision, so it
+    // is counted apart.
     let board_key = use_memo(move || {
         let e = ed.read();
         let draft = e
             .drawing()
             .then(|| (e.pointer, e.path_draft.clone(), e.camera));
-        (e.project.revision(), e.selection.clone(), draft)
+        (
+            e.project.revision(),
+            e.project.placements(),
+            e.selection.clone(),
+            draft,
+        )
     });
     let frame = use_memo(move || {
         board_key.read();

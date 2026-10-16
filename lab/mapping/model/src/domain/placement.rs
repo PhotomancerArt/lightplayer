@@ -62,9 +62,10 @@ impl Frame {
     }
 }
 
-/// The placement a project carries. Never compared: see the module docs.
+/// The placement a project carries, and how many it has been handed. Never
+/// compared: see the module docs.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Carried(pub(crate) Arc<Placement>);
+pub(crate) struct Carried(pub(crate) Arc<Placement>, u64);
 
 impl PartialEq for Carried {
     fn eq(&self, _: &Self) -> bool {
@@ -78,6 +79,12 @@ impl Project {
         &self.placement.0
     }
 
+    /// How many placements this project has been handed: what changes when
+    /// nodes move without an edit (the revision stays put).
+    pub fn placements(&self) -> u64 {
+        self.placement.1
+    }
+
     /// Take where the view placed every node. Returns whether anything
     /// moved; when it did, what was worked out in world units is worked out
     /// again.
@@ -85,7 +92,7 @@ impl Project {
         if *self.placement.0 == placement {
             return false;
         }
-        self.placement = Carried(Arc::new(placement));
+        self.placement = Carried(Arc::new(placement), self.placement.1 + 1);
         self.moved();
         true
     }

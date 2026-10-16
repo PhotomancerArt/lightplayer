@@ -150,6 +150,23 @@ impl Raster {
         }
     }
 
+    /// Each pixel owned by a lamp (`owner`, one per pixel, `u32::MAX` for
+    /// none) in that lamp's colour; the rest left clear.
+    pub fn fill_owned(&mut self, owner: &[u32], colours: &[[f64; 4]]) {
+        let colours: Vec<[u8; 4]> = colours
+            .iter()
+            .map(|c| {
+                let u = to_u8(*c);
+                [u[0], u[1], u[2], (c[3].clamp(0.0, 1.0) * 255.0) as u8]
+            })
+            .collect();
+        for (i, &o) in owner.iter().enumerate() {
+            if let Some(c) = colours.get(o as usize) {
+                self.buf[i * 4..i * 4 + 4].copy_from_slice(c);
+            }
+        }
+    }
+
     fn blend(&mut self, px: i64, py: i64, c: [f64; 4], alpha: f64) {
         let i = ((py as u32 * self.w + px as u32) * 4) as usize;
         let a = alpha.clamp(0.0, 1.0);

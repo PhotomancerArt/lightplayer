@@ -13,6 +13,7 @@ mod dots_layer;
 mod edge_layer;
 mod faces;
 mod input;
+mod lamp_cells;
 mod node_card;
 mod overlay;
 mod panels;

@@ -3149,11 +3149,13 @@ fn a_fixtures_face_lights_the_selection_in_its_own_units() {
         panic!("a ring")
     };
     assert_eq!(*center, Vec2::new(35.0, 35.0), "the ring's own centre");
+    assert_eq!(ring_face.look, FixtureLook::Editing, "you work inside it");
     assert_eq!(
-        ring_face.wires_emphasis,
-        Emphasis::Lit,
-        "you work inside it"
+        face("strip").look,
+        FixtureLook::Live,
+        "drawn as it looks lit"
     );
+    assert!(face("strip").wires.is_empty());
 }
 
 /// A card shows its words only when they would be at least 4.5 px on
