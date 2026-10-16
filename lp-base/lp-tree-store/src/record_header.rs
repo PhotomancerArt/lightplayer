@@ -7,6 +7,7 @@
 //! its CRC checks; anything else that fails to parse or to check *closes*
 //! the sector (nothing after it is read).
 
+#[cfg(any(test, feature = "inspect"))]
 use lp_crc32::Crc32;
 
 use crate::object_id::ObjectId;
@@ -73,22 +74,52 @@ impl RecordHeader {
         RECORD_HEADER_LEN + u32::from(self.len)
     }
 
-    /// Whether `payload` belongs to the header bytes `raw`.
+    /// Whether `payload` belongs to the header bytes `raw` (by `lp-crc32`;
+    /// the store checks by its flash's engine, `RecordLog::crc_ok`).
+    #[cfg(any(test, feature = "inspect"))]
     pub fn crc_ok(raw: &[u8; RECORD_HEADER_LEN as usize], payload: &[u8]) -> bool {
-        let mut c = Crc32::new();
-        c.update(&raw[..12]);
-        c.update(payload);
-        c.finish() == u32::from_le_bytes([raw[12], raw[13], raw[14], raw[15]])
+        Self::crc_ok_by(raw, payload, &lp_crc32_by)
     }
+
+    /// [`crc_ok`](Self::crc_ok) by a CRC engine (`Flash::crc32`'s shape).
+    pub fn crc_ok_by(
+        raw: &[u8; RECORD_HEADER_LEN as usize],
+        payload: &[u8],
+        crc: &dyn Fn(u32, &[u8]) -> u32,
+    ) -> bool {
+        #[cfg(test)]
+        crate::mount_cost_tests::CRC_BYTES.with(|c| c.set(c.get() + 12 + payload.len() as u64));
+        crc(crc(0, &raw[..12]), payload) == u32::from_le_bytes([raw[12], raw[13], raw[14], raw[15]])
+    }
+}
+
+/// `lp-crc32` in `Flash::crc32`'s shape.
+#[cfg(any(test, feature = "inspect"))]
+fn lp_crc32_by(crc: u32, bytes: &[u8]) -> u32 {
+    let mut c = Crc32::resume(crc);
+    c.update(bytes);
+    c.finish()
 }
 
 /// The header bytes of a record whose payload is the concatenation of
 /// `parts` (at most `u16::MAX` bytes; callers keep it under `record_max`).
+#[cfg(test)]
 pub fn encode_header(
     kind: RecordKind,
     codec: ChunkCodec,
     id: ObjectId,
     parts: &[&[u8]],
+) -> [u8; RECORD_HEADER_LEN as usize] {
+    encode_header_by(kind, codec, id, parts, &lp_crc32_by)
+}
+
+/// [`encode_header`] by a CRC engine (`Flash::crc32`'s shape).
+pub fn encode_header_by(
+    kind: RecordKind,
+    codec: ChunkCodec,
+    id: ObjectId,
+    parts: &[&[u8]],
+    crc: &dyn Fn(u32, &[u8]) -> u32,
 ) -> [u8; RECORD_HEADER_LEN as usize] {
     let len: usize = parts.iter().map(|p| p.len()).sum();
     debug_assert!(len <= u16::MAX as usize);
@@ -97,12 +128,11 @@ pub fn encode_header(
     h[1] = codec.to_u8();
     h[2..4].copy_from_slice(&(len as u16).to_le_bytes());
     h[4..12].copy_from_slice(&id.0.to_le_bytes());
-    let mut c = Crc32::new();
-    c.update(&h[..12]);
+    let mut c = crc(0, &h[..12]);
     for p in parts {
-        c.update(p);
+        c = crc(c, p);
     }
-    h[12..16].copy_from_slice(&c.finish().to_le_bytes());
+    h[12..16].copy_from_slice(&c.to_le_bytes());
     h
 }
 

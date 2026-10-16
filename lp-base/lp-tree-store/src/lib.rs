@@ -69,6 +69,7 @@ mod record_kind;
 mod record_log;
 mod record_scan;
 mod root_record;
+mod sector_filter;
 mod sector_header;
 mod sector_table;
 mod space_estimate;
@@ -93,6 +94,8 @@ mod edge_gc_tests;
 mod format_extension_tests;
 #[cfg(all(test, feature = "lpfs"))]
 mod lp_fs_tree_tests;
+#[cfg(test)]
+mod mount_cost_tests;
 #[cfg(test)]
 mod mount_verdict_tests;
 #[cfg(test)]
