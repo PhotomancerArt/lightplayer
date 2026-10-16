@@ -649,6 +649,8 @@ jobs:
               - '.github/workflows/pre-merge.yml'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
+              - 'lp-fw/fw-esp32c6/partitions-tree.csv'
+              - 'lp-fw/fw-esp32c6/src/tree_flash.rs'
               - 'lp-fw/fw-esp32c6/.cargo/config.toml'
               - 'lp-fw/builds/esp32c6-4mb.json'
               - 'lp-fw/fw-esp32c6/src/flash_storage.rs'
@@ -658,6 +660,8 @@ jobs:
               - 'lp-core/lpc-wire/src/server/fs_boot_state.rs'
               - 'lp-app/lpa-link/src/layout_migration/**'
               - 'lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv'
+              - 'lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv'
+              - 'lp-app/lpa-link/src/provider/fs_kind.rs'
               - 'lp-app/lpa-link/src/provider/partition_table.rs'
               - 'lp-app/lpa-link/src/provider/flash_plan.rs'
               - 'lp-app/lpa-link/src/provider/flash_region.rs'
@@ -2986,7 +2990,10 @@ jobs:
     # 5m23s release lp-cli test tree, 1m17s fw-esp32c6, 28m40s for the four
     # scenarios (W10's migration alone ~13 min) — 1.8x the M2 Max's 16 min.
     # 60 is headroom for a cold cache; re-measure before tightening.
-    timeout-minutes: 60
+    # The tree-store cutover (A6, 2026-10-16) added five scenarios — 12m17s on
+    # the M2 Max, so ~22 min here — plus a split fs-tree build on the tree
+    # table and the pinned fielded image's build on a cold cache: 100.
+    timeout-minutes: 100
     needs: detect-changes
     if: needs.detect-changes.outputs.c6_layout == 'true'
     env:
