@@ -1,0 +1,350 @@
+{
+  "board": "CX1 c6-expendable, MAC 14:C1:9F:E6:54:90, flash JEDEC 0x464016 (4 MiB)",
+  "hello": {
+    "auth": {
+      "granted": "edit",
+      "required": false
+    },
+    "build": {
+      "commit": "7a95d4d466a6",
+      "dirty": false,
+      "features": [
+        "node.button",
+        "node.clock",
+        "node.fluid",
+        "node.fixture",
+        "node.playlist",
+        "node.power-button",
+        "node.radio",
+        "node.shader",
+        "node.texture",
+        "svc.button",
+        "svc.radio-espnow",
+        "gfx.lpvm"
+      ],
+      "package": "fw-esp32c6",
+      "profile": "release-esp32",
+      "version": "7a95d4d46"
+    },
+    "deviceUid": null,
+    "hardware": {
+      "baseMac": "14:c1:9f:e6:54:90",
+      "boardId": "seeed/xiao-esp32-c6",
+      "button": true,
+      "chipRevision": "0.2",
+      "eui64": "14:c1:9f:e6:54:90:fe:ff",
+      "fs": "mounted",
+      "radio": true,
+      "totalLedBudget": null
+    },
+    "packFormat": 2,
+    "proto": 43
+  },
+  "idle_window_s": [
+    186.521086167,
+    246.853689542
+  ],
+  "label": "littlefs",
+  "mounts": [
+    {
+      "fs": "formatted",
+      "fs_line": "[WARN] fw_esp32_common::lp_fs: [FS] Mount failed (filesystem corrupt), formatting partition...",
+      "mount_us": 8864,
+      "what": "first boot (format)"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 739,
+      "what": "mount, empty #0"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 750,
+      "what": "mount, empty #1"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 748,
+      "what": "mount, empty #2"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 7495,
+      "what": "mount, c40 #0"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 7503,
+      "what": "mount, c40 #1"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 7521,
+      "what": "mount, c40 #2"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 7841,
+      "what": "mount, full (c40 + 13 × 4 KiB) #0"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 7850,
+      "what": "mount, full (c40 + 13 × 4 KiB) #1"
+    },
+    {
+      "fs": "mounted",
+      "fs_line": null,
+      "mount_us": 7850,
+      "what": "mount, full (c40 + 13 × 4 KiB) #2"
+    }
+  ],
+  "panel_writes_at_s": [
+    112.008708333,
+    124.413503708,
+    136.848402875,
+    149.332184208,
+    161.767661083,
+    174.192877417
+  ],
+  "rows": [
+    {
+      "baseline": null,
+      "less_baseline_ms": null,
+      "max_ms": 9.642166000000001,
+      "median_ms": 5.568708,
+      "min_ms": 5.412707999999999,
+      "n": 20,
+      "note": "",
+      "samples_ms": [
+        5.60975,
+        5.537167,
+        5.47075,
+        5.549250000000001,
+        5.560542,
+        5.568708,
+        5.562792000000001,
+        5.435958,
+        5.623208999999999,
+        5.549042,
+        5.537208,
+        5.5444580000000006,
+        5.412707999999999,
+        5.60525,
+        5.572458,
+        5.580875,
+        5.577625,
+        9.642166000000001,
+        5.641,
+        5.600292
+      ],
+      "what": "ListLoadedProjects (baseline: no file)"
+    },
+    {
+      "baseline": null,
+      "less_baseline_ms": null,
+      "max_ms": 69085.16129100001,
+      "median_ms": 69085.16129100001,
+      "min_ms": 69085.16129100001,
+      "n": 1,
+      "note": "replace_and_load_project: StopAll, one batch, deflated writes, LoadProject",
+      "samples_ms": [
+        69085.16129100001
+      ],
+      "what": "push c40 (132 files, ~216 KB) and load"
+    },
+    {
+      "baseline": null,
+      "less_baseline_ms": null,
+      "max_ms": 63.387457999999995,
+      "median_ms": 52.423249999999996,
+      "min_ms": 50.755874999999996,
+      "n": 10,
+      "note": "",
+      "samples_ms": [
+        63.387457999999995,
+        52.323167,
+        50.755874999999996,
+        52.500209,
+        52.423249999999996,
+        52.561042,
+        52.339999999999996,
+        52.246583,
+        52.445458,
+        52.298458
+      ],
+      "what": "read doc-000 (1.7 KB; the save's baseline)"
+    },
+    {
+      "baseline": {
+        "median_ms": 52.423249999999996,
+        "what": "read of the same document"
+      },
+      "less_baseline_ms": 274.026542,
+      "max_ms": 332.19658400000003,
+      "median_ms": 326.449792,
+      "min_ms": 167.401792,
+      "n": 10,
+      "note": "",
+      "samples_ms": [
+        167.401792,
+        321.176416,
+        324.64083300000004,
+        323.958417,
+        331.357,
+        323.82683299999997,
+        328.127958,
+        326.449792,
+        328.908667,
+        332.19658400000003
+      ],
+      "what": "save (1.7 KB document, written whole), each"
+    },
+    {
+      "baseline": null,
+      "less_baseline_ms": null,
+      "max_ms": 218.03074999999998,
+      "median_ms": 52.914958,
+      "min_ms": 52.110584,
+      "n": 10,
+      "note": "",
+      "samples_ms": [
+        218.03074999999998,
+        53.417334,
+        52.110584,
+        52.9455,
+        55.301167,
+        52.885875,
+        52.914958,
+        52.635166,
+        52.809875,
+        52.897417000000004
+      ],
+      "what": "read a 4 KiB file (the append's baseline)"
+    },
+    {
+      "baseline": {
+        "median_ms": 52.914958,
+        "what": "read of a 4 KiB file"
+      },
+      "less_baseline_ms": 220.00858399999998,
+      "max_ms": 398.184833,
+      "median_ms": 272.923542,
+      "min_ms": 266.65325,
+      "n": 12,
+      "note": "three 20 KiB files, four appends each",
+      "samples_ms": [
+        271.51025,
+        276.458833,
+        272.915708,
+        269.274833,
+        276.255375,
+        266.65325,
+        270.811958,
+        268.542084,
+        272.923542,
+        274.497834,
+        278.289125,
+        398.184833
+      ],
+      "what": "4 KiB append (WriteChunk at an offset, with its file_size check), each"
+    },
+    {
+      "baseline": {
+        "median_ms": 5.568708,
+        "what": "ListLoadedProjects"
+      },
+      "less_baseline_ms": 48.740792,
+      "max_ms": 65.992333,
+      "median_ms": 54.3095,
+      "min_ms": 53.745208000000005,
+      "n": 10,
+      "note": "",
+      "samples_ms": [
+        53.919374999999995,
+        54.43625,
+        53.745208000000005,
+        54.838125,
+        65.992333,
+        54.109417,
+        54.156458,
+        54.410917000000005,
+        53.911208,
+        54.3095
+      ],
+      "what": "read the largest c40 file (shader.glsl, 4365 B), each"
+    },
+    {
+      "baseline": null,
+      "less_baseline_ms": null,
+      "max_ms": 252.39362500000001,
+      "median_ms": 250.444084,
+      "min_ms": 206.511,
+      "n": 3,
+      "note": "",
+      "samples_ms": [
+        206.511,
+        252.39362500000001,
+        250.444084
+      ],
+      "what": "whole-project load (stop + LoadProject c40)"
+    },
+    {
+      "baseline": {
+        "median_ms": 5.568708,
+        "what": "ListLoadedProjects"
+      },
+      "less_baseline_ms": 113.01737499999999,
+      "max_ms": 121.163042,
+      "median_ms": 118.58608299999999,
+      "min_ms": 110.20129100000001,
+      "n": 6,
+      "note": "its flash work is the auto-save on a later frame: see the frame-time windows",
+      "samples_ms": [
+        110.20129100000001,
+        121.163042,
+        120.852958,
+        118.58608299999999,
+        118.447416,
+        117.68825
+      ],
+      "what": "panel write (WirePanelWrite, the request), each"
+    },
+    {
+      "baseline": {
+        "median_ms": 52.914958,
+        "what": "read of a 4 KiB file"
+      },
+      "less_baseline_ms": 102.66283399999999,
+      "max_ms": 231.755417,
+      "median_ms": 155.577792,
+      "min_ms": 140.955042,
+      "n": 13,
+      "note": "stopped by: server error: Filesystem error: write /fill/f013.bin: no space left on device",
+      "samples_ms": [
+        231.755417,
+        142.96475,
+        140.955042,
+        146.397625,
+        146.734084,
+        155.577792,
+        147.633708,
+        160.841084,
+        154.980458,
+        166.502917,
+        159.093084,
+        192.513291,
+        174.10245799999998
+      ],
+      "what": "new 4 KiB file (incompressible), each, filling to full (13 files)"
+    }
+  ]
+}
