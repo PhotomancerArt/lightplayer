@@ -56,7 +56,7 @@ use lpc_update::board::{
 };
 use lpc_wire::lp_link::{CH_UPDATE, LinkEvent};
 
-use super::board_identity::{CoreIdentity, board_facts};
+use super::board_identity::{CoreIdentity, board_facts, core_sha256};
 use super::boot_state::BootState;
 use super::status_light::StatusLight;
 use super::update_edge::{EdgeEffect, UpdateEdge, state_word};
@@ -144,7 +144,14 @@ pub async fn core_only(ctx: CoreOnly) -> ! {
         lp_recovery::mark_boot_complete();
     }
 
-    let facts = board_facts(&state, &identity, SessionMode::CoreOnly, engine, engine_len);
+    let facts = board_facts(
+        &state,
+        &identity,
+        SessionMode::CoreOnly,
+        engine,
+        engine_len,
+        core_sha256(&state),
+    );
     let config = SessionConfig {
         // Encoding 1: a `Z` chunk decodes with lp-deflate on this task, in a
         // 32 KiB + 4 KiB window allocated at the first `Z` (DM18: core-only

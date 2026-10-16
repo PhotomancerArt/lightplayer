@@ -468,6 +468,12 @@ fn frame_hook(server: &LpServer) {
     first_light::on_served();
     #[cfg(not(any(lp_split, lp_net)))]
     let _ = server;
+    // The core's own hash, held back until the boot has lit: a slice a
+    // frame (`ota::core_hash_step`), and the unsolicited hello waits for it.
+    #[cfg(lp_split)]
+    if first_light::decided() {
+        ota::core_hash_step();
+    }
     #[cfg(lp_split)]
     output::status_light_note::persist(server);
     #[cfg(lp_net)]
@@ -1233,6 +1239,11 @@ fn lp_engine_entry(core: CoreBoot) {
     // core's update session says it, as it answers `Q` on channel 3.
     #[cfg(lp_split)]
     server.set_firmware_manifest(Some(ota::running_manifest));
+    // ...whose core hash is taken after first light (the frame hook): the
+    // unsolicited hello waits for it, so saying it never holds a frame. A
+    // host's own `Hello` before then is answered at once.
+    #[cfg(lp_split)]
+    server_loop::set_hello_gate(ota::hello_ready);
     // ...and records the strip its update light may drive; the relay's
     // answers (relay protocol 2); and the first-light count. One frame hook
     // holds them all.
