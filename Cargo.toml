@@ -40,6 +40,7 @@ members = [
     "lab/mapping/fit-tests",
     "lab/mapping/radiance-gen",
     "lab/mapping/arrows",
+    "lab/mapping/layout",
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",

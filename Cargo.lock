@@ -5589,6 +5589,10 @@ name = "lab-arrows"
 version = "40.0.0"
 
 [[package]]
+name = "lab-layout"
+version = "40.0.0"
+
+[[package]]
 name = "lab-mapping-files"
 version = "40.0.0"
 dependencies = [

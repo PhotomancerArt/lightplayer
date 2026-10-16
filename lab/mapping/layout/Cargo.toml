@@ -1,0 +1,17 @@
+[package]
+name = "lab-layout"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Mapping design lab: layout — a semantic graph of nodes in, placements out (the canvas layout by role, and the stack)"
+
+# The fence: this crate depends on nothing at all, workspace or crates.io.
+# It owns its tiny geometry so it can sit under the lab's model, its page,
+# or the app later, without pulling any of them in. See README.md.
+[dependencies]
+
+[lints]
+workspace = true
