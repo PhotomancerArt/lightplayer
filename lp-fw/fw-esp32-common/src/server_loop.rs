@@ -61,25 +61,27 @@ static HELLO_GATE: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicU
 /// Hold the loop's unsolicited hello until `ready` says it may go. The C6's
 /// split image takes its core's own SHA-256 — which the hello's board
 /// manifest carries — after the boot's first light rather than before it,
-/// and holds the hello for it, so saying the hello never stalls a frame for
-/// the hash. A host's own `Hello` request is answered whenever it comes;
-/// heartbeats wait for the unsolicited hello, which stays the first id-0
-/// frame. A host's `Hello` request waits with it: answering it would build
-/// the hello. Neither waits longer than [`HELLO_HOLD_MAX_MS`] from the
-/// loop's start. Unset, the hello goes on the first pass, as it always did.
-pub fn set_hello_gate(ready: fn() -> bool) {
+/// and holds the hello for it, so building the hello never stalls the boot
+/// for the hash. Heartbeats wait for the unsolicited hello, which stays the
+/// first id-0 frame, and the hosts' requests wait with it (a host's first is
+/// its `Hello`, and answering it would build the hello). `ready(wanted)`:
+/// `wanted` says a host is waiting on a held request, so the chip may open
+/// the gate sooner and pay for the hello then. Nothing waits longer than
+/// [`HELLO_HOLD_MAX_MS`] from the loop's start. Unset, the hello goes on the
+/// first pass, as it always did.
+pub fn set_hello_gate(ready: fn(bool) -> bool) {
     HELLO_GATE.store(ready as usize, core::sync::atomic::Ordering::Release);
 }
 
-fn hello_gate_open() -> bool {
+fn hello_gate_open(wanted: bool) -> bool {
     let raw = HELLO_GATE.load(core::sync::atomic::Ordering::Acquire);
     if raw == 0 {
         return true;
     }
     // SAFETY: only `set_hello_gate` stores here, and it stores a
-    // `fn() -> bool`.
-    let ready: fn() -> bool = unsafe { core::mem::transmute(raw) };
-    ready()
+    // `fn(bool) -> bool`.
+    let ready: fn(bool) -> bool = unsafe { core::mem::transmute(raw) };
+    ready(wanted)
 }
 
 /// The longest the hello gate holds the hello, from the loop's start: past
@@ -175,7 +177,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
         crate::frame_pace_diag::frame_start();
 
         if hello_owed {
-            if hello_gate_open()
+            if hello_gate_open(!held_asks.is_empty())
                 || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS
             {
                 hello_owed = false;
@@ -216,14 +218,15 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
                 }
             }
         }
-        // While the hello is held, so is a host's `Hello` request: answering
-        // it would build the hello the gate is holding (on the C6, hash the
-        // core before its first light). The held ones go first in the tick
-        // after the gate opens.
+        // While the hello is held, so are the hosts' requests: the first a
+        // host sends is its `Hello`, and answering it would build the hello
+        // the gate is holding (on the C6, hash the core before its first
+        // light). They are answered, in order, in the tick after it opens.
         if hello_owed {
-            hold_hello_asks(&mut incoming_messages, &mut held_asks);
+            held_asks.append(&mut incoming_messages);
         } else if !held_asks.is_empty() {
-            incoming_messages.splice(0..0, held_asks.drain(..));
+            held_asks.append(&mut incoming_messages);
+            incoming_messages = core::mem::take(&mut held_asks);
         }
         let receive_done = time_provider.now_ms();
 
@@ -385,18 +388,6 @@ async fn send_held_hello<T: ServerTransport>(
     for link in hello_order(boot, held) {
         if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
             note_send_failure("hello", &e);
-        }
-    }
-}
-
-/// Move every `Hello` request out of `incoming` into `held`, in order.
-fn hold_hello_asks(incoming: &mut Vec<Incoming>, held: &mut Vec<Incoming>) {
-    let mut k = 0;
-    while k < incoming.len() {
-        if matches!(incoming[k].msg.msg, lpc_wire::ClientRequest::Hello) {
-            held.push(incoming.remove(k));
-        } else {
-            k += 1;
         }
     }
 }
@@ -585,7 +576,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
         }
 
         if hello_owed {
-            if hello_gate_open()
+            if hello_gate_open(!held_asks.is_empty())
                 || time_provider.now_ms().saturating_sub(startup_time) >= HELLO_HOLD_MAX_MS
             {
                 hello_owed = false;
@@ -626,14 +617,15 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
                 }
             }
         }
-        // While the hello is held, so is a host's `Hello` request: answering
-        // it would build the hello the gate is holding (on the C6, hash the
-        // core before its first light). The held ones go first in the tick
-        // after the gate opens.
+        // While the hello is held, so are the hosts' requests: the first a
+        // host sends is its `Hello`, and answering it would build the hello
+        // the gate is holding (on the C6, hash the core before its first
+        // light). They are answered, in order, in the tick after it opens.
         if hello_owed {
-            hold_hello_asks(&mut incoming_messages, &mut held_asks);
+            held_asks.append(&mut incoming_messages);
         } else if !held_asks.is_empty() {
-            incoming_messages.splice(0..0, held_asks.drain(..));
+            held_asks.append(&mut incoming_messages);
+            incoming_messages = core::mem::take(&mut held_asks);
         }
         let receive_done = time_provider.now_ms();
 

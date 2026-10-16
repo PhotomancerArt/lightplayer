@@ -1,7 +1,7 @@
 //! SHA-256 on the C6's SHA accelerator, for a split image's two boot-path
-//! hashes — the core's own SHA-256 (`ota::board_identity`, every boot) and
-//! the engine guard (`ota::engine_guard`, the first boot after a flash) — and,
-//! in an `fs-tree` build (split or not), the tree store's record ids
+//! hashes — the core's own SHA-256 (`ota::board_identity`, every boot, after
+//! its first light) and the engine guard (`ota::engine_guard`, the first
+//! boot after a flash) — and, in an `fs-tree` build (split or not), the tree store's record ids
 //! ([`StoreSha256`], the store's `ObjectHasher`).
 //!
 //! In software (`sha2` at the image's `opt-level = "z"`) those cost about a

@@ -90,8 +90,12 @@ fn u01_x_to_y_raw_with_a_read_back_and_the_identity() {
     let last = ota.manifests.last().unwrap();
     assert_eq!(last.state, BoardState::Running);
     identity(last, &y.manifest, "Y running");
-    // The hello's `firmware` is the same manifest `M` is.
-    let hello = last_hello_firmware(&host).expect("Y's hello carries firmware");
+    // The hello's `firmware` is the same manifest `M` is. Y's hello may come
+    // after its `M`: the board holds its hello until its core's hash is known
+    // (taken after first light, or at once for the session's `Q`).
+    let last = last.clone();
+    let summary = ota.summary();
+    let hello = hello_firmware_of(&mut host, &last.build_id).expect("Y's hello carries firmware");
     assert_eq!(
         (
             &hello.build_id,
@@ -110,8 +114,7 @@ fn u01_x_to_y_raw_with_a_read_back_and_the_identity() {
     report(
         "U1/U13/U17",
         &format!(
-            "X->Y raw: {}; read-back = X engine.bin; M = ota-manifest.json for X and Y",
-            ota.summary()
+            "X->Y raw: {summary}; read-back = X engine.bin; M = ota-manifest.json for X and Y"
         ),
     );
 }
@@ -1044,6 +1047,22 @@ fn expect_last_core(host: &EmuLinkHost<C6Board>, img: &Image, engine: bool) {
 }
 
 /// The last hello's `firmware` block, read off the console.
+/// The newest hello's board manifest once it names `build_id`, stepping the
+/// board (at most a few emulated seconds) until one does; else the newest
+/// hello's, whatever it names.
+fn hello_firmware_of(host: &mut EmuLinkHost<C6Board>, build_id: &str) -> Option<BoardManifest> {
+    let until = host.board.machine.micros() + 5_000_000;
+    while host.board.machine.micros() < until {
+        if let Some(firmware) = last_hello_firmware(host)
+            && firmware.build_id == build_id
+        {
+            return Some(firmware);
+        }
+        host.step().expect("the run");
+    }
+    last_hello_firmware(host)
+}
+
 fn last_hello_firmware(host: &EmuLinkHost<C6Board>) -> Option<BoardManifest> {
     let line = host
         .console()

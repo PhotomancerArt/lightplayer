@@ -31,9 +31,11 @@
 //! **The core's SHA-256 (DM24) is not taken at install**: hashing the 1.4 MB
 //! core there held every boot's first light ~185 ms (CX1, 2026-10-16). The
 //! engine's frame hook hashes it a slice a frame once the boot has lit
-//! ([`hash_step`]), and the server loop holds the unsolicited hello until it
-//! is known ([`hello_ready`]). Anything that needs it sooner — a host's
-//! `Hello`, a radio link's owed hello, a host's first channel-3 message —
+//! ([`hash_step`]), and the server loop holds the hello — unsolicited, owed
+//! to a link that opened, or asked for — until it is known ([`hello_ready`];
+//! a host waiting on its `Hello` has the rest taken at once after first
+//! light, and nothing waits past `server_loop::HELLO_HOLD_MAX_MS`). Anything
+//! else that needs the hash sooner — a host's first channel-3 message —
 //! finishes it then, as every boot used to.
 
 use core::cell::RefCell;
@@ -152,11 +154,14 @@ pub fn hash_step() {
     }
 }
 
-/// Whether the unsolicited hello may go out: the core's hash is known, so
-/// saying it costs the loop nothing (`server_loop::set_hello_gate`). `true`
+/// Whether the unsolicited hello may go out (`server_loop::set_hello_gate`):
+/// the core's hash is known, so saying it costs the loop nothing; or a host
+/// is waiting on its `Hello` (`wanted`) and the boot has lit, so the rest of
+/// the hash is taken at once, for it, rather than a slice a frame. `true`
 /// too when no hook is installed, which has no hash to wait for.
-pub fn hello_ready() -> bool {
+pub fn hello_ready(wanted: bool) -> bool {
     core_sha256_known().is_some()
+        || (wanted && crate::first_light::decided())
         || RUNNING
             .0
             .try_borrow()
