@@ -20,11 +20,23 @@
 //!   tail held (a program asking a cleared bit to become 1:
 //!   `program_over_unerased`) — the guarantee the head-resume tail check
 //!   keeps.
+//! - `shadowed_copy` (T1 only, **non-physical**): a committed store with one
+//!   sector holding a live directory or multi copied into a blank sector under a sector
+//!   seq between its own and the newest of its kind (a GC copy whose
+//!   original was not yet erased), and one bit of that record flipped in the
+//!   copy. The newer copy fails its CRC; the older one is whole, so every
+//!   record has a good copy and the store must mount at that committed
+//!   state and read it — what mount's full pass is for when its fast one
+//!   adopts the damaged copy (`lp-tree-store`'s `store_mount.rs`).
 //!
 //! Pass: mount never panics and never loops (the read watchdog); when it
 //! mounts, the state it reads is one the history committed (a `cut` image:
 //! the interrupted step's old or new state, per path for a store that is
-//! not step-atomic), with no read error; a `newer_version` image is refused
+//! not step-atomic), with no read error — except that a `mutated` image's
+//! damage may show as a file whose read reports it (`Corrupt`), never as
+//! wrong bytes: every other file must read as that committed state has it
+//! (T1's mount reads every record a cut can have torn and every directory
+//! and multi, not every file's bytes; a read checks those); a `newer_version` image is refused
 //! as `Unsupported` (never mounted, never "no store"); and a format
 //! afterwards gives an empty store that takes a write. A case is replayable
 //! from the params and its index (`Reproducer::Fuzz`).
@@ -73,6 +85,9 @@ pub struct FuzzKindCount {
     pub cases: u64,
     pub mounted: u64,
     pub refused: u64,
+    /// Mounted, and a file's read reported the damage (`mutated` only).
+    #[serde(default)]
+    pub damage_at_read: u64,
     pub failures: u64,
 }
 
@@ -131,6 +146,8 @@ struct CaseResult {
     kind: &'static str,
     mutations: Vec<&'static str>,
     mounted: bool,
+    /// Mounted, and a file's read reported the image's damage.
+    damage_at_read: bool,
     failure: Option<Failure>,
 }
 
@@ -170,6 +187,7 @@ fn run(
         k.cases += 1;
         k.mounted += r.mounted as u64;
         k.refused += !r.mounted as u64;
+        k.damage_at_read += r.damage_at_read as u64;
         for m in r.mutations {
             *sum.mutations.entry(m.into()).or_default() += 1;
         }
@@ -257,7 +275,14 @@ fn one_case(
     c: u64,
 ) -> CaseResult {
     let kinds: &[&'static str] = if t1 {
-        &["garbage", "mutated", "cut", "newer_version", "stale_tail"]
+        &[
+            "garbage",
+            "mutated",
+            "cut",
+            "newer_version",
+            "stale_tail",
+            "shadowed_copy",
+        ]
     } else {
         &["garbage", "mutated", "cut"]
     };
@@ -266,6 +291,7 @@ fn one_case(
         kind,
         mutations: Vec::new(),
         mounted: false,
+        damage_at_read: false,
         failure: None,
     };
     let r = crate::catch_quiet(|| case_inner(cand, p, histories, tears, kind, c, &mut res));
@@ -294,6 +320,9 @@ fn case_inner(
     let hist = &histories[rng.below(histories.len() as u64) as usize];
     if kind == "stale_tail" {
         return stale_tail_case(cand, cfg, hist, &mut rng, res);
+    }
+    if kind == "shadowed_copy" {
+        return shadowed_copy_case(cand, cfg, hist, &mut rng, res);
     }
     // The image, and the states a mount of it may show.
     let (mut image, allowed): (NorFlashSim, Allowed) = match kind {
@@ -339,6 +368,7 @@ fn case_inner(
     image.set_panic_on_violation(false);
     image.power_cycle(FaultPlan::none());
     image.set_read_budget(Some(READ_BUDGET));
+    let damage_shows_at_read = kind == "mutated";
     let flash = match cand.mount(image, cfg) {
         Err((e, f)) => {
             let text = e.to_string();
@@ -355,7 +385,11 @@ fn case_inner(
             if matches!(allowed, Allowed::Refused) {
                 return Err(Failure::new("newer_version_mounted", "mounted"));
             }
-            judge(store.as_mut(), &allowed)?;
+            if damage_shows_at_read {
+                res.damage_at_read = judge_damaged(store.as_mut(), &allowed)?;
+            } else {
+                judge(store.as_mut(), &allowed)?;
+            }
             store.into_flash()
         }
     };
@@ -435,6 +469,96 @@ fn stale_tail_case(
         ));
     }
     format_after(cand, cfg, store.into_flash())
+}
+
+/// A `shadowed_copy` case: committed state `j` with a damaged newer copy of
+/// a sector holding a live blob; it mounts at that state and reads it.
+fn shadowed_copy_case(
+    cand: &dyn Candidate,
+    cfg: &CandidateConfig,
+    hist: &History,
+    rng: &mut SimRng,
+    res: &mut CaseResult,
+) -> Result<(), Failure> {
+    let j = rng.below(hist.states.len() as u64) as usize;
+    let mut image = if j < hist.pres.len() {
+        hist.pres[j].clone()
+    } else {
+        hist.last.clone()
+    };
+    if !shadowed_copy(&mut image, rng) {
+        return Ok(());
+    }
+    image.set_panic_on_violation(false);
+    image.power_cycle(FaultPlan::none());
+    image.set_read_budget(Some(READ_BUDGET));
+    let mut store = match cand.mount(image, cfg) {
+        Ok(s) => s,
+        Err((e, _)) => {
+            let text = e.to_string();
+            let kind = if text.contains("Watchdog") {
+                "loop"
+            } else {
+                "shadowed_copy_unmountable"
+            };
+            return Err(Failure::new(kind, text));
+        }
+    };
+    res.mounted = true;
+    judge(store.as_mut(), &Allowed::OneOf(vec![hist.states[j].clone()]))?;
+    format_after(cand, cfg, store.into_flash())
+}
+
+/// [`judge`] for an image with damage no cut makes: files whose read reports
+/// damage (`Corrupt`) are set aside, and every other path must read as one
+/// committed state has it, the damaged ones being files of that state.
+/// Whether any file reported damage.
+fn judge_damaged(store: &mut dyn CandidateStore, allowed: &Allowed) -> Result<bool, Failure> {
+    let Allowed::OneOf(states) = allowed else {
+        judge(store, allowed)?;
+        return Ok(false);
+    };
+    let read_err = |what: String| Failure::new("read_error_after_mount", what);
+    let listed: std::collections::BTreeSet<String> = store
+        .list("/")
+        .map_err(|e| read_err(format!("list: {e}")))?
+        .into_iter()
+        .collect();
+    let mut paths: std::collections::BTreeSet<String> =
+        states.iter().flat_map(|s| s.keys().cloned()).collect();
+    paths.extend(listed.iter().cloned());
+    let mut got: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
+    let mut damaged = Vec::new();
+    for p in &paths {
+        match store.get(p) {
+            Ok(b) => {
+                if b.is_some() != listed.contains(p) {
+                    return Err(Failure::new("list_mismatch", p.clone()));
+                }
+                got.insert(p.clone(), b);
+            }
+            Err(e) if e.to_string().contains("Corrupt") => damaged.push(p.clone()),
+            Err(e) => return Err(read_err(format!("get {p}: {e}"))),
+        }
+    }
+    let fits = |s: &Model| {
+        damaged.iter().all(|p| s.contains_key(p))
+            && got
+                .iter()
+                .all(|(p, b)| s.get(p).map(|v| v.as_slice()) == b.as_deref())
+    };
+    if !states.iter().any(fits) {
+        return Err(Failure::new(
+            "not_a_committed_state",
+            format!(
+                "{} paths ({} damaged), none of {} states",
+                paths.len(),
+                damaged.len(),
+                states.len()
+            ),
+        ));
+    }
+    Ok(!damaged.is_empty())
 }
 
 /// What a mounted image may hold.
@@ -661,6 +785,68 @@ fn stale_tail(f: &mut NorFlashSim, rng: &mut SimRng) -> bool {
         rewrite(f, s, |b| b[at..at + len].copy_from_slice(&bytes));
     }
     !open.is_empty()
+}
+
+/// T1, non-physical: copy a sector holding a live directory or multi into a
+/// blank sector under a header that orders it after its original and before
+/// its kind's newest (resealed), then flip one bit of that record's payload
+/// in the copy. `false` when no such copy can be placed.
+fn shadowed_copy(f: &mut NorFlashSim, rng: &mut SimRng) -> bool {
+    use lp_tree_store::{HeadReport, RecordKindReport, RecordStatus};
+    let ss = f.geometry().sector_size;
+    let mut image = vec![0u8; (f.geometry().sector_count * ss) as usize];
+    f.peek(0, &mut image);
+    let Ok(img) = lp_tree_store::StoreImage::open(&image, Some(ss)) else {
+        return false;
+    };
+    let sectors = &img.report().sectors;
+    let blanks: Vec<u32> = sectors
+        .iter()
+        .filter(|s| s.header.is_none() && f.sector_is_blank(s.index))
+        .map(|s| s.index)
+        .collect();
+    let seqs: Vec<(u32, bool)> = sectors
+        .iter()
+        .filter_map(|s| s.header.as_ref().map(|h| (h.seq, h.head == HeadReport::Hot)))
+        .collect();
+    // (sector, the copy's sector and seq, a live directory's or multi's
+    // payload range — records mount reads whole): the
+    // copy is newer than its original and older than its kind's newest — an
+    // unused seq between theirs, else the original's own in a later sector
+    // (equal seqs order by sector).
+    let mut picks = Vec::new();
+    for s in sectors {
+        let Some(h) = &s.header else { continue };
+        let hot = h.head == HeadReport::Hot;
+        let newest = seqs.iter().filter(|q| q.1 == hot).map(|q| q.0).max().unwrap();
+        if h.seq >= newest {
+            continue;
+        }
+        let gap = (h.seq + 1..newest).find(|q| seqs.iter().all(|x| x.0 != *q));
+        let copy = match (gap, blanks.first(), blanks.iter().find(|&&b| b > s.index)) {
+            (Some(q), Some(&b), _) => (b, q),
+            (None, _, Some(&b)) => (b, h.seq),
+            _ => continue,
+        };
+        for r in &s.records {
+            let named = matches!(r.kind, RecordKindReport::Dir | RecordKindReport::Multi);
+            if named && r.status == RecordStatus::Live && r.len > 0 {
+                picks.push((s.index, copy, r.offset + 16, u32::from(r.len)));
+            }
+        }
+    }
+    if picks.is_empty() {
+        return false;
+    }
+    let (from, (blank, seq), at, len) = picks[rng.below(picks.len() as u64) as usize];
+    let mut body = sector_bytes(f, from);
+    body[12..16].copy_from_slice(&seq.to_le_bytes());
+    let crc = lp_crc32::crc32(&body[..20]);
+    body[20..24].copy_from_slice(&crc.to_le_bytes());
+    let i = (at + rng.below(u64::from(len)) as u32) as usize;
+    body[i] ^= 1 << rng.below(8);
+    rewrite(f, blank, |b| b.copy_from_slice(&body));
+    true
 }
 
 fn sector_bytes(f: &NorFlashSim, s: u32) -> Vec<u8> {
