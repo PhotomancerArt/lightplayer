@@ -92,6 +92,8 @@ lpc_model::lp_embed_manifest_core! {
 }
 
 mod board;
+#[cfg(all(feature = "heap-dram2", not(fw_harness)))]
+mod dram2_heap;
 #[cfg(not(fw_harness))]
 mod flash_storage;
 #[cfg(all(feature = "io-thread", not(fw_harness)))]
@@ -168,9 +170,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// windowed ABI's larger frames deserve. The heartbeat's free-heap figure is
 /// the number to watch if a future node kind pushes it.
 ///
-/// The next lever, if one is needed, is `dram2_seg`
-/// (`0x3FCDB700..0x3FCED710`, ~72 KB) as a second `esp_alloc` region — not
-/// taking more from the stack.
+/// More heap does not come from here: `dram2_seg` (`0x3FCDB700..0x3FCED710`,
+/// 73,744 B) is a second `esp_alloc` region (feature `heap-dram2`, see
+/// `dram2_heap`), so the stack keeps its share.
 const HEAP_SIZE: usize = 240 * 1024;
 
 /// Abort-tier panic handler (ADR 2026-07-29-per-chip-fw-toolchains): stage a
@@ -440,13 +442,28 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // not allocate it (unlike the C6's). Recovery leaks its instance into a
     // `&'static mut`, so it cannot run before this line.
     esp_alloc::heap_allocator!(size: HEAP_SIZE);
+    // The bootloader's segment, second: first-fit in registration order keeps
+    // the boot residents in the arena above. See `dram2_heap`.
+    #[cfg(feature = "heap-dram2")]
+    let (dram2_base, dram2_heap) = dram2_heap::add_region();
     // Paint the main stack before anything deep runs, so the high-water report
     // measures the whole app (see `stack_probe`). After the arena is carved,
     // because the paint runs on the main stack and the arena is `.bss`, not
     // stack. Mirrors the classic's placement exactly.
     stack_probe::paint();
     esp_println::println!("[INIT] fw-esp32s3 boot");
+    #[cfg(not(feature = "heap-dram2"))]
     esp_println::println!("[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}");
+    #[cfg(feature = "heap-dram2")]
+    {
+        esp_println::println!(
+            "[INIT] chip=esp32s3 arch=xtensa heap={HEAP_SIZE}+{dram2_heap}={} (dram_seg arena + dram2_seg)",
+            HEAP_SIZE + dram2_heap
+        );
+        esp_println::println!(
+            "[INIT] heap regions: 0 .bss+{HEAP_SIZE} (dram_seg arena), 1 {dram2_base:#010x}+{dram2_heap} (dram2_seg, bootloader's)"
+        );
+    }
 
     // Crash recovery first, before anything crash-prone runs: this both reports
     // the previous run and gives everything after it somewhere to leave a

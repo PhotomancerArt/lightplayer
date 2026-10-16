@@ -9,7 +9,7 @@ rust-version.workspace = true
 description = "LightPlayer firmware for ESP32-S3 (Xtensa LX7)."
 
 [features]
-default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread"]
+default = ["esp32s3", "server", "float-f32", "json-pack", "io-thread", "heap-dram2"]
 esp32s3 = [
     "esp-backtrace/esp32s3",
     "esp-bootloader-esp-idf/esp32s3",
@@ -37,6 +37,14 @@ server = [
     "dep:lpc-wire",
     "dep:lpc-model",
 ]
+
+# `dram2_seg` — the 73,744 B the second-stage bootloader runs in — as a second
+# heap region after the `.bss` arena, with no capability tag (the C6's rule:
+# nothing that asks for `Internal` lands in memory the bootloader takes back).
+# On by default; without it the span is idle, as before. See `src/dram2_heap.rs`
+# (who else uses the bytes, and why this chip has none of the C6's warm-reset
+# hazard) and RAM research E14.
+heap-dram2 = []
 
 # JSON Pack (plan `lp-json-pack`, Q4): replies go out packed on a link whose
 # host opted in (`ClientRequest::SetEncoding`); every other link stays JSON.
