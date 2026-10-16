@@ -31,8 +31,10 @@
 //!   port's pixel, reversed, turned), and the effective patch they make
 //!   (derived, never stored); [`port_runs`] — a port's pixels as one run
 //!   per object.
-//! - [`Placement`] — where each node sits, in world units: a fact the view
-//!   hands over. The model never lays anything out (D63).
+//! - [`Placement`] — where each node sits, in world units, and each
+//!   fixture's frame (where its own units land, scaled when the stack draws
+//!   it bigger): a fact the view hands over. The model never lays anything
+//!   out (D63).
 //! - [`board`] — the simulated board, a small recreation of the engine:
 //!   render products ([`render_product`]) sampled by fixtures, fixture
 //!   overrides ([`fixture_overrides`]), control products

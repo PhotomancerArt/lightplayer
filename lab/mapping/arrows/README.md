@@ -20,8 +20,10 @@ qlmanage -t -s 1600 -o /tmp /tmp/arrows.svg                # a PNG of it
 
 - **`Arrow`** says what the arrow is: `from`, `to`; how it leaves and
   arrives (`EndDirection`: straight toward the other end, from a `Side` of
-  the point, or an explicit direction of travel); its `Route` (straight, or
-  a smooth cubic with a `Bend`; elbows later); a `Head` at the end and
+  the point, or an explicit direction of travel); its `Route` (straight, a
+  smooth cubic with a `Bend`, or a `Gutter`: out sideways to a vertical
+  lane, along it and back in sideways, with rounded corners — the stack
+  layout's edges); a `Head` at the end and
   optionally at the start (triangle or chevron, with a size); and its
   `Label`s, each with text, a `LabelRole` (`Primary`, `Quiet`) and a
   preferred `Placement` (centre, near the start, near the end, or a 0–1
@@ -67,13 +69,16 @@ Known limit: the pass is greedy. A primary label that takes the middle of
 a short arrow can leave too little room for a quiet one near the end, which
 then drops as `Crowded` rather than nudging the primary aside.
 
-## How the page will use it
+## How the page uses it
 
-The model builds one `Arrow` per edge (`edges.rs`: lamp → pixel, leaving
-`Direct`, arriving from `Side::Left`; bindings leave from the right) with
-the span label as `Primary` and the channel's name as `Quiet`, near the
-end. It lays them out together, in screen units, once per frame, and the
-page draws what comes back: the path, the heads, and each placed label as a
-background-filled box with its text, rotated. Hovering tests
-`Path::distance_to`. Integration is a later step; this crate depends on
-nothing in the lab, and nothing in the lab depends on it yet.
+Core says which edges there are and what each says; the page
+(`web/src/edge_layer.rs`) builds one `Arrow` per shown edge from where the
+cards landed, in screen pixels: on the canvas a curve from the source's
+right side, arriving from `Side::Left`; in the stack a `Gutter` route on
+its own lane, the shorter spans nearer the column. What it carries is a
+`Primary` label (only on the selection), the channel's name a `Quiet` one
+near the end. It lays them out together and draws what comes back: the
+path, the heads, and each placed label as a background-filled box with its
+text, rotated. Hovering tests `Arrow::line().distance_to`, and the page
+reports the hovered edge to core. The model doesn't depend on this crate;
+the page does.

@@ -7,6 +7,7 @@ planning workspace: `lp2025/2026-10-10-1853-mapping-design-lab/vision.md`.
 ```bash
 just lab-mapping        # serves the canvas; the printed URL is the source of truth
 cargo test -p lab-mapping-model        # the statements
+cargo test -p lab-layout -p lab-arrows # the layout's and the arrows' statements
 cargo test -p lab-mapping-files        # opening and saving real projects
 cargo test -p lab-mapping-fit-tests    # the proof against the product (slow: runs its engine)
 cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
@@ -14,16 +15,28 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 
 ## The crates
 
-- **`model/`** (`lab-mapping-model`): the editor's whole behaviour. Nodes
-  (modules, shaders, fixtures, outputs), the bus channels that wire them,
-  components, objects, layout, the patch and its edges, selection,
-  properties, hints, and the simulated board. It has
-  no IO, and its input is events; it never reads a clock, so the page
-  passes the time in. Yona reads and edits this crate, so keep it small and
-  plain. **It depends on no workspace crate.** That keeps it abstract and
-  lets it drop into the app later.
+- **`model/`** (`lab-mapping-model`): the editor's whole behaviour, in two
+  halves (architecture §2). **`domain/`** is what's stored and the logic
+  over it: nodes (modules, shaders, fixtures, outputs), the bus channels
+  that wire them, components, objects, the patch, and the simulated board.
+  **`ux/`** is the editor and every user verb: selection, picks, handles,
+  properties, hints, and `Editor::view_tree()`, which emits everything
+  the page draws as one tree with **no positions** (`UiCanvasView`). It
+  never lays anything out: it builds the layout's input and takes the
+  placement back as a fact. It has no IO, and its input is events; it
+  never reads a clock, so the page passes the time in. Yona reads and
+  edits this crate, so keep it small and plain. **It depends on no product
+  crate**, only `lab-layout`, which depends on nothing at all. That keeps
+  it abstract and lets it drop into the app later.
+- **`layout/`** (`lab-layout`): a semantic graph in, placements out — the
+  canvas layout by role and the stack layout, pure and dependency-free
+  (its README).
+- **`arrows/`** (`lab-arrows`): a semantic arrow in, geometry out — curves
+  on the canvas, gutter lanes in the stack, labels lying along the line
+  (its README). Dependency-free; the page uses it.
 - **`web/`** (`lab-mapping-web`): a Dioxus page that forwards events to the
-  model and draws what it says. No editor logic lives here.
+  model, runs the layout, and draws the view tree as it comes. No editor
+  logic and no detail decisions live here (below, "The page").
 - **`files/`** (`lab-mapping-files`): opens real LightPlayer projects into
   the model and saves them back, in the product's own formats (vision D51,
   fit-check §6). Fenced like the model: the model and `serde_json` only,
@@ -60,15 +73,17 @@ one of the test projects, and fits the view:
 - **PLAYFUL choker** (`catalog/projects/playful-choker`): 12 paths, 73
   lamps, one output whose one port takes the rest; its shader is a card
   at the left feeding the fixture over `visual.out`, and its clock and
-  power button are plain cards beside it.
+  power button are plain cards in a row above.
 - **Zook dome** (`catalog/projects/zook-dome`): one repeat — five copies
   of a 300-lamp zigzag path with a jumper — on five ports.
 - **Radiance dome** (`projects/radiance-dome`, generated): 55 panel
   shapes × 5 copies, 22,000 lamps, ten named outputs of 32 ports, every
-  panel placed by hand. It loads in about a second and draws, but every
-  interaction re-renders the whole SVG — 50,000 elements — so panning
-  and hovering take about half a second each in the dev build. Making it
-  interactive is the next piece.
+  panel placed by hand. Its lamps and pixels are drawn on canvases
+  inside their cards, so panning and hovering run at 16.7 ms a frame in
+  the dev build (they took about half a second when everything was SVG);
+  with a repeat selected and its lamps animating, about 83 ms.
+  `web/perf/` is the harness that measured it:
+  `bun lab/mapping/web/perf/run.mjs <page url> radiance-dome`.
 
 What the model took from the product to open them (each with its
 statement, fit-check's resolutions applied): lamps resolved in the
@@ -104,14 +119,17 @@ A 2D canvas with selection, and the start of the whole node graph on it
   one selects what's in it, and the frame itself is picked by its title or
   border. An output card is not a frame: click it to select it, click again
   for the port under the cursor, and again for the pixel (D47).
-- **Layout** (D37, D48), inside-out: in every container the fixtures and
-  modules stack top to bottom, and each output sits just to the right of
-  the first fixture that feeds it, a fixed gap away, level with its top.
-  **Dragging a node pins it** where you drop it — by its title or border,
-  an output by its card (or a port or pixel of it). The rest lay
-  themselves out around it, and nothing overlaps. A pinned node shows a
-  pin on its title; U, or "Unpin" in the right-click menu, gives it back
-  to the layout. One drag, one undo.
+- **Layout runs in the page** (D63), from `lab-layout`, by role: controls
+  (a clock, a power button) in a row on top, then shaders, fixtures and
+  outputs in columns that follow the flow, each output level with what
+  feeds it, modules as frames below, anything else at the right. Core says
+  what there is (`Editor::layout_input`) and takes where it landed back
+  (`Editor::set_placement`). It is **automatic only, on trial** (D64):
+  dragging a node selects it and moves nothing. **Pinning** is under
+  Debug: on, dragging a node by its title or border (an output by its
+  card) pins it where you drop it, the rest lay out around it, and U or
+  "Unpin" gives it back. Every reach for a drag is a finding for the
+  lab's `notes.md`.
 - **The engine, small** (D55; `board.rs`): a recreation of the product's
   dataflow, pulled from the outputs like the engine's and kept for the
   frame. A **shader** (a render source, `render_source.rs`) publishes a
@@ -142,19 +160,22 @@ A 2D canvas with selection, and the start of the whole node graph on it
   before it in the product's attach order). The effective patch is
   derived and never stored. A rule whose output, port or object is gone
   shows as a problem and is never retargeted.
-- **Edges are the patch** (D42, D45, D46): violet, one per object (per
-  span, when an object runs on into the next port), leaving the object's
-  FIRST lamp toward the output and landing — from the left, with an
-  arrowhead — on the PIXEL where its span starts, inside the card. They
-  don't change with the selection. A (fixture, output) pair bundles into
-  one edge only by density: more than 24 objects (the dome), or zoomed out
-  until the fixture has under 8 screen pixels per object. A bundle leaves
-  the frame's side nearest where it lands. Hovering an edge lights it and
-  says what it carries ("path1 → GPIO 10 · lamps 0–24 at pixel 0"); it
-  never selects. Opening a fixture (Enter) frames it with its outputs; ⇧2
-  frames the selection (an empty fixture with the outputs its rules name).
-  A selected port rings the lamps it carries, and a selected object tints
-  the ports it lands on.
+- **Edges are node to node** (D57, amending D45/D46): one per pair of
+  nodes, violet, with an arrowhead where the data arrives. Core says
+  which there are and what each says; the page routes them with
+  `lab-arrows` from where the cards landed. On the canvas an edge is a
+  curve from its source's right side into its target's left, on an output
+  level with the port rows it lands on. Its channel's name is always on
+  it in a small box; what it carries ("50 lamps on GPIO 10") shows only
+  while it belongs to the selection, and edges touching the selection are
+  lit, the rest quieter. Where a fixture's objects land shows on the
+  output instead, as each object's run of pixels, lit while the object is
+  hovered or selected. Hovering an edge (the page hit-tests it and tells
+  core) lights it and says what it carries in full; it never selects. In
+  the stack only the selection's edges show, in the gutter (below).
+  Opening a fixture (Enter) frames it with its outputs; ⇧2 frames the
+  selection. A selected port rings the lamps it carries, and a selected
+  object tints the ports it lands on.
 - **Pixels** (D47): a port's pixels are squares on its row, laid out by
   the model (`pixel_grid.rs`), each selectable. Arrows walk them, ⇧-click
   selects a run from the first one picked. A selected pixel breathes on
@@ -195,7 +216,7 @@ A 2D canvas with selection, and the start of the whole node graph on it
   takes what it touches, or with ⌥ only what is fully inside.
 - **⌘A climbs** a level each time you press it, out to everything you drew
   and then the nodes themselves, so ⌘A ⌫ always empties every fixture.
-- **Editing:** drag moves what's drawn (and pins a node), ⌫ deletes,
+- **Editing:** drag moves what's drawn (and pins a node, with pinning on), ⌫ deletes,
   with refusals in rustc style. − and = change a count (a port's pixels too), r reverses
   direction, and ⌘Z undoes.
 - **Handles** (`handle.rs`): small squares on the selection — one on each
@@ -233,7 +254,54 @@ A 2D canvas with selection, and the start of the whole node graph on it
   lead says what you're doing ("Drawing a path", "Moving circle1"), never
   what's selected — the breadcrumb says that.
 
-Not covered yet: editing place rules on the canvas (they open, show,
+## The page
+
+The canvas container (architecture §8), bottom to top:
+
+- **background dots** on a screen-space canvas, spaced in world units and
+  stepping coarser (×5) as you zoom out;
+- **the world layer**, one `div` whose transform is the camera, holding
+  every node as a flat, keyed DOM card in world units. Panning and zooming
+  change only that transform, so no card renders for a pan; cards out of
+  view are not mounted; a relayout eases each card to its new place.
+  **Faces:** a fixture's drawing is SVG in its own units with its lamps
+  on a canvas inside it; an output's rows are SVG with its pixels on a
+  canvas. Lamps and pixels are rasterized in Rust and put with one
+  `putImageData` (`dense_canvas.rs`), drawn again only when the zoom moves
+  a step or the colours tick;
+- **the overlay**, in screen pixels, never scaled: frames' title tabs (a
+  frame is picked by its tab), the edges, outlines (each thing's area —
+  what's outlined is what a click hits), handles, the selection box, a
+  drawing in progress; and, as DOM, the right-click list and the note
+  beside the cursor.
+
+The page draws the view tree's parts, each a memo core keys on what it
+depends on (`view_keys.rs`), so a pan builds only the overlay again.
+
+**Two layouts** (architecture §5), switched in the toolbar (Canvas |
+Stack) and remembered per browser, never in the project: the **canvas**,
+which pans and zooms, and the **stack**, one column in tree order at a
+fixed zoom (card text at 13 px) that scrolls natively, a module a rail
+down its children's left, a fixture filling the column (drawn bigger
+than its box, whole). Switching eases every card to its new place while
+the world's own transform eases between the two, and the edges fade for
+the move. In the stack the selection's edges run in a **gutter** at the
+column's left, each on its own lane (`lab-arrows`' gutter route), and the
+card the selection is in scrolls into view.
+
+**Size classes** (architecture §7), from the app's width by Tailwind's
+breakpoints: **lg** (≥ 1024 px) has the tree left, the inspector right
+and the hint bar; **md** puts the tree in a drawer (Tree in the toolbar)
+and the inspector over the canvas's right while something is selected;
+**sm** (< 640 px) starts in the stack, with the inspector a bottom sheet
+whose handle steps peek, half, full, and the hint bar one line.
+
+**Debug**, at the toolbar's right end: Pinning (above), and Size (Auto,
+sm, md, lg), which draws as if the screen were that size and frames the
+app at 390 or 820 px wide, the way devtools' device mode does.
+
+Not covered yet: touch gestures (pinch, long-press: the touch plan, on
+the test phones), GPU faces at dome scale, editing place rules on the canvas (they open, show,
 save and light the board, but there is no gesture for them yet), choosing
 a rule's output, choosing a node's channels, saving from the page,
 routes, running GLSL (shaders are stand-in patterns), clocks and other
