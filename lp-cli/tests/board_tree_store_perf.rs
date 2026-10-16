@@ -31,9 +31,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use desk_board::{Console, Desk, PortWatch, close, connect};
-use lp_cli::client::cli_connect::CliConnection;
-use lpa_client::{ClientEvent, LpClient};
+use desk_board::{Console, Desk, close, connect, power_up};
+use lpa_client::LpClient;
 use lpc_model::LpValue;
 use lpfs::LpPath;
 use tree_store_board::c40_files;
@@ -405,87 +404,6 @@ fn median(v: &[f64]) -> f64 {
         return f64::NAN;
     }
     s[s.len() / 2]
-}
-
-/// Cut the power at idle (closing `conn` first), open the link at power-up,
-/// and read the boot's mount line. Stops unless it was a power-on boot.
-async fn power_up(
-    desk: &Desk,
-    port: &str,
-    conn: Option<CliConnection>,
-    console: &Console,
-    what: &str,
-) -> (CliConnection, serde_json::Value) {
-    if let Some(c) = conn {
-        close(c).await;
-    }
-    let epoch = Instant::now();
-    let boot = Console::new(epoch);
-    let watch = PortWatch::start(port, epoch);
-    let power = desk.power_cycle_async(epoch);
-    let until = Instant::now() + Duration::from_secs(30);
-    while watch.times().back.is_none() && Instant::now() < until {
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    assert!(
-        watch.times().back.is_some(),
-        "{what}: the port never came back"
-    );
-    let conn = connect(port, &boot)
-        .await
-        .unwrap_or_else(|e| panic!("{what}: {e}"));
-    while power.lock().unwrap().is_none() {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let pc = power.lock().unwrap().clone().unwrap();
-    assert_eq!(
-        pc.code,
-        Some(0),
-        "STOP: `board power-cycle` failed: {}",
-        pc.output
-    );
-    let mut reason = boot
-        .find("[RECOVERY] boot: cause=")
-        .map(|l| l.contains("cause=power-on"));
-    if reason.is_none() {
-        let mut client = LpClient::new(conn.client_io());
-        let until = Instant::now() + Duration::from_secs(8);
-        while reason.is_none() && Instant::now() < until {
-            if let Ok(o) = client.project_list_loaded().await {
-                for e in &o.events {
-                    if let ClientEvent::Heartbeat {
-                        recovery: Some(r), ..
-                    } = e
-                    {
-                        reason = Some(r.reset_reason == "power-on");
-                    }
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(300)).await;
-        }
-    }
-    assert_eq!(
-        reason,
-        Some(true),
-        "STOP: {what}: the boot was not a power-on"
-    );
-    let mount_us = boot.find("[perf] fs mount ").and_then(|l| {
-        l.split_whitespace()
-            .nth(3)
-            .and_then(|v| v.parse::<u64>().ok())
-    });
-    let fs_line = boot.find("[FS] ");
-    let fs = conn
-        .hello()
-        .map(|h| serde_json::to_value(h).unwrap()["hardware"]["fs"].clone());
-    eprintln!("{what}: mount {mount_us:?} us, {fs_line:?}, fs {fs:?}");
-    for (t, l) in boot.take() {
-        console.push(format!("[{what} +{t:.3}] {l}"));
-    }
-    (
-        conn,
-        serde_json::json!({"what": what, "mount_us": mount_us, "fs_line": fs_line, "fs": fs}),
-    )
 }
 
 /// A panel write to the loaded project's `time` channel.

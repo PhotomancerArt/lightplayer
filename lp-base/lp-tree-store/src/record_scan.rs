@@ -1,11 +1,26 @@
-//! Mount's first pass over one sector: every record header and payload,
-//! CRC-checked (a torn program can leave a good header over a short payload
-//! — README defect 1), stopping at the end or at the first record that does
-//! not check; a record of an unknown kind is checked the same way and
-//! skipped. Nothing is indexed here (that would cost RAM for every record
-//! on flash, garbage included): the pass finds where each sector's trusted
-//! records end and keeps the roots, two at most (I1 falls back one step and
-//! no further). `mount_walk.rs` then indexes only the chosen root's closure.
+//! Mount's first pass over one sector, in one of two readings:
+//!
+//! - **checked** (`check`): every record header and payload, CRC-checked (a
+//!   torn program can leave a good header over a short payload — README
+//!   defect 1), stopping at the end or at the first record that does not
+//!   check; a record of an unknown kind is checked the same way and skipped.
+//!   What FORMAT.md's mount step 2 says, and what mount does for the newest
+//!   sector of each kind (the only place a cut can have torn a program), for
+//!   a sector a newer writer closed, and for every sector when its fast pass
+//!   adopts no root.
+//! - **by headers** (the rest): the record headers only, `16 + len` to the
+//!   next, with only roots read whole and checked (their seq picks the
+//!   root). Every record there was read back whole when it was written, and
+//!   its sector stopped being a write head before any later cut, so no cut
+//!   can have reached it; the closure walk (`mount_walk.rs`) then reads every
+//!   record it adopts whole, and a CRC that fails there sends mount back to
+//!   the checked reading of every sector (`store_mount.rs`).
+//!
+//! Nothing is indexed here (that would cost RAM for every record on flash,
+//! garbage included): the pass finds where each sector's trusted records
+//! end, keeps the roots, two at most (I1 falls back one step and no
+//! further), and adds every record's id to the sector's filter
+//! (`sector_filter.rs`) for the walk.
 //!
 //! **Settling a head's tail.** A CRC that passed is a fact about one read,
 //! not about the cells: a program torn inside a 4-byte word can leave its
@@ -33,6 +48,7 @@ use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader};
 use crate::record_kind::RecordKind;
 use crate::record_log::RecordLog;
 use crate::root_record::RootRecord;
+use crate::sector_filter::SectorFilter;
 use crate::sector_header::SECTOR_HEADER_LEN;
 use crate::store_error::StoreError;
 
@@ -84,16 +100,20 @@ pub struct ScannedSector {
     pub closed: bool,
 }
 
-/// Scan sector `s`, whose header was valid. Every CRC-good record is also
-/// shown to `residue` (`mount_verdict.rs`: was anything here beyond what
-/// `format` writes?). `settle`: `s` is the newest sector of its kind, and
-/// its tail is settled (above); a tail that does not read back as settled
-/// closes the sector.
+/// Scan sector `s`, whose header was valid. `check`: every record's payload
+/// is read and CRC-checked, and every CRC-good record is shown to `residue`
+/// (`mount_verdict.rs`: was anything here beyond what `format` writes?);
+/// otherwise only the header chain is walked and only roots are read whole
+/// (a cold sector, above). `settle` (with `check`): `s` is the newest
+/// sector of its kind, and its tail is settled (above); a tail that does not
+/// read back as settled closes the sector.
 pub fn scan_sector<F: Flash>(
     log: &mut RecordLog<F>,
     s: u32,
     roots: &mut RootCandidates,
     residue: &mut FormatResidue,
+    filter: &mut SectorFilter,
+    check: bool,
     settle: bool,
 ) -> Result<ScannedSector, StoreError<F::Error>> {
     let size = log.sector_size;
@@ -111,7 +131,7 @@ pub fn scan_sector<F: Flash>(
     while off + RECORD_HEADER_LEN <= size {
         let mut h = [0u8; RECORD_HEADER_LEN as usize];
         log.read(log.addr(s, off), &mut h)?;
-        let (len, kind, root) = match RecordHeader::parse(&h) {
+        let (len, record) = match RecordHeader::parse(&h) {
             HeaderRead::End => break,
             HeaderRead::Bad => {
                 (out.closed, torn) = (true, true);
@@ -119,26 +139,32 @@ pub fn scan_sector<F: Flash>(
             }
             // Checked like any record, then skipped: garbage (FORMAT.md
             // "Unknown records").
-            HeaderRead::Unknown { len } => (len, None, None),
-            HeaderRead::Record(r) => (
-                r.len,
-                Some(r.kind),
-                Some(r).filter(|r| r.kind == RecordKind::Root),
-            ),
+            HeaderRead::Unknown { len } => (len, None),
+            HeaderRead::Record(r) => (r.len, Some(r)),
         };
+        let root = record.filter(|r| r.kind == RecordKind::Root);
         let total = RECORD_HEADER_LEN + u32::from(len);
         if off + total > size {
             (out.closed, torn) = (true, true);
             break;
         }
-        payload.clear();
-        payload.resize(usize::from(len), 0);
-        log.read(log.addr(s, off + RECORD_HEADER_LEN), &mut payload)?;
-        if !mutant!(TrustRecordHeaders) && !RecordHeader::crc_ok(&h, &payload) {
-            (out.closed, torn) = (true, true);
-            break;
+        // A cold sector's records were each read back whole when written,
+        // and no cut since can have reached them: only a root is read. (A
+        // sector read whole in one call instead costs the C6 more: a call is
+        // ~15 µs there, a byte ~0.25 µs — A2's silicon fit, README.)
+        if check || root.is_some() {
+            payload = log.read_vec(log.addr(s, off + RECORD_HEADER_LEN), usize::from(len))?;
+            if !(check && mutant!(TrustRecordHeaders)) && !log.crc_ok(&h, &payload) {
+                (out.closed, torn) = (true, true);
+                break;
+            }
         }
-        residue.saw_record(kind, &payload);
+        if check {
+            residue.saw_record(record.map(|r| r.kind), &payload);
+        }
+        if let Some(r) = record {
+            filter.add(s, r.id);
+        }
         let loc = RecordLoc {
             sector: s,
             offset: off,
@@ -160,7 +186,7 @@ pub fn scan_sector<F: Flash>(
         off += total;
         out.end = off;
     }
-    if settle && !mutant!(TrustTailOnce) {
+    if check && settle && !mutant!(TrustTailOnce) {
         if torn {
             log.kill_record(s, out.end)?;
         } else if !out.closed {
