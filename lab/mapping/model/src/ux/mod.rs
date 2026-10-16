@@ -21,6 +21,7 @@ pub mod tree_rows;
 pub mod ui;
 pub mod view_faces;
 pub mod view_inspector;
+pub mod view_keys;
 pub mod view_overlay;
 pub mod view_tree;
 pub mod view_tree_pane;

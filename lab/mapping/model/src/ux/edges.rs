@@ -109,7 +109,7 @@ impl Editor {
     }
 
     /// The reported edge, if it counts right now.
-    fn edge_hover_now(&self) -> Option<(NodeId, NodeId)> {
+    pub(crate) fn edge_hover_now(&self) -> Option<(NodeId, NodeId)> {
         if self.hover_point().is_none() || self.hover_target().is_some() {
             return None;
         }
@@ -121,14 +121,12 @@ impl Editor {
         let p = &self.project;
         let from_t = Target::Node(from.clone());
         let to_t = Target::Node(to.clone());
-        let lands_on = p
-            .ports_of(&Target::Node(from.clone()))
-            .into_iter()
-            .filter_map(|t| match t {
-                Target::Port { output, key } if &output == to => Some(key),
-                _ => None,
-            })
-            .collect();
+        let mut lands_on: Vec<String> = Vec::new();
+        for s in &p.effective_patch().spans {
+            if &s.fixture == from && &s.output == to && !lands_on.contains(&s.port) {
+                lands_on.push(s.port.clone());
+            }
+        }
         let label = p.carried(from, to);
         let mut carries = format!("{} → {}", p.node_name(from), p.node_name(to));
         if !label.is_empty() {
@@ -198,22 +196,27 @@ impl Project {
     /// render source's, or an empty fixture's).
     pub(crate) fn carried(&self, from: &NodeId, to: &NodeId) -> String {
         let mut lamps = 0u32;
-        let mut ports: Vec<String> = Vec::new();
+        let mut keys: Vec<&str> = Vec::new();
         for s in &self.effective_patch().spans {
             if &s.fixture == from && &s.output == to {
                 lamps += s.len();
-                let port = self.label(&Target::Port {
-                    output: s.output.clone(),
-                    key: s.port.clone(),
-                });
-                if !ports.contains(&port) {
-                    ports.push(port);
+                if !keys.contains(&s.port.as_str()) {
+                    keys.push(&s.port);
                 }
             }
         }
         if lamps == 0 {
             return String::new();
         }
+        let ports: Vec<String> = keys
+            .into_iter()
+            .map(|key| {
+                self.label(&Target::Port {
+                    output: to.clone(),
+                    key: key.to_string(),
+                })
+            })
+            .collect();
         let s = if lamps == 1 { "" } else { "s" };
         format!("{lamps} lamp{s} on {}", ports.join(", "))
     }

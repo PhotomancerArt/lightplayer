@@ -39,10 +39,7 @@ impl Editor {
             notice: self.notice.clone(),
             toolbar: self.view_toolbar(),
             menu: self.view_menu(),
-            cursor_note: self
-                .cursor_note()
-                .zip(self.pointer)
-                .map(|(text, at)| UiCursorNote { text, at }),
+            cursor_note: self.view_cursor_note(),
             cursor: self.view_cursor(),
         }
     }
@@ -51,8 +48,8 @@ impl Editor {
     /// emphasis.
     pub fn view_nodes(&self) -> Vec<UiCanvasNode> {
         let p = &self.project;
-        let context = self.context();
-        let open = self.open_fixtures();
+        let cx = self.face_context();
+        let (context, open) = (self.context(), self.open_fixtures());
         p.all_nodes()
             .into_iter()
             .map(|n| {
@@ -76,7 +73,7 @@ impl Editor {
                         pinned: self.debug.pinning && n.pinned.is_some(),
                         title_px: title_width(&n.name, n.pinned.is_some()),
                     },
-                    face: self.view_face(n),
+                    face: self.view_face(n, &cx),
                     detail: detail_level(size.x * self.camera.scale),
                     emphasis: if outside && !fed_by_open {
                         Emphasis::Dimmed
@@ -152,6 +149,13 @@ impl Editor {
                 })
                 .collect(),
         })
+    }
+
+    /// The note beside the cursor, where the cursor is.
+    pub fn view_cursor_note(&self) -> Option<UiCursorNote> {
+        self.cursor_note()
+            .zip(self.pointer)
+            .map(|(text, at)| UiCursorNote { text, at })
     }
 
     /// What the pointer looks like: what it is doing, or what pressing

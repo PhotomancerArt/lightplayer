@@ -1087,6 +1087,13 @@ impl Editor {
     /// at the whole project — and ⌘A ⌫ from nothing selected empties every
     /// fixture.
     pub fn select_all(&mut self) {
+        if let Some(level) = self.select_all_next() {
+            self.selection = level;
+        }
+    }
+
+    /// What ⌘A would select now, without selecting it.
+    fn select_all_next(&self) -> Option<Vec<Target>> {
         // The levels ⌘A can select, from where you are outward: first the
         // levels inside a fixture, then the levels of nodes (inside modules,
         // an output's ports), then "everything you drew, in every fixture",
@@ -1110,35 +1117,33 @@ impl Editor {
                 .collect(),
         );
         levels.push(p.children(None));
-        let next = levels
+        levels
             .into_iter()
-            .find(|level| !level.is_empty() && !level.iter().all(|t| self.selection.contains(t)));
-        if let Some(level) = next {
-            self.selection = level;
-        }
+            .find(|level| !level.is_empty() && !level.iter().all(|t| self.selection.contains(t)))
     }
 
     /// What ⌘A would do now, in words.
     pub fn select_all_hint(&self) -> String {
-        let mut probe = self.clone();
-        probe.select_all();
-        let p = &probe.project;
-        if probe.selection.is_empty() {
+        let p = &self.project;
+        let next = self
+            .select_all_next()
+            .unwrap_or_else(|| self.selection.clone());
+        if next.is_empty() {
             return "nothing to select yet".into();
         }
-        if probe.selection == self.selection {
+        if next == self.selection {
             return "everything is selected".into();
         }
-        if probe.selection.iter().all(|t| matches!(t, Target::Node(_))) {
-            let parent = p.parent(&probe.selection[0]);
-            let one_parent = probe.selection.iter().all(|t| p.parent(t) == parent);
+        if next.iter().all(|t| matches!(t, Target::Node(_))) {
+            let parent = p.parent(&next[0]);
+            let one_parent = next.iter().all(|t| p.parent(t) == parent);
             return match parent {
                 Some(m) if one_parent => format!("select everything in {}", p.label(&m)),
                 _ => "select the nodes themselves".into(),
             };
         }
         let mut parents: Vec<Option<Target>> = Vec::new();
-        for t in &probe.selection {
+        for t in &next {
             let parent = p.parent(t);
             if !parents.contains(&parent) {
                 parents.push(parent);
@@ -1147,7 +1152,7 @@ impl Editor {
         match parents.as_slice() {
             [Some(c)] => format!(
                 "select every {} in {}",
-                p.kind_word(&probe.selection[0]),
+                p.kind_word(&next[0]),
                 p.label(c)
             ),
             _ => "select everything you drew, in every fixture".into(),

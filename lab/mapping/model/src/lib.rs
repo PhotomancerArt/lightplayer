@@ -115,3 +115,4 @@ pub use ux::pixel_grid::PixelGrid;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
 pub use ux::tree_rows::TreeRow;
 pub use ux::ui::*;
+pub use ux::view_keys::{EdgesKey, NodesKey, PanelsKey};

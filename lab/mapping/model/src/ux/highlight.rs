@@ -93,6 +93,8 @@ impl Project {
             Target::Lamp { object, index } => &s.object == object && s.lamps.contains(index),
             Target::Port { .. } | Target::Pixel { .. } => false,
             Target::Node(id) if self.output(id).is_some() => false,
+            // A fixture: its own spans, without walking up from each one.
+            Target::Node(id) if self.fixture(id).is_some() => &s.fixture == id,
             // The span's object, and everything above it up to the root.
             _ => self.is_ancestor_or_self(t, &self.object_target(&s.object)),
         }

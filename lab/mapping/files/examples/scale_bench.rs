@@ -15,7 +15,7 @@
 use std::time::Instant;
 
 use lab_mapping_files::{Opened, embedded};
-use lab_mapping_model::{Editor, Mods, Project, Target, Vec2, common_props};
+use lab_mapping_model::{Editor, Mods, Project, Target, Vec2};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -130,7 +130,22 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
         warm_ed("hint bar", &|ed| {
             let _ = ed.hint_bar();
         });
-        warm_ed("page frame (canvas + panels)", &|ed| page_frame(ed));
+        warm_ed("view nodes (faces)", &|ed| {
+            let _ = ed.view_nodes();
+        });
+        warm_ed("view overlay", &|ed| {
+            let _ = ed.view_overlay();
+        });
+        warm_ed("view inspector", &|ed| {
+            let _ = ed.view_inspector();
+        });
+        warm_ed("view tree pane", &|ed| {
+            let _ = ed.view_tree_pane();
+        });
+        warm_ed("board frame", &|ed| {
+            let _ = ed.board_frame(1.0);
+        });
+        warm_ed("page frame (the view tree)", &|ed| page_frame(ed));
         // A pointer move: the editor takes the event, then the page asks.
         let mut moving = ed.clone();
         let mut k = 0.0;
@@ -143,43 +158,9 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     }
 }
 
-/// What the page asks the model each time it draws (canvas.rs, panels.rs).
+/// What the page asks the model each time it draws: the view tree.
 fn page_frame(e: &Editor) {
-    let p = &e.project;
-    let _ = p.effective_patch();
-    let _ = e.context();
-    let _ = e.hover_target();
-    let _ = e.open_fixtures();
-    for n in p.all_nodes() {
-        let _ = p.node_rect(&n.id);
-        if let Some(o) = n.output() {
-            for port in &o.ports {
-                let _ = p.pixel_grid(&n.id, &port.key);
-                let _ = p.port_pixels(&n.id, &port.key);
-            }
-        }
-    }
-    let _ = e.edges();
-    let _ = e.marked_lamps();
-    let _ = e.marked_pixels();
-    for (f, o) in p.placed_objects() {
-        let t = p.object_target(&o.id);
-        let _ = p.chain(&t);
-        let _ = p.node_rect(&f);
-    }
-    for n in p.fixtures() {
-        let _ = p.data_path(&n.id);
-    }
-    let _ = e.handles();
-    for t in &e.selection {
-        let _ = p.area(&e.camera, t);
-    }
-    let _ = e.cursor_note();
-    let _ = e.board_frame(1.0);
-    // Panels.
-    let _ = p.tree_rows();
-    let _ = common_props(p, &e.selection);
-    let _ = e.hint_bar();
+    let _ = e.view_tree();
 }
 
 /// The project as if just opened: nothing derived yet (a `&mut` way in

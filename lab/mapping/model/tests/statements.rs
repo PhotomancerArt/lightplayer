@@ -3261,6 +3261,23 @@ fn the_tree_pane_marks_selection_and_context() {
     assert!(tree.rows.iter().any(|r| r.selected && r.label == "strip"));
 }
 
+/// Panning builds nothing again but the overlay: the keys of the nodes, the
+/// edges and the panels stay the same, so a page keeps what it drew. A
+/// selection or an edit changes them.
+#[test]
+fn panning_changes_no_part_of_the_view_but_the_overlay() {
+    let mut e = editor();
+    let keys = |e: &Editor| (e.view_nodes_key(), e.view_edges_key(), e.view_panels_key());
+    let before = keys(&e);
+    e.camera.pan(Vec2::new(40.0, -25.0));
+    assert!(keys(&e) == before, "a pan");
+    e.select(vec![fixture(&e, "strip")]);
+    let selected = keys(&e);
+    assert!(selected.0 != before.0 && selected.1 != before.1 && selected.2 != before.2);
+    e.edit_selection_prop("width", PropEdit::SetNumber(90.0));
+    assert!(keys(&e).0 != selected.0, "an edit");
+}
+
 // ---- helpers -------------------------------------------------------------------
 
 /// Every pair of nodes at one level whose boxes overlap, in words: empty

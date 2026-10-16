@@ -10,6 +10,7 @@ use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::target::Target;
 use crate::ux::card_geometry::card_row;
 use crate::ux::editor::Editor;
+use crate::ux::pixel_grid::PixelGrid;
 use crate::ux::ui::{
     Emphasis, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace, UiPortRow, UiRun,
     UiShape, UiSourceFace, UiWire,
@@ -18,13 +19,44 @@ use crate::ux::ui::{
 /// A fixture's picture behind its lamps: this many cells each way.
 pub const PICTURE_CELLS: u32 = 16;
 
+/// What every face asks about the selection and the pointer, worked out
+/// once for all of them.
+pub struct FaceContext {
+    hover: Option<Target>,
+    context: Option<Target>,
+    open: Vec<NodeId>,
+    /// Ports the selection lands on.
+    tinted: Vec<Target>,
+    /// Pixels ringed: each selected lamp's.
+    marked: Vec<Target>,
+}
+
 impl Editor {
+    pub fn face_context(&self) -> FaceContext {
+        let p = &self.project;
+        let mut tinted: Vec<Target> = Vec::new();
+        for t in &self.selection {
+            for port in p.ports_of(t) {
+                if !tinted.contains(&port) {
+                    tinted.push(port);
+                }
+            }
+        }
+        FaceContext {
+            hover: self.hover_target(),
+            context: self.context(),
+            open: self.open_fixtures(),
+            tinted,
+            marked: self.marked_pixels(),
+        }
+    }
+
     /// What a node shows on the canvas; a module only its frame.
-    pub fn view_face(&self, n: &Node) -> Option<UiNodeFace> {
+    pub fn view_face(&self, n: &Node, cx: &FaceContext) -> Option<UiNodeFace> {
         Some(match &n.kind {
             NodeKind::Module { .. } => return None,
-            NodeKind::Fixture(_) => UiNodeFace::Fixture(self.fixture_face(&n.id)),
-            NodeKind::Output(_) => UiNodeFace::Output(self.output_face(&n.id)),
+            NodeKind::Fixture(_) => UiNodeFace::Fixture(self.fixture_face(&n.id, cx)),
+            NodeKind::Output(_) => UiNodeFace::Output(self.output_face(&n.id, cx)),
             NodeKind::Source(s) => UiNodeFace::Source(UiSourceFace {
                 kind: s.kind_words(),
                 writes: s.writes.to_string(),
@@ -36,11 +68,11 @@ impl Editor {
         })
     }
 
-    fn fixture_face(&self, id: &NodeId) -> UiFixtureFace {
+    fn fixture_face(&self, id: &NodeId, cx: &FaceContext) -> UiFixtureFace {
         let p = &self.project;
         let origin = p.origin(id);
         let local = |v: Vec2| v - origin;
-        let context = self.context();
+        let context = &cx.context;
         let objects = p
             .objects_in(id)
             .into_iter()
@@ -69,7 +101,7 @@ impl Editor {
             at: local(e.at),
             along: e.along,
         }));
-        let working = self.open_fixtures().contains(id)
+        let working = cx.open.contains(id)
             || self.selection.contains(&Target::Node(id.clone()));
         UiFixtureFace {
             fixture: id.clone(),
@@ -88,7 +120,7 @@ impl Editor {
         }
     }
 
-    fn output_face(&self, id: &NodeId) -> UiOutputFace {
+    fn output_face(&self, id: &NodeId, cx: &FaceContext) -> UiOutputFace {
         let p = &self.project;
         let patch = p.effective_patch();
         let Some(output) = p.output(id) else {
@@ -97,16 +129,7 @@ impl Editor {
                 ports: Vec::new(),
             };
         };
-        // Ports the selection lands on, tinted.
-        let mut tinted: Vec<Target> = Vec::new();
-        for t in &self.selection {
-            for port in p.ports_of(t) {
-                if !tinted.contains(&port) {
-                    tinted.push(port);
-                }
-            }
-        }
-        let hover = self.hover_target();
+        let (tinted, hover) = (&cx.tinted, &cx.hover);
         // A run is lit while its object, or anything round it, is hovered
         // or selected.
         let lit_by = |object: &ObjectId| {
@@ -116,16 +139,18 @@ impl Editor {
                 .chain(self.selection.iter())
                 .any(|s| p.is_ancestor_or_self(s, &t) || p.is_ancestor_or_self(&t, s))
         };
-        let marked = self.marked_pixels();
+        let marked = &cx.marked;
         let ports = output
             .ports
             .iter()
             .enumerate()
             .filter_map(|(i, port)| {
                 let row = card_row(i);
-                let grid = p.pixel_grid_in(id, &port.key, row)?;
-                let runs = p
-                    .port_runs(id, &port.key)
+                let port_runs = p.port_runs(id, &port.key);
+                let pixels = p.port_pixels(id, &port.key);
+                let starts = port_runs.iter().skip(1).map(|r| r.pixels.start).collect();
+                let grid = PixelGrid::in_row(row, pixels, starts);
+                let runs = port_runs
                     .into_iter()
                     .map(|run| UiRun {
                         rects: grid.run_outline(run.pixels.clone()),
@@ -143,11 +168,7 @@ impl Editor {
                 Some(UiPortRow {
                     key: port.key.clone(),
                     name: port.name.clone(),
-                    fill: format!(
-                        "{}/{} px",
-                        patch.used(id, &port.key),
-                        p.port_pixels(id, &port.key)
-                    ),
+                    fill: format!("{}/{pixels} px", patch.used(id, &port.key)),
                     row,
                     tinted: tinted.contains(&target),
                     grid,
@@ -186,7 +207,9 @@ pub(crate) fn ui_object(o: &Object, emphasis: Emphasis, origin: Vec2) -> UiObjec
             radius: *radius,
         },
     };
-    let lamps: Vec<Vec2> = o.lamps.iter().map(|l| local(l.pos)).collect();
+    // Only the first two lamps matter here: where the data enters, and
+    // which way a ring runs.
+    let lamps: Vec<Vec2> = o.lamps.iter().take(2).map(|l| local(l.pos)).collect();
     UiObject {
         id: o.id.clone(),
         arrow: direction_arrow(&shape, &lamps),
