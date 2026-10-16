@@ -125,6 +125,16 @@ fn c40_budget_on(sectors: u32) {
 
     // Per-operation transient, by the allocator (the caller's buffer — the
     // bytes passed in, or `get`'s result — excluded).
+    // The simulator keeps every never-written sector in one shared buffer
+    // and copies it (4 KiB) on that sector's first write: the simulator's
+    // heap, not the store's. Since `format` erases two sectors, not all of
+    // them, give each blank sector its own buffer first (erasing a blank
+    // sector changes no cell).
+    for s in 0..sectors {
+        if st.flash().sector_is_blank(s) {
+            st.flash_mut().erase_sector(s).unwrap();
+        }
+    }
     let shader = text(999, 2900);
     let panel = text(998, 450);
     let piece = text(5, 4096);

@@ -56,10 +56,13 @@ pub enum Mutant {
     /// Mount trusts the newest sectors' last programs on one read: their
     /// tail is not settled (no re-program, no kill of a record that failed).
     TrustTailOnce,
+    /// `format` erases its two sectors but leaves every other header as it
+    /// reads (no kill): an earlier store's sectors stay trusted.
+    FormatKeepsHeaders,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 12] = [
+    pub const ALL: [Mutant; 13] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -72,6 +75,7 @@ impl Mutant {
         Mutant::NewerVersionUntrusted,
         Mutant::OpenWithoutReadBack,
         Mutant::TrustTailOnce,
+        Mutant::FormatKeepsHeaders,
     ];
 
     pub fn name(self) -> &'static str {
@@ -88,6 +92,7 @@ impl Mutant {
             Mutant::NewerVersionUntrusted => "newer_version_untrusted",
             Mutant::OpenWithoutReadBack => "open_without_read_back",
             Mutant::TrustTailOnce => "trust_tail_once",
+            Mutant::FormatKeepsHeaders => "format_keeps_headers",
         }
     }
 
