@@ -81,3 +81,90 @@ mount without a complete root was `Corrupt("no complete root")`.
   a channel-3 addition, left for the adoption round if it is wanted.
 - `refused` is a new value of a required hello field and `fs.tree` a new
   feature: wire 43. A littlefs build never produces either.
+
+## Amendment (2026-10-16): the littlefs half — a littlefs core holds a tree store
+
+Plan `lp2025/2026-10-16-0848-tree-store-adoption`, A5 (decision AD4). The
+Consequences above left one direction open: "a **littlefs** board would
+still format a tree store it is handed". A littlefs core reaches a tree
+store three ways once boards are migrated: the loader rolls back to it when
+a tree core's trial fails (`lp_bootctl::choose` boots the other record), an
+older image is flashed over USB, or Studio's "Other version…" installs one.
+Each formatted the store. This closes it, in the image that ships today,
+before any tree core is released (AD4).
+
+- **The firmware.** When littlefs will not mount the C6's `lpfs`, the
+  littlefs build looks at the first four bytes of every sector for the tree
+  store's sector magic `"LTS1"` (FORMAT.md, "Sector": bytes 0..4 of every
+  header in every version) before anything formats
+  (`fw_esp32_common::lp_fs::holds_tree_store`). Every sector, because the
+  store levels its wear and its first sectors may be free; only the magic,
+  never a CRC or a version, because a newer store must be held too. A sector
+  that will not read counts as one. The magic is spelled in the littlefs
+  build, not imported: it links no tree store (a test pins it to
+  `lp_tree_store::SECTOR_MAGIC`). Read-only, four bytes a sector, only on a
+  failed mount.
+- **What it does: the existing `refused`.** Nothing written, files kept, a
+  RAM filesystem served, `fs: refused` in the hello, the device store locked
+  (USB, a trusted link, still holds edit), Bluetooth off, network writes
+  refused — exactly the tree core's refusal above. The boot word is
+  `[FS] this board's files are in the tree store, a newer filesystem than
+  this firmware reads — not formatting; files kept; using memory FS, access
+  locked. Update the firmware.` The tree check comes before the legacy-layout
+  probe: a tree store is never reported `legacy_held`, whose migration would
+  write over it.
+- **Over the air, the same guard.** While a littlefs core holds a tree
+  store, its update session refuses a core install whose embedded manifest
+  lacks `fs.tree`, exactly as an `fs-tree` board's does
+  (`fs_tree_core_guard`, now in every server build;
+  `ota::cores_must_read_tree_store`): an older littlefs core picked with
+  "Other version…" would take the store for blank flash and format it. A
+  core that reads the store is the way forward, and installs.
+- **No wire change.** `FsBootState::Refused` (wire 43) already meant
+  "files kept, access locked, nothing to press". Which refusal it is follows
+  from a fact the hello already carries: a build with `fs.tree` refused its
+  own store (newer or damaged header); one without is a littlefs core on a
+  tree store. The server, lp-cli and Studio choose their words from that
+  (`lpa_server::network_store::refused_store_refusal`,
+  `lp-cli … refused_store_words`, `BoardFs::TreeStoreHeld` — a host-model
+  value, not a wire one): "the board's files are in the tree store, a newer
+  filesystem than its firmware reads; they are kept — update the firmware".
+  Studio's card says **Files need newer firmware** and offers nothing that
+  moves files. `WIRE_PROTO_VERSION` and `PACK_FORMAT_VERSION` are unchanged;
+  no persisted byte changed.
+- **The host half: the USB flash path never writes over a tree store.** The
+  layout probe (`lpa_link::layout_migration`) recognises one
+  (`LayoutState::TreeStore`): from the 8 KB superblock read it already makes
+  when the store's first sectors are in use, and otherwise from the rest of
+  the target `lpfs`, which it now reads before it says "no filesystem" (a
+  tree store with free first sectors used to classify `CurrentNothing`, and
+  a pending backup would have been restored over it as littlefs). A tree
+  store on the frozen legacy table, or one at the target with a stale
+  legacy superblock left at `0x310000`, is a tree store too. On it, only a
+  firmware whose embedded manifest core lists `fs.tree` is written, as a
+  plain flash on the layout it is on; a littlefs image is refused
+  (`Refusal::TreeStoreNotRead`), and a restore or a layout change is
+  refused (`Refusal::TreeStoreWouldBeWritten`) — nothing written, in words,
+  in lp-cli (`firmware install`, `hardware lpfs migrate|restore`) and in
+  Studio's flash step. Providers hand the package's manifest over
+  (`LinkLayoutInspection::target_manifest`: host from the package's images,
+  the browser from the same images esptool-js loads); the decision is the
+  shared pure code's.
+- **What this does not cover.** Table-only preflights (`fwcheck`,
+  `validate run`, `just flash-fw-esp32c6`) still read only the partition
+  table: they flash this tree's image, which holds. An image from before
+  this change, flashed by a path that skips the layout probe (plain
+  espflash), still formats a tree store — which is why AD4 ships this first
+  and why the migration (A6) leaves no older littlefs core in the other
+  boot record.
+- **Evidence.** Host: `fw-esp32-common` `lp_fs` tests (a real store found at
+  the front and with its first sectors free; a refusal writes nothing),
+  `lpa-link` `layout_state` / `migration_plan` / `tree_store_magic` /
+  `firmware_reads_tree_store`, Studio's `device_layout_step` and the board
+  card's e2e test, `lpa-server`'s `network_requests`. Emulated
+  (`lp-emu:esp32c6:t1+net=lan`, never hardware-validated):
+  `lp-cli/tests/emu_littlefs_on_tree_store.rs` — the shipped image (direct
+  and split, ROM-up) on a tree store holds, says so, keeps answering, and
+  leaves `lpfs` byte-identical across a power cycle; the USB probe refuses
+  the shipped image and takes the `fs-tree` one by their own manifests — and
+  `emu_split_scenarios.rs` S11, the rollback itself.

@@ -105,6 +105,29 @@ pub use update_links::UpdateLinks;
 
 use split_flash::SplitFlash;
 
+/// This boot's littlefs core found the board's files in a tree store and
+/// holds them (`fs: refused`; ADR 2026-10-10, amended 2026-10-16). Set once
+/// by the boot mount, before any link opens.
+#[cfg(not(feature = "fs-tree"))]
+static TREE_STORE_HELD: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The boot mount found a tree store it does not read and holds it.
+#[cfg(not(feature = "fs-tree"))]
+pub fn hold_tree_store() {
+    TREE_STORE_HELD.store(true, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Must a core installed over the air read the tree store? Always on an
+/// `fs-tree` board; on a littlefs board only while it holds a tree store —
+/// an older littlefs core installed then (Studio's "Other version…") would
+/// take the store for blank flash and format it.
+pub fn cores_must_read_tree_store() -> bool {
+    #[cfg(feature = "fs-tree")]
+    return true;
+    #[cfg(not(feature = "fs-tree"))]
+    TREE_STORE_HELD.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 /// Incomplete boots after which the core stops starting the engine: the
 /// recovery ledger's safe mode (2) already skipped the project; two more
 /// failures with no project loaded say the engine itself is broken.

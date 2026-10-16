@@ -864,12 +864,15 @@ fn data_is_a_self_copy_and_is_placed_at_its_vaddr() {
     );
 }
 
-/// The one segment whose `paddr` differs from its `vaddr` is
-/// `.rtc_fast.persistent`: NOBITS, linked to RTC fast memory with a load
-/// address in the DROM window. Placed by vaddr, and recorded.
+/// The segments whose `paddr` differs from their `vaddr` are the two RTC
+/// `persistent` sections: `.rtc_fast.persistent` (the recovery ledger and the
+/// link boot count) and, since RAM research E14, `.rtc_slow.persistent` (the
+/// `heap-rtc-slow` region, `fw-esp32v3/src/rtc_slow_heap.rs`). Both NOBITS,
+/// linked to RTC memory with a load address in the DROM window. Placed by
+/// vaddr, and recorded.
 #[test]
 #[ignore = "needs the shipped image; run through `just test-emu-esp32v3-boot`"]
-fn the_only_relocated_segment_is_rtc_fast_persistent() {
+fn the_only_relocated_segments_are_the_rtc_persistent_ones() {
     let Some(machine) = direct(false) else {
         return;
     };
@@ -878,25 +881,30 @@ fn the_only_relocated_segment_is_rtc_fast_persistent() {
         .iter()
         .filter(|s| s.relocated())
         .collect();
-    assert_eq!(relocated.len(), 1, "{relocated:?}");
-    let seg = relocated[0];
-    assert_eq!(seg.vaddr, memmap::RTC_FAST_DBUS);
-    assert!(
-        memmap::Span {
-            name: "drom",
-            base: memmap::DROM_BASE,
-            len: memmap::DROM_LEN
-        }
-        .contains(seg.paddr),
-        "its load address is in the DROM window: {:#010x}",
-        seg.paddr
-    );
-    assert_eq!(seg.filesz, 0, "NOBITS: nothing to copy either way");
-    assert_eq!(seg.regions, vec!["rtc-fast-dbus"]);
+    assert_eq!(relocated.len(), 2, "{relocated:?}");
+    let expected = [
+        (memmap::RTC_FAST_DBUS, "rtc-fast-dbus"),
+        (memmap::RTC_SLOW_BASE, "rtc-slow"),
+    ];
+    for (seg, (vaddr, region)) in relocated.iter().zip(expected) {
+        assert_eq!(seg.vaddr, vaddr);
+        assert!(
+            memmap::Span {
+                name: "drom",
+                base: memmap::DROM_BASE,
+                len: memmap::DROM_LEN
+            }
+            .contains(seg.paddr),
+            "its load address is in the DROM window: {:#010x}",
+            seg.paddr
+        );
+        assert_eq!(seg.filesz, 0, "NOBITS: nothing to copy either way");
+        assert_eq!(seg.regions, vec![region]);
+    }
     assert_eq!(
         machine.app_segments().len(),
-        6,
-        "readelf -l: seven headers, one GNU_STACK"
+        7,
+        "readelf -l: eight headers, one GNU_STACK"
     );
 }
 

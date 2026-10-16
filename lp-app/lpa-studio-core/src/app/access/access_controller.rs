@@ -1235,7 +1235,9 @@ pub(crate) fn holds_its_files(device: &Device) -> bool {
     device.evidence.classification.hello().is_some_and(|hello| {
         matches!(
             hello.fs,
-            lpa_devices::wire::BoardFs::LegacyHeld | lpa_devices::wire::BoardFs::Refused
+            lpa_devices::wire::BoardFs::LegacyHeld
+                | lpa_devices::wire::BoardFs::Refused
+                | lpa_devices::wire::BoardFs::TreeStoreHeld
         )
     })
 }

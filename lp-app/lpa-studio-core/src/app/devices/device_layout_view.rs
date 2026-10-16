@@ -62,6 +62,13 @@ pub struct FilesEvidence {
 pub const REFUSED_STORE_LINE: &str = "This board's file store has a newer or damaged header; its files \
      are kept — read them with `lp-cli hardware tree extract`.";
 
+/// The card's line for a board whose firmware does not read the tree store
+/// its files are in (`fs: refused` from a littlefs build): it kept them,
+/// and a firmware that reads the store brings them back.
+pub const TREE_STORE_HELD_LINE: &str = "This board's files are in the tree store, a newer \
+     filesystem than its firmware reads. They're kept, untouched — update the firmware to one \
+     that reads the tree store to get them back.";
+
 /// The card's layout facts for one device.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiDeviceLayout {
@@ -74,10 +81,15 @@ pub struct UiDeviceLayout {
     pub panel: Option<UiLayoutPanel>,
     /// One line in the firmware zone (a board whose files are waiting).
     pub line: Option<String>,
-    /// The board refused its file store (`fs: refused`, an `fs-tree`
-    /// build): [`Self::line`] is [`REFUSED_STORE_LINE`] and nothing here is
-    /// offered.
+    /// The board refused its file store (`fs: refused`): [`Self::line`] is
+    /// [`REFUSED_STORE_LINE`] (an `fs-tree` build) or
+    /// [`TREE_STORE_HELD_LINE`] (a littlefs build on a tree store), and
+    /// nothing here is offered.
     pub store_refused: bool,
+    /// The refusal is a littlefs build's on a tree store
+    /// ([`TREE_STORE_HELD_LINE`]): its files wait for a firmware that reads
+    /// the store.
+    pub store_needs_newer_firmware: bool,
     /// "Restore files" — the resume rule's verb (the line names the date).
     pub restore: Option<OfferPath>,
     /// The Update verb relabelled "Finish update" on a board holding its
@@ -133,6 +145,7 @@ impl UiDeviceLayout {
             panel: None,
             line: None,
             store_refused: false,
+            store_needs_newer_firmware: false,
             restore: None,
             finish_update: None,
             download: None,
@@ -196,6 +209,7 @@ pub fn device_layout_view(
         panel: None,
         line: None,
         store_refused: false,
+        store_needs_newer_firmware: false,
         restore: None,
         finish_update: None,
         download: None,
@@ -257,6 +271,16 @@ pub fn device_layout_view(
     if fs == BoardFs::Refused {
         layout.line = Some(REFUSED_STORE_LINE.to_string());
         layout.store_refused = true;
+        return Some(layout);
+    }
+    // A littlefs core that found a tree store: words only too. Its way back
+    // is the card's own Update verb (a firmware that reads the store); a
+    // migration or a restore would write over the store, so neither is
+    // offered here.
+    if fs == BoardFs::TreeStoreHeld {
+        layout.line = Some(TREE_STORE_HELD_LINE.to_string());
+        layout.store_refused = true;
+        layout.store_needs_newer_firmware = true;
         return Some(layout);
     }
     // A board holding its files for a migration: the Update verb finishes it.
@@ -328,7 +352,11 @@ pub fn device_layout_view(
         && match fs {
             BoardFs::Formatted => pending.is_some() || evidence.remembered,
             BoardFs::Mounted => !has_uid && pending.is_some(),
-            BoardFs::Unknown | BoardFs::Memory | BoardFs::LegacyHeld | BoardFs::Refused => false,
+            BoardFs::Unknown
+            | BoardFs::Memory
+            | BoardFs::LegacyHeld
+            | BoardFs::Refused
+            | BoardFs::TreeStoreHeld => false,
         };
     if lost_files {
         layout.line = Some(match pending {

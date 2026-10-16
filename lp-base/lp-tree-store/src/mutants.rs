@@ -56,10 +56,16 @@ pub enum Mutant {
     /// Mount trusts the newest sectors' last programs on one read: their
     /// tail is not settled (no re-program, no kill of a record that failed).
     TrustTailOnce,
+    /// Mount walks the newest sector of each kind by its header chain, as
+    /// it walks a cold one (no payload checked, no tail settled).
+    NewestByHeaders,
+    /// Mount never falls back to reading every record: a closure the fast
+    /// pass could not complete is no store.
+    NoFullScan,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 12] = [
+    pub const ALL: [Mutant; 14] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -72,6 +78,8 @@ impl Mutant {
         Mutant::NewerVersionUntrusted,
         Mutant::OpenWithoutReadBack,
         Mutant::TrustTailOnce,
+        Mutant::NewestByHeaders,
+        Mutant::NoFullScan,
     ];
 
     pub fn name(self) -> &'static str {
@@ -88,6 +96,8 @@ impl Mutant {
             Mutant::NewerVersionUntrusted => "newer_version_untrusted",
             Mutant::OpenWithoutReadBack => "open_without_read_back",
             Mutant::TrustTailOnce => "trust_tail_once",
+            Mutant::NewestByHeaders => "newest_by_headers",
+            Mutant::NoFullScan => "no_full_scan",
         }
     }
 
@@ -115,11 +125,11 @@ pub(crate) fn on(m: Mutant) -> bool {
 
 /// [`Mutant::DedupAgainstAllRecords`]: after mount's closure walk, index
 /// every other record the trusted sectors hold (newest sector first).
-pub(crate) fn index_every_record<F: Flash, K>(
+pub(crate) fn index_every_record<F: Flash>(
     log: &mut RecordLog<F>,
-    sectors: &[(u32, u32, K)],
+    sectors: &[u16],
 ) -> Result<(), StoreError<F::Error>> {
-    for &(_, s, _) in sectors.iter().rev() {
+    for s in sectors.iter().rev().map(|&s| u32::from(s)) {
         let end = u32::from(log.sectors.end[s as usize]);
         let mut off = SECTOR_HEADER_LEN;
         while off + RECORD_HEADER_LEN <= end {

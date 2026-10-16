@@ -3,8 +3,9 @@
 A content-addressed copy-on-write tree store for NOR flash — **v1**, the
 device-grade rework of the storage race's prototype T1 (plan
 `lp2025/2026-10-08-1017-tree-store-device-round`, M2). `#![no_std]` +
-`alloc`, sans-IO over a five-method `Flash` trait and an injected
-`ObjectHasher`. Not linked into any firmware yet: M5 wires it behind the C6's
+`alloc`, sans-IO over a small `Flash` trait (read, program, erase, the
+geometry, and the record CRC with a default a chip may answer faster) and
+an injected `ObjectHasher`. Not linked into any firmware yet: M5 wires it behind the C6's
 non-default `fs-tree` feature.
 
 **Every on-flash byte is in [`FORMAT.md`](FORMAT.md)** (format version 3),
@@ -74,14 +75,24 @@ change has to be readable, or cleanly refused, by the core before it.
   is read back as all `0xFF`, then its sector header programmed and read
   back. A mismatch retires the sector (never opened, erased or collected
   again; persisted in the next root), and the record goes elsewhere.
-- **Mount** reads every trusted record whole (CRC over header and payload)
-  but indexes none of them: that pass finds where each sector's trusted
-  records end and keeps the newest two roots. Then it indexes only the
-  newest root's closure (falling back one step): level by level, one scan of
-  record headers over the trusted sectors, newest sector first, so the first
-  copy seen is the one FORMAT.md keeps; each record found is visited with
-  the mark's own step. Its RAM is the live set's, whatever the garbage on
-  flash.
+- **Mount reads what it needs, not every byte ever written** (A2,
+  2026-10-16; FORMAT.md "A faster reading"). Its first pass reads the
+  newest sector of each kind whole and CRC-checked (the only place a cut
+  can have torn a program) and every other sector by its record headers
+  alone, reading only roots whole; it indexes nothing, but notes where each
+  sector's records end, the newest two roots, and a 16-byte filter of each
+  sector's ids. Then it indexes only the newest root's closure: level by
+  level, one scan of record headers over the sectors the filters say may
+  hold the level's ids, newest sector first, so the first copy seen is the
+  one FORMAT.md keeps; each record found is visited with the mark's own
+  step where it is found, every root, directory and multi read whole and
+  CRC-checked, and indexed in one merge per level. A blob is checked when
+  it is read, as every record is. When that adopts no root — a blank or
+  foreign partition, an interrupted format, damage — mount reads and
+  checks every record of every sector as it always did and takes the
+  verdict and the one-root fall-back from that reading; so does a store
+  whose sector seqs may have wrapped. Its RAM is the live set's, whatever
+  the garbage on flash.
 - **Mount settles each head's tail** before anything trusts it. A program
   torn inside a 4-byte word can leave its one missing clear weak, so a
   record reads whole on some reads and fails its CRC on others; only the
@@ -166,10 +177,12 @@ excluded): a record's payload (≤ `record_max`), a directory's bytes and
 entries along the path, a file's leaf list (16 B per chunk), the mark's
 bitset and stack, a 4 KiB inflate buffer (`put_chunk_deflated`), and — for a
 transaction — its delta (≤ `txn_delta_max` + one call). **Mount** holds the live index as it builds it, the two
-widest adjacent tree levels (16 B per id), 12 B per sector of sorted
+widest adjacent tree levels (16 B per id, and 4 B per id of the level
+being scanned), each sector's id filter (16 B), 2 B per sector of sorted
 headers, and a record's payload; nothing that grows with the garbage on
-flash. In exchange it scans record headers once per tree level (16 B per
-record on flash per level, stopping a level once every id is found).
+flash. In exchange it reads each sector's record headers once, and again
+per tree level in the sectors whose filter may hold that level's ids
+(stopping a level once every id is found).
 
 Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 
@@ -211,8 +224,10 @@ under it, one change; any other prefix is `InvalidPath`),
 `flash`/`flash_mut`, `into_flash`, `into_parts`. After `StoreError::Flash`
 the store must be dropped.
 
-**Mount verdicts** (`mount_verdict.rs`; read from what mount's first pass
-already reads, no byte of the format involved), and who acts on each:
+**Mount verdicts** (`mount_verdict.rs`; read from mount's whole reading,
+the one it falls back to when its fast one adopts no root, so they are
+what they were before mount got fast; no byte of the format involved), and
+who acts on each:
 
 | error | what is on the flash | the firmware (`fs-tree`) |
 |---|---|---|
@@ -221,7 +236,9 @@ already reads, no byte of the format involved), and who acts on each:
 | `Unsupported(why)` | a sector header of a newer format, another sector size, an unknown incompat flag or head kind | refuses, as `Damaged` |
 
 Mount never returns `Corrupt` (a record that did not check while mount read
-the committed tree is `Damaged`). The sweep
+the committed tree is `Damaged`). A file whose blob does not check (damage
+no cut makes: bit rot, a foreign write) is found when it is read, as
+`Corrupt`, never as wrong bytes; the rest of the store mounts. The sweep
 `mount_verdict_tests::a_cut_anywhere_in_a_first_format_is_no_store` cuts a
 first `format` at every operation under every named tear model, over blank,
 littlefs-shaped and garbage flash: every cut mounts as `NoStore`, and a
@@ -300,8 +317,15 @@ plain); `delete_prefix` taking whole directories only; RAM against the budget on
 tree (and what reading every file once costs in flash reads) and on a full store (mount's peak ≤ 16 KB at 128 sectors in both),
 cross-checked with a counting allocator; mount's index and live bytes equal
 to a full mark's after GC copies and a level-1 directory multi, and the
-newest of two copies indexed; the `LpFs` adapter against `LpFsMemory`; the
-format golden.
+newest of two copies indexed; a damaged newer copy sending mount back to the
+whole reading, which mounts from the older one; the `LpFs` adapter against
+`LpFsMemory`; the format golden. `mount_cost_tests.rs` reports what a mount
+reads (calls and bytes as the store asks for them and as the C6's
+`AlignedNorFlash` makes them, and the bytes it CRCs) on an empty, a c40, a
+used and a full store at 128 and 176 sectors, and on any raw `lpfs` image in
+`LP_TREE_MOUNT_IMAGES`; `LP_TREE_WRITE_IMAGES=<dir>` writes those stores as
+images for a board (`lp-cli/tests/board_tree_store_mount.rs`) or the
+emulator (`lp-cli/tests/emu_tree_store_mount.rs`).
 
 **The cut sweeps** (`test_support::sweep`): for each step, every sampled
 cut point × every tear model (by default the three guessed ones: clean,
@@ -342,14 +366,17 @@ not — a commit past `u64::MAX` mounts as the one before it, pinned by
 (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
 commits, not reachable in practice).
 
-**Mutants** (feature `mutants`, `mutants.rs`): twelve switches, each
+**Mutants** (feature `mutants`, `mutants.rs`): fourteen switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
 without its tail check; `NoSpace` checked after writing; GC forgetting the
 pending set; the sector header magic first; a newer version read as
 untrusted; open a sector without the erase read-back; trust the newest
-sectors' last programs on one read (no settle). `lp-store-bench
+sectors' last programs on one read (no settle); and the two checks the fast
+mount stands on: read the newest sector of each kind by its headers, as a
+cold one (`newest_by_headers`), and never fall back to the whole reading
+(`no_full_scan`). `lp-store-bench
 mutants` runs each through a fixed driver set and requires every one caught
 and the unmutated store clean (its README has the table).
 
@@ -564,6 +591,142 @@ host_deflate 103 / 152 / 146 KB → 127 / 195 / 200 KB (1,056–1,653 →
 2,582–5,038 calls). The extra bytes are 16-byte headers, one scan per tree
 level, plus the directories and multis the visit reads again; the extra
 calls are those header reads one by one.
+
+The peaks after A2 (below): 15,668 B for the stored c40 at 128 sectors and
+the full-of-panel-garbage store (13,168 B deflated), 17,212 B at 176;
+the test's ceilings hold.
+
+### Mount speed (A2, 2026-10-16)
+
+Mount read every byte ever written: on CX1 a written-out partition (the
+soak's) mounted in 554 ms and one full of live files in 793 ms. A2 makes it
+read what it needs ("The design in brief"; FORMAT.md "A faster reading of
+steps 2–3"). No byte of the format changed.
+
+**What a mount costs on CX1** — a least-squares fit of 20 silicon mounts (4
+builds × 5 stores, below) against the reads `mount_cost_tests.rs` counts
+for the same stores, every one within ~3 ms:
+
+`t ≈ 2.8 ms + 14.3 µs × reads + 0.25 µs × bytes read + c × bytes CRC'd`,
+`c` = 0.38 µs/B for `lp-crc32`'s bitwise CRC, 0.065 µs/B for the mask
+ROM's `crc32_le` (what the C6 uses now).
+
+A read is esp-storage's ROM call (one per call of at most 4 KiB once
+`AlignedNorFlash` passes aligned work through; one per 256-B bounce before),
+so a 16-byte header costs about as much as 60 bytes of data: reading whole
+sectors instead of header chains was measured and **rejected** (the soak
+image 203 ms against 59).
+
+**The shape**, `S` sectors, `R` records on flash (live, garbage and copies),
+`B` their bytes, `L` live records (`I` of them roots, directories and
+multis, `B_I` their bytes), `D` the tree's depth:
+
+| | reads | bytes read | bytes CRC'd |
+|---|---|---|---|
+| before | `S + R·(2 + B/256R) + D·R'` (`R'` ≤ `R` headers per level) | `24S + B + 16·D·R'` | `B`, bitwise |
+| after | `S + R + R_f + I` (`R_f` = headers of the sectors each level's filter cannot rule out, `≪ D·R`) | `24S + 16R + 16R_f + B_I + 8 KiB` | the two newest sectors + roots + `B_I`, ROM |
+| checkpoint prototype | `S + R_c + C + L` (`R_c` = records since the checkpoint, `C` its chunks) | `24S + 16R_c + 12L + …` | same |
+
+So the bytes term went from `B` (≈ the partition after churn) to `16R`, and
+the CRC from all of it, bitwise, to the closure's interior on the ROM; the
+calls went from `~(2 + D)·R` to `~R`. What is left still grows with `R`, 16
+bytes and one read per record on flash: **bounded by `S` plus the live set
+only with a checkpoint** (below).
+
+**Counted** (`mount_cost_tests.rs`, lp-nor-sim; reads and bytes as the C6's
+shim makes them; "used" = pushes of a small project and of c40 into two
+slots, saves and panel writes until the partition was written over three
+times; "full" = c40 then 4 KiB files until `NoSpace`; "soak" = the M7 soak's
+written-out partition, read off CX1):
+
+| store | reads before → after | bytes before → after | CRC'd before → after |
+|---|---:|---:|---:|
+| empty / 128 | 210 → 206 | 11,620 → 11,556 | 142 → 142 |
+| c40 / 128 | 2,597 → 1,111 | 122,140 → 32,580 | 79,470 → 8,752 |
+| used / 128 | 9,175 → 3,132 | 586,784 → 72,356 | 475,062 → 14,710 |
+| full / 128 | 8,367 → 3,506 | 578,528 → 76,828 | 477,942 → 15,960 |
+| empty / 176 | 258 → 254 | 12,772 → 12,708 | 142 → 142 |
+| c40 / 176 | 2,645 → 1,159 | 123,292 → 33,732 | 79,470 → 8,752 |
+| used / 176 | 11,144 → 3,515 | 772,760 → 76,872 | 644,826 → 10,631 |
+| full / 176 | 10,572 → 4,698 | 762,952 → 99,064 | 642,566 → 21,300 |
+| soak (176) | 8,346 → 2,856 | 731,312 → 61,220 | 653,977 → 7,097 |
+
+**Measured** — `[perf] fs mount` at power-on boots on CX1 (silicon, 2 boots
+each, ±0.3 ms) and on `lp-emu:esp32c6:t1+net=lan` (CPU only: the
+emulator's flash commands take no time), the same five images written over
+`lpfs` for every build (`board_tree_store_mount.rs`,
+`emu_tree_store_mount.rs`). Monolithic `fs-tree` images with
+`heap_peak_diag`, CX1 (`c6-expendable`), 2026-10-16, the PR's head:
+
+| store (176 sectors) | CX1 before | CX1 after | emulated before | emulated after |
+|---|---:|---:|---:|---:|
+| empty | 8.0 ms | 7.8 ms | 3.7 ms | 3.3 ms |
+| c40 | 112.5 ms | 29.7 ms | 65.7 ms | 13.3 ms |
+| used | 599.6 ms | 70.6 ms | 370.3 ms | 28.4 ms |
+| full | 792.5 ms | 98.4 ms | 516.6 ms | 44.3 ms |
+| soak | 554.2 ms | 55.7 ms | 354.9 ms | 22.5 ms |
+
+What each lever bought (CX1, the soak / full images; each build adds one
+to the one before):
+
+| build | soak | full | what changed |
+|---|---:|---:|---|
+| before (`3fc9aa987`) | 554 ms | 793 ms | — |
+| header chains for cold sectors, the closure read whole with every blob, sector filter, visit on sight, ROM CRC, aligned spans | 59 ms | 293 ms | cold payloads no longer read or CRC'd |
+| … the closure's blobs not read at mount | 56 ms | 99 ms | 590 KB of live blobs no longer read |
+| (whole-sector reads instead of header chains, rejected) | 203 ms | 447 ms | 4 KiB a sector costs more than its header reads |
+
+On the emulator (CPU only), the batched index merge took the full store from
+266 to 118 ms: one insert at a time into the sorted index had been
+quadratic in the live set (≈ 150 ms of the old full mount's CPU); the ROM
+CRC took the closure-reading build's full store from 472 to 266 ms.
+
+**The one check given up: a blob's CRC at mount.** Mount reads every
+record a cut can have torn, every root, directory and multi, and the
+header of every blob it adopts; a blob's bytes are checked when they are
+read, as every record's are. Reading them at mount as well cost the full
+store 293 ms against 99, over the 200 ms ceiling. What changes is only what
+happens to damage no cut makes (bit rot, a foreign write): a damaged blob
+used to make the mount refuse the whole store (`Damaged`, the board on its
+memory filesystem); now the store mounts and that one file's read reports
+`Corrupt` — never wrong bytes — and a GC that must copy it fails the same
+way. `lp-store-bench`'s fuzz now accepts that for its `mutated` images
+(and counts it), and nothing else: at M3's size (40,000 cases, 128
+sectors) 0 failures, and 1,671 of the 4,922 mutated images that mount
+report damage at read — images a mount reading every blob would have
+refused. **⚑ a decision**, recorded on the PR.
+
+**The checkpoint prototype** (branch
+`claude/tree-store-checkpoint-prototype`, feature `checkpoint`, off; not
+in format version 3): an index checkpoint (record kind 6 chunks, a root
+tail tag naming the first) written every `checkpoint_every` records lets a
+mount read the sector headers, the sectors written since, the checkpoint
+and the closure, verified by GC's mark. Counted at a checkpoint every 256
+records: used / 176 3,515 → 581 reads, c40 1,159 → 1,016; the full store
+fell back (no room left for a 12 KB checkpoint). On CX1 (its own images,
+written with checkpoints): used 70.6 → 31.8 ms, c40 29.7 → 31.4, empty
+7.8 → 8.4, full 108 ms (fell back); emulated used 28.4 → 18.1 ms. Its costs: `12L + 2S` bytes written per checkpoint (12 KB for the
+full store), mount RAM up to ~29 KB on the used store (the checkpoint's
+entries plus the recent records, against the 16 KB budget — unoptimized),
+and a format allocation (kind 6, tag 1) that must be decided before
+FORMAT.md freezes. The alternative, a per-sector summary written when a
+sector closes (JFFS2's erase-block summary), would turn the `R` header
+reads into `S` reads of `12R` bytes in all (the soak image ≈ 31 ms against 56
+by the formula) for ~3 % more bytes written and no RAM, but stays `O(R)`:
+only an index checkpoint is bounded by `S` plus the live set.
+
+**Code**: `size-probe` `.text` 46,456 → 48,628 B (+2,172; `.rodata` +20),
+the C6's monolithic `fs-tree` image +2,930 B `.text` and +64 B `.rodata`
+(the prototype, feature on, +6.5 KB more). Nothing A2 adds is in the
+shipped littlefs image: the shim's changes are `fs-tree`'s, and
+`Crc32::resume` is used only by them.
+
+**Further levers, not built:** reading `lpfs` through the cache (mapping the
+partition with the MMU, as the loader's `flash_window.rs` does, and
+invalidating after each program and erase) would make a read cost nothing
+and a byte ~10× less — every mount term and every file read, at the price
+of a coherence rule on every write; and walking cold sectors only when a
+level needs them, which moves their `end`s to GC.
 
 ### Space and the record size (smallest partition, `--min-sectors`)
 

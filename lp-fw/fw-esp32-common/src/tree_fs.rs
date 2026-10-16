@@ -73,7 +73,9 @@ where
             };
         }
     };
-    if may_format(&mut flash) == FormatVerdict::Hold {
+    // Anything but `Format` writes nothing (the C6's tree build answers only
+    // `Format` or `Hold`; its refusals are the store's own, above).
+    if may_format(&mut flash) != FormatVerdict::Format {
         return TreeFsInit::Held(flash);
     }
     log::warn!("[FS] tree store: no store here, formatting partition...");
