@@ -199,6 +199,7 @@ pub(crate) mod tests {
             commit: "abc1234567890123456789012345678901234567".into(),
             wire_proto: 37,
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },

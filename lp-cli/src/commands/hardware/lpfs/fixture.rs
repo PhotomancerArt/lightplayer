@@ -1,15 +1,16 @@
 //! `lp-cli hardware lpfs fixture` (hidden): a 4 MiB emulator chip image —
 //! a merged firmware image at `0x0`, a partition table at `0x8000` (by
 //! default the frozen pre-2026-10 C6 table), and a filesystem holding a
-//! directory's tree at that table's `lpfs`. What the emulator migration walk
+//! directory's tree at that table's `lpfs` (littlefs, or `--fs tree` for a
+//! board already on the tree store). What the emulator migration walk
 //! seeds a "fielded board" from (plan Q4); no binaries are committed.
 
 use anyhow::{Context, Result, bail};
 use lpa_link::layout_migration::lpfs_tree::LpfsTree;
-use lpa_link::layout_migration::{LpfsGeometry, build_image, legacy_c6_v1_table};
+use lpa_link::layout_migration::{LpfsGeometry, build_image, legacy_c6_v1_table, pack_tree};
 use lpa_link::{PARTITION_TABLE_OFFSET, PartitionTable};
 
-use super::super::args::LpfsFixtureArgs;
+use super::super::args::{LpfsFixtureArgs, LpfsTargetFs};
 use super::lpfs_target::{kb, target_table};
 use super::report::collect;
 
@@ -28,7 +29,7 @@ pub fn handle_fixture(args: LpfsFixtureArgs) -> Result<()> {
         files.push((format!("/{relative}"), bytes));
     })?;
     let tree = LpfsTree::from_files(files);
-    let chip = build_chip(&merged, &table, &tree)?;
+    let chip = build_chip(&merged, &table, &tree, args.fs)?;
     std::fs::write(&args.out, &chip).with_context(|| format!("write {}", args.out.display()))?;
     println!(
         "{}: {} files ({}) at {:#x}",
@@ -43,7 +44,12 @@ pub fn handle_fixture(args: LpfsFixtureArgs) -> Result<()> {
 }
 
 /// The chip bytes (pure).
-pub fn build_chip(merged: &[u8], table: &PartitionTable, tree: &LpfsTree) -> Result<Vec<u8>> {
+pub fn build_chip(
+    merged: &[u8],
+    table: &PartitionTable,
+    tree: &LpfsTree,
+    fs: LpfsTargetFs,
+) -> Result<Vec<u8>> {
     let geometry = LpfsGeometry::from_table(table).context("the table has no lpfs row")?;
     // `espflash save-image --merge` pads to the whole chip with erased
     // (0xFF) bytes; what must stay below the filesystem is the written part.
@@ -63,7 +69,11 @@ pub fn build_chip(merged: &[u8], table: &PartitionTable, tree: &LpfsTree) -> Res
     let table_bytes = table.to_bytes();
     let at = PARTITION_TABLE_OFFSET as usize;
     chip[at..at + table_bytes.len()].copy_from_slice(&table_bytes);
-    let image = build_image(tree, geometry).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let image = match fs {
+        LpfsTargetFs::Littlefs => build_image(tree, geometry),
+        LpfsTargetFs::Tree => pack_tree(tree, geometry).map(|packed| packed.image),
+    }
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     let start = geometry.offset as usize;
     chip[start..start + image.len()].copy_from_slice(&image);
     Ok(chip)
@@ -77,7 +87,13 @@ mod tests {
     #[test]
     fn a_legacy_fixture_is_a_legacy_board_to_the_probe() {
         let tree = LpfsTree::from_files([("/hardware.json".to_string(), b"{}".to_vec())]);
-        let chip = build_chip(&[0x5A; 0x2000], &legacy_c6_v1_table(), &tree).unwrap();
+        let chip = build_chip(
+            &[0x5A; 0x2000],
+            &legacy_c6_v1_table(),
+            &tree,
+            LpfsTargetFs::Littlefs,
+        )
+        .unwrap();
         let mut target = legacy_c6_v1_table().entries().to_vec();
         target[3].size = 0x34_0000;
         target[4].offset = 0x35_0000;
@@ -91,7 +107,13 @@ mod tests {
         let tree = LpfsTree::from_files([("/hardware.json".to_string(), b"{}".to_vec())]);
         let mut merged = vec![0xFFu8; CHIP_LEN];
         merged[..0x2000].fill(0x5A);
-        let chip = build_chip(&merged, &legacy_c6_v1_table(), &tree).unwrap();
+        let chip = build_chip(
+            &merged,
+            &legacy_c6_v1_table(),
+            &tree,
+            LpfsTargetFs::Littlefs,
+        )
+        .unwrap();
         assert_eq!(&chip[..0x2000], &merged[..0x2000]);
         assert_eq!(chip.len(), CHIP_LEN);
     }

@@ -326,6 +326,7 @@ mod tests {
             commit: "736d72856d243fce519c9f461f369f59fcbf175a".into(),
             wire_proto: 39,
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },

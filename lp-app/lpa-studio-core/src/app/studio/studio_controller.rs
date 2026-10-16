@@ -1820,6 +1820,7 @@ impl StudioController {
                 store_releases: None,
                 store_lookups: None,
                 file_build: None,
+                board_tree_store: board_on_tree_store(evidence),
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1916,6 +1917,7 @@ impl StudioController {
             store_releases: self.update_build_facts.store_releases(),
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
+            board_tree_store: evidence.is_some_and(board_on_tree_store),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -10299,6 +10301,15 @@ struct AgentStartProbe {
     journal: u64,
     /// What a push press sends, by name.
     push_project: Option<String>,
+}
+
+/// Whether the board's last hello listed `fs.tree` (its filesystem is the
+/// tree store): what lets a tree-store build go to it over the air.
+fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> bool {
+    evidence
+        .classification
+        .hello()
+        .is_some_and(|hello| hello.tree_store)
 }
 
 /// The board a device press is aimed at, when it is one that changes what

@@ -580,13 +580,49 @@ pub fn split_slug(image: &FwImage) -> String {
 /// says what the packaged image's does, and as a figure build (version
 /// `0000000`, stamped clean), so it is the heap ratchet's bytes.
 pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
+    split_image_with(image, None)
+}
+
+/// A partition table a split image can be built with instead of
+/// `partitions.csv`: its repo-relative CSV and the word its slug carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplitTable {
+    pub csv: &'static str,
+    pub slug: &'static str,
+}
+
+impl SplitTable {
+    /// The tree-store table (`partitions-tree.csv`: a 128-sector `lpfs` at
+    /// `0x380000`, `factory` to `0x380000`) — what an `fs-tree` image is
+    /// built with until the cutover's default switch.
+    pub const TREE: SplitTable = SplitTable {
+        csv: "lp-fw/fw-esp32c6/partitions-tree.csv",
+        slug: "TREETABLE",
+    };
+}
+
+/// [`split_image`] built with `table` (its slug says so:
+/// `<SLUG>_<TABLE>_SPLIT`).
+pub fn split_image_on(image: &FwImage, table: SplitTable) -> Result<SplitImage, String> {
+    split_image_with(image, Some(table))
+}
+
+fn split_image_with(image: &FwImage, table: Option<SplitTable>) -> Result<SplitImage, String> {
     assert!(
         image.default_features,
         "lp-fw-split builds with fw-esp32c6's defaults on; {} turns them off",
         image.slug()
     );
-    let slug = split_slug(image);
-    let var = format!("LP_EMU_C6_SPLIT_{}", image.slug());
+    let (slug, var) = match table {
+        None => (
+            split_slug(image),
+            format!("LP_EMU_C6_SPLIT_{}", image.slug()),
+        ),
+        Some(t) => (
+            format!("{}_{}_SPLIT", image.slug(), t.slug),
+            format!("LP_EMU_C6_SPLIT_{}_{}", image.slug(), t.slug),
+        ),
+    };
     let what = format!("the split image for `{}`", image.slug());
     if let Ok(dir) = std::env::var(&var) {
         return complete_split_dir(PathBuf::from(dir), &var);
@@ -613,7 +649,7 @@ pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
         &[],
         &dir.join("merged.bin"),
         "`just test-emu-c6`",
-        || build_split(&root, image, &dir),
+        || build_split(&root, image, table, &dir),
     )?;
     Ok(SplitImage {
         dir: merged
@@ -640,7 +676,12 @@ fn complete_split_dir(dir: PathBuf, var: &str) -> Result<SplitImage, String> {
 /// `lp-fw-split build` for one feature set into a scratch directory, then
 /// the four files published into `dir` by one rename. Panics on a failed
 /// build: `LP_EMU_BUILD_FW=1` asked for this image.
-fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
+fn build_split(
+    root: &Path,
+    image: &FwImage,
+    table: Option<SplitTable>,
+    dir: &Path,
+) -> Result<(), String> {
     let scratch = dir.with_extension("partial");
     let _ = std::fs::remove_dir_all(&scratch);
     let mut cmd = Command::new("cargo");
@@ -658,6 +699,9 @@ fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
         .arg(&scratch)
         .arg("--features")
         .arg(image.features.join(","));
+    if let Some(table) = table {
+        cmd.arg("--partitions").arg(root.join(table.csv));
+    }
     if *image == FwImage::SHIPPED {
         // A figure build (`LP_FIGURE_BUILD=1`, `tools/lp-app-version`): a
         // fixed version and a clean stamp, as `scripts/heap-budget-check.sh`

@@ -22,6 +22,7 @@
 //! | `ContinueUpdate` | — | `Finishing` (starts itself) |
 //! | `Busy` | — | `AnotherDevice` |
 //! | `NeedsUsb` | — | `NeedsUsbOnce` |
+//! | `OfferUpdate` or `NeedsUsb` of a tree-store build, to a board whose hello does not list `fs.tree` | — | `NeedsFilesMoved` |
 //! | over Wi‑Fi, a release older than the link's first, or the last update heard nothing on the update channel | — | `NotOverWifiYet` |
 //! | `ReportCrashing` | — | `KeepsCrashing` |
 //! | `RefusedBuild` | — | `RolledBack` |
@@ -74,6 +75,10 @@ pub struct UpdateStandingInputs<'a> {
     /// The custom build picked from files ("From a file…"), when one is.
     /// Read only by the card's version choices.
     pub file_build: Option<&'a HostBuildFacts>,
+    /// The board's filesystem is the tree store (its hello lists `fs.tree`):
+    /// a tree-store build may go to it over the air. `false` for a board on
+    /// littlefs — and for one that has not said hello this window.
+    pub board_tree_store: bool,
 }
 
 /// Where a board stands. See the module docs for which row is which.
@@ -132,6 +137,15 @@ pub enum UpdateStanding {
     },
     /// The board cannot update over this link yet: one update over USB.
     NeedsUsbOnce {
+        board: UpdateVersion,
+        to: UpdateVersion,
+        link: UpdateLink,
+    },
+    /// This Studio's build (`to`) mounts the tree store and the board holds
+    /// littlefs: its files move to the new filesystem over USB — the card's
+    /// USB update, which backs them up first — never over the air (the
+    /// tree-store cutover, AD3).
+    NeedsFilesMoved {
         board: UpdateVersion,
         to: UpdateVersion,
         link: UpdateLink,
@@ -197,6 +211,7 @@ impl UpdateStanding {
             | Self::Restoring { board, .. }
             | Self::AnotherDevice { board, .. }
             | Self::NeedsUsbOnce { board, .. }
+            | Self::NeedsFilesMoved { board, .. }
             | Self::KeepsCrashing { board, .. }
             | Self::CantGetVersion { board, .. }
             | Self::RolledBack { board, .. }
@@ -334,6 +349,21 @@ pub fn update_standing(inputs: &UpdateStandingInputs<'_>) -> UpdateStanding {
     else {
         return UpdateStanding::Nothing;
     };
+    // A tree-store build is never sent over the air to a board on littlefs:
+    // its files move over USB first.
+    if inputs.own.is_some_and(|build| build.needs_tree_store)
+        && !inputs.board_tree_store
+        && matches!(
+            decision,
+            Decision::OfferUpdate { .. } | Decision::NeedsUsb { .. }
+        )
+    {
+        return UpdateStanding::NeedsFilesMoved {
+            board,
+            to: own,
+            link: inputs.link,
+        };
+    }
     match decision {
         Decision::Nothing => UpdateStanding::UpToDate { version: own },
         Decision::OfferUpdate { .. } => match board.age_against(&own) {
@@ -694,6 +724,53 @@ pub(crate) mod tests {
         assert!(!wants_auto_start(&UpdateStanding::Nothing));
     }
 
+    /// AD3: a tree-store build never goes over the air to a board on
+    /// littlefs; the board stands "files move", over USB and wireless alike,
+    /// and the same build is an ordinary update to a board on the store.
+    #[test]
+    fn a_tree_store_build_for_a_littlefs_board_stands_files_moved() {
+        let view = ready_view();
+        let tree_y = studio_y().with_tree_store(true);
+        let facts = facts_of(&board_x());
+        for link in [UpdateLink::Usb, UpdateLink::Bluetooth] {
+            let mut on_littlefs = inputs(&view, Some(&facts), Some(&tree_y));
+            on_littlefs.link = link;
+            assert!(
+                matches!(
+                    update_standing(&on_littlefs),
+                    UpdateStanding::NeedsFilesMoved { link: l, .. } if l == link
+                ),
+                "{link:?}"
+            );
+            let mut on_store = on_littlefs;
+            on_store.board_tree_store = true;
+            assert!(matches!(
+                update_standing(&on_store),
+                UpdateStanding::Available { .. }
+            ));
+        }
+        // A littlefs build to a littlefs board: today's update.
+        let y = studio_y();
+        assert!(matches!(
+            update_standing(&inputs(&view, Some(&facts), Some(&y))),
+            UpdateStanding::Available { .. }
+        ));
+        // A board that cannot update over its link yet still moves its files
+        // (both need the cable).
+        let old = facts_of(&old_loader());
+        assert!(matches!(
+            update_standing(&inputs(&view, Some(&old), Some(&tree_y))),
+            UpdateStanding::NeedsFilesMoved { .. }
+        ));
+        // A heal puts back the board's own build: untouched by the rule.
+        let healing = facts_of(&needs_engine());
+        assert!(wants_auto_start(&update_standing(&inputs(
+            &view,
+            Some(&healing),
+            Some(&tree_y)
+        ))));
+    }
+
     // ---- Fixtures (shared with the words and offers tests) ---------------
 
     pub(crate) fn inputs<'a>(
@@ -702,6 +779,7 @@ pub(crate) mod tests {
         own: Option<&'a HostBuildFacts>,
     ) -> UpdateStandingInputs<'a> {
         UpdateStandingInputs {
+            board_tree_store: false,
             view,
             facts,
             own,

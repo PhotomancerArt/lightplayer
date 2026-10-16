@@ -292,7 +292,8 @@ impl CoreIdentity {
 /// `requires`, from the split block and the loader's own version word:
 /// `layout` is the block's layout integer (which must be the code table's
 /// layout 1), `loader` the word's version (which must be the code table's
-/// loader 1, the split image's loader). Nothing else.
+/// loader 1, the split image's loader), and `fsTree` whether the image's
+/// manifest core lists `fs.tree` (the image mounts the tree store).
 pub fn requires_of(split: &SplitBlock, image: &[u8]) -> Result<Requires> {
     ensure!(
         split.layout == u32::from(LAYOUT_1),
@@ -315,6 +316,7 @@ pub fn requires_of(split: &SplitBlock, image: &[u8]) -> Result<Requires> {
         lp_bootctl::LOADER_VERSION
     );
     Ok(Requires {
+        fs_tree: lpa_link::layout_migration::image_fs_kind(image) == lpa_link::FsKind::Tree,
         layout: LAYOUT_1,
         loader: declared,
     })
@@ -391,6 +393,7 @@ mod tests {
         assert_eq!(
             m.requires,
             Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1
             }

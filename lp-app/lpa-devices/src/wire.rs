@@ -399,6 +399,13 @@ pub struct HelloFacts {
     /// reads to say a board's files are waiting.
     #[serde(default)]
     pub fs: BoardFs,
+    /// The board's build lists `fs.tree` (its hello's `build.features`): its
+    /// filesystem is the tree store. A board without it holds littlefs, and
+    /// a tree-store core is never sent to it over the air — its files move
+    /// over USB first (plan `lp2025/2026-10-16-0848-tree-store-adoption`,
+    /// AD3).
+    #[serde(default)]
+    pub tree_store: bool,
     /// The hello's board manifest (its `firmware` field, update protocol
     /// Part B), mirrored: proof the board speaks channel 3, and its update
     /// facts until channel 3 itself says otherwise. `None` from a board

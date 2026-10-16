@@ -193,6 +193,7 @@ impl UpdateOfferFacts {
                     file_build: inputs.file_build,
                     link: inputs.link,
                     studio_wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+                    board_tree_store: inputs.board_tree_store,
                 });
                 (choices, index_for(inputs.store_releases, target).is_some())
             }
@@ -227,6 +228,14 @@ pub fn update_offers(
         // Over USB, today's flash is the one update this board takes; over
         // the air there is nothing to press, and the line says what to do.
         UpdateStanding::NeedsUsbOnce { link, .. } => {
+            set.keep_flash = *link == UpdateLink::Usb;
+            return set;
+        }
+        // A tree-store build for a board on littlefs: over USB the card's
+        // flash, which inspects the board, backs its files up and moves them
+        // (the layout migration's question); over the air nothing — the line
+        // says to plug it in.
+        UpdateStanding::NeedsFilesMoved { link, .. } => {
             set.keep_flash = *link == UpdateLink::Usb;
             return set;
         }
@@ -961,6 +970,31 @@ mod tests {
                 ..UpdateOfferFacts::default()
             };
             assert_eq!(set_of(&ready_view(), &ble), (vec![], false, true));
+        }
+    }
+
+    /// AD3: a board whose files must move offers no over-the-air install at
+    /// all; over USB it keeps the card's flash (the migration), over
+    /// Bluetooth nothing — the line says to plug it in.
+    #[test]
+    fn files_moved_keeps_only_the_usb_flash() {
+        for route in [UpdateRoute::OverTheAir, UpdateRoute::Flash] {
+            for (link, keep_flash) in [(UpdateLink::Usb, true), (UpdateLink::Bluetooth, false)] {
+                let facts = UpdateOfferFacts {
+                    standing: UpdateStanding::NeedsFilesMoved {
+                        board: x(),
+                        to: y(),
+                        link,
+                    },
+                    route,
+                    ..UpdateOfferFacts::default()
+                };
+                assert_eq!(
+                    set_of(&ready_view(), &facts),
+                    (vec![], keep_flash, true),
+                    "{link:?} {route:?}"
+                );
+            }
         }
     }
 

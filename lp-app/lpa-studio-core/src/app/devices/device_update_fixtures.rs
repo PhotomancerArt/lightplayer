@@ -256,6 +256,7 @@ impl UpdateFixture {
     /// The standing's inputs, as the controller assembles them.
     pub fn inputs(&self) -> UpdateStandingInputs<'_> {
         UpdateStandingInputs {
+            board_tree_store: false,
             view: &self.view,
             facts: Some(&self.facts),
             own: Some(&self.own),
@@ -526,6 +527,7 @@ pub fn release_index() -> ReleaseIndex {
                 _ => lpc_wire::WIRE_PROTO_VERSION - 1,
             },
             requires: Requires {
+                fs_tree: false,
                 layout: 1,
                 loader: 1,
             },
@@ -544,6 +546,7 @@ pub fn looked_up_release(version: &str) -> StoreLookup {
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION - 1,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
@@ -576,6 +579,7 @@ pub fn ota_manifest_for(version: &str, core: &[u8], engine: &[u8]) -> OtaManifes
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
         requires: Requires {
+            fs_tree: false,
             layout: 1,
             loader: 1,
         },
