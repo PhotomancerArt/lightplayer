@@ -101,6 +101,29 @@ impl RamIndex {
         }
     }
 
+    /// Add `k` entries, given by id **descending**, none of them present:
+    /// one pass from the back (the index's own entries move once), not `k`
+    /// inserts that each move the entries after them.
+    pub fn merge_sorted(&mut self, add: impl Iterator<Item = (ObjectId, RecordLoc)>, k: usize) {
+        let n = self.entries.len();
+        self.entries.reserve_exact(k);
+        self.entries.resize(n + k, IndexEntry { id: 0, loc: 0 });
+        let (mut i, mut w) = (n, n + k);
+        for (id, loc) in add {
+            while i > 0 && { self.entries[i - 1].id } > id.0 {
+                self.entries[w - 1] = self.entries[i - 1];
+                i -= 1;
+                w -= 1;
+            }
+            self.entries[w - 1] = IndexEntry {
+                id: id.0,
+                loc: loc.pack(),
+            };
+            w -= 1;
+        }
+        debug_assert_eq!(w, i, "k entries were given");
+    }
+
     /// Keep the entries `keep(position)` says to.
     pub fn retain_positions(&mut self, mut keep: impl FnMut(usize) -> bool) {
         let mut i = 0;
@@ -151,5 +174,26 @@ mod tests {
         assert_eq!(ix.get(ObjectId(2)), Some(loc(3, 20)));
         ix.remove_sector(0);
         assert_eq!(ix.len(), 1);
+    }
+
+    #[test]
+    fn a_merge_is_the_inserts() {
+        let mut a = RamIndex::default();
+        let mut b = RamIndex::default();
+        for id in [40u64, 10, 70, 30] {
+            a.insert(ObjectId(id), loc(1, id as u32));
+            b.insert(ObjectId(id), loc(1, id as u32));
+        }
+        let add = [5u64, 20, 50, 60, 90];
+        for &id in &add {
+            a.insert(ObjectId(id), loc(2, id as u32));
+        }
+        b.merge_sorted(add.iter().rev().map(|&id| (ObjectId(id), loc(2, id as u32))), 5);
+        let all = |ix: &RamIndex| {
+            (0..ix.len())
+                .map(|i| (ix.id_at(i).0, ix.loc_at(i)))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(all(&a), all(&b));
     }
 }
