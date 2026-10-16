@@ -667,99 +667,100 @@ fn the_auto_rule_fills_ports_in_order() {
     assert_eq!(patch.unpatched[0].lamps, 30..31);
 }
 
-/// Patch edges match the effective patch: one per object (one per span,
-/// where an object runs on into the next port), in patch order.
+/// Edges are node to node: one per pair — a render source into a fixture,
+/// a fixture into an output — never one per object or per port. Where the
+/// objects land shows on the output itself, as runs of pixels.
 #[test]
-fn patch_edges_match_the_effective_patch() {
+fn edges_run_node_to_node_one_per_pair() {
     let e = editor();
-    // The bindings that aren't the patch (shaders feeding fixtures, the
-    // empty scarf bound to its output) are edges too, node to node.
-    let edges: Vec<Edge> = e.edges().into_iter().filter(|x| !x.binding).collect();
-    let spans = e.project.effective_patch().spans.clone();
-    assert_eq!(edges.len(), spans.len());
-    let got: Vec<(Target, Target, String)> = edges
-        .iter()
-        .map(|x| (x.from.clone(), x.to.clone(), x.label.clone()))
-        .collect();
-    let tail_out = node_id(&e, "tail out");
-    let main = node_id(&e, "main");
-    assert_eq!(
-        got,
-        vec![
-            (
-                comp("path1"),
-                port(&tail_out, "0"),
-                "lamps 0–24 → GPIO 10 @0".into()
-            ),
-            (
-                comp("path2"),
-                port(&tail_out, "0"),
-                "lamps 0–24 → GPIO 10 @25".into()
-            ),
-            (
-                ring("circle1", "r1"),
-                port(&main, "0"),
-                "lamps 0–39 → D0 @0".into()
-            ),
-            (
-                ring("circle1", "r2"),
-                port(&main, "0"),
-                "lamps 0–23 → D0 @40".into()
-            ),
-            (comp("path3"), port(&main, "1"), "lamps 0–29 → D1 @0".into()),
-        ]
-    );
-    assert!(edges.iter().all(|x| !x.bundled && x.active));
-}
-
-/// A per-object edge leaves from the object's first lamp and lands on the
-/// outline of its run, just left of the pixel where its span starts: it
-/// leaves heading toward the output and arrives from the left.
-#[test]
-fn an_edge_runs_from_the_first_lamp_to_its_pixel() {
-    let mut e = editor();
-    let tail_out = node_id(&e, "tail out");
-    let main = node_id(&e, "main");
-    let left_of = |e: &Editor, out: &NodeId, key: &str, i: u32| {
-        let grid = e.project.pixel_grid(out, key).unwrap();
-        let r = grid.rect(i).unwrap();
-        let pad = grid.side * lab_mapping_model::pixel_grid::RUN_OUTLINE_PAD;
-        Vec2::new(r.min.x - pad, (r.min.y + r.max.y) / 2.0)
-    };
-    let edge = |e: &Editor, from: Target| e.edges().into_iter().find(|x| x.from == from).unwrap();
-    // path2 enters at its top (its first point) and lands on pixel 25.
-    let x = edge(&e, comp("path2"));
-    assert_eq!(x.from_at, lamp_pos(&e, "path2", "path", 0));
-    assert_eq!(x.to_at, left_of(&e, &tail_out, "0", 25));
-    // r2 from its lamp 0, onto pixel 40 of D0, after r1's 40.
-    let x = edge(&e, ring("circle1", "r2"));
-    assert_eq!(x.from_at, lamp_pos(&e, "circle1", "r2", 0));
-    assert_eq!(x.to_at, left_of(&e, &main, "0", 40));
-    // The curve heads for the output and comes in from the left.
-    let [a, c1, c2, b] = x.curve(&e.camera);
-    assert!((c1 - a).x > 0.0, "leaves toward the output, on its right");
-    assert!(c2.y == b.y && c2.x < b.x, "arrives from the left");
-    // Reverse path2, and its edge leaves from the other end.
-    e.select(vec![comp("path2")]);
-    key(&mut e, Key::Char('r'), none());
-    let x = edge(&e, comp("path2"));
-    assert_eq!(x.from_at, lamp_pos(&e, "path2", "path", 0));
+    let p = &e.project;
+    let edges = e.edges();
     assert!(
-        x.from_at.distance(place(&e, "tail", 45.0, 70.0)) < 1e-9,
-        "the bottom now"
+        edges
+            .iter()
+            .all(|x| matches!(x.from, Target::Node(_)) && matches!(x.to, Target::Node(_))),
+        "{edges:?}"
+    );
+    let patch: Vec<(String, String, String)> = edges
+        .iter()
+        .filter(|x| p.output(&node_of_target(&x.to)).is_some())
+        .map(|x| {
+            (
+                p.node_name(&node_of_target(&x.from)),
+                p.node_name(&node_of_target(&x.to)),
+                x.label.clone(),
+            )
+        })
+        .collect();
+    let mut patch = patch;
+    patch.sort();
+    let want: Vec<(String, String, String)> = [
+        ("ring display", "main", "64 lamps on D0"),
+        ("scarf", "scarf out", ""),
+        ("strip", "main", "30 lamps on D1"),
+        ("tail", "tail out", "50 lamps on GPIO 10"),
+    ]
+    .iter()
+    .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+    .collect();
+    assert_eq!(patch, want);
+    assert_eq!(patch.len(), 4, "one edge per fixture and output");
+    assert!(edges.iter().all(|x| x.active));
+}
+
+/// An edge leaves the right side of its source and reaches the left side of
+/// its target, arriving from the left; on an output it arrives level with
+/// the port rows its fixture lands on, so two fixtures on one output arrive
+/// apart.
+#[test]
+fn an_edge_reaches_its_output_beside_the_ports_it_feeds() {
+    let e = editor();
+    let main = node_id(&e, "main");
+    let edge = |name: &str| {
+        e.edges()
+            .into_iter()
+            .find(|x| x.from == fixture(&e, name) && x.to == Target::Node(main.clone()))
+            .unwrap()
+    };
+    let card = e.project.node_rect(&main).unwrap();
+    let (ring, strip) = (edge("ring display"), edge("strip"));
+    for x in [&ring, &strip] {
+        assert!(
+            (x.to_at.x - card.min.x).abs() < 1e-9,
+            "the card's left side"
+        );
+        let frame = e.project.node_rect(&node_of_target(&x.from)).unwrap();
+        assert!(
+            (x.from_at.x - frame.max.x).abs() < 1e-9,
+            "the frame's right side"
+        );
+    }
+    let d0 = e.project.port_rect(&main, "0").unwrap();
+    let d1 = e.project.port_rect(&main, "1").unwrap();
+    assert!(
+        (ring.to_at.y - (d0.min.y + d0.max.y) / 2.0).abs() < 1e-9,
+        "beside D0"
+    );
+    assert!(
+        (strip.to_at.y - (d1.min.y + d1.max.y) / 2.0).abs() < 1e-9,
+        "beside D1"
+    );
+    let line = ring.arrow(&e.camera).centreline();
+    assert!(
+        line.c2.x < line.end.x && (line.c2.y - line.end.y).abs() < 1e-9,
+        "arrives from the left"
     );
 }
 
-/// Edges don't change when the selection changes; a fixture with many
-/// objects on one output bundles, and so does one zoomed out too far to
-/// tell its edges apart.
+/// Edges don't change when the selection changes — only how they are drawn
+/// — and a fixture with many objects on one output is still one edge.
 #[test]
-fn edges_bundle_by_density_not_selection() {
+fn edges_dont_change_with_selection_or_density() {
     let mut e = editor();
     let shape = |e: &Editor| {
         e.edges()
             .into_iter()
-            .map(|x| (x.from, x.to, x.from_at, x.to_at, x.bundled))
+            .map(|x| (x.from, x.to, x.from_at, x.to_at))
             .collect::<Vec<_>>()
     };
     let before = shape(&e);
@@ -774,11 +775,8 @@ fn edges_bundle_by_density_not_selection() {
         e.select(selection.clone());
         assert_eq!(shape(&e), before, "{selection:?}");
     }
-
-    // Twenty-five short paths in the scarf: more than 24 objects on one
-    // output, so one bundled edge, from the scarf's frame to pixel 0.
+    // Twenty-five short paths in the scarf: one edge to its output.
     let scarf = node_id(&e, "scarf");
-    let scarf_out = node_id(&e, "scarf out");
     for i in 0..25 {
         let y = 4.0 + i as f64 * 3.6;
         e.project.add(
@@ -789,51 +787,10 @@ fn edges_bundle_by_density_not_selection() {
     let from_scarf: Vec<Edge> = e
         .edges()
         .into_iter()
-        .filter(|x| {
-            x.from == Target::Node(scarf.clone()) || {
-                e.project.fixture_of_target(&x.from) == Some(scarf.clone())
-            }
-        })
+        .filter(|x| x.from == Target::Node(scarf.clone()))
         .collect();
-    assert_eq!(from_scarf.len(), 1, "one bundle");
-    let x = &from_scarf[0];
-    assert!(x.bundled && x.to == Target::Node(scarf_out.clone()));
-    assert_eq!(x.label, "50 lamps");
-    let frame = e.project.node_rect(&scarf).unwrap();
-    assert!(
-        (x.from_at.x - frame.max.x).abs() < 1e-9,
-        "leaves the frame's side facing the output"
-    );
-
-    // Ten paths in the scarf stay ten edges — until zoomed far out (half
-    // a pixel a unit), where the scarf is too small on screen to tell them
-    // apart.
-    let mut e = editor();
-    let scarf = node_id(&e, "scarf");
-    for i in 0..10 {
-        let y = 5.0 + i as f64 * 9.0;
-        e.project.add(
-            &scarf,
-            ComponentKind::path(vec![Vec2::new(10.0, y), Vec2::new(30.0, y)], 4),
-        );
-    }
-    let bundled = |e: &Editor| {
-        e.edges()
-            .into_iter()
-            .filter(|x| x.bundled)
-            .map(|x| x.from)
-            .collect::<Vec<_>>()
-    };
-    assert!(bundled(&e).is_empty());
-    let middle = e.viewport * 0.5;
-    while e.camera.scale > 0.5 {
-        e.wheel(middle, Vec2::new(0.0, 5.0), cmd());
-    }
-    assert_eq!(
-        bundled(&e),
-        vec![Target::Node(scarf)],
-        "only the crowded one"
-    );
+    assert_eq!(from_scarf.len(), 1);
+    assert_eq!(from_scarf[0].label, "50 lamps on D10");
 }
 
 /// Deleting an output leaves its fixtures' rules as visible problems;
@@ -888,8 +845,9 @@ fn a_selected_port_highlights_its_lamps() {
     );
 }
 
-/// Edges stay quiet: with nothing selected none shows a label, and with
-/// something selected only the edges attached to that thing itself do.
+/// Edges stay quiet: with nothing selected none says what it carries (each
+/// shows only its channel's name); with something selected, only the edges
+/// belonging to it do — its own nodes, or what it feeds on an output.
 #[test]
 fn only_edges_on_the_selection_are_labelled() {
     let mut e = editor();
@@ -897,21 +855,21 @@ fn only_edges_on_the_selection_are_labelled() {
         e.edges().iter().all(|x| !x.labelled),
         "nothing selected, no labels"
     );
-
     let main = node_id(&e, "main");
     e.select(vec![port(&main, "1")]);
     let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
-    assert_eq!(labelled.len(), 1, "only the strip's edge lands on D1");
-    assert_eq!(labelled[0].from, comp("path3"));
+    assert_eq!(labelled.len(), 1, "only the strip's edge feeds D1");
+    assert_eq!(labelled[0].from, fixture(&e, "strip"));
 
-    // Inside the ring display, the circle's per-ring edges aren't attached
-    // to a selected ring, so only the selected ring's edge is labelled.
-    e.select(vec![ring("circle1", "r2")]);
+    e.select(vec![fixture(&e, "ring display")]);
     let labelled: Vec<Edge> = e.edges().into_iter().filter(|x| x.labelled).collect();
     assert!(
-        labelled.iter().all(|x| x.from == ring("circle1", "r2")),
+        labelled
+            .iter()
+            .all(|x| x.from == fixture(&e, "ring display") || x.to == fixture(&e, "ring display")),
         "{labelled:?}"
     );
+    assert!(!labelled.is_empty());
 }
 
 /// Enter on a fixture frames the fixture together with its outputs.
@@ -2005,10 +1963,9 @@ fn every_edge_is_a_channel_binding_with_its_name() {
             .unwrap_or_else(|| panic!("{x:?} is no binding"));
         assert_eq!(x.channel, b.channel.as_str());
     }
-    // Every binding is drawn, and says its name once.
+    // Every binding is drawn, once, with its name.
     let named: Vec<(String, String, String)> = edges
         .iter()
-        .filter(|x| x.channel_shown)
         .map(|x| {
             (
                 p.node_name(&node_of(&x.from)),
@@ -2035,13 +1992,12 @@ fn every_edge_is_a_channel_binding_with_its_name() {
     want.sort();
     assert_eq!(got, want);
     assert_eq!(bindings.len(), want.len());
-    // The empty scarf has nothing placed yet: its binding is one plain
-    // edge, node to node.
+    // The empty scarf has nothing placed yet: its binding is still an edge.
     let scarf = edges
         .iter()
         .find(|x| x.from == fixture(&e, "scarf"))
         .unwrap();
-    assert!(scarf.binding && scarf.to == fixture(&e, "scarf out"));
+    assert!(scarf.label.is_empty() && scarf.to == fixture(&e, "scarf out"));
 }
 
 /// Two fixtures on one output each arrive as their own control product,
@@ -2165,11 +2121,11 @@ fn selecting_a_port_lights_its_whole_range() {
 #[test]
 fn hovering_an_edge_says_what_it_carries() {
     let mut e = editor();
-    let at = clear_point_on_edge(&e, &comp("path1"));
+    let at = clear_point_on_edge(&e, &fixture(&e, "tail"));
     e.pointer_move(at, none());
     assert_eq!(
         e.cursor_note().as_deref(),
-        Some("path1 → GPIO 10 · lamps 0–24 at pixel 0")
+        Some("tail → tail out · 50 lamps on GPIO 10 · control.out")
     );
     let hovered: Vec<Target> = e
         .edges()
@@ -2177,16 +2133,16 @@ fn hovering_an_edge_says_what_it_carries() {
         .filter(|x| x.hovered)
         .map(|x| x.from)
         .collect();
-    assert_eq!(hovered, vec![comp("path1")]);
+    assert_eq!(hovered, vec![fixture(&e, "tail")]);
     assert!(e.selection.is_empty(), "hovering selects nothing");
 
     // With something selected, the same.
     e.select(vec![comp("path2")]);
-    let at = clear_point_on_edge(&e, &ring("circle1", "r2"));
+    let at = clear_point_on_edge(&e, &fixture(&e, "ring display"));
     e.pointer_move(at, none());
     assert_eq!(
         e.cursor_note().as_deref(),
-        Some("ring r2 → D0 · lamps 0–23 at pixel 40")
+        Some("ring display → main · 64 lamps on D0 · control.out")
     );
     assert_eq!(e.selection, vec![comp("path2")]);
 
@@ -2969,10 +2925,10 @@ fn a_ports_pixels_split_into_runs_per_object() {
     assert_eq!(covered, (0..60).collect::<Vec<_>>());
 }
 
-/// Each run starts on a fresh square after a gap, and a patch edge lands on
-/// the run's outline, just left of its first square — never on a square.
+/// Each run starts on a fresh square: on its own line when a port has few
+/// runs, or after an empty square when runs share a line.
 #[test]
-fn an_edge_lands_on_its_run_not_on_a_square() {
+fn each_run_starts_on_a_fresh_square() {
     let e = editor();
     let out = node_id(&e, "tail out");
     let grid = e.project.pixel_grid(&out, "0").unwrap();
@@ -2983,20 +2939,11 @@ fn an_edge_lands_on_its_run_not_on_a_square() {
             first_of_second.min.x - last_of_first.max.x > grid.side * 0.9,
             "a gap between runs"
         );
-    }
-    for edge in e
-        .edges()
-        .iter()
-        .filter(|x| matches!(x.to, Target::Port { .. } | Target::Pixel { .. }))
-    {
-        let on_square = (0..60).any(|i| {
-            let r = grid.rect(i).unwrap();
-            edge.to_at.x > r.min.x
-                && edge.to_at.x < r.max.x
-                && edge.to_at.y > r.min.y
-                && edge.to_at.y < r.max.y
-        });
-        assert!(!on_square, "{edge:?}");
+    } else {
+        assert!(
+            first_of_second.min.x <= grid.rect(0).unwrap().min.x + 1e-9,
+            "a new line starts at the left"
+        );
     }
 }
 
@@ -3075,9 +3022,17 @@ fn draw_path(e: &mut Editor, fixture: &str, points: &[(f64, f64)]) {
 /// A point on the edge from `from`, on screen, with nothing under it (an
 /// edge starts among lamps, and things win over edges).
 fn clear_point_on_edge(e: &Editor, from: &Target) -> Vec2 {
-    let edge = e.edges().into_iter().find(|x| &x.from == from).unwrap();
+    let edge = e
+        .edges()
+        .into_iter()
+        .find(|x| &x.from == from && e.project.output(&node_of_target(&x.to)).is_some())
+        .unwrap();
+    let line = edge.arrow(&e.camera).centreline();
     (10..=90)
-        .map(|i| edge.point_at(&e.camera, i as f64 / 100.0))
+        .map(|i| {
+            let q = line.point(i as f64 / 100.0);
+            Vec2::new(q.x, q.y)
+        })
         .find(|p| e.project.things_at(&e.camera, *p).is_empty())
         .expect("somewhere clear along it")
 }
@@ -3090,6 +3045,14 @@ fn handle_at(e: &Editor, which: impl Fn(&HandleKind) -> bool) -> Vec2 {
         .find(|h| which(&h.kind))
         .expect("the handle is shown");
     e.camera.to_screen(h.at)
+}
+
+/// The node a target names (edges only ever end on nodes now).
+fn node_of_target(t: &Target) -> NodeId {
+    match t {
+        Target::Node(id) => id.clone(),
+        other => panic!("not a node: {other:?}"),
+    }
 }
 
 fn editor() -> Editor {

@@ -102,19 +102,19 @@ kbd { font: 11px var(--mono); color: var(--text-subtle); background: var(--bg); 
 .port-tint { fill: var(--bound-bg); }
 
 .edge-line { fill: none; stroke: var(--bound); stroke-width: 1.4; opacity: 0.75; }
-.edge-bundled .edge-line { stroke-width: 2.6; }
 .edge-selected .edge-line { opacity: 1; stroke-width: 2; }
-.edge-bundled.edge-selected .edge-line { stroke-width: 3.2; }
 .edge-quiet .edge-line { opacity: 0.32; }
 .edge-arrow { fill: var(--bound); opacity: 0.85; }
 .edge-quiet .edge-arrow { opacity: 0.35; }
 .edge-selected .edge-arrow { opacity: 1; }
 .edge-hover .edge-line { opacity: 1; stroke-width: 3; }
 .edge-hover .edge-arrow { opacity: 1; }
-.edge-label { fill: var(--bound); font: 10px var(--font); paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; }
+.edge-label-box { fill: var(--outside); stroke: var(--bound); stroke-opacity: 0.35; stroke-width: 1; }
+.edge-quiet .edge-label-box { stroke-opacity: 0.15; }
+.edge-label { fill: var(--bound); font: 10px var(--font); }
 .edge-quiet .edge-label { opacity: 0.45; }
 /* A channel's name on its edge (D53): always there, small and quiet. */
-.edge-channel { fill: var(--bound); font: 9px var(--mono); opacity: 0.7; paint-order: stroke; stroke: var(--outside); stroke-width: 3px; stroke-linejoin: round; pointer-events: none; }
+.edge-channel { fill: var(--bound); font: 9px var(--font); opacity: 0.8; pointer-events: none; }
 .edge-quiet .edge-channel { opacity: 0.4; }
 /* A fixture's render product, faintly behind its lamps. */
 .pictures { opacity: 0.1; pointer-events: none; }

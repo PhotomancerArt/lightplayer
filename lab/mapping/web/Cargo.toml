@@ -12,9 +12,10 @@ description = "Mapping design lab: the canvas page (Dioxus web) over lab-mapping
 dioxus = { version = "0.7", features = ["web"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 lab-mapping-files = { path = "../files" }
+lab-arrows = { path = "../arrows" }
 lab-mapping-model = { path = "../model" }
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "Performance"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "Performance", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics"] }
 
 [lints]
 workspace = true

@@ -9,6 +9,7 @@
 mod canvas;
 mod input;
 mod panels;
+mod text_measure;
 
 use dioxus::prelude::*;
 use lab_mapping_files::{Opened, embedded};

@@ -224,21 +224,21 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     }
     // A module's frame goes under the frames inside it.
     frames.sort_by_key(|fr| !fr.module);
-    // Edges landing on the same port stack their labels.
-    let mut landed: Vec<Target> = Vec::new();
-    let edges: Vec<EdgeView> = e
-        .edges()
-        .into_iter()
-        .map(|x| {
-            let stack = landed.iter().filter(|t| **t == x.to).count() as f64;
-            if x.labelled {
-                landed.push(x.to.clone());
-            }
-            let mid = x.point_at(&cam, 0.5) + Vec2::new(0.0, stack * 12.0);
+    // Node-level edges, laid out together by lab-arrows: each label lies
+    // along its line in a little box, upright, clear of heads and of the
+    // other labels.
+    let model_edges = e.edges();
+    let arrows: Vec<lab_arrows::Arrow> = model_edges.iter().map(|x| x.arrow(&cam)).collect();
+    let geometry = lab_arrows::layout_arrows(
+        &arrows,
+        &crate::text_measure::measure,
+        &lab_arrows::LayoutOptions::default(),
+    );
+    let edges: Vec<EdgeView> = model_edges
+        .iter()
+        .zip(geometry)
+        .map(|(x, g)| {
             let mut class = String::from("edge");
-            if x.bundled {
-                class.push_str(" edge-bundled");
-            }
             if x.selected {
                 class.push_str(" edge-selected");
             } else if !e.selection.is_empty() {
@@ -247,19 +247,29 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
             if x.hovered {
                 class.push_str(" edge-hover");
             }
-            // The channel's name, once per pair: mid-curve on a binding, near
-            // the output on the patch, clear of the span label.
-            let channel = x.channel_shown.then(|| {
-                let t = if x.binding { 0.5 } else { 0.8 };
-                (x.channel.clone(), x.point_at(&cam, t))
-            });
+            let labels = g
+                .labels
+                .iter()
+                .filter_map(|l| {
+                    let p = l.placed?;
+                    Some(EdgeLabelView {
+                        text: l.text.clone(),
+                        class: match l.role {
+                            lab_arrows::LabelRole::Primary => "edge-label",
+                            _ => "edge-channel",
+                        },
+                        at: Vec2::new(p.text_at.x, p.text_at.y),
+                        w: p.frame.width,
+                        h: p.frame.height,
+                        transform: p.svg_transform(),
+                    })
+                })
+                .collect();
             EdgeView {
-                d: x.path(&cam),
-                arrow: x.arrow_path(&cam),
-                label: x.labelled.then_some(x.label.clone()),
-                mid,
+                d: g.path.to_svg(),
+                heads: g.heads.iter().map(|h| h.to_svg()).collect(),
+                labels,
                 class,
-                channel,
             }
         })
         .collect();
@@ -577,21 +587,24 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
                 for (i, x) in edges.iter().enumerate() {
                     g { key: "e{i}", class: "{x.class}",
                         path { class: "edge-line", d: "{x.d}" }
-                        path { class: "edge-arrow", d: "{x.arrow}" }
-                        if let Some(label) = &x.label {
-                            text {
-                                class: "edge-label",
-                                x: "{x.mid.x}", y: "{x.mid.y - 4.0}",
-                                text_anchor: "middle",
-                                "{label}"
-                            }
+                        for (j, h) in x.heads.iter().enumerate() {
+                            path { key: "h{j}", class: "edge-arrow", d: "{h}" }
                         }
-                        if let Some((name, at)) = &x.channel {
-                            text {
-                                class: "edge-channel",
-                                x: "{at.x}", y: "{at.y - 3.0}",
-                                text_anchor: "middle",
-                                "{name}"
+                        for (j, l) in x.labels.iter().enumerate() {
+                            g { key: "l{j}", transform: "{l.transform}",
+                                rect {
+                                    class: "edge-label-box",
+                                    x: "{l.at.x - l.w / 2.0}", y: "{l.at.y - l.h / 2.0}",
+                                    width: "{l.w}", height: "{l.h}",
+                                    rx: "{l.h / 2.0}",
+                                }
+                                text {
+                                    class: "{l.class}",
+                                    x: "{l.at.x}", y: "{l.at.y}",
+                                    text_anchor: "middle",
+                                    dominant_baseline: "central",
+                                    "{l.text}"
+                                }
                             }
                         }
                     }
@@ -782,17 +795,22 @@ struct PortRow {
     tinted: bool,
 }
 
-/// One edge: a cubic from what it leaves to what it reaches, and the
-/// arrowhead where it lands.
+/// One edge, laid out by lab-arrows: its line, its head, its labels.
 struct EdgeView {
     d: String,
-    arrow: String,
-    /// Only for edges attached to a selected thing itself.
-    label: Option<String>,
-    mid: Vec2,
+    heads: Vec<String>,
+    labels: Vec<EdgeLabelView>,
     class: String,
-    /// Its channel's name and where it goes, on the first edge of a pair.
-    channel: Option<(String, Vec2)>,
+}
+
+/// A label lying along its edge: a little box, its text centred on it.
+struct EdgeLabelView {
+    text: String,
+    class: &'static str,
+    at: Vec2,
+    w: f64,
+    h: f64,
+    transform: String,
 }
 
 /// The outline around one run of a port's pixels, on screen: one box per
