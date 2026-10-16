@@ -5596,6 +5596,7 @@ version = "40.0.0"
 name = "lab-mapping-files"
 version = "40.0.0"
 dependencies = [
+ "lab-layout",
  "lab-mapping-model",
  "serde_json",
 ]
@@ -5619,6 +5620,7 @@ name = "lab-mapping-model"
 version = "40.0.0"
 dependencies = [
  "lab-arrows",
+ "lab-layout",
  "libm",
 ]
 
@@ -5636,6 +5638,7 @@ dependencies = [
  "dioxus",
  "gloo-timers",
  "lab-arrows",
+ "lab-layout",
  "lab-mapping-files",
  "lab-mapping-model",
  "wasm-bindgen",

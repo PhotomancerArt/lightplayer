@@ -19,6 +19,7 @@ pub mod output;
 pub mod output_overrides;
 pub mod patch;
 pub mod pattern;
+pub mod placement;
 pub mod port_runs;
 pub mod project;
 pub mod render_product;

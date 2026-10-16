@@ -57,8 +57,9 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     let both = |name: &str, f: &dyn Fn(&Project)| {
         println!("  {name:<34} cold {:>9.3}  warm {:>9.3}", cold(f), warm(f));
     };
-    both("layout", &|p| {
-        let _ = p.layout();
+    both("layout (input, then lab-layout)", &|p| {
+        let input = Editor::new(p.clone()).layout_input();
+        let _ = lab_layout::canvas_layout(&input);
     });
     both("placed objects", &|p| {
         let _ = p.placed_objects();
@@ -91,6 +92,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
 
     // The editor's questions, at the whole view and zoomed in on a lamp.
     let mut e = Editor::new(fresh(&project));
+    e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
     e.resize(Vec2::new(1200.0, 800.0));
     e.fit();
     let lamp = project

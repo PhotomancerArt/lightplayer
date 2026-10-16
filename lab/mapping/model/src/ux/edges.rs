@@ -25,7 +25,7 @@ use lab_arrows::{Arrow, EndDirection, Head, Label, Side};
 use crate::ux::camera::Camera;
 use crate::ux::editor::Editor;
 use crate::domain::geom::{Rect, Vec2};
-use crate::layout::{CARD_HEADER, CARD_ROW};
+use crate::ux::card_geometry::{CARD_HEADER, CARD_ROW};
 use crate::domain::node::NodeId;
 use crate::domain::project::Project;
 use crate::domain::target::Target;

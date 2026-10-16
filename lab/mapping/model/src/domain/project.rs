@@ -8,8 +8,8 @@
 //! the only one (D44).
 //!
 //! Positions this file hands out (`objects`, `object`) are in **world**
-//! units: a fixture's own coordinates plus where the layout put it
-//! (`layout.rs`). Edits go to components in the fixture's own coordinates;
+//! units: a fixture's own coordinates plus where the view placed it
+//! (`placement.rs`). Edits go to components in the fixture's own coordinates;
 //! a move is the same delta in both.
 //!
 //! The nodes are private to this file so that every edit comes in through
@@ -25,6 +25,7 @@ use crate::domain::node::{self, Node, NodeId, NodeKind};
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::output::Output;
 use crate::domain::patch::PatchRule;
+use crate::domain::placement::Carried;
 use crate::domain::pattern::Pattern;
 use crate::domain::render_source::RenderSource;
 
@@ -39,6 +40,8 @@ pub struct Project {
     counters: Counters,
     /// What has been worked out about the nodes, until they change.
     pub(crate) derived: Derived,
+    /// Where the view placed the nodes (`placement.rs`).
+    pub(crate) placement: Carried,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +76,7 @@ impl Project {
                 node: 1,
             },
             derived: Derived::default(),
+            placement: Carried::default(),
         }
     }
 
@@ -246,6 +250,26 @@ impl Project {
         node::parent_of(&self.nodes, id, None).flatten()
     }
 
+    /// Pin a node at `at`, in its container's coordinates (D48). Inside a
+    /// module a pin stays inside its padding. Pins are session data: the
+    /// layout honours them only while pinning is on (D64).
+    pub fn pin(&mut self, id: &NodeId, at: Vec2) {
+        let at = if self.parent_module(id).is_some() {
+            Vec2::new(at.x.max(0.0), at.y.max(0.0))
+        } else {
+            at
+        };
+        if let Some(n) = self.node_mut(id) {
+            n.pinned = Some(at);
+        }
+    }
+
+    /// Give a node back to the automatic layout. Returns whether it was
+    /// pinned.
+    pub fn unpin(&mut self, id: &NodeId) -> bool {
+        self.node_mut(id).is_some_and(|n| n.pinned.take().is_some())
+    }
+
     /// The node's name, or its id if it's gone.
     pub fn node_name(&self, id: &NodeId) -> String {
         self.node(id)
@@ -385,14 +409,6 @@ impl Project {
 
     pub fn lamp_count(&self) -> usize {
         self.placed().lamp_count()
-    }
-
-    /// The fixture whose box holds a world point.
-    pub fn fixture_at(&self, p: Vec2) -> Option<NodeId> {
-        self.fixtures()
-            .into_iter()
-            .find(|n| self.node_rect(&n.id).is_some_and(|r| r.contains(p)))
-            .map(|n| n.id.clone())
     }
 
     /// The lab's starting project: Yona's desk. A tail rig (the tail that

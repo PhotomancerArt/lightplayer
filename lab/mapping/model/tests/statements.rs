@@ -28,6 +28,7 @@
 //! turns them into the canvas's.
 
 use lab_mapping_model::*;
+use lab_mapping_model::card_geometry::*;
 use lab_mapping_model::domain::*;
 
 // ---- deleting ------------------------------------------------------------
@@ -423,6 +424,7 @@ fn dragging_a_node_pins_it() {
     let title = e.camera.to_screen(before.min) + Vec2::new(12.0, -10.0);
     let to = title + Vec2::new(40.0, 0.0) * e.camera.scale;
     drag(&mut e, title, to, none());
+    lay_out(&mut e);
     assert_eq!(e.selection, vec![fixture(&e, "ring display")]);
     let moved = before.min + Vec2::new(40.0, 0.0);
     let after = e.project.node_rect(&ring).unwrap();
@@ -435,6 +437,7 @@ fn dragging_a_node_pins_it() {
     assert_eq!(overlaps(&e.project), Vec::<String>::new());
     // Undo puts it back under the layout; redo pins it again.
     key(&mut e, Key::Char('z'), cmd());
+    lay_out(&mut e);
     assert!(e.project.node(&ring).unwrap().pinned.is_none());
     assert_eq!(e.project.node_rect(&ring).unwrap(), before);
     key(
@@ -445,9 +448,11 @@ fn dragging_a_node_pins_it() {
             ..cmd()
         },
     );
+    lay_out(&mut e);
     assert!(e.project.node_rect(&ring).unwrap().min.distance(moved) < 1e-9);
     // U gives it back to the layout.
     key(&mut e, Key::Char('u'), none());
+    lay_out(&mut e);
     assert!(e.project.node(&ring).unwrap().pinned.is_none());
     assert_eq!(e.project.node_rect(&ring).unwrap(), before);
 
@@ -461,6 +466,7 @@ fn dragging_a_node_pins_it() {
     e.select(vec![]);
     let (from, to) = (e.camera.to_screen(grab), e.camera.to_screen(onto));
     drag(&mut e, from, to, none());
+    lay_out(&mut e);
     assert_eq!(e.selection, vec![Target::Node(scarf_out.clone())]);
     let card = e.project.node_rect(&scarf_out).unwrap();
     assert!(
@@ -492,12 +498,15 @@ fn a_fixtures_size_is_a_property() {
 #[test]
 fn a_drag_survives_leaving_the_canvas() {
     let mut e = editor();
-    // From the tail's bottom-left, up past the top of the canvas.
-    let a = e.camera.to_screen(place(&e, "tail", 28.0, 77.0));
+    // From the tail's top-left, down past the bottom of the canvas.
+    let a = e.camera.to_screen(place(&e, "tail", 28.0, 5.0));
     e.pointer_down(a, Button::Primary, none());
-    e.pointer_move(a + Vec2::new(10.0, -10.0), none());
+    e.pointer_move(a + Vec2::new(10.0, 10.0), none());
     e.pointer_leave();
-    let outside = Vec2::new(e.camera.to_screen(place(&e, "tail", 55.0, 0.0)).x, -500.0);
+    let outside = Vec2::new(
+        e.camera.to_screen(place(&e, "tail", 55.0, 0.0)).x,
+        e.viewport.y + 500.0,
+    );
     e.pointer_move(outside, none());
     assert!(e.selection_box().is_some(), "the box is still there");
     e.pointer_up(outside, none());
@@ -515,6 +524,7 @@ fn layout_never_overlaps_nodes() {
     let inner = e.project.add_module(Some(&rig), "spare").unwrap();
     e.project
         .add_fixture_sized(Some(&inner), "spare strip", Vec2::new(30.0, 10.0));
+    lay_out(&mut e);
     let p = &e.project;
     assert_eq!(overlaps(p), Vec::<String>::new());
     assert!(
@@ -538,37 +548,78 @@ fn layout_never_overlaps_nodes() {
     }
 }
 
-/// An output sits beside the fixture that feeds it — the first one, when
-/// several do — a fixed gap to its right, level with its top.
+/// Core says what there is to lay out, never where (D63): each node with
+/// its module, its role from its kind, the size it declares (a fixture's
+/// box; an output's card, a row per port), and the dataflow from the
+/// bindings and the patch. The page runs the layout.
 #[test]
-fn an_output_sits_beside_the_fixture_that_feeds_it() {
-    let mut e = editor();
-    let p = &e.project;
-    let rect = |name: &str| p.node_rect(&node_id(&e, name)).unwrap();
-    for (output, fixture) in [
-        ("tail out", "tail"),
-        ("main", "ring display"),
-        ("scarf out", "scarf"),
+fn the_layout_input_says_what_there_is_never_where() {
+    let e = editor();
+    let input = e.layout_input();
+    let node = |name: &str| {
+        let id = node_id(&e, name).to_string();
+        input.nodes.iter().find(|n| n.id == id).unwrap().clone()
+    };
+    let rig = node_id(&e, "tail rig").to_string();
+    assert_eq!(node("tail rig").role, lab_layout::LayoutRole::Module);
+    assert_eq!(node("rainbow").role, lab_layout::LayoutRole::Source);
+    assert_eq!(node("tail").role, lab_layout::LayoutRole::Fixture);
+    assert_eq!(node("tail").parent, Some(rig));
+    assert_eq!(node("tail").size, lab_layout::Vec2::new(82.0, 82.0));
+    assert_eq!(node("main").role, lab_layout::LayoutRole::Output);
+    assert_eq!(
+        node("main").size,
+        lab_layout::Vec2::new(CARD_WIDTH, CARD_HEADER + 2.0 * CARD_ROW + CARD_FOOT),
+        "a header and a row per port"
+    );
+    let edge = |a: &str, b: &str| {
+        (node_id(&e, a).to_string(), node_id(&e, b).to_string())
+    };
+    for (a, b) in [
+        ("rainbow", "ring display"),
+        ("glow", "tail"),
+        ("ring display", "main"),
+        ("strip", "main"),
+        ("tail", "tail out"),
     ] {
-        let (o, f) = (rect(output), rect(fixture));
-        assert_eq!(
-            o.min,
-            Vec2::new(f.max.x + layout::OUTPUT_GAP, f.min.y),
-            "{output} beside {fixture}"
-        );
+        assert!(input.edges.contains(&edge(a, b)), "{a} → {b}");
     }
-    // One that nothing feeds goes to the right of everything.
-    let spare = e.project.add_output(None, "spare", &[("D5", 10)]).unwrap();
-    let r = e.project.node_rect(&spare).unwrap();
-    let others = e
-        .project
-        .nodes()
-        .iter()
-        .filter(|n| n.id != spare)
-        .map(|n| e.project.node_rect(&n.id).unwrap().max.x)
-        .fold(0.0, f64::max);
-    assert!(r.min.x > others, "{r:?}");
-    assert_eq!(overlaps(&e.project), Vec::<String>::new());
+    assert!(input.pins.is_empty(), "nothing is pinned");
+}
+
+/// To the layout, a clock, a power button, a button and a radio are
+/// controls, and a playlist makes a picture, like a shader.
+#[test]
+fn controls_and_playlists_have_their_roles() {
+    let mut p = Project::new("t");
+    for kind in ["Clock", "PowerButton", "Button", "ControlRadio", "Playlist", "Fluid"] {
+        p.add_node(None, kind, NodeKind::Other(OtherNode::new(kind)));
+    }
+    let e = editor_of(p);
+    let roles: Vec<lab_layout::LayoutRole> =
+        e.layout_input().nodes.iter().map(|n| n.role).collect();
+    use lab_layout::LayoutRole::*;
+    assert_eq!(roles, vec![Control, Control, Control, Control, Source, Other]);
+}
+
+/// Where nodes sit is a fact the view hands over: before it does, no node
+/// has a place; the first placement gives every node one and frames them
+/// all.
+#[test]
+fn where_nodes_sit_is_a_fact_the_view_hands_over() {
+    let mut e = Editor::new(Project::seed());
+    e.resize(Vec2::new(1200.0, 800.0));
+    let tail = node_id(&e, "tail");
+    assert_eq!(e.project.node_rect(&tail), None);
+    let unplaced = e.camera;
+    lay_out(&mut e);
+    for n in e.project.all_nodes() {
+        assert!(e.project.node_rect(&n.id).is_some(), "{} has a place", n.name);
+    }
+    assert_ne!(e.camera, unplaced, "framed");
+    let framed = e.camera;
+    e.fit();
+    assert_eq!(e.camera, framed, "everything fits");
 }
 
 /// A node of any kind (module, fixture, output) selects, deletes and
@@ -2490,8 +2541,7 @@ fn a_repeat_is_picked_by_its_copies() {
             4,
         ),
     );
-    let mut e = Editor::new(p);
-    e.resize(Vec2::new(1200.0, 800.0));
+    let mut e = editor_of(p);
     e.fit();
     let origin = e.project.origin(&f);
     let t = Target::Component(sector);
@@ -2536,7 +2586,7 @@ fn a_copy_cant_be_deleted_on_its_own() {
             4,
         ),
     );
-    let mut e = Editor::new(p);
+    let mut e = editor_of(p);
     e.select(vec![Target::Object(ObjectId::new(&sector, "2"))]);
     key(&mut e, Key::Delete, none());
     assert_eq!(
@@ -2777,9 +2827,8 @@ fn colour_order_belongs_to_the_fixture() {
     );
 }
 
-/// A node the lab doesn't edit (a shader, a clock) is a plain card at the
-/// left of what it feeds: it selects and deletes like any node, and holds
-/// nothing.
+/// A node the lab doesn't edit (a fluid, a clock) is a plain card: it
+/// selects and deletes like any node, and holds nothing.
 #[test]
 fn a_node_the_lab_doesnt_edit_is_a_plain_card() {
     let mut e = editor();
@@ -2787,17 +2836,11 @@ fn a_node_the_lab_doesnt_edit_is_a_plain_card() {
         .project
         .add_node(None, "shader", NodeKind::Other(OtherNode::new("Shader")))
         .unwrap();
+    lay_out(&mut e);
     let t = Target::Node(shader.clone());
     assert!(!e.project.is_frame(&t));
     assert!(e.project.children(Some(&t)).is_empty());
-    let card = e.project.node_rect(&shader).unwrap();
-    for n in e.project.nodes().iter().filter(|n| !n.is_card()) {
-        assert!(
-            card.max.x < e.project.node_rect(&n.id).unwrap().min.x,
-            "{}",
-            n.name
-        );
-    }
+    assert!(e.project.node_rect(&shader).is_some(), "it is on the canvas");
     e.select(vec![t]);
     key(&mut e, Key::Delete, none());
     assert!(e.project.node(&shader).is_none());
@@ -2830,13 +2873,13 @@ fn minting_skips_ids_already_taken() {
 /// moves with every edit, and with nothing else.
 #[test]
 fn kept_answers_are_never_stale() {
-    let mut e = Editor::new(Project::seed());
+    let mut e = editor();
     let main = node_id(&e, "main");
     let ring_display = node_id(&e, "ring display");
     let same_as_afresh = |e: &Editor| {
         let mut afresh = e.project.clone();
         afresh.nodes_mut(); // a `&mut` way in forgets what was kept
-        assert_eq!(e.project.layout(), afresh.layout());
+        assert_eq!(e.project.placement(), afresh.placement());
         assert_eq!(e.project.objects(), afresh.objects());
         assert_eq!(e.project.effective_patch(), afresh.effective_patch());
         assert_eq!(
@@ -2873,6 +2916,9 @@ fn kept_answers_are_never_stale() {
     let card = e.project.node_rect(&main).unwrap();
     e.select(vec![Target::Node(ring_display.clone())]);
     e.edit_selection_prop("width", PropEdit::SetNumber(120.0));
+    let edited = e.project.revision();
+    lay_out(&mut e);
+    assert_eq!(e.project.revision(), edited, "a new placement is not an edit");
     assert_eq!(e.project.node_rect(&ring_display).unwrap().width(), 120.0);
     assert!(e.project.node_rect(&main).unwrap().min.x > card.min.x);
     assert_ne!(e.project.revision(), counted);
@@ -3057,9 +3103,22 @@ fn node_of_target(t: &Target) -> NodeId {
 }
 
 fn editor() -> Editor {
-    let mut e = Editor::new(Project::seed());
+    editor_of(Project::seed())
+}
+
+/// An editor on `p`, laid out the way the page does it.
+fn editor_of(p: Project) -> Editor {
+    let mut e = Editor::new(p);
+    lay_out(&mut e);
     e.resize(Vec2::new(1200.0, 800.0));
     e
+}
+
+/// What the page does after every change: build the layout input, run the
+/// layout, and hand the editor where everything landed.
+fn lay_out(e: &mut Editor) {
+    let placement = lab_layout::canvas_layout(&e.layout_input());
+    e.set_placement(&placement);
 }
 
 fn none() -> Mods {

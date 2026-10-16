@@ -1,9 +1,9 @@
 //! What the model derives from a project, kept until the project changes.
 //!
-//! Everything here is a function of the project alone — never of the
-//! camera, the selection or the time: the layout, every object with its
-//! lamps in world units, the effective patch, and which pixel each lamp
-//! lights. Asked for again with nothing changed, it is the same answer, so
+//! Everything here is a function of the project and where the view placed
+//! its nodes (`placement.rs`) — never of the camera, the selection or the
+//! time: every object with its lamps in world units, the effective patch,
+//! and which pixel each lamp lights. Asked for again with nothing changed, it is the same answer, so
 //! it is worked out once and kept.
 //!
 //! **Why it can't go stale:** a project's nodes are private to
@@ -26,7 +26,6 @@ use std::sync::{Arc, OnceLock};
 
 use crate::domain::component::{Component, ComponentId};
 use crate::domain::geom::{Rect, Vec2};
-use crate::layout::Layout;
 use crate::domain::node::NodeId;
 use crate::domain::object::{Object, ObjectId, ObjectShape};
 use crate::domain::patch::EffectivePatch;
@@ -37,7 +36,6 @@ use crate::domain::project::Project;
 pub(crate) struct Derived {
     /// Names what the project holds right now: see [`Project::revision`].
     revision: u64,
-    layout: OnceLock<Arc<Layout>>,
     placed: OnceLock<Arc<Placed>>,
     patch: OnceLock<Arc<EffectivePatch>>,
     wiring: OnceLock<Arc<Wiring>>,
@@ -48,7 +46,6 @@ impl Default for Derived {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Derived {
             revision: NEXT.fetch_add(1, Ordering::Relaxed),
-            layout: OnceLock::new(),
             placed: OnceLock::new(),
             patch: OnceLock::new(),
             wiring: OnceLock::new(),
@@ -188,19 +185,23 @@ impl Project {
         self.derived = Derived::default();
     }
 
+    /// Forget what was worked out in world units: the view placed the
+    /// nodes somewhere new. What the project holds is the same, so its
+    /// revision stays.
+    pub(crate) fn moved(&mut self) {
+        let revision = self.derived.revision;
+        self.derived = Derived {
+            revision,
+            ..Derived::default()
+        };
+    }
+
     /// A number naming what the project holds right now. Every edit gives
     /// it a new one, never used before by any project; a clone keeps its
     /// original's (it holds the same). So a page can keep anything it
     /// draws from the project — the tree's rows, say — until this moves.
     pub fn revision(&self) -> u64 {
         self.derived.revision
-    }
-
-    /// Every node's box, kept.
-    pub(crate) fn kept_layout(&self) -> &Layout {
-        self.derived
-            .layout
-            .get_or_init(|| Arc::new(self.compute_layout()))
     }
 
     /// Every object in world units, kept.
@@ -227,7 +228,7 @@ impl Project {
 
     fn compute_placed(&self) -> Placed {
         let mut p = Placed::default();
-        let layout = self.kept_layout();
+        let layout = self.placement();
         for n in self.fixtures() {
             let Some(f) = n.fixture() else { continue };
             let origin = layout.rects.get(&n.id).map(|r| r.min).unwrap_or_default();

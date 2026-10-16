@@ -5,6 +5,7 @@
 //! crate, so it can be read, changed and tested without a browser.
 
 use crate::ux::camera::Camera;
+use crate::ux::debug_flags::DebugFlags;
 use crate::domain::component::{Component, ComponentId, ComponentKind};
 use crate::domain::geom::{Rect, Vec2, polyline_length};
 use crate::ux::handle::{Handle, HandleKind};
@@ -190,6 +191,7 @@ pub struct Editor {
     /// reshaped; off, it holds still and only selection and patching work
     /// (the dome). M toggles it.
     pub move_draw: bool,
+    pub debug: DebugFlags,
     /// The selection before each of the last two presses: a double-click
     /// adds a point to a path that was shaped BEFORE its two clicks went
     /// into it.
@@ -218,6 +220,7 @@ impl Editor {
             menu: None,
             path_draft: Vec::new(),
             move_draw: true,
+            debug: DebugFlags::default(),
             press_log: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),

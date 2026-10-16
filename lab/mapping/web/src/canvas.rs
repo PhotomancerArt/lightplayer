@@ -40,7 +40,7 @@ use lab_mapping_model::{
     domain::object::objects_of,
     ux::area::{FRAME_TITLE_PX, title_width},
     ux::handle::HANDLE_PX,
-    layout::{CARD_HEADER, CARD_ROW},
+    ux::card_geometry::{CARD_HEADER, CARD_ROW},
 };
 
 use crate::input;
@@ -55,6 +55,13 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     // when the pointer leaves the canvas (or the window) and finishes right
     // when it comes back.
     use_hook(move || input::follow_window(ed));
+    // Layout runs here, in the view (D63): whenever what there is to lay
+    // out changes, lay it out and hand the editor where everything landed.
+    let layout_input = use_memo(move || ed.read().layout_input());
+    use_effect(move || {
+        let placement = lab_layout::canvas_layout(&layout_input.read());
+        ed.write().set_placement(&placement);
+    });
     // The board's clock. It only advances while the pixels move, so a
     // still board costs no redraws.
     let mut now = use_signal(|| 0.0_f64);

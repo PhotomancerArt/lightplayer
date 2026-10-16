@@ -126,6 +126,7 @@ fn open_project(ed: &mut Signal<Editor>, key: &str) {
         Ok(project) => {
             let viewport = ed.peek().viewport;
             let mut e = Editor::new(project);
+            e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
             e.resize(viewport);
             e.fit();
             ed.set(e);

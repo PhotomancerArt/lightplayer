@@ -15,5 +15,8 @@ description = "Mapping design lab: opens and saves real LightPlayer projects in 
 lab-mapping-model = { path = "../model" }
 serde_json = { workspace = true, features = ["std", "preserve_order"] }
 
+[dev-dependencies]
+lab-layout = { path = "../layout" }
+
 [lints]
 workspace = true
