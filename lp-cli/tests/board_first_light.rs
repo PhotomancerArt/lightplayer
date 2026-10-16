@@ -24,7 +24,9 @@
 //! (records), `LP_FIRST_LIGHT_LABEL` (the image: `littlefs`, `fs-tree`),
 //! `LP_FIRST_LIGHT_MERGED` (the image to flash; unset, the board is not
 //! flashed), `LP_FIRST_LIGHT_CASES` (default `none,basic,c40`),
-//! `LP_FIRST_LIGHT_BOOTS` (per case, default 10), `BOARD_HOLDER`.
+//! `LP_FIRST_LIGHT_BOOTS` (per case, default 10),
+//! `LP_FIRST_LIGHT_HOST_DELAY_MS` (open the link this long after the port
+//! is back, so the boot runs with no host draining it), `BOARD_HOLDER`.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -237,6 +239,15 @@ async fn power_up(
         watch.times().back.is_some(),
         "{what}: the port never came back"
     );
+    // A host that opens the port late: the boot runs with nobody draining
+    // the link (a board on a USB charger), and the line waits in the log
+    // ring for the host.
+    if let Some(ms) = std::env::var("LP_FIRST_LIGHT_HOST_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+    }
     let conn = connect(port, &boot)
         .await
         .unwrap_or_else(|e| panic!("{what}: {e}"));
