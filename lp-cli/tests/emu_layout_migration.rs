@@ -55,8 +55,7 @@ use lp_emu_esp32c6::machine::{
     UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::test_support::{
-    FwImage, ReferenceImage, fw_esp32c6_image, merged_image, reference_lpfs_offset,
-    workspace_root,
+    FwImage, ReferenceImage, fw_esp32c6_image, merged_image, reference_lpfs_offset, workspace_root,
 };
 use lpa_link::PartitionTable;
 use lpa_link::layout_migration::{LpfsGeometry, LpfsTree, legacy_c6_v1_table};
