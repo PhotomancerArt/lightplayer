@@ -445,7 +445,22 @@
                         console.warn(`emu-tty ignored (not \`mac\` or \`none\`): ${ttyFlag}`);
                     }
                     console.info(`[emu] host serial path: ${hostTty === "mac" ? "a Mac's (drops late 0xFF bytes)" : "lossless"}`);
+                    // `?emu-second-tab=1`: this page is a SECOND tab of one
+                    // browser beside the page that holds the boards' cables
+                    // (the one-tab-holds-a-board walk). The door admits one
+                    // `/control` client, so without the flag a second page
+                    // fails to install, loudly, which is what keeps a
+                    // reloading page from installing without its cable. With
+                    // it, a refused control channel makes a CABLE-LESS port:
+                    // the page can list, grant, open and close the board's
+                    // bytes (everything taking a board over needs), and every
+                    // cable verb says another page holds the cable. Real
+                    // Chrome gives both tabs the cable; this is the door's
+                    // way of being that, and no more.
+                    const secondTab =
+                        new URLSearchParams(window.location.search).get("emu-second-tab") === "1";
                     const options = {
+                        secondTab,
                         picker: chrome.createPicker({ backingUrl: label }),
                         // D0 held ON on every board: the switch a
                         // switch-mode power button reads (the PLAYFUL
@@ -536,7 +551,7 @@
                         tabBacking,
                     };
                     whenBody(() =>
-                        chrome.installDevBanner({ bus, backingUrl: label, facade }),
+                        chrome.installDevBanner({ bus, backingUrl: label, facade, secondTab }),
                     );
                     console.info(
                         `[emu] navigator.serial is a shim over ${label} ` +

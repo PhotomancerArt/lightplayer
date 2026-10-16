@@ -65,7 +65,7 @@ pub struct RandomSummary {
     pub error: Option<String>,
 }
 
-const SLOTS: [&str; 3] = ["a", "b", "c"];
+pub(crate) const SLOTS: [&str; 3] = ["a", "b", "c"];
 
 pub fn random_walk(
     cand: &dyn Candidate,
@@ -200,7 +200,7 @@ fn slots_present(model: &Model) -> Vec<&'static str> {
         .collect()
 }
 
-fn next_step(
+pub(crate) fn next_step(
     rng: &mut SimRng,
     model: &Model,
     corpora: &CorpusSet,

@@ -1,7 +1,9 @@
 //! The board's end of the device leg: when to dial, how to back off, the
-//! challenge, and the route table. Sans-IO; the firmware's relay task and
-//! lp-cli's host board drive the same [`RelayClient`].
+//! challenge, the route table, and (protocol 2) the project report and the
+//! picture schedule. Sans-IO; the firmware's relay task and lp-cli's host
+//! board drive the same [`RelayClient`].
 
+mod picture_schedule;
 mod relay_account;
 mod relay_action;
 mod relay_backoff;
@@ -12,6 +14,7 @@ mod relay_backoff;
 mod relay_client;
 mod relay_client_config;
 mod relay_event;
+mod relay_project_facts;
 mod relay_routes;
 mod relay_state;
 
@@ -22,9 +25,10 @@ pub use relay_backoff::{
 };
 pub use relay_client::{
     CONNECT_TIMEOUT_MS, HANDSHAKE_TIMEOUT_MS, RESOLVE_TIMEOUT_MS, RelayClient,
-    VERSION_REFUSED_RETRY_MS,
+    VERSION_REFUSED_RETRY_MS, VERSION_TOO_NEW_RETRY_MS,
 };
 pub use relay_client_config::RelayClientConfig;
 pub use relay_event::RelayEvent;
+pub use relay_project_facts::RelayProjectFacts;
 pub use relay_routes::RelayRoutes;
 pub use relay_state::RelayState;

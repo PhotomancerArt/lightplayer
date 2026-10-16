@@ -28,8 +28,8 @@ use lpa_studio_core::{
 };
 use lpa_studio_web_story_macros::story;
 
+use crate::app::board_card::other_version_form::OfferPickerPreview;
 use crate::app::home::device_offer_story_fixtures::{StoryDeviceCard, session_device_tree};
-use crate::app::home::device_roster_card::OfferPickerPreview;
 use crate::app::home::home_gallery_stories::live_card_lamp_frame;
 use crate::app::layout::LinkReconnectingStrip;
 use crate::app::layout::session_control::SessionDevicePanel;
@@ -38,133 +38,133 @@ use crate::core::OffersProvider;
 // --- The device card, one row of the table each ---------------------------
 
 #[story(
-    description = "Up to date (information): the firmware line reads \"2026.10.05-2 · up to date\", the header's second row leads with the version and its commit dim, the chip stays Ready, and the firmware verbs are Other version… (the store's other releases) and Factory reset."
+    description = "Up to date (information): the firmware bar says the version alone, \"2026.10.05-2\", plain and with no action; its details give the version with its commit and build, Other version… (the store's other releases), and Factory reset apart."
 )]
 fn device_card_update_up_to_date() -> Element {
     update_card(UpdateFixtureRow::UpToDate, Link::Usb)
 }
 
 #[story(
-    description = "Update available (information with an offer, not a needs-you): \"2026.10.03-1 → 2026.10.05-2 available\", one plain Update (Routine: one click, no arm), the quiet Other version… beside it, Factory reset at the end. The show keeps running."
+    description = "Update available (information with an offer, not a needs-you): the firmware bar is blue with \"2026.10.03-1\" and one plain Update (Routine: one click, no arm); Other version… and Factory reset are in its details. The show keeps running."
 )]
 fn device_card_update_available() -> Element {
     update_card(UpdateFixtureRow::Available, Link::Usb)
 }
 
 #[story(
-    description = "Update available on a dev-build board: the line names both builds (\"dev 5eb70a7 · Studio has 2026.10.05-2\"), because a dev build has no order against a release, and the offer reads \"Install 2026.10.05-2\" instead of Update."
+    description = "Update available on a dev-build board: the firmware bar is blue with \"dev 5eb70a7\", its action \"Install 2026.10.05-2\" instead of Update, because a dev build has no order against a release; its details name both builds."
 )]
 fn device_card_update_available_dev_board() -> Element {
     update_card(UpdateFixtureRow::AvailableDevBoard, Link::Usb)
 }
 
 #[story(
-    description = "Backing up (progress): the current firmware is read back before a byte is written. The firmware bar is lit at 18%, the chip says Backing up, and Cancel is offered — nothing on the board has changed yet."
+    description = "Backing up (progress): the current firmware is read back before a byte is written. The firmware bar's work reads \"Backing up · 18%\", its foot lit to 18%, with Cancel — nothing on the board has changed yet, and the picture keeps the show."
 )]
 fn device_card_update_backing_up() -> Element {
     update_card(UpdateFixtureRow::BackingUp, Link::Usb)
 }
 
 #[story(
-    description = "Updating over USB (progress, the show stopped): the firmware bar lit at 40%, the chip Updating, no verbs (no Cancel once writing starts), and the picture slot shows what the board's own lights show — solid dark yellow — with the whole sentence: \"…Keep the board powered.\""
+    description = "Updating over USB (progress, the show stopped): \"Updating · 1 of 2 · 40%\" on the firmware bar, no Cancel once writing starts, and the picture shows the board's own lights — solid dark yellow. The whole sentence, naming the link, is in its details and the corner's: \"Updating to 2026.10.05-2 over USB: the new firmware first. Keep the board powered.\""
 )]
 fn device_card_update_updating_usb() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Usb)
 }
 
 #[story(
-    description = "Updating over Bluetooth: the same row, its line and sentence naming the link (\"Updating over Bluetooth… 40%\")."
+    description = "Updating over Bluetooth: same work (\"Updating · 1 of 2 · 40%\"), its sentence naming the link (\"…over Bluetooth: the new firmware first.\")."
 )]
 fn device_card_update_updating_bluetooth() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Bluetooth)
 }
 
 #[story(
-    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same row, its line and sentence naming the link (\"Updating over Wi‑Fi… 40%\"), the device line \"Wi‑Fi · 192.168.1.40\". The board resets three times on the way; each time the page redials it by itself and the card keeps this row."
+    description = "Updating over Wi‑Fi (the board on the LAN, no cable): the same work (\"Updating · 1 of 2 · 40%\"), its sentence naming the link (\"…over Wi‑Fi: the new firmware first.\"), the connection bar \"Wi‑Fi · live\". The board resets three times on the way; each time the page redials it by itself and the card keeps this work."
 )]
 fn device_card_update_updating_wifi() -> Element {
     update_card(UpdateFixtureRow::Updating, Link::Wifi)
 }
 
 #[story(
-    description = "The last step of an update this Studio is running (progress): \"Finishing the update… 70%\", the dark-yellow slot saying \"Installing the rest of the firmware… 70%. Keep the board powered.\" Not called interrupted: nothing was."
+    description = "The last step of an update this Studio is running (progress): \"Updating · 2 of 2 · 70%\", the strip dark yellow, and \"Installing the rest of the firmware. Keep the board powered.\" Not called interrupted: nothing was."
 )]
 fn device_card_update_finishing() -> Element {
     update_card(UpdateFixtureRow::Finishing, Link::Bluetooth)
 }
 
 #[story(
-    description = "Finishing an interrupted update this Studio found half-way on connect (progress, started with no click): \"Finishing the update… 70%\", the dark-yellow slot saying it was interrupted and this Studio is completing it."
+    description = "Finishing an interrupted update this Studio found half-way on connect (progress, started with no click): \"Resuming · 2 of 2 · 70%\", naming the piece it is on, the strip dark yellow, and the sentence saying it was interrupted and this Studio is installing the rest."
 )]
 fn device_card_update_finishing_resumed() -> Element {
     update_card(UpdateFixtureRow::FinishingResumed, Link::Bluetooth)
 }
 
 #[story(
-    description = "Restoring missing firmware (progress, no click): \"Restoring firmware… 35%\", the chip Restoring firmware, the dark-yellow slot: part of it was missing and this Studio had a copy."
+    description = "Restoring missing firmware (progress, no click): \"Restoring · 35%\" on the firmware bar, the strip dark yellow: part of it was missing and Studio had a copy."
 )]
 fn device_card_update_restoring() -> Element {
     update_card(UpdateFixtureRow::Restoring, Link::Usb)
 }
 
 #[story(
-    description = "Another device is updating it (progress, someone else's): the bar at 40% in the quieter fill, no verbs, and the dark-yellow slot saying this Studio finishes it if it stops."
+    description = "Another device is updating it (progress, someone else's): \"Another device is updating it · 40%\", the foot at 40% in the quieter fill, no Cancel, the strip dark yellow: this Studio finishes it if it stops."
 )]
 fn device_card_update_another_device() -> Element {
     update_card(UpdateFixtureRow::AnotherDevice, Link::Bluetooth)
 }
 
 #[story(
-    description = "Needs one update over USB, plugged in by USB (needs you): the line in the attention tone, and today's USB flash as the way (Update firmware, Lasting: it arms on the first click)."
+    description = "Needs one update over USB, plugged in by USB (needs you): the firmware bar's words in orange, and today's USB flash as its action (Update, Lasting: it arms on the first click)."
 )]
 fn device_card_update_needs_usb_once_usb() -> Element {
     update_card(UpdateFixtureRow::NeedsUsbOnce, Link::Usb)
 }
 
 #[story(
-    description = "Needs one update over USB, reached over Bluetooth: the same line, and nothing to press here — the line says what to do (its hover: update it over USB once, and after that it updates without a cable)."
+    description = "Needs one update over USB, reached over Bluetooth: the same orange words, and nothing to press here — the details say what to do (update it over USB once, and after that it updates without a cable)."
 )]
 fn device_card_update_needs_usb_once_bluetooth() -> Element {
     update_card(UpdateFixtureRow::NeedsUsbOnce, Link::Bluetooth)
 }
 
 #[story(
-    description = "Over Wi‑Fi, a board on a release from before Wi‑Fi updates: its hello offered the update, but its Wi‑Fi link never answered it (5 s), so the card says what to do — \"Update over USB or Bluetooth once\", its hover \"This board updates over USB or Bluetooth until it has been updated once.\" — and offers nothing that would only hang."
+    description = "Over Wi‑Fi, a board released before Wi‑Fi updates: its hello offered the update, but its Wi‑Fi link never answered it (5 s), so the firmware bar says what to do — \"Update over USB or Bluetooth once\"; details: \"This board updates over USB or Bluetooth until it has been updated once.\" — and offers nothing that would hang."
 )]
 fn device_card_update_not_over_wifi_yet() -> Element {
     update_card(UpdateFixtureRow::NotOverWifiYet, Link::Wifi)
 }
 
 #[story(
-    description = "Keeps crashing (needs you, the show stopped): the line in the attention tone, the chip Needs firmware, the picture slot dark red with the whole sentence, and two repairs: Reinstall and Other version… (the store's releases, the board's own drawn but not pickable). Factory reset is withdrawn: installing is the repair."
+    description = "Keeps crashing (needs you, the show stopped): \"2026.10.03-1 keeps crashing\" in orange with Reinstall, the picture's strip dark red, and in the details the whole sentence and Other version… (the store's releases, the board's own drawn but not pickable). Factory reset is withdrawn: installing is the repair."
 )]
 fn device_card_update_keeps_crashing() -> Element {
     update_card(UpdateFixtureRow::KeepsCrashing, Link::Usb)
 }
 
 #[story(
-    description = "Needs a version this Studio can't get (needs you, the show stopped): \"Needs 2026.09.28-4, which Studio can't get\", the dark-red slot saying to connect to the internet or install this Studio's version, and Install 2026.10.05-2 (the install offer with this Studio's version preselected). Factory reset withdrawn."
+    description = "Needs a version this Studio can't get (needs you, the show stopped): \"Needs 2026.09.28-4, which Studio can't get\" in orange, the strip dark red, the details saying to connect to the internet or install this Studio's version, with the install there, 2026.10.05-2 preselected. Factory reset withdrawn."
 )]
 fn device_card_update_cant_get_version() -> Element {
     update_card(UpdateFixtureRow::CantGetVersion, Link::Usb)
 }
 
 #[story(
-    description = "Rolled back (information): \"Back on 2026.10.03-1 · the update didn't start\". The board refuses that build from now on, so Update is not offered; Other version… is, with the refused build drawn but not pickable. The show runs on the old version."
+    description = "Rolled back (information): the update didn't start, so the board is back on 2026.10.03-1 and refuses that build: no Update, only the version on the firmware bar, and Other version… shows the refused build unpickable. The show runs on the old one."
 )]
 fn device_card_update_rolled_back() -> Element {
     update_card(UpdateFixtureRow::RolledBack, Link::Usb)
 }
 
 #[story(
-    description = "Newer than this Studio (information): \"2026.10.07-4 · newer than this Studio\"; its hover says to reload Studio to catch up. Other version… is offered (an older one arms first)."
+    description = "Newer than this Studio (information): the firmware bar says \"2026.10.07-4\", plain; its details also name this Studio's own, and offer Other version… (an older one arms first)."
 )]
 fn device_card_update_newer() -> Element {
     update_card(UpdateFixtureRow::Newer, Link::Usb)
 }
 
 #[story(
-    description = "Play access only, over Bluetooth: the update is available and said so, but nothing is offered — installing needs the author password, and the device zone's \"Enter a password\" is the way to it."
+    description = "Play access only, over Bluetooth: the update is available and said so — the firmware bar is blue — but its Update wears a lock: it needs the author password, so it opens the Unlock sheet."
 )]
 fn device_card_update_play_only() -> Element {
     update_card(UpdateFixtureRow::PlayOnly, Link::Bluetooth)
@@ -313,7 +313,7 @@ fn device_curtain_update_updating() -> Element {
 }
 
 #[story(
-    description = "The same Reconnecting card while its board updates over Wi‑Fi: each reset closes the board's socket and the page redials it by itself, so the card's detail is the update's line, \"Updating over Wi‑Fi… 40%\"."
+    description = "The same Reconnecting card while its board updates over Wi‑Fi: each reset closes the board's socket and the page redials it by itself, so the card's detail is the update's line, \"Updating · 1 of 2 · 40%\"."
 )]
 fn device_curtain_update_updating_wifi() -> Element {
     let fixture =
@@ -390,6 +390,11 @@ fn fixture_card(
         unlock: Some(UiUnlockOffer::PlayOnly),
         panel: None,
         account_key_refused: None,
+        grant: Some(lpa_studio_core::UiAccessGrant {
+            tier: lpa_studio_core::AccessTier::Play,
+            key: Some("friends".to_string()),
+        }),
+        waiting: None,
     });
     rsx! {
         div { class: CARD_FRAME,
@@ -472,6 +477,7 @@ fn porch_lights(link: Link) -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: (link != Link::Usb).then(|| FIRMWARE_NEEDS_USB.to_string()),
+        held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
         last_update_outcome: None,

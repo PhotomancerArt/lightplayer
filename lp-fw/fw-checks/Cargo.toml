@@ -45,6 +45,13 @@ check-oom = []
 # esp-storage driver, the clock, the USB link and the reset reason stay in
 # `fw-esp32c6`.
 check-flash-tears = []
+# The `flash-reprogram` payload: does programming a torn word again with its
+# intended value make its weak bits read solid? The region layout, the
+# state log, the frontier scan, the weak-bit reads, the re-program and the
+# whole boot flow over an injected flash (`checks::flash_reprogram`). No chip
+# dependency — the esp-storage driver, the clock, the USB link and the reset
+# reason stay in `fw-esp32c6`.
+check-flash-reprogram = []
 # The `rmt-chase` payload: the chase pattern, the FNV-1a checksum and the
 # per-frame record (`checks::rmt_chase`). No chip dependency at all — the
 # harness half (board init, `Rmt`, `LedChannel`, `embassy_time`) stays in

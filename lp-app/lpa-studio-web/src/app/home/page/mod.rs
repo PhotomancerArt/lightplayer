@@ -5,8 +5,7 @@
 //! shared with Explore (`example_groups`), the sign-in line
 //! (`sign_in_prompt`), the boards half (`online_boards`, `offline_boards`,
 //! `boards_section`, the one card mount point `board_card_slot`,
-//! `offline_board_tile`, `board_row`), the "Unlocking your boards" fold
-//! (`keys_fold`), and the projects half (`other_projects`,
+//! `board_row`), the "Unlocking your boards" fold (`keys_fold`), and the projects half (`other_projects`,
 //! `projects_tab_section`, `your_patterns`, `project_items`, `project_row`,
 //! the add row `project_add_row`, and the page-wide drop and paste
 //! `library_drop`).
@@ -21,7 +20,6 @@ pub(crate) mod home_parts;
 pub(crate) mod home_view_mode;
 pub(crate) mod keys_fold;
 pub(crate) mod library_drop;
-pub(crate) mod offline_board_tile;
 pub(crate) mod offline_boards;
 pub(crate) mod online_boards;
 pub(crate) mod other_projects;

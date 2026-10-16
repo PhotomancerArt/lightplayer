@@ -726,6 +726,69 @@ fn sent_commands_and_action_outcomes_reach_the_device_event_log() {
 }
 
 // ---------------------------------------------------------------------------
+// Session recorder and secrets: a password typed into Unlock never reaches a
+// `?record=` session.
+// ---------------------------------------------------------------------------
+#[test]
+fn an_unlock_press_never_puts_its_password_in_a_recorded_session() {
+    const PASSWORD: &str = "correct-horse-42";
+    let (mut controller, _handle) = connected_controller();
+    // What the web shell mirrors into the recorder's sink: one JSON line per
+    // record (`device_events_io.rs`).
+    let lines = Rc::new(RefCell::new(Vec::new()));
+    controller.set_on_device_event({
+        let lines = Rc::clone(&lines);
+        move |record| {
+            lines
+                .borrow_mut()
+                .push(serde_json::to_string(record).expect("a record serializes"));
+        }
+    });
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
+
+    // The press as a click makes it: the offer bound with the typed values.
+    let unlock = crate::unlock_offer(
+        &crate::OfferPath::devices().child("mac-a0f26287b48e"),
+        crate::DeviceId(7),
+        crate::UiUnlockOffer::Locked,
+    );
+    let pressed = unlock
+        .press(
+            &crate::OfferArgs::new()
+                .with(crate::UNLOCK_PASSWORD_PARAM, PASSWORD)
+                .with(crate::UNLOCK_REMEMBER_PARAM, "true"),
+        )
+        .expect("the offer binds");
+    tx.send(StudioCommand::Action(pressed));
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    let lines = lines.borrow();
+    let recorded = |kind: &str, name: &str| {
+        lines
+            .iter()
+            .any(|line| line.contains(&format!("\"kind\":\"{kind}\"")) && line.contains(name))
+    };
+    assert!(
+        recorded("command", "Action/studio|access/Submit"),
+        "the press is on the timeline by name: {lines:?}"
+    );
+    assert!(
+        recorded("action", "studio|access/Submit"),
+        "and so is its outcome: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("<redacted>")),
+        "the command's detail says the password was held back: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| !line.contains(PASSWORD)),
+        "no recorded line holds the password: {lines:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Scenario 7: the controller log ring wraps at the core cap.
 // ---------------------------------------------------------------------------
 #[test]

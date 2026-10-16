@@ -22,6 +22,13 @@ options:
     default:
       - value: false
 
+  # LP fork (third diff, README-LP.md): research switch, default off.
+  - name: ble_controller_flash_only_params
+    description: "Call the BLE controller blob's `esp_ble_controller_flash_only_param_config()` before `r_ble_controller_enable` — what ESP-IDF 5.5.3 does under `BT_CTRL_RUN_IN_FLASH_ONLY`, retuning three controller timing values for a controller that runs from flash. Pair with esp-hal's `place_ble_controller_iram_in_flash`."
+    default:
+      - value: false
+    active: 'chip == "esp32c6"'
+
   - name: event_channel_capacity
     description: "Capacity of the internal event channel"
     default:

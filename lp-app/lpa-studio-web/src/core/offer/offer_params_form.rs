@@ -438,6 +438,7 @@ mod tests {
             detected_chip: chip.map(str::to_string),
             mac: None,
             firmware_blocked: None,
+            held_by_tab: false,
             escapes: vec![lpa_studio_core::DeviceEscape::Forget],
         }
     }

@@ -10,19 +10,19 @@
 //!
 //! | path verb | offered when |
 //! |---|---|
-//! | `cancel`, `retry`, `reconnect`, `disconnect`, `forget` | the model projects that escape |
+//! | `cancel`, `retry`, `reconnect`, `disconnect`, `forget` | the model projects that escape (`retry` and `forget` not on a board another tab holds: Forget hands the site's port grant back, which can pull the port from that tab, and deletes the registry row every tab shares) |
 //! | `push` | a LightPlayer on an open port, idle, that has said what it runs ([`push_device_offer`]) and is not locked |
 //! | `clear-faults` | the board reported it is degraded, linked, idle |
 //! | `remove-project` | the board reported something running, port open, idle |
-//! | `flash` | the needs-firmware faces ([`flash_device_offer`]) |
-//! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting) |
+//! | `flash` | the needs-firmware faces ([`flash_device_offer`]); not on a board another tab holds over USB (this tab's port to it is that tab's) |
+//! | `update-firmware` | over the air: an update available ([`update_offers`], Routine); else the USB flash on a running LightPlayer ([`update_firmware_offer`], Lasting; not on a board another tab holds over USB) |
 //! | `reinstall-firmware` | the board's firmware keeps crashing ([`update_offers`]) |
 //! | `install-firmware` | an idle board that can update over the air — up to date, update available, newer, rolled back, keeps crashing ("Other version…") or needs a version Studio can't get ("Install Y"): a `find` box over a `version` choice from the store's release index, or a look-up of a version the box names ([`update_offers`]) |
 //! | `install-firmware-file` | wherever `install-firmware` opens its list: "From a file…", a custom build's update files picked in the web's file dialog (needs the user's click; the build joins the list, and its install arms) ([`update_offers`]) |
-//! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]) |
-//! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered |
-//! | `connect` | the port is there but closed |
-//! | `reset-board` | linked: a USB link's reset lines, a network link's restart request ([`ResetReach`]); disabled over a network link without the author tier (the board would refuse) and while an activity runs (the model refuses a reset under one; Cancel is the escape) |
+//! | `erase` | linked, idle, not a needs-firmware face (erasing a blank flash does nothing), and not where the update standing withdraws it ([`update_offers`]); not on a board another tab holds over USB |
+//! | `identify` | linked and idle, where Retry (the same `Identify`) is not already offered; not on a board another tab holds |
+//! | `connect` | the port is there but closed, and no other tab holds the board (then the controller offers `take-over` instead) |
+//! | `reset-board` | linked: a USB link's reset lines, a network link's restart request ([`ResetReach`]); disabled over a network link without the author tier (the board would refuse) and while an activity runs (the model refuses a reset under one; Cancel is the escape); not on a board another tab holds over USB (the lines are that tab's port's) |
 //! | `rename` | always: one Text param, `name` |
 //! | `autoconnect` | a board at the end of a wire: one Toggle param, `enabled` |
 //!
@@ -31,9 +31,9 @@
 //! Flash (Q3), Push (Q4) and the over-the-air install (an older version is
 //! Lasting).
 
-use lpa_devices::Action;
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{DeviceView, Escape};
+use lpa_devices::{Action, HoldVia};
 
 use super::device_affordance::device_escape_action_for;
 use super::device_flash::{FirmwareVerb, firmware_verb};
@@ -90,6 +90,13 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
     let idle = view.activity.is_none();
     let linked = view.escapes.contains(&Escape::Disconnect);
     let verb = firmware_verb(view);
+    // A board another tab of this browser holds. Over USB, the OS opens a
+    // port for one tab at a time, so this tab's port to the board (gated,
+    // or let go on request) is that tab's: nothing here may touch its
+    // firmware or its lines. Over the network the board's USB port, if this
+    // tab has one, stays its own.
+    let held_elsewhere = view.held_elsewhere.as_ref();
+    let port_elsewhere = held_elsewhere.is_some_and(|held| held.via == HoldVia::Usb);
     let mut offers = Vec::new();
     let escape = |escape: Escape| {
         UiOffer::new(
@@ -132,16 +139,17 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
 
     // FIRMWARE
     let update = update_offers(view, &facts.update, &facts.prefix);
-    if let Some(flash) = flash_device_offer(view, facts.prefix.clone()) {
+    if !port_elsewhere && let Some(flash) = flash_device_offer(view, facts.prefix.clone()) {
         offers.push(flash);
     }
     if update.keep_flash
+        && !port_elsewhere
         && let Some(flash) = update_firmware_offer(view, facts.prefix.clone())
     {
         offers.push(flash);
     }
     offers.extend(update.offers);
-    if update.keep_erase && idle && linked && verb != Some(FirmwareVerb::Flash) {
+    if update.keep_erase && idle && linked && !port_elsewhere && verb != Some(FirmwareVerb::Flash) {
         let erase = DevicesOp::action_for(Action::Erase { device });
         offers.push(UiOffer::new(
             at("erase"),
@@ -154,16 +162,21 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
     }
 
     // DEVICE
-    if view.escapes.contains(&Escape::Retry) {
-        offers.push(escape(Escape::Retry));
-    } else if idle && linked {
-        offers.push(UiOffer::new(
-            at("identify"),
-            "info",
-            DevicesOp::action_for(Action::Identify { device }),
-        ));
+    // A board another tab holds is opened by its `take-over` (the
+    // controller's): Retry, Identify and Connect would each open a port
+    // that tab holds, fighting it for the board.
+    if held_elsewhere.is_none() {
+        if view.escapes.contains(&Escape::Retry) {
+            offers.push(escape(Escape::Retry));
+        } else if idle && linked {
+            offers.push(UiOffer::new(
+                at("identify"),
+                "info",
+                DevicesOp::action_for(Action::Identify { device }),
+            ));
+        }
     }
-    if view.status == DeviceStatus::Attached {
+    if view.status == DeviceStatus::Attached && held_elsewhere.is_none() {
         offers.push(UiOffer::new(
             at("connect"),
             "connect",
@@ -180,7 +193,7 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
     // with that reason: an offer the user or the agent can press must do
     // something (director, M3 P3). The escape from a busy board is Cancel,
     // which leads the list; Reset enables once the activity ends.
-    if linked {
+    if linked && !port_elsewhere {
         let reset = DevicesOp::action_for(Action::ResetBoard { device });
         offers.push(UiOffer::new(
             at("reset-board"),
@@ -209,7 +222,11 @@ pub fn device_offers(view: &DeviceView, facts: &DeviceOfferFacts<'_>) -> Vec<UiO
             facts.autoconnect,
         ));
     }
-    if view.escapes.contains(&Escape::Forget) {
+    // Not on a board another tab holds (or one this tab let go to it):
+    // Forget hands the site's port grant back, which can pull the port from
+    // the tab that holds it, and deletes the registry row every tab of this
+    // browser shares. It is back once the hold ends.
+    if view.escapes.contains(&Escape::Forget) && held_elsewhere.is_none() {
         offers.push(escape(Escape::Forget));
     }
     offers
@@ -332,6 +349,70 @@ mod tests {
                 "forget" | "erase" | "remove-project" | "update-firmware" | "push"
             );
             assert_eq!(offer.consequence().arms(), lasting, "{verb}");
+        }
+    }
+
+    /// Z4: a board another tab holds offers no verb that would open its
+    /// port — not Connect, Retry or Identify; the controller offers
+    /// `take-over` there instead. When the fact clears they are back.
+    #[test]
+    fn a_board_another_tab_holds_offers_no_verb_that_opens_its_port() {
+        let mut view = ready();
+        view.status = DeviceStatus::Attached;
+        view.escapes = vec![Escape::Retry, Escape::Disconnect, Escape::Forget];
+        view.held_elsewhere = Some(lpa_devices::HeldElsewhere {
+            via: lpa_devices::HoldVia::Usb,
+            level: lpa_devices::HoldLevel::Watching,
+            taken_from_here: false,
+        });
+
+        let held = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        for verb in ["connect", "retry", "identify"] {
+            assert!(!held.iter().any(|path| path == verb), "{verb}: {held:?}");
+        }
+
+        view.held_elsewhere = None;
+        let free = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        for verb in ["connect", "retry"] {
+            assert!(free.iter().any(|path| path == verb), "{verb}: {free:?}");
+        }
+    }
+
+    /// DD35 fix 2: a board another tab holds offers no Forget (the grant and
+    /// the registry row are shared with that tab), and one held over USB
+    /// nothing that touches its port's firmware or lines. Held over the
+    /// network, this tab's own USB port keeps its verbs.
+    #[test]
+    fn a_board_another_tab_holds_offers_no_forget_and_no_port_verb() {
+        let held = |via| {
+            Some(lpa_devices::HeldElsewhere {
+                via,
+                level: lpa_devices::HoldLevel::Watching,
+                taken_from_here: false,
+            })
+        };
+        let mut view = ready();
+        let free = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        assert!(free.iter().any(|path| path == "forget"), "{free:?}");
+
+        view.held_elsewhere = held(lpa_devices::HoldVia::Usb);
+        let usb = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        for verb in ["forget", "reset-board", "erase", "update-firmware", "flash"] {
+            assert!(!usb.iter().any(|path| path == verb), "{verb}: {usb:?}");
+        }
+        view.firmware_face = FirmwareFace::Blank;
+        let blank = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        assert!(!blank.iter().any(|path| path == "flash"), "{blank:?}");
+
+        let mut view = ready();
+        view.held_elsewhere = held(lpa_devices::HoldVia::Network);
+        let network = paths(&device_offers(&view, &facts(DeviceFace::Wire)));
+        assert!(!network.iter().any(|path| path == "forget"), "{network:?}");
+        for verb in ["reset-board", "erase", "update-firmware"] {
+            assert!(
+                network.iter().any(|path| path == verb),
+                "{verb}: {network:?}"
+            );
         }
     }
 
@@ -714,6 +795,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
             last_update_outcome: None,

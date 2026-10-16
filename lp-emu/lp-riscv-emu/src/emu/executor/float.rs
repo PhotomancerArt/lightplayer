@@ -2338,6 +2338,7 @@ mod tests {
                 &mut self.regs,
                 &mut self.memory,
                 &mut self.fp,
+                &mut crate::emu::LrReservation::new(),
             )
         }
 

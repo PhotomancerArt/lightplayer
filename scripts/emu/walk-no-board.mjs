@@ -46,7 +46,7 @@ import path from "node:path";
 import process from "node:process";
 import { execSync } from "node:child_process";
 
-import { StudioDriver } from "./studio-driver.mjs";
+import { PANEL, StudioDriver, boardPath, macOfPath } from "./studio-driver.mjs";
 import { liveRegistry, serveStudioBundle, startDoor, stopDoor, studioUrlFor, walkPort } from "./emulated-lane.mjs";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
@@ -173,11 +173,12 @@ function startSink() {
 /// never asserted: whether a cable-out leaves a card under Online boards
 /// ("Reconnect…") or moves it to Offline boards depends on the board's state
 /// (`walk-ota-emu.mjs` says so where it waits for the same thing), so a claim
-/// here would be a claim about the roster's timing. Matches the board's MAC
-/// in `#home-offline-boards` / `#home-online-boards`; an offline card does not
-/// print the MAC, so with one board in the walk, the only section on the page
-/// is where it sits. Answers `offline`, `online`, `neither` (no section on the
-/// page) or `unmatched` (both are there and neither names the MAC).
+/// here would be a claim about the roster's timing. Finds the board's card
+/// by its hook (`data-board-card="devices/mac-<hex>"`) inside
+/// `#home-offline-boards` / `#home-online-boards`; with one board in the
+/// walk and no MAC known, the only section on the page is where it sits.
+/// Answers `offline`, `online`, `neither` (no section on the page) or
+/// `unmatched` (both are there and neither holds the card).
 ///
 /// Waits, bounded, for Offline boards to appear before it answers, so a card
 /// still on its way there is not reported as staying: a page-side wait that
@@ -190,12 +191,13 @@ async function sectionOf(driver, mac) {
       what: "Offline boards to appear",
     })
     .catch(() => null);
+  const card = mac ? `[data-board-card="${boardPath(mac)}"]` : null;
   return driver.evaluate(`(() => {
-    const mac = ${JSON.stringify((mac ?? "").toLowerCase())};
+    const card = ${JSON.stringify(card)};
     const found = { offline: document.querySelector('#home-offline-boards'),
                     online: document.querySelector('#home-online-boards') };
     const present = Object.keys(found).filter((name) => found[name]);
-    const named = present.find((name) => mac && found[name].innerText.toLowerCase().includes(mac));
+    const named = present.find((name) => card && found[name].querySelector(card));
     if (named) return named;
     if (present.length === 0) return 'neither';
     return present.length === 1 ? present[0] : 'unmatched';
@@ -389,30 +391,13 @@ async function main() {
     await step("flash", "Studio flashes the packaged firmware into a blank board", async () => {
       await driver.pressConnect("USB", { timeoutMs: STEP_DEADLINE_MS });
       await driver.pickBoard(options.board, { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(
-        `(document.querySelector('#main')?.innerText || '').includes('needs firmware')`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the blank-flash face" },
-      );
-      await driver.clickWhenReady("boards fit", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
-        timeoutMs: STEP_DEADLINE_MS,
-        what: "the board-model picker",
-      });
-      await driver.click(BOARD_MODEL, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-      await driver.clickWhenReady("Flash firmware", { timeoutMs: STEP_DEADLINE_MS });
-      // The flow has to START and then FINISH, and both halves are needed.
-      // "the card stopped saying `needs firmware`" alone is satisfied the
-      // instant the card switches to `Flashing firmware…`, which screenshotted
-      // a progress bar and called it a flash.
-      await driver.waitFor(
-        `(document.querySelector('#main')?.innerText || '').includes('Flashing firmware')`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the flash to start" },
-      );
-      await driver.waitFor(
-        `(() => { const t = document.querySelector('#main')?.innerText || "";
-                  return !t.includes('Flashing firmware') && !t.includes('needs firmware'); })()`,
-        { timeoutMs: FLASH_DEADLINE_MS, what: "the flash to finish" },
-      );
+      // The blank board's card: its firmware bar says "No firmware", and
+      // core offers it `flash` — the name bar's Install, drawn as the board
+      // pick. The flash is the firmware bar's work, and it has to START and
+      // then FINISH: "the bar stopped saying `No firmware`" alone is
+      // satisfied the instant the work starts, which screenshotted a
+      // progress bar and called it a flash (`StudioDriver.flashBlank`).
+      await driver.flashBlank(BOARD_MODEL, { timeoutMs: STEP_DEADLINE_MS, flashTimeoutMs: FLASH_DEADLINE_MS });
       // …and then the BACKING, which is the only party that can see the
       // reset vector. `flash` answers "does an image magic sit there",
       // recomputed rather than cached (DD34), so `loaded` means what Studio
@@ -430,42 +415,46 @@ async function main() {
     // 2 + 3. CONNECT and IDENTIFY. The flash flow leaves the port held; the
     // card comes back on the board's own hello, which is the identity.
     await step("connect", "the session comes back on the flashed board", async () => {
+      // Identifying is the connection bar's work; once the board has said
+      // hello, core offers it `push` (an empty board's "Add a project").
       await driver.waitFor(
-        `(() => { const t = document.querySelector('#main')?.innerText || "";
-                  return t.includes("Ready") || t.includes("Identifying") || false; })()`,
+        `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
+                  return card.querySelector('[data-bar="connection"]')?.getAttribute('data-bar-work') === 'running'
+                    || Boolean(card.querySelector('[data-offer-path$="/push"]')); })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the card to reconnect" },
       );
     });
 
     await step("identify", "the board says what it is, in its own hello", async () => {
-      await driver.waitFor(
-        `(document.querySelector('#main')?.innerText || '').includes('Ready')`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "Ready" },
-      );
-      const identity = await driver.evaluate(`
-        (() => { const t = document.querySelector('#main')?.innerText || "";
-                 const m = t.match(/fw-esp32c6 [0-9a-f]+[^\\n]*/); return m ? m[0] : null; })()
-      `);
-      const mac = await driver.evaluate(`
-        (() => { const t = document.querySelector('#main')?.innerText || "";
-                 const m = t.match(/[0-9a-f]{2}(:[0-9a-f]{2}){5}/); return m ? m[0] : null; })()
-      `);
-      console.log(`  identity: ${identity}   mac: ${mac}`);
-      if (!identity) throw new Error("the card never showed a firmware identity");
+      // Ready, as core reads it: the board is offered a project.
+      await driver.waitOffer("push", { timeoutMs: STEP_DEADLINE_MS });
+      // The firmware's identity is the firmware details' Version: the label
+      // the board's own hello carried (the bar's summary may be saying
+      // something more pressing about the board's files). The MAC is the
+      // card's ref, which core keys by it.
+      const identity = await driver.detailsFact("firmware", "Version", { timeoutMs: STEP_DEADLINE_MS });
+      const ref = await driver.waitCard();
+      const mac = macOfPath(ref);
+      console.log(`  identity: ${identity}   card: ${ref}   mac: ${mac}`);
+      if (!identity || !identity.startsWith("fw-esp32c6")) {
+        throw new Error(`the card's firmware bar never named the firmware: ${JSON.stringify(identity)}`);
+      }
       steps.identity = identity;
       boardMac = mac;
     });
 
     // 4. UPLOAD — through Studio, as the criterion says, not the CLI.
     await step("upload", `push ${WALK_PROJECT} onto the board from the gallery`, async () => {
-      await driver.clickWhenReady("to choose from", { timeoutMs: STEP_DEADLINE_MS });
-      await driver.waitFor(`Boolean(document.querySelector('[id^="ux-popover-panel"]'))`, {
+      // `push`: the empty board's project bar action, "Add a project", drawn
+      // as the project pick.
+      await driver.pressOffer("push", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
+      await driver.waitFor(`Boolean(${PANEL})`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the project popover",
       });
       const before = sink.records.length;
-      await driver.click(WALK_PROJECT, { scope: `document.querySelector('[id^="ux-popover-panel"]')` });
-      await driver.clickWhenReady("Put it on the board", { timeoutMs: STEP_DEADLINE_MS });
+      await driver.click(WALK_PROJECT, { scope: PANEL });
+      await driver.clickWhenReady("Put it on the board", { scope: PANEL, timeoutMs: STEP_DEADLINE_MS });
       // NOT "the page mentions the project", which the CHOOSER's own button
       // already satisfies the moment it is picked — a predicate written that
       // way passed instantly and screenshotted a card that still read
@@ -473,13 +462,10 @@ async function main() {
       // heartbeat. And not "Nothing loaded went away" either: that happens
       // when the push STARTS. The push's own end, in the device model's
       // journal, is the only thing that carries an outcome.
-      // THE BOARD'S OWN WORDS decide this step, and they are on the card's
-      // terminal, streamed off the wire: `Project loaded` is the firmware
-      // saying it. That is the gate.
-      await driver.waitFor(
-        `(document.querySelector('#main')?.innerText || '').includes('Project loaded')`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the board to say `Project loaded`" },
-      );
+      // THE BOARD'S OWN WORDS decide this step, and they are on the board's
+      // terminal, in the status corner's details, streamed off the wire:
+      // `Project loaded` is the firmware saying it. That is the gate.
+      await driver.boardSaid("Project loaded", { board: boardMac, timeoutMs: STEP_DEADLINE_MS });
 
       // STUDIO'S VERDICT is reported beside it rather than asserted on,
       // because they are different claims and the board's is the stronger
@@ -531,16 +517,14 @@ async function main() {
       // product question. It was a shim bug instead: the unplug left the dead
       // port's byte channel open, so the replugged port's open() was refused
       // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
-      // Since that fix this should read "Ready"; "not listening" here is a
-      // regression worth chasing, not the expected answer.
+      // Since that fix the card's connection bar should read the port open
+      // ("USB · connected", "USB · live") once its work is over; "USB · not
+      // connected" here is a regression worth chasing, not the expected
+      // answer.
       const settled = await driver
-        .waitFor(
-          `(() => { const t = document.querySelector('#main')?.innerText || "";
-                    const hit = ["Ready", "Identifying", "not listening", "Gone"].find((w) => t.includes(w));
-                    return hit || false; })()`,
-          { timeoutMs: 60_000, what: "the card to settle after the replug" },
-        )
-        .catch(() => "(never settled to a word this walk knows)");
+        .waitWork("connection", ["none", "failed"], { timeoutMs: 60_000 })
+        .then(() => driver.barText("connection"))
+        .catch(() => "(the card never settled)");
       console.log(`  after the replug the card reads: ${JSON.stringify(settled)}`);
       steps.replugSettled = settled;
       sections.afterReattach = await reportSection(driver, boardMac, "after the cable went back in");

@@ -17,13 +17,12 @@ pub(crate) mod browser_identity;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
 pub(crate) mod connect_board;
-pub(crate) mod connections_group;
 pub(crate) mod device_access_panel;
 pub(crate) mod device_layout_sheet;
 #[cfg(feature = "stories")]
 pub(crate) mod device_offer_story_fixtures;
 pub(crate) mod device_pick_popover;
-pub(crate) mod device_roster_card;
+pub(crate) mod device_rename_section;
 pub(crate) mod device_terminal;
 #[cfg(feature = "stories")]
 pub(crate) mod device_update_stories;
@@ -49,7 +48,6 @@ pub(crate) mod package_card;
 pub(crate) mod package_card_stories;
 pub mod package_export;
 pub mod page;
-pub(crate) mod play_feed_text;
 pub mod project_opening_frame;
 #[cfg(feature = "stories")]
 pub(crate) mod project_opening_frame_stories;
@@ -58,6 +56,7 @@ pub(crate) mod reach_note;
 pub(crate) mod relay_connect_stories;
 #[cfg(feature = "stories")]
 pub(crate) mod relay_link_stories;
+pub(crate) mod row_cta;
 pub(crate) mod share_words;
 pub(crate) mod target_pick_popover;
 /// Poster capture is the wasm thumb path; host builds of this crate render

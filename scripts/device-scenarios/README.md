@@ -84,8 +84,9 @@ never a substitute server — or, with `--serve-release`, from the release bundl
 (`just studio-web-story-build`) the run serves itself on its own stable port: no
 prompt, no detached process, one foreground command. The two are joined by
 `?emu=<url>`, which composes with `?record=` because nothing reads anything
-else's flag. The steps' only page contact is the `connect` and `cancel-connect`
-steps, which press the home page's **USB** square (`pressConnect`).
+else's flag. The steps' only contact with the page outside a board's card is
+the `connect` and `cancel-connect` steps, which press the home page's **USB**
+square (`pressConnect`), and a `text` step with no `bar`.
 
 ## The `emulated` block
 
@@ -95,15 +96,42 @@ steps, which press the home page's **USB** square (`pressConnect`).
   "boards": ["c6-a=blank,kind=rom-up"],   // `--board` args; `{fw}` = the packaged C6 ELF
   "steps": [
     { "do": "connect", "board": "c6-a", "describe": "mirrors the manual: line" },
-    { "do": "settle",  "words": ["Ready"] },
+    { "do": "settle",  "offers": ["push|edit"] },
     { "do": "shot",    "name": "s2-ready" },
     { "do": "await",   "match": "state:ready" }
   ]
 }
 ```
 
-Verbs: `connect`, `cancel-connect`, `settle`, `text`, `project`, `push`,
-`flash`, `card`, `detach`, `attach`, `registry`, `shot`, `mark`, `await`.
+Every step that reads or presses a board does it through the **board
+card's hooks** (`lp-app/lpa-studio-web/src/app/board_card/mod.rs`, "Walk
+hooks"; the helpers are `scripts/emu/studio-driver.mjs`'s): a card by
+`data-board-card="devices/<board ref>"`, a verb by the offer path its
+`AgentMark` carries (`data-offer-path`), a bar by `data-bar`, and what the
+board said off its own terminal in the status corner's details. **Never the
+card's face text**: a page string Studio can satisfy by itself is a weak
+predicate. A step that names `board` means the door's board id (`c6-a`); the
+lane finds its card by the MAC the door's live registry lists for it (core
+keys a card by the MAC the board's hello said, `devices/mac-<12 hex>`), and
+`mac` names one directly. With neither, the step means the page's only card
+— a blank chip that has not said who it is (`devices/new-<n>`) is left
+unnamed.
+
+| step | what it does |
+|---|---|
+| `connect` / `cancel-connect` | press the home page's **USB** square, then pick `board` in the in-page chooser (or Cancel it) |
+| `settle` | wait until core says what the board is: every verb in `offers` drawn on the card's face and enabled (`"a\|b"` = either, as an `expect` matcher spells it: `"push\|edit"` is a ready board, offered a project or the editor on the one it runs), and each bar's line in `bars` (`{ "firmware": "No firmware" }`) including its words. `words` (the card's face text) is refused |
+| `flash` | a blank board's Install: the firmware bar says "No firmware", `flash` opens the board pick, picking `model` (default `XIAO ESP32-C6`) is the press, and the firmware bar's work must start and finish |
+| `project` | press `push` (an empty board's "Add a project") and choose `name` in the project pick |
+| `push` | press "Put it on the board" in the project pick |
+| `said` | the board's own `words` in its terminal (the status corner's details) |
+| `board` | wait for the card of `board` (or `mac`): `[data-board-card="devices/mac-…"]` |
+| `card` | press any other offer by its `verb`, on the card's face or in `bar`'s details (`reset-board` is the hardware details'); `confirm: true` presses a Lasting verb (arm, then press) |
+| `text` | `contains` anywhere on the page; with `bar`, in that bar of the card, its line or its details |
+| `detach` / `attach` | the cable out / back in (`bus.detach`) |
+| `registry` | print the door's live registry |
+| `shot` | a screenshot, `name`d, into `--shots` |
+| `mark` / `await` | below |
 
 - **`await`** is the only step that is about the TRACE, and it goes last on
   purpose: everything before it has already been observed on the card, so a

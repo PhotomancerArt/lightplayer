@@ -29,6 +29,7 @@
 
 mod advertising;
 mod ble_connection;
+mod ble_controller_config;
 mod ble_task;
 mod conn_params;
 mod hci_transport;

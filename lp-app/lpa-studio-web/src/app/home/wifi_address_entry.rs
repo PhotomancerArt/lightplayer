@@ -103,6 +103,7 @@ mod tests {
             through_relay: false,
             connecting: true,
             error: None,
+            busy: false,
         };
         assert_eq!(
             connect_line(&connecting),
@@ -111,6 +112,7 @@ mod tests {
         let failed = UiWifiConnect {
             connecting: false,
             error: Some(lpa_studio_core::WIFI_BUSY_WORDS.to_string()),
+            busy: true,
             ..connecting
         };
         assert_eq!(connect_line(&failed), lpa_studio_core::WIFI_BUSY_WORDS);
@@ -119,6 +121,7 @@ mod tests {
             through_relay: true,
             connecting: true,
             error: None,
+            busy: false,
         };
         assert_eq!(
             connect_line(&relay),

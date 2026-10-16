@@ -95,6 +95,7 @@ pub(crate) fn status_pane_tone(kind: UiStatusKind) -> PaneTone {
         UiStatusKind::Neutral => PaneTone::Neutral,
         UiStatusKind::Working => PaneTone::Working,
         UiStatusKind::Good => PaneTone::Good,
+        UiStatusKind::Live => PaneTone::Live,
         UiStatusKind::Warning => PaneTone::Warning,
         UiStatusKind::Attention => PaneTone::Attention,
         UiStatusKind::Error => PaneTone::Error,

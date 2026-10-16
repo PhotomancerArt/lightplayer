@@ -67,8 +67,8 @@ use super::network_link_keys::{NetworkLinkKeys, link_key};
 use super::remembered_passwords::RememberedPasswords;
 use super::two_passwords::{device_password_salts, password_lines, plan_password};
 use super::ui_access_view::{
-    UiAccessPanel, UiDeviceAccess, UiLoginPrompt, UiPasswordLine, UiUnlockOffer, access_line,
-    account_key_refused_sentence, dropped_sentence, prompt_sentence,
+    UiAccessGrant, UiAccessPanel, UiAccessWait, UiDeviceAccess, UiLoginPrompt, UiPasswordLine,
+    UiUnlockOffer, access_line, account_key_refused_sentence, dropped_sentence, prompt_sentence,
 };
 use crate::app::devices::device_effects::{DeviceEffects, DeviceTaskFuture, DeviceTimerFuture};
 
@@ -1023,6 +1023,25 @@ impl AccessController {
             } => Some(UiUnlockOffer::PlayOnly),
             _ => None,
         });
+        // The typed facts the board card reads: what the link holds, or
+        // what it is doing about it — on an untrusted link, while the port
+        // is open (as the line).
+        let phase = untrusted
+            .then(|| session.map_or(AccessPhase::Unknown, |s| s.phase.clone()))
+            .filter(|_| device.evidence.presence.is_open());
+        let grant = match &phase {
+            Some(AccessPhase::Granted { tier, label }) => Some(UiAccessGrant {
+                tier: *tier,
+                key: label.clone(),
+            }),
+            _ => None,
+        };
+        let waiting = match phase {
+            Some(AccessPhase::Unknown | AccessPhase::Checking) => Some(UiAccessWait::Checking),
+            Some(AccessPhase::LoggingIn) => Some(UiAccessWait::Unlocking),
+            Some(AccessPhase::Unreachable) => Some(UiAccessWait::NoPassword),
+            Some(AccessPhase::Granted { .. } | AccessPhase::Locked) | None => None,
+        };
         let panel = self.panel(device);
         if !untrusted && panel.is_none() {
             return None;
@@ -1036,6 +1055,8 @@ impl AccessController {
                 .account_refused
                 .get(&device.id)
                 .map(|why| account_key_refused_sentence(why)),
+            grant,
+            waiting,
         })
     }
 
@@ -1207,13 +1228,16 @@ fn syncs_over_usb(device: &Device) -> bool {
 /// add would land in a store that exists only until the next reboot, and a
 /// list read from it is not the board's (G1 rehearsal, 2026-10-03: "Who has
 /// access 1" on a board whose own list held 16). The firmware keeps
-/// Bluetooth off on such a board for the same reason.
+/// Bluetooth off on such a board for the same reason. A board that refused
+/// its file store (`refused`, an `fs-tree` build) is the same: its store
+/// waits on the flash it would not mount.
 pub(crate) fn holds_its_files(device: &Device) -> bool {
-    device
-        .evidence
-        .classification
-        .hello()
-        .is_some_and(|hello| hello.fs == lpa_devices::wire::BoardFs::LegacyHeld)
+    device.evidence.classification.hello().is_some_and(|hello| {
+        matches!(
+            hello.fs,
+            lpa_devices::wire::BoardFs::LegacyHeld | lpa_devices::wire::BoardFs::Refused
+        )
+    })
 }
 
 /// The device's current connection window, when its link is open and has

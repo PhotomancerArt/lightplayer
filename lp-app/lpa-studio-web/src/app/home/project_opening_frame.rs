@@ -46,11 +46,10 @@
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
-    AccessCommand, ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait,
-    DeviceWaitReason, OfferPath, OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
+    ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason, OfferPath,
+    OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
 };
 
-use crate::app::home::access_ui_context::access_handler;
 use crate::core::{
     quiet_action_class, solid_action_class, use_device_verbs, use_offers, verb_named,
 };
@@ -808,12 +807,11 @@ pub(crate) fn OpenFailureNotice(
         None => (StudioRoute::Explore.path(), "Back to Explore"),
     };
     let board = device.as_ref().and_then(|device| device.id);
-    let unlock = board.filter(|_| needs_unlock);
-    // The board's own `reset-board` offer (M3).
+    // The board's own `reset-board` and `unlock` offers (M3, P02).
     let verbs = use_device_verbs(board)();
+    let unlock: Option<UiOffer> = verb_named(&verbs, "unlock").filter(|_| needs_unlock);
     let reset: Option<UiOffer> = verb_named(&verbs, "reset-board").filter(|_| !needs_unlock);
     let reset = reset.map(|offer| offer.action);
-    let on_access = access_handler();
     rsx! {
         section { class: "tw:grid tw:max-w-[560px] tw:gap-3.5",
             div { class: "tw:grid tw:gap-2 tw:rounded-lg tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-4",
@@ -835,13 +833,24 @@ pub(crate) fn OpenFailureNotice(
                     },
                     "Retry"
                 }
-                if let Some(device) = unlock {
+                // The board's own `unlock` offer: pressed bare, it raises
+                // the sheet.
+                if let Some(unlock) = unlock {
                     button {
                         r#type: "button",
                         class: solid_action_class(ActionPriority::Secondary),
+                        disabled: !unlock.is_enabled(),
                         title: "Unlock with an edit password; Retry once it is unlocked.",
-                        onclick: move |_| on_access.call(AccessCommand::LogIn { device }),
-                        "Unlock"
+                        "data-offer-path": "{unlock.path}",
+                        onclick: {
+                            let press = unlock.action.clone();
+                            move |_| {
+                                if let Some(on_action) = on_action {
+                                    on_action.call(press.clone());
+                                }
+                            }
+                        },
+                        "{unlock.label()}"
                     }
                 }
                 if let Some(reset) = reset {

@@ -14,7 +14,11 @@
 //! 3. The board's proofs, checked against the accounts its salts name —
 //!    the one store call on this path, through `with_service`, once.
 //! 4. `Registered` (or `Refused`), and the board is online until its leg
-//!    closes.
+//!    closes. A protocol 2 board's `PictureRate` goes through the leg's
+//!    queue, so it reaches the board after `Registered`.
+//!
+//! These steps are relay protocol 1's, and every protocol speaks them
+//! unchanged.
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -127,12 +131,13 @@ async fn register(
     };
 
     let RelayHello {
+        relay_proto,
         board_mac,
         label,
         wire_proto,
         lan,
         accounts: salts,
-        ..
+        firmware,
     } = hello;
     let accounts = state
         .with_service(move |core| {
@@ -155,6 +160,9 @@ async fn register(
         lan,
         public_ip: ip,
         since: epoch_seconds(),
+        relay_proto,
+        firmware,
+        project: None,
     };
     if let Err(reason) = relay.register_board(registration, handle.take_outbox()) {
         refuse(socket, reason).await;
@@ -205,7 +213,8 @@ async fn refuse(socket: &mut WebSocket, reason: RefuseReason) {
     close(socket, RelayCloseCode::Normal).await;
 }
 
-fn epoch_seconds() -> f64 {
+/// Now, as f64 epoch seconds: the hub's clock, read at its edge.
+pub(super) fn epoch_seconds() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64())

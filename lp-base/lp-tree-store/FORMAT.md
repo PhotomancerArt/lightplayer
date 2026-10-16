@@ -118,8 +118,8 @@ Writing and killing:
   of weak bits.
 - Head kind says which write head opened the sector: **hot** sectors hold
   `…/.lp/panel.json` files, the hot directory and roots; **cold** sectors
-  hold everything else and GC copies. A reader does not need it except to
-  resume appending.
+  hold everything else. GC copies a sector's live records to a sector of
+  the same kind. A reader does not need it except to resume appending.
 
 ## Record
 
@@ -318,6 +318,18 @@ other file only in the cold tree.
 A writer appends only to a sector that is not closed (by a record that
 failed to check, or by an unknown compat flag) and whose bytes after its
 last record all read `0xFF`.
+
+A record whose CRC checked on one read may not check on the next: a program
+torn inside a 4-byte word can leave its one missing clear weak. Only the
+last program in the newest sector of a head kind can be torn that way, so
+before a writer trusts that sector (resumes it, or adopts a root or a copy
+found in it) it settles it: it programs the sector's last record again with
+the bytes it read and checked, and reads them back (program only clears, so
+this finishes the clear; a mismatch closes the sector); when the sector's
+records end at a record that failed to check, it programs that record's 16
+header bytes to zero, which no reader accepts. A newest sector that holds no
+record is not resumed. These are writer rules: they program only bytes a
+reader already classifies the same way, and no byte of the format changes.
 
 ## What a writer guarantees (the invariants)
 

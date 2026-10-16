@@ -101,6 +101,12 @@ impl LpFsView {
     }
 }
 
+// Every method forwarded, none defaulted: a default here would answer for
+// the parent without asking it (a batch through a view would commit each
+// call). The lint makes a new `LpFs` method fail clippy until it is
+// forwarded; `lpa-server/tests/lp_fs_wrapper_conformance.rs` proves the forwards reach the
+// parent.
+#[deny(clippy::missing_trait_methods)]
 impl LpFs for LpFsView {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         // Validate input is absolute (contract: LpFs only accepts absolute paths)
@@ -260,12 +266,54 @@ impl LpFs for LpFsView {
         self.parent.borrow().abort_batch()
     }
 
+    fn batches_are_atomic(&self) -> bool {
+        self.parent.borrow().batches_are_atomic()
+    }
+
+    fn write_deflated_chunk(
+        &self,
+        path: &LpPath,
+        offset: u32,
+        logical_len: u32,
+        deflated: &[u8],
+    ) -> Result<(), FsError> {
+        // Delegated so the parent's own form (the tree store keeps the
+        // deflated bytes) and its change recording are used.
+        self.validate_path(path)?;
+        let normalized = path.to_path_buf();
+        let parent_path = self.parent_path(normalized.as_str());
+        let parent_lp_path = LpPath::new(parent_path.as_str());
+        self.parent
+            .borrow()
+            .write_deflated_chunk(parent_lp_path, offset, logical_len, deflated)
+    }
+
     fn current_version(&self) -> FsVersion {
         self.parent.borrow().current_version()
     }
 
     fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsEvent> {
         let parent_changes = self.parent.borrow().get_changes_since(since_version);
+        self.chrooted_events(parent_changes)
+    }
+
+    fn get_events_since(&self, since_version: FsVersion) -> Vec<FsEvent> {
+        let parent_events = self.parent.borrow().get_events_since(since_version);
+        self.chrooted_events(parent_events)
+    }
+
+    fn clear_changes_before(&mut self, _before_version: FsVersion) {
+        // No-op for views (parent manages versions)
+    }
+
+    fn record_changes(&mut self, _changes: Vec<FsEvent>) {
+        // No-op for views (parent manages versions)
+    }
+}
+
+impl LpFsView {
+    /// The parent's events under this view's prefix, with chrooted paths.
+    fn chrooted_events(&self, parent_changes: Vec<FsEvent>) -> Vec<FsEvent> {
         let prefix = &self.prefix;
 
         parent_changes
@@ -286,14 +334,6 @@ impl LpFs for LpFsView {
                 }
             })
             .collect()
-    }
-
-    fn clear_changes_before(&mut self, _before_version: FsVersion) {
-        // No-op for views (parent manages versions)
-    }
-
-    fn record_changes(&mut self, _changes: Vec<FsEvent>) {
-        // No-op for views (parent manages versions)
     }
 }
 

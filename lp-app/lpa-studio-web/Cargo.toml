@@ -145,3 +145,7 @@ lpa-cloud-client = { path = "../lpa-cloud-client" }
 # its tests compare every module against this MIT encoder. Test-only: the
 # shipped bundle carries none of it.
 qrcodegen = "1.8"
+# The board card's DOM, rendered on the host: its walk hooks and that every
+# action is marked with its offer path are facts of the markup, not of a
+# class string. Already in the workspace (lp-cli's desk images); test-only.
+dioxus-ssr = "0.7"

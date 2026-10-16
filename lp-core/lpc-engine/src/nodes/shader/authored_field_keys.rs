@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
 use lp_collection::VecMap;
-use lpc_model::SlotPath;
+use lpc_model::{Revision, SlotPath};
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{NodeError, TickContext};
@@ -58,6 +58,13 @@ pub struct AuthoredFieldKeys {
 /// One consumed uniform's authored-field keys, indexed by [`AuthoredField`].
 pub struct UniformFieldKeys {
     keys: [Option<Rc<QueryKey>>; AuthoredField::COUNT],
+    /// The revision of the authored `gradient.some` value this uniform's
+    /// runtime gradient was last parsed from, so a steady frame skips the
+    /// parse (see `sync_gradient_from_authored`). Lives here because it has
+    /// exactly the keys' lifetime: dropped with the uniform
+    /// ([`AuthoredFieldKeys::retain_uniforms`]) and on every structural
+    /// epoch, which is when an authored value can change its source.
+    pub(super) gradient_revision: Option<Revision>,
 }
 
 /// An authored field of one shader uniform, as a fixed index into
@@ -182,6 +189,7 @@ impl UniformFieldKeys {
     fn new() -> Self {
         Self {
             keys: core::array::from_fn(|_| None),
+            gradient_revision: None,
         }
     }
 

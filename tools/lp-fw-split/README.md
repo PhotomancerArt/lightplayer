@@ -10,6 +10,7 @@ boot records that say which core to boot.
 lp-fw-split build --out target/fw-split/<slug> [--features esp32c6,server]
 lp-fw-split reach  <elf> <map> --emit-ld <engine.x>   # one link → placement rules
 lp-fw-split verify <elf> <map>                        # one (pass-2) link → verdict
+lp-fw-split segments <core.bin>...                    # an image's segments; fails on one the loader cannot place
 ```
 
 `lp-cli firmware build|package` use the library; the just recipes use the
@@ -53,6 +54,22 @@ come from `lp-bootctl` itself.
    3. only then is the core's ESP image made, so its checksum and appended
       hash cover the patched slot. The tool checks the slot equals the
       engine's SHA-256 and refuses the build otherwise.
+
+   **Every segment of `core.bin` must be one the loader can place**
+   (`core_segments`): inside the core's flash (`0x4200_0000` to the engine
+   region, at its page offset), or inside the core's RAM (esp-hal's C6 `RAM`
+   region) less the loader's own. The loader copies any other segment to its
+   address, and espflash 3.3.0 writes an address-0 padding segment when a
+   page crossing leaves a gap the RAM segments cannot fill: on silicon that
+   copy faulted before the core ran
+   (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
+   So first each such padding segment's load address becomes a run at the
+   start of the core's `.bss` (`core_padding`; `_bss_start.._bss_end` from
+   the pass-2 ELF). Its bytes stay where they are, so every later segment
+   keeps its offset, and the loader copies zeros that riscv-rt zeroes again
+   before Rust runs. The appended SHA-256 is recomputed. Then any segment the
+   loader still cannot place fails the build, and `lp-cli firmware package`
+   checks the bytes it ships the same way.
 8. **Loader.** Built from its own directory; its ESP image by espflash. The
    build refuses a loader image without this tree's version word
    (`lp_bootctl::loader_identity`) or longer than `LOADER_MAX_LEN`.

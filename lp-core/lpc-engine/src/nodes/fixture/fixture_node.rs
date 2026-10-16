@@ -591,7 +591,7 @@ impl FixtureNode {
         Some(AssetRefreshResult::Refreshed)
     }
 
-    fn control_display_layout_revision(
+    fn display_layout_revision_at(
         &mut self,
         settings: FixtureRenderSettings,
         ctx: &ControlRenderContext<'_>,
@@ -1156,6 +1156,19 @@ impl ControlNode for FixtureNode {
     ) -> Result<Option<ControlDisplayLayout>, NodeError> {
         self.control_display_layout_impl(ctx)
     }
+
+    fn control_display_layout_revision(
+        &mut self,
+        _product: ControlProduct,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<Option<Revision>, NodeError> {
+        // The revision rides on the mapping version and the render size, both
+        // held on the node: no layout is built to learn it.
+        let settings = self
+            .last_settings
+            .ok_or_else(|| NodeError::msg("fixture display layout missing cached settings"))?;
+        Ok(Some(self.display_layout_revision_at(settings, ctx)))
+    }
 }
 
 impl FixtureNode {
@@ -1371,7 +1384,7 @@ impl FixtureNode {
         let settings = self
             .last_settings
             .ok_or_else(|| NodeError::msg("fixture display layout missing cached settings"))?;
-        let revision = self.control_display_layout_revision(settings, ctx);
+        let revision = self.display_layout_revision_at(settings, ctx);
         Ok(Some(ControlDisplayLayout::Layout2d(
             fixture_control_layout_2d(
                 self.mapping.as_mapping_ref(),
