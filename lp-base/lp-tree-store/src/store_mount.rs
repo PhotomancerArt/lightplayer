@@ -34,8 +34,8 @@ use crate::flash::Flash;
 use crate::heap_sort::heap_sort_by;
 use crate::mount_verdict::FormatResidue;
 use crate::mount_walk::{Walked, index_closure};
-use crate::object_id::ObjectId;
 use crate::object_hasher::ObjectHasher;
+use crate::object_id::ObjectId;
 use crate::record_scan::{RootCandidates, scan_sector};
 use crate::root_record::RootRecord;
 use crate::sector_filter::SectorFilter;
@@ -69,7 +69,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             }
         }
         let seqs = &self.log.sectors.seq;
-        heap_sort_by(&mut valid, |&a, &b| (seqs[a as usize], a) < (seqs[b as usize], b));
+        heap_sort_by(&mut valid, |&a, &b| {
+            (seqs[a as usize], a) < (seqs[b as usize], b)
+        });
         // The newest sector of each kind: the only place a cut can have torn
         // the last program, and the head a resume would append to.
         let newest = HeadKind::ALL.map(|kind| {
@@ -195,9 +197,8 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         self.max_root_seq = roots.max_seq;
         self.log.note(filter.ram_bytes());
         #[cfg(test)]
-        crate::mount_cost_tests::PASS1.with(|p| {
-            p.set((self.log.counters.read_calls, self.log.counters.bytes_read))
-        });
+        crate::mount_cost_tests::PASS1
+            .with(|p| p.set((self.log.counters.read_calls, self.log.counters.bytes_read)));
         // The fast reading adopts the newest root or nothing: a closure it
         // cannot complete may be one the whole reading completes (a damaged
         // newer copy over a good older one), and falling back a root on it

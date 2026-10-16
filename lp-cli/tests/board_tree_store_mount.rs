@@ -105,8 +105,14 @@ async fn run() {
             let mut conn = None;
             let mut samples = Vec::new();
             for i in 0..repeats {
-                let (c, m) =
-                    power_up(&desk, &port, conn, &console, &format!("{label} {name} #{i}")).await;
+                let (c, m) = power_up(
+                    &desk,
+                    &port,
+                    conn,
+                    &console,
+                    &format!("{label} {name} #{i}"),
+                )
+                .await;
                 conn = Some(c);
                 samples.push(m);
             }

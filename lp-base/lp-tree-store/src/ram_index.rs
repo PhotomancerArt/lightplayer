@@ -188,7 +188,12 @@ mod tests {
         for &id in &add {
             a.insert(ObjectId(id), loc(2, id as u32));
         }
-        b.merge_sorted(add.iter().rev().map(|&id| (ObjectId(id), loc(2, id as u32))), 5);
+        b.merge_sorted(
+            add.iter()
+                .rev()
+                .map(|&id| (ObjectId(id), loc(2, id as u32))),
+            5,
+        );
         let all = |ix: &RamIndex| {
             (0..ix.len())
                 .map(|i| (ix.id_at(i).0, ix.loc_at(i)))

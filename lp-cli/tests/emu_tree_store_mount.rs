@@ -38,7 +38,11 @@ fn tree_store_mount_cpu_on_the_emulated_c6() {
         let (label, elf) = e.split_once('=').expect("label=path");
         for image in &paths {
             let region = std::fs::read(image).unwrap();
-            let mut host = board(PathBuf::from(elf).as_path(), chip_with_lpfs(&region), 0x7EE0_0A20);
+            let mut host = board(
+                PathBuf::from(elf).as_path(),
+                chip_with_lpfs(&region),
+                0x7EE0_0A20,
+            );
             let hello = boot(&mut host);
             let mount = line_with(&host, "[perf] fs mount ").cloned();
             let fs = line_with(&host, "[FS] ").cloned();

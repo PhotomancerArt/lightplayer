@@ -505,7 +505,10 @@ fn shadowed_copy_case(
         }
     };
     res.mounted = true;
-    judge(store.as_mut(), &Allowed::OneOf(vec![hist.states[j].clone()]))?;
+    judge(
+        store.as_mut(),
+        &Allowed::OneOf(vec![hist.states[j].clone()]),
+    )?;
     format_after(cand, cfg, store.into_flash())
 }
 
@@ -807,7 +810,11 @@ fn shadowed_copy(f: &mut NorFlashSim, rng: &mut SimRng) -> bool {
         .collect();
     let seqs: Vec<(u32, bool)> = sectors
         .iter()
-        .filter_map(|s| s.header.as_ref().map(|h| (h.seq, h.head == HeadReport::Hot)))
+        .filter_map(|s| {
+            s.header
+                .as_ref()
+                .map(|h| (h.seq, h.head == HeadReport::Hot))
+        })
         .collect();
     // (sector, the copy's sector and seq, a live directory's or multi's
     // payload range — records mount reads whole): the
@@ -818,7 +825,12 @@ fn shadowed_copy(f: &mut NorFlashSim, rng: &mut SimRng) -> bool {
     for s in sectors {
         let Some(h) = &s.header else { continue };
         let hot = h.head == HeadReport::Hot;
-        let newest = seqs.iter().filter(|q| q.1 == hot).map(|q| q.0).max().unwrap();
+        let newest = seqs
+            .iter()
+            .filter(|q| q.1 == hot)
+            .map(|q| q.0)
+            .max()
+            .unwrap();
         if h.seq >= newest {
             continue;
         }

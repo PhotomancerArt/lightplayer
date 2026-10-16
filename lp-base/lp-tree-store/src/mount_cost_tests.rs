@@ -151,8 +151,11 @@ fn push_c40(st: &mut crate::test_support::Store, c: &StoreConfig, root: &str) {
 fn push_basic(st: &mut crate::test_support::Store, root: &str, seed: u64) {
     st.begin().unwrap();
     for i in 0..8u64 {
-        st.put(&format!("{root}/doc{i}.json"), &text(seed + i, 300 + 200 * i as usize))
-            .unwrap();
+        st.put(
+            &format!("{root}/doc{i}.json"),
+            &text(seed + i, 300 + 200 * i as usize),
+        )
+        .unwrap();
     }
     st.commit().unwrap();
 }
