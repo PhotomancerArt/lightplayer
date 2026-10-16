@@ -6,6 +6,7 @@
 
 use crate::ux::camera::Camera;
 use crate::ux::debug_flags::DebugFlags;
+use crate::ux::ui::LayoutKind;
 use crate::domain::component::{Component, ComponentId, ComponentKind};
 use crate::domain::geom::{Rect, Vec2, polyline_length};
 use crate::ux::handle::{Handle, HandleKind};
@@ -192,6 +193,8 @@ pub struct Editor {
     /// (the dome). M toggles it.
     pub move_draw: bool,
     pub debug: DebugFlags,
+    /// Which layout the canvas is in.
+    pub layout: LayoutKind,
     /// The edge under the pointer, as the view reports it
     /// (`edges.rs`).
     pub(crate) edge_hover: Option<(NodeId, NodeId)>,
@@ -224,6 +227,7 @@ impl Editor {
             path_draft: Vec::new(),
             move_draw: true,
             debug: DebugFlags::default(),
+            layout: LayoutKind::default(),
             edge_hover: None,
             press_log: Vec::new(),
             undo: Vec::new(),

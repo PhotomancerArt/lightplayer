@@ -136,7 +136,12 @@ impl PixelGrid {
 impl Project {
     /// One port's pixel grid, in world units.
     pub fn pixel_grid(&self, output: &NodeId, key: &str) -> Option<PixelGrid> {
-        let row = self.port_rect(output, key)?;
+        self.pixel_grid_in(output, key, self.port_rect(output, key)?)
+    }
+
+    /// One port's pixel grid in its row `row`, in whatever units `row` is:
+    /// world units on the canvas, card-local on the card's face.
+    pub fn pixel_grid_in(&self, output: &NodeId, key: &str, row: Rect) -> Option<PixelGrid> {
         self.output(output)?.port(key)?;
         let starts = self
             .port_runs(output, key)

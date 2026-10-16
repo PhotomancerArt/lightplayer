@@ -62,6 +62,11 @@
 //! - [`hints`] — what the screen says you can do right now.
 //! - [`data_path`] — the wiring order drawn inside a fixture;
 //!   [`board_view`] — the board as the editor shows it.
+//! - [`view_tree`] — what the page draws, as one tree with no positions
+//!   ([`UiCanvasView`], the `Ui…` types in [`ui`]): every node with its
+//!   face, detail and emphasis, the edges and what they say, the overlay,
+//!   the inspector, the tree pane, the hints. Every decision the page used
+//!   to make is a field here.
 //!
 //! The behaviour is pinned by `tests/statements.rs`: one sentence, one test.
 //!
@@ -71,7 +76,7 @@ pub mod domain;
 pub mod ux;
 
 pub use domain::{bindings, board, fixture_overrides, output_overrides, patch, port_runs, render_product, resolve};
-pub use ux::{area, board_view, card_geometry, data_path, edges, handle, highlight, hints, layout_input, pick, pixel_grid, props};
+pub use ux::{area, board_view, card_geometry, data_path, edges, handle, highlight, hints, layout_input, pick, pixel_grid, props, ui, view_tree};
 
 pub use domain::bindings::Binding;
 pub use domain::board::{BoardFrame, PortFrame};
@@ -109,3 +114,4 @@ pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};
 pub use ux::tree_rows::TreeRow;
+pub use ux::ui::*;

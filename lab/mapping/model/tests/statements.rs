@@ -3028,6 +3028,239 @@ fn each_run_starts_on_a_fresh_square() {
     }
 }
 
+// ---- the view tree -------------------------------------------------------------
+
+/// The view tree carries no positions: every node, in tree order, with its
+/// module, its role and the size core declares — the same the layout is
+/// given — and the page places the cards.
+#[test]
+fn the_view_tree_says_what_there_is_never_where() {
+    let e = editor();
+    let view = e.view_tree();
+    let input = e.layout_input();
+    assert_eq!(view.nodes.len(), input.nodes.len());
+    for (n, l) in view.nodes.iter().zip(&input.nodes) {
+        assert_eq!(n.id.to_string(), l.id);
+        assert_eq!(n.parent.as_ref().map(|p| p.to_string()), l.parent);
+        assert_eq!(n.role, l.role);
+        assert_eq!((n.size.x, n.size.y), (l.size.x, l.size.y));
+    }
+    let frame = |name: &str| {
+        view.nodes
+            .iter()
+            .find(|n| n.header.name == name)
+            .unwrap()
+            .frame
+    };
+    assert_eq!(frame("tail rig"), FrameKind::Module);
+    assert_eq!(frame("tail"), FrameKind::Fixture);
+    assert_eq!(frame("main"), FrameKind::Card);
+}
+
+/// Outside the level you are working in, a node is dimmed — except an
+/// output fed by a fixture you are working in, which stays as it is. A
+/// node is marked selected when it is.
+#[test]
+fn outside_the_level_you_work_in_nodes_are_dimmed() {
+    let mut e = editor();
+    let emphasis = |e: &Editor, name: &str| {
+        e.view_nodes()
+            .into_iter()
+            .find(|n| n.header.name == name)
+            .unwrap()
+            .emphasis
+    };
+    assert!(
+        e.view_nodes().iter().all(|n| n.emphasis == Emphasis::Full),
+        "nothing selected, nothing dimmed"
+    );
+    e.select(vec![comp("circle1")]);
+    assert_eq!(emphasis(&e, "ring display"), Emphasis::Full);
+    assert_eq!(emphasis(&e, "strip"), Emphasis::Dimmed);
+    assert_eq!(emphasis(&e, "main"), Emphasis::Full, "the ring feeds it");
+    assert_eq!(emphasis(&e, "scarf out"), Emphasis::Dimmed);
+    e.select(vec![fixture(&e, "strip")]);
+    assert!(
+        e.view_nodes()
+            .iter()
+            .any(|n| n.header.name == "strip" && n.selected)
+    );
+}
+
+/// In a fixture's face, an object in the selection is lit and one outside
+/// the level you are in is dimmed; the face is drawn in the fixture's own
+/// units, wherever the fixture landed.
+#[test]
+fn a_fixtures_face_lights_the_selection_in_its_own_units() {
+    let mut e = editor();
+    e.select(vec![ring("circle1", "r1")]);
+    let view = e.view_tree();
+    let face = |name: &str| {
+        match view
+            .nodes
+            .iter()
+            .find(|n| n.header.name == name)
+            .and_then(|n| n.face.clone())
+        {
+            Some(UiNodeFace::Fixture(f)) => f,
+            _ => panic!("{name} has a fixture's face"),
+        }
+    };
+    let ring_face = face("ring display");
+    let emphasis = |key: &str| {
+        ring_face
+            .objects
+            .iter()
+            .find(|o| o.id.key == key)
+            .unwrap()
+            .emphasis
+    };
+    assert_eq!(emphasis("r1"), Emphasis::Lit);
+    assert_eq!(emphasis("r2"), Emphasis::Full, "in the level you are in");
+    assert!(
+        face("strip").objects.iter().all(|o| o.emphasis == Emphasis::Dimmed),
+        "another fixture is outside it"
+    );
+    let Some(UiShape::Ring { center, .. }) = ring_face.objects.first().map(|o| &o.shape) else {
+        panic!("a ring")
+    };
+    assert_eq!(*center, Vec2::new(35.0, 35.0), "the ring's own centre");
+    assert_eq!(ring_face.wires_emphasis, Emphasis::Lit, "you work inside it");
+}
+
+/// A card shows its words only when they would be at least 4.5 px on
+/// screen; much smaller it shows its face without them, and smaller still
+/// only its box.
+#[test]
+fn a_card_shows_as_much_as_fits() {
+    let mut e = editor();
+    let detail = |e: &Editor| {
+        e.view_nodes()
+            .into_iter()
+            .find(|n| n.header.name == "main")
+            .unwrap()
+            .detail
+    };
+    e.camera.scale = 4.5 / 3.9 + 0.01;
+    assert_eq!(detail(&e), DetailLevel::Full);
+    e.camera.scale = 4.5 / 3.9 - 0.01;
+    assert_eq!(detail(&e), DetailLevel::Face);
+    e.camera.scale = 0.1;
+    assert_eq!(detail(&e), DetailLevel::Dot);
+}
+
+/// Selecting a fixture tints the port rows it lands on, and selecting a
+/// lamp rings its pixel on its port's row; the run its object is on is
+/// lit.
+#[test]
+fn an_outputs_face_shows_where_the_selection_lands() {
+    let mut e = editor();
+    let port_row = |e: &Editor, output: &str, key: &str| {
+        e.view_nodes()
+            .into_iter()
+            .find(|n| n.header.name == output)
+            .and_then(|n| match n.face {
+                Some(UiNodeFace::Output(f)) => f.ports.into_iter().find(|p| p.key == key),
+                _ => None,
+            })
+            .unwrap()
+    };
+    e.select(vec![fixture(&e, "strip")]);
+    assert!(port_row(&e, "main", "1").tinted, "the strip lands on D1");
+    assert!(!port_row(&e, "main", "0").tinted);
+    e.select(vec![lamp("circle1", "r1", 3)]);
+    let d0 = port_row(&e, "main", "0");
+    assert_eq!(d0.marked, vec![3], "its pixel, ringed");
+    assert!(d0.runs.iter().any(|r| r.emphasis == Emphasis::Lit));
+}
+
+/// An edge touching the selection is lit and the others step back while
+/// anything is selected; only the selection's own edges say what they
+/// carry. Every edge always says its channel.
+#[test]
+fn the_selections_edges_are_lit_and_say_what_they_carry() {
+    let mut e = editor();
+    assert!(e.view_edges().iter().all(|x| x.emphasis == Emphasis::Full && x.label.is_none()));
+    e.select(vec![fixture(&e, "tail")]);
+    let tail = node_id(&e, "tail");
+    for x in e.view_edges() {
+        if x.from == tail || x.to == tail {
+            assert_eq!(x.emphasis, Emphasis::Lit);
+        } else {
+            assert_eq!(x.emphasis, Emphasis::Quiet);
+        }
+        assert!(x.shown);
+    }
+    let out = e
+        .view_edges()
+        .into_iter()
+        .find(|x| x.from == tail && e.project.output(&x.to).is_some())
+        .unwrap();
+    assert_eq!(out.label.as_deref(), Some("50 lamps on GPIO 10"));
+    assert_eq!(out.channel, "control.out");
+}
+
+/// The overlay outlines the selection, the level it is in, and what a
+/// click would select, each in the shape a click hits, on screen.
+#[test]
+fn the_overlay_outlines_selection_context_and_hover() {
+    let mut e = editor();
+    e.select(vec![lamp("circle1", "r1", 3)]);
+    e.pointer_move(lamp_screen(&e, "circle1", "r1", 10), none());
+    let kinds: Vec<OutlineKind> = e.view_overlay().outlines.iter().map(|o| o.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![OutlineKind::Context, OutlineKind::Selected, OutlineKind::Hover]
+    );
+    let hover = e.hover_target().unwrap();
+    let area = e.project.area(&e.camera, &hover).unwrap();
+    assert_eq!(e.view_overlay().outlines[2].path, area.outline_path());
+}
+
+/// With nothing selected the inspector lists the project's facts; with a
+/// fixture selected, its patch and its properties, under the crumbs down
+/// to it.
+#[test]
+fn the_inspector_says_whats_true_of_the_selection() {
+    let mut e = editor();
+    let titles = |e: &Editor| -> Vec<Option<String>> {
+        e.view_inspector()
+            .sections
+            .iter()
+            .map(|s| s.title.clone())
+            .collect()
+    };
+    assert_eq!(titles(&e)[0].as_deref(), Some("Project"));
+    e.select(vec![fixture(&e, "tail")]);
+    let inspector = e.view_inspector();
+    let crumbs: Vec<&str> = inspector.crumbs.iter().map(|c| c.label.as_str()).collect();
+    assert_eq!(crumbs, vec!["desk", "tail rig", "tail"]);
+    assert!(titles(&e).contains(&Some("Patch".into())));
+    assert!(titles(&e).contains(&Some("Properties".into())));
+    let patch = &inspector
+        .sections
+        .iter()
+        .find(|s| s.title.as_deref() == Some("Patch"))
+        .unwrap()
+        .items;
+    assert!(patch.iter().any(|i| matches!(i, UiItem::Rule(r) if r.starts_with("Lands on"))));
+}
+
+/// The tree pane marks the selection and the level it is in, and a
+/// selected lamp lights its path's row.
+#[test]
+fn the_tree_pane_marks_selection_and_context() {
+    let mut e = editor();
+    e.select(vec![lamp("path2", "", 3)]);
+    let tree = e.view_tree_pane();
+    let row = |t: &Target| tree.rows.iter().find(|r| &r.target == t).unwrap();
+    assert!(row(&comp("path2")).lit);
+    assert!(row(&comp("path2")).context, "the lamp's level is its path");
+    e.select(vec![fixture(&e, "strip")]);
+    let tree = e.view_tree_pane();
+    assert!(tree.rows.iter().any(|r| r.selected && r.label == "strip"));
+}
+
 // ---- helpers -------------------------------------------------------------------
 
 /// Every pair of nodes at one level whose boxes overlap, in words: empty
