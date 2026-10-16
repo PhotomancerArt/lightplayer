@@ -21,6 +21,10 @@ pub struct StoreConfig {
     /// RAM a transaction may hold as not-yet-written directory changes
     /// (paths and entries) before it writes them as pending directories.
     pub txn_delta_max: u32,
+    /// PROTOTYPE (`checkpoint`): write an index checkpoint with the next
+    /// root once this many records were written since the last (0: never).
+    #[cfg(feature = "checkpoint")]
+    pub checkpoint_every: u32,
 }
 
 impl Default for StoreConfig {
@@ -30,6 +34,8 @@ impl Default for StoreConfig {
             gc_policy: GcPolicy::CostBenefit,
             reserve: 3,
             txn_delta_max: 2048,
+            #[cfg(feature = "checkpoint")]
+            checkpoint_every: 0,
         }
     }
 }

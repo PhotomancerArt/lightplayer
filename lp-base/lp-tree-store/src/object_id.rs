@@ -24,6 +24,9 @@ pub enum IdTag {
     Multi = 3,
     /// A `Root` record: its payload.
     Root = 4,
+    /// PROTOTYPE: a checkpoint chunk (`checkpoint.rs`): its payload.
+    #[cfg(feature = "checkpoint")]
+    Checkpoint = 6,
     // 5 was the RAM path table's path hash (never written; FORMAT.md "Ids").
 }
 

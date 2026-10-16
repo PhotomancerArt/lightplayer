@@ -107,7 +107,30 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             &[false, true]
         };
         let mut chosen = None;
+        // PROTOTYPE: by the newest root's index checkpoint, when it has one.
+        #[cfg(all(test, feature = "checkpoint"))]
+        let ignore = crate::checkpoint_tests::IGNORE_CHECKPOINT.with(|i| i.get());
+        #[cfg(all(not(test), feature = "checkpoint"))]
+        let ignore = false;
+        #[cfg(feature = "checkpoint")]
+        if !wrapped && !mutant!(NoFullScan) && !ignore {
+            stat!(self.stats.mount_read_every_record = false);
+            let mut by_checkpoint = closed.clone();
+            chosen = self.try_checkpoint_mount(&valid, &mut by_checkpoint, newest)?;
+            if chosen.is_some() {
+                closed = by_checkpoint;
+            }
+            stat!(self.stats.mount_by_checkpoint = chosen.is_some());
+            #[cfg(test)]
+            if chosen.is_some() {
+                crate::checkpoint_tests::MOUNTS_BY_CHECKPOINT
+                    .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            }
+        }
         for &full in attempts {
+            if chosen.is_some() {
+                break;
+            }
             stat!(self.stats.mount_read_every_record = full);
             chosen = self.scan_and_walk(&valid, &mut closed, newest, &mut residue, full)?;
             if chosen.is_some() {

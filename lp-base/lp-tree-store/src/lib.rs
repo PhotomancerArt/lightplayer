@@ -38,6 +38,8 @@ macro_rules! mutant {
 }
 
 mod blob_codec;
+#[cfg(feature = "checkpoint")]
+mod checkpoint;
 #[cfg(feature = "deflate-plan")]
 mod deflate_plan;
 mod dir_node;
@@ -84,6 +86,8 @@ mod tree_store;
 mod tree_walk;
 mod vec_growth;
 
+#[cfg(all(test, feature = "checkpoint"))]
+mod checkpoint_tests;
 #[cfg(test)]
 mod counter_wrap_tests;
 #[cfg(test)]

@@ -447,7 +447,18 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             hot_dir: self.work.hot,
             retired: self.log.sectors.retired.clone(),
         };
-        let payload = root.encode();
+        #[allow(unused_mut, reason = "only the checkpoint prototype extends it")]
+        let mut payload = root.encode();
+        // PROTOTYPE: a checkpoint when one is due, its tag in the root.
+        #[cfg(feature = "checkpoint")]
+        {
+            if self.checkpoint_due() {
+                self.write_checkpoint()?;
+            }
+            if let Some(r) = self.log.ckpt.current {
+                payload.extend_from_slice(&crate::checkpoint::tag_bytes(r));
+            }
+        }
         let id = ObjectId::of(&mut self.hasher, IdTag::Root, &[&payload]);
         let len = crate::record_header::RECORD_HEADER_LEN + payload.len() as u32;
         self.ensure_room(&[(HeadKind::Hot, len)])?;

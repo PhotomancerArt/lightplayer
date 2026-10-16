@@ -101,6 +101,19 @@ impl RamIndex {
         }
     }
 
+    /// An index of `entries`, sorted by id and one per id.
+    #[cfg(feature = "checkpoint")]
+    pub fn from_sorted(entries: impl Iterator<Item = (ObjectId, RecordLoc)>) -> Self {
+        Self {
+            entries: entries
+                .map(|(id, loc)| IndexEntry {
+                    id: id.0,
+                    loc: loc.pack(),
+                })
+                .collect(),
+        }
+    }
+
     /// Add `k` entries, given by id **descending**, none of them present:
     /// one pass from the back (the index's own entries move once), not `k`
     /// inserts that each move the entries after them.

@@ -40,6 +40,10 @@ pub struct TreeStoreStats {
     /// Whether the last mount read every record whole (its fast pass adopted
     /// no root, or the sector seqs may have wrapped: `store_mount.rs`).
     pub mount_read_every_record: bool,
+    /// PROTOTYPE (`checkpoint`): the last mount adopted its root by the
+    /// root's index checkpoint.
+    #[cfg(feature = "checkpoint")]
+    pub mount_by_checkpoint: bool,
     pub sectors_opened: u64,
     pub erases: u64,
     /// Read-backs that did not match what was written (record, erase or

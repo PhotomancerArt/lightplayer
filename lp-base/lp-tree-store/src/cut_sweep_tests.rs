@@ -19,6 +19,10 @@ use crate::test_support::{Step, deflate, dial, noise, remount_sweep, sweep, swee
 fn cfg(record_max: u32) -> StoreConfig {
     StoreConfig {
         record_max,
+        // PROTOTYPE: `--features checkpoint` sweeps with a checkpoint every
+        // `LP_TREE_STORE_CHECKPOINT_EVERY` records (default 8).
+        #[cfg(feature = "checkpoint")]
+        checkpoint_every: dial("LP_TREE_STORE_CHECKPOINT_EVERY", 8) as u32,
         ..StoreConfig::default()
     }
 }

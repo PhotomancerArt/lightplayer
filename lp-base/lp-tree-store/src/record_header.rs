@@ -121,11 +121,23 @@ pub fn encode_header_by(
     parts: &[&[u8]],
     crc: &dyn Fn(u32, &[u8]) -> u32,
 ) -> [u8; RECORD_HEADER_LEN as usize] {
+    encode_header_raw(kind.to_u8(), codec.to_u8(), id, parts, crc)
+}
+
+/// [`encode_header_by`] for any kind and codec byte (a kind this version
+/// does not define: the `checkpoint` prototype's chunks).
+pub fn encode_header_raw(
+    kind: u8,
+    codec: u8,
+    id: ObjectId,
+    parts: &[&[u8]],
+    crc: &dyn Fn(u32, &[u8]) -> u32,
+) -> [u8; RECORD_HEADER_LEN as usize] {
     let len: usize = parts.iter().map(|p| p.len()).sum();
     debug_assert!(len <= u16::MAX as usize);
     let mut h = [0u8; RECORD_HEADER_LEN as usize];
-    h[0] = kind.to_u8();
-    h[1] = codec.to_u8();
+    h[0] = kind;
+    h[1] = codec;
     h[2..4].copy_from_slice(&(len as u16).to_le_bytes());
     h[4..12].copy_from_slice(&id.0.to_le_bytes());
     let mut c = crc(0, &h[..12]);

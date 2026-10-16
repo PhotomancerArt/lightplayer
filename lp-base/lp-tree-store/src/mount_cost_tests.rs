@@ -162,7 +162,7 @@ fn push_basic(st: &mut crate::test_support::Store, root: &str, seed: u64) {
 
 /// The stores, by name.
 pub fn scenarios(sectors: u32) -> Vec<(String, NorFlashSim)> {
-    let c = StoreConfig::default();
+    let c = cost_cfg();
     let geom = NorGeometry::c6(sectors);
     let mut out = Vec::new();
     out.push((String::from("empty"), formatted(geom, &c)));
@@ -243,7 +243,7 @@ fn images() -> Vec<(String, NorFlashSim)> {
 
 #[test]
 fn mount_cost_report() {
-    let c = StoreConfig::default();
+    let c = cost_cfg();
     std::println!(
         "{:<36} {:>7} {:>9} {:>8} {:>9} {:>9} {:>7} {:>9} {:>5} {:>7}",
         "store / sectors",
@@ -295,5 +295,16 @@ fn write_scenario_images() {
         let mut bytes = alloc::vec![0u8; (g.sector_count * g.sector_size) as usize];
         f.peek(0, &mut bytes);
         std::fs::write(std::format!("{dir}/{name}-176.bin"), &bytes).unwrap();
+    }
+}
+
+/// The stores' dials: the defaults (with `--features checkpoint`, the
+/// prototype's checkpoint every `LP_TREE_STORE_CHECKPOINT_EVERY` records,
+/// default 256).
+fn cost_cfg() -> StoreConfig {
+    StoreConfig {
+        #[cfg(feature = "checkpoint")]
+        checkpoint_every: crate::test_support::dial("LP_TREE_STORE_CHECKPOINT_EVERY", 256) as u32,
+        ..StoreConfig::default()
     }
 }

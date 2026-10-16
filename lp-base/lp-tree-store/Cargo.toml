@@ -29,6 +29,10 @@ stats = []
 # Test-only mutation switches (`mutants::set_mutant`): each breaks one
 # guarantee on purpose, for `lp-store-bench mutants`. Never in a product build.
 mutants = []
+# PROTOTYPE (A2, a decision before FORMAT.md freezes): an index checkpoint
+# a root names by a tail tag (`checkpoint.rs`), and mount by it. Off by
+# default; no product build turns it on.
+checkpoint = []
 # `StoreImage`: the read-only inspector over a raw image of the partition
 # (`lp-cli hardware tree inspect|check|extract`). Host tooling; never on a
 # device. Reports derive `serde::Serialize` for `--json`.

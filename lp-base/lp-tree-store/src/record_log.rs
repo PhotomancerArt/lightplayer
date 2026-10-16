@@ -50,6 +50,9 @@ pub struct RecordLog<F: Flash> {
     /// The largest transient buffer seen.
     #[cfg(feature = "stats")]
     pub largest_buffer: usize,
+    /// PROTOTYPE: the index checkpoint the next root names.
+    #[cfg(feature = "checkpoint")]
+    pub ckpt: crate::checkpoint::CheckpointState,
 }
 
 type R<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
@@ -74,6 +77,8 @@ impl<F: Flash> RecordLog<F> {
             counters: LogCounters::default(),
             #[cfg(feature = "stats")]
             largest_buffer: 0,
+            #[cfg(feature = "checkpoint")]
+            ckpt: Default::default(),
         }
     }
 
@@ -123,6 +128,14 @@ impl<F: Flash> RecordLog<F> {
             self.counters.read_calls += 1;
         );
         self.flash.read(addr, buf).map_err(StoreError::Flash)
+    }
+
+    /// The header at offset `off` of `s`, parsed.
+    #[cfg(feature = "checkpoint")]
+    pub fn header_raw(&mut self, s: u32, off: u32) -> R<HeaderRead, F> {
+        let mut h = [0u8; RECORD_HEADER_LEN as usize];
+        self.read(self.addr(s, off), &mut h)?;
+        Ok(RecordHeader::parse(&h))
     }
 
     /// The header at `loc`, parsed (not CRC-checked against its payload).
@@ -227,6 +240,33 @@ impl<F: Flash> RecordLog<F> {
     ) -> R<RecordLoc, F> {
         let flash = &self.flash;
         let header = encode_header_by(rkind, codec, id, parts, &|c, b| flash.crc32(c, b));
+        self.append_header(kind, header, id, parts)
+    }
+
+    /// [`append`](Self::append) of a record with any kind byte (the
+    /// `checkpoint` prototype's chunks), codec 0.
+    #[cfg(feature = "checkpoint")]
+    pub fn append_raw(
+        &mut self,
+        kind: HeadKind,
+        kind_byte: u8,
+        id: ObjectId,
+        parts: &[&[u8]],
+    ) -> R<RecordLoc, F> {
+        let flash = &self.flash;
+        let header = crate::record_header::encode_header_raw(kind_byte, 0, id, parts, &|c, b| {
+            flash.crc32(c, b)
+        });
+        self.append_header(kind, header, id, parts)
+    }
+
+    fn append_header(
+        &mut self,
+        kind: HeadKind,
+        header: [u8; RECORD_HEADER_LEN as usize],
+        id: ObjectId,
+        parts: &[&[u8]],
+    ) -> R<RecordLoc, F> {
         let total = RECORD_HEADER_LEN + parts.iter().map(|p| p.len() as u32).sum::<u32>();
         if total > self.sector_capacity() {
             return Err(StoreError::TooLarge);
@@ -256,6 +296,10 @@ impl<F: Flash> RecordLog<F> {
                     self.counters.records_written += 1;
                     self.counters.record_bytes_written += u64::from(total);
                 );
+                #[cfg(feature = "checkpoint")]
+                {
+                    self.ckpt.records_since += 1;
+                }
                 return Ok(loc);
             }
             stat!(self.counters.verify_failures += 1);
@@ -319,6 +363,8 @@ impl<F: Flash> RecordLog<F> {
     /// Forget a sector's records, kill its header, erase it, and read it
     /// back. `false` = the erase did not take: the sector is retired.
     pub fn kill_and_erase(&mut self, s: u32) -> R<bool, F> {
+        #[cfg(feature = "checkpoint")]
+        self.ckpt.erasing(s);
         self.index.remove_sector(s);
         self.sectors.end[s as usize] = NEEDS_ERASE;
         self.sectors.live[s as usize] = 0;
