@@ -4197,6 +4197,7 @@ dependencies = [
  "littlefs-rust",
  "log",
  "lp-collection 1.0.0",
+ "lp-crc32",
  "lp-gfx",
  "lp-json-pack",
  "lp-link",
