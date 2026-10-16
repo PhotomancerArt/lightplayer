@@ -137,6 +137,9 @@ pub struct FakeLightPlayerState {
     /// How the board's filesystem came up, reported in its hello
     /// (`HardwareFacts::fs`). `Mounted` by default, as a flashed board's is.
     pub fs_boot_state: lpc_wire::FsBootState,
+    /// The build reads the tree store (`fs-tree`): its hello lists
+    /// `fs.tree`. `false` (today's littlefs build) by default.
+    pub fs_tree: bool,
     /// The board's whole flash, when a plan the fake executed wrote it —
     /// then THIS is what layout operations read, not an image synthesized
     /// from the files above (`fake_flash_layout`). `None` for a scripted
@@ -173,6 +176,7 @@ impl FakeLightPlayerState {
             root_files: Vec::new(),
             layout: FakeFlashLayout::Current,
             fs_boot_state: lpc_wire::FsBootState::Mounted,
+            fs_tree: false,
             flash: None,
             link_config: lpc_wire::lp_link::LinkConfig::usb(),
             untrusted_link: false,
@@ -202,6 +206,12 @@ impl FakeLightPlayerState {
     /// Report this filesystem boot state in the hello.
     pub fn with_fs_boot_state(mut self, fs: lpc_wire::FsBootState) -> Self {
         self.fs_boot_state = fs;
+        self
+    }
+
+    /// An `fs-tree` build: its hello lists `fs.tree` ([`Self::fs_tree`]).
+    pub fn with_fs_tree(mut self) -> Self {
+        self.fs_tree = true;
         self
     }
 

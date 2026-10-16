@@ -23,9 +23,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpa_server::network_store::{
-    HELD_BOARD_REFUSAL, NEWER_STORE_REFUSAL, REFUSED_STORE_REFUSAL,
-};
+use lpa_server::network_store::{HELD_BOARD_REFUSAL, NEWER_STORE_REFUSAL, REFUSED_STORE_REFUSAL};
 use lpa_server::{LpGraphics, LpServer};
 use lpc_access::{NetworkFile, OpenTo, Tier};
 use lpc_model::{AsLpPath, AsLpPathBuf, FsVersion};

@@ -32,6 +32,23 @@ use super::args::{LpfsArgs, LpfsCommand};
 pub const REFUSED_STORE: &str = "the board refused its file store: a newer or damaged store \
      header; its files are kept — read them with `lp-cli hardware tree extract`";
 
+/// What lp-cli says about a board whose hello reports `fs: refused` from a
+/// build WITHOUT `fs.tree`: a littlefs core that found its files in a tree
+/// store, and kept them rather than format it.
+pub const TREE_STORE_HELD: &str = "the board's files are in the tree store, a newer filesystem \
+     than its firmware reads; they are kept, untouched — install a firmware that reads the tree \
+     store";
+
+/// The words for a refused board's hello, by whether its build reads the
+/// tree store.
+pub fn refused_store_words(hello: &lpc_wire::ServerHello) -> &'static str {
+    if hello.build.features.contains(&lpc_model::LpFeature::FsTree) {
+        REFUSED_STORE
+    } else {
+        TREE_STORE_HELD
+    }
+}
+
 pub fn handle_lpfs(args: LpfsArgs) -> Result<()> {
     match args.command {
         LpfsCommand::Report(args) => report::handle_report(args),

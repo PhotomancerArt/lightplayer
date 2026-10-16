@@ -23,8 +23,11 @@
 //! | [`migration_plan`] | the ordered flash steps, or a refusal |
 //! | [`flash_map`] | the steps applied to a flash image in memory (fake, tests) |
 //! | [`device_backup_archive`] | the v2 backup ZIP every migration stores first |
+//! | [`tree_store_magic`] | is a tree store (the newer filesystem) on the board? |
+//! | [`firmware_reads_tree_store`] | does the firmware about to be written read one? |
 
 pub mod device_backup_archive;
+pub mod firmware_reads_tree_store;
 pub mod flash_map;
 pub mod layout_preflight;
 pub mod layout_state;
@@ -33,6 +36,10 @@ pub mod lpfs_geometry;
 pub mod lpfs_repack;
 pub mod lpfs_tree;
 pub mod migration_plan;
+pub mod tree_store_magic;
+
+pub use firmware_reads_tree_store::{embedded_manifest, firmware_reads_tree_store};
+pub use tree_store_magic::{TREE_STORE_SECTOR_MAGIC, holds_tree_store_sector};
 
 pub use flash_map::apply_steps;
 pub use layout_preflight::{LayoutPreflight, describe_layout, preflight};
