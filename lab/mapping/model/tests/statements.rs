@@ -760,48 +760,23 @@ fn edges_run_node_to_node_one_per_pair() {
     assert!(edges.iter().all(|x| x.active));
 }
 
-/// An edge leaves the right side of its source and reaches the left side of
-/// its target, arriving from the left; on an output it arrives level with
-/// the port rows its fixture lands on, so two fixtures on one output arrive
-/// apart.
+/// An edge into an output says which of its port rows it lands beside, so
+/// the view brings it in level with them and two fixtures on one output
+/// arrive apart. An edge into anything else lands beside no row.
 #[test]
-fn an_edge_reaches_its_output_beside_the_ports_it_feeds() {
+fn an_edge_into_an_output_says_which_ports_it_lands_beside() {
     let e = editor();
     let main = node_id(&e, "main");
-    let edge = |name: &str| {
+    let edge = |from: &str, to: &NodeId| {
         e.edges()
             .into_iter()
-            .find(|x| x.from == fixture(&e, name) && x.to == Target::Node(main.clone()))
+            .find(|x| x.from == fixture(&e, from) && x.to == Target::Node(to.clone()))
             .unwrap()
     };
-    let card = e.project.node_rect(&main).unwrap();
-    let (ring, strip) = (edge("ring display"), edge("strip"));
-    for x in [&ring, &strip] {
-        assert!(
-            (x.to_at.x - card.min.x).abs() < 1e-9,
-            "the card's left side"
-        );
-        let frame = e.project.node_rect(&node_of_target(&x.from)).unwrap();
-        assert!(
-            (x.from_at.x - frame.max.x).abs() < 1e-9,
-            "the frame's right side"
-        );
-    }
-    let d0 = e.project.port_rect(&main, "0").unwrap();
-    let d1 = e.project.port_rect(&main, "1").unwrap();
-    assert!(
-        (ring.to_at.y - (d0.min.y + d0.max.y) / 2.0).abs() < 1e-9,
-        "beside D0"
-    );
-    assert!(
-        (strip.to_at.y - (d1.min.y + d1.max.y) / 2.0).abs() < 1e-9,
-        "beside D1"
-    );
-    let line = ring.arrow(&e.camera).centreline();
-    assert!(
-        line.c2.x < line.end.x && (line.c2.y - line.end.y).abs() < 1e-9,
-        "arrives from the left"
-    );
+    assert_eq!(edge("ring display", &main).lands_on, vec!["0".to_string()]);
+    assert_eq!(edge("strip", &main).lands_on, vec!["1".to_string()]);
+    let ring = node_id(&e, "ring display");
+    assert_eq!(edge("rainbow", &ring).lands_on, Vec::<String>::new());
 }
 
 /// Edges don't change when the selection changes — only how they are drawn
@@ -812,7 +787,7 @@ fn edges_dont_change_with_selection_or_density() {
     let shape = |e: &Editor| {
         e.edges()
             .into_iter()
-            .map(|x| (x.from, x.to, x.from_at, x.to_at))
+            .map(|x| (x.from, x.to, x.lands_on))
             .collect::<Vec<_>>()
     };
     let before = shape(&e);
@@ -2168,13 +2143,19 @@ fn selecting_a_port_lights_its_whole_range() {
     }
 }
 
-/// Hovering an edge says what it carries, lights that edge and selects
-/// nothing.
+/// Hovering an edge, as the view reports it, says what the edge carries,
+/// lights it and selects nothing. A thing under the pointer wins over an
+/// edge.
 #[test]
 fn hovering_an_edge_says_what_it_carries() {
     let mut e = editor();
-    let at = clear_point_on_edge(&e, &fixture(&e, "tail"));
-    e.pointer_move(at, none());
+    let tail = node_id(&e, "tail");
+    let tail_out = node_id(&e, "tail out");
+    // Somewhere clear of everything, as an edge between cards is.
+    let clear = e.camera.to_screen(Vec2::new(-40.0, -40.0));
+    assert!(e.project.things_at(&e.camera, clear).is_empty());
+    e.pointer_move(clear, none());
+    e.set_hovered_edge(Some((tail.clone(), tail_out.clone())));
     assert_eq!(
         e.cursor_note().as_deref(),
         Some("tail → tail out · 50 lamps on GPIO 10 · control.out")
@@ -2190,16 +2171,23 @@ fn hovering_an_edge_says_what_it_carries() {
 
     // With something selected, the same.
     e.select(vec![comp("path2")]);
-    let at = clear_point_on_edge(&e, &fixture(&e, "ring display"));
-    e.pointer_move(at, none());
+    let ring = node_id(&e, "ring display");
+    let main = node_id(&e, "main");
+    e.set_hovered_edge(Some((ring, main)));
     assert_eq!(
         e.cursor_note().as_deref(),
         Some("ring display → main · 64 lamps on D0 · control.out")
     );
     assert_eq!(e.selection, vec![comp("path2")]);
 
+    // Over a thing, the thing wins.
+    e.pointer_move(e.camera.to_screen(lamp_pos(&e, "circle1", "r1", 0)), none());
+    assert!(e.hover_target().is_some());
+    assert!(e.edges().iter().all(|x| !x.hovered));
+
     // Away from every edge, no note.
-    e.pointer_move(e.camera.to_screen(place(&e, "scarf", 50.0, 15.0)), none());
+    e.pointer_move(clear, none());
+    e.set_hovered_edge(None);
     assert!(e.edges().iter().all(|x| !x.hovered));
     assert_eq!(e.cursor_note(), None);
 }
@@ -3064,24 +3052,6 @@ fn draw_path(e: &mut Editor, fixture: &str, points: &[(f64, f64)]) {
         e.pointer_up(at, none());
     }
     key(e, Key::Enter, none());
-}
-
-/// A point on the edge from `from`, on screen, with nothing under it (an
-/// edge starts among lamps, and things win over edges).
-fn clear_point_on_edge(e: &Editor, from: &Target) -> Vec2 {
-    let edge = e
-        .edges()
-        .into_iter()
-        .find(|x| &x.from == from && e.project.output(&node_of_target(&x.to)).is_some())
-        .unwrap();
-    let line = edge.arrow(&e.camera).centreline();
-    (10..=90)
-        .map(|i| {
-            let q = line.point(i as f64 / 100.0);
-            Vec2::new(q.x, q.y)
-        })
-        .find(|p| e.project.things_at(&e.camera, *p).is_empty())
-        .expect("somewhere clear along it")
 }
 
 /// Where the handle `which` picks sits on screen.

@@ -192,6 +192,9 @@ pub struct Editor {
     /// (the dome). M toggles it.
     pub move_draw: bool,
     pub debug: DebugFlags,
+    /// The edge under the pointer, as the view reports it
+    /// (`edges.rs`).
+    pub(crate) edge_hover: Option<(NodeId, NodeId)>,
     /// The selection before each of the last two presses: a double-click
     /// adds a point to a path that was shaped BEFORE its two clicks went
     /// into it.
@@ -221,6 +224,7 @@ impl Editor {
             path_draft: Vec::new(),
             move_draw: true,
             debug: DebugFlags::default(),
+            edge_hover: None,
             press_log: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),

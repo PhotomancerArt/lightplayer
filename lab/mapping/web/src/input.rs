@@ -109,7 +109,10 @@ pub fn follow_window(ed: Signal<Editor>) {
                     e.pointer_move(at, m);
                     e.pointer_up(at, m);
                 } else if dragging || inside {
-                    ed.write().pointer_move(at, m);
+                    let mut e = ed.write();
+                    e.pointer_move(at, m);
+                    let edge = crate::edge_layer::hit(&e, at);
+                    e.set_hovered_edge(edge);
                 } else if ed.peek().pointer.is_some() {
                     ed.write().pointer_leave();
                 }

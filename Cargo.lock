@@ -5619,7 +5619,6 @@ dependencies = [
 name = "lab-mapping-model"
 version = "40.0.0"
 dependencies = [
- "lab-arrows",
  "lab-layout",
  "libm",
 ]

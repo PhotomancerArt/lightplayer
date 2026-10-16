@@ -234,8 +234,7 @@ pub fn Canvas(ed: Signal<Editor>) -> Element {
     // Node-level edges, laid out together by lab-arrows: each label lies
     // along its line in a little box, upright, clear of heads and of the
     // other labels.
-    let model_edges = e.edges();
-    let arrows: Vec<lab_arrows::Arrow> = model_edges.iter().map(|x| x.arrow(&cam)).collect();
+    let (model_edges, arrows): (Vec<_>, Vec<_>) = crate::edge_layer::route(&e).into_iter().unzip();
     let geometry = lab_arrows::layout_arrows(
         &arrows,
         &crate::text_measure::measure,

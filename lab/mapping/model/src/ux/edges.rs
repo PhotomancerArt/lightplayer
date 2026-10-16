@@ -16,16 +16,14 @@
 //! 10"). Hovering an edge says it in full in the cursor note and lights it;
 //! it never selects.
 //!
-//! The arrow itself — the curve, the head, where the words sit — is a
-//! [`lab_arrows::Arrow`], built here ([`Edge::arrow`]) so the page draws
-//! exactly the line the pointer hit-tests.
+//! Core says which edges there are and what each says; it never says where
+//! they run. The view routes them from where the cards landed (a curve on
+//! the canvas, D57), and since only it knows where its lines are, it
+//! hit-tests them and reports the one under the pointer as a fact
+//! ([`Editor::set_hovered_edge`]).
 
-use lab_arrows::{Arrow, EndDirection, Head, Label, Side};
-
-use crate::ux::camera::Camera;
 use crate::ux::editor::Editor;
-use crate::domain::geom::{Rect, Vec2};
-use crate::ux::card_geometry::{CARD_HEADER, CARD_ROW};
+use crate::domain::geom::Rect;
 use crate::domain::node::NodeId;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
@@ -45,10 +43,11 @@ pub struct Edge {
     /// What it carries in full, for the hover note:
     /// `tail → tail out · 50 lamps on GPIO 10 · control.out`.
     pub carries: String,
-    /// Where it leaves and arrives, in world units: the right side of the
-    /// source, the left side of the target.
-    pub from_at: Vec2,
-    pub to_at: Vec2,
+    /// The port rows of the target it lands beside (an output's ports this
+    /// fixture feeds), by key: the view brings the edge in level with them,
+    /// so two fixtures on one output arrive apart. Empty for any other
+    /// target.
+    pub lands_on: Vec<String>,
     /// It touches the selection (something at either end, or inside
     /// either): drawn at full strength.
     pub selected: bool,
@@ -59,38 +58,6 @@ pub struct Edge {
     pub active: bool,
     /// The pointer is on it.
     pub hovered: bool,
-}
-
-/// How near, in screen pixels, the pointer must be to an edge to hover it.
-pub const EDGE_HOVER_PX: f64 = 6.0;
-/// The arrowhead where an edge lands: length and width, in screen pixels.
-pub const ARROW_LEN_PX: f64 = 7.0;
-pub const ARROW_WIDTH_PX: f64 = 7.0;
-
-impl Edge {
-    /// The arrow on screen: it leaves toward its target and arrives from the
-    /// left, with a head on the target. Its words: the channel, always,
-    /// near the end; what it carries, when it belongs to the selection.
-    pub fn arrow(&self, cam: &Camera) -> Arrow {
-        let a = cam.to_screen(self.from_at);
-        let b = cam.to_screen(self.to_at);
-        let mut arrow = Arrow::new(av(a), av(b))
-            .arrive(EndDirection::Side(Side::Left))
-            .end_head(Some(Head::triangle(ARROW_LEN_PX, ARROW_WIDTH_PX)));
-        if self.labelled && !self.label.is_empty() {
-            arrow = arrow.label(Label::primary(self.label.clone()));
-        }
-        if !self.channel.is_empty() {
-            arrow = arrow.label(Label::quiet(self.channel.clone()).near_end());
-        }
-        arrow
-    }
-
-    /// How far `p` (screen) is from the arrow's line.
-    pub fn distance(&self, cam: &Camera, p: Vec2) -> f64 {
-        let line = self.arrow(cam).centreline();
-        lab_arrows::Path::of_cubic(&line, false).distance_to(av(p))
-    }
 }
 
 impl Editor {
@@ -115,37 +82,38 @@ impl Editor {
         for s in &p.effective_patch().spans {
             add(&s.fixture, &s.output, String::new());
         }
-        let mut edges: Vec<Edge> = pairs
+        let hovered = self.edge_hover_now();
+        pairs
             .iter()
-            .map(|(from, to, channel)| self.edge(from, to, channel))
-            .collect();
-        if let Some(i) = self.hovered_edge_of(&edges) {
-            edges[i].hovered = true;
-        }
-        edges
+            .map(|(from, to, channel)| {
+                let mut e = self.edge(from, to, channel);
+                e.hovered = hovered.as_ref() == Some(&(from.clone(), to.clone()));
+                e
+            })
+            .collect()
     }
 
-    /// The edge under the pointer, if hovering means anything right now and
-    /// no thing is under it (things win: an edge's ends touch them).
+    /// The edge under the pointer, as the view reported it, while hovering
+    /// means anything and no thing is under the pointer (things win: an
+    /// edge's ends touch them).
     pub fn hovered_edge(&self) -> Option<Edge> {
-        if self.hover_point().is_none() || self.hover_target().is_some() {
-            return None;
-        }
+        self.edge_hover_now()?;
         self.edges().into_iter().find(|e| e.hovered)
     }
 
-    fn hovered_edge_of(&self, edges: &[Edge]) -> Option<usize> {
-        let p = self.hover_point()?;
-        if self.hover_target().is_some() {
+    /// The view's report of the edge under the pointer, `(from, to)`, or
+    /// `None`. A fact, like the pointer itself: core can't hit-test lines it
+    /// doesn't route.
+    pub fn set_hovered_edge(&mut self, edge: Option<(NodeId, NodeId)>) {
+        self.edge_hover = edge;
+    }
+
+    /// The reported edge, if it counts right now.
+    fn edge_hover_now(&self) -> Option<(NodeId, NodeId)> {
+        if self.hover_point().is_none() || self.hover_target().is_some() {
             return None;
         }
-        edges
-            .iter()
-            .enumerate()
-            .map(|(i, e)| (i, e.distance(&self.camera, p)))
-            .filter(|(_, d)| *d <= EDGE_HOVER_PX)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(i, _)| i)
+        self.edge_hover.clone()
     }
 
     /// One pair's edge.
@@ -153,14 +121,14 @@ impl Editor {
         let p = &self.project;
         let from_t = Target::Node(from.clone());
         let to_t = Target::Node(to.clone());
-        let to_at = p.arrival(from, to);
-        let from_at = match p.node_rect(from) {
-            Some(r) if p.node(from).is_some_and(|n| n.is_card()) => {
-                Vec2::new(r.max.x, r.min.y + CARD_HEADER + CARD_ROW / 2.0)
-            }
-            Some(r) => Vec2::new(r.max.x, to_at.y.clamp(r.min.y, r.max.y)),
-            None => Vec2::default(),
-        };
+        let lands_on = p
+            .ports_of(&Target::Node(from.clone()))
+            .into_iter()
+            .filter_map(|t| match t {
+                Target::Port { output, key } if &output == to => Some(key),
+                _ => None,
+            })
+            .collect();
         let label = p.carried(from, to);
         let mut carries = format!("{} → {}", p.node_name(from), p.node_name(to));
         if !label.is_empty() {
@@ -196,8 +164,7 @@ impl Editor {
             channel: channel.to_string(),
             label,
             carries,
-            from_at,
-            to_at,
+            lands_on,
             active: true,
             hovered: false,
         }
@@ -226,30 +193,6 @@ impl Project {
         Rect::around(self.lamps_under(t))
     }
 
-    /// Where an edge from `from` reaches `to`: the left side of `to`. On an
-    /// output card, level with the middle of the port rows `from` lands on,
-    /// so two fixtures on one output arrive apart; otherwise near the top.
-    pub(crate) fn arrival(&self, from: &NodeId, to: &NodeId) -> Vec2 {
-        let Some(r) = self.node_rect(to) else {
-            return Vec2::default();
-        };
-        if self.output(to).is_some() {
-            let rows: Vec<Rect> = self
-                .ports_of(&Target::Node(from.clone()))
-                .iter()
-                .filter_map(|t| match t {
-                    Target::Port { output, key } if output == to => self.port_rect(output, key),
-                    _ => None,
-                })
-                .collect();
-            if let Some(span) = Rect::around(rows.iter().flat_map(|r| [r.min, r.max])) {
-                return Vec2::new(r.min.x, (span.min.y + span.max.y) / 2.0);
-            }
-            return Vec2::new(r.min.x, r.min.y + CARD_HEADER + CARD_ROW / 2.0);
-        }
-        Vec2::new(r.min.x, r.min.y + (r.height() / 2.0).min(30.0))
-    }
-
     /// What a fixture → output edge carries, short: `50 lamps on GPIO 10`,
     /// `64 lamps on D0, D1`; empty for an edge with nothing patched (a
     /// render source's, or an empty fixture's).
@@ -274,8 +217,4 @@ impl Project {
         let s = if lamps == 1 { "" } else { "s" };
         format!("{lamps} lamp{s} on {}", ports.join(", "))
     }
-}
-
-fn av(p: Vec2) -> lab_arrows::Vec2 {
-    lab_arrows::Vec2::new(p.x, p.y)
 }

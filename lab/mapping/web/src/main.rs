@@ -7,6 +7,7 @@
 //! dome, the radiance dome), and fits the view to it.
 
 mod canvas;
+mod edge_layer;
 mod input;
 mod panels;
 mod text_measure;
