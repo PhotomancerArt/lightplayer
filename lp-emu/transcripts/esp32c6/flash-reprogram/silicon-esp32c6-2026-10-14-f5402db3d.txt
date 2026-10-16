@@ -1,0 +1,407 @@
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"usb-uart","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":101,"generation":102,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":102,"order_bytes":712704,"frontier":null,"frontier_addr":null,"last_dirty":712700,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":344766}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":174,"erase_us":1410465,"blank":true,"keep":[],"pending":0,"next_generation":103}
+[fw-check-json] {"kind":"fr-timing","erase_us":22001,"writes":16,"write_us_min":307,"write_us_max":348,"write_us_total":5220}
+[flash-reprogram] === SCAN DONE === generation=103 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":102,"generation":103,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":103,"order_bytes":712704,"frontier":364832,"frontier_addr":"0x3ab120","last_dirty":364828,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328459}
+[fw-check-json] {"kind":"fr-window","start":364544,"end":365312,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":90,"erase_us":1110002,"blank":true,"keep":[],"pending":0,"next_generation":104}
+[fw-check-json] {"kind":"fr-timing","erase_us":21273,"writes":16,"write_us_min":307,"write_us_max":347,"write_us_total":5218}
+[flash-reprogram] === SCAN DONE === generation=104 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":103,"generation":104,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":104,"order_bytes":712704,"frontier":388096,"frontier_addr":"0x3b0c00","last_dirty":388092,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329550}
+[fw-check-json] {"kind":"fr-window","start":387840,"end":388608,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":95,"erase_us":974454,"blank":true,"keep":[],"pending":0,"next_generation":105}
+[fw-check-json] {"kind":"fr-timing","erase_us":22030,"writes":16,"write_us_min":313,"write_us_max":346,"write_us_total":5243}
+[flash-reprogram] === SCAN DONE === generation=105 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":104,"generation":105,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":105,"order_bytes":712704,"frontier":386880,"frontier_addr":"0x3b0740","last_dirty":386876,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329493}
+[fw-check-json] {"kind":"fr-window","start":386560,"end":387328,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":95,"erase_us":970269,"blank":true,"keep":[],"pending":0,"next_generation":106}
+[fw-check-json] {"kind":"fr-timing","erase_us":22041,"writes":16,"write_us_min":310,"write_us_max":346,"write_us_total":5229}
+[flash-reprogram] === SCAN DONE === generation=106 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":105,"generation":106,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":106,"order_bytes":712704,"frontier":382176,"frontier_addr":"0x3af4e0","last_dirty":382172,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329273}
+[fw-check-json] {"kind":"fr-window","start":381696,"end":382464,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":94,"erase_us":953001,"blank":true,"keep":[],"pending":0,"next_generation":107}
+[fw-check-json] {"kind":"fr-timing","erase_us":21990,"writes":16,"write_us_min":307,"write_us_max":345,"write_us_total":5237}
+[flash-reprogram] === SCAN DONE === generation=107 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":106,"generation":107,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":107,"order_bytes":712704,"frontier":357632,"frontier_addr":"0x3a9500","last_dirty":357628,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328122}
+[fw-check-json] {"kind":"fr-window","start":357376,"end":358144,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":88,"erase_us":1063751,"blank":true,"keep":[],"pending":0,"next_generation":108}
+[fw-check-json] {"kind":"fr-timing","erase_us":25077,"writes":16,"write_us_min":311,"write_us_max":348,"write_us_total":5243}
+[flash-reprogram] === SCAN DONE === generation=108 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":107,"generation":108,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":108,"order_bytes":712704,"frontier":353856,"frontier_addr":"0x3a8640","last_dirty":353852,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":327945}
+[fw-check-json] {"kind":"fr-window","start":353536,"end":354304,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":87,"erase_us":1048946,"blank":true,"keep":[],"pending":0,"next_generation":109}
+[fw-check-json] {"kind":"fr-timing","erase_us":21968,"writes":16,"write_us_min":310,"write_us_max":347,"write_us_total":5215}
+[flash-reprogram] === SCAN DONE === generation=109 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":108,"generation":109,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":109,"order_bytes":712704,"frontier":415296,"frontier_addr":"0x3b7640","last_dirty":415292,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330825}
+[fw-check-json] {"kind":"fr-window","start":414976,"end":415744,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":102,"erase_us":1112152,"blank":true,"keep":[],"pending":0,"next_generation":110}
+[fw-check-json] {"kind":"fr-timing","erase_us":24333,"writes":16,"write_us_min":310,"write_us_max":341,"write_us_total":5206}
+[flash-reprogram] === SCAN DONE === generation=110 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":109,"generation":110,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":110,"order_bytes":712704,"frontier":362496,"frontier_addr":"0x3aa800","last_dirty":362492,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328351}
+[fw-check-json] {"kind":"fr-window","start":362240,"end":363008,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":89,"erase_us":1091008,"blank":true,"keep":[],"pending":0,"next_generation":111}
+[fw-check-json] {"kind":"fr-timing","erase_us":22736,"writes":16,"write_us_min":311,"write_us_max":346,"write_us_total":5236}
+[flash-reprogram] === SCAN DONE === generation=111 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":110,"generation":111,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":111,"order_bytes":712704,"frontier":416512,"frontier_addr":"0x3b7b00","last_dirty":416508,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330882}
+[fw-check-json] {"kind":"fr-window","start":416256,"end":417024,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":102,"erase_us":1116814,"blank":true,"keep":[],"pending":0,"next_generation":112}
+[fw-check-json] {"kind":"fr-timing","erase_us":22163,"writes":16,"write_us_min":307,"write_us_max":346,"write_us_total":5223}
+[flash-reprogram] === SCAN DONE === generation=112 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":111,"generation":112,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":112,"order_bytes":712704,"frontier":362048,"frontier_addr":"0x3aa640","last_dirty":362044,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328329}
+[fw-check-json] {"kind":"fr-window","start":361728,"end":362496,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":89,"erase_us":1093396,"blank":true,"keep":[],"pending":0,"next_generation":113}
+[fw-check-json] {"kind":"fr-timing","erase_us":21978,"writes":16,"write_us_min":310,"write_us_max":343,"write_us_total":5220}
+[flash-reprogram] === SCAN DONE === generation=113 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":112,"generation":113,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":113,"order_bytes":712704,"frontier":368440,"frontier_addr":"0x3abf38","last_dirty":368436,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328629}
+[fw-check-json] {"kind":"fr-window","start":368128,"end":368896,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":90,"erase_us":1111645,"blank":true,"keep":[],"pending":0,"next_generation":114}
+[fw-check-json] {"kind":"fr-timing","erase_us":21995,"writes":16,"write_us_min":310,"write_us_max":346,"write_us_total":5227}
+[flash-reprogram] === SCAN DONE === generation=114 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":113,"generation":114,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":114,"order_bytes":712704,"frontier":429440,"frontier_addr":"0x3bad80","last_dirty":429436,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":331489}
+[fw-check-json] {"kind":"fr-window","start":429056,"end":429824,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":105,"erase_us":1181752,"blank":true,"keep":[],"pending":0,"next_generation":115}
+[fw-check-json] {"kind":"fr-timing","erase_us":22738,"writes":16,"write_us_min":310,"write_us_max":343,"write_us_total":5193}
+[flash-reprogram] === SCAN DONE === generation=115 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":114,"generation":115,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":115,"order_bytes":712704,"frontier":418304,"frontier_addr":"0x3b8200","last_dirty":418300,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330966}
+[fw-check-json] {"kind":"fr-window","start":418048,"end":418816,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":103,"erase_us":1138498,"blank":true,"keep":[],"pending":0,"next_generation":116}
+[fw-check-json] {"kind":"fr-timing","erase_us":23983,"writes":16,"write_us_min":311,"write_us_max":346,"write_us_total":5223}
+[flash-reprogram] === SCAN DONE === generation=116 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":115,"generation":116,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":116,"order_bytes":712704,"frontier":386528,"frontier_addr":"0x3b05e0","last_dirty":386524,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329477}
+[fw-check-json] {"kind":"fr-window","start":386048,"end":386816,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":95,"erase_us":970542,"blank":true,"keep":[],"pending":0,"next_generation":117}
+[fw-check-json] {"kind":"fr-timing","erase_us":21997,"writes":16,"write_us_min":310,"write_us_max":343,"write_us_total":5226}
+[flash-reprogram] === SCAN DONE === generation=117 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":116,"generation":117,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":117,"order_bytes":712704,"frontier":477952,"frontier_addr":"0x3c6b00","last_dirty":477948,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":333763}
+[fw-check-json] {"kind":"fr-window","start":477696,"end":478464,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":117,"erase_us":1182809,"blank":true,"keep":[],"pending":0,"next_generation":118}
+[fw-check-json] {"kind":"fr-timing","erase_us":22063,"writes":16,"write_us_min":311,"write_us_max":344,"write_us_total":5211}
+[flash-reprogram] === SCAN DONE === generation=118 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":117,"generation":118,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":118,"order_bytes":712704,"frontier":359012,"frontier_addr":"0x3a9a64","last_dirty":359008,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328187}
+[fw-check-json] {"kind":"fr-window","start":358656,"end":359424,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":88,"erase_us":1067420,"blank":true,"keep":[],"pending":0,"next_generation":119}
+[fw-check-json] {"kind":"fr-timing","erase_us":25052,"writes":16,"write_us_min":309,"write_us_max":342,"write_us_total":5218}
+[flash-reprogram] === SCAN DONE === generation=119 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":118,"generation":119,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":119,"order_bytes":712704,"frontier":293248,"frontier_addr":"0x399980","last_dirty":293244,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":325104}
+[fw-check-json] {"kind":"fr-window","start":292864,"end":293632,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":72,"erase_us":975623,"blank":true,"keep":[],"pending":0,"next_generation":120}
+[fw-check-json] {"kind":"fr-timing","erase_us":22000,"writes":16,"write_us_min":310,"write_us_max":342,"write_us_total":5227}
+[flash-reprogram] === SCAN DONE === generation=120 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":119,"generation":120,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":120,"order_bytes":712704,"frontier":358332,"frontier_addr":"0x3a97bc","last_dirty":358328,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328155}
+[fw-check-json] {"kind":"fr-window","start":357888,"end":358656,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":88,"erase_us":1071061,"blank":true,"keep":[],"pending":0,"next_generation":121}
+[fw-check-json] {"kind":"fr-timing","erase_us":22730,"writes":16,"write_us_min":310,"write_us_max":349,"write_us_total":5240}
+[flash-reprogram] === SCAN DONE === generation=121 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":120,"generation":121,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":121,"order_bytes":712704,"frontier":361984,"frontier_addr":"0x3aa600","last_dirty":361980,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328327}
+[fw-check-json] {"kind":"fr-window","start":361728,"end":362496,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":89,"erase_us":1091545,"blank":true,"keep":[],"pending":0,"next_generation":122}
+[fw-check-json] {"kind":"fr-timing","erase_us":22728,"writes":16,"write_us_min":310,"write_us_max":344,"write_us_total":5231}
+[flash-reprogram] === SCAN DONE === generation=122 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":121,"generation":122,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":122,"order_bytes":712704,"frontier":387268,"frontier_addr":"0x3b08c4","last_dirty":387264,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329511}
+[fw-check-json] {"kind":"fr-window","start":386816,"end":387584,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":95,"erase_us":971612,"blank":true,"keep":[],"pending":0,"next_generation":123}
+[fw-check-json] {"kind":"fr-timing","erase_us":22746,"writes":16,"write_us_min":310,"write_us_max":343,"write_us_total":5231}
+[flash-reprogram] === SCAN DONE === generation=123 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":122,"generation":123,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":123,"order_bytes":712704,"frontier":324352,"frontier_addr":"0x3a1300","last_dirty":324348,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":326563}
+[fw-check-json] {"kind":"fr-window","start":324096,"end":324864,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":80,"erase_us":902118,"blank":true,"keep":[],"pending":0,"next_generation":124}
+[fw-check-json] {"kind":"fr-timing","erase_us":24733,"writes":16,"write_us_min":310,"write_us_max":341,"write_us_total":5201}
+[flash-reprogram] === SCAN DONE === generation=124 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":123,"generation":124,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":124,"order_bytes":712704,"frontier":314592,"frontier_addr":"0x39ece0","last_dirty":314588,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":326105}
+[fw-check-json] {"kind":"fr-window","start":314112,"end":314880,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":77,"erase_us":1082661,"blank":true,"keep":[],"pending":0,"next_generation":125}
+[fw-check-json] {"kind":"fr-timing","erase_us":22760,"writes":16,"write_us_min":310,"write_us_max":344,"write_us_total":5246}
+[flash-reprogram] === SCAN DONE === generation=125 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":124,"generation":125,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":125,"order_bytes":712704,"frontier":286724,"frontier_addr":"0x398004","last_dirty":286720,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":324798}
+[fw-check-json] {"kind":"fr-window","start":286464,"end":287232,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":71,"erase_us":955214,"blank":true,"keep":[],"pending":0,"next_generation":126}
+[fw-check-json] {"kind":"fr-timing","erase_us":22735,"writes":16,"write_us_min":310,"write_us_max":348,"write_us_total":5220}
+[flash-reprogram] === SCAN DONE === generation=126 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":125,"generation":126,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":126,"order_bytes":712704,"frontier":352768,"frontier_addr":"0x3a8200","last_dirty":352764,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":327894}
+[fw-check-json] {"kind":"fr-window","start":352512,"end":353280,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":87,"erase_us":1051448,"blank":true,"keep":[],"pending":0,"next_generation":127}
+[fw-check-json] {"kind":"fr-timing","erase_us":26984,"writes":16,"write_us_min":314,"write_us_max":342,"write_us_total":5223}
+[flash-reprogram] === SCAN DONE === generation=127 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":126,"generation":127,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":127,"order_bytes":712704,"frontier":346208,"frontier_addr":"0x3a6860","last_dirty":346204,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":327586}
+[fw-check-json] {"kind":"fr-window","start":345856,"end":346624,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":85,"erase_us":1005095,"blank":true,"keep":[],"pending":0,"next_generation":128}
+[fw-check-json] {"kind":"fr-timing","erase_us":22738,"writes":16,"write_us_min":307,"write_us_max":344,"write_us_total":5219}
+[flash-reprogram] === SCAN DONE === generation=128 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":127,"generation":128,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":128,"order_bytes":712704,"frontier":287792,"frontier_addr":"0x398430","last_dirty":287788,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":324848}
+[fw-check-json] {"kind":"fr-window","start":287488,"end":288256,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":71,"erase_us":969017,"blank":true,"keep":[],"pending":0,"next_generation":129}
+[fw-check-json] {"kind":"fr-timing","erase_us":21969,"writes":16,"write_us_min":310,"write_us_max":344,"write_us_total":5213}
+[flash-reprogram] === SCAN DONE === generation=129 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":128,"generation":129,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":129,"order_bytes":712704,"frontier":381952,"frontier_addr":"0x3af400","last_dirty":381948,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329263}
+[fw-check-json] {"kind":"fr-window","start":381696,"end":382464,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":94,"erase_us":957466,"blank":true,"keep":[],"pending":0,"next_generation":130}
+[fw-check-json] {"kind":"fr-timing","erase_us":22753,"writes":16,"write_us_min":311,"write_us_max":343,"write_us_total":5213}
+[flash-reprogram] === SCAN DONE === generation=130 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":129,"generation":130,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":130,"order_bytes":712704,"frontier":283136,"frontier_addr":"0x397200","last_dirty":283132,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":324631}
+[fw-check-json] {"kind":"fr-window","start":282880,"end":283648,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":70,"erase_us":944265,"blank":true,"keep":[],"pending":0,"next_generation":131}
+[fw-check-json] {"kind":"fr-timing","erase_us":23929,"writes":16,"write_us_min":311,"write_us_max":346,"write_us_total":5217}
+[flash-reprogram] === SCAN DONE === generation=131 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":130,"generation":131,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":131,"order_bytes":712704,"frontier":447840,"frontier_addr":"0x3bf560","last_dirty":447836,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":332351}
+[fw-check-json] {"kind":"fr-window","start":447488,"end":448256,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":110,"erase_us":1043318,"blank":true,"keep":[],"pending":0,"next_generation":132}
+[fw-check-json] {"kind":"fr-timing","erase_us":21968,"writes":16,"write_us_min":307,"write_us_max":341,"write_us_total":5216}
+[flash-reprogram] === SCAN DONE === generation=132 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":131,"generation":132,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":132,"order_bytes":712704,"frontier":474428,"frontier_addr":"0x3c5d3c","last_dirty":474424,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":333598}
+[fw-check-json] {"kind":"fr-window","start":474112,"end":474880,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":116,"erase_us":1162943,"blank":true,"keep":[],"pending":0,"next_generation":133}
+[fw-check-json] {"kind":"fr-timing","erase_us":21994,"writes":16,"write_us_min":314,"write_us_max":346,"write_us_total":5233}
+[flash-reprogram] === SCAN DONE === generation=133 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":132,"generation":133,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":133,"order_bytes":712704,"frontier":418048,"frontier_addr":"0x3b8100","last_dirty":418044,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330955}
+[fw-check-json] {"kind":"fr-window","start":417792,"end":418560,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":103,"erase_us":1141291,"blank":true,"keep":[],"pending":0,"next_generation":134}
+[fw-check-json] {"kind":"fr-timing","erase_us":22748,"writes":16,"write_us_min":314,"write_us_max":338,"write_us_total":5198}
+[flash-reprogram] === SCAN DONE === generation=134 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":133,"generation":134,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":134,"order_bytes":712704,"frontier":359712,"frontier_addr":"0x3a9d20","last_dirty":359708,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328220}
+[fw-check-json] {"kind":"fr-window","start":359424,"end":360192,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":88,"erase_us":1071623,"blank":true,"keep":[],"pending":0,"next_generation":135}
+[fw-check-json] {"kind":"fr-timing","erase_us":22751,"writes":16,"write_us_min":309,"write_us_max":345,"write_us_total":5217}
+[flash-reprogram] === SCAN DONE === generation=135 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":134,"generation":135,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":135,"order_bytes":712704,"frontier":358048,"frontier_addr":"0x3a96a0","last_dirty":358044,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328142}
+[fw-check-json] {"kind":"fr-window","start":357632,"end":358400,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":88,"erase_us":1075602,"blank":true,"keep":[],"pending":0,"next_generation":136}
+[fw-check-json] {"kind":"fr-timing","erase_us":22732,"writes":16,"write_us_min":314,"write_us_max":345,"write_us_total":5240}
+[flash-reprogram] === SCAN DONE === generation=136 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":135,"generation":136,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":136,"order_bytes":712704,"frontier":435328,"frontier_addr":"0x3bc480","last_dirty":435324,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":331765}
+[fw-check-json] {"kind":"fr-window","start":434944,"end":435712,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":107,"erase_us":1225821,"blank":true,"keep":[],"pending":0,"next_generation":137}
+[fw-check-json] {"kind":"fr-timing","erase_us":22769,"writes":16,"write_us_min":314,"write_us_max":346,"write_us_total":5228}
+[flash-reprogram] === SCAN DONE === generation=137 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":136,"generation":137,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":137,"order_bytes":712704,"frontier":408576,"frontier_addr":"0x3b5c00","last_dirty":408572,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330510}
+[fw-check-json] {"kind":"fr-window","start":408320,"end":409088,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":100,"erase_us":1081849,"blank":true,"keep":[],"pending":0,"next_generation":138}
+[fw-check-json] {"kind":"fr-timing","erase_us":22745,"writes":16,"write_us_min":311,"write_us_max":345,"write_us_total":5217}
+[flash-reprogram] === SCAN DONE === generation=138 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":137,"generation":138,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":138,"order_bytes":712704,"frontier":368668,"frontier_addr":"0x3ac01c","last_dirty":368664,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328639}
+[fw-check-json] {"kind":"fr-window","start":368384,"end":369152,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":91,"erase_us":1133601,"blank":true,"keep":[],"pending":0,"next_generation":139}
+[fw-check-json] {"kind":"fr-timing","erase_us":22764,"writes":16,"write_us_min":313,"write_us_max":345,"write_us_total":5227}
+[flash-reprogram] === SCAN DONE === generation=139 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":138,"generation":139,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":139,"order_bytes":712704,"frontier":401996,"frontier_addr":"0x3b424c","last_dirty":401992,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330202}
+[fw-check-json] {"kind":"fr-window","start":401664,"end":402432,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":99,"erase_us":1062096,"blank":true,"keep":[],"pending":0,"next_generation":140}
+[fw-check-json] {"kind":"fr-timing","erase_us":22739,"writes":16,"write_us_min":310,"write_us_max":339,"write_us_total":5209}
+[flash-reprogram] === SCAN DONE === generation=140 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":139,"generation":140,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":140,"order_bytes":712704,"frontier":410624,"frontier_addr":"0x3b6400","last_dirty":410620,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330607}
+[fw-check-json] {"kind":"fr-window","start":410368,"end":411136,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":101,"erase_us":1093324,"blank":true,"keep":[],"pending":0,"next_generation":141}
+[fw-check-json] {"kind":"fr-timing","erase_us":21988,"writes":16,"write_us_min":312,"write_us_max":344,"write_us_total":5213}
+[flash-reprogram] === SCAN DONE === generation=141 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":140,"generation":141,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":141,"order_bytes":712704,"frontier":402684,"frontier_addr":"0x3b44fc","last_dirty":402680,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330234}
+[fw-check-json] {"kind":"fr-window","start":402176,"end":402944,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":99,"erase_us":1058724,"blank":true,"keep":[],"pending":0,"next_generation":142}
+[fw-check-json] {"kind":"fr-timing","erase_us":21967,"writes":16,"write_us_min":314,"write_us_max":343,"write_us_total":5223}
+[flash-reprogram] === SCAN DONE === generation=142 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":141,"generation":142,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":142,"order_bytes":712704,"frontier":371104,"frontier_addr":"0x3ac9a0","last_dirty":371100,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328754}
+[fw-check-json] {"kind":"fr-window","start":370688,"end":371456,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":91,"erase_us":1131451,"blank":true,"keep":[],"pending":0,"next_generation":143}
+[fw-check-json] {"kind":"fr-timing","erase_us":24329,"writes":16,"write_us_min":314,"write_us_max":342,"write_us_total":5217}
+[flash-reprogram] === SCAN DONE === generation=143 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":142,"generation":143,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":143,"order_bytes":712704,"frontier":372788,"frontier_addr":"0x3ad034","last_dirty":372784,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":328833}
+[fw-check-json] {"kind":"fr-window","start":372480,"end":373248,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":92,"erase_us":1156761,"blank":true,"keep":[],"pending":0,"next_generation":144}
+[fw-check-json] {"kind":"fr-timing","erase_us":23934,"writes":16,"write_us_min":310,"write_us_max":344,"write_us_total":5207}
+[flash-reprogram] === SCAN DONE === generation=144 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":143,"generation":144,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":144,"order_bytes":712704,"frontier":439424,"frontier_addr":"0x3bd480","last_dirty":439420,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":331956}
+[fw-check-json] {"kind":"fr-window","start":439040,"end":439808,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":108,"erase_us":1240117,"blank":true,"keep":[],"pending":0,"next_generation":145}
+[fw-check-json] {"kind":"fr-timing","erase_us":21997,"writes":16,"write_us_min":313,"write_us_max":342,"write_us_total":5212}
+[flash-reprogram] === SCAN DONE === generation=145 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":144,"generation":145,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":145,"order_bytes":712704,"frontier":476940,"frontier_addr":"0x3c670c","last_dirty":476936,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":333715}
+[fw-check-json] {"kind":"fr-window","start":476672,"end":477440,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":117,"erase_us":1183284,"blank":true,"keep":[],"pending":0,"next_generation":146}
+[fw-check-json] {"kind":"fr-timing","erase_us":22729,"writes":16,"write_us_min":313,"write_us_max":347,"write_us_total":5206}
+[flash-reprogram] === SCAN DONE === generation=146 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":145,"generation":146,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":146,"order_bytes":712704,"frontier":481472,"frontier_addr":"0x3c78c0","last_dirty":481468,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":333928}
+[fw-check-json] {"kind":"fr-window","start":481024,"end":481792,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":118,"erase_us":1204686,"blank":true,"keep":[],"pending":0,"next_generation":147}
+[fw-check-json] {"kind":"fr-timing","erase_us":25102,"writes":16,"write_us_min":314,"write_us_max":343,"write_us_total":5230}
+[flash-reprogram] === SCAN DONE === generation=147 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":146,"generation":147,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":147,"order_bytes":712704,"frontier":452736,"frontier_addr":"0x3c0880","last_dirty":452732,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":332580}
+[fw-check-json] {"kind":"fr-window","start":452352,"end":453120,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":111,"erase_us":1064803,"blank":true,"keep":[],"pending":0,"next_generation":148}
+[fw-check-json] {"kind":"fr-timing","erase_us":22749,"writes":16,"write_us_min":314,"write_us_max":347,"write_us_total":5224}
+[flash-reprogram] === SCAN DONE === generation=148 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":147,"generation":148,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":148,"order_bytes":712704,"frontier":384832,"frontier_addr":"0x3aff40","last_dirty":384828,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329397}
+[fw-check-json] {"kind":"fr-window","start":384512,"end":385280,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":94,"erase_us":956993,"blank":true,"keep":[],"pending":0,"next_generation":149}
+[fw-check-json] {"kind":"fr-timing","erase_us":22738,"writes":16,"write_us_min":310,"write_us_max":343,"write_us_total":5241}
+[flash-reprogram] === SCAN DONE === generation=149 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":148,"generation":149,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":149,"order_bytes":712704,"frontier":351936,"frontier_addr":"0x3a7ec0","last_dirty":351932,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":327855}
+[fw-check-json] {"kind":"fr-window","start":351488,"end":352256,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":86,"erase_us":1028997,"blank":true,"keep":[],"pending":0,"next_generation":150}
+[fw-check-json] {"kind":"fr-timing","erase_us":22764,"writes":16,"write_us_min":314,"write_us_max":345,"write_us_total":5239}
+[flash-reprogram] === SCAN DONE === generation=150 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":149,"generation":150,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":150,"order_bytes":712704,"frontier":388720,"frontier_addr":"0x3b0e70","last_dirty":388716,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":329579}
+[fw-check-json] {"kind":"fr-window","start":388352,"end":389120,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":95,"erase_us":971653,"blank":true,"keep":[],"pending":0,"next_generation":151}
+[fw-check-json] {"kind":"fr-timing","erase_us":22722,"writes":16,"write_us_min":310,"write_us_max":345,"write_us_total":5240}
+[flash-reprogram] === SCAN DONE === generation=151 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":150,"generation":151,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":151,"order_bytes":712704,"frontier":401568,"frontier_addr":"0x3b40a0","last_dirty":401564,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330182}
+[fw-check-json] {"kind":"fr-window","start":401152,"end":401920,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":99,"erase_us":1057605,"blank":true,"keep":[],"pending":0,"next_generation":152}
+[fw-check-json] {"kind":"fr-timing","erase_us":24714,"writes":16,"write_us_min":310,"write_us_max":348,"write_us_total":5238}
+[flash-reprogram] === SCAN DONE === generation=152 bytes=712704
+[flash-reprogram] READY host answered, scanning
+[fw-checks-header] {"schema":1,"payload":"flash-reprogram","chip":"esp32c6","firmware_commit":"f5402db3de4c","firmware_features":"ble,default,esp32c6,esp_radio,io_thread,json_pack,lp_gfx_lpvm,lpa_server,lpc_hardware,lpc_model,lpc_shared,lpc_wire,lpfs,radio,server,test_flash_reprogram,wifi","firmware_dirty":false}
+[fw-check-json] {"kind":"fr-boot","reset":"poweron","mac":"14:c1:9f:e6:54:90","flash_id":"0x464016","base":"0x350000","sectors":176,"state":"resume","seq":151,"generation":152,"keep":[],"pending":0}
+[fw-check-json] {"kind":"fr-scan","generation":152,"order_bytes":712704,"frontier":404480,"frontier_addr":"0x3b4c00","last_dirty":404476,"span_words":0,"span_eq":0,"span_ff":0,"span_other":0,"scan_us":330319}
+[fw-check-json] {"kind":"fr-window","start":404224,"end":404992,"reads":64,"capped":false,"weak_words":0,"weak_bits":0,"torn_words":0,"followed":0}
+[fw-check-json] {"kind":"fr-prepare","erased_sectors":99,"erase_us":1049036,"blank":true,"keep":[],"pending":0,"next_generation":153}
+[fw-check-json] {"kind":"fr-timing","erase_us":26985,"writes":16,"write_us_min":310,"write_us_max":344,"write_us_total":5241}
+[flash-reprogram] === SCAN DONE === generation=153 bytes=712704

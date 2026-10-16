@@ -1237,13 +1237,7 @@ pub(super) fn sync_shader_slot_def_from_authored(
     // JIT-recompile the shader on every frame of a color-picker drag, for a
     // spec that is byte-identical before and after.
     if matches!(slot.kind.value(), ShaderSlotKind::Palette) {
-        sync_optional_field_from_authored::<GradientConfig>(
-            ctx,
-            keys,
-            uniform,
-            AuthoredField::GradientSome,
-            &mut slot.gradient,
-        )?;
+        sync_gradient_from_authored(ctx, keys, uniform, &mut slot.gradient)?;
     }
     changed |= sync_optional_field_from_authored::<f32>(
         ctx,
@@ -1675,6 +1669,51 @@ where
         Some(existing) => set_slot_if_changed(existing, value),
         None => {
             *slot = OptionSlot::some(ValueSlot::new(value));
+            true
+        }
+    })
+}
+
+/// Sync the authored gradient config onto a palette uniform, parsing it only
+/// when the authored value has moved.
+///
+/// [`GradientConfig::from_lp_value`] rebuilds the whole set (a `Vec`, and per
+/// gradient a parsed stops literal) and the result was then compared against
+/// the runtime copy and dropped: on the choker, ~40 allocations a frame and
+/// 30 % of all frame churn (RAM research E9). The authored value's revision
+/// says whether anything changed, so the revision it was last parsed at is
+/// kept beside the uniform's keys and a matching read skips the parse. The
+/// cache dies with the keys, so a structural epoch, a removed uniform or a
+/// reloaded node starts over; a parse that fails records nothing and so
+/// fails again next frame, as before.
+fn sync_gradient_from_authored(
+    ctx: &mut TickContext<'_>,
+    keys: &mut UniformFieldKeys,
+    uniform: &str,
+    slot: &mut OptionSlot<ValueSlot<GradientConfig>>,
+) -> Result<bool, NodeError> {
+    let key = keys.key(ctx, uniform, AuthoredField::GradientSome)?;
+    let Ok(production) = ctx.resolve(key) else {
+        return Ok(false);
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved shader path is not a value"))?;
+    let revision = value.changed_at();
+    if slot.data.is_some() && keys.gradient_revision == Some(revision) {
+        return Ok(false);
+    }
+    let next = GradientConfig::from_lp_value(value.value()).map_err(|e| {
+        NodeError::msg(alloc::format!(
+            "shader path {:?}: {e}",
+            AuthoredField::GradientSome.path_for(uniform)
+        ))
+    })?;
+    keys.gradient_revision = Some(revision);
+    Ok(match slot.data.as_mut() {
+        Some(existing) => set_slot_if_changed(existing, next),
+        None => {
+            *slot = OptionSlot::some(ValueSlot::new(next));
             true
         }
     })
@@ -4575,6 +4614,87 @@ mod authored_sync_tests {
         assert_eq!(node.visual_uniforms.len(), 2);
     }
 
+    /// A palette's authored gradient is parsed when it changes, not every
+    /// frame (RAM research E9/F05: `read_gradient_set` was 30 % of the
+    /// choker's frame churn). A steady sync over an unchanged authored
+    /// gradient must allocate nothing.
+    #[test]
+    fn a_steady_palette_sync_does_not_reparse_the_gradient() {
+        let (mut node, mut resolver) = node_with_a_palette(&GradientConfig::default());
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        let (_, churn) = measure(|| sync_once(&mut node, &mut resolver, &shapes, 3));
+
+        std::eprintln!("steady palette sync: {churn:?}");
+        assert_eq!(
+            churn.allocs, 0,
+            "a steady palette sync must not reparse its gradient, made {} requests ({} B)",
+            churn.allocs, churn.bytes
+        );
+    }
+
+    /// The first sync lands the authored gradient on the runtime copy (the
+    /// parse the cache must not skip), and a later authored edit, stamped
+    /// with a new revision, lands too.
+    #[test]
+    fn an_edited_gradient_lands_on_the_next_tick() {
+        let authored = other_gradient_config();
+        assert_ne!(authored, GradientConfig::default());
+        let (mut node, mut resolver) = node_with_a_palette(&authored);
+        let shapes = SlotShapeRegistry::default();
+
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+        assert_eq!(
+            node.consumed_slots.entries["tint"].gradient_config(),
+            authored
+        );
+        node.needs_compile = false;
+
+        resolver.set_gradient("tint", &GradientConfig::default(), 5);
+        sync_once(&mut node, &mut resolver, &shapes, 2);
+
+        assert_eq!(
+            node.consumed_slots.entries["tint"].gradient_config(),
+            GradientConfig::default(),
+            "the edit must reach the runtime copy"
+        );
+        assert!(
+            !node.needs_compile,
+            "a palette edit never recompiles the shader"
+        );
+    }
+
+    /// A parse that fails is not remembered: the next frame tries again, so a
+    /// bad value cannot stick as "already synced" once it is repaired.
+    #[test]
+    fn a_gradient_that_fails_to_parse_is_retried() {
+        let (mut node, mut resolver) = node_with_a_palette(&GradientConfig::default());
+        let shapes = SlotShapeRegistry::default();
+        sync_once(&mut node, &mut resolver, &shapes, 1);
+
+        resolver.set_at(
+            "consumed[tint].gradient.some",
+            LpValue::String(String::from("not a gradient")),
+            4,
+        );
+        let mut ctx = tick(&mut resolver, &shapes, 2);
+        assert!(node.update_consumed_slots_from_view(&mut ctx).is_err());
+        let mut ctx = tick(&mut resolver, &shapes, 3);
+        assert!(
+            node.update_consumed_slots_from_view(&mut ctx).is_err(),
+            "the failure repeats while the value stays bad"
+        );
+
+        resolver.set_gradient("tint", &other_gradient_config(), 6);
+        sync_once(&mut node, &mut resolver, &shapes, 4);
+        assert_eq!(
+            node.consumed_slots.entries["tint"].gradient_config(),
+            other_gradient_config()
+        );
+    }
+
     /// A uniform the author adds mid-run is synced on the next tick: its
     /// keys are built on the spot and resolve.
     #[test]
@@ -4930,6 +5050,53 @@ mod authored_sync_tests {
         )
     }
 
+    /// A node with one palette uniform whose runtime copy starts at the
+    /// default gradient, and an authored view holding `authored`.
+    fn node_with_a_palette(authored: &GradientConfig) -> (ShaderNode, AuthoredDefResolver) {
+        let mut consumed_slots = MapSlot::default();
+        consumed_slots.entries.insert(
+            String::from("tint"),
+            ShaderSlotDef::palette("Tint", "described", GradientConfig::default()),
+        );
+        let node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef {
+                consumed_slots,
+                ..ShaderDef::default()
+            },
+            AssetText {
+                location: AssetLocation::artifact(ArtifactLocation::file("/shader.glsl")),
+                content_type: AssetContentType::ShaderSource,
+                revision: Revision::new(1),
+                text: String::from("vec4 render_2d(vec2 p) { return vec4(0.0); }"),
+                diagnostic_name: String::from("/shader.glsl"),
+            },
+        );
+        let mut resolver = authored_view();
+        resolver.uniforms.clear();
+        resolver.fields.clear();
+        resolver.add_palette_uniform("tint", authored, 2);
+        (node, resolver)
+    }
+
+    fn other_gradient_config() -> GradientConfig {
+        let mut config = GradientConfig::default();
+        if let GradientConfig::Static(gradient) = &mut config {
+            *gradient = lpc_model::Gradient::default();
+        }
+        // A cycle differs from the default by kind, whatever the default's
+        // own set holds.
+        match GradientConfig::default() {
+            GradientConfig::Static(gradient) => GradientConfig::Cycle {
+                set: alloc::vec![gradient.clone(), gradient],
+                step_seconds: 7.0,
+                fade_seconds: 1.0,
+                pinned: None,
+            },
+            other => other,
+        }
+    }
+
     fn authored_view() -> AuthoredDefResolver {
         let mut view = AuthoredDefResolver {
             fields: Vec::new(),
@@ -5041,10 +5208,47 @@ mod authored_sync_tests {
             self.rebuild_consumed_map();
         }
 
+        /// A palette uniform authored with `config`, stamped at `revision`.
+        fn add_palette_uniform(&mut self, name: &str, config: &GradientConfig, revision: i64) {
+            self.uniforms.push(String::from(name));
+            self.set(
+                &alloc::format!("consumed[{name}].kind"),
+                LpValue::String(String::from("palette")),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].value"),
+                LpValue::String(String::from("sampler2D")),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].label"),
+                LpValue::String(String::from("Tint")),
+            );
+            self.set(
+                &alloc::format!("consumed[{name}].description"),
+                LpValue::String(String::from("described")),
+            );
+            self.set_gradient(name, config, revision);
+            self.rebuild_consumed_map();
+        }
+
+        /// Author `config` as the uniform's gradient, as a def edit at
+        /// `revision` would.
+        fn set_gradient(&mut self, name: &str, config: &GradientConfig, revision: i64) {
+            self.set_at(
+                &alloc::format!("consumed[{name}].gradient.some"),
+                lpc_model::ToLpValue::to_lp_value(config),
+                revision,
+            );
+        }
+
         fn set(&mut self, path: &str, value: LpValue) {
+            self.set_at(path, value, 1);
+        }
+
+        fn set_at(&mut self, path: &str, value: LpValue, revision: i64) {
             let path = SlotPath::parse(path).expect("test authored path");
             let production = Production::leaf(
-                WithRevision::new(Revision::new(1), value),
+                WithRevision::new(Revision::new(revision), value),
                 ProductionSource::Default,
             );
             match self.fields.iter_mut().find(|(held, _)| *held == path) {

@@ -1,3 +1,9 @@
+---
+status: fixed
+found: 2026-07-30      # the Xtensa filetest corpus, on its first run
+area: lpvm-native/regalloc (walk.rs)
+class: config-masked-defect
+---
 # Defect: call-argument staging was not a parallel move (Xtensa)
 
 - **Date:** 2026-07-30

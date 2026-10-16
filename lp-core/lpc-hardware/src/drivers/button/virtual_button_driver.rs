@@ -9,7 +9,7 @@ use lp_collection::VecMap;
 use crate::{
     ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareEndpointError,
     HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint, HwEndpointId,
-    HwEndpointKind, HwEndpointSpec, HwRegistry,
+    HwEndpointKind, HwEndpointSpec, HwRegistry, preferred_endpoint,
 };
 
 /// Manifest-backed virtual button driver for tests and emulation.
@@ -42,13 +42,40 @@ impl VirtualButtonDriver {
         HwEndpointId::for_driver_address(self.driver_id(), address)
     }
 
+    /// Every button endpoint, built one at a time as the caller asks for it.
+    fn endpoint_stream(&self) -> impl Iterator<Item = HwEndpoint> + '_ {
+        self.registry
+            .manifest()
+            .resources()
+            .iter()
+            .filter(|resource| resource.supports(HwCapability::GpioInput))
+            .map(|resource| {
+                let address = resource.address().clone();
+                let spec = button_local_spec(resource.display_label());
+                HwEndpoint::new(
+                    self.endpoint_id(&address),
+                    spec,
+                    HwEndpointKind::Button,
+                    self.driver_id(),
+                    address,
+                    resource.display_label(),
+                    self.registry.endpoint_status_for(resource.address()),
+                )
+            })
+    }
+
     fn gpio_for_endpoint(
         &self,
         endpoint_id: &HwEndpointId,
     ) -> Result<HwAddress, HardwareEndpointError> {
-        for endpoint in self.endpoints() {
-            if endpoint.id() == endpoint_id {
-                return Ok(endpoint.address().clone());
+        // Walks the manifest rather than building the endpoint list: the id
+        // already determines the address, and the list carries a status
+        // lookup and cloned strings for every GPIO the board declares.
+        for resource in self.registry.manifest().resources() {
+            if resource.supports(HwCapability::GpioInput)
+                && self.endpoint_id(resource.address()) == *endpoint_id
+            {
+                return Ok(resource.address().clone());
             }
         }
 
@@ -71,24 +98,11 @@ impl HwDriver for VirtualButtonDriver {
 
 impl ButtonDriver for VirtualButtonDriver {
     fn endpoints(&self) -> Vec<HwEndpoint> {
-        let mut endpoints = Vec::new();
-        for resource in self.registry.manifest().resources() {
-            if !resource.supports(HwCapability::GpioInput) {
-                continue;
-            }
-            let address = resource.address().clone();
-            let spec = button_local_spec(resource.display_label());
-            endpoints.push(HwEndpoint::new(
-                self.endpoint_id(&address),
-                spec,
-                HwEndpointKind::Button,
-                self.driver_id(),
-                address,
-                resource.display_label(),
-                self.registry.endpoint_status_for(resource.address()),
-            ));
-        }
-        endpoints
+        self.endpoint_stream().collect()
+    }
+
+    fn find_endpoint(&self, matches: &dyn Fn(&HwEndpoint) -> bool) -> Option<HwEndpoint> {
+        preferred_endpoint(self.endpoint_stream(), matches)
     }
 
     fn open(

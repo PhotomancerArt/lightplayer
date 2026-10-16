@@ -20,5 +20,7 @@
 
 /// Where the pre-repartition `lpfs` starts.
 pub const LEGACY_LPFS_V1_OFFSET: u32 = 0x0031_0000;
-/// How many 4 KB littlefs blocks it holds (`0xF0000` bytes).
+/// How many 4 KB littlefs blocks it holds (`0xF0000` bytes). Read by the
+/// probe only, which the size measurement's build leaves out.
+#[cfg(not(feature = "measure_no_legacy_probe"))]
 pub const LEGACY_LPFS_V1_BLOCKS: u32 = 240;

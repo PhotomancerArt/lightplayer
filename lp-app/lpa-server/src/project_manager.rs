@@ -378,6 +378,17 @@ impl ProjectManager {
         self.projects.get(&handle)
     }
 
+    /// The first loaded project: the lowest handle (a board plays one; the
+    /// relay reports it). No allocation, unlike
+    /// [`Self::list_loaded_projects`].
+    #[must_use]
+    pub fn first_loaded(&self) -> Option<&Project> {
+        self.projects
+            .iter()
+            .min_by_key(|(handle, _)| handle.id())
+            .map(|(_, project)| project)
+    }
+
     /// Get a mutable reference to a project by handle
     pub fn get_project_mut(&mut self, handle: ProjectHandle) -> Option<&mut Project> {
         self.projects.get_mut(&handle)

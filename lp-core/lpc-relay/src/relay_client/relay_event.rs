@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 
 use super::relay_account::RelayAccount;
+use super::relay_project_facts::RelayProjectFacts;
 use crate::lan_address::LanAddress;
 
 /// One fact for [`RelayClient::handle`](super::RelayClient::handle), with
@@ -40,6 +41,14 @@ pub enum RelayEvent<'a> {
         route: u16,
         reason: crate::RouteCloseReason,
     },
+    /// The board's project as the server knows it (at start, and on every
+    /// change); `None` when no project is loaded. The client reports it to
+    /// the hub after every `Registered` and on every change, as a name and
+    /// tags, never the uid or the hash.
+    Project(Option<RelayProjectFacts>),
+    /// The edge has the picture [`RelayAction::TakePicture`](super::RelayAction::TakePicture)
+    /// asked for. Its bytes stay with the edge.
+    PictureReady,
     /// Time passed; deadlines are checked against `now_ms`.
     Tick,
 }

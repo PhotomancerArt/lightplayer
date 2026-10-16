@@ -34,11 +34,11 @@ pub mod tab_id;
 
 pub use board_hold_edge::{BoardHoldEdge, ClaimAnswer};
 pub use hold_answer::{
-    AnswerPlan, PendingRelease, RELEASE_CLOSE_PATIENCE_SECS, ReleaseStage, answer_plan,
+    AnswerPlan, PendingRelease, RELEASE_PATIENCE_SECS, ReleaseStage, answer_plan,
 };
 pub use hold_book::{BoardHoldBook, BookChange, OtherHold, PendingAsk};
 pub use hold_edge_event::HoldEdgeEvent;
-pub use hold_flow::BoardHoldFlow;
+pub use hold_flow::{BoardHoldFlow, FreedPorts};
 pub use hold_gate::{
     SharedUsbHoldGate, UsbHoldGate, associate, gate_group, reads_as_held, usb_pair_of,
 };

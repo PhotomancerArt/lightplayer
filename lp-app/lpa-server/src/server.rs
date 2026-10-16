@@ -26,6 +26,7 @@ use lpc_wire::{ClientRequest, WireServerMessage};
 use crate::access_gate::classify;
 use crate::access_state::{AccessState, EntropySource};
 use crate::access_store;
+use crate::batch_state::{BatchState, fs_request_changes_files};
 use crate::heartbeat_status::HeartbeatStatus;
 use crate::network_store;
 use lpfs::{FsEvent, LpFs};
@@ -197,6 +198,7 @@ pub struct LpServer {
     /// The ProjectRead memory gate's floors, per chip (see [`ReadGate`]).
     /// Unset (hosts/browser) = reads are never refused.
     read_gate: Option<ReadGate>,
+    read_cost_margin: Option<u32>,
     /// Answer a tick's requests before rendering its frame (see
     /// [`Self::set_messages_first`]). Off = render first, then answer.
     messages_first: bool,
@@ -251,6 +253,9 @@ pub struct LpServer {
     /// [`ServerTransport::take_closed_links`]), the device's one login and
     /// its backoff, and the clock and randomness they run on.
     access: AccessState,
+    /// The one fs batch a link may hold open (`FsRequest::BeginBatch`): its
+    /// owner and idle time; the filesystem holds the transaction.
+    batch: BatchState,
 }
 
 /// After the first failure, restate a persistent tick error only every
@@ -400,6 +405,7 @@ impl LpServer {
             network_changed: None,
             access_changed: None,
             read_gate: None,
+            read_cost_margin: None,
             messages_first: false,
             reboot_hook: None,
             firmware_manifest: None,
@@ -431,6 +437,7 @@ impl LpServer {
             },
             tick_failures: HashMap::new(),
             access: AccessState::new(),
+            batch: BatchState::new(),
         }
     }
 
@@ -919,6 +926,18 @@ impl LpServer {
         // gone before anything else is answered this tick.
         for closed in transport.take_closed_links() {
             self.access.close_link(closed);
+            self.end_link_batch(closed);
+        }
+        // A link whose session reset keeps its id and its login (the same
+        // cable), but not an fs batch its old session began: the new
+        // session's first write must not join it.
+        for reset in transport.take_reset_links() {
+            self.end_link_batch(reset);
+        }
+        // The batch's idle clock: this tick's delta, unless the last tick
+        // handled a request (then the delta is that request's time).
+        if self.batch.tick(delta_ms, &*self.base_fs) {
+            self.access.invalidate_device_store();
         }
         // Then secure links' handshakes: a link that came up this tick
         // holds its key's tier before its first request is gated.
@@ -956,16 +975,44 @@ impl LpServer {
                 response_count += 1;
                 continue;
             }
-            // Any fs mutation may have rewritten the device store; the
-            // cached `open` flag is re-read on next use.
-            if let ClientRequest::Filesystem(
-                lpc_wire::server::FsRequest::Write { .. }
-                | lpc_wire::server::FsRequest::WriteChunk { .. }
-                | lpc_wire::server::FsRequest::DeleteFile { .. }
-                | lpc_wire::server::FsRequest::DeleteDir { .. },
-            ) = &client_msg.msg
-            {
-                self.access.invalidate_device_store();
+            self.batch.note_handled(link.id);
+            if let ClientRequest::Filesystem(fs_request) = &client_msg.msg {
+                // Any fs mutation (a commit or an abort included) may have
+                // rewritten the device store; the cached `open` flag is
+                // re-read on next use.
+                if fs_request_changes_files(fs_request) {
+                    self.access.invalidate_device_store();
+                }
+                // The batch: another link's mutation is refused while one
+                // is open, and the batch verbs are answered here, where the
+                // link is known.
+                let answer = match self.batch.refusal(link.id, fs_request) {
+                    Some(refusal) => Some(refusal),
+                    None if matches!(
+                        fs_request,
+                        lpc_wire::server::FsRequest::BeginBatch
+                            | lpc_wire::server::FsRequest::CommitBatch
+                            | lpc_wire::server::FsRequest::AbortBatch
+                    ) =>
+                    {
+                        Some(self.batch.handle(link.id, fs_request, &*self.base_fs))
+                    }
+                    None => None,
+                };
+                if let Some(answer) = answer {
+                    transport
+                        .send(
+                            link.id,
+                            WireServerMessage::new(
+                                msg_id,
+                                lpc_wire::server::ServerMsgBody::Filesystem(answer),
+                            ),
+                        )
+                        .await
+                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                    response_count += 1;
+                    continue;
+                }
             }
 
             match client_msg.msg {
@@ -1068,7 +1115,22 @@ impl LpServer {
                     // request with a structured terminal error instead
                     // of letting infallible alloc abort-reset the
                     // board mid-assembly.
-                    if let Some(refusal) = self.read_gate.and_then(|gate| {
+                    // With a per-request margin installed, the floors are
+                    // this read's own estimated cost plus the margin, not
+                    // the chip's fixed pair (`crate::read_cost`).
+                    let request_gate = self.read_cost_margin.map(|margin| {
+                        let lamps = self
+                            .project_manager
+                            .get_project(handle)
+                            .map(|project| project.engine().published_output_lamps())
+                            .unwrap_or(0);
+                        let cost = crate::read_cost::ReadCost::estimate(&request, lamps);
+                        ReadGate {
+                            min_free_bytes: cost.working_set.saturating_add(margin),
+                            min_largest_block_bytes: cost.largest_ask.saturating_add(512),
+                        }
+                    });
+                    if let Some(refusal) = request_gate.or(self.read_gate).and_then(|gate| {
                         let memory = server_status.memory.as_ref();
                         gate.check(memory.map(|memory| memory.free_bytes), largest_block)
                             .err()
@@ -1241,6 +1303,18 @@ impl LpServer {
         Ok(response_count)
     }
 
+    /// The link that holds the open fs batch, if one is open.
+    pub fn fs_batch_owner(&self) -> Option<LinkId> {
+        self.batch.owner()
+    }
+
+    /// `link` closed or reset: drop a batch it owns.
+    fn end_link_batch(&mut self, link: LinkId) {
+        if self.batch.link_ended(link, &*self.base_fs) {
+            self.access.invalidate_device_store();
+        }
+    }
+
     /// Get a reference to the base filesystem
     /// Answer secure links' handshake events (see
     /// [`ServerTransport::take_secure_events`]). A transport with no secure
@@ -1354,15 +1428,22 @@ impl LpServer {
     /// network's `last`) are filled in.
     fn network_body(&self, request: ClientRequest) -> lpc_wire::server::ServerMsgBody {
         let fs = &*self.base_fs;
-        let held = self.hello.hardware.fs == lpc_wire::FsBootState::LegacyHeld;
+        // A board serving a RAM filesystem over files it kept (held for the
+        // layout change, or a refused store): a network written here would
+        // be gone at the next reboot, and its real file waits on the flash.
+        let kept = match self.hello.hardware.fs {
+            lpc_wire::FsBootState::LegacyHeld => Some(network_store::HELD_BOARD_REFUSAL),
+            lpc_wire::FsBootState::Refused => Some(network_store::REFUSED_STORE_REFUSAL),
+            _ => None,
+        };
         match request {
             ClientRequest::NetworkAdd { .. }
             | ClientRequest::NetworkForget { .. }
             | ClientRequest::NetworkSet { .. }
-                if held =>
+                if kept.is_some() =>
             {
                 lpc_wire::server::ServerMsgBody::Error {
-                    error: alloc::string::String::from(network_store::HELD_BOARD_REFUSAL),
+                    error: alloc::string::String::from(kept.unwrap_or_default()),
                 }
             }
             ClientRequest::NetworkAdd {
@@ -1423,6 +1504,14 @@ impl LpServer {
     /// Unset = reads are never refused.
     pub fn set_read_gate(&mut self, gate: Option<ReadGate>) {
         self.read_gate = gate;
+    }
+
+    /// Size the read gate per request
+    /// ([`crate::read_cost::ReadCost`]): a read needs its own estimated
+    /// working set plus `margin` free, and a block for its own largest ask.
+    /// `None` (the default) keeps [`Self::set_read_gate`]'s fixed floors.
+    pub fn set_read_cost_margin(&mut self, margin: Option<u32>) {
+        self.read_cost_margin = margin;
     }
 
     /// Choose the order [`Self::tick_and_send`] works in. Default off.
@@ -1793,7 +1882,8 @@ fn graphics_feature(backend_name: &str) -> Option<lpc_model::LpFeature> {
             | LpFeature::SvcButton
             | LpFeature::SvcRadioEspnow
             | LpFeature::DiagUnwind
-            | LpFeature::ShaderF32 => None,
+            | LpFeature::ShaderF32
+            | LpFeature::FsTree => None,
         }
     }
 

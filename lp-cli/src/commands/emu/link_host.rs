@@ -140,11 +140,14 @@ impl EmuUsbBoard for C6Board {
         let m = &mut self.machine;
         m.flush_frames();
         let flash = m.flush_flash();
-        finish_lines(
+        let mut lines = finish_lines(
             m.instructions(),
             (m.bus.unmapped_reads(), m.bus.unmapped_writes()),
             flash,
-        )
+        );
+        // `--flash-cut`: the cut and the in-range census, when one was armed.
+        lines.extend(m.flash_cut_summary());
+        lines
     }
 }
 
@@ -352,6 +355,8 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     /// `--ota-cut-after`'s request was answered: the run is to end here, as
     /// a power cut (the flash written back).
     pub ota_cut: bool,
+    /// Called with the board after every slice ([`Self::set_slice_observer`]).
+    slice_observer: Option<Box<dyn FnMut(&B)>>,
 }
 
 impl<B: EmuUsbBoard> EmuLinkHost<B> {
@@ -377,7 +382,16 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             wall_deadline: None,
             ota: None,
             ota_cut: false,
+            slice_observer: None,
         }
+    }
+
+    /// Look at the board after every slice, between the board's run and
+    /// the host's end of the link — a test watching state the wire does not
+    /// carry (the tree-store walks read the flash's committed root). `None`
+    /// stops it.
+    pub fn set_slice_observer(&mut self, observer: Option<Box<dyn FnMut(&B)>>) {
+        self.slice_observer = observer;
     }
 
     /// Write every console line here as it arrives, newline-terminated.
@@ -446,6 +460,9 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
         self.board
             .run_for_us(SLICE_US)
             .map_err(|why| anyhow::anyhow!("the emulated board stopped: {why}"))?;
+        if let Some(observer) = self.slice_observer.as_mut() {
+            observer(&self.board);
+        }
         let now = self.now_us();
         let bytes = self.board.take_usb_output();
         if !bytes.is_empty() {

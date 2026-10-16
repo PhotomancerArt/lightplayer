@@ -31,6 +31,18 @@
 //! while the LAN serves the one session it is not needed. Both are asked
 //! for fallibly; a heap with no room is a failed dial (the driver backs
 //! off) or a closed route, never a reset.
+//!
+//! **Pictures** (relay protocol 2). The client's `TakePicture` asks the
+//! main thread through the platform's [`RelayPictureSlot`]
+//! ([`RelayLegIo::picture_slot`]); the main thread makes the frame into a
+//! buffer of at most `MAX_BOARD_PICTURE_FRAME` (836 B), reserved fallibly
+//! on the main thread only once a picture is asked for, and handed back
+//! and forth after that, so a picture costs no allocation. The leg sends it
+//! as one message (the WebSocket masks through its own stack chunk) and
+//! gives the buffer back. Whenever a leg ends, and whenever the board may
+//! not dial, the slot is released: a board off the relay holds no picture
+//! buffer. No core log line is spent on pictures; the heartbeat says
+//! `pictures N idle|watched|off`.
 
 use core::future::Future;
 
@@ -42,6 +54,7 @@ use alloc::boxed::Box;
 
 use super::relay_driver::RelayDriver;
 use super::relay_driver_action::RelayDriverAction;
+use super::relay_picture_slot::RelayPictureSlot;
 use super::relay_route_link::{RelayRouteLink, RouteSlotState};
 use crate::net::try_zeroed_bytes;
 use crate::net::ws::{ByteStream, CloseCode, WsClosed, WsConnection, WsEvent};
@@ -88,9 +101,13 @@ pub trait RelayLegIo {
     async fn sleep_until(&self, at: Option<Micros>);
 
     /// The driver's next input from the board (the network joined or lost,
-    /// the LAN address, the Cloud relay switch, the account entries).
+    /// the LAN address, the Cloud relay switch, the account entries, the
+    /// project's facts, and `PictureReady` when the picture slot has news).
     /// Cancel-safe: it is raced and dropped every pass.
     async fn next_input(&self) -> RelayEvent<'static>;
+
+    /// The picture between the main thread and this relay.
+    fn picture_slot(&self) -> &RelayPictureSlot;
 
     /// The driver's state and counters, after every pass (the status probe
     /// and the heartbeat read them).
@@ -188,7 +205,10 @@ pub async fn run_relay_leg<I: RelayLegIo>(
         };
         log::info!("[relay] leg open to {host}");
         driver.handle(io.now_us(), RelayEvent::Connected);
-        match serve_leg(driver, io, port, index, &mut ws, sizes.frame_tx).await {
+        let end = serve_leg(driver, io, port, index, &mut ws, sizes.frame_tx).await;
+        // No leg, no pictures: the buffers go with it.
+        io.picture_slot().release();
+        match end {
             LegEnd::Ours => ws.close(CloseCode::NORMAL).await,
             LegEnd::Theirs(going_away) => {
                 log::info!(
@@ -220,6 +240,7 @@ async fn wait_for_dial<I: RelayLegIo>(
         }
         if !driver.may_dial() {
             *held = None;
+            io.picture_slot().release();
         }
         let mut dial = None;
         for action in driver.take_actions() {
@@ -230,8 +251,12 @@ async fn wait_for_dial<I: RelayLegIo>(
                 }
                 RelayDriverAction::Connect { addr, port } => dial = Some((addr, port)),
                 RelayDriverAction::Announce(event) => port.announce(event).await,
-                // No leg: nothing to send or close.
-                RelayDriverAction::Send(_) | RelayDriverAction::Close => {}
+                RelayDriverAction::DropPicture => give_back_ready(io.picture_slot()),
+                // No leg: nothing to send, close or ask for.
+                RelayDriverAction::Send(_)
+                | RelayDriverAction::Close
+                | RelayDriverAction::TakePicture
+                | RelayDriverAction::SendPicture => {}
             }
         }
         if dial.is_some() {
@@ -264,6 +289,7 @@ async fn serve_leg<I: RelayLegIo, S: ByteStream>(
             return LegEnd::Stop;
         }
         let mut closing = false;
+        let pictures = io.picture_slot();
         for action in driver.take_actions() {
             match action {
                 RelayDriverAction::Send(bytes) if !closing => {
@@ -274,6 +300,22 @@ async fn serve_leg<I: RelayLegIo, S: ByteStream>(
                 }
                 RelayDriverAction::Close => closing = true,
                 RelayDriverAction::Announce(event) => port.announce(event).await,
+                RelayDriverAction::TakePicture => pictures.ask(),
+                RelayDriverAction::SendPicture if !closing => {
+                    if let Some(frame) = pictures.take_ready() {
+                        let sent = ws.send(&frame).await;
+                        let len = frame.len();
+                        pictures.give_back(frame);
+                        if sent.is_err() {
+                            return LegEnd::Theirs(false);
+                        }
+                        driver.note_sent(len);
+                        driver.note_picture_sent();
+                    }
+                }
+                RelayDriverAction::SendPicture | RelayDriverAction::DropPicture => {
+                    give_back_ready(pictures);
+                }
                 RelayDriverAction::Send(_)
                 | RelayDriverAction::Resolve { .. }
                 | RelayDriverAction::Connect { .. } => {}
@@ -343,6 +385,13 @@ async fn serve_leg<I: RelayLegIo, S: ByteStream>(
             Either3::Third(Either::First(input)) => driver.handle(io.now_us(), input),
             Either3::Third(Either::Second(())) => driver.tick(io.now_us()),
         }
+    }
+}
+
+/// Drop the ready picture, keeping its buffer.
+fn give_back_ready(pictures: &RelayPictureSlot) {
+    if let Some(frame) = pictures.take_ready() {
+        pictures.give_back(frame);
     }
 }
 

@@ -148,7 +148,26 @@ board and back without reading — the session is sealed end to end.
   lock — never the store's). Shutdown closes every leg `1001 going away`, so
   boards come back within their 2–12 s backoff. `ListBoards` answers the
   account's online boards with `sameNetwork` (same public address, from
-  `Fly-Client-IP`; always true locally).
+  `Fly-Client-IP`; always true locally), and each board's `relayProto`,
+  `firmware` and `project` (its name).
+- **Two relay protocols** (`lpc_relay::SUPPORTED_RELAY_PROTO_VERSIONS`,
+  `[1, 2]`). Fielded cores speak 1, accepted forever and answered as before:
+  **a protocol 1 leg is never sent a protocol 2 frame** — every send to a
+  board goes through `to_board` in `relay_hub.rs`, which drops and logs such
+  a frame (a debug build fails outright), because a protocol 1 board drops
+  its leg on a frame it does not know. The post-deploy smoke in
+  `.github/workflows/deploy-cloud.yml` sends the live hub a protocol 1 and a
+  protocol 2 hello and expects a challenge for each.
+- **Pictures** (protocol 2; `src/relay/picture_cache.rs`). A board sends its
+  LED colours, sampled, at the pace the hub sets with `PictureRate` right
+  after `Registered`: one a minute while nobody watches, two a second while
+  one of its accounts does. `BoardPictures` (cloud API v6, `src/api/api_route.rs`)
+  reads the last picture; with `watch` it renews a 15 s lease that keeps the
+  board fast. The cache is memory only: kept, marked offline, after a board
+  leaves, lost at a deploy, at most 4,096 boards; only the board's own
+  accounts read it. Two knobs (`src/config.rs`):
+  `LP_CLOUD_RELAY_PICTURE_IDLE_S` (60; 0 = none) and
+  `LP_CLOUD_RELAY_PICTURE_WATCHED_MS` (500; 0 = never fast).
 
 A host board on a local relay, and a client through it:
 
@@ -163,7 +182,9 @@ lp-cli upload projects/test/basic "relay:<id>@$BASE" # in another terminal
 Tests: `tests/relay_plane.rs` (a fake board and browsers over real
 sockets, including a 50-board registration storm against `/api`),
 `lp-cli/tests/relay_link.rs` (the whole path with a real server behind the
-board).
+board), `lp-cli/tests/emu_relay_link.rs` (an emulated C6 through the virtual
+LAN's uplink: registration, pictures, a deploy; and, with
+`LP_RELAY_P1_ELF`, a protocol 1 core — `just walk-wifi-emu relay-p1`).
 
 ## Running it
 

@@ -8,7 +8,9 @@
 //! 3. `tick_and_send` (closed links, secure handshakes' key lookups and
 //!    grants, then the requests);
 //! 4. a heartbeat per link every [`HEARTBEAT_EVERY_MS`];
-//! 5. `upkeep` (the login deadline), then a 1 ms yield.
+//! 5. `upkeep` (the login deadline), then the relay's answer
+//!    (`serve_relay`: a picture when asked, the project's facts when they
+//!    change — the C6's frame hook), then a 1 ms yield.
 //!
 //! Keep that order the loop's: a difference here would hide exactly the
 //! kind of ordering defect this harness exists to find.
@@ -36,8 +38,10 @@ use lpfs::{LpFs, LpFsMemory};
 use super::harness_block_on::{StdDelay, block_on};
 use super::harness_counters::HarnessCounters;
 use super::harness_entropy::harness_entropy;
+use super::harness_relay::RelayShared;
 use super::no_usb::NoUsb;
 use crate::link_upkeep::LinkUpkeep;
+use crate::net::relay::{RelaySourceState, serve_relay};
 use crate::radio_link::{LinkMuxTransport, PortLock, RadioLinkPort, SharedPort};
 
 /// How often each open link gets a heartbeat (the C6's is 5 s; shorter here
@@ -53,6 +57,8 @@ pub(super) struct ServerSetup {
     pub graphics: Arc<dyn LpGraphics>,
     pub stop: Arc<AtomicBool>,
     pub counters: Arc<HarnessCounters>,
+    /// The relay's board, when the harness is on a relay.
+    pub relay: Option<Arc<RelayShared>>,
 }
 
 /// Run the board's main thread until `setup.stop`. The port is made here,
@@ -65,6 +71,7 @@ pub(super) fn run_server(setup: ServerSetup, ready: std::sync::mpsc::Sender<Shar
         graphics,
         stop,
         counters,
+        relay,
     } = setup;
     let (port, shared) = RadioLinkPort::leak_locked(lock);
     let fs = LpFsMemory::new();
@@ -91,6 +98,7 @@ pub(super) fn run_server(setup: ServerSetup, ready: std::sync::mpsc::Sender<Shar
     // Links whose session's hello has been handed out: a request on any
     // other link came through before its secure session was up.
     let mut up: BTreeSet<LinkId> = BTreeSet::new();
+    let mut relay_source = RelaySourceState::new();
 
     while !stop.load(Ordering::SeqCst) {
         for link in mux.take_opened_links() {
@@ -139,6 +147,9 @@ pub(super) fn run_server(setup: ServerSetup, ready: std::sync::mpsc::Sender<Shar
         }
 
         mux.upkeep(&server, now);
+        if let Some(relay) = &relay {
+            serve_relay(&relay.board, &server, now, &mut relay_source);
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
     let _ = block_on(mux.close());

@@ -297,4 +297,38 @@ mod tests {
             _ => panic!("expected WriteChunk"),
         }
     }
+
+    /// The board refuses a package hash it cannot hold in memory (the Edit
+    /// press's library bind, `docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md`)
+    /// with `error` set and no hash. That must reach the caller as an error
+    /// carrying the refusal's words, never as an empty hash that parses as
+    /// something: the bind logs it and opens the editor unnamed.
+    #[test]
+    fn a_refused_package_hash_is_an_error_with_the_boards_words() {
+        let refused = WireServerMsgBody::Filesystem(FsResponse::PackageHash {
+            prefix: "/projects/choker".as_path_buf(),
+            hash: String::new(),
+            error: Some(
+                "read refused: board memory busy (27091 B file needs 27603 B), retry shortly"
+                    .to_string(),
+            ),
+        });
+        match validate_hash_package_response(&refused) {
+            Err(ClientError::Server(message)) => {
+                assert!(message.contains("board memory busy"), "{message}");
+                assert!(message.contains("retry shortly"), "{message}");
+            }
+            other => panic!("a refused hash must be an error: {other:?}"),
+        }
+
+        let served = WireServerMsgBody::Filesystem(FsResponse::PackageHash {
+            prefix: "/projects/choker".as_path_buf(),
+            hash: "ab".repeat(32),
+            error: None,
+        });
+        assert_eq!(
+            validate_hash_package_response(&served).unwrap(),
+            "ab".repeat(32)
+        );
+    }
 }

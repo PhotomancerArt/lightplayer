@@ -10,6 +10,8 @@ pub mod client_event;
 pub mod client_io;
 pub mod client_observer;
 pub mod device_push;
+mod device_push_one_slot;
+mod device_push_two_slot;
 pub mod device_remove;
 pub mod device_stamp;
 pub mod file_sync_ops;
@@ -20,6 +22,7 @@ pub mod project_deploy;
 pub mod project_read_stream;
 pub mod protocol_session;
 pub mod pull_loop;
+pub mod push_files;
 #[cfg(test)]
 pub(crate) mod scripted_io;
 #[cfg(feature = "host")]

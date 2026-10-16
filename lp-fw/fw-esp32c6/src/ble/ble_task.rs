@@ -35,6 +35,7 @@ use trouble_host::prelude::*;
 
 use super::advertising;
 use super::ble_connection;
+use super::ble_controller_config::ble_controller_config;
 use super::hci_transport::LpHciTransport;
 use super::nus_service::NusServer;
 use crate::board::esp32c6::board_quirks::BoardQuirksApplied;
@@ -76,7 +77,7 @@ pub fn start(
     _quirks: BoardQuirksApplied,
 ) {
     let heap_before = esp_alloc::HEAP.used();
-    let connector = match BleConnector::new(bt, Default::default()) {
+    let connector = match BleConnector::new(bt, ble_controller_config()) {
         Ok(connector) => connector,
         Err(_) => {
             log::error!("[ble] controller init FAILED — BLE stays off this boot");

@@ -83,6 +83,7 @@ env:
 # paragraphs below):
 #
 #   detect-changes ─┬─ lint              (fmt + clippy + repo lints + feature-variant tests)
+#                   ├─ defects           (the defect registry's frontmatter; seconds, docs-only PRs too)
 #                   ├─ validate-x64      (build prereqs + gated test recipes + schema-check + heap ratchet)
 #                   ├─ validate-gfx      (ARM; wgpu tree)
 #                   ├─ validate-browser  (real-browser wasm suites)
@@ -104,10 +105,12 @@ env:
 #                                           names the PRs since the last green main)
 #
 # Every job is path-gated, including lint/validate via the `core` filter, so a
-# docs-only PR runs nothing but detect-changes — with one carve-out:
+# docs-only PR runs nothing but detect-changes — with two carve-outs:
 # `docs/user-guide/**` is compiled INTO lpa-studio-web (`include_str!`ed
 # articles with build-generated embed/sim/link checks), so a user-guide-only
-# PR still runs validate-x64 and validate-stories. All gates follow the same
+# PR still runs validate-x64 and validate-stories; and `docs/defects/**` runs
+# the seconds-long `defects` job, the registry's frontmatter lint (the index
+# is built from it). All gates follow the same
 # philosophy: conservative dependency-closure filters on PRs, and pushes to
 # main force every gate true, so anything a filter miss lets through surfaces
 # on the very next merge.
@@ -201,7 +204,20 @@ jobs:
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
       emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
+      # The jobs that hold a chip's PINNED FIGURES (docs/chip-figures.md) run
+      # on that chip's own emulator filter OR on any crate linked into its
+      # shipped firmware (the generated `fw_closure_*` filters below). The
+      # figures are read off the shipped image, so a statics change in a
+      # shared crate moves them; on the emulator filter alone such a PR
+      # skipped them and main went red instead (#1049 → #1075, #1088 →
+      # #1142; docs/debt/firmware-figures-skip-on-shared-crate-prs.md). Jobs
+      # with no pinned figure of the image (emu-c6-cli, emu-esp32v3-ref, the
+      # layout migration) stay on the narrower filters (DD77).
+      figures_esp32c6: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.closure.outputs.fw_closure_esp32c6 == 'true') && 'true' || 'false' }}
+      figures_esp32v3: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_esp32v3 == 'true' || steps.closure.outputs.fw_closure_esp32v3 == 'true') && 'true' || 'false' }}
+      figures_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_esp32s3 == 'true' || steps.closure.outputs.fw_closure_esp32s3 == 'true') && 'true' || 'false' }}
       release: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.release }}
+      defects: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.defects }}
       # The 35-minute layout-migration job runs only on PRs that touch its
       # paths; main pushes skip it (Yona, 2026-10-05).
       c6_layout: ${{ steps.some.outputs.c6_layout }}
@@ -402,6 +418,9 @@ jobs:
               # unless it happened to touch something else. Deliberately NOT
               # `lp-core/**` (director ruling DD77): that closure is wider
               # than what the two chips' `fw-esp32-common` actually shares.
+              # The jobs holding pinned figures of the image do run on it —
+              # through the generated firmware closure (`figures_esp32c6`
+              # above), not through this filter.
               - 'lp-fw/fw-esp32-common/**'
               # The vendored forks (esp-hal, esp-radio, esp-alloc, naga, …)
               # are in the C6 image's link closure, so a change there moves
@@ -506,7 +525,8 @@ jobs:
               - 'lp-fw/fw-esp32v3/**'
               # The server loop and wire code both chips' firmware share —
               # see `emu_c6`'s comment above for why it belongs here too and
-              # why it stops short of `lp-core/**` (DD77).
+              # why it stops short of `lp-core/**` (DD77; the figure-holding
+              # half runs on the firmware closure, `figures_esp32v3`).
               - 'lp-fw/fw-esp32-common/**'
               - 'scripts/emu/**'
               # Since M5 P5 this job also runs the classic's heap-budget
@@ -547,7 +567,8 @@ jobs:
               - 'lp-fw/fw-esp32s3/**'
               # The server loop and wire code all three chips' firmware share
               # — see `emu_c6`'s comment above for why it belongs here too
-              # (E6) and why it stops short of `lp-core/**` (DD77).
+              # (E6) and why it stops short of `lp-core/**` (DD77; this job
+              # holds figures, so it also runs on `figures_esp32s3`).
               - 'lp-fw/fw-esp32-common/**'
               - 'scripts/emu/**'
               # This job carries the S3's heap-budget ratchet, for the reason
@@ -619,6 +640,13 @@ jobs:
               - 'Cargo.lock'
               - 'justfile'
               - 'rust-toolchain.toml'
+            # The defect registry's frontmatter lint (the `defects` job). A
+            # defect-only PR is docs-only, so `core` above is false and the
+            # Lint job, which also runs it, never does.
+            defects:
+              - 'docs/defects/**'
+              - 'scripts/defects-index.py'
+              - '.github/workflows/pre-merge.yml'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
               - 'lp-fw/fw-esp32c6/.cargo/config.toml'
@@ -638,6 +666,27 @@ jobs:
               - 'lp-cli/tests/emu_layout_migration.rs'
               - 'lp-emu/esp/lp-emu-esp32c6/src/flash.rs'
               - 'scripts/emu/build-merged-image.sh'
+
+      # Each chip firmware's crate closure, generated from `cargo tree` by
+      # `scripts/ci/firmware-closure.py` (`just firmware-closure`; `just
+      # lint-firmware-closure` in check-lint keeps it current). A file, not
+      # an inline list, so the generated globs live outside this hand-written
+      # one; the sparse checkout fetches only it (~2 s), and the filter itself
+      # still reads the PR's changed files from the API, as above.
+      - name: Check out the firmware closure filters
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/firmware-closure-filters.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Filter changed paths (firmware closure)
+        id: closure
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: .github/firmware-closure-filters.yml
 
       # `core` is the negative gate for lint + validate-x64: with
       # predicate-quantifier: every, a changed file counts only if it matches
@@ -804,6 +853,33 @@ jobs:
             grep -o -E "$kinds" "$log" | sed -E 's/ \([a-z]+\)//' | sort | uniq -c
             grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
+
+  # The defect registry has no committed index: `just defects-index` builds it
+  # from each entry's frontmatter when it is read, so two PRs that each file a
+  # defect never conflict on a shared table (docs/debt/hand-written-defects-index.md).
+  # This lints that every entry carries what the index reads, and that no
+  # hand-written row came back to the README. Lint's `just check-lint` runs it
+  # too, but a defect-only PR is docs-only (`core` false, no Lint job), so
+  # without this job a bad entry would first go red on main. Stdlib python on
+  # a sparse checkout.
+  defects:
+    name: Defect registry
+    runs-on: ubuntu-24.04
+    # trivial: a sparse checkout and ~0.1 s of python.
+    timeout-minutes: 5
+    needs: detect-changes
+    if: needs.detect-changes.outputs.defects == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            docs/defects
+            scripts
+          persist-credentials: false
+      - name: Lint the defect registry (just lint-defects)
+        run: |
+          python3 scripts/defects-index.py --self-test
+          python3 scripts/defects-index.py --check
 
   # fw-esp32s3 is the repo's only crate on a SECOND toolchain (Espressif's
   # Xtensa Rust fork — no upstream target exists), so no other job compiles it.
@@ -1601,7 +1677,9 @@ jobs:
     # ceiling, and a job that starts timing out wants its p95 re-measured.
     timeout-minutes: 35
     needs: detect-changes
-    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    # Its suite pins figures of the shipped image (`hello.proto`,
+    # `heartbeat.total_bytes`), so it also runs on the C6's firmware closure.
+    if: needs.detect-changes.outputs.figures_esp32c6 == 'true'
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "false"
@@ -2061,7 +2139,10 @@ jobs:
     # first green run's wall-clock goes in this comment.
     timeout-minutes: 35
     needs: detect-changes
-    if: needs.detect-changes.outputs.emu_esp32v3 == 'true'
+    # The boot suite and the heap ratchet pin figures of the shipped image
+    # (the main stack, the boot chain, the ledger), so this half also runs
+    # on the classic's firmware closure. The reference half does not.
+    if: needs.detect-changes.outputs.figures_esp32v3 == 'true'
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "false"
@@ -2431,7 +2512,10 @@ jobs:
     # frame gates. **The first green run's wall clock goes in this comment.**
     timeout-minutes: 35
     needs: detect-changes
-    if: needs.detect-changes.outputs.emu_esp32s3 == 'true'
+    # Its suite and heap ratchet pin figures of the shipped image
+    # (`stack_total_bytes`, the ledger), so it also runs on the S3's
+    # firmware closure.
+    if: needs.detect-changes.outputs.figures_esp32s3 == 'true'
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "false"
@@ -2649,7 +2733,9 @@ jobs:
     # split, not a bigger number.
     timeout-minutes: 35
     needs: detect-changes
-    if: needs.detect-changes.outputs.emu_c6 == 'true'
+    # The C6's heap ledger and its link gates' figures are the shipped
+    # image's, so this also runs on the C6's firmware closure.
+    if: needs.detect-changes.outputs.figures_esp32c6 == 'true'
     env:
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "false"
@@ -3934,6 +4020,7 @@ jobs:
     needs:
       - detect-changes
       - lint
+      - defects
       - firmware-xtensa
       - firmware-esp32v3
       - validate-xtensa

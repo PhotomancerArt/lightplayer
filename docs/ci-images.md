@@ -42,7 +42,10 @@ a red run's images are the ones most worth having.
 The v3 and S3 boot recipes write `target/lp-emu-esp32{v3,s3}/images.env` (the
 variables they set) and the packer takes exactly those files; the C6's are
 `lp_emu_esp32c6::test_support`'s own keyed copies. The heap ratchets' shipped
-image is the same bytes the boot suite reads (same features, same profile), so
+image is the same bytes the boot suite reads (same features, same profile —
+and on the C6, both are figure builds, `LP_FIGURE_BUILD=1`: version `0000000`,
+stamped clean, so the two jobs' different checkouts and short-sha lengths no
+longer reach the image), so
 nothing is uploaded from `Heap budget (esp32c6 chip)` or the `Firmware build`
 jobs, and `Emulator ESP32v3 reference` uploads nothing either: its only
 firmware build is the reproducibility claim itself, which is about the host

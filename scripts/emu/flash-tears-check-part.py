@@ -6,7 +6,8 @@
 The soak driver (`flash-tears-soak.sh`) states the part's JEDEC id in each
 batch's sidecar `note` before the batch runs — a silicon configuration
 cannot read it, the board's own `ft-boot` records can. This runs after the
-batch: exit 0 when every `ft-boot` record carries `expected`, exit 4 (and
+batch: exit 0 when every `ft-boot` (or `flash-reprogram`'s `fr-boot`) record
+carries `expected`, exit 4 (and
 say which ids it found) when any does not, so a different part stops the
 sitting instead of filing tears under the wrong name. Reads the file; never
 edits it.
@@ -30,7 +31,7 @@ def main() -> int:
             if TAG not in line:
                 continue
             rec = json.loads(line.split(TAG, 1)[1])
-            if rec.get("kind") == "ft-boot":
+            if rec.get("kind") in ("ft-boot", "fr-boot"):
                 fid = str(rec.get("flash_id", "?")).lower()
                 ids[fid] = ids.get(fid, 0) + 1
     if not ids:

@@ -11,10 +11,23 @@ use lpfs::lp_path::AsLpPath;
 
 /// Read LightplayerConfig from /lightplayer.json.
 ///
-/// Returns None if file is missing, unreadable, or invalid JSON.
+/// Returns None if file is missing, unreadable, or invalid JSON; an empty
+/// or invalid one is said in plain words, and boot carries on as if there
+/// were none.
 pub fn read_config(fs: &dyn LpFs) -> Option<ServerConfig> {
     let data = fs.read_file(ServerConfig::PATH.as_path()).ok()?;
-    lpc_wire::json::from_slice(&data).ok()
+    let config = lpc_wire::json::from_slice(&data).ok();
+    if config.is_none() {
+        log::warn!(
+            "Boot: /lightplayer.json is {}; ignoring it",
+            if data.is_empty() {
+                "empty"
+            } else {
+                "not valid JSON"
+            }
+        );
+    }
+    config
 }
 
 /// Auto-load a project at boot: use startup_project from config if set,

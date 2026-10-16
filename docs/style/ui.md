@@ -279,9 +279,12 @@ The rules:
   out lives there; nothing on the card is lost, only moved.
 - **Work in progress shows in the bar doing it.** The bar goes neutral, with
   the conic spinner, the step and the percent, and the iridescent fill
-  along its foot. When it's done, the bar is green for a few seconds; when
-  it fails, the bar is striped and offers Retry. The picture and the corner
-  don't change.
+  along its foot. The fill sweeps when the percent is unknown, and it lives
+  in a clipped track the bar's width: the bar and the card clip nothing, so
+  the details that float over a bar and the corner's notch are never cut,
+  and no pixel of the fill leaves the card. When it's done, the bar is green
+  for a few seconds; when it fails, the bar is striped and offers Retry. The
+  picture and the corner don't change.
 - **Connected, the bars become the panel.** Connect turns the card's bars
   into the board's panel, drawn with Studio's existing panel widgets: as
   many controls as fit at the card's height, then All controls. Done turns

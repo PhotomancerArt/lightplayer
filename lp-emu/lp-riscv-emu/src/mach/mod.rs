@@ -89,7 +89,7 @@ use alloc::{
 use lp_emu_core::block::{BlockCache, BlockStats};
 use lp_emu_core::{Bus, CycleModel, InstClass, MemoryAccessKind, MemoryError};
 
-use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, decode_execute};
+use crate::emu::{EmulatorError, FpRegs, LoggingDisabled, LrReservation, decode_execute};
 use block::{Class, MAX_BLOCK_SLOTS, RvSlot};
 use csr::CsrFile;
 use trap::Exception;
@@ -220,6 +220,10 @@ pub struct MachineHart<B: Bus> {
     /// the call, and the three F CSRs are illegal here. Held rather than
     /// constructed per instruction so the slice loop stays a loop.
     fp_unused: FpRegs,
+    /// The word the last `lr.w` reserved, while the reservation holds.
+    /// Architectural state: a snapshot carries it. Any `sc.w` and every trap
+    /// the hart takes ([`MachineHart::trap_taken`]) end it.
+    reservation: LrReservation,
     /// The pre-decoded block cache, built on first use.
     ///
     /// **Not architectural state.** Nothing observable may depend on a hit or
@@ -450,6 +454,7 @@ impl<B: Bus> Clone for MachineHart<B> {
             external: self.external,
             allow_unaligned: self.allow_unaligned,
             fp_unused: self.fp_unused.clone(),
+            reservation: self.reservation,
             // The block cache is NOT copied. It is not architectural state,
             // so a cloned hart — the snapshot path — starts with an empty one
             // and re-decodes what it needs. Copying it would be a correctness
@@ -494,6 +499,7 @@ impl<B: Bus> core::fmt::Debug for MachineHart<B> {
             .field("wfi", &self.wfi)
             .field("external", &self.external)
             .field("allow_unaligned", &self.allow_unaligned)
+            .field("reservation", &self.reservation)
             .finish()
     }
 }
@@ -516,6 +522,7 @@ impl<B: Bus> MachineHart<B> {
             external: None,
             allow_unaligned: false,
             fp_unused: FpRegs::new(),
+            reservation: LrReservation::new(),
             cache: None,
             block_cache: true,
             fence_i_count: 0,
@@ -756,12 +763,29 @@ impl<B: Bus> MachineHart<B> {
         self.trap_log = log;
     }
 
+    /// What taking a trap does beyond the CSRs `trap::deliver_*` has just
+    /// written: end the `lr.w` reservation, so an `sc.w` resumed after the
+    /// handler fails and its loop re-reads the word the handler may have
+    /// changed (see [`LrReservation`]), and note the trap in the log.
+    ///
+    /// Called immediately after every `trap::deliver_*` on this hart.
+    #[inline]
+    fn trap_taken(&mut self) {
+        self.reservation.clear();
+        self.note_trap();
+    }
+
+    /// The `lr.w` reservation, if one is held: the word it covers.
+    #[inline]
+    #[must_use]
+    pub const fn reservation(&self) -> Option<u32> {
+        self.reservation.held()
+    }
+
     /// One line for the trap the hart has just delivered, read back off the
     /// CSRs the delivery wrote so there is one description of a trap and not
-    /// two that can drift.
-    ///
-    /// Called immediately after every `trap::deliver_*` on this hart. When no
-    /// log was asked for this is one `Option` test.
+    /// two that can drift. When no log was asked for this is one `Option`
+    /// test.
     #[inline]
     fn note_trap(&mut self) {
         if self.trap_log.is_none() {
@@ -1029,7 +1053,7 @@ impl<B: Bus> MachineHart<B> {
             return false;
         }
         self.pc = trap::deliver_interrupt(&mut self.csr, n, self.pc);
-        self.note_trap();
+        self.trap_taken();
         true
     }
 
@@ -1039,7 +1063,7 @@ impl<B: Bus> MachineHart<B> {
     /// the exception, and `ebreak` does not advance past itself).
     pub fn deliver_breakpoint(&mut self, pc: u32) {
         self.pc = trap::deliver_exception(&mut self.csr, Exception::Breakpoint, 0, pc);
-        self.note_trap();
+        self.trap_taken();
     }
 
     // --- the slice loop ----------------------------------------------------
@@ -1481,6 +1505,7 @@ impl<B: Bus> MachineHart<B> {
             &mut self.regs,
             bus,
             &mut self.fp_unused,
+            &mut self.reservation,
         );
         let result = match executed {
             Ok(result) => result,
@@ -1573,7 +1598,7 @@ impl<B: Bus> MachineHart<B> {
                     // `mtval` is 0 for an environment call (spec §3.1.16).
                     self.pc =
                         trap::deliver_exception(&mut self.csr, Exception::MachineEnvCall, 0, pc);
-                    self.note_trap();
+                    self.trap_taken();
                     StepOutcome::Continue
                 }
                 // Deliberately *not* charged and `pc` deliberately not
@@ -1797,7 +1822,7 @@ impl<B: Bus> MachineHart<B> {
         // `mtval` carries the faulting instruction word (spec §3.1.16).
         self.pc =
             trap::deliver_exception(&mut self.csr, Exception::IllegalInstruction, inst_word, pc);
-        self.note_trap();
+        self.trap_taken();
     }
 
     /// Turn a failed instruction fetch into a trap, or into a
@@ -1827,7 +1852,7 @@ impl<B: Bus> MachineHart<B> {
         }
 
         self.pc = trap::deliver_exception(&mut self.csr, exception, tval, pc);
-        self.note_trap();
+        self.trap_taken();
         Ok(())
     }
 
@@ -1849,7 +1874,7 @@ impl<B: Bus> MachineHart<B> {
                     MemoryAccessKind::InstructionFetch => Exception::InstructionAccessFault,
                 };
                 self.pc = trap::deliver_exception(&mut self.csr, exception, address, pc);
-                self.note_trap();
+                self.trap_taken();
             }
             EmulatorError::UnalignedAccess { address, .. } => {
                 if self.allow_unaligned {
@@ -1866,7 +1891,7 @@ impl<B: Bus> MachineHart<B> {
                     Exception::LoadAddressMisaligned
                 };
                 self.pc = trap::deliver_exception(&mut self.csr, exception, address, pc);
-                self.note_trap();
+                self.trap_taken();
             }
             EmulatorError::Watchpoint { address, slot, .. } => {
                 // The bus reports the watchpoint *instead of* performing the
@@ -1875,7 +1900,7 @@ impl<B: Bus> MachineHart<B> {
                 self.triggers.set_hit(usize::from(slot));
                 self.pc =
                     trap::deliver_exception(&mut self.csr, Exception::Breakpoint, address, pc);
-                self.note_trap();
+                self.trap_taken();
             }
             other => {
                 log::error!("mach: no architectural mapping for executor error: {other}");

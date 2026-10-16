@@ -23,7 +23,13 @@
 //! closed "going away" first, so boards take the short one). No table, no
 //! migration for presence; the store is touched only to look up the
 //! accounts a registering board names, and the session of an opening
-//! browser.
+//! browser. **So do pictures** ([`picture_cache`]): each protocol 2 board's
+//! last picture, kept after it leaves, gone at a deploy.
+//!
+//! The device leg speaks two relay protocols (`lpc-relay`): fielded cores
+//! speak protocol 1, which the hub accepts forever and **never sends a
+//! frame it does not have** (the hub's one send path checks); protocol 2
+//! adds the board's firmware, its project and its pictures.
 //!
 //! Decision record: `docs/adr/2026-10-06-cloud-relay.md`.
 
@@ -31,6 +37,7 @@ pub mod browser_leg;
 pub mod client_address;
 pub mod device_leg;
 pub mod leg_pump;
+pub mod picture_cache;
 pub mod relay_hub;
 pub mod relay_registry;
 pub mod route_admission;
