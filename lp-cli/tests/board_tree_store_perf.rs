@@ -235,7 +235,7 @@ async fn perf() {
     }
     // Its baseline: a 4 KiB read.
     let four_k: Vec<u8> = (0..4_096u32)
-        .map(|i| ((i * 2_654_435_761) >> 24) as u8)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
         .collect();
     client
         .fs_write(LpPath::new("/projects/demo/four-k.bin"), four_k.clone())
@@ -337,7 +337,7 @@ async fn perf() {
     let mut stopped = String::new();
     for i in 0..FILL_FILES {
         let fill: Vec<u8> = (0..4_096u32)
-            .map(|j| (((j + i as u32 * 7_919) * 2_654_435_761) >> 24) as u8)
+            .map(|j| ((j + i as u32 * 7_919).wrapping_mul(2_654_435_761) >> 24) as u8)
             .collect();
         let t = Instant::now();
         match client
