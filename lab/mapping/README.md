@@ -15,8 +15,9 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 ## The crates
 
 - **`model/`** (`lab-mapping-model`): the editor's whole behaviour. Nodes
-  (modules, fixtures, outputs), components, objects, layout, the patch and
-  its edges, selection, properties, hints, and the simulated board. It has
+  (modules, shaders, fixtures, outputs), the bus channels that wire them,
+  components, objects, layout, the patch and its edges, selection,
+  properties, hints, and the simulated board. It has
   no IO, and its input is events; it never reads a clock, so the page
   passes the time in. Yona reads and edits this crate, so keep it small and
   plain. **It depends on no workspace crate.** That keeps it abstract and
@@ -27,8 +28,9 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
   the model and saves them back, in the product's own formats (vision D51,
   fit-check §6). Fenced like the model: the model and `serde_json` only,
   no product crate — the product's documents it needs are re-created
-  there. It carries what the lab doesn't model (shaders and other nodes,
-  unknown fields) through untouched, writes only the files it owns and
+  there. It opens shaders as render sources (their GLSL kept, to show)
+  and carries what the lab doesn't model (other nodes, unknown fields)
+  through untouched, writes only the files it owns and
   only when what they say changed, so saving an unedited project writes
   nothing. It also bakes the three test projects in for the page.
 - **`fit-tests/`** (`lab-mapping-fit-tests`): the proof, and the only lab
@@ -56,8 +58,9 @@ The toolbar's **Project** picker opens the desk (the lab's own seed) or
 one of the test projects, and fits the view:
 
 - **PLAYFUL choker** (`catalog/projects/playful-choker`): 12 paths, 73
-  lamps, one output whose one port takes the rest; its clock, power
-  button and shader are plain cards at the left.
+  lamps, one output whose one port takes the rest; its shader is a card
+  at the left feeding the fixture over `visual.out`, and its clock and
+  power button are plain cards beside it.
 - **Zook dome** (`catalog/projects/zook-dome`): one repeat — five copies
   of a 300-lamp zigzag path with a jumper — on five ports.
 - **Radiance dome** (`projects/radiance-dome`, generated): 55 panel
@@ -75,10 +78,14 @@ gaps and a `reversed` flag; polygons; repeats (copy *k* turned
 port's pixel, reversed, turned in its window) beside auto; an output's
 ports as one flat wire, the last one free to take the rest; auto flow in
 the product's attach order (each module's nodes by name); colour order
-on the fixture; nodes the lab doesn't edit as plain cards; output names.
+on the fixture; shaders as render sources (stand-in patterns, picked from
+their GLSL); bus channels (`bindings`) — the visual channel a fixture
+reads, the control channel an output reads; nodes the lab doesn't
+simulate as plain cards; output names.
 
 On disk (`files/src/save.rs`): an auto rule is the fixture writing the
-channel its output reads; a place rule is a patch row, its port and
+channel its output reads; a shader the lab made is a shader node with a
+small stand-in GLSL file (one it opened is never written); a place rule is a patch row, its port and
 pixel flattened onto the wire; a lab circle is one ring shape per ring
 and a group is its children (both lose their grouping until the product
 has addressable rings and groups); a lab name the product refuses
@@ -105,6 +112,30 @@ A 2D canvas with selection, and the start of the whole node graph on it
   themselves out around it, and nothing overlaps. A pinned node shows a
   pin on its title; U, or "Unpin" in the right-click menu, gives it back
   to the layout. One drag, one undo.
+- **The engine, small** (D55; `board.rs`): a recreation of the product's
+  dataflow, pulled from the outputs like the engine's and kept for the
+  frame. A **shader** (a render source, `render_source.rs`) publishes a
+  render product on a visual channel — the lab runs no GLSL, so it is a
+  stand-in pattern (rainbow sweep, gradient, clouds, rings; `pattern.rs`),
+  and the inspector says so and shows the GLSL. A **fixture** reads the
+  nearest writer of its visual channel (its own module first, then
+  outward), samples the picture at each lamp in its own box, applies its
+  **fixture overrides** (`fixture_overrides.rs`: the selection inside it,
+  or a draft being drawn) and publishes its **control product** — one
+  colour per lamp, in data order (`control_product.rs`). An **output**
+  takes each fixture on its control channel as its own control product,
+  places them on its pixels by the patch, then applies its **output
+  overrides** (`output_overrides.rs`: a selected output, port, run or
+  pixel breathes; the rest dims) to its own pixels only. The patterns
+  hold still, so the page only ticks while a selection or a draft moves.
+- **Bus channels are the wiring** (`channel.rs`, `bindings.rs`). Every
+  edge between nodes is a channel binding and says its channel's name,
+  small, once per pair of nodes (D53): `visual.out` from a shader's card
+  to each fixture it feeds, `control.out` (or an output's own channel,
+  `control.scarf_out`) on the patch. The lab's auto rule IS the control
+  binding, read the product's way: the fixture writes the channel its
+  rule's output reads (fit-check §6); a fixture bound to an output with
+  nothing placed yet gets one plain edge, node to node.
 - **Patch rules** (`patch.rs`): place (one object on a port's pixel,
   reversed, turned) and auto (what no place rule claims fills the
   output's ports in order, after every placed run and after fixtures
@@ -130,25 +161,28 @@ A 2D canvas with selection, and the start of the whole node graph on it
   the board even with nothing patched to it, and the lamp on it is ringed
   on the canvas; select a lamp and its pixel is ringed on its port.
 - **A simulated board** (D12, D16, D44): the lab is always attached to a
-  board, and for now the model simulates it (`device_frame.rs`). Every
-  port row on an output card shows its pixels as the board has them: a
-  stand-in pattern (a hue sweep per object), then the selection in lamp
-  space (everything else dims to a quarter; every object under the
-  selection shows old LightPlayer's pattern from lp2014's
-  `GenericShapeMapper` — a blue lead-in, a red lead-out, and between them
-  black but for a white band sweeping start to end every two seconds; a
-  lamp selected on its own breathes white), then a selected port or
-  output in channel space (its whole range breathes, patched or not —
-  D13), and a selected pixel on its own (D47). While you draw a path or
-  circle, only the draft's lamps light, on
-  the pixels it will take when it's finished. Lamps outside their
-  fixture's box never light (D4). The page ticks at ~30 fps only while
-  something moves. The seed's scarf is patched to "scarf out" (D10,
-  60 px), so drawing in it lights pixels at once.
-- **Lamps in their pixel's colour.** Every lamp on the canvas is drawn in
-  its pixel's colour from the same frame the port rows show, so the
-  drawing and the strip read as one. A lamp that lights nothing
-  (unpatched, or outside its box) is a dim hollow dot.
+  board, and for now the model simulates it (the engine above). Every
+  port row on an output card shows its pixels as the board has them.
+  Selecting inside a fixture is a fixture override, so it shows on the
+  lamps AND their pixels: everything else dims to a quarter; every
+  object under the selection shows old LightPlayer's pattern from
+  lp2014's `GenericShapeMapper` — a blue lead-in, a red lead-out, and
+  between them black but for a white band sweeping start to end every
+  two seconds; a lamp selected on its own breathes white. Selecting an
+  output, port or pixel is an output override: its whole range breathes,
+  patched or not (D13, D47), and no lamp changes. While you draw a path
+  or circle, only the draft's lamps light, on the pixels it will take
+  when it's finished. Lamps outside their fixture's box never light
+  (D4). The page ticks at ~30 fps only while something moves. The seed's
+  scarf is patched to "scarf out" (D10, 60 px), so drawing in it lights
+  pixels at once.
+- **Lamps in their control product's colour.** Every lamp on the canvas
+  is drawn in its colour in its fixture's control product — never an
+  output's override, so selecting a pixel rings its lamp and leaves its
+  colour alone. A lamp patched to no pixel is drawn fainter; a lamp with
+  no colour (outside its box, or nothing renders for its fixture) is a
+  dim hollow dot. Faintly behind each fixture's lamps is the picture
+  they sample.
 - **The data path** inside each fixture (`data_path.rs`): a quiet dashed
   wire from each object's last lamp to the next one's first, in patch
   order, and an "in" where a port's data enters. Brighter in the fixture
@@ -201,7 +235,7 @@ A 2D canvas with selection, and the start of the whole node graph on it
 
 Not covered yet: editing place rules on the canvas (they open, show,
 save and light the board, but there is no gesture for them yet), choosing
-a rule's output, saving from the page, routes,
-other node kinds (patterns), a level above the
-project, and a real board (the simulated one stands in until the lab moves
+a rule's output, choosing a node's channels, saving from the page,
+routes, running GLSL (shaders are stand-in patterns), clocks and other
+inputs to a shader, a level above the project, and a real board (the simulated one stands in until the lab moves
 into Studio).
