@@ -809,6 +809,12 @@ pub const SILICON_BOOT_IDLE_COMMIT: &str = "735af98ae";
 /// carries the commit that produced it.
 pub const SCENARIO_COMMIT: &str = "372392b9c";
 
+/// The commit the fielded littlefs image is built at
+/// ([`ReferenceImage::FIELDED_LITTLEFS`]): `origin/main` when the tree-store
+/// adoption's migration (A6) began, 2026-10-16 — littlefs on the 2026-10
+/// repartition's table, the firmware every fielded C6 runs.
+pub const FIELDED_LITTLEFS_COMMIT: &str = "3fc9aa987";
+
 /// One of the reference images the script builds: a commit, with these
 /// features, optionally plus the `spike_uart0_link` feature applied as a
 /// dirty tree.
@@ -881,6 +887,19 @@ impl ReferenceImage {
         slug: "esp32c6+server+radio",
         features: "esp32c6,server,radio",
         commit: SILICON_BOOT_IDLE_COMMIT,
+        spike: false,
+    };
+
+    /// What a board in a house runs on the eve of the tree-store cutover:
+    /// the shipped feature set (littlefs, the 176-sector table at
+    /// `0x350000`) at [`FIELDED_LITTLEFS_COMMIT`], the tree-store adoption's
+    /// base. The cutover migration's walks start from it
+    /// (`lp-cli/tests/emu_layout_migration.rs`), pinned by commit so it does
+    /// not become a tree-store image when the default switches.
+    pub const FIELDED_LITTLEFS: ReferenceImage = ReferenceImage {
+        slug: "esp32c6+server+radio",
+        features: "esp32c6,server,radio",
+        commit: FIELDED_LITTLEFS_COMMIT,
         spike: false,
     };
 

@@ -48,10 +48,14 @@ pub enum LayoutState {
     /// The target's table, no filesystem at its `lpfs`, and a littlefs from
     /// an older layout still at that layout's offset — a board flashed by a
     /// path that skipped the migration (its firmware holds the files: `fs:
-    /// legacy_held`). Migrate from the legacy region. (A littlefs target
-    /// only: under a tree target the older regions lie inside the new app
-    /// partition, where a firmware may already have written, so nothing is
-    /// migrated from there — a stored backup is restored instead.)
+    /// legacy_held`). Migrate from the legacy region.
+    ///
+    /// Under the tree table the older regions start inside the new app
+    /// partition. A firmware image is written up from `0x10000`, so a
+    /// superblock still there means no image reached it — or any block of
+    /// the filesystem after it. (An over-the-air core placed high in the
+    /// partition could; Studio never sends one to a board whose files are
+    /// held.)
     CurrentLegacyPresent,
     /// The target's table with the OTHER filesystem at its `lpfs`: littlefs
     /// where a tree-store image is about to be written. Migrate in place.
@@ -280,6 +284,20 @@ impl LayoutProbe {
                     })?;
                     if tree_header_present(header) {
                         return Ok((LayoutState::CurrentMounts, None));
+                    }
+                }
+                // Nothing of a store anywhere in the target region: an older
+                // layout's littlefs, held by a board that skipped the
+                // migration, may still be whole.
+                if self.chip_is_c6 {
+                    for &legacy in KNOWN_C6_LPFS
+                        .iter()
+                        .filter(|legacy| legacy.offset != target_lpfs.offset)
+                    {
+                        if has_superblock(reads.take(superblocks(legacy.offset))?) {
+                            reads.take(full(legacy))?;
+                            return Ok((LayoutState::CurrentLegacyPresent, Some(legacy)));
+                        }
                     }
                 }
                 Ok((LayoutState::CurrentNothing, None))
@@ -616,7 +634,11 @@ pub(crate) mod tests {
             let at = read.offset as usize;
             probe.record(read, flash[at..at + read.length as usize].to_vec());
         }
-        assert_eq!(count, 2 + 126, "the table, the head, one header per sector");
+        assert_eq!(
+            count,
+            2 + 126 + 2,
+            "the table, the head, one header per sector, the two older heads"
+        );
         assert_eq!(probe.finish().state, LayoutState::CurrentNothing);
     }
 
@@ -629,16 +651,18 @@ pub(crate) mod tests {
         assert_eq!(inspection.source.unwrap().0, LEGACY_C6_V2_LPFS);
     }
 
-    /// Under a tree image, an older littlefs inside the new app partition is
-    /// never read as a source (an image may have written over it).
+    /// A board on the tree table whose tree core held an older littlefs (a
+    /// flash that skipped the migration): its files move from the old
+    /// region. Erased, nothing does.
     #[test]
-    fn under_a_tree_table_an_old_littlefs_in_the_app_partition_is_not_a_source() {
+    fn under_a_tree_table_a_held_littlefs_is_migrated_from() {
         let mut flash = chip(Some(&t2_table()));
         put_fs(&mut flash, LEGACY_C6_V2_LPFS);
-        // Erase the T2 region: what a plain T2 flash that never booted
-        // leaves is littlefs there, never a tree header.
-        let t2 = t2_lpfs();
-        flash[t2.offset as usize..t2.end() as usize].fill(0xFF);
+        let inspection = inspect_flash_for(&flash, t2_table(), FsKind::Tree, true);
+        assert_eq!(inspection.state, LayoutState::CurrentLegacyPresent);
+        assert_eq!(inspection.source.unwrap().0, LEGACY_C6_V2_LPFS);
+        assert_eq!(inspection.source_fs, Some(FsKind::Littlefs));
+        flash[0x35_0000..0x35_2000].fill(0xFF);
         let inspection = inspect_flash_for(&flash, t2_table(), FsKind::Tree, true);
         assert_eq!(inspection.state, LayoutState::CurrentNothing);
     }

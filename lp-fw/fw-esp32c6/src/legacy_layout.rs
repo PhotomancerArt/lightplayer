@@ -24,3 +24,12 @@ pub const LEGACY_LPFS_V1_OFFSET: u32 = 0x0031_0000;
 /// probe only, which the size measurement's build leaves out.
 #[cfg(not(feature = "measure_no_legacy_probe"))]
 pub const LEGACY_LPFS_V1_BLOCKS: u32 = 240;
+
+/// Where the 2026-10 repartition's `lpfs` starts (`partitions.csv` until the
+/// tree-store cutover): an `fs-tree` board on the tree table holds a
+/// littlefs it finds here (`flash_storage::legacy_lpfs_present_at`).
+#[cfg(all(feature = "fs-tree", not(feature = "measure_no_legacy_probe")))]
+pub const LEGACY_LPFS_V2_OFFSET: u32 = 0x0035_0000;
+/// Its 4 KB littlefs blocks (`0xB0000` bytes).
+#[cfg(all(feature = "fs-tree", not(feature = "measure_no_legacy_probe")))]
+pub const LEGACY_LPFS_V2_BLOCKS: u32 = 176;

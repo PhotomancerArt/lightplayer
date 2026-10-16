@@ -69,6 +69,10 @@ served_builds_json := "lp-fw/builds/served.json"
 # its update files, which Studio needs to update a board over the air. Ask
 # for it when testing updates: `LP_FW_IMAGE=split just studio-dev`. The
 # release bundle (`studio-web-build`, every deploy) is ALWAYS split.
+# `split-tree` is the split image with the tree store as its filesystem on the
+# tree table (`lp-cli firmware package --fs-tree`): the tree-store cutover's
+# image before its default switch, what `walk-migration-emu`'s tree scenarios
+# serve. Never a release.
 # Measured warm on an M2 Max, 2026-10-06: single 23 s, split 50 s (two link
 # passes, 23 s + 25 s). See lp-fw/builds/README.md.
 studio_fw_image := env("LP_FW_IMAGE", "single")
@@ -764,8 +768,9 @@ studio-firmware-package-esp32c6 image=studio_fw_image: install-rv32-target
     case "{{ image }}" in
         single) cargo run -p lp-cli -- firmware package esp32c6-4mb --single-image ;;
         split) cargo run -p lp-cli -- firmware package esp32c6-4mb ;;
+        split-tree) cargo run -p lp-cli -- firmware package esp32c6-4mb --fs-tree ;;
         *)
-            echo "studio-firmware-package-esp32c6: image must be single or split, not {{ image }}" >&2
+            echo "studio-firmware-package-esp32c6: image must be single, split or split-tree, not {{ image }}" >&2
             exit 1
             ;;
     esac
