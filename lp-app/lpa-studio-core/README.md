@@ -502,12 +502,65 @@ is published disabled with its reason. Unlock takes `password` (secret) and
 (`access/unlock_offer.rs`, `unlock_op.rs`: the op holds the password in an
 `UnlockPassword` whose `Debug` writes `<redacted>`, so the session recorder
 never carries it). It is published while a board's link holds nothing, or
-only play, and the board is linked and idle. `edit` opens the board's
-project in the editor (`devices/edit_offer.rs`, `RuntimeOp::OpenDeviceLens`;
-the web's lens sync then writes `/device/<uid>`). It is published on a
-board that is Ready (or Degraded), running a project, linked, idle and
-registered, and it is the board card's primary there until the card's own
-Connect lands. See
+only play, and the board is linked and idle.
+
+A board whose files are gone is offered its way back and a way on
+(`devices/device_layout_view.rs`): Restore files (a backup this browser
+kept), Restore from a backup file…, and `start-fresh`
+(`DeviceStartFreshOp`, Routine: nothing on the board changes, the notice
+goes). The notice needs evidence the board had files (`FilesEvidence`, from
+`devices/board_files_memory.rs`: a pending backup, a project seen running
+here or given by this browser, a stamped identity it no longer names): a
+fresh install's first boot formats too, and is not a loss. A Start fresh
+is kept per board in this browser (the web edge's `localStorage`,
+`FRESH_STARTS_STORAGE_KEY`) until the board runs a project again.
+
+Three verbs open, show and close the board's session (the editor's lens),
+which the home page can hold (`app/studio/connected_board.rs`,
+`studio_controller/connect_flow.rs`; the board card ADR, §4):
+
+- `connect` means one thing: this board's session, on its card, with the
+  home page still up (`devices/connect_offer.rs`,
+  `RuntimeOp::ConnectDevice`). The lens opens the way an address opens it,
+  and the session is recorded as a `ConnectedBoard`: going home keeps it,
+  and it shows on the board's card unless an Edit is waiting or the user is
+  on the session's own page (`ConnectedBoard::shows_editor`, which reads the
+  place and acts on nothing). It is published on a board that is Ready (or
+  Degraded), linked, idle, holds a tier (any: the play password is enough),
+  registered, and not the board this tab's session is on; disabled, "No
+  project", on a board running none (its card's primary is then Add a
+  project, the `push` offer), and "Project not known" until the board says
+  what it runs. A session on another
+  board closes first: one board is connected at a time. Connect reaches the
+  board if it must, then opens its panel, in one press: on a closed port
+  (`device_offers.rs`) it opens the port; on an offline board it takes the
+  road the card's own verbs would — Wi‑Fi address, then lightplayer.app,
+  then the cable (`ConnectReach`, the same code `connect-wifi`,
+  `connect-relay` and `reconnect` run). Then it holds the intent
+  (`app/studio/pending_lens.rs`): the tick attaches it on the card once the
+  board is ready, it gives up after `CONNECT_INTENT_GRACE` (60 s) with
+  "The board didn't answer in time" (`StudioController::connect_failure`),
+  and it lets go at once when the board turns out locked or needing
+  firmware (Unlock, Install take over), when the port chooser it opened
+  closes with nothing picked (no failure: the user said no) or fails (said
+  on the card), on Done, another Connect, an Edit elsewhere, or an
+  address's open. "Couldn't connect" goes by itself once the board is
+  ready on another link (`ConnectFailure::outlived`). While an editor open is held for the
+  board (the opening frame's exit), it opens the port only. Not published
+  again while it waits, nor on an offline stand-in (Power on is its way
+  back).
+- `edit` shows the editor on the board (`devices/edit_offer.rs`,
+  `RuntimeOp::EditDevice`): on the connected board, the session already
+  open, with nothing reattached or read again; on any other ready, running,
+  registered board, a connect first. It is not published while the editor
+  already shows the board.
+- `done` closes the session on the board this tab's session is on, whoever
+  holds it (`devices/done_offer.rs`, `RuntimeOp::CloseDeviceLens`; Routine).
+
+An address's open (`RuntimeOp::OpenDeviceLens`, `/device/<uid>`, a project
+card) is not connected, and on the board a connected session already holds
+it does nothing: the user being on the session's address is what shows it
+in the editor. See
 `docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
 
 A board another tab of this browser holds offers `devices/<board
@@ -563,9 +616,9 @@ builds a roster board's card and `pending_board_card(..)` a new board's;
 boards first. `StudioController::view()` publishes them on
 `DeviceRosterView.cards` once the view's offers are published, and the
 editor's docked card is `UiLensCard::Board`, built with the editor holding
-the board (no primary until the card's Done lands). A builder reads only the
-board's own offers from the published tree, so a card can point at nothing
-core did not offer.
+the board (Done is its primary, and it carries no panel: the editor is the
+session's surface). A builder reads only the board's own offers from the
+published tree, so a card can point at nothing core did not offer.
 
 A card (`UiBoardCard`) is:
 
@@ -576,13 +629,31 @@ A card (`UiBoardCard`) is:
   watching), a reading ("58 fps", "5 h ago"), and details holding the
   notices, how the board is running, the picture's words and its terminal;
 - the **name bar** (`UiNameBar`): the board's name and its **one primary**
-  (`UiPrimary`): Install, Unlock, Connect, Power on or Edit, or a disabled
-  word saying why (`primary_action.rs` has the order);
+  (`UiPrimary`): Install, Unlock, Connect, Add a project, Power on or
+  Done; never a greyed verb: when nothing can be pressed, its word is the
+  reason ("Connecting…", "Updating · 42%", "Offline · 2 weeks";
+  `primary_action.rs` has the order);
 - **five bars** (`UiStackBar`), always project · connection · access ·
   firmware · hardware, each one line: a summary, an aside, a tone (blue is
   Update, orange is attention or someone else has it), at most one action,
   and the bar's work while an activity runs in it. Each bar has its own file
   (`project_bar.rs` …), whose doc is the table of what it says.
+
+**Connected**, the card carries the board's **panel** in the five bars'
+place (`UiBoardCard.panel: Option<UiBoardPanel>`, `Some` exactly while the
+session is connected with its project ready): a pick of the project's root
+panel (`board_panel_picks.rs`: the master brightness fader, then knobs and
+toggles in panel order, `BOARD_PANEL_CONTROLS` = 4 at most, the rest
+counted in `more`), each control the root panel's own
+`UiPanelControlView` with its scope, so its writes are the panel's own.
+`auto_save` is `Some` only at the edit tier, and `edit` is the All controls
+row's action: Edit, or Edit with a lock (`unlock`) on a play-only board.
+The root face is `ProjectEditorView::root_module_face`, which the play page
+and the docs embed read too. The session's state while it is not open is
+the connection bar's work (`BoardConnection`, per board on
+`DeviceRosterView.connections`): "Connecting…", "Reconnecting…", or
+"Couldn't connect" striped with Retry (`connect`). The picture is the
+lens's own frames (`PictureSource::Lens`, `LensFrameSource`).
 
 A bar's **details** (`UiBarDetails`) are `RichSection<UiCardAction>`
 sections (a notice first, facts, verbs, a Danger section last) and today's

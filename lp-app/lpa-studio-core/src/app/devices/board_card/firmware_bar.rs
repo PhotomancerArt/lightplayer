@@ -4,7 +4,7 @@
 //! The busiest part of today's card — the face's verdict, the update
 //! story's line and bar, the layout question, the restore face, Flash,
 //! Update, Reinstall, Other version…, From a file…, Restore from a backup
-//! file…, Download backup and Factory reset — as one bar.
+//! file…, Start fresh, Download backup and Factory reset — as one bar.
 //!
 //! First match wins:
 //!
@@ -13,7 +13,8 @@
 //! | Flash or erase running | (the work shows) | — | Neutral | the work's Cancel |
 //! | An update running, or about to (its story is progress) | (the work: the update's short words) | — | Neutral | Cancel while backing up |
 //! | The layout question or refusal open | "Needs your answer" (a flash's own step shows as its work) | — | Attention | — (the details rise) |
-//! | Its files need restoring | "Its files need restoring" | — | Attention | Restore files |
+//! | Its file store refused (`fs: refused`, an `fs-tree` build) | "Data unreadable" | — | Attention | — (the details say where the files are; no click here is safe) |
+//! | Its files are gone (only on evidence it had some: never a fresh install) | "Its files are gone" | — | Attention | Restore files, or Start fresh with no backup here |
 //! | Its files are waiting | "Files waiting" | — | Attention | Finish update |
 //! | Needs you: keeps crashing | the update's words | — | Attention | Reinstall |
 //! | Needs you: a version Studio can't get | the update's words | — | Attention | Install <Studio's own> |
@@ -23,7 +24,7 @@
 //! | Play only, an update available | the version alone | — | Live | Update with a lock (Unlock) |
 //! | Offline, or a closed port (nothing heard this time) | the remembered version | "last seen" ("when it's back" when the standing says Available) | Neutral (Live) | — |
 //! | The flash wants firmware | "No firmware", "Pre-hello firmware", … | — | Attention | — (Install is the primary); Update (by USB) for an older LightPlayer whose board is known |
-//! | Nothing known | "Not known yet" | — | Neutral | — |
+//! | Nothing known | "Firmware not known" | — | Neutral | — |
 //! | Otherwise | the version alone | — | Neutral | — |
 //!
 //! "The version alone" never repeats the board, the MAC or a verdict
@@ -47,6 +48,14 @@ use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
 use crate::{RichLine, UiOffer, UiStatusKind};
 
+/// The bar's words when nothing says which firmware the board runs.
+const FIRMWARE_NOT_KNOWN: &str = "Firmware not known";
+/// The bar's words for a board that came back without the files it had.
+pub const FILES_ARE_GONE: &str = "Its files are gone";
+/// The bar's words for a board that refused its file store: its files are
+/// kept, and nothing on the card can read them.
+pub const DATA_UNREADABLE: &str = "Data unreadable";
+
 /// The firmware bar.
 pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let view = input.view;
@@ -63,14 +72,21 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             UiStatusKind::Attention,
             None,
         )
+    } else if layout.is_some_and(|layout| layout.store_refused) {
+        // Words only: the details name the tool that reads its files.
+        (DATA_UNREADABLE.to_string(), UiStatusKind::Attention, None)
     } else if input.offer("restore-files").is_some() || input.offer("restore-from-file").is_some() {
+        // The way back when this browser kept a backup; else the way on.
+        // Restore from a backup file… is in the details either way.
+        let restore = input
+            .offer("restore-files")
+            .filter(|_| !blocked)
+            .map(|restore| UiCardAction::press(restore, "Restore files").with_icon("upload"));
+        let start_fresh = || input.offer("start-fresh").map(start_fresh);
         (
-            "Its files need restoring".to_string(),
+            FILES_ARE_GONE.to_string(),
             UiStatusKind::Attention,
-            input
-                .offer("restore-files")
-                .filter(|_| !blocked)
-                .map(|restore| UiCardAction::press(restore, "Restore files").with_icon("upload")),
+            restore.or_else(start_fresh),
         )
     } else if let Some(finish) = input.offer("finish-update") {
         (
@@ -163,7 +179,7 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         details: details(input, &version, tone, action.as_ref()),
         summary,
         aside,
-        aside_icon: None,
+        mark: None,
         tone: if running { UiStatusKind::Neutral } else { tone },
         action: if running { None } else { action },
         work,
@@ -197,7 +213,7 @@ pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
         icon: "firmware".to_string(),
         summary,
         aside: None,
-        aside_icon: None,
+        mark: None,
         tone,
         action: None,
         work: None,
@@ -231,14 +247,14 @@ fn firmware_work(input: &BoardCardInput<'_>) -> Option<super::ui_bar_work::UiBar
 
 /// The version alone: the update story's version when there is one, else
 /// the label the board said hello with (or the one it is remembered by),
-/// else "Not known yet".
+/// else "Firmware not known".
 fn version_alone(input: &BoardCardInput<'_>, firmware: &IdentityFirmware) -> String {
     if let Some(update) = input.update {
         return update.version.text.clone();
     }
     firmware
         .label()
-        .map_or_else(|| "Not known yet".to_string(), str::to_string)
+        .map_or_else(|| FIRMWARE_NOT_KNOWN.to_string(), str::to_string)
 }
 
 /// Whether the board is older than this Studio, so the USB update is the
@@ -262,6 +278,11 @@ fn update_recommended(input: &BoardCardInput<'_>) -> bool {
     )
 }
 
+/// Start fresh: let the lost files go; the board waits for a project.
+fn start_fresh(offer: &UiOffer) -> UiCardAction {
+    UiCardAction::press(offer, "Start fresh").with_icon("add")
+}
+
 /// The update by USB: "Update", arming in place; the board pick when the
 /// board must be picked.
 fn usb_update(input: &BoardCardInput<'_>, offer: &UiOffer) -> UiCardAction {
@@ -283,7 +304,7 @@ fn face_words(face: &FirmwareFace) -> &'static str {
         FirmwareFace::OlderLightPlayer { .. } => "Older LightPlayer",
         FirmwareFace::Unknown
         | FirmwareFace::LightPlayer { .. }
-        | FirmwareFace::CoreOnly { .. } => "Not known yet",
+        | FirmwareFace::CoreOnly { .. } => FIRMWARE_NOT_KNOWN,
     }
 }
 
@@ -301,9 +322,12 @@ fn details(
     let layout = input.layout;
     let mut sections = Vec::new();
 
-    // 1. The notice.
-    let story = update
-        .filter(|update| update.kind == UpdateRowKind::NeedsYou || tone == UiStatusKind::Live);
+    // 1. The notice. A refused store's line is the notice, before any
+    // update story.
+    let refused = layout.is_some_and(|layout| layout.store_refused);
+    let story = update.filter(|update| {
+        !refused && (update.kind == UpdateRowKind::NeedsYou || tone == UiStatusKind::Live)
+    });
     if let Some(update) = story {
         sections.push(notice(
             "Firmware",
@@ -430,6 +454,7 @@ fn details(
         ),
         update_verb,
         verb(input.offer("download-backup"), None, "download"),
+        input.offer("start-fresh").map(start_fresh),
     ]
     .into_iter()
     .flatten()
@@ -859,10 +884,10 @@ mod tests {
     }
 
     #[test]
-    fn nothing_known_is_not_known_yet() {
+    fn nothing_known_names_what_is_not_known() {
         let mut fixture = CardFixture::ready();
         fixture.view.firmware_face = FirmwareFace::Unknown;
-        assert_eq!(firmware_bar(&fixture.input()).summary, "Not known yet");
+        assert_eq!(firmware_bar(&fixture.input()).summary, "Firmware not known");
     }
 
     /// Over a link that cannot carry firmware, every refused verb keeps its

@@ -4,12 +4,13 @@
 //!
 //! | Board | Summary | Aside | Tone | Action |
 //! |---|---|---|---|---|
-//! | Offline | "Not known yet" | "when it's back" | Neutral | — |
-//! | A trusted link (USB, a stand-in) | "You can edit" | "USB" / "in this tab" | Neutral | — |
+//! | A stand-in (a sim, an in-tab board), on or off | "You can edit" | "in this tab" | Neutral | — |
+//! | Offline | "Access not known" | "when it's back" | Neutral | — |
+//! | A trusted link (USB) | "You can edit" | "USB" | Neutral | — |
 //! | Locked | "Locked" | "needs a password" | Neutral | — (Unlock is the primary) |
 //! | Play only | "You can play" | the key, or "anyone can play" | Neutral | Unlock (the sheet) |
 //! | Unlocked at edit | "You can edit" | the key | Neutral | — |
-//! | Checking, unlocking | "Not known yet" (the work shows) | — | Neutral | — |
+//! | Checking, unlocking | "Access not known" (the work shows) | — | Neutral | — |
 //! | No password reaches it | "No password here" | "set one over USB" | Warning | — |
 //!
 //! Over any row: a board open to edit with no password says "anyone can
@@ -21,7 +22,8 @@
 //! ([`crate::UiAccessGrant`], [`crate::UiAccessWait`]), never the login
 //! line's words, so it can never name the wrong link: nothing here says
 //! "Bluetooth" on a LAN or relay link. Its icon is `lock` in every row; the
-//! words say the tier.
+//! words say the tier, and name their subject when it is not known. A
+//! stand-in's access is known whether it runs or not: it lives in this tab.
 
 use lpc_access::{OpenTo, Tier};
 
@@ -37,6 +39,8 @@ use crate::app::access::{
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{RichLine, UiStatusKind};
 
+/// The bar's words when Studio cannot tell what this link may do.
+const ACCESS_NOT_KNOWN: &str = "Access not known";
 /// The notice on a board anyone nearby may edit.
 pub const ANYONE_CAN_EDIT_SENTENCE: &str = "Anyone nearby can change this board.";
 /// The account-key notice's title, ahead of #1056's sentence.
@@ -50,9 +54,9 @@ pub(crate) fn access_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let unlock = access.and_then(|access| access.unlock);
     let trusted = input.stand_in() || input.link_kind() == UiLinkKind::Usb;
     let mut work = None;
-    let (summary, mut aside, mut tone, action) = if input.offline() {
+    let (summary, mut aside, mut tone, action) = if input.offline() && !input.stand_in() {
         (
-            "Not known yet",
+            ACCESS_NOT_KNOWN,
             Some("when it's back".to_string()),
             UiStatusKind::Neutral,
             None,
@@ -118,7 +122,7 @@ pub(crate) fn access_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 other_device: false,
             });
         }
-        ("Not known yet", None, UiStatusKind::Neutral, None)
+        (ACCESS_NOT_KNOWN, None, UiStatusKind::Neutral, None)
     };
     // Open to edit with no password: anyone nearby can change it. A grant
     // at edit with no key's name is that same board, before its list is
@@ -151,7 +155,7 @@ pub(crate) fn access_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             refused,
         ),
         aside,
-        aside_icon: None,
+        mark: None,
         tone: if work.is_some() {
             UiStatusKind::Neutral
         } else {
@@ -167,9 +171,9 @@ pub(crate) fn pending_access_bar() -> UiStackBar {
     UiStackBar {
         layer: BarLayer::Access,
         icon: "lock".to_string(),
-        summary: "Not known yet".to_string(),
+        summary: ACCESS_NOT_KNOWN.to_string(),
         aside: None,
-        aside_icon: None,
+        mark: None,
         tone: UiStatusKind::Neutral,
         action: None,
         work: None,
@@ -294,11 +298,25 @@ mod tests {
     use crate::{UiAccessGrant, UiDeviceAccess};
 
     #[test]
-    fn an_offline_board_is_not_known_yet_until_its_back() {
+    fn an_offline_boards_access_is_not_known_until_its_back() {
         let bar = access_bar(&CardFixture::offline().input());
-        assert_eq!(bar.summary, "Not known yet");
+        assert_eq!(bar.summary, "Access not known");
         assert_eq!(bar.aside.as_deref(), Some("when it's back"));
         assert_eq!(bar.icon, "lock");
+        assert_eq!(pending_access_bar().summary, "Access not known");
+    }
+
+    /// A stand-in lives in this tab: its access is known even while it is
+    /// off.
+    #[test]
+    fn a_stand_ins_access_is_known_on_or_off() {
+        let mut off = CardFixture::offline();
+        off.runtime = Some(crate::UiRuntimeBand::sim("seeed/xiao-esp32-c6", None));
+        let bar = access_bar(&off.input());
+        assert_eq!(
+            (bar.summary.as_str(), bar.aside.as_deref()),
+            ("You can edit", Some("in this tab"))
+        );
     }
 
     #[test]

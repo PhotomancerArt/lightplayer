@@ -13,9 +13,9 @@
 //       (`lp.devices.wifi-addresses.v1`, keyed by MAC) — the address the
 //       board's own status gave
 //   S2  the cable is gone (Studio reloads with no `?emu=`: no USB at all):
-//       c6-a is a card under Offline boards whose primary is Connect over
-//       Wi‑Fi (`connect-wifi`); pressed, the board says a secure LAN session
-//       opened, the SAME device comes back as its card on the Wi‑Fi link
+//       c6-a is a card under Offline boards whose primary is Connect
+//       (`connect`, Wi‑Fi first); pressed, the board says a secure LAN session
+//       opened, its session opens on its card, Done, and the SAME device is its card on the Wi‑Fi link
 //       ("Wi‑Fi · …", reached at the remembered address), and a project
 //       pushed from it lands (the board's console: `Project loaded`, frames
 //       advancing)
@@ -102,9 +102,9 @@ const NOWHERE = "127.0.0.1:9";
 /// `board_card/connection_bar.rs`). They say where to look; the boards'
 /// consoles say what happened.
 const WORDS = {
-  // The verb's own words, where the connection details draw it; as an
-  // offline card's primary (Wi‑Fi first, `primary_action.rs`) it reads
-  // "Connect". The walk presses it by its offer, `connect-wifi`.
+  // The verb's own words, where the connection details draw it. An
+  // offline card's primary is Connect (`connect`, reaching over Wi‑Fi
+  // first, `primary_action.rs`), which the walk presses by its offer.
   connectOverWifi: "Connect over Wi‑Fi",
   busy: "Busy with another connection — try again",
   unreachable: (host) => `Couldn't reach the board at ${host}. Is it on this network?`,
@@ -215,7 +215,7 @@ async function main() {
   if (options.dryRun) {
     const steps = [
       `S1 lp-cli wifi add <usb door> ${NET.ssid} (each board) → status connected; Studio ?emu= → the USB square → ${A}'s card ready (push or edit offered) → ${BOOK_KEY}[${A}'s MAC].ip == its status ip`,
-      `S2 hold both consoles; book entry ip → ${A}'s forward (the one substitution); Studio with no ?emu= → ${A}'s card under Offline boards → connect-wifi (${WORDS.connectOverWifi}, its primary) → console: secure session opening → its card ready, "${WORDS.wifiLine("<fwd a>")}", one device → push ${WALK_PROJECT} → console: Project loaded, frames advance`,
+      `S2 hold both consoles; book entry ip → ${A}'s forward (the one substitution); Studio with no ?emu= → ${A}'s card under Offline boards → connect (Connect, its primary, Wi‑Fi first) → console: secure session opening → its session on the card → Done → its card ready, "${WORDS.wifiLine("<fwd a>")}", one device → push ${WALK_PROJECT} → console: Project loaded, frames advance`,
       `S3 Network row: <fwd b> → Connect → ${B}'s console: secure session opening → ${B}'s card (its MAC) ready at <fwd b>; a second browser: <fwd a> → "${WORDS.busy}" and ${A}'s console: every LAN link in use; ${A}'s first link not closed`,
       `S4 the second browser: ${NOWHERE} → "${WORDS.unreachable(NOWHERE)}"`,
     ];
@@ -353,7 +353,7 @@ async function main() {
     for (const id of BOARDS) await holds[id].console.waitFor("[link] up (session", { what: "its USB link up for the capture" });
     const page = new Page(driver, { doorAddr: door.addr });
 
-    await step("S2", `no cable: ${A}'s tile offers "${WORDS.connectOverWifi}"; pressed, it comes back over Wi‑Fi and an edit lands`, async (seen) => {
+    await step("S2", `no cable: ${A}'s tile offers Connect (Wi‑Fi first); pressed, it comes back over Wi‑Fi and an edit lands`, async (seen) => {
       // The stand-in (DD193, see the header): the remembered entry's ip
       // becomes the board's forward, so the host can dial it.
       await page.load(plainUrl);
@@ -369,11 +369,21 @@ async function main() {
       await page.load(plainUrl);
       const from = holds[A].console.mark();
       // The board is a card under Offline boards, always open: wait for ITS
-      // card there (by its MAC), then press its `connect-wifi` — the offline
-      // card's primary, Wi‑Fi first (`primary_action.rs`) — on its face.
+      // card there (by its MAC), then press its primary, Connect
+      // (`connect`) — one meaning since the connected card (`connect_offer.rs`):
+      // it reaches the board over Wi‑Fi first (`connect-wifi`'s road, the
+      // remembered address), then opens the board's panel on its card.
       await driver.waitFor(`Boolean(${offlineCard(mac[A])})`, { timeoutMs: STEP_MS, what: `${A}'s card under Offline boards` });
-      seen.pressed = await driver.pressOffer("connect-wifi", { board: mac[A], timeoutMs: STEP_MS });
+      seen.pressed = await driver.pressOffer("connect", { board: mac[A], timeoutMs: STEP_MS });
       seen.opened = (await holds[A].console.waitFor(/\[lan\] link \S+ .*secure session opening/, { from, what: "a secure LAN session opening" })).trim();
+      // Connect ends with the board's session open on its card (Done its
+      // primary) — its panel too when the board runs a project; this board
+      // has nothing on it yet, so its bars stay. Done gives the card its
+      // facts back (the link stays up) for the reads below.
+      await driver.waitOffer("done", { board: mac[A], timeoutMs: STEP_MS });
+      const cardA = await driver.card({ board: mac[A] });
+      seen.panelOnCard = await driver.evaluate(`Boolean(${cardA}?.querySelector('[data-board-panel]'))`);
+      await driver.pressOffer("done", { board: mac[A], timeoutMs: STEP_MS });
       await page.cardReady(fwd[A]);
       const shown = await page.cardMac(fwd[A]);
       if (shown !== mac[A]) throw new Error(`the Wi‑Fi card shows ${shown}, not ${A}'s ${mac[A]}`);

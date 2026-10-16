@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiLensCard, UiNodeFace, UiPaneView, UiStudioView, UiViewContent};
+use lpa_studio_core::{UiAction, UiLensCard, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::layout::ReconnectingCurtain;
 use crate::app::module::{PlayModeSurface, panel_gesture_actions};
@@ -224,15 +224,16 @@ fn project_editor_view(panes: &[UiPaneView]) -> Option<lpa_studio_core::ProjectE
 
 /// The module face play mode renders: the workspace ROOT's, since the flat
 /// root is the single top-level card and its scope is the project's own
-/// (R8). Anything else — no editor yet, or a root wearing another kind's
-/// face — has no play surface, and the caller falls back.
+/// (R8) — core's [`ProjectEditorView::root_module_face`], the same face the
+/// docs embed and the board card's panel read. Anything else — no editor
+/// yet, or a root wearing another kind's face — has no play surface, and
+/// the caller falls back.
+///
+/// [`ProjectEditorView::root_module_face`]: lpa_studio_core::ProjectEditorView::root_module_face
 fn play_mode_face(
     editor: Option<&lpa_studio_core::ProjectEditorView>,
 ) -> Option<lpa_studio_core::UiModuleFace> {
-    match editor?.nodes.first()?.face.as_ref()? {
-        UiNodeFace::Module(face) => Some(face.clone()),
-        _ => None,
-    }
+    editor?.root_module_face().cloned()
 }
 
 /// The docked lens card: the board card the home page draws for the device

@@ -87,6 +87,20 @@ impl fmt::Display for OfferArgError {
     }
 }
 
+impl OfferArgError {
+    /// The refusal as a person reads it under a disabled button: an offer
+    /// that cannot be pressed right now says its own reason alone ("No
+    /// project"), without [`Display`](fmt::Display)'s "this cannot be done
+    /// right now:" lead, which is for logs and the app agent; every other
+    /// refusal names its parameter, as `Display` does.
+    pub fn shown(&self) -> String {
+        match self {
+            Self::Unavailable { reason } => reason.clone(),
+            other => other.to_string(),
+        }
+    }
+}
+
 impl std::error::Error for OfferArgError {}
 
 #[cfg(test)]
@@ -171,5 +185,25 @@ mod tests {
         for (error, text) in cases {
             assert_eq!(error.to_string(), text);
         }
+    }
+
+    /// Under a button, an offer that cannot be pressed right now says its
+    /// reason alone; a refused value still names its parameter.
+    #[test]
+    fn a_refusal_shown_to_a_person_is_the_reason_alone() {
+        let unavailable = OfferArgError::Unavailable {
+            reason: "No project".to_string(),
+        };
+        assert_eq!(unavailable.shown(), "No project");
+        assert_eq!(
+            unavailable.to_string(),
+            "this cannot be done right now: No project",
+            "logs and the agent keep the lead"
+        );
+        let missing = OfferArgError::Missing {
+            name: "project".to_string(),
+            label: "project".to_string(),
+        };
+        assert_eq!(missing.shown(), missing.to_string());
     }
 }

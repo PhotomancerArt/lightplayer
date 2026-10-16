@@ -16,12 +16,14 @@ pub struct UiStackBar {
     /// An icon token, as offers use (`project`, `usb`, `lock`, `firmware`,
     /// `chip`, …).
     pub icon: String,
-    /// What the bar says: "USB · live", "Nothing on it yet", the version.
+    /// What the bar says: "USB · live", "No project", the version. It
+    /// names its subject: never a bare "Not known yet".
     pub summary: String,
-    /// The quieter words at the end: "3 boards", "also cloud", "last seen".
+    /// The quieter words at the end: "3 boards", "editor open", "last seen".
     pub aside: Option<String>,
-    /// The icon leading the aside ("also cloud" carries `cloud`).
-    pub aside_icon: Option<String>,
+    /// An icon alone at the bar's end, after the aside: the cloud on a
+    /// board also reachable through lightplayer.app.
+    pub mark: Option<UiBarMark>,
     /// The bar's tint: a notice's family, or Neutral. Blue
     /// ([`UiStatusKind::Live`]) only for Update.
     pub tone: UiStatusKind,
@@ -31,6 +33,20 @@ pub struct UiStackBar {
     /// reads neutral with the work's words.
     pub work: Option<UiBarWork>,
     pub details: UiBarDetails,
+}
+
+/// An icon alone at a bar's end, saying one fact without words on the
+/// bar: its label is the accessible name and the hover.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiBarMark {
+    /// An icon token (`cloud`).
+    pub icon: String,
+    /// What the mark means, in words: "Also reachable through
+    /// lightplayer.app".
+    pub label: String,
+    /// Lit (the live tone) when the fact holds right now; plain when it is
+    /// set up and not holding yet.
+    pub lit: bool,
 }
 
 /// Which bar, in the card's fixed order.

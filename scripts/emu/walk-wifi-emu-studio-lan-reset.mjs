@@ -94,13 +94,13 @@ const PRESS_ADDRESS_CONNECT = `(() => {
 const RESET = { verb: "reset-board", bar: "hardware" };
 
 /// Page-side: the board is not ready, as core reads it — its card is gone,
-/// or it offers neither a project (`push` on its project bar) nor the
+/// or it offers neither a project (`push`, Add a project, as its primary) nor the
 /// editor (`edit`, pressable) on its face. `StudioDriver.boardRuns`'s
 /// question turned around, for the wait on the board going away.
 const notReady = (scope) => `(() => { const card = ${scope}; if (!card) return true;
   const face = (verb) => [...card.querySelectorAll('[data-offer-path$="/' + verb + '"]')].filter((mark) => !mark.closest('.ux-popover-layer'));
   const pressable = (mark) => { const all = mark.querySelectorAll('button'); const button = all[all.length - 1]; return Boolean(button) && !button.disabled; };
-  const empty = face('push').some((mark) => mark.closest('[data-bar="project"]') && mark.querySelector('button'));
+  const empty = face('push').some((mark) => mark.closest('[data-name-bar]') && mark.querySelector('button'));
   const running = face('edit').some(pressable);
   return !empty && !running; })()`;
 

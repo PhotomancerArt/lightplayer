@@ -45,7 +45,7 @@ pub(crate) fn WifiAddressEntry(
     // no section around it (the app agent, ⌘K).
     let press = match offer.press(&resolved_args(&offer, &current)) {
         Ok(action) => action,
-        Err(refused) => offer.action.clone().disabled(refused.to_string()),
+        Err(refused) => offer.action.clone().disabled(refused.shown()),
     }
     .with_label("Connect");
     let line = connect.as_ref().map(connect_line);
