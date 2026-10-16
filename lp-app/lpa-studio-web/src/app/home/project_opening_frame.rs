@@ -551,7 +551,9 @@ pub fn ProjectOpeningFrame(
     };
 
     rsx! {
-        section { class: "tw:grid tw:gap-3.5",
+        // `data-opening-frame`: the walk hook — Edit on a connected board
+        // must draw no opening frame (it reopens nothing).
+        section { class: "tw:grid tw:gap-3.5", "data-opening-frame": "",
             div { class: "tw:grid tw:gap-2",
                 div { class: "tw:flex tw:items-center tw:gap-3",
                     span { class: "tw:h-2.5 tw:w-2.5 tw:animate-pulse tw:rounded-full tw:bg-status-working-foreground" }

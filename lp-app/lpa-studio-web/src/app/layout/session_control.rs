@@ -1122,6 +1122,7 @@ mod tests {
             stat_line: None,
             update: None,
             link: lpa_studio_core::UiLinkKind::Usb,
+            connected: false,
         }
     }
 

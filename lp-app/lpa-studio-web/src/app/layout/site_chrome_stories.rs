@@ -546,6 +546,7 @@ fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
         stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
         update: None,
         link: lpa_studio_core::UiLinkKind::Usb,
+        connected: false,
     }
 }
 
@@ -563,6 +564,7 @@ fn hardware_control() -> UiChromeSessionControl {
         stat_line: Some("43 fps".to_string()),
         update: None,
         link: lpa_studio_core::UiLinkKind::Usb,
+        connected: false,
     }
 }
 
