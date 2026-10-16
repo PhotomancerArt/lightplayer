@@ -177,6 +177,14 @@ records` (`scripts/ci/figures-patch.py`):
    old → new; the bless logs' tails) and **stays red**. Nothing is committed or
    pushed.
 
+The four chip jobs among them run on a pull request when their chip's emulator filter fires
+**or** when it touches any crate linked into that chip's shipped firmware —
+the closure `cargo tree` gives, generated into
+`.github/firmware-closure-filters.yml` by `just firmware-closure` and kept
+current by `just lint-firmware-closure`. Before 2026-10-15 a shared-crate
+change skipped them and its moves were found on main
+([the debt entry](debt/firmware-figures-skip-on-shared-crate-prs.md)).
+
 The `figures-comment` job then posts or rewrites **one** sticky comment on the
 PR (marker `<!-- lp-figures-patch -->`): per job, a table of chip / record /
 figure / old / new, the command that applies it, and a line for every failure
