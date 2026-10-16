@@ -19,7 +19,9 @@
 //! **It erases the board's `lpfs`** (espflash, over the bootloader) to start
 //! from a first-boot format. Run it only on the sacrificial board, leased.
 //! Env: `LP_SOAK_DIR` (records), `LP_PERF_LABEL` (the image: `fs-tree` or
-//! `littlefs`), `LP_PERF_ERASE=1` (erase first; default on), `BOARD_HOLDER`.
+//! `littlefs`), `LP_PERF_ERASE=1` (erase first; default on),
+//! `LP_PERF_BOOT_ONLY=1` (the first boot and the empty mounts, then stop),
+//! `BOARD_HOLDER`.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -157,6 +159,15 @@ async fn perf() {
             conn = c;
         }
         close(conn).await;
+    }
+    if std::env::var("LP_PERF_BOOT_ONLY").as_deref() == Ok("1") {
+        write_record(
+            &dir,
+            &label,
+            &console,
+            serde_json::json!({ "label": label, "mounts": mounts }),
+        );
+        return;
     }
 
     let mut conn = connect(&port, &console).await.expect("CX1's link");
@@ -375,12 +386,6 @@ async fn perf() {
     }
     close(conn).await;
 
-    // The record.
-    let lines = console.take();
-    let mut f = std::fs::File::create(dir.join(format!("perf-{label}-console.txt"))).unwrap();
-    for (t, l) in &lines {
-        writeln!(f, "{t:9.3} {l}").ok();
-    }
     let out = serde_json::json!({
         "label": label,
         "board": "CX1 c6-expendable, MAC 14:C1:9F:E6:54:90, flash JEDEC 0x464016 (4 MiB)",
@@ -390,6 +395,16 @@ async fn perf() {
         "panel_writes_at_s": panel_at,
         "idle_window_s": [idle_from, idle_to],
     });
+    write_record(&dir, &label, &console, out);
+}
+
+/// The record: the console, and `out` as `perf-<label>.json`.
+fn write_record(dir: &std::path::Path, label: &str, console: &Console, out: serde_json::Value) {
+    let lines = console.take();
+    let mut f = std::fs::File::create(dir.join(format!("perf-{label}-console.txt"))).unwrap();
+    for (t, l) in &lines {
+        writeln!(f, "{t:9.3} {l}").ok();
+    }
     std::fs::write(
         dir.join(format!("perf-{label}.json")),
         serde_json::to_string_pretty(&out).unwrap(),
