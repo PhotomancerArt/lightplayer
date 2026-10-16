@@ -208,7 +208,9 @@ pub struct Editor {
     press_log: Vec<Vec<Target>>,
     undo: Vec<(Project, Vec<Target>)>,
     redo: Vec<(Project, Vec<Target>)>,
-    fitted: bool,
+    /// The camera still frames everything as the editor put it: until you
+    /// move the view, a new canvas size frames everything again.
+    framed: bool,
 }
 
 impl Editor {
@@ -237,7 +239,7 @@ impl Editor {
             press_log: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
-            fitted: false,
+            framed: true,
         }
     }
 
@@ -371,17 +373,19 @@ impl Editor {
 
     // ---- input ---------------------------------------------------------
 
+    /// The canvas's size on screen. Until you move the view, the canvas
+    /// keeps everything framed (in the stack, the page moves the camera).
     pub fn resize(&mut self, size: Vec2) {
         self.viewport = size;
-        if !self.fitted {
+        if self.framed && self.layout() == LayoutKind::Canvas {
             self.fit();
-            self.fitted = true;
         }
     }
 
     /// ⇧1: everything on the canvas.
     pub fn fit(&mut self) {
         self.camera = Camera::fit(self.project.extent(), self.viewport, 40.0);
+        self.framed = true;
     }
 
     /// ⇧2: the selection. A fixture is framed with the outputs it feeds,
@@ -391,7 +395,10 @@ impl Editor {
     pub fn frame_selection(&mut self) {
         let rects = self.selection.iter().filter_map(|t| self.framing_rect(t));
         match union(rects) {
-            Some(r) => self.camera = Camera::fit(r, self.viewport, 40.0),
+            Some(r) => {
+                self.camera = Camera::fit(r, self.viewport, 40.0);
+                self.framed = false;
+            }
             None => {
                 self.notice = Some(Notice::refused(
                     "Nothing to frame",
@@ -546,6 +553,7 @@ impl Editor {
             Gesture::Boxing { .. } => self.update_box(),
             Gesture::Panning { last } => {
                 self.camera.pan(at - last);
+                self.framed = false;
                 self.gesture = Gesture::Panning { last: at };
             }
             Gesture::Drawing { .. } | Gesture::None => {
@@ -738,6 +746,7 @@ impl Editor {
         } else {
             self.camera.pan(delta * -1.0);
         }
+        self.framed = false;
     }
 
     pub fn modifiers(&mut self, mods: Mods) {
@@ -1057,6 +1066,7 @@ impl Editor {
                     && let Some(r) = self.framing_rect(&first)
                 {
                     self.camera = Camera::fit(r, self.viewport, 40.0);
+                    self.framed = false;
                 }
                 self.selection = vec![child];
             }

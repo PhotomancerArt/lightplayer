@@ -689,6 +689,24 @@ fn where_nodes_sit_is_a_fact_the_view_hands_over() {
     assert_eq!(e.camera, framed, "everything fits");
 }
 
+/// Until you move the view, the canvas keeps everything framed as its size
+/// changes (the page mounts it again when the size class settles); once
+/// you pan, a new size leaves the view where you put it.
+#[test]
+fn the_canvas_keeps_everything_framed_until_you_move_the_view() {
+    let mut e = editor_of(Project::seed());
+    e.resize(Vec2::new(600.0, 800.0));
+    lay_out(&mut e);
+    e.resize(Vec2::new(1200.0, 800.0));
+    let wide = e.camera;
+    e.fit();
+    assert_eq!(e.camera, wide, "framed for the new size");
+    e.wheel(Vec2::new(300.0, 300.0), Vec2::new(0.0, 40.0), none());
+    let moved = e.camera;
+    e.resize(Vec2::new(900.0, 800.0));
+    assert_eq!(e.camera, moved, "where you put it");
+}
+
 /// A node of any kind (module, fixture, output) selects, deletes and
 /// climbs (Esc) the same way.
 #[test]
