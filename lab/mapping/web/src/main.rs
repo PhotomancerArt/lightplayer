@@ -65,11 +65,15 @@ fn App() -> Element {
         div {
             class: "{lab_class}",
             tabindex: "0",
-            // The size class, from the whole app's width: the chrome follows
-            // it, and the canvas's own width moves with the chrome.
+            // The size class, from the window's width: the chrome follows
+            // it, and the canvas's own width moves with the chrome. Not this
+            // box's width: a size forced in Debug frames it narrower.
             onresize: move |evt| {
                 if let Ok(size) = evt.get_content_box_size() {
-                    ed.write().report_size_class(SizeClass::of_width(size.width));
+                    let width = web_sys::window()
+                        .and_then(|w| w.inner_width().ok()?.as_f64())
+                        .unwrap_or(size.width);
+                    ed.write().report_size_class(SizeClass::of_width(width));
                 }
             },
             onmounted: move |evt| async move {
