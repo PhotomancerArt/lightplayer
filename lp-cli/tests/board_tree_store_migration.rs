@@ -82,7 +82,11 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
             "the board must run a littlefs build: {:?}",
             hello.build.features
         );
-        assert_eq!(hello.hardware.fs, lpc_wire::FsBootState::Mounted);
+        // Mounted, or formatted on its first boot after the release went on.
+        assert!(matches!(
+            hello.hardware.fs,
+            lpc_wire::FsBootState::Mounted | lpc_wire::FsBootState::Formatted
+        ));
         record(&dir, "hello-before.json", &format!("{hello:#?}"));
         let mut client = LpClient::new(conn.client_io());
         if std::env::var("LP_MIGRATE_SETUP").as_deref() == Ok("1") {
