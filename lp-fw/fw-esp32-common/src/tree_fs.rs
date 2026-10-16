@@ -47,8 +47,8 @@ pub enum TreeFsInit<F: Flash, H: ObjectHasher> {
 
 /// Mount the store on `flash`; format only a flash with no store on it, and
 /// only when `may_format` says so. The caller prints the verdict's boot
-/// word (it owns the console); this logs only the start of a format, the
-/// one step that takes seconds on silicon (D4), and a failed one.
+/// word (it owns the console); this logs only the start of a format (two
+/// erases since the format went lazy) and a failed one.
 pub fn init_tree_guarded<F, H>(
     flash: F,
     hasher: H,
