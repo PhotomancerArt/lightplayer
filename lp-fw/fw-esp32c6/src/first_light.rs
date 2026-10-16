@@ -5,6 +5,9 @@
 //! Each boot stage stamps the system timer once ([`mark`]): SYSTIMER unit 0,
 //! 16 MHz, which counts from the chip's reset (esp-hal keeps it enabled and
 //! never resets it; `esp_hal::time::Instant` and so `embassy_time` read it).
+//! Its raw count, divided here: `Instant`'s tick-to-µs scaler is set inside
+//! `esp_hal::init`, and the app's entry is before that (read through
+//! `Instant` there, the count came back as raw 16 MHz ticks — 16x).
 //! The first lit frame — the first buffer handed to the RMT with any byte
 //! that is not zero ([`on_frame`]) — also reads the **LP timer**, the
 //! slow-clock counter that starts at power-on, the mask ROM and the
@@ -166,9 +169,9 @@ fn report(lit: bool) {
 
 /// The system timer, µs from reset.
 fn sys_us() -> u32 {
-    esp_hal::time::Instant::now()
-        .duration_since_epoch()
-        .as_micros() as u32
+    use esp_hal::timer::systimer::{SystemTimer, Unit};
+    // 16 ticks a µs on the C6 (XTAL 40 MHz / 2.5).
+    (SystemTimer::unit_value(Unit::Unit0) / 16) as u32
 }
 
 /// The LP timer's raw count (slow-clock ticks since power-on).

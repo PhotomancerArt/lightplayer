@@ -120,6 +120,12 @@ fn time_to_first_light_on_the_emulated_c6() {
                     })
                     .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.min(b))));
                 let lit_us = lit_us.map(|us| us - t0 as f64);
+                if lit_us.is_none() && files.is_some() {
+                    println!(
+                        "{label}/{project}: t0 {t0} us; pads {:?}",
+                        host.board.machine.routed_pads()
+                    );
+                }
                 if files.is_some() {
                     assert!(
                         said.contains("first light at "),
@@ -168,12 +174,30 @@ fn time_to_first_light_on_the_emulated_c6() {
 }
 
 /// Step `host` until a console line contains `needle`; that line. Panics
-/// with the console's tail if it never comes.
+/// with the console's tail if it never comes. With `LP_FIRST_LIGHT_TIMELINE`
+/// set, prints every console line with the guest time it arrived by (the
+/// end of the slice it came out in).
 fn line(host: &mut EmuLinkHost<C6Board>, needle: &str) -> String {
-    match host.wait_for_line(needle, LINE_BUDGET_US) {
-        Ok(Some(line)) => line,
-        Ok(None) => panic!("no {needle:?}:\n{}", tail(host)),
-        Err(e) => panic!("the boot failed before {needle:?} ({e}):\n{}", tail(host)),
+    let timeline = std::env::var_os("LP_FIRST_LIGHT_TIMELINE").is_some();
+    let until = host.board.machine.micros() + LINE_BUDGET_US;
+    let mut seen = 0;
+    loop {
+        let now = host.board.machine.micros();
+        if timeline {
+            for l in &host.console()[seen..] {
+                println!("  {:>10.3} ms  {l}", now as f64 / 1e3);
+            }
+        }
+        if let Some(l) = host.console()[seen..].iter().find(|l| l.contains(needle)) {
+            return l.clone();
+        }
+        seen = host.console().len();
+        if now >= until {
+            panic!("no {needle:?}:\n{}", tail(host));
+        }
+        if let Err(e) = host.step() {
+            panic!("the boot failed before {needle:?} ({e}):\n{}", tail(host));
+        }
     }
 }
 
