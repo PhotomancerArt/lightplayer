@@ -54,10 +54,12 @@ struct Setup {
 struct Running {
     setup: Setup,
     edge: Option<UpdateEdge>,
-    /// The manifest at install. With no session nothing it says can
-    /// change: the engine never runs on a trial core, and only a session
-    /// starts a transfer.
-    at_install: lpc_update::BoardManifest,
+    /// The manifest at install, as a view that owns no heap: its text is
+    /// the image's own `'static` strings, so what stays resident does not
+    /// grow with the app version's length (#964). With no session nothing
+    /// it says can change: the engine never runs on a trial core, and only
+    /// a session starts a transfer.
+    at_install: lpc_update::BoardManifestView<'static>,
 }
 
 /// The hook's state. One task only: the server loop's (the transports call
@@ -93,16 +95,29 @@ pub fn install(
     // Built here, before the engine starts, rather than in the server
     // loop's first hello (which would stall the loop for the core's hash,
     // ~0.8 s emulated); dropped at once, so its buffers cost the engine's
-    // heap nothing until a host arrives — the manifest kept is ~200 B.
-    let at_install = new_edge(&setup)
-        .session
-        .manifest(super::update_edge::now_ms());
+    // heap nothing until a host arrives — the view kept owns no heap.
+    let at_install = resident_manifest(&setup);
     *RUNNING.0.borrow_mut() = Some(Running {
         setup,
         edge: None,
         at_install,
     });
     fw_esp32_common::usb_link::set_update_hook(usb_hook);
+}
+
+/// The manifest at install, borrowing the image's own strings. Its own
+/// frame (`inline(never)`), so the edge it reads from does not stay on the
+/// stack beside the view it returns.
+#[inline(never)]
+fn resident_manifest(setup: &Setup) -> lpc_update::BoardManifestView<'static> {
+    let edge = new_edge(setup);
+    edge.session
+        .manifest_view(super::update_edge::now_ms())
+        .with_text(
+            setup.identity.target,
+            setup.identity.chip,
+            setup.identity.version,
+        )
 }
 
 /// The board manifest the hello carries (`ServerHello::firmware`, wire
@@ -115,7 +130,7 @@ pub fn manifest() -> Option<lpc_update::BoardManifest> {
     let running = running.as_ref()?;
     Some(match &running.edge {
         Some(edge) => edge.session.manifest(super::update_edge::now_ms()),
-        None => running.at_install.clone(),
+        None => running.at_install.to_manifest(),
     })
 }
 
