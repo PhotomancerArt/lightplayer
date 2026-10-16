@@ -117,7 +117,8 @@ A 2D canvas with selection, and the start of the whole node graph on it
   frames around nodes, fixtures are frames around a drawing, and outputs
   are cards with one row per port. Frames are see-through: a click inside
   one selects what's in it, and the frame itself is picked by its title or
-  border. An output card is not a frame: click it to select it, click again
+  border. A fixture's empty inside picks the fixture too, behind anything
+  drawn in it (a drag from there still draws a selection box). An output card is not a frame: click it to select it, click again
   for the port under the cursor, and again for the pixel (D47).
 - **Layout runs in the page** (D63), from `lab-layout`, by role: controls
   (a clock, a power button) in a row on top, then shaders, fixtures and
@@ -166,8 +167,7 @@ A 2D canvas with selection, and the start of the whole node graph on it
   `lab-arrows` from where the cards landed. On the canvas an edge is a
   curve from its source's right side into its target's left, on an output
   level with the port rows it lands on. Its channel's name is always on
-  it in a small box; what it carries ("50 lamps on GPIO 10") shows only
-  while it belongs to the selection, and edges touching the selection are
+  it in a small box, and nothing more; edges touching the selection are
   lit, the rest quieter. Where a fixture's objects land shows on the
   output instead, as each object's run of pixels, lit while the object is
   hovered or selected. Hovering an edge (the page hit-tests it and tells
@@ -250,9 +250,12 @@ A 2D canvas with selection, and the start of the whole node graph on it
   fixtures, outputs and ports. The inspector shows the properties
   everything selected shares, a fixture's rules and problems, and an
   output's ports with how full each one is.
-- **A hint bar** that says what every key does in the current state. Its
-  lead says what you're doing ("Drawing a path", "Moving circle1"), never
-  what's selected — the breadcrumb says that.
+- **A hint bar** that says what every key does in the current state, each
+  action in a word or two ("select", "go in", "delete"), never naming what
+  it acts on — the breadcrumb says what's selected. A hint comes and goes
+  only as its action does, so the bar stays still as you point around. Its
+  lead says what you're doing ("Drawing a path", "Moving"), in a word or
+  two.
 
 ## The page
 
@@ -264,8 +267,13 @@ The canvas container (architecture §8), bottom to top:
   every node as a flat, keyed DOM card in world units. Panning and zooming
   change only that transform, so no card renders for a pan; cards out of
   view are not mounted; a relayout eases each card to its new place.
-  **Faces:** a fixture's drawing is SVG in its own units with its lamps
-  on a canvas inside it; an output's rows are SVG with its pixels on a
+  **Faces:** a fixture you work in (it or anything in it selected, or a
+  drawing tool out) is the mapping editor: its drawing in SVG, in its own
+  units, with its lamps as dots on a canvas inside it. Any other fixture is
+  Studio's live view, its lamps alone as cells of light (`lamp_cells.rs`,
+  built as `lpa-mapping-editor`'s `point_cells` builds them, worked out
+  once per layout and zoom). Lines in a card divide their width by the
+  zoom, so they keep one width on screen. An output's rows are SVG with its pixels on a
   canvas. Lamps and pixels are rasterized in Rust and put with one
   `putImageData` (`dense_canvas.rs`), drawn again only when the zoom moves
   a step or the colours tick;
