@@ -3547,14 +3547,17 @@ test-emu-layout-migration:
 #   cold (D10) · S5 a started trial with no host survives power cycles (D9) ·
 #   S7 reflashing the packaged image clears a stale newer record (D12) · S8 an
 #   uncommitted engine is not entered (core-only, no hello) · S9 the loader
-#   skips a core that will not load and boots the other (D4). S6 and S10 are
-#   named skips (each needs another fixture).
+#   skips a core that will not load and boots the other (D4) · S11 a tree-store
+#   core's trial dies and the littlefs core it rolls back to holds the store
+#   (tree-store adoption A5). S6 and S10 are named skips (each needs another
+#   fixture).
 #
-# NOT in CI (D19): four split builds (X, Y, Y with `fixture-trial-dies`, Y
-# with `fixture-trial-hangs`; two link passes each, a few minutes on an M2
-# Max) and a few minutes of scenarios. Run it when you touch `lp-bootctl`'s
-# records or `choose`, the loader (`lp-fw/fw-esp32c6-loader`) or
-# `fw-esp32c6/src/ota/`. `scenarios=<dir>` reuses images already built there.
+# NOT in CI (D19): five split builds (X, Y, Y with `fixture-trial-dies`, Y
+# with `fixture-trial-hangs`, Y with `fs-tree` and `fixture-trial-dies`; two
+# link passes each, a few minutes on an M2 Max) and a few minutes of
+# scenarios. Run it when you touch `lp-bootctl`'s records or `choose`, the
+# loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32c6/src/ota/` or the boot
+# mount. `scenarios=<dir>` reuses images already built there.
 test-emu-c6-split-boot scenarios="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -3566,6 +3569,7 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
         split y-test y esp32c6,server
         split y-test y-dies esp32c6,server,fixture-trial-dies
         split y-test y-hangs esp32c6,server,fixture-trial-hangs
+        split y-test y-tree-dies esp32c6,server,fs-tree,fixture-trial-dies
     fi
     LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
 
@@ -3653,12 +3657,13 @@ test-emu-c6-cli-link: install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
 
 # The boards half: whole boards over the link — the fragmented-heap reads,
-# the split image's boot, the LED seam on the split image, and a flash power
-# cut mid-upload power-cycled back to a serving board. CI's `Emulator C6
+# the split image's boot, the LED seam on the split image, a flash power
+# cut mid-upload power-cycled back to a serving board, and today's littlefs
+# image holding a tree store instead of formatting it. CI's `Emulator C6
 # lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts --test emu_littlefs_on_tree_store -- --include-ignored --nocapture
 
 # The tree-store cut walk's long form (plan
 # lp2025/2026-10-08-2339-tree-store-firmware-and-emulator, P7): every erase
