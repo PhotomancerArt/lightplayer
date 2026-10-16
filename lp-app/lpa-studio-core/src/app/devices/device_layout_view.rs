@@ -74,6 +74,10 @@ pub struct UiDeviceLayout {
     pub panel: Option<UiLayoutPanel>,
     /// One line in the firmware zone (a board whose files are waiting).
     pub line: Option<String>,
+    /// The board refused its file store (`fs: refused`, an `fs-tree`
+    /// build): [`Self::line`] is [`REFUSED_STORE_LINE`] and nothing here is
+    /// offered.
+    pub store_refused: bool,
     /// "Restore files" — the resume rule's verb (the line names the date).
     pub restore: Option<OfferPath>,
     /// The Update verb relabelled "Finish update" on a board holding its
@@ -128,6 +132,7 @@ impl UiDeviceLayout {
             offers_at,
             panel: None,
             line: None,
+            store_refused: false,
             restore: None,
             finish_update: None,
             download: None,
@@ -190,6 +195,7 @@ pub fn device_layout_view(
         offers_at: offers_at.clone(),
         panel: None,
         line: None,
+        store_refused: false,
         restore: None,
         finish_update: None,
         download: None,
@@ -250,6 +256,7 @@ pub fn device_layout_view(
     // way to the files is the CLI the line names.
     if fs == BoardFs::Refused {
         layout.line = Some(REFUSED_STORE_LINE.to_string());
+        layout.store_refused = true;
         return Some(layout);
     }
     // A board holding its files for a migration: the Update verb finishes it.
@@ -839,6 +846,7 @@ mod tests {
         )
         .expect("the refused line");
         assert_eq!(layout.line.as_deref(), Some(REFUSED_STORE_LINE));
+        assert!(layout.store_refused);
         assert!(
             layout
                 .line

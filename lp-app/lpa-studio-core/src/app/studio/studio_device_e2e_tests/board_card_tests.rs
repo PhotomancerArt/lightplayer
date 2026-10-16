@@ -712,6 +712,65 @@ fn a_freshly_installed_board_is_not_told_its_files_are_gone() {
     every_card_action_is_offered(&mut bench);
 }
 
+/// An `fs-tree` board that refused its file store (`fs: refused`): its
+/// files are kept on flash and no click here can safely read or move them.
+/// The firmware bar says "Data unreadable" in Attention with no action, the
+/// details name the tool that reads the files, and nothing that would
+/// restore, start fresh or move its files is offered — nor is the primary
+/// one of them.
+#[test]
+fn a_board_that_refused_its_store_says_its_data_is_unreadable_and_offers_no_way_to_move_it() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_fs_boot_state(lpc_wire::FsBootState::Refused)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
+    let (mut bench, tasks) = identified(&device, "usb-card-refused-1");
+    let id = bench.view().devices[0].id;
+    bench.run_until(&tasks, "the refused store to reach the card", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&id)
+            .is_some_and(|layout| layout.store_refused)
+    });
+    let card = card_of(&bench, id);
+    let firmware = card.bar(crate::BarLayer::Firmware);
+    assert_eq!(firmware.summary, crate::DATA_UNREADABLE);
+    assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
+    assert_eq!(firmware.action, None, "no click here is safe");
+    assert_eq!(
+        firmware
+            .details
+            .notice()
+            .and_then(|notice| notice.sentence.as_deref()),
+        Some(crate::app::devices::device_layout_view::REFUSED_STORE_LINE),
+        "the long line is in the details, not on the bar"
+    );
+    for verb in [
+        RESTORE_FILES,
+        RESTORE_FROM_FILE,
+        DOWNLOAD_BACKUP,
+        crate::START_FRESH,
+        "finish-update",
+    ] {
+        let path = bench.device_verb(id, verb);
+        bench.not_offered(&path);
+    }
+    if let Some(UiPrimary::Offer(primary)) = &card.name_bar.primary {
+        for verb in [RESTORE_FILES, "finish-update", "flash"] {
+            assert_ne!(
+                primary.offer,
+                bench.device_verb(id, verb),
+                "the primary moves no files"
+            );
+        }
+    }
+    every_card_action_is_offered(&mut bench);
+}
+
 /// A sim sends no heartbeat: it only says what it runs when asked. As its
 /// identify ends it is asked, so a sim running nothing reads "No project"
 /// with Add a project, as a board does — never "Project not known" with no

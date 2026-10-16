@@ -13,6 +13,7 @@
 //! | Flash or erase running | (the work shows) | — | Neutral | the work's Cancel |
 //! | An update running, or about to (its story is progress) | (the work: the update's short words) | — | Neutral | Cancel while backing up |
 //! | The layout question or refusal open | "Needs your answer" (a flash's own step shows as its work) | — | Attention | — (the details rise) |
+//! | Its file store refused (`fs: refused`, an `fs-tree` build) | "Data unreadable" | — | Attention | — (the details say where the files are; no click here is safe) |
 //! | Its files are gone (only on evidence it had some: never a fresh install) | "Its files are gone" | — | Attention | Restore files, or Start fresh with no backup here |
 //! | Its files are waiting | "Files waiting" | — | Attention | Finish update |
 //! | Needs you: keeps crashing | the update's words | — | Attention | Reinstall |
@@ -51,6 +52,9 @@ use crate::{RichLine, UiOffer, UiStatusKind};
 const FIRMWARE_NOT_KNOWN: &str = "Firmware not known";
 /// The bar's words for a board that came back without the files it had.
 pub const FILES_ARE_GONE: &str = "Its files are gone";
+/// The bar's words for a board that refused its file store: its files are
+/// kept, and nothing on the card can read them.
+pub const DATA_UNREADABLE: &str = "Data unreadable";
 
 /// The firmware bar.
 pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
@@ -68,6 +72,9 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             UiStatusKind::Attention,
             None,
         )
+    } else if layout.is_some_and(|layout| layout.store_refused) {
+        // Words only: the details name the tool that reads its files.
+        (DATA_UNREADABLE.to_string(), UiStatusKind::Attention, None)
     } else if input.offer("restore-files").is_some() || input.offer("restore-from-file").is_some() {
         // The way back when this browser kept a backup; else the way on.
         // Restore from a backup file… is in the details either way.
@@ -315,9 +322,12 @@ fn details(
     let layout = input.layout;
     let mut sections = Vec::new();
 
-    // 1. The notice.
-    let story = update
-        .filter(|update| update.kind == UpdateRowKind::NeedsYou || tone == UiStatusKind::Live);
+    // 1. The notice. A refused store's line is the notice, before any
+    // update story.
+    let refused = layout.is_some_and(|layout| layout.store_refused);
+    let story = update.filter(|update| {
+        !refused && (update.kind == UpdateRowKind::NeedsYou || tone == UiStatusKind::Live)
+    });
     if let Some(update) = story {
         sections.push(notice(
             "Firmware",
