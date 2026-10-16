@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-10-09      # ci: "C6 layout migration (x64)" on held PR #1092 (run 38023028133); reproduced on origin/main at 0629f43a5
+fixed: this change
 area: lp-cli/tests/emu_layout_migration.rs × lp-cli `hardware lpfs fixture` (the legacy-layout "fielded board") × the single fw-esp32c6 image
 class: budget-exhaustion   # a hard budget (the old layout's 0x300000 app region) is checked only by a path-gated job, so the image crossed it unseen
 related:
@@ -68,17 +69,34 @@ change to touch a gated path is the first to pay (#1092 edits
 comment records a green 34m40s run on #970 (2026-10-04); the crossing came after.
 The commit that crossed it was not bisected.
 
-**Fix** — none yet. This entry files the finding only. The fixture needs a
-legacy-layout image that fits the legacy layout; the honest candidates are a
-pinned pre-growth image (a reference image, like `emu-ref`), or a fielded-board
-image built for the purpose. Not an option: shrinking the product image to fit
-the old region, trimming it in the fixture, or editing the test or goldens to
-pass. Whoever takes it should decide whether the job should also run on a
-schedule or on main so the next drift is seen the week it happens.
+**Fix** — the fielded board carries a pinned image, never this tree's. The
+fixture chip's firmware is `ReferenceImage::SHIPPED_USB_SILICON`: the shipped
+feature set at `735af98ae`, the commit flashed on a desk C6 for the 2026-09-07
+silicon `boot-idle` capture, built by `scripts/emu/build-reference-image.sh`
+in a detached worktree and merged with that commit's own (legacy) partition
+table. It is a board that really existed on the old layout, and it does not
+grow with the tree. The test checks the pin is pre-repartition (its commit's
+`lpfs` row is `0x310000`) and `lpfs fixture` still refuses it if it reached the
+filesystem. What `lpfs migrate --merged` writes is unchanged: this tree's
+image, so the migration under test is today's host path. No release asset could
+serve: no release before the repartition carries firmware, and every released
+C6 image since is past the line.
 
-**Regression coverage** — none: this is the test that broke. The four scenarios
-(W10, W11, W3, step 0) are not exercising the migration at all while the
-fixture cannot be built.
+Because today's image now reaches past `0x310000`, W10 runs Decision 7's
+retire-first write order, which no earlier run of the test reached. Its "the
+old superblock pair is erased" check now reads "retired": erased, or this
+image's own bytes where the image covers it. The CI job checks out full history
+(the pinned commit) and restores the reference-image cache `emu-c6` saves (the
+same image backs its `flash_over_socket` tests), read only.
+
+**On the job's gating** (the question above): it stays PR-only and narrowly
+gated. The premise that drifted is pinned now. The image `migrate` writes may
+grow up to the 3.25 MB `factory` partition, and `fw-esp32c6-size-check` gates
+that on every firmware PR, so a schedule would only re-prove a pin.
+
+**Regression coverage** — the test itself, all four scenarios green again
+(`just test-emu-layout-migration`, `lp-emu:esp32c6:t1`). W10 now also covers
+the retire-first order.
 
 **Lesson** — a test that builds a fixture "from this tree" inherits every
 budget that tree's output is subject to. Here the budget (the old layout's

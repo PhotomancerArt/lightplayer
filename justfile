@@ -3279,7 +3279,7 @@ test-glsl-filetests:
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
 # pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
 [parallel]
-check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
+check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-firmware-closure lint-ci-durations lint-defects lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
 [parallel]
 check: check-lint schema-check fw-manifest-check-emu
@@ -3397,6 +3397,18 @@ lint-nested-patches:
 # stdlib python, ~0.1 s.
 lint-red-main-needs:
     python3 scripts/ci/check-red-main-needs.py
+
+# The per-chip firmware closure filters (`.github/firmware-closure-filters.yml`)
+# that fire each chip's pinned-figure jobs when a crate linked into that
+# chip's shipped image changes: `cargo tree` per firmware, default features,
+# its real target. Rewrite after adding or dropping a path dependency of
+# anything a firmware links; the lint below fails until you do. ~4 s.
+# docs/debt/firmware-figures-skip-on-shared-crate-prs.md.
+firmware-closure:
+    python3 scripts/ci/firmware-closure.py
+
+lint-firmware-closure:
+    python3 scripts/ci/firmware-closure.py --check
 
 # job-durations.py's own fixture-based self-test: percentiles, the
 # timeout-minutes parse and the verdicts, no network. Offline, stdlib

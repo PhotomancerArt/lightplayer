@@ -257,7 +257,7 @@ pub fn pressed_or_refused(offer: &UiOffer, args: &OfferArgs) -> UiAction {
         Err(error) => offer
             .press(&OfferArgs::new())
             .unwrap_or_else(|_| offer.action.clone())
-            .disabled(error.to_string()),
+            .disabled(error.shown()),
     }
 }
 

@@ -7,12 +7,14 @@ use super::wifi_connect_tests::{KEY, joined_light_player, with_lan};
 use super::*;
 use crate::{UiBoardCard, UiCardAction, UiPrimary};
 
-/// A board with nothing on it cannot be edited yet; once a project runs,
-/// the card's primary is Edit, and pressing it by path opens the editor on
-/// the board once — and the docked lens card has no primary while the
-/// editor holds it.
+/// A board running no project has no panel to connect to: its primary is
+/// the next step, Add a project (`push`, the project pick), never a greyed
+/// Connect, and `connect` is refused with "No project". Once a project
+/// runs, the card's primary is Connect, and pressing it by path opens the
+/// session on the card once — its primary Done. Edit, the project bar's action, shows the editor on
+/// that same session, and the docked card's primary is Done too.
 #[test]
-fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
+fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
     let device = empty_light_player("dev000000card000001");
     let (mut bench, tasks) = identified(&device, "usb-card-1");
     bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
@@ -23,13 +25,16 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let id = bench.view().devices[0].id;
+    let add = primary_offer(&card_of(&bench, id));
+    assert_eq!(add.offer, bench.device_verb(id, "push"));
+    assert_eq!(add.word, "Add a project");
+    assert_eq!(add.refused, None, "never a greyed primary");
+    assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));
+    let connect = bench.device_verb(id, "connect");
     assert_eq!(
-        card_of(&bench, id).name_bar.primary,
-        Some(UiPrimary::Unavailable {
-            word: "Edit".to_string(),
-            icon: "edit".to_string(),
-            reason: crate::NOTHING_TO_EDIT.to_string(),
-        })
+        bench.offer_reason(connect),
+        crate::NO_PROJECT,
+        "the agent reads why Connect waits"
     );
     every_card_action_is_offered(&mut bench);
 
@@ -43,15 +48,16 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
                 )
         })
     });
-    let edit = primary_offer(&card_of(&bench, id));
-    assert_eq!(edit.offer, bench.device_verb(id, "edit"));
-    assert_eq!(edit.word, "Edit");
-    assert_eq!(edit.icon.as_deref(), Some("edit"));
+    let connect = primary_offer(&card_of(&bench, id));
+    assert_eq!(connect.offer, bench.device_verb(id, "connect"));
+    assert_eq!(connect.word, "Connect");
+    assert_eq!(connect.icon.as_deref(), Some("usb"));
+    assert_eq!(connect.refused, None);
     every_card_action_is_offered(&mut bench);
 
     bench
-        .press(&edit.offer, edit.args.clone())
-        .expect("Edit opens the editor");
+        .press(&connect.offer, connect.args.clone())
+        .expect("Connect opens the session");
     let uid = bench.registry()[0].uid.clone();
     assert_eq!(bench.lens_device_uid().as_deref(), Some(uid.as_str()));
     let session = bench.lens_session_id();
@@ -63,14 +69,43 @@ fn a_running_boards_card_presses_edit_by_path_and_opens_the_lens_once() {
         session,
         "one open: the same session, never a second"
     );
+    let card = card_of(&bench, id);
+    let done = primary_offer(&card);
+    assert_eq!(done.offer, bench.device_verb(id, "done"));
+    assert_eq!(done.word, "Done");
+    assert_eq!(done.icon.as_deref(), Some("check"));
+    every_card_action_is_offered(&mut bench);
+
+    // Edit: the project bar's action (the panel's All controls row's too).
+    let edit = card
+        .bar(crate::BarLayer::Project)
+        .action
+        .clone()
+        .expect("Edit on the project bar");
+    assert_eq!(edit.offer, bench.device_verb(id, "edit"));
+    bench
+        .press(&edit.offer, edit.args.clone())
+        .expect("Edit shows the editor");
+    assert_eq!(bench.lens_session_id(), session, "on the same session");
     let view = bench.controller.view();
-    let crate::UiLensCard::Board(card) =
+    let crate::UiLensCard::Board(docked) =
         *view.lens_card.expect("the editor docks the board's card");
-    assert_eq!(card.device, id);
+    assert_eq!(docked.device, id);
     assert_eq!(
-        card.name_bar.primary, None,
-        "no primary while the editor holds it"
+        docked
+            .name_bar
+            .primary
+            .as_ref()
+            .map(|primary| primary.word()),
+        Some("Done"),
+        "Done on the docked card"
     );
+    assert_eq!(
+        docked.bar(crate::BarLayer::Project).action,
+        None,
+        "no Edit on the docked card: the editor shows the board"
+    );
+    assert_eq!(docked.panel, None, "the editor is the session's surface");
 }
 
 /// A push that ends well leaves its bar green for a few seconds, read off
@@ -158,8 +193,9 @@ fn an_attached_boards_card_connects_by_path() {
     });
 }
 
-/// Unplugged, a board is an offline card: its primary reconnects by its
-/// cable, or over Wi‑Fi first when this browser remembers where it is.
+/// Unplugged, a board is an offline card: its primary is Connect, which
+/// reaches it by its cable, or over Wi‑Fi first when this browser remembers
+/// where it is, then opens its panel (one press).
 #[test]
 fn an_offline_boards_card_reconnects_wifi_first() {
     let device = joined_light_player("dev000000card000004");
@@ -183,8 +219,9 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     assert_eq!(card.presence, crate::UiBoardPresence::Offline);
     assert_eq!(card.status.mark, crate::CornerMark::Quiet);
     let reconnect = primary_offer(&card);
-    assert_eq!(reconnect.offer, bench.device_verb(id, "reconnect"));
+    assert_eq!(reconnect.offer, bench.device_verb(id, "connect"));
     assert_eq!(reconnect.word, "Connect");
+    assert_eq!(reconnect.icon.as_deref(), Some("usb"), "by its cable");
     every_card_action_is_offered(&mut bench);
 
     // Back on its cable, the board says where it is on Wi‑Fi; unplugged
@@ -209,16 +246,17 @@ fn an_offline_boards_card_reconnects_wifi_first() {
             .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
     });
     let wifi = primary_offer(&card_of(&bench, id));
-    assert_eq!(wifi.offer, bench.device_verb(id, "connect-wifi"));
+    assert_eq!(wifi.offer, bench.device_verb(id, "connect"));
     assert_eq!(wifi.word, "Connect");
-    assert_eq!(wifi.icon.as_deref(), Some("wifi"));
+    assert_eq!(wifi.icon.as_deref(), Some("wifi"), "over Wi‑Fi first");
     every_card_action_is_offered(&mut bench);
 }
 
-/// An empty board's project bar offers "Add a project": the `push` offer,
-/// drawn as the picker; pressed by path with a source, the push runs.
+/// An empty board says "No project", and its primary is "Add a project":
+/// the `push` offer, drawn as the picker, which the project bar does not
+/// repeat; pressed by path with a source, the push runs.
 #[test]
-fn an_empty_boards_project_action_adds_a_project_by_path() {
+fn an_empty_boards_primary_adds_a_project_by_path() {
     let device = empty_light_player("dev000000card000005");
     let (mut bench, tasks) = identified(&device, "usb-card-5");
     bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
@@ -229,9 +267,11 @@ fn an_empty_boards_project_action_adds_a_project_by_path() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
     let id = bench.view().devices[0].id;
-    let bar = card_of(&bench, id).bar(crate::BarLayer::Project).clone();
-    assert_eq!(bar.summary, "Nothing on it yet");
-    let add = bar.action.expect("Add a project");
+    let card = card_of(&bench, id);
+    let bar = card.bar(crate::BarLayer::Project).clone();
+    assert_eq!(bar.summary, "No project");
+    assert_eq!(bar.action, None, "the primary carries it, once");
+    let add = primary_offer(&card);
     assert_eq!(add.word, "Add a project");
     assert_eq!(add.offer, bench.device_verb(id, "push"));
     assert!(matches!(add.draw, crate::UiActionDraw::ProjectPick { .. }));
@@ -560,8 +600,11 @@ fn a_board_holding_its_files_offers_finish_update_as_the_firmware_action() {
 }
 
 /// The cable pulled mid filesystem write: the board boots formatted, and
-/// the firmware bar's action puts the stored backup back, at
-/// `…/restore-files`.
+/// the firmware bar says its files are gone, with the stored backup's way
+/// back as its action (`…/restore-files`) and Start fresh as the way on.
+/// Start fresh, pressed by path, lets the files go: the notice leaves the
+/// card, and this browser keeps the choice for the board (the web edge's
+/// storage), so a reload does not bring it back.
 #[test]
 fn a_formatted_boards_firmware_action_restores_its_files() {
     let device = legacy_light_player(Vec::new());
@@ -584,7 +627,7 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
     let bar = card_of(&bench, target)
         .bar(crate::BarLayer::Firmware)
         .clone();
-    assert_eq!(bar.summary, "Its files need restoring");
+    assert_eq!(bar.summary, crate::FILES_ARE_GONE);
     let restore = bar.action.clone().expect("Restore files");
     assert_eq!(restore.word, "Restore files");
     assert_eq!(restore.offer, bench.device_verb(target, RESTORE_FILES));
@@ -602,6 +645,162 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
         .flat_map(|section| section.affordances.iter().map(|action| action.word.clone()))
         .collect();
     assert!(verbs.contains(&"Download backup".to_string()), "{verbs:?}");
+    assert!(verbs.contains(&"Start fresh".to_string()), "{verbs:?}");
+    every_card_action_is_offered(&mut bench);
+
+    // Start fresh: Routine, the agent's to press too; nothing on the board
+    // changes, and the notice goes.
+    let kept = Rc::new(RefCell::new(Vec::<String>::new()));
+    let sink = Rc::clone(&kept);
+    bench
+        .controller
+        .set_on_fresh_starts(move |json| sink.borrow_mut().push(json.to_string()));
+    let start_fresh = bench.device_verb(target, crate::START_FRESH);
+    assert!(bench.offered(&start_fresh).consequence().is_routine());
+    bench
+        .press(&start_fresh, OfferArgs::new())
+        .expect("Start fresh");
+    let bar = card_of(&bench, target)
+        .bar(crate::BarLayer::Firmware)
+        .clone();
+    assert_ne!(bar.summary, crate::FILES_ARE_GONE, "the notice is gone");
+    bench.not_offered(&start_fresh);
+    assert_eq!(
+        kept.borrow().last().map(String::as_str),
+        Some(r#"["60:55:f9:0a:0b:0c"]"#),
+        "this browser keeps the choice, by the board's MAC"
+    );
+    every_card_action_is_offered(&mut bench);
+}
+
+/// A fresh install's first boot formats its storage, and so does every
+/// board Studio installs: a board this browser never saw hold anything has
+/// lost nothing. Its card is the ordinary one — no "Its files are gone", no
+/// restore — and its primary is the next step, Add a project (the connected
+/// feel gate's finding 1).
+#[test]
+fn a_freshly_installed_board_is_not_told_its_files_are_gone() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_fs_boot_state(lpc_wire::FsBootState::Formatted)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
+    let (mut bench, tasks) = identified(&device, "usb-card-fresh-1");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let id = bench.view().devices[0].id;
+    let card = card_of(&bench, id);
+    let firmware = card.bar(crate::BarLayer::Firmware);
+    assert_ne!(firmware.summary, crate::FILES_ARE_GONE);
+    assert_ne!(
+        firmware.tone,
+        crate::UiStatusKind::Attention,
+        "{firmware:?}"
+    );
+    for verb in [crate::START_FRESH, RESTORE_FILES, "restore-from-file"] {
+        let path = bench.device_verb(id, verb);
+        bench.not_offered(&path);
+    }
+    assert_eq!(card.bar(crate::BarLayer::Project).summary, "No project");
+    assert_eq!(primary_offer(&card).word, "Add a project");
+    every_card_action_is_offered(&mut bench);
+}
+
+/// An `fs-tree` board that refused its file store (`fs: refused`): its
+/// files are kept on flash and no click here can safely read or move them.
+/// The firmware bar says "Data unreadable" in Attention with no action, the
+/// details name the tool that reads the files, and nothing that would
+/// restore, start fresh or move its files is offered — nor is the primary
+/// one of them.
+#[test]
+fn a_board_that_refused_its_store_says_its_data_is_unreadable_and_offers_no_way_to_move_it() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_fs_boot_state(lpc_wire::FsBootState::Refused)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
+    let (mut bench, tasks) = identified(&device, "usb-card-refused-1");
+    let id = bench.view().devices[0].id;
+    bench.run_until(&tasks, "the refused store to reach the card", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&id)
+            .is_some_and(|layout| layout.store_refused)
+    });
+    let card = card_of(&bench, id);
+    let firmware = card.bar(crate::BarLayer::Firmware);
+    assert_eq!(firmware.summary, crate::DATA_UNREADABLE);
+    assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
+    assert_eq!(firmware.action, None, "no click here is safe");
+    assert_eq!(
+        firmware
+            .details
+            .notice()
+            .and_then(|notice| notice.sentence.as_deref()),
+        Some(crate::app::devices::device_layout_view::REFUSED_STORE_LINE),
+        "the long line is in the details, not on the bar"
+    );
+    for verb in [
+        RESTORE_FILES,
+        RESTORE_FROM_FILE,
+        DOWNLOAD_BACKUP,
+        crate::START_FRESH,
+        "finish-update",
+    ] {
+        let path = bench.device_verb(id, verb);
+        bench.not_offered(&path);
+    }
+    if let Some(UiPrimary::Offer(primary)) = &card.name_bar.primary {
+        for verb in [RESTORE_FILES, "finish-update", "flash"] {
+            assert_ne!(
+                primary.offer,
+                bench.device_verb(id, verb),
+                "the primary moves no files"
+            );
+        }
+    }
+    every_card_action_is_offered(&mut bench);
+}
+
+/// A sim sends no heartbeat: it only says what it runs when asked. As its
+/// identify ends it is asked, so a sim running nothing reads "No project"
+/// with Add a project, as a board does — never "Project not known" with no
+/// way on (the connected feel gate's finding 2).
+#[test]
+fn a_running_sim_with_no_project_offers_add_a_project() {
+    let (uid, base_mac) = sim_identity();
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(&uid, "Sim"))
+            .with_base_mac(&base_mac),
+    )));
+    let (mut bench, tasks, _uid) = DeviceBench::with_sim(&device, SIM_TARGET);
+    let sim = bench.view().devices[0].id;
+    bench.press_device(sim, "reconnect", OfferArgs::new());
+    bench.run_until(&tasks, "the sim to say it runs nothing", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && card.loaded_project == lpa_devices::view::LoadedProject::Empty
+        })
+    });
+    let card = card_of(&bench, sim);
+    assert_eq!(card.bar(crate::BarLayer::Project).summary, "No project");
+    assert_eq!(
+        card.bar(crate::BarLayer::Connection).summary,
+        "Simulated · running"
+    );
+    let add = primary_offer(&card);
+    assert_eq!(add.word, "Add a project");
+    assert_eq!(add.offer, bench.device_verb(sim, "push"));
     every_card_action_is_offered(&mut bench);
 }
 

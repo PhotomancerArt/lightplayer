@@ -22,7 +22,7 @@ pub mod runtime_pool;
 pub mod runtime_session;
 
 pub use runtime_id::RuntimeId;
-pub use runtime_op::RuntimeOp;
+pub use runtime_op::{ConnectReach, RuntimeOp};
 pub use runtime_pool::{RuntimePool, SESSION_CAPACITY};
 pub use runtime_session::{
     CONSOLE_TAIL_LEN, DeviceLensAttachment, LinkTransport, RuntimePayload, RuntimeSession,

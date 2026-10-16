@@ -1224,6 +1224,26 @@ fn other_project_ops_are_coalescing_barriers() {
     );
 }
 
+/// Place reports are never folded to the last one: a move and a move back
+/// queued behind one long action (Edit, then Back) are both applied, in
+/// order, or a waiting Edit never sees the user leave
+/// (`connected_tests::a_move_and_back_behind_a_long_edit_still_ends_the_wait`).
+#[test]
+fn every_place_report_in_a_batch_is_kept_in_order() {
+    let home = crate::UiPlace::new(crate::UiPage::Home);
+    let editor = crate::UiPlace::new(crate::UiPage::Project {
+        uid: "prjexample".to_string(),
+        view: crate::UiProjectView::Nodes,
+    });
+    let plan = CommandPlan::from_batch(vec![
+        StudioCommand::Place(editor.clone()),
+        StudioCommand::RefreshTick,
+        StudioCommand::Place(home.clone()),
+    ]);
+
+    assert_eq!(plan.places, vec![editor, home]);
+}
+
 // ---------------------------------------------------------------------------
 // P4: global `log::` sink drain, drop accounting, and the mirror hook.
 // ---------------------------------------------------------------------------

@@ -44,6 +44,7 @@ pub mod age_words;
 pub mod ble_transport;
 pub mod bluetooth_reach;
 pub mod board_card;
+pub mod board_files_memory;
 /// One tab holds a board: the hold vocabulary, the book, the edge trait and
 /// its in-memory double.
 pub mod board_hold;
@@ -72,6 +73,7 @@ pub mod browser_sim_source;
 pub mod browser_transport;
 pub mod bundled_own_build;
 pub mod composite_transport;
+pub mod connect_offer;
 pub mod device_affordance;
 pub mod device_backup_import;
 pub mod device_backup_op;
@@ -97,6 +99,7 @@ pub mod device_push_offer;
 pub mod device_records;
 pub mod device_reset_reach;
 pub mod device_roster;
+pub mod device_start_fresh_op;
 pub mod device_transport;
 /// The update story's inputs, built for tests and for the web's stories.
 #[cfg(any(test, feature = "story-fixtures"))]
@@ -107,6 +110,7 @@ pub mod device_update_standing;
 pub mod device_update_version;
 pub mod device_update_words;
 pub mod devices_op;
+pub mod done_offer;
 pub mod edit_offer;
 pub mod emu_transport;
 pub mod firmware_file_build;
@@ -157,6 +161,7 @@ pub use add_device_offers::{
 pub use age_words::{age_words, duration_words};
 pub use ble_transport::{BleDeviceTransport, BleLinkSource};
 pub use bluetooth_reach::BluetoothReach;
+pub use board_files_memory::{BoardFilesMemory, FRESH_STARTS_STORAGE_KEY};
 pub use board_hold::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
     HOLD_PROTO_VERSION, HoldEdgeEvent, HoldKey, HoldNote, MemoryBoardHold, MemoryBoardHoldBus,
@@ -179,6 +184,9 @@ pub use browser_sim_source::BrowserSimLinkSource;
 pub use browser_transport::BrowserSerialTransport;
 pub use bundled_own_build::{BundledOwnBuild, BundledOwnBuildSource, OWN_BUILD_MISMATCH};
 pub use composite_transport::CompositeDeviceTransport;
+pub use connect_offer::{
+    CONNECT_VERB, ConnectFacts, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
+};
 pub use device_affordance::{
     device_escape_action, device_escape_action_for, device_status_kind, pending_escape_action,
 };
@@ -193,7 +201,8 @@ pub use device_backup_store::{
 };
 pub use device_by_base_mac::{DeviceByBaseMac, device_by_base_mac};
 pub use device_card_feed_view::{
-    DeviceCardFeedView, FeedLiveness, device_card_feed_view, device_card_feed_views, feed_liveness,
+    DeviceCardFeedView, FeedLiveness, LensFrameSource, device_card_feed_view,
+    device_card_feed_views, feed_liveness, lens_feed_view,
 };
 pub use device_effects::{
     CompletedPush, DeviceEffects, DeviceTaskFuture, DeviceTimerFuture, PendingWrites, PushPayload,
@@ -219,7 +228,9 @@ pub use device_identity::{
     device_identity_line, pending_identity_rows,
 };
 pub use device_layout_effect::BackupDownload;
-pub use device_layout_view::{UiDeviceLayout, UiLayoutPanel, device_layout_view};
+pub use device_layout_view::{
+    FilesEvidence, START_FRESH, UiDeviceLayout, UiLayoutPanel, device_layout_view,
+};
 pub use device_link_counter_rows::{LINK_COUNTERS_CAPTION, UiLinkCounterRow, link_counter_rows};
 pub use device_offers::{
     AUTOCONNECT_ENABLED_PARAM, DeviceOfferFacts, RENAME_NAME_PARAM, device_offers, escape_verb,
@@ -239,6 +250,7 @@ pub use device_reset_reach::{RESET_NEEDS_AUTHOR, RESET_WAITS_FOR_ANSWER, ResetRe
 pub use device_roster::{
     DeviceRoster, DeviceRosterView, JournalLine, RememberedView, RosterSplit, split_roster,
 };
+pub use device_start_fresh_op::DeviceStartFreshOp;
 pub use device_transport::{
     DeviceEffectCall, DeviceEffectFacts, DeviceEffectProgress, DeviceTransport,
     DeviceTransportFuture, GrantedLink, LensLineTap, LensTapEvent,
@@ -259,6 +271,7 @@ pub use device_update_words::{
     UpdateRunWord, update_session_words, update_words,
 };
 pub use devices_op::{DeviceFace, DevicesOp};
+pub use done_offer::{DONE_VERB, device_done_offer};
 pub use edit_offer::{EDIT_VERB, device_edit_offer};
 pub use emu_transport::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,

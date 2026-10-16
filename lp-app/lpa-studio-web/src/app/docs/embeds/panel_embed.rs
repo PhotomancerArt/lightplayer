@@ -32,7 +32,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, ProjectController, ProjectOp,
-    UiAction, UiNodeFace, UiPanelGroup, UiStudioView, UiViewContent,
+    UiAction, UiPanelGroup, UiStudioView, UiViewContent,
 };
 
 use crate::app::module::{ModulePanel, panel_gesture_actions};
@@ -227,17 +227,15 @@ pub(crate) fn reset_docs_sim(sim: &DocsSim) {
 }
 
 /// The root module's panel from a docs sim's view: the workspace ROOT's
-/// group, the same one play mode renders (`docs/design/modules.md` R8).
-/// `None` until the sim has deployed and synced.
+/// group, the same one play mode renders (`docs/design/modules.md` R8),
+/// read through core's `ProjectEditorView::root_module_face`. `None` until
+/// the sim has deployed and synced.
 pub(crate) fn root_panel(studio_view: &UiStudioView) -> Option<UiPanelGroup> {
     studio_view.panes.iter().find_map(|pane| {
         let UiViewContent::ProjectEditor(editor) = &pane.body else {
             return None;
         };
-        match editor.nodes.first()?.face.as_ref()? {
-            UiNodeFace::Module(face) => Some(face.panel.clone()),
-            _ => None,
-        }
+        editor.root_module_face().map(|face| face.panel.clone())
     })
 }
 

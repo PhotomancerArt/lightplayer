@@ -449,7 +449,7 @@ async function runStep(step, ctx) {
       return `flashed through the card's Install (\`flash\`), picking ${JSON.stringify(model)}`;
     }
     case "project": {
-      // `push`: an empty board's project bar action ("Add a project"),
+      // `push`: an empty board's primary ("Add a project"),
       // drawn as the project pick; the project is chosen in its panel.
       await driver.pressOffer("push", { board: await boardOf(step, ctx), timeoutMs: STEP_DEADLINE_MS });
       await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_DEADLINE_MS, what: "the project pick" });
