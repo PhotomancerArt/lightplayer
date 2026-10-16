@@ -649,6 +649,7 @@ jobs:
               - 'lp-cli/tests/emu_layout_migration.rs'
               - 'lp-emu/esp/lp-emu-esp32c6/src/flash.rs'
               - 'scripts/emu/build-merged-image.sh'
+              - 'scripts/emu/build-reference-image.sh'
 
       # `core` is the negative gate for lint + validate-x64: with
       # predicate-quantifier: every, a changed file counts only if it matches
@@ -2957,6 +2958,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: lp2025
+          # The fielded board's firmware is a pinned reference image
+          # (`ReferenceImage::SHIPPED_USB_SILICON`, `735af98ae`):
+          # build-reference-image.sh does `git worktree add --detach` there and
+          # build-merged-image.sh reads that commit's partition table, both
+          # history a shallow checkout does not have.
+          fetch-depth: 0
 
       - name: Checkout lp-regalloc2
         uses: actions/checkout@v4
@@ -2997,6 +3004,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: cargo binstall --no-confirm --locked espflash@3.3.0
+
+      # The fielded board's pinned image, from the cache `emu-c6` saves (its
+      # flash_over_socket tests boot the same image), read only: this job
+      # never saves one. The key and the paths must be emu-c6's exactly — the
+      # path list is part of the cache's version. On a miss the test builds
+      # it (LP_EMU_BUILD_FW=1), a few minutes cold.
+      - name: Reference-build cache key
+        id: emu-ref-key
+        env:
+          RECIPE_HASH: ${{ hashFiles('lp2025/scripts/emu/build-reference-*.sh', 'lp2025/rust-toolchain.toml') }}
+        run: echo "prefix=emu-ref-c6-${{ runner.os }}-${{ runner.arch }}-$RECIPE_HASH-" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pinned reference builds
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            lp2025/target/emu-ref/*/fw-esp32c6
+            lp2025/target/emu-ref/*/SHA256SUMS
+            lp2025/target/emu-ref/*/PROVENANCE
+            lp2025/target/emu-ref/*-lp-cli/lp-cli
+            !lp2025/target/emu-ref/wt-*
+          key: ${{ steps.emu-ref-key.outputs.prefix }}restore-by-prefix
+          restore-keys: ${{ steps.emu-ref-key.outputs.prefix }}
 
       # The test RETURNS (passes) with "emu_layout_migration: skipped — …" when
       # it cannot get a firmware image, which is the right thing at a desk and

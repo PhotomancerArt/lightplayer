@@ -1,9 +1,17 @@
 //! The C6 repartition's host path, end to end against the emulated ESP32-C6
 //! (plan `lp2025/2026-10-01-1843-c6-repartition`, P08): a "fielded board"
-//! — the current firmware on the frozen pre-2026-10 table, its files in a
-//! 240-block littlefs at `0x310000` — read and migrated by the REAL
-//! `lp-cli hardware lpfs` commands, through espflash and its stub, over a
-//! pty into the emulated mask ROM's download console.
+//! — a pre-repartition firmware on the frozen pre-2026-10 table, its files
+//! in a 240-block littlefs at `0x310000` — read and migrated to THIS tree's
+//! image by the REAL `lp-cli hardware lpfs` commands, through espflash and
+//! its stub, over a pty into the emulated mask ROM's download console.
+//!
+//! The fielded board's firmware is pinned ([`FIELDED`]), never this tree's:
+//! ADR `2026-10-02-c6-repartition-and-layout-migration.md` Decision 11 lets
+//! the image grow past `0x300000`, and once it did, "this tree's image on the
+//! old table" was a board that cannot exist
+//! (`docs/defects/2026-10-09-the-layout-migration-fixture-outgrew-the-old-layout.md`).
+//! What `migrate` writes is this tree's image, so the migration under test
+//! is today's, onto a board that could really be in a house.
 //!
 //! - **Step 0** (`the_bootloader_reads_back_the_chip_byte_for_byte`): no test
 //!   had ever run an esptool READ against the emulated ROM/stub. `lpfs save`
@@ -11,8 +19,10 @@
 //!   chip file's bytes.
 //! - **W10**: `lpfs migrate` moves every file to the new layout — table at
 //!   `0x8000` is the new one, the filesystem at `0x350000` mounts with every
-//!   file byte for byte, the old superblock pair at `0x310000` is erased —
-//!   and the board then boots its files without formatting.
+//!   file byte for byte, the old superblock pair at `0x310000` is retired
+//!   (erased, or under this tree's image where the image reaches past it —
+//!   Decision 7's retire-first order) — and the board then boots its files
+//!   without formatting.
 //! - **W11**: a preflight for an image with the OLD table, against the
 //!   migrated chip, refuses (exit 3) and writes nothing.
 //! - **W3**: a board whose files do not fit the new layout is refused, and
@@ -24,8 +34,9 @@
 //! DTR/RTS, so the reset into the app is the modelled dance on the
 //! machine's control channel.
 //!
-//! `#[ignore]`d: it needs a built `fw-esp32c6` ELF (`LP_EMU_BUILD_FW=1`) and
-//! espflash 3.3.0 for the merged image. `just test-emu-c6-cli` runs it.
+//! `#[ignore]`d: it needs a built `fw-esp32c6` ELF and the pinned reference
+//! image (`LP_EMU_BUILD_FW=1` builds both) and espflash 3.3.0 for the merged
+//! images. `just test-emu-layout-migration` runs it.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -43,7 +54,10 @@ use lp_emu_esp32c6::machine::{
     BootMode, Esp32C6Builder, Esp32C6Machine, Outcome, StopCondition, Uart0Sink, UsbHost,
     UsbSjDrain, UsbSjSink,
 };
-use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image, workspace_root};
+use lp_emu_esp32c6::test_support::{
+    FwImage, ReferenceImage, fw_esp32c6_image, merged_image, reference_lpfs_offset,
+    workspace_root,
+};
 use lpa_link::PartitionTable;
 use lpa_link::layout_migration::{LpfsGeometry, LpfsTree, legacy_c6_v1_table};
 use serialport::{SerialPort, TTYPort};
@@ -53,6 +67,13 @@ const MAC: [u8; 6] = [0x60, 0x55, 0xf9, 0x0a, 0x0b, 0x0c];
 
 /// The uid the fixture's `/.lp/device.json` stamps.
 const UID: &str = "dev0000000000000011";
+
+/// The firmware a fielded board carries: the shipped feature set at
+/// `735af98ae`, the commit flashed on a desk C6 for the 2026-09-07 silicon
+/// `boot-idle` capture — on the old table, and well inside its 3 MB app
+/// region. Pinned by commit (`scripts/emu/build-reference-image.sh` builds
+/// it in a detached worktree), so it does not grow with this tree.
+const FIELDED: ReferenceImage = ReferenceImage::SHIPPED_USB_SILICON;
 
 /// The old filesystem: `0x310000`, 240 blocks.
 const LEGACY_OFFSET: usize = 0x31_0000;
@@ -113,6 +134,7 @@ fn migrate_moves_every_file_and_the_board_boots_them() {
     );
 
     let chip = std::fs::read(&work.chip).unwrap();
+    let written = std::fs::read(&work.merged).unwrap();
     // The new table, the files at the new filesystem, the old one retired.
     let target = target_table();
     assert_eq!(
@@ -125,11 +147,16 @@ fn migrate_moves_every_file_and_the_board_boots_them() {
     let (tree, _) = LpfsTree::from_image(&chip[start..start + geometry.len() as usize], geometry)
         .expect("the new filesystem mounts");
     assert_eq!(files_of(&tree), work.files, "every file, byte for byte");
+    // Retired: erased, except where this tree's image now covers it (the
+    // image reaches past 0x310000, so the retire went first — Decision 7).
+    let retired: Vec<u8> = (LEGACY_OFFSET..LEGACY_OFFSET + 0x2000)
+        .map(|at| written.get(at).copied().unwrap_or(0xFF))
+        .collect();
     assert!(
-        chip[LEGACY_OFFSET..LEGACY_OFFSET + 0x2000]
-            .iter()
-            .all(|b| *b == 0xFF),
-        "the old superblock pair at 0x310000 is erased"
+        chip[LEGACY_OFFSET..LEGACY_OFFSET + 0x2000] == retired[..],
+        "the old superblock pair at 0x310000 is retired (erased, or the image's own bytes \
+         where the {} B image reaches it)",
+        written.len()
     );
 
     // The board boots what was written: its files mount, nothing formats.
@@ -211,8 +238,8 @@ enum Layout {
     Current,
 }
 
-/// One scenario's scratch: the fixture chip, the merged image to write, the
-/// fixture's files.
+/// One scenario's scratch: the fixture chip, the merged image `migrate`
+/// writes (this tree's), the fixture's files.
 struct Work {
     dir: PathBuf,
     chip: PathBuf,
@@ -242,7 +269,7 @@ impl Work {
         std::fs::create_dir_all(&dir).unwrap();
 
         // The current tree's image, merged the way a package is (no
-        // padding past what it writes).
+        // padding past what it writes): what `migrate` writes.
         let padded = dir.join("merged-padded.bin");
         let status = Command::new(root.join("scripts/emu/build-merged-image.sh"))
             .arg(&elf)
@@ -251,19 +278,35 @@ impl Work {
             .expect("running build-merged-image.sh");
         assert!(status.success(), "build-merged-image.sh failed");
         let bytes = std::fs::read(&padded).unwrap();
-        let end = bytes
-            .iter()
-            .rposition(|b| *b != 0xFF)
-            .map_or(0, |at| at + 1);
+        let end = written_len(&bytes);
         let merged = dir.join("merged.bin");
         std::fs::write(&merged, &bytes[..end]).unwrap();
+
+        // What the board already runs: a pre-repartition image on the old
+        // table, or — a board already on the new layout — this tree's.
+        let fielded = match layout {
+            Layout::Legacy => match fielded_image() {
+                Ok(path) => path,
+                Err(reason) => {
+                    eprintln!("emu_layout_migration: skipped — {reason}");
+                    return None;
+                }
+            },
+            Layout::Current => merged.clone(),
+        };
+        eprintln!(
+            "emu_layout_migration: the board runs {} ({} B written); migrate writes {} B",
+            fielded.display(),
+            written_len(&std::fs::read(&fielded).unwrap()),
+            end
+        );
 
         let tree = dir.join("tree");
         let files = fixture_tree(&root, &tree, over_full);
         let chip = dir.join("chip.bin");
         let made = Command::new(env!("CARGO_BIN_EXE_lp-cli"))
             .args(["hardware", "lpfs", "fixture", "--merged"])
-            .arg(&merged)
+            .arg(&fielded)
             .arg("--tree")
             .arg(&tree)
             .arg("--out")
@@ -370,6 +413,27 @@ impl Work {
         );
         text
     }
+}
+
+/// [`FIELDED`]'s merged image (4 MiB, erased tail), checked to be a
+/// pre-repartition build: its own commit's table keeps `lpfs` at
+/// `0x310000`. `lpfs fixture` then refuses it if it reaches the filesystem.
+fn fielded_image() -> Result<PathBuf, String> {
+    let lpfs = reference_lpfs_offset(&FIELDED)?;
+    assert_eq!(
+        lpfs as usize, LEGACY_OFFSET,
+        "the fielded image ({} at {}) must be a pre-repartition build",
+        FIELDED.slug, FIELDED.commit
+    );
+    merged_image(&FIELDED)
+}
+
+/// The bytes a merged image writes: up to its last non-erased byte.
+fn written_len(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .rposition(|b| *b != 0xFF)
+        .map_or(0, |at| at + 1)
 }
 
 /// The fixture board's files (plan Q4), written under `tree`; returns them
