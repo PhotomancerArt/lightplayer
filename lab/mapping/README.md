@@ -34,9 +34,18 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 - **`arrows/`** (`lab-arrows`): a semantic arrow in, geometry out — curves
   on the canvas, gutter lanes in the stack, labels lying along the line
   (its README). Dependency-free; the page uses it.
-- **`web/`** (`lab-mapping-web`): a Dioxus page that forwards events to the
-  model, runs the layout, and draws the view tree as it comes. No editor
-  logic and no detail decisions live here (below, "The page").
+- **`web/`** (`lab-mapping-web`): the canvas, its panels and the hint bar
+  as a **library** a host mounts, and the lab's own page (the bin) around
+  it. The components read the host's editor through a `GraphEditor` and
+  say what happened as `GraphInput`s (`model/src/ux/graph_input.rs`,
+  applied by `Editor::input`), so the lab's page and **Studio's Graph tab**
+  (`lp-app/lpa-studio-web/src/app/workbench/graph_view.rs`, over core's
+  editor in `lpa-studio-core`'s `app/graph`) mean the same thing by the
+  same input. The board's frame is the host's too: the lab simulates one;
+  Studio builds one from the board's own published frames
+  (`Project::board_frame_from_ports`). Its styles are scoped under
+  `.graph`. No editor logic and no detail decisions live here (below,
+  "The page").
 - **`files/`** (`lab-mapping-files`): opens real LightPlayer projects into
   the model and saves them back, in the product's own formats (vision D51,
   fit-check §6). Fenced like the model: the model and `serde_json` only,
@@ -254,6 +263,12 @@ A 2D canvas with selection, and the start of the whole node graph on it
   fixtures, outputs and ports. The inspector shows the properties
   everything selected shares, a fixture's rules and problems, and an
   output's ports with how full each one is.
+- **Verbs by name** (`graph_verb.rs`): every key the hint bar names is a
+  `GraphVerb` (`delete`, `go-in`, `select-all`, `path-tool`, …), and each
+  hint carries its verbs; `Editor::verbs` lists the ones on offer now from
+  those same hints and `Editor::press` does what the key does, through the
+  key handler. Studio publishes them as offers at `project/graph/<verb>`.
+  Moving the view (pan, zoom, fit, the layout) is never a verb.
 - **A hint bar** that says what every key does in the current state, each
   action in a word or two ("select", "go in", "delete"), never naming what
   it acts on — the breadcrumb says what's selected. A hint comes and goes
@@ -317,5 +332,6 @@ the test phones), GPU faces at dome scale, editing place rules on the canvas (th
 save and light the board, but there is no gesture for them yet), choosing
 a rule's output, choosing a node's channels, saving from the page,
 routes, running GLSL (shaders are stand-in patterns), clocks and other
-inputs to a shader, a level above the project, and a real board (the simulated one stands in until the lab moves
-into Studio).
+inputs to a shader, and a level above the project. In the lab the board
+is simulated; in Studio's Graph tab it is the real one (or the preview
+host's), and saving goes through Studio's own asset edits.
