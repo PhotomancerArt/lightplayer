@@ -322,9 +322,8 @@ impl<F: Flash> RecordLog<F> {
         self.index.remove_sector(s);
         self.sectors.end[s as usize] = NEEDS_ERASE;
         self.sectors.live[s as usize] = 0;
-        let addr = self.addr(s, 0);
         if !mutant!(SkipKill) {
-            self.program(addr, &KILLED_SECTOR_HEADER)?;
+            self.kill_header(s)?;
         }
         self.flash.erase_sector(s).map_err(StoreError::Flash)?;
         stat!(self.counters.erases += 1);
@@ -337,6 +336,21 @@ impl<F: Flash> RecordLog<F> {
         }
         self.sectors.end[s as usize] = ERASED;
         Ok(true)
+    }
+
+    /// Program `s`'s header to 24 zero bytes (FORMAT.md "Writing and
+    /// killing"): from then on it is untrusted on every read, whatever the
+    /// sector holds. Program only clears bits, so this also finishes a kill
+    /// a power cut left weak.
+    pub fn kill_header(&mut self, s: u32) -> R<(), F> {
+        self.program(self.addr(s, 0), &KILLED_SECTOR_HEADER)
+    }
+
+    /// Whether `s`'s header reads `want`.
+    pub fn header_reads(&mut self, s: u32, want: u8) -> R<bool, F> {
+        let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+        self.read(self.addr(s, 0), &mut h)?;
+        Ok(h.iter().all(|&b| b == want))
     }
 
     /// Never use `s` again: it keeps whatever records it holds (readable,

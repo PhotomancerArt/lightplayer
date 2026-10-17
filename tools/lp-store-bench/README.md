@@ -127,13 +127,13 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s fourteen mutants, through one fixed set
+  store, then each of `lp-tree-store`'s fifteen mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
   walk with one sector worn on erases and one on programs), every driver
   under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
   `calibrated_mid_word`. A catch is a failure kind the unmutated store does
-  not show in that driver; pass = every mutant caught. Last run (A2's fast
-  mount, 2026-10-16, lp-nor-sim simulator):
+  not show in that driver; pass = every mutant caught. Last run (the lazy
+  format over A2's fast mount, 2026-10-16, lp-nor-sim simulator):
 
   | mutant | caught by | failures |
   |---|---|---|
@@ -151,13 +151,17 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   | `trust_tail_once` | double | 4 (`remount_failed`) |
   | `newest_by_headers` | sweep | 701 (`read_error`, `remount_failed`) |
   | `no_full_scan` | fuzz (`shadowed_copy`) | 82 |
+  | `format_keeps_headers` | fuzz (`format_after_failed`) | 63 |
 
   The unmutated store: 0 failures in all seven drivers (6,115 cases).
   A2 dropped one it had built, `mount_trusts_blobs`, with the check it
   broke (mount reading every blob of the closure): fuzz caught it (11), and
   the mount no longer makes that check.
   Before `calibrated_mid_word` joined the set, `skip_kill` survived it
-  (10 of 11 caught at `609f0e4c9`).
+  (10 of 11 caught at `609f0e4c9`). `wear`'s two sectors wear out three
+  erases after the format: their fourth erase, counting the one the format
+  gave every sector before it went lazy (at four after it, `skip_kill`
+  survived the lazy format).
 
 `overnight` also runs, every round, `long` (4 walks × 10k steps), one
 `full-flash` and one `fuzz` per candidate (P8–P10) and the GC dials once
