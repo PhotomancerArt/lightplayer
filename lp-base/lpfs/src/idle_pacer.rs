@@ -46,6 +46,32 @@ pub struct IdlePacer {
     credit: i32,
     /// Frames since a piece ran with no room under the ceiling.
     since_over: u32,
+    /// What the pacer did lately, logged once a window while it works.
+    report: IdleReport,
+}
+
+/// What the pacer did over a window of a playing show (one `[fs idle]`
+/// log line, only for a window in which a piece ran).
+#[derive(Clone, Copy, Debug)]
+struct IdleReport {
+    show_ms: u32,
+    pieces: u32,
+    piece_ms: u32,
+    worst_ms: u32,
+    /// Ticks a piece waited: no room under the ceiling, or no duty left.
+    held_room: u32,
+    held_duty: u32,
+}
+
+impl IdleReport {
+    const NONE: Self = Self {
+        show_ms: 0,
+        pieces: 0,
+        piece_ms: 0,
+        worst_ms: 0,
+        held_room: 0,
+        held_duty: 0,
+    };
 }
 
 impl Default for IdlePacer {
@@ -71,6 +97,8 @@ impl IdlePacer {
     pub const CREDIT_CAP_MS: i32 = 50;
     /// A piece's cost before one has been seen (ms).
     pub const PIECE_GUESS_MS: u32 = 30;
+    /// A report line covers this much of a playing show (ms).
+    pub const REPORT_EVERY_MS: u32 = 5_000;
 
     pub const fn new() -> Self {
         Self {
@@ -81,6 +109,7 @@ impl IdlePacer {
             piece_ms: Self::PIECE_GUESS_MS,
             credit: 0,
             since_over: 0,
+            report: IdleReport::NONE,
         }
     }
 
@@ -96,6 +125,10 @@ impl IdlePacer {
                 let cost = delta.saturating_sub(frame);
                 self.piece_ms = cost.max(self.piece_ms - self.piece_ms / 8);
                 self.credit = self.credit.saturating_sub(cost as i32 * 100);
+                let r = &mut self.report;
+                r.pieces += 1;
+                r.piece_ms = r.piece_ms.saturating_add(cost);
+                r.worst_ms = r.worst_ms.max(cost);
             } else if self.frame_x8 == 0 {
                 self.frame_x8 = delta * 8;
             } else {
@@ -114,14 +147,17 @@ impl IdlePacer {
         if !t.playing {
             return true;
         }
+        self.report_window(delta);
         self.credit =
             (self.credit + (delta * Self::DUTY_PERCENT) as i32).min(Self::CREDIT_CAP_MS * 100);
         self.since_over = self.since_over.saturating_add(1);
         if self.credit < 0 {
+            self.report.held_duty += 1;
             return false;
         }
         if self.frame_ms() + self.piece_ms > Self::FRAME_CEILING_MS - Self::SLACK_MARGIN_MS {
             if self.since_over < Self::OVER_EVERY_FRAMES {
+                self.report.held_room += 1;
                 return false;
             }
             self.since_over = 0;
@@ -134,6 +170,31 @@ impl IdlePacer {
     /// nothing.
     pub fn ran(&mut self, did: bool) {
         self.ran = did;
+    }
+
+    /// Count `delta` of a playing show; every [`Self::REPORT_EVERY_MS`],
+    /// one log line if a piece ran in the window.
+    fn report_window(&mut self, delta: u32) {
+        let r = &mut self.report;
+        r.show_ms = r.show_ms.saturating_add(delta);
+        if r.show_ms < Self::REPORT_EVERY_MS {
+            return;
+        }
+        if r.pieces > 0 {
+            log::info!(
+                "[fs idle] {} ms: {} pieces, {} ms, worst {} ms; frame {} ms, piece {} ms; \
+                 held: room {}, duty {}",
+                r.show_ms,
+                r.pieces,
+                r.piece_ms,
+                r.worst_ms,
+                self.frame_x8 / 8,
+                self.piece_ms,
+                r.held_room,
+                r.held_duty
+            );
+        }
+        self.report = IdleReport::NONE;
     }
 
     /// The show's frame as learned (ms).
