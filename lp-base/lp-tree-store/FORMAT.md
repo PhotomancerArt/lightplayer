@@ -560,6 +560,36 @@ reader already classifies the same way, and no byte of the format changes.
 - **I3 — derived liveness.** Nothing on flash records liveness or free
   space: live = reachable from the committed root (and, while writing, from
   the writer's uncommitted tree).
+- **I4 — log order.** Every program a writer makes, except a kill (a
+  sector header before its erase, a record header that failed to check)
+  and a settle (programming bytes that already read so), is an **append**:
+  at the end of the records of the current head of its kind, which is the
+  newest sector of that kind. A sector is appended to only while it is a
+  head; once a newer sector of its kind is opened, it is never programmed
+  again until it is killed. A sector's seq is assigned when it is opened
+  and is greater (wrapping) than every seq trusted at that moment (the
+  writer's counter: the newest trusted at mount, plus one per sector
+  opened), so while trusted seqs span less than `2³¹`, a later sector has
+  the larger seq. Hence, for any earlier moment, everything written since lies in
+  sectors opened since or above that moment's head ends in that moment's
+  heads — what a roll-forward from a watermark (the index checkpoint)
+  needs to be complete.
+- **I5 — root placement.** Roots are written only to hot sectors (each
+  commit's root, and GC's copy of the committed root, which goes to the hot
+  head), and root seqs never decrease in log order: no root in an older
+  sector, or earlier in the same sector, has a greater seq than one after
+  it. So the committed root is the highest-seq root in the newest hot
+  sector that holds a good one (or, when that root's closure is incomplete
+  after a cut, the root before it): a reader can find it from the newest
+  hot sectors without reading every record header on the flash.
+
+Every v3 core is held to I4 and I5 (the cut sweeps check both after every
+step and every cut, `log_order_check.rs`), because a later bounded reader
+on a store an earlier core wrote depends on them: a v3-era optimisation
+that broke them (topping up an older sector, a root written to a cold
+sector) would silently break that reader on fielded stores. They are
+writer rules over bytes every reader already classifies; no byte of the
+format changes.
 
 ## Limits at scale
 
