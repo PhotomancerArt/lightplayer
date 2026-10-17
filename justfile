@@ -3591,7 +3591,13 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
         split y-test y-hangs esp32c6,server,fixture-trial-hangs
         split y-test y-tree-dies esp32c6,server,fs-tree,fixture-trial-dies
     fi
-    LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
+    # Through both front doors: our own second stage (`merged.bin`) and the
+    # ESP-IDF one (`merged-idf.bin`, LP_BOOT_DOOR=idf) — every core must boot
+    # through both (docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+    for door in lp idf; do
+        echo "== split scenarios through the $door door"
+        LP_BOOT_DOOR=$door LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
+    done
 
 # Over-the-air updates on an emulated C6, scenario by scenario (OTA plan
 # lp2025/2026-10-04-0757-ota-update-protocol, Part B, P08;
@@ -3631,7 +3637,11 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         scripts/ota/build-image.sh "$out/y-dies" b1b1b1b1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
     fi
-    LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+    # Through both front doors, as test-emu-c6-split-boot.
+    for door in lp idf; do
+        echo "== OTA scenarios through the $door door"
+        LP_BOOT_DOOR=$door LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+    done
 
 # Over-the-air updates over the EMULATED LAN (OTA Wi-Fi plan P4): the board on
 # a virtual LAN under `emu serve`, no USB cable, `lp-cli link capture lan:` as

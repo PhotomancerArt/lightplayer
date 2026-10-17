@@ -1,5 +1,13 @@
 # Vendored second-stage bootloaders
 
+**Since 2026-10-17 the C6 product image boots through LightPlayer's own
+second stage** (`lp-fw/fw-esp32c6-loader --features bootloader`, written by
+`tools/lp-fw-split`; ADR
+`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`). The IDF
+bootloaders below remain the **IDF door**: `merged-idf.bin`, the boards that
+have only been updated over the air, and the emulator gates that boot every
+split image through both doors.
+
 The merged images `lp-cli firmware package` builds start with an ESP-IDF
 second-stage bootloader. By default that is the one the installed espflash
 bundles (espflash 3.3.0 → ESP-IDF `v5.1-beta1-378-gea5e0ff298-dirt` for the
