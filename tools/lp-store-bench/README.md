@@ -32,8 +32,13 @@ number — not an emulator or silicon measurement.
   `txn_delta_max`, and `codec` = `stored` (every file written stored) |
   `host_deflate` (every file but the board's own `…/.lp/panel.json` arrives
   as the wire carries it after M6: `host_deflate_chunks` → ≤ 4 KiB logical
-  chunks, `put_chunk_deflated` at offset 0 then the running size). The
-  prototype's `deflate`, `deflate_dict`, `dict_size` and `json_tree` dials
+  chunks, `put_chunk_deflated` at offset 0 then the running size), and
+  `read_cache` = `off` | `sim` (the store reads through
+  `lp_tree_store::SimLineCache`, a model of the C6's flash cache that serves
+  a line's old bytes until the store's `WindowedFlash` invalidates it — the
+  firmware's cache-mapped `lpfs` reads; a mount after a cut starts with it
+  empty, as a power-on does; the `mutants` set runs every driver with it on).
+  The prototype's `deflate`, `deflate_dict`, `dict_size` and `json_tree` dials
   are gone with what they selected.
 - **Workloads** (`workload.rs`): steps of puts and prefix deletes, each
   ending in `commit`, built from corpora at runtime, deterministic by seed.
@@ -127,14 +132,16 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s seventeen mutants, through one fixed set
+  store, then each of `lp-tree-store`'s eighteen mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
   walk with one sector worn on erases and one on programs — and `idle`, the
   long walk with every third step up to 16 idle steps, cut like the rest),
   every driver
   under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
   `calibrated_mid_word`. A catch is a failure kind the unmutated store does
-  not show in that driver; pass = every mutant caught. Last run (idle
+  not show in that driver; pass = every mutant caught. Since the C6 reads
+  `lpfs` through its flash cache (K1+, C7), every driver runs T1 with
+  `read_cache=sim`. Last run (idle
   cleanup over A2's fast mount, 2026-10-16; the mount study's rows added with it; lp-nor-sim simulator):
 
   | mutant | caught by | failures |
@@ -155,6 +162,7 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   | `no_full_scan` | fuzz (`shadowed_copy`) | 82 |
   | `format_keeps_headers` | fuzz (`format_after_failed`) | 63 |
   | `mount_index_takes_untrusted` | fuzz (`shadowed_copy`) | 82 |
+  | `reads_without_invalidate` | sweep (and every other driver) | 25 |
   | `idle_forgets_heads` | idle (`panic`: a program over a killed header) | 2 |
 
   The unmutated store: 0 failures in all eight drivers (7,095 cases).
