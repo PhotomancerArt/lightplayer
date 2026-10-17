@@ -1917,7 +1917,7 @@ impl StudioController {
             store_releases: self.update_build_facts.store_releases(),
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
-            board_tree_store: evidence.is_some_and(board_on_tree_store),
+            board_tree_store: evidence.is_none_or(board_on_tree_store),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -10303,9 +10303,16 @@ struct AgentStartProbe {
 /// needs.
 fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> bool {
     use lpa_devices::wire::BoardFs;
-    evidence.classification.hello().is_some_and(|hello| {
-        (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld
-    })
+    // A board that sent no hello (a core-only board waiting for its engine,
+    // which answers only on the update channel) is not known to hold
+    // littlefs, and is not held back: since the tree-store cutover such a
+    // board is almost always a tree board, and a tree core installed on a
+    // littlefs one holds its files (AD3) for the USB migration rather than
+    // formatting them. Only a hello that names littlefs restricts.
+    let Some(hello) = evidence.classification.hello() else {
+        return true;
+    };
+    (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld
 }
 
 /// The board a device press is aimed at, when it is one that changes what
