@@ -172,19 +172,19 @@ pub fn ClockFace(
                     // empty listing, which would read as "nothing running".
                     UiTimebaseState::Unread => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                            "Reading the timebase\u{2026}"
+                            "Reading the clock\u{2026}"
                         }
                     },
                     // A structured answer, not an error: a card asking about
                     // a node that just left the tree is not a fault.
                     UiTimebaseState::Unknown => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                            "This clock is not producing a timebase."
+                            "This clock has no time to show."
                         }
                     },
                     UiTimebaseState::Live if face.phasors.is_empty() => rsx! {
                         p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground",
-                            "Nothing is riding this timebase."
+                            "Nothing is using this clock."
                         }
                     },
                     UiTimebaseState::Live => rsx! {
@@ -269,7 +269,7 @@ fn PhasorTraceCard(
                     }
                     span {
                         class: "tw:ml-auto tw:flex-none tw:font-mono tw:text-[9px] tw:tabular-nums tw:text-dim-foreground",
-                        title: "Completed cycles since this integrator materialized",
+                        title: "Cycles completed since this clock started",
                         "\u{00d7}{reading.cycle}"
                     }
                 }

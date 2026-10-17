@@ -81,7 +81,7 @@ pub fn AgentChatPane(
                             "Describe what the lights should do."
                         }
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground",
-                            "The agent edits this shader; changes land as unsaved edits you can Save or revert."
+                            "The agent edits this shader. Its changes show up as unsaved, so you can save or revert them."
                         }
                     }
                 },
@@ -140,7 +140,7 @@ fn HistoryStrip(
             if view.history_dropped > 0 {
                 span {
                     class: "tw:flex-none tw:self-center tw:text-[10px] tw:text-dim-foreground",
-                    title: "Older edits fell off the session's history cap",
+                    title: "Older edits are no longer kept",
                     "+{view.history_dropped} older"
                 }
             }
@@ -169,10 +169,10 @@ fn HistoryChip(
 ) -> Element {
     let intent = entry.note.as_deref().unwrap_or("this edit");
     let title = if busy {
-        format!("Turn {}: {intent} — stop the run to revert", entry.turn)
+        format!("Turn {}: {intent}. Stop the run to revert.", entry.turn)
     } else {
         format!(
-            "Revert to turn {}: {intent} (stages the source; Save keeps it)",
+            "Revert to turn {}: {intent}. Save to keep it.",
             entry.turn
         )
     };

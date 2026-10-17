@@ -72,9 +72,9 @@ pub fn ModulePanel(
             div { class: "tw:grid tw:gap-1 tw:px-4 tw:py-3",
                 p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No public channels yet." }
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-dim-foreground",
-                    "Binding a slot to "
+                    "Bind a slot to "
                     code { class: "tw:font-mono", "bus:…" }
-                    " is what makes it public — and a control appears here."
+                    " to make it public. Its control will appear here."
                 }
             }
         };
@@ -272,7 +272,7 @@ fn PanelResetButton(
 ) -> Element {
     let noun = if held == 1 { "control" } else { "controls" };
     let label = format!(
-        "Reset {held} held {noun} in {scope} — panel writers are dropped and the project drives again"
+        "Reset {held} held {noun} in {scope} and let the project control them again"
     );
     rsx! {
         button {
@@ -313,9 +313,9 @@ fn AutoSaveToggle(
         "tw:absolute tw:left-[1px] tw:h-[7px] tw:w-[7px] tw:rounded-full tw:bg-dim-foreground"
     };
     let title = if auto_save {
-        "Auto-save on — panel settings are saved and restored on boot (.lp/state.json)"
+        "Auto-save on. Panel settings will come back after a restart."
     } else {
-        "Auto-save off — panel settings are NOT saved, and are lost on restart"
+        "Auto-save off. Panel settings will be lost on restart."
     };
     let icon_class = if auto_save {
         "tw:inline-flex tw:flex-none tw:text-subtle-foreground"

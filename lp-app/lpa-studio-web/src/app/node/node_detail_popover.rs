@@ -152,7 +152,7 @@ pub(crate) fn NodeDetailPopover(
                     }
                     if dirty.persisted > 0 {
                         p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
-                            "Copies the last saved version — this node has unsaved edits."
+                            "This node has unsaved changes, so this copies the last saved version."
                         }
                     }
                 }
@@ -212,13 +212,13 @@ fn ModuleExportRow(export: UiModuleExport, on_action: EventHandler<UiAction>) ->
                 }
             } else {
                 p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
-                    "Importers vendor "
+                    "Projects that import it get their own copy of "
                     span { class: "tw:font-mono", "{export.folder}/" }
-                    " as their own copy. The folder must be self-contained; its bus consumers are its interface."
+                    ". Everything it needs must be inside the folder, and the bus channels it reads are its controls."
                 }
                 if export.upgrades_to_pattern {
                     p { class: "tw:m-0 tw:text-[0.68rem] tw:leading-snug tw:text-status-export-foreground",
-                        "The first export makes "
+                        "Exporting it will make "
                         strong { "{export.project}" }
                         " a pattern project."
                     }

@@ -73,7 +73,7 @@ fn ModelChip(model: UiAgentModelView, busy: bool) -> Element {
     let Some(effective) = model.effective.clone() else {
         return rsx! {
             span { class: "tw:flex-none tw:text-[10px] tw:font-bold tw:text-status-warning-foreground",
-                title: "The provider needs a model id — set one in Settings (the gear icon, top right)",
+                title: "The provider needs a model. Set one in Settings (the gear icon, top right).",
                 "model: set in Settings"
             }
         };
@@ -91,7 +91,7 @@ fn ModelChip(model: UiAgentModelView, busy: bool) -> Element {
             select {
                 class: model_chip_class(busy),
                 disabled: busy,
-                title: if busy { "Model for the next run — wait for this run to finish to switch" } else { "Model for the next run — custom ids in Settings" },
+                title: if busy { "Model for the next run. Wait for this run to finish to switch." } else { "Model for the next run. Add others in Settings." },
                 value: "{effective}",
                 // Opening the selector is the fetch trigger
                 // (store-debounced); pointer and keyboard opens both land
@@ -117,7 +117,7 @@ fn ModelChip(model: UiAgentModelView, busy: bool) -> Element {
                 option {
                     value: SETTINGS_MODEL_VALUE,
                     disabled: true,
-                    if model.loading { "fetching model list…" } else { "Custom / more — Settings" }
+                    if model.loading { "Loading models…" } else { "More in Settings…" }
                 }
             }
         }

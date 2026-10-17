@@ -57,7 +57,7 @@ pub(crate) fn AppChatDrawer(
                 button {
                     class: "tw:inline-flex tw:h-7 tw:w-7 tw:flex-none tw:cursor-pointer tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-transparent tw:bg-transparent tw:text-muted-foreground tw:transition tw:duration-300 tw:hover:border-border-subtle tw:hover:text-strong-foreground",
                     r#type: "button",
-                    title: "Close the assistant (the conversation stays)",
+                    title: "Close the assistant. Your conversation will be kept.",
                     aria_label: "Close the assistant",
                     onclick: move |_| open.set(false),
                     "✕"

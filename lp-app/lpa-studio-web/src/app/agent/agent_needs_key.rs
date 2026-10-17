@@ -34,10 +34,10 @@ pub(crate) fn AgentNeedsKey(
                     r#type: "button",
                     title: "Sign in on openrouter.ai instead of pasting a key",
                     onclick: move |_| on_connect.call(()),
-                    "Connect OpenRouter — use your own account"
+                    "Connect OpenRouter"
                 }
                 p { class: "tw:m-0 tw:max-w-96 tw:text-xs tw:text-dim-foreground",
-                    "Pay-as-you-go from your OpenRouter credits; every major model."
+                    "Pay as you go with your OpenRouter credits. Every major model is available."
                 }
             }
             if let Some(error) = connect_error.as_deref() {

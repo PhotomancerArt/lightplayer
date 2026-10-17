@@ -338,10 +338,10 @@ fn export_chip_title(worst: Option<ExportSeverity>) -> &'static str {
     match worst {
         None => "This module is exported from the project.",
         Some(ExportSeverity::Warning) => {
-            "This module is exported from the project, with a warning — see its ⓘ."
+            "This module is exported, with a warning. See its ⓘ."
         }
         Some(ExportSeverity::Error) => {
-            "This module is exported from the project, and would not load as an import — see its ⓘ."
+            "This module is exported, but it wouldn't load in another project. See its ⓘ."
         }
     }
 }
@@ -685,7 +685,7 @@ fn NodeDebugMarker(count: usize) -> Element {
     rsx! {
         span {
             class: "lp-debug-marker",
-            title: "This node carries {count} active debug override(s) — session only, never saved",
+            title: "This node has {count} debug override(s). They're never saved.",
             "debug {count}"
         }
     }
