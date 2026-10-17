@@ -370,6 +370,86 @@ fn s9_the_loader_skips_a_core_that_will_not_load_and_boots_the_other() {
     );
 }
 
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// a trial that died warm was rolled back, and the heal wrote the running
+/// core's engine over the dead core's bytes. The newer record still names
+/// that trial (attempted, never started, no cold retries counted), so a
+/// cold boot picks it again, the loader finds the engine header where the
+/// core was and falls back to the proven core. That core must read the
+/// fallback as the rollback it is: trusted, the dead build refused, the
+/// engine started — on every power cycle.
+#[test]
+#[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
+fn s12_a_power_cycle_after_a_heal_over_a_dead_trial_boots_the_proven_core_and_its_engine() {
+    let (Some(x), Some(y)) = (image("x"), image("y-dies")) else {
+        return;
+    };
+    let mut chip = x.merged();
+    let proven = slot(&chip, 0);
+    assert!(proven.proven(), "the package's record 0 is proven");
+    // The dead trial's record: newer, naming where X's engine now is.
+    let dead = x.engine_offset();
+    write_record(
+        &mut chip,
+        1,
+        &BootRecord {
+            seq: proven.record.seq + 1,
+            core_off: dead,
+            core_len: y.core.len() as u32,
+            build: build_hash(y.build_id.as_bytes()),
+            trial: true,
+        },
+    );
+    let attempted = BOOT_RECORD_SECTORS[1] as usize + lp_bootctl::ATTEMPTED_MARK_OFFSET as usize;
+    chip[attempted..attempted + 4].fill(0);
+    for cycle in 1..=2 {
+        let mut host = hosted(chip, false);
+        let console = until(&mut host, "[CORE] core @", 30_000_000);
+        expect(&console, &format!("[LOADER] core @{dead:#x} skipped"));
+        expect(&console, "[LOADER] core @0x18000 (fallback)");
+        host.run_until(host.board.machine.micros() + 3_000_000, None)
+            .expect("the run");
+        let console = host.console().join("\n");
+        expect(
+            &console,
+            &format!(
+                "[CORE] rolled back: the newer core (build {:#010x}) failed its trial",
+                build_hash(y.build_id.as_bytes())
+            ),
+        );
+        assert!(
+            !console.contains("boot state not trusted") && !console.contains("[OTA] core-only"),
+            "cycle {cycle}: X did not trust its fallback:\n{console}"
+        );
+        let core = console
+            .lines()
+            .find(|l| l.contains("[CORE] core @0x18000"))
+            .unwrap_or_default();
+        assert!(
+            core.contains("(rolled back)") && core.contains(" B · digest"),
+            "cycle {cycle}: X's engine did not start: {core}"
+        );
+        chip = flash_of(&host.board.machine);
+        // Neither record changed (the engine guard may mark X's record
+        // `confirmed`, which the loader does not read on a proven record);
+        // the dead trial's marks are as the rollback left them.
+        assert_eq!(slot(&chip, 0).record, proven.record, "cycle {cycle}");
+        let dead_slot = slot(&chip, 1);
+        assert!(
+            dead_slot.marks.attempted
+                && !dead_slot.marks.started
+                && !dead_slot.marks.confirmed
+                && dead_slot.marks.cold_retries() == 0,
+            "cycle {cycle}: {dead_slot:?}"
+        );
+    }
+    report(
+        "S12",
+        "a dead trial's record over X's engine: two power cycles, the loader falls back, X \
+         reads it as the rollback, refuses the build and runs its engine",
+    );
+}
+
 /// The failed-trial bar of the tree-store cutover (plan
 /// `lp2025/2026-10-16-0848-tree-store-adoption`; rolling back to an older
 /// core is otherwise a non-goal): a board whose files are in the tree store
