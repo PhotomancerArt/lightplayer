@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-10-16      # how: packaging the cutover's fs-tree split image (A6) refused "not a ManifestCore"
+fixed: this change     # PR #1167 (A7, the default switch; held for the cutover)
 area: fw-esp32-common `fs_tree_core_guard` × lp-fw-split's core/engine placement
 class: contract-gap
 related:
@@ -39,3 +40,27 @@ reads only the core, where there is no blob.**
 will mount from something the core itself carries (a feature word beside the
 build id, say), or check the engine once it is written; and an emulated OTA
 of one `fs-tree` image onto another must pass before the default switches.
+
+**Fixed (A7, the default switch, PR #1167)** — the core says what it mounts
+in its own bytes. A core that mounts the tree store links a 20-byte mark,
+`lpc_model::manifest::CORE_FS_TREE_MARK` (`"\u{1}LP-CORE-FS-TREE-v1\u{2}"`),
+as the static `LP_CORE_FS_TREE_MARK` in `fw_esp32_common::tree_fs`, named by
+the mount itself (`black_box`) so only a build that mounts the store links
+it. `lp-fw-split` makes the symbol a core root (like the seam table and the
+digest slot), so the split link always places it in `core.bin`, and fails
+the build when the manifest lists `fs.tree` but `core.bin` carries no mark,
+or the other way round (`check_core_tree_mark`; every C6 build prints which
+it is). The guard (`core_store_verdict`) now scans the core for the mark —
+held masked, so the guard's own copy is never a match and a littlefs core
+that links the guard (A5's holding core) does not read as a tree core — and
+never reads the manifest. Verdicts: `KeepsTheStore`, `WouldFormat` (no mark:
+every littlefs core, and every tree-store dev core built before the mark),
+`Unreadable` (a read failed).
+
+Regression coverage: `fs_tree_core_guard` tests (a core whose manifest says
+`fs.tree` but whose bytes carry no mark is refused — this defect's shape;
+the masked copy and a cut-short mark are not matches; every read boundary),
+`lp-fw-split`'s `a_tree_manifest_needs_the_mark_in_the_core_and_only_then`,
+`tree_fs::the_core_mark_is_the_models`, and the emulated OTA of one
+tree-store image onto another (`just test-emu-c6-ota`, U1 X→Y on the default
+build since the switch).

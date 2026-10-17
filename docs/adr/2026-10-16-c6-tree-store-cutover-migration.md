@@ -216,3 +216,95 @@ tree store allows the write order to do.
 - `scripts/emu/walk-migration-emu.mjs` T1, T7a/b, T8a/b, T9 (Studio over
   `?emu=`, not CI).
 - One silicon run on CX1 (`docs/reports/2026-10-16-tree-store-migration-cx1.md`).
+
+## Amendment (2026-10-17): the default switch (A7)
+
+Held with this ADR for the cutover gate (PR #1167, which carries #1151's
+commits). What changes when it merges:
+
+1. **The tree store is the C6's filesystem in every build.** `server`
+   implies `fs-tree` in `fw-esp32c6`; the served build def
+   (`lp-fw/builds/esp32c6-4mb.json`) names it, and its reviewed manifest core
+   lists `fs.tree` (`lpa-boards`' drift test now requires both, and that no
+   other chip turns it on). The release's provisioning (USB) image and its
+   over-the-air "own" build are one package, so they switch together, and
+   the release's `requires.fsTree` is `true` from the first tree-store
+   release on (Decision 7 routes on it). `memory_fs` replaces the store (no
+   `lpfs` mounted; the hello lists no `fs.tree`); the benchmark and
+   no-flash emulator images keep building with it, so `fs-tree` +
+   `memory_fs` is no longer a `compile_error!`.
+2. **The tree table is `partitions.csv`** (`factory` `0x10000`+`0x370000`,
+   `lpfs` `0x380000`+`0x80000`); `partitions-tree.csv` is gone, and the
+   176-sector table stays frozen as `partitions-esp32c6-legacy-v2.csv`. This
+   ADR is the migration the table move needs (AGENTS.md: never just a new
+   table); the flash budget ADR's amendment of the same date has the 192 KB
+   and the gate's new numbers.
+3. **littlefs leaves the C6 (AD5).** `flash_storage.rs` (the littlefs
+   adapter and the legacy probe) and `legacy_layout.rs` are deleted, and
+   `littlefs-rust` is no longer a `fw-esp32c6` dependency; nothing in the
+   image links littlefs. A tree core that finds no store recognises a
+   littlefs by its superblock's name alone (`littlefs` at byte 8 of block 0
+   or 1, `fw_esp32_common::tree_fs::littlefs_superblock_at`) in two places
+   (`fw-esp32c6/src/tree_flash.rs::littlefs_found`): `lpfs` itself (a
+   littlefs core ran on this table), and `0x350000` (Decision 8's skipped
+   migration). Either **holds** — `fs: legacy_held`, nothing written,
+   Studio's USB update moves the files (AD3: a tree core never formats a
+   littlefs that holds files; the magic does not say whether it holds
+   files, so it holds whenever the magic is there, which costs a board with
+   an empty littlefs one migration that finds nothing to move). The
+   pre-repartition `0x310000` is not probed any more: every image since the
+   2026-10 repartition writes over its superblock pair, so the probe could
+   not find one (measured: `legacy overlap` was −196,608 B on main). The
+   `0x350000` hold lasts while `app.bin` ends below `0x350000`;
+   `lp-fw-split headroom` now reports that margin as its "legacy overlap"
+   (65,536 B at the switch; report-only).
+4. **The update guard reads the core's own mark** (the defect
+   `2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry`,
+   closed by this change): a core that mounts the store carries
+   `LP_CORE_FS_TREE_MARK` (`lpc_model::manifest::CORE_FS_TREE_MARK`), a core
+   root of the split link, and `lp-fw-split` fails a build whose manifest and
+   core disagree. Before this every tree core refused every core over the
+   air, its own kind included; the emulated OTA walk now runs tree core onto
+   tree core.
+5. **The fielded board is a pinned image.** Since no littlefs C6 image is
+   built from this tree, every littlefs control — the migration's fielded
+   board, the littlefs core that meets a tree store (A5), the RAM/mount
+   comparisons, the cut walk's control — boots
+   `ReferenceImage::FIELDED_LITTLEFS`, re-pinned from `3fc9aa987` to
+   `1d5840a76` (the last littlefs `main` this branch saw: #1150's hold and
+   #1152's first-light line in it), on its own table
+   (`lp_emu_esp32c6::flash::legacy_v2_partition_table_bytes`). Re-pin it to
+   the cutover merge's first parent if a later littlefs release ships first.
+
+What a fielded board sees once a tree-store release is out:
+
+- **Studio over USB** (the board card's Update firmware): the layout probe
+  reads littlefs at `0x350000` on the 176-sector table; the update asks
+  before moving the files (`continue-update`, Lasting), stores the backup,
+  and migrates (Decisions 3–6). ~45 s on CX1 for 150 files.
+- **Studio over Bluetooth, Wi-Fi or the relay:** no over-the-air install of
+  a tree-store release (`NeedsFilesMoved`): the card says to plug it in.
+- **Another host's over-the-air install** of a tree core onto a littlefs
+  board (not Studio): the littlefs core's session does not check the new
+  core (it holds no store), so the tree core boots on trial, finds the
+  littlefs at its own `lpfs` (the 176-sector table is still flashed: `lpfs`
+  is `0x350000`, its superblock there) and holds. The board's files are
+  untouched; it needs the USB migration, and a failed trial rolls back to
+  the littlefs core.
+- **A plain flash** (espflash, esptool) of the tree image: refused by
+  `lp-cli`'s and Studio's layout preflights; by hand, the tree core holds
+  (3) while the superblock at `0x350000` survives.
+- **A board with no files** (blank, or factory firmware): the tree store
+  formats lazily on first boot, as any tree board does.
+
+Rolling back stays mostly a non-goal (plan notes, 2026-10-16): only a
+failed over-the-air trial boots the previous core, which on a migrated
+board is a tree core too (AD4: the USB migration leaves no littlefs core in
+a boot record). `emu_split_scenarios`' S11 is now that bar: a core that dies
+on trial rolls back to one that mounts the store, every file kept.
+
+Verification (A7): host tests (`fw-esp32-common` with `fs-tree`,
+`lp-fw-split`, `lpa-link` with `layout-migration`, `lp-bootctl`,
+`lpa-boards`, the emulator's table parity for both tables); the emulated
+walks and CX1, recorded in
+`docs/reports/2026-10-17-tree-store-default-switch.md`.

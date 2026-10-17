@@ -24,16 +24,18 @@
 //!    project's `HashPackage` is the same; the board's own `[FS] tree store
 //!    mounted (…)` and `[LOADER] core @0x18000` lines; the loaded project
 //!    runs (its console, kept with the run).
-//! 6. **First light, both sides:** a power cycle (`board power-cycle`) before
-//!    the migration and another after it, each read to the firmware's
-//!    `[perf] first light …` line (said on power-on boots only), so the
-//!    record carries the littlefs and the tree-store boot of the same board
-//!    and files.
+//! 6. **First light, both sides:** `LP_MIGRATE_BOOTS` power cycles (`board
+//!    power-cycle`; default 1) before the migration and as many after it,
+//!    each read to the firmware's `[perf] first light …` line (said on
+//!    power-on boots only), so the record carries the littlefs and the
+//!    tree-store boots of the same board and files, and the median of each.
 //!
-//! Env: `LP_MIGRATE_DIR` (required), `LP_MIGRATE_MANIFEST` (the `fs-tree`
-//! package's manifest.json; required), `LP_MIGRATE_LP_CLI` (an `lp-cli`
-//! copied out of `target/`, which the desk's hourly clean deletes),
-//! `LP_MIGRATE_SETUP=1`, `BOARD_HOLDER` (the lease's holder; required).
+//! Env: `LP_MIGRATE_DIR` (required), `LP_MIGRATE_MANIFEST` (the shipped
+//! package's manifest.json — the tree store since the default switch;
+//! required), `LP_MIGRATE_LP_CLI` (an `lp-cli` copied out of `target/`,
+//! which the desk's hourly clean deletes), `LP_MIGRATE_SETUP=1`,
+//! `LP_MIGRATE_BOOTS` (power-on boots a side), `BOARD_HOLDER` (the lease's
+//! holder; required).
 //!
 //! `#[ignore]`d: it needs the desk, CX1 leased, and today's littlefs
 //! release flashed (`lp-cli firmware install --release latest`).
@@ -112,11 +114,19 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
             hashes.insert(id.to_string(), hash);
         }
         drop(client);
-        // First light on littlefs: a power-on boot of the board as it is.
-        let (conn, light) =
-            power_up_to_first_light(&desk, &port, Some(conn), &console, "littlefs").await;
-        close(conn).await;
-        (hashes, light)
+        // First light on littlefs: power-on boots of the board as it is.
+        let mut lights = Vec::new();
+        let mut conn = Some(conn);
+        for _ in 0..boots() {
+            let (c, light) =
+                power_up_to_first_light(&desk, &port, conn.take(), &console, "littlefs").await;
+            lights.push(light);
+            conn = Some(c);
+        }
+        if let Some(c) = conn {
+            close(c).await;
+        }
+        (hashes, serde_json::Value::Array(lights))
     });
     let (before_hashes, light_before) = before_hashes;
     record(&dir, "hashes-before.json", &format!("{before_hashes:#?}"));
@@ -173,9 +183,17 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
     );
     assert_eq!(after, before, "every file, byte for byte");
     let (after_hashes, lines, light_after) = local.block_on(&runtime, async {
-        // First light on the tree store: a power-on boot after the move.
-        let (conn, light) =
-            power_up_to_first_light(&desk, &port, None, &console, "tree store").await;
+        // First light on the tree store: power-on boots after the move.
+        let mut lights = Vec::new();
+        let mut last = None;
+        for _ in 0..boots() {
+            let (c, light) =
+                power_up_to_first_light(&desk, &port, last.take(), &console, "tree store").await;
+            lights.push(light);
+            last = Some(c);
+        }
+        let conn = last.expect("at least one boot");
+        let light = serde_json::Value::Array(lights);
         let hello = conn.hello().expect("a hello");
         record(&dir, "hello-after.json", &format!("{hello:#?}"));
         assert!(hello.build.features.contains(&lpc_model::LpFeature::FsTree));
@@ -201,8 +219,38 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
     });
     record(&dir, "console.txt", &lines.join("\n"));
     record(&dir, "first-light-after.json", &light_after.to_string());
+    eprintln!(
+        "first light, median of {} power-on boots: littlefs {:?} ms, tree store {:?} ms",
+        boots(),
+        median_ms(&light_before),
+        median_ms(&light_after)
+    );
     assert_eq!(after_hashes, before_hashes, "every project's HashPackage");
     eprintln!("after: {} files, hashes {after_hashes:?}", after.len());
+}
+
+/// Power-on boots a side (`LP_MIGRATE_BOOTS`, default 1).
+fn boots() -> usize {
+    std::env::var("LP_MIGRATE_BOOTS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// The median `first light at <n> ms` of a side's boots.
+fn median_ms(lights: &serde_json::Value) -> Option<u64> {
+    let mut ms: Vec<u64> = lights
+        .as_array()?
+        .iter()
+        .filter_map(|l| l["first_light"].as_str())
+        .filter_map(|line| {
+            let at = line.find("first light at ")? + "first light at ".len();
+            line[at..].split(' ').next()?.parse().ok()
+        })
+        .collect();
+    ms.sort_unstable();
+    ms.get(ms.len() / 2).copied()
 }
 
 /// The files a raw `lpfs` region holds, mounted on the host by its magic.
