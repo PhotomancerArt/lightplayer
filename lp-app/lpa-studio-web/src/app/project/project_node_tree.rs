@@ -152,7 +152,7 @@ fn ProjectNodeTreeItemView(
                     if streaming_live {
                         span {
                             class: "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-live-foreground",
-                            title: "Live — the device streams only the selected node",
+                            title: "Live. The device sends live values for the selected node only.",
                         }
                     }
                 }

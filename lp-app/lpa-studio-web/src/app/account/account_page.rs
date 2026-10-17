@@ -328,7 +328,7 @@ pub fn AccountPageBody(
                         span { class: "{VALUE_CLASS} tw:flex tw:items-center tw:gap-2.5",
                             AccountAvatar { face: AvatarFace::of_me(&me), size: 34 }
                             span { class: "tw:min-w-0 tw:text-[11px] tw:font-medium tw:text-dim-foreground",
-                                "from your sign-in provider — updates when it does; not stored here"
+                                "From your sign-in provider"
                             }
                         }
                     }
@@ -528,16 +528,15 @@ fn NameRow(
 /// library, and how much it offered when it did.
 fn sync_engine_note(sync: &SyncStatusSnapshot, now_secs: f64) -> String {
     if !sync.engine.signed_in {
-        return "waiting for sign-in — nothing syncs until the account is known".to_string();
+        return "Waiting for sign-in".to_string();
     }
     match &sync.engine.last_sweep {
-        None => "on — projects publish as they are created and saved".to_string(),
+        None => "On. New and saved projects are published.".to_string(),
         Some(sweep) if sweep.host_missing => {
-            "the project library was not ready at sign-in, so nothing was offered yet — the timer retries every minute"
-                .to_string()
+            "The project library wasn't ready at sign-in. Retrying every minute.".to_string()
         }
         Some(sweep) => format!(
-            "sign-in sweep offered {} project{} {}",
+            "Sent {} project{} to sync at sign-in, {}",
             sweep.offered,
             if sweep.offered == 1 { "" } else { "s" },
             age_words(now_secs - sweep.at_ms / 1000.0),
@@ -720,10 +719,12 @@ fn name_field(value: &str) -> Option<String> {
 /// What the line beside Save says.
 fn save_note(status: SaveStatus) -> &'static str {
     match status {
-        SaveStatus::Idle => "Names start from your provider; edits stay on LightPlayer.",
+        SaveStatus::Idle => {
+            "Names start from your sign-in provider. Edits here stay on LightPlayer."
+        }
         SaveStatus::Saving => "Saving…",
         SaveStatus::Saved => "Saved.",
-        SaveStatus::Failed => "Could not save — your edit is still here; try again.",
+        SaveStatus::Failed => "Couldn't save. Try again.",
     }
 }
 

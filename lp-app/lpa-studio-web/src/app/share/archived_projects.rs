@@ -110,13 +110,13 @@ pub fn ArchivedProjectsSection() -> Element {
                 Ok(_) => {
                     reload += 1;
                     if let Some(mut toasts) = toasts {
-                        toasts.say("Restored — the link resolves again.");
+                        toasts.say("Restored. The link works again.");
                     }
                 }
                 Err(error) => {
                     log::warn!("archive: could not restore {uid}: {error}");
                     if let Some(mut toasts) = toasts {
-                        toasts.warn("Could not restore this project — it is still archived.");
+                        toasts.warn("Couldn't restore this project.");
                     }
                 }
             }
@@ -148,13 +148,13 @@ pub fn archive_project(
             Ok(_) => {
                 on_archived();
                 if let Some(mut toasts) = toasts {
-                    toasts.say("Archived — Restore it from Archived projects.");
+                    toasts.say("Archived. You can restore it from Archived projects.");
                 }
             }
             Err(error) => {
                 log::warn!("share: could not archive {uid}: {error}");
                 if let Some(mut toasts) = toasts {
-                    toasts.warn("Could not archive this project — it is still where it was.");
+                    toasts.warn("Couldn't archive this project.");
                 }
             }
         }

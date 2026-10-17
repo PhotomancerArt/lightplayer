@@ -152,23 +152,33 @@ change has to be readable, or cleanly refused, by the core before it.
   remembered (RAM): a write needing as many bytes is refused without GC
   until a write needs fewer or a sector more is free.
 - **Idle cleanup** (`collect_step`, `store_idle.rs`): the same GC, early and
-  a bounded piece at a time, for a caller with nothing else to do (the
-  server's quiet ticks, through `LpFs::idle_step`). Each step marks, then
-  does at most one thing: **forget** a garbage-only sector (kill its header,
-  no erase — a mount then reads 24 B of it instead of its records, and it is
-  erased when opened, as it would have been: an erase now would be repeated
-  after the next mount, which never trusts a sector to be erased);
-  **collect** one sector holding at least `idle_min_garbage` of garbage
-  while fewer than `idle_free_percent` of the sectors are free; or, near
-  full (fewer than `reserve + idle_pack_free` free), **pack**: GC's own next
-  victim, a pass at a time while passes shrink the waste. A pass rewrites
-  most of the store, so a new one starts only once the waste has grown a
-  sector's capacity past what the last packing left (RAM: a mount forgets
-  it, so the first quiet after a mount packs once), and a write does not
-  restart a pass under way. A step that finds
-  nothing **settles** the store: later steps return at once, with no mark,
-  until the next write. Never inside a transaction. A cut anywhere in a
-  step leaves the state it had (a step changes no file).
+  **one piece a step** — about one erase's time — for a caller with nothing
+  else to do: the server's ticks, through `LpFs::idle_tick`, paced by
+  `lpfs::IdlePacer` (quiet two seconds first; with nothing playing, a step
+  every quiet tick; with a show playing, only when the frame it lengthens
+  stays under 100 ms less a 15 ms margin, and within 8 % of the show's
+  time — the radio frame-rate budget's idle row). A step is one of: a
+  **mark** (its lengths held between steps until the next write or mark —
+  copies keep the index's positions, so they stay exact); the **erase** of
+  the victim the last steps emptied; a **forget** of a garbage-only sector
+  (kill its header, no erase — a mount then reads 24 B of it instead of its
+  records, and it is erased when opened, as it would have been: an erase now
+  would be repeated after the next mount, which never trusts a sector to be
+  erased); or the next **copies** out of a victim, at most `idle_copy_bytes`
+  a step, the victim kept until it is empty. A victim is one holding at
+  least `idle_min_garbage` of garbage while fewer than `idle_free_percent`
+  of the sectors are free; or, near full (fewer than `reserve +
+  idle_pack_free` free), **packing**: GC's own next victim, a pass at a time
+  while passes shrink the waste. A pass rewrites most of the store, so a new
+  one starts only once the waste has grown a sector's capacity past what the
+  last packing left (RAM: a mount forgets it, so the first quiet after a
+  mount packs once), and a write does not restart a pass under way. A write
+  between steps drops the victim under way (its copies so far stand) and the
+  emptied one (a later step forgets it). A step that finds nothing
+  **settles** the store: later steps return at once, with no mark, until
+  the next write. Never inside a transaction. A cut anywhere in a step
+  leaves the state it had (a step changes no file); between steps the store
+  is in the state a cut inside GC leaves (I2).
 
 ## Invariants (hold after every operation and every cut)
 
@@ -237,6 +247,7 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 | `idle_free_percent` | 25 | the idle low water: below this share of sectors free, an idle step collects a sector with garbage (0 = never; forgetting goes on) |
 | `idle_min_garbage` | 1024 | the least garbage (bytes) an idle collection wins back |
 | `idle_pack_free` | 4 | near full: below `reserve` + this many free sectors, idle steps also pack (0 = never) |
+| `idle_copy_bytes` | 2048 | the most an idle step copies out of a victim (the record that crosses it finishes): what keeps a step to about one erase's time |
 
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`
@@ -263,7 +274,7 @@ sequence — always on, for a boot line), `get`, `file_size`, `exists`, `list`
 `delete`, `delete_prefix` (`"<dir>/"` only: the directory and everything
 under it, one change; any other prefix is `InvalidPath`),
 `delete_file_and_tree`, `begin`, `commit`, `abort`, `in_transaction`,
-`collect_step` (the idle cleanup, above: `true` if it changed the flash),
+`collect_step` (the idle cleanup, above: one piece; `true` if it did one),
 `stats` and `reset_transient_peak` (feature `stats`), `free_sectors`,
 `flash`/`flash_mut`, `into_flash`, `into_parts`, `name_clash` (whether a
 new file at a path would share a name with a directory), `file_node` and
@@ -467,14 +478,22 @@ transaction; forgetting makes the next mount read less (16 sectors of churn:
 13.2 KB over 16 trusted sectors → 11.4 KB over 4, over the fast mount); steps keep the low water;
 cut sweeps and remount sweeps through idle steps (every tear model of the
 sweeps; `calibrated_mid_word` and `calibrated_first_lift` with 8 seeds a
-cut). And the soak's near-full fill on 176 sectors — about c40's content,
+cut). A step is one piece (`each_step_is_one_piece`: a mark that programs
+nothing, one erase, one forget, or at most `idle_copy_bytes` + a record of
+copies — never two together); a write between steps drops the victim under
+way and every file reads back
+(`a_write_between_steps_drops_the_victim_under_way`), and the cut sweep runs
+through steps a write interrupts, part of a victim copied or an emptied one
+waiting (`cut_sweep_through_steps_a_write_interrupts`). And the soak's
+near-full fill on 176 sectors — about c40's content,
 then incompressible 4 KiB files and a panel save each until `NoSpace` —
 priced by a silicon model (an erase 19 ms, a program 0.5 ms per 256 B, a
 read 0.42 µs per byte; a host estimate, never a silicon claim): back to
 back, 6 of the 95 writes cost over 1 s, the worst 3.9 s (CX1 measured
-3.78 s); with up to 40 idle steps between writes (CX1's 20 s of quiet),
-none, the last included (worst 57 ms), at 523 erases against 770 — each
-idle step at most 62 ms. Near full, 300 panel saves with the store left to
+3.78 s); with CX1's 20 s of quiet between writes as a playing 44 ms show,
+the steps paced by `lpfs::IdlePacer`, none, the last included (worst
+57 ms), at 563 erases against 770 — each step at most 29 ms, the show's
+p99 frame 65 ms with none over 100 ms, the steps 0.8 % of its time. Near full, 300 panel saves with the store left to
 settle before each cost 39 erases against the write path's 93 (at 93
 files; one settling of 342 erases after the mount): before a new pass
 waited for a sector of new waste, every save bought a whole re-pack, 50,913
@@ -483,7 +502,7 @@ quiet between them leaves a mount 45 KB over 66 trusted sectors to read
 instead of 217 KB over 176 (~19 ms against ~91 by the model's read rate),
 at the same 270 erases.
 
-**Mutants** (feature `mutants`, `mutants.rs`): sixteen switches, each
+**Mutants** (feature `mutants`, `mutants.rs`): twenty switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
@@ -493,8 +512,12 @@ untrusted; open a sector without the erase read-back; trust the newest
 sectors' last programs on one read (no settle); and the two checks the fast
 mount stands on: read the newest sector of each kind by its headers, as a
 cold one (`newest_by_headers`), and never fall back to the whole reading
-(`no_full_scan`); format leaving the headers it does not erase (no kill); an idle step
-forgetting a write head.
+(`no_full_scan`); format leaving the headers it does not erase (no kill); the
+mount's id index taking records it does not trust; reading through the cache
+without invalidating what a program or erase changed; an idle step
+forgetting a write head; idle steps keeping their mark (and victim) across
+writes; an idle step erasing its victim before every live record in it has
+a copy.
 `lp-store-bench
 mutants` runs each through a fixed driver set and requires every one caught
 and the unmutated store clean (its README has the table).

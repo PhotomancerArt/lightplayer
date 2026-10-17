@@ -33,7 +33,9 @@ enum Command {
         /// fw-esp32c6 features (its defaults are always on).
         #[arg(long, default_value = "esp32c6,server")]
         features: String,
-        /// A bootloader to use instead of espflash 3.3.0's bundled one.
+        /// The second-stage bootloader to merge (default:
+        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin, the
+        /// one the esp32c6-4mb build def ships).
         #[arg(long)]
         bootloader: Option<PathBuf>,
         /// The partition table (default: lp-fw/fw-esp32c6/partitions.csv).
@@ -98,7 +100,9 @@ fn run(command: Command) -> Result<bool> {
         } => {
             let mut opts = BuildOptions::new(repo, out);
             opts.features = features;
-            opts.bootloader = bootloader;
+            if let Some(b) = bootloader {
+                opts.bootloader = Some(b);
+            }
             opts.target = target;
             if let Some(p) = partitions {
                 opts.partitions = p;

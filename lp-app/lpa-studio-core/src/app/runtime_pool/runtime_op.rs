@@ -113,12 +113,12 @@ impl ControllerOp for RuntimeOp {
             .with_icon("edit"),
             Self::CloseDeviceLens => ActionMeta::new(
                 "Close",
-                "Close the editor on this board and give its wire back.",
+                "Close the editor on this board.",
                 ActionPriority::Tertiary,
             ),
             Self::CancelOpen => ActionMeta::new(
                 "Cancel",
-                "Stop opening this project and give the board back.",
+                "Stop opening this project on the board.",
                 ActionPriority::Secondary,
             ),
         }

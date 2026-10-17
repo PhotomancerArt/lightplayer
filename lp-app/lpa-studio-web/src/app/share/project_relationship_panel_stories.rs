@@ -92,7 +92,7 @@ pub(crate) fn project_popover_mine_published() -> Element {
 
 #[story(
     label = "Project popover — member of someone else's",
-    description = "An editor on a project somebody else owns. The roster renders READ-ONLY (no segment, no add row, no Remove buttons): you can see who else is here, and you administer none of it. The owner's name is deliberately absent — the service exposes no owner profile, so \"someone else's\" stands rather than a guess. Slot 1 is the quiet \"Fork my copy\"."
+    description = "An editor on a project somebody else owns. The roster renders READ-ONLY (no segment, no add row, no Remove buttons): you can see who else is here, and you administer none of it. The owner's name is deliberately absent — the service exposes no owner profile, so \"someone else's\" stands rather than a guess. Slot 1 is the quiet \"Fork a copy\"."
 )]
 pub(crate) fn project_popover_member() -> Element {
     panel(rsx! {
@@ -115,7 +115,7 @@ pub(crate) fn project_popover_member() -> Element {
 
 #[story(
     label = "Project popover — viewing someone else's",
-    description = "A guest on a shared link: no roster (the service answers member lists to members only), one sentence saying what the link grants, and the hero \"Fork — make it yours\" in slot 1, because taking a copy is the only way anything you do here survives. Note there is no export row in the ⋯ menu — there is no library package behind a visit."
+    description = "A guest on a shared link: no roster (the service answers member lists to members only), one sentence saying what the link grants, and the hero \"Fork a copy\" in slot 1, because taking a copy is the only way anything you do here survives. Note there is no export row in the ⋯ menu — there is no library package behind a visit."
 )]
 pub(crate) fn project_popover_visitor() -> Element {
     panel(rsx! {

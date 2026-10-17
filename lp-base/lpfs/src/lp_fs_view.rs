@@ -270,8 +270,8 @@ impl LpFs for LpFsView {
         self.parent.borrow().batches_are_atomic()
     }
 
-    fn idle_step(&self) -> Result<bool, FsError> {
-        self.parent.borrow().idle_step()
+    fn idle_tick(&self, tick: crate::IdleTick) -> Result<bool, FsError> {
+        self.parent.borrow().idle_tick(tick)
     }
 
     fn write_deflated_chunk(

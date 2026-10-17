@@ -185,7 +185,7 @@ pub(crate) fn DocsPanelSurface(
                 },
                 None => rsx! {
                     EmbedLoading {
-                        message: "Starting Desktop (sim) — the knobs appear here.".to_string(),
+                        message: "Starting Desktop (sim). The knobs will appear here.".to_string(),
                         min_height: 120,
                     }
                 },

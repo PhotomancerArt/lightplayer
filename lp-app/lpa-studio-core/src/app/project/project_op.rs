@@ -100,23 +100,23 @@ impl ControllerOp for ProjectOp {
             ),
             Self::DetachLens => ActionMeta::new(
                 "Close editor",
-                "Close the editor; every runtime keeps running.",
+                "Close the editor. Your boards and sims will keep running.",
                 ActionPriority::Tertiary,
             ),
             Self::SaveOverlay => ActionMeta::new(
                 "Save",
-                "Write pending persisted edits back to the project files.",
+                "Save your changes to the project.",
                 ActionPriority::Primary,
             ),
             // Every unsaved edit goes, and nothing brings them back (D7).
             Self::RevertAllEdits => ActionMeta::new(
                 "Revert all",
-                "Discard every pending edit on this project.",
+                "Discard every unsaved change in this project.",
                 ActionPriority::Secondary,
             )
             .lasting(ActionConfirmation::new(
                 "Revert to saved?",
-                "Every unsaved edit in this project is discarded.",
+                "Every unsaved change in this project will be lost.",
                 "revert",
             )),
             Self::ClearDebugEdits => ActionMeta::new(

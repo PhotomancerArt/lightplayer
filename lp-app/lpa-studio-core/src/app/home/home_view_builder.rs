@@ -383,7 +383,7 @@ mod tests {
             .find(|card| card.slug == "z-hand-copied")
             .expect("the unreadable package has a card");
         let (headline, remedy) = stale.health.blocked().expect("classified as blocked");
-        assert_eq!(headline, "Format 2 — too old for this Studio");
+        assert_eq!(headline, "Format too old (2)");
         assert!(
             remedy.contains("too old to upgrade automatically"),
             "{remedy}"

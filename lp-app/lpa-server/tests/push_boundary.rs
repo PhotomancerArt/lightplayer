@@ -11,7 +11,7 @@
 //!   every tear model `lp-nor-sim` names (the calibrated ones included);
 //!   after each, the remounted flash holds the old project or the new one,
 //!   never a mix.
-//! - **Quiet ticks** clean the store up (`LpFs::idle_step`) only after two
+//! - **Quiet ticks** clean the store up (`LpFs::idle_tick`) only after two
 //!   seconds with no file-changing request, and change no file.
 //! - **Measurements** on the repo's corpus (`catalog/` + `projects/`): wire
 //!   bytes and request counts with and without deflate, fixed 4 KiB chunks
@@ -155,18 +155,7 @@ fn an_idle_batch_expires_and_the_old_project_stays() {
 /// mount) with the project unchanged. A write ends the quiet.
 #[test]
 fn quiet_ticks_clean_the_tree_store_up_and_change_no_file() {
-    let board = Board::tree(formatted());
-    let a = project_files(PROJECT);
-    board.push(&a).expect("push a");
-    board.settle();
-    // Edits until the old pushes fill sectors of their own.
-    for i in 0..40 {
-        board.push(&edited(&a, &format!("edit {i}"))).expect("push");
-        board.settle();
-        if board.trusted_sectors() >= 8 {
-            break;
-        }
-    }
+    let board = Board::with_garbage();
     let hash = board.hash("demo");
     let trusted = board.trusted_sectors();
     board.set_plan(FaultPlan::none());
@@ -203,6 +192,44 @@ fn quiet_ticks_clean_the_tree_store_up_and_change_no_file() {
         after_write,
         "a write did not end the quiet"
     );
+}
+
+/// The server tells the filesystem whether a show is playing (a project is
+/// loaded) and how long its ticks take: a show with no room under the frame
+/// ceiling (95 ms frames) gets a cleanup step once in 200 frames; with the
+/// project stopped, the same garbage is cleaned on consecutive quiet ticks.
+#[test]
+fn a_playing_show_paces_the_cleanup() {
+    // The ticks (of 95 ms) at which a step touched the flash.
+    let steps = |board: &Board, ticks: u32| {
+        let mut at = Vec::new();
+        let mut touches = board.flash_touches();
+        for t in 0..ticks {
+            board.idle_ms(95);
+            let now = board.flash_touches();
+            if now > touches {
+                at.push(t);
+                touches = now;
+            }
+        }
+        at
+    };
+    let playing = Board::with_garbage();
+    let hash = playing.hash("demo");
+    // 2 s of quiet is 22 frames; then one step in 200 frames.
+    let slow = steps(&playing, 1_000);
+    assert!((3..=6).contains(&slow.len()), "steps at frames {slow:?}");
+    assert!(slow.windows(2).all(|w| w[1] - w[0] >= 199), "{slow:?}");
+    assert_eq!(playing.hash("demo"), hash);
+
+    let stopped = Board::with_garbage();
+    let mut client = stopped.client();
+    stopped.request(&mut client, ClientRequest::StopAllProjects);
+    assert_eq!(stopped.running(), None);
+    let quick = steps(&stopped, 60);
+    std::println!("playing at 95 ms: steps at {slow:?}; stopped: at {quick:?}");
+    assert!(quick.len() > slow.len(), "{quick:?}");
+    assert!(quick.windows(2).all(|w| w[1] == w[0] + 1), "{quick:?}");
 }
 
 #[test]
@@ -461,6 +488,23 @@ impl Board {
         Self::over(Box::new(tree), Some(handle))
     }
 
+    /// A tree board playing `PROJECT`, pushed and edited until the old
+    /// pushes fill sectors of their own (garbage for idle steps).
+    fn with_garbage() -> Self {
+        let board = Self::tree(formatted());
+        let a = project_files(PROJECT);
+        board.push(&a).expect("push a");
+        board.settle();
+        for i in 0..40 {
+            board.push(&edited(&a, &format!("edit {i}"))).expect("push");
+            board.settle();
+            if board.trusted_sectors() >= 8 {
+                break;
+            }
+        }
+        board
+    }
+
     fn memory() -> Self {
         Self::over(Box::new(LpFsMemory::new()), None)
     }
@@ -603,6 +647,14 @@ impl Board {
 
     fn ops_since_plan(&self) -> u64 {
         self.tree_handle(|st| st.flash().ops_since_plan())
+    }
+
+    /// Reads, programs and erases so far.
+    fn flash_touches(&self) -> u64 {
+        self.tree_handle(|st| {
+            let s = st.flash().stats();
+            s.read_calls + s.ops_total
+        })
     }
 
     /// Sectors whose header a mount would trust.

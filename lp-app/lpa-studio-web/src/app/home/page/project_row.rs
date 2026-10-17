@@ -157,17 +157,14 @@ mod tests {
         let facts = row_facts(
             &UiPackageCard {
                 health: PackageHealth::Blocked {
-                    headline: "Format 3 — too old for this Studio".to_string(),
+                    headline: "Format too old (3)".to_string(),
                     remedy: "Export a copy or delete it.".to_string(),
                 },
                 ..card()
             },
             0.0,
         );
-        assert_eq!(
-            facts.blocked.as_deref(),
-            Some("Format 3 — too old for this Studio")
-        );
+        assert_eq!(facts.blocked.as_deref(), Some("Format too old (3)"));
         assert_eq!(facts.open_href, None);
     }
 

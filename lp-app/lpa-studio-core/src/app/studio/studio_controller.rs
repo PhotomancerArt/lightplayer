@@ -5018,7 +5018,7 @@ impl StudioController {
             });
             if let Some(slug) = slug {
                 return UiError::UnsupportedAction(format!(
-                    "{slug} is open in another tab — close it there first"
+                    "{slug} is open in another tab. Close it there first."
                 ));
             }
         }
@@ -6540,7 +6540,7 @@ impl StudioController {
             // programming error or a hand-made action — refused with the
             // reason rather than silently started as Desktop.
             return Err(UiError::UnsupportedAction(format!(
-                "no hardware profile is checked in for {target_id}, so it cannot be started here"
+                "{target_id} has no hardware profile yet, so it can't be started here"
             )));
         }
         let kind = match op.backing {
@@ -8117,7 +8117,7 @@ impl StudioController {
     ) -> Result<(lpa_agent::ProjectEditsOutcome, UiNotices), UiError> {
         if self.project.active_library_uid().is_none() {
             return Err(UiError::UnsupportedAction(
-                "no project is open — open or create one first".to_string(),
+                "no project is open: open or create one first".to_string(),
             ));
         }
         let (landings, runs) = {
@@ -8800,7 +8800,7 @@ impl StudioController {
     fn app_agent_start(&mut self, text: String, shown: bool) -> UiResult {
         let Some(config) = self.settings.app_agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
-                "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
+                "the assistant isn't set up yet: choose a provider in Settings (the gear icon)"
                     .to_string(),
             ));
         };
@@ -9030,7 +9030,7 @@ impl StudioController {
         };
         let Some(config) = self.settings.agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
-                "the agent isn't set up yet — configure a provider in Settings (the gear icon)"
+                "the agent isn't set up yet: choose a provider in Settings (the gear icon)"
                     .to_string(),
             ));
         };
