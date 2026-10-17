@@ -114,14 +114,20 @@ and the correct solution was always to fix the dependency.
 
 ## How to Handle Binary Size Issues
 
-The ESP32-C6 app image must fit a 3.25 MB partition, and the budget is tight —
-read `docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
+The ESP32-C6 app image must fit its `factory` partition — `0x370000`
+(3,604,480 B, 3.4375 MiB) on the 128-sector tree-store table since the
+2026-10 cutover (`lp-fw/fw-esp32c6/partitions.csv`: `lpfs` is the last
+512 KiB, `0x380000`) — and the budget is tight. Read
+`docs/adr/2026-07-28-esp32c6-flash-budget.md` before doing size work. It
 records what has already been spent (a ~200 KB diagnostics-for-flash flag
 stack, the deliberately-kept 500 KB WiFi blob), what was reserved and is now
 spent (256 KB of the lpfs partition, given to the app for Wi-Fi by the 2026-10
 repartition — `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`;
-moving `lpfs` again needs a migration, never just a new table), and what has
-been measured and *rejected* so you don't re-run dead ends.
+then 192 KB more when the tree store's 128 sectors replaced littlefs's 176 —
+`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`. Moving `lpfs` again
+needs a migration, never just a new table, and the table it leaves is frozen
+beside the others in `lp-app/lpa-link/testdata/`), and what has been measured
+and *rejected* so you don't re-run dead ends.
 
 Check where you stand at any time:
 
@@ -506,6 +512,35 @@ are four ADRs, which cross-link each other:
   `FlashStorage`; the write fence (nothing written outside the region, inside
   the running core, or before the fence knows both); an image ends on a
   flash sector and the host flasher checks each write.
+- **The C6 boots mask ROM → LightPlayer's own second stage (at `0x0`) →
+  core → engine** since the 2026-10 cutover; the ESP-IDF bootloader is out
+  of the product path (`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`).
+  `merged.bin`, release packages, Studio's USB installs and the migration's
+  firmware step all write ours; `merged-idf.bin` keeps the IDF door, and a
+  board updated only over the air keeps whichever door its last USB flash
+  wrote (`app.bin` is the same behind both). Every split image must boot
+  through **both** doors. Our stage sets no clocks, no PLL, no analog bus, no
+  SPI1 command; it carries over only the state a core inherits (contract
+  C1–C8 in that ADR), and the brownout setting as the IDF left it.
+- **The C6's filesystem is the tree store** (`lp-tree-store`, `fs-tree`,
+  which `server` implies), on the 128-sector `lpfs` at `0x380000`. littlefs
+  is gone from the C6 image. A board still on littlefs (the 176-sector table,
+  `lpfs` at `0x350000`) moves only through one USB session — Studio's update
+  or `lp-cli hardware lpfs migrate --to tree` — that writes bootloader,
+  table, the migrated store and the firmware; a tree core that finds
+  littlefs **holds** it untouched (`fs: legacy_held`), never formats it
+  (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`).
+- **Flash read mode.** The image header stays **DIO, 40 MHz**: the ROM,
+  both second stages and the loader read in DIO, and every reset starts
+  there (a QIO header bricks the ROM's load — never). The core runs at
+  DIO 80 MHz and switches its reads to **QIO once at boot, read-only**: only
+  on a part on `fw_esp32_common::flash_qio::QIO_PARTS` whose QE bit is
+  already set, through `SPIMasterReadModeCnfig` (never
+  `esp_rom_spiflash_config_readmode`, which writes the status register),
+  checked and reverted to DIO if anything is off
+  (`fw-esp32c6/src/flash_qio.rs`,
+  `docs/adr/2026-10-17-c6-core-reads-flash-in-qio-read-only.md`). Never
+  write a flash status register to get QIO.
 - **Persisted formats are forever.** The boot records, the engine header and
   digest slot, the loader's version word, the progress record, the
   `ota-manifest.json` and the release index are versioned and bind from the
@@ -1477,8 +1512,8 @@ the port (see below); it writes the protocol file and Yona runs it.
 `lp-emu/esp/lp-emu-esp32c6` runs the shipped `fw-esp32c6` image on the host —
 the bytes a board is flashed with, not a variant. It boots either way a board
 can: **ROM-up** from a merged 4 MiB flash image, where the hart starts at the
-reset vector and the real mask ROM and ESP-IDF second-stage bootloader load
-the app, or a **direct load** straight to the entry point, which M7 measured
+reset vector and the real mask ROM and the image's second stage — ours in
+`merged.bin`, ESP-IDF's in `merged-idf.bin` — load the app, or a **direct load** straight to the entry point, which M7 measured
 byte-equal to ROM-up at app entry and which is what the per-tick gates use. It
 speaks the link the product ships on (emulated USB-Serial-JTAG, with a host
 that can be attached, detached, opened and closed), serves a project over it,
