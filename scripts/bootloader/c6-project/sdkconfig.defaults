@@ -1,0 +1,2 @@
+# Common to both variants (see build-c6-bootloader.sh). ESP-IDF's own
+# defaults for the C6 at the pinned commit, which is what espflash built.
