@@ -59,6 +59,7 @@ mod mount_walk;
 mod multi_node;
 #[cfg(feature = "mutants")]
 pub mod mutants;
+mod name_clash;
 mod node_read;
 mod node_write;
 mod object_hasher;

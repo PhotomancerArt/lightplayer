@@ -137,6 +137,24 @@ fn writable(p: &str) -> Result<(), FsError> {
     Ok(())
 }
 
+/// Whether a file is at `p` already; when not, refuse a new one that would
+/// share a name with a directory — under a file, or where files are
+/// (FORMAT.md "Files and paths"; littlefs refuses the same).
+fn existed_or_free<F: Flash, H: ObjectHasher>(
+    st: &mut TreeStore<F, H>,
+    p: &str,
+) -> Result<bool, FsError> {
+    if st.exists(p).map_err(store_err)? {
+        return Ok(true);
+    }
+    if st.name_clash(p).map_err(store_err)? {
+        return Err(FsError::InvalidPath(format!(
+            "{p}: a file and a directory cannot share a name"
+        )));
+    }
+    Ok(false)
+}
+
 impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         let p = norm(path)?;
@@ -149,7 +167,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         writable(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
-            let existed = st.exists(&p).map_err(store_err)?;
+            let existed = existed_or_free(st, &p)?;
             st.put(&p, data).map_err(store_err)?;
             existed
         };
@@ -169,7 +187,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         writable(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
-            let existed = st.exists(&p).map_err(store_err)?;
+            let existed = existed_or_free(st, &p)?;
             st.append(&p, data).map_err(store_err)?;
             existed
         };
@@ -351,7 +369,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         writable(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
-            let existed = st.exists(&p).map_err(store_err)?;
+            let existed = existed_or_free(st, &p)?;
             st.put_chunk_deflated(&p, offset, logical_len, None, deflated)
                 .map_err(store_err)?;
             existed

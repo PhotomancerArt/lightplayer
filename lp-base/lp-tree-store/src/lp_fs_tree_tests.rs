@@ -334,6 +334,52 @@ fn nothing_but_a_snapshot_writes_under_the_snapshot_namespace() {
         .unwrap();
 }
 
+/// A file and a directory never share a name (FORMAT.md "Files and
+/// paths"): a new file under a file, or where files are, is refused with
+/// nothing written — through every write, inside a batch too, and for hot
+/// paths — while rewriting a file, and writing where a deleted one was,
+/// stay ordinary.
+#[test]
+fn a_file_and_a_directory_never_share_a_name() {
+    let fs = tree_fs();
+    fs.write_file("/a".as_path(), b"file a").unwrap();
+    fs.write_file("/d/x.json".as_path(), b"under d").unwrap();
+    fs.write_file("/p/.lp/panel.json".as_path(), b"{}").unwrap();
+    fs.write_file("/q".as_path(), b"file q").unwrap();
+    let before = image(&fs);
+    let refused = |what: &str, r: Result<(), lpfs::FsError>| {
+        assert!(
+            matches!(r, Err(lpfs::FsError::InvalidPath(_))),
+            "{what}: {r:?}"
+        );
+    };
+    let z = crate::test_support::deflate(b"{}");
+    for p in ["/a/b", "/a/b/c", "/d", "/p/.lp", "/p", "/q/.lp/panel.json"] {
+        refused(p, fs.write_file(p.as_path(), b"{}"));
+        refused(p, fs.append_file(p.as_path(), b"{}"));
+        refused(p, fs.write_deflated_chunk(p.as_path(), 0, 2, &z));
+    }
+    assert!(image(&fs) == before, "a refused write wrote");
+    assert!(!fs.is_dir("/a".as_path()).unwrap());
+    // A rewrite and an append of an existing file are not new files.
+    fs.write_file("/a".as_path(), b"file a, again").unwrap();
+    fs.append_file("/d/x.json".as_path(), b"+").unwrap();
+    // Inside a batch, the batch's own writes count.
+    fs.begin_batch().unwrap();
+    fs.write_file("/t/u".as_path(), b"u").unwrap();
+    refused("/t in a batch", fs.write_file("/t".as_path(), b"t"));
+    fs.write_file("/v".as_path(), b"v").unwrap();
+    refused("/v/w in a batch", fs.write_file("/v/w".as_path(), b"w"));
+    fs.commit_batch().unwrap();
+    // Gone, the name is free again: a deleted file becomes a directory.
+    fs.delete_file("/a".as_path()).unwrap();
+    fs.write_file("/a/b".as_path(), b"b").unwrap();
+    fs.delete_dir("/d".as_path()).unwrap();
+    fs.write_file("/d".as_path(), b"d").unwrap();
+    assert_eq!(fs.read_file("/d".as_path()).unwrap(), b"d");
+    assert_eq!(fs.read_file("/a/b".as_path()).unwrap(), b"b");
+}
+
 /// `bytes` to `path` as the wire sends them: the plan's chunks, in order.
 fn write_deflated(fs: &dyn LpFs, path: &str, bytes: &[u8], record_max: u32) {
     for chunk in crate::plan_deflated_chunks(bytes, record_max, crate::DEFAULT_DEFLATE_LEVEL) {

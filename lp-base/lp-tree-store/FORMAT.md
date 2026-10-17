@@ -235,9 +235,12 @@ count u16, then per entry:
   id u64            the file's or directory's node id
 ```
 
-Entries are sorted by (name bytes, kind); a file and a directory may share
-a name. The name rules (UTF-8, non-empty, no `/`; full hot paths, below)
-are the **writer's**: a directory *decodes* (mount step 3) when its count,
+Entries are sorted by (name bytes, kind). The encoding could hold a file
+and a directory of one name; **a writer never makes one** ("Files and
+paths"), and a reader that meets one anyway (damage, a foreign writer)
+decodes it and must not fail on it. The name rules (UTF-8, non-empty, no
+`/`; full hot paths, below; no file and directory of one name) are the
+**writer's**: a directory *decodes* (mount step 3) when its count,
 kinds, lengths and ids parse and its bytes end exactly. This reader checks
 UTF-8 only where a name leaves the store as a string (a listing), and
 reports such a name as corrupt there. A directory whose bytes fit one record (`≤ R − 16`) is one `Dir`
@@ -315,7 +318,14 @@ holds without comparing bytes.
 
 A path is absolute, `/`-separated, no empty component, no trailing `/`, at
 most 32 components and 65535 bytes. Directories are implicit: a directory
-exists while a file is under it. A path is **hot** when it ends with
+exists while a file is under it. **A path names a file or a directory,
+never both**: a writer refuses a new file under a path that is a file, or
+at a path that files are under (`LpFsTree`: `InvalidPath`, nothing
+written; littlefs and every host filesystem refuse the same, so every tool
+that reads a store — extract, a backup, a desktop folder — can hold what
+it finds). Names are compared as bytes: no Unicode normalization, and case
+matters (`A.glsl` and `a.glsl` are two files; a case-insensitive host
+folder cannot hold both, which is an app's concern, not the store's). A path is **hot** when it ends with
 `/.lp/panel.json`; a hot file appears only in the hot directory, every
 other file only in the cold tree.
 
