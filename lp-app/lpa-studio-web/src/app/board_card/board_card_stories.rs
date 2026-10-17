@@ -45,7 +45,7 @@ use crate::app::module::module_fixtures::{
 // --- Every state ------------------------------------------------------------
 
 #[story(
-    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md): live (the corner quiet, Connect as the primary, Edit on the Project row), connected (the board's panel in the five bars' place at their height: the master fader, three knobs, All controls · 2 more with Edit at its end; Done as the primary), identifying (the Hardware row working: the spinner in its icon's place, \"identifying\", the iridescent sweep along its foot, Cancel; the primary the spinner alone, never a greyed Connect), offline with its last picture (dimmed, the corner quiet, \"Offline · 2 weeks\" on its Link row and the other rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: Unlock, the picture dark), updating (the firmware bar's work at 40 % and the board's own light strip in the picture), done (the project bar green for a few seconds), failed (striped, Retry), a new board (Install with the board pick), an emulated board (\"Emulated · running\" on its Link row, the model alone on its Hardware row), a board reached through lightplayer.app (\"lightplayer.app · connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"Open in another tab\" in orange, the picture that tab saved, dimmed, Connect), taking over (the connection bar working: \"Asking the other tab…\", the primary saying the same words) and taken (\"Taken by another tab\", Connect). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
+    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md), the card's top saying what matters (round 3's surface: the state's icon in its tone and plain sentences, the picture dimmed under them): live (the picture alone, the corner a quiet ⋯, Connect as the primary, Edit on the Project row), connected (the board's panel in the five bars' place at their height: the master fader, three knobs, All controls · 2 more with Edit at its end; Done as the primary), identifying (\"Identifying this board.\" with the spinner; the Hardware row working; no button), offline with its last picture (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\" over it, its Link row naming the way that works, \"Wi‑Fi · not connected\", the other rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: \"This board is locked. Unlock it to connect.\", Unlock), updating (\"This board is updating its firmware.\" and its bar at 40 %, over the board's own light strip), done (the project bar green for a few seconds), failed (\"Studio couldn't send the project to this board. Retry to send it again.\"; the Project row keeps its words and Retry, quietly), a new board (\"This board doesn't have LightPlayer firmware.\", Install firmware with the board pick), an emulated board (\"Emulated · running\" on its Link row, the model alone on its Hardware row), a board reached through lightplayer.app (\"lightplayer.app · connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"This board is open in another tab. Connect here to move it to this tab.\" over the picture that tab saved; Connect here), taking over (\"Moving this board to this tab.\", the spinner, here and as the primary) and taken (\"Another tab took this board.\", Connect here). The picture is 138 px, the name bar 50 px, each bar 28 px: every card is 330 px tall."
 )]
 fn board_card_every_state() -> Element {
     rsx! {
@@ -133,7 +133,7 @@ fn board_card_every_state() -> Element {
 // --- Row states ---------------------------------------------------------------
 
 #[story(
-    description = "Round 2's row states the other stories do not show, each in the row's own grammar (icon · kind · name · state · action): a shader error (Project · aurora-drift · error, red and striped, the fault in its details), play only (Access · play only, Unlock flush at its end), USB only (Access · USB only · no password, orange, no button: no core offer sets a board's password, so the details say what to do), and a board known only by its chip (Hardware · ESP32-C6 · model not set)."
+    description = "Round 2's row states the other stories do not show, each in the row's own grammar (icon · kind · name · state · action): a shader error (Project · aurora-drift · error, the fault in its details; the surface says \"This board's project has an error.\" in red, so the row goes quiet), play only (Access · play only, Unlock flush at its end), USB only (Access · USB only · no password, orange, no button: no core offer sets a board's password, so the details say what to do), and a board known only by its chip (Hardware · ESP32-C6 · model not set)."
 )]
 fn board_card_row_states() -> Element {
     let mut faulted = porch();
@@ -187,6 +187,360 @@ fn board_card_row_states() -> Element {
     }
 }
 
+// --- The surface ------------------------------------------------------------
+
+#[story(
+    description = "The card's top says what matters (round 3, concept B): when the board needs something, the picture's place carries the state's icon in the state's tone and one or two plain sentences, the second the primary's button said aloud; the primary beside the name is that button. What runs the board: OLD FIRMWARE (the desk's C6 of 2026-10-17, an older LightPlayer Studio's link cannot speak to: \"This board is running old firmware. Update the firmware to connect and edit.\", Update firmware, one click; the Project row says \"not known\", never a false \"none\"), NO FIRMWARE, CRASHING (red), a version Studio CAN'T GET, INCOMPLETE (only its core runs), from BEFORE THE HELLO, DOWNLOAD MODE and a board that SAYS NOTHING. The rows go quiet: the Firmware row keeps its words and its own button, and loses its tone."
+)]
+fn board_card_surface_firmware() -> Element {
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "old firmware",
+                StoryBoardCard { card: older_lightplayer(), on_action: |_| {} }
+            }
+            Cell { caption: "no firmware",
+                StoryBoardCard { card: needs_firmware(DeviceFirmwareFace::Blank), on_action: |_| {} }
+            }
+            Cell { caption: "crashing",
+                {update_card(UpdateFixtureRow::KeepsCrashing, None)}
+            }
+            Cell { caption: "a version Studio can't get",
+                {update_card(UpdateFixtureRow::CantGetVersion, None)}
+            }
+            Cell { caption: "incomplete",
+                StoryBoardCard {
+                    card: needs_firmware(DeviceFirmwareFace::CoreOnly {
+                        version: Some("2026.10.08-9".to_string()),
+                        state: lpa_studio_core::DeviceUpdateBoardState::NeedsEngine,
+                    }),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "from before the hello",
+                StoryBoardCard { card: needs_firmware(DeviceFirmwareFace::NoHello), on_action: |_| {} }
+            }
+            Cell { caption: "download mode",
+                StoryBoardCard { card: needs_firmware(DeviceFirmwareFace::Bootloader), on_action: |_| {} }
+            }
+            Cell { caption: "says nothing",
+                StoryBoardCard { card: needs_firmware(DeviceFirmwareFace::Silent), on_action: |_| {} }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The surface when the board can't be reached, or is someone else's: NOT ANSWERING (\"This board stopped responding over USB. Retry to reconnect.\", Retry), Wi‑Fi FAILED (\"Studio couldn't reach this board over Wi‑Fi. Make sure this computer is on the same Wi‑Fi, then retry.\", the longest words a surface says), through lightplayer.app failed, SOMEONE ELSE connected, the last Connect FAILED, OFFLINE (its last picture dims under \"This board is offline. It was last seen 2 hours ago.\", no button: nothing reaches it), offline but WI‑FI REACHES IT (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\", and the Link row names the way that works: \"Wi‑Fi · not connected\"), OPEN IN ANOTHER TAB (\"Connect here\"), TAKEN by another tab, BUSY in another tab, a closed port (DISCONNECTED) and a simulated board POWERED OFF. One dim: a picture under the notice takes the cover's dim, never a stale dim as well."
+)]
+fn board_card_surface_reach() -> Element {
+    let mut not_answering = porch();
+    not_answering.status = DeviceStatus::NotResponding;
+    not_answering.state_label = "Not responding".to_string();
+    not_answering.escapes = vec![
+        DeviceEscape::Retry,
+        DeviceEscape::Disconnect,
+        DeviceEscape::Forget,
+    ];
+    let mut nothing_reaches = offline();
+    nothing_reaches.escapes = vec![DeviceEscape::Forget];
+    let mut disconnected = porch();
+    disconnected.status = DeviceStatus::Attached;
+    disconnected.state_label = "Attached — not listening".to_string();
+    disconnected.can_receive_project = false;
+    disconnected.can_remove_project = false;
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "not answering",
+                StoryBoardCard {
+                    card: not_answering,
+                    feed: live_feed(),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "Wi‑Fi failed",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    wifi_address: Some("192.168.1.40".to_string()),
+                    wifi_connect: Some(failed_connect(false)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "lightplayer.app failed",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    relay: true,
+                    wifi_connect: Some(failed_connect(true)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "someone else",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    wifi_address: Some("192.168.1.40".to_string()),
+                    wifi_connect: Some(busy_connect(false)),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "connect failed",
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    connection: BoardConnection::Failed {
+                        reason: "The board didn't answer in time".to_string(),
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "offline",
+                StoryBoardCard {
+                    card: nothing_reaches,
+                    feed: last_picture(),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "offline, Wi‑Fi reaches it",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    wifi_address: Some("192.168.1.40".to_string()),
+                    last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "another tab",
+                {held_card(HoldLevel::Open, false, None)}
+            }
+            Cell { caption: "taken by another tab",
+                {held_card(HoldLevel::Watching, true, None)}
+            }
+            Cell { caption: "busy in another tab",
+                {held_card(HoldLevel::Busy("Updating · 42%".to_string()), false, None)}
+            }
+            Cell { caption: "disconnected",
+                StoryBoardCard { card: disconnected, on_action: |_| {} }
+            }
+            Cell { caption: "simulated, off",
+                StoryBoardCard {
+                    card: offline(),
+                    runtime: Some(UiRuntimeBand::sim("seeed/xiao-esp32-c6", None)),
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The surface while work runs: its icon (or the spinner in its place, when the work has no number) and one sentence, the work's bar and percent under it, the picture dimmed beneath; no primary but the spinner while the board is being reached. UPDATING (\"This board is updating its firmware.\" · 40%), SENDING (\"Sending the project “studio” to this board.\": a project's name in running text is quoted), INSTALLING a flash, CONNECTING (the spinner, here and as the primary), MOVING a board from another tab, IDENTIFYING, RECONNECTING (Done stays the primary: the session holds on) and the editor holding the board (\"This board is open in the editor.\", Done). The row doing the work still shows it along its foot."
+)]
+fn board_card_surface_work() -> Element {
+    let sending = DeviceView {
+        status: DeviceStatus::Busy,
+        can_receive_project: false,
+        can_remove_project: false,
+        activity: Some(activity(
+            DeviceActivityKind::Push,
+            "Sending the project",
+            Some(40),
+        )),
+        escapes: vec![
+            DeviceEscape::Cancel,
+            DeviceEscape::Disconnect,
+            DeviceEscape::Forget,
+        ],
+        ..porch()
+    };
+    let installing = DeviceView {
+        status: DeviceStatus::Busy,
+        activity: Some(activity(
+            DeviceActivityKind::Flash,
+            "Writing firmware",
+            Some(30),
+        )),
+        escapes: vec![DeviceEscape::Cancel, DeviceEscape::Forget],
+        ..needs_firmware(DeviceFirmwareFace::Blank)
+    };
+    let editor_feed = DeviceCardFeedView {
+        liveness: FeedLiveness::Lens,
+        ..last_picture().expect("a picture")
+    };
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "updating",
+                {update_card(UpdateFixtureRow::Updating, None)}
+            }
+            Cell { caption: "sending",
+                StoryBoardCard {
+                    card: sending,
+                    feed: live_feed(),
+                    plays: running(),
+                    sending: Some("studio".to_string()),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "installing",
+                StoryBoardCard { card: installing, on_action: |_| {} }
+            }
+            Cell { caption: "connecting",
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    connection: BoardConnection::Connecting,
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "moving here from another tab",
+                {held_card(HoldLevel::Watching, false, Some(asking_the_other_tab()))}
+            }
+            Cell { caption: "identifying",
+                StoryBoardCard { card: identifying(), on_action: |_| {} }
+            }
+            Cell { caption: "reconnecting",
+                StoryBoardCard {
+                    card: offline(),
+                    feed: last_picture(),
+                    editor_holds_it: true,
+                    connection: BoardConnection::Reconnecting,
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "open in the editor",
+                StoryBoardCard {
+                    card: porch(),
+                    feed: Some(editor_feed),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    editor_holds_it: true,
+                    on_action: |_| {},
+                }
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The surface for what the board plays and who may: its files LOST (\"This board's files were lost. Restore them from a backup, or reset the board.\": with no backup in this browser, Reset is the primary), its project's SHADER ERROR (red; Edit project), NO PROJECT yet (Add a project), LOCKED (Unlock), a SEND that FAILED (Retry), its file store UNREADABLE (no button: no click here is safe), its files waiting for NEWER FIRMWARE (Update firmware), and a picture TOO LARGE to show over Bluetooth. Then the two states that say nothing over the picture: ALL WELL (Connect) and CONNECTED (Done, the panel in the rows' place). And one update over USB first, which is no notice: the board plays and connects, and the Firmware row's own Update carries it."
+)]
+fn board_card_surface_project() -> Element {
+    let mut faulted = porch();
+    faulted.status = DeviceStatus::Degraded;
+    faulted.degraded = Some("Degraded: orbit.shader:12: 'tme' is not declared".to_string());
+    let empty = DeviceView {
+        loaded_project: DeviceLoadedProject::Empty,
+        can_remove_project: false,
+        ..porch()
+    };
+    let too_large = DeviceCardFeedView {
+        frame: live_feed().and_then(|feed| feed.frame).map(|frame| {
+            lpa_studio_core::UiControlProductPreview {
+                display_layout: None,
+                ..frame
+            }
+        }),
+        ..live_feed().expect("a picture")
+    };
+    rsx! {
+        section { class: STORY_GRID_CLASS,
+            Cell { caption: "data lost",
+                {files_card(DeviceBoardFs::Formatted, empty.clone())}
+            }
+            Cell { caption: "a shader error",
+                StoryBoardCard {
+                    card: faulted,
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "no project",
+                StoryBoardCard { card: empty, on_action: |_| {} }
+            }
+            Cell { caption: "locked",
+                StoryBoardCard {
+                    card: over_network(porch()),
+                    link: Some(UiLinkKind::Bluetooth),
+                    access: Some(locked_access()),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "send failed",
+                {failed_card(None)}
+            }
+            Cell { caption: "data unreadable",
+                {files_card(DeviceBoardFs::Refused, porch())}
+            }
+            Cell { caption: "files need newer firmware",
+                {files_card(DeviceBoardFs::TreeStoreHeld, porch())}
+            }
+            Cell { caption: "picture too large",
+                StoryBoardCard {
+                    card: over_network(porch()),
+                    link: Some(UiLinkKind::Bluetooth),
+                    feed: Some(too_large),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "all well",
+                StoryBoardCard {
+                    card: porch(),
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "connected",
+                {connected_card(card_root_panel(), None)}
+            }
+            Cell { caption: "one update over USB first",
+                {update_card(UpdateFixtureRow::NeedsUsbOnce, None)}
+            }
+        }
+    }
+}
+
+#[story(
+    description = "The surface on a phone's narrow card (two to a row, a 108 px picture): the same notice, smaller, and its longest words still fit inside the picture's place — Wi‑Fi failed, old firmware, offline but Wi‑Fi reaches it, and updating with its bar."
+)]
+fn board_card_surface_narrow() -> Element {
+    rsx! {
+        section { class: "tw:grid tw:w-[390px] tw:max-w-full tw:grid-cols-2 tw:gap-[9px] tw:p-3",
+            StoryBoardCard {
+                card: offline(),
+                feed: last_picture(),
+                wifi_address: Some("192.168.1.40".to_string()),
+                wifi_connect: Some(failed_connect(false)),
+                last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                on_action: |_| {},
+            }
+            StoryBoardCard { card: older_lightplayer(), on_action: |_| {} }
+            StoryBoardCard {
+                card: offline(),
+                feed: last_picture(),
+                wifi_address: Some("192.168.1.40".to_string()),
+                last_seen_at: Some(STORY_BOARD_NOW - 2.0 * HOUR),
+                on_action: |_| {},
+            }
+            {update_card(UpdateFixtureRow::Updating, None)}
+        }
+    }
+}
+
 // --- Work with no percent ---------------------------------------------------
 
 #[story(
@@ -225,7 +579,7 @@ fn board_card_sweep_stays_inside_the_card() -> Element {
 // --- A board another tab holds ----------------------------------------------
 
 #[story(
-    description = "A board another tab of this browser holds (one tab holds each board; the others show its last picture and say so). Three frames of the same card, by what the holder is doing: WATCHING (it holds the board and nothing of the user's is open there): the picture that tab saved, dimmed, its age (\"5 min ago\") in the corner; the connection bar says \"Open in another tab\" in orange, the colour of \"someone has it\", and nothing else; the name bar's primary is Connect, whose offer is the take-over; the corner is orange too, its details saying \"The last picture another tab saved.\". EDITOR OPEN: the aside says \"editor open\", and Connect wears the error tint (taking the board closes that editor; the undo is pressing Connect over there). BUSY: the aside is what the holder is doing (\"Updating · 42%\"), and the primary says \"Busy in the other tab\" (the work, \"Busy in the other tab: Updating · 42%\", on its hover): never a greyed Connect. The card is the board's own card: same height, same five bars."
+    description = "A board another tab of this browser holds (one tab holds each board; the others show its last picture and say so). Three frames of the same card, by what the holder is doing: WATCHING (it holds the board and nothing of the user's is open there): the picture that tab saved, dimmed under the surface's \"This board is open in another tab. Connect here to move it to this tab.\", its icon orange, the colour of \"someone has it\"; the connection bar says \"Open in another tab\", quietly (the surface is the loud place); the name bar's primary is Connect here, whose offer is the take-over; the corner's details say \"The last picture another tab saved.\". EDITOR OPEN: the aside says \"editor open\", and Connect here wears the error tint (taking the board closes that editor; the undo is pressing Connect here over there). BUSY: \"This board is busy in another tab.\", the aside what the holder is doing (\"Updating · 42%\"), and no button: never a greyed Connect. The card is the board's own card: same height, same five bars."
 )]
 fn board_card_held_by_another_tab() -> Element {
     rsx! {
@@ -244,7 +598,7 @@ fn board_card_held_by_another_tab() -> Element {
 }
 
 #[story(
-    description = "Connect on a board another tab holds, while it runs and when it fails. ASKING: the Link row is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), the primary the spinner alone, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: the bar is striped with \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, which presses the same take-over; Connect is a press again. The picture and the status corner do not change for work."
+    description = "Connect here on a board another tab holds, while it runs and when it fails. ASKING: the surface says \"Moving this board to this tab.\" with the spinner in its icon's place; the Link row is the work (the spinner and \"Asking the other tab…\", the iridescent sweep along its foot), the primary the spinner alone, and the summary under it is unchanged. OPENING: the other tab let go; \"Opening…\" while the board opens here. FAILED: \"Studio couldn't move this board to this tab. Connect here to try again.\", its icon red; the Link row keeps \"That tab didn't answer\" (the holder may be a tab of an older build) and Retry, quietly, both pressing the same take-over."
 )]
 fn board_card_taking_over() -> Element {
     rsx! {
@@ -269,7 +623,7 @@ fn board_card_taking_over() -> Element {
 }
 
 #[story(
-    description = "The tab that let go because another tab asked. Its card stays: \"Taken by another tab\" in orange on the connection bar, the picture it saved on the way out (dimmed; its age in the corner's details), and Connect, which takes the board back the same way. Nothing reopens by itself."
+    description = "The tab that let go because another tab asked. Its card stays: \"Another tab took this board. Connect here to move it back to this tab.\" over the picture it saved on the way out (dimmed; its age in the corner's details), \"Taken by another tab\" on the connection bar, and Connect here, which takes the board back the same way. Nothing reopens by itself."
 )]
 fn board_card_taken_from_this_tab() -> Element {
     rsx! {
@@ -285,7 +639,7 @@ fn board_card_taken_from_this_tab() -> Element {
 }
 
 #[story(
-    description = "A board whose one network connection is someone else's — a person Studio cannot name, so there is no tab to ask. The connection bar says \"Someone else connected\" in orange, and offers Retry on the same road (Wi‑Fi, or the cloud) and nothing more: taking a board from another person is sharing's question. Compare \"Open in another tab\", which is a tab of this browser and whose Connect takes it over."
+    description = "A board whose one network connection is someone else's — a person Studio cannot name, so there is no tab to ask. The surface says \"Someone else is connected to this board. Retry when they're done.\", its icon orange; the connection bar says \"Someone else connected\" and keeps Retry on the same road (Wi‑Fi, or the cloud), which the primary repeats, and nothing more: taking a board from another person is sharing's question. Compare \"Open in another tab\", which is a tab of this browser and whose Connect here takes it over."
 )]
 fn board_card_network_busy() -> Element {
     rsx! {
@@ -400,7 +754,7 @@ fn board_card_connected_play_only() -> Element {
 }
 
 #[story(
-    description = "Connect pressed: the board's session is opening (or the board is being reached first). The Link row is the work — the spinner and \"USB · connecting\", the iridescent sweep along its foot — and the primary is the spinner alone (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
+    description = "Connect pressed: the board's session is opening (or the board is being reached first). The surface says \"Connecting to this board over USB.\" with the spinner in its icon's place; the Link row is the work — the spinner and \"USB · connecting\", the iridescent sweep along its foot — and the primary is the spinner alone (no Cancel: the open is bounded by its deadline). The bars stay until the panel is ready."
 )]
 fn board_card_connecting() -> Element {
     rsx! {
@@ -420,7 +774,7 @@ fn board_card_connecting() -> Element {
 }
 
 #[story(
-    description = "The last Connect did not open: the Link row is red and striped, \"USB · connection failed\" with Retry (Connect again), the reason the first thing in its details. The card is otherwise the board's facts, Connect its primary."
+    description = "The last Connect did not open: the surface says \"Studio couldn't connect to this board over USB. Retry to connect.\", its icon red, and Retry (Connect again) is the primary; the Link row keeps \"USB · connection failed\" and its own Retry, quietly, the reason the first thing in its details."
 )]
 fn board_card_connect_failed() -> Element {
     rsx! {
@@ -963,6 +1317,97 @@ fn busy_connect(through_relay: bool) -> UiWifiConnect {
         busy: true,
     }
 }
+
+/// A Wi‑Fi (or relay) connect that failed: the board did not answer.
+fn failed_connect(through_relay: bool) -> UiWifiConnect {
+    UiWifiConnect {
+        error: Some(match through_relay {
+            true => "lightplayer.app couldn't reach the board.".to_string(),
+            false => "The board didn't answer at 192.168.1.40.".to_string(),
+        }),
+        busy: false,
+        ..busy_connect(through_relay)
+    }
+}
+
+/// The desk's C6 of 2026-10-17: an older LightPlayer on its USB cable,
+/// its board known, which this Studio's link cannot speak to.
+pub(crate) fn older_lightplayer() -> DeviceView {
+    DeviceView {
+        title: "XIAO ESP32-C6".to_string(),
+        state_label: "Older LightPlayer firmware".to_string(),
+        ..needs_firmware(DeviceFirmwareFace::OlderLightPlayer { proto: Some(33) })
+    }
+}
+
+/// The porch board on its cable with `face` on its flash: it needs
+/// attention, and has said nothing of a project.
+pub(crate) fn needs_firmware(face: DeviceFirmwareFace) -> DeviceView {
+    let board_known = matches!(face, DeviceFirmwareFace::OlderLightPlayer { .. });
+    DeviceView {
+        status: DeviceStatus::NeedsAttention,
+        state_label: "Needs firmware".to_string(),
+        firmware_face: face,
+        board_id: board_known.then(|| "seeed/xiao-esp32-c6".to_string()),
+        loaded_project: DeviceLoadedProject::Unknown,
+        engine_fps: None,
+        can_receive_project: false,
+        can_remove_project: false,
+        ..porch()
+    }
+}
+
+/// An activity of `kind`, cancellable, saying `label` at `percent`.
+fn activity(kind: DeviceActivityKind, label: &str, percent: Option<u8>) -> DeviceActivityView {
+    DeviceActivityView {
+        kind,
+        label: label.to_string(),
+        percent,
+        cancellable: true,
+        cancel_requested: false,
+        layout: None,
+        update: None,
+    }
+}
+
+/// `card` with its files in `fs`, as core reads them (its layout and the
+/// verbs core publishes for it): Formatted on a board that held files is
+/// data lost; Refused, a store it could not read; TreeStoreHeld, files
+/// waiting for a firmware that reads their store.
+fn files_card(fs: DeviceBoardFs, card: DeviceView) -> Element {
+    let mut verbs = UiOfferTree::new();
+    let layout = device_layout_view(
+        &card,
+        story_board_prefix(card.id),
+        fs,
+        false,
+        lpa_studio_core::FilesEvidence {
+            remembered: true,
+            started_fresh: false,
+        },
+        None,
+        None,
+        None,
+        &mut verbs,
+    );
+    let plays = match card.loaded_project {
+        DeviceLoadedProject::Empty => BoardPlays::Nothing,
+        _ => running(),
+    };
+    rsx! {
+        StoryBoardCard {
+            card,
+            open_uid: Some(PORCH_UID.to_string()),
+            plays,
+            layout,
+            extra_offers: Some(verbs),
+            on_action: |_| {},
+        }
+    }
+}
+
+/// An hour, in seconds.
+pub(crate) const HOUR: f64 = 3_600.0;
 
 /// A day, in seconds.
 pub(crate) const DAY: f64 = 86_400.0;
