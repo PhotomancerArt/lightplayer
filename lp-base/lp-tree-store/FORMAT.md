@@ -319,6 +319,49 @@ exists while a file is under it. A path is **hot** when it ends with
 `/.lp/panel.json`; a hot file appears only in the hot directory, every
 other file only in the cold tree.
 
+### The snapshot namespace
+
+`/.lp/snapshots/` is **reserved** for snapshots of a project
+(`SNAPSHOT_DIR`). Version 3 makes no snapshot; it reserves the path so a
+later core can add them with no format change, kept by every core:
+
+- **What a snapshot is.** A directory entry of kind 2 at
+  `/.lp/snapshots/<project>/<name>` naming a directory node that held the
+  project at that moment, plus a copy of the project's hot files at
+  `/.lp/snapshots/<project>/<name>/…/.lp/panel.json` (hot by the rule
+  above, so in the hot directory). It is ordinary tree: every reader's
+  mark, mount closure and dedup already follow directory entries to any
+  directory node, so a snapshot shares every unchanged blob, multi and
+  subdirectory with the live project and with other snapshots, and costs
+  only the records it alone reaches. Restore points the project's path at
+  the snapshot's node; a diff walks two directory ids and descends only
+  where they differ.
+- **Who writes there.** Only the snapshot feature. Every other writer
+  refuses a path under it (`LpFsTree`: `InvalidPath`, nothing written).
+  Deleting under it is an ordinary delete (it frees what the snapshots
+  alone held).
+- **Write-only files.** A snapshot never contains a write-only file — an
+  access file (`.lp/access.json`) or the network file (`.lp/network.json`),
+  whatever `lpc_access::is_write_only_file_path` matches: the snapshot
+  writer names a directory node built without them, never the project's own
+  node while that holds one. And the write-only rule covers any copy
+  regardless: the predicate matches the last two components wherever they
+  sit, so `/.lp/snapshots/<project>/<name>/.lp/access.json` is write-only
+  (pinned in `lpc-access`).
+- **Listing and sync.** Snapshots are files to every listing
+  (`LpFs::list_dir` of `/` or `/.lp` names them). Studio syncs and hashes a
+  project by its own prefix (`/projects/<id>`), which a snapshot is never
+  under, so no project sync walks them; a whole-image tool (`lp-cli
+  hardware tree extract`) extracts them as files and a restore writes them
+  back as files (sharing returns by dedup).
+- **Space.** A snapshot's records are live like any other: admission and
+  GC count them, so a full store refuses writes until snapshots go
+  ("keep N, drop the oldest" is the feature's policy, not the format's).
+
+Should a core that predates the feature write after one that made
+snapshots (a failed trial's rollback), the snapshots stay files to it and
+survive; that is more than the trial rule asks.
+
 ## Finding the committed state (mount)
 
 1. Read all `N` sector headers, each classified per "Sector". Any

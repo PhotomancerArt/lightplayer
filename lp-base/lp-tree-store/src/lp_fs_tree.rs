@@ -21,6 +21,7 @@ use lpfs::{FsError, FsEvent, FsEventKind, FsVersion, LpFs, LpFsView, LpPath, LpP
 use crate::flash::Flash;
 use crate::heap_sort::sort_strings;
 use crate::object_hasher::ObjectHasher;
+use crate::snapshot_namespace::is_snapshot_path;
 use crate::store_error::StoreError;
 use crate::tree_store::TreeStore;
 
@@ -123,6 +124,19 @@ fn not_found(p: &str) -> FsError {
     FsError::NotFound(p.to_string())
 }
 
+/// A normalized path a write may name: not the root, and not under the
+/// reserved snapshot namespace (FORMAT.md "The snapshot namespace": only a
+/// snapshot feature writes there; deleting is allowed).
+fn writable(p: &str) -> Result<(), FsError> {
+    if p == "/" {
+        return Err(FsError::InvalidPath("Cannot write to root".to_string()));
+    }
+    if is_snapshot_path(p) {
+        return Err(FsError::InvalidPath(format!("{p}: reserved for snapshots")));
+    }
+    Ok(())
+}
+
 impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         let p = norm(path)?;
@@ -132,9 +146,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
 
     fn write_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
         let p = norm(path)?;
-        if p == "/" {
-            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
-        }
+        writable(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
             let existed = st.exists(&p).map_err(store_err)?;
@@ -154,9 +166,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
 
     fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
         let p = norm(path)?;
-        if p == "/" {
-            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
-        }
+        writable(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
             let existed = st.exists(&p).map_err(store_err)?;
@@ -338,9 +348,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         deflated: &[u8],
     ) -> Result<(), FsError> {
         let p = norm(path)?;
-        if p == "/" {
-            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
-        }
+        writable(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
             let existed = st.exists(&p).map_err(store_err)?;

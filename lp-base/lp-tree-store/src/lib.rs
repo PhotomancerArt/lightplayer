@@ -72,6 +72,7 @@ mod root_record;
 mod sector_filter;
 mod sector_header;
 mod sector_table;
+mod snapshot_namespace;
 mod space_estimate;
 mod store_config;
 mod store_error;
@@ -123,6 +124,7 @@ pub use object_hasher::ObjectHasher;
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
 pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
+pub use snapshot_namespace::{SNAPSHOT_DIR, is_snapshot_path};
 pub use store_config::{GcPolicy, StoreConfig};
 pub use store_error::StoreError;
 #[cfg(feature = "stats")]

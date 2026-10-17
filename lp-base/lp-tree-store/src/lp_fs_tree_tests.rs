@@ -304,6 +304,36 @@ fn the_default_deflated_write_inflates_into_plain_bytes() {
     assert!(!fs.file_exists("/p/t.glsl".as_path()).unwrap());
 }
 
+/// The snapshot namespace is reserved (FORMAT.md "The snapshot namespace"):
+/// no write, append or deflated write lands under it, and nothing is
+/// written trying; a neighbour of it is an ordinary path.
+#[test]
+fn nothing_but_a_snapshot_writes_under_the_snapshot_namespace() {
+    let fs = tree_fs();
+    let before = image(&fs);
+    for p in [
+        "/.lp/snapshots",
+        "/.lp/snapshots/p/n/project.json",
+        "/.lp/snapshots/p/n/.lp/panel.json",
+    ] {
+        let refused = |r: Result<(), lpfs::FsError>| {
+            assert!(
+                matches!(r, Err(lpfs::FsError::InvalidPath(_))),
+                "{p}: {r:?}"
+            );
+        };
+        refused(fs.write_file(p.as_path(), b"{}"));
+        refused(fs.append_file(p.as_path(), b"{}"));
+        let z = crate::test_support::deflate(b"{}");
+        refused(fs.write_deflated_chunk(p.as_path(), 0, 2, &z));
+    }
+    assert!(image(&fs) == before);
+    fs.write_file("/.lp/snapshotsx.json".as_path(), b"{}")
+        .unwrap();
+    fs.write_file("/projects/p/.lp/snapshots/a".as_path(), b"{}")
+        .unwrap();
+}
+
 /// `bytes` to `path` as the wire sends them: the plan's chunks, in order.
 fn write_deflated(fs: &dyn LpFs, path: &str, bytes: &[u8], record_max: u32) {
     for chunk in crate::plan_deflated_chunks(bytes, record_max, crate::DEFAULT_DEFLATE_LEVEL) {
@@ -315,4 +345,15 @@ fn write_deflated(fs: &dyn LpFs, path: &str, bytes: &[u8], record_max: u32) {
         )
         .unwrap();
     }
+}
+
+/// Every byte of the store's flash.
+fn image(fs: &LpFsTree<NorFlashSim, SoftSha256>) -> Vec<u8> {
+    use crate::Flash;
+    fs.with_store(|st| {
+        let f = st.flash();
+        let mut out = vec![0u8; (f.sector_count() * f.sector_size()) as usize];
+        f.peek(0, &mut out);
+        out
+    })
 }
