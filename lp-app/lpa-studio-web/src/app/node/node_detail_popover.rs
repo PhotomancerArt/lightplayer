@@ -116,7 +116,7 @@ pub(crate) fn NodeDetailPopover(
             }
             if dirty.persisted > 0 {
                 DetailSection {
-                    title: "Unsaved (persisted)",
+                    title: "Unsaved changes",
                     meta: dirty.persisted.to_string(),
                     tint: bucket_section_tint(PendingEditBucket::Persisted, dirty.persisted),
                     PendingEditList { entries: unsaved_entries, on_action: forward }

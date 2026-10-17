@@ -32,7 +32,7 @@ pub(crate) fn AgentNeedsKey(
                 button {
                     class: "{outline_action_class(false)} tw:mt-2",
                     r#type: "button",
-                    title: "Sign in on openrouter.ai and come right back — no key to paste",
+                    title: "Sign in on openrouter.ai instead of pasting a key",
                     onclick: move |_| on_connect.call(()),
                     "Connect OpenRouter — use your own account"
                 }

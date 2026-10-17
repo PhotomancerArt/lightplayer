@@ -104,7 +104,7 @@ pub struct ProjectChanges {
     pub header_offers: Vec<UiOffer>,
     /// The document's banked history, newest first and capped. It rides the
     /// changes value because changes and history are ONE temporal axis
-    /// (relationship-control D14): the receipt "Save banks v13" and the
+    /// (relationship-control D14): the receipt "Save to keep them as v13" and the
     /// timeline's "v12 saved" are the same ledger read from opposite ends.
     pub history: lpa_studio_core::UiProjectHistory,
 }
@@ -502,7 +502,7 @@ pub(crate) fn ProjectDetailRow(label: String, value: String) -> Element {
 /// panel.
 pub(crate) fn trigger_label(affordance: UiAffordance) -> &'static str {
     match affordance {
-        UiAffordance::Info => "Project details — no unsaved changes",
+        UiAffordance::Info => "Project details: no unsaved changes",
         UiAffordance::Busy => "Project activity in progress",
         UiAffordance::Debug => "Project has debug overrides",
         UiAffordance::Unsaved => "Project has unsaved changes",
@@ -517,7 +517,7 @@ pub(crate) fn state_label(affordance: UiAffordance) -> &'static str {
         UiAffordance::Info => "unchanged",
         UiAffordance::Busy => "in progress",
         UiAffordance::Debug => "debug overrides only",
-        UiAffordance::Unsaved => "uncommitted",
+        UiAffordance::Unsaved => "unsaved",
         UiAffordance::Error => "needs attention",
     }
 }
@@ -558,7 +558,7 @@ mod tests {
         // (Unsaved outranks Busy in the shared priority).
         let uncommitted = editor_view(dirty(1, 0), 1).affordance(UiStatusKind::Good);
         assert_eq!(uncommitted, UiAffordance::Unsaved);
-        assert_eq!(state_label(uncommitted), "uncommitted");
+        assert_eq!(state_label(uncommitted), "unsaved");
 
         // In-flight only: genuine activity.
         let busy = editor_view(dirty(0, 0), 1).affordance(UiStatusKind::Good);

@@ -333,7 +333,7 @@ pub fn AgentSettingsSection(
                             class: inline_text_button_class(InlineButtonTone::Neutral, probe.running),
                             r#type: "button",
                             disabled: probe.running,
-                            title: "Try the ports Ollama, LM Studio, llama.cpp, vLLM and friends use",
+                            title: "Look for Ollama, LM Studio, llama.cpp or vLLM on their usual ports",
                             onclick: move |_| {
                                 if let Some(on_probe) = on_probe {
                                     on_probe.call(ProbeRequest::ScanCommonPorts);
@@ -391,7 +391,7 @@ pub fn AgentSettingsSection(
                         button {
                             class: outline_action_class(false),
                             r#type: "button",
-                            title: "Sign in on openrouter.ai and come right back — no key to paste",
+                            title: "Sign in on openrouter.ai instead of pasting a key",
                             onclick: move |_| {
                                 if let Some(on_connect) = on_connect {
                                     on_connect.call(());
@@ -524,7 +524,7 @@ pub fn AgentSettingsSection(
                     }
                     if agent.model_missing {
                         span { class: "tw:text-[0.68rem] tw:font-bold tw:text-status-warning-foreground",
-                            "required — the agent stays off until a model id is set"
+                            "Required. The agent is off until you set a model."
                         }
                     }
                     if let Some(hint) = model_hint {
@@ -572,7 +572,7 @@ pub fn AgentSettingsSection(
                     }
                 }
                 p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                    "Powers the ~$ estimate in the chat. Blank uses built-in rates for known models."
+                    "Used for the cost estimate in the chat. Leave blank to use built-in rates for known models."
                 }
             }
         }
