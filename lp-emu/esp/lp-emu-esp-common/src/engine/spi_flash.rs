@@ -140,9 +140,11 @@ pub struct FlashImage {
     pub block_erases: u64,
     pub write_enables: u64,
     pub status_reads: u64,
-    /// Status-register writes (`WRSR`), any controller. A core's QIO switch
-    /// must leave this at zero; the gate that says so reads it.
-    pub status_writes: u64,
+    /// Every status-register write (`WRSR`), any controller, the 16-bit
+    /// value it wrote, in order. esp-storage's unlock writes one on a boot
+    /// that writes flash (keeping QE, clearing the protection bits); a core's
+    /// QIO switch must add none, and the gate that says so reads this.
+    pub status_written: Vec<u16>,
     /// The part's identity and power-on status ([`FlashPart`]).
     part: FlashPart,
     /// The power-cut plan and the powered-off latch
@@ -229,7 +231,7 @@ impl FlashImage {
             block_erases: 0,
             write_enables: 0,
             status_reads: 0,
-            status_writes: 0,
+            status_written: Vec::new(),
             part: FlashPart::ROM_DEFAULT,
             cutter: FlashCutter::default(),
             weak: FlashWeakBits::default(),
@@ -867,7 +869,7 @@ impl FlashEngine {
                 FlashOutcome::Status(self.status)
             }
             FlashOp::WriteStatus(value) => {
-                self.flash.lock().unwrap().status_writes += 1;
+                self.flash.lock().unwrap().status_written.push(value);
                 self.status = value & !SR_WIP;
                 self.status &= !SR_WEL;
                 FlashOutcome::Nothing
@@ -1126,7 +1128,7 @@ mod tests {
         let flash: FlashHandle = Arc::new(Mutex::new(f));
         let engine = FlashEngine::new(flash.clone());
         assert_eq!(engine.status(), 0x0200, "QE (SR2 bit 1) set, WIP/WEL clear");
-        assert_eq!(flash.lock().unwrap().status_writes, 0);
+        assert!(flash.lock().unwrap().status_written.is_empty());
         assert_eq!(FlashPart::parse("cx1"), Ok(FlashPart::CX1));
         assert_eq!(FlashPart::parse("xiao-c6"), Ok(FlashPart::XIAO_C6));
         assert_eq!(FlashPart::parse("rom-default"), Ok(FlashPart::ROM_DEFAULT));

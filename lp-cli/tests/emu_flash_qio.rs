@@ -8,9 +8,15 @@
 //! names the part (`Esp32C6Builder::flash_part`) and reads three things: the
 //! core's one `[flash]` line (on the log channel, so here and not in the
 //! emulator's own crate — the MIT fence), the cache controller's
-//! `SPI_MEM_CTRL` read-mode bits after the boot, and the chip's count of
-//! status-register writes. The engine's hello must still come, so the core
-//! and the engine ran from flash read the chosen way.
+//! `SPI_MEM_CTRL` read-mode bits after the boot, and every status-register
+//! write the chip saw. The engine's hello must still come, so the core and
+//! the engine ran from flash read the chosen way.
+//!
+//! The boot does write the status register, before and after this change:
+//! esp-storage unlocks the part before its first write (the ROM's
+//! `esp_rom_spiflash_unlock`: QE kept, the protection bits cleared). So the
+//! claim is relative — the same writes, with the same values, whether or not
+//! the switch ran — and absolute only for QE: no write ever sets it.
 //!
 //! What this proves is the switch's decisions and the ROM's register writes
 //! as the real mask ROM makes them. The emulator moves the same bytes
@@ -35,10 +41,16 @@ const HELLO: &str = "M!{\"id\":0,\"msg\":{\"hello\":{\"proto\":";
 const SPI0_CTRL: u32 = 0x6000_2008;
 const FREAD_DIO: u32 = 1 << 23;
 const FREAD_QIO: u32 = 1 << 24;
+/// QE in the 16-bit status a `WRSR` writes (status register 2, bit 1).
+const QE: u16 = 1 << 9;
 
 #[test]
 #[ignore = "needs a split fw-esp32c6 build; `just test-emu-c6-cli-boards` runs it"]
-fn a_desk_part_with_qe_set_is_read_in_qio_and_nothing_writes_its_status() {
+fn a_desk_part_with_qe_set_is_read_in_qio_and_the_switch_writes_no_status() {
+    // The baseline: a part off the list, where the switch reads and stops.
+    let Some(dio) = boot(FlashPart::ROM_DEFAULT) else {
+        return;
+    };
     for (part, id) in [(FlashPart::CX1, "164046"), (FlashPart::XIAO_C6, "164020")] {
         let Some(run) = boot(part) else { return };
         run.expect_line(&format!("[flash] QIO (jedec {id}, sr2 02)"));
@@ -47,7 +59,18 @@ fn a_desk_part_with_qe_set_is_read_in_qio_and_nothing_writes_its_status() {
             FREAD_QIO,
             "the cache reads in QIO"
         );
-        assert_eq!(run.status_writes, 0, "no status-register write");
+        assert_eq!(
+            run.status_written.len(),
+            dio.status_written.len(),
+            "the switch added no status write: {:04x?} vs DIO's {:04x?}",
+            run.status_written,
+            dio.status_written
+        );
+        assert!(
+            run.status_written.iter().all(|w| w & QE != 0),
+            "every write kept QE: {:04x?}",
+            run.status_written
+        );
     }
 }
 
@@ -59,7 +82,6 @@ fn a_part_off_the_list_stays_dio() {
     };
     run.expect_line("[flash] DIO: part not on the QIO list (jedec 1640ef, sr2 00)");
     assert_eq!(run.ctrl & (FREAD_DIO | FREAD_QIO), FREAD_DIO);
-    assert_eq!(run.status_writes, 0);
 }
 
 #[test]
@@ -73,9 +95,10 @@ fn a_listed_part_with_qe_clear_stays_dio_and_qe_is_never_set() {
     };
     run.expect_line("[flash] DIO: QE bit clear (jedec 164046, sr2 00)");
     assert_eq!(run.ctrl & (FREAD_DIO | FREAD_QIO), FREAD_DIO);
-    assert_eq!(
-        run.status_writes, 0,
-        "the switch reads QE and never sets it — nor does the ROM it calls"
+    assert!(
+        run.status_written.iter().all(|w| w & QE == 0),
+        "no write set QE — not the switch, nor the ROM it calls: {:04x?}",
+        run.status_written
     );
 }
 
@@ -83,7 +106,7 @@ fn a_listed_part_with_qe_clear_stays_dio_and_qe_is_never_set() {
 struct Run {
     console: String,
     ctrl: u32,
-    status_writes: u64,
+    status_written: Vec<u16>,
 }
 
 impl Run {
@@ -121,9 +144,9 @@ fn boot(part: FlashPart) -> Option<Run> {
     assert_eq!(host.link_errors, 0, "{console}");
     let machine = &mut host.board.machine;
     let ctrl = machine.peek_word(SPI0_CTRL).expect("SPI0 CTRL reads");
-    let status_writes = machine.flash().lock().unwrap().status_writes;
+    let status_written = machine.flash().lock().unwrap().status_written.clone();
     println!(
-        "flash part {part:?} (lp-emu:esp32c6:t1): {} · SPI0 CTRL {ctrl:#010x} · {status_writes} status writes",
+        "flash part {part:?} (lp-emu:esp32c6:t1): {} · SPI0 CTRL {ctrl:#010x} · status writes {status_written:04x?}",
         console
             .lines()
             .find(|l| l.contains("[flash] "))
@@ -132,7 +155,7 @@ fn boot(part: FlashPart) -> Option<Run> {
     Some(Run {
         console,
         ctrl,
-        status_writes,
+        status_written,
     })
 }
 
