@@ -256,6 +256,8 @@ pub struct LpServer {
     /// The one fs batch a link may hold open (`FsRequest::BeginBatch`): its
     /// owner and idle time; the filesystem holds the transaction.
     batch: BatchState,
+    /// When the filesystem may clean up (`fs_idle.rs`).
+    fs_idle: crate::fs_idle::FsIdle,
 }
 
 /// After the first failure, restate a persistent tick error only every
@@ -438,6 +440,7 @@ impl LpServer {
             tick_failures: HashMap::new(),
             access: AccessState::new(),
             batch: BatchState::new(),
+            fs_idle: crate::fs_idle::FsIdle::new(),
         }
     }
 
@@ -944,6 +947,9 @@ impl LpServer {
         self.handle_secure_link_events(transport);
 
         let mut response_count = 0usize;
+        // A request that changes files (or a batch verb) ends the
+        // filesystem's quiet; reads and polls do not.
+        let mut fs_busy = false;
         for message in incoming {
             let Incoming {
                 link,
@@ -982,6 +988,7 @@ impl LpServer {
                 // re-read on next use.
                 if fs_request_changes_files(fs_request) {
                     self.access.invalidate_device_store();
+                    fs_busy = true;
                 }
                 // The batch: another link's mutation is refused while one
                 // is open, and the batch verbs are answered here, where the
@@ -1298,6 +1305,17 @@ impl LpServer {
                 YieldOnce::default().await;
             }
             self.advance_frame(delta_ms)?;
+        }
+
+        // A quiet tick, after the frame: one bounded piece of the
+        // filesystem's own cleanup (the tree store's early GC). It changes
+        // no file; a failure is the filesystem's to report on its next use.
+        if self
+            .fs_idle
+            .tick(delta_ms, fs_busy || self.batch.owner().is_some())
+            && let Err(e) = self.base_fs.idle_step()
+        {
+            log::warn!("fs idle step: {e}");
         }
 
         Ok(response_count)

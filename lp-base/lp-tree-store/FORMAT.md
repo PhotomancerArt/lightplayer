@@ -147,6 +147,9 @@ Writing and killing:
   is finished. It erases sectors 0 and 1 (a littlefs partition's
   superblock pair) so the partition no longer reads as littlefs. Every
   other sector is erased (killed first, as above) when it is first opened.
+- A writer may kill the header of a sector that holds no live record at
+  any time (no erase): the sector is untrusted from then on, and is erased
+  (killed first, as above) when it is next opened.
 - **Growing the partition.** Whoever enlarges the partition a store is in
   (the USB layout migration, a loader, a core) first kills the header of
   every sector in the **added range** that does not read all `0xFF` (and

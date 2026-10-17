@@ -13,7 +13,9 @@
 //! `true` — the tree store) and a **deflated chunk write**
 //! (`write_deflated_chunk`, whose default inflates and writes plain bytes):
 //! the two halves of a wire push
-//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`). A
+//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`); and an
+//! **idle step** (`idle_step`, the tree store's early cleanup; the default
+//! does nothing). A
 //! *wrapper* (`LpFsView`, a server's `AccessGuardedFs`) must forward every
 //! method, defaulted ones included — the defaults are a backend's answers —
 //! and carries `#[deny(clippy::missing_trait_methods)]` to keep it so.

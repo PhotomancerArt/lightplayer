@@ -88,6 +88,16 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     /// The last write GC could not make room for (RAM only: a mount forgets
     /// it). See `store_space::Refusal`.
     pub(crate) refused: Option<crate::store_space::Refusal>,
+    /// An idle step found nothing to do; until the next write, steps return
+    /// at once (`store_idle.rs`).
+    pub(crate) idle_settled: bool,
+    /// The idle packing pass under way: the first sector sequence it opened
+    /// and the waste when it began (`store_idle.rs`).
+    pub(crate) idle_pass: Option<(u32, u64)>,
+    /// The waste the last idle packing left (the least seen since): a new
+    /// pass starts only once the waste has grown a sector past it (RAM
+    /// only: after a mount, the first pass runs; `store_idle.rs`).
+    pub(crate) idle_packed_waste: Option<u64>,
     /// `mutants`: a flush that computes ids and writes nothing.
     #[cfg(feature = "mutants")]
     pub(crate) dry: bool,
@@ -280,6 +290,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if self.txn != Txn::Explicit {
             return Ok(());
         }
+        self.wake_idle();
         self.commit_inner()?;
         self.txn = Txn::None;
         Ok(())
@@ -375,6 +386,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             live_after_mark: 0,
             inflight: Vec::new(),
             refused: None,
+            idle_settled: false,
+            idle_pass: None,
+            idle_packed_waste: None,
             #[cfg(feature = "mutants")]
             dry: false,
         }
@@ -417,6 +431,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// call's own answer is the `bool` (`delete`'s), ignored by the rest.
     #[inline(never)]
     pub(crate) fn op(&mut self, f: &mut dyn FnMut(&mut Self) -> Res<bool, F>) -> Res<bool, F> {
+        self.wake_idle();
         if self.txn == Txn::Explicit {
             if self.delta.ram_bytes() >= self.cfg.txn_delta_max as usize {
                 self.flush()?;
