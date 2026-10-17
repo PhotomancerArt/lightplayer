@@ -182,7 +182,7 @@ svg.i { width:14px; height:14px; flex:none; }
 .sf-a.center .prog { justify-content:center; }
 .sf-a .band { position:absolute; left:0; right:0; bottom:0; padding:9px 14px 10px; background:rgba(9,9,14,.88); border-top:1px solid rgba(255,255,255,.06); }
 /* B · the notice as an object */
-.sf-b { display:grid; place-items:center; padding:10px 26px; text-align:center; }
+.sf-b { display:grid; place-items:center; padding:8px 18px; text-align:center; }
 .sf-b .scrim { position:absolute; inset:0; background:rgba(7,8,10,.55); }
 .sf-b .inner { position:relative; display:grid; justify-items:center; gap:6px; }
 .sf-b .s1 { justify-content:center; font-size:13px; }
@@ -265,6 +265,30 @@ tr.same td.why { color:var(--shell-dim); }
 .minis .cap { font:700 11px var(--font); letter-spacing:.07em; text-transform:uppercase; color:var(--shell-dim); margin:0 0 5px 2px; }
 .mini .nb { border-radius:0 0 7px 7px; }
 footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
+/* round 2: the decision log, the rejected strip, B's tone option */
+.log { border:1px solid var(--lean-bd); border-radius:10px; padding:12px 16px; display:grid; gap:7px; background:#0f1412; max-width:1180px; }
+.log h3 { margin:0; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--lean); }
+.log p { color:var(--shell-mut); font-size:13.5px; }
+.log p b { color:var(--shell-tx); font-weight:600; }
+.log q { color:var(--shell-tx); font-style:italic; quotes:"“" "”"; }
+pre.pair { margin:2px 0 0; padding:9px 12px; border:1px solid var(--shell-bd); border-radius:8px; background:#08090b; color:var(--shell-tx); font:12px/1.6 var(--mono); overflow:auto; }
+pre.pair .bad { color:var(--bad); } pre.pair .do { color:var(--lean); }
+.strip p.note { margin:0; }
+.concepts.r2 { grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr); }
+.concept.main { border-color:var(--lean-bd); box-shadow:inset 0 0 0 1px var(--lean-bd); }
+.rejected { border:1px dashed var(--shell-bd-strong); border-radius:12px; padding:14px; display:grid; gap:12px; align-content:start; min-width:0; }
+.rejected h3 { margin:0; font:700 11px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--shell-dim); }
+.rej { display:grid; grid-template-columns:180px minmax(0,1fr); gap:12px; align-items:center; }
+.rej p { font-size:12.5px; color:var(--shell-dim); line-height:1.45; }
+.rej p b { color:var(--shell-mut); font-weight:700; }
+.tiny { width:180px; height:94px; overflow:hidden; border-radius:5px; }
+.tiny > .sc { width:360px; transform:scale(.5); transform-origin:0 0; }
+.say.r1diff .s1.d, .say.r1diff .s2.d { text-decoration:underline dotted rgba(255,255,255,.45); text-underline-offset:3px; }
+.sf-b.white .s1 { color:var(--strong); }
+.decided { margin:0; padding-left:18px; display:grid; gap:7px; }
+.decided li { color:var(--shell-mut); max-width:112ch; }
+.decided li b { color:var(--shell-tx); font-weight:600; }
+.minis.three { grid-template-columns:repeat(3, minmax(0,1fr)); }
 @media (prefers-reduced-motion: reduce) { .spin, .iri, .prog .track i { animation:none; } }
 </style>
 </head>
@@ -272,13 +296,20 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
 <main>
 
 <header>
-  <span class="eyebrow">Spike · board card · the surface</span>
+  <span class="eyebrow">Spike · board card · the surface · round 2</span>
   <h1>The card’s top as its main surface</h1>
   <p class="hint">Yona, 2026-10-17: <q>the primary surface should always give the most important information</q>. The top of the board card, today its picture, is its main surface, and <b>it is never black</b>. And: <q>the primary action slot should hold the most likely action a user wants to take</q>, the button to the right of the board’s name, even when it repeats a row’s own button. <b>The surface explains; the primary gives the thing to do.</b> There are no buttons inside the surface.</p>
   <p class="hint">What prompted it: the desk board is running an Oct 3 firmware that this Studio can’t talk to. Its card today is a black picture, a name and no primary, <b>Project none</b> (false: it is playing a project Studio can’t read), and a red Update on the fourth row. Yona: <q>this board is connected by usb, but I can’t connect/edit it? feels like a dead end</q>.</p>
+  <div class="log">
+    <h3>Decided in round 1</h3>
+    <p><b>Concept B, the notice as an object.</b> Yona: <q>I like the icon and plain text. its clear, and hits the balance between boldness and simplicity</q>.</p>
+    <p><b>The copy rule.</b> The second sentence is the button said aloud: the button’s own verb and object, then what it gets you.</p>
+    <pre class="pair"><span class="bad">bad:</span>  An update is required to connect and edit.
+<span class="do">do:</span>   Update the firmware to connect and edit.        → ▲ Update firmware</pre>
+  </div>
   <div class="voices">
     <div class="voice"><h3>Rows · labels</h3><p>kind · name · state, as shipped.</p><p class="ex mono">▲ Firmware&nbsp;&nbsp;Oct 3 build</p></div>
-    <div class="voice"><h3>Surface · one or two sentences</h3><p>What is going on with the board, then what it means for you. The second only when it adds something.</p><p class="ex">This board is running old firmware. An update is required to connect and edit.</p></div>
+    <div class="voice"><h3>Surface · one or two sentences</h3><p>What is going on with the board, then the button said aloud: its verb and object, then what it gets you. The second only when it adds something.</p><p class="ex">This board is running old firmware. Update the firmware to connect and edit.</p></div>
     <div class="voice"><h3>Buttons · a verb and its object</h3><p>The primary, to the right of the name.</p><p class="ex">▲ Update firmware</p></div>
   </div>
 </header>
@@ -287,43 +318,46 @@ footer { color:var(--shell-dim); font-size:12.5px; max-width:110ch; }
   <div class="line"><span class="lbl">State</span><div class="chips" id="chips"></div></div>
   <div class="line">
     <span class="lbl">Copy</span>
-    <div class="seg" role="group" aria-label="Copy for the old-firmware state">
-      <button type="button" data-copy="yona" aria-pressed="true">Yona’s voice</button>
+    <div class="seg" role="group" aria-label="Which copy">
+      <button type="button" data-copy="now" aria-pressed="true">the button said aloud</button>
+      <button type="button" data-copy="r1" aria-pressed="false">round 1</button>
       <button type="button" class="badbtn" data-copy="bad" aria-pressed="false">director’s draft (bad)</button>
+    </div>
+    <span class="lbl">Tone</span>
+    <div class="seg" role="group" aria-label="Where the tone goes">
+      <button type="button" data-tt="tone" aria-pressed="true">icon + first sentence</button>
+      <button type="button" data-tt="white" aria-pressed="false">icon only, plain text</button>
     </div>
     <span class="lbl">Rows</span>
     <div class="seg" role="group" aria-label="Row tones">
-      <button type="button" data-rows="quiet" aria-pressed="true">quiet: one loud place</button>
+      <button type="button" data-rows="quiet" aria-pressed="true">quiet (decided)</button>
       <button type="button" data-rows="toned" aria-pressed="false">toned, as today</button>
     </div>
-    <span class="note" id="copynote"></span>
   </div>
+  <p class="note" id="copynote"></p>
 </div>
 
 <section id="s1">
-  <h2><span class="n">1</span>Five surfaces, side by side</h2>
-  <p class="lede">Each card is a whole board card at a real card’s width, in the state picked above: the surface, the name bar with its primary, the five rows. <b>Today’s card comes first</b>, drawn from <code>docs/ux/anatomy/board-card.md</code> and <code>primary_action.rs</code>. Pick <b>all well</b> or <b>connected</b> and the five concepts agree: a live picture says nothing.</p>
+  <h2><span class="n">1</span>Today and B</h2>
+  <p class="lede">Today’s card and B, each a whole board card at a real card’s width, in the state picked above. Today’s card is drawn from <code>docs/ux/anatomy/board-card.md</code> and <code>primary_action.rs</code>. The four concepts B beat are on the right, each with a small copy of its surface.</p>
   <div class="concepts" id="concepts"></div>
 </section>
 
 <section id="s2">
-  <h2><span class="n">2</span>Every state, in one concept</h2>
-  <div class="gridhead">
-    <p class="lede" id="s2lede"></p>
-    <div class="seg" role="group" aria-label="Concept for every state" id="gseg"></div>
-  </div>
+  <h2><span class="n">2</span>Every state in B</h2>
+  <p class="lede">Every state at once, so the copy and the primaries scan as a set. Each card’s caption gives its primary. The picked state wears the selection ring; click a card to pick it. The desk board is the one marked <b>your board</b>.</p>
   <div class="grid" id="grid"></div>
 </section>
 
 <section id="s3">
-  <h2><span class="n">3</span>The rows under the new surface</h2>
-  <p class="lede">The desk board, old firmware. <b>The surface carries the loud tone.</b> The Firmware row says only the fact, <b>Oct 3 build</b>, and the Project row says <b>not known</b> instead of the false <b>none</b>. The middle card keeps the row’s Update, so the primary repeats it (the DRY breach Yona accepted); the right card drops it.</p>
+  <h2><span class="n">3</span>The rows under B</h2>
+  <p class="lede">The desk board, old firmware. <b>The rows go quiet</b>: each keeps its state word and its own button, and the loud tone is the surface’s alone. The Firmware row says only the fact, <b>Oct 3 build</b>, with its Update, which the primary repeats (the DRY breach Yona accepted). The Project row says <b>not known</b> instead of the false <b>none</b>.</p>
   <div class="trio" id="trio"></div>
-  <div class="tbl"><table><thead><tr><th>Row</th><th>Today</th><th>New</th><th>Why</th></tr></thead><tbody id="rowtbl"></tbody></table></div>
+  <div class="tbl"><table><thead><tr><th>Row</th><th>Today</th><th>B</th><th>Why</th></tr></thead><tbody id="rowtbl"></tbody></table></div>
 </section>
 
 <section id="s4">
-  <h2><span class="n">4</span>Questions for Yona</h2>
+  <h2><span class="n">4</span>Decided, and one question</h2>
   <div class="qs" id="qs"></div>
 </section>
 
@@ -358,11 +392,12 @@ const ic = (n) => `<svg class="i" viewBox="0 0 24 24" fill="none" stroke="curren
 const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
 /* =====================================================================
-   The states. Surface copy is Yona's, exactly as given (2026-10-17);
-   the arrow column is the primary. `today` is the card as it ships.
+   The states. Surface copy is Yona's, exactly as given: `say` is round
+   2's (the second sentence is the button said aloud), `r1` round 1's,
+   `bad` the director's rejected draft. The arrow column is `prim`.
+   `today` is the card as it ships.
    Rows: {i icon, k kind, s name, a state, t tone att|err, act [{w,i,tint}],
-          work {p}, stale, mark}. `fact: true` marks the row whose button
-   section 3's right-hand card drops.
+          work {p}, stale, mark}.
    ===================================================================== */
 const P = (s, o={}) => ({ i:'layers', k:'Project', s, ...o });
 const L = (i, s, o={}) => ({ i, s, ...o });
@@ -376,23 +411,26 @@ const USBC = L('usb', 'USB · connected');
 
 const STATES = [
 { id:'old', label:'old firmware', yours:true, tone:'att', kind:'fw', name:'XIAO ESP32-C6 · Sep 7 2', pat:'rainbow', layout:'ring',
-  say:['This board is running old firmware.', 'An update is required to connect and edit.'],
+  say:['This board is running old firmware.', 'Update the firmware to connect and edit.'],
+  r1:['This board is running old firmware.', 'An update is required to connect and edit.'],
   bad:['Firmware too old for this Studio', 'its project keeps playing'],
   prim:{ w:'Update firmware', i:'fw' },
-  rows:[ P('not known'), USBC, A('edit · USB'), F('Oct 3 build', { act:[{ w:'Update', i:'download' }], fact:true }), XIAO ],
+  rows:[ P('not known'), USBC, A('edit · USB'), F('Oct 3 build', { act:[{ w:'Update', i:'download' }] }), XIAO ],
   today:{ prim:null, rows:[ P('none'), USBC, A('edit · USB'), F('unknown', { a:'older LightPlayer', act:[{ w:'Update', i:'download', tint:'err' }] }), XIAO ] } },
 { id:'nofw', label:'no firmware', tone:'neu', kind:'fw', name:'ESP32-C6', pat:'off', layout:'strip',
-  say:['This board doesn’t have LightPlayer firmware.', 'Install it to use the board.'],
+  say:['This board doesn’t have LightPlayer firmware.', 'Install the firmware to use it.'],
+  r1:['This board doesn’t have LightPlayer firmware.', 'Install it to use the board.'],
   prim:{ w:'Install firmware', i:'fw' },
   rows:[ P('none'), USBC, A('edit · USB'), F('none'), H('ESP32-C6', { a:'model not set' }) ],
   today:{ prim:{ w:'Install firmware', i:'fw' } } },
 { id:'crash', label:'crashing', tone:'err', kind:'fw', name:'Porch lamp', pat:'eaves', layout:'roof',
   say:['This board’s firmware keeps crashing.', 'Reinstall the firmware to fix it.'],
-  prim:{ w:'Reinstall', i:'fw' },
+  prim:{ w:'Reinstall firmware', i:'fw' },
   rows:[ P('studio'), USBC, A('edit · USB'), F(OLD, { a:'crashing', t:'err', act:[{ w:'Reinstall', i:'retry' }] }), XIAO ],
   today:{ prim:{ w:'Connect', i:'usb' }, guess:true } },
 { id:'incomplete', label:'incomplete', tone:'att', kind:'fw', name:'Kitchen shelf', pat:'rainbow', layout:'strip',
-  say:['Part of this board’s firmware is missing.', 'An install is required to use it.'],
+  say:['Part of this board’s firmware is missing.', 'Install the firmware to use it.'],
+  r1:['Part of this board’s firmware is missing.', 'An install is required to use it.'],
   prim:{ w:'Install firmware', i:'fw' },
   rows:[ P('not known'), USBC, A('edit · USB'), F('v2026.09.30-2', { a:'incomplete', t:'att', act:[{ w:'Install', i:'download' }] }), XIAO ],
   today:{ prim:null, guess:true, rows:[ P('unknown'), USBC, A('edit · USB'), F('v2026.09.30-2', { a:'incomplete', t:'att', act:[{ w:'Install', i:'download' }] }), XIAO ] } },
@@ -402,7 +440,8 @@ const STATES = [
   rows:[ P('none', { a:'data lost', t:'att', act:[{ w:'Restore', i:'upload' }, { w:'Reset' }] }), L('ble', 'Bluetooth · connected'), A('edit · password'), F(V), XIAO ],
   today:{ prim:{ w:'Add a project', i:'add' }, guess:true } },
 { id:'locked', label:'locked', tone:'neu', kind:'lock', name:'Fiber headband', pat:'aurora', layout:'strip',
-  say:['This board is locked.', 'Its password is required to connect.'],
+  say:['This board is locked.', 'Unlock it to connect.'],
+  r1:['This board is locked.', 'Its password is required to connect.'],
   prim:{ w:'Unlock', i:'lock' },
   rows:[ P('hidden'), L('ble', 'Bluetooth · connected'), A('locked'), F(V), XIAO ],
   today:{ prim:{ w:'Unlock', i:'lock' } } },
@@ -412,27 +451,31 @@ const STATES = [
   rows:[ P('studio'), L('usb', 'USB · not responding', { t:'att', act:RETRY }), A('edit · USB'), F(V), XIAO ],
   today:{ prim:null, guess:true } },
 { id:'wifi', label:'wifi failed', tone:'err', kind:'wifi', name:'Porch lamp', pat:'eaves', layout:'roof',
-  say:['Studio couldn’t reach this board over Wi‑Fi.', 'It needs to be on the same network.'],
+  say:['Studio couldn’t reach this board over Wi‑Fi.', 'Make sure this computer is on the same Wi‑Fi, then retry.'],
+  r1:['Studio couldn’t reach this board over Wi‑Fi.', 'It needs to be on the same network.'],
   prim:{ w:'Retry', i:'retry' },
   rows:[ P('studio', { stale:true }), L('wifi', 'Wi‑Fi · connection failed', { t:'err', act:RETRY }), A('edit', { stale:true }), F(V, { stale:true }), XIAO ],
   today:{ prim:null, guess:true } },
 { id:'someone', label:'someone else', tone:'att', kind:'wifi', name:'Living room', pat:'aurora', layout:'roof',
-  say:['Someone else is connected to this board.', 'Only one connection is allowed at a time.'],
+  say:['Someone else is connected to this board.', 'Retry when they’re done.'],
+  r1:['Someone else is connected to this board.', 'Only one connection is allowed at a time.'],
   prim:{ w:'Retry', i:'retry' },
   rows:[ P('Aurora Drift', { stale:true }), L('wifi', 'Someone else connected', { t:'att', act:RETRY }), A('edit', { stale:true }), F(V, { stale:true }), H('ESP32-C6 DevKit') ],
   today:{ prim:null, guess:true } },
 { id:'offline', label:'offline', tone:'neu', kind:'usb', name:'Truck', pic:'stale', pat:'rocaille', layout:'strip',
   say:['This board is offline.', 'It was last seen 2 hours ago.'],
   prim:null,
-  rows:[ P('Rocaille', { stale:true }), L('usb', 'Offline · 2 h'), A('edit', { stale:true }), F(OLD, { stale:true }), H('ESP32-C6 DevKit') ],
-  today:{ prim:null, pic:'stale' } },
+  rows:[ P('Rocaille', { stale:true }), L('usb', 'Offline · 2 hours ago'), A('edit', { stale:true }), F(OLD, { stale:true }), H('ESP32-C6 DevKit') ],
+  today:{ prim:null, pic:'stale', rows:[ P('Rocaille', { stale:true }), L('usb', 'Offline · 2 h'), A('edit', { stale:true }), F(OLD, { stale:true }), H('ESP32-C6 DevKit') ] } },
 { id:'offline2', label:'offline · Wi‑Fi reaches it', tone:'neu', kind:'usb', name:'Garage', pic:'stale', pat:'eaves', layout:'roof',
-  say:['This board is offline.', 'It was last seen 2 hours ago.'],
+  say:['This board isn’t plugged in.', 'Connect over Wi‑Fi to use it.'],
+  r1:['This board is offline.', 'It was last seen 2 hours ago.'],
   prim:{ w:'Connect', i:'wifi' },
-  rows:[ P('Holiday Eaves', { stale:true }), L('usb', 'Offline · 2 h'), A('edit', { stale:true }), F(V, { stale:true }), H('ESP32-C6 mini') ],
-  today:{ prim:{ w:'Connect', i:'wifi' }, pic:'stale' } },
+  rows:[ P('Holiday Eaves', { stale:true }), L('usb', 'Offline · 2 hours ago'), A('edit', { stale:true }), F(V, { stale:true }), H('ESP32-C6 mini') ],
+  today:{ prim:{ w:'Connect', i:'wifi' }, pic:'stale', rows:[ P('Holiday Eaves', { stale:true }), L('usb', 'Offline · 2 h'), A('edit', { stale:true }), F(V, { stale:true }), H('ESP32-C6 mini') ] } },
 { id:'tab', label:'another tab', tone:'att', kind:'usb', name:'Porch lamp', pic:'last', pat:'eaves', layout:'roof',
-  say:['This board is open in another tab.', 'Connecting here will disconnect the other tab.'],
+  say:['This board is open in another tab.', 'Connect here to move it to this tab.'],
+  r1:['This board is open in another tab.', 'Connecting here will disconnect the other tab.'],
   prim:{ w:'Connect here', i:'usb' },
   rows:[ P('studio'), L('usb', 'Open in another tab', { a:'editor open', t:'att' }), A('edit · USB'), F(V), XIAO ],
   today:{ prim:{ w:'Connect', i:'usb', tint:'err' }, pic:'stale' } },
@@ -452,7 +495,8 @@ const STATES = [
   rows:[ P('studio'), L('wifi', 'Wi‑Fi · connected'), A('edit · password'), F(OLD, { a:'updating · 42%', work:{ p:42 } }), XIAO ],
   today:{ prim:null, pic:'strip' } },
 { id:'sending', label:'sending', tone:'work', kind:'layers', name:'Porch lamp', pic:'last', pat:'eaves', layout:'roof', work:{ p:40 },
-  say:['Sending studio to this board.'],
+  say:['Sending the project studio to this board.'],
+  r1:['Sending studio to this board.'],
   prim:null,
   rows:[ P('studio', { a:'sending · 40%', work:{ p:40 } }), USBC, A('edit · USB'), F(V), XIAO ],
   today:{ prim:null, pic:'live' } },
@@ -478,15 +522,16 @@ const byId = (id) => STATES.find((s) => s.id === id);
 for (const s of STATES) { s.today.rows = s.today.rows || s.rows; s.today.pic = s.today.pic || null; }
 
 /* =====================================================================
-   The page's settings
+   The page's settings. copy: now | r1 | bad; tt (where the tone goes):
+   tone (icon + first sentence, B as drawn) | white (icon only)
    ===================================================================== */
-const ST = { state:'old', copy:'yona', rows:'quiet', grid:'E' };
+const ST = { state:'old', copy:'now', tt:'tone', rows:'quiet' };
 const qs = new URLSearchParams(location.search);
 if (qs.get('state') && byId(qs.get('state'))) ST.state = qs.get('state');
-if (qs.get('copy') === 'bad') ST.copy = 'bad';
+if (['now', 'r1', 'bad'].includes(qs.get('copy'))) ST.copy = qs.get('copy');
+if (qs.get('tt') === 'white') ST.tt = 'white';
 if (qs.get('rows') === 'toned') ST.rows = 'toned';
-if (/^[A-E]$/.test(qs.get('g') || '')) ST.grid = qs.get('g');
-const sayOf = (st) => (st.id === 'old' && ST.copy === 'bad') ? st.bad : st.say;
+const sayOf = (st) => (st.id === 'old' && ST.copy === 'bad') ? st.bad : (ST.copy === 'r1' && st.r1) ? st.r1 : st.say;
 
 /* =====================================================================
    The card's pieces
@@ -537,43 +582,39 @@ function panelFace() {
     + `<div class="cbar">${ic('sliders')}<span class="lbl">All controls</span><span class="sub">· 2 more</span><span class="spring"></span><button type="button" class="wo" tabindex="-1">${ic('edit')}Edit</button></div>`;
 }
 
-/* the sentences, with the work they report */
+
+/* the sentences, with the work they report. In round 1's copy, the
+   sentences that changed since are dotted. */
 function sayHtml(st) {
   const [s1, s2] = sayOf(st);
   const bad = st.id === 'old' && ST.copy === 'bad' ? ' bad' : '';
+  const r1 = ST.copy === 'r1' && st.r1 ? ' r1diff' : '';
+  const d1 = r1 && st.r1[0] !== st.say[0] ? ' d' : '', d2 = r1 && st.r1[1] !== st.say[1] ? ' d' : '';
   const spin = st.work && st.work.spin ? '<span class="spin"></span>' : '';
   const prog = st.work && st.work.p != null ? `<div class="prog"><span class="track"><i style="width:${st.work.p}%"></i></span><span class="pc">${st.work.p}%</span></div>` : '';
-  return `<div class="say${bad}"><p class="s1">${spin}<span>${esc(s1)}</span></p>${s2 ? `<p class="s2">${esc(s2)}</p>` : ''}${prog}</div>`;
+  return `<div class="say${bad}${r1}"><p class="s1${d1}">${spin}<span>${esc(s1)}</span></p>${s2 ? `<p class="s2${d2}">${esc(s2)}</p>` : ''}${prog}</div>`;
 }
 
 /* =====================================================================
-   The concepts. Each draws the 138 px surface for a state.
+   The concepts. Each draws the 138 px surface for a state. B is
+   decided (round 1); A, C, D and E stay only as the rejected strip.
    ===================================================================== */
+const MAIN = 'B';
 const CONCEPTS = {
   A:{ name:'Words in place of the picture',
-      what:'No picture: the sentences, centred on the dark surface, the first in the tone’s colour. A picture: it dims, and the words sit in a band along its foot.',
-      pro:'Calm. The words are the whole surface, and the tone is in the words themselves (never colour alone).',
-      con:'The words move between the centre and the foot as a picture comes and goes (stay in place). On dark, orange words are a quiet alarm: a page of cards doesn’t show at a glance which ones need you.' },
+      why:'the words jump between the centre and the foot as a picture comes and goes, and orange words alone are a quiet alarm.' },
   B:{ name:'The notice as an object',
-      what:'An empty state: the kind’s icon in the tone, then the sentences, centred. A picture dims under it, fully covered.',
-      pro:'The icon says which part of the board it is about before you read (firmware, link, access, project). A shape everyone knows from empty states.',
-      con:'The icon repeats the row’s icon (say it once). A full cover hides a live picture. Centred blocks are slow to scan at a card’s size, and the tallest copy only just fits.' },
+      what:'An empty state: the kind’s icon in the tone, then the sentences, centred. A picture dims under them.',
+      yona:'I like the icon and plain text. its clear, and hits the balance between boldness and simplicity' },
   C:{ name:'The toned surface',
-      what:'The surface takes the state’s status family as its ground: orange when the board needs you, red and striped when it’s broken, neutral otherwise. A picture becomes a dim thumbnail.',
-      pro:'The rows’ own tone treatment, at the surface’s scale (one treatment per meaning). A page of cards shows which ones need you at a glance (loud when bad).',
-      con:'A live picture shrinks to a stamp while another tab has the board, and while it updates. The thumbnail is a box inside the surface (useful structure: no box in a box).' },
+      why:'a live picture shrinks to a stamp, and the thumbnail is a box inside the surface.' },
   D:{ name:'Words over the picture',
-      what:'The picture is left as it is. The words sit top-left on a scrim, like a video player’s overlay. With no picture, the same place on dark.',
-      pro:'The lights stay bright and visible. The words never move.',
-      con:'The words fight the picture’s own colours, and the scrim takes the top-left third of the lights. Over dark, the words float in a corner of an empty surface. The tone is only in the words.' },
-  E:{ name:'The row’s tone, grown into the surface', mine:true,
-      what:'My own idea, from A and C. The words always sit at the surface’s foot, right above the name and its primary, on the state’s tone ground. With no picture the tone fills the surface; with one, the tone is a band and the whole picture fits above it.',
-      pro:'One look means one thing: the row’s treatment, scaled (one treatment per meaning). The words never move (stay in place), and they sit right above the button they lead to: read, then act. Nothing covers the picture, so ui.md’s rule still holds.',
-      con:'While the words are there, the picture has half the height (the lights are drawn smaller, not cut). With no picture, the tone field above the words is empty.' },
+      why:'the words fight the lights’ own colours, and over dark they float in a corner.' },
+  E:{ name:'The row’s tone, grown into the surface',
+      why:'an empty tone field above the words, and the picture at half height; the icon and plain text read clearer.' },
 };
-const LEAN = 'E';
 
-function surface(c, st) {
+function surface(c, st, o = {}) {
   const n = notch();
   if (!st.say) return `<div class="pic">${cv(st, 'live')}${n}</div>`;
   const tone = st.tone;
@@ -585,10 +626,11 @@ function surface(c, st) {
     return `<div class="pic sf-a ${tc}"><div class="under dim">${cv(st, pm)}</div><div class="band">${say}</div>${n}</div>`;
   }
   if (c === 'B') {
+    const white = (o.tt || ST.tt) === 'white' ? ' white' : '';
     const obj = `<span class="obj">${st.work && st.work.spin ? '<span class="spin"></span>' : ic(st.kind)}</span>`;
     const sayB = st.work && st.work.spin ? say.replace('<span class="spin"></span>', '') : say;
     const under = pm ? `<div class="under dimmer">${cv(st, pm)}</div><div class="scrim"></div>` : '';
-    return `<div class="pic sf-b ${tc}">${under}<div class="inner">${obj}${sayB}</div>${n}</div>`;
+    return `<div class="pic sf-b ${tc}${white}">${under}<div class="inner">${obj}${sayB}</div>${n}</div>`;
   }
   if (c === 'C') {
     const thumb = pm ? `<div class="thumb">${cv(st, pm)}</div>` : '';
@@ -611,22 +653,25 @@ function todayCard(st) {
 }
 function newCard(c, st, o = {}) {
   const quiet = o.quiet != null ? o.quiet : ST.rows === 'quiet';
-  const face = st.panel ? panelFace() : st.rows.map((r) => row(o.factAlone && r.fact ? { ...r, act:null } : r, quiet)).join('');
-  return `<div class="sc">${surface(c, st)}${nb(st.name, st.prim)}<div class="face">${face}</div></div>`;
+  const face = st.panel ? panelFace() : st.rows.map((r) => row(r, quiet)).join('');
+  return `<div class="sc">${surface(c, st, o)}${nb(st.name, st.prim)}<div class="face">${face}</div></div>`;
 }
-function miniCard(c, st) { return `<div class="sc mini">${surface(c, st)}${nb(st.name, st.prim)}</div>`; }
+function miniCard(c, st, o = {}) { return `<div class="sc mini">${surface(c, st, o)}${nb(st.name, st.prim)}</div>`; }
 
 /* =====================================================================
    Sections
    ===================================================================== */
+const COPYNOTE = {
+  now:'<b>The button said aloud (decided).</b> What is going on with the board, then the button’s own verb and object and what it gets you. “Update the firmware to connect and edit.” → ▲ Update firmware.',
+  r1:'<b>Round 1, before the rule.</b> The sentences that have changed since are dotted. Switch back to see the rule in place.',
+  bad:'<b>The director’s draft, rejected.</b> Headline-ese (no articles, no verbs); our mechanism (Studio versions) instead of your situation; a reassuring fragment nobody asked for; and it never says what you can’t do. The switch swaps the old-firmware surface only.',
+};
 function renderChips() {
   document.getElementById('chips').innerHTML = STATES.map((s) =>
     `<button type="button" class="chip" data-state="${s.id}" aria-pressed="${s.id === ST.state}"><span class="td ${s.tone}"></span>${esc(s.label)}${s.yours ? ' <span class="yours">your board</span>' : ''}</button>`).join('');
   const note = document.getElementById('copynote');
   note.className = 'note' + (ST.copy === 'bad' ? ' bad' : '');
-  note.innerHTML = ST.copy === 'bad'
-    ? '<b>The director’s draft, rejected.</b> Headline-ese (no articles, no verbs); our mechanism (Studio versions) instead of your situation; a reassuring fragment nobody asked for; and it never says what you can’t do. The switch swaps the old-firmware surface only.'
-    : '<b>Yona’s voice.</b> What is going on with the board, then what it means for you, in two short complete sentences. Switch to the draft to see the difference in place (old firmware only).';
+  note.innerHTML = COPYNOTE[ST.copy];
 }
 
 function renderConcepts() {
@@ -635,28 +680,29 @@ function renderConcepts() {
     <p class="cw">The picture, black when the board shows none. A primary when one is offered. The rows carry every problem, in their tones.</p>
     ${todayCard(st)}
     <p class="cfa"><b>Against:</b> a black surface says nothing, and most problems sit on the fourth row. On the desk board: no primary, “Project none”, and the fix is a red Update that reads as “broken”: a dead end.${st.today.guess ? '<br><span class="dagger">† Today’s primary for this state is my reading of <code>primary_action.rs</code>, not a capture.</span>' : ''}</p></div>`;
-  const rest = Object.entries(CONCEPTS).map(([k, c]) => `<div class="concept${k === LEAN ? ' leanc' : ''}"><div class="chead"><span class="cl">${k}</span><span class="cn">${esc(c.name)}</span>${k === LEAN ? '<span class="leanb">lean</span>' : ''}</div>
-    <p class="cw">${esc(c.what)}</p>${newCard(k, st)}
-    <p class="cfa"><b>For:</b> ${esc(c.pro)}<br><b>Against:</b> ${esc(c.con)}</p></div>`).join('');
-  document.getElementById('concepts').innerHTML = today + rest;
+  const b = CONCEPTS.B;
+  const main = `<div class="concept main"><div class="chead"><span class="cl">B</span><span class="cn">${esc(b.name)}</span><span class="leanb">decided</span></div>
+    <p class="cw">${esc(b.what)}</p>${newCard('B', st)}
+    <p class="cfa"><b>Yona:</b> “${esc(b.yona)}”.</p></div>`;
+  const rej = ['A', 'C', 'D', 'E'].map((k) => `<div class="rej"><div class="tiny">${miniCard(k, st)}</div><p><b>${k} · ${esc(CONCEPTS[k].name)}.</b> Rejected because ${esc(CONCEPTS[k].why)}</p></div>`).join('');
+  const strip = `<div class="rejected"><h3>Rejected in round 1</h3>${rej}</div>`;
+  const el = document.getElementById('concepts');
+  el.className = 'concepts r2';
+  el.innerHTML = today + main + strip;
 }
 
 function renderGrid() {
-  document.getElementById('gseg').innerHTML = Object.keys(CONCEPTS).map((k) => `<button type="button" data-g="${k}" aria-pressed="${k === ST.grid}">${k}${k === LEAN ? ' · lean' : ''}</button>`).join('');
-  document.getElementById('s2lede').innerHTML = `Every state at once in <b>${ST.grid} · ${esc(CONCEPTS[ST.grid].name)}</b>, so the copy and the primaries scan as a set; switch concepts to compare. The picked state wears the selection ring; click a card to pick it. <b>Why E is the lean:</b> it is the rows’ own tone treatment, scaled, so orange and red mean what they mean on a row; its words never move; they sit right above the primary they lead to; and nothing covers the picture: the whole picture fits above the words.`;
   document.getElementById('grid').innerHTML = STATES.map((s) => {
     const pv = s.prim ? (s.prim.spin ? '◌ spinner' : '→ ' + s.prim.w) : 'no primary';
-    return `<div class="gitem${s.id === ST.state ? ' sel' : ''}${s.yours ? ' yourb' : ''}" data-state="${s.id}" tabindex="0"><div class="gcap"><span>${esc(s.label)}</span>${s.yours ? '<span class="yours">your board</span>' : ''}<span class="pv">${esc(pv)}</span></div>${newCard(ST.grid, s)}</div>`;
+    return `<div class="gitem${s.id === ST.state ? ' sel' : ''}${s.yours ? ' yourb' : ''}" data-state="${s.id}" tabindex="0"><div class="gcap"><span>${esc(s.label)}</span>${s.yours ? '<span class="yours">your board</span>' : ''}<span class="pv">${esc(pv)}</span></div>${newCard(MAIN, s)}</div>`;
   }).join('');
 }
 
 function renderRows() {
   const st = byId('old');
-  const c = ST.grid;
   document.getElementById('trio').innerHTML =
     `<div><p class="cap">Today</p>${todayCard(st)}<p class="sub">No primary, “Project none”, a red Update on the fourth row.</p></div>`
-    + `<div><p class="cap">New · the fact, its button kept</p>${newCard(c, st, { quiet:true })}<p class="sub">The primary repeats the row’s Update. The row reads the same in every state.</p></div>`
-    + `<div><p class="cap">New · the fact alone</p>${newCard(c, st, { quiet:true, factAlone:true })}<p class="sub">One button for one fix. The row now differs by state.</p></div>`;
+    + `<div><p class="cap">B · quiet rows</p>${newCard(MAIN, st, { quiet:true })}<p class="sub">The primary repeats the row’s Update. The row keeps its fact and its button; the tone is the surface’s.</p></div>`;
   const tr = (k, a, b, why, same) => `<tr class="${same ? 'same' : ''}"><td class="st">${k}</td><td class="v"><div class="box">${row(a, false)}</div></td><td class="v"><div class="box">${row(b, true)}</div></td><td class="why">${why}</td></tr>`;
   const T = st.today.rows, N = st.rows;
   document.getElementById('rowtbl').innerHTML =
@@ -668,44 +714,36 @@ function renderRows() {
 }
 
 function renderQs() {
-  const st = byId('tab'), off = byId('offline'), up = byId('updating');
-  const minis = [['E', 'band below'], ['A', 'band over'], ['B', 'full cover'], ['C', 'thumbnail']];
-  const q3 = [st, off, up].map((s) => minis.map(([k, w]) => `<div><p class="cap">${esc(s.label)} · ${k} · ${w}</p>${miniCard(k, s)}</div>`).join('')).join('');
+  const pick = ['old', 'crash', 'tab'].map(byId);
+  const pair = [['tone', 'icon + first sentence in the tone (B as drawn)'], ['white', 'icon in the tone, plain text']]
+    .map(([tt, w]) => pick.map((s) => `<div><p class="cap">${esc(s.label)} · ${w}</p>${miniCard('B', s, { tt })}</div>`).join('')).join('');
   document.getElementById('qs').innerHTML = `
-  <div class="q"><h3><span class="id">Q1</span>Which concept?</h3>
-    <p>A puts the words in the picture’s place; B makes the notice an object; C tones the whole surface; D lays the words over the picture; E grows the row’s tone into the surface, its words always at the foot.</p>
-    <p class="lean"><b>Lean: E.</b> It reuses the one treatment the card already has for “needs you” and “broken”, so nothing new has to be learned. Its words have one place in every state, right above the primary they lead to. And nothing covers the picture: it fits above the words, whole. C is the close second: just as loud, but it shrinks the lights to a stamp whenever there is a picture.</p></div>
-  <div class="q"><h3><span class="id">Q2</span>Do the rows go quiet (one loud place)?</h3>
-    <p>With the surface saying the problem in sentences, a toned row says it a second time in a second colour field (say it once). The “Rows” switch in the strip shows both on every card. Quiet rows keep their state word (“crashing”, “data lost”) and their button: only the tone goes. Section 3 shows the button question on the desk board.</p>
-    <p class="lean"><b>Lean: yes, quiet rows, buttons kept.</b> The surface is the one loud place; a row is a label and keeps its fix, so the primary repeating it is the breach you accepted. Dropping the row’s button would lose the way out where there are two (data lost: Restore │ Reset), and the row would then read differently by state (stay in place).</p></div>
-  <div class="q"><h3><span class="id">Q3</span>A band over a live picture, or a full cover?</h3>
-    <p>Three states have a picture to keep while the surface talks: another tab (the frames that tab saved), offline (the last picture, dimmed), updating (the last picture). Each is drawn four ways: E’s band below the picture (the picture shrinks to fit above it), A’s band over the dimmed picture, B’s full cover, C’s thumbnail.</p>
-    <div class="minis">${q3}</div>
-    <p class="lean"><b>Lean: a band, below the picture rather than over it (E).</b> The picture is information: what the board is playing in the other tab, what it was playing when it went away. A band keeps it in view; drawn below rather than over, it covers none of it and ui.md’s rule can stay. A full cover hides the lights, and a thumbnail turns them into a stamp.</p></div>
-  <div class="q"><h3><span class="id">Q4</span>What else the concepts made me notice</h3>
+  <div class="q"><h3><span class="id">✓</span>Decided</h3>
+    <ol class="decided">
+      <li><b>B, the notice as an object.</b> Yona: “I like the icon and plain text. its clear, and hits the balance between boldness and simplicity”.</li>
+      <li><b>The copy rule.</b> The second sentence is the button said aloud: the button’s own verb and object, then what it gets you. Bad: “An update is required to connect and edit.” Do: “Update the firmware to connect and edit.” One format per card follows from it: the offline row says “2 hours ago”, as its sentence does.</li>
+      <li><b>Quiet rows</b> (the director’s call, pending Yona’s veto). The rows keep their state word and their own button, and the loud tone is the surface’s alone. The Rows switch in the strip still shows the toned rows.</li>
+      <li><b>The dimmed cover</b> (the director’s call, pending Yona’s veto). B covers a picture: it dims under the icon and the sentences, for another tab, offline and updating as for the rest. ui.md’s “nothing covers the picture” needs rewording to match: nothing covers the picture while the board is well.</li>
+    </ol></div>
+  <div class="q"><h3><span class="id">Q</span>Does the tone go in the icon only, or in the first sentence too?</h3>
+    <p>B as drawn so far tints the icon and the first sentence. The other way tints the icon alone and keeps the sentences white. The Tone switch in the strip applies either one to every card on the page; here are three states both ways.</p>
+    <div class="minis three">${pair}</div>
+    <p class="lean"><b>Lean: the icon only, the sentences white.</b> It is what Yona named: “the icon and plain text”. The tone then has one carrier, so a toned state and a neutral one read alike and only the icon says how bad; the icon’s shape and the words still say what (never colour alone). White reads better than orange or pale red at 13 px, most of all over a dimmed picture (another tab). Against: on a full page of cards, a 30 px icon is a smaller signal than a coloured line of text.</p></div>
+  <div class="q"><h3><span class="id">·</span>Noted for the plan (no decision needed)</h3>
     <ul>
-      <li><b>The red Update.</b> Today’s fix on the desk board wears the error tint, the look a press gets when it isn’t Routine (Undoable and Lasting presses both take it), and that tint is the same red as “broken”. The only red thing on the card was the fix. An action’s consequence and the board’s state share one colour (one treatment per meaning).</li>
-      <li><b>The corner’s “!” loses its job.</b> Today the corner shows a notice icon only while the connected panel covers the rows. A surface that speaks can say the problem itself while connected, so the corner is only ever the quiet ⋯ (the details and the terminal).</li>
-      <li><b>Progress shows twice.</b> Updating and sending put the percent in the surface and again along the row’s foot. One home is enough: the surface, with the row keeping its word (“updating”).</li>
-      <li><b>Connecting flashes.</b> A sentence for a moment that usually lasts under a second will flicker on every connect. The words could wait a second before they show; the spinner primary covers that second.</li>
-      <li><b>Locked over Bluetooth</b> is drawn without a picture, as the shipped story has it. If a locked board’s picture can come over Bluetooth before the password, it would sit above the words like another tab’s.</li>
-      <li><b>“Nothing covers the picture”</b> (ui.md, The board card): A, B and D break it, C keeps it by shrinking the picture to a stamp, and E keeps it by fitting the picture above the words. If you pick A, B or D, the rule needs rewriting; one candidate is “nothing covers a live picture while the board is well”.</li>
+      <li><b>The red Update.</b> Today’s fix on the desk board wears the error tint, the look a press gets when it isn’t Routine, and it is the same red as “broken”: an action’s consequence and the board’s state share one colour.</li>
+      <li><b>The corner’s “!” loses its job.</b> The surface can say a problem while the connected panel covers the rows, so the corner is only ever the quiet ⋯.</li>
+      <li><b>Progress shows twice.</b> Updating and sending put the percent in the surface and again along the row’s foot.</li>
+      <li><b>Connecting flashes.</b> A sentence for a moment that usually lasts under a second will flicker on every connect; the words could wait a second before they show.</li>
+      <li><b>Two labels for one action.</b> The primary says “Reinstall firmware” while the row’s own button says “Reinstall” (and Install firmware / Install, Update firmware / Update): the row button says the verb alone for width.</li>
       <li><b>The desk board’s name</b> still carries a date (“· Sep 7 2”); O5 decided a new board’s name has none.</li>
-    </ul></div>
-  <div class="q"><h3><span class="id">Q5</span>Copy that may still ring wrong (noted, not changed)</h3>
-    <ul>
-      <li><b>Offline:</b> “It was last seen 2 hours ago.” beside the Link row’s “Offline · 2 h”: one time, two formats, one card (numbers read naturally, the guide’s own bad example).</li>
-      <li><b>Offline, Wi‑Fi reaches it:</b> “This board is offline.” over a Connect that works.</li>
-      <li><b>Sending:</b> “Sending studio to this board.” The project’s name, “studio”, reads as the app in a sentence; “Studio couldn’t reach this board” is in the same list.</li>
-      <li><b>Wi‑Fi failed:</b> in “It needs to be on the same network.”, “It” reads as the board. It is your computer that has to share the board’s network.</li>
-      <li><b>Someone else:</b> “Only one connection is allowed at a time.” explains our rule more than your situation, the rejected draft’s fault in a milder form. What it means for you is that you can connect when they leave.</li>
-      <li><b>Two shapes for one consequence:</b> “An update is required to connect and edit.” and “An install is required to use it.” beside “Install it to use the board.” and “Reinstall the firmware to fix it.”</li>
     </ul></div>`;
 }
 
 function renderAll() {
   renderChips(); renderConcepts(); renderGrid(); renderRows(); renderQs();
   document.querySelectorAll('[data-copy]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.copy === ST.copy)));
+  document.querySelectorAll('[data-tt]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tt === ST.tt)));
   document.querySelectorAll('[data-rows]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.rows === ST.rows)));
   requestAnimationFrame(mountCanvases);
 }
@@ -715,10 +753,10 @@ document.addEventListener('click', (e) => {
   if (s) { ST.state = s.dataset.state; return renderAll(); }
   const c = e.target.closest('[data-copy]');
   if (c) { ST.copy = c.dataset.copy; return renderAll(); }
+  const t = e.target.closest('[data-tt]');
+  if (t) { ST.tt = t.dataset.tt; return renderAll(); }
   const r = e.target.closest('[data-rows]');
   if (r) { ST.rows = r.dataset.rows; return renderAll(); }
-  const g = e.target.closest('[data-g]');
-  if (g) { ST.grid = g.dataset.g; return renderAll(); }
 });
 document.addEventListener('keydown', (e) => {
   const s = e.target.closest && e.target.closest('.gitem');
