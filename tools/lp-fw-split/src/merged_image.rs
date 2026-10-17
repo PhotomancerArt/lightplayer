@@ -20,6 +20,21 @@ use lp_bootctl::LOADER_OFFSET;
 /// The C6's flash: 4 MiB.
 pub const FLASH_LEN: usize = 4 * 1024 * 1024;
 
+/// `merged` with its second stage replaced: `bootloader` at `0x0`, erased
+/// (`0xFF`) to the partition table at `0x8000`. Moving a board between the
+/// two front doors rewrites exactly this range; everything from the
+/// partition table on is the same bytes.
+pub fn with_bootloader(merged: &[u8], bootloader: &[u8]) -> Result<Vec<u8>> {
+    const TABLE: usize = 0x8000;
+    if bootloader.len() > TABLE {
+        bail!("the bootloader runs into the partition table");
+    }
+    let mut out = merged.to_vec();
+    out[..TABLE].fill(0xff);
+    out[..bootloader.len()].copy_from_slice(bootloader);
+    Ok(out)
+}
+
 /// The merged image of `app` over the bootloader and `partitions`.
 /// `loader_elf` stands in as espflash's app; `bootloader` overrides the
 /// bundled one (a build def's override).

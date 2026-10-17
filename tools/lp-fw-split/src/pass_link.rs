@@ -87,12 +87,28 @@ pub fn link_firmware(
 
 /// Build the loader from its own directory; its ELF.
 pub fn build_loader(repo: &Path) -> Result<PathBuf> {
+    build_loader_flavour(repo, false)
+}
+
+/// Build the loader's bootloader flavour (`--features bootloader`): our
+/// second stage for flash 0x0; its ELF. Both flavours build to the same
+/// path, so read one before building the other.
+pub fn build_bootloader(repo: &Path) -> Result<PathBuf> {
+    build_loader_flavour(repo, true)
+}
+
+fn build_loader_flavour(repo: &Path, bootloader: bool) -> Result<PathBuf> {
     let dir = repo.join("lp-fw/fw-esp32c6-loader");
     let mut command = Command::new("cargo");
     scrub_outer_build_env(&mut command);
+    if bootloader {
+        command.args(["build", "--features", "bootloader"]);
+    } else {
+        command.arg("build");
+    }
     let output = command
         .current_dir(&dir)
-        .args(["build", "--release", "--quiet"])
+        .args(["--release", "--quiet"])
         .args(["--message-format", "json-render-diagnostics"])
         .stderr(Stdio::inherit())
         .output()

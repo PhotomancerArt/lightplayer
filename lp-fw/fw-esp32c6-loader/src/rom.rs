@@ -5,6 +5,10 @@ unsafe extern "C" {
     fn ets_printf(fmt: *const core::ffi::c_char, ...) -> i32;
     fn Cache_Invalidate_ICache_All();
     fn rtc_get_reset_reason(cpu: u32) -> u32;
+    #[cfg(feature = "bootloader")]
+    fn Cache_Suspend_ICache() -> u32;
+    #[cfg(feature = "bootloader")]
+    fn Cache_Resume_ICache(autoload: u32);
 }
 
 /// The reset-reason code of this boot (classified by
@@ -18,6 +22,28 @@ pub fn reset_reason() -> u32 {
 pub fn invalidate_cache() {
     // SAFETY: a ROM routine with no arguments; nothing runs from the window.
     unsafe { Cache_Invalidate_ICache_All() }
+}
+
+/// Stop the cache serving while the MMU changes under it; its autoload
+/// state, for [`resume_cache`].
+#[cfg(feature = "bootloader")]
+pub fn suspend_cache() -> u32 {
+    // SAFETY: a ROM routine; this stage runs from RAM.
+    unsafe { Cache_Suspend_ICache() }
+}
+
+/// Let the cache serve again.
+#[cfg(feature = "bootloader")]
+pub fn resume_cache(autoload: u32) {
+    // SAFETY: a ROM routine, given what `suspend_cache` returned.
+    unsafe { Cache_Resume_ICache(autoload) }
+}
+
+/// The bootloader's one line of its own: which bootloader this is.
+#[cfg(feature = "bootloader")]
+pub fn print_bootloader(version: u32) {
+    // SAFETY: a C format string with a matching argument.
+    unsafe { ets_printf(c"[LPBOOT] LightPlayer bootloader v%u\n".as_ptr(), version) };
 }
 
 /// The one line before the core runs: which core, and why this one.
