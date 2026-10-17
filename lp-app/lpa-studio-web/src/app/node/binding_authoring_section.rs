@@ -118,7 +118,7 @@ pub(crate) fn BindingAuthoringSection(
     let author_title = if authored.is_some() {
         "Point this slot's authored binding at a different channel"
     } else if bound {
-        "The slot declares this default wiring; authoring a binding overrides it"
+        "The slot sets this default wiring. A binding you add will replace it."
     } else {
         "Author a binding from this slot to a bus channel"
     };

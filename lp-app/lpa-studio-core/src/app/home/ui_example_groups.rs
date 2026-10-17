@@ -77,10 +77,9 @@ pub fn example_page_label(group_key: &str) -> &'static str {
         _ => EXAMPLE_PROJECTS_LABEL,
     }
 }
-pub const PROJECTS_LEDE: &str =
-    "Real pieces, wired the way they were built. Open one here, then make it yours.";
+pub const PROJECTS_LEDE: &str = "Open one to try it, then save it to keep your own copy.";
 pub const PATTERNS_LEDE: &str =
-    "Single effects on a test rig. Each exports an effect you can import into your own project.";
+    "Single effects, shown on a test rig. You can add any of them to your own project.";
 
 #[cfg(test)]
 mod tests {

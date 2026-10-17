@@ -286,7 +286,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
                     log::warn!("share: could not set access on {uid}: {error}");
                     state.write().set_access(previous);
                     if let Some(mut toasts) = toasts {
-                        toasts.warn("Could not change who the link lets in — nothing was saved.");
+                        toasts.warn("Couldn't change who can open the link.");
                     }
                 }
             }
@@ -303,7 +303,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
                 Err(error) => {
                     log::warn!("share: could not add a member to {uid}: {error}");
                     if let Some(mut toasts) = toasts {
-                        toasts.warn("Could not add that address — nobody was invited.");
+                        toasts.warn("Couldn't add that address.");
                     }
                 }
             }
@@ -321,7 +321,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
                 Err(error) => {
                     log::warn!("share: could not remove a member from {uid}: {error}");
                     if let Some(mut toasts) = toasts {
-                        toasts.warn("Could not remove them — their access is unchanged.");
+                        toasts.warn("Couldn't remove them.");
                     }
                 }
             }

@@ -19,7 +19,7 @@
 //! Relationship-control D2/P5: the project segment's popover owns the
 //! fork-family verb for every standing, and for a visit (a TRANSIENT view
 //! session — the shape every `/p/` View link opens as since the examples
-//! vision) its hero slot is "Fork — make it yours". The pristine strip's
+//! vision) its hero slot is "Fork a copy". The pristine strip's
 //! own Fork button was the same offer one row lower, so it retired; the
 //! strip keeps Copy link and says what world the copy is in.
 //!
@@ -198,7 +198,7 @@ pub fn VisitorBanner(
             rsx! { Radio { size: 14 } },
             "Viewing",
             name,
-            " — updates arrive as they happen.",
+            ", updating live.",
         ),
         VisitorBannerView::ViewEdited => rsx! {
             div { class: "{STRIP_BASE} {WARN_TINT}", role: "status",
@@ -206,9 +206,9 @@ pub fn VisitorBanner(
                     GitBranch { size: 14 }
                 }
                 span { class: STRIP_TEXT,
-                    "You've made local changes — updates are "
+                    "You've made changes here, so updates are "
                     strong { class: STRONG_TEXT, "paused" }
-                    ". They stay on this device unless you fork."
+                    ". Fork to keep your version."
                 }
                 span { class: ACTIONS,
                     QuietButton { label: "Discard changes", on_press: on_discard }
@@ -220,7 +220,7 @@ pub fn VisitorBanner(
             rsx! { Pencil { size: 14 } },
             "Editing",
             name,
-            " — saves go live for everyone.",
+            ". Saves go live for everyone.",
         ),
     }
 }

@@ -44,9 +44,9 @@ use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_set_v
 const SHAPE_PROMPT: &str = "What shape is this fixture?";
 /// Why the card is asking (spike §4 wording, trimmed of pack-matching
 /// promises that don't exist yet).
-const SHAPE_PROMPT_SUB: &str = "This is the fixture's identity — effects are matched to it.";
+const SHAPE_PROMPT_SUB: &str = "Effects are matched to the fixture's shape.";
 /// The dismiss affordance: the moment is an offer, never a gate.
-const SHAPE_SKIP: &str = "skip — keep it as it is";
+const SHAPE_SKIP: &str = "Skip and keep it as it is";
 
 /// One preset tile of the Shape moment (Q7's proposed set).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,8 +73,8 @@ impl ShapePreset {
 
     const fn hint(self) -> &'static str {
         match self {
-            Self::Strip => "1D — a line of pixels",
-            Self::Matrix => "2D — a grid or panel",
+            Self::Strip => "1D: a line of pixels",
+            Self::Matrix => "2D: a grid or panel",
             Self::MappedShape => "a strip placed in space",
             Self::ThreeD => "a cube or volume",
         }
@@ -223,7 +223,7 @@ pub fn FixtureShapeMoment(
                     class: shape_tile_class(mappable),
                     r#type: "button",
                     disabled: !mappable,
-                    title: if mappable { "open the mapping editor — the map is the shape" } else { "needs a map2d mapping document (add one in the advanced drawer)" },
+                    title: if mappable { "Open the mapping editor to draw the shape" } else { "Needs a 2D mapping first. Add one in the advanced drawer." },
                     onclick: {
                         let dispatch_preset = dispatch_preset.clone();
                         move |event: MouseEvent| {
@@ -252,7 +252,7 @@ pub fn FixtureShapeMoment(
                     class: shape_tile_class(false),
                     r#type: "button",
                     disabled: true,
-                    title: "{ShapePreset::ThreeD.hint()} — not yet",
+                    title: "{ShapePreset::ThreeD.hint()} (not yet)",
                     span { class: "tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
                         ShapeGlyph { preset: ShapePreset::ThreeD }
                     }

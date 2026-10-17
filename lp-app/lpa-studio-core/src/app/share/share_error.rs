@@ -36,25 +36,28 @@ pub enum ShareError {
 impl fmt::Display for ShareError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Malformed(detail) => write!(f, "not a LightPlayer share envelope: {detail}"),
+            Self::Malformed(detail) => {
+                write!(f, "not a copied LightPlayer project or node: {detail}")
+            }
             Self::UnknownKind { kind } => write!(
                 f,
-                "unknown share envelope kind {kind:?} — expected \"lp.package\" or \"lp.node\""
+                "not a copied LightPlayer project or node (it says {kind:?}, expected \
+                 \"lp.package\" or \"lp.node\")"
             ),
             Self::UnsupportedFormat { found, supported } => write!(
                 f,
-                "share envelope format {found} is not supported (this build reads format \
-                 {supported}); re-export it from the version that wrote it"
+                "this was copied in format {found}, and this version of Studio reads format \
+                 {supported}: copy it again from the version that made it"
             ),
             Self::ArtifactFormatMismatch { found, expected } => write!(
                 f,
-                "this node was copied from a format-{found} project; this Studio uses \
-                 {expected} — re-copy it from an upgraded project"
+                "this node was copied from a project in format {found}, and this version of \
+                 Studio uses format {expected}: copy it again from an upgraded project"
             ),
             Self::ArtifactFormatMissing { expected } => write!(
                 f,
-                "this node was copied before format stamping; this Studio uses format \
-                 {expected} — re-copy it from the source project"
+                "this node was copied by an older version of Studio (before format \
+                 {expected}): copy it again from its project"
             ),
         }
     }
@@ -74,7 +77,7 @@ mod tests {
         };
         let message = error.to_string();
         assert!(message.contains('2') && message.contains('1'), "{message}");
-        assert!(message.contains("re-export"), "{message}");
+        assert!(message.contains("copy it again"), "{message}");
     }
 
     #[test]
@@ -85,14 +88,14 @@ mod tests {
         }
         .to_string();
         assert!(
-            message.contains("format-4") && message.contains('5'),
+            message.contains("format 4") && message.contains('5'),
             "{message}"
         );
-        assert!(message.contains("re-copy"), "{message}");
+        assert!(message.contains("copy it again"), "{message}");
 
         let message = ShareError::ArtifactFormatMissing { expected: 5 }.to_string();
-        assert!(message.contains("before format stamping"), "{message}");
-        assert!(message.contains("re-copy"), "{message}");
+        assert!(message.contains("older version of Studio"), "{message}");
+        assert!(message.contains("copy it again"), "{message}");
     }
 
     #[test]

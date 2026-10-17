@@ -76,19 +76,19 @@ use crate::router::StudioRoute;
 
 /// The spike's refused-push line, said once per save that stays local.
 pub const REFUSED_PUSH_LINE: &str =
-    "This is a shared project — your changes stay on this device. Fork to give them a home.";
+    "This is a shared project, so your changes are only on this device. Fork a copy to keep them.";
 /// CFS-D5's ratified auto-apply toast.
 pub const UPDATED_LINE: &str = "Updated to the latest version";
 /// The fork confirmation.
-pub const FORKED_LINE: &str = "Forked — this one's yours.";
+pub const FORKED_LINE: &str = "Forked. This copy is yours.";
 
 /// The fork-at-explicit-save confirmation (examples vision D7): the first
 /// save of a transient view session installed it into the library. Raised
 /// by the web shell's view loop on the transient→owned transition.
 /// Copy ruled at G1 (2026-08-29): name the mechanism, not the feeling.
-pub const FORKED_COPY_LINE: &str = "Forked — now editing your copy.";
+pub const FORKED_COPY_LINE: &str = "Forked. You're editing your copy now.";
 /// The discard confirmation.
-pub const DISCARDED_LINE: &str = "Changes discarded — you're back on the shared version.";
+pub const DISCARDED_LINE: &str = "Changes discarded. You're on the shared version again.";
 
 /// How often the pull loop asks, between the open and focus triggers.
 const PULL_INTERVAL_MS: u32 = 30_000;
@@ -176,10 +176,8 @@ impl VisitorSession {
         let mut this = self.clone();
         if let Some(toasts) = this.toasts.as_mut() {
             match access {
-                Some(Access::Edit) => {
-                    toasts.say("Link copied — anyone holding it can edit and save.")
-                }
-                _ => toasts.say("Link copied — opens running for anyone (no account)."),
+                Some(Access::Edit) => toasts.say("Link copied. Anyone with it can edit and save."),
+                _ => toasts.say("Link copied. Anyone can open it, no account needed."),
             }
         }
     }
@@ -217,7 +215,7 @@ impl VisitorSession {
     pub fn discard(&self) {
         if self.overlay_dirty()
             && !crate::unsaved_gate::confirm_discarding_unsaved(
-                "Discard also drops the edits you haven't saved.\n\nDiscard everything and return to the shared version?",
+                "Discarding will also drop the edits you haven't saved.\n\nDiscard everything and go back to the shared version?",
             )
         {
             return;
@@ -815,7 +813,7 @@ mod io {
                 log::warn!("fork of {uid} failed: {message}");
                 let mut toasts = session.toasts;
                 if let Some(toasts) = toasts.as_mut() {
-                    toasts.warn("Could not fork — nothing was created.");
+                    toasts.warn("Couldn't fork this project.");
                 }
             }
         }
@@ -920,7 +918,7 @@ mod io {
                 log::warn!("discard on {uid} failed: {message}");
                 let mut toasts = session.toasts;
                 if let Some(toasts) = toasts.as_mut() {
-                    toasts.warn("Could not reach the shared version — nothing was changed.");
+                    toasts.warn("Couldn't reach the shared version.");
                 }
             }
         }

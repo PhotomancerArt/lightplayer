@@ -128,15 +128,16 @@ impl UiBusChannelView {
             .with_affordance(UiSlotAffordance::Bound);
         if self.contended {
             aspect = aspect.with_row(UiSlotAspectRow::new("Contention", "ambiguous").with_detail(
-                "Multiple writers tie at top priority (E3); the author's pick \
-                     resolves it. Until then resolution is ambiguous.",
+                "Several writers have the same top priority, so it isn't settled \
+                     which one wins.",
             ));
         }
         if self.writers.len() > 1 {
             aspect = aspect.with_row(
                 UiSlotAspectRow::new("Writers", format!("{} writers", self.writers.len()))
                     .with_detail(
-                        "Readers resolve the highest-priority writer; map-valued readers                          merge all writers by key.",
+                        "Readers get the highest-priority writer. Readers of a map merge all \
+                         writers by key.",
                     ),
             );
         }

@@ -82,7 +82,7 @@ pub(crate) fn TargetPickPopover(
                 span { class: trigger_caret_class(), "\u{25be}" }
             },
             label: "Start a board here".to_string(),
-            title: "Start a runtime of a board — or of this computer — in this tab.".to_string(),
+            title: "Simulate a board, or this computer, in this tab.".to_string(),
             popup_class: TARGET_POPUP_CLASS.to_string(),
             chrome_class: "ux-popover-chrome-neutral".to_string(),
             placement: PopoverPlacement::BottomMiddle,

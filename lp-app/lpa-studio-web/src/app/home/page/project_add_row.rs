@@ -39,7 +39,7 @@ pub(crate) fn ProjectAddRow(
             button {
                 class: quiet_action_class(),
                 r#type: "button",
-                title: "Install a project from a zip archive.",
+                title: "Add a project from a zip file.",
                 onclick: move |_| open_import_picker(),
                 span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                     StudioIcon { name: StudioIconName::Upload, size: 14 }
@@ -52,7 +52,7 @@ pub(crate) fn ProjectAddRow(
             button {
                 class: quiet_action_class(),
                 r#type: "button",
-                title: "Install a project from a JSON envelope on the clipboard.",
+                title: "Add a project you copied as JSON.",
                 onclick: move |_| paste_from_clipboard(on_action),
                 span { class: "tw:inline-flex tw:h-[15px] tw:w-[15px] tw:items-center tw:justify-center", aria_hidden: "true",
                     StudioIcon { name: StudioIconName::Copy, size: 14 }

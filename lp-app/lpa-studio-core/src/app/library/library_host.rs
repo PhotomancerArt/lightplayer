@@ -336,13 +336,13 @@ impl From<LibraryHostError> for crate::UiError {
     fn from(error: LibraryHostError) -> Self {
         match error {
             LibraryHostError::OpenElsewhere { .. } => crate::UiError::UnsupportedAction(
-                "This project is open in another tab — close it there first".to_string(),
+                "This project is open in another tab. Close it there first.".to_string(),
             ),
             LibraryHostError::OpenInThisTab { .. } => crate::UiError::UnsupportedAction(
-                "This project is open in this tab — close it before changing it".to_string(),
+                "This project is open in this tab. Close it before changing it.".to_string(),
             ),
             LibraryHostError::Busy(_) => crate::UiError::UnsupportedAction(
-                "The library is busy in another tab — try again in a moment".to_string(),
+                "Your library is busy in another tab. Try again in a moment.".to_string(),
             ),
             LibraryHostError::Refused(message) => crate::UiError::UnsupportedAction(message),
             LibraryHostError::NotFound(key) => {

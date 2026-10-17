@@ -58,7 +58,7 @@ pub(crate) fn openai_needs_setup() -> Element {
     agent.provider_layer = SettingsLayer::User;
     agent.guidance = provider_guidance(AgentProvider::OpenAi);
     agent.model_default = None;
-    agent.model_placeholder = "model id from your provider — see its docs".to_string();
+    agent.model_placeholder = "Model id from your provider's docs".to_string();
     agent.model_missing = true;
     panel(agent)
 }
@@ -231,7 +231,7 @@ pub(crate) fn model_fetch_error() -> Element {
     agent.model_placeholder = "llama3.2".to_string();
     agent.model_layer = SettingsLayer::User;
     agent.models_error = Some(
-        "model list unavailable — server unreachable (check the base URL and the CORS note above)"
+        "Couldn't load models: the server didn't answer. Check the base URL and the CORS note above."
             .to_string(),
     );
     panel(agent)
@@ -311,7 +311,7 @@ fn custom_agent() -> UiAgentSettingsView {
     agent.guidance = provider_guidance(AgentProvider::Custom);
     agent.api_key_optional = true;
     agent.model_default = None;
-    agent.model_placeholder = "model id from your provider — see its docs".to_string();
+    agent.model_placeholder = "Model id from your provider's docs".to_string();
     agent.model_missing = true;
     agent
 }

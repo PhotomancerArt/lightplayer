@@ -157,9 +157,8 @@ fn HardwareRow(uid: String, target: Option<String>, on_action: EventHandler<UiAc
                 HardwarePickPopover { uid, target, on_action }
             }
             p { class: "tw:m-0 tw:text-[11px] tw:leading-relaxed tw:text-dim-foreground",
-                "The hardware this project runs on. Open starts an emu of it in this tab \
-                 (a sim when no emulator exists yet); to put it on a real board, use that \
-                 board's card."
+                "The hardware this project runs on. Opening the project will simulate it \
+                 in this tab. To run it on a real board, use that board's card."
             }
         }
     }

@@ -36,13 +36,13 @@ impl ControllerOp for ModuleExportOp {
         if self.export {
             ActionMeta::new(
                 "Export module",
-                "Ship this module's folder from this project.",
+                "Let other projects import this module.",
                 ActionPriority::Secondary,
             )
         } else {
             ActionMeta::new(
                 "Stop exporting module",
-                "Remove this module's folder from the project's exports.",
+                "Stop other projects from importing this module.",
                 ActionPriority::Secondary,
             )
         }
