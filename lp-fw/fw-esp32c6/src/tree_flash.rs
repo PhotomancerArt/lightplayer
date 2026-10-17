@@ -23,9 +23,13 @@ const SECTOR_SIZE: u32 = 4096;
 /// `lpfs` as the tree store sees it.
 pub type TreeFlash = AlignedNorFlash<FlashStorage<'static>>;
 
-/// The store's flash over the located `lpfs` partition.
+/// The store's flash over the located `lpfs` partition. Records are checked
+/// by the mask ROM's table-driven `crc32_le` (FORMAT.md's CRC-32/ISO-HDLC,
+/// the same values as `lp-crc32`): ~8x fewer cycles a byte than the bitwise
+/// one, which bounds mount and every record read, for no flash.
 pub fn tree_flash(flash: FlashStorage<'static>, partition: PartitionExtent) -> TreeFlash {
     AlignedNorFlash::new(flash, partition.offset, partition.len, SECTOR_SIZE)
+        .with_crc32(esp_hal::rom::crc::crc32_le)
 }
 
 /// Is a pre-repartition LightPlayer filesystem waiting at the legacy offset

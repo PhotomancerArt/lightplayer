@@ -55,6 +55,9 @@ pub const FILES_ARE_GONE: &str = "Its files are gone";
 /// The bar's words for a board that refused its file store: its files are
 /// kept, and nothing on the card can read them.
 pub const DATA_UNREADABLE: &str = "Data unreadable";
+/// The bar's words for a board whose firmware does not read the tree store
+/// its files are in: kept, waiting for a firmware that does.
+pub const FILES_NEED_NEWER_FIRMWARE: &str = "Files need newer firmware";
 
 /// The firmware bar.
 pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
@@ -69,6 +72,14 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
     let (summary, tone, action) = if layout.is_some_and(|layout| layout.panel.is_some()) {
         (
             "Needs your answer".to_string(),
+            UiStatusKind::Attention,
+            None,
+        )
+    } else if layout.is_some_and(|layout| layout.store_needs_newer_firmware) {
+        // Words only: the details say a firmware that reads the store
+        // brings the files back.
+        (
+            FILES_NEED_NEWER_FIRMWARE.to_string(),
             UiStatusKind::Attention,
             None,
         )

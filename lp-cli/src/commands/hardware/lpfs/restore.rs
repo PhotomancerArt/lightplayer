@@ -51,6 +51,12 @@ pub fn handle_restore(args: LpfsRestoreArgs) -> Result<()> {
                 .and_then(lpa_link::chip_id_from_reported)
                 == Some("esp32c6");
             let state = LayoutProbe::replay(target.clone(), chip_is_c6, &inspection.reads).state;
+            // A restore writes a littlefs filesystem: never over a tree store.
+            if state == LayoutState::TreeStore {
+                return Err(LinkError::other(refusal_text(
+                    &lpa_link::layout_migration::Refusal::TreeStoreWouldBeWritten,
+                )));
+            }
             if !matches!(
                 state,
                 LayoutState::CurrentMounts | LayoutState::CurrentNothing

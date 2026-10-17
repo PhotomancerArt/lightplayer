@@ -724,6 +724,7 @@ fn a_board_that_refused_its_store_says_its_data_is_unreadable_and_offers_no_way_
         FakeLightPlayerState::new()
             .with_base_mac(BENCH_BOARD_MAC)
             .with_fs_boot_state(lpc_wire::FsBootState::Refused)
+            .with_fs_tree()
             .with_heartbeat_interval(Duration::from_millis(20)),
     )));
     let (mut bench, tasks) = identified(&device, "usb-card-refused-1");
@@ -767,6 +768,57 @@ fn a_board_that_refused_its_store_says_its_data_is_unreadable_and_offers_no_way_
                 "the primary moves no files"
             );
         }
+    }
+    every_card_action_is_offered(&mut bench);
+}
+
+/// A littlefs build that found its board's files in a tree store (`fs:
+/// refused` in a hello without `fs.tree`; ADR
+/// `2026-10-10-fs-tree-refused-state-and-update-guard`, amended 2026-10-16):
+/// the bar says the files need newer firmware, the details say they are kept
+/// and what brings them back, and nothing that would write over the store —
+/// a restore, Start fresh, a migration's Finish update — is offered.
+#[test]
+fn a_littlefs_board_on_a_tree_store_says_its_files_need_newer_firmware() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac(BENCH_BOARD_MAC)
+            .with_fs_boot_state(lpc_wire::FsBootState::Refused)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
+    let (mut bench, tasks) = identified(&device, "usb-card-tree-held-1");
+    let id = bench.view().devices[0].id;
+    bench.run_until(&tasks, "the held tree store to reach the card", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&id)
+            .is_some_and(|layout| layout.store_needs_newer_firmware)
+    });
+    let card = card_of(&bench, id);
+    let firmware = card.bar(crate::BarLayer::Firmware);
+    assert_eq!(firmware.summary, crate::FILES_NEED_NEWER_FIRMWARE);
+    assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
+    assert_eq!(firmware.action, None);
+    let line = crate::app::devices::device_layout_view::TREE_STORE_HELD_LINE;
+    assert_eq!(
+        firmware
+            .details
+            .notice()
+            .and_then(|notice| notice.sentence.as_deref()),
+        Some(line)
+    );
+    assert!(line.contains("kept") && line.contains("update the firmware"));
+    for verb in [
+        RESTORE_FILES,
+        RESTORE_FROM_FILE,
+        DOWNLOAD_BACKUP,
+        crate::START_FRESH,
+        "finish-update",
+    ] {
+        let path = bench.device_verb(id, verb);
+        bench.not_offered(&path);
     }
     every_card_action_is_offered(&mut bench);
 }

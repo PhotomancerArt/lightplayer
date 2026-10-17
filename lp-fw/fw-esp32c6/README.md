@@ -275,6 +275,16 @@ it, because they all go through `base_fs`.
   install whose embedded manifest lacks the feature `fs.tree` — a littlefs
   core would format the store
   (`fw_esp32_common::fs_tree_core_guard`).
+- **The littlefs build's half** (adoption A5): today's littlefs image,
+  finding a partition littlefs will not mount, looks for the tree store's
+  sector magic `"LTS1"` at every sector before it formats
+  (`fw_esp32_common::lp_fs::holds_tree_store`). A tree store is held, not
+  formatted: `[FS] this board's files are in the tree store, a newer
+  filesystem than this firmware reads — not formatting; files kept; using
+  memory FS, access locked. Update the firmware.` — `fs: refused` with no
+  `fs.tree` in the hello, the same locked state as above. While it holds
+  one, its update session applies the same guard: only a core that reads
+  the store installs over the air.
 
 Two measurement features ride with it, neither shipped: `heap_peak_diag`
 (`[heap] peak=… live=… max_usage=… largest=…` after each heartbeat — the

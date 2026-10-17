@@ -37,6 +37,9 @@ pub struct TreeStoreStats {
     /// Header scans the last mount made after its first pass (one per level
     /// of the tree it indexed).
     pub mount_scans: u32,
+    /// Whether the last mount read every record whole (its fast pass adopted
+    /// no root, or the sector seqs may have wrapped: `store_mount.rs`).
+    pub mount_read_every_record: bool,
     pub sectors_opened: u64,
     pub erases: u64,
     /// Read-backs that did not match what was written (record, erase or

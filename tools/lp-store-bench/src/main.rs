@@ -1176,8 +1176,16 @@ fn print_fuzz(s: &FuzzSummary) {
     );
     for (k, c) in &s.by_kind {
         println!(
-            "  {k:<14} cases {:>6} mounted {:>6} refused {:>6} failures {}",
-            c.cases, c.mounted, c.refused, c.failures
+            "  {k:<14} cases {:>6} mounted {:>6} refused {:>6} failures {}{}",
+            c.cases,
+            c.mounted,
+            c.refused,
+            c.failures,
+            if c.damage_at_read > 0 {
+                format!(" (damage reported at read: {})", c.damage_at_read)
+            } else {
+                String::new()
+            }
         );
     }
     println!("  mutations {:?}", s.mutations);

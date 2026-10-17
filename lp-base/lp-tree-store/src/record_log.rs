@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use crate::flash::Flash;
 use crate::object_id::ObjectId;
 use crate::ram_index::{RamIndex, RecordLoc};
-use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader, encode_header};
+use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader, encode_header_by};
 use crate::record_kind::{ChunkCodec, RecordKind};
 use crate::sector_header::{HeadKind, KILLED_SECTOR_HEADER, SECTOR_HEADER_LEN, SectorHeader};
 use crate::sector_table::{ERASED, NEEDS_ERASE, SectorTable};
@@ -23,6 +23,7 @@ use crate::store_error::StoreError;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LogCounters {
     pub bytes_read: u64,
+    pub read_calls: u64,
     pub records_written: u64,
     pub record_bytes_written: u64,
     pub sectors_opened: u64,
@@ -92,8 +93,35 @@ impl<F: Flash> RecordLog<F> {
         stat!(self.largest_buffer = self.largest_buffer.max(_bytes));
     }
 
+    /// Whether `payload` belongs to the header bytes `raw`, by the flash's
+    /// CRC engine.
+    pub fn crc_ok(&self, raw: &[u8; RECORD_HEADER_LEN as usize], payload: &[u8]) -> bool {
+        RecordHeader::crc_ok_by(raw, payload, &|c, b| self.flash.crc32(c, b))
+    }
+
+    /// `len` bytes at `addr`, read as **one** read of the word-aligned span
+    /// around them into a word-aligned buffer (at most 6 bytes more): a part
+    /// that only takes word-aligned work (the C6's, through
+    /// `fw-esp32-common`'s `AlignedNorFlash`) takes it in one call instead of
+    /// one per bounce buffer, and a call costs the C6 more than a few hundred
+    /// bytes do. Never past the sector: sectors are whole words.
+    pub fn read_vec(&mut self, addr: u32, len: usize) -> R<Vec<u8>, F> {
+        let start = addr & !3;
+        let lead = (addr - start) as usize;
+        let span = (lead + len).next_multiple_of(4);
+        let mut v = vec![0u8; span + 3];
+        let skip = v.as_ptr().align_offset(4).min(3);
+        self.read(start, &mut v[skip..skip + span])?;
+        v.copy_within(skip + lead..skip + lead + len, 0);
+        v.truncate(len);
+        Ok(v)
+    }
+
     pub fn read(&mut self, addr: u32, buf: &mut [u8]) -> R<(), F> {
-        stat!(self.counters.bytes_read += buf.len() as u64);
+        stat!(
+            self.counters.bytes_read += buf.len() as u64;
+            self.counters.read_calls += 1;
+        );
         self.flash.read(addr, buf).map_err(StoreError::Flash)
     }
 
@@ -122,21 +150,40 @@ impl<F: Flash> RecordLog<F> {
         if h.id != id {
             return Err(StoreError::Corrupt("record id"));
         }
-        let mut payload = vec![0u8; usize::from(h.len)];
-        self.note(payload.len());
-        self.read(
+        let payload = self.read_vec(
             self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN),
-            &mut payload,
+            usize::from(h.len),
         )?;
-        if !RecordHeader::crc_ok(&raw, &payload) {
+        self.note(payload.capacity());
+        if !self.crc_ok(&raw, &payload) {
             return Err(StoreError::Corrupt("record CRC"));
         }
         Ok((h, payload))
     }
 
+    /// The payload of the record at `loc` whose header bytes `raw` were read
+    /// there, checked against its CRC (one read: the header is not read
+    /// again).
+    pub fn read_payload(
+        &mut self,
+        loc: RecordLoc,
+        raw: &[u8; RECORD_HEADER_LEN as usize],
+    ) -> R<Vec<u8>, F> {
+        let len = u16::from_le_bytes([raw[2], raw[3]]);
+        let payload = self.read_vec(
+            self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN),
+            usize::from(len),
+        )?;
+        self.note(payload.capacity());
+        if !self.crc_ok(raw, &payload) {
+            return Err(StoreError::Corrupt("record CRC"));
+        }
+        Ok(payload)
+    }
+
     /// The first `buf.len()` payload bytes at `loc`, unchecked (a deflated
-    /// chunk's logical length; the CRC was checked when it was scanned or
-    /// written).
+    /// chunk's logical length: mount reads no blob whole, so a damaged
+    /// chunk is found when its bytes are read, not here).
     pub fn read_payload_prefix(&mut self, loc: RecordLoc, buf: &mut [u8]) -> R<(), F> {
         self.read(self.addr(loc.sector, loc.offset + RECORD_HEADER_LEN), buf)
     }
@@ -178,7 +225,8 @@ impl<F: Flash> RecordLog<F> {
         id: ObjectId,
         parts: &[&[u8]],
     ) -> R<RecordLoc, F> {
-        let header = encode_header(rkind, codec, id, parts);
+        let flash = &self.flash;
+        let header = encode_header_by(rkind, codec, id, parts, &|c, b| flash.crc32(c, b));
         let total = RECORD_HEADER_LEN + parts.iter().map(|p| p.len() as u32).sum::<u32>();
         if total > self.sector_capacity() {
             return Err(StoreError::TooLarge);

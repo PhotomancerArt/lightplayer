@@ -110,13 +110,24 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   `stale_tail` (**non-physical**: stale bytes in the erased tail of the two
   newest sectors, as a bad erase or a foreign writer would leave; it must
   mount at that committed state, take the next step without programming
-  over them, and then format). A mounted image must read one committed
-  state with no read error — littlefs mounts lazily and reports damage at
-  read time, which this scores as `read_error_after_mount`.
+  over them, and then format), and `shadowed_copy` (**non-physical**: a
+  sector holding a live directory or multi copied into a blank sector that
+  orders after it and before its kind's newest, one bit of that record
+  flipped in the copy — a damaged newer copy over a good older one; it must
+  mount at that committed state and read it, which is what T1's whole
+  reading is for when its fast mount adopts the damaged copy). A mounted
+  image must read one committed state with no read error, except a
+  `mutated` image: its damage may show as files whose read reports it
+  (`Corrupt`, counted as "damage reported at read"), never as wrong bytes —
+  every other path must read as one committed state has it. (Since A2,
+  2026-10-16, T1's mount reads every record a cut can have torn and every
+  directory and multi, but not every file's bytes; a read checks those.
+  Before, a mount read every byte, and this scored damage found at read as
+  `read_error_after_mount`, as it scored littlefs's lazy mount.)
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s fourteen mutants, through one fixed set
+  store, then each of `lp-tree-store`'s sixteen mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
   walk with one sector worn on erases and one on programs — and `idle`, the
   long walk with every third step up to 16 idle steps, cut like the rest),
@@ -124,26 +135,31 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
   `calibrated_mid_word`. A catch is a failure kind the unmutated store does
   not show in that driver; pass = every mutant caught. Last run (idle
-  cleanup, 2026-10-16, lp-nor-sim simulator):
+  cleanup over A2's fast mount, 2026-10-16, lp-nor-sim simulator):
 
   | mutant | caught by | failures |
   |---|---|---|
   | `skip_kill` | wear | 1 (`unmountable`) |
-  | `trust_record_headers` | sweep | 853 |
+  | `trust_record_headers` | sweep | 920 |
   | `dedup_against_all_records` | long | 6 |
   | `gc_erase_before_copy` | sweep_gc | 338 |
   | `root_before_dirs` | double | 222 |
-  | `resume_without_tail_check` | fuzz (`stale_tail`) | 70 |
-  | `no_space_after_write` | sweep | 409 |
-  | `gc_forgets_pending` | sweep | 105 |
+  | `resume_without_tail_check` | fuzz (`stale_tail`) | 55 |
+  | `no_space_after_write` | sweep | 406 |
+  | `gc_forgets_pending` | sweep | 100 |
   | `magic_first` | sweep_gc | 4 |
-  | `newer_version_untrusted` | fuzz (`newer_version`) | 120 |
+  | `newer_version_untrusted` | fuzz (`newer_version`) | 100 |
   | `open_without_read_back` | wear (`program_over_unerased`) | 2 |
-  | `trust_tail_once` | double | 1 (`remount_failed`) |
-  | `format_keeps_headers` | fuzz (`format_after_failed`) | 70 |
+  | `trust_tail_once` | double | 4 (`remount_failed`) |
+  | `newest_by_headers` | sweep | 701 (`read_error`, `remount_failed`) |
+  | `no_full_scan` | fuzz (`shadowed_copy`) | 82 |
+  | `format_keeps_headers` | fuzz (`format_after_failed`) | 63 |
   | `idle_forgets_heads` | idle (`panic`: a program over a killed header) | 2 |
 
   The unmutated store: 0 failures in all eight drivers (7,095 cases).
+  A2 dropped one it had built, `mount_trusts_blobs`, with the check it
+  broke (mount reading every blob of the closure): fuzz caught it (11), and
+  the mount no longer makes that check.
   Before `calibrated_mid_word` joined the set, `skip_kill` survived it
   (10 of 11 caught at `609f0e4c9`). `wear`'s two sectors wear out three
   erases after the format: their fourth erase, counting the one the format

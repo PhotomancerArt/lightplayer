@@ -751,15 +751,20 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                         }
                     }
                 }
-                // The legacy guard (crate::legacy_layout): a partition that
-                // will not mount is formatted only when no pre-repartition
-                // filesystem is waiting at the old offset.
+                // A partition that will not mount is formatted only when it
+                // holds no tree store (the newer filesystem an `fs-tree` core
+                // writes: refused, files kept, access locked — ADR
+                // 2026-10-10-fs-tree-refused-state-and-update-guard, amended
+                // 2026-10-16) and no pre-repartition filesystem is waiting at
+                // the old offset (the legacy guard, crate::legacy_layout).
                 #[cfg(not(feature = "fs-tree"))]
                 Some(partition) => match lp_fs::LpFsFlash::init_guarded(
                     crate::flash_storage::LpFlashStorage::new(flash_storage, partition),
                     crate::flash_storage::lpfs_config,
                     |storage| {
-                        if storage.legacy_lpfs_present() {
+                        if storage.holds_tree_store() {
+                            lp_fs::FormatVerdict::Refuse
+                        } else if storage.legacy_lpfs_present() {
                             lp_fs::FormatVerdict::Hold
                         } else {
                             lp_fs::FormatVerdict::Format
@@ -783,6 +788,18 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                             crate::legacy_layout::LEGACY_LPFS_V1_OFFSET
                         );
                         (Box::new(LpFsMemory::new()), FsBootState::LegacyHeld)
+                    }
+                    Ok(lp_fs::FlashFsInit::Refused) => {
+                        esp_println::println!(
+                            "[FS] this board's files are in the tree store, a newer filesystem \
+                             than this firmware reads — not formatting; files kept; using memory \
+                             FS, access locked. Update the firmware."
+                        );
+                        // Over the air it takes only a core that reads the
+                        // store (an older littlefs core would format it).
+                        #[cfg(lp_split)]
+                        crate::ota::hold_tree_store();
+                        (Box::new(LpFsMemory::new()), FsBootState::Refused)
                     }
                     Err(e) => {
                         esp_println::println!(

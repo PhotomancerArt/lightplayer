@@ -69,6 +69,7 @@ mod record_kind;
 mod record_log;
 mod record_scan;
 mod root_record;
+mod sector_filter;
 mod sector_header;
 mod sector_table;
 mod space_estimate;
@@ -97,6 +98,8 @@ mod idle_gc_tests;
 #[cfg(all(test, feature = "lpfs"))]
 mod lp_fs_tree_tests;
 #[cfg(test)]
+mod mount_cost_tests;
+#[cfg(test)]
 mod mount_verdict_tests;
 #[cfg(test)]
 mod ram_budget_tests;
@@ -122,7 +125,7 @@ pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
-pub use sector_header::FORMAT_VERSION;
+pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
 pub use store_config::{GcPolicy, StoreConfig};
 pub use store_error::StoreError;
 #[cfg(feature = "stats")]

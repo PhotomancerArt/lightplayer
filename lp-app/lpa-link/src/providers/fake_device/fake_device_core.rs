@@ -637,6 +637,7 @@ impl FakeDeviceCore {
         let files = lp.project_files.clone();
         let root_files = lp.root_files.clone();
         let fs_boot_state = lp.fs_boot_state;
+        let fs_tree = lp.fs_tree;
         let load_at_boot = lp.load_project_at_boot;
         let project_dir = lp.project_dir.clone();
         let identity = lp.identity.clone();
@@ -699,6 +700,9 @@ impl FakeDeviceCore {
             let mut server =
                 create_memory_server_on_board(fs, hello_identity, board_manifest.as_deref());
             server.set_fs_boot_state(fs_boot_state);
+            if fs_tree {
+                server.declare_embedder_features(&[lpc_model::LpFeature::FsTree]);
+            }
             if let Some(station) = wifi_station {
                 server.set_station_probe(Some(station.state));
                 server.set_scan_probe(Some(station.scan));

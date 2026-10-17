@@ -1451,7 +1451,12 @@ impl LpServer {
         // be gone at the next reboot, and its real file waits on the flash.
         let kept = match self.hello.hardware.fs {
             lpc_wire::FsBootState::LegacyHeld => Some(network_store::HELD_BOARD_REFUSAL),
-            lpc_wire::FsBootState::Refused => Some(network_store::REFUSED_STORE_REFUSAL),
+            lpc_wire::FsBootState::Refused => Some(network_store::refused_store_refusal(
+                self.hello
+                    .build
+                    .features
+                    .contains(&lpc_model::LpFeature::FsTree),
+            )),
             _ => None,
         };
         match request {
