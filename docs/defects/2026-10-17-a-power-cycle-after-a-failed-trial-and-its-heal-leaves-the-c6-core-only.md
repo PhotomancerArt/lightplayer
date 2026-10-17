@@ -1,6 +1,7 @@
 ---
-status: open
+status: fixed
 found: 2026-10-17      # CX1 (c6-expendable, 14:C1:9F:E6:54:90) and CX2 (c6-button, E4:B3:23:AE:80:98), the C6 cutover sitting (#1179)
+fixed: 2026-10-17      # lp_bootctl::booted_by, read by fw-esp32c6 ota/boot_state.rs
 area: lp-bootctl boot_choice (cold retry of a failed trial) × fw-esp32c6 ota/boot_state.rs (trust) × the split layout's engine placement
 class: untested-path
 related:
@@ -58,11 +59,29 @@ emulator repro images (both doors) in `~/.photomancer/cutover-img/repro/`.
 Both boards were put back with a plain USB flash of the package (record 0
 proven, record 1 erased), files kept.
 
-**To do (needs a decision — the records are a never-break format).**
-Candidates: (a) a core that rolled back from a trial that died warm fills
-that record's cold tally to the cap (program-only bits it already writes),
-so a cold reset calls it failed too; (b) the core trusts a fallback whose
-MMU core matches the other record when that record is proven, and treats it
-as a rollback; (c) the heal refuses to write an engine over a core a record
-still names as a live trial, or retires that record first. Then a split
-scenario: U12's heal followed by a power cycle must boot the project.
+**Fix (no persisted byte changes meaning).** Of the three candidates, (b):
+the core reads the fallback as the rollback it is. `lp_bootctl::booted_by`
+takes `choose`'s pick and where the MMU says the core runs; when the pick is
+an unconfirmed trial whose core is not the one running, and the other record
+is proven and names the running core, the boot is the other record's,
+`rolled_back`. `BootState::read` uses it instead of `choose`. The core then
+trusts its state, refuses the dead build (`refusedBuild`), starts its
+engine, and the next update's trial record goes into the dead trial's sector
+(the one the running core's record is not in), retiring it.
+
+Why (b) and not the others: it writes nothing and changes no record, mark
+or loader byte (the loader still picks the dead trial cold and skips it with
+a reason); it covers a trial that died warm **after** `started` too, which
+(a) cannot (a started trial is never failed by a cold boot, whatever the
+tally); and it keeps the refused build, which (c)'s retiring the record
+would forget. Any other disagreement with the MMU (a proven pick that will
+not load, a core neither record names) is still untrusted. The ADR's
+2026-10-17 amendment "a fallback from a dead trial is a rollback" records it.
+
+**Tests.** `lp-bootctl` unit tests (`booted_by` against `choose`, the
+fallback rule, the cases left untrusted); `emu_split_scenarios` S12 (the
+state constructed: a dead trial's record naming X's engine, two power
+cycles); `emu_ota` U19 (X → Y, Y → Y-dies rolled back, Y healed, two power
+cycles: Y runs its engine and still refuses Y-dies). Both failed on `main`
+(`boot state not trusted`, `engine not started (trial)`) and pass with the
+fix, through both doors.
