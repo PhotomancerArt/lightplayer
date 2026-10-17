@@ -174,6 +174,10 @@ mod serial;
 // Time to first light and its parts: one `[perf] first light` line a boot.
 #[cfg(not(fw_harness))]
 mod first_light;
+// The core reads its flash in QIO when the part is ready for it: one
+// `[flash]` line a boot.
+#[cfg(all(not(fw_harness), not(feature = "memory_fs")))]
+mod flash_qio;
 #[cfg(not(fw_harness))]
 mod stack_probe;
 #[cfg(all(any(feature = "stress_s2", feature = "stress_s3"), not(fw_harness)))]
@@ -640,6 +644,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     #[cfg(not(feature = "memory_fs"))]
     let (boot_control, flash, flash_layout) = {
         let mut flash_storage = esp_storage::FlashStorage::new(flash);
+        // From here every flash read — the code cache, the mount, the
+        // project — goes four bits at a time when the part is ready for it.
+        // Right after esp-storage's own RDID size probe, before any ROM
+        // flash access (the rule below), so neither id read sees a ROM
+        // routine's leftovers on SPI1.
+        crate::flash_qio::enter();
         // The partition table, read once: `lpfs` for the filesystem, and
         // `factory` for a split image's region end.
         let flash_layout = crate::flash_layout::FlashLayout::locate(&mut flash_storage);

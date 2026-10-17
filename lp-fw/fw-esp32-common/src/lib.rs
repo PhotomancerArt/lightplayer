@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+pub mod flash_qio;
 #[cfg(feature = "frame-pace-diag")]
 pub mod frame_pace_diag;
 pub mod frame_time_stats;

@@ -15,7 +15,7 @@
 //! exactly as it did before the move.
 
 pub use lp_emu_esp_common::engine::spi_flash::{
-    BLOCK_LEN, FlashBacking, FlashCensus, FlashHandle, FlashImage, PAGE_LEN, SECTOR_LEN,
+    BLOCK_LEN, FlashBacking, FlashCensus, FlashHandle, FlashImage, FlashPart, PAGE_LEN, SECTOR_LEN,
 };
 
 /// The first byte of an ESP image header. A chip whose reset vector starts
