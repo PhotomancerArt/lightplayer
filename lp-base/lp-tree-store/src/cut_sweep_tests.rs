@@ -196,6 +196,44 @@ fn cut_sweep_through_gc() {
     }
 }
 
+/// A secret replaced and scrubbed (`TreeStore::scrub`, FORMAT.md "Secret
+/// files") on a small flash: the scrub is GC run on purpose after the
+/// write's commit, so a cut anywhere in it leaves the new state.
+fn secret_workload() -> Vec<Step> {
+    let mut steps: Vec<Step> = Vec::new();
+    steps.push(Box::new(|st| {
+        st.begin()?;
+        st.put("/keep.json", &text(70, 2500))?;
+        st.put("/.lp/network.json", &text(71, 90))?;
+        st.commit()
+    }));
+    for i in 0..dial("LP_TREE_STORE_SWEEP_STEPS", 6) {
+        steps.push(Box::new(move |st| {
+            let old = st.file_node("/.lp/network.json")?;
+            st.begin()?;
+            st.put(&alloc::format!("/log/{i}.json"), &text(80 + i, 1500))?;
+            st.put("/.lp/network.json", &text(90 + i, 90))?;
+            st.commit()?;
+            match old {
+                Some(old) => st.scrub(old),
+                None => Ok(()),
+            }
+        }));
+    }
+    steps
+}
+
+#[test]
+fn cut_sweep_secret_scrub() {
+    for rm in [256, 1024] {
+        let r = sweep(NorGeometry::c6(10), &cfg(rm), &secret_workload(), 20);
+        std::println!("{}: {r:?}", line!());
+        assert!(r.landed_old > 0 && r.landed_new > 0, "{rm}: {r:?}");
+        // The scrub's own erases were cut too (no ordinary GC runs here).
+        assert!(r.gc_runs == 0 && r.torn_erases > 0, "{rm}: {r:?}");
+    }
+}
+
 /// Every mount after a cut reads the state the first one read: a torn
 /// record that reads whole on one read only is settled by the first mount
 /// (re-programmed, or killed when it read bad), so no later mount reads it

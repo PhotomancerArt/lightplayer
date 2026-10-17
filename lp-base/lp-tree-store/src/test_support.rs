@@ -14,6 +14,7 @@ use std::cell::Cell;
 
 use lp_nor_sim::{FaultPlan, NorError, NorFlashSim, NorGeometry, TearModel};
 
+use crate::log_order_check::{check_log_order, check_roots};
 use crate::{SoftSha256, StoreConfig, StoreError, TreeStore};
 
 pub type Store = TreeStore<NorFlashSim, SoftSha256>;
@@ -172,10 +173,16 @@ pub fn sweep_from(
     for (si, step) in steps.iter().enumerate() {
         let pre = flash.clone();
         let mut st = mount(pre.clone(), cfg);
+        let mounted = st.flash().clone();
         st.flash_mut().set_plan(FaultPlan::none());
         step(&mut st).unwrap_or_else(|e| panic!("step {si} fault-free: {e:?}"));
         let n = st.flash().ops_since_plan();
         report.gc_runs += st.stats().gc_runs;
+        // I4 and I5 (FORMAT.md): the step only appended at heads' ends and
+        // changed headers, and the roots stay in log order.
+        let ctx = format!("step {si} fault-free");
+        check_log_order(&mounted, st.flash(), &ctx);
+        check_roots(st.flash(), root_seq(&st), &ctx);
         let new = snapshot(&mut st);
         flash = st.into_flash();
         report.ops_total += n;
@@ -183,6 +190,7 @@ pub fn sweep_from(
             for tear in sweep_tears() {
                 let seed = (si as u64) << 32 | k << 2 | tear as u64;
                 let mut st = mount(pre.clone(), cfg);
+                let mounted = st.flash().clone();
                 st.flash_mut().set_plan(FaultPlan::cut(k, tear, seed));
                 let torn_before = st.flash().stats().torn_erases;
                 let cut_result = step(&mut st);
@@ -192,10 +200,14 @@ pub fn sweep_from(
                 if k < n {
                     assert!(cut_result.is_err(), "{}: step survived its cut", ctx());
                 }
+                // I4 holds whatever the cut tore (a torn program stays in
+                // its append; a torn erase is behind a kill).
+                check_log_order(&mounted, &f, &ctx());
                 f.power_cycle(FaultPlan::none());
                 let f = mount(f, cfg).into_flash();
                 assert_walks_agree(&f, cfg, &ctx);
                 let mut st = mount(f, cfg);
+                check_roots(st.flash(), root_seq(&st), &ctx());
                 let mut got = snapshot(&mut st);
                 if got == new {
                     report.landed_new += 1;
@@ -298,6 +310,7 @@ pub fn remount_sweep(
                         (0..f.geometry().sector_count).any(|s| f.sector_damage(s).weak.is_some()),
                     );
                     let mut st = mount(f, cfg);
+                    check_roots(st.flash(), root_seq(&st), &ctx());
                     let first = snapshot(&mut st);
                     assert!(
                         first == old || first == new,
@@ -323,6 +336,11 @@ pub fn remount_sweep(
         old = new;
     }
     report
+}
+
+/// The root seq a mounted store adopted.
+pub fn root_seq(st: &Store) -> u64 {
+    st.committed.as_ref().map_or(0, |c| c.root.seq)
 }
 
 /// A sweep dial: `default`, or the environment variable `name` when set

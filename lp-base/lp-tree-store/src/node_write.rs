@@ -1,13 +1,15 @@
 //! Writing content: a file's bytes as stored chunks under a multi tree, an
 //! append that re-chunks only the stored tail, a host-deflated chunk
 //! (verified by inflating and hashing it), and a directory node. Every
-//! record is skipped when its id is already indexed (dedup: the index's
-//! records all have complete closures, `ram_index.rs`).
+//! record is skipped when its id is already indexed and the record there
+//! holds the same bytes (dedup: the index's records all have complete
+//! closures, `ram_index.rs`; a hit with other bytes is a collision, and the
+//! write is refused).
 
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::blob_codec::{DEFLATE_PREFIX, MAX_LOGICAL_CHUNK};
+use crate::blob_codec::{DEFLATE_PREFIX, MAX_LOGICAL_CHUNK, decode_blob_into};
 use crate::flash::Flash;
 use crate::gc_mark::MarkRole;
 use crate::multi_node::{encode_multi, multi_fanout};
@@ -22,6 +24,11 @@ use crate::tree_delta::FileEntry;
 use crate::tree_store::{Res, TreeStore, Txn, head_for};
 
 const HDR: u32 = RECORD_HEADER_LEN;
+
+/// A write whose record's id is indexed with other bytes behind it: a
+/// 64-bit id collision (crafted, or a damaged record). The write is refused
+/// and nothing is written; the record already there keeps its bytes.
+pub(crate) const ID_COLLISION: &str = "a record with this id holds other bytes";
 
 /// A host-deflated chunk a write keeps as it came.
 pub(crate) struct Coded<'a> {
@@ -83,6 +90,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let id = ObjectId::of(&mut self.hasher, IdTag::Blob, &[&buf]);
         if expected.is_some_and(|e| e != id) {
             return Err(StoreError::Corrupt("chunk id"));
+        }
+        if self.log.index.contains(id) && !self.holds(id, RecordKind::Blob, &[&buf])? {
+            return Err(StoreError::Corrupt(ID_COLLISION));
         }
         let coded = DEFLATE_PREFIX + deflated.len();
         if coded <= self.max_payload() && coded < logical {
@@ -268,6 +278,11 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         parts: &[&[u8]],
     ) -> Res<(), F> {
         if self.log.index.contains(id) {
+            // A new deflated chunk was compared by `deflated_inner`, which
+            // holds its logical bytes.
+            if codec == ChunkCodec::Stored && !self.holds(id, kind, parts)? {
+                return Err(StoreError::Corrupt(ID_COLLISION));
+            }
             stat!(self.stats.dedup_hits += 1);
             return Ok(());
         }
@@ -277,6 +292,26 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         }
         self.log.append(head, kind, codec, id, parts)?;
         Ok(())
+    }
+
+    /// Whether the record indexed as `id` is a `kind` record whose logical
+    /// bytes are `parts` (decoded when it is a deflated chunk: a stored and
+    /// a deflated copy of one chunk share an id). A dedup hit asks this
+    /// before it reuses a record (FORMAT.md "Ids": ids are 64 bits and not
+    /// cryptographic, so a crafted collision must not alias two files): one
+    /// read of the record per hit.
+    fn holds(&mut self, id: ObjectId, kind: RecordKind, parts: &[&[u8]]) -> Res<bool, F> {
+        let (h, payload) = self.log.read_record(id)?;
+        let mut decoded = Vec::new();
+        let have: &[u8] = if h.codec == ChunkCodec::Deflate {
+            decode_blob_into(h.codec, &payload, &mut decoded)
+                .ok_or(StoreError::Corrupt("chunk does not decode"))?;
+            self.log.note(decoded.capacity());
+            &decoded
+        } else {
+            &payload
+        };
+        Ok(h.kind == kind && have == parts.concat())
     }
 
     // ---- what a write will append (before it appends anything) ----------
