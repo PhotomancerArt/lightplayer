@@ -7455,9 +7455,7 @@ impl ProjectController {
         let outcome = server.project_create_node(handle_id, request).await?;
         let mut logs = outcome.logs;
         match outcome.response {
-            WireCreateNodeResponse::Created {
-                artifact_changes, ..
-            } => {
+            WireCreateNodeResponse::Created { .. } => {
                 // Focus resolves once the created node's tree entry lands in
                 // an applied view (usually the refresh right below).
                 self.pending_focus = Some(PendingNodeFocus {
@@ -7482,10 +7480,8 @@ impl ProjectController {
                         log::warn!("post-create inventory read failed: {error:?}");
                     }
                 }
-                let mut notices = UiNotices::new().with_notice(UiNotice::info(format!(
-                    "Added {name}",
-                    artifact_changes.added.len()
-                )));
+                let mut notices =
+                    UiNotices::new().with_notice(UiNotice::info(format!("Added {name}")));
                 // Creation committed files — pull them into the library so it
                 // lands as a Saved event (reload-safe). Same failure posture
                 // as save: the runtime already committed fine.
