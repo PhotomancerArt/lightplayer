@@ -132,13 +132,15 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
 - **`gc-dials`** (`driver_gc_dials.rs`): `gc_policy` × `reserve` × codec at
   partitions where c40 meets GC (host-deflated 28/36/48, stored 72/80/96).
 - **`mutants`** (`driver_mutants.rs`, feature `mutants`): the unmutated
-  store, then each of `lp-tree-store`'s fifteen mutants, through one fixed set
+  store, then each of `lp-tree-store`'s sixteen mutants, through one fixed set
   (`sweep`, `sweep_gc`, `double`, `long`, `full_flash`, `fuzz`, `wear` — a
   walk with one sector worn on erases and one on programs), every driver
   under `clean`, `byte_prefix`, `random_bits`, `calibrated` and
   `calibrated_mid_word`. A catch is a failure kind the unmutated store does
-  not show in that driver; pass = every mutant caught. Last run (the lazy
-  format over A2's fast mount, 2026-10-16, lp-nor-sim simulator):
+  not show in that driver; pass = every mutant caught. Since the C6 reads
+  `lpfs` through its flash cache (K1+, C7), every driver runs T1 with
+  `read_cache=sim`. Last run (the lazy format over A2's fast mount; the
+  cache's row added with it, 2026-10-16, lp-nor-sim simulator):
 
   | mutant | caught by | failures |
   |---|---|---|
@@ -157,6 +159,7 @@ cargo run --release -p lp-store-bench --features mutants -- mutants [--only skip
   | `newest_by_headers` | sweep | 701 (`read_error`, `remount_failed`) |
   | `no_full_scan` | fuzz (`shadowed_copy`) | 82 |
   | `format_keeps_headers` | fuzz (`format_after_failed`) | 63 |
+  | `reads_without_invalidate` | sweep (and every other driver) | 25 |
 
   The unmutated store: 0 failures in all seven drivers (6,115 cases).
   A2 dropped one it had built, `mount_trusts_blobs`, with the check it
