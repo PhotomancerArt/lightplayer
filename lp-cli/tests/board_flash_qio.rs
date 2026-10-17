@@ -15,8 +15,9 @@
 //! 3. **Warm resets** (`LP_QIO_WARM_BOOTS`, default 0): the board asked to
 //!    restart over its link (`ClientRequest::Reboot`: the firmware's own
 //!    `LP_SW_HPSYS` reset, the one an update ends with), the files read back
-//!    after each. The port need not drop on that reset; the boot's
-//!    `[RECOVERY] boot: cause=` line says it was not power.
+//!    after each. The port need not drop on that reset; the heartbeat's
+//!    reset reason says it was not power (and, on every other boot, that
+//!    it was).
 //! 4. The files deleted.
 //!
 //! **It erases the board's filesystem when `LP_QIO_MERGED` is set.** Lease
@@ -38,7 +39,7 @@ use std::time::{Duration, Instant};
 
 use desk_board::{CX1_MAC, CX1_SLUG, Console, Desk, PortWatch, close, connect};
 use lp_cli::client::cli_connect::CliConnection;
-use lpa_client::LpClient;
+use lpa_client::{ClientEvent, LpClient};
 use lpc_wire::ClientRequest;
 use lpfs::LpPath;
 use tree_store_board::project_files;
@@ -298,18 +299,30 @@ impl Sitting {
         }
         // Keep the link read until the boot's lines are in (first light is
         // said at the first lit frame; only on a power-on boot).
+        // The reset's cause rides the heartbeat (`recovery.reset_reason`).
         let mut client = LpClient::new(conn.client_io());
+        let mut reset: Option<String> = None;
         let until = Instant::now() + Duration::from_secs(15);
-        while (boot.find(FLASH).is_none() || (!warm && boot.find(FIRST_LIGHT).is_none()))
+        while (boot.find(FLASH).is_none()
+            || reset.is_none()
+            || (!warm && boot.find(FIRST_LIGHT).is_none()))
             && Instant::now() < until
         {
-            let _ = client.project_list_loaded().await;
+            if let Ok(o) = client.project_list_loaded().await {
+                for e in &o.events {
+                    if let ClientEvent::Heartbeat {
+                        recovery: Some(r), ..
+                    } = e
+                    {
+                        reset = Some(r.reset_reason.clone());
+                    }
+                }
+            }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         drop(client);
         let flash = boot.find(FLASH);
         let first_light = boot.find(FIRST_LIGHT);
-        let reset = boot.find("[RECOVERY] boot: cause=");
         let hello = conn.hello().map(|h| serde_json::to_value(h).unwrap());
         let core_sha256 = hello
             .as_ref()
@@ -329,14 +342,10 @@ impl Sitting {
         if !warm && first_light.is_none() {
             self.failures.push(format!("{what}: no first light line"));
         }
-        // A warm boot must be one: a reset the board made, not power.
-        if warm
-            && !reset
-                .as_deref()
-                .is_some_and(|l| !l.contains("cause=power-on"))
-        {
+        // Each boot is the kind asked for: power, or a reset the board made.
+        if reset.is_none() || (reset.as_deref() == Some("power-on")) == warm {
             self.failures
-                .push(format!("{what}: not a warm reset: {reset:?}"));
+                .push(format!("{what}: reset reason {reset:?} (warm: {warm})"));
         }
         eprintln!(
             "{what}: {} | {}",
