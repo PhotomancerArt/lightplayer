@@ -996,7 +996,7 @@ fn ask_agent_offer(node: &NodeController, face: Option<&UiNodeFace>) -> Option<U
         )
         .with_label(format!("Ask {label}'s shader agent"))
         .with_summary(format!(
-            "Open {label}'s shader agent with the request typed in; you press Send."
+            "Open {label}'s shader agent with the request typed in, ready to send."
         ))
     };
     let unbound = action(None);
