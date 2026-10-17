@@ -2244,7 +2244,7 @@ fn fixture_display_layout(view: &UiStudioView) -> Option<lpc_model::ControlLayou
 
 /// A server holding one embedded gallery example, loaded from the very
 /// bytes the wasm bundle ships (`build.rs` embeds `catalog/<bucket>/<slug>/`).
-fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
+pub(super) fn example_e2e_server(example: &crate::app::home::EmbeddedExample) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
     let graphics: Arc<dyn LpGraphics> =
         Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
@@ -5186,6 +5186,6 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
 /// No offer covers this step yet: it is a pane action before the project is
 /// ready (`ProjectController::actions`), so it is built here once rather
 /// than at every call site.
-fn connect_running_project(tx: &crate::app::studio::studio_view_channel::CommandSender) {
+pub(super) fn connect_running_project(tx: &crate::app::studio::studio_view_channel::CommandSender) {
     tx.send(project_action(ProjectOp::ConnectRunningProject));
 }

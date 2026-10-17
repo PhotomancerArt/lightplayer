@@ -43,6 +43,8 @@ mod studio_export_e2e_tests;
 /// with live knob/fader edits over the real overlay path (node-card P3).
 #[cfg(test)]
 mod studio_face_e2e_tests;
+#[cfg(test)]
+mod studio_graph_e2e_tests;
 /// End-to-end import tests (module authoring unit, P5): vendoring a
 /// library pattern's export into the open project through the add-node
 /// picker, and composing a whole new project around one.

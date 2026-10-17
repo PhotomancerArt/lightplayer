@@ -4,6 +4,7 @@ pub mod bus;
 pub mod devices;
 pub mod docs_host;
 pub mod frame_feed;
+pub mod graph;
 pub mod home;
 pub mod library;
 pub mod network;

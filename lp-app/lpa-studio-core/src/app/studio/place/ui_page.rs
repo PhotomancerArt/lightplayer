@@ -36,7 +36,7 @@ pub enum UiPage {
 }
 
 /// Which surface of the project editor the page shows: the `/play`,
-/// `/patch` and `/mapping` suffixes, or none.
+/// `/patch`, `/mapping` and `/graph` suffixes, or none.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UiProjectView {
     /// The node workspace (no suffix).
@@ -48,6 +48,8 @@ pub enum UiProjectView {
     Patch,
     /// The mapping view.
     Mapping,
+    /// The Graph: the mapping lab's canvas (`app/graph`).
+    Graph,
 }
 
 impl UiPage {
@@ -105,13 +107,14 @@ impl UiPage {
 }
 
 impl UiProjectView {
-    /// `nodes view`, `play mode`, `patch view`, `mapping view`.
+    /// `nodes view`, `play mode`, `patch view`, `mapping view`, `graph view`.
     pub fn describe(self) -> &'static str {
         match self {
             Self::Nodes => "nodes view",
             Self::Play => "play mode",
             Self::Patch => "patch view",
             Self::Mapping => "mapping view",
+            Self::Graph => "graph view",
         }
     }
 }

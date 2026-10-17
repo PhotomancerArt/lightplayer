@@ -95,6 +95,10 @@ pub enum StudioCommand {
     /// lock manager, a sentinel), or a hold deadline that may have passed.
     /// Applied in queue order after the notes, never coalesced.
     HoldEdge(crate::HoldEdgeEvent),
+    /// The Graph's page changed the project or the selection
+    /// (`app/graph`). Applied synchronously by the actor, in queue order;
+    /// the actor reads the editor for what changed, so a burst acts once.
+    Graph(crate::app::graph::GraphNote),
     /// A timer-driven passive refresh tick. Coalescable and droppable: the actor
     /// keeps at most one pending tick and drops a tick that would run behind a
     /// pending action.

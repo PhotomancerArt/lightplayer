@@ -223,6 +223,9 @@ pub struct StudioController {
     /// tests and evals, which have no page). Read-only: core never
     /// navigates because of it.
     place: Option<crate::UiPlace>,
+    /// The Graph tab's editor and how it is kept in step with the open
+    /// project's files (`app/graph`).
+    graph: crate::app::graph::GraphController,
     /// How many Play surfaces are mounted on the lens right now (the
     /// `PlayViewOp` lease). Play is the one mode with an idle read budget
     /// over Bluetooth; everything else is authoring.
@@ -537,6 +540,7 @@ impl StudioController {
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
             place: None,
+            graph: crate::app::graph::GraphController::default(),
             play_views: 0,
             device_sims: std::collections::BTreeMap::new(),
             pool: RuntimePool::new(),
@@ -610,6 +614,43 @@ impl StudioController {
 
     /// Hand the agent sub-controller the actor's command sender (called by
     /// `StudioActor::new`); run futures report progress through it.
+    /// The Graph's editor, for the page to hold before the controller moves
+    /// into the actor (see [`crate::app::graph::GraphHandle`]).
+    pub fn graph_handle(&self) -> crate::app::graph::GraphHandle {
+        self.graph.handle()
+    }
+
+    /// Give the Graph's handle the actor's queue (called by
+    /// `StudioActor::new`).
+    pub(crate) fn set_graph_command_sender(
+        &mut self,
+        tx: crate::app::studio::studio_view_channel::CommandSender,
+    ) {
+        self.graph.handle().set_command_sender(tx);
+    }
+
+    /// Something the page did in the Graph changed the project or the
+    /// selection (`StudioCommand::Graph`).
+    pub fn apply_graph_note(&mut self, note: crate::app::graph::GraphNote) {
+        let _ = note;
+        self.mark_dirty();
+    }
+
+    /// Open the project on the Graph, or bring it back in step with its
+    /// files, while the Graph is the place (called by the actor after each
+    /// batch).
+    pub async fn settle_graph(&mut self) {
+        let wanted = self.editor_view_in_place(false) == Some(crate::UiProjectView::Graph);
+        let server = self
+            .pool
+            .lens_session_mut()
+            .ok()
+            .and_then(|session| session.client_mut().ok());
+        if self.graph.settle(&mut self.project, server, wanted).await {
+            self.mark_dirty();
+        }
+    }
+
     pub(crate) fn set_agent_command_sender(
         &mut self,
         tx: crate::app::studio::studio_view_channel::CommandSender,
@@ -3352,6 +3393,11 @@ impl StudioController {
         // pane layout exists only for an open project
         let mut project_pane = self.project.view(self.has_lightplayer_state(), &mut offers);
         self.publish_device_offers(&mut offers);
+        // The Graph's verbs, while it is the page (`project/graph/…`).
+        let graph = self.graph.view(&self.project);
+        if self.editor_view_in_place(false) == Some(crate::UiProjectView::Graph) {
+            self.graph.publish_offers(&mut offers);
+        }
         offers.set_focus(self.offer_focus(false));
         // Decorate every GLSL inline editor with its agent chat DTO (the
         // project walk stays agent-free; chat state lives on this
@@ -3408,6 +3454,7 @@ impl StudioController {
             .with_dirty(dirty)
             .with_app_agent(app_agent)
             .with_offers(offers)
+            .with_graph(graph)
     }
 
     /// The app chat's view with the agent's activity on it (roadmap M8):
@@ -4706,6 +4753,12 @@ impl StudioController {
             if action.op_as::<PatchPulseOp>().is_some() {
                 let op = action.into_op::<PatchPulseOp>()?;
                 return self.execute_patch_pulse_op(op).await;
+            }
+            if action.op_as::<crate::app::graph::GraphOp>().is_some() {
+                let op = action.into_op::<crate::app::graph::GraphOp>()?;
+                self.graph.press(op.verb);
+                self.mark_dirty();
+                return Ok(crate::core::notice::UiNotices::new());
             }
             if action.op_as::<PlaylistActivateOp>().is_some() {
                 let op = action.into_op::<PlaylistActivateOp>()?;
@@ -9948,7 +10001,15 @@ impl StudioController {
         &mut self.agent
     }
 
+    /// Read the project and the board's frames now, as a refresh does
+    /// (test-only: a bench whose clock never makes a tick due).
+    #[cfg(test)]
+    pub(crate) async fn refresh_project_for_test(&mut self) {
+        let _ = self.refresh_project(UxUpdateSink::noop()).await;
+    }
+
     /// The runtime pool, for e2e assertions about session coexistence.
+
     #[cfg(test)]
     pub(crate) fn project_for_test(&self) -> &ProjectController {
         &self.project

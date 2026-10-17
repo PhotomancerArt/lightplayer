@@ -118,6 +118,7 @@ fn project_view(view: ProjectView) -> UiProjectView {
         ProjectView::Play => UiProjectView::Play,
         ProjectView::Patch => UiProjectView::Patch,
         ProjectView::Mapping => UiProjectView::Mapping,
+        ProjectView::Graph => UiProjectView::Graph,
     }
 }
 

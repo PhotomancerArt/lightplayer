@@ -32,7 +32,9 @@ impl ProjectController {
     pub(crate) fn looked_at_node(&self, view: UiProjectView) -> Option<&NodeController> {
         match view {
             UiProjectView::Nodes => self.focused_node(),
-            UiProjectView::Patch | UiProjectView::Mapping => self.selected_node(),
+            UiProjectView::Patch | UiProjectView::Mapping | UiProjectView::Graph => {
+                self.selected_node()
+            }
             UiProjectView::Play => None,
         }
     }

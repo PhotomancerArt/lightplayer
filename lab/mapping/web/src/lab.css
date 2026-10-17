@@ -1,0 +1,61 @@
+/* Mapping lab. Colours are Studio's tokens (lpa-studio-web/src/style.css),
+   copied so the lab needs nothing from the app. */
+
+:root {
+    color-scheme: dark;
+    --bg: #0d0d13;
+    --surface: #14141c;
+    --surface-raised: #1d1d28;
+    --outside: #08080c;
+    --border: #343444;
+    --border-strong: #4a4a5e;
+    --text: #f2f0e8;
+    --text-muted: #c9c9d2;
+    --text-subtle: #9c9cab;
+    --selection: #d6dae0;
+    --selection-bg: rgba(214, 218, 224, 0.12);
+    --hover: #8caaff;
+    --lamp: #f5d99a;
+    --refused: #ff8f8f;
+    /* The product's colour for what is bound: patches, buses. */
+    --bound: #a58af7;
+    --bound-bg: rgba(165, 138, 247, 0.16);
+    --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #main { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 var(--font); }
+
+.lab {
+    display: grid;
+    grid-template-columns: 240px 1fr 280px;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "top top top" "tree canvas inspector" "hints hints hints";
+    height: 100%;
+    outline: none;
+}
+
+/* Size classes (architecture §7), from the app's width or forced in Debug.
+   md and sm: one column; the tree and inspector come over the canvas. */
+.lab { background: var(--bg); }
+.lab.size-md, .lab.size-sm {
+    grid-template-columns: 1fr;
+    grid-template-areas: "top" "canvas" "hints";
+}
+.lab.size-md .top, .lab.size-sm .top { flex-wrap: wrap; gap: 6px 10px; }
+.lab.size-sm .top kbd { display: none; }
+/* Debug's forced class frames the app at that width, like device mode. */
+html:has(.lab.forced), body:has(.lab.forced) { background: var(--outside); }
+.lab.forced { margin: 0 auto; box-shadow: 0 0 0 1px var(--border-strong); }
+.lab.forced.size-sm { max-width: 390px; }
+.lab.forced.size-md { max-width: 820px; }
+
+.debug { position: relative; margin-left: auto; }
+.debug-row { display: flex; align-items: center; gap: 4px; }
+.debug-label { color: var(--text-subtle); font-size: 12px; margin-right: 4px; }
+.debug-menu { position: absolute; right: 0; top: calc(100% + 4px); display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); z-index: 10; white-space: nowrap; }
+.top { grid-area: top; display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.brand { font-weight: 600; }
+.fixture-picker { color: var(--text-subtle); }
+.fixture-picker select { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
