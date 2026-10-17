@@ -44,6 +44,7 @@ impl Entry {
         u64::from(self.0[0]) | u64::from(self.0[1]) << 32
     }
 
+    /// Its location, as pushed (before [`MountIndex::sort`]).
     fn loc(self) -> RecordLoc {
         RecordLoc::unpack(self.0[2])
     }
@@ -89,13 +90,19 @@ impl MountIndex {
     }
 
     /// Sort for lookups. `rank[s]`: sector `s`'s place in sector-sequence
-    /// order (later = newer).
+    /// order (later = newer). Each entry's sector becomes its rank, counted
+    /// from the newest (so a plain compare of `(id, place)` puts the copy in
+    /// the newest sector, and then the one at the lowest offset, first); a
+    /// lookup turns it back.
     pub fn sort(&mut self, rank: &[u16]) {
-        let key = |e: Entry| {
-            let loc = e.loc();
-            // Newer sector first, then the lower offset.
-            (e.id(), u16::MAX - rank[loc.sector as usize], loc.offset)
-        };
+        for b in &mut self.blocks {
+            for e in b.iter_mut() {
+                let loc = e.loc();
+                if let Some(&r) = rank.get(loc.sector as usize) {
+                    e.0[2] = u32::from(u16::MAX - r) << 16 | loc.offset;
+                }
+            }
+        }
         let blocks = &mut self.blocks;
         heap_sort_positions(self.len, &mut |i, j, swap| {
             let (a, b) = (blocks[i / BLOCK][i % BLOCK], blocks[j / BLOCK][j % BLOCK]);
@@ -104,13 +111,14 @@ impl MountIndex {
                 blocks[j / BLOCK][j % BLOCK] = a;
                 false
             } else {
-                key(a) < key(b)
+                (a.0[1], a.0[0], a.0[2]) < (b.0[1], b.0[0], b.0[2])
             }
         });
     }
 
-    /// Where the adopted copy of `id` is (after [`sort`](Self::sort)).
-    pub fn get(&self, id: ObjectId) -> Option<RecordLoc> {
+    /// Where the adopted copy of `id` is (after [`sort`](Self::sort));
+    /// `sectors`: the trusted sectors in sector-sequence order (the ranks).
+    pub fn get(&self, id: ObjectId, sectors: &[u16]) -> Option<RecordLoc> {
         let (mut lo, mut hi) = (0, self.len);
         while lo < hi {
             let mid = (lo + hi) / 2;
@@ -120,7 +128,15 @@ impl MountIndex {
                 hi = mid;
             }
         }
-        (lo < self.len && self.at(lo).id() == id.0).then(|| self.at(lo).loc())
+        if lo == self.len || self.at(lo).id() != id.0 {
+            return None;
+        }
+        let place = self.at(lo).0[2];
+        let rank = usize::from(u16::MAX - (place >> 16) as u16);
+        Some(RecordLoc {
+            sector: u32::from(*sectors.get(rank)?),
+            offset: place & 0xFFFF,
+        })
     }
 
     /// What the allocator holds for it.
@@ -161,12 +177,13 @@ mod tests {
             assert!(ix.push(ObjectId(id), loc(0, i)));
         }
         ix.sort(&rank);
-        assert_eq!(ix.get(ObjectId(7)), Some(loc(3, 20)));
-        assert_eq!(ix.get(ObjectId(9)), Some(loc(2, 24)));
-        assert_eq!(ix.get(ObjectId(5)), Some(loc(1, 8)));
-        assert_eq!(ix.get(ObjectId(6)), None);
-        assert_eq!(ix.get(ObjectId(2000)), None);
-        assert_eq!(ix.get(ObjectId(1007)), Some(loc(0, 1)));
+        let valid: [u16; 4] = [0, 1, 3, 2];
+        assert_eq!(ix.get(ObjectId(7), &valid), Some(loc(3, 20)));
+        assert_eq!(ix.get(ObjectId(9), &valid), Some(loc(2, 24)));
+        assert_eq!(ix.get(ObjectId(5), &valid), Some(loc(1, 8)));
+        assert_eq!(ix.get(ObjectId(6), &valid), None);
+        assert_eq!(ix.get(ObjectId(2000), &valid), None);
+        assert_eq!(ix.get(ObjectId(1007), &valid), Some(loc(0, 1)));
     }
 
     #[test]
