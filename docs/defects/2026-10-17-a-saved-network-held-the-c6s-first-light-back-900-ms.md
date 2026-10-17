@@ -50,7 +50,9 @@ CX2, the same build pair, ten power-on boots each: **network saved 415 ms**
 (413–422), **no network 412 ms** (411–413). Association still takes ~960 ms
 and starts at ~424 ms; the address came at a median 2.09 s from reset (DHCP
 retries once a second); the one long frame (~0.9 s) now always falls just
-after the light. Heap after 70 s joined: 136,028 B free, largest block
+after the light. CX1 (generic C6, `projects/test/basic`), the same pair:
+network saved 1,286 ms median (nine of ten boots ~1,286, one 425) → **385**
+(384–386); no network 376 → 380. Heap after 70 s joined: 136,028 B free, largest block
 65,528 B (main: 136,144 / 65,536).
 
 **Regression coverage.** None that runs in CI: the emulated network seam
