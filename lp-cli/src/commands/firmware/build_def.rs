@@ -375,6 +375,52 @@ mod tests {
         }
     }
 
+    /// The C6's bootloader file is named in four places that cannot read each other:
+    /// the build def (canonical: `lp-cli firmware package`, the release,
+    /// Studio's bundle), `lp-fw-split`'s default (`just fw-esp32c6-split`,
+    /// the emulator's split images), the justfile's `c6_bootloader` (its
+    /// espflash flashes) and the crate's `cargo run` runner. One drifting
+    /// would flash a board a bootloader nobody chose.
+    #[test]
+    fn c6_bootloader_mirrors_agree_with_the_def() {
+        let repo_root = find_repo_root().unwrap();
+        let def = load_build_def(&repo_root, "esp32c6-4mb").unwrap();
+        let bootloader = def
+            .bootloader
+            .as_deref()
+            .expect("the C6 def names its bootloader");
+        assert!(repo_root.join(bootloader).exists(), "{bootloader}");
+        assert_eq!(
+            bootloader,
+            lp_fw_split::merged_image::C6_BOOTLOADER,
+            "lp-fw-split's default bootloader drifted from lp-fw/builds/esp32c6-4mb.json"
+        );
+
+        let justfile = std::fs::read_to_string(repo_root.join("justfile")).unwrap();
+        assert!(
+            justfile.contains(&format!("c6_bootloader := \"{bootloader}\"")),
+            "justfile c6_bootloader drifted from lp-fw/builds/esp32c6-4mb.json"
+        );
+
+        let crate_dir = def.crate_dir(&repo_root).unwrap();
+        let config = std::fs::read_to_string(crate_dir.join(".cargo/config.toml")).unwrap();
+        let runner = config
+            .lines()
+            .map(str::trim_start)
+            .find(|line| line.starts_with("runner") && line.contains("--chip esp32c6"))
+            .expect("fw-esp32c6's espflash runner");
+        let named = runner
+            .split_whitespace()
+            .skip_while(|word| *word != "--bootloader")
+            .nth(1)
+            .unwrap_or_else(|| panic!("fw-esp32c6's runner passes no --bootloader:\n  {runner}"));
+        assert_eq!(
+            std::fs::canonicalize(crate_dir.join(named)).unwrap(),
+            std::fs::canonicalize(repo_root.join(bootloader)).unwrap(),
+            "fw-esp32c6's runner flashes another bootloader:\n  {runner}"
+        );
+    }
+
     /// The checked-in defs parse, and their ids match their file names.
     #[test]
     fn checked_in_defs_are_valid() {
