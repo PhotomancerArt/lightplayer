@@ -23,6 +23,12 @@
 //!    last one shrank what the closed sectors waste (GC's own rule, so the
 //!    steps end). Near full a write's GC re-packs most of the store in
 //!    front of it (seconds on a C6); done here, the write finds its room.
+//!    A pass rewrites most of the store, so a new one starts only once the
+//!    waste has grown a sector's capacity past what the last packing left:
+//!    room for a sector to be won. Without that, every few hundred bytes of
+//!    garbage (a panel save) bought a whole re-pack — 170 erases a write,
+//!    against the write path's one in three (the near-full wear test). A
+//!    write does not restart a pass under way.
 //!
 //! When a step finds nothing to do, the store is **settled**: later steps
 //! return at once, with no mark, until the next write. No step runs inside
@@ -78,25 +84,37 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         Ok(true)
     }
 
-    /// A write (or a commit) may have made garbage: idle steps look again,
-    /// and a packing pass starts over.
+    /// A write (or a commit) may have made garbage: idle steps look again.
+    /// A packing pass under way goes on (sectors the write opened are past
+    /// its first sequence, so it does not re-pack them).
     pub(crate) fn wake_idle(&mut self) {
         self.idle_settled = false;
-        self.idle_pass = None;
     }
 
     /// The packing pass's next victim and the pass's first sequence: GC's
     /// own choice within the pass under way, or the first of a new pass
     /// when the last one shrank the waste; `None` when it did not.
     fn pack_victim(&mut self) -> Option<(u32, u32)> {
-        let (pass_from, waste) = *self
-            .idle_pass
-            .get_or_insert((self.log.next_sector_seq, self.waste()));
+        let (pass_from, waste) = match self.idle_pass {
+            Some(p) => p,
+            None => {
+                let now = self.waste();
+                if let Some(floor) = self.idle_packed_waste
+                    && now < floor + u64::from(self.log.sector_capacity())
+                {
+                    self.idle_packed_waste = Some(floor.min(now));
+                    return None;
+                }
+                *self.idle_pass.insert((self.log.next_sector_seq, now))
+            }
+        };
         if let Some(v) = choose_victim(&self.log, self.cfg.gc_policy, pass_from) {
             return Some((v, pass_from));
         }
         let now = self.waste();
         if now >= waste {
+            self.idle_pass = None;
+            self.idle_packed_waste = Some(now);
             return None;
         }
         let pass_from = self.log.next_sector_seq;

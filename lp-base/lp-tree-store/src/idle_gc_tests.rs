@@ -153,7 +153,7 @@ fn idle_cuts_remount_to_one_state() {
 
 /// The soak's near-full fill, on the C6's 176 sectors: c40-sized content,
 /// then incompressible 4 KiB files until the store says no space — once
-/// with no idle time, once with idle steps (until settled) between writes.
+/// with no idle time, once with up to 40 idle steps between writes.
 /// Each write's flash work is priced by a silicon model (an erase 19 ms, a
 /// program 0.5 ms per 256 B, a read 0.42 µs per byte: CX1's c40 mount),
 /// a host estimate — silicon numbers come from CX1, never from this.
@@ -184,11 +184,11 @@ fn idle_steps_keep_near_full_writes_from_stalling() {
         over(&without.costs) > 1,
         "the fill no longer stalls without idle steps"
     );
-    // The write that takes the store's last room may still re-pack in front
-    // of itself (idle packing stops when a pass no longer shrinks the
-    // waste; a write's GC also renews its heads); no write before it does.
-    let (_, before_last) = with.costs.split_last().unwrap();
-    assert_eq!(over(before_last), 0, "an idle store still stalled a write");
+    // Not even the write that takes the store's last room. (While a write
+    // restarted the packing pass, and every pass re-packed the whole store
+    // for a write's few hundred bytes of garbage, the last write still
+    // re-packed in front of itself: 2.5 s here, 4.5 s on CX1.)
+    assert_eq!(over(&with.costs), 0, "an idle store still stalled a write");
     // No more erases than the write path's GC would have made.
     assert!(
         with.erases <= without.erases + without.erases / 20,
@@ -203,6 +203,60 @@ fn idle_steps_keep_near_full_writes_from_stalling() {
     assert!(with.costs.len() + 2 >= without.costs.len());
 }
 
+/// Near full, a store given all the quiet it wants between small writes
+/// (the board's panel saves) wears no more than the write path's own GC
+/// would. Before idle packing waited for a sector's worth of new waste, at
+/// 93 files every 450 B save bought a whole re-pack: 50,913 erases over
+/// these 300 writes against the write path's 93. A mount forgets what the
+/// last packing left, so the first quiet after one packs once (`settle`).
+#[test]
+fn idle_packing_near_full_wears_no_more_than_the_write_path() {
+    let c = StoreConfig::default();
+    for files in [86u32, 91, 93] {
+        let mut erases = [0u64; 2];
+        let mut worst = [0f64; 2];
+        let mut settle = 0;
+        for (k, idle_between) in [false, true].into_iter().enumerate() {
+            let mut st = near_full(&c, files);
+            let e0 = st.flash().stats().erases_total();
+            if idle_between {
+                idle_until_settled(&mut st);
+                settle = st.flash().stats().erases_total() - e0;
+            }
+            let e0 = st.flash().stats().erases_total();
+            for i in 0..300u64 {
+                if idle_between {
+                    idle_until_settled(&mut st);
+                }
+                let before = st.flash().stats().clone();
+                st.put("/projects/demo/.lp/panel.json", &text(9000 + i, 450))
+                    .unwrap();
+                worst[k] = worst[k].max(cost_ms(&before, st.flash().stats()));
+            }
+            erases[k] = st.flash().stats().erases_total() - e0;
+        }
+        std::println!(
+            "{files} files: 300 panel writes: {} erases with no idle time, {} with idle steps \
+             until settled before each (after {settle} settling once); worst write {:.0} / \
+             {:.0} ms (model)",
+            erases[0],
+            erases[1],
+            worst[0],
+            worst[1]
+        );
+        assert!(
+            erases[1] <= erases[0] + erases[0] / 4,
+            "{files} files: idle packing wore the store: {} erases against {}",
+            erases[1],
+            erases[0]
+        );
+        assert!(
+            settle <= 2 * 176,
+            "{files} files: settling took {settle} erases"
+        );
+    }
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 const SECTORS: u32 = 16;
@@ -212,6 +266,16 @@ fn cfg(idle_free_percent: u32) -> StoreConfig {
         idle_free_percent,
         ..StoreConfig::default()
     }
+}
+
+/// Idle steps until one does nothing (at most 4,000).
+fn idle_until_settled(st: &mut Store) {
+    for _ in 0..4000 {
+        if !st.collect_step().unwrap() {
+            return;
+        }
+    }
+    panic!("4,000 idle steps did not settle");
 }
 
 /// Idle steps until one does nothing (at most 64).
@@ -321,7 +385,8 @@ fn fill(c: &StoreConfig, idle_between: bool) -> Fill {
     for i in 0..400u32 {
         let steps_before = out.idle_steps;
         if idle_between {
-            for _ in 0..64 {
+            // 20 s of quiet at one step per 500 ms, as CX1's fill gives.
+            for _ in 0..40 {
                 let before = st.flash().stats().clone();
                 let did = st.collect_step().unwrap();
                 let ms = cost_ms(&before, st.flash().stats());
@@ -373,6 +438,34 @@ fn fill(c: &StoreConfig, idle_between: bool) -> Fill {
     out.erases = st.flash().stats().erases_total() - erases0;
     out.mount_read = mount_reads(st.into_flash(), c).0;
     out
+}
+
+/// The near-full fill's store (`fill`'s content), filled with 4 KiB files
+/// until fewer than `reserve + idle_pack_free` sectors are free.
+fn near_full(c: &StoreConfig, files: u32) -> Store {
+    let mut st = mount(formatted(NorGeometry::c6(176), c), c);
+    st.begin().unwrap();
+    for m in 0..44u64 {
+        st.put(
+            &format!("/projects/demo/modules/m{m:02}/shader.glsl"),
+            &text(m, 2900),
+        )
+        .unwrap();
+        st.put(
+            &format!("/projects/demo/modules/m{m:02}/node.json"),
+            &text(m + 100, 1800),
+        )
+        .unwrap();
+    }
+    st.commit().unwrap();
+    for i in 0..files {
+        st.put(
+            &format!("/fill/f{i:03}.bin"),
+            &noise(u64::from(i) + 9000, 4096),
+        )
+        .unwrap();
+    }
+    st
 }
 
 /// A silicon estimate of the flash work between two simulator counters.

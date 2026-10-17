@@ -94,6 +94,10 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
     /// The idle packing pass under way: the first sector sequence it opened
     /// and the waste when it began (`store_idle.rs`).
     pub(crate) idle_pass: Option<(u32, u64)>,
+    /// The waste the last idle packing left (the least seen since): a new
+    /// pass starts only once the waste has grown a sector past it (RAM
+    /// only: after a mount, the first pass runs; `store_idle.rs`).
+    pub(crate) idle_packed_waste: Option<u64>,
     /// `mutants`: a flush that computes ids and writes nothing.
     #[cfg(feature = "mutants")]
     pub(crate) dry: bool,
@@ -384,6 +388,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             refused: None,
             idle_settled: false,
             idle_pass: None,
+            idle_packed_waste: None,
             #[cfg(feature = "mutants")]
             dry: false,
         }
