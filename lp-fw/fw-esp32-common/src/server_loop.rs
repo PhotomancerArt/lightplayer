@@ -375,7 +375,8 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 /// The hellos due, once the gate is open: the unsolicited one to every link
 /// that was open when the loop started (`boot`; what
 /// `fw_core::send_unsolicited_hello` sends), then the one each newly opened
-/// link is owed (`opened`; a single-link transport's is its session's `Up`).
+/// link is owed (`opened`; a single-link transport's is its session's `Up`),
+/// unless the unsolicited one just went to it: one hello per link per boot.
 /// A failure is logged and not retried: the link's own `Hello` request still
 /// gets an answer.
 async fn send_hellos<T: ServerTransport>(
@@ -384,7 +385,8 @@ async fn send_hellos<T: ServerTransport>(
     boot: Vec<Link>,
     opened: Vec<Link>,
 ) {
-    for link in boot.into_iter().chain(opened) {
+    let owed = opened.into_iter().filter(|link| !boot.contains(link));
+    for link in boot.iter().copied().chain(owed) {
         if let Err(e) = fw_core::send_hello_to_link(server, transport, link).await {
             note_send_failure("hello", &e);
         }
