@@ -9790,7 +9790,15 @@ impl StudioController {
         &mut self.agent
     }
 
+    /// Read the project and the board's frames now, as a refresh does
+    /// (test-only: a bench whose clock never makes a tick due).
+    #[cfg(test)]
+    pub(crate) async fn refresh_project_for_test(&mut self) {
+        let _ = self.refresh_project(UxUpdateSink::noop()).await;
+    }
+
     /// The runtime pool, for e2e assertions about session coexistence.
+
     #[cfg(test)]
     pub(crate) fn project_for_test(&self) -> &ProjectController {
         &self.project

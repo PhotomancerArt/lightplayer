@@ -14,11 +14,11 @@ use lab_mapping_model::{GraphInput, GraphVerb, NodeId, Rgb, Target, UiNodeFace};
 
 use crate::app::graph::{GraphHandle, UiGraphState, graph_verb_path};
 use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
-use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive, project_action};
-use crate::app::studio::studio_face_e2e_tests::example_e2e_server;
+use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive};
+use crate::app::studio::studio_face_e2e_tests::{connect_running_project, example_e2e_server};
 use crate::{
-    ArtifactLocation, OfferArgs, ProjectOp, StudioActor, StudioCommand, StudioController,
-    StudioServerClient, UiPage, UiPlace, UiProjectView, UiStudioView,
+    ArtifactLocation, OfferArgs, StudioActor, StudioCommand, StudioController, StudioServerClient,
+    UiPage, UiPlace, UiProjectView, UiStudioView,
 };
 
 /// The choker opens on the Graph as the lab opens it: its five nodes,
@@ -262,16 +262,14 @@ fn leaving_the_graph_stops_the_highlight() {
             view: UiProjectView::Nodes,
         })));
     graph.batch();
-    graph.refresh();
-    // Back to look: the board's frame no longer chases.
-    let view = graph.go_to_graph();
-    let _ = view;
-    graph.handle.input(GraphInput::Select(Vec::new()));
+    // Away from the Graph, the board's frame no longer chases (the Graph
+    // still holds its selection, for when it comes back).
     let view = graph.refresh();
-    let frame = view.graph.expect("the Graph").frame.0;
+    let frame = view.graph.expect("the Graph's slice").frame.0;
     let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
     assert_ne!(pixels[head], Rgb::new(0, 0, 255));
     assert_ne!(pixels[tail], Rgb::new(255, 0, 0));
+    assert!(!graph.handle.editor().borrow().selection.is_empty());
 }
 
 /// A studio actor on a running catalog project, and the Graph's handle.
@@ -305,9 +303,7 @@ impl Graph {
             handle,
             last: None,
         };
-        graph
-            .tx
-            .send(project_action(ProjectOp::ConnectRunningProject));
+        connect_running_project(&graph.tx);
         graph.batch();
         graph.refresh();
         graph
@@ -321,11 +317,18 @@ impl Graph {
     }
 
     fn refresh(&mut self) -> UiStudioView {
+        // The lens reads the project and the board's frames, as the page's
+        // refresh timer has it do.
         for _ in 0..4 {
-            self.tx.send(project_action(ProjectOp::RefreshProject));
-            self.batch();
+            drive(
+                self.actor
+                    .controller_mut_for_test()
+                    .refresh_project_for_test(),
+            );
         }
-        self.view()
+        let view = self.actor.controller_mut_for_test().view();
+        self.last = Some(view.clone());
+        view
     }
 
     fn view(&self) -> UiStudioView {

@@ -5186,6 +5186,6 @@ fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
 /// No offer covers this step yet: it is a pane action before the project is
 /// ready (`ProjectController::actions`), so it is built here once rather
 /// than at every call site.
-fn connect_running_project(tx: &crate::app::studio::studio_view_channel::CommandSender) {
+pub(super) fn connect_running_project(tx: &crate::app::studio::studio_view_channel::CommandSender) {
     tx.send(project_action(ProjectOp::ConnectRunningProject));
 }
