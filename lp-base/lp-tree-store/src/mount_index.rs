@@ -1,148 +1,114 @@
 //! Mount's whole id → location index: every record header mount's first
 //! pass reads (`record_scan.rs`) is kept as one 12-byte entry, so the
-//! closure walk (`mount_walk.rs`) finds each id it wants by a binary search
+//! closure walk (`mount_walk.rs`) finds each id it wants by one lookup
 //! instead of scanning the headers of every sector that may hold it, one
 //! scan per tree level. RAM only, built and dropped inside one mount;
 //! nothing on flash describes it.
 //!
+//! **A hash table, not a sorted array.** Ids are hashes already, so an
+//! open-addressed table (linear probing, the id's own bits as the slot) is
+//! filled in one pass with no sort: on CX1 a heap sort of the same entries
+//! cost more than the level scans it replaced (used/176: 70 → 165 ms,
+//! 2026-10-16), the compares being most of a mount's CPU.
+//!
 //! **Which copy.** Two copies of an id (a GC copy and the original it has
-//! not erased yet) are ordered as the level walk finds them: the copy in the
+//! not erased yet) are kept as the level walk finds them: the copy in the
 //! sector later in sector-sequence order wins (FORMAT.md mount step 2), and
-//! inside one sector the first. Entries are sorted by id, then by that
-//! preference, so the first entry of an id's run is the one mount adopts.
+//! inside one sector the first. Pass 1 visits the sectors in that order, so
+//! a copy from another sector replaces the one held, and a second copy in
+//! the same sector does not.
 //!
 //! **Bounded.** It costs RAM for every record on flash, garbage included —
-//! unbounded in the history. Past [`StoreConfig::mount_index_max`] bytes it
-//! is dropped where it stands and the walk scans by levels as it did before
-//! (`mount_walk.rs`, the per-sector filters pass 1 keeps beside it). Both
-//! readings adopt the same copies (`mount_walk.rs`'s tests compare them).
-//! Entries live in fixed blocks, never one growing array: no copy on growth,
-//! so the peak is the cap, and no single large block is asked of the heap.
+//! unbounded in the history — so its table is as big as
+//! [`StoreConfig::mount_index_max`] allows, asked of the heap once (and
+//! none at all if the heap cannot give it), and it is dropped where it
+//! stands when it fills to fifteen sixteenths: the walk then scans by levels as
+//! it did before (`mount_walk.rs`, the per-sector filters pass 1 keeps
+//! beside it). Both readings adopt the same copies (`mount_walk.rs`'s
+//! tests compare them).
 //!
 //! [`StoreConfig::mount_index_max`]: crate::StoreConfig::mount_index_max
 
 use alloc::vec::Vec;
 
-use crate::heap_sort::heap_sort_positions;
 use crate::object_id::ObjectId;
 use crate::ram_index::RecordLoc;
 
-/// Entries per block (3 KiB).
-const BLOCK: usize = 256;
+/// Fewest slots worth a table.
+const MIN_SLOTS: usize = 64;
 
 /// An id (two words, low first) and its packed location: 12 bytes at a
-/// word's alignment (no packed struct).
+/// word's alignment. All zeros = an empty slot (no record has id 0; one
+/// that did would drop the index).
 #[derive(Clone, Copy)]
 struct Entry([u32; 3]);
 
-impl Entry {
-    fn new(id: ObjectId, loc: RecordLoc) -> Self {
-        Self([id.0 as u32, (id.0 >> 32) as u32, loc.pack()])
-    }
-
-    fn id(self) -> u64 {
-        u64::from(self.0[0]) | u64::from(self.0[1]) << 32
-    }
-
-    /// Its location, as pushed (before [`MountIndex::sort`]).
-    fn loc(self) -> RecordLoc {
-        RecordLoc::unpack(self.0[2])
-    }
-}
-
 /// Every record mount's first pass read, by id.
 pub struct MountIndex {
-    blocks: Vec<Vec<Entry>>,
+    slots: Vec<Entry>,
     len: usize,
-    /// Most entries allowed.
-    max: usize,
 }
 
 impl MountIndex {
-    /// An index that holds at most `max_bytes` of entries (`None`: none at
-    /// all fit, so there is no index).
+    /// The largest table of a power of two slots that fits `max_bytes`;
+    /// `None` when fewer than [`MIN_SLOTS`] fit, or the heap cannot give it.
     pub fn new(max_bytes: u32) -> Option<Self> {
-        let max = max_bytes as usize / size_of::<Entry>();
-        (max > 0).then(|| Self {
-            blocks: Vec::new(),
-            len: 0,
-            max,
-        })
+        let fit = max_bytes as usize / size_of::<Entry>();
+        if fit < MIN_SLOTS {
+            return None;
+        }
+        let n = 1usize << (usize::BITS - 1 - fit.leading_zeros());
+        let mut slots = Vec::new();
+        slots.try_reserve_exact(n).ok()?;
+        slots.resize(n, Entry([0; 3]));
+        Some(Self { slots, len: 0 })
     }
 
-    /// Add a record pass 1 read; `false` when it does not fit (the index is
-    /// then useless and must be dropped).
+    /// Where `id` sits, or the empty slot it would take.
+    fn probe(&self, id: u64) -> usize {
+        let mask = self.slots.len() - 1;
+        let key = [id as u32, (id >> 32) as u32];
+        let mut i = (key[0] ^ key[1]) as usize & mask;
+        loop {
+            let e = self.slots[i].0;
+            if e == [0; 3] || [e[0], e[1]] == key {
+                return i;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    /// Add a record pass 1 read (sectors in sector-sequence order); `false`
+    /// when the table is full (the index is then useless and must be
+    /// dropped).
     pub fn push(&mut self, id: ObjectId, loc: RecordLoc) -> bool {
-        if self.len == self.max {
+        if id.0 == 0 || self.len >= self.slots.len() - self.slots.len() / 16 {
             return false;
         }
-        if self.len.is_multiple_of(BLOCK) {
-            self.blocks.push(alloc::vec![Entry([0; 3]); BLOCK]);
+        let i = self.probe(id.0);
+        let e = &mut self.slots[i];
+        if e.0 == [0; 3] {
+            self.len += 1;
+        } else if RecordLoc::unpack(e.0[2]).sector == loc.sector {
+            // The first copy in a sector is the one kept.
+            return true;
         }
-        let (b, i) = (self.len / BLOCK, self.len % BLOCK);
-        self.blocks[b][i] = Entry::new(id, loc);
-        self.len += 1;
+        *e = Entry([id.0 as u32, (id.0 >> 32) as u32, loc.pack()]);
         true
     }
 
-    fn at(&self, i: usize) -> Entry {
-        self.blocks[i / BLOCK][i % BLOCK]
-    }
-
-    /// Sort for lookups. `rank[s]`: sector `s`'s place in sector-sequence
-    /// order (later = newer). Each entry's sector becomes its rank, counted
-    /// from the newest (so a plain compare of `(id, place)` puts the copy in
-    /// the newest sector, and then the one at the lowest offset, first); a
-    /// lookup turns it back.
-    pub fn sort(&mut self, rank: &[u16]) {
-        for b in &mut self.blocks {
-            for e in b.iter_mut() {
-                let loc = e.loc();
-                if let Some(&r) = rank.get(loc.sector as usize) {
-                    e.0[2] = u32::from(u16::MAX - r) << 16 | loc.offset;
-                }
-            }
-        }
-        let blocks = &mut self.blocks;
-        heap_sort_positions(self.len, &mut |i, j, swap| {
-            let (a, b) = (blocks[i / BLOCK][i % BLOCK], blocks[j / BLOCK][j % BLOCK]);
-            if swap {
-                blocks[i / BLOCK][i % BLOCK] = b;
-                blocks[j / BLOCK][j % BLOCK] = a;
-                false
-            } else {
-                (a.0[1], a.0[0], a.0[2]) < (b.0[1], b.0[0], b.0[2])
-            }
-        });
-    }
-
-    /// Where the adopted copy of `id` is (after [`sort`](Self::sort));
-    /// `sectors`: the trusted sectors in sector-sequence order (the ranks).
-    pub fn get(&self, id: ObjectId, sectors: &[u16]) -> Option<RecordLoc> {
-        let (mut lo, mut hi) = (0, self.len);
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            if self.at(mid).id() < id.0 {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        if lo == self.len || self.at(lo).id() != id.0 {
+    /// Where the adopted copy of `id` is.
+    pub fn get(&self, id: ObjectId) -> Option<RecordLoc> {
+        if id.0 == 0 {
             return None;
         }
-        let place = self.at(lo).0[2];
-        let rank = usize::from(u16::MAX - (place >> 16) as u16);
-        Some(RecordLoc {
-            sector: u32::from(*sectors.get(rank)?),
-            offset: place & 0xFFFF,
-        })
+        let e = self.slots[self.probe(id.0)].0;
+        (e != [0; 3]).then(|| RecordLoc::unpack(e[2]))
     }
 
     /// What the allocator holds for it.
     pub fn ram_bytes(&self) -> usize {
-        self.blocks.len() * BLOCK * size_of::<Entry>()
-            + self.blocks.capacity() * size_of::<Vec<Entry>>()
+        self.slots.capacity() * size_of::<Entry>()
     }
 }
 
@@ -155,45 +121,47 @@ mod tests {
     }
 
     #[test]
-    fn the_newest_sector_then_the_first_offset_wins() {
+    fn a_later_sector_then_the_first_offset_wins() {
         assert_eq!(size_of::<Entry>(), 12);
         let mut ix = MountIndex::new(64 * 1024).unwrap();
-        // Sector 2 is the newest, then 3, then 1, then 0.
-        let rank: [u16; 4] = [0, 1, 3, 2];
+        // Pushed as pass 1 visits them: sector 1, then 3, then 2.
         let adds: [(u64, u32, u32); 6] = [
             (7, 1, 40),
-            (7, 3, 90),
-            (7, 3, 20),
-            (9, 2, 24),
             (9, 1, 24),
             (5, 1, 8),
+            (7, 3, 20),
+            (7, 3, 90),
+            (9, 2, 24),
         ];
         for (id, s, off) in adds {
             assert!(ix.push(ObjectId(id), loc(s, off)));
         }
-        // Many more, across blocks: ids 1000..2000, offset = the id's step.
-        for i in 0..1000u32 {
-            let id = 1000 + u64::from(i * 7 % 1000);
-            assert!(ix.push(ObjectId(id), loc(0, i)));
+        // Many more, colliding in the low bits.
+        for i in 0..1000u64 {
+            assert!(ix.push(ObjectId((i + 1) << 32 | 7), loc(0, i as u32)));
         }
-        ix.sort(&rank);
-        let valid: [u16; 4] = [0, 1, 3, 2];
-        assert_eq!(ix.get(ObjectId(7), &valid), Some(loc(3, 20)));
-        assert_eq!(ix.get(ObjectId(9), &valid), Some(loc(2, 24)));
-        assert_eq!(ix.get(ObjectId(5), &valid), Some(loc(1, 8)));
-        assert_eq!(ix.get(ObjectId(6), &valid), None);
-        assert_eq!(ix.get(ObjectId(2000), &valid), None);
-        assert_eq!(ix.get(ObjectId(1007), &valid), Some(loc(0, 1)));
+        assert_eq!(ix.get(ObjectId(7)), Some(loc(3, 20)));
+        assert_eq!(ix.get(ObjectId(9)), Some(loc(2, 24)));
+        assert_eq!(ix.get(ObjectId(5)), Some(loc(1, 8)));
+        assert_eq!(ix.get(ObjectId(6)), None);
+        assert_eq!(ix.get(ObjectId(0)), None);
+        assert_eq!(ix.get(ObjectId(2 << 32 | 7)), Some(loc(0, 1)));
     }
 
     #[test]
-    fn refuses_past_its_cap() {
+    fn refuses_at_fifteen_sixteenths_and_below_its_floor() {
         let mut ix = MountIndex::new(12 * 300).unwrap();
-        for i in 0..300u64 {
-            assert!(ix.push(ObjectId(i), loc(0, 0)));
+        // 300 fit: a table of 256, full at 240.
+        assert_eq!(ix.ram_bytes(), 256 * 12);
+        for i in 1..=240u64 {
+            assert!(ix.push(ObjectId(i.wrapping_mul(0x9E37_79B9_7F4A_7C15)), loc(0, 0)));
         }
-        assert!(!ix.push(ObjectId(300), loc(0, 0)));
-        assert!(MountIndex::new(11).is_none());
-        assert!(ix.ram_bytes() >= 2 * BLOCK * 12);
+        assert!(!ix.push(ObjectId(1), loc(0, 0)));
+        assert!(
+            !MountIndex::new(12 * 300)
+                .unwrap()
+                .push(ObjectId(0), loc(0, 0))
+        );
+        assert!(MountIndex::new(12 * 63).is_none());
     }
 }

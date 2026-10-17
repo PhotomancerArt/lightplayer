@@ -208,15 +208,6 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
             scan_closed[s as usize] = scan.closed;
         }
         self.max_root_seq = roots.max_seq;
-        if let Some(ix) = &mut index {
-            // Each sector's place in sector-sequence order: of two copies,
-            // the later one is adopted.
-            let mut rank = alloc::vec![0u16; closed.len()];
-            for (r, &s) in valid.iter().enumerate() {
-                rank[s as usize] = r as u16;
-            }
-            ix.sort(&rank);
-        }
         stat!(
             self.stats.mount_indexed = index.is_some();
             self.stats.mount_index_bytes = index.as_ref().map_or(0, MountIndex::ram_bytes);

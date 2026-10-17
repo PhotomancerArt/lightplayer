@@ -9,7 +9,7 @@
 /// non-generic heap sort that reaches the slice through `cmp_or_swap`.
 pub fn heap_sort_by<T>(v: &mut [T], mut less: impl FnMut(&T, &T) -> bool) {
     let n = v.len();
-    heap_sort_positions(n, &mut |i, j, swap| {
+    heap_sort_core(n, &mut |i, j, swap| {
         if swap {
             v.swap(i, j);
             false
@@ -25,11 +25,10 @@ pub fn sort_strings(v: &mut [alloc::string::String]) {
     heap_sort_by(v, |a, b| a.as_bytes() < b.as_bytes());
 }
 
-/// Sort `n` positions of something that is not one slice (mount's blocked
-/// index): `op(i, j, false)` = is `i` less than `j`; `op(i, j, true)` swaps
-/// them.
+/// The sort over positions: `op(i, j, false)` = is `i` less than `j`;
+/// `op(i, j, true)` swaps them.
 #[inline(never)]
-pub fn heap_sort_positions(n: usize, op: &mut dyn FnMut(usize, usize, bool) -> bool) {
+fn heap_sort_core(n: usize, op: &mut dyn FnMut(usize, usize, bool) -> bool) {
     for start in (0..n / 2).rev() {
         sift(op, start, n);
     }

@@ -139,7 +139,7 @@ pub fn index_closure<F: Flash>(
                 + found.dir_bytes.capacity(),
         );
         match index {
-            Some(ix) => locate_indexed(log, &level, ix, sectors, &mut found, &mut out.live)?,
+            Some(ix) => locate_indexed(log, &level, ix, &mut found, &mut out.live)?,
             None => locate(log, &level, sectors, filter, &mut found, &mut out.live)?,
         }
         peak = peak.max(
@@ -241,15 +241,12 @@ fn locate_indexed<F: Flash>(
     log: &mut RecordLog<F>,
     want: &[(ObjectId, MarkRole)],
     index: &MountIndex,
-    sectors: &[u16],
     found: &mut VisitOut<'_>,
     live: &mut [u16],
 ) -> R<(), F> {
     let mut at = Vec::with_capacity(want.len());
     for &(id, role) in want {
-        let loc = index
-            .get(id, sectors)
-            .ok_or(StoreError::Corrupt("missing record"))?;
+        let loc = index.get(id).ok_or(StoreError::Corrupt("missing record"))?;
         let h = visit(log, id, role, loc, found)?;
         add_live(live, loc, h.total_len());
         at.push(loc.pack());
