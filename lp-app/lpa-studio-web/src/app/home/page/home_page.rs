@@ -214,6 +214,7 @@ pub fn HomePage(
                                 usb_available: home.devices.usb_available,
                                 transport_available: home.devices.transport_available,
                                 wifi_connect: home.devices.wifi_address_connect.clone(),
+                                chooser_failure: home.devices.chooser_failure.clone(),
                                 welcome: home.sections.connect.welcome,
                                 ble_reach: connect_pins.ble_reach,
                                 page_url: connect_pins.page_url.clone(),

@@ -554,6 +554,13 @@ opt-level = 3
 # spans it reclaims once both cores are up) and `add_region` panics past the
 # cap. See third_party/esp-alloc/README-LP.md.
 esp-alloc = { path = "third_party/esp-alloc" }
+# bt-hci 0.8.1 fork: a Command Complete carrying more return bytes than its
+# command declares is copied up to what fits, not sliced past the caller's
+# buffer — LE Remote Connection Parameter Request (Negative) Reply complete
+# with a handle bt-hci has no room for, which panicked the C6 on every
+# Android connection. See third_party/bt-hci/README-LP.md and
+# docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md.
+bt-hci = { path = "third_party/bt-hci" }
 esp-storage = { path = "third_party/esp-storage" }
 # esp-hal 1.1.1 fork: `#[ram]` on the three helpers the `#[ram]` Xtensa
 # level-1/2/3 interrupt entries call on every peripheral interrupt
@@ -573,6 +580,11 @@ esp-radio = { path = "third_party/esp-radio" }
 naga = { path = "third_party/naga" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/PhotomancerArt/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
+# trouble-host 0.6.0 fork: a central's link-layer parameter request is answered
+# with the Reply alone (upstream sent an LE Connection Update first, which the
+# controller refuses, then turned every such request down). See
+# third_party/trouble-host/README-LP.md.
+trouble-host = { path = "third_party/trouble-host" }
 # ser-write 0.3.1 fork: a provided `SerWrite::token` hook (declines by
 # default) so a sink can take the serializer's structural tokens instead of
 # its JSON text. See third_party/ser-write/README-LP.md.

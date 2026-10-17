@@ -538,7 +538,7 @@ async function main() {
     );
 
     await step("play", "switch the editor to Play", async () => {
-      await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
+      await driver.evaluate(`document.querySelector('a[data-play-toggle="enter"]').click()`);
       await driver.waitFor(`location.pathname.endsWith('/play')`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the Play route",

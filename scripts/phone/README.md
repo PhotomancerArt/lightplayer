@@ -62,9 +62,18 @@ with no pairing code (2026-10-17).
 - **Chrome's DevTools socket takes over 10 s to appear on a cold start**, and
   Chrome in the background renders nothing (a CDP screenshot hangs): `phone
   cdp` brings Chrome to the front every time and waits up to 30 s.
-- **Every connect from the phone panics the C6** (open defect
-  `docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`),
-  so the walk stops at `identify` until that is fixed.
+- **Every connect from the phone panicked the C6** until PR #1180: Android
+  asks for connection parameters over the link layer, which no Mac or
+  iPhone central had done
+  (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+  Fixed in the forks of bt-hci and trouble-host under `third_party/`.
+- **The board must let the phone in.** The phone is signed out and holds no
+  key, so a board whose access is `open: nobody` (fixture-c6's) shows it as
+  locked, and the walk stops at `identify`. CX2 `c6-button` is open.
+- **The bug report held only `btsnooz_hci.log`** (the filtered summary) on
+  2026-10-17, not `btsnoop_hci.log`: check Developer options › Enable
+  Bluetooth HCI snoop log is set to *Enabled*, not *Filtered*, before a
+  session you want the packets of.
 
 ## The walk
 
