@@ -270,7 +270,7 @@ fn a_day_of_churn_leaves_less_for_the_mount() {
         let mut st = mount(formatted(NorGeometry::c6(176), &c), &c);
         demo_project(&mut st, 0);
         let e0 = st.flash().stats().erases_total();
-        let mut quiet = |st: &mut Store| {
+        let quiet = |st: &mut Store| {
             if idle_between {
                 idle_until_settled(st);
             }

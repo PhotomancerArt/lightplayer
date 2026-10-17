@@ -142,7 +142,7 @@ fn a_cut_anywhere_in_a_first_format_is_no_store() {
 
 /// A format over a store with files and many roots (each with a higher
 /// sequence than the root `format` writes): two sectors erased, every other
-/// header killed, so the mount sees the empty store and nothing of the old
+/// header killed (its erase count left readable), so the mount sees the empty store and nothing of the old
 /// one, the old roots included; writing goes on over the killed sectors.
 #[test]
 fn a_format_over_a_store_kills_every_old_header() {
@@ -160,10 +160,12 @@ fn a_format_over_a_store_kills_every_old_header() {
     for s in 2..SECTORS {
         let mut h = [0u8; SECTOR_HEADER_LEN as usize];
         f.peek(s * 4096, &mut h);
-        assert!(
-            h == [0u8; 24] || h == [0xFF; 24],
-            "sector {s} header {h:02x?}"
-        );
+        let killed = crate::sector_header::reads_killed(&h);
+        assert!(killed || h == [0xFF; 24], "sector {s} header {h:02x?}");
+        // A kill leaves bytes 4..20: the erase count survives the format.
+        if killed {
+            assert!(u32::from_le_bytes(h[16..20].try_into().unwrap()) >= 1);
+        }
     }
     let mut st = mount(f, &c);
     assert!(snapshot(&mut st).is_empty());

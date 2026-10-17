@@ -63,7 +63,7 @@ where
     let (mut flash, hasher) = match TreeStore::mount(flash, hasher, cfg.clone()) {
         Ok(st) => {
             let s = st.summary();
-            return TreeFsInit::Mounted(LpFsTree::new(st), s);
+            return TreeFsInit::Mounted(served(st), s);
         }
         Err((StoreError::NoStore, flash, hasher)) => (flash, hasher),
         Err((e, flash, _)) => {
@@ -82,13 +82,37 @@ where
     match TreeStore::format(flash, hasher, cfg) {
         Ok(st) => {
             let s = st.summary();
-            TreeFsInit::Formatted(LpFsTree::new(st), s)
+            TreeFsInit::Formatted(served(st), s)
         }
         Err((e, _, _)) => {
             log::warn!("[FS] tree store format failed: {e:?}");
             TreeFsInit::FormatFailed
         }
     }
+}
+
+/// The store as the board's filesystem. Its write-only files (access
+/// files, the network file: `lpc_access::is_write_only_file_path`) are
+/// secret to it: replaced or deleted, their old versions are erased from
+/// flash right after the commit, not left as garbage for GC (FORMAT.md
+/// "Secret files").
+fn served<F: Flash, H: ObjectHasher>(st: TreeStore<F, H>) -> LpFsTree<F, H> {
+    LpFsTree::new(st).with_secret_paths(lpc_access::is_write_only_file_path)
+}
+
+/// Whether this boot may change the store's **format** on flash: set an
+/// incompat flag, write a sector of a newer format version, or start an
+/// in-place conversion (FORMAT.md "Versioning", the trial rule). Only on a
+/// confirmed boot: a core on an unconfirmed over-the-air trial may yet roll
+/// back to the core before it, which must still boot and read the ordinary
+/// files — and a store flagged or converted by the trial core would be
+/// refused. The same gate as the device access file's
+/// ([`lpa_server::access_store::may_migrate_device_store`]).
+///
+/// Format version 3 defines no flag and no conversion, so nothing calls this
+/// yet: it is the gate the first change that needs one must call.
+pub fn may_change_store_format(standing: lpa_server::access_store::BootStanding) -> bool {
+    lpa_server::access_store::may_migrate_device_store(standing)
 }
 
 /// The store's word for a mount it would not adopt (never `NoStore`).
@@ -190,6 +214,34 @@ mod tests {
         };
         assert_eq!(why, "newer format");
         assert_eq!(image(&flash), newer);
+    }
+
+    /// The served store scrubs the write-only files: the old Wi-Fi
+    /// password is not on flash after the network file is replaced.
+    #[test]
+    fn a_replaced_network_file_leaves_no_old_password_on_flash() {
+        let TreeFsInit::Formatted(fs, _) =
+            init_tree_guarded(blank(), SoftSha256, cfg(), |_| FormatVerdict::Format)
+        else {
+            panic!("not formatted");
+        };
+        let net = LpPath::new("/.lp/network.json");
+        fs.write_file(net, b"{\"pass\":\"old-password-1\"}")
+            .unwrap();
+        fs.write_file(LpPath::new("/a.json"), b"{}").unwrap();
+        fs.write_file(net, b"{\"pass\":\"new-password-2\"}")
+            .unwrap();
+        let flash = fs.with_store(|st| image(st.flash()));
+        let has = |s: &[u8]| flash.windows(s.len()).any(|w| w == s);
+        assert!(!has(b"old-password-1"));
+        assert!(has(b"new-password-2"));
+    }
+
+    #[test]
+    fn only_a_confirmed_boot_may_change_the_store_format() {
+        use lpa_server::access_store::BootStanding;
+        assert!(may_change_store_format(BootStanding::Confirmed));
+        assert!(!may_change_store_format(BootStanding::UnconfirmedTrial));
     }
 
     // ---- helpers -----------------------------------------------------------

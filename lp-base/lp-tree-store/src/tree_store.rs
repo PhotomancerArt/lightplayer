@@ -109,7 +109,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// it erases two sectors, not all of them — sectors 0 and 1 (littlefs's
     /// superblock pair, so nothing reads the partition as littlefs again;
     /// the two heads open there) — and kills the header of every other
-    /// sector that does not read erased (24 zero bytes, no erase), so no
+    /// sector that does not read erased (magic and CRC zeroed, no erase), so no
     /// earlier store's sector is trusted again. Every other sector is
     /// erased when it is first opened, as after any mount. A cut anywhere
     /// leaves a flash that mounts as [`StoreError::NoStore`] (when the flash
@@ -395,7 +395,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     }
 
     /// Format's body: sectors 0 and 1 killed and erased; every other
-    /// header that does not read erased killed (and read back as zeros: a
+    /// header that does not read erased killed (and read back killed: a
     /// kill that does not take is an erase, as `open_sector` would do);
     /// then an empty directory and a root naming it.
     fn format_walk(&mut self) -> Res<(), F> {
@@ -408,7 +408,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
                 continue;
             }
             self.log.kill_header(s)?;
-            if !self.log.header_reads(s, 0)? {
+            if !self.log.header_killed(s)? {
                 self.log.kill_and_erase(s)?;
             }
         }
