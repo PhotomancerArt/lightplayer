@@ -7,7 +7,11 @@
 //! transaction (`batches_are_atomic` is `true`), and an aborted batch puts
 //! the change log back as it was when the batch began. A deflated wire chunk
 //! (`write_deflated_chunk`) goes to `TreeStore::put_chunk_deflated`, which
-//! keeps the deflated bytes.
+//! keeps the deflated bytes. Paths the embedder names secret
+//! ([`LpFsTree::with_secret_paths`]: the firmware's write-only files) are
+//! scrubbed when replaced or deleted: the sectors that held the old version
+//! are collected right after the commit (`TreeStore::scrub`), not whenever
+//! GC gets there (FORMAT.md "Secret files").
 
 use alloc::format;
 use alloc::rc::Rc;
@@ -21,6 +25,8 @@ use lpfs::{FsError, FsEvent, FsEventKind, FsVersion, LpFs, LpFsView, LpPath, LpP
 use crate::flash::Flash;
 use crate::heap_sort::sort_strings;
 use crate::object_hasher::ObjectHasher;
+use crate::object_id::ObjectId;
+use crate::snapshot_namespace::is_snapshot_path;
 use crate::store_error::StoreError;
 use crate::tree_store::TreeStore;
 
@@ -37,6 +43,11 @@ struct Inner<F: Flash, H: ObjectHasher> {
     /// it back, so a pull after an aborted push is not told of writes (or
     /// deletes) that never landed. `None` outside a batch.
     changes_before_batch: Option<Vec<(LpPathBuf, FsVersion, FsEventKind)>>,
+    /// Which paths are secret (scrubbed when replaced or deleted).
+    secret: Option<fn(&str) -> bool>,
+    /// Secret file nodes a batch replaced or deleted: scrubbed once it
+    /// commits, forgotten if it aborts.
+    scrub_after_batch: Vec<ObjectId>,
 }
 
 impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
@@ -47,8 +58,45 @@ impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
                 version: FsVersion::default(),
                 changes: Vec::new(),
                 changes_before_batch: None,
+                secret: None,
+                scrub_after_batch: Vec::new(),
             })),
         }
+    }
+
+    /// Name the secret paths: when one is replaced or deleted, the sectors
+    /// holding its old records are collected right after the commit
+    /// (`TreeStore::scrub`), so an old secret does not stay on flash until
+    /// GC reaches it. The firmware passes its write-only predicate
+    /// (`lpc_access::is_write_only_file_path`).
+    pub fn with_secret_paths(self, is_secret: fn(&str) -> bool) -> Self {
+        self.inner.borrow_mut().secret = Some(is_secret);
+        self
+    }
+
+    /// The node of the file at `p` when `p` is secret (before a write or a
+    /// delete replaces it).
+    fn secret_node(&self, p: &str) -> Result<Option<ObjectId>, FsError> {
+        let mut i = self.inner.borrow_mut();
+        if !i.secret.is_some_and(|f| f(p)) {
+            return Ok(None);
+        }
+        i.store.file_node(p).map_err(store_err)
+    }
+
+    /// Scrub `old` (the node `secret_node` saw before a write or a delete);
+    /// inside a batch, once the batch commits. A rewrite of the same bytes
+    /// leaves `old` live, and the scrub then erases nothing.
+    fn scrub_replaced(&self, old: Option<ObjectId>) -> Result<(), FsError> {
+        let Some(old) = old else {
+            return Ok(());
+        };
+        let mut i = self.inner.borrow_mut();
+        if i.store.in_transaction() {
+            i.scrub_after_batch.push(old);
+            return Ok(());
+        }
+        i.store.scrub(old).map_err(store_err)
     }
 
     /// Another handle on the same store and change log — for an embedder
@@ -123,6 +171,37 @@ fn not_found(p: &str) -> FsError {
     FsError::NotFound(p.to_string())
 }
 
+/// A normalized path a write may name: not the root, and not under the
+/// reserved snapshot namespace (FORMAT.md "The snapshot namespace": only a
+/// snapshot feature writes there; deleting is allowed).
+fn writable(p: &str) -> Result<(), FsError> {
+    if p == "/" {
+        return Err(FsError::InvalidPath("Cannot write to root".to_string()));
+    }
+    if is_snapshot_path(p) {
+        return Err(FsError::InvalidPath(format!("{p}: reserved for snapshots")));
+    }
+    Ok(())
+}
+
+/// Whether a file is at `p` already; when not, refuse a new one that would
+/// share a name with a directory — under a file, or where files are
+/// (FORMAT.md "Files and paths"; littlefs refuses the same).
+fn existed_or_free<F: Flash, H: ObjectHasher>(
+    st: &mut TreeStore<F, H>,
+    p: &str,
+) -> Result<bool, FsError> {
+    if st.exists(p).map_err(store_err)? {
+        return Ok(true);
+    }
+    if st.name_clash(p).map_err(store_err)? {
+        return Err(FsError::InvalidPath(format!(
+            "{p}: a file and a directory cannot share a name"
+        )));
+    }
+    Ok(false)
+}
+
 impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         let p = norm(path)?;
@@ -132,12 +211,11 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
 
     fn write_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
         let p = norm(path)?;
-        if p == "/" {
-            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
-        }
+        writable(&p)?;
+        let old = self.secret_node(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
-            let existed = st.exists(&p).map_err(store_err)?;
+            let existed = existed_or_free(st, &p)?;
             st.put(&p, data).map_err(store_err)?;
             existed
         };
@@ -149,17 +227,16 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 FsEventKind::Create
             },
         );
-        Ok(())
+        self.scrub_replaced(old)
     }
 
     fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
         let p = norm(path)?;
-        if p == "/" {
-            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
-        }
+        writable(&p)?;
+        let old = self.secret_node(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
-            let existed = st.exists(&p).map_err(store_err)?;
+            let existed = existed_or_free(st, &p)?;
             st.append(&p, data).map_err(store_err)?;
             existed
         };
@@ -171,7 +248,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 FsEventKind::Create
             },
         );
-        Ok(())
+        self.scrub_replaced(old)
     }
 
     fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
@@ -241,6 +318,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 "Path {p:?} is a directory, use delete_dir() instead"
             )));
         }
+        let old = self.secret_node(&p)?;
         let gone = self
             .inner
             .borrow_mut()
@@ -251,7 +329,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
             return Err(not_found(&p));
         }
         self.record(&p, FsEventKind::Delete);
-        Ok(())
+        self.scrub_replaced(old)
     }
 
     fn delete_dir(&self, path: &LpPath) -> Result<(), FsError> {
@@ -266,16 +344,23 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         if gone.is_empty() && !is_file {
             return Err(not_found(&p));
         }
+        if is_file {
+            gone.push(p.clone());
+        }
+        let mut secrets = Vec::new();
+        for f in &gone {
+            secrets.push(self.secret_node(f)?);
+        }
         self.inner
             .borrow_mut()
             .store
             .delete_file_and_tree(&p)
             .map_err(store_err)?;
-        if is_file {
-            gone.push(p);
-        }
         for f in gone {
             self.record(&f, FsEventKind::Delete);
+        }
+        for old in secrets {
+            self.scrub_replaced(old)?;
         }
         Ok(())
     }
@@ -307,6 +392,10 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         let mut i = self.inner.borrow_mut();
         i.store.commit().map_err(store_err)?;
         i.changes_before_batch = None;
+        // The secrets the batch replaced: their old versions now garbage.
+        for old in core::mem::take(&mut i.scrub_after_batch) {
+            i.store.scrub(old).map_err(store_err)?;
+        }
         Ok(())
     }
 
@@ -319,6 +408,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         if let Some(before) = i.changes_before_batch.take() {
             i.changes = before;
         }
+        i.scrub_after_batch.clear();
         Ok(())
     }
 
@@ -338,12 +428,11 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         deflated: &[u8],
     ) -> Result<(), FsError> {
         let p = norm(path)?;
-        if p == "/" {
-            return Err(FsError::InvalidPath("Cannot write to root".to_string()));
-        }
+        writable(&p)?;
+        let old = self.secret_node(&p)?;
         let existed = {
             let st = &mut self.inner.borrow_mut().store;
-            let existed = st.exists(&p).map_err(store_err)?;
+            let existed = existed_or_free(st, &p)?;
             st.put_chunk_deflated(&p, offset, logical_len, None, deflated)
                 .map_err(store_err)?;
             existed
@@ -356,7 +445,7 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
                 FsEventKind::Create
             },
         );
-        Ok(())
+        self.scrub_replaced(old)
     }
 
     fn current_version(&self) -> FsVersion {

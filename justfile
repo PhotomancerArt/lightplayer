@@ -3683,12 +3683,14 @@ test-emu-c6-cli-link: install-rv32-target
 
 # The boards half: whole boards over the link — the fragmented-heap reads,
 # the split image's boot, the LED seam on the split image, a flash power
-# cut mid-upload power-cycled back to a serving board, and today's littlefs
-# image holding a tree store instead of formatting it. CI's `Emulator C6
+# cut mid-upload power-cycled back to a serving board, today's littlefs
+# image holding a tree store instead of formatting it, and the main stack
+# gate (`emu_stack_peak`: the deepest catalog projects' load and shader
+# edits must leave 12 KiB of the main stack unused). CI's `Emulator C6
 # lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts --test emu_littlefs_on_tree_store -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts --test emu_littlefs_on_tree_store --test emu_stack_peak -- --include-ignored --nocapture
 
 # Time to first light on the emulated C6 (plan
 # lp2025/2026-10-16-0848-tree-store-adoption, A1;

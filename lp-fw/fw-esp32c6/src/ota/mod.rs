@@ -96,7 +96,10 @@ pub use engine_guard::engine_guard;
 pub use engine_window::{ENGINE_VADDR, map_engine, page_size};
 #[cfg(feature = "ble")]
 pub use running_hook::radio_update_hook;
-pub use running_hook::{install as install_running_hook, manifest as running_manifest};
+pub use running_hook::{
+    hash_step as core_hash_step, hello_ready, install as install_running_hook,
+    manifest as running_manifest,
+};
 pub use status_light::StatusLight;
 pub use update_links::UpdateLinks;
 

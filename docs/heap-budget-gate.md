@@ -330,6 +330,16 @@ A mismatch in any of these is a finding, not a re-baseline. Statics growth on
 its own is no longer gated here: it is visible as the stack shrinking, which
 the run prints (`… B above the high-water band`).
 
+**On the C6 the demand is gated elsewhere.** The idle band says nothing about
+what a project needs from the stack (a loaded meteor is three times the idle
+mark), so `lp-cli/tests/emu_stack_peak.rs` loads the deepest catalog projects
+on the shipped split image, edits meteor's shader ten times, and fails unless
+the main stack exceeds every peak by 12 KiB. It runs in `Emulator C6 lp-cli
+(x64)` (`just test-emu-c6-cli-boards`), and it is what sizes `HEAP_MAIN`
+(`docs/adr/2026-09-02-esp32c6-ram-split.md`, 2026-10-16 amendment). The
+classic and the S3 have no such gate yet
+(`docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.md`).
+
 ### Silicon, printed beside it
 
 The record also carries `silicon_reference`: the same figures from a committed
