@@ -179,7 +179,10 @@ The board card's verbs:
 - **Review** — open a confirmation the details ask for.
 
 **No dead ends.** When nothing can be pressed there is no primary at all —
-never a greyed verb: the surface says why. While the board is being
+never a greyed verb: the surface says why. When a fix isn't offered here,
+its second sentence says why and what to do instead, in the same voice:
+"Connect over USB or Bluetooth to install it.", "Studio doesn't have
+firmware for this board." While the board is being
 reached or identified the primary is the spinner alone. And a reason shown
 under a disabled button is the reason alone ("No project"), never "this
 cannot be done right now: …".

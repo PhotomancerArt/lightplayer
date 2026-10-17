@@ -274,13 +274,19 @@ From the top:
   greyed verb:** a board with nothing on it offers the next step (Add a
   project); while the board is being reached or identified the primary is
   the conic spinner alone; and when nothing can be pressed there is no
-  primary at all — the surface says why.
+  primary at all — the surface says why. The name keeps about twelve
+  characters: on a card too narrow for that beside the whole primary, the
+  primary says its verb alone (Update, Install, Reinstall), and the
+  surface's sentence names the object.
 - **The rows,** always in this order: project · link · access · firmware ·
   hardware. Each is one line in one grammar (`docs/ux/anatomy/board-card.md`):
   **icon · kind · name · state · action**. The icon is the kind's own in
   every state (layers for a project); the kind is a fixed, muted 56 px
   column, so the names line up down the card; the name is the thing itself
-  and never moves; the state follows only when it is not normal; at most
+  and never moves, and it keeps its width: short of room, the state gives
+  way first, cut at its end and then gone, and on a narrow card the kind
+  word too (its icon stays), before the name is cut; the
+  state follows only when it is not normal; at most
   one action fixes it, with a way out beside it where the fix needs one
   (Restore · Reset). The Link row has no kind word: the link's name is its
   kind.

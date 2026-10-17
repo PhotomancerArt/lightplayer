@@ -78,9 +78,14 @@ icon       the row's icon whose state it is, in a circle, in the state's tone:
 first      what is going on with the board. one plain sentence.
 second     the primary's button said aloud: its verb and object, then what it
            gets you. said only while that button is the primary; a refusal
-           ("Firmware updates need USB.") in its place when the link refuses it.
+           ("Firmware updates need USB.") in its place when the link refuses it;
+           and when the fix isn't offered here, why and what to do instead
+           ("Connect over USB or Bluetooth to install it.", "Studio doesn't have
+           firmware for this board."). no dead ends (P7).
 progress   the work's bar and percent; the spinner in the icon's place when
-           it has no number.
+           it has no number. the percent is the one the working row carries
+           and says: an update is one number, the new firmware 0–49 %, its
+           last part 50–100 %, here, on the row and in the editor alike.
 picture    dims under the notice, fully covered: one dim, the cover's (never a
            stale picture's own as well). no picture: the notice on the dark.
 ```
@@ -103,7 +108,8 @@ move failed                 Studio couldn't move this board to this tab.
                             Connect here to try again.                                     ↔ Connect here
 taken by another tab        Another tab took this board.
                             Connect here to move it back to this tab.                      ↔ Connect here
-busy in another tab         This board is busy in another tab.                              (none)
+busy in another tab         This board is busy in another tab.
+                            Connect here when it's done.                                   (none)
 another tab                 This board is open in another tab.
                             Connect here to move it to this tab.                           ↔ Connect here
 someone else                Someone else is connected to this board.
@@ -134,10 +140,14 @@ send failed                 Studio couldn't send the project to this board.
 update failed               This board's firmware update didn't finish.  Retry to update it.   ↻ Retry
 install failed              Installing the firmware on this board didn't finish.
                             Retry to install it.                                           ↻ Retry
+erase failed                Erasing this board didn't finish.  Retry to erase it.          ↻ Retry
+removal failed              Removing the project from this board didn't finish.
+                            Retry to remove it.                                            ↻ Retry
 crashing                    This board's firmware keeps crashing.
                             Reinstall the firmware to fix it.                              ▲ Reinstall firmware
 a version Studio can't get  This board needs a firmware version Studio can't get.
                             Install the firmware to use it.                                ▲ Install firmware
+                                                                     (Studio's own: one press, or the version its list picks)
 incomplete (core, no        Part of this board's firmware is missing.
   engine)                   Install the firmware to use it.                                ▲ Install firmware
 old firmware (an older      This board is running old firmware.
@@ -161,6 +171,21 @@ all well                    the live picture, no words                          
 One update over USB first (a pre-update board) is no notice: the board
 plays and connects, and the Firmware row's own Update carries it.
 
+A failed row's state holds only while its row offers the verb again; once
+it doesn't, the board's own state says what comes next (an update that
+found no copy of the engine reads "a version Studio can't get", Install
+firmware). When a firmware fix isn't offered here the second sentence says
+why, read off the board's update story:
+
+```text
+over Wi‑Fi, before it updates there    Connect over USB or Bluetooth to install it.
+through lightplayer.app, the same      Connect nearby to install it.
+Studio's build can't go over the air   Connect over USB to install it.
+a version Studio can't get             Connect this computer to the internet to get it.
+files need newer firmware              Studio doesn't have firmware new enough to read them.
+else                                   Studio doesn't have firmware for this board.
+```
+
 **The rows go quiet.** The row whose problem the surface says keeps its
 state word and its own button and loses its orange or red: the surface is
 the one loud place. The primary may repeat that row's button; it says verb
@@ -174,7 +199,8 @@ and object ("Update firmware") where the row says the verb alone
   │ │         │             │             │
   │ │         │             │             action   verb (+ object). fixes the state. at most one.
   │ │         │             state         only when not normal. its tone says how bad.
-  │ │         name          the thing itself. here in every state.
+  │ │         │                           gives way first: cut, then gone, before the name is cut.
+  │ │         name          the thing itself. here in every state. keeps its width.   # was: cut first
   │ kind                    muted. teaches what the row is about.
   icon                      the kind's one icon, the same everywhere in the app.
 ```
@@ -191,6 +217,16 @@ stale      the row dims; its words don't change
 The Link row is the one exception: the link's own icon and name are its
 kind (`USB`, `Wi‑Fi`, `Bluetooth`, `lightplayer.app`), as a version
 number is.
+
+Short of room, a row gives way in one order: its state first (cut at its
+end, then gone), then, on a narrow card, its kind word (the icon stays),
+and its name only when it alone is wider than the row:
+
+```text
+▲ Firmware  v2026.10.03-1  crashing  │ Reinstall │   wide
+▲ Firmware  v2026.10.03-1            │ Reinstall │   the state gone   # was: v crashing
+▲ v2026.10.03-1                      │ Reinstall │   a narrow card
+```
 
 ## Each row
 
@@ -309,7 +345,14 @@ number is.
 │ Porch lamp            │ ▶ Power on          │   simulated, off
 │ Porch lamp                                  │   nothing to press: no button; the surface says why
 │ XIAO ESP32-C6                               │   a new board's name   # was: XIAO ESP32-C6 · Oct 11
+│ XIAO ESP32-…  │ ▲ Update │                      a narrow card   # was: XIAO ES… │ Update firmware
 ```
+
+The name keeps about twelve characters. On a card too narrow for that
+beside the whole primary, the primary says its verb alone ("Update",
+"Install", "Reinstall", "Resume", "Edit", "Add", "Connect"): the surface's
+sentence already names the object. The button's text stays whole for a
+screen reader.
 
 ## Decided
 
@@ -335,4 +378,9 @@ R5  B covers a picture: it dims under the notice, one dim          (director's c
 R6  the tone is the icon's alone; the sentences stay plain         (director's call, pending Yona's veto)
 R7  offline, another way reaches it: the Link row names that way  (director's call, pending Yona's veto)
 R8  a project's name in running text is quoted                     (director's call, pending Yona's veto)
+R9  a row's value keeps its width; its state gives way first: cut, then gone   (director's review)
+    (on a narrow card the kind word gives way next, its icon staying: pending review)
+R10 one update, one number: the surface reads the working row's percent       (director's review)
+R11 no dead ends: a fix that isn't offered says why and what to do instead    (director's review)
+R12 a narrow name bar keeps the name's twelve characters; the primary says its verb alone   (director's review)
 ```
