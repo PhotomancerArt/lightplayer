@@ -217,7 +217,11 @@ async function main() {
           out.how = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
           knob.dispatchEvent(new KeyboardEvent('keydown', { key: out.how, bubbles: true, cancelable: true }));
         } else if (range) {
-          const to = Number(range.value) >= Number(range.max) ? range.min : range.max;
+          // At its max, to the middle, not the min: the first control is
+          // often brightness, and 0 leaves the next step's picture black and
+          // still (the first walk that got this far, 2026-10-17).
+          const lo = Number(range.min), hi = Number(range.max);
+          const to = Number(range.value) >= hi ? String((lo + hi) / 2) : range.max;
           Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(range, to);
           range.dispatchEvent(new Event('input', { bubbles: true }));
           out.how = 'to ' + to;
@@ -272,7 +276,7 @@ async function main() {
     });
 
     await step("play", "switch the editor to Play and turn a knob", async () => {
-      await driver.evaluate(`document.querySelector('a[title^="Play mode"]').click()`);
+      await driver.evaluate(`document.querySelector('a[data-play-toggle="enter"]').click()`);
       await driver.waitFor(`location.pathname.endsWith('/play') && Boolean(${SLIDER})`, {
         timeoutMs: STEP_DEADLINE_MS,
         what: "the Play route and its knobs",

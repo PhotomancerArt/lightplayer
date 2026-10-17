@@ -523,7 +523,7 @@ async function main() {
     const waitEditor = (what) =>
       driver.waitFor(
         `(location.pathname.startsWith('/p/') || location.pathname.startsWith('/device/'))
-          && Boolean(document.querySelector('a[title^="Play mode"]'))
+          && Boolean(document.querySelector('a[data-play-toggle="enter"]'))
           ? location.pathname + location.search : false`,
         { timeoutMs: STEP_DEADLINE_MS, what },
       );

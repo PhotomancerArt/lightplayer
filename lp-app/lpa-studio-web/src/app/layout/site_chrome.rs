@@ -415,6 +415,8 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
         a {
             class: "{class} tw:inline-flex tw:items-center",
             href: "{href}",
+            // The walks find the toggle by this, never by its words.
+            "data-play-toggle": if playing { "exit" } else { "enter" },
             title: if playing { "Back to the editor" } else { "Show the panel full screen" },
             // Word above the utility cut, glyph below it (the crowded
             // ladder's <900 rung): the mode keeps its one-tap home on the
