@@ -775,17 +775,32 @@ fn a_module_is_see_through() {
     assert_eq!(e.selection, vec![fixture(&e, "tail rig")]);
 }
 
-/// Clicking an output selects it; clicking it again selects the port under
-/// the cursor.
+/// On an output, a span is its object: a click on the strip's span on D1
+/// selects path3, as a click on it in the strip would, and a press there
+/// never drags the drawing. The output itself is picked by its title, and
+/// Esc from a span's pixel climbs to its port.
 #[test]
-fn clicking_an_output_then_again_selects_a_port() {
+fn a_span_on_an_output_selects_its_object() {
     let mut e = editor();
     let main = node_id(&e, "main");
-    let d1 = e.project.port_rect(&main, "1").unwrap();
-    let at = d1.min.lerp(d1.max, 0.5);
+    let at = pixel_centre(&e, &main, "1", 3);
+    e.pointer_move(e.camera.to_screen(at), none());
+    assert_eq!(e.hover_target(), Some(comp("path3")), "the hover says so");
     click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![comp("path3")]);
+    let before = e.project.clone();
+    let from = e.camera.to_screen(at);
+    drag(&mut e, from, from + Vec2::new(30.0, 0.0), none());
+    assert_eq!(e.project, before, "nothing moved");
+
+    let title = e.project.node_rect(&main).unwrap().min + Vec2::new(5.0, 3.0);
+    click_at(&mut e, title, none());
     assert_eq!(e.selection, vec![Target::Node(main.clone())]);
+
     click_at(&mut e, at, none());
+    click_at(&mut e, at, none());
+    assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
+    key(&mut e, Key::Escape, none());
     assert_eq!(e.selection, vec![port(&main, "1")]);
     assert_eq!(e.project.label(&e.selection[0]), "D1");
 }
@@ -2393,17 +2408,16 @@ fn with_move_and_draw_off_nothing_moves() {
 
 // ---- pixels --------------------------------------------------------------------
 
-/// Clicking into a port selects one of its pixels; the arrow keys walk the
-/// pixels, and ⇧-click selects the run from the first one picked.
+/// Clicking a span selects its object; clicking again selects the pixel
+/// under the cursor. The arrow keys walk the pixels, and ⇧-click selects
+/// the run from the first one picked.
 #[test]
-fn clicking_into_a_port_selects_a_pixel() {
+fn clicking_into_a_span_selects_a_pixel() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let at = pixel_centre(&e, &main, "1", 3);
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![Target::Node(main.clone())]);
-    click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![port(&main, "1")]);
+    assert_eq!(e.selection, vec![comp("path3")]);
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
     assert_eq!(
@@ -3242,9 +3256,11 @@ fn the_overlay_outlines_selection_context_and_hover() {
     e.select(vec![lamp("circle1", "r1", 3)]);
     e.pointer_move(lamp_screen(&e, "circle1", "r1", 10), none());
     let kinds: Vec<OutlineKind> = e.view_overlay().outlines.iter().map(|o| o.kind).collect();
+    // The ring is outlined in its fixture and on its span on D0.
     assert_eq!(
         kinds,
         vec![
+            OutlineKind::Context,
             OutlineKind::Context,
             OutlineKind::Selected,
             OutlineKind::Hover
@@ -3252,7 +3268,7 @@ fn the_overlay_outlines_selection_context_and_hover() {
     );
     let hover = e.hover_target().unwrap();
     let area = e.project.area(&e.camera, &hover).unwrap();
-    assert_eq!(e.view_overlay().outlines[2].path, area.outline_path());
+    assert_eq!(e.view_overlay().outlines[3].path, area.outline_path());
 }
 
 /// With nothing selected the inspector lists the project's facts; with a

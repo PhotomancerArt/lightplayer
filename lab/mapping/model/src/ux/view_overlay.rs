@@ -16,12 +16,16 @@ impl Editor {
         let mut add = |t: &Target, kind: OutlineKind, label: bool| {
             if let Some(a) = p.area(cam, t) {
                 let top = a.top();
-                outlines.push(UiOutline {
-                    path: a.outline_path(),
-                    stroke: a.stroke_width(),
-                    kind,
-                    label: label.then(|| (p.label(t), top)),
-                });
+                // A drawn thing is outlined in its fixture and on each of
+                // its spans; the name goes on the first.
+                for (i, part) in a.parts().into_iter().enumerate() {
+                    outlines.push(UiOutline {
+                        path: part.outline_path(),
+                        stroke: part.stroke_width(),
+                        kind,
+                        label: (label && i == 0).then(|| (p.label(t), top)),
+                    });
+                }
             }
         };
         let context = self.context();

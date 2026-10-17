@@ -458,11 +458,19 @@ impl Editor {
                     self.press_log.remove(0);
                 }
                 let under = self.project.things_at(&self.camera, at);
-                // A fixture's empty inside is empty space to a drag: it
-                // draws a selection box. A click there selects the fixture.
-                let over = under
-                    .iter()
-                    .any(|t| !self.project.only_inside(&self.camera, t, at));
+                // Something is under the press only where the press would
+                // grab it. A fixture's empty inside, or a drawn thing's span
+                // out on an output, is empty space to a drag (it draws a
+                // selection box, and never drags the drawing from the
+                // output); a click there still selects (on release).
+                let over = pick(
+                    &self.project,
+                    &self.camera,
+                    &self.selection,
+                    at,
+                    self.press_mode(mods),
+                )
+                .is_some_and(|t| self.project.hit_directly(&self.camera, &t, at));
                 let on_selection = under.iter().any(|t| self.selection.contains(t));
                 let handle = self.handle_at(at).map(|h| h.kind);
                 let mut decided = false;

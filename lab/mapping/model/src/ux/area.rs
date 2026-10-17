@@ -15,19 +15,30 @@
 //! - module: a frame — its border and title tab, not its inside;
 //! - fixture: a frame whose inside picks it too, behind anything drawn in
 //!   it (`FRAME_INSIDE_DISTANCE`);
-//! - output (and any other card): its whole card; a port: its row on the
-//!   card; a pixel: its square in the row (`pixel_grid.rs`).
+//! - an output: its whole card, behind the spans in it except on its
+//!   title (`CARD_INSIDE_DISTANCE`); any other card: its whole card; a
+//!   port: its row on the card; a pixel: its square in the row
+//!   (`pixel_grid.rs`);
+//! - and a drawn thing is also its spans: the outlined runs of pixels its
+//!   lamps land on, on every output (`Area::Spanned`). A span is its
+//!   object seen from the output, so it picks and outlines the same thing.
 //!
 //! Areas are in screen pixels, because their padding is: a path is as easy
 //! to hit zoomed out as zoomed in.
 
 use crate::domain::component::ComponentKind;
 use crate::domain::geom::{Rect, Vec2, distance_to_polyline, distance_to_segment};
-use crate::domain::object::ObjectShape;
+use std::collections::HashMap;
+
+use crate::domain::derived::SpanOutlines;
+use crate::domain::node::NodeId;
+use crate::domain::object::{ObjectId, ObjectShape};
 use crate::domain::placement::Frame;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
+use crate::ux::card_geometry::CARD_HEADER;
+use crate::ux::pixel_grid::PixelGrid;
 
 pub const LAMP_PAD_PX: f64 = 7.0;
 pub const PATH_PAD_PX: f64 = 10.0;
@@ -41,6 +52,9 @@ pub const FRAME_TITLE_PX: f64 = 18.0;
 /// How far a fixture's inside counts as from the cursor: farther than
 /// anything drawn in it, so a lamp or a path there always wins.
 pub const FRAME_INSIDE_DISTANCE: f64 = 1.0e6;
+/// How far an output card's body, below its title, counts as from the
+/// cursor: farther than a span in it, so a click there picks the span.
+pub const CARD_INSIDE_DISTANCE: f64 = 1.0e3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Area {
@@ -62,8 +76,14 @@ pub enum Area {
         title: Rect,
         inside: bool,
     },
-    /// A filled rectangle: an output card, a port's row.
+    /// A filled rectangle: a card, a port's row, a pixel.
     Box { rect: Rect },
+    /// An output's card: all of it, but below its title only behind the
+    /// spans in it.
+    Card { rect: Rect, title: Rect },
+    /// A drawn thing's shape in its fixture, and its spans on the outputs
+    /// its lamps land on: one thing, seen from both sides.
+    Spanned { shape: Box<Area>, spans: Vec<Rect> },
 }
 
 impl Area {
@@ -95,7 +115,33 @@ impl Area {
                     || edge_distance(rect, p) <= FRAME_EDGE_PX
                     || (*inside && rect.contains(p))
             }
-            Area::Box { rect } => rect.contains(p),
+            Area::Box { rect } | Area::Card { rect, .. } => rect.contains(p),
+            Area::Spanned { shape, spans } => {
+                shape.contains(p) || spans.iter().any(|r| r.contains(p))
+            }
+        }
+    }
+
+    /// Whether `p` is on the thing itself, not only on a fixture's empty
+    /// inside or on a span of it out on an output: a press there grabs it,
+    /// to drag.
+    pub fn contains_directly(&self, p: Vec2) -> bool {
+        match self {
+            Area::Frame { rect, title, .. } => {
+                title.contains(p) || edge_distance(rect, p) <= FRAME_EDGE_PX
+            }
+            Area::Spanned { shape, .. } => shape.contains_directly(p),
+            other => other.contains(p),
+        }
+    }
+
+    /// The pieces it is drawn as: one outline each.
+    pub fn parts(&self) -> Vec<Area> {
+        match self {
+            Area::Spanned { shape, spans } => std::iter::once((**shape).clone())
+                .chain(spans.iter().map(|r| Area::Box { rect: *r }))
+                .collect(),
+            other => vec![other.clone()],
         }
     }
 
@@ -131,6 +177,25 @@ impl Area {
                     edge_distance(rect, p)
                 }
             }
+            Area::Card { rect, title } => {
+                if title.contains(p) {
+                    0.0
+                } else if rect.contains(p) {
+                    CARD_INSIDE_DISTANCE
+                } else {
+                    edge_distance(rect, p)
+                }
+            }
+            Area::Spanned { shape, spans } => spans
+                .iter()
+                .map(|r| {
+                    if r.contains(p) {
+                        0.0
+                    } else {
+                        edge_distance(r, p)
+                    }
+                })
+                .fold(shape.distance(p), f64::min),
         }
     }
 
@@ -160,7 +225,10 @@ impl Area {
                 pad,
             } => Vec2::new(center.x, center.y - radius - pad),
             Area::Frame { title, .. } => title.min,
-            Area::Box { rect } => Vec2::new((rect.min.x + rect.max.x) / 2.0, rect.min.y),
+            Area::Box { rect } | Area::Card { rect, .. } => {
+                Vec2::new((rect.min.x + rect.max.x) / 2.0, rect.min.y)
+            }
+            Area::Spanned { shape, .. } => shape.top(),
         }
     }
 
@@ -190,7 +258,9 @@ impl Area {
                 }
             }
             Area::Frame { rect, title, .. } => format!("{} {}", rect_path(rect), rect_path(title)),
-            Area::Box { rect } => rect_path(rect),
+            Area::Box { rect } | Area::Card { rect, .. } => rect_path(rect),
+            // Drawn as its parts (`Area::parts`); this is its shape alone.
+            Area::Spanned { shape, .. } => shape.outline_path(),
         }
     }
 
@@ -199,6 +269,7 @@ impl Area {
     pub fn stroke_width(&self) -> Option<f64> {
         match self {
             Area::Polyline { pad, .. } | Area::Polylines { pad, .. } => Some(2.0 * pad),
+            Area::Spanned { shape, .. } => shape.stroke_width(),
             _ => None,
         }
     }
@@ -241,8 +312,102 @@ fn edge_distance(r: &Rect, p: Vec2) -> f64 {
 }
 
 impl Project {
-    /// The area of one target on screen.
+    /// The area of one target on screen. A drawn thing's takes in its spans
+    /// on the outputs too.
     pub fn area(&self, camera: &Camera, t: &Target) -> Option<Area> {
+        let shape = self.shape_area(camera, t)?;
+        if !matches!(t, Target::Component(_) | Target::Object(_)) {
+            return Some(shape);
+        }
+        let spans = self.span_rects(camera, t);
+        if spans.is_empty() {
+            return Some(shape);
+        }
+        Some(Area::Spanned {
+            shape: Box::new(shape),
+            spans,
+        })
+    }
+
+    /// The outlines of every span of `t` (an object, or a component and
+    /// everything in it) on the outputs, on screen.
+    pub fn span_rects(&self, camera: &Camera, t: &Target) -> Vec<Rect> {
+        let kept = self.span_outlines();
+        let objects: Vec<ObjectId> = match t {
+            Target::Object(o) => vec![o.clone()],
+            Target::Component(id) => self
+                .objects_under(id)
+                .iter()
+                .map(|o| o.id.clone())
+                .collect(),
+            _ => Vec::new(),
+        };
+        objects
+            .iter()
+            .filter_map(|o| kept.by_object.get(o))
+            .flatten()
+            .flat_map(|&i| &kept.list[i].2)
+            .map(|r| Rect::from_corners(camera.to_screen(r.min), camera.to_screen(r.max)))
+            .collect()
+    }
+
+    /// The drawn things whose spans on output `id` hold `p`, and what they
+    /// are in: what a click on a span reaches at each level.
+    fn span_hits(&self, camera: &Camera, id: &NodeId, p: Vec2) -> Vec<Target> {
+        let kept = self.span_outlines();
+        let w = camera.to_world(p);
+        let mut out = Vec::new();
+        for &i in kept.by_output.get(id).into_iter().flatten() {
+            let (object, _, rects) = &kept.list[i];
+            if !rects.iter().any(|r| r.contains(w)) {
+                continue;
+            }
+            for t in self.chain(&self.object_target(object)) {
+                if !matches!(t, Target::Node(_)) && !out.contains(&t) {
+                    out.push(t);
+                }
+            }
+        }
+        out
+    }
+
+    /// Each span's outline on its port, in world units, kept.
+    fn span_outlines(&self) -> &SpanOutlines {
+        self.kept_span_outlines(|| {
+            let mut kept = SpanOutlines::default();
+            let mut grids: HashMap<(NodeId, String), Option<(PixelGrid, u32)>> = HashMap::new();
+            for s in &self.effective_patch().spans {
+                let grid = grids
+                    .entry((s.output.clone(), s.port.clone()))
+                    .or_insert_with(|| {
+                        let grid = self.pixel_grid(&s.output, &s.port)?;
+                        Some((grid, self.port_pixels(&s.output, &s.port)))
+                    });
+                let Some((grid, count)) = grid else { continue };
+                // A reversed span runs down the wire from its start pixel.
+                let lo = if s.reversed {
+                    (s.start_pixel + 1).saturating_sub(s.len())
+                } else {
+                    s.start_pixel
+                };
+                let rects = grid.run_outline(lo.min(*count)..(lo + s.len()).min(*count));
+                let i = kept.list.len();
+                kept.by_object.entry(s.object.clone()).or_default().push(i);
+                kept.by_output.entry(s.output.clone()).or_default().push(i);
+                kept.list.push((s.object.clone(), s.output.clone(), rects));
+            }
+            kept
+        })
+    }
+
+    /// Whether `p` is on `t` itself, not only on a fixture's empty inside
+    /// or on one of its spans (`Area::contains_directly`).
+    pub fn hit_directly(&self, camera: &Camera, t: &Target, p: Vec2) -> bool {
+        self.area(camera, t).is_some_and(|a| a.contains_directly(p))
+    }
+
+    /// The area of one target on screen, its own shape only.
+    fn shape_area(&self, camera: &Camera, t: &Target) -> Option<Area> {
         let screen = |p: Vec2| camera.to_screen(p);
         // Components store their own fixture's coordinates.
         let frame = t
@@ -259,6 +424,13 @@ impl Project {
                 let n = self.node(id)?;
                 let b = self.node_rect(id)?;
                 let rect = Rect::from_corners(screen(b.min), screen(b.max));
+                if n.output().is_some() {
+                    let title = Rect::new(
+                        rect.min,
+                        Vec2::new(rect.max.x, rect.min.y + CARD_HEADER * camera.scale),
+                    );
+                    return Some(Area::Card { rect, title });
+                }
                 if !n.is_frame() {
                     return Some(Area::Box { rect });
                 }
@@ -365,6 +537,21 @@ impl Project {
         let mut out = Vec::new();
         for t in self.children(None) {
             self.collect_at(camera, p, &t, &mut out);
+        }
+        // On an output, its spans are its objects (and what they are in).
+        let outputs: Vec<NodeId> = out
+            .iter()
+            .filter_map(|t| match t {
+                Target::Node(id) if self.output(id).is_some() => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        for id in outputs {
+            for t in self.span_hits(camera, &id, p) {
+                if !out.contains(&t) {
+                    out.push(t);
+                }
+            }
         }
         // A fixture's inside is there only when nothing else is: it is
         // never one of the overlaps.

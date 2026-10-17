@@ -13,6 +13,10 @@
 //! - **⌥-click:** the next thing at that level under the cursor, for when
 //!   things overlap. Pressed again, the one after that.
 //!
+//! On an output, a span is its object (`area.rs`): a click there picks the
+//! object as a click in its fixture would, and going in from it, past its
+//! deepest part under the cursor, reaches the pixel.
+//!
 //! Hover shows exactly what a click would select. That is the whole
 //! teaching device, so it is ONE function used by both.
 
@@ -85,7 +89,11 @@ pub fn pick(
         PickMode::Deep => Some(deepest_from(f, cam, nearest, p, &under)),
         PickMode::Click => {
             if selection.len() == 1 && selection[0] == nearest {
-                Some(nearest_child(f, cam, &nearest, p, &under).unwrap_or(nearest))
+                Some(
+                    nearest_child(f, cam, &nearest, p, &under)
+                        .or_else(|| pixel_of_span(&nearest, &under))
+                        .unwrap_or(nearest),
+                )
             } else {
                 Some(nearest)
             }
@@ -122,5 +130,17 @@ fn deepest_from(f: &Project, cam: &Camera, mut t: Target, p: Vec2, under: &[Targ
     while let Some(child) = nearest_child(f, cam, &t, p, under) {
         t = child;
     }
-    t
+    pixel_of_span(&t, under).unwrap_or(t)
+}
+
+/// Clicked on a drawn thing's span out on an output, with nothing of it
+/// deeper there: the pixel under the cursor is the next level in.
+fn pixel_of_span(t: &Target, under: &[Target]) -> Option<Target> {
+    if !matches!(t, Target::Component(_) | Target::Object(_)) {
+        return None;
+    }
+    under
+        .iter()
+        .find(|u| matches!(u, Target::Pixel { .. }))
+        .cloned()
 }
