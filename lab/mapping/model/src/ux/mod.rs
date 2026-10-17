@@ -11,6 +11,7 @@ pub mod debug_flags;
 pub mod edges;
 pub mod editor;
 pub mod graph_input;
+pub mod graph_verb;
 pub mod handle;
 pub mod highlight;
 pub mod hints;

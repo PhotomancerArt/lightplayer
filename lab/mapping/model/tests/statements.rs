@@ -1564,6 +1564,51 @@ fn every_offered_key_does_something() {
     }
 }
 
+// ---- verbs by name -------------------------------------------------------------
+
+/// Every verb the hint bar names is on offer by name, and pressing one
+/// does what its key does: ⌘A then ⌫, pressed, empty every fixture as the
+/// keys do. Undo is on offer once there is something to undo.
+#[test]
+fn pressing_a_verb_does_what_its_key_does() {
+    let mut pressed = editor();
+    let mut keyed = editor();
+    assert!(!pressed.verbs().contains(&GraphVerb::Undo));
+    assert!(pressed.verbs().contains(&GraphVerb::SelectAll));
+    pressed.press(GraphVerb::SelectAll);
+    keyed.key_down(
+        Key::Char('a'),
+        Mods {
+            command: true,
+            ..Mods::default()
+        },
+    );
+    assert_eq!(pressed.selection, keyed.selection);
+    let bar: Vec<GraphVerb> = pressed
+        .hint_bar()
+        .hints
+        .iter()
+        .flat_map(|h| h.verbs.clone())
+        .collect();
+    assert!(bar.contains(&GraphVerb::Delete));
+    assert!(pressed.verbs().contains(&GraphVerb::Delete));
+    pressed.press(GraphVerb::Delete);
+    keyed.key_down(Key::Delete, Mods::default());
+    assert_eq!(pressed.project.lamp_count(), 0);
+    assert_eq!(keyed.project.lamp_count(), 0);
+    assert!(pressed.verbs().contains(&GraphVerb::Undo));
+}
+
+/// A verb's name is a path segment: lowercase words, never a dot, and
+/// each names one verb.
+#[test]
+fn every_verb_has_its_own_name() {
+    for v in GraphVerb::ALL {
+        assert!(!v.name().contains('.'), "{}", v.name());
+        assert_eq!(GraphVerb::from_name(v.name()), Some(v));
+    }
+}
+
 // ---- a real board ------------------------------------------------------------
 
 /// A real board's pixels are what the board shows: each port as the board

@@ -377,9 +377,14 @@ impl<'a> Writer<'a> {
         let old = carried.map(|f| &f.value);
         self.emit(path, old, &value);
 
-        // The mapping.
-        let map = self.map_value(n, &addressed)?;
+        // The mapping. A document that is written anyway gives every
+        // object its id (one a patch, a selection on the board or an agent
+        // can name); one that hasn't changed is left as it is.
         let old_map = carried.and_then(|f| f.map.as_ref()).map(|m| &m.doc.value);
+        let mut map = self.map_value(n, &addressed, false)?;
+        if self.force || old_map.is_none_or(|o| !same(o, &map)) {
+            map = self.map_value(n, &addressed, true)?;
+        }
         self.emit(&map_path, old_map, &map);
         Ok(())
     }
@@ -497,8 +502,14 @@ impl<'a> Writer<'a> {
         }
     }
 
-    /// The fixture's mapping document.
-    fn map_value(&self, n: &Node, addressed: &BTreeSet<ComponentId>) -> Result<Value, FilesError> {
+    /// The fixture's mapping document; `every_id` writes an id on every
+    /// object, not only the ones that had one or that a patch row names.
+    fn map_value(
+        &self,
+        n: &Node,
+        addressed: &BTreeSet<ComponentId>,
+        every_id: bool,
+    ) -> Result<Value, FilesError> {
         let Some(fx) = n.fixture() else {
             return Ok(Value::Null);
         };
@@ -557,7 +568,8 @@ impl<'a> Writer<'a> {
                     m.insert("name".into(), c.id.as_str().into());
                     m
                 });
-                let write_id = file.is_some_and(|f| f.had_id) || addressed.contains(&c.id);
+                let write_id =
+                    every_id || file.is_some_and(|f| f.had_id) || addressed.contains(&c.id);
                 if write_id {
                     insert_after(&mut o, "id", id.into(), "name");
                 } else {

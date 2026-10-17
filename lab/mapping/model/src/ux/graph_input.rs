@@ -13,6 +13,7 @@ use crate::domain::node::NodeId;
 use crate::domain::target::Target;
 use crate::ux::camera::Camera;
 use crate::ux::editor::{Button, Editor, Key, Mods, Tool};
+use crate::ux::graph_verb::GraphVerb;
 use crate::ux::props::PropEdit;
 use crate::ux::ui::{LayoutKind, SizeClass};
 
@@ -95,6 +96,8 @@ pub enum GraphInput {
     Pinning(bool),
     /// Debug's Size.
     ForceSizeClass(Option<SizeClass>),
+    /// A verb by name, as its key does it.
+    Verb(GraphVerb),
 }
 
 impl Editor {
@@ -130,6 +133,7 @@ impl Editor {
             GraphInput::Redo => self.redo(),
             GraphInput::Pinning(on) => self.set_pinning(on),
             GraphInput::ForceSizeClass(class) => self.force_size_class(class),
+            GraphInput::Verb(verb) => return self.press(verb),
         }
         true
     }

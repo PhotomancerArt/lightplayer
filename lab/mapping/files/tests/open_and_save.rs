@@ -159,6 +159,49 @@ fn an_edit_writes_only_what_it_touches() {
     assert_eq!(reopen(&ZOOK_DOME, &saved.writes).project.lamp_count(), 1495);
 }
 
+/// A mapping that is written gives every object an id, stamped at the
+/// lowest format that holds ids (3), and reopens with the same component
+/// ids it was saved with — so a second save compares like with like.
+#[test]
+fn a_written_mapping_gives_every_object_an_id() {
+    let o = open(&CHOKER);
+    let mut p = o.project.clone();
+    let first = p.fixture(&NodeId::new("fixture")).unwrap().components[0]
+        .id
+        .clone();
+    assert!(p.edit_prop(
+        &Target::Component(first),
+        "lamps",
+        lab_mapping_model::PropEdit::Nudge(1),
+        2.4
+    ));
+    let saved = o.files.save(&p).unwrap();
+    let (_, map) = saved
+        .writes
+        .iter()
+        .find(|(path, _)| path.ends_with(".map2d.json"))
+        .expect("the mapping is written");
+    let doc: serde_json::Value = serde_json::from_str(map).unwrap();
+    assert_eq!(doc["format"], 3);
+    let objects = doc["objects"].as_array().unwrap();
+    assert_eq!(objects.len(), 12);
+    assert!(objects.iter().all(|o| o.get("id").is_some()));
+    let again = reopen(&CHOKER, &saved.writes);
+    let ids = |p: &Project| -> Vec<String> {
+        p.fixture(&NodeId::new("fixture"))
+            .unwrap()
+            .components
+            .iter()
+            .map(|c| c.id.to_string())
+            .collect()
+    };
+    assert_eq!(ids(&again.project), ids(&p));
+    assert!(
+        again.files.save(&p).unwrap().writes.is_empty(),
+        "nothing left to write"
+    );
+}
+
 /// Deleting the choker's shader removes it from the module and reports its
 /// file as no longer used.
 #[test]

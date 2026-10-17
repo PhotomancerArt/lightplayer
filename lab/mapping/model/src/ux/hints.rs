@@ -15,6 +15,7 @@ use crate::domain::component::ComponentKind;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::{Editor, Gesture, Tool};
+use crate::ux::graph_verb::GraphVerb;
 use crate::ux::handle::{HandleKind, SizeEdge};
 use crate::ux::props::common_props;
 
@@ -25,6 +26,9 @@ pub struct Hint {
     pub does: String,
     /// Mouse or keyboard: the bar shows them as separate rows.
     pub kind: HintKind,
+    /// The verbs it names, for whoever presses verbs by name
+    /// (`graph_verb.rs`): none for a gesture or a way of moving the view.
+    pub verbs: Vec<GraphVerb>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +61,15 @@ fn h(keys: &str, does: impl Into<String>) -> Hint {
         } else {
             HintKind::Key
         },
+        verbs: Vec::new(),
+    }
+}
+
+/// A hint that names verbs.
+fn hv(keys: &str, does: impl Into<String>, verbs: &[GraphVerb]) -> Hint {
+    Hint {
+        verbs: verbs.to_vec(),
+        ..h(keys, does)
     }
 }
 
@@ -68,7 +81,7 @@ impl Editor {
             h("space-drag", "pan"),
             h("⇧1", "fit"),
             h("⇧2", "frame selection"),
-            h("⌘Z", "undo"),
+            hv("⌘Z", "undo", &[GraphVerb::Undo]),
         ];
         let (lead, hints) = match &self.gesture {
             Gesture::Moving { .. } => (
@@ -117,7 +130,10 @@ impl Editor {
                     match self.tool {
                         Tool::Path if self.path_draft.is_empty() => (
                             "Path tool".into(),
-                            vec![h("click", "first point"), h("Esc · V", "done")],
+                            vec![
+                                h("click", "first point"),
+                                hv("Esc · V", "done", &[GraphVerb::SelectTool]),
+                            ],
                         ),
                         Tool::Path => (
                             "Drawing a path".into(),
@@ -129,7 +145,10 @@ impl Editor {
                         ),
                         Tool::Circle => (
                             "Circle tool".into(),
-                            vec![h("drag", "draw"), h("Esc · V", "done")],
+                            vec![
+                                h("drag", "draw"),
+                                hv("Esc · V", "done", &[GraphVerb::SelectTool]),
+                            ],
                         ),
                         Tool::Select => (String::new(), self.select_hints()),
                     }
@@ -169,22 +188,27 @@ impl Editor {
         out.push(h("right-click", "what's here"));
 
         if let Some(first) = sel.first() {
-            out.push(h(
+            out.push(hv(
                 "Esc",
                 if f.parent(first).is_some() {
                     "up"
                 } else {
                     "deselect"
                 },
+                &[GraphVerb::Up],
             ));
             if !f.children(Some(first)).is_empty() {
-                out.push(h("Enter", "go in"));
+                out.push(hv("Enter", "go in", &[GraphVerb::GoIn]));
             }
             if f.siblings(first).len() > 1 {
-                out.push(h("← →", "previous · next"));
+                out.push(hv(
+                    "← →",
+                    "previous · next",
+                    &[GraphVerb::Previous, GraphVerb::Next],
+                ));
             }
             if deletable(f, sel) {
-                out.push(h("⌫", "delete"));
+                out.push(hv("⌫", "delete", &[GraphVerb::Delete]));
             }
             let edit: Vec<Target> = sel
                 .iter()
@@ -198,10 +222,14 @@ impl Editor {
                 .iter()
                 .find(|p| p.desc.nudge && (self.move_draw || !p.desc.reshapes))
             {
-                out.push(h("− =", p.desc.label.to_lowercase()));
+                out.push(hv(
+                    "− =",
+                    p.desc.label.to_lowercase(),
+                    &[GraphVerb::Fewer, GraphVerb::More],
+                ));
             }
             if sel.iter().all(|t| f.has_direction(t)) {
-                out.push(h("r", "reverse"));
+                out.push(hv("r", "reverse", &[GraphVerb::Reverse]));
             }
             if self.move_draw
                 && self
@@ -209,14 +237,18 @@ impl Editor {
                     .iter()
                     .any(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))
             {
-                out.push(h("U", "unpin"));
+                out.push(hv("U", "unpin", &[GraphVerb::Unpin]));
             }
         }
-        out.push(h("⌘A", "select all"));
+        out.push(hv("⌘A", "select all", &[GraphVerb::SelectAll]));
         if self.move_draw {
-            out.push(h("P · O", "path · circle"));
+            out.push(hv(
+                "P · O",
+                "path · circle",
+                &[GraphVerb::PathTool, GraphVerb::CircleTool],
+            ));
         }
-        out.push(h("M", "move & draw"));
+        out.push(hv("M", "move & draw", &[GraphVerb::MoveDraw]));
         out
     }
 
