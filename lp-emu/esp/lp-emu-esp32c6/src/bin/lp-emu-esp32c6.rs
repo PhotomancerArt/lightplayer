@@ -109,6 +109,10 @@ OPTIONS:
                             the bootloader it stands in for would [64k, the
                             reset value; espflash 3.3.0's picks 32k on 4 MB]
     --flash-size <4M|8M>    the modelled chip's size [4M]
+    --flash-part <rom-default|cx1|xiao-c6>
+                            the part on the board: its JEDEC id and status
+                            register 2 at power-on; the desk parts power on
+                            with QE set, so the core reads in QIO [rom-default]
     --usb-host absent|attached|attached-idle
                             the USB-Serial-JTAG host at power-on: no cable
                             (P6's machine), a host with the port open and
@@ -423,6 +427,7 @@ struct Args {
     usb_sj: UsbSjSink,
     flash: FlashBacking,
     flash_len: Option<u32>,
+    flash_part: Option<lp_emu_esp32c6::flash::FlashPart>,
     usb_sj_tried: UsbSjSink,
     usb_host: UsbHost,
     usb_sj_drain: UsbSjDrain,
@@ -606,6 +611,9 @@ fn run() -> Result<ExitCode, String> {
     }
     if let Some(len) = args.flash_len {
         builder = builder.flash_len(len);
+    }
+    if let Some(part) = args.flash_part {
+        builder = builder.flash_part(part);
     }
     if let Some(addr) = args.control.clone() {
         builder = builder.control(addr);
@@ -830,6 +838,11 @@ fn parse(argv: Vec<String>) -> Result<Args, String> {
             "--usb-sj" => args.usb_sj = parse_usb_sj(&value("--usb-sj")?)?,
             "--flash" => args.flash = FlashBacking::File(value("--flash")?.into()),
             "--flash-copy" => args.flash = FlashBacking::Copy(value("--flash-copy")?.into()),
+            "--flash-part" => {
+                args.flash_part = Some(lp_emu_esp32c6::flash::FlashPart::parse(&value(
+                    "--flash-part",
+                )?)?);
+            }
             "--flash-size" => {
                 let text = value("--flash-size")?;
                 args.flash_len = Some(parse_flash_size(&text)?);
