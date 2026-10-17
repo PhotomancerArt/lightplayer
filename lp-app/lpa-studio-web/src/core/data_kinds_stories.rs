@@ -5,8 +5,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    CalendarDate, PRE_HELLO_FIRMWARE, age_words, byte_size, date_words, duration_words,
-    firmware_label_version, firmware_version, percent, pre_ota_version,
+    CalendarDate, PRE_HELLO_FIRMWARE, age_spoken, age_words, byte_size, date_words,
+    duration_words, firmware_label_version, firmware_version, percent, pre_ota_version,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -16,7 +16,7 @@ const DAY: f64 = 86_400.0;
 const OCT_16_2026: f64 = 1_792_152_000.0;
 
 #[story(
-    description = "Every data kind Studio shows and every case of it, as core says it: ages, durations, byte sizes, percentages, dates and firmware versions."
+    description = "Every data kind Studio shows and every case of it, as core says it: ages, durations, an age in a sentence (the board card's surface and its Link row), byte sizes, percentages, dates and firmware versions."
 )]
 fn every_kind() -> Element {
     let ages: Vec<(String, String)> = [0.0, 12.0, 89.0, 90.0, 2.0 * 3_600.0, 3.0 * DAY, 14.0 * DAY]
@@ -26,6 +26,10 @@ fn every_kind() -> Element {
     let durations: Vec<(String, String)> = [0.0, 89.0, 90.0, 2.0 * 3_600.0, 14.0 * DAY]
         .into_iter()
         .map(|secs| (seconds(secs), duration_words(secs)))
+        .collect();
+    let spoken: Vec<(String, String)> = [0.0, 1.0, 12.0, 90.0, 2.0 * 3_600.0, 3.0 * DAY, 14.0 * DAY]
+        .into_iter()
+        .map(|secs| (seconds(secs), age_spoken(secs)))
         .collect();
     let sizes: Vec<(String, String)> = [
         0_u64,
@@ -85,7 +89,8 @@ fn every_kind() -> Element {
     rsx! {
         div { class: "tw:grid tw:max-w-[560px] tw:gap-5 tw:p-4",
             KindSection { title: "Age", rule: "a reading: how long ago", rows: ages }
-            KindSection { title: "Duration", rule: "for how long: Offline · 2 h", rows: durations }
+            KindSection { title: "Duration", rule: "for how long: 2 h", rows: durations }
+            KindSection { title: "Age in a sentence", rule: "spelled out: It was last seen 2 hours ago.", rows: spoken }
             KindSection { title: "Byte size", rule: "1 KB = 1024 B; one decimal below ten", rows: sizes }
             KindSection { title: "Percent", rule: "a whole number, never past 100", rows: percents }
             KindSection { title: "Date", rule: "UTC, the month's short name and the day", rows: dates }
