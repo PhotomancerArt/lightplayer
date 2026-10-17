@@ -20,7 +20,10 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt::Debug;
 
-use lpfs::{FsError, FsEvent, FsEventKind, FsVersion, LpFs, LpFsView, LpPath, LpPathBuf};
+use lpfs::{
+    FsError, FsEvent, FsEventKind, FsVersion, IdlePacer, IdleTick, LpFs, LpFsView, LpPath,
+    LpPathBuf,
+};
 
 use crate::flash::Flash;
 use crate::heap_sort::sort_strings;
@@ -48,6 +51,8 @@ struct Inner<F: Flash, H: ObjectHasher> {
     /// Secret file nodes a batch replaced or deleted: scrubbed once it
     /// commits, forgotten if it aborts.
     scrub_after_batch: Vec<ObjectId>,
+    /// When the store's idle steps run (`idle_tick`).
+    pacer: IdlePacer,
 }
 
 impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
@@ -60,6 +65,7 @@ impl<F: Flash, H: ObjectHasher> LpFsTree<F, H> {
                 changes_before_batch: None,
                 secret: None,
                 scrub_after_batch: Vec::new(),
+                pacer: IdlePacer::new(),
             })),
         }
     }
@@ -416,14 +422,17 @@ impl<F: Flash + 'static, H: ObjectHasher + 'static> LpFs for LpFsTree<F, H> {
         true
     }
 
-    /// The store's idle step (`TreeStore::collect_step`): a mark, then at
-    /// most one garbage-only sector forgotten or one victim collected.
-    fn idle_step(&self) -> Result<bool, FsError> {
-        self.inner
-            .borrow_mut()
-            .store
-            .collect_step()
-            .map_err(store_err)
+    /// One of the store's idle steps (`TreeStore::collect_step`: a mark, an
+    /// erase, a forget or a victim's next copies) when the pacer says this
+    /// tick has the time (`lpfs::IdlePacer`).
+    fn idle_tick(&self, tick: IdleTick) -> Result<bool, FsError> {
+        let mut i = self.inner.borrow_mut();
+        if !i.pacer.tick(tick) {
+            return Ok(false);
+        }
+        let did = i.store.collect_step();
+        i.pacer.ran(!matches!(did, Ok(false)));
+        did.map_err(store_err)
     }
 
     /// The store's own deflated write (`TreeStore::put_chunk_deflated`): it

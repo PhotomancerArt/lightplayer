@@ -160,7 +160,7 @@ fn calls(st: ProbeStore) {
         let _ = black_box(f.list_dir(p("/"), black_box(true)));
         let _ = black_box(f.chroot(p("/projects/a")));
         let _ = black_box(f.get_changes_since(FsVersion::default()));
-        let _ = black_box(f.idle_step());
+        let _ = black_box(f.idle_tick(black_box(lpfs::IdleTick::default())));
     }
     fs.borrow_mut().clear_changes_before(FsVersion::default());
     black_box(fs);

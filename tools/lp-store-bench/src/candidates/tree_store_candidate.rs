@@ -1,7 +1,7 @@
 //! T1: the content-addressed copy-on-write tree store (`lp-tree-store` v1).
 //! Dials: `record_max`, `gc_policy` (`greedy` | `cost_benefit`), `reserve`,
 //! `txn_delta_max`, `idle_free_percent`, `idle_min_garbage`, `idle_pack_free`,
-//! `codec` (`stored` | `host_deflate`), `read_cache` (`off` | `sim`: the
+//! `idle_copy_bytes`, `codec` (`stored` | `host_deflate`), `read_cache` (`off` | `sim`: the
 //! store reads through `lp_tree_store::SimLineCache`, a model of the C6's
 //! flash cache that serves a line's old bytes until the store's
 //! `WindowedFlash` invalidates it — the firmware's C7 read path; a mount
@@ -50,6 +50,7 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
             "idle_free_percent" => c.idle_free_percent = num()?,
             "idle_min_garbage" => c.idle_min_garbage = num()?,
             "idle_pack_free" => c.idle_pack_free = num()?,
+            "idle_copy_bytes" => c.idle_copy_bytes = num()?,
             "gc_policy" => {
                 c.gc_policy = match v.as_str() {
                     "greedy" => GcPolicy::Greedy,

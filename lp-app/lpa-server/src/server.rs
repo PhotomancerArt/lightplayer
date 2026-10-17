@@ -256,8 +256,6 @@ pub struct LpServer {
     /// The one fs batch a link may hold open (`FsRequest::BeginBatch`): its
     /// owner and idle time; the filesystem holds the transaction.
     batch: BatchState,
-    /// When the filesystem may clean up (`fs_idle.rs`).
-    fs_idle: crate::fs_idle::FsIdle,
 }
 
 /// After the first failure, restate a persistent tick error only every
@@ -440,7 +438,6 @@ impl LpServer {
             tick_failures: HashMap::new(),
             access: AccessState::new(),
             batch: BatchState::new(),
-            fs_idle: crate::fs_idle::FsIdle::new(),
         }
     }
 
@@ -1307,14 +1304,16 @@ impl LpServer {
             self.advance_frame(delta_ms)?;
         }
 
-        // A quiet tick, after the frame: one bounded piece of the
-        // filesystem's own cleanup (the tree store's early GC). It changes
-        // no file; a failure is the filesystem's to report on its next use.
-        if self
-            .fs_idle
-            .tick(delta_ms, fs_busy || self.batch.owner().is_some())
-            && let Err(e) = self.base_fs.idle_step()
-        {
+        // After the frame: how the tick went, so the filesystem can do a
+        // piece of its own cleanup (the tree store's early GC) when the
+        // tick is quiet and a playing show has the time
+        // (`lpfs::IdlePacer`). It changes no file; a failure is the
+        // filesystem's to report on its next use.
+        if let Err(e) = self.base_fs.idle_tick(lpfs::IdleTick {
+            delta_ms,
+            busy: fs_busy || self.batch.owner().is_some(),
+            playing: self.project_manager.first_loaded().is_some(),
+        }) {
             log::warn!("fs idle step: {e}");
         }
 

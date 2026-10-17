@@ -14,8 +14,9 @@
 //! (`write_deflated_chunk`, whose default inflates and writes plain bytes):
 //! the two halves of a wire push
 //! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`); and an
-//! **idle step** (`idle_step`, the tree store's early cleanup; the default
-//! does nothing). A
+//! **idle tick** (`idle_tick`: the server says how each tick went, and a
+//! filesystem with cleanup to do — the tree store — does a piece of it when
+//! [`IdlePacer`] says the tick has time; the default does nothing). A
 //! *wrapper* (`LpFsView`, a server's `AccessGuardedFs`) must forward every
 //! method, defaulted ones included — the defaults are a backend's answers —
 //! and carries `#[deny(clippy::missing_trait_methods)]` to keep it so.
@@ -27,6 +28,8 @@ extern crate std;
 
 pub mod error;
 pub mod fs_event;
+pub mod idle_pacer;
+pub mod idle_tick;
 pub mod impls;
 pub mod lp_fs;
 pub mod lp_fs_view;
@@ -38,6 +41,8 @@ pub use error::FsError;
 #[allow(deprecated, reason = "legacy fs event type aliases for migration")]
 pub use fs_event::{ChangeType, FsChange};
 pub use fs_event::{FsEvent, FsEventKind, FsVersion};
+pub use idle_pacer::IdlePacer;
+pub use idle_tick::IdleTick;
 pub use impls::lp_fs_mem::LpFsMemory;
 pub use lp_fs::{LpFs, MAX_DEFLATED_CHUNK_LOGICAL};
 pub use lp_fs_view::LpFsView;

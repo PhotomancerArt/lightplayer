@@ -122,8 +122,8 @@ impl LpFs for AccessGuardedFs {
         self.inner.borrow().batches_are_atomic()
     }
 
-    fn idle_step(&self) -> Result<bool, FsError> {
-        self.inner.borrow().idle_step()
+    fn idle_tick(&self, tick: lpfs::IdleTick) -> Result<bool, FsError> {
+        self.inner.borrow().idle_tick(tick)
     }
 
     fn write_deflated_chunk(
