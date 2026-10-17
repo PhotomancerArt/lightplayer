@@ -164,10 +164,7 @@ mod tests {
             },
             0.0,
         );
-        assert_eq!(
-            facts.blocked.as_deref(),
-            Some("Format too old (3)")
-        );
+        assert_eq!(facts.blocked.as_deref(), Some("Format too old (3)"));
         assert_eq!(facts.open_href, None);
     }
 

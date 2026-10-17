@@ -540,12 +540,8 @@ fn where_words(relationship: ProjectRelationship) -> WhereWords {
 /// ([`local_access_line`]), not an address one.
 fn address_note(relationship: ProjectRelationship) -> Option<&'static str> {
     match relationship {
-        ProjectRelationship::Example => {
-            Some("Anyone can open this link.")
-        }
-        ProjectRelationship::MinePublished => {
-            Some("The same link as the address bar.")
-        }
+        ProjectRelationship::Example => Some("Anyone can open this link."),
+        ProjectRelationship::MinePublished => Some("The same link as the address bar."),
         ProjectRelationship::MineLocal
         | ProjectRelationship::MemberOfSomeoneElses
         | ProjectRelationship::ViewingSomeoneElses => None,

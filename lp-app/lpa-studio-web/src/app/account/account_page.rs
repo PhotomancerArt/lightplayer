@@ -719,7 +719,9 @@ fn name_field(value: &str) -> Option<String> {
 /// What the line beside Save says.
 fn save_note(status: SaveStatus) -> &'static str {
     match status {
-        SaveStatus::Idle => "Names start from your sign-in provider. Edits here stay on LightPlayer.",
+        SaveStatus::Idle => {
+            "Names start from your sign-in provider. Edits here stay on LightPlayer."
+        }
         SaveStatus::Saving => "Saving…",
         SaveStatus::Saved => "Saved.",
         SaveStatus::Failed => "Couldn't save. Try again.",

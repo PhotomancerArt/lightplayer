@@ -271,9 +271,8 @@ fn PanelResetButton(
     on_panel: EventHandler<PanelGesture>,
 ) -> Element {
     let noun = if held == 1 { "control" } else { "controls" };
-    let label = format!(
-        "Reset {held} held {noun} in {scope} and let the project control them again"
-    );
+    let label =
+        format!("Reset {held} held {noun} in {scope} and let the project control them again");
     rsx! {
         button {
             class: "tw:inline-flex tw:h-5 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-start tw:gap-px tw:rounded-xs tw:border-0 tw:bg-transparent tw:px-1 tw:py-0.5 tw:text-status-engaged-foreground tw:opacity-70 tw:hover:opacity-100",

@@ -324,9 +324,7 @@ fn cell_title(cell: &UiPatchCell) -> String {
         title.push_str("\nlaid onto the wire end-first");
     }
     if cell.contested {
-        title.push_str(
-            "\nAnother strand uses some of these channels too, so they are left dark.",
-        );
+        title.push_str("\nAnother strand uses some of these channels too, so they are left dark.");
     }
     title
 }

@@ -503,9 +503,7 @@ impl AgentController {
     ) {
         if let Some(session) = self.session_for_mut(runtime, artifact) {
             session.bridge.borrow_mut().source = source.to_string();
-            session.push_notice(format!(
-                "Reverted to turn {turn}. Save to keep it."
-            ));
+            session.push_notice(format!("Reverted to turn {turn}. Save to keep it."));
         }
     }
 

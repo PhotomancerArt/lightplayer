@@ -94,9 +94,7 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
         // The staged removal row: the entry's label is the removed node's
         // name and its path is the attachment site; the staged file
         // deletions list separately as their own file rows.
-        (UiPendingEditKind::NodeRemoved, _) => {
-            "node removed on save".to_string()
-        }
+        (UiPendingEditKind::NodeRemoved, _) => "node removed on save".to_string(),
     }
 }
 
@@ -107,10 +105,7 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
 /// overrides never reach this list (D7); their verb is Clear, on the row.
 fn revert_label(edit: &UiPendingEdit) -> (&'static str, &'static str) {
     if matches!(edit.kind, UiPendingEditKind::NodeRemoved) {
-        return (
-            "Restore",
-            "Restore this node and keep its files",
-        );
+        return ("Restore", "Restore this node and keep its files");
     }
     match edit.phase {
         UiPendingEditPhase::Persisted => ("Revert", "Discard this change"),

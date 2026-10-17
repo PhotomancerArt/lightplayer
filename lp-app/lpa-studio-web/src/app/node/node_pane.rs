@@ -337,9 +337,7 @@ fn export_chip_class(worst: Option<ExportSeverity>) -> &'static str {
 fn export_chip_title(worst: Option<ExportSeverity>) -> &'static str {
     match worst {
         None => "This module is exported from the project.",
-        Some(ExportSeverity::Warning) => {
-            "This module is exported, with a warning. See its ⓘ."
-        }
+        Some(ExportSeverity::Warning) => "This module is exported, with a warning. See its ⓘ.",
         Some(ExportSeverity::Error) => {
             "This module is exported, but it wouldn't load in another project. See its ⓘ."
         }

@@ -171,10 +171,7 @@ fn HistoryChip(
     let title = if busy {
         format!("Turn {}: {intent}. Stop the run to revert.", entry.turn)
     } else {
-        format!(
-            "Revert to turn {}: {intent}. Save to keep it.",
-            entry.turn
-        )
+        format!("Revert to turn {}: {intent}. Save to keep it.", entry.turn)
     };
     rsx! {
         button {

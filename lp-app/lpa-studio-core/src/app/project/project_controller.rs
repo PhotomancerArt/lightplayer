@@ -18583,7 +18583,10 @@ mod tests {
         let run = block_on_ready(project.save_overlay(&mut client)).unwrap();
 
         assert_eq!(run.notices.notices.len(), 1);
-        assert_eq!(run.notices.notices[0].message, "Saved", "one file was written");
+        assert_eq!(
+            run.notices.notices[0].message, "Saved",
+            "one file was written"
+        );
         assert_eq!(
             sent.borrow().len(),
             2,

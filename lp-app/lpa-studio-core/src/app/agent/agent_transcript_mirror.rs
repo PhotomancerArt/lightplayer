@@ -338,9 +338,9 @@ fn truncation_notice(stop_reason: &StopReason, dropped_tool_call: bool) -> Strin
         (StopReason::MaxTokens, false) => "Run stopped: the response hit the output-token limit \
              — try again or ask for something smaller."
             .to_string(),
-        (StopReason::Other(reason), true) => format!(
-            "The run stopped early ({reason:?}), and its unfinished edit was discarded."
-        ),
+        (StopReason::Other(reason), true) => {
+            format!("The run stopped early ({reason:?}), and its unfinished edit was discarded.")
+        }
         (StopReason::Other(reason), false) => {
             format!("Run stopped early (provider reported {reason:?}).")
         }

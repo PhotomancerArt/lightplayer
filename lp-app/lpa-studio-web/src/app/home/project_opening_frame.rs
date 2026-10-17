@@ -939,10 +939,7 @@ mod tests {
             ..opening()
         });
         assert_eq!(indeterminate.fraction(), None);
-        assert_eq!(
-            indeterminate.label().unwrap(),
-            "Downloading the sim… 5 MB"
-        );
+        assert_eq!(indeterminate.label().unwrap(), "Downloading the sim… 5 MB");
     }
 
     #[test]

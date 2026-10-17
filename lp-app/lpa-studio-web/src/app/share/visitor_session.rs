@@ -176,9 +176,7 @@ impl VisitorSession {
         let mut this = self.clone();
         if let Some(toasts) = this.toasts.as_mut() {
             match access {
-                Some(Access::Edit) => {
-                    toasts.say("Link copied. Anyone with it can edit and save.")
-                }
+                Some(Access::Edit) => toasts.say("Link copied. Anyone with it can edit and save."),
                 _ => toasts.say("Link copied. Anyone can open it, no account needed."),
             }
         }

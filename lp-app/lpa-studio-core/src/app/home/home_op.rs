@@ -301,7 +301,9 @@ impl ControllerOp for HomeOp {
                         "Create and open a 1D pattern project, with a strip and a matrix \
                          to try the effect on."
                     }
-                    _ => "Create and open a 2D pattern project, with a matrix to try the effect on.",
+                    _ => {
+                        "Create and open a 2D pattern project, with a matrix to try the effect on."
+                    }
                 },
                 ActionPriority::Secondary,
             )
