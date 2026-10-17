@@ -213,9 +213,9 @@ def pack(chip: str, out: Path) -> None:
         for slug, elf in sorted(by_slug.items()):
             add(elf, f"tree/{slug}/fw-esp32c6", "tree", slug=slug, profile="release-esp32")
         # Split images: `test_support::split_image`'s keyed directories,
-        # `target/lp-emu-c6/<SLUG>_SPLIT-<key>/` — the four files a boot test
+        # `target/lp-emu-c6/<SLUG>_SPLIT-<key>/` — the five files a boot test
         # reads, `lp-fw-split`'s output for that feature set.
-        split_files = ("merged.bin", "loader.elf", "p2.elf", "split.json")
+        split_files = ("merged.bin", "merged-idf.bin", "loader.elf", "p2.elf", "split.json")
         by_split: dict[str, Path] = {}
         for merged in sorted((target / "lp-emu-c6").glob("*_SPLIT-*/merged.bin")):
             m = re.match(r"^(.+_SPLIT)-([0-9a-f]{16})$", merged.parent.name)

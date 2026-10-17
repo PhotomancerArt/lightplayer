@@ -27,10 +27,15 @@ pub struct BuildOptions {
     pub out: PathBuf,
     /// Cargo features for fw-esp32c6 (its defaults are always on).
     pub features: String,
-    /// The second-stage bootloader to merge. [`BuildOptions::new`] sets the
-    /// shipped one ([`crate::merged_image::C6_BOOTLOADER`]); `None` merges
-    /// the one espflash bundles.
+    /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries.
+    /// [`BuildOptions::new`] sets the build def's
+    /// ([`crate::merged_image::C6_BOOTLOADER`]); `None` merges the one
+    /// espflash bundles.
     pub bootloader: Option<PathBuf>,
+    /// Which second stage `merged.bin` boots through. Both doors' images are
+    /// always written (`merged-lp.bin`, `merged-idf.bin`); this picks the one
+    /// copied to `merged.bin`, which packaging and the emulator gates read.
+    pub door: Door,
     /// The partition table the image is flashed with.
     pub partitions: PathBuf,
     /// The target (`lp-fw/builds/` id) the image is built as, embedded in
@@ -47,8 +52,32 @@ impl BuildOptions {
             out,
             features: "esp32c6,server".into(),
             bootloader,
+            door: Door::Lightplayer,
             partitions,
             target: None,
+        }
+    }
+}
+
+/// The second stage at flash `0x0`: the C6's front door.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Door {
+    /// LightPlayer's own bootloader (`fw-esp32c6-loader --features
+    /// bootloader`, `bootloader.bin`), loaded by the mask ROM.
+    #[default]
+    Lightplayer,
+    /// The ESP-IDF second stage, which starts the factory loader as its app.
+    Idf,
+}
+
+impl std::str::FromStr for Door {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "lightplayer" | "lp" => Ok(Self::Lightplayer),
+            "idf" => Ok(Self::Idf),
+            _ => Err(format!("unknown door `{s}` (lightplayer or idf)")),
         }
     }
 }
@@ -88,6 +117,12 @@ pub struct SplitReport {
     pub build_id: String,
     pub loader_version: u16,
     pub loader: Piece,
+    /// The door `merged.bin` boots through.
+    #[serde(default)]
+    pub door: Door,
+    /// Our second stage (`bootloader.bin`, flash 0x0 of `merged-lp.bin`).
+    #[serde(default)]
+    pub bootloader: Option<Piece>,
     pub core: Piece,
     pub engine: Piece,
     pub app_bin: Piece,
@@ -170,6 +205,9 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         );
     }
 
+    eprintln!("==> bootloader");
+    let bootloader = build_bootloader_image(&repo, &out)?;
+
     eprintln!("==> split");
     let mut p2_elf = fs::read(&p2.elf)?;
     let (engine_base, mut engine) = split_artifacts::engine_bin(&p2_elf)?;
@@ -226,12 +264,19 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     let build = lp_bootctl::build_hash(build_id_text.as_bytes());
     let app = app_image::assemble(&loader, &core, &engine, region_end, build)?;
     fs::write(out.join("app.bin"), &app.bytes)?;
-    let merged = merged_image::merge(
+    let merged_idf = merged_image::merge(
         &loader_elf,
         &app.bytes,
         &opts.partitions,
         opts.bootloader.as_deref(),
     )?;
+    let merged_lp = merged_image::with_bootloader(&merged_idf, &bootloader)?;
+    fs::write(out.join("merged-idf.bin"), &merged_idf)?;
+    fs::write(out.join("merged-lp.bin"), &merged_lp)?;
+    let merged = match opts.door {
+        Door::Lightplayer => merged_lp,
+        Door::Idf => merged_idf,
+    };
     fs::write(out.join("merged.bin"), &merged)?;
 
     let piece = |offset: u32, bytes: &[u8]| Piece {
@@ -247,6 +292,8 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         build_id: build_id_text,
         loader_version,
         loader: piece(lp_bootctl::LOADER_OFFSET, &loader),
+        door: opts.door,
+        bootloader: Some(piece(0, &bootloader)),
         core: piece(app.core_off, &core),
         engine: piece(app.engine_off, &engine),
         app_bin: piece(lp_bootctl::LOADER_OFFSET, &app.bytes),
@@ -278,6 +325,51 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         p2.took.as_secs_f64()
     );
     Ok(report)
+}
+
+/// Build our second stage and write `bootloader.elf` and `bootloader.bin`
+/// into `out`; the image.
+fn build_bootloader_image(repo: &Path, out: &Path) -> Result<Vec<u8>> {
+    let elf = fs::read(pass_link::build_bootloader(repo)?)?;
+    fs::write(out.join("bootloader.elf"), &elf)?;
+    let image = crate::bootloader_image::image_from_elf(&elf)?;
+    crate::bootloader_image::check(&image)?;
+    if lp_bootctl::find_bootloader_version(&image) != lp_bootctl::BOOTLOADER_VERSION {
+        bail!(
+            "bootloader.bin does not carry bootloader version {}",
+            lp_bootctl::BOOTLOADER_VERSION
+        );
+    }
+    fs::write(out.join("bootloader.bin"), &image)?;
+    eprintln!("    bootloader.bin: {} B", image.len());
+    Ok(image)
+}
+
+/// Rebuild only our second stage into the build at `out`: `bootloader.bin`,
+/// `merged-lp.bin` (from `merged-idf.bin`), `merged.bin` when the build's
+/// door is ours, and `split.json`'s bootloader piece.
+pub fn rebuild_bootloader(repo: &Path, out: &Path) -> Result<()> {
+    let repo = repo.canonicalize()?;
+    let image = build_bootloader_image(&repo, out)?;
+    let idf = fs::read(out.join("merged-idf.bin"))
+        .with_context(|| format!("{} has no merged-idf.bin", out.display()))?;
+    let lp = merged_image::with_bootloader(&idf, &image)?;
+    fs::write(out.join("merged-lp.bin"), &lp)?;
+    let mut report: SplitReport = serde_json::from_slice(&fs::read(out.join("split.json"))?)?;
+    if report.door == Door::Lightplayer {
+        fs::write(out.join("merged.bin"), &lp)?;
+        report.merged_sha256 = hex(&Sha256::digest(&lp));
+    }
+    report.bootloader = Some(Piece {
+        offset: 0,
+        size_bytes: image.len() as u32,
+        sha256: hex(&Sha256::digest(&image)),
+    });
+    fs::write(
+        out.join("split.json"),
+        serde_json::to_string_pretty(&report)?,
+    )?;
+    Ok(())
 }
 
 /// Verify one link: its graph, its split, the verdict.

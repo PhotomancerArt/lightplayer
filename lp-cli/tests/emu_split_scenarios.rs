@@ -438,11 +438,24 @@ struct Image {
 
 impl Image {
     fn merged(&self) -> Vec<u8> {
-        std::fs::read(self.dir.join("merged.bin")).expect("merged.bin")
+        std::fs::read(self.dir.join(merged_name())).expect(merged_name())
     }
 
     fn engine_offset(&self) -> u32 {
         self.split["engine"]["offset"].as_u64().unwrap() as u32
+    }
+}
+
+/// The merged image to boot: `merged.bin` (the build's own door — our
+/// bootloader, by default), or with `LP_BOOT_DOOR=idf` the same `app.bin`
+/// behind the ESP-IDF bootloader (`merged-idf.bin`), the door every board
+/// flashed before the cutover still boots through. The recipe runs the
+/// scenarios once per door.
+fn merged_name() -> &'static str {
+    match std::env::var("LP_BOOT_DOOR").as_deref() {
+        Ok("idf") => "merged-idf.bin",
+        Ok("lp") | Ok("") | Err(_) => "merged.bin",
+        Ok(other) => panic!("LP_BOOT_DOOR={other}: expected idf or lp"),
     }
 }
 
