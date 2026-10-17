@@ -726,6 +726,15 @@ zero is invalid, `Cache_MSPI_MMU_Set` (`0x4002_7c90`) says an entry is
 function, on purpose — and the rung that was promised off it has landed as
 `t3`.
 
+A **range invalidate** (`Cache_Invalidate_Addr` → `Cache_Invalidate_ICache_Items`:
+`cache_sync_addr`, `cache_sync_size`, then `cache_sync_ctrl`'s
+`invalidate_ena`) marks the mapped pages it names for a refill and ends the
+slice (`periph/extmem.rs`), so the read after it sees the flash — what the
+`fs-tree` firmware's cache-mapped `lpfs` reads rely on after each program and
+erase. A flash write under a mapped page is otherwise refilled at the next
+slice boundary, as before: a guest that forgets the invalidate reads the old
+bytes until then.
+
 ### Flash-cut injection: a power cut at a flash command
 
 `--flash-cut` (a TEST switch, off by default) cuts the supply in the middle

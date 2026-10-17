@@ -93,6 +93,18 @@ change has to be readable, or cleanly refused, by the core before it.
   verdict and the one-root fall-back from that reading; so does a store
   whose sector seqs may have wrapped. Its RAM is the live set's, whatever
   the garbage on flash.
+- **Reads may go through a cache** (`read_window.rs`, the mount study's
+  C7). On the C6, `lpfs` is mapped by the MMU and read as memory: a 32-byte
+  line fill the first time a line is touched instead of a ROM read call
+  (~14 µs) per read. `WindowedFlash` is the store's `Flash` over such a
+  window and holds one rule: after every program and every erase, the range
+  written is invalidated before the store reads again (a stale line read
+  back as erased would make a resume, a settle or a verify trust a tail
+  that is not blank). Nothing about the format changes; the window is the
+  platform's (`fw-esp32c6`'s `tree_flash.rs`). `SimLineCache` models the
+  C6's cache for the host (stale lines served until invalidated); the
+  mutant `reads_without_invalidate` drops the rule and `lp-store-bench`'s
+  drivers, run over the model, catch it.
 - **Mount settles each head's tail** before anything trusts it. A program
   torn inside a 4-byte word can leave its one missing clear weak, so a
   record reads whole on some reads and fails its CRC on others; only the

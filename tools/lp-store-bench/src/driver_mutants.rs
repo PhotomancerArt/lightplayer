@@ -80,6 +80,13 @@ pub fn run_mutants(only: &[String], sink: &Scoreboard) -> Result<Vec<MutantResul
     Ok(out)
 }
 
+/// Every driver's store: T1 reading through the simulated flash cache, as
+/// the C6 reads `lpfs` (`read_cache=sim`), so a mutant that leaves a stale
+/// line in it is one the drivers can see.
+fn t1_config(sectors: u32) -> CandidateConfig {
+    CandidateConfig::new(sectors).with_dial("read_cache", "sim")
+}
+
 fn run_set(name: &str) -> MutantResult {
     let corpora = CorpusSet::new(None);
     let sink = Scoreboard::memory();
@@ -115,7 +122,7 @@ fn run_set(name: &str) -> MutantResult {
             };
             add_sweeps(
                 &mut t,
-                &sweep_exhaustive(&cand, &CandidateConfig::new(sectors), &wl, &p, &sink),
+                &sweep_exhaustive(&cand, &t1_config(sectors), &wl, &p, &sink),
             );
         }
         t
@@ -158,7 +165,7 @@ fn run_set(name: &str) -> MutantResult {
                 &mut t,
                 &sweep_double_cut(
                     &cand,
-                    &CandidateConfig::new(sectors),
+                    &t1_config(sectors),
                     &wl,
                     &p,
                     &DoubleCutParams {
@@ -183,7 +190,7 @@ fn run_set(name: &str) -> MutantResult {
                 &cand,
                 &LongParams {
                     candidate: "t1".into(),
-                    config: CandidateConfig::new(sectors),
+                    config: t1_config(sectors),
                     corpora: vec!["syn:3:1200".into(), "syn:4:700".into(), "syn:2:2500".into()],
                     seed,
                     steps: 1500,
@@ -218,7 +225,7 @@ fn run_set(name: &str) -> MutantResult {
                 &cand,
                 &FullFlashParams {
                     candidate: "t1".into(),
-                    config: CandidateConfig::new(16),
+                    config: t1_config(16),
                     corpus: "syn:3:900".into(),
                     seed,
                     edge_steps: 24,
@@ -243,7 +250,7 @@ fn run_set(name: &str) -> MutantResult {
             &cand,
             &FuzzParams {
                 candidate: "t1".into(),
-                config: CandidateConfig::new(16),
+                config: t1_config(16),
                 corpora: vec!["syn:3:600".into(), "syn:4:900".into()],
                 seed: 11,
                 cases: 600,

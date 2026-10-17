@@ -64,6 +64,7 @@ mod node_write;
 mod object_hasher;
 mod object_id;
 mod ram_index;
+mod read_window;
 mod record_header;
 mod record_kind;
 mod record_log;
@@ -101,6 +102,8 @@ mod mount_verdict_tests;
 #[cfg(test)]
 mod ram_budget_tests;
 #[cfg(test)]
+mod read_window_tests;
+#[cfg(test)]
 mod store_tests;
 #[cfg(test)]
 mod test_support;
@@ -122,6 +125,9 @@ pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
+#[cfg(any(test, feature = "nor-sim"))]
+pub use read_window::SimLineCache;
+pub use read_window::{ReadWindow, WindowedFlash};
 pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
 pub use store_config::{GcPolicy, StoreConfig};
 pub use store_error::StoreError;

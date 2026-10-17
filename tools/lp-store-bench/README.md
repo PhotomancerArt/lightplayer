@@ -32,8 +32,13 @@ number — not an emulator or silicon measurement.
   `txn_delta_max`, and `codec` = `stored` (every file written stored) |
   `host_deflate` (every file but the board's own `…/.lp/panel.json` arrives
   as the wire carries it after M6: `host_deflate_chunks` → ≤ 4 KiB logical
-  chunks, `put_chunk_deflated` at offset 0 then the running size). The
-  prototype's `deflate`, `deflate_dict`, `dict_size` and `json_tree` dials
+  chunks, `put_chunk_deflated` at offset 0 then the running size), and
+  `read_cache` = `off` | `sim` (the store reads through
+  `lp_tree_store::SimLineCache`, a model of the C6's flash cache that serves
+  a line's old bytes until the store's `WindowedFlash` invalidates it — the
+  firmware's cache-mapped `lpfs` reads; a mount after a cut starts with it
+  empty, as a power-on does; the `mutants` set runs every driver with it on).
+  The prototype's `deflate`, `deflate_dict`, `dict_size` and `json_tree` dials
   are gone with what they selected.
 - **Workloads** (`workload.rs`): steps of puts and prefix deletes, each
   ending in `commit`, built from corpora at runtime, deterministic by seed.
