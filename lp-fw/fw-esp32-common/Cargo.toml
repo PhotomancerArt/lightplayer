@@ -178,3 +178,9 @@ async-trait = "0.1"
 tungstenite = "0.28"
 sha1 = "0.10"
 simple-dns = "0.9"
+# `tests/ble_controller_answers.rs`: the host side of the C6's HCI (bt-hci's
+# ExternalController, as forked in third_party/bt-hci) against the exact
+# answers its controller gives. Host-only; the firmware's own bt-hci is
+# fw-esp32c6's.
+bt-hci = { version = "0.8.0", default-features = false }
+embedded-io-07 = { package = "embedded-io", version = "0.7" }

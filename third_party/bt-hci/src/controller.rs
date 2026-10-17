@@ -324,15 +324,31 @@ impl<const SLOTS: usize> ControllerState<SLOTS> {
         for (idx, slot) in slots.iter_mut().enumerate() {
             match slot {
                 CommandSlot::Pending { opcode, event } if *opcode == op.to_raw() => {
-                    if !data.is_empty() {
+                    // LP fork (third_party/bt-hci/README-LP.md): a controller may
+                    // answer with more return parameters than the command
+                    // declares — LE Remote Connection Parameter Request (Negative)
+                    // Reply are declared async here (no return), and the
+                    // controller's Command Complete carries the 2-byte handle the
+                    // spec gives them. Copy what fits rather than slice past the
+                    // caller's buffer: that panicked the C6 on every Android
+                    // connection.
+                    let mut len = data.len();
+                    if len > 0 {
                         assert!(!event.is_null());
                         // Safety: since the slot is in pending, the caller stack will be valid.
-                        unsafe { (&mut (**event))[..data.len()].copy_from_slice(data) };
+                        let dest = unsafe { &mut (**event) };
+                        if len > dest.len() {
+                            warn!(
+                                "[bt-hci] command 0x{:04x} completed with {} return bytes, room for {}; extra ignored",
+                                op.to_raw(),
+                                len,
+                                dest.len()
+                            );
+                            len = dest.len();
+                        }
+                        dest[..len].copy_from_slice(&data[..len]);
                     }
-                    self.signals[idx].signal(CommandResponse {
-                        status,
-                        len: data.len(),
-                    });
+                    self.signals[idx].signal(CommandResponse { status, len });
                     if op != Reset::OPCODE {
                         break;
                     }
