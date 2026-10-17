@@ -139,7 +139,7 @@ pub enum LpfsCommand {
     Save(LpfsSaveArgs),
     /// Move a board's files to the layout of a firmware package, writing
     /// the firmware too — across a repartition, or from littlefs into the
-    /// tree store (`--to tree`, an `fs-tree` image). Stores a backup first.
+    /// tree store (`--to tree`, every C6 image since the cutover). Stores a backup first.
     /// WRITES THE BOARD (unless `--dry-run`).
     Migrate(LpfsMigrateArgs),
     /// Put a backup ZIP's files back onto a board already on the package's
@@ -251,7 +251,7 @@ pub struct LpfsMigrateArgs {
 pub enum LpfsTargetFs {
     /// littlefs (every image before the tree store).
     Littlefs,
-    /// The tree store (`fs-tree` images).
+    /// The tree store (every C6 image since the tree-store cutover).
     Tree,
 }
 

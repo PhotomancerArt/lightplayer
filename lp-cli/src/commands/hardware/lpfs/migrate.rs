@@ -7,7 +7,7 @@
 //! retiring the old filesystem and writing the new one's superblock, it is
 //! the only copy (plan MQ9).
 //!
-//! `--to tree` (an `fs-tree` image): the cutover's move from littlefs into
+//! `--to tree` (every C6 image since the cutover): the move from littlefs into
 //! the tree store — staged in the blocks the old filesystem does not use
 //! when it can be, so the old board stays whole until the firmware switch
 //! (`lpa_link::layout_migration::tree_migration_plan`). `--dry-run` reads
@@ -168,7 +168,7 @@ fn check_target_fs(
     if inspection.target_fs != wanted {
         return Err(LinkError::other(format!(
             "this image mounts {}, not {} (an image for the tree store is built with \
-             `fs-tree`). Nothing was written.",
+             `fs-tree`, every C6 package since the cutover). Nothing was written.",
             inspection.target_fs.word(),
             wanted.word()
         )));

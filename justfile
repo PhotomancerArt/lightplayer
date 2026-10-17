@@ -68,11 +68,10 @@ served_builds_json := "lp-fw/builds/served.json"
 # updates over USB only — and `split` builds the product's split image with
 # its update files, which Studio needs to update a board over the air. Ask
 # for it when testing updates: `LP_FW_IMAGE=split just studio-dev`. The
-# release bundle (`studio-web-build`, every deploy) is ALWAYS split.
-# `split-tree` is the split image with the tree store as its filesystem on the
-# tree table (`lp-cli firmware package --fs-tree`): the tree-store cutover's
-# image before its default switch, what `walk-migration-emu`'s tree scenarios
-# serve. Never a release.
+# release bundle (`studio-web-build`, every deploy) is ALWAYS split. Both
+# mount the tree store on the tree table since the tree-store cutover (A7):
+# the provisioning (USB) image and the over-the-air "own" build are one
+# package, so they switch together.
 # Measured warm on an M2 Max, 2026-10-06: single 23 s, split 50 s (two link
 # passes, 23 s + 25 s). See lp-fw/builds/README.md.
 studio_fw_image := env("LP_FW_IMAGE", "single")
@@ -768,9 +767,8 @@ studio-firmware-package-esp32c6 image=studio_fw_image: install-rv32-target
     case "{{ image }}" in
         single) cargo run -p lp-cli -- firmware package esp32c6-4mb --single-image ;;
         split) cargo run -p lp-cli -- firmware package esp32c6-4mb ;;
-        split-tree) cargo run -p lp-cli -- firmware package esp32c6-4mb --fs-tree ;;
         *)
-            echo "studio-firmware-package-esp32c6: image must be single, split or split-tree, not {{ image }}" >&2
+            echo "studio-firmware-package-esp32c6: image must be single or split, not {{ image }}" >&2
             exit 1
             ;;
     esac
@@ -2240,9 +2238,9 @@ fw-esp32c6-split features="": install-rv32-target
 # `margin`. `unsplit=1` also builds the monolithic image and prints the code
 # and image deltas against it (informational; CI does not pay that build).
 # `features` (the third, positional: `just fw-esp32c6-size-check 65536 ""
-# esp32c6,server,fs-tree`) measures another feature set the same way — the
-# tree store, never shipped. The default, empty, is the shipped image and is
-# what CI gates.
+# esp32c6,server,heap_peak_diag`) measures another feature set the same way.
+# The default, empty, is the shipped image (the tree store on the tree table
+# since the tree-store cutover) and is what CI gates.
 fw-esp32c6-size-check margin="65536" unsplit="" features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2426,16 +2424,18 @@ _fw-size-check name chip flash_size elf csv margin doc:
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         echo "{{ name }} image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
     fi
-    # The C6's pre-repartition lpfs began at 0x310000 (frozen at
-    # lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv). Once the app
-    # image crosses it, a migration must retire the old filesystem BEFORE the
-    # firmware is written (plan MQ6/MQ9) — informational, never a failure.
+    # Every C6 fielded before the tree-store cutover keeps its littlefs at
+    # 0x350000 (frozen at lp-app/lpa-link/testdata/
+    # partitions-esp32c6-legacy-v2.csv). A tree core holds a board whose
+    # migration a plain flash skipped only while that flash left the
+    # superblock pair there whole — informational, never a failure (the
+    # migration reads the board first and does not depend on it).
     if [ "{{ name }}" = "esp32c6" ]; then
-        overlap=$(( 0x300000 - size ))
+        overlap=$(( 0x340000 - size ))
         if [ "${overlap}" -ge 0 ]; then
-            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x310000"
+            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x350000"
         else
-            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x310000"
+            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x350000"
         fi
     fi
     if [ "${headroom}" -lt "{{ margin }}" ]; then
@@ -2841,17 +2841,14 @@ clippy-fw-esp32c6: install-rv32-target
     echo "clippy: split (LP_SPLIT_LINK=1)"
     LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,server -- --no-deps -D warnings
-    # `fs-tree` (the tree store as `lpfs`; never shipped), plain and split:
-    # nothing else lints its mount, its shim's glue or its update guard.
-    # With it, its two measurement features: the heap-peak line and the
-    # probe-less build the size table's "littlefs removed" row comes from.
-    echo "clippy: --features fs-tree (plain with heap_peak_diag, probe-less, split)"
+    # The tree store's measurement feature (the heap-peak line), and the
+    # in-memory filesystem that replaces the store (`memory_fs`: the bench
+    # and no-flash emulator images) — nothing else lints either.
+    echo "clippy: --features heap_peak_diag, memory_fs"
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,fs-tree,heap_peak_diag -- --no-deps -D warnings
+        --features esp32c6,heap_peak_diag -- --no-deps -D warnings
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,measure_no_legacy_probe -- --no-deps -D warnings
-    LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,server,fs-tree -- --no-deps -D warnings
+        --features esp32c6,memory_fs -- --no-deps -D warnings
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader
@@ -3057,8 +3054,8 @@ test-rust-features:
     # ...and the C6's Bluetooth links (feature `radio-link`, the mux and the
     # radio slots), with `json-pack` so the packed-session test runs too.
     cargo test -p fw-esp32-common --features radio-link,json-pack
-    # The tree store as the board's filesystem (`fs-tree`, never shipped):
-    # the mount verdict, the alignment shim and the update guard.
+    # The tree store as the board's filesystem (`fs-tree`, the C6's since the
+    # cutover): the mount verdict, the alignment shim and the update guard.
     cargo test -p fw-esp32-common --features fs-tree
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
@@ -3572,14 +3569,14 @@ test-emu-layout-migration:
 #   cold (D10) · S5 a started trial with no host survives power cycles (D9) ·
 #   S7 reflashing the packaged image clears a stale newer record (D12) · S8 an
 #   uncommitted engine is not entered (core-only, no hello) · S9 the loader
-#   skips a core that will not load and boots the other (D4) · S11 a tree-store
-#   core's trial dies and the littlefs core it rolls back to holds the store
-#   (tree-store adoption A5). S6 and S10 are named skips (each needs another
-#   fixture).
+#   skips a core that will not load and boots the other (D4) · S11 a core's
+#   trial dies and the core it rolls back to mounts the board's tree store,
+#   every file kept (the failed-trial bar of the tree-store cutover). S6 and
+#   S10 are named skips (each needs another fixture).
 #
-# NOT in CI (D19): five split builds (X, Y, Y with `fixture-trial-dies`, Y
-# with `fixture-trial-hangs`, Y with `fs-tree` and `fixture-trial-dies`; two
-# link passes each, a few minutes on an M2 Max) and a few minutes of
+# NOT in CI (D19): four split builds (X, Y, Y with `fixture-trial-dies`, Y
+# with `fixture-trial-hangs`; two link passes each, a few minutes on an M2
+# Max) and a few minutes of
 # scenarios. Run it when you touch `lp-bootctl`'s records or `choose`, the
 # loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32c6/src/ota/` or the boot
 # mount. `scenarios=<dir>` reuses images already built there.
@@ -3594,7 +3591,6 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
         split y-test y esp32c6,server
         split y-test y-dies esp32c6,server,fixture-trial-dies
         split y-test y-hangs esp32c6,server,fixture-trial-hangs
-        split y-test y-tree-dies esp32c6,server,fs-tree,fixture-trial-dies
     fi
     LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
 
@@ -3695,9 +3691,10 @@ test-emu-c6-cli-boards: install-rv32-target
 # Time to first light on the emulated C6 (plan
 # lp2025/2026-10-16-0848-tree-store-adoption, A1;
 # `lp-cli/tests/emu_first_light.rs`): power-on to the first lit LED frame,
-# and its parts, from a ROM-up boot of the split image, for the shipped
-# (littlefs) and `fs-tree` images, with no project, `projects/test/basic` and
-# a c40-sized project. A REPORT, never a gate: emulated time, never compared
+# and its parts, from a ROM-up boot, for the shipped image (the tree store)
+# and the fielded littlefs image (pinned, `FIELDED_LITTLEFS`, on its own
+# 176-sector table), with no project, `projects/test/basic` and a c40-sized
+# project. A REPORT, never a gate: emulated time, never compared
 # with silicon in ms (docs/reports/2026-10-16-c6-time-to-first-light.md has
 # the silicon figures). Never CI. `grade` is t1, t2 or t3; `dir` keeps the
 # JSON record.

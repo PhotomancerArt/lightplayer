@@ -118,23 +118,42 @@ fn every_served_build_has_a_build_def() {
     }
 }
 
-/// `fs-tree` (the tree store as `lpfs`) is never shipped: no served build
-/// def turns it on, so no release or `firmware/<id>/` carries it. A board
-/// flashed with a littlefs image would format a tree store, and an `fs-tree`
-/// one would format littlefs (plan
-/// `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, Q22, D8).
+/// The tree store is the C6's filesystem since the tree-store cutover (plan
+/// `lp2025/2026-10-16-0848-tree-store-adoption`, A7): every served C6 build
+/// def turns on `fs-tree`, and its reviewed manifest core lists `fs.tree` —
+/// so the provisioning (USB) image and the over-the-air "own" build, one
+/// package, switch together, and `requires.fsTree` says so in its release.
+/// The other chips (`fw-esp32s3`, `fw-esp32v3`) stay on littlefs and list
+/// neither. A C6 build without the tree store would format a migrated
+/// board's store; one with it on a littlefs chip has no store to mount.
 #[test]
-fn no_served_build_turns_on_fs_tree() {
+fn every_served_c6_build_turns_on_fs_tree_and_no_other_does() {
     let on_disk = build_defs_on_disk();
+    let mut c6 = 0;
     for id in lpa_boards::served_build_ids() {
-        let features = on_disk[id]["cargoFeatures"]
+        let def = &on_disk[id];
+        let features = def["cargoFeatures"]
             .as_array()
             .unwrap_or_else(|| panic!("{id}: cargoFeatures"));
-        assert!(
-            !features.iter().any(|f| f == "fs-tree"),
-            "served build {id} turns on fs-tree, which never ships"
-        );
+        let turns_on = features.iter().any(|f| f == "fs-tree");
+        if def["package"] == "fw-esp32c6" {
+            c6 += 1;
+            assert!(turns_on, "served C6 build {id} does not turn on fs-tree");
+        } else {
+            assert!(!turns_on, "served build {id} turns on fs-tree, a C6 feature");
+        }
     }
+    assert!(c6 > 0, "no served C6 build");
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../lp-fw/fw-esp32c6/manifest-core.expected.json"
+    ))
+    .unwrap();
+    assert!(
+        manifest["features"]
+            .as_array()
+            .is_some_and(|f| f.iter().any(|f| f == "fs.tree")),
+        "fw-esp32c6's reviewed manifest core does not list fs.tree"
+    );
 }
 
 /// `provisioning_build` compares its `normalized_chip` argument against

@@ -89,13 +89,6 @@ pub struct PackageArgs {
     /// (`lp-fw/builds/README.md`); releases and deploys never pass it.
     #[arg(long)]
     pub single_image: bool,
-
-    /// Build the C6 with the tree store as its filesystem: `fs-tree` added
-    /// to the features and the tree table (`partitions-tree.csv`, a
-    /// 128-sector `lpfs` at 0x380000). The cutover's image until its default
-    /// switch: what the tree-store migration walks install. Never a release.
-    #[arg(long)]
-    pub fs_tree: bool,
 }
 
 #[derive(Debug, Args)]
