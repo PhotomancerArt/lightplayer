@@ -30,7 +30,7 @@ use super::board_surface::BoardSurface;
 use super::card_action::{CardPreviews, CardScope, use_provide_card_scope};
 use super::card_play_address::use_card_play_address;
 use super::name_bar::NameBar;
-use super::stack_bar::{StackBar, kind_need};
+use super::stack_bar::StackBar;
 use super::status_corner::StatusCorner;
 use crate::app::module::CompactPanel;
 
@@ -100,13 +100,8 @@ pub fn BoardCard(
     let board = card.board.clone();
     // Connected: All controls goes to the session's play page.
     let all_controls = use_card_play_address();
-    // The card width below which the rows' kind words give way, so each
-    // row keeps its value whole (style.css `.ux-board-bar-kind`).
-    let kind_need = kind_need(&card.bars)
-        .map(|px| format!("--ux-kind-need: {px}px"))
-        .unwrap_or_default();
     rsx! {
-        article { class: CARD_CLASS, style: kind_need, "data-board-card": "{card.board}",
+        article { class: CARD_CLASS, "data-board-card": "{card.board}",
             div { class: PICTURE_SLOT_CLASS,
                 BoardPicture {
                     picture: card.picture.clone(),

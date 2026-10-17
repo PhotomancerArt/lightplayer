@@ -218,16 +218,15 @@ The Link row is the one exception: the link's own icon and name are its
 kind (`USB`, `Wi‑Fi`, `Bluetooth`, `lightplayer.app`), as a version
 number is.
 
-Short of room, a row gives way in one order: its state first (cut at its
-end, then gone), then the card's kind words (on every row at once, so the
-values still line up; the icons stay), and its name only when it alone is
-wider than the row. The kind words go on a card too narrow for its widest
-row's value whole beside that row's button (four to a row, a phone's two):
+Short of room, a row's state gives way first (cut at its end, then gone).
+The kind column stays, so every card in a grid reads alike (P8, P1); where
+the row is still narrower than its name and its button (four to a row, a
+phone's two), the name is cut at its end and the details hold it whole:
 
 ```text
 ▲ Firmware  v2026.10.03-1  crashing  │ Reinstall │   wide
 ▲ Firmware  v2026.10.03-1            │ Reinstall │   the state gone   # was: v crashing
-▲ v2026.10.03-1          crashing    │ Reinstall │   too narrow for it with its kind word
+▲ Firmware  v2026.10.0…              │ Reinstall │   still narrower: the name cut at its end
 ```
 
 ## Each row
@@ -381,7 +380,7 @@ R6  the tone is the icon's alone; the sentences stay plain         (director's c
 R7  offline, another way reaches it: the Link row names that way  (director's call, pending Yona's veto)
 R8  a project's name in running text is quoted                     (director's call, pending Yona's veto)
 R9  a row's value keeps its width; its state gives way first: cut, then gone   (director's review)
-    (then the card's kind words, together, where a value needs their room: pending review)
+    (the kind column stays: one layout in one grid; a value still too long is cut at its end)
 R10 one update, one number: the surface reads the working row's percent       (director's review)
 R11 no dead ends: a fix that isn't offered says why and what to do instead    (director's review)
 R12 a narrow name bar keeps the name's twelve characters; the primary says its verb alone   (director's review)

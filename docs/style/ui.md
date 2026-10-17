@@ -284,9 +284,10 @@ From the top:
   every state (layers for a project); the kind is a fixed, muted 56 px
   column, so the names line up down the card; the name is the thing itself
   and never moves, and it keeps its width: short of room, the state gives
-  way first, cut at its end and then gone, then the card's kind words
-  together where a value needs their room (the icons stay), before the
-  name is cut; the
+  way first, cut at its end and then gone, before the name is cut (a
+  name still too long beside its button is cut at its end, and the
+  details hold it whole; the kind column stays, so every card in a grid
+  reads alike); the
   state follows only when it is not normal; at most
   one action fixes it, with a way out beside it where the fix needs one
   (Restore · Reset). The Link row has no kind word: the link's name is its
