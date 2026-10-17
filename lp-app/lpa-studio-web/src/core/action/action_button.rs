@@ -65,6 +65,14 @@ pub fn ActionButton(
     /// palette, a chat card — still arms it.
     #[props(default)]
     asked_by_surface: bool,
+    /// The end of the label a narrow card drops (" firmware" of "Update
+    /// firmware", the board card's primary): drawn in `.ux-label-tail`
+    /// (style.css), so the verb alone stays where the card can't hold the
+    /// board's name beside the whole word. The armed reading drops its
+    /// verb the same way ("Confirm"). The text stays whole for a screen
+    /// reader.
+    #[props(default)]
+    narrow_tail: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let action_to_run = action.clone();
@@ -162,11 +170,15 @@ pub fn ActionButton(
                 // armed `title` carries the confirmation message.
                 if arms {
                     span { class: armed_labels_class(variant),
-                        span { class: "ux-armed-label-rest", "{rest_label}" }
-                        span { class: "ux-armed-label-armed", aria_hidden: "true", "{armed_label}" }
+                        span { class: "ux-armed-label-rest",
+                            {label_text(&rest_label, narrow_tail.as_deref())}
+                        }
+                        span { class: "ux-armed-label-armed", aria_hidden: "true",
+                            {label_text(&armed_label, narrow_tail.as_deref().and_then(|_| armed_tail(&armed_label)))}
+                        }
                     }
                 } else {
-                    span { class: "tw:inline-flex", "{rest_label}" }
+                    span { class: "tw:inline-flex", {label_text(&rest_label, narrow_tail.as_deref())} }
                 }
             }
             // An empty reason is a verb whose reason is said once beside it
@@ -215,10 +227,32 @@ fn arms_on_press(consequence: &ActionConsequence, asked_by_surface: bool) -> boo
 /// Kept as a plain function so the pair is testable without mounting.
 fn confirm_chip_labels(label: &str, confirm_verb: Option<&str>) -> (String, String) {
     let armed = match confirm_verb {
-        Some(verb) => format!("Confirm {verb}"),
+        Some(verb) => format!("{CONFIRM} {verb}"),
         None => label.to_string(),
     };
     (label.to_string(), armed)
+}
+
+/// The armed reading's first word.
+const CONFIRM: &str = "Confirm";
+
+/// `label`, its `tail` in `.ux-label-tail` (style.css) when it ends with
+/// it: the part a narrow card drops, the head staying. The whole label as
+/// one text otherwise.
+pub(crate) fn label_text(label: &str, tail: Option<&str>) -> Element {
+    match tail.and_then(|tail| Some((label.strip_suffix(tail)?, tail))) {
+        Some((head, tail)) if !head.is_empty() => rsx! {
+            "{head}"
+            span { class: "ux-label-tail", "{tail}" }
+        },
+        _ => rsx! { "{label}" },
+    }
+}
+
+/// What an armed reading drops on a narrow card: its verb, after
+/// "Confirm".
+fn armed_tail(armed: &str) -> Option<&str> {
+    armed.strip_prefix(CONFIRM).filter(|tail| !tail.is_empty())
 }
 
 /// The arming chip's classes for its current armed state. The base

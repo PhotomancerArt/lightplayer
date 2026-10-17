@@ -3,7 +3,10 @@
 //! · name · state · action**. The icon is the kind's own in every state;
 //! the kind is a fixed muted column, so the names line up down the card;
 //! the name is the thing itself; the state follows only when it is not
-//! normal; the action sits flush at the end. While the row works, the
+//! normal; the action sits flush at the end. The name is the row's value
+//! and keeps its width: where the row is short of room the state gives
+//! way first — cut at its end, then gone — before the name is cut
+//! ([`aside_style`]). While the row works, the
 //! conic spinner takes the icon's place and the work's words are its state
 //! ([`row_words`]), with the iridescent fill along its foot
 //! ([`WorkFoot`](super::bar_work::WorkFoot)).
@@ -151,6 +154,23 @@ pub(crate) fn row_words(bar: &UiStackBar) -> (String, Option<String>) {
     }
 }
 
+/// How a row's state gives way to its name: a short word is shown whole or
+/// not at all; a longer one is cut at its end, down to its first few
+/// characters, and goes once fewer than those fit. Its class, and the
+/// least of it worth showing.
+fn aside_style(state: &str) -> (&'static str, String) {
+    match state.chars().count() <= WHOLE_ASIDE_CHARS {
+        true => (ASIDE_WHOLE_CLASS, String::new()),
+        false => (ASIDE_CLASS, format!("--ux-aside-min: {ASIDE_MIN_CH}ch")),
+    }
+}
+
+/// A state this short is shown whole or not at all ("crashing").
+const WHOLE_ASIDE_CHARS: usize = 8;
+
+/// The least of a longer state worth showing, its ellipsis included.
+const ASIDE_MIN_CH: usize = 6;
+
 /// The word of the row's own end section that opens its details
 /// ("Review"), while the row carries no work.
 fn opens_details(bar: &UiStackBar) -> Option<&'static str> {
@@ -210,15 +230,23 @@ fn bar_line(bar: &UiStackBar) -> Element {
             (false, false) => NAME_CLASS,
         }
     );
+    let aside = state.as_deref().map(aside_style);
     rsx! {
         {lead}
         if let Some(kind) = bar.kind {
             span { class: "{kind_class}", "data-bar-kind": "{kind}", "{kind}" }
         }
-        span { class: "{name_class}", "{name}" }
-        if let Some(state) = state {
-            span { class: "{state_class}", "data-bar-state": "true",
-                span { class: "tw:truncate", "{state}" }
+        // The name keeps its width; the state gives way first (the words'
+        // wrap, style.css `.ux-board-bar-words`).
+        span { class: WORDS_CLASS,
+            span { class: "{name_class}", "{name}" }
+            if let (Some(state), Some((aside_class, aside_min))) = (state, aside) {
+                span {
+                    class: "{state_class} {aside_class}",
+                    style: aside_min,
+                    "data-bar-state": "true",
+                    "{state}"
+                }
             }
         }
         if let Some(mark) = bar.mark.clone().filter(|_| bar.work.is_none()) {
@@ -340,14 +368,22 @@ const KIND_CLASS: &str =
     "tw:w-14 tw:flex-none tw:font-medium tw:text-[color:var(--studio-color-text-faint)]";
 /// …in a toned row: the row's own colour, quieter.
 const KIND_TONED_CLASS: &str = "tw:w-14 tw:flex-none tw:font-medium tw:opacity-70";
-const NAME_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:text-foreground";
-const NAME_TONED_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold";
+/// The name and the state: one 28 px line that the state wraps off when
+/// it can't fit beside the whole name (style.css).
+const WORDS_CLASS: &str = "ux-board-bar-words";
+/// The name: its whole width before the state has any, cut only when it
+/// alone is wider than the row.
+const NAME_CLASS: &str = "ux-board-bar-name tw:text-foreground";
+const NAME_TONED_CLASS: &str = "ux-board-bar-name tw:font-bold";
 /// The name while the row works: strong, the row neutral.
-const NAME_WORKING_CLASS: &str =
-    "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold tw:text-strong-foreground";
-const STATE_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:max-w-[55%] tw:flex-none tw:items-center tw:gap-1 tw:text-subtle-foreground";
-const STATE_TONED_CLASS: &str =
-    "tw:inline-flex tw:min-w-0 tw:max-w-[55%] tw:flex-none tw:items-center tw:gap-1";
+const NAME_WORKING_CLASS: &str = "ux-board-bar-name tw:font-bold tw:text-strong-foreground";
+const STATE_CLASS: &str = "tw:text-subtle-foreground";
+/// …in a toned row: the row's own ink.
+const STATE_TONED_CLASS: &str = "";
+/// A longer state: cut at its end, down to `--ux-aside-min`.
+const ASIDE_CLASS: &str = "ux-board-bar-aside";
+/// A short state: whole, or wrapped off.
+const ASIDE_WHOLE_CLASS: &str = "ux-board-bar-aside-whole";
 /// What a stale row's words wear: last known, dimmed.
 const STALE_CLASS: &str = "tw:opacity-45";
 const CHEVRON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-dim-foreground";
@@ -434,6 +470,40 @@ mod tests {
         let link = link_row(None);
         let html = dioxus_ssr::render_element(bar_line(&link));
         assert!(!html.contains("data-bar-kind"), "{html}");
+    }
+
+    /// The name is the row's value and keeps its width: it and the state
+    /// share one wrapping line, the state after it. A short state is whole
+    /// or wrapped off; a longer one is cut down to its first few characters
+    /// before it goes. The name is never the one that gives way first.
+    #[test]
+    fn the_state_gives_way_before_the_name() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Firmware,
+            "firmware",
+            "v2026.10.03-1",
+        );
+        row.aside = Some("crashing".to_string());
+        let html = dioxus_ssr::render_element(bar_line(&row));
+        let words = html.find(WORDS_CLASS).expect("the words' line");
+        let name = html.find(">v2026.10.03-1<").expect("the name");
+        let state = html.find(">crashing<").expect("the state");
+        assert!(words < name && name < state, "{html}");
+        assert!(
+            html.contains(ASIDE_WHOLE_CLASS),
+            "a short state is whole: {html}"
+        );
+
+        row.aside = Some("older LightPlayer".to_string());
+        let html = dioxus_ssr::render_element(bar_line(&row));
+        assert!(html.contains(&format!("{ASIDE_CLASS}\"")), "{html}");
+        assert!(html.contains("--ux-aside-min: 6ch"), "{html}");
+        for class in [NAME_CLASS, NAME_TONED_CLASS, NAME_WORKING_CLASS] {
+            assert!(
+                !class.contains("tw:flex-1"),
+                "the CSS sizes the name: {class}"
+            );
+        }
     }
 
     /// While a row works its name stays and the work's words are its
@@ -551,7 +621,7 @@ mod tests {
             assert!(!class.contains("tw:py-"), "{class}");
         }
         for class in [NAME_CLASS, NAME_TONED_CLASS, NAME_WORKING_CLASS] {
-            assert!(class.contains("tw:truncate"), "{class}");
+            assert!(class.contains("ux-board-bar-name"), "{class}");
         }
         assert!(TRIGGER_CLASS.contains("tw:h-full"));
         assert!(TRIGGER_OPEN_CLASS.contains("tw:h-full"));

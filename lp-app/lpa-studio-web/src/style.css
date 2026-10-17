@@ -949,6 +949,78 @@ label:has(> input:not(:disabled)) {
     height: 11px;
 }
 
+/* A row's name and its state (`stack_bar.rs`). The name is the row's
+   value and keeps its width; the state takes what is left. One 28px line
+   that wraps and clips: a state that can't fit its least beside the whole
+   name wraps to the hidden second line, so it is cut, then gone, before
+   the name is cut — and a name wider than the row alone is cut at its
+   end. The state takes the free space first (its grow is the larger), so
+   it sits at the row's end at its whole width once it fits. */
+.ux-board-bar-words {
+    display: flex;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    column-gap: 6px;
+    min-width: 0;
+    height: 28px;
+    overflow: hidden;
+    line-height: 28px;
+}
+
+.ux-board-bar-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A longer state: cut at its end, down to `--ux-aside-min`. */
+.ux-board-bar-aside {
+    flex: 1000 1 var(--ux-aside-min);
+    min-width: var(--ux-aside-min);
+    max-width: max-content;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A short state ("crashing"): whole, or wrapped off. */
+.ux-board-bar-aside-whole {
+    flex: none;
+    white-space: nowrap;
+}
+
+/* A narrow card (a phone's two-column grid) is short of room in every row:
+   the kind word gives way so a row's value keeps its room beside its
+   action (the kind's icon still says what the row is about), and the
+   primary's section pads less, so the board's name keeps more of itself. */
+@container board-card (max-width: 239px) {
+    .ux-board-bar [data-bar-kind] {
+        display: none;
+    }
+
+    [data-name-bar] .ux-row-flush {
+        padding-inline: 10px;
+    }
+}
+
+/* The end of the primary's word (" firmware" of "Update firmware",
+   `name_bar.rs`): gone, leaving the verb, on a card narrower than
+   `--ux-primary-need` — the width the whole word needs beside the board's
+   name at about twelve characters, which the name bar sets from its
+   words. A step, never a squeeze: the difference times a large number,
+   clamped, is either nothing or the whole tail. The text stays for a
+   screen reader. */
+.ux-label-tail {
+    display: inline-block;
+    overflow: hidden;
+    white-space: pre;
+    vertical-align: bottom;
+    max-width: clamp(0px, calc((100cqw - var(--ux-primary-need, 0px)) * 1000), 20em);
+}
+
 /* The "Reconnecting…" curtain (`link_reconnecting_strip.rs`): over the
    page, never in its flow. Off, it is invisible and lets clicks through;
    on, it fades in after a short beat (a blip that recovers at once never

@@ -6,6 +6,12 @@
 //! The bar carries `data-name-bar`, the walks' hook for the primary (an
 //! empty board's Add a project is pressed there).
 //!
+//! The name keeps about twelve characters: on a card too narrow for that
+//! beside the whole primary, the primary drops to its verb alone ("Update"
+//! for "Update firmware"; core's [`UiCardAction::verb_alone`]), since the
+//! surface's sentence already names the firmware ([`primary_need`],
+//! style.css `.ux-label-tail`).
+//!
 //! While the board is being reached or identified the primary is Studio's
 //! conic spinner alone in the same section ([`UiPrimary::Working`]), its
 //! label the accessible name: the Link row (or the Hardware row) says how.
@@ -14,15 +20,24 @@
 //! presses nothing, so it is not an action.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiNameBar, UiPrimary};
+use lpa_studio_core::{UiAction, UiCardAction, UiNameBar, UiPrimary};
 
-use super::card_action::{CardAction, CardActionLook};
+use super::card_action::{CardAction, CardActionLook, narrow_tail};
 use crate::base::conic_spinner_class;
 
 /// The name bar. See the module doc.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
+    // The card width the whole primary needs beside the name's reserve:
+    // narrower, its word drops to the verb alone (style.css
+    // `.ux-label-tail`).
+    let need = match &bar.primary {
+        Some(UiPrimary::Offer(action)) => primary_need(&bar.title, action),
+        _ => None,
+    }
+    .map(|px| format!("--ux-primary-need: {px}px"))
+    .unwrap_or_default();
     let primary = match bar.primary {
         Some(UiPrimary::Offer(action)) => rsx! {
             CardAction { action, look: CardActionLook::Primary, on_action }
@@ -33,7 +48,7 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
         None => rsx! {},
     };
     rsx! {
-        div { class: NAME_BAR_CLASS, "data-name-bar": "true",
+        div { class: NAME_BAR_CLASS, "data-name-bar": "true", style: need,
             div { class: NAME_BLOCK_CLASS,
                 h3 { class: TITLE_CLASS, title: "{bar.title}", "{bar.title}" }
                 if let Some(place) = bar.place {
@@ -61,6 +76,53 @@ fn WorkingPrimary(label: String) -> Element {
         }
     }
 }
+
+/// The card width, in px, the whole primary needs beside the board's name
+/// at its reserve — about twelve characters, or the whole name when it is
+/// shorter — or `None` for a primary with nothing to drop. An estimate
+/// from the words' letters at the bar's type sizes: below it the name
+/// would be cut short of its reserve, so the word drops to its verb alone
+/// (the surface's sentence names the object).
+fn primary_need(title: &str, action: &UiCardAction) -> Option<usize> {
+    narrow_tail(action, CardActionLook::Primary)?;
+    let name = text_tenths(title).min(NAME_RESERVE_CHARS * GLYPH_TENTHS) * NAME_SCALE_PERCENT / 100;
+    let icon = match action.icon {
+        Some(_) => PRIMARY_ICON_TENTHS,
+        None => 0,
+    };
+    let word = text_tenths(&action.word);
+    let need = BAR_EDGES_TENTHS + name + PRIMARY_PADDING_TENTHS + icon + word + MARGIN_TENTHS;
+    Some(need.div_ceil(10))
+}
+
+/// About how wide `text` is at the primary's 12.5 px extrabold, in tenths
+/// of a px: narrow letters, wide ones, capitals and the rest.
+fn text_tenths(text: &str) -> usize {
+    text.chars()
+        .map(|glyph| match glyph {
+            'i' | 'j' | 'l' | 'r' | 't' | 'f' | 'I' | ' ' | '.' | ',' | '-' | '\'' => 40,
+            'm' | 'w' | 'M' | 'W' => 105,
+            'A'..='Z' => 85,
+            _ => GLYPH_TENTHS,
+        })
+        .sum()
+}
+
+/// The name's reserve: about twelve characters.
+const NAME_RESERVE_CHARS: usize = 12;
+/// An ordinary letter at 12.5 px extrabold, in tenths of a px.
+const GLYPH_TENTHS: usize = 75;
+/// The name's 13.5 px bold against the primary's type.
+const NAME_SCALE_PERCENT: usize = 106;
+/// The bar's left padding (11 px) and its gap (8 px).
+const BAR_EDGES_TENTHS: usize = 190;
+/// The primary's padding (16 px each side) and its leading hairline.
+const PRIMARY_PADDING_TENTHS: usize = 330;
+/// The primary's icon (12 px) and its gap (6 px).
+const PRIMARY_ICON_TENTHS: usize = 180;
+/// A few px over: a guess at the letters' widths must not cost the name its
+/// last letter (measured on the stories: within 3 px).
+const MARGIN_TENTHS: usize = 40;
 
 /// The bar: 50 px with its top hairline, flush to the card's right edge so
 /// the primary's section reaches it. Nothing here clips: the primary's
@@ -118,6 +180,56 @@ mod tests {
         assert!(html.contains("data-primary-working"), "{html}");
         assert!(html.contains("aria-label=\"Connecting\""), "{html}");
         assert!(!html.contains("<button"), "nothing to press: {html}");
+    }
+
+    /// The name keeps about twelve characters: the whole primary needs its
+    /// width beside them, a longer word more, a shorter name less; a
+    /// primary that is its verb alone has nothing to drop.
+    #[test]
+    fn the_primary_names_the_width_it_needs_beside_the_name() {
+        let update = primary("Update firmware", Some("Update"));
+        let need = primary_need("XIAO ESP32-C6", &update).expect("a tail to drop");
+        assert!((240..300).contains(&need), "{need}");
+        let reinstall = primary("Reinstall firmware", Some("Reinstall"));
+        assert!(primary_need("XIAO ESP32-C6", &reinstall).unwrap() > need);
+        assert!(primary_need("Lamp", &update).unwrap() < need);
+        assert_eq!(
+            primary_need("A very long board name", &update),
+            Some(need),
+            "the reserve, not the whole name"
+        );
+        assert_eq!(
+            primary_need("XIAO ESP32-C6", &primary("Connect", None)),
+            None
+        );
+    }
+
+    /// The primary's tail is its own span, so a narrow card can drop it;
+    /// the button's text stays whole.
+    #[test]
+    fn the_primary_draws_its_tail_apart() {
+        let html = super::super::card_test_fixtures::render(tail_label, ());
+        assert!(
+            html.contains("Update<span class=\"ux-label-tail\"> firmware</span>"),
+            "{html}"
+        );
+    }
+
+    fn tail_label() -> Element {
+        crate::core::action::action_button::label_text("Update firmware", Some(" firmware"))
+    }
+
+    fn primary(word: &str, verb: Option<&str>) -> UiCardAction {
+        UiCardAction {
+            offer: lpa_studio_core::OfferPath::parse("devices/new-1/update-firmware")
+                .expect("a path"),
+            word: word.to_string(),
+            icon: Some("firmware".to_string()),
+            draw: lpa_studio_core::UiActionDraw::Press,
+            args: lpa_studio_core::OfferArgs::new(),
+            refused: None,
+            verb_alone: verb.map(str::to_string),
+        }
     }
 
     fn working() -> Element {

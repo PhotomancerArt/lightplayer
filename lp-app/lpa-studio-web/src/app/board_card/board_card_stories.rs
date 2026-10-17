@@ -515,7 +515,7 @@ fn board_card_surface_project() -> Element {
 }
 
 #[story(
-    description = "The surface on a phone's narrow card (two to a row, a 108 px picture): the same notice, smaller, and its longest words still fit inside the picture's place — Wi‑Fi failed, old firmware, offline but Wi‑Fi reaches it, and updating with its bar."
+    description = "The surface on a phone's narrow card (two to a row, a 108 px picture): the same notice, smaller, and its longest words still fit inside the picture's place — Wi‑Fi failed, old firmware, offline but Wi‑Fi reaches it, updating with its bar, crashing and a version Studio can't get. The board's name keeps about twelve characters: too narrow for that beside the whole primary, the primary says its verb alone (\"Update\", \"Reinstall\", \"Install\"; the sentence names the firmware). In the rows the value keeps its width and the state gives way first: \"v2026.10.03-1\" whole, \"crashing\" gone before it would cut the version."
 )]
 fn board_card_surface_narrow() -> Element {
     rsx! {
@@ -537,6 +537,8 @@ fn board_card_surface_narrow() -> Element {
                 on_action: |_| {},
             }
             {update_card(UpdateFixtureRow::Updating, None)}
+            {update_card(UpdateFixtureRow::KeepsCrashing, None)}
+            {update_card(UpdateFixtureRow::CantGetVersion, None)}
         }
     }
 }
