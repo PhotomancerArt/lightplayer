@@ -65,7 +65,11 @@ const HOLDER = process.env.BOARD_HOLDER ?? "walk-ble-phone";
 
 const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 const CARD = `document.querySelector('[data-board-card]')`;
-const SLIDER = `document.querySelector('#main [role="slider"]')`;
+/// A knob or a fader: Play shows only the root panel, whose controls may be
+/// faders alone (`first-light`'s brightness and speed).
+const SLIDER = `document.querySelector('#main [role="slider"], #main input[type="range"]')`;
+/// Its value, whichever it is.
+const SLIDER_VALUE = `(() => { const c = ${SLIDER}; return c.getAttribute('aria-valuenow') ?? c.value; })()`;
 /// A digest of every canvas under #main, so a changed render reads as a
 /// changed digest.
 const CANVAS_DIGEST = `(() => {
@@ -150,18 +154,26 @@ async function main() {
     if (error) throw error;
   };
   const turnKnob = async () => {
-    const before = await driver.evaluate(`${SLIDER}.getAttribute('aria-valuenow')`);
+    const before = await driver.evaluate(SLIDER_VALUE);
     await driver.evaluate(`(() => {
-      const knob = ${SLIDER};
-      knob.focus();
-      const key = Number(knob.getAttribute('aria-valuenow')) >= Number(knob.getAttribute('aria-valuemax')) ? 'Home' : 'End';
-      knob.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+      const control = ${SLIDER};
+      if (control.matches('input[type="range"]')) {
+        // At its max, to the middle (never the min: brightness at 0 shows nothing).
+        const lo = Number(control.min), hi = Number(control.max);
+        const to = Number(control.value) >= hi ? String((lo + hi) / 2) : control.max;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(control, to);
+        control.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+      control.focus();
+      const key = Number(control.getAttribute('aria-valuenow')) >= Number(control.getAttribute('aria-valuemax')) ? 'Home' : 'End';
+      control.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
     })()`);
-    await driver.waitFor(`${SLIDER}.getAttribute('aria-valuenow') !== ${JSON.stringify(before)}`, {
+    await driver.waitFor(`${SLIDER_VALUE} !== ${JSON.stringify(before)}`, {
       timeoutMs: STEP_DEADLINE_MS,
-      what: "the knob to take the turn",
+      what: "the control to take the turn",
     });
-    return `${before} → ${await driver.evaluate(`${SLIDER}.getAttribute('aria-valuenow')`)}`;
+    return `${before} → ${await driver.evaluate(SLIDER_VALUE)}`;
   };
 
   let fatal = null;
