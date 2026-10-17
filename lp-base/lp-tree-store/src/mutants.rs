@@ -68,10 +68,16 @@ pub enum Mutant {
     /// An idle step forgets a garbage-only sector even when it is a write
     /// head (its next append lands in a sector a mount no longer reads).
     IdleForgetsHeads,
+    /// Idle steps keep their mark (lengths by index position), and the
+    /// victim under way, across writes and other marks.
+    IdleKeepsMarkAcrossWrites,
+    /// An idle step erases its victim after its first copies, not once
+    /// every live record in it has one.
+    IdleErasesBeforeEmpty,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 16] = [
+    pub const ALL: [Mutant; 18] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -88,6 +94,8 @@ impl Mutant {
         Mutant::NoFullScan,
         Mutant::FormatKeepsHeaders,
         Mutant::IdleForgetsHeads,
+        Mutant::IdleKeepsMarkAcrossWrites,
+        Mutant::IdleErasesBeforeEmpty,
     ];
 
     pub fn name(self) -> &'static str {
@@ -108,6 +116,8 @@ impl Mutant {
             Mutant::NoFullScan => "no_full_scan",
             Mutant::FormatKeepsHeaders => "format_keeps_headers",
             Mutant::IdleForgetsHeads => "idle_forgets_heads",
+            Mutant::IdleKeepsMarkAcrossWrites => "idle_keeps_mark_across_writes",
+            Mutant::IdleErasesBeforeEmpty => "idle_erases_before_empty",
         }
     }
 

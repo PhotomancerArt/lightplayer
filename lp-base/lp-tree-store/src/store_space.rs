@@ -207,6 +207,11 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// index (and make the sectors' live bytes exact); returns each index
     /// entry's record length when asked.
     pub(crate) fn mark_and_prune(&mut self, want_lens: bool) -> Res<Vec<u16>, F> {
+        // The prune moves the index's positions: a mark idle steps held is
+        // stale.
+        if !mutant!(IdleKeepsMarkAcrossWrites) {
+            self.idle_lens = None;
+        }
         let mut roots: Vec<(ObjectId, MarkRole)> = Vec::new();
         if let Some(c) = &self.committed {
             roots.push((c.id, MarkRole::Root));
