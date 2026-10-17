@@ -416,10 +416,21 @@ fn cut_sweep(name: &str, start: Cutover, order: &str) {
         let mut chip = start.clone();
         apply_steps(&mut chip, &plan.steps[..k], &firmware).unwrap();
         let states = if k == switch {
-            // Inside the firmware write: bootloader and table written.
+            // Inside the firmware write, which runs from 0x0 up: the new
+            // second stage written over the old one and nothing after it
+            // (since our own bootloader, a different program at 0x0 than
+            // the fielded board's ESP-IDF one, booting the old table and
+            // whatever the plan left of the old app), then bootloader and
+            // table written.
+            let mut boot_only = chip.clone();
+            boot_only[..0x8000].copy_from_slice(&firmware[..0x8000]);
             let mut torn = chip.clone();
             torn[..0x9000].copy_from_slice(&firmware[..0x9000]);
-            vec![(format!("{k} (+ table)"), torn), (k.to_string(), chip)]
+            vec![
+                (format!("{k} (+ bootloader)"), boot_only),
+                (format!("{k} (+ table)"), torn),
+                (k.to_string(), chip),
+            ]
         } else {
             vec![(k.to_string(), chip)]
         };
