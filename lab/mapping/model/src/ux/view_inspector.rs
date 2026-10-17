@@ -78,6 +78,11 @@ impl Editor {
         {
             out.extend(facts);
         }
+        if let [t @ (Target::Component(_) | Target::Object(_))] = selection.as_slice()
+            && let Some(spans) = span_facts(p, t)
+        {
+            out.push(section("Spans", spans));
+        }
         if let [t @ Target::Lamp { object, index }] = selection.as_slice()
             && let Some(info) = lamp_fact(p, t, object, *index)
         {
@@ -145,6 +150,51 @@ fn project_facts(p: &Project) -> Vec<String> {
             format!("{outside} lamps outside their fixture's box — never lit")
         },
     ]
+}
+
+/// Where a drawn thing's lamps land: one line per span, its pixels on its
+/// port. `None` for one with no lamps.
+fn span_facts(p: &Project, t: &Target) -> Option<Vec<UiItem>> {
+    let objects: Vec<crate::ObjectId> = match t {
+        Target::Object(o) => vec![o.clone()],
+        Target::Component(id) => p.objects_under(id).iter().map(|o| o.id.clone()).collect(),
+        _ => return None,
+    };
+    if objects
+        .iter()
+        .all(|o| p.object(o).is_none_or(|o| o.lamps.is_empty()))
+    {
+        return None;
+    }
+    let lines: Vec<UiItem> = p
+        .effective_patch()
+        .spans
+        .iter()
+        .filter(|s| objects.contains(&s.object))
+        .map(|s| {
+            // A reversed span runs down the wire from its start pixel.
+            let lo = if s.reversed {
+                (s.start_pixel + 1).saturating_sub(s.len())
+            } else {
+                s.start_pixel
+            };
+            let hi = lo + s.len().max(1) - 1;
+            let port = p.long_label(&Target::Port {
+                output: s.output.clone(),
+                key: s.port.clone(),
+            });
+            UiItem::Fact(if lo == hi {
+                format!("Pixel {lo} of {port}")
+            } else {
+                format!("Pixels {lo}–{hi} of {port}")
+            })
+        })
+        .collect();
+    Some(if lines.is_empty() {
+        vec![UiItem::Fact("On no port: its lamps light nothing".into())]
+    } else {
+        lines
+    })
 }
 
 /// One selected lamp: where it is on its path or ring, and the pixel it

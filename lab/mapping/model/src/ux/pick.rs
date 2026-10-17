@@ -23,6 +23,7 @@
 use crate::domain::geom::Vec2;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
+use crate::ux::area::CARD_INSIDE_DISTANCE;
 use crate::ux::camera::Camera;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,11 @@ fn candidates_among(
                 f.distance_to(cam, a, p)
                     .total_cmp(&f.distance_to(cam, b, p))
             });
+            // A card's body behind a span is not one of the overlaps: its
+            // title picks it.
+            if f.distance_to(cam, &cands[0], p) < CARD_INSIDE_DISTANCE {
+                cands.retain(|t| f.distance_to(cam, t, p) < CARD_INSIDE_DISTANCE);
+            }
             return cands;
         }
         match level {

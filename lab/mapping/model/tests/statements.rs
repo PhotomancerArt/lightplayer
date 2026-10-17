@@ -786,8 +786,19 @@ fn a_span_on_an_output_selects_its_object() {
     let at = pixel_centre(&e, &main, "1", 3);
     e.pointer_move(e.camera.to_screen(at), none());
     assert_eq!(e.hover_target(), Some(comp("path3")), "the hover says so");
+    assert_eq!(e.cursor_note(), None, "the card behind is no overlap");
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![comp("path3")]);
+    let spans = e
+        .view_inspector()
+        .sections
+        .into_iter()
+        .find(|s| s.title.as_deref() == Some("Spans"))
+        .expect("the inspector says where it lands");
+    assert_eq!(
+        spans.items,
+        vec![UiItem::Fact("Pixels 0–29 of D1 of main".into())]
+    );
     let before = e.project.clone();
     let from = e.camera.to_screen(at);
     drag(&mut e, from, from + Vec2::new(30.0, 0.0), none());
