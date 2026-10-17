@@ -138,6 +138,29 @@ Writing and killing:
   is finished. It erases sectors 0 and 1 (a littlefs partition's
   superblock pair) so the partition no longer reads as littlefs. Every
   other sector is erased (killed first, as above) when it is first opened.
+- **Growing the partition.** Whoever enlarges the partition a store is in
+  (the USB layout migration, a loader, a core) first kills the header of
+  every sector in the **added range** that does not read all `0xFF` (and
+  read it back; one that does not read back killed is erased) — the lazy
+  format's kill, applied to the range — before the store is mounted over
+  the new size. The store records no identity and `N` is not on flash, so
+  a trusted sector left there by another store (flash an earlier layout
+  used, a store whose seqs restarted at its own format) would be read as
+  this store's, and a root of its with a higher seq and a complete closure
+  adopted. `lp_tree_store::kill_added_sectors(flash, first_added)` is the
+  helper; it is idempotent and safe to repeat after a cut. Shrinking needs
+  no such rule: a core that knows the new `N` collects the sectors being
+  cut first, and nothing past `N` is read.
+
+  *Why a rule and not a store id (rejected before the freeze,
+  2026-10-16).* A random id in every sector header, set at format, would
+  make a foreign store's sectors untrusted by construction — a guarantee
+  where the growth rule is a rule. It costs 4 B a header, a random seed
+  injected at format (sans-IO), ~100 B of code, and a change to version
+  3's header layout. The only way a foreign trusted sector reaches a
+  store's range is a partition growing over old flash, which this rule
+  covers at no cost; an identity for backups, if wanted, can be a root tag
+  later.
 - Head kind says which write head opened the sector: **hot** sectors hold
   `…/.lp/panel.json` files, the hot directory and roots; **cold** sectors
   hold everything else. GC copies a sector's live records to a sector of

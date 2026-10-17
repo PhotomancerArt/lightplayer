@@ -65,6 +65,7 @@ mod node_read;
 mod node_write;
 mod object_hasher;
 mod object_id;
+mod partition_growth;
 mod ram_index;
 mod record_header;
 mod record_kind;
@@ -128,6 +129,7 @@ pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
+pub use partition_growth::kill_added_sectors;
 pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
 pub use snapshot_namespace::{SNAPSHOT_DIR, is_snapshot_path};
 pub use store_config::{GcPolicy, StoreConfig};
