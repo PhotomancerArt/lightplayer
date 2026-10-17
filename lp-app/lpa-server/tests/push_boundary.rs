@@ -11,6 +11,8 @@
 //!   every tear model `lp-nor-sim` names (the calibrated ones included);
 //!   after each, the remounted flash holds the old project or the new one,
 //!   never a mix.
+//! - **Quiet ticks** clean the store up (`LpFs::idle_step`) only after two
+//!   seconds with no file-changing request, and change no file.
 //! - **Measurements** on the repo's corpus (`catalog/` + `projects/`): wire
 //!   bytes and request counts with and without deflate, fixed 4 KiB chunks
 //!   against the shrink-to-fit plan.
@@ -145,6 +147,62 @@ fn an_idle_batch_expires_and_the_old_project_stays() {
     board.idle_ms(61_000);
     assert_eq!(board.hash("demo"), a_hash);
     let _ = block_on(abort_batch(&mut LpClientSink::new(&mut client)));
+}
+
+/// Pushes leave garbage. Under two seconds of quiet nothing is
+/// cleaned; reads and polls do not end the quiet, and past it idle steps
+/// forget the garbage-only sectors (fewer trusted sectors for the next
+/// mount) with the project unchanged. A write ends the quiet.
+#[test]
+fn quiet_ticks_clean_the_tree_store_up_and_change_no_file() {
+    let board = Board::tree(formatted());
+    let a = project_files(PROJECT);
+    board.push(&a).expect("push a");
+    board.settle();
+    // Edits until the old pushes fill sectors of their own.
+    for i in 0..40 {
+        board.push(&edited(&a, &format!("edit {i}"))).expect("push");
+        board.settle();
+        if board.trusted_sectors() >= 8 {
+            break;
+        }
+    }
+    let hash = board.hash("demo");
+    let trusted = board.trusted_sectors();
+    board.set_plan(FaultPlan::none());
+    board.idle(100);
+    assert_eq!(
+        board.ops_since_plan(),
+        0,
+        "cleaned before two quiet seconds"
+    );
+    let mut client = board.client();
+    for _ in 0..100 {
+        board.request(&mut client, ClientRequest::ListLoadedProjects);
+    }
+    assert!(board.ops_since_plan() > 0, "polls ended the quiet");
+    board.idle(1000);
+    assert!(
+        board.trusted_sectors() < trusted,
+        "{} trusted sectors, {trusted} before",
+        board.trusted_sectors()
+    );
+    assert_eq!(board.hash("demo"), hash);
+    assert_eq!(board.remounted_hash("demo"), hash);
+    board.request(
+        &mut client,
+        ClientRequest::Filesystem(FsRequest::Write {
+            path: "/notes.txt".as_path_buf(),
+            data: b"a write".to_vec(),
+        }),
+    );
+    let after_write = board.ops_since_plan();
+    board.idle(100);
+    assert_eq!(
+        board.ops_since_plan(),
+        after_write,
+        "a write did not end the quiet"
+    );
 }
 
 #[test]
@@ -545,6 +603,28 @@ impl Board {
 
     fn ops_since_plan(&self) -> u64 {
         self.tree_handle(|st| st.flash().ops_since_plan())
+    }
+
+    /// Sectors whose header a mount would trust.
+    fn trusted_sectors(&self) -> usize {
+        let flash = self.flash();
+        (0..flash.geometry().sector_count)
+            .filter(|&s| {
+                let mut magic = [0u8; 4];
+                flash.peek(s * 4096, &mut magic);
+                magic == *b"LTS1"
+            })
+            .count()
+    }
+
+    /// The project's hash on the flash mounted afresh.
+    fn remounted_hash(&self, dir: &str) -> String {
+        let fs = self.remounted();
+        let view = fs
+            .chroot(format!("/projects/{dir}").as_str().as_path())
+            .unwrap();
+        let view = view.borrow();
+        lpc_history::hash_package(&*view).unwrap().0.to_string()
     }
 
     fn remounted(&self) -> LpFsTree<NorFlashSim, SoftSha256> {

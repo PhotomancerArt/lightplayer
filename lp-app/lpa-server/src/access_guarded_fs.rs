@@ -122,6 +122,10 @@ impl LpFs for AccessGuardedFs {
         self.inner.borrow().batches_are_atomic()
     }
 
+    fn idle_step(&self) -> Result<bool, FsError> {
+        self.inner.borrow().idle_step()
+    }
+
     fn write_deflated_chunk(
         &self,
         path: &LpPath,

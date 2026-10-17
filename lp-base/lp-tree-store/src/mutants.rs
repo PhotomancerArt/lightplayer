@@ -70,10 +70,13 @@ pub enum Mutant {
     /// root that does not decode) is indexed too, and wins over an older
     /// good copy.
     MountIndexTakesUntrusted,
+    /// An idle step forgets a garbage-only sector even when it is a write
+    /// head (its next append lands in a sector a mount no longer reads).
+    IdleForgetsHeads,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 16] = [
+    pub const ALL: [Mutant; 17] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -90,6 +93,7 @@ impl Mutant {
         Mutant::NoFullScan,
         Mutant::FormatKeepsHeaders,
         Mutant::MountIndexTakesUntrusted,
+        Mutant::IdleForgetsHeads,
     ];
 
     pub fn name(self) -> &'static str {
@@ -110,6 +114,7 @@ impl Mutant {
             Mutant::NoFullScan => "no_full_scan",
             Mutant::FormatKeepsHeaders => "format_keeps_headers",
             Mutant::MountIndexTakesUntrusted => "mount_index_takes_untrusted",
+            Mutant::IdleForgetsHeads => "idle_forgets_heads",
         }
     }
 
