@@ -434,7 +434,7 @@ async function main() {
       if (section !== "online") throw new Error(`tab B's card is under ${section ?? "no section"}, not Online boards`);
       await driverB.waitOffer("take-over", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       const words = await driverB.offerWords("take-over", { board: state.mac });
-      if (words !== "Connect") throw new Error(`the held card's primary is ${JSON.stringify(words)}, not Connect`);
+      if (words !== "Connect here") throw new Error(`the held card's primary is ${JSON.stringify(words)}, not Connect here`);
       const picture = await driverB.pictureOf({ board: state.mac });
       if (picture?.source !== "saved" || !picture.frame || !picture.dim) {
         throw new Error(`the held card's picture is not A's saved one, dimmed: ${JSON.stringify(picture)}`);
