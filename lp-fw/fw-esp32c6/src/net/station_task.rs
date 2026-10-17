@@ -26,13 +26,16 @@
 //!   no attempt is under way, and records what was heard for the next ask.
 //!   It is the one scan a board with nothing saved ever makes, and only on
 //!   request; afterwards the radio goes back to ESP-NOW's channel.
-//! - **The boot's first join waits for first light** ([`FIRST_JOIN_CAP`]).
-//!   A WPA2 join derives the key from the password (PBKDF2, 4,096 rounds of
-//!   HMAC-SHA-1 in software, inside esp-radio's Wi-Fi task, above every
-//!   thread of ours): ~1 s of CPU the main thread does not get. Started at
-//!   boot, it fell on the shader compile and held the first lit frame back
-//!   ~900 ms on every board with a network saved (silicon, CX1 and CX2,
-//!   2026-10-17). It still runs, a few hundred ms later, after the light.
+//! - **The boot's first join waits for first light** ([`FIRST_JOIN_CAP`]),
+//!   on a board that will join. A WPA2 join with a password derives the key
+//!   from it (PBKDF2-HMAC-SHA-1, 4,096 rounds, in software inside
+//!   esp-radio's Wi-Fi task, above every thread of ours): ~0.9 s in which
+//!   the main thread does not run. Started at boot, it fell on the project
+//!   load or the shader compile and held the first lit frame back ~900 ms
+//!   (CX2, 2026-10-17: 1,320 ms against 409 with no network; a 64-hex raw
+//!   key joins in ~130 ms and costs no light). Waiting moves the join ~0.1 s
+//!   later and leaves its one long frame just after the light. See
+//!   `docs/defects/2026-10-17-a-saved-network-held-the-c6s-first-light-back-900-ms.md`.
 //! - Every radio call is bounded (`EspStation`'s limits, which the seam's
 //!   station keeps), so an emulated board whose radio never finishes a scan
 //!   still answers. A scan that
