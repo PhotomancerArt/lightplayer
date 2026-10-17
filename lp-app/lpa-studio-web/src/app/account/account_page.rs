@@ -36,7 +36,7 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Laptop, Smartphone, Tablet};
-use lpa_studio_core::core::time_ago::time_ago;
+use lpa_studio_core::{CalendarDate, age_words};
 use lpc_cloud_api::request::{ListSessions, RevokeSession, UpdateMe};
 use lpc_cloud_api::{LoginOptionsInfo, MeInfo, SessionInfo};
 
@@ -397,7 +397,7 @@ pub fn AccountPageBody(
                     div { class: ROW_CLASS,
                         span { class: KEY_CLASS, "Account id" }
                         span { class: "{VALUE_DIM_CLASS} tw:truncate tw:font-mono tw:text-[11px]",
-                            "{me.uid} · since {short_date(me.created_at)}"
+                            "{me.uid} · since {CalendarDate::from_epoch_secs(me.created_at).words_with_year()}"
                         }
                     }
                 }
@@ -540,7 +540,7 @@ fn sync_engine_note(sync: &SyncStatusSnapshot, now_secs: f64) -> String {
             "sign-in sweep offered {} project{} {}",
             sweep.offered,
             if sweep.offered == 1 { "" } else { "s" },
-            time_ago(now_secs, sweep.at_ms / 1000.0),
+            age_words(now_secs - sweep.at_ms / 1000.0),
         ),
     }
 }
@@ -575,7 +575,7 @@ fn SyncStatusRow(row: ProjectSyncStatus, now_secs: f64) -> Element {
                 // The full sentence survives truncation as the tooltip —
                 // the detail is the diagnosis.
                 title: "{row.detail}",
-                "{row.detail} · {time_ago(now_secs, row.at_ms / 1000.0)}"
+                "{row.detail} · {age_words(now_secs - row.at_ms / 1000.0)}"
             }
             span { class: ACTION_CLASS,
                 span { class: badge, "{row.kind.label()}" }
@@ -620,7 +620,7 @@ fn SessionRow(
                     }
                 }
                 span { class: "tw:min-w-0 tw:truncate",
-                    "{summary} · signed in {time_ago(now_secs, session.created_at)}"
+                    "{summary} · signed in {age_words(now_secs - session.created_at)}"
                 }
             }
             span { class: ACTION_CLASS,
@@ -745,29 +745,6 @@ fn session_lifetime_note(sessions: &SessionsPane) -> String {
         Some(days) => format!("{days}-day sessions."),
         None => "Includes this browser.".to_string(),
     }
-}
-
-/// `Aug 6, 2026` from f64 epoch seconds (UTC).
-///
-/// Howard Hinnant's civil-from-days, the same arithmetic the studio
-/// controller's slug stamp uses — no date crate, and no dependency on the
-/// browser's locale machinery for a string this small.
-pub fn short_date(epoch_secs: f64) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let days = (epoch_secs as i64).div_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    let name = MONTHS.get((month - 1) as usize).copied().unwrap_or("???");
-    format!("{name} {day}, {year}")
 }
 
 /// Which glyph a session's row wears.
@@ -1015,15 +992,6 @@ mod tests {
             DeviceKind::Computer
         );
         assert_eq!(device_kind(""), DeviceKind::Computer);
-    }
-
-    #[test]
-    fn dates_read_as_a_person_would_write_them() {
-        // 2026-08-06T00:00:00Z
-        assert_eq!(short_date(1_785_974_400.0), "Aug 6, 2026");
-        assert_eq!(short_date(0.0), "Jan 1, 1970");
-        // A leap day, because the arithmetic is the whole point.
-        assert_eq!(short_date(1_709_164_800.0), "Feb 29, 2024");
     }
 
     /// The lifetime line is read off the current session, never assumed.

@@ -172,7 +172,7 @@ fn a_board_met_over_usb_is_reached_through_lightplayer_app_after_unplug_as_the_s
     assert_eq!(line.kind, crate::UiLinkKind::Relay);
     assert_eq!(
         line.line(),
-        "Wi\u{2011}Fi via lightplayer.app",
+        "lightplayer.app",
         "the card says how it is reached"
     );
     assert!(

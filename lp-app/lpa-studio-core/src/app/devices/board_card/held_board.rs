@@ -33,9 +33,6 @@ pub const OPEN_IN_ANOTHER_TAB: &str = "Open in another tab";
 pub const TAKEN_BY_ANOTHER_TAB: &str = "Taken by another tab";
 /// The aside when the holder has its editor open on the board.
 pub const EDITOR_OPEN_ASIDE: &str = "editor open";
-/// The primary's word while the holder is busy with the board (its
-/// reason, on the hover, names the work).
-pub const BUSY_IN_THE_OTHER_TAB: &str = "Busy in the other tab";
 /// The corner's picture line: a held board's picture is the library's.
 pub const HELD_PICTURE_LINE: &str = "The last picture another tab saved.";
 /// … and when no tab has saved one yet.
@@ -88,9 +85,12 @@ pub fn held_sentence(held: &HeldElsewhere, undoable: bool) -> String {
 }
 
 /// The primary for a board another tab holds, or whose take-over is under
-/// way: Connect, which is the take-over. `None` when this tab has an open
-/// link to the board (it is not held from here).
-pub(crate) fn held_primary(input: &BoardCardInput<'_>) -> Option<UiPrimary> {
+/// way: Connect, which is the take-over; the spinner alone while it runs;
+/// nothing while the holder is busy with the board, or when there is
+/// nobody to ask (the Link row says who has it). `None` when this tab has
+/// an open link to the board (it is not held from here); `Some(None)` when
+/// it is held and nothing can be pressed.
+pub(crate) fn held_primary(input: &BoardCardInput<'_>) -> Option<Option<UiPrimary>> {
     if !input.no_open_link() {
         return None;
     }
@@ -99,24 +99,19 @@ pub(crate) fn held_primary(input: &BoardCardInput<'_>) -> Option<UiPrimary> {
     if held.is_none() && working.is_none() {
         return None;
     }
-    let icon = link_icon(input.held_link());
     if let Some(over) = working {
-        return Some(UiPrimary::says(over.words.clone(), icon));
+        return Some(Some(UiPrimary::working(over.words.clone())));
     }
     let held = held?;
-    if let HoldLevel::Busy(label) = &held.level {
-        return Some(UiPrimary::Unavailable {
-            word: BUSY_IN_THE_OTHER_TAB.to_string(),
-            icon: icon.to_string(),
-            reason: busy_in_the_other_tab(label),
-        });
+    if let HoldLevel::Busy(_) = &held.level {
+        return Some(None);
     }
-    Some(match input.offer("take-over") {
-        Some(offer) => UiPrimary::Offer(UiCardAction::press(offer, "Connect").with_icon(icon)),
-        // Nothing to press (this browser cannot ask its other tabs): the
-        // word says who has it.
-        None => UiPrimary::says(held_summary(held), icon),
-    })
+    let icon = link_icon(input.held_link());
+    Some(
+        input
+            .offer("take-over")
+            .map(|offer| UiPrimary::Offer(UiCardAction::press(offer, "Connect").with_icon(icon))),
+    )
 }
 
 /// The connection bar's work for a take-over: running while the other tab
@@ -134,6 +129,7 @@ pub(crate) fn take_over_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
     };
     Some(UiBarWork {
         words: over.words.clone(),
+        detail: None,
         percent: None,
         state,
         cancel: None,

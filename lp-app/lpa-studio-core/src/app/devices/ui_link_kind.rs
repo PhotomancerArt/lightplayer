@@ -1,6 +1,6 @@
 //! How a board is reached right now, in the words and glyph the card and
-//! the editor header use: USB, Bluetooth, Wi‑Fi, or Wi‑Fi via
-//! lightplayer.app.
+//! the editor header use: USB, Bluetooth, Wi‑Fi, or lightplayer.app (the
+//! link is lightplayer.app: P1, `docs/ux/anatomy/board-card.md`).
 //!
 //! One rule, read off the link's endpoint key, so the card's preview
 //! sentence, the header's glyph and the lens's refusals can never name
@@ -37,14 +37,14 @@ impl UiLinkKind {
         }
     }
 
-    /// Its name in a sentence: "USB", "Bluetooth", "Wi‑Fi", "Wi‑Fi via
-    /// lightplayer.app".
+    /// Its name, the Link row's kind and its name in a sentence: "USB",
+    /// "Bluetooth", "Wi‑Fi", "lightplayer.app".
     pub fn label(self) -> &'static str {
         match self {
             Self::Usb => "USB",
             Self::Bluetooth => "Bluetooth",
             Self::Wifi => "Wi\u{2011}Fi",
-            Self::Relay => "Wi\u{2011}Fi via lightplayer.app",
+            Self::Relay => "lightplayer.app",
         }
     }
 
@@ -68,10 +68,7 @@ mod tests {
         assert_eq!(UiLinkKind::of_endpoint(None), UiLinkKind::Usb);
         assert_eq!(UiLinkKind::Wifi.label(), "Wi\u{2011}Fi");
         assert_eq!(kind("relay:a0f26287b48c"), UiLinkKind::Relay);
-        assert_eq!(
-            UiLinkKind::Relay.label(),
-            "Wi\u{2011}Fi via lightplayer.app"
-        );
+        assert_eq!(UiLinkKind::Relay.label(), "lightplayer.app");
         assert!(UiLinkKind::Relay.is_wifi() && UiLinkKind::Wifi.is_wifi());
         assert!(!UiLinkKind::Usb.is_wifi());
     }

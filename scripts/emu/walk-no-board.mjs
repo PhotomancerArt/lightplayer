@@ -431,11 +431,11 @@ async function main() {
     // 2 + 3. CONNECT and IDENTIFY. The flash flow leaves the port held; the
     // card comes back on the board's own hello, which is the identity.
     await step("connect", "the session comes back on the flashed board", async () => {
-      // Identifying is the connection bar's work; once the board has said
+      // Identifying is the Hardware row's work; once the board has said
       // hello, core offers it `push` (an empty board's "Add a project").
       await driver.waitFor(
         `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
-                  return card.querySelector('[data-bar="connection"]')?.getAttribute('data-bar-work') === 'running'
+                  return card.querySelector('[data-bar="hardware"]')?.getAttribute('data-bar-work') === 'running'
                     || Boolean(card.querySelector('[data-offer-path$="/push"]')); })()`,
         { timeoutMs: STEP_DEADLINE_MS, what: "the card to reconnect" },
       );
@@ -444,11 +444,11 @@ async function main() {
     await step("identify", "the board says what it is, in its own hello", async () => {
       // Ready, as core reads it: the board is offered a project.
       await driver.waitOffer("push", { timeoutMs: STEP_DEADLINE_MS });
-      // The firmware's identity is the firmware details' Version: the label
-      // the board's own hello carried (the bar's summary may be saying
-      // something more pressing about the board's files). The MAC is the
-      // card's ref, which core keys by it.
-      const identity = await driver.detailsFact("firmware", "Version", { timeoutMs: STEP_DEADLINE_MS });
+      // The firmware's identity is the firmware details' Build: the label
+      // the board's own hello carried (the row says the version alone, never
+      // the build's target prefix). The MAC is the card's ref, which core
+      // keys by it.
+      const identity = await driver.detailsFact("firmware", "Build", { timeoutMs: STEP_DEADLINE_MS });
       const ref = await driver.waitCard();
       const mac = macOfPath(ref);
       console.log(`  identity: ${identity}   card: ${ref}   mac: ${mac}`);
@@ -553,14 +553,16 @@ async function main() {
       if (sessions.connect !== 1) throw new Error(`Connect opened ${sessions.connect} session(s), not one`);
       console.log(`  the card's panel: ${controls.join(" · ")}   (pool install +1, the address still /)`);
       // AC6: the connected card's picture is the session's own frames, live
-      // — the corner reads a frame rate, not an age. Bounded, not timed.
+      // and drawn — the corner stays quiet (P4: no "Editing", no age), and
+      // its details give the frame rate. Bounded, not timed.
       const corner = `${card}?.querySelector('[data-board-corner]')`;
-      const live = await driver
+      await driver
         .waitFor(
           `(() => { const p = ${card}?.querySelector('[data-picture]'); const c = ${corner};
                     const reading = (c?.textContent || '').replace(/\\s+/g, ' ').trim();
-                    return p?.getAttribute('data-picture') === 'lens' && /fps/.test(reading) ? reading : false; })()`,
-          { timeoutMs: 60_000, what: "the card's picture to be the session's own, live (the corner reading fps)" },
+                    return p?.getAttribute('data-picture') === 'lens' && p?.getAttribute('data-picture-frame') === 'true'
+                      && !/Editing|ago/.test(reading) ? 'live' : false; })()`,
+          { timeoutMs: 60_000, what: "the card's picture to be the session's own, live and drawn" },
         )
         .catch(async (error) => {
           const now = await driver.evaluate(
@@ -569,7 +571,9 @@ async function main() {
           );
           throw new Error(`${error.message.split("\n")[0]} — the picture reads ${now}`);
         });
-      console.log(`  the card's picture: the session's own, live — the corner reads ${live}`);
+      const rate = await driver.cornerFact("Frame rate").catch(() => null);
+      if (!rate || !/fps/.test(rate)) throw new Error(`the corner's details give no frame rate (${JSON.stringify(rate)})`);
+      console.log(`  the card's picture: the session's own, live — its details read ${rate}`);
     });
 
     await step("card-panel", "write the card's first control to its far end", async () => {
@@ -743,10 +747,9 @@ async function main() {
       // product question. It was a shim bug instead: the unplug left the dead
       // port's byte channel open, so the replugged port's open() was refused
       // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
-      // Since that fix the card's connection bar should read the port open
-      // ("USB · connected", "USB · live") once its work is over; "USB · not
-      // connected" here is a regression worth chasing, not the expected
-      // answer.
+      // Since that fix the card's Link row should read the port open ("USB ·
+      // connected") once its work is over; "USB · not connected" here is a
+      // regression worth chasing, not the expected answer.
       const settled = await driver
         .waitWork("connection", ["none", "failed"], { timeoutMs: 60_000 })
         .then(() => driver.barText("connection"))

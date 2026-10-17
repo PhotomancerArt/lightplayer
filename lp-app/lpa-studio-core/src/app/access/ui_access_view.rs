@@ -334,10 +334,7 @@ mod tests {
         for (link, words) in [
             (crate::UiLinkKind::Bluetooth, "Connecting over Bluetooth…"),
             (crate::UiLinkKind::Wifi, "Connecting over Wi\u{2011}Fi…"),
-            (
-                crate::UiLinkKind::Relay,
-                "Connecting over Wi\u{2011}Fi via lightplayer.app…",
-            ),
+            (crate::UiLinkKind::Relay, "Connecting over lightplayer.app…"),
         ] {
             assert_eq!(
                 access_line(&AccessPhase::Checking, link).as_deref(),

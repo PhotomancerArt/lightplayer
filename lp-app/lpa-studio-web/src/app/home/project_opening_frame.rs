@@ -47,7 +47,7 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
     ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason, OfferPath,
-    OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
+    OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer, byte_size, percent_of,
 };
 
 use crate::core::{
@@ -159,12 +159,12 @@ impl OpeningState {
                 total_bytes,
             } => Some(match total_bytes {
                 Some(total) if *total > 0.0 => format!(
-                    "Downloading the engine… {}%",
-                    ((received_bytes / total) * 100.0).clamp(0.0, 100.0).round()
+                    "Downloading the engine… {}",
+                    percent_of(*received_bytes, *total).unwrap_or_default()
                 ),
                 _ => format!(
-                    "Downloading the engine… {:.1} MB",
-                    received_bytes / 1_048_576.0
+                    "Downloading the engine… {}",
+                    byte_size(received_bytes.max(0.0) as u64)
                 ),
             }),
             Self::StartingEngine { phase } => Some(phase.label().to_string()),
@@ -265,8 +265,8 @@ fn step_label(progress: &DeviceOpenProgress) -> String {
             total_bytes,
         } => format!(
             "Sending the project to {name}… {} of {}",
-            human_bytes(sent_bytes),
-            human_bytes(total_bytes)
+            byte_size(sent_bytes),
+            byte_size(total_bytes)
         ),
         DeviceOpenStep::Loading => format!("Loading on {name} — compiling its shaders…"),
         DeviceOpenStep::Reading => format!("Reading the project back from {name}…"),
@@ -295,14 +295,6 @@ fn device_detail(state: &OpeningState) -> Option<&'static str> {
             ..
         }) => Some("The board compiles every shader itself; a large project takes a while."),
         _ => None,
-    }
-}
-
-fn human_bytes(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
     }
 }
 
@@ -949,7 +941,7 @@ mod tests {
         assert_eq!(indeterminate.fraction(), None);
         assert_eq!(
             indeterminate.label().unwrap(),
-            "Downloading the engine… 5.0 MB"
+            "Downloading the engine… 5 MB"
         );
     }
 

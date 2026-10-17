@@ -31,22 +31,19 @@ fn c1_a_watchers_card_is_online_saying_another_tab_has_it_and_connects_by_taking
     assert_eq!(card.picture.source, PictureSource::Saved);
     assert!(card.picture.dim, "A's picture, dimmed");
     assert!(card.picture.frame.is_some());
-    assert!(
-        card.status
-            .reading
-            .as_deref()
-            .is_some_and(|age| age.ends_with(" ago")),
-        "the corner reads the picture's age: {:?}",
-        card.status.reading
+    assert_eq!(
+        card.status.reading, None,
+        "the picture dims; the corner says nothing (P4)"
     );
     let connection = card.bar(BarLayer::Connection);
     assert_eq!(connection.summary, "Open in another tab");
     assert_eq!(connection.aside, None, "A only watches");
     assert_eq!(connection.tone, UiStatusKind::Attention);
     assert_eq!(connection.action, None);
-    assert_eq!(
+    assert_ne!(
         card.status.mark,
-        CornerMark::Notice(UiStatusKind::Attention)
+        CornerMark::Notice(UiStatusKind::Attention),
+        "the Link row says it, once"
     );
 
     let primary = primary_of(&card);
@@ -121,13 +118,8 @@ fn c2_the_holders_level_is_the_aside_and_the_cost() {
         Some(label.as_str())
     );
     assert_eq!(
-        card.name_bar.primary,
-        Some(UiPrimary::Unavailable {
-            word: "Busy in the other tab".to_string(),
-            icon: "usb".to_string(),
-            reason: reason.clone(),
-        }),
-        "never a greyed Connect: the primary says why"
+        card.name_bar.primary, None,
+        "never a greyed Connect: no button, and the Link row says why"
     );
     assert_eq!(
         b.bench.offer_reason(b.verb(MAC_A, "take-over")),
@@ -167,7 +159,8 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
     );
     assert_eq!(
         card.name_bar.primary,
-        Some(UiPrimary::says("Asking the other tab\u{2026}", "usb"))
+        Some(UiPrimary::working("Asking the other tab\u{2026}")),
+        "the spinner alone: the Link row says how"
     );
     assert_eq!(
         b.bench.offer_reason(primary.offer.clone()),

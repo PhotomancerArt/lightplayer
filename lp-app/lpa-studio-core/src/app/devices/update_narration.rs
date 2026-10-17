@@ -1,7 +1,8 @@
 //! What an update says in the card's terminal: one line per change of
 //! state, in the update-states spike's terminal voice (lowercase, `·` between
 //! clauses), and the line the walk reads its numbers from (DS11) — bytes,
-//! seconds and KB/s per piece, and how long each reconnect took.
+//! seconds and KB/s per piece (the size in Studio's one byte size), and how
+//! long each reconnect took.
 //!
 //! Times are the controller's injected clock's (`now_ms`), never a core
 //! clock. Nothing here ever sees a credential.
@@ -204,10 +205,11 @@ impl UpdateNarration {
     }
 }
 
-/// `core 1 160 KB in 52 s (22 KB/s)`; the rate is left out when the piece
-/// moved in no measurable time.
+/// `core 1.1 MB in 52 s (22 KB/s)`: the size in Studio's one byte size
+/// ([`crate::byte_size`]); the rate is left out when the piece moved in no
+/// measurable time.
 fn rate_part(name: &str, piece: &PieceStat) -> String {
-    let size = format_kb(piece.bytes);
+    let size = crate::byte_size(u64::from(piece.bytes));
     let took = format_secs(piece.active_ms);
     if piece.active_ms == 0 {
         return format!("{name} {size} in {took}");
@@ -236,21 +238,6 @@ fn percent(done: u32, total: u32) -> Option<u64> {
     (total > 0).then(|| u64::from(done.min(total)) * 100 / u64::from(total))
 }
 
-/// Kilobytes (1000 bytes), grouped by thousands with a space:
-/// `1 160 KB`.
-pub(crate) fn format_kb(bytes: u32) -> String {
-    let kb = (u64::from(bytes) + 500) / 1000;
-    let digits = kb.to_string();
-    let mut out = String::new();
-    for (i, digit) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push(' ');
-        }
-        out.push(digit);
-    }
-    format!("{out} KB")
-}
-
 /// Seconds: one decimal under ten (`1.2 s`), whole above (`52 s`).
 pub(crate) fn format_secs(ms: u64) -> String {
     if ms < 10_000 {
@@ -265,10 +252,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sizes_and_times_read_the_way_the_walk_quotes_them() {
-        assert_eq!(format_kb(1_160_000), "1 160 KB");
-        assert_eq!(format_kb(1_822_400), "1 822 KB");
-        assert_eq!(format_kb(24_876), "25 KB");
+    fn times_read_the_way_the_walk_quotes_them() {
         assert_eq!(format_secs(1_200), "1.2 s");
         assert_eq!(format_secs(52_300), "52 s");
         assert_eq!(format_secs(0), "0.0 s");
@@ -289,7 +273,7 @@ mod tests {
         };
         assert_eq!(
             n.decided(&offer, &names).as_deref(),
-            Some("update 2026.10.03-1 → 2026.10.05-2 over Bluetooth")
+            Some("update v2026.10.03-1 → v2026.10.05-2 over Bluetooth")
         );
         assert_eq!(n.decided(&offer, &names), None, "the opening line is once");
         assert_eq!(
@@ -313,7 +297,7 @@ mod tests {
         assert_eq!(n.link_up(136_000).as_deref(), Some("reconnected in 0.9 s"));
         assert_eq!(
             n.rates().as_deref(),
-            Some("backup 1 822 KB in 81 s (22 KB/s) · core 1 160 KB in 52 s (22 KB/s)")
+            Some("backup 1.7 MB in 81 s (22 KB/s) · core 1.1 MB in 52 s (22 KB/s)")
         );
     }
 

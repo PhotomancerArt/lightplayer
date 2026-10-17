@@ -49,6 +49,12 @@ pub struct DeviceView {
     pub detail: Option<String>,
     /// Honest staleness ("last heard 12 s ago") instead of a stuck spinner.
     pub freshness_label: Option<String>,
+    /// How long ago the board was last heard, in milliseconds — the number
+    /// behind [`Self::freshness_label`], for a surface that says the age in
+    /// its own one phrasing (Studio's card: `Last heard` · `12 s ago`).
+    /// `None` until the board has been heard.
+    #[serde(default)]
+    pub heard_age_ms: Option<u64>,
     /// Strongest identity binding, for disambiguating two similar boards.
     pub identity_label: Option<String>,
     /// Chip read off the boot banner, normalized ("esp32c6"). What the
@@ -328,6 +334,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         state_label: state_label(device, status),
         detail: detail(device),
         freshness_label: freshness_label(device, now),
+        heard_age_ms: device.evidence.freshness.age_ms(now),
         identity_label: device.identity.strongest_label(),
         // A boot banner names the chip for a board seen booting; a board
         // that was already running when the tab attached never shows one,

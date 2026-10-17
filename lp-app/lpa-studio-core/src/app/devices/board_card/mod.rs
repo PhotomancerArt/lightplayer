@@ -62,16 +62,20 @@ pub use board_connection::BoardConnection;
 pub use board_panel_picks::{BOARD_PANEL_CONTROLS, MASTER_CHANNEL, board_panel_picks};
 pub use board_picture::{LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE};
 pub use connection_bar::{
-    ALSO_THROUGH_THE_CLOUD, CLOUD_NOT_YET, COULDNT_CONNECT, RECONNECTING, SOMEONE_ELSE_SENTENCE,
+    ALSO_THROUGH_THE_CLOUD, CLOUD_NOT_YET, CONNECTION_FAILED, RECONNECTING, SOMEONE_ELSE_SENTENCE,
 };
-pub use firmware_bar::{DATA_UNREADABLE, FILES_ARE_GONE, FILES_NEED_NEWER_FIRMWARE};
-pub use hardware_bar::chip_words;
+pub use firmware_bar::{
+    CONFIRMATION_REQUIRED, DATA_UNREADABLE, UPDATE_INTERRUPTED, UPDATE_REQUIRED,
+};
+pub use hardware_bar::{MODEL_NOT_SET, chip_words};
 pub use held_board::{
     EDITOR_OPEN_ASIDE, HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE, OPEN_IN_ANOTHER_TAB,
     TAKEN_BY_ANOTHER_TAB,
 };
 pub use primary_action::{ADD_A_PROJECT, CONNECTING};
+pub use project_bar::{DATA_LOST, PROJECT_HIDDEN, PROJECT_NONE};
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
+pub use status_corner::EDITING;
 pub use ui_bar_work::{BarWorkState, UiBarWork};
 pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
