@@ -1,9 +1,8 @@
-# The C6's committed second-stage bootloader
-# (lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin) is a build
-# product: this rebuilds it from ESP-IDF source in the pinned Docker image and
-# fails if a single byte differs. It also rebuilds the stock variant and
-# checks it against espflash 3.3.0's bundled bootloader — the proof that the
-# recipe is the stock bootloader with one setting changed.
+# The C6's committed second-stage bootloaders (lp-fw/bootloaders/: the shipped
+# esp32c6-bootloader-idf-v5.1.bin, byte-identical to espflash 3.3.0's bundled
+# one, and the quiet fallback) are build products: this rebuilds both from
+# ESP-IDF source in the pinned Docker image and fails if a single byte
+# differs.
 #
 # On an x64 runner, so it is also the amd64 half of the reproducibility proof
 # (the desk builds on arm64; the pinned digest is the multi-arch index).
@@ -34,11 +33,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Quiet bootloader == the committed binary
-        run: scripts/bootloader/build-c6-bootloader.sh --variant quiet --check
-
-      - name: Stock bootloader == espflash 3.3.0's bundled one
+      - name: Stock (shipped) bootloader == the committed binary == espflash 3.3.0's
         run: scripts/bootloader/build-c6-bootloader.sh --variant stock --check
+
+      - name: Quiet (fallback) bootloader == the committed binary
+        run: scripts/bootloader/build-c6-bootloader.sh --variant quiet --check
 
       - name: Keep the build records
         if: always()

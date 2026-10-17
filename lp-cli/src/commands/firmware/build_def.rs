@@ -375,7 +375,7 @@ mod tests {
         }
     }
 
-    /// The C6's bootloader lives in four places that cannot read each other:
+    /// The C6's bootloader file is named in four places that cannot read each other:
     /// the build def (canonical: `lp-cli firmware package`, the release,
     /// Studio's bundle), `lp-fw-split`'s default (`just fw-esp32c6-split`,
     /// the emulator's split images), the justfile's `c6_bootloader` (its

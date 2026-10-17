@@ -4,10 +4,10 @@
 //! bootloader agrees with it.
 //!
 //! - **The ROM-up boot.** The whole merged image in the chip, the hart at
-//!   the mask ROM's reset vector, nothing placed: the ROM loads the IDF
-//!   bootloader the image carries (espflash 3.3.0's, rebuilt quiet:
-//!   `lp-fw/bootloaders/README.md`), which loads the loader as its app and
-//!   says nothing doing it; the loader
+//!   the mask ROM's reset vector, nothing placed: the ROM loads the
+//!   second-stage bootloader the image carries (whichever the build def
+//!   names: `lp-fw/bootloaders/README.md`), which loads the loader as its
+//!   app; the loader
 //!   reads the boot records, maps the core and copies its RAM segments; the
 //!   core starts the radios and links and opens the engine. Asserted on the
 //!   board's own words — the loader's ROM print, the core's first line, the
@@ -56,6 +56,7 @@ const CORE_FIRST: &str = "[INIT] Initializing board";
 
 /// The cache MMU page the layout is aligned to, and the one espflash
 /// 3.3.0's bundled bootloader (and its quiet rebuild) picks on a 4 MB C6.
+/// A bootloader that picked another would fail here.
 const PAGE: u32 = 0x8000;
 
 #[test]
@@ -85,21 +86,18 @@ fn the_split_image_boots_from_the_reset_vector_to_the_engine() {
     );
 
     let rom_console = m.uart0().text();
-    // The quiet bootloader: between the ROM handing it the CPU (`entry`) and
-    // the loader's first line, UART0 carries nothing at all. The stock one
-    // printed ~22 lines there, ~145 ms of every boot at 115,200 baud.
+    // The ROM handed the CPU to the bootloader (`entry`), and the bootloader
+    // started the loader after it. Not its log lines: which bootloader the
+    // image carries is the build def's choice, and a quiet one says nothing.
     let entry = rom_console
         .find("entry 0x")
         .unwrap_or_else(|| panic!("the ROM started the bootloader:\n{rom_console}"));
     let loader = rom_console
         .find("[LOADER]")
         .unwrap_or_else(|| panic!("the bootloader started the loader:\n{rom_console}"));
-    let between = rom_console[entry..loader]
-        .split_once('\n')
-        .map_or("", |(_, rest)| rest);
     assert!(
-        between.trim().is_empty(),
-        "the bootloader printed between the ROM's entry and the loader:\n{between}"
+        entry < loader,
+        "the loader ran before the ROM entered the bootloader:\n{rom_console}"
     );
     assert!(
         rom_console.contains("[LOADER] core @0x18000 (proven)"),

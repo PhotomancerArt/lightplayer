@@ -37,14 +37,16 @@ pub struct KnownBootloader {
 /// The C6's bootloaders, oldest first.
 const ESP32C6_BOOTLOADERS: &[KnownBootloader] = &[
     // espflash 3.3.0's bundled `esp32c6-bootloader.bin` (ESP-IDF
-    // v5.1-beta1-378): every C6 image until the quiet one, so every board
-    // not USB-flashed since.
+    // v5.1-beta1-378), committed byte-identical as
+    // `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin`: what every C6
+    // image has carried so far.
     KnownBootloader {
         name: "espflash 3.3.0's bundled bootloader (ESP-IDF v5.1-beta1-378)",
         code: &[0x4086e610..0x40871378, 0x40875720..0x40876f20],
     },
     // `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin`: the same
-    // source with its log level NONE, so the same code with fewer bytes.
+    // source with its log level NONE, so the same code with fewer bytes. Built,
+    // not shipped (a fallback); known here so a build def may name it.
     KnownBootloader {
         name: "esp32c6-bootloader-idf-v5.1-quiet.bin (ESP-IDF v5.1-beta1-378, log level NONE)",
         code: &[0x4086e610..0x40870a14, 0x40875720..0x40875c08],

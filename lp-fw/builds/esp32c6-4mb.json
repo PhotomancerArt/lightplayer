@@ -8,7 +8,7 @@
   "cargoFeatures": ["esp32c6", "server"],
   "flashSizeMb": 4,
   "partitionsCsv": "lp-fw/fw-esp32c6/partitions.csv",
-  "bootloader": "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin",
+  "bootloader": "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin",
   "split": true,
   "chip": {
     "family": "esp32",

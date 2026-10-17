@@ -18,10 +18,10 @@ use espflash::targets::{Chip, XtalFrequency};
 use lp_bootctl::LOADER_OFFSET;
 
 /// The bootloader a split image carries unless told otherwise: espflash
-/// 3.3.0's bundled one rebuilt with its log level NONE
+/// 3.3.0's bundled one, rebuilt from source and committed byte-identical
 /// (`lp-fw/bootloaders/README.md`). Repo-relative; the `esp32c6-4mb` build
 /// def names the same file (a test in lp-cli holds the two together).
-pub const C6_BOOTLOADER: &str = "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin";
+pub const C6_BOOTLOADER: &str = "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin";
 
 /// The C6's flash: 4 MiB.
 pub const FLASH_LEN: usize = 4 * 1024 * 1024;

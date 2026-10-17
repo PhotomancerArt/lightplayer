@@ -34,8 +34,8 @@ enum Command {
         #[arg(long, default_value = "esp32c6,server")]
         features: String,
         /// The second-stage bootloader to merge (default:
-        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin, the
-        /// shipped one).
+        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin, the
+        /// one the esp32c6-4mb build def ships).
         #[arg(long)]
         bootloader: Option<PathBuf>,
         /// The partition table (default: lp-fw/fw-esp32c6/partitions.csv).

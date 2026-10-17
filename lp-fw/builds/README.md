@@ -67,7 +67,7 @@ Three names, never confused: the **target** (`esp32c6-4mb`), the
   upgrade, a new `bootloader` file) must add the new one's image header to
   the table — and, if the detection ranges move, the copy in
   `scripts/c6-lp-ana-i2c.py`. The C6 def names
-  `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin`. See
+  `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin`. See
   `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
 - Xtensa builds need Espressif's fork on PATH. `lp-cli` runs cargo in the
   crate directory so the crate's `rust-toolchain.toml` selects the channel,

@@ -3,21 +3,23 @@
 # reproducibly. Nothing is installed on the host: the toolchain, Python and
 # ESP-IDF itself all come from one espressif/idf image pinned by digest.
 #
-#   scripts/bootloader/build-c6-bootloader.sh [--variant quiet|stock] [--out <dir>]
+#   scripts/bootloader/build-c6-bootloader.sh [--variant stock|quiet] [--out <dir>]
 #                                             [--platform linux/arm64|linux/amd64]
 #                                             [--check]
 #
-#   --variant quiet (default)  the bootloader LightPlayer ships: the stock one
-#                              with its log level set to NONE
-#   --variant stock            espflash 3.3.0's bundled bootloader, rebuilt —
-#                              the proof that this recipe IS that bootloader
-#                              (compared byte for byte, see --check)
+#   --variant stock (default)  espflash 3.3.0's bundled bootloader, rebuilt —
+#                              the one the C6 ships
+#                              (lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin),
+#                              and the proof that this recipe IS that
+#                              bootloader (byte for byte, see --check)
+#   --variant quiet            the same with its log level NONE
+#                              (esp32c6-bootloader-idf-v5.1-quiet.bin): built
+#                              and committed, not shipped — a fallback
 #   --out                      default target/bootloader/<variant>/
 #   --platform                 the image's architecture (default: Docker's);
-#                              both give the same bytes, which is checked by
-#                              running it once under each
+#                              the x64 CI workflow is the amd64 run
 #   --check                    compare the result with the committed binary
-#                              (quiet) or espflash 3.3.0's bundled one (stock)
+#                              (and, for stock, espflash 3.3.0's bundled one)
 #                              and fail on any difference
 #
 # What is pinned, and why each:
@@ -38,7 +40,7 @@
 #   2023-06-07 08:02:08 UTC, the stock banner's `compile time`. The quiet
 #   variant logs nothing, so the date leaves its bytes untouched either way.
 #
-# Provenance: lp-fw/bootloaders/README.md. License: ESP-IDF is Apache-2.0
+# Provenance: lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.provenance.txt. License: ESP-IDF is Apache-2.0
 # (licenses/ESP-IDF-Apache-2.0.txt).
 set -euo pipefail
 
@@ -47,17 +49,19 @@ IDF_COMMIT="ea5e0ff298e6257b31d8e0c81435e6d3937f04c7"
 IDF_VER="v5.1-beta1-378-gea5e0ff298-dirty"
 SOURCE_DATE_EPOCH_PIN="1686124928"
 
-# The committed quiet binary, and the stock one it is checked against.
+# The committed binaries: the stock one (shipped; byte-identical to
+# espflash 3.3.0's bundled bootloader) and the quiet one (a fallback).
+STOCK_BIN="lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin"
 QUIET_BIN="lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin"
 STOCK_SHA256="c569fa7d2363da15f6b60ea288aa2396ca3c33b6eed84616bb506feaba7a0528"
 
-variant=quiet
+variant=stock
 out=""
 platform=""
 check=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --variant) variant="${2:?--variant needs quiet or stock}"; shift 2 ;;
+        --variant) variant="${2:?--variant needs stock or quiet}"; shift 2 ;;
         --out) out="${2:?--out needs a directory}"; shift 2 ;;
         --platform) platform="${2:?--platform needs a value}"; shift 2 ;;
         --check) check=1; shift ;;
@@ -104,7 +108,12 @@ if [[ "$check" == 1 ]]; then
         what="the committed $QUIET_BIN"
     else
         want="$STOCK_SHA256"
-        what="espflash 3.3.0's bundled esp32c6-bootloader.bin"
+        what="espflash 3.3.0's bundled esp32c6-bootloader.bin (and the committed $STOCK_BIN)"
+        have="$(shasum -a 256 "$repo/$STOCK_BIN" | awk '{print $1}')"
+        if [[ "$have" != "$want" ]]; then
+            echo "build-c6-bootloader: the committed $STOCK_BIN is $have, not espflash's $want" >&2
+            exit 1
+        fi
     fi
     if [[ "$sha" != "$want" ]]; then
         echo "build-c6-bootloader: MISMATCH — built $sha, $what is $want" >&2

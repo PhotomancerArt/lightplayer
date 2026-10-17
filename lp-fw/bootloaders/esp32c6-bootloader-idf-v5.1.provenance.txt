@@ -1,0 +1,70 @@
+Provenance: esp32c6-bootloader-idf-v5.1.bin and esp32c6-bootloader-idf-v5.1-quiet.bin
+
+What they are
+  esp32c6-bootloader-idf-v5.1.bin (SHIPPED: the esp32c6-4mb build def names
+  it) is the ESP32-C6 ESP-IDF second-stage bootloader espflash 3.3.0 bundles
+  — the one every LightPlayer C6 has carried — rebuilt from source. It is
+  byte-identical to espflash 3.3.0's resources/bootloaders/esp32c6-bootloader.bin.
+
+  esp32c6-bootloader-idf-v5.1-quiet.bin (NOT shipped; a fallback) is the
+  same build with one change: CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y. It prints
+  nothing on UART0 during a good boot (the stock one prints ~22 lines at
+  115,200 baud, ~145 ms of every boot). An assert or abort() still prints:
+  those go through esp_rom_printf, not the log. Booted on the emulator only.
+
+sha256
+  c569fa7d2363da15f6b60ea288aa2396ca3c33b6eed84616bb506feaba7a0528  esp32c6-bootloader-idf-v5.1.bin        (21,264 bytes)
+  933f77385330420aa0101851e8f21d28d76111c7981b7adf009789ced1b372fd  esp32c6-bootloader-idf-v5.1-quiet.bin  (13,280 bytes)
+
+Upstream
+  repository  https://github.com/espressif/esp-idf
+  commit      ea5e0ff298e6257b31d8e0c81435e6d3937f04c7 (release/v5.1 branch,
+              2023-05-26; `v5.1-beta1-378-gea5e0ff298` in espflash's build,
+              `v5.1-rc1-8-gea5e0ff298` in a clone with every tag)
+  paths       components/bootloader/subproject (built by `idf.py bootloader`)
+  license     Apache-2.0. ESP-IDF's LICENSE at this commit is byte-identical
+              to licenses/ESP-IDF-Apache-2.0.txt (sha256
+              cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30).
+  modified?   No source is modified. The builds differ by configuration only.
+
+Build (scripts/bootloader/build-c6-bootloader.sh, `just build-c6-bootloader [stock|quiet]`)
+  image       espressif/idf@sha256:16beaf5b7f54d343f7c38d2738c7c03829fef78f7555e23eac4d20dc8515eb45
+              (the multi-arch index of espressif/idf:v5.1; arm64 manifest
+              sha256:971a59eba1595b4ba2d3bb194fb75f98c5fbcf63aa104fac547b589525d815c5,
+              amd64 sha256:41a6db60cbe3dc0fce17c7f703fe18ac254cfa12ce36fb03a916b3e8d1826fff;
+              ~2.0 GB download, ~4.2 GB on disk)
+  toolchain   riscv32-esp-elf esp-12.2.0_20230208, CMake 3.24.0 (the image's;
+              tools/tools.json at the pinned commit names the same versions)
+  source      the pinned commit, from the image's own ESP-IDF clone, which
+              carries the whole history (`docker run --network none`:
+              nothing is downloaded during the build)
+  IDF_VER     v5.1-beta1-378-gea5e0ff298-dirty (version.txt; the string
+              espflash's build compiled in)
+  SOURCE_DATE_EPOCH  1686124928 (2023-06-07 08:02:08 UTC, the stock banner's
+              compile time; the quiet build compiles no date in)
+  target      esp32c6, `idf.py -DIDF_TARGET=esp32c6 bootloader`
+
+sdkconfig, against ESP-IDF's defaults for esp32c6 at this commit
+  (`idf.py save-defconfig`):
+    stock:  CONFIG_IDF_TARGET="esp32c6"
+    quiet:  CONFIG_IDF_TARGET="esp32c6"
+            CONFIG_BOOTLOADER_LOG_LEVEL_NONE=y
+  The two full sdkconfigs differ only in the log-level lines
+  (CONFIG_BOOTLOADER_LOG_LEVEL* and its deprecated alias
+  CONFIG_LOG_BOOTLOADER_LEVEL*).
+
+Reproducibility
+  On arm64 (Docker 29, M2 Max), stock and quiet each built twice: the same
+  sha256 every time, and stock equal to espflash's binary. The x64 run is the
+  `Bootloader reproducible` workflow (.github/workflows/bootloader-reproducible.yml).
+
+Image headers (before a flasher patches flash mode/size/frequency into bytes
+2-3 and recomputes the appended SHA-256, as espflash does at merge)
+  chip id 13 (ESP32-C6), chip revision v0.0..v0.99, hash appended
+  stock:  seg 0x4086c410 len 0xd48 (data), 0x4086e610 len 0x2d68 (code),
+          0x40875720 len 0x1800 (code)
+  quiet:  seg 0x4086c410 len 0xa98 (data), 0x4086e610 len 0x2404 (code),
+          0x40875720 len 0x4e8 (code)
+  The quiet code ranges lie inside the stock ones, the ranges Studio's
+  hung-bootloader detection reads a ROM `Saved PC` against
+  (lpa_devices::bootloader).

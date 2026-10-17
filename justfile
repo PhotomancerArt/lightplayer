@@ -52,14 +52,16 @@ v3_flash_size := "4mb"
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).
 c6_flash_size := "4mb"
 
-# The C6's second-stage bootloader: espflash 3.3.0's bundled one rebuilt with
-# its log level NONE (lp-fw/bootloaders/README.md; `just build-c6-bootloader`
-# rebuilds it in Docker). Every `espflash flash`/`save-image --merge` for this
+# The C6's second-stage bootloader, the bytes every C6 flash writes at 0x0:
+# today espflash 3.3.0's bundled one, rebuilt from source and committed
+# byte-identical (lp-fw/bootloaders/README.md; `just build-c6-bootloader
+# stock` rebuilds it in Docker). Changing which bootloader the C6 ships is
+# changing this file name in the build def and its mirrors. Every `espflash flash`/`save-image --merge` for this
 # chip passes it as `--bootloader`. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`bootloader`); this var, lp-fw-split's
 # default and the crate's runner are mirrors, and `cargo test -p lp-cli`
 # fails if one drifts.
-c6_bootloader := "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin"
+c6_bootloader := "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -2204,17 +2206,18 @@ fwtest-button-esp32s3 port="":
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
-# Rebuild the C6's second-stage bootloader from ESP-IDF source in Docker (a
+# Rebuild a C6 second-stage bootloader from ESP-IDF source in Docker (a
 # pinned `espressif/idf` image; nothing installed on the host, nothing
-# downloaded inside) and check it against the committed
-# lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin byte for byte.
-# `variant=stock` rebuilds espflash 3.3.0's bundled bootloader instead and
-# checks it against that — the proof the recipe is the stock bootloader with
-# one setting changed. The first run pulls the image (~4 GB on disk).
+# downloaded inside) and check it byte for byte against the committed file.
+# `stock` is espflash 3.3.0's bundled bootloader (the shipped
+# lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin); `quiet` is the same
+# with its log level NONE (esp32c6-bootloader-idf-v5.1-quiet.bin, built but
+# not shipped — a fallback). The first run pulls the image (~2 GB download,
+# ~4 GB on disk).
 #
-#   just build-c6-bootloader
 #   just build-c6-bootloader stock
-build-c6-bootloader variant="quiet":
+#   just build-c6-bootloader quiet
+build-c6-bootloader variant="stock":
     scripts/bootloader/build-c6-bootloader.sh --variant {{ variant }} --check
 
 # Build the ESP32-C6 SPLIT image — the product image: the loader, the boot
