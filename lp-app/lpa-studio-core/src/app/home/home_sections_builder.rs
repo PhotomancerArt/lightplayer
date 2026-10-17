@@ -454,7 +454,7 @@ mod tests {
     fn a_blocked_package_stays_listed() {
         let blocked = UiPackageCard {
             health: PackageHealth::Blocked {
-                headline: "Format 2 — too old for this Studio".to_string(),
+                headline: "Format too old (2)".to_string(),
                 remedy: "Export it.".to_string(),
             },
             ..card("stale", 1.0)

@@ -11165,7 +11165,7 @@ mod tests {
             panic!("expected the failed state, got {:?}", project.state);
         };
         assert!(
-            issue.message.contains("Format 3 — too old for this Studio"),
+            issue.message.contains("Format too old (3)"),
             "{}",
             issue.message
         );

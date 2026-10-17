@@ -95,10 +95,10 @@ fn hero_badge_text(badge: &ThumbPreviewBadge) -> &'static str {
 fn hero_badge_title(badge: &ThumbPreviewBadge) -> String {
     match badge {
         ThumbPreviewBadge::Gpu => "Running live on your GPU".to_string(),
-        ThumbPreviewBadge::Cpu { reason: None } => "Running live on the CPU tier".to_string(),
+        ThumbPreviewBadge::Cpu { reason: None } => "Running live on the CPU".to_string(),
         ThumbPreviewBadge::Cpu {
             reason: Some(reason),
-        } => format!("Running on the CPU tier (GPU unavailable: {reason})"),
+        } => format!("Running live on the CPU. GPU unavailable: {reason}"),
         ThumbPreviewBadge::Error { reason } => format!("This preview stopped: {reason}"),
     }
 }

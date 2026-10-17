@@ -79,7 +79,7 @@ pub(crate) fn LibraryDrop(
             if enabled && drag_active() > 0 {
                 div { class: "tw:pointer-events-none tw:absolute tw:inset-0 tw:z-10 tw:grid tw:place-items-center tw:rounded-md tw:border-2 tw:border-dashed tw:border-selection-border tw:bg-background/80",
                     p { class: "tw:m-0 tw:text-base tw:font-semibold tw:text-strong-foreground",
-                        "Drop a project zip, or paste a project JSON envelope"
+                        "Drop a project zip here, or paste a copied project"
                     }
                 }
             }
