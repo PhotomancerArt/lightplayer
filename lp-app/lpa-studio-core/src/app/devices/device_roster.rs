@@ -93,6 +93,10 @@ pub struct DeviceRosterView {
     /// Connect a board's Network row, under way, or why it
     /// failed (`devices/connect-wifi-address`).
     pub wifi_address_connect: Option<super::UiWifiConnect>,
+    /// Connect a board's USB or Bluetooth press that failed after the pick
+    /// (`devices/connect-usb`, `devices/connect-ble`): what the section says
+    /// under its squares until the next press. Joined by the controller.
+    pub chooser_failure: Option<super::UiChooserFailure>,
     /// Each board another tab held whose Connect is under way here, or why
     /// it failed (`devices/<board>/take-over`). Joined by the controller,
     /// which holds the asks; absent = nothing to say.
@@ -157,6 +161,7 @@ impl Default for DeviceRosterView {
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            chooser_failure: None,
             take_overs: std::collections::BTreeMap::new(),
             connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
@@ -545,6 +550,7 @@ impl DeviceRoster {
             // Joined by the controller, which holds the connects.
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            chooser_failure: None,
             // Joined by the controller, which holds the asks.
             take_overs: std::collections::BTreeMap::new(),
             connections: std::collections::BTreeMap::new(),
@@ -1077,6 +1083,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            chooser_failure: None,
             take_overs: Default::default(),
             connections: Default::default(),
             updates: Default::default(),
@@ -1148,6 +1155,7 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            chooser_failure: None,
             take_overs: Default::default(),
             connections: Default::default(),
             updates: Default::default(),

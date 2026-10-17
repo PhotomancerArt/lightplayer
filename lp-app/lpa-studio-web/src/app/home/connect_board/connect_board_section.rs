@@ -24,7 +24,9 @@
 //! row for that transport only, in full and never folded.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{OfferPath, UiAction, UiHomeSection, UiOffer, UiWifiConnect};
+use lpa_studio_core::{
+    OfferPath, UiAction, UiChooserFailure, UiHomeSection, UiOffer, UiWifiConnect,
+};
 
 use crate::app::home::ble_reach::{BluetoothReach, use_ble_reach};
 use crate::app::home::connect_board::connect_square::ConnectSquare;
@@ -34,7 +36,7 @@ use crate::app::home::connect_board::transport_offer::{
 use crate::app::home::page::page_section::PageSection;
 use crate::app::home::reach_note::{ReachNote, this_page_url};
 use crate::app::home::target_pick_popover::TargetPickPopover;
-use crate::app::home::wifi_address_entry::WifiAddressEntry;
+use crate::app::home::wifi_address_entry::{FAILED_LINE_CLASS, WifiAddressEntry};
 use crate::core::use_offer_at;
 
 /// The id of the examples section the welcome hint scrolls to. The page's
@@ -88,6 +90,10 @@ pub(crate) fn ConnectBoardSection(
     /// The Network row's connect under way, or why it failed (core's).
     #[props(default)]
     wifi_connect: Option<UiWifiConnect>,
+    /// USB's or Bluetooth's press that failed after the pick (core's
+    /// words), said under the squares until the next press.
+    #[props(default)]
+    chooser_failure: Option<UiChooserFailure>,
     /// A first visit: add the one hint line after the squares.
     #[props(default)]
     welcome: bool,
@@ -188,6 +194,14 @@ pub(crate) fn ConnectBoardSection(
                                 "{hint.link}"
                             }
                         }
+                    }
+                }
+                if let Some(failure) = chooser_failure {
+                    p {
+                        class: "{FAILED_LINE_CLASS} tw:max-w-sm tw:text-left",
+                        role: "status",
+                        "data-chooser-failure": "true",
+                        "{failure.words}"
                     }
                 }
                 for (key , note) in [("usb", notes.usb), ("ble", notes.ble)] {
