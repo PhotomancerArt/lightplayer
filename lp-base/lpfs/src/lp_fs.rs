@@ -207,15 +207,18 @@ pub trait LpFs {
         }
     }
 
-    /// One bounded piece of the filesystem's own cleanup, for a caller with
-    /// nothing else to do: a server calls it on a quiet tick (no request,
-    /// no open batch). It changes no file. `true` if it did any work; once
-    /// there is none left it answers `false` cheaply until the next write.
+    /// A server calls this once a tick, after the frame, with how the tick
+    /// went ([`crate::IdleTick`]: its time, whether it changed files,
+    /// whether a show is playing). A filesystem with cleanup of its own does
+    /// one small piece of it when [`crate::IdlePacer`] says the tick has
+    /// the time (quiet, and in a playing show's spare time). It changes no
+    /// file. `true` if it did a piece.
     ///
     /// The default does nothing: only the tree store has cleanup it can do
     /// early (`TreeStore::collect_step`); littlefs, memory and the host
     /// filesystem have none.
-    fn idle_step(&self) -> Result<bool, FsError> {
+    fn idle_tick(&self, tick: crate::IdleTick) -> Result<bool, FsError> {
+        let _ = tick;
         Ok(false)
     }
 

@@ -92,7 +92,7 @@ const EVERY_METHOD: &[&str] = &[
     "abort_batch",
     "batches_are_atomic",
     "write_deflated_chunk",
-    "idle_step",
+    "idle_tick",
     "current_version",
     "get_changes_since",
     "get_events_since",
@@ -121,7 +121,7 @@ fn call(fs: &mut dyn LpFs, method: &str, path: &str) {
         "abort_batch" => drop(fs.abort_batch()),
         "batches_are_atomic" => drop(fs.batches_are_atomic()),
         "write_deflated_chunk" => drop(fs.write_deflated_chunk(path, 0, 2, &STORED_HI)),
-        "idle_step" => drop(fs.idle_step()),
+        "idle_tick" => drop(fs.idle_tick(lpfs::IdleTick::default())),
         "current_version" => drop(fs.current_version()),
         "get_changes_since" => drop(fs.get_changes_since(since)),
         "get_events_since" => drop(fs.get_events_since(since)),
@@ -256,8 +256,8 @@ impl LpFs for Recorder {
         Ok(())
     }
 
-    fn idle_step(&self) -> Result<bool, FsError> {
-        self.hit("idle_step");
+    fn idle_tick(&self, _tick: lpfs::IdleTick) -> Result<bool, FsError> {
+        self.hit("idle_tick");
         Ok(false)
     }
 

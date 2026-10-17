@@ -37,6 +37,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         if self.txn != Txn::None || self.log.index.get(old).is_none() {
             return Ok(());
         }
+        self.wake_idle();
         let mut ids: Vec<ObjectId> = leaf_list(&mut self.log, old)?
             .iter()
             .map(|l| l.id)

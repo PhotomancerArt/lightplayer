@@ -1,5 +1,6 @@
 //! The `fs-tree` firmware cleaning its store up on quiet ticks
-//! (`LpFs::idle_step`, the tree store's `collect_step`), on the emulated C6
+//! (`LpFs::idle_tick`, paced by `lpfs::IdlePacer`; the tree store's
+//! `collect_step`, one piece a step), on the emulated C6
 //! while a project plays:
 //!
 //! 1. Three uploads of a c40-shaped project (`projects/test/basic` and its
@@ -110,7 +111,7 @@ fn quiet_ticks_clean_up_while_the_project_plays() {
     let worst = sorted.last().copied().unwrap_or(0);
     println!(
         "idle window (20 s emulated): {} programs ({} B), {} erases (silicon estimate {:.0} ms of \
-         flash work; the host store predicted {host_steps} steps); {frames} frames, all \
+         flash work; the host store predicted {host_steps} steps, its mark one of them); {frames} frames, all \
          complete; frame gap median {median} µs, worst {worst} µs (t1, CPU only)",
         quiet.programs,
         quiet.program_bytes,

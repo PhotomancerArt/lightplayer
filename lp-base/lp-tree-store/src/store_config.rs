@@ -41,6 +41,11 @@ pub struct StoreConfig {
     /// tail, a GC pass at a time, while passes shrink the waste) — the work
     /// a write would otherwise do in front of itself (0 = never).
     pub idle_pack_free: u32,
+    /// The most an idle step copies out of a victim (bytes; the record that
+    /// crosses it finishes): what keeps a step to about one erase's time, so
+    /// a step fits beside a playing frame. A victim takes a few steps, then
+    /// one more erases it.
+    pub idle_copy_bytes: u32,
 }
 
 impl Default for StoreConfig {
@@ -54,6 +59,7 @@ impl Default for StoreConfig {
             idle_free_percent: 25,
             idle_min_garbage: 1024,
             idle_pack_free: 4,
+            idle_copy_bytes: 2048,
         }
     }
 }

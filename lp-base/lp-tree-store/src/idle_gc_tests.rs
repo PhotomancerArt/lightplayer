@@ -7,8 +7,8 @@
 extern crate std;
 
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::vec::Vec;
+use alloc::{format, vec};
 
 use lp_nor_sim::{NorError, NorFlashSim, NorGeometry, NorStats, TearModel};
 
@@ -151,12 +151,107 @@ fn idle_cuts_remount_to_one_state() {
     assert!(r.cuts > 100, "{r:?}");
 }
 
+/// A step is one piece, about one erase's time: a mark (reads only), one
+/// erase, one forget (a header kill), or copies of at most
+/// `idle_copy_bytes` (the record that crosses it finishes) — never a mark
+/// and work together, never two erases. Near full and churned alike, until
+/// settled.
+#[test]
+fn each_step_is_one_piece() {
+    let c = StoreConfig::default();
+    let mut stores = [near_full(&c, 93), churned(&c)];
+    let mut kinds = [0u32; 4];
+    for st in &mut stores {
+        for _ in 0..4000 {
+            let before = st.flash().stats().clone();
+            let marks = st.stats().marks;
+            if !st.collect_step().unwrap() {
+                break;
+            }
+            let after = st.flash().stats();
+            let erases = after.erases_total() - before.erases_total();
+            let programmed = after.program_bytes - before.program_bytes;
+            let marked = st.stats().marks - marks;
+            assert!(marked + erases <= 1, "a mark and an erase in one step");
+            let kind = if marked == 1 {
+                assert_eq!(programmed, 0, "a mark step programmed");
+                0
+            } else if erases == 1 {
+                // The kill (8 B), and an opened head's header, at most.
+                assert!(programmed <= 64, "an erase step programmed {programmed} B");
+                1
+            } else if programmed <= 8 {
+                2
+            } else {
+                // Copies, each with its header, and a sector opened for them.
+                let most = u64::from(c.idle_copy_bytes + c.record_max) + 64;
+                assert!(programmed <= most, "a copy step programmed {programmed} B");
+                3
+            };
+            kinds[kind] += 1;
+        }
+    }
+    std::println!(
+        "steps: {} marks, {} erases, {} forgets, {} copies",
+        kinds[0],
+        kinds[1],
+        kinds[2],
+        kinds[3]
+    );
+    assert!(kinds.iter().all(|&k| k > 0), "{kinds:?}");
+}
+
+/// A write between steps: the victim under way is dropped (its copies so
+/// far stand; the rest of it stays live where it is) and every file reads
+/// back, now and after a mount; the next steps settle from a new mark.
+#[test]
+fn a_write_between_steps_drops_the_victim_under_way() {
+    let c = StoreConfig {
+        idle_copy_bytes: 512,
+        ..StoreConfig::default()
+    };
+    let mut st = near_full(&c, 93);
+    let mut steps = 0;
+    while st.idle_victim.is_none() {
+        assert!(st.collect_step().unwrap(), "settled before a victim");
+        steps += 1;
+    }
+    st.collect_step().unwrap();
+    assert!(st.idle_victim.is_some(), "a victim in {} steps", steps + 1);
+    st.put("/projects/demo/.lp/panel.json", &text(77, 450))
+        .unwrap();
+    assert!(st.idle_victim.is_none() && st.idle_lens.is_none());
+    let want = snapshot(&mut st);
+    idle_until_settled(&mut st);
+    assert_eq!(snapshot(&mut st), want);
+    assert_eq!(snapshot(&mut mount(st.into_flash(), &c)), want);
+}
+
+/// Cuts through steps that a write interrupts — part of a victim copied, a
+/// write, more steps; an emptied victim, a write, more steps — under the
+/// sweep's tear models: the state is the one before the write or after it.
+#[test]
+fn cut_sweep_through_steps_a_write_interrupts() {
+    for rm in [256, 1024] {
+        let c = StoreConfig {
+            record_max: rm,
+            idle_copy_bytes: 512,
+            ..cfg(100)
+        };
+        let r = sweep(NorGeometry::c6(12), &c, &interrupted_workload(), 12);
+        std::println!("{}: {r:?}", line!());
+        assert!(r.landed_old > 0 && r.landed_new > 0, "{rm}: {r:?}");
+    }
+}
+
 /// The soak's near-full fill, on the C6's 176 sectors: c40-sized content,
 /// then incompressible 4 KiB files until the store says no space — once
-/// with no idle time, once with up to 40 idle steps between writes.
-/// Each write's flash work is priced by a silicon model (an erase 19 ms, a
-/// program 0.5 ms per 256 B, a read 0.42 µs per byte: CX1's c40 mount),
-/// a host estimate — silicon numbers come from CX1, never from this.
+/// with no idle time, once with CX1's 20 s of a playing show (44 ms frames)
+/// between writes, the steps paced by the server's `lpfs::IdlePacer`.
+/// Each write's and step's flash work is priced by a silicon model (an
+/// erase 19 ms, a program 0.5 ms per 256 B, a read 0.42 µs per byte: CX1's
+/// c40 mount), a host estimate — silicon numbers come from CX1, never from
+/// this.
 #[test]
 fn idle_steps_keep_near_full_writes_from_stalling() {
     let c = StoreConfig::default();
@@ -165,12 +260,16 @@ fn idle_steps_keep_near_full_writes_from_stalling() {
     for (label, f) in [("no idle", &without), ("idle steps", &with)] {
         let over = f.costs.iter().filter(|&&ms| ms > 1000.0).count();
         let worst = f.costs.iter().cloned().fold(0.0, f64::max);
+        let but_last = f.costs[..f.costs.len() - 1]
+            .iter()
+            .cloned()
+            .fold(0.0, f64::max);
         let last20: Vec<_> = f.costs.iter().rev().take(20).collect();
         let over20 = last20.iter().filter(|&&&ms| ms > 1000.0).count();
         std::println!(
-            "{label}: {} files, {over} writes over 1 s (last 20: {over20}), worst {worst:.0} ms \
-             (model); {} erases in all; idle steps {} ({:.0} ms modelled, worst {:.0} ms); then \
-             a mount reads {} B",
+            "{label}: {} files, {over} writes over 1 s (last 20: {over20}), worst {worst:.0} ms, \
+             worst but the last {but_last:.0} ms (model); {} erases in all; idle steps {} \
+             ({:.0} ms modelled, worst {:.0} ms); then a mount reads {} B",
             f.costs.len(),
             f.erases,
             f.idle_steps,
@@ -179,6 +278,22 @@ fn idle_steps_keep_near_full_writes_from_stalling() {
             f.mount_read
         );
     }
+    std::println!(
+        "the show beside the steps: {} frames, p50 {:.0} p99 {:.0} worst {:.0} ms, {} over \
+         100 ms; the steps took {:.1} % of its time",
+        with.frames.len(),
+        with.frame_percentile(50.0),
+        with.frame_percentile(99.0),
+        with.frame_percentile(100.0),
+        with.frames_over(100.0),
+        with.fps_cost_percent()
+    );
+    // The frame-rate budget's idle row, as a radio feature's: p99 frame
+    // ≤ 100 ms and ≤ 10 % of the show's fps.
+    assert!(with.frame_percentile(99.0) <= 100.0);
+    assert!(with.fps_cost_percent() <= 10.0);
+    // A step fits beside a 44 ms frame under the ceiling.
+    assert!(with.idle_worst_ms <= 50.0, "{}", with.idle_worst_ms);
     let over = |costs: &[f64]| costs.iter().filter(|&&ms| ms > 1000.0).count();
     assert!(
         over(&without.costs) > 1,
@@ -197,8 +312,6 @@ fn idle_steps_keep_near_full_writes_from_stalling() {
         without.erases
     );
     assert!(with.mount_read < without.mount_read);
-    // An idle step is bounded: one mark and at most one victim.
-    assert!(with.idle_worst_ms < 300.0, "{}", with.idle_worst_ms);
     // Idle collection does not cost the store files.
     assert!(with.costs.len() + 2 >= without.costs.len());
 }
@@ -382,6 +495,34 @@ fn idle_workload() -> Vec<Step> {
     steps
 }
 
+/// Churn, then steps a write cuts short: `k` steps (a mark and some
+/// copies, or an emptied victim), a write, and steps until settled.
+fn interrupted_workload() -> Vec<Step> {
+    // Small files packed into shared sectors, then every other one
+    // rewritten: sectors with live records and garbage side by side.
+    let small = |st: &mut Store, rev: u64, parity: u64| {
+        st.begin()?;
+        for j in (0..24u64).filter(|j| j % 2 == parity || rev == 0) {
+            st.put(&format!("/s/{j:02}.json"), &noise(rev * 100 + j, 300))?;
+        }
+        st.commit()
+    };
+    let mut steps: Vec<Step> = vec![Box::new(move |st| small(st, 0, 0))];
+    for k in [2u32, 3, 5, 8] {
+        steps.push(Box::new(move |st| {
+            small(st, u64::from(k), u64::from(k % 2))
+        }));
+        steps.push(Box::new(move |st| {
+            for _ in 0..k {
+                st.collect_step()?;
+            }
+            st.put("/projects/a/.lp/panel.json", &text(u64::from(k) + 90, 110))?;
+            idle(st).map(drop)
+        }));
+    }
+    steps
+}
+
 /// A mount's flash reads, and how many sectors it trusted.
 fn mount_reads(mut f: NorFlashSim, c: &StoreConfig) -> (u64, u32) {
     let trusted = (0..f.geometry().sector_count)
@@ -406,7 +547,37 @@ struct Fill {
     idle_steps: u32,
     idle_ms: f64,
     idle_worst_ms: f64,
+    /// Every frame of the show in the quiet between writes (ms): the
+    /// render's own [`SHOW_FRAME_MS`], plus the step it hosted.
+    frames: Vec<f64>,
 }
+
+impl Fill {
+    /// Frames over `ms`.
+    fn frames_over(&self, ms: f64) -> usize {
+        self.frames.iter().filter(|&&f| f > ms).count()
+    }
+
+    /// The `p`th percentile frame (ms).
+    fn frame_percentile(&self, p: f64) -> f64 {
+        let mut f = self.frames.clone();
+        f.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        f.get(((f.len() as f64 - 1.0) * p / 100.0).round() as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// The share of the show's time idle steps took (%): its fps cost.
+    fn fps_cost_percent(&self) -> f64 {
+        self.idle_ms * 100.0 / self.frames.iter().sum::<f64>().max(1.0)
+    }
+}
+
+/// CX1's c40 show: a frame's render alone, quiet and settled (ms).
+const SHOW_FRAME_MS: f64 = 44.0;
+
+/// The quiet between two fill writes (ms): CX1's fill driver's 20 s.
+const FILL_QUIET_MS: f64 = 20_000.0;
 
 fn fill(c: &StoreConfig, idle_between: bool) -> Fill {
     let mut st = mount(formatted(NorGeometry::c6(176), c), c);
@@ -442,21 +613,44 @@ fn fill(c: &StoreConfig, idle_between: bool) -> Fill {
         idle_steps: 0,
         idle_ms: 0.0,
         idle_worst_ms: 0.0,
+        frames: Vec::new(),
     };
+    // The server's pacing, over the show's frames (`lpfs::IdlePacer`).
+    let mut pacer = lpfs::IdlePacer::new();
+    let mut delta = SHOW_FRAME_MS as u32;
     for i in 0..400u32 {
         let steps_before = out.idle_steps;
         if idle_between {
-            // 20 s of quiet at one step per 500 ms, as CX1's fill gives.
-            for _ in 0..40 {
-                let before = st.flash().stats().clone();
-                let did = st.collect_step().unwrap();
-                let ms = cost_ms(&before, st.flash().stats());
-                out.idle_ms += ms;
-                out.idle_worst_ms = out.idle_worst_ms.max(ms);
-                if !did {
-                    break;
+            // The write's tick ended the quiet; then 20 s of a playing show,
+            // a step after a frame whenever the pacer finds the time.
+            pacer.tick(lpfs::IdleTick {
+                delta_ms: delta,
+                busy: true,
+                playing: true,
+            });
+            delta = SHOW_FRAME_MS as u32;
+            let mut t = 0.0;
+            while t < FILL_QUIET_MS {
+                let mut frame = SHOW_FRAME_MS;
+                if pacer.tick(lpfs::IdleTick {
+                    delta_ms: delta,
+                    busy: false,
+                    playing: true,
+                }) {
+                    let before = st.flash().stats().clone();
+                    let did = st.collect_step().unwrap();
+                    pacer.ran(did);
+                    let ms = cost_ms(&before, st.flash().stats());
+                    if did {
+                        out.idle_steps += 1;
+                        out.idle_ms += ms;
+                        out.idle_worst_ms = out.idle_worst_ms.max(ms);
+                        frame += ms;
+                    }
                 }
-                out.idle_steps += 1;
+                out.frames.push(frame);
+                t += frame;
+                delta = frame.ceil() as u32;
             }
         }
         // The board's own writes go on as the store fills (panel saves).
