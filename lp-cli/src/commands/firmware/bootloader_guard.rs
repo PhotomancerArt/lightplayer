@@ -202,10 +202,7 @@ mod tests {
             ("esp32c6-bootloader-idf-v5.1.bin", "espflash 3.3.0"),
             ("esp32c6-bootloader-idf-v5.1-quiet.bin", "quiet"),
         ] {
-            let path = format!(
-                "{}/../lp-fw/bootloaders/{file}",
-                env!("CARGO_MANIFEST_DIR")
-            );
+            let path = format!("{}/../lp-fw/bootloaders/{file}", env!("CARGO_MANIFEST_DIR"));
             let bytes = std::fs::read(&path).expect("a committed bootloader");
             let name = check_bootloader_segments("esp32c6", &bytes).unwrap();
             assert!(name.unwrap().contains(expect), "{file}: {name:?}");
@@ -245,6 +242,9 @@ mod tests {
 
     #[test]
     fn chips_without_a_table_are_not_checked() {
-        assert_eq!(check_bootloader_segments("esp32", &[0xFF; 8]).unwrap(), None);
+        assert_eq!(
+            check_bootloader_segments("esp32", &[0xFF; 8]).unwrap(),
+            None
+        );
     }
 }
