@@ -210,18 +210,8 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
         state,
     } = &view.firmware_face
     {
-        let name = core
-            .as_deref()
-            .map_or_else(|| FIRMWARE_UNKNOWN.to_string(), firmware_version);
-        match state {
-            UpdateBoardState::EngineCrashing => (name, Some(CRASHING), UiStatusKind::Error, None),
-            UpdateBoardState::Updating | UpdateBoardState::OnTrial => {
-                (name, Some("updating"), UiStatusKind::Neutral, None)
-            }
-            UpdateBoardState::NeedsEngine
-            | UpdateBoardState::Running
-            | UpdateBoardState::Unknown => (name, Some(INCOMPLETE), UiStatusKind::Attention, None),
-        }
+        let (name, state, tone) = core_only_words(core.as_deref(), *state);
+        (name, state, tone, None)
     } else {
         (version.clone(), None, UiStatusKind::Neutral, None)
     };
@@ -255,24 +245,51 @@ pub(crate) fn firmware_bar(input: &BoardCardInput<'_>) -> UiStackBar {
 /// action: Install firmware is the primary.
 pub(crate) fn pending_firmware_bar(pending: &PendingLinkView) -> UiStackBar {
     let face = &pending.firmware_face;
-    let (summary, aside) = match face {
-        FirmwareFace::Unknown => (FIRMWARE_UNKNOWN.to_string(), None),
-        face if face.wants_flash() => face_words(face),
+    let (summary, aside, tone) = match face {
+        FirmwareFace::Unknown => (FIRMWARE_UNKNOWN.to_string(), None, UiStatusKind::Neutral),
+        // A core with no engine says no hello, so it waits here: the same
+        // words as the board's own card once it is kept.
+        FirmwareFace::CoreOnly { version, state } => core_only_words(version.as_deref(), *state),
+        face if face.wants_flash() => {
+            let (summary, aside) = face_words(face);
+            (summary, aside, UiStatusKind::Neutral)
+        }
         face => (
             firmware_label_version(&device_firmware_line(face, None)),
             None,
+            UiStatusKind::Neutral,
         ),
     };
     let mut said = facts("Firmware", Vec::new());
     said.sentence = Some(pending_firmware_line(face));
     UiStackBar {
         aside: aside.map(str::to_string),
+        tone,
         details: UiBarDetails {
             sections: vec![said],
             panels: Vec::new(),
             raised: false,
         },
         ..UiStackBar::new(BarLayer::Firmware, "firmware", summary)
+    }
+}
+
+/// A core with no engine, as the row's name, state and tone: its version
+/// and "incomplete" (orange) while it waits for its engine, "crashing"
+/// (red) when the engine keeps crashing, "updating" while it finishes.
+fn core_only_words(
+    core: Option<&str>,
+    state: UpdateBoardState,
+) -> (String, Option<&'static str>, UiStatusKind) {
+    let name = core.map_or_else(|| FIRMWARE_UNKNOWN.to_string(), firmware_version);
+    match state {
+        UpdateBoardState::EngineCrashing => (name, Some(CRASHING), UiStatusKind::Error),
+        UpdateBoardState::Updating | UpdateBoardState::OnTrial => {
+            (name, Some("updating"), UiStatusKind::Neutral)
+        }
+        UpdateBoardState::NeedsEngine | UpdateBoardState::Running | UpdateBoardState::Unknown => {
+            (name, Some(INCOMPLETE), UiStatusKind::Attention)
+        }
     }
 }
 
@@ -1022,6 +1039,29 @@ mod tests {
             pending_firmware_bar(&pending).summary,
             "unknown (pre-2026.07)"
         );
+    }
+
+    /// A core with no engine says no hello, so it waits as a new board:
+    /// its row reads as the kept card's will, the version and "incomplete".
+    #[test]
+    fn a_new_core_only_board_is_incomplete() {
+        let mut pending = pending_view();
+        pending.firmware_face = FirmwareFace::CoreOnly {
+            version: Some("2026.10.16-1".to_string()),
+            state: UpdateBoardState::NeedsEngine,
+        };
+        let bar = pending_firmware_bar(&pending);
+        assert_eq!(bar.summary, "v2026.10.16-1");
+        assert_eq!(bar.aside.as_deref(), Some("incomplete"));
+        assert_eq!(bar.tone, UiStatusKind::Attention);
+        pending.firmware_face = FirmwareFace::CoreOnly {
+            version: None,
+            state: UpdateBoardState::EngineCrashing,
+        };
+        let bar = pending_firmware_bar(&pending);
+        assert_eq!(bar.summary, "unknown");
+        assert_eq!(bar.aside.as_deref(), Some("crashing"));
+        assert_eq!(bar.tone, UiStatusKind::Error);
     }
 
     /// The layout question is a confirmation the row asks for: orange,

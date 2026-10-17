@@ -1794,14 +1794,13 @@ async function main() {
               // card until it is kept: its no-click restore runs (and misses)
               // there, and the row that needs a person is on the kept card.
               // The new board's card (`data-board-corner="blank"`,
-              // `pending_board_card`) settled on core-only: its firmware bar
-              // says "<version> · waiting for its firmware"
-              // (`device_firmware_face.rs` `core_only_line`, the pending
-              // firmware bar's summary).
+              // `pending_board_card`) settled on core-only: its Firmware row
+              // reads "<version> incomplete", as the kept card's will
+              // (`firmware_bar.rs` `core_only_words`).
               const pending = await driver.waitFor(
                 `(() => { const card = JSON.parse(${snapshotExpr()}).board;
-                          return card && card.corner === 'blank' && /waiting for its firmware/.test(card.firmware?.line ?? '') ? card.path : false; })()`,
-                { timeoutMs: STEP_MS, what: "the new board's card to settle on core-only (… · waiting for its firmware)" },
+                          return card && card.corner === 'blank' && /\\bincomplete\\b/.test(card.firmware?.line ?? '') ? card.path : false; })()`,
+                { timeoutMs: STEP_MS, what: "the new board's card to settle on core-only (Firmware … incomplete)" },
               );
               await shot("cant-get-pending");
               // Set up this device: `adopt`, in the new board's hardware
