@@ -220,6 +220,26 @@ impl UpdateStanding {
         )
     }
 
+    /// How far along the whole update is, as the one number every place
+    /// says (the card's surface, its Firmware row, the editor's popover):
+    /// the new firmware is the first half and its last part the second, so
+    /// the number never restarts at "2 of 2". A backup, a restore and
+    /// another device's update are one step each. `None` while the step has
+    /// no number yet, and for a standing that is no update under way.
+    pub fn whole_percent(&self) -> Option<u8> {
+        let half = |percent: Option<u8>, second: bool| {
+            percent.map(|percent| (u32::from(percent.min(100)) / 2 + u32::from(second) * 50) as u8)
+        };
+        match self {
+            Self::Updating { percent, .. } => half(*percent, false),
+            Self::Finishing { percent, .. } => half(*percent, true),
+            Self::BackingUp { percent, .. }
+            | Self::Restoring { percent, .. }
+            | Self::AnotherDevice { percent, .. } => percent.map(|percent| percent.min(100)),
+            _ => None,
+        }
+    }
+
     /// Whether this Studio is running an update on the board right now.
     pub fn is_running(&self) -> bool {
         match self {

@@ -3,7 +3,8 @@
 //! percentage, a date or a firmware version says it through the one rule
 //! here, so the same fact never reads two ways on one screen.
 //!
-//! - [`age`]: "12 s ago", and the duration "2 h".
+//! - [`age`]: "12 s ago", the duration "2 h", and in a sentence "2 hours
+//!   ago".
 //! - [`byte_size`]: "512 B", "1.5 KB", "38 KB", "4.2 MB".
 //! - [`percent`]: "42%".
 //! - [`calendar_date`]: "Oct 7" (and "Oct 7, 2026" where the year is the
@@ -21,7 +22,7 @@ pub mod calendar_date;
 pub mod firmware_version;
 pub mod percent;
 
-pub use age::{age_words, duration_words};
+pub use age::{age_spoken, age_words, duration_words};
 pub use byte_size::byte_size;
 pub use calendar_date::{CalendarDate, date_words};
 pub use firmware_version::{

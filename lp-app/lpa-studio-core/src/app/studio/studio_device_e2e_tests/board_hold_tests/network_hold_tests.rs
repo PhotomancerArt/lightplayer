@@ -1019,10 +1019,22 @@ impl Tab {
         let card = self.ui_card(mac);
         let bar = card.bar(crate::BarLayer::Connection);
         assert_eq!(bar.summary, "Someone else connected");
-        assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+        assert_eq!(
+            bar.tone,
+            crate::UiStatusKind::Neutral,
+            "the surface says it; the row goes quiet"
+        );
         let retry = bar.action.as_ref().expect("Retry on the bar");
         assert_eq!((retry.word.as_str(), &retry.offer), ("Retry", connect));
         assert_eq!(bar.work, None);
+        assert_eq!(card.surface.state, crate::SurfaceState::SomeoneElse);
+        let notice = card.surface.notice.as_ref().expect("the surface says it");
+        assert_eq!(notice.tone, crate::UiStatusKind::Attention);
+        // The primary is the row's own Retry, pressed on the same road.
+        let Some(crate::UiPrimary::Offer(primary)) = card.name_bar.primary.as_ref() else {
+            panic!("Retry: {:?}", card.name_bar.primary);
+        };
+        assert_eq!((primary.word.as_str(), &primary.offer), ("Retry", connect));
     }
 }
 

@@ -1,55 +1,81 @@
 //! The name bar's one primary action (`docs/ux/anatomy/board-card.md`,
-//! "Name bar and primary"; the connected plan's P4 table).
+//! "Name bar and primary"): the most likely thing the person wants to do
+//! (Yona, 2026-10-17), even when it repeats a row's own button.
 //!
-//! In order, first match wins:
+//! The primary follows the card's surface ([`super::board_surface`]): the
+//! surface says what is going on and its second sentence says this button
+//! aloud, so both read one state ([`surface_state`]) and can never
+//! disagree. Before the state, two rules: while a Connect is under way the
+//! primary is the spinner alone, and while this tab's session is on the
+//! board (its card, or the editor's docked card) it is Done.
 //!
-//! | Board | Primary | Offer | Icon |
+//! | Surface state | Primary | Offer | Icon |
 //! |---|---|---|---|
-//! | Connecting (the session opening, or a Connect held for the board) | the spinner alone ("USB · connecting" is the Link row's) | — | — |
-//! | The session is on it (its card, or the editor's docked card) | Done | `done` | check |
-//! | Busy | nothing (the busy row says it) | — | — |
-//! | Another tab holds it | Connect (it is the take-over) | `take-over` | the held link's |
-//! | …and is busy with it | nothing (the Link row says it) | — | — |
-//! | …a take-over is under way | the spinner alone | — | — |
-//! | Needs firmware, `flash` offered | Install firmware (the board pick) | `flash` | firmware |
+//! | Connecting, or a take-over under way | the spinner alone | — | — |
+//! | The session on the board (connected, reconnecting, in the editor) | Done | `done` | check |
+//! | Updating, installing, erasing, sending, removing, identifying | nothing (the surface and the busy row say it) | — | — |
+//! | Open in another tab, taken by another tab, a take-over that failed | Connect here | `take-over` | the held link's |
+//! | Busy in another tab | nothing (the surface: Connect here when it's done) | — | — |
+//! | Someone else connected, a Wi‑Fi connect failed | Retry | `connect-wifi` / `connect-relay` | retry |
+//! | The last Connect failed | Retry | `connect` | retry |
+//! | Not answering | Retry | `retry` | retry |
+//! | A stand-in, off | Power on | `reconnect` | play |
+//! | Offline: Wi‑Fi first, then lightplayer.app, then its cable | Connect | `connect`, else the road's own offer | wifi / cloud / the link's |
+//! | Offline, nothing reaches it | nothing | — | — |
+//! | A send, an update, an install, an erase or a removal failed, while its verb is offered again | Retry (the row's) | `push` / `update-firmware` / `flash` / `erase` / `remove-project` | retry |
+//! | Its files wait for newer firmware | Update firmware | `update-firmware` | firmware |
+//! | Its files were lost | Restore, else Reset | `restore-files`, else `start-fresh` | upload / add |
+//! | A move of its files stopped half-way | Resume update | `finish-update` | download |
+//! | Keeps crashing | Reinstall firmware | `reinstall-firmware` | firmware |
+//! | Needs a version Studio can't get, or only its core runs | Install firmware | `install-firmware`: Studio's own at one press, or the version its list picks | firmware |
+//! | An older LightPlayer | Update firmware | `update-firmware`, else `flash` (the board pick) | firmware |
+//! | From before the hello, no LightPlayer, download mode, says nothing | Install firmware | `flash` (the board pick) | firmware |
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
-//! | Attached (the port is there, closed) | Connect | `connect` | the link's |
-//! | Offline stand-in (a sim, an in-tab board) | Power on | `reconnect` | play |
-//! | Offline, reachable | Connect: Wi‑Fi first, then the cloud, then the cable | `connect` | wifi / cloud / the link's, by the road |
-//! | Offline, nothing reaches it | nothing ("Offline · 2 weeks" is the Link row's) | — | — |
-//! | Ready, running, granted at any tier | Connect | `connect` | the link's |
-//! | Ready, running no project | Add a project (the project pick) | `push` | add |
-//! | …with nothing to push, or not said what it runs | nothing (the Project row says it) | — | — |
+//! | Its port closed | Connect | `connect` | the link's |
+//! | A shader error | Edit project | `edit` (its lock on a play-only link) | edit |
+//! | Runs no project | Add a project (the project pick) | `push` | add |
+//! | All well, or its picture too large | Connect, granted at any tier | `connect` | the link's |
+//! | The layout question open, its store refused | nothing (its row and details hold the answer) | — | — |
 //!
-//! **No dead ends, and no repeats** (P2, P7). When nothing can be pressed
-//! there is no button at all — never a greyed verb, and never the row's
-//! words said again on the name bar: the busy, away or waiting row says
-//! why, once. While the board is being reached or identified, the primary
-//! is the spinner alone ([`UiPrimary::Working`]). With nothing on the board
-//! to connect to, the primary is the next useful step: Add a project, the
-//! same `push` the Project row would carry, which then does not repeat it.
+//! **No dead ends** (P7). When nothing can be pressed there is no button
+//! at all — never a greyed verb: an offer its link refuses is no primary,
+//! and the surface says the refusal in the button's place ("Firmware
+//! updates need USB."); a fix that isn't offered here is said the same
+//! way, why and what to do instead ("Connect over USB or Bluetooth to
+//! install it."). Work that failed hands over to the board's own state
+//! once its verb is no longer offered. A Connect that waits ("No
+//! project", "Project not known") is no button either: the Project row
+//! says why.
+//!
+//! The primary says its verb and its object ("Update firmware"); a row's
+//! own button says the verb alone ("Update"), because the row already
+//! names its object (P12). A name bar too narrow for the board's name
+//! beside the whole word says the verb alone too ([`UiCardAction::verb_alone`]):
+//! the surface's sentence names the object.
 //!
 //! A new board's primary is [`pending_primary`]: Install firmware once it
-//! has settled on needing firmware, else the spinner while it identifies.
+//! has settled on needing firmware (Update firmware on an older
+//! LightPlayer), else the spinner while it identifies.
 //!
 //! Connect means one thing (the board card ADR, §4): this board's panel,
 //! here, on its card, reaching the board first when it must. Edit is the
 //! Project row's action ([`super::project_bar::edit_action`]), and while the
 //! board is connected, the panel's All controls row's.
 
+use lpa_devices::ActivityKind;
 use lpa_devices::device::DeviceStatus;
-use lpa_devices::view::{LoadedProject, PendingLinkView};
+use lpa_devices::view::{FirmwareFace, LoadedProject, PendingLinkView};
 
-use super::bar_work::board_pick;
+use super::bar_work::{board_pick, retry};
 use super::board_card_input::{BoardCardInput, link_icon, offer_at};
-use super::board_connection::BoardConnection;
-use super::held_board::held_primary;
+use super::board_surface::{offline_road, road_link, surface_state};
+use super::project_bar::edit_action;
 use super::ui_bar_work::UiBarWork;
+use super::ui_board_surface::SurfaceState;
 use super::ui_card_action::{UiActionDraw, UiCardAction};
 use super::ui_name_bar::UiPrimary;
-use crate::app::devices::ui_link_kind::UiLinkKind;
-use crate::core::data_kinds::duration_words;
-use crate::{ActionEnablement, OfferPath, UiOffer};
+use crate::core::data_kinds::age_spoken;
+use crate::{OfferPath, UiOffer};
 
 /// The Link row's state while a Connect is under way ("USB · connecting");
 /// the primary is the spinner alone then.
@@ -58,157 +84,245 @@ pub const CONNECTING: &str = "connecting";
 /// The primary of a ready board that runs no project: the next step.
 pub const ADD_A_PROJECT: &str = "Add a project";
 
+/// The primary's word on a take-over: Connect, here, in this tab.
+pub const CONNECT_HERE: &str = "Connect here";
+
 /// A board's primary; `None` when nothing can be pressed.
 pub(crate) fn primary_action(
     input: &BoardCardInput<'_>,
     _work: Option<&UiBarWork>,
 ) -> Option<UiPrimary> {
-    let view = input.view;
-    let link = input.link_kind();
-    let icon = link_icon(link);
-    // No Cancel while connecting (Q10): the open is bounded by the device
-    // request deadline, a held Connect by its grace. The Link row says how.
-    if *input.connection == BoardConnection::Connecting {
-        return Some(UiPrimary::working("Connecting"));
+    let state = surface_state(input);
+    match state {
+        // No Cancel while connecting (Q10): the open is bounded by the
+        // device request deadline, a held Connect by its grace.
+        SurfaceState::Connecting => return Some(UiPrimary::working("Connecting")),
+        SurfaceState::MovingHere => {
+            return input
+                .take_over
+                .map(|over| UiPrimary::working(over.words.clone()));
+        }
+        _ => {}
     }
     // The session is on the board: on its card, or docked in the editor.
     if input.editor_holds_it {
-        return input
-            .offer("done")
-            .map(|done| offer(UiCardAction::press(done, "Done").with_icon("check")));
+        return input.offer("done").map(|done| offer(done_action(done)));
     }
-    // Busy: the row doing the work says it (P2).
-    if view.activity.is_some() {
-        return None;
-    }
-    // A board another tab holds is neither attached nor offline from here:
-    // Connect is the take-over.
-    if let Some(primary) = held_primary(input) {
-        return primary;
-    }
-    if view.needs_firmware()
-        && let Some(flash) = input.offer("flash")
-    {
-        return Some(offer(install(flash).drawn(board_pick(input))));
-    }
-    if input.locked()
-        && let Some(unlock) = input.offer("unlock")
-    {
-        return Some(offer(
+    state_action(input, state)
+        .filter(|action| action.refused.is_none())
+        .map(offer)
+}
+
+/// The offer `state` asks the person to press, in the primary's words —
+/// refused or not: the surface says a refusal in the button's place. `None`
+/// for a state with nothing to press.
+pub(crate) fn state_action(
+    input: &BoardCardInput<'_>,
+    state: SurfaceState,
+) -> Option<UiCardAction> {
+    use SurfaceState::*;
+    let view = input.view;
+    let icon = link_icon(input.link_kind());
+    let press = |verb: &str, word: &str, icon: &str| {
+        input
+            .offer(verb)
+            .map(|offer| UiCardAction::press(offer, word).with_icon(icon))
+    };
+    match state {
+        AllWell | PictureTooLarge => press("connect", "Connect", icon),
+        Connected | InTheEditor | Reconnecting => input.offer("done").map(done_action),
+        Connecting | MovingHere | Updating | Installing | Erasing | Sending | Removing
+        | Identifying | AnotherTabBusy | ConfirmationRequired | DataUnreadable => None,
+        AnotherTab | TakenByAnotherTab | MoveFailed => {
+            press("take-over", CONNECT_HERE, link_icon(input.held_link()))
+        }
+        SomeoneElse | NetworkFailed => {
+            let verb = match input
+                .wifi_connect
+                .is_some_and(|connect| connect.through_relay)
+            {
+                true => "connect-relay",
+                false => "connect-wifi",
+            };
+            press(verb, "Retry", "retry")
+        }
+        ConnectFailed => press("connect", "Retry", "retry"),
+        NotAnswering => press("retry", "Retry", "retry"),
+        PoweredOff => press("reconnect", "Power on", "play"),
+        Offline | OfflineReachable => offline_road(input).map(|(road, offer)| {
+            UiCardAction::press(offer, "Connect").with_icon(link_icon(road_link(input, road)))
+        }),
+        Disconnected => press("connect", "Connect", icon),
+        SendFailed => retry(input, ActivityKind::Push),
+        UpdateFailed => retry(input, ActivityKind::Update),
+        InstallFailed => retry(input, ActivityKind::Flash),
+        EraseFailed => retry(input, ActivityKind::Erase),
+        RemoveFailed => retry(input, ActivityKind::RemoveProject),
+        UpdateRequired => update_firmware(input),
+        DataLost => input
+            .offer("restore-files")
+            .filter(|_| view.firmware_blocked.is_none())
+            .map(|restore| UiCardAction::press(restore, "Restore").with_icon("upload"))
+            .or_else(|| press("start-fresh", "Reset", "add")),
+        UpdateInterrupted => {
+            press("finish-update", RESUME_UPDATE, "download").map(|resume| UiCardAction {
+                refused: resume.refused.or_else(|| view.firmware_blocked.clone()),
+                ..resume
+            })
+        }
+        Crashing => press("reinstall-firmware", REINSTALL_FIRMWARE, "firmware"),
+        // Studio's own build: one press, or — where the row's details list
+        // the versions — the version that list picks for the person.
+        CantGetVersion | Incomplete => input
+            .offer("install-firmware")
+            .map(|install| UiCardAction::press(install, INSTALL_FIRMWARE).with_icon("firmware")),
+        OldFirmware => update_firmware(input).or_else(|| {
+            input.offer("flash").map(|flash| UiCardAction {
+                word: UPDATE_FIRMWARE.to_string(),
+                ..install(flash).drawn(board_pick(input))
+            })
+        }),
+        PreHelloFirmware | NoFirmware | DownloadMode | Silent => input
+            .offer("flash")
+            .map(|flash| install(flash).drawn(board_pick(input)))
+            .or_else(|| {
+                update_firmware(input).map(|update| UiCardAction {
+                    word: INSTALL_FIRMWARE.to_string(),
+                    ..update
+                })
+            }),
+        Locked => input.offer("unlock").map(|unlock| {
             UiCardAction::press(unlock, "Unlock")
                 .with_icon("lock")
-                .drawn(UiActionDraw::Sheet),
-        ));
+                .drawn(UiActionDraw::Sheet)
+        }),
+        ProjectError => edit_action(input)
+            .map(|edit| UiCardAction {
+                word: EDIT_PROJECT.to_string(),
+                ..edit
+            })
+            .or_else(|| press("connect", "Connect", icon)),
+        NoProject => add_a_project(input),
     }
-    if view.status == DeviceStatus::Attached
-        && let Some(connect) = input.offer("connect")
-    {
-        return Some(offer(
-            UiCardAction::press(connect, "Connect").with_icon(icon),
-        ));
-    }
-    if view.status == DeviceStatus::Offline {
-        return offline_primary(input, link);
-    }
-    // Ready: with nothing on the board, the next step; else Connect,
-    // granted at any tier.
-    if let Some(add) = add_a_project(input) {
-        return Some(offer(add));
-    }
-    // Connect, when it can be pressed; a Connect that waits ("No project",
-    // "Project not known") is no button: the Project row says why.
-    input
-        .offer("connect")
-        .filter(|connect| connect.action.meta().enablement == ActionEnablement::Enabled)
-        .map(|connect| offer(UiCardAction::press(connect, "Connect").with_icon(icon)))
+}
+
+/// The primary's words that name their object (P12): verb and object.
+const UPDATE_FIRMWARE: &str = "Update firmware";
+const INSTALL_FIRMWARE: &str = "Install firmware";
+const REINSTALL_FIRMWARE: &str = "Reinstall firmware";
+const RESUME_UPDATE: &str = "Resume update";
+const EDIT_PROJECT: &str = "Edit project";
+
+/// The verb alone of a primary that names its object: what a name bar too
+/// narrow for the board's name (about twelve characters) beside the whole
+/// word says instead. The surface's sentence already names the object.
+fn verb_alone(word: &str) -> Option<&'static str> {
+    Some(match word {
+        UPDATE_FIRMWARE => "Update",
+        INSTALL_FIRMWARE => "Install",
+        REINSTALL_FIRMWARE => "Reinstall",
+        RESUME_UPDATE => "Resume",
+        EDIT_PROJECT => "Edit",
+        ADD_A_PROJECT => "Add",
+        CONNECT_HERE => "Connect",
+        _ => return None,
+    })
+}
+
+/// Update firmware: `update-firmware`, one press, or the board pick when
+/// the board must be picked.
+fn update_firmware(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
+    let update = input.offer("update-firmware")?;
+    let action = UiCardAction::press(update, UPDATE_FIRMWARE).with_icon("firmware");
+    Some(match update.params().is_empty() {
+        true => action,
+        false => action.drawn(board_pick(input)),
+    })
+}
+
+/// Done: the session's own verb.
+fn done_action(done: &UiOffer) -> UiCardAction {
+    UiCardAction::press(done, "Done").with_icon("check")
 }
 
 /// Add a project: the primary of a ready, idle board that runs no project
 /// — `push` with the project pick, as the project bar would draw it (the
 /// bar then does not repeat it). `None` when the board runs something or
-/// has not said, and when `push` is not offered or is refused (the primary
-/// then says "No project").
+/// has not said, and when `push` is not offered. Refused, it is no
+/// primary, and the surface says the refusal in the button's place.
 pub(crate) fn add_a_project(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
     let view = input.view;
     let ready = matches!(view.status, DeviceStatus::Ready | DeviceStatus::Degraded);
     if !ready || !input.idle() || view.loaded_project != LoadedProject::Empty {
         return None;
     }
-    let action = UiCardAction::press(input.offer("push")?, ADD_A_PROJECT)
-        .with_icon("add")
-        .drawn(UiActionDraw::ProjectPick {
-            board_id: view.board_id.clone(),
-        });
-    action.refused.is_none().then_some(action)
+    Some(
+        UiCardAction::press(input.offer("push")?, ADD_A_PROJECT)
+            .with_icon("add")
+            .drawn(UiActionDraw::ProjectPick {
+                board_id: view.board_id.clone(),
+            }),
+    )
 }
 
-/// An offline board's primary: a stand-in powers on; a board Studio can
-/// reach connects, reaching it over Wi‑Fi first, then through
-/// lightplayer.app, then by its cable (`connect`, whose icon is the road it
-/// takes); with none of those, nothing — the Link row says how long it has
-/// been away.
-fn offline_primary(input: &BoardCardInput<'_>, link: UiLinkKind) -> Option<UiPrimary> {
-    if input.stand_in()
-        && let Some(reconnect) = input.offer("reconnect")
-    {
-        return Some(offer(
-            UiCardAction::press(reconnect, "Power on").with_icon("play"),
-        ));
-    }
-    if let Some(connect) = input.offer("connect") {
-        return Some(offer(
-            UiCardAction::press(connect, "Connect").with_icon(connect.icon.clone()),
-        ));
-    }
-    // A board with no registry row has no session to open; its roads' own
-    // offers still reach it.
-    for (verb, icon) in [
-        ("connect-wifi", "wifi"),
-        ("connect-relay", "cloud"),
-        ("reconnect", link_icon(link)),
-    ] {
-        if let Some(found) = input.offer(verb) {
-            return Some(offer(UiCardAction::press(found, "Connect").with_icon(icon)));
-        }
-    }
-    None
-}
-
-/// "Offline · 2 weeks", from the registry's last sighting; "Offline" when
-/// Studio has none.
+/// "Offline · 2 hours ago", from the registry's last sighting, in the
+/// words the surface's sentence uses for the same age (P17); "Offline"
+/// when Studio has none.
 pub(crate) fn offline_words(last_seen_at: Option<f64>, now: f64) -> String {
     match last_seen_at {
-        Some(seen) => format!("Offline · {}", duration_words(now - seen)),
+        Some(seen) => format!("Offline · {}", age_spoken(now - seen)),
         None => "Offline".to_string(),
     }
 }
 
 /// A new board's primary: Install firmware once it settled on needing
-/// firmware (the board pick, filtered by the chip its boot banner named),
-/// else the spinner alone while it identifies (the Hardware row says
-/// "identifying").
+/// firmware (the board pick, filtered by the chip its boot banner named;
+/// Update firmware on an older LightPlayer), else the spinner alone while
+/// it identifies (the Hardware row says "identifying").
 pub(crate) fn pending_primary(
     pending: &PendingLinkView,
     board: &OfferPath,
     offers: &[UiOffer],
 ) -> Option<UiPrimary> {
-    if let Some(flash) = offer_at(offers, board, "flash") {
-        return Some(offer(install(flash).drawn(UiActionDraw::BoardPick {
-            chip: pending.detected_chip.clone(),
-            chip_from_banner: pending.detected_chip.is_some(),
-        })));
+    if let Some(action) = pending_action(pending, board, offers) {
+        return action.refused.is_none().then(|| offer(action));
     }
     (!pending.needs_firmware()).then(|| UiPrimary::working("Identifying"))
+}
+
+/// The offer a new board's surface asks for, refused or not: its Flash.
+pub(crate) fn pending_action(
+    pending: &PendingLinkView,
+    board: &OfferPath,
+    offers: &[UiOffer],
+) -> Option<UiCardAction> {
+    let flash = offer_at(offers, board, "flash")?;
+    let word = match pending.firmware_face {
+        FirmwareFace::OlderLightPlayer { .. } => UPDATE_FIRMWARE,
+        _ => INSTALL_FIRMWARE,
+    };
+    Some(UiCardAction {
+        word: word.to_string(),
+        ..install(flash).drawn(UiActionDraw::BoardPick {
+            chip: pending.detected_chip.clone(),
+            chip_from_banner: pending.detected_chip.is_some(),
+        })
+    })
 }
 
 /// Install firmware: the `flash` offer, in the card's words (P12: install
 /// what?).
 fn install(flash: &UiOffer) -> UiCardAction {
-    UiCardAction::press(flash, "Install firmware").with_icon("firmware")
+    UiCardAction::press(flash, INSTALL_FIRMWARE).with_icon("firmware")
 }
 
+/// The primary pressing `action`, with its verb alone for a narrow name
+/// bar.
 fn offer(action: UiCardAction) -> UiPrimary {
-    UiPrimary::Offer(action)
+    UiPrimary::Offer(match verb_alone(&action.word) {
+        Some(verb) => action.with_verb_alone(verb),
+        None => action,
+    })
 }
 
 #[cfg(test)]
@@ -216,10 +330,12 @@ pub(crate) mod tests {
     use lpa_devices::view::{Escape, FirmwareFace};
     use lpa_devices::{ActivityKind, HoldLevel, HoldVia};
 
+    use super::super::board_connection::BoardConnection;
     use super::super::card_fixtures::{CardFixture, activity};
     use super::*;
     use crate::app::access::{UiDeviceAccess, UiUnlockOffer};
     use crate::app::devices::take_over_state::UiTakeOver;
+    use crate::app::devices::ui_link_kind::UiLinkKind;
 
     #[test]
     fn a_connecting_board_says_connecting_with_its_links_icon() {
@@ -368,7 +484,81 @@ pub(crate) mod tests {
         assert_eq!(primary_action(&fixture.input(), None), None);
         assert_eq!(
             offline_words(fixture.last_seen_at, fixture.now),
-            "Offline · 2 weeks"
+            "Offline · 2 weeks ago"
+        );
+    }
+
+    /// The dead end of 2026-10-17: an older LightPlayer on USB, its board
+    /// known. Its primary is the update, pressed by path, one click.
+    #[test]
+    fn an_older_lightplayer_updates_its_firmware() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.firmware_face = FirmwareFace::OlderLightPlayer { proto: Some(33) };
+        fixture.view.status = DeviceStatus::NeedsAttention;
+        fixture.view.loaded_project = LoadedProject::Unknown;
+        fixture.view.can_receive_project = false;
+        fixture.view.can_remove_project = false;
+        let action = offered(&mut fixture);
+        assert_eq!(action.word, "Update firmware");
+        assert_eq!(action.icon.as_deref(), Some("firmware"));
+        assert_eq!(path(&action), "update-firmware");
+        assert_eq!(action.draw, UiActionDraw::Press);
+        let update = fixture.offers_at("update-firmware");
+        assert!(
+            update.consequence().is_routine(),
+            "the update keeps the project and the files: {:?}",
+            update.consequence()
+        );
+        // Its board not known: the same words over the board pick.
+        fixture.view.board_id = None;
+        fixture.view.detected_chip = None;
+        let action = offered(&mut fixture);
+        assert_eq!(action.word, "Update firmware");
+        assert_eq!(path(&action), "flash");
+        assert!(matches!(action.draw, UiActionDraw::BoardPick { .. }));
+    }
+
+    #[test]
+    fn a_board_not_answering_retries() {
+        let mut fixture = CardFixture::not_answering();
+        let action = offered(&mut fixture);
+        assert_eq!(
+            (action.word.as_str(), path(&action)),
+            ("Retry", "retry".to_string())
+        );
+    }
+
+    #[test]
+    fn a_crashing_board_reinstalls_and_lost_files_restore() {
+        let mut crashing = CardFixture::ready();
+        crashing
+            .extra_offers
+            .push(extra(&crashing, "reinstall-firmware"));
+        crashing.view.firmware_face = FirmwareFace::CoreOnly {
+            version: Some("2026.10.08-9".to_string()),
+            state: lpa_devices::UpdateBoardState::EngineCrashing,
+        };
+        crashing.view.status = DeviceStatus::NeedsAttention;
+        let action = offered(&mut crashing);
+        assert_eq!(
+            (action.word.as_str(), path(&action)),
+            ("Reinstall firmware", "reinstall-firmware".to_string())
+        );
+
+        let mut lost = CardFixture::ready();
+        lost.extra_offers.push(extra(&lost, "restore-files"));
+        lost.extra_offers.push(extra(&lost, "start-fresh"));
+        let action = offered(&mut lost);
+        assert_eq!(
+            (action.word.as_str(), path(&action)),
+            ("Restore", "restore-files".to_string())
+        );
+        lost.without_offer("restore-files");
+        lost.extra_offers.push(extra(&lost, "restore-from-file"));
+        let action = offered(&mut lost);
+        assert_eq!(
+            (action.word.as_str(), path(&action)),
+            ("Reset", "start-fresh".to_string())
         );
     }
 
@@ -436,7 +626,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_failed_connect_leaves_connect_to_press_again() {
+    fn a_failed_connect_retries_its_connect() {
         let mut fixture = CardFixture::ready();
         fixture.connection = BoardConnection::Failed {
             reason: "the board did not answer".to_string(),
@@ -444,7 +634,7 @@ pub(crate) mod tests {
         let action = offered(&mut fixture);
         assert_eq!(
             (action.word.as_str(), path(&action)),
-            ("Connect", "connect".to_string())
+            ("Retry", "connect".to_string())
         );
     }
 
@@ -473,7 +663,7 @@ pub(crate) mod tests {
     fn a_board_another_tab_holds_connects_by_taking_it_over() {
         let mut fixture = CardFixture::held(HoldLevel::Watching);
         let action = offered(&mut fixture);
-        assert_eq!(action.word, "Connect");
+        assert_eq!(action.word, "Connect here");
         assert_eq!(action.icon.as_deref(), Some("usb"));
         assert_eq!(path(&action), "take-over");
         assert_eq!(action.draw, UiActionDraw::Press);
@@ -588,6 +778,15 @@ pub(crate) mod tests {
         let prefix = "devices/mac-a0f26287b48c/";
         assert!(path.starts_with(prefix), "{path}");
         path[prefix.len()..].to_string()
+    }
+
+    /// `verb` published on the fixture's board beside the device's own, as
+    /// the controller publishes its layout and update verbs; what it
+    /// presses is the board's own published `identify` (the card only
+    /// reads that the verb is there).
+    fn extra(fixture: &CardFixture, verb: &str) -> UiOffer {
+        let identify = fixture.clone().offers_at("identify");
+        UiOffer::new(fixture.board.clone().child(verb), "upload", identify.action)
     }
 
     pub(crate) fn pending_view() -> PendingLinkView {
