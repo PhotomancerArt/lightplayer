@@ -6728,6 +6728,7 @@ dependencies = [
  "gloo-net",
  "gloo-timers",
  "js-sys",
+ "lab-layout",
  "lab-mapping-files",
  "lab-mapping-model",
  "lab-mapping-web",
