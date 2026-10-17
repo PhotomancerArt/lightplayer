@@ -364,17 +364,17 @@ async function main() {
     // for the radio, and the read rate is the page's pace against an
     // emulated clock: neither is a Bluetooth number.
     await step("card", `the card shows the board's picture over Bluetooth, then ${CARD_WINDOW_MS / 1000} s watched`, async () => {
-      // The board card says where its picture comes from in the status
-      // corner's details, the "Picture" line (today's pill, word for word):
-      // live, at the Bluetooth pace.
+      // The board card says how its picture moves in the status corner's
+      // details: the "Picture" fact names the Bluetooth pace (the frame
+      // rate and the age are facts of their own).
       await driver.openCorner({ timeoutMs: STEP_DEADLINE_MS });
       const pill = await driver.waitFor(
         `(() => { const card = document.querySelector('[data-board-card]'); if (!card) return false;
                   const dt = [...card.querySelectorAll('[data-board-corner] [id^="ux-popover-panel"] dt')]
                     .find((el) => (el.textContent || '').trim().toLowerCase() === 'picture');
                   const line = (dt?.nextElementSibling?.textContent || '').trim();
-                  return line.startsWith('live') && line.includes('shown 1–2/s') ? line : false; })()`,
-        { timeoutMs: STEP_DEADLINE_MS, what: "the card's picture line, live at the Bluetooth pace" },
+                  return line.includes('over Bluetooth') ? line : false; })()`,
+        { timeoutMs: STEP_DEADLINE_MS, what: "the card's picture fact, live at the Bluetooth pace" },
       );
       await driver.closeDetails();
       report.card = await measure(CARD_WINDOW_MS);
