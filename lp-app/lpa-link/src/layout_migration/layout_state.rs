@@ -454,10 +454,8 @@ pub(crate) mod tests {
 
     /// The tree-store table (`partitions.csv` since the cutover).
     pub(crate) fn t2_table() -> PartitionTable {
-        PartitionTable::from_csv(include_str!(
-            "../../../../lp-fw/fw-esp32c6/partitions.csv"
-        ))
-        .unwrap()
+        PartitionTable::from_csv(include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"))
+            .unwrap()
     }
 
     pub(crate) fn chip(table: Option<&PartitionTable>) -> Vec<u8> {

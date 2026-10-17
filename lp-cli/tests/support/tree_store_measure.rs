@@ -9,7 +9,6 @@
 
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
 
-
 /// One `[heap]` line.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HeapLine {

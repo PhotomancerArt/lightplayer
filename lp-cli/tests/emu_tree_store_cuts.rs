@@ -116,9 +116,10 @@ fn a_cut_at_any_flash_operation_loses_nothing_committed() {
     }
     let mut control_rows = Vec::new();
     if control && (replay.is_none() || skip_tree) {
-        if let Some(shipped) =
-            fielded_elf("emu_tree_store_cuts control", &ReferenceImage::FIELDED_LITTLEFS)
-        {
+        if let Some(shipped) = fielded_elf(
+            "emu_tree_store_cuts control",
+            &ReferenceImage::FIELDED_LITTLEFS,
+        ) {
             for scenario in scenarios(&shipped, Fs::Littlefs, long) {
                 if scenario.name == "format"
                     || only

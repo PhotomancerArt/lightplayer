@@ -1,8 +1,10 @@
 //! Decoding one `Blob` payload. The device never encodes: its own writes are
 //! stored, and host-deflated chunks (`put_chunk_deflated`) arrive coded.
-//! Decoding is `lp_deflate::inflate`, the device's own decoder, straight into
-//! the caller's buffer (no second chunk-sized buffer).
+//! Decoding is `lp_deflate::inflate_with`, the device's own decoder, straight
+//! into the caller's buffer (no second chunk-sized buffer), with its Huffman
+//! tables on the heap ([`heap_tables`]).
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::record_kind::ChunkCodec;
@@ -34,7 +36,7 @@ pub fn decode_blob_into(codec: ChunkCodec, payload: &[u8], out: &mut Vec<u8>) ->
         ChunkCodec::Deflate => {
             out.resize(start + len, 0);
             let stream = payload.get(DEFLATE_PREFIX..)?;
-            match lp_deflate::inflate(stream, &mut out[start..], 0) {
+            match lp_deflate::inflate_with(stream, &mut out[start..], 0, &mut heap_tables()) {
                 Ok(n) if n == len => {}
                 _ => {
                     out.truncate(start);
@@ -44,6 +46,19 @@ pub fn decode_blob_into(codec: ChunkCodec, payload: &[u8], out: &mut Vec<u8>) ->
         }
     }
     Some(())
+}
+
+/// The inflater's Huffman tables (≈ 3.8 KiB), on the heap. A read inflates
+/// a chunk from deep inside a project load, and on the C6 the stack frame
+/// `lp_deflate::inflate` keeps them in cost the main stack 3.6–5.6 KB of its
+/// 12 KiB margin (`lp-cli/tests/emu_stack_peak.rs`, the tree-store default
+/// switch); the heap has the room for a transient table.
+pub(crate) fn heap_tables() -> Box<lp_deflate::Tables> {
+    // SAFETY: `lp_deflate::Tables` holds integer arrays only, and all-zero
+    // bytes are a valid value (its docs): every table is rebuilt before it
+    // is read. Zeroed on the heap, so no 3.8 KiB value is built on the stack
+    // first.
+    unsafe { Box::<lp_deflate::Tables>::new_zeroed().assume_init() }
 }
 
 #[cfg(test)]

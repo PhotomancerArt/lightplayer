@@ -13,8 +13,9 @@
 //!
 //! 1. **A batched, deflated upload lands byte for byte.** The upload sends
 //!    `StopAllProjects`, `BeginBatch`, the writes (the files that shrink go
-//!    as `WriteChunkDeflated`), `CommitBatch` — the one ending that lands
-//!    them — and `LoadProject`. The board's `HashPackage` of the project
+//!    as `WriteChunkDeflated`), `LoadProject` (inside the batch: the load's
+//!    own writes join it) and `CommitBatch`, the one ending that lands them.
+//!    The board's `HashPackage` of the project
 //!    equals the hash the host computes over the same files with
 //!    `lpc_history::hash_package`, which can only be true if the board
 //!    inflated every deflated chunk to the bytes that were sent.
@@ -129,8 +130,8 @@ fn a_batched_deflated_upload_lands_byte_for_byte_in_one_committed_batch() {
         .position(|k| *k == "commit")
         .expect("an atomic board's batch is committed");
     assert!(
-        begin < commit && commit < load,
-        "the commit comes after the begin and before the load: {kinds:?}"
+        begin < load && load < commit,
+        "the load runs inside the batch (its own writes join it) and the commit ends it: {kinds:?}"
     );
     assert!(
         kinds[..load]

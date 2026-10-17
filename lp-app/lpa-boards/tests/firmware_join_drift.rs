@@ -140,7 +140,10 @@ fn every_served_c6_build_turns_on_fs_tree_and_no_other_does() {
             c6 += 1;
             assert!(turns_on, "served C6 build {id} does not turn on fs-tree");
         } else {
-            assert!(!turns_on, "served build {id} turns on fs-tree, a C6 feature");
+            assert!(
+                !turns_on,
+                "served build {id} turns on fs-tree, a C6 feature"
+            );
         }
     }
     assert!(c6 > 0, "no served C6 build");
