@@ -11,6 +11,13 @@
   image is now written up to a 4 KiB sector (trimmed to its last non-erased
   byte it ended mid-word and espflash's stub lost its tail, the split ADR's
   §9 rule).
+- **Re-run after merging main again** (#1149, the lazy first-boot format)
+  at `82b7af555`: the nine `emu_layout_migration` tests pass (T5 the same:
+  staged 8 steps — 4 old, 4 new, 2 boot nothing; retired 7 — 1 old, 7
+  boot nothing, 1 new; 78 min on a loaded M2 Max, load ~150), and every
+  Studio walk below passes again with the `fs-tree` package built from that
+  commit. T7b's store mounts with 120 free sectors, T8's (c40-sized,
+  restored from the browser's backup) with 51.
 - **The fielded board:** `ReferenceImage::FIELDED_LITTLEFS` (`3fc9aa987`,
   littlefs on the 176-sector table) and a fixture filesystem at `0x350000`.
 - **The target:** the `fs-tree` split image on the tree table

@@ -54,7 +54,13 @@ tree store allows the write order to do.
    byte for byte. A board whose files do not fit — or would leave fewer than
    16 free sectors — is refused, nothing written. **Empty directories are not
    carried**: the tree store has none (a directory exists while a file is in
-   it); every file is.
+   it); every file is. The pack keeps the rules the board's own writer
+   (`LpFsTree`) keeps in format version 3: a file under the reserved
+   `/.lp/snapshots` namespace, or named like a folder another file is in, is
+   refused by name (littlefs cannot hold the second, and nothing fielded
+   writes the first). The pack uses only the store's public surface
+   (`format`, `put`/`put_chunk_deflated`, `commit`, `mount`, `get`), so an
+   additive provision to the format does not touch it.
 3. **The write order is staged when it can be.** The tree store is
    position-independent — no sector header or record names its own sector,
    and mount orders sectors by their sequence numbers — so its sectors are
@@ -72,6 +78,22 @@ tree store allows the write order to do.
    attempt migrates from them); after the firmware, **the new board**, its
    store complete — the old filesystem's leftovers in its region are
    untrusted to the store (FORMAT.md "Sector", rule 1) and erased.
+
+   **FORMAT.md's growth rule (OW-P6).** The store records no identity, so a
+   trusted header of another store in the new region (an earlier attempt, a
+   dev build's store) whose roots out-sequence the new store's would be
+   adopted by its first mount. The migration places `lpfs` over flash
+   another layout used, so it owes the rule's guarantee — no trusted header
+   but the new store's in the region from the moment a tree core can mount
+   it (the firmware write) — and keeps it without the kill helper: every
+   free sector is erased or read erased in this session before the switch
+   (step 1), and a block the old littlefs uses that carries a store header
+   refuses the migration outright ("an interrupted migration wrote over part
+   of the old filesystem"), since littlefs does not checksum data blocks. So
+   from the switch on, the only tree headers in the region are the new
+   store's; the retire step then erases the littlefs leftovers, and the
+   final read-back covers the whole region. The retired order erases the
+   whole region first.
 4. **When the files cannot be staged, the retired order.** A littlefs that
    leaves too few free blocks in the target region, a source that is itself
    a tree store (the 176-sector stores the fs-tree dev builds left; its
@@ -181,10 +203,12 @@ tree store allows the write order to do.
 ## Verification
 
 - `lpa-link` unit tests: the probe at both geometries, the pack (fit, too
-  tight, deterministic, empty files, hot files, unstorable paths), the
-  planner's two orders, and a cut after every step (and inside the firmware
-  write at the table) ending old, new, or a board whose next attempt ends new
-  with every file (`tree_migration_plan_tests.rs`).
+  tight, deterministic, empty files, hot files, unstorable paths, the
+  snapshot namespace, a file named like a folder), the planner's two orders,
+  a cut after every step (and inside the firmware write at the table) ending
+  old, new, or a board whose next attempt ends new with every file, and a
+  foreign store with higher seqs in littlefs's free blocks gone before the
+  switch (`tree_migration_plan_tests.rs`).
 - `lp-cli/tests/emu_layout_migration.rs` (CI "C6 layout migration (x64)"):
   T1–T5 against the pinned fielded image on the emulated C6 through
   espflash's stub, including a cut after every step booted from the reset
