@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(at(r#"{"format":5}"#.to_string()), None);
 
         let line = SharedOpenState::NewerFormat.line().unwrap();
-        assert!(line.contains("newer LightPlayer"), "{line}");
+        assert!(line.contains("newer version of LightPlayer"), "{line}");
         assert!(SharedOpenState::NewerFormat.is_refusal());
         assert!(SharedOpenState::UnsupportedFormat.is_refusal());
     }
@@ -467,7 +467,7 @@ mod tests {
         ));
         assert_eq!(state, SharedOpenState::ContentRefused);
         let line = state.line().unwrap();
-        assert!(line.contains("doesn't know") && line.contains("update LightPlayer"));
+        assert!(line.contains("doesn't know") && line.contains("Update LightPlayer"));
         assert!(state.is_refusal());
         assert_ne!(line, SharedOpenState::Unreachable.line().unwrap());
 
