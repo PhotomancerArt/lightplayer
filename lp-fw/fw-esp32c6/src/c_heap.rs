@@ -22,22 +22,28 @@
 //! image-hash check and crashed it on 11 of 22 warm resets
 //! (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
 //! The region is now `HEAP_RADIO` in main RAM's `.bss`, which no bootloader
-//! loads into; when it is full a block falls back to the main region —
-//! never to `dram2_seg`.
+//! loads into; when it is full a block falls back to the main region below
+//! the split loader's RAM — never to `dram2_seg`, nor to the loader's RAM.
 //!
 //! The regions are picked by capability, and the C6 has no SPI RAM, so
 //! `MemoryCapability::External` is borrowed as a tag nothing else asks for:
 //!
 //! | region | tag | who lands there |
 //! |---|---|---|
-//! | main | `Internal` | Rust first; C when the radio region is full |
+//! | main, below the loader's RAM | `Internal` | Rust first; C when the radio region is full |
+//! | main, from the loader's RAM up | none ([`BOOTLOADER_RECLAIMED`]) | Rust only |
 //! | `dram2_seg` | none ([`BOOTLOADER_RECLAIMED`]) | Rust only (capability-free requests) |
 //! | radio | `Internal` and `External` ([`RADIO`]) | C first; Rust last of all |
 //!
 //! A request carrying `Internal` (the C fallback, esp-radio's own
-//! `InternalMemory`) therefore never reaches `dram2_seg`. Rust's global
-//! allocator asks for nothing and tries the regions in registration order:
-//! main, `dram2_seg`, radio.
+//! `InternalMemory`) therefore never reaches `dram2_seg`, nor the top of the
+//! main array where the split image's loader runs after a warm reset
+//! (`lp_bootctl::BOOT_STAGE_RAM`, 0x40850000..0x40860000): on 2026-10-14 the
+//! fallback carried 1,852 B Wi-Fi blocks there, up to 50 KB of them, on CX1
+//! (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+//! Rust's global allocator asks for nothing and tries the regions in
+//! registration order: main below the loader, main from it up, `dram2_seg`,
+//! radio.
 //!
 //! Semantics are esp-alloc 0.10's `compat` ones (`malloc.rs`): a 4-byte size
 //! header in front of each block, 4-byte alignment.
