@@ -435,6 +435,82 @@ fn a_littlefs_with_a_store_sector_in_a_used_block_is_not_trusted() {
     ));
 }
 
+/// FORMAT.md "Growing the partition" (OW-P6): the store records no
+/// identity, so a trusted sector of ANOTHER store left in the new region —
+/// an earlier attempt, a dev build's store — whose roots out-sequence the
+/// new store's would be adopted by the first mount. Here a foreign store
+/// with many commits sits in the blocks the old littlefs does not use (so
+/// the board still stages). From the switch on, the only tree headers in
+/// the region are the new store's own sectors, and every cut ends old or
+/// new with the board's own files — never the foreign ones.
+#[test]
+fn a_foreign_store_in_free_blocks_is_gone_before_the_switch() {
+    use crate::layout_migration::fs_kind::tree_sectors;
+    use crate::layout_migration::tree_image::{RamNor, store_config};
+    use lp_tree_store::{SoftSha256, TreeStore};
+
+    let files = tree();
+    let mut start = fielded(&files);
+    let at = LEGACY_C6_V2_LPFS.offset as usize;
+    let used = used_blocks(&start[at..at + 0xB_0000], LEGACY_C6_V2_LPFS).unwrap();
+    // A foreign store: 40 commits, so its newest root's seq is far above
+    // the one-transaction pack's.
+    let mut foreign = TreeStore::format(RamNor::erased(128), SoftSha256, store_config())
+        .map_err(|(e, ..)| e)
+        .unwrap();
+    for i in 0..40u32 {
+        foreign
+            .put("/projects/theirs/project.json", &noise(900, 100 + i))
+            .unwrap();
+    }
+    let foreign = foreign.into_flash().into_bytes();
+    let foreign_sectors = crate::layout_migration::tree_image::used_sectors(&foreign);
+    // Into the target region's free blocks (old blocks 48–175 not in use).
+    let free: Vec<u32> = (48..176).filter(|b| !used.contains(b)).collect();
+    assert!(free.len() > foreign_sectors.len() + 20, "room to stage");
+    for (s, b) in foreign_sectors.iter().zip(free.iter().rev()) {
+        let to = at + (*b * 4096) as usize;
+        let from = (*s * 4096) as usize;
+        start[to..to + 4096].copy_from_slice(&foreign[from..from + 4096]);
+    }
+    assert_eq!(
+        board(&start, &files),
+        Board::Old,
+        "littlefs reads past them"
+    );
+
+    let plan = migrate_plan(&start);
+    let LayoutDecision::Migrate { summary, .. } = plan_for(&start, None).unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(summary.order, Some(WriteOrder::Staged));
+    let new_fw = firmware(&t2_table(), 0x5A);
+    let target = t2();
+    let region = |flash: &[u8]| flash[target.offset as usize..target.end() as usize].to_vec();
+    let mut done = start.clone();
+    apply_steps(&mut done, &plan.steps, &new_fw).unwrap();
+    let final_region = region(&done);
+    let ours: BTreeSet<u32> = tree_sectors(&final_region).into_iter().collect();
+    let firmware_at = plan
+        .steps
+        .iter()
+        .position(|s| *s == FlashStep::WriteFirmware)
+        .unwrap();
+    for k in firmware_at + 1..=plan.steps.len() {
+        let mut flash = start.clone();
+        apply_steps(&mut flash, &plan.steps[..k], &new_fw).unwrap();
+        let now = region(&flash);
+        for s in tree_sectors(&now) {
+            let span = (s * 4096) as usize..(s as usize + 1) * 4096;
+            assert!(
+                ours.contains(&s) && now[span.clone()] == final_region[span],
+                "after step {k}: sector {s} carries a tree header that is not the new store's"
+            );
+        }
+    }
+    every_cut(&start, &plan, &files, true);
+}
+
 #[test]
 fn runs_coalesce_consecutive_sectors() {
     assert_eq!(runs(&[0, 1, 2, 5, 6, 9]), vec![(0, 3), (5, 2), (9, 1)]);

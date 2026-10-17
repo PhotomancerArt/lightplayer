@@ -20,7 +20,7 @@
 
 use lp_tree_store::{
     Flash, MountSummary, SoftSha256, StoreConfig, StoreError, StoreImage, TreeStore,
-    host_deflate_chunks, valid_path,
+    host_deflate_chunks, is_snapshot_path, valid_path,
 };
 
 use super::fs_kind::TREE_SECTOR_SIZE;
@@ -158,7 +158,13 @@ pub fn used_sectors(image: &[u8]) -> Vec<u32> {
 /// Pack every file of `tree` into a fresh tree store of `geometry`, verify
 /// it, and measure it — or refuse with nothing written.
 pub fn pack_tree(tree: &LpfsTree, geometry: LpfsGeometry) -> Result<PackedTree, Refusal> {
-    if let Some((path, _)) = tree.files().find(|(path, _)| !valid_path(path)) {
+    // The reserved snapshot namespace is the snapshot feature's alone
+    // (FORMAT.md "The snapshot namespace"; `LpFsTree` refuses writes there
+    // too): a littlefs file under it is refused by name, never carried.
+    if let Some((path, _)) = tree
+        .files()
+        .find(|(path, _)| !valid_path(path) || is_snapshot_path(path))
+    {
         return Err(Refusal::UnstorablePath(path.to_string()));
     }
     let does_not_fit = || Refusal::DoesNotFit {
@@ -180,6 +186,12 @@ pub fn pack_tree(tree: &LpfsTree, geometry: LpfsGeometry) -> Result<PackedTree, 
     let record_max = store.config().record_max;
     store.begin().map_err(|e| failed("begin", e))?;
     for (path, bytes) in tree.files() {
+        // A file and a folder never share a name (FORMAT.md "Files and
+        // paths"). littlefs cannot hold both either, so this never fires on
+        // a board's own files; a backup made elsewhere could.
+        if store.name_clash(path).map_err(|e| failed(path, e))? {
+            return Err(Refusal::UnstorablePath(path.to_string()));
+        }
         if bytes.is_empty() {
             store.put(path, &[]).map_err(|e| failed(path, e))?;
             continue;
@@ -405,6 +417,32 @@ mod tests {
         let deep = format!("/{}", vec!["d"; 40].join("/"));
         let tree = LpfsTree::from_files([(deep.clone(), b"x".to_vec())]);
         assert_eq!(pack_tree(&tree, T2), Err(Refusal::UnstorablePath(deep)));
+    }
+
+    #[test]
+    fn a_file_in_the_snapshot_namespace_is_refused_by_name() {
+        let tree = LpfsTree::from_files([
+            ("/projects/a/project.json".to_string(), b"{}".to_vec()),
+            ("/.lp/snapshots/a/one.json".to_string(), b"{}".to_vec()),
+        ]);
+        assert_eq!(
+            pack_tree(&tree, T2),
+            Err(Refusal::UnstorablePath(
+                "/.lp/snapshots/a/one.json".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_file_named_like_a_folder_is_refused_by_name() {
+        let tree = LpfsTree::from_files([
+            ("/projects/a".to_string(), b"file".to_vec()),
+            ("/projects/a/project.json".to_string(), b"{}".to_vec()),
+        ]);
+        assert!(matches!(
+            pack_tree(&tree, T2),
+            Err(Refusal::UnstorablePath(path)) if path.starts_with("/projects/a")
+        ));
     }
 
     #[test]

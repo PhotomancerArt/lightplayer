@@ -82,7 +82,8 @@ pub enum Refusal {
     /// The target image has no `lpfs` row.
     NoTargetFilesystem,
     /// A file whose path the tree store cannot hold (deeper than 32
-    /// components, an empty component).
+    /// components, an empty component, under the reserved
+    /// `/.lp/snapshots`, or a file named like a folder another file is in).
     UnstorablePath(String),
     /// The board's files are in a tree store (the newer filesystem), and the
     /// firmware about to be written does not read it: it would find no
@@ -124,7 +125,8 @@ impl core::fmt::Display for Refusal {
             Self::UnstorablePath(path) => write!(
                 f,
                 "the file {path} has a path the new filesystem cannot hold (at most 32 folders \
-                 deep, no empty names)"
+                 deep, no empty names, nothing under /.lp/snapshots, no file named like a \
+                 folder)"
             ),
             Self::TreeStoreNotRead => f.write_str(
                 "this board's files are in the tree store, a newer filesystem than this firmware \
