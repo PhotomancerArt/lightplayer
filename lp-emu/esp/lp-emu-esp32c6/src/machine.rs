@@ -7077,7 +7077,7 @@ mod tests {
             "{summary:?}"
         );
         assert!(
-            summary[1].starts_with("FLASH-OPS range=0x350000+0xb0000 ops=2"),
+            summary[1].starts_with("FLASH-OPS range=0x380000+0x80000 ops=2"),
             "{summary:?}"
         );
 

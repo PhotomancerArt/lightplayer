@@ -107,19 +107,16 @@ mod tests {
         assert_eq!(known_c6_layout(&fixture), Some(LEGACY_C6_V2_LPFS));
     }
 
-    /// Until the cutover's default switch, `partitions.csv` IS the v2 table;
-    /// after it, it is the tree table. Either way it is never a third one
-    /// without a frozen copy here.
+    /// Since the cutover's default switch (A7), `partitions.csv` is the tree
+    /// table: the 128-sector `lpfs` at `0x380000`, `factory` to `0x380000`.
+    /// It is neither frozen layout, and a move away from it freezes it here
+    /// first (a v3 table beside these two).
     #[test]
-    fn partitions_csv_is_the_v2_table_or_the_tree_table() {
-        let current =
+    fn partitions_csv_is_the_tree_table() {
+        let tree =
             PartitionTable::from_csv(include_str!("../../../../lp-fw/fw-esp32c6/partitions.csv"))
                 .unwrap();
-        let tree = PartitionTable::from_csv(include_str!(
-            "../../../../lp-fw/fw-esp32c6/partitions-tree.csv"
-        ))
-        .unwrap();
-        assert!(is_legacy_c6_v2(&current) || current.same_layout(&tree));
+        assert!(!is_legacy_c6_v1(&tree) && !is_legacy_c6_v2(&tree));
         assert_eq!(
             LpfsGeometry::from_table(&tree),
             Some(LpfsGeometry {

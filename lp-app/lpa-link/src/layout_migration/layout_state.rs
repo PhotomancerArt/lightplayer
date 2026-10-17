@@ -452,10 +452,10 @@ pub(crate) mod tests {
         legacy_c6_v2_table()
     }
 
-    /// The tree-store table (`partitions-tree.csv`).
+    /// The tree-store table (`partitions.csv` since the cutover).
     pub(crate) fn t2_table() -> PartitionTable {
         PartitionTable::from_csv(include_str!(
-            "../../../../lp-fw/fw-esp32c6/partitions-tree.csv"
+            "../../../../lp-fw/fw-esp32c6/partitions.csv"
         ))
         .unwrap()
     }

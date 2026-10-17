@@ -2235,7 +2235,7 @@ fw-esp32c6-split features="": install-rv32-target
 #   - steady headroom, core low (as flashed) and core high (after an update):
 #     the region − the page-rounded core − the engine;
 #   - update headroom: whether a second core of the same size fits beside it;
-#   - legacy overlap: app.bin's end to the pre-repartition lpfs at 0x310000.
+#   - legacy overlap: app.bin's end to the fielded littlefs superblock at 0x350000.
 # The GATE is the smallest of the steady and update headrooms, against
 # `margin`. `unsplit=1` also builds the monolithic image and prints the code
 # and image deltas against it (informational; CI does not pay that build).

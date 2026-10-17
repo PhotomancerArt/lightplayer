@@ -29,6 +29,20 @@ pub const MANIFEST_BLOB_BEGIN: &str = "\u{1}LP-FW-MANIFEST-BEGIN-v1\u{2}";
 /// Blob suffix; guards against truncated artifacts.
 pub const MANIFEST_BLOB_END: &str = "\u{3}LP-FW-MANIFEST-END-v1\u{4}";
 
+/// The mark a split image's **core** carries in its own bytes when it mounts
+/// the tree store (`fw_esp32_common::tree_fs::LP_CORE_FS_TREE_MARK`, a core
+/// root of the split link).
+///
+/// The manifest blob says the same (`fs.tree`), but it is linked into the
+/// engine, and an over-the-air update writes and trials the core before its
+/// engine exists — so the board's update guard
+/// (`fw_esp32_common::fs_tree_core_guard`) reads this instead
+/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+/// Only the mark's own layout is versioned here (`v1`); which store format
+/// the core reads is the store's business (it refuses a newer one). A scanner
+/// holds it masked, so the only contiguous copy in an image is the real mark.
+pub const CORE_FS_TREE_MARK: &str = "\u{1}LP-CORE-FS-TREE-v1\u{2}";
+
 /// JSON shape version of the manifest core payload.
 ///
 /// - 3: `target`, the opaque name of the line of builds this build belongs
@@ -499,11 +513,11 @@ pub struct ManifestPlatform {
 /// merged image, or wasm module). Returns the JSON slice, or `None` when no
 /// well-formed blob is present.
 ///
-/// The markers can appear more than once: code that SCANS for a blob (the
-/// `fs-tree` core's update guard, `fw_esp32_common::fs_tree_core_guard`)
-/// holds them as string constants, so an image carrying that code has a
-/// begin marker followed by the end marker with no JSON between. The blob
-/// is the first begin marker whose payload is a JSON object.
+/// The markers can appear more than once: code that SCANS for a blob and
+/// holds them as string constants (the tree-store update guard did, until it
+/// read the core's own mark instead) leaves a begin marker followed by the
+/// end marker with no JSON between. The blob is the first begin marker whose
+/// payload is a JSON object.
 pub fn find_manifest_core(artifact: &[u8]) -> Option<&[u8]> {
     let begin = MANIFEST_BLOB_BEGIN.as_bytes();
     let end = MANIFEST_BLOB_END.as_bytes();

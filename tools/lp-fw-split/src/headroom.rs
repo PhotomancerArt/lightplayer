@@ -13,8 +13,13 @@
 //!   update), where the engine fills the room before it;
 //! - **update**: whether a second core of the same size fits beside the
 //!   running one — the room an update needs while both exist;
-//! - **legacy overlap**: from `app.bin`'s end to `0x310000`, where the
-//!   pre-repartition `lpfs` began (informational, never a gate).
+//! - **legacy overlap**: from `app.bin`'s end to `0x350000`, where every
+//!   board fielded before the tree-store cutover keeps its littlefs
+//!   superblock pair (informational, never a gate). A tree core holds such a
+//!   board's files when a plain flash skipped the migration — but only while
+//!   that flash did not write over the superblock, i.e. while this is
+//!   positive (`fw-esp32c6/src/tree_flash.rs`, `LITTLEFS_V2_OFFSET`). The
+//!   migration itself does not depend on it: it reads the board first.
 //!
 //! The gate is the smallest of the steady and update headrooms.
 
@@ -22,8 +27,12 @@ use lp_bootctl::{LOADER_OFFSET, REGION_START, SplitLayout};
 
 use crate::split_build::SplitReport;
 
-/// Where the pre-2026-10 `lpfs` began (`lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv`).
-pub const LEGACY_LPFS_OFFSET: u32 = 0x31_0000;
+/// Where the 2026-10 repartition's littlefs `lpfs` began — every fielded
+/// board's before the tree-store cutover
+/// (`lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv`). Until the
+/// cutover this was `0x310000`, the pre-repartition one, which every image
+/// since has written over.
+pub const LEGACY_LPFS_OFFSET: u32 = 0x35_0000;
 
 /// The headroom numbers, in bytes (negative: over).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
