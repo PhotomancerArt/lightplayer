@@ -97,6 +97,11 @@ pub struct DeviceRosterView {
     /// it failed (`devices/<board>/take-over`). Joined by the controller,
     /// which holds the asks; absent = nothing to say.
     pub take_overs: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiTakeOver>,
+    /// The project each board's push is sending, by name (the library
+    /// project's slug, the example's, the starter's), for the card's
+    /// surface while the push runs. Joined by the controller, which staged
+    /// the push; absent = no name to say.
+    pub sending: std::collections::BTreeMap<lpa_devices::DeviceId, String>,
     /// Where this tab's session stands on each board it is about —
     /// connecting, connected, reconnecting, or why the last Connect failed
     /// ([`super::board_card::BoardConnection`]). Joined by the controller,
@@ -158,6 +163,7 @@ impl Default for DeviceRosterView {
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
             take_overs: std::collections::BTreeMap::new(),
+            sending: std::collections::BTreeMap::new(),
             connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
@@ -547,6 +553,8 @@ impl DeviceRoster {
             wifi_address_connect: None,
             // Joined by the controller, which holds the asks.
             take_overs: std::collections::BTreeMap::new(),
+            // Joined by the controller, which staged the pushes.
+            sending: std::collections::BTreeMap::new(),
             connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
@@ -1078,6 +1086,7 @@ mod tests {
             wifi_connects: Default::default(),
             wifi_address_connect: None,
             take_overs: Default::default(),
+            sending: Default::default(),
             connections: Default::default(),
             updates: Default::default(),
             roster: RosterView {
@@ -1149,6 +1158,7 @@ mod tests {
             wifi_connects: Default::default(),
             wifi_address_connect: None,
             take_overs: Default::default(),
+            sending: Default::default(),
             connections: Default::default(),
             updates: Default::default(),
             roster: RosterView {

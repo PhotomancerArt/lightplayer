@@ -8,20 +8,26 @@
 //! | A push or a removal running | the project, else none | the work: "sending · 40%" | Neutral | the work's Cancel |
 //! | Locked (its link unlocked nothing) | "hidden" | — | Neutral | — (Unlock is the primary) |
 //! | Its data was lost (only on evidence it had some: never a fresh install) | "none" | "data lost" | Attention | Restore (`restore-files`), Reset (`start-fresh`) beside it (O3) |
-//! | Offline | the last project known, dimmed | — | Neutral | Edit, when offered |
-//! | No LightPlayer on it (it needs firmware) | "none" | — | Neutral | — (Install firmware is the primary) |
+//! | Offline | the last project known, dimmed, else "not known" | — | Neutral | Edit, when offered |
+//! | A LightPlayer Studio can't read (older, or from before the hello), or a board that says nothing | "not known" | — | Neutral | — (the primary is its firmware) |
+//! | No LightPlayer on it (blank, somebody else's firmware) | "none" | — | Neutral | — (Install firmware is the primary) |
 //! | A shader error (degraded) | the project | "error" | Error | — (the error is in the details) |
 //! | Given an older version than the project's newest | the project | "out of date" | Neutral | "Send latest" (`push`, the project preset) |
 //! | Says it runs nothing | "none", or what starts at its next power-up | — | Neutral | "Add a project" (`push`, the picker), unless the primary carries it |
 //! | Open in the editor, or given the newest | the project | "N boards" when shared | Neutral | Edit |
 //! | Runs something this library cannot name | its label | — | Neutral | Edit |
-//! | Has not said yet, on a link | — (the spinner, a moment) | — | Neutral | — |
-//! | Has not said, and nothing reaches it | "unknown" | — | Neutral | — |
+//! | Has not said yet, a LightPlayer on a link | — (the spinner, a moment) | — | Neutral | — |
+//! | Has not said, and will not (nothing reaches it, or only its core runs) | "not known" | — | Neutral | — |
 //!
-//! The name stays in place in every state (P3): "out of date" follows it,
-//! never moves in front of it. An older copy is no alarm: the row is
-//! untinted and its button says what to do (P16). A shader error is the one
-//! broken state, red, and its whole fault is in the details (P5). `push` is
+//! "none" only when the board said it runs nothing, or has no LightPlayer
+//! to run anything: a board Studio cannot read is "not known", never a
+//! false "none" (the desk C6, 2026-10-17, played `studio` while its card
+//! said "Project none"). The name stays in place in every state (P3): "out
+//! of date" follows it, never moves in front of it. An older copy is no
+//! alarm: the row is untinted and its button says what to do (P16). A
+//! shader error is the one broken state, red, and its whole fault is in
+//! the details (P5) — and while the surface says it, the row goes quiet
+//! ([`super::board_surface::carried_layer`]). `push` is
 //! offered only when the board can take a project and has said what it
 //! runs; without it there is no action, and the words stay. On a ready
 //! board running no project, Add a project is the card's primary
@@ -38,7 +44,7 @@
 //! controls row ([`super::UiBoardPanel::edit`]): one function builds both,
 //! so they cannot disagree.
 
-use lpa_devices::view::LoadedProject;
+use lpa_devices::view::{FirmwareFace, LoadedProject};
 
 use super::bar_work::bar_work;
 use super::board_card_input::BoardCardInput;
@@ -59,8 +65,9 @@ pub const PROJECT_NONE: &str = "none";
 /// The name on a locked board: it plays something, and the link may not
 /// say what.
 pub const PROJECT_HIDDEN: &str = "hidden";
-/// The name when nothing says what the board plays and nothing will.
-const PROJECT_UNKNOWN: &str = "unknown";
+/// The name when Studio cannot read what the board plays: a LightPlayer it
+/// cannot speak to, or a board that has not said and will not.
+pub const PROJECT_UNKNOWN: &str = "not known";
 /// The state of a board whose data was lost (O3).
 pub const DATA_LOST: &str = "data lost";
 /// The state of a board given an older version than the project's newest.
@@ -121,9 +128,14 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             None,
         )
     } else if view.needs_firmware() {
-        // No LightPlayer on it: it plays nothing (Install firmware is the
-        // primary).
-        (PROJECT_NONE.to_string(), None, UiStatusKind::Neutral, None)
+        // No LightPlayer on it plays nothing (Install firmware is the
+        // primary); a LightPlayer this Studio cannot read plays something it
+        // cannot name.
+        let name = match view.firmware_face {
+            FirmwareFace::Blank | FirmwareFace::Foreign { .. } => PROJECT_NONE,
+            _ => PROJECT_UNKNOWN,
+        };
+        (name.to_string(), None, UiStatusKind::Neutral, None)
     } else if view.degraded.is_some() {
         (
             name.unwrap_or_else(|| PROJECT_UNKNOWN.to_string()),
@@ -168,8 +180,15 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 None,
             ),
             BoardPlays::Running { label } => (label.clone(), None, UiStatusKind::Neutral, None),
-            // A moment: the board has not said yet. A spinner, no words.
-            BoardPlays::Unknown if input.linked() => {
+            // A moment: a LightPlayer on a link has not said yet. A
+            // spinner, no words. A core alone never will.
+            BoardPlays::Unknown
+                if input.linked()
+                    && matches!(
+                        view.firmware_face,
+                        FirmwareFace::LightPlayer { .. } | FirmwareFace::Unknown
+                    ) =>
+            {
                 waiting = true;
                 (String::new(), None, UiStatusKind::Neutral, None)
             }
@@ -275,10 +294,15 @@ fn primary_adds_a_project(input: &BoardCardInput<'_>) -> bool {
 }
 
 /// A new board's Project row: while it is still saying who it is, nothing
-/// is known ("unknown"); once it settles on needing firmware, it plays
-/// nothing ("none": there is no LightPlayer on it to play anything).
+/// is known ("not known"); once it settles on needing firmware, it plays
+/// nothing ("none": there is no LightPlayer on it to play anything) — or,
+/// a LightPlayer this Studio cannot read, still "not known".
 pub(crate) fn pending_project_bar(pending: &lpa_devices::view::PendingLinkView) -> UiStackBar {
-    let settled = pending.needs_firmware();
+    let settled = pending.needs_firmware()
+        && matches!(
+            pending.firmware_face,
+            FirmwareFace::Blank | FirmwareFace::Foreign { .. }
+        );
     let mut known = facts("Project", Vec::new());
     known.sentence = Some(
         match settled {
@@ -647,19 +671,57 @@ mod tests {
         unknown.plays = BoardPlays::Unknown;
         unknown.view.loaded_project = LoadedProject::Unknown;
         let bar = project_bar(&unknown.input());
-        assert_eq!(bar.summary, "unknown");
+        assert_eq!(bar.summary, "not known");
         assert!(bar.stale);
     }
 
-    /// A new board says "unknown" while it identifies, and "none" once it
-    /// settles on needing firmware — never "Project not known".
+    /// A new board says "not known" while it identifies, and "none" once it
+    /// settles on having no LightPlayer.
     #[test]
-    fn a_new_board_is_unknown_then_none() {
+    fn a_new_board_is_not_known_then_none() {
         let mut pending = super::super::primary_action::tests::pending_view();
-        assert_eq!(pending_project_bar(&pending).summary, "unknown");
-        pending.firmware_face = lpa_devices::view::FirmwareFace::Blank;
+        assert_eq!(pending_project_bar(&pending).summary, "not known");
+        pending.firmware_face = FirmwareFace::Blank;
         assert_eq!(pending_project_bar(&pending).summary, "none");
         assert_eq!(pending_project_bar(&pending).kind, Some("Project"));
+        pending.firmware_face = FirmwareFace::OlderLightPlayer { proto: Some(33) };
+        assert_eq!(pending_project_bar(&pending).summary, "not known");
+    }
+
+    /// The desk C6 of 2026-10-17: an older LightPlayer plays a project this
+    /// Studio cannot read. "not known", never a false "none"; a chip with no
+    /// LightPlayer plays nothing; a core alone never says, so no spinner.
+    #[test]
+    fn a_board_studio_cannot_read_is_not_known_never_none() {
+        for (face, name) in [
+            (
+                FirmwareFace::OlderLightPlayer { proto: Some(33) },
+                "not known",
+            ),
+            (FirmwareFace::NoHello, "not known"),
+            (FirmwareFace::Silent, "not known"),
+            (FirmwareFace::Bootloader, "not known"),
+            (FirmwareFace::Blank, "none"),
+            (FirmwareFace::Foreign { label: None }, "none"),
+            (
+                FirmwareFace::CoreOnly {
+                    version: None,
+                    state: lpa_devices::UpdateBoardState::NeedsEngine,
+                },
+                "not known",
+            ),
+        ] {
+            let mut fixture = CardFixture::ready();
+            fixture.view.firmware_face = face.clone();
+            fixture.view.status = lpa_devices::device::DeviceStatus::NeedsAttention;
+            fixture.view.loaded_project = LoadedProject::Unknown;
+            fixture.view.can_receive_project = false;
+            fixture.view.can_remove_project = false;
+            fixture.plays = BoardPlays::Unknown;
+            let bar = project_bar(&fixture.input());
+            assert_eq!(bar.summary, name, "{face:?}");
+            assert_eq!(bar.work, None, "{face:?}: no spinner");
+        }
     }
 
     /// Ported from the old card: the work's narration, then the fault, then

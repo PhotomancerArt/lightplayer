@@ -1,8 +1,9 @@
 //! The board card, built in core
 //! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`): one board as
-//! a picture, a status corner, a name bar with one primary action, and five
-//! bars — project, connection, access, firmware, hardware — each with its
-//! summary, aside, tone, one action, work in progress and details.
+//! a surface (its picture, and over it what matters now), a status corner,
+//! a name bar with one primary action, and five bars — project, connection,
+//! access, firmware, hardware — each with its summary, aside, tone, one
+//! action, work in progress and details.
 //!
 //! The card is data. Its builder reads the roster's facts and the board's
 //! own offers ([`BoardCardInput`]) and decides every word, tone and action;
@@ -14,11 +15,14 @@
 //! ([`board_panel_picks`]), and its primary is Done; where the session
 //! stands on each board is [`board_connection`].
 //!
-//! - Types: [`ui_board_card`], [`ui_board_picture`], [`ui_status_corner`],
-//!   [`ui_name_bar`], [`ui_stack_bar`], [`ui_bar_work`], [`ui_card_action`],
-//!   [`ui_detail_panel`], [`ui_board_panel`], [`board_connection`].
+//! - Types: [`ui_board_card`], [`ui_board_picture`], [`ui_board_surface`],
+//!   [`ui_status_corner`], [`ui_name_bar`], [`ui_stack_bar`], [`ui_bar_work`],
+//!   [`ui_card_action`], [`ui_detail_panel`], [`ui_board_panel`],
+//!   [`board_connection`].
 //! - Building: [`board_card_input`], [`board_card_builder`], and one file
-//!   per decision: [`board_picture`], [`status_corner`], [`primary_action`],
+//!   per decision: [`board_picture`], [`board_surface`] (the state the
+//!   surface says, which the primary presses), [`status_corner`],
+//!   [`primary_action`],
 //!   [`bar_work`], [`held_board`] (a board another tab holds),
 //!   [`board_panel_picks`], and one per bar — [`project_bar`],
 //!   [`connection_bar`], [`access_bar`], [`firmware_bar`],
@@ -32,6 +36,7 @@ pub mod board_card_input;
 pub mod board_connection;
 pub mod board_panel_picks;
 pub mod board_picture;
+pub mod board_surface;
 #[cfg(test)]
 pub(crate) mod card_fixtures;
 pub mod connection_bar;
@@ -48,6 +53,7 @@ pub mod ui_bluetooth_switch;
 pub mod ui_board_card;
 pub mod ui_board_panel;
 pub mod ui_board_picture;
+pub mod ui_board_surface;
 pub mod ui_card_action;
 pub mod ui_detail_panel;
 pub mod ui_name_bar;
@@ -72,15 +78,17 @@ pub use held_board::{
     EDITOR_OPEN_ASIDE, HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE, OPEN_IN_ANOTHER_TAB,
     TAKEN_BY_ANOTHER_TAB,
 };
-pub use primary_action::{ADD_A_PROJECT, CONNECTING};
-pub use project_bar::{DATA_LOST, PROJECT_HIDDEN, PROJECT_NONE};
+pub use primary_action::{ADD_A_PROJECT, CONNECT_HERE, CONNECTING};
+pub use project_bar::{DATA_LOST, PROJECT_HIDDEN, PROJECT_NONE, PROJECT_UNKNOWN};
 pub use roster_board_cards::{RosterCardsInput, roster_board_card, roster_board_cards};
-pub use status_corner::EDITING;
 pub use ui_bar_work::{BarWorkState, UiBarWork};
 pub use ui_bluetooth_switch::{UiBluetoothSwitch, bluetooth_switch};
 pub use ui_board_card::{UiBoardCard, UiBoardPresence};
 pub use ui_board_panel::{UiBoardPanel, UiCardControl};
 pub use ui_board_picture::{PictureSource, UiBoardPicture};
+pub use ui_board_surface::{
+    SurfacePicture, SurfaceProgress, SurfaceState, UiBoardSurface, UiSurfaceNotice,
+};
 pub use ui_card_action::{UiActionDraw, UiCardAction};
 pub use ui_detail_panel::UiDetailPanel;
 pub use ui_name_bar::{UiNameBar, UiPrimary};

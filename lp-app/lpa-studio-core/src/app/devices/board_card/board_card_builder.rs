@@ -5,17 +5,22 @@
 //! own offers publish (a debug assertion, and a test): a button the card
 //! drew that the tree did not offer would be one the app agent cannot see
 //! and a press that could only fail.
+//!
+//! The rows come first; the surface reads them finished (its progress is
+//! the running row's), and its state names the one row it speaks for,
+//! which then goes quiet: the surface is the card's one loud place.
 
 use lpa_devices::view::PendingLinkView;
 
 use super::access_bar::{access_bar, pending_access_bar};
 use super::board_card_input::BoardCardInput;
 use super::board_picture::board_picture;
+use super::board_surface::{board_surface, carried_layer, pending_surface, surface_state};
 use super::connection_bar::{connection_bar, pending_connection_bar};
 use super::detail_sections::notice;
 use super::firmware_bar::{firmware_bar, pending_firmware_bar};
 use super::hardware_bar::{hardware_bar, pending_hardware_bar};
-use super::primary_action::{pending_primary, primary_action};
+use super::primary_action::{pending_action, pending_primary, primary_action, state_action};
 use super::project_bar::{edit_action, pending_project_bar, project_bar};
 use super::status_corner::{layer_title, status_corner};
 use super::ui_bar_work::{BarWorkState, UiBarWork};
@@ -24,7 +29,7 @@ use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
 use super::ui_detail_panel::UiDetailPanel;
 use super::ui_name_bar::UiNameBar;
-use super::ui_stack_bar::UiStackBar;
+use super::ui_stack_bar::{BarLayer, UiStackBar};
 use super::ui_status_corner::{CornerMark, UiCornerDetails, UiStatusCorner};
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::{OfferPath, RichLine, RichSection, RichWeight, UiOffer, UiStatusKind};
@@ -40,12 +45,25 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     ]
     .into_iter()
     .map(with_failure_notice)
+    .map(with_work_tone)
     .collect();
     let running_work = bars
         .iter()
         .filter_map(|bar| bar.work.as_ref())
-        .find(|work| work.state == super::ui_bar_work::BarWorkState::Running);
+        .find(|work| work.state == BarWorkState::Running);
     let panel = connected_panel(input);
+    let picture = board_picture(input);
+    let primary = primary_action(input, running_work);
+    let state = surface_state(input);
+    let surface = board_surface(
+        input,
+        state,
+        &bars,
+        &picture,
+        primary.as_ref(),
+        state_action(input, state).as_ref(),
+    );
+    let bars = quiet_rows(bars, carried_layer(state));
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
@@ -55,18 +73,46 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
             true => UiBoardPresence::Offline,
             false => UiBoardPresence::Online,
         },
-        picture: board_picture(input),
-        status: status_corner(input, &bars, panel.is_some()),
+        picture,
+        surface,
+        status: status_corner(input, &bars),
         name_bar: UiNameBar {
             title: input.view.title.clone(),
             place: None,
-            primary: primary_action(input, running_work),
+            primary,
         },
         bars,
         panel,
     };
     debug_assert_offered(&card, input.offers);
     card
+}
+
+/// A row's tone reads how its work stands: green for a few seconds after
+/// work that went well, red (striped) after work that failed; while work
+/// runs the row is neutral, as its builder left it.
+fn with_work_tone(mut bar: UiStackBar) -> UiStackBar {
+    match bar.work.as_ref().map(|work| &work.state) {
+        Some(BarWorkState::Done) => bar.tone = UiStatusKind::Good,
+        Some(BarWorkState::Failed { .. }) => bar.tone = UiStatusKind::Error,
+        Some(BarWorkState::Running) | None => {}
+    }
+    bar
+}
+
+/// The rows go quiet: the row whose problem the surface says keeps its
+/// state word and its button, and loses its attention or error tone. The
+/// surface is the one loud place (P2).
+fn quiet_rows(bars: Vec<UiStackBar>, carried: Option<BarLayer>) -> Vec<UiStackBar> {
+    bars.into_iter()
+        .map(|mut bar| {
+            let loud = matches!(bar.tone, UiStatusKind::Attention | UiStatusKind::Error);
+            if Some(bar.layer) == carried && loud {
+                bar.tone = UiStatusKind::Neutral;
+            }
+            bar
+        })
+        .collect()
 }
 
 /// A row whose work failed says why in its details, first: its notice is
@@ -119,6 +165,12 @@ pub fn pending_board_card(
         Some(detail) => format!("{} · {detail}", pending.state_label),
         None => pending.state_label.clone(),
     };
+    let primary = pending_primary(pending, board, offers);
+    let surface = pending_surface(
+        pending,
+        primary.as_ref(),
+        pending_action(pending, board, offers).as_ref(),
+    );
     let card = UiBoardCard {
         board: board.clone(),
         device: pending.device,
@@ -129,9 +181,9 @@ pub fn pending_board_card(
             dim: false,
             light: None,
         },
+        surface,
         status: UiStatusCorner {
             mark: CornerMark::Blank,
-            reading: None,
             details: UiCornerDetails {
                 sections: vec![RichSection {
                     title: "Running".to_string(),
@@ -153,7 +205,7 @@ pub fn pending_board_card(
         name_bar: UiNameBar {
             title: pending.title.clone(),
             place: None,
-            primary: pending_primary(pending, board, offers),
+            primary,
         },
         bars: vec![
             pending_project_bar(pending),
@@ -341,11 +393,16 @@ mod tests {
             assert_eq!(card.picture.source, PictureSource::Saved);
             assert!(card.picture.dim);
             assert!(card.picture.frame.is_some());
-            assert_eq!(card.status.reading, None, "the picture dims (P4)");
-            assert_ne!(
-                card.status.mark,
-                CornerMark::Notice(UiStatusKind::Attention),
-                "the Link row says someone has it, once (P2)"
+            assert_eq!(card.surface.state, crate::SurfaceState::AnotherTab);
+            assert_eq!(
+                card.surface.picture,
+                crate::SurfacePicture::Dimmed,
+                "the picture dims under the notice"
+            );
+            assert_eq!(
+                card.bar(BarLayer::Connection).tone,
+                UiStatusKind::Neutral,
+                "the surface says someone has it, once (P2)"
             );
             let running = card.status.details.sections.last().expect("running");
             let lines: Vec<(&str, &str)> = running
@@ -366,7 +423,7 @@ mod tests {
                     .primary
                     .as_ref()
                     .and_then(|primary| primary.word()),
-                Some("Connect")
+                Some("Connect here")
             );
             assert_eq!(
                 card.bar(BarLayer::Connection).summary,

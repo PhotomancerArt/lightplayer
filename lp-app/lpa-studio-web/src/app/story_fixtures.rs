@@ -59,6 +59,7 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         wifi_connect: None,
         take_over: None,
         update: None,
+        sending: None,
         layout: None,
         plays: &lpa_studio_core::BoardPlays::Running {
             label: "demo-project".to_string(),

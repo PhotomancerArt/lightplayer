@@ -124,15 +124,14 @@ pub fn StackBar(
     }
 }
 
-/// The tone the row is drawn in: work tints it by how it stands (neutral
-/// while it runs, green when it went well, red when it failed); otherwise
-/// the row's own tone.
+/// The tone the row is drawn in: neutral while its work runs; otherwise the
+/// row's own, which core decides — green a moment after work that went
+/// well, red after work that failed, and quiet when the card's surface says
+/// the row's problem (the rows go quiet).
 pub(crate) fn row_tone(bar: &UiStackBar) -> UiStatusKind {
     match bar.work.as_ref().map(|work| &work.state) {
         Some(BarWorkState::Running) => UiStatusKind::Neutral,
-        Some(BarWorkState::Done) => UiStatusKind::Good,
-        Some(BarWorkState::Failed { .. }) => UiStatusKind::Error,
-        None => bar.tone,
+        Some(BarWorkState::Done | BarWorkState::Failed { .. }) | None => bar.tone,
     }
 }
 
@@ -316,20 +315,6 @@ pub(crate) fn bar_tone_class(tone: UiStatusKind) -> &'static str {
     }
 }
 
-/// The icon a status mark leads with, so a tone never rests on colour
-/// alone where no word says it (the status corner's mark); `None` for
-/// Neutral. A row keeps its kind's icon and says its state in a word.
-pub(crate) fn tone_icon(tone: UiStatusKind) -> Option<StudioIconName> {
-    match tone {
-        UiStatusKind::Neutral => None,
-        UiStatusKind::Working => Some(StudioIconName::Refresh),
-        UiStatusKind::Good => Some(StudioIconName::StepComplete),
-        UiStatusKind::Live => Some(StudioIconName::Newer),
-        UiStatusKind::Warning | UiStatusKind::Attention => Some(StudioIconName::StepAttention),
-        UiStatusKind::Error => Some(StudioIconName::StatusError),
-    }
-}
-
 /// The fixed row: 28 px with its top hairline (the rows are full-bleed rows
 /// of one card, never boxes), the last one rounded with the card.
 const BAR_BASE_CLASS: &str = "ux-board-bar tw:relative tw:flex tw:h-7 tw:min-w-0 tw:items-stretch tw:border-0 tw:border-t tw:border-solid tw:text-[11.5px] tw:last:rounded-b-[7px]";
@@ -503,17 +488,15 @@ mod tests {
         UiStatusKind::Error,
     ];
 
-    /// Every tone maps to a tint in its own family — Neutral to none — and
-    /// every non-neutral tone has a status icon for the corner's mark.
+    /// Every tone maps to a tint in its own family — Neutral to none.
     #[test]
-    fn every_tone_tints_in_its_family_and_carries_its_icon() {
+    fn every_tone_tints_in_its_family() {
         for kind in KINDS {
             let class = bar_tone_class(kind);
             match kind {
                 UiStatusKind::Neutral => {
                     assert!(!class.contains("tw:bg-"), "{class}");
                     assert!(!class.contains("status"), "{class}");
-                    assert_eq!(tone_icon(kind), None);
                 }
                 _ => {
                     let family = format!("{kind:?}").to_lowercase();
@@ -521,7 +504,6 @@ mod tests {
                         let token = format!("status-{family}-{part}");
                         assert!(class.contains(&token), "{token} missing: {class}");
                     }
-                    assert!(tone_icon(kind).is_some(), "{kind:?} has no icon");
                 }
             }
         }

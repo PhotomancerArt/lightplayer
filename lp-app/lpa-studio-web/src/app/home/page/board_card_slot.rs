@@ -130,8 +130,8 @@ mod tests {
 
     /// The home page reverses D7: an offline board is not folded away
     /// under a line, it is a card under Offline boards — and that card
-    /// draws the board's last picture, dimmed, its age a fact in the
-    /// corner's details (the corner itself stays quiet: P4).
+    /// draws the board's last picture, dimmed under the surface's "This
+    /// board is offline.", its age a fact in the corner's details too.
     #[test]
     fn an_offline_board_is_a_card_with_its_last_picture_and_its_age() {
         let mut devices = roster(vec![
@@ -146,9 +146,11 @@ mod tests {
         let card = slot_card(&sections.offline[0], &devices).expect("its card");
         assert!(card.picture.frame.is_some(), "{:?}", card.picture);
         assert!(card.picture.dim, "a last picture is dimmed");
+        assert_eq!(card.surface.state, lpa_studio_core::SurfaceState::Offline);
         assert_eq!(
-            card.status.reading, None,
-            "the picture dims; the corner is quiet"
+            card.surface.picture,
+            lpa_studio_core::SurfacePicture::Dimmed,
+            "the picture dims under the surface's notice"
         );
         assert!(
             card.status.details.sections.iter().any(|section| section

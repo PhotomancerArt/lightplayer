@@ -176,22 +176,35 @@ fn ended_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<UiBarWork> 
             ..UiBarWork::running(done_word(end.kind), None)
         });
     }
-    let failed = outcome
-        .filter(|outcome| !outcome.ok && !end.ok)
-        .filter(|_| end.kind != ActivityKind::Identify)?;
-    input.idle().then(|| {
-        UiBarWork::failed(
-            failed_words(end.kind),
-            Some(failed.summary.clone()),
-            retry(input, end.kind),
-        )
-    })
+    let kind = failed_kind(input).filter(|kind| *kind == end.kind)?;
+    Some(UiBarWork::failed(
+        failed_words(kind),
+        outcome.map(|outcome| outcome.summary.clone()),
+        retry(input, kind),
+    ))
+}
+
+/// The kind of work that failed and still shows so: the model keeps its
+/// failed outcome until the next activity clears it, past the few green
+/// seconds a success gets. Never an identify (how it ended is the board's
+/// own state now), and only on an idle board.
+pub(crate) fn failed_kind(input: &BoardCardInput<'_>) -> Option<ActivityKind> {
+    let end = input.ended?;
+    if end.shows_done(input.now) || end.ok || end.kind == ActivityKind::Identify {
+        return None;
+    }
+    let failed = input
+        .view
+        .last_outcome
+        .as_ref()
+        .is_some_and(|outcome| !outcome.ok);
+    (failed && input.idle()).then_some(end.kind)
 }
 
 /// Retry for a failed `kind`: the row's own verb, when it is offered again —
 /// the project picker for a push, the update for an update, the board pick
 /// for a flash. Nothing else retries from the row.
-fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<UiCardAction> {
+pub(crate) fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<UiCardAction> {
     let retry = |offer, draw| {
         Some(
             UiCardAction::press(offer, "Retry")

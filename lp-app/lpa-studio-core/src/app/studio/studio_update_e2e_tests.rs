@@ -840,12 +840,15 @@ fn a_crashing_boards_firmware_bar_reinstalls_by_path() {
     bench.run_until("the card to offer Reinstall", |bench| {
         matches!(bench.standing(device), UpdateStanding::KeepsCrashing { .. })
     });
-    let bar = firmware_bar(&bench, device);
-    assert_eq!(
-        bar.tone,
-        crate::UiStatusKind::Error,
-        "crashing is broken: red"
-    );
+    let card = board_card(&bench, device);
+    let bar = card.bar(crate::BarLayer::Firmware).clone();
+    // Crashing is broken, and the surface says so in red; the row keeps its
+    // word and its button, quietly.
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(card.surface.state, crate::SurfaceState::Crashing);
+    assert_eq!(notice.tone, crate::UiStatusKind::Error, "broken: red");
+    assert_eq!(notice.first, "This board's firmware keeps crashing.");
+    assert_eq!(bar.tone, crate::UiStatusKind::Neutral, "the row goes quiet");
     assert_eq!(bar.aside.as_deref(), Some("crashing"));
     let reinstall = bar.action.expect("Reinstall");
     assert_eq!(reinstall.word, "Reinstall");
@@ -853,6 +856,11 @@ fn a_crashing_boards_firmware_bar_reinstalls_by_path() {
         reinstall.offer,
         bench.controller.device_verb(device, "reinstall-firmware")
     );
+    let Some(crate::UiPrimary::Offer(primary)) = card.name_bar.primary.clone() else {
+        panic!("Reinstall firmware: {:?}", card.name_bar.primary);
+    };
+    assert_eq!(primary.word, "Reinstall firmware");
+    assert_eq!(primary.offer, reinstall.offer, "the row's button, repeated");
     let boots = bench.board().rig.boots;
     bench
         .controller
@@ -2545,6 +2553,13 @@ impl Bench {
 
 /// The firmware bar of `device`'s card, as the home view publishes it.
 fn firmware_bar(bench: &Bench, device: DeviceId) -> crate::UiStackBar {
+    board_card(bench, device)
+        .bar(crate::BarLayer::Firmware)
+        .clone()
+}
+
+/// The board's card, as the home view publishes it.
+fn board_card(bench: &Bench, device: DeviceId) -> crate::UiBoardCard {
     bench
         .controller
         .view()
@@ -2555,8 +2570,6 @@ fn firmware_bar(bench: &Bench, device: DeviceId) -> crate::UiStackBar {
         .into_iter()
         .find(|card| card.device == device)
         .expect("the board's card")
-        .bar(crate::BarLayer::Firmware)
-        .clone()
 }
 
 // ---------------------------------------------------------------------
