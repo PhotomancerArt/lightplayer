@@ -36,6 +36,7 @@ pub fn tree_store_config(cfg: &CandidateConfig) -> Result<(StoreConfig, T1Codec)
             "record_max" => c.record_max = num()?,
             "reserve" => c.reserve = num()?,
             "txn_delta_max" => c.txn_delta_max = num()?,
+            "dir_cache_max" => c.dir_cache_max = num()?,
             "gc_policy" => {
                 c.gc_policy = match v.as_str() {
                     "greedy" => GcPolicy::Greedy,

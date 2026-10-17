@@ -167,6 +167,7 @@ What the store keeps between operations (`TreeStoreStats.resident_ram_bytes`
 | index: sorted `(id u64, sector u16 \| offset u16)` | 12 B per record |
 | sector table: end u16, live u16, erase count u32, seq u32, head kind (a bit) | 12 B + 1 bit per sector |
 | retired list | 2 B per retired sector |
+| directory cache (`dir_cache.rs`): the directory nodes the last lookups read, by id | ≤ `dir_cache_max` (4 KiB) of directory bytes; empty after mount and after every write |
 
 Between marks the index also holds every record written since; when it has
 grown an eighth (+ 16) past the last mark's live set, the next write marks
@@ -194,6 +195,7 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 | `gc_policy` | `CostBenefit` | `Greedy` (most garbage) or `CostBenefit` (LFS: `(1−u)·age/(1+u)`) |
 | `reserve` | 3 | sectors every write must leave free |
 | `txn_delta_max` | 2048 | RAM a transaction's directory delta may hold before it is written as pending directories |
+| `dir_cache_max` | 4096 | bytes of directory nodes the last lookups read, kept between calls (`dir_cache.rs`) so a project load does not read `/projects/a/…` again per file; dropped on every write; 0 = none |
 
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`

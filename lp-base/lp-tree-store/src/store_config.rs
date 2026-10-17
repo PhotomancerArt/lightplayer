@@ -21,6 +21,11 @@ pub struct StoreConfig {
     /// RAM a transaction may hold as not-yet-written directory changes
     /// (paths and entries) before it writes them as pending directories.
     pub txn_delta_max: u32,
+    /// RAM the directory cache may hold between calls, in bytes of
+    /// directory nodes (`dir_cache.rs`): the directories the last lookups
+    /// read, so a project load does not read `/projects/a/…` again for each
+    /// of its files. Dropped on every write. 0: no cache.
+    pub dir_cache_max: u32,
 }
 
 impl Default for StoreConfig {
@@ -30,6 +35,7 @@ impl Default for StoreConfig {
             gc_policy: GcPolicy::CostBenefit,
             reserve: 3,
             txn_delta_max: 2048,
+            dir_cache_max: 4096,
         }
     }
 }

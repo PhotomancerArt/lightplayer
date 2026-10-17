@@ -17,7 +17,9 @@
 //! - `c40`: the same project replaced by a c40-sized one (132 files, ~216 KB);
 //! - `used` (`LP_FIRST_LIGHT_CHURN` pushes of c40 first, 20 by default): a
 //!   written-out store, as a board that has been edited for a while has;
-//! - `full` (4 KiB files until the store says no space): nearly full.
+//! - `full` (4 KiB files until the store says no space): nearly full;
+//! - `project:<dir>`: any project directory (repo-relative or absolute),
+//!   pushed as `basic` is — e.g. `project:catalog/projects/playful-choker-tryout`.
 //!
 //! **It erases the board's filesystem** (the merged image's blank `lpfs`).
 //! Run it only on the sacrificial board, leased. Env: `LP_FIRST_LIGHT_DIR`
@@ -202,6 +204,15 @@ async fn prepare(case: &str, conn: CliConnection, churn: usize) -> CliConnection
                     }
                 }
             }
+        }
+        // Any project directory (repo-relative, or absolute), pushed as
+        // `basic` is: `project:catalog/projects/playful-choker-tryout`.
+        other if other.starts_with("project:") => {
+            let path = &other["project:".len()..];
+            client
+                .replace_and_load_project("first-light", &project_files(path))
+                .await
+                .expect("push the project");
         }
         other => panic!("unknown case {other:?}"),
     }

@@ -40,6 +40,7 @@ macro_rules! mutant {
 mod blob_codec;
 #[cfg(feature = "deflate-plan")]
 mod deflate_plan;
+mod dir_cache;
 mod dir_node;
 mod dir_rebuild;
 mod flash;
