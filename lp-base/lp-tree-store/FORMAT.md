@@ -127,11 +127,20 @@ Writing and killing:
   cell during the header can only leave a header without the magic, which
   is untrusted (rule 1), never one that reads as a newer version (rule 0).
   Every writer of every version keeps this order.
-- Before every erase, a writer programs the header to **24 zero bytes**
-  ("kill"). A torn erase can then never leave an old valid header in front
-  of weak bits.
+- Before every erase, a writer **kills** the header: it programs the
+  magic (bytes 0..4) to zero, then the header CRC (bytes 20..24) to zero.
+  A torn erase can then never leave an old valid header in front of weak
+  bits. Bytes 4..20 — version, head kind, sector size, flags, seq and
+  **erase count** — are left as they read, so a sector's erase count
+  survives a kill: a later writer may read it from a killed header (magic
+  and CRC zero, version 3, its own sector size) to keep wear history
+  across a format or a cut between kill and erase; this one does not yet.
+  A header reads **killed** when its magic and CRC read zero (24 zero
+  bytes, what kills programmed before 2026-10-16, reads killed too). A
+  reader needs nothing new: a header without the magic is untrusted
+  (rule 1).
 - **Formatting** need not erase every sector. A writer that makes an empty
-  store kills (24 zero bytes, read back) the header of every sector it
+  store kills (read back killed) the header of every sector it
   does not erase and that does not read all `0xFF`, before it writes the
   store's first record: then no earlier store's sector — its roots, of any
   sequence, included — is trusted again, and a kill a power cut left weak
@@ -719,9 +728,11 @@ it yet, and the first change that needs it must.
 Rule 0 trusts 6 bytes with no CRC, so it matters what else could put them
 there:
 
-- *Erased* (`FF…`) and *killed* (`00…`) headers do not show the magic.
-- *A torn kill* over a good header only clears bits, so the version stays a
-  subset of 3's bits (0..3), never greater.
+- *Erased* (`FF…`) and *killed* (magic `00…`) headers do not show the
+  magic.
+- *A torn kill* over a good header programs only the magic and the CRC and
+  only clears bits: the version is not touched (and a magic with any bit
+  cleared is no magic).
 - *A torn erase* starts from a killed header (the writer kills before every
   erase) and moves bits towards 1. To read as the magic, exactly its 13
   one-bits must have come up and its 19 zero-bits stayed down — one

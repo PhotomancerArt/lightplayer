@@ -248,8 +248,9 @@ second format works.
 all of them. Sectors 0 and 1 — littlefs's superblock pair, so neither a
 littlefs core nor the host's probe finds the old files again — are killed,
 erased and read back, and the two heads open there. Every other sector
-whose header does not read erased gets its header killed (24 zero bytes,
-read back; a kill that does not take is an erase), so no earlier store's
+whose header does not read erased gets its header killed (magic and CRC
+zeroed, the erase count left; read back; a kill that does not take is an
+erase), so no earlier store's
 sector is trusted again — its roots, whatever their sequence, included —
 and a kill a cut left weak is finished. The rest are erased when they are
 first opened, which `open_sector` does after any mount anyway (a mount

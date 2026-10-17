@@ -10,7 +10,7 @@
 //! kill, applied to the range.
 
 use crate::flash::Flash;
-use crate::sector_header::{KILLED_SECTOR_HEADER, SECTOR_HEADER_LEN};
+use crate::sector_header::{KILL_SPANS, SECTOR_HEADER_LEN, reads_killed};
 
 /// Kill the header of every sector from `first` to the end of `flash` (the
 /// enlarged partition) that does not read all `0xFF`, and read it back; a
@@ -30,10 +30,12 @@ pub fn kill_added_sectors<F: Flash>(flash: &mut F, first: u32) -> Result<u32, F:
         // Killed again even when it reads killed: a kill a power cut left
         // weak reads killed on some reads only (programming zeros over zeros
         // finishes it and changes nothing else).
-        let was_killed = h == KILLED_SECTOR_HEADER;
-        flash.program(s * size, &KILLED_SECTOR_HEADER)?;
+        let was_killed = reads_killed(&h);
+        for (from, to) in KILL_SPANS {
+            flash.program(s * size + from, &[0u8; 4][..(to - from) as usize])?;
+        }
         flash.read(s * size, &mut h)?;
-        if h != KILLED_SECTOR_HEADER {
+        if !reads_killed(&h) {
             flash.erase_sector(s)?;
         }
         killed += u32::from(!was_killed);
