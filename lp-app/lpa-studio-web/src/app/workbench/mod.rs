@@ -37,6 +37,8 @@
 //! ([`crate::app::editor_shell::EditorShellCenter`]); the Tree's Mapping
 //! body and the Outputs panel are that editor's rails, grown in place.
 
+#[cfg(feature = "stories")]
+pub(crate) mod graph_stories;
 pub mod graph_view;
 pub mod panels;
 #[cfg(feature = "stories")]
@@ -558,7 +560,7 @@ pub fn WorkbenchFrame(
                             }
                         },
                         WorkbenchView::Graph => rsx! {
-                            GraphCenter { page: graph.clone(), state: graph_state.clone() }
+                            GraphCenter { page: graph.clone(), state: graph_state.clone(), on_action }
                         },
                     }
                     if let Some(panel) = *summoned.read() {
