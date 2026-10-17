@@ -85,3 +85,14 @@ cycles); `emu_ota` U19 (X → Y, Y → Y-dies rolled back, Y healed, two power
 cycles: Y runs its engine and still refuses Y-dies). Both failed on `main`
 (`boot state not trusted`, `engine not started (trial)`) and pass with the
 fix, through both doors.
+
+**Silicon (CX1, c6-expendable, 14:C1:9F:E6:54:90).** The same walk on
+`main`'s images and then on the fix's, each from a USB flash of X with
+`projects/test/basic` uploaded: X → Y `UpToDate`, Y → Y-dies
+`RefusedBuild`, Y again `UpToDate` (project running, `refusedBuild` named),
+then three `board power-cycle`s. On `main` every cycle came up `(fallback)`
+· `engine not started (trial)` · `boot state not trusted` · `core-only: on
+trial`. With the fix every cycle came up `(rolled back)` with its engine,
+`[CORE] rolled back: the newer core (build 0x433c544c) failed its trial`,
+the project's output opened, and the hello said `running` with
+`refusedBuild` 1128027212 (Y-dies).
