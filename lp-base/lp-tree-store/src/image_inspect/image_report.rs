@@ -32,7 +32,8 @@ pub enum SectorState {
     Valid,
     /// Every byte is `0xFF`: erased, free.
     Blank,
-    /// A killed header (24 zero bytes): an erase was about to happen.
+    /// A killed header (magic and CRC zero): an erase was about to happen,
+    /// or a format left it.
     Killed,
     /// Not a header of this version and not blank or killed: the writer
     /// erases it before it is used again.

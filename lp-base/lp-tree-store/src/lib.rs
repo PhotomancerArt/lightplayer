@@ -43,6 +43,7 @@ mod deflate_plan;
 mod dir_node;
 mod dir_rebuild;
 mod flash;
+mod format_reservations;
 mod gc_copy;
 mod gc_mark;
 mod gc_victim;
@@ -59,10 +60,12 @@ mod mount_walk;
 mod multi_node;
 #[cfg(feature = "mutants")]
 pub mod mutants;
+mod name_clash;
 mod node_read;
 mod node_write;
 mod object_hasher;
 mod object_id;
+mod partition_growth;
 mod ram_index;
 mod read_window;
 mod record_header;
@@ -70,9 +73,11 @@ mod record_kind;
 mod record_log;
 mod record_scan;
 mod root_record;
+mod secret_scrub;
 mod sector_filter;
 mod sector_header;
 mod sector_table;
+mod snapshot_namespace;
 mod space_estimate;
 mod store_config;
 mod store_error;
@@ -90,9 +95,13 @@ mod counter_wrap_tests;
 #[cfg(test)]
 mod cut_sweep_tests;
 #[cfg(test)]
+mod dedup_collision_tests;
+#[cfg(test)]
 mod edge_gc_tests;
 #[cfg(test)]
 mod format_extension_tests;
+#[cfg(test)]
+mod log_order_check;
 #[cfg(all(test, feature = "lpfs"))]
 mod lp_fs_tree_tests;
 #[cfg(test)]
@@ -114,6 +123,7 @@ pub use blob_codec::MAX_LOGICAL_CHUNK;
 #[cfg(feature = "deflate-plan")]
 pub use deflate_plan::{DEFAULT_DEFLATE_LEVEL, PlannedChunk, plan_deflated_chunks};
 pub use flash::Flash;
+pub use format_reservations::*;
 #[cfg(feature = "host-deflate")]
 pub use host_deflate::{HostChunk, host_deflate_chunks};
 #[cfg(feature = "inspect")]
@@ -125,10 +135,12 @@ pub use object_hasher::ObjectHasher;
 #[cfg(feature = "soft-sha")]
 pub use object_hasher::SoftSha256;
 pub use object_id::ObjectId;
+pub use partition_growth::kill_added_sectors;
 #[cfg(any(test, feature = "nor-sim"))]
 pub use read_window::SimLineCache;
 pub use read_window::{ReadWindow, WindowedFlash};
 pub use sector_header::{FORMAT_VERSION, SECTOR_MAGIC};
+pub use snapshot_namespace::{SNAPSHOT_DIR, is_snapshot_path};
 pub use store_config::{GcPolicy, StoreConfig};
 pub use store_error::StoreError;
 #[cfg(feature = "stats")]
