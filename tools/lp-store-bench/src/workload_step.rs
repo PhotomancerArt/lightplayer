@@ -5,8 +5,15 @@ use std::sync::Arc;
 /// One store operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
-    Put { path: String, bytes: Arc<Vec<u8>> },
+    Put {
+        path: String,
+        bytes: Arc<Vec<u8>>,
+    },
     DeletePrefix(String),
+    /// Up to this many idle steps (`CandidateStore::idle`), stopping at the
+    /// first that does nothing. Changes no file; a step of these alone is
+    /// cut and checked like any other (its old and new states are one).
+    Idle(u32),
 }
 
 /// Operations ending in a commit: the unit the oracle calls "old or new".
@@ -35,6 +42,14 @@ impl Step {
         self.ops.push(Op::DeletePrefix(prefix.into()));
     }
 
+    /// A step of idle time: up to `n` idle steps.
+    pub fn idle(n: u32) -> Self {
+        Self {
+            label: "idle".into(),
+            ops: vec![Op::Idle(n)],
+        }
+    }
+
     /// Bytes the step asks the store to hold (the denominator of write
     /// amplification).
     pub fn logical_bytes(&self) -> u64 {
@@ -42,7 +57,7 @@ impl Step {
             .iter()
             .map(|op| match op {
                 Op::Put { bytes, .. } => bytes.len() as u64,
-                Op::DeletePrefix(_) => 0,
+                Op::DeletePrefix(_) | Op::Idle(_) => 0,
             })
             .sum()
     }

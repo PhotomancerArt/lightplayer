@@ -68,10 +68,13 @@ pub enum Mutant {
     /// `WindowedFlash` (reads through a cache) leaves the cache as it is
     /// after a program or an erase: stale lines go on being read.
     ReadsWithoutInvalidate,
+    /// An idle step forgets a garbage-only sector even when it is a write
+    /// head (its next append lands in a sector a mount no longer reads).
+    IdleForgetsHeads,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 16] = [
+    pub const ALL: [Mutant; 17] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -88,6 +91,7 @@ impl Mutant {
         Mutant::NoFullScan,
         Mutant::FormatKeepsHeaders,
         Mutant::ReadsWithoutInvalidate,
+        Mutant::IdleForgetsHeads,
     ];
 
     pub fn name(self) -> &'static str {
@@ -108,6 +112,7 @@ impl Mutant {
             Mutant::NoFullScan => "no_full_scan",
             Mutant::FormatKeepsHeaders => "format_keeps_headers",
             Mutant::ReadsWithoutInvalidate => "reads_without_invalidate",
+            Mutant::IdleForgetsHeads => "idle_forgets_heads",
         }
     }
 

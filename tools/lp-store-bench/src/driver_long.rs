@@ -58,6 +58,10 @@ pub struct LongParams {
     /// a resumable run may pause (and checkpoint) there. 0 = one piece.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub piece_steps: u64,
+    /// Idle time: every third step (from step 2) is up to this many idle
+    /// steps instead of a write (`Op::Idle`), cut like any other. 0 = none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub idle_steps: u64,
 }
 
 fn is_zero(v: &u64) -> bool {
@@ -376,6 +380,11 @@ fn walk(
         } else {
             next_step(&mut rng, &model, corpora, &p.corpora)?
         };
+        let step = if p.idle_steps > 0 && i % 3 == 2 {
+            crate::Step::idle(p.idle_steps as u32)
+        } else {
+            step
+        };
         if stop_before == Some(i) {
             return Ok(WalkEnd::Prefix(sum.gc.unmount(store), model, step));
         }
@@ -600,6 +609,7 @@ mod tests {
             wear: vec![],
             edit_mix: true,
             piece_steps: 0,
+            idle_steps: 0,
         }
     }
 

@@ -180,7 +180,7 @@ fn run_set(name: &str) -> MutantResult {
         drivers.push(t);
     }
     // 4. Long walks on a small flash.
-    let long = |label: &str, wear: Vec<WearSpec>, sectors: u32, seeds: &[u64]| {
+    let long = |label: &str, wear: Vec<WearSpec>, sectors: u32, seeds: &[u64], idle: u64| {
         let mut t = DriverTally {
             driver: label.into(),
             ..Default::default()
@@ -200,6 +200,7 @@ fn run_set(name: &str) -> MutantResult {
                     wear: wear.clone(),
                     edit_mix: seed % 2 == 1,
                     piece_steps: 0,
+                    idle_steps: idle,
                 },
                 &corpora,
                 &sink,
@@ -213,7 +214,7 @@ fn run_set(name: &str) -> MutantResult {
         }
         t
     };
-    drivers.push(long("long", vec![], 12, &[1, 2, 3, 4]));
+    drivers.push(long("long", vec![], 12, &[1, 2, 3, 4], 0));
     // 5. Full flash.
     {
         let mut t = DriverTally {
@@ -291,7 +292,12 @@ fn run_set(name: &str) -> MutantResult {
         ],
         16,
         &[1, 2],
+        0,
     ));
+    // 8. Idle time: the long walk with every third step up to 16 idle steps
+    // (`collect_step`: forgets, collections, packing near full), cut like
+    // the rest.
+    drivers.push(long("idle", vec![], 12, &[1, 2, 3, 4], 16));
 
     let failures = drivers.iter().map(|d| d.failures).sum();
     let caught_by = drivers
