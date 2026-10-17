@@ -102,3 +102,13 @@ the drop's own words. That is cosmetic: the read fails either way.
 Not fixed here (it is `main`'s, and the fix belongs to the firmware's room
 wait against a slow host, the emulator's pace, or the read's frame size).
 Status stays open.
+
+**Re-checked 2026-10-17** (the board card's round 3, branch
+`claude/card-surface-3` on `main` at `dd8534867`, `lp-emu:esp32c6:t1`,
+lp-emu `7bf210663`, a loaded desk running other walks' builds). `just
+walk-drop-emu --serve-release` over the door failed 3 runs of 3 at the
+`editor` step (`connect` and `push` pass), each console repeating `expected
+project read frame seq 1, got 0` between link resets, two runs in Chrome for
+Testing 142 and one in Brave. The same walk on the tab backing
+(`WALK_BACKING=tab`) passed every step, both cable pulls included. The
+card's change touches no read path: this is the defect above, not the round.
