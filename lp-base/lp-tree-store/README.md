@@ -132,6 +132,24 @@ change has to be readable, or cleanly refused, by the core before it.
   head of its kind). When GC still cannot make room, the refusal is
   remembered (RAM): a write needing as many bytes is refused without GC
   until a write needs fewer or a sector more is free.
+- **Idle cleanup** (`collect_step`, `store_idle.rs`): the same GC, early and
+  a bounded piece at a time, for a caller with nothing else to do (the
+  server's quiet ticks, through `LpFs::idle_step`). Each step marks, then
+  does at most one thing: **forget** a garbage-only sector (kill its header,
+  no erase — a mount then reads 24 B of it instead of its records, and it is
+  erased when opened, as it would have been: an erase now would be repeated
+  after the next mount, which never trusts a sector to be erased);
+  **collect** one sector holding at least `idle_min_garbage` of garbage
+  while fewer than `idle_free_percent` of the sectors are free; or, near
+  full (fewer than `reserve + idle_pack_free` free), **pack**: GC's own next
+  victim, a pass at a time while passes shrink the waste. A pass rewrites
+  most of the store, so a new one starts only once the waste has grown a
+  sector's capacity past what the last packing left (RAM: a mount forgets
+  it, so the first quiet after a mount packs once), and a write does not
+  restart a pass under way. A step that finds
+  nothing **settles** the store: later steps return at once, with no mark,
+  until the next write. Never inside a transaction. A cut anywhere in a
+  step leaves the state it had (a step changes no file).
 
 ## Invariants (hold after every operation and every cut)
 
@@ -194,6 +212,9 @@ Measured (lp-nor-sim simulator, default dials, see "G1 figures" below).
 | `gc_policy` | `CostBenefit` | `Greedy` (most garbage) or `CostBenefit` (LFS: `(1−u)·age/(1+u)`) |
 | `reserve` | 3 | sectors every write must leave free |
 | `txn_delta_max` | 2048 | RAM a transaction's directory delta may hold before it is written as pending directories |
+| `idle_free_percent` | 25 | the idle low water: below this share of sectors free, an idle step collects a sector with garbage (0 = never; forgetting goes on) |
+| `idle_min_garbage` | 1024 | the least garbage (bytes) an idle collection wins back |
+| `idle_pack_free` | 4 | near full: below `reserve` + this many free sectors, idle steps also pack (0 = never) |
 
 Features: `soft-sha` (default; `SoftSha256` over `sha2`), `lpfs` (`LpFsTree`,
 `lpfs::LpFs` over the store, with `begin_batch`/`commit_batch`/`abort_batch`
@@ -220,9 +241,29 @@ sequence — always on, for a boot line), `get`, `file_size`, `exists`, `list`
 `delete`, `delete_prefix` (`"<dir>/"` only: the directory and everything
 under it, one change; any other prefix is `InvalidPath`),
 `delete_file_and_tree`, `begin`, `commit`, `abort`, `in_transaction`,
+`collect_step` (the idle cleanup, above: `true` if it changed the flash),
 `stats` and `reset_transient_peak` (feature `stats`), `free_sectors`,
-`flash`/`flash_mut`, `into_flash`, `into_parts`. After `StoreError::Flash`
-the store must be dropped.
+`flash`/`flash_mut`, `into_flash`, `into_parts`, `name_clash` (whether a
+new file at a path would share a name with a directory), `file_node` and
+`scrub` (erase what a replaced secret left, below). After
+`StoreError::Flash` the store must be dropped. Free functions and
+constants: `kill_added_sectors(flash, first_added)` (the partition-growth
+rule), `SNAPSHOT_DIR` and `is_snapshot_path` (the reserved snapshot
+namespace), and the numbers reserved for the index checkpoint
+(`INDEX_CHUNK_KIND`, `INDEX_FENCE_KIND`, `INDEX_TOP_ROOT_TAG`, …,
+`format_reservations.rs`).
+
+**`LpFsTree`'s writer rules** (each in FORMAT.md): a new file under a file,
+or where files are, is refused (`InvalidPath`, nothing written: a file and a
+directory never share a name); nothing is written under `/.lp/snapshots/`
+(`InvalidPath`); and with `with_secret_paths(is_secret)` — the firmware
+passes `lpc_access::is_write_only_file_path` — a secret file replaced or
+deleted has its old version's sectors collected right after the commit
+(`TreeStore::scrub`: a mark, then GC's own copy-then-erase of each sector
+holding the old node's records that nothing live names), so an old Wi-Fi
+password does not stay on the chip as garbage. A dedup hit compares bytes
+before it reuses a record (`Corrupt("a record with this id holds other
+bytes")` on a crafted 64-bit collision; one read of the record a hit).
 
 **Mount verdicts** (`mount_verdict.rs`; read from mount's whole reading,
 the one it falls back to when its fast one adopts no root, so they are
@@ -248,8 +289,9 @@ second format works.
 all of them. Sectors 0 and 1 — littlefs's superblock pair, so neither a
 littlefs core nor the host's probe finds the old files again — are killed,
 erased and read back, and the two heads open there. Every other sector
-whose header does not read erased gets its header killed (24 zero bytes,
-read back; a kill that does not take is an erase), so no earlier store's
+whose header does not read erased gets its header killed (magic and CRC
+zeroed, the erase count left; read back; a kill that does not take is an
+erase), so no earlier store's
 sector is trusted again — its roots, whatever their sequence, included —
 and a kill a cut left weak is finished. The rest are erased when they are
 first opened, which `open_sector` does after any mount anyway (a mount
@@ -373,6 +415,22 @@ on one read only shows up here as two states. It fails on a store that
 settles nothing and on one that re-programs a tail it read whole but leaves
 one it read bad (both at per-call step 2, cut 6, seed 33: a torn root).
 
+**Log order and root placement** (`log_order_check.rs`): every sweep
+above (and the remount sweep) checks FORMAT.md's I4 and I5 over raw images
+after every fault-free step and every cut — nothing changed below a head's
+records' end or in a sector that is not a head, a new header's seq newer
+than every trusted one, every root in a hot sector, root seqs never
+decreasing in log order, the mount's root one of the newest two — and a
+test shows the checks catch each violation. **The secret scrub**
+(`cut_sweep_secret_scrub`): a replace-then-scrub on 10 sectors, both record
+sizes, every tear model, the scrub's own erases cut. **Format provisions**:
+a file/directory name clash refused, nothing written under the snapshot
+namespace, a replaced secret's bytes gone from the image (with a plain
+file's old bytes as the control), a crafted id collision refused whichever
+side was written first (`dedup_collision_tests.rs`), a grown partition over
+another store's flash reading only its own store, and an index checkpoint
+in the reserved layout mounting as if absent.
+
 **Counter wrap** (`counter_wrap_tests.rs`, a test-only start value): the
 sector sequence (u32) wraps safely under cuts; the root sequence (u64) does
 not — a commit past `u64::MAX` mounts as the one before it, pinned by
@@ -380,7 +438,29 @@ not — a commit past `u64::MAX` mounts as the one before it, pinned by
 (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
 commits, not reachable in practice).
 
-**Mutants** (feature `mutants`, `mutants.rs`): fifteen switches, each
+**Idle steps** (`idle_gc_tests.rs`): a step changes no file; steps settle
+until the next write (a settled step reads no byte) and never run in a
+transaction; forgetting makes the next mount read less (16 sectors of churn:
+13.2 KB over 16 trusted sectors → 11.4 KB over 4, over the fast mount); steps keep the low water;
+cut sweeps and remount sweeps through idle steps (every tear model of the
+sweeps; `calibrated_mid_word` and `calibrated_first_lift` with 8 seeds a
+cut). And the soak's near-full fill on 176 sectors — about c40's content,
+then incompressible 4 KiB files and a panel save each until `NoSpace` —
+priced by a silicon model (an erase 19 ms, a program 0.5 ms per 256 B, a
+read 0.42 µs per byte; a host estimate, never a silicon claim): back to
+back, 6 of the 95 writes cost over 1 s, the worst 3.9 s (CX1 measured
+3.78 s); with up to 40 idle steps between writes (CX1's 20 s of quiet),
+none, the last included (worst 57 ms), at 523 erases against 770 — each
+idle step at most 62 ms. Near full, 300 panel saves with the store left to
+settle before each cost 39 erases against the write path's 93 (at 93
+files; one settling of 342 erases after the mount): before a new pass
+waited for a sector of new waste, every save bought a whole re-pack, 50,913
+erases. A day of churn (a re-push, 10 saves, 1,440 panel saves) with the
+quiet between them leaves a mount 45 KB over 66 trusted sectors to read
+instead of 217 KB over 176 (~19 ms against ~91 by the model's read rate),
+at the same 270 erases.
+
+**Mutants** (feature `mutants`, `mutants.rs`): sixteen switches, each
 breaking one guarantee — skip the kill before an erase; trust record headers
 without the payload CRC; dedup against every indexed id; GC erasing its
 victim before its copies; the root before the directories; resume a head
@@ -390,7 +470,8 @@ untrusted; open a sector without the erase read-back; trust the newest
 sectors' last programs on one read (no settle); and the two checks the fast
 mount stands on: read the newest sector of each kind by its headers, as a
 cold one (`newest_by_headers`), and never fall back to the whole reading
-(`no_full_scan`); format leaving the headers it does not erase (no kill).
+(`no_full_scan`); format leaving the headers it does not erase (no kill); an idle step
+forgetting a write head.
 `lp-store-bench
 mutants` runs each through a fixed driver set and requires every one caught
 and the unmutated store clean (its README has the table).
@@ -428,7 +509,41 @@ inlined) counts as new.
 
 See "G1 figures" for the numbers.
 
+## Before the freeze (2026-10-16)
+
+The one-way-door review and the 8 MB screen
+(`lp2025/2026-10-16-1043-tree-store-mount-study`) found no byte to change;
+the director adopted these provisions (plan
+`lp2025/2026-10-16-0848-tree-store-adoption`), all in FORMAT.md:
+
+| provision | where | bytes on flash |
+|---|---|---|
+| a version bump may convert in place over the air (a dual-reading core, sector by sector through GC) | "Versioning" | none |
+| the trial rule: a new incompat flag, a newer version or a conversion only after the OTA trial is confirmed; `tree_fs::may_change_store_format` is the gate | "Versioning" | none |
+| `/.lp/snapshots/` reserved; snapshots are ordinary directory entries; never a write-only file | "The snapshot namespace" | none |
+| a file and a directory never share a name (`LpFsTree` refuses) | "Files and paths" | none |
+| kinds 6/7, id tags 6/7 and root tag 1 reserved for an index checkpoint, with its scalable layout | "Reserved: the index checkpoint" | none (no v3 writer writes them) |
+| the partition-growth rule (`kill_added_sectors`) | "Growing the partition" | none |
+| a kill zeroes only the magic and the CRC (the erase count survives) | "Writing and killing" | a killed header keeps bytes 4..20 |
+| secret files: never expose a write-only file's id; scrub a replaced secret (`TreeStore::scrub`) | "Secret files" | none |
+| a dedup hit compares bytes | "Ids" | none |
+| I4 log order and I5 root placement, checked by every cut sweep | "What a writer guarantees" | none |
+| sector size 512..=65,536 by configuration; a limits-at-scale table | "The medium", "Limits at scale" | none |
+| rejected: a random store id in every sector header (the growth rule covers it) | "Growing the partition" | — |
+
 ## Future options
+
+**Reading the erase count from a killed header.** A kill leaves bytes 4..20
+(FORMAT.md "Writing and killing"), so a mount could take a killed sector's
+erase count (magic and CRC zero, version 3, its sector size) instead of
+starting it at 0, and keep wear history across a lazy format or a cut
+between kill and erase. Not done: it changes which sector `open_sector`
+picks after such a mount, nothing reads the counts for wear yet, and it is a
+writer improvement that needs no format change.
+
+**An identity for a store** (for Studio backups): a root tag, if wanted. A
+store id in every sector header was considered and rejected before the
+freeze (FORMAT.md "Growing the partition").
 
 **A RAM path table** (removed in the size pass, `5db02b3d0`): a sorted
 table of `(path hash u64, file id u64, size u32)` rows, 20 B per file, built
@@ -723,8 +838,13 @@ written with checkpoints): used 70.6 → 31.8 ms, c40 29.7 → 31.4, empty
 7.8 → 8.4, full 108 ms (fell back); emulated used 28.4 → 18.1 ms. Its costs: `12L + 2S` bytes written per checkpoint (12 KB for the
 full store), mount RAM up to ~29 KB on the used store (the checkpoint's
 entries plus the recent records, against the 16 KB budget — unoptimized),
-and a format allocation (kind 6, tag 1) that must be decided before
-FORMAT.md freezes. The alternative, a per-sector summary written when a
+and a format allocation (kind 6, tag 1) that had to be decided before
+FORMAT.md froze. **Decided (2026-10-16, the 8 MB screen):** kinds 6 and 7
+and root tag 1 are reserved for an index checkpoint in a different, scalable
+layout (FORMAT.md "Reserved: the index checkpoint": sorted 14-byte entries,
+whole entries per chunk, fenced runs read in place, per-head-kind
+watermarks). The prototype's stream schema is loaded and rewritten whole and
+does not scale; if it is ever built it adopts that layout. The alternative, a per-sector summary written when a
 sector closes (JFFS2's erase-block summary), would turn the `R` header
 reads into `S` reads of `12R` bytes in all (the soak image ≈ 31 ms against 56
 by the formula) for ~3 % more bytes written and no RAM, but stays `O(R)`:
@@ -783,6 +903,19 @@ probe `.text` 45,896 → **46,456 B** (+560 B; +16 B `.rodata`), through
 C6's flags. Almost all of it is `mount` (+494 B: the re-program, its
 read-back and the kill, inlined). Not in the shipped C6 image (the store
 is `fs-tree` only).
+
+The pre-freeze provisions (2026-10-16, against `main` at `129f09599`, the
+C6's flags): core probe `.text` 48,898 → **49,452 B** (+554 B; `.rodata`
++24): the dedup compare ≈ 490 B, the kill's two programs ≈ 0. Through
+`LpFsTree` 65,994 → **69,376 B** (+3,382 B; `.rodata` +112): the secret
+scrub and its glue ≈ 1.6 KB (`scrub` 698 B, the `LpFsTree` hooks ≈ 0.9 KB),
+the name-clash check ≈ 1.0 KB (`existed_or_free` 622 B, and `list_files`
+no longer inlined into its one caller), the dedup compare ≈ 0.5 KB, the
+snapshot-namespace refusal ≈ 0.2 KB. The C6's monolithic `fs-tree` image:
+`.text` 2,856,570 → 2,859,816 B (+3,246 B), `.rodata` +128 B. Not in the
+shipped C6 image (the store is `fs-tree` only). If the `fs-tree` budget
+needs it back, the scrub is the one to drop: its rule ("Secret files")
+stands without the code, and GC erases an old secret eventually.
 
 On the study's own C6 image (another branch's build, fewer shared names)
 the same probe measured ~1.6 KB more new code: at the study's commit

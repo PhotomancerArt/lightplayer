@@ -99,7 +99,8 @@ pub use slot_shape_registry::{
     SlotShapeEntry, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
 };
 pub use slot_shape_view::{
-    SlotFieldShapeView, SlotShapeView, SlotValueShapeView, SlotVariantShapeView,
+    SlotEnumEncodingView, SlotFieldShapeView, SlotShapeView, SlotValueShapeView,
+    SlotVariantShapeView,
 };
 pub use static_slot_shape::{
     StaticLpType, StaticModelEnumVariant, StaticModelStructMember, StaticSlotEnumEncoding,

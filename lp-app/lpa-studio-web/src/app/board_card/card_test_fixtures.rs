@@ -28,6 +28,7 @@ pub(crate) fn porch_view() -> DeviceView {
         state_label: "Ready".to_string(),
         detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
         freshness_label: None,
+        heard_age_ms: None,
         identity_label: Some("a0:f2:62:87:b4:8c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),

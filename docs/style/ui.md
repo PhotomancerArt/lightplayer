@@ -248,21 +248,33 @@ From the top:
 
 - **The picture.** The board's lights. Nothing covers it: no overlay, no
   badge, no progress, no button.
-- **The status corner,** cut out of the picture's corner, not laid over it.
-  It shows the worst notice's icon (a blue dot when all is fine), then the
-  frame rate, or the picture's age when the picture isn't live. It opens its
-  own details; the board's terminal lives there.
+- **The status corner,** cut out of the picture's corner, not laid over it,
+  and quiet unless it has something to say: nothing while the board is live
+  and well (the moving picture says live), nothing on a stale picture (the
+  picture dims; the Link row says since when), "Editing" while the editor
+  holds the picture, and a notice's icon only while the connected panel
+  covers the rows that would say it. With nothing to say it is a quiet ⋯:
+  it opens its own details — every notice, the picture's frame rate, age
+  and source as facts, and the board's terminal.
 - **The name bar.** The board's name, its group or owner under it, and one
   primary action. The action is a plain, flush section of the bar with an
   icon leading the word: the link's icon before Connect, a lock before
-  Unlock, ✓ before Done, + before Add a project. The spectrum ring lights
-  it on hover, like any action. **The primary is never a greyed verb:** a
-  board with nothing on it offers the next step (Add a project), and one
-  that can't be pressed shows its reason as its word, drawn quiet
-  ("Connecting…", "Updating · 42%", "Offline · 2 weeks").
-- **The bars,** always in this order: project · connection · access ·
-  firmware · hardware. Each is one line: an icon, a summary, an aside, and
-  at most one action.
+  Unlock, ✓ before Done, + before Add a project, the firmware mark before
+  Install firmware. The spectrum ring lights it on hover, like any action.
+  **The primary is never a greyed verb:** a board with nothing on it offers
+  the next step (Add a project); while the board is being reached or
+  identified the primary is the conic spinner alone; and when nothing can
+  be pressed there is no primary at all — the row that is busy or away
+  says why, once.
+- **The rows,** always in this order: project · link · access · firmware ·
+  hardware. Each is one line in one grammar (`docs/ux/anatomy/board-card.md`):
+  **icon · kind · name · state · action**. The icon is the kind's own in
+  every state (layers for a project); the kind is a fixed, muted 56 px
+  column, so the names line up down the card; the name is the thing itself
+  and never moves; the state follows only when it is not normal; at most
+  one action fixes it, with a way out beside it where the fix needs one
+  (Restore · Reset). The Link row has no kind word: the link's name is its
+  kind.
 
 The rules:
 
@@ -271,35 +283,44 @@ The rules:
   measure the same.
 - **No boxes in boxes.** The bars are full-bleed rows of one card,
   separated by hairlines. Nothing inside a bar draws its own frame.
-- **A notice tints its bar,** in its status family, with its icon (never
-  colour alone). The rest of the card stays neutral.
-- **"Someone has it" is orange.** The connection bar says **Open in another
+- **A state tints its row,** in ui.md's status families and no others,
+  and its word says what (never colour alone): **orange** (Attention) when
+  a device needs you; **red, striped** (Error) when it is broken — a
+  shader error, crashing firmware, a connection that failed. Nothing on
+  the card is yellow (an unsaved edit's colour), and blue is the lit
+  cloud's alone: an update on offer is untinted, and its button carries
+  it. In a toned row the kind takes the row's colour, quieter. The rest of
+  the card stays neutral.
+- **"Someone has it" is orange.** The Link row says **Open in another
   tab**, **Taken by another tab** or **Someone else connected** in the
-  orange (Attention) family, and nothing else tints for it; blue stays
-  Update. A take-over under way is the bar's work, and one that failed is
-  striped with Retry.
+  orange (Attention) family, and nothing else tints for it. A take-over
+  under way is the row's work, and one that failed is striped with Retry.
+- **Old looks old.** An offline board's rows keep the last thing known,
+  dimmed, their words unchanged; only the Link row says since when.
 - **A bar's action sits flush at its end,** as a section of the bar, not a
   chip floating inside it.
-- **A mark is an icon alone at a bar's end,** after the aside, with its
+- **A mark is an icon alone at a row's end,** after the state, with its
   words as its accessible name and hover: the cloud on a board also
-  reachable through lightplayer.app, lit in the live tone while it is, quiet
-  while Cloud relay is on and the board isn't there yet. A fact a mark
-  carries is not repeated in words on the bar.
-- **Every bar names its subject.** "No project", "Project not known",
-  "Access not known · when it's back", "Firmware not known", never a bare
-  "Not known yet". A stand-in's connection bar says what it is:
-  "Simulated · running", "Emulated · off".
+  reachable through lightplayer.app, filled in the live tone while it is,
+  struck through while Cloud relay is on and the board isn't there. Its
+  shape says the fact, not its colour alone. A fact a mark carries is not
+  repeated in words on the row.
+- **Every row names its subject,** with its kind word: `Project none`,
+  `Firmware unknown`, never a bare "Not known yet". A stand-in's Link row
+  says what it is, and only it: "Simulated · running", "Emulated · off".
 - **Details open as Studio's detail card, merged with the bar that opened
   it** (the merged-outline popover). Every fact the bar's summary leaves
   out lives there; nothing on the card is lost, only moved.
-- **Work in progress shows in the bar doing it.** The bar goes neutral, with
-  the conic spinner, the step and the percent, and the iridescent fill
-  along its foot. The fill sweeps when the percent is unknown, and it lives
+- **Work in progress shows in the row doing it,** as its state. The row
+  goes neutral, the conic spinner takes its icon's place, its name stays,
+  and the work's words are the state ("sending · 40%", one number for an
+  update), with the iridescent fill along its foot. The fill sweeps when the percent is unknown, and it lives
   in a clipped track the bar's width: the bar and the card clip nothing, so
   the details that float over a bar and the corner's notch are never cut,
-  and no pixel of the fill leaves the card. When it's done, the bar is green
-  for a few seconds; when it fails, the bar is striped and offers Retry. The
-  picture and the corner don't change.
+  and no pixel of the fill leaves the card. When it's done, the row is green
+  for a few seconds; when it fails, the row is striped, says only that it
+  failed ("send failed"), and offers Retry, the reason the first thing in
+  its details. The picture and the corner don't change.
 - **Connected, the bars become the panel.** Connect turns the card's bars
   into the board's panel, drawn with Studio's existing panel widgets: as
   many controls as fit at the card's height, then All controls. Done turns

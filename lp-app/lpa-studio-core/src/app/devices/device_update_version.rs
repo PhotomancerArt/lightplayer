@@ -1,6 +1,8 @@
 //! A firmware version, read as a version (the update-states spike, §3):
-//! the version leads; the commit is detail, dim and in full on hover; a dev
-//! build reads `dev <sha>`; a modified tree's `-dirty-HHMMSSPT` suffix reads
+//! the version leads, as Studio's one firmware version
+//! ([`crate::firmware_version`]: a release as its tag, `v2026.10.03-1`);
+//! the commit is detail, dim and in full on hover; a dev build reads
+//! `dev <sha>`; a modified tree's `-dirty-HHMMSSPT` suffix reads
 //! "(modified)", with the raw string on hover.
 //!
 //! "Out of date" only ever means an older VERSION, and two dev builds
@@ -26,7 +28,7 @@ pub struct UpdateVersion {
 /// anywhere a version is drawn with its hover.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateVersionDisplay {
-    /// What leads: `2026.10.03-1`, `dev 5eb70a7`, `dev 5eb70a7 (modified)`.
+    /// What leads: `v2026.10.03-1`, `dev 5eb70a7`, `dev 5eb70a7 (modified)`.
     pub text: String,
     /// A release's commit, short (`a41c9e2`), drawn dim after the text.
     /// `None` for a dev build — its text already is its commit — and when
@@ -70,22 +72,20 @@ impl UpdateVersion {
         FirmwareAge::compare(self.parsed(), other.parsed())
     }
 
-    /// The short form a line uses: the version, or `dev <sha>` with
+    /// The short form a line uses, Studio's one firmware version
+    /// ([`crate::firmware_version`]): `v2026.10.03-1`, or `dev <sha>` with
     /// "(modified)" for a dirty tree.
     pub fn short(&self) -> String {
-        match self.dev_parts() {
-            Some((sha, false)) => format!("dev {sha}"),
-            Some((sha, true)) => format!("dev {sha} (modified)"),
-            None => self.version.clone(),
-        }
+        crate::firmware_version(&self.version)
     }
 
-    /// The form a sentence uses: the version, or `dev build <sha>`.
+    /// The form a sentence uses: the version (`v2026.10.03-1`), or
+    /// `dev build <sha>`.
     pub fn long(&self) -> String {
         match self.dev_parts() {
             Some((sha, false)) => format!("dev build {sha}"),
             Some((sha, true)) => format!("dev build {sha} (modified)"),
-            None => self.version.clone(),
+            None => self.short(),
         }
     }
 
@@ -140,12 +140,12 @@ mod tests {
         assert_eq!(
             x.display(),
             UpdateVersionDisplay {
-                text: "2026.10.03-1".to_string(),
+                text: "v2026.10.03-1".to_string(),
                 commit: Some("a41c9e2".to_string()),
                 raw: "2026.10.03-1+a41c9e2d11f0".to_string(),
             }
         );
-        assert_eq!(x.long(), "2026.10.03-1");
+        assert_eq!(x.long(), "v2026.10.03-1");
         assert!(!x.is_dev());
     }
 

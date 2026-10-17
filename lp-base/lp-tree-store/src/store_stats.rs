@@ -47,4 +47,8 @@ pub struct TreeStoreStats {
     pub verify_failures: u64,
     /// Sectors retired (never allocated again).
     pub retired_sectors: usize,
+    /// Garbage-only sectors an idle step forgot (header killed).
+    pub idle_forgets: u64,
+    /// Victims an idle step collected (also counted in `gc_runs`).
+    pub idle_collections: u64,
 }

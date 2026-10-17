@@ -13,24 +13,37 @@ value and final XOR `0xFFFF_FFFF`; `crc32(b"123456789") = 0xCBF4_3926`.
 ## The medium
 
 The partition is `N` sectors of `S` bytes (`4 ≤ N ≤ 65535`; `S` a power of
-two, `512 ≤ S ≤ 32768`; the C6 uses `S = 4096`, design target `N = 128`,
+two, `512 ≤ S ≤ 65,536`; the C6 uses `S = 4096`, design target `N = 128`,
 today's partition `N = 176`). NOR semantics: erase sets a sector to all
 `0xFF`; program can only clear bits. Address of byte `o` of sector `s` is
 `s·S + o`.
 
+**The sector size is configuration, not a format version.** A board picks
+`S` from the format's range (a bigger part might take 32 or 64 KiB erase
+blocks); a reader given another `S` than a store's headers record refuses
+the store (rule 3), so a store of one size is never misread by a reader
+configured for another. An implementation may support a narrower range:
+this one (`lp-tree-store`) takes `512 ≤ S ≤ 32,768`, because its RAM sector
+table keeps each sector's end and live bytes as u16 (a 64 KiB store needs
+those widened in RAM; no byte of the format changes).
+
 Every sector header records `S` (as its log2), so a raw image describes its
 own sector size: a tool handed an image and no geometry reads byte 7 of the
-first header that checks (trying each power of two from 512 to 32768 as the
-stride if sector 0 is erased or killed) and then reads every header at
-multiples of `S`. **`N` is recorded nowhere** and needs no field: it is the
+first header that checks (trying each power of two from 512 to 65,536 that
+it supports as the stride if sector 0 is erased or killed) and then reads
+every header at multiples of `S`. **`N` is recorded nowhere** and needs no field: it is the
 partition's length divided by `S`, which the partition table (or the image
 file's length) already gives, and nothing in the format depends on it
 beyond the retired list's sector numbers.
 
 `record_max` (`R`, 128 ≤ `R` ≤ `S − 24`) is a store dial, **not recorded on
 flash**: it bounds what a writer produces. A reader must accept any record
-that fits its sector (`16 + len ≤ S − 24`). The firmware's value is fixed
-per build (see the README's record-size choice).
+that fits its sector (`16 + len ≤ S − 24`) and **never assumes `R`**: every
+chunk carries its own length, so a board may raise `R` (a bigger board, a
+store of bigger files) or lower it, and a store written under one `R`
+reads, appends and collects under another (only dedup between the two is
+lost). The firmware's value is fixed per build (see the README's
+record-size choice).
 
 ## Sector
 
@@ -96,7 +109,8 @@ The flag rules, for whoever adds the first flag:
   record that needs the feature only into a sector that carries it: then
   wherever such a record is, its own sector's header makes an old reader
   refuse the whole store (and once GC has erased the last of them, the
-  store no longer needs the feature).
+  store no longer needs the feature). A core sets one only after its
+  over-the-air trial is confirmed (the trial rule, "Versioning").
 - Bits are allocated from bit 0 upwards in each set and documented here
   with the version of this document that added them. A bit, once fielded,
   is never reused for a different meaning. Adding a flag does **not** bump
@@ -113,17 +127,52 @@ Writing and killing:
   cell during the header can only leave a header without the magic, which
   is untrusted (rule 1), never one that reads as a newer version (rule 0).
   Every writer of every version keeps this order.
-- Before every erase, a writer programs the header to **24 zero bytes**
-  ("kill"). A torn erase can then never leave an old valid header in front
-  of weak bits.
+- Before every erase, a writer **kills** the header: it programs the
+  magic (bytes 0..4) to zero, then the header CRC (bytes 20..24) to zero.
+  A torn erase can then never leave an old valid header in front of weak
+  bits. Bytes 4..20 — version, head kind, sector size, flags, seq and
+  **erase count** — are left as they read, so a sector's erase count
+  survives a kill: a later writer may read it from a killed header (magic
+  and CRC zero, version 3, its own sector size) to keep wear history
+  across a format or a cut between kill and erase; this one does not yet.
+  A header reads **killed** when its magic and CRC read zero (24 zero
+  bytes, what kills programmed before 2026-10-16, reads killed too). A
+  reader needs nothing new: a header without the magic is untrusted
+  (rule 1).
 - **Formatting** need not erase every sector. A writer that makes an empty
-  store kills (24 zero bytes, read back) the header of every sector it
+  store kills (read back killed) the header of every sector it
   does not erase and that does not read all `0xFF`, before it writes the
   store's first record: then no earlier store's sector — its roots, of any
   sequence, included — is trusted again, and a kill a power cut left weak
   is finished. It erases sectors 0 and 1 (a littlefs partition's
   superblock pair) so the partition no longer reads as littlefs. Every
   other sector is erased (killed first, as above) when it is first opened.
+- A writer may kill the header of a sector that holds no live record at
+  any time (no erase): the sector is untrusted from then on, and is erased
+  (killed first, as above) when it is next opened.
+- **Growing the partition.** Whoever enlarges the partition a store is in
+  (the USB layout migration, a loader, a core) first kills the header of
+  every sector in the **added range** that does not read all `0xFF` (and
+  read it back; one that does not read back killed is erased) — the lazy
+  format's kill, applied to the range — before the store is mounted over
+  the new size. The store records no identity and `N` is not on flash, so
+  a trusted sector left there by another store (flash an earlier layout
+  used, a store whose seqs restarted at its own format) would be read as
+  this store's, and a root of its with a higher seq and a complete closure
+  adopted. `lp_tree_store::kill_added_sectors(flash, first_added)` is the
+  helper; it is idempotent and safe to repeat after a cut. Shrinking needs
+  no such rule: a core that knows the new `N` collects the sectors being
+  cut first, and nothing past `N` is read.
+
+  *Why a rule and not a store id (rejected before the freeze,
+  2026-10-16).* A random id in every sector header, set at format, would
+  make a foreign store's sectors untrusted by construction — a guarantee
+  where the growth rule is a rule. It costs 4 B a header, a random seed
+  injected at format (sans-IO), ~100 B of code, and a change to version
+  3's header layout. The only way a foreign trusted sector reaches a
+  store's range is a partition growing over old flash, which this rule
+  covers at no cost; an identity for backups, if wanted, can be a root tag
+  later.
 - Head kind says which write head opened the sector: **hot** sectors hold
   `…/.lp/panel.json` files, the hot directory and roots; **cold** sectors
   hold everything else. GC copies a sector's live records to a sector of
@@ -170,7 +219,9 @@ information an older reader may lose (an index, a hint, a cache) and that
 no known kind refers to. A kind or codec that a known record refers to — a
 new chunk codec, a new node kind — needs an incompat flag. Kind values 0
 and 255 are never assigned. The race prototype (version 1) used kind 5 and
-codec 2; nothing in version 3 gives them a meaning.
+codec 2; nothing in version 3 gives them a meaning. **Kinds 6 and 7 are
+reserved** for the index checkpoint (below): version 3 writes neither and
+reads both as unknown records.
 
 The same id may be on flash more than once (a GC copy whose original was
 not yet erased; a record re-written after a cut). Copies are byte-identical
@@ -187,7 +238,9 @@ A whole small file, or one chunk of a bigger node.
   bytes with no preset dictionary. Written only as the host sent it
   (`put_chunk_deflated`), after the board inflated and hashed it.
 
-A chunk's logical length is at most 4096.
+A deflated chunk's logical length is at most 4096 (a reader refuses a
+longer one); a stored chunk is bounded only by its record (`≤ S − 40`; a
+writer cuts stored chunks at `R − 16`).
 
 ### Multi (kind 2)
 
@@ -219,9 +272,12 @@ count u16, then per entry:
   id u64            the file's or directory's node id
 ```
 
-Entries are sorted by (name bytes, kind); a file and a directory may share
-a name. The name rules (UTF-8, non-empty, no `/`; full hot paths, below)
-are the **writer's**: a directory *decodes* (mount step 3) when its count,
+Entries are sorted by (name bytes, kind). The encoding could hold a file
+and a directory of one name; **a writer never makes one** ("Files and
+paths"), and a reader that meets one anyway (damage, a foreign writer)
+decodes it and must not fail on it. The name rules (UTF-8, non-empty, no
+`/`; full hot paths, below; no file and directory of one name) are the
+**writer's**: a directory *decodes* (mount step 3) when its count,
 kinds, lengths and ids parse and its bytes end exactly. This reader checks
 UTF-8 only where a name leaves the store as a string (a listing), and
 reports such a name as corrupt there. A directory whose bytes fit one record (`≤ R − 16`) is one `Dir`
@@ -266,7 +322,9 @@ sequence of entries
 back to back, the last ending exactly at `L` (no entries is the empty
 tail). A tail that does not parse that way — half an entry, a length
 running past `L` — makes the root fail to decode (it is not a candidate).
-**Version 3 defines no tags and writes an empty tail.**
+**Version 3 defines no tags and writes an empty tail.** Tag 1 is
+**reserved** for the index checkpoint's top (below); tag 0 and 255 are
+never assigned.
 
 Every tag is **skippable**: a reader ignores a tag it does not know. There
 is no "must understand" tag — information an older reader must not ignore
@@ -276,6 +334,114 @@ only something that stays correct when it vanishes after an older writer's
 commit (a hint, a cache, a counter that can be rebuilt), and a newer reader
 must treat a missing tag as "not known". The root's id covers the whole
 payload, tail included.
+
+### Reserved: the index checkpoint (kinds 6 and 7, root tag 1)
+
+**Not part of version 3's writer**: no version-3 core writes these, and
+every version-3 reader skips them (unknown kinds, an unknown tag). They are
+allocated, with their layout, so that a later core can add a bounded mount
+for big partitions (thousands of sectors) as an additive change — the
+shape decided while nothing is fielded, so no two efforts hand out the same
+numbers. The layout is read **in place** on flash (never loaded whole) and
+updated by small sorted runs, so its RAM stays small and its writes stay
+near the live set's changes whatever the partition's size.
+
+The record numbers follow "Ids" and the location convention ("Limits at
+scale": `sector u16 ‖ offset u16`, the record header's offset in its
+sector).
+
+**Index chunk** (kind 6, codec 0; id = `id(6, payload)`):
+
+```
+0   2     count c ≥ 1
+2   14c   entries: id u64 ‖ sector u16 ‖ offset u16 ‖ len u16
+```
+
+One entry per indexed record: where its header is, and `len` = the
+record's **total** length (`16 + L`), so one read fetches header and
+payload. Entries are sorted by id, strictly ascending, and a chunk holds
+whole entries only (no entry spans two chunks): `⌊(R − 18) / 14⌋` per
+chunk, 71 at `R` = 1,024.
+
+**Index fence or top** (kind 7, codec 0; id = `id(7, payload)`). Byte 0 is
+`flags+level`: bit 7 set = the **top**, clear = a **fence**; bits 0–6 = a
+fence's level `L`.
+
+A fence of level `L` (one node of a run's search tree):
+
+```
+0   1     flags+level   bit 7 clear; bits 0–6 = L
+1   2     count k ≥ 1
+3   20k   refs: first id u64 ‖ child id u64 ‖ sector u16 ‖ offset u16
+```
+
+Its children are index chunks (`L` = 0) or fences of level `L − 1`; each
+ref's `first id` is the smallest entry id under that child; refs are sorted
+by `first id`, strictly ascending, and the children cover disjoint,
+ascending id ranges.
+
+The top (one per checkpoint; the root names it):
+
+```
+0     1     flags+level   0x80
+1     8     covered root seq u64     the commit the index describes
+9     1     head kinds h             2 in version 3 (cold, hot), in head-kind order
+10    6h    per head kind: watermark sector seq u32 ‖ head end u16
+…     1     run count r ≥ 1          newest first
+…           per run: entry count u32 ‖ level u8 ‖ count k u16 ‖ k refs (20 B each, as a fence's)
+…     2     sector rows n            0, or N
+…     4n    per sector s: end u16 ‖ live u16
+```
+
+A run is a sorted set of entries; its refs are its fence of level `level`
+(level 0: they name chunks directly). The newest run wins for an id in two
+runs. A writer keeps the top within one record by merging runs (a base run
+plus a few small delta runs is the expected shape) and adds a fence level
+to a run whose refs outgrow it.
+
+The **watermarks** are, per head kind, the newest sector of that kind and
+its records' end when the index was taken. The optional **sector rows** are
+each sector's records' end and live bytes at that moment (`0` for one not
+written); they let a writer resume and admit writes without a mark.
+
+**Root tail tag 1** = the top: `top id u64 ‖ sector u16 ‖ offset u16` (12
+bytes).
+
+**Using one — every piece verified on use:**
+
+- A chunk, fence or top counts only if the header at its ref's location
+  names its kind and its id and its CRC holds. Anything that does not —
+  and a missing tag, or trusted sector seqs spanning `2³¹` or more — means
+  **there is no index**: mount as without it.
+- An entry is used only if its sector is trusted and either that sector's
+  seq is older (wrapping) than its head kind's watermark, or it is the
+  watermark sector itself and the entry's offset is below the recorded
+  head end. Every other sector, and each watermark sector from its
+  recorded end, is **rolled forward** by its record header chain; the
+  log-order invariant (I4, "What a writer guarantees") makes that
+  complete. A sector row is used under the same condition.
+- A read through an entry checks the header's id and the record's CRC (as
+  every read does), so a stale entry reads as damage and is looked up
+  again by scanning, never as another record's bytes.
+- The root is found by I5 (roots only in hot sectors, in log order), not
+  through the index.
+- Dedup and GC wait for a mark that proves the index complete for the
+  committed closure.
+
+**Cut and rollback safety, by the existing rules:** chunks, fences and the
+top are written and read back before the root that names them (I1), so a
+cut before that root leaves them garbage; a writer that does not know the
+index (version 3, or a rolled-back core) drops tag 1 at its next commit and
+never copies kinds 6 and 7, so the index simply vanishes; its erases give
+sectors new seqs, which the watermarks catch.
+
+**The prototype is not this layout.** `claude/tree-store-checkpoint-prototype`
+(never merged, never fielded) wrote kind 6 as one byte stream chained across
+chunks with entries straddling them, and tag 1 naming its first chunk: it
+must be loaded whole, is rewritten whole at every checkpoint and does not
+scale past a few hundred sectors. If it is ever built, it adopts this
+layout. A reader of this layout rejects a prototype image's tag (its
+location holds no kind-7 top) and mounts without an index.
 
 ## Ids
 
@@ -289,19 +455,118 @@ as a u64; the value 0 is replaced by 1. Tags:
 | 3 | Multi | the payload (a Merkle hash of its children, the flags byte included) |
 | 4 | Root | the payload |
 | 5 | reserved | never written (v1's RAM path table hashed paths with it; that table is gone) |
+| 6 | reserved: index chunk (kind 6) | the payload; not written by version 3 |
+| 7 | reserved: index fence or top (kind 7) | the payload; not written by version 3 |
 
 A file's node id is its one Blob's id (a file of at most `R − 16` stored
 bytes, or one chunk) or its top Multi's id. Ids are 64 bits and **not**
-cryptographic (spike U9): a writer reuses a record whose id it already
-holds without comparing bytes.
+cryptographic (spike U9): an accidental collision is negligible (about
+`L²/2⁶⁵` for `L` live records), but anyone who can write can spend about
+2³² SHA-256 evaluations to make bytes whose id equals a file they can
+predict. So **a writer compares bytes on a dedup hit**: before it reuses a
+record whose id it already holds, it reads that record and compares it with
+what it would write (logical bytes when either copy is deflated, since a
+stored and a deflated copy of one chunk share an id). A hit with other
+bytes behind it is refused — nothing is written, the record already there
+keeps its bytes, and no file ever reads another's (`lp-tree-store`:
+`Corrupt("a record with this id holds other bytes")`). A writer rule; a
+reader needs nothing.
 
 ## Files and paths
 
 A path is absolute, `/`-separated, no empty component, no trailing `/`, at
 most 32 components and 65535 bytes. Directories are implicit: a directory
-exists while a file is under it. A path is **hot** when it ends with
+exists while a file is under it. **A path names a file or a directory,
+never both**: a writer refuses a new file under a path that is a file, or
+at a path that files are under (`LpFsTree`: `InvalidPath`, nothing
+written; littlefs and every host filesystem refuse the same, so every tool
+that reads a store — extract, a backup, a desktop folder — can hold what
+it finds). Names are compared as bytes: no Unicode normalization, and case
+matters (`A.glsl` and `a.glsl` are two files; a case-insensitive host
+folder cannot hold both, which is an app's concern, not the store's). A path is **hot** when it ends with
 `/.lp/panel.json`; a hot file appears only in the hot directory, every
 other file only in the cold tree.
+
+### The snapshot namespace
+
+`/.lp/snapshots/` is **reserved** for snapshots of a project
+(`SNAPSHOT_DIR`). Version 3 makes no snapshot; it reserves the path so a
+later core can add them with no format change, kept by every core:
+
+- **What a snapshot is.** A directory entry of kind 2 at
+  `/.lp/snapshots/<project>/<name>` naming a directory node that held the
+  project at that moment, plus a copy of the project's hot files at
+  `/.lp/snapshots/<project>/<name>/…/.lp/panel.json` (hot by the rule
+  above, so in the hot directory). It is ordinary tree: every reader's
+  mark, mount closure and dedup already follow directory entries to any
+  directory node, so a snapshot shares every unchanged blob, multi and
+  subdirectory with the live project and with other snapshots, and costs
+  only the records it alone reaches. Restore points the project's path at
+  the snapshot's node; a diff walks two directory ids and descends only
+  where they differ.
+- **Who writes there.** Only the snapshot feature. Every other writer
+  refuses a path under it (`LpFsTree`: `InvalidPath`, nothing written).
+  Deleting under it is an ordinary delete (it frees what the snapshots
+  alone held).
+- **Write-only files.** A snapshot never contains a write-only file — an
+  access file (`.lp/access.json`) or the network file (`.lp/network.json`),
+  whatever `lpc_access::is_write_only_file_path` matches: the snapshot
+  writer names a directory node built without them, never the project's own
+  node while that holds one. And the write-only rule covers any copy
+  regardless: the predicate matches the last two components wherever they
+  sit, so `/.lp/snapshots/<project>/<name>/.lp/access.json` is write-only
+  (pinned in `lpc-access`).
+- **Listing and sync.** Snapshots are files to every listing
+  (`LpFs::list_dir` of `/` or `/.lp` names them). Studio syncs and hashes a
+  project by its own prefix (`/projects/<id>`), which a snapshot is never
+  under, so no project sync walks them; a whole-image tool (`lp-cli
+  hardware tree extract`) extracts them as files and a restore writes them
+  back as files (sharing returns by dedup).
+- **Space.** A snapshot's records are live like any other: admission and
+  GC count them, so a full store refuses writes until snapshots go
+  ("keep N, drop the oldest" is the feature's policy, not the format's).
+
+Should a core that predates the feature write after one that made
+snapshots (a failed trial's rollback), the snapshots stay files to it and
+survive; that is more than the trial rule asks.
+
+### Secret files
+
+A write-only file — an access file or the network file, whatever
+`lpc_access::is_write_only_file_path` matches — never leaves the device.
+Content addressing opens two side doors to its bytes; these rules, on
+whoever writes and serves a store, close them:
+
+- **Never expose a write-only file's id.** An id is 64 bits of SHA-256 of
+  the file's bytes, and the network file's layout is public JSON: given
+  its id, anyone can test guesses at a Wi-Fi password offline. So no wire
+  answer, listing, sync, diff or etag carries the id of a write-only file,
+  nor the id of a directory node that holds one (a Merkle diff over that
+  directory is the same oracle). At this freeze (2026-10-16) no wire
+  message carries any store id: ids leave `lp-tree-store` only through
+  `lp-cli hardware tree inspect` of a raw image, which is physical access;
+  the canonical package hash refuses a prefix that would cover a
+  write-only file and the changes walk drops them
+  (`lpa_server::file_sync`); no answer says whether a write was
+  deduplicated, and free space is reported only in whole sectors, at boot
+  (no oracle for a ~100 B file). A later
+  etag, sync or snapshot-diff API must keep this.
+- **Collect a replaced secret promptly.** A replaced or deleted file's
+  records stay on flash as garbage until GC erases their sector — on a
+  store far from full, perhaps never — so a dump of the partition would
+  hold every old password. A writer that replaces or deletes a write-only
+  file collects the sectors holding the old version's records right after
+  the commit (inside a transaction, after it commits): a mark, then GC's
+  own copy-then-erase of each such sector (I2), a head renewed
+  (`TreeStore::scrub`; `LpFsTree::with_secret_paths`, which the firmware
+  turns on for its write-only files). A record still live elsewhere (the
+  same bytes in another file) keeps its sector. Best effort: with no free
+  sector to copy into, the rest waits for GC, and a cut mid-scrub leaves
+  what ordinary GC's cut would. It does not reach older directory records
+  that name the old file's id (a 64-bit fingerprint, not the bytes) until
+  GC does; whoever holds a dump of an unencrypted flash holds the current
+  secret in the clear anyway.
+- A snapshot never holds a write-only file ("The snapshot namespace").
 
 ## Finding the committed state (mount)
 
@@ -377,6 +642,71 @@ reader already classifies the same way, and no byte of the format changes.
 - **I3 — derived liveness.** Nothing on flash records liveness or free
   space: live = reachable from the committed root (and, while writing, from
   the writer's uncommitted tree).
+- **I4 — log order.** Every program a writer makes, except a kill (a
+  sector header before its erase, a record header that failed to check)
+  and a settle (programming bytes that already read so), is an **append**:
+  at the end of the records of the current head of its kind, which is the
+  newest sector of that kind. A sector is appended to only while it is a
+  head; once a newer sector of its kind is opened, it is never programmed
+  again until it is killed. A sector's seq is assigned when it is opened
+  and is greater (wrapping) than every seq trusted at that moment (the
+  writer's counter: the newest trusted at mount, plus one per sector
+  opened), so while trusted seqs span less than `2³¹`, a later sector has
+  the larger seq. Hence, for any earlier moment, everything written since lies in
+  sectors opened since or above that moment's head ends in that moment's
+  heads — what a roll-forward from a watermark (the index checkpoint)
+  needs to be complete.
+- **I5 — root placement.** Roots are written only to hot sectors (each
+  commit's root, and GC's copy of the committed root, which goes to the hot
+  head), and root seqs never decrease in log order: no root in an older
+  sector, or earlier in the same sector, has a greater seq than one after
+  it. So the committed root is the highest-seq root in the newest hot
+  sector that holds a good one (or, when that root's closure is incomplete
+  after a cut, the root before it): a reader can find it from the newest
+  hot sectors without reading every record header on the flash.
+
+Every v3 core is held to I4 and I5 (the cut sweeps check both after every
+step and every cut, `log_order_check.rs`), because a later bounded reader
+on a store an earlier core wrote depends on them: a v3-era optimisation
+that broke them (topping up an older sector, a root written to a cold
+sector) would silently break that reader on fielded stores. They are
+writer rules over bytes every reader already classifies; no byte of the
+format changes.
+
+## Limits at scale
+
+What each field allows, and where it stands on the largest board planned
+(an 8 MB filesystem: `N = 2,048` sectors of 4 KiB). **No field fails at
+8 MB, or at 64 MB**; what grows with the partition is the number of records
+on flash, which a reader that reads one header per record pays at mount,
+and the RAM of an index of every live record (12 B each in this
+implementation) — what the index checkpoint (kinds 6 and 7, below) is
+reserved for.
+
+| field | width | limit | at 2,048 × 4 KiB |
+|---|---|---|---|
+| sector count `N` | not on flash; retired list and locations u16 | 65,535 sectors (256 MiB at 4 KiB) | ok |
+| sector size `S` | header byte 7, log2 | 512 ..= 65,536, by configuration (above) | ok |
+| sector seq | u32, wrapping | a span ≥ 2³¹ makes a reader read the whole flash ("A faster reading") | ~7,700 opens a month: ~23,000 years to wrap |
+| erase count | u32 | 4·10⁹ | ok |
+| compat / incompat flags | u16 each | 16 bits each; none assigned | ok |
+| record `len` | u16 | 65,535; a record never spans a sector, so `≤ S − 40` | ok |
+| record id | u64, not cryptographic | accidental collision ≈ `L²/2⁶⁵` (`L` live records); a crafted one is refused by the writer's byte compare ("Ids") | `L` ≈ 11,300 at full: ≈ 3·10⁻¹² |
+| root seq | u64 | does not wrap (2⁶⁴ commits) | ok |
+| retired list | count u16, sectors u16 | the root is one record: a reader accepts `⌊(S − 66) / 2⌋` sectors (2,015 at 4 KiB); a root held to `record_max` `R`, like every other record, names at most `⌊(R − 42) / 2⌋` — **491 at `R` = 1,024** | 491 = 24 % of the partition |
+| root tail entry | length u16 | 65,535, inside the root record | ok |
+| Multi | total u32, count u16, fanout `⌊(R − 23) / 8⌋` | 4 GiB a node; levels 0..127 | ok |
+| Dir | count u16, name length u16, size u32 | 65,535 entries a directory | ok |
+| deflated chunk | logical length u16 prefix | ≤ 4,096 logical bytes (a reader refuses more) | ok |
+| stored chunk | its record's `len` | `≤ S − 40`; a writer cuts at `R − 16` | ok |
+| `record_max` | not on flash | 128 ..= `S − 24`, a per-board dial readers never assume | ok |
+| path | — | ≤ 32 components, ≤ 65,535 B | ok |
+
+**One location convention.** A record that stores where another record is
+(the index checkpoint is the first) writes it as `sector u16 ‖ offset u16`,
+the offset of the record's header from the start of its sector. That holds
+for every `N ≤ 65,535` and `S ≤ 65,536` (an offset is below `S`), so every
+later record follows it rather than choosing its own widths.
 
 ## Versioning and extension
 
@@ -404,19 +734,55 @@ There are two kinds of change, handled differently:
 - **A layout change bumps the version**: what the rules above cannot
   express (the header's own fields after byte 6 moving, a record header
   change, a CRC change). An older reader refuses a store holding any
-  sector of the new version (rule 0: `Unsupported("newer format")`) — never
-  misread, and never "no store" — so a version bump ships with a migration
-  that rewrites **every** sector before the new firmware writes, and a
-  board must be re-packed to take it. A board rolled back to the older
+  sector of the new version (rule 0: `Unsupported("newer format")`) —
+  never misread, and never "no store". A board rolled back to the older
   core afterwards refuses its store rather than formatting over it.
+
+**A version bump does not need a USB re-pack.** The version is in every
+sector's header and bytes 0..6 are the same in every version, so a store
+may hold sectors of two versions at once, and a core that reads both can
+run on it. A version bump therefore ships in one of two ways:
+
+- **in place, over the air**: the new core carries a reader of the old
+  version beside its own, writes only new-version sectors, and converts the
+  store on the device — sector by sector as GC copies live records into new
+  sectors, or in one background pass that is GC run over every old-version
+  sector. Every step is a GC step (copy, read back, then kill and erase:
+  I1, I2), so a power cut anywhere leaves a mixed store the same core
+  mounts. Its only limit is free space when new records are bigger than
+  old ones (the conversion then needs room reserved before it starts);
+- **by a re-pack over USB** (the layout migration, below), when a second
+  reader is not worth carrying.
+
+Both obey the trial rule. The cost of a later layout change is the code of
+a second reader plus one rewrite of the live set, not a re-pack of every
+board.
+
+**The trial rule.** A core that arrived over the air runs **on trial**
+until a link confirms it; a trial that fails boots the core before it
+(`docs/adr/2026-10-06-ota-update-protocol.md`). A core sets a new
+incompat flag, writes a sector of a newer version, or starts a conversion
+**only after its trial is confirmed** — never on an unconfirmed trial,
+whatever the feature. Everything else a newer core may do on trial (a
+compat flag, a new record kind nothing known names, a new root tag) is
+safe for the core before it by the rules above. So a failed trial meets the
+format's rollback bar: **the previous core boots and reads the ordinary
+files** (data that only a newer feature wrote — a snapshot, an index — may
+be lost when the older core writes; that is accepted). The firmware's gate
+is `fw_esp32_common::tree_fs::may_change_store_format(standing)`, true only
+for a confirmed boot (as `lpa_server::access_store::may_migrate_device_store`
+is for the device access file); version 3 defines no flag, so nothing calls
+it yet, and the first change that needs it must.
 
 **Can anything but a newer writer show the magic and a greater version?**
 Rule 0 trusts 6 bytes with no CRC, so it matters what else could put them
 there:
 
-- *Erased* (`FF…`) and *killed* (`00…`) headers do not show the magic.
-- *A torn kill* over a good header only clears bits, so the version stays a
-  subset of 3's bits (0..3), never greater.
+- *Erased* (`FF…`) and *killed* (magic `00…`) headers do not show the
+  magic.
+- *A torn kill* over a good header programs only the magic and the CRC and
+  only clears bits: the version is not touched (and a magic with any bit
+  cleared is no magic).
 - *A torn erase* starts from a killed header (the writer kills before every
   erase) and moves bits towards 1. To read as the magic, exactly its 13
   one-bits must have come up and its 19 zero-bits stayed down — one
@@ -453,13 +819,16 @@ rewrites the partition on the host, in one bootloader session, **over
 USB**. A board updated over Wi-Fi or Bluetooth (the update channel) cannot
 be re-packed: its next core must read the flash the previous core wrote, as
 it is, and a rolled-back core must read what the newer one left. So a
-change a later core makes must be expressible without a version bump — as
-a flag, a tag or a skippable kind that the core it replaces handles safely
-— and version bumps are kept for changes worth a USB re-pack.
+change a later core makes is best expressed without a version bump — as a
+flag, a tag or a skippable kind that the core it replaces handles safely.
+A version bump is still open to an over-the-air core when it carries a
+reader of the old version and converts the store on the device (above);
+what it costs is that reader's code, not a cable.
 
 Once a store is fielded (the adoption round), this format is
 **never-break**: a change that an existing reader would misread is either
-behind an incompat flag or bumps the version and ships with a migration;
+behind an incompat flag or bumps the version and ships with a conversion
+(on the device by a core that reads both versions, or over USB);
 the golden in `tests/format_golden.rs` is never re-recorded to make a change
 pass. Until then a change is allowed but still bumps the version (or, inside
 one unmerged PR, re-records the golden in a commit that says which

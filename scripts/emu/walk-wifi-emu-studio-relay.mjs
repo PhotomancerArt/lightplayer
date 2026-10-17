@@ -101,7 +101,7 @@ const WORDS = {
   connectRelay: "Connect through lightplayer.app",
   // `UiLinkKind::Relay.label()`: the connection bar's line on a relay link
   // (`<link> · connected` or `· live`).
-  relayLine: "Wi‑Fi via lightplayer.app",
+  relayLine: "lightplayer.app · ",
   // `RELAY_OFFLINE_WORDS`: a relay connect the hub refused (4404), the
   // connection bar's failed work.
   offline: "The board isn't online.",

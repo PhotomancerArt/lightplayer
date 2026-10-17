@@ -150,10 +150,10 @@ const RADIO_OFF_FOR_WIFI =
 /// Wi‑Fi panel's own "Cloud relay", `app/home/wifi_panel.rs`). They say WHEN
 /// to look; the board's status says what happened.
 export const WORDS = {
-  // U+2011. The connection bar's line on a LAN link: `<link> · connected`
-  // or `· live` (`board_card/connection_bar.rs`), the link's word being
+  // U+2011. The Link row on a LAN link: `<link> · connected`
+  // (`board_card/connection_bar.rs`), the link's word being
   // `UiLinkKind::Wifi.label()` (`ui_link_kind.rs`). A board through the relay
-  // reads "Wi‑Fi via lightplayer.app · …", which this does not match.
+  // reads "lightplayer.app · …", which this does not match.
   wifiLine: "Wi‑Fi · ",
   connectToANetwork: "Connect to a network",
   otherNetwork: "Other network",

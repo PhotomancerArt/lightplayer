@@ -14,7 +14,7 @@ use crate::object_id::ObjectId;
 use crate::ram_index::{RamIndex, RecordLoc};
 use crate::record_header::{HeaderRead, RECORD_HEADER_LEN, RecordHeader, encode_header_by};
 use crate::record_kind::{ChunkCodec, RecordKind};
-use crate::sector_header::{HeadKind, KILLED_SECTOR_HEADER, SECTOR_HEADER_LEN, SectorHeader};
+use crate::sector_header::{HeadKind, KILL_SPANS, SECTOR_HEADER_LEN, SectorHeader, reads_killed};
 use crate::sector_table::{ERASED, NEEDS_ERASE, SectorTable};
 use crate::store_error::StoreError;
 
@@ -338,12 +338,33 @@ impl<F: Flash> RecordLog<F> {
         Ok(true)
     }
 
-    /// Program `s`'s header to 24 zero bytes (FORMAT.md "Writing and
-    /// killing"): from then on it is untrusted on every read, whatever the
-    /// sector holds. Program only clears bits, so this also finishes a kill
-    /// a power cut left weak.
+    /// Program `s`'s header magic, then its CRC, to zeros (FORMAT.md
+    /// "Writing and killing"): from then on it is untrusted on every read,
+    /// whatever the sector holds, and its erase count still reads. Program
+    /// only clears bits, so this also finishes a kill a power cut left weak.
     pub fn kill_header(&mut self, s: u32) -> R<(), F> {
-        self.program(self.addr(s, 0), &KILLED_SECTOR_HEADER)
+        for (from, to) in KILL_SPANS {
+            self.program(self.addr(s, from), &[0u8; 4][..(to - from) as usize])?;
+        }
+        Ok(())
+    }
+
+    /// Whether `s`'s header reads killed (magic and CRC zero).
+    pub fn header_killed(&mut self, s: u32) -> R<bool, F> {
+        let mut h = [0u8; SECTOR_HEADER_LEN as usize];
+        self.read(self.addr(s, 0), &mut h)?;
+        Ok(reads_killed(&h))
+    }
+
+    /// Stop trusting a sector that holds no live record (nothing indexed in
+    /// it): kill its header, so a mount reads 24 bytes of it instead of its
+    /// records. It stays free and is erased when it is opened, as it would
+    /// have been.
+    pub fn forget_sector(&mut self, s: u32) -> R<(), F> {
+        self.index.remove_sector(s);
+        self.sectors.end[s as usize] = NEEDS_ERASE;
+        self.sectors.live[s as usize] = 0;
+        self.kill_header(s)
     }
 
     /// Whether `s`'s header reads `want`.
@@ -410,7 +431,7 @@ impl<F: Flash> RecordLog<F> {
     }
 
     /// Whether flash at `addr` reads `first ++ parts…`.
-    fn verify(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
+    pub fn verify(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
         let mut buf = [0u8; 64];
         let mut a = addr;
         for p in core::iter::once(first).chain(parts.iter().copied()) {

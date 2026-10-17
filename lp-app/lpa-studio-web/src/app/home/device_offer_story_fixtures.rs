@@ -946,6 +946,7 @@ fn ready_device(id: lpa_studio_core::DeviceId, title: &str) -> DeviceView {
         state_label: "Ready".to_string(),
         detail: None,
         freshness_label: None,
+        heard_age_ms: None,
         identity_label: None,
         detected_chip: None,
         board_id: None,

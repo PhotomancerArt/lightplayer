@@ -438,6 +438,7 @@ mod tests {
             state_label: "Ready".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: board_id.map(str::to_string),

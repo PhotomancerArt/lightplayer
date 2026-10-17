@@ -1,12 +1,13 @@
-//! How long ago something happened, in units that read naturally (the
-//! unit-awareness principle): seconds while seconds are meaningful, then
-//! minutes, hours, days, and from two weeks on, weeks.
+//! An age: how long ago something happened, in units that read naturally
+//! (the unit-awareness principle, P15): seconds while seconds are
+//! meaningful, then minutes, hours, days, and from two weeks on, weeks.
 //!
-//! One rule for every surface that names an age: the board card's status
-//! corner ("5 h ago" for the picture), the connection bar of a board that is
-//! away ("Offline · 2 weeks"), and the web's live-picture surfaces, which
-//! read it from here. A stale picture counting "412 s" is arithmetic
-//! homework; a remembered board's picture can be a month old.
+//! One rule for every surface that names an age (P17): a reading is
+//! [`age_words`] ("12 s ago"); a details fact is a label and that value
+//! (`Last heard` · `12 s ago`, `Last frame` · `12 s ago`); a "for how
+//! long" is [`duration_words`] ("Offline · 2 h"). A stale picture counting
+//! "412 s" is arithmetic homework; a remembered board's picture can be a
+//! month old.
 
 /// Seconds below which an age is said in seconds.
 const MINUTES_FROM: f64 = 90.0;
@@ -17,15 +18,15 @@ const DAYS_FROM: f64 = 172_800.0;
 /// … in days; from here on, in weeks.
 const WEEKS_FROM: f64 = 14.0 * 86_400.0;
 
-/// An age as the picture's reading says it: "12 s ago", "2 min ago",
-/// "5 h ago", "7 d ago", "3 weeks ago". A negative age (a clock that
-/// stepped back) reads "0 s ago".
+/// An age as a reading says it: "12 s ago", "2 min ago", "5 h ago",
+/// "7 d ago", "3 weeks ago". A negative age (a clock that stepped back)
+/// reads "0 s ago".
 pub fn age_words(age_secs: f64) -> String {
     format!("{} ago", duration_words(age_secs))
 }
 
-/// The same age as a duration, for a sentence that says "for how long":
-/// "Offline · 2 weeks", "Offline · 5 h".
+/// The same age as a duration, for "for how long": "Offline · 2 weeks",
+/// "Offline · 5 h".
 pub fn duration_words(age_secs: f64) -> String {
     let age = age_secs.max(0.0);
     if age < MINUTES_FROM {

@@ -1,63 +1,63 @@
-//! [`StackBar`]: one of the card's five bars, one 28 px row — its icon, its
-//! summary, its aside and its action flush at the end; while it carries work,
-//! the work instead ([`BarWork`]).
+//! [`StackBar`]: one of the card's five rows, one 28 px line in the card's
+//! one grammar (`docs/ux/anatomy/board-card.md`, "The row"): **icon · kind
+//! · name · state · action**. The icon is the kind's own in every state;
+//! the kind is a fixed muted column, so the names line up down the card;
+//! the name is the thing itself; the state follows only when it is not
+//! normal; the action sits flush at the end. While the row works, the
+//! conic spinner takes the icon's place and the work's words are its state
+//! ([`row_words`]), with the iridescent fill along its foot
+//! ([`WorkFoot`](super::bar_work::WorkFoot)).
 //!
-//! The icon, summary and aside are ONE full-width button: the trigger of the
-//! bar's details ([`BarDetails`], the merged detail card). The action sits
-//! outside the trigger (DC14), so pressing it never opens the details.
+//! The icon, kind, name and state are ONE full-width button: the trigger of
+//! the row's details ([`BarDetails`], the merged detail card). The action
+//! and its way out sit outside the trigger (DC14), so pressing one never
+//! opens the details; a row whose end only opens its details ("Review")
+//! draws that section inside the trigger, because that is all it does.
 //!
 //! A mark ([`UiBarMark`]) is an icon alone at the line's end, after the
-//! aside — the cloud on a board also reachable through lightplayer.app —
-//! with its words as its accessible name and hover, and the live tone while
-//! it is lit.
+//! state — the cloud on a board also reachable through lightplayer.app —
+//! with its words as its accessible name and hover: filled in the live tone
+//! while it holds, struck through while it doesn't (never colour alone).
 //!
-//! The bar's tone tints the row in its status family with the tone's icon
-//! leading — never colour alone (`docs/style/ui.md` "Icons"): Attention,
-//! Warning, Error (striped), Live (blue: Update), Good. Neutral is untinted.
-//! Which tone, which words and which offer are core's; this file only says
-//! how each looks.
+//! The row's tone tints it in its status family (`docs/style/ui.md`):
+//! Attention (a device needs you), Error (broken, striped), Good (work that
+//! just went well); the kind takes the row's own colour, quieter. A stale
+//! row (last known) is dimmed, its words unchanged. Which tone, which words
+//! and which offer are core's; this file only says how each looks.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{BarWorkState, OfferPath, UiAction, UiBarMark, UiStackBar, UiStatusKind};
 
 use super::bar_details::BarDetails;
-use super::bar_work::{BarWork, work_state_name};
+use super::bar_work::work_state_name;
 use super::card_action::{CardAction, CardActionLook, OfferAction};
-use crate::base::{PopoverPlacement, StudioIcon, StudioIconName, action_icon_name};
+use crate::base::{
+    PopoverPlacement, StudioIcon, StudioIconName, action_icon_name, conic_spinner_class,
+};
 use crate::core::ActionButtonVariant;
 
-/// One bar. See the module doc.
+/// One row. See the module doc.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StackBar(
     bar: UiStackBar,
-    /// `devices/<board ref>`: the board the bar's panels act on.
+    /// `devices/<board ref>`: the board the row's panels act on.
     board: OfferPath,
-    /// Stories: mount the bar's details open.
+    /// Stories: mount the row's details open.
     #[props(default)]
     initially_open: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let layer = bar.layer.as_str();
-    // Work tints the row by how it stands; otherwise the bar's own tone.
-    let tone = match bar.work.as_ref().map(|work| &work.state) {
-        Some(BarWorkState::Running) => UiStatusKind::Neutral,
-        Some(BarWorkState::Done) => UiStatusKind::Good,
-        Some(BarWorkState::Failed { .. }) => UiStatusKind::Error,
-        None => bar.tone,
-    };
+    let tone = row_tone(&bar);
     let work_state = bar.work.as_ref().map(|work| work_state_name(&work.state));
     let title = bar_title(&bar);
     let label = format!("{} details", layer_name(bar.layer));
     let details = bar.details.clone();
-    let trigger = match bar.work.clone() {
-        Some(work) => rsx! {
-            BarWork { work }
-        },
-        None => bar_line(&bar),
-    };
+    let trigger = bar_line(&bar);
     // Outside the trigger: the work's own way out (Cancel, Retry), else the
-    // bar's action. A bar with neither ends in its details' chevron.
+    // row's action and its way out. A row with none of them, and no section
+    // of its own that opens its details, ends in the details' chevron.
     let end = match bar.work.as_ref() {
         Some(work) => match &work.state {
             BarWorkState::Running => work.cancel.clone().map(|cancel| {
@@ -70,12 +70,19 @@ pub fn StackBar(
             }),
             BarWorkState::Failed { retry: None } | BarWorkState::Done => None,
         },
-        None => bar.action.clone().map(|action| {
-            rsx! {
-                CardAction { action, look: CardActionLook::BarEnd, on_action }
-            }
-        }),
+        None => match (bar.action.clone(), bar.way_out.clone()) {
+            (None, None) => None,
+            (action, way_out) => Some(rsx! {
+                if let Some(action) = action {
+                    CardAction { action, look: CardActionLook::BarEnd, on_action }
+                }
+                if let Some(way_out) = way_out {
+                    CardAction { action: way_out, look: CardActionLook::BarEnd, on_action }
+                }
+            }),
+        },
     };
+    let chevron = end.is_none() && opens_details(&bar).is_none();
     let foot = bar.work.as_ref().and_then(|work| match work.state {
         BarWorkState::Running => Some((work.percent, work.other_device)),
         BarWorkState::Done | BarWorkState::Failed { .. } => None,
@@ -85,6 +92,7 @@ pub fn StackBar(
             class: bar_class(tone),
             "data-bar": "{layer}",
             "data-bar-work": work_state,
+            "data-stale": if bar.stale { "true" },
             div { class: TRIGGER_SLOT_CLASS,
                 BarDetails {
                     sections: details.sections,
@@ -95,7 +103,7 @@ pub fn StackBar(
                     title,
                     trigger: rsx! {
                         {trigger}
-                        if end.is_none() {
+                        if chevron {
                             span { class: CHEVRON_CLASS, aria_hidden: "true",
                                 StudioIcon { name: StudioIconName::Collapsed, size: 12 }
                             }
@@ -116,33 +124,122 @@ pub fn StackBar(
     }
 }
 
-/// The bar's resting line: the leading icon (the tone's, on a tinted bar),
-/// the summary, the aside.
+/// The tone the row is drawn in: work tints it by how it stands (neutral
+/// while it runs, green when it went well, red when it failed); otherwise
+/// the row's own tone.
+pub(crate) fn row_tone(bar: &UiStackBar) -> UiStatusKind {
+    match bar.work.as_ref().map(|work| &work.state) {
+        Some(BarWorkState::Running) => UiStatusKind::Neutral,
+        Some(BarWorkState::Done) => UiStatusKind::Good,
+        Some(BarWorkState::Failed { .. }) => UiStatusKind::Error,
+        None => bar.tone,
+    }
+}
+
+/// The row's name and state, as drawn: at rest the summary and the aside;
+/// while it works, the name stays and the work's words are its state. On
+/// the Link row (no kind) the work's words are the whole line ("USB ·
+/// connecting"), and a row with no name yet puts them where the name goes
+/// ("installing · 30%").
+pub(crate) fn row_words(bar: &UiStackBar) -> (String, Option<String>) {
+    match &bar.work {
+        Some(work) if bar.kind.is_none() || bar.summary.is_empty() => (work.words.clone(), None),
+        Some(work) => (
+            bar.summary.clone(),
+            Some(work.words.clone()).filter(|words| !words.is_empty()),
+        ),
+        None => (bar.summary.clone(), bar.aside.clone()),
+    }
+}
+
+/// The word of the row's own end section that opens its details
+/// ("Review"), while the row carries no work.
+fn opens_details(bar: &UiStackBar) -> Option<&'static str> {
+    bar.opens_details.filter(|_| bar.work.is_none())
+}
+
+/// The row's line: the lead (the kind's icon; the spinner while it works,
+/// the check once it went well), the kind, the name, the state, the mark,
+/// and the section that opens its details.
 fn bar_line(bar: &UiStackBar) -> Element {
-    let toned = bar.tone != UiStatusKind::Neutral;
-    let icon = tone_icon(bar.tone).or_else(|| action_icon_name(Some(bar.icon.as_str())));
+    let toned = row_tone(bar) != UiStatusKind::Neutral;
+    let working = matches!(
+        bar.work.as_ref().map(|work| &work.state),
+        Some(BarWorkState::Running)
+    );
+    let dim = if bar.stale { STALE_CLASS } else { "" };
+    let icon_class = format!(
+        "{} {dim}",
+        if toned { ICON_TONED_CLASS } else { ICON_CLASS }
+    );
+    let kind_class = format!(
+        "{} {dim}",
+        if toned { KIND_TONED_CLASS } else { KIND_CLASS }
+    );
+    let state_class = format!(
+        "{} {dim}",
+        if toned {
+            STATE_TONED_CLASS
+        } else {
+            STATE_CLASS
+        }
+    );
+    let lead = match bar.work.as_ref().map(|work| &work.state) {
+        Some(BarWorkState::Running) => rsx! {
+            span { class: "{conic_spinner_class()} ux-board-spinner", aria_hidden: "true" }
+        },
+        Some(BarWorkState::Done) => rsx! {
+            span { class: ICON_TONED_CLASS, aria_hidden: "true",
+                StudioIcon { name: StudioIconName::StepComplete, size: 12 }
+            }
+        },
+        _ => match action_icon_name(Some(bar.icon.as_str())) {
+            Some(icon) => rsx! {
+                span { class: "{icon_class}", aria_hidden: "true",
+                    StudioIcon { name: icon, size: 12 }
+                }
+            },
+            None => rsx! {},
+        },
+    };
+    let (name, state) = row_words(bar);
+    let name_class = format!(
+        "{} {dim}",
+        match (toned, working) {
+            (true, _) => NAME_TONED_CLASS,
+            (false, true) => NAME_WORKING_CLASS,
+            (false, false) => NAME_CLASS,
+        }
+    );
     rsx! {
-        if let Some(icon) = icon {
-            span { class: if toned { ICON_TONED_CLASS } else { ICON_CLASS }, aria_hidden: "true",
-                StudioIcon { name: icon, size: 12 }
+        {lead}
+        if let Some(kind) = bar.kind {
+            span { class: "{kind_class}", "data-bar-kind": "{kind}", "{kind}" }
+        }
+        span { class: "{name_class}", "{name}" }
+        if let Some(state) = state {
+            span { class: "{state_class}", "data-bar-state": "true",
+                span { class: "tw:truncate", "{state}" }
             }
         }
-        span { class: if toned { SUMMARY_TONED_CLASS } else { SUMMARY_CLASS }, "{bar.summary}" }
-        if let Some(aside) = bar.aside.clone() {
-            span { class: if toned { ASIDE_TONED_CLASS } else { ASIDE_CLASS },
-                span { class: "tw:truncate", "{aside}" }
-            }
-        }
-        if let Some(mark) = bar.mark.clone() {
+        if let Some(mark) = bar.mark.clone().filter(|_| bar.work.is_none()) {
             {bar_mark(mark)}
+        }
+        if let Some(word) = opens_details(bar) {
+            span { class: OPENS_DETAILS_CLASS, "data-opens-details": "true", "{word}" }
         }
     }
 }
 
-/// The mark: its icon alone, its words the accessible name and the hover,
-/// in the live tone while lit.
+/// The mark: its icon alone, its words the accessible name and the hover;
+/// filled in the live tone while lit, struck through while it isn't.
 fn bar_mark(mark: UiBarMark) -> Element {
-    let Some(icon) = action_icon_name(Some(mark.icon.as_str())) else {
+    let icon = match (mark.icon.as_str(), mark.lit) {
+        ("cloud", true) => Some(StudioIconName::CloudFilled),
+        ("cloud", false) => Some(StudioIconName::CloudOff),
+        (other, _) => action_icon_name(Some(other)),
+    };
+    let Some(icon) = icon else {
         return rsx! {};
     };
     rsx! {
@@ -158,21 +255,24 @@ fn bar_mark(mark: UiBarMark) -> Element {
     }
 }
 
-/// The bar's hover title: its whole line, which the row may cut, and its
+/// The row's hover title: its whole line, which the row may cut, and its
 /// mark's words.
 fn bar_title(bar: &UiStackBar) -> String {
-    let line = match (&bar.work, &bar.aside) {
-        (Some(work), _) => work.words.clone(),
-        (None, Some(aside)) => format!("{} · {aside}", bar.summary),
-        (None, None) => bar.summary.clone(),
-    };
+    let (name, state) = row_words(bar);
+    let mut line: Vec<&str> = bar.kind.into_iter().collect();
+    line.push(&name);
+    let mut title = line.join(" ");
+    if let Some(state) = &state {
+        title.push_str(" · ");
+        title.push_str(state);
+    }
     match (&bar.work, &bar.mark) {
-        (None, Some(mark)) => format!("{line} · {}", mark.label),
-        _ => line,
+        (None, Some(mark)) => format!("{title} · {}", mark.label),
+        _ => title,
     }
 }
 
-/// The bar's name, for its details' accessible name.
+/// The row's name, for its details' accessible name.
 fn layer_name(layer: lpa_studio_core::BarLayer) -> &'static str {
     match layer {
         lpa_studio_core::BarLayer::Project => "Project",
@@ -216,8 +316,9 @@ pub(crate) fn bar_tone_class(tone: UiStatusKind) -> &'static str {
     }
 }
 
-/// The icon a tinted bar leads with, so its tone never rests on colour
-/// alone; `None` for Neutral (the bar keeps its own icon).
+/// The icon a status mark leads with, so a tone never rests on colour
+/// alone where no word says it (the status corner's mark); `None` for
+/// Neutral. A row keeps its kind's icon and says its state in a word.
 pub(crate) fn tone_icon(tone: UiStatusKind) -> Option<StudioIconName> {
     match tone {
         UiStatusKind::Neutral => None,
@@ -229,7 +330,7 @@ pub(crate) fn tone_icon(tone: UiStatusKind) -> Option<StudioIconName> {
     }
 }
 
-/// The fixed row: 28 px with its top hairline (the bars are full-bleed rows
+/// The fixed row: 28 px with its top hairline (the rows are full-bleed rows
 /// of one card, never boxes), the last one rounded with the card.
 const BAR_BASE_CLASS: &str = "ux-board-bar tw:relative tw:flex tw:h-7 tw:min-w-0 tw:items-stretch tw:border-0 tw:border-t tw:border-solid tw:text-[11.5px] tw:last:rounded-b-[7px]";
 
@@ -238,8 +339,9 @@ const BAR_BASE_CLASS: &str = "ux-board-bar tw:relative tw:flex tw:h-7 tw:min-w-0
 /// a pick the details hand back opens over it.
 const TRIGGER_SLOT_CLASS: &str = "tw:relative tw:grid tw:min-w-0 tw:flex-1 tw:[&>span]:h-full tw:[&>span]:w-full tw:[&>span]:place-items-stretch";
 
-/// The trigger: the row's icon, summary and aside as one button, the row's
-/// own ink. Tailwind preflight is not loaded, so the UA chrome is reset.
+/// The trigger: the row's icon, kind, name and state as one button, the
+/// row's own ink. Tailwind preflight is not loaded, so the UA chrome is
+/// reset.
 const TRIGGER_CLASS: &str = "tw:flex tw:h-full tw:w-full tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:px-2.5 tw:text-left tw:text-[11.5px] tw:text-inherit tw:transition-colors tw:hover:bg-white/5 ux-focus-ring";
 
 /// …while its details are open.
@@ -247,16 +349,31 @@ const TRIGGER_OPEN_CLASS: &str = "tw:flex tw:h-full tw:w-full tw:min-w-0 tw:curs
 
 const ICON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-subtle-foreground";
 const ICON_TONED_CLASS: &str = "tw:inline-flex tw:flex-none";
-const SUMMARY_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:text-foreground";
-const SUMMARY_TONED_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold";
-const ASIDE_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:max-w-[45%] tw:flex-none tw:items-center tw:gap-1 tw:text-subtle-foreground";
-const ASIDE_TONED_CLASS: &str =
-    "tw:inline-flex tw:min-w-0 tw:max-w-[45%] tw:flex-none tw:items-center tw:gap-1 tw:opacity-80";
+/// The kind: a fixed column (56 px) so the names line up down the card,
+/// muted — it teaches, it isn't news.
+const KIND_CLASS: &str =
+    "tw:w-14 tw:flex-none tw:font-medium tw:text-[color:var(--studio-color-text-faint)]";
+/// …in a toned row: the row's own colour, quieter.
+const KIND_TONED_CLASS: &str = "tw:w-14 tw:flex-none tw:font-medium tw:opacity-70";
+const NAME_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:text-foreground";
+const NAME_TONED_CLASS: &str = "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold";
+/// The name while the row works: strong, the row neutral.
+const NAME_WORKING_CLASS: &str =
+    "tw:min-w-0 tw:flex-1 tw:truncate tw:font-bold tw:text-strong-foreground";
+const STATE_CLASS: &str = "tw:inline-flex tw:min-w-0 tw:max-w-[55%] tw:flex-none tw:items-center tw:gap-1 tw:text-subtle-foreground";
+const STATE_TONED_CLASS: &str =
+    "tw:inline-flex tw:min-w-0 tw:max-w-[55%] tw:flex-none tw:items-center tw:gap-1";
+/// What a stale row's words wear: last known, dimmed.
+const STALE_CLASS: &str = "tw:opacity-45";
 const CHEVRON_CLASS: &str = "tw:inline-flex tw:flex-none tw:text-dim-foreground";
-/// A mark at rest: set up, not holding yet (Cloud relay on, the board not
-/// registered).
+/// The row's own end section that opens its details ("Review"): drawn as a
+/// flush section, inside the trigger because opening the details is all it
+/// does.
+const OPENS_DETAILS_CLASS: &str = "tw:-mr-2.5 tw:ml-1 tw:inline-flex tw:h-full tw:flex-none tw:items-center tw:whitespace-nowrap tw:border-0 tw:border-l tw:border-solid tw:border-[color:var(--ux-row-flush-edge,var(--studio-color-border))] tw:bg-white/[0.035] tw:px-[11px] tw:text-[11px] tw:font-extrabold tw:text-strong-foreground";
+/// A mark not holding: struck through, dim.
 const MARK_CLASS: &str = "tw:inline-flex tw:flex-none tw:items-center tw:text-dim-foreground";
-/// A lit mark: the live tone (the board reachable through lightplayer.app).
+/// A lit mark: filled, the live tone (the board reachable through
+/// lightplayer.app).
 const MARK_LIT_CLASS: &str =
     "tw:inline-flex tw:flex-none tw:items-center tw:text-status-live-foreground";
 
@@ -264,26 +381,16 @@ const MARK_LIT_CLASS: &str =
 mod tests {
     use super::*;
 
-    /// The cloud mark is the icon alone: no words on the bar, its label the
+    /// The cloud mark is the icon alone: no words on the row, its label the
     /// accessible name and the hover, lit in the live tone when the board is
     /// reachable through lightplayer.app.
     #[test]
     fn a_mark_is_an_icon_alone_with_its_words_as_its_name() {
-        let bar = UiStackBar {
-            layer: lpa_studio_core::BarLayer::Connection,
-            icon: "usb".to_string(),
-            summary: "USB · connected".to_string(),
-            aside: None,
-            mark: Some(UiBarMark {
-                icon: "cloud".to_string(),
-                label: lpa_studio_core::ALSO_THROUGH_THE_CLOUD.to_string(),
-                lit: true,
-            }),
-            tone: UiStatusKind::Neutral,
-            action: None,
-            work: None,
-            details: lpa_studio_core::UiBarDetails::default(),
-        };
+        let bar = link_row(Some(UiBarMark {
+            icon: "cloud".to_string(),
+            label: lpa_studio_core::ALSO_THROUGH_THE_CLOUD.to_string(),
+            lit: true,
+        }));
         let html = dioxus_ssr::render_element(bar_line(&bar));
         assert!(html.contains("data-bar-mark=\"cloud\""), "{html}");
         assert!(html.contains("data-lit=\"true\""), "{html}");
@@ -299,6 +406,93 @@ mod tests {
         );
     }
 
+    /// P14: lit and not lit differ in shape, not only in colour — filled
+    /// against struck through.
+    #[test]
+    fn a_lit_cloud_is_filled_and_an_unreachable_one_struck_through() {
+        let lit = dioxus_ssr::render_element(bar_mark(UiBarMark {
+            icon: "cloud".to_string(),
+            label: "lit".to_string(),
+            lit: true,
+        }));
+        let off = dioxus_ssr::render_element(bar_mark(UiBarMark {
+            icon: "cloud".to_string(),
+            label: "off".to_string(),
+            lit: false,
+        }));
+        assert!(lit.contains("fill=\"currentColor\""), "{lit}");
+        assert!(!off.contains("fill=\"currentColor\""), "{off}");
+        assert_ne!(
+            lit.matches("<path").count(),
+            off.matches("<path").count(),
+            "struck through draws the strike: {off}"
+        );
+    }
+
+    /// The row's grammar: the kind's word in its own column after the icon,
+    /// then the name, then the state; the Link row has no kind.
+    #[test]
+    fn a_row_reads_icon_kind_name_state() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Project,
+            "project",
+            "studio",
+        );
+        row.aside = Some("out of date".to_string());
+        let html = dioxus_ssr::render_element(bar_line(&row));
+        let kind = html.find("data-bar-kind=\"Project\"").expect("the kind");
+        let name = html.find(">studio<").expect("the name");
+        let state = html.find(">out of date<").expect("the state");
+        assert!(kind < name && name < state, "{html}");
+        assert_eq!(bar_title(&row), "Project studio · out of date");
+
+        let link = link_row(None);
+        let html = dioxus_ssr::render_element(bar_line(&link));
+        assert!(!html.contains("data-bar-kind"), "{html}");
+    }
+
+    /// While a row works its name stays and the work's words are its
+    /// state; on the Link row they are the whole line.
+    #[test]
+    fn work_keeps_the_name_and_says_its_state() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Project,
+            "project",
+            "Playful Choker",
+        );
+        row.work = Some(running("sending · 40%"));
+        assert_eq!(
+            row_words(&row),
+            (
+                "Playful Choker".to_string(),
+                Some("sending · 40%".to_string())
+            )
+        );
+        let mut link = link_row(None);
+        link.work = Some(running("USB · connecting"));
+        assert_eq!(row_words(&link), ("USB · connecting".to_string(), None));
+        let mut nameless =
+            lpa_studio_core::UiStackBar::new(lpa_studio_core::BarLayer::Firmware, "firmware", "");
+        nameless.work = Some(running("installing · 30%"));
+        assert_eq!(row_words(&nameless), ("installing · 30%".to_string(), None));
+    }
+
+    /// A stale row is dimmed and says the same words.
+    #[test]
+    fn a_stale_row_is_dimmed_with_the_same_words() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Firmware,
+            "firmware",
+            "v2026.10.08-9",
+        );
+        let fresh = dioxus_ssr::render_element(bar_line(&row));
+        row.stale = true;
+        let stale = dioxus_ssr::render_element(bar_line(&row));
+        assert!(!fresh.contains(STALE_CLASS), "{fresh}");
+        assert!(stale.contains(STALE_CLASS), "{stale}");
+        assert!(stale.contains(">v2026.10.08-9<"), "{stale}");
+    }
+
     const KINDS: [UiStatusKind; 7] = [
         UiStatusKind::Neutral,
         UiStatusKind::Working,
@@ -310,7 +504,7 @@ mod tests {
     ];
 
     /// Every tone maps to a tint in its own family — Neutral to none — and
-    /// a tinted bar carries its tone's icon (never colour alone).
+    /// every non-neutral tone has a status icon for the corner's mark.
     #[test]
     fn every_tone_tints_in_its_family_and_carries_its_icon() {
         for kind in KINDS {
@@ -341,7 +535,30 @@ mod tests {
         }
     }
 
-    /// A tinted bar keeps its height: the row is the same fixed 28 px in
+    /// A toned row keeps its kind's icon: the state's word says what, the
+    /// tone how bad (P14).
+    #[test]
+    fn a_toned_row_keeps_its_kinds_icon() {
+        let mut row = lpa_studio_core::UiStackBar::new(
+            lpa_studio_core::BarLayer::Firmware,
+            "firmware",
+            "v2026.10.08-9",
+        );
+        row.aside = Some("crashing".to_string());
+        row.tone = UiStatusKind::Error;
+        let toned = dioxus_ssr::render_element(bar_line(&row));
+        row.tone = UiStatusKind::Neutral;
+        row.aside = None;
+        let quiet = dioxus_ssr::render_element(bar_line(&row));
+        let svg = |html: &str| html[html.find("<svg").expect("an icon")..].to_string();
+        assert_eq!(
+            svg(&toned).split('>').nth(1),
+            svg(&quiet).split('>').nth(1),
+            "the same glyph"
+        );
+    }
+
+    /// A toned row keeps its height: the row is the same fixed 28 px in
     /// every tone, one line, never wrapping.
     #[test]
     fn a_tinted_bar_keeps_its_height() {
@@ -351,15 +568,16 @@ mod tests {
             assert!(!class.contains("min-h"), "{class}");
             assert!(!class.contains("tw:py-"), "{class}");
         }
-        for class in [SUMMARY_CLASS, SUMMARY_TONED_CLASS] {
+        for class in [NAME_CLASS, NAME_TONED_CLASS, NAME_WORKING_CLASS] {
             assert!(class.contains("tw:truncate"), "{class}");
         }
         assert!(TRIGGER_CLASS.contains("tw:h-full"));
         assert!(TRIGGER_OPEN_CLASS.contains("tw:h-full"));
+        assert!(KIND_CLASS.contains("tw:w-14") && KIND_TONED_CLASS.contains("tw:w-14"));
     }
 
-    /// The bars' hairlines: every bar carries the full-bleed top border,
-    /// and nothing inside a bar draws a frame of its own.
+    /// The rows' hairlines: every row carries the full-bleed top border,
+    /// and nothing inside a row draws a frame of its own.
     #[test]
     fn every_bar_carries_the_full_bleed_hairline() {
         assert!(BAR_BASE_CLASS.contains("tw:border-t tw:border-solid"));
@@ -367,9 +585,37 @@ mod tests {
             !BAR_BASE_CLASS.contains("tw:px-"),
             "the row pads its pieces, not itself"
         );
-        for class in [TRIGGER_CLASS, ICON_CLASS, SUMMARY_CLASS, ASIDE_CLASS] {
+        for class in [
+            TRIGGER_CLASS,
+            ICON_CLASS,
+            KIND_CLASS,
+            NAME_CLASS,
+            STATE_CLASS,
+        ] {
             assert!(!class.contains("rounded"), "{class}");
             assert!(!class.contains("tw:border "), "{class}");
+        }
+    }
+
+    fn link_row(mark: Option<UiBarMark>) -> UiStackBar {
+        UiStackBar {
+            mark,
+            ..UiStackBar::new(
+                lpa_studio_core::BarLayer::Connection,
+                "usb",
+                "USB · connected",
+            )
+        }
+    }
+
+    fn running(words: &str) -> lpa_studio_core::UiBarWork {
+        lpa_studio_core::UiBarWork {
+            words: words.to_string(),
+            detail: None,
+            percent: Some(40),
+            state: BarWorkState::Running,
+            cancel: None,
+            other_device: false,
         }
     }
 }

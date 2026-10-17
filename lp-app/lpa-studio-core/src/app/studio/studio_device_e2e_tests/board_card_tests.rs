@@ -96,7 +96,7 @@ fn a_running_boards_card_presses_connect_by_path_and_opens_the_session_once() {
             .name_bar
             .primary
             .as_ref()
-            .map(|primary| primary.word()),
+            .and_then(|primary| primary.word()),
         Some("Done"),
         "Done on the docked card"
     );
@@ -252,7 +252,7 @@ fn an_offline_boards_card_reconnects_wifi_first() {
     every_card_action_is_offered(&mut bench);
 }
 
-/// An empty board says "No project", and its primary is "Add a project":
+/// An empty board's Project row says "none", and its primary is "Add a project":
 /// the `push` offer, drawn as the picker, which the project bar does not
 /// repeat; pressed by path with a source, the push runs.
 #[test]
@@ -269,7 +269,7 @@ fn an_empty_boards_primary_adds_a_project_by_path() {
     let id = bench.view().devices[0].id;
     let card = card_of(&bench, id);
     let bar = card.bar(crate::BarLayer::Project).clone();
-    assert_eq!(bar.summary, "No project");
+    assert_eq!(bar.summary, "none");
     assert_eq!(bar.action, None, "the primary carries it, once");
     let add = primary_offer(&card);
     assert_eq!(add.word, "Add a project");
@@ -322,9 +322,13 @@ fn an_out_of_date_boards_send_latest_presses_push_with_the_project() {
     drive(bench.controller.settle_library());
 
     let bar = card_of(&bench, id).bar(crate::BarLayer::Project).clone();
-    assert_eq!(bar.summary, "Out of date");
-    assert_eq!(bar.aside.as_deref(), Some(slug.as_str()));
-    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(bar.summary, slug, "the name stays in place");
+    assert_eq!(bar.aside.as_deref(), Some("out of date"));
+    assert_eq!(
+        bar.tone,
+        crate::UiStatusKind::Neutral,
+        "the button carries it"
+    );
     let send = bar.action.expect("Send latest");
     assert_eq!(send.word, "Send latest");
     assert_eq!(send.offer, bench.device_verb(id, "push"));
@@ -335,8 +339,8 @@ fn an_out_of_date_boards_send_latest_presses_push_with_the_project() {
     let card = card_of(&bench, id);
     assert_eq!(
         card.status.mark,
-        crate::CornerMark::Notice(crate::UiStatusKind::Attention),
-        "the corner says it too"
+        crate::CornerMark::Fine,
+        "an older copy is no alarm: the row says it, once"
     );
     every_card_action_is_offered(&mut bench);
 
@@ -398,13 +402,14 @@ fn a_not_responding_boards_retry_presses_retry_by_path() {
     let id = bench.view().devices[0].id;
     let bar = card_of(&bench, id).bar(crate::BarLayer::Connection).clone();
     assert_eq!(bar.summary, "USB · not responding");
-    assert_eq!(bar.tone, crate::UiStatusKind::Warning);
+    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
     let retry = bar.action.expect("Retry");
     assert_eq!(retry.word, "Retry");
     assert_eq!(retry.offer, bench.device_verb(id, "retry"));
     assert_eq!(
         card_of(&bench, id).status.mark,
-        crate::CornerMark::Notice(crate::UiStatusKind::Warning)
+        crate::CornerMark::Fine,
+        "the row says it; the corner stays quiet"
     );
     every_card_action_is_offered(&mut bench);
     bench
@@ -501,10 +506,12 @@ fn the_layout_question_raises_the_firmware_details_and_continue_runs_by_path() {
         bar.details.panels
     );
     assert_eq!(
-        bar.work.as_ref().map(|work| work.words.as_str()),
-        Some("Waiting for your answer…"),
-        "the running flash names its step"
+        bar.work, None,
+        "a flash waiting for its answer is not working"
     );
+    assert_eq!(bar.aside.as_deref(), Some(crate::CONFIRMATION_REQUIRED));
+    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    assert_eq!(bar.opens_details, Some("Review"), "no dead end: Review");
     assert_eq!(
         bar.details
             .notice()
@@ -584,29 +591,32 @@ fn a_board_holding_its_files_offers_finish_update_as_the_firmware_action() {
     let bar = card_of(&bench, target)
         .bar(crate::BarLayer::Firmware)
         .clone();
-    assert_eq!(bar.summary, "Files waiting");
+    assert_eq!(bar.aside.as_deref(), Some(crate::UPDATE_INTERRUPTED));
     assert_eq!(bar.tone, crate::UiStatusKind::Attention);
-    let finish = bar.action.clone().expect("Finish update");
-    assert_eq!(finish.word, "Finish update");
+    let finish = bar.action.clone().expect("Resume");
+    assert_eq!(finish.word, "Resume");
     assert_eq!(finish.offer, bench.device_verb(target, "finish-update"));
+    // The interrupted flash's failure is said first; the waiting files'
+    // line is the row's own notice after it.
     assert!(
-        bar.details
-            .notice()
-            .and_then(|notice| notice.sentence.as_deref())
-            .is_some_and(|line| line.contains("waiting")),
-        "the waiting-files line is the notice"
+        bar.details.sections.iter().any(|section| section
+            .sentence
+            .as_deref()
+            .is_some_and(|line| line.contains("waiting"))),
+        "the waiting-files line is in the details: {:#?}",
+        bar.details.sections
     );
     every_card_action_is_offered(&mut bench);
 }
 
 /// The cable pulled mid filesystem write: the board boots formatted, and
-/// the firmware bar says its files are gone, with the stored backup's way
-/// back as its action (`…/restore-files`) and Start fresh as the way on.
-/// Start fresh, pressed by path, lets the files go: the notice leaves the
-/// card, and this browser keeps the choice for the board (the web edge's
-/// storage), so a reload does not bring it back.
+/// its Project row says its data was lost (O3), with the stored backup's
+/// way back as its action (Restore, `…/restore-files`) and Reset (Start
+/// fresh) beside it as the way out. Reset, pressed by path, lets the files
+/// go: the state leaves the card, and this browser keeps the choice for the
+/// board (the web edge's storage), so a reload does not bring it back.
 #[test]
-fn a_formatted_boards_firmware_action_restores_its_files() {
+fn a_formatted_boards_project_row_restores_its_data() {
     let device = legacy_light_player(Vec::new());
     let (mut bench, tasks) = identified(&device, "usb-card-layout-3");
     let target = bench.view().devices[0].id;
@@ -625,12 +635,27 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
     });
 
     let bar = card_of(&bench, target)
-        .bar(crate::BarLayer::Firmware)
+        .bar(crate::BarLayer::Project)
         .clone();
-    assert_eq!(bar.summary, crate::FILES_ARE_GONE);
-    let restore = bar.action.clone().expect("Restore files");
-    assert_eq!(restore.word, "Restore files");
+    assert_eq!(
+        (bar.summary.as_str(), bar.aside.as_deref()),
+        (crate::PROJECT_NONE, Some(crate::DATA_LOST))
+    );
+    assert_eq!(bar.tone, crate::UiStatusKind::Attention);
+    let restore = bar.action.clone().expect("Restore");
+    assert_eq!(restore.word, "Restore");
     assert_eq!(restore.offer, bench.device_verb(target, RESTORE_FILES));
+    let reset = bar.way_out.clone().expect("Reset beside it");
+    assert_eq!(reset.word, "Reset");
+    assert_eq!(reset.offer, bench.device_verb(target, crate::START_FRESH));
+    assert_ne!(
+        card_of(&bench, target)
+            .bar(crate::BarLayer::Firmware)
+            .aside
+            .as_deref(),
+        Some(crate::DATA_LOST),
+        "said once, on the Project row"
+    );
     assert!(
         bar.details
             .panels
@@ -645,7 +670,6 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
         .flat_map(|section| section.affordances.iter().map(|action| action.word.clone()))
         .collect();
     assert!(verbs.contains(&"Download backup".to_string()), "{verbs:?}");
-    assert!(verbs.contains(&"Start fresh".to_string()), "{verbs:?}");
     every_card_action_is_offered(&mut bench);
 
     // Start fresh: Routine, the agent's to press too; nothing on the board
@@ -661,9 +685,13 @@ fn a_formatted_boards_firmware_action_restores_its_files() {
         .press(&start_fresh, OfferArgs::new())
         .expect("Start fresh");
     let bar = card_of(&bench, target)
-        .bar(crate::BarLayer::Firmware)
+        .bar(crate::BarLayer::Project)
         .clone();
-    assert_ne!(bar.summary, crate::FILES_ARE_GONE, "the notice is gone");
+    assert_ne!(
+        bar.aside.as_deref(),
+        Some(crate::DATA_LOST),
+        "the state is gone"
+    );
     bench.not_offered(&start_fresh);
     assert_eq!(
         kept.borrow().last().map(String::as_str),
@@ -697,17 +725,21 @@ fn a_freshly_installed_board_is_not_told_its_files_are_gone() {
     let id = bench.view().devices[0].id;
     let card = card_of(&bench, id);
     let firmware = card.bar(crate::BarLayer::Firmware);
-    assert_ne!(firmware.summary, crate::FILES_ARE_GONE);
     assert_ne!(
         firmware.tone,
         crate::UiStatusKind::Attention,
         "{firmware:?}"
     );
+    assert_ne!(
+        card.bar(crate::BarLayer::Project).aside.as_deref(),
+        Some(crate::DATA_LOST),
+        "a fresh install lost nothing"
+    );
     for verb in [crate::START_FRESH, RESTORE_FILES, "restore-from-file"] {
         let path = bench.device_verb(id, verb);
         bench.not_offered(&path);
     }
-    assert_eq!(card.bar(crate::BarLayer::Project).summary, "No project");
+    assert_eq!(card.bar(crate::BarLayer::Project).summary, "none");
     assert_eq!(primary_offer(&card).word, "Add a project");
     every_card_action_is_offered(&mut bench);
 }
@@ -739,7 +771,7 @@ fn a_board_that_refused_its_store_says_its_data_is_unreadable_and_offers_no_way_
     });
     let card = card_of(&bench, id);
     let firmware = card.bar(crate::BarLayer::Firmware);
-    assert_eq!(firmware.summary, crate::DATA_UNREADABLE);
+    assert_eq!(firmware.aside.as_deref(), Some(crate::DATA_UNREADABLE));
     assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
     assert_eq!(firmware.action, None, "no click here is safe");
     assert_eq!(
@@ -798,7 +830,7 @@ fn a_littlefs_board_on_a_tree_store_says_its_files_need_newer_firmware() {
     });
     let card = card_of(&bench, id);
     let firmware = card.bar(crate::BarLayer::Firmware);
-    assert_eq!(firmware.summary, crate::FILES_NEED_NEWER_FIRMWARE);
+    assert_eq!(firmware.aside.as_deref(), Some(crate::UPDATE_REQUIRED));
     assert_eq!(firmware.tone, crate::UiStatusKind::Attention);
     assert_eq!(firmware.action, None);
     let line = crate::app::devices::device_layout_view::TREE_STORE_HELD_LINE;
@@ -845,7 +877,7 @@ fn a_running_sim_with_no_project_offers_add_a_project() {
         })
     });
     let card = card_of(&bench, sim);
-    assert_eq!(card.bar(crate::BarLayer::Project).summary, "No project");
+    assert_eq!(card.bar(crate::BarLayer::Project).summary, "none");
     assert_eq!(
         card.bar(crate::BarLayer::Connection).summary,
         "Simulated · running"

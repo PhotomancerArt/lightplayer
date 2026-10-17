@@ -219,6 +219,10 @@ const PRESSABLE = `((mark) => { if (!mark) return null; const all = mark.querySe
 /// mark (the cloud) is an icon with no text, and reads as nothing.
 const LINE_TEXT = `((el) => [...el.children].map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
 
+/// The Firmware row of a board with no LightPlayer on it: "Firmware none"
+/// (`firmware_bar.rs`; the row's kind word, then its name).
+export const NO_FIRMWARE = /^Firmware none\b/;
+
 /// Page-side test for a text: includes a string, or matches a RegExp.
 function textTest(words) {
   return words instanceof RegExp
@@ -716,6 +720,24 @@ export class StudioDriver {
     }
   }
 
+  /// One fact in the status corner's details ("Frame rate", "Last frame",
+  /// "Picture"): opens them, reads the value, closes them. `null` when the
+  /// details carry no such fact.
+  async cornerFact(label, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    await this.openCorner({ board, timeoutMs });
+    const scope = await this.card({ board });
+    try {
+      return await this.evaluate(`(() => { const card = ${scope}; if (!card) return null;
+        const wanted = ${JSON.stringify(label.toLowerCase())};
+        const dt = [...card.querySelectorAll('[data-board-corner] [id^="ux-popover-panel"] dt')]
+          .find((el) => (el.textContent || '').trim().toLowerCase() === wanted);
+        const dd = dt?.nextElementSibling;
+        return dd ? (dd.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`);
+    } finally {
+      await this.closeDetails({ board });
+    }
+  }
+
   /// A bar's work: `"running"`, `"done"`, `"failed"`, or `"none"` (no work),
   /// off its `data-bar-work`; `null` when the card is not there.
   async workState(layer, { board = null } = {}) {
@@ -772,15 +794,15 @@ export class StudioDriver {
   }
 
   /// Studio's own flash flow on a blank board's card, the way a person does
-  /// it: the firmware bar says "No firmware", the primary Install (`flash`)
-  /// opens the board pick, picking `model` presses it, and the flash is the
-  /// firmware bar's work — it must START and then FINISH (a wait on "No
-  /// firmware went away" alone is satisfied the instant the work starts).
-  /// Finished means the work is gone and the bar no longer says "No
-  /// firmware"; the board's own state (its backing's registry) is the
-  /// caller's to check.
+  /// it: the Firmware row says "none", the primary Install firmware
+  /// (`flash`) opens the board pick, picking `model` presses it, and the
+  /// flash is the Firmware row's work — it must START and then FINISH (a
+  /// wait on "none went away" alone is satisfied the instant the work
+  /// starts). Finished means the work is gone and the row no longer says
+  /// "none"; the board's own state (its backing's registry) is the caller's
+  /// to check.
   async flashBlank(model, { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000 } = {}) {
-    await this.waitBar("firmware", "No firmware", { board, timeoutMs });
+    await this.waitBar("firmware", NO_FIRMWARE, { board, timeoutMs });
     await this.pressOffer("flash", { board, timeoutMs });
     await this.waitFor(`Boolean(${PANEL})`, { timeoutMs, what: "the board-model picker" });
     // Picking the model is the press: the board pick in verb mode.
@@ -790,7 +812,8 @@ export class StudioDriver {
     await this.waitFor(
       `(() => { const bar = ${scope}?.querySelector('[data-bar="firmware"]');
                 if (!bar || bar.getAttribute('data-bar-work') === 'running') return false;
-                return !(bar.textContent || '').includes('No firmware'); })()`,
+                const line = ${LINE_TEXT}(bar.querySelector('button[aria-label="Firmware details"]') || bar);
+                return !${textTest(NO_FIRMWARE)}(line); })()`,
       { timeoutMs: flashTimeoutMs, what: "the flash to finish" },
     );
   }
