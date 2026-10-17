@@ -14,6 +14,15 @@
 //! pass — a diff here means the refactor moved pixels, which is the bug the
 //! oracle exists to catch.
 //!
+//! **One re-capture, 2026-10-16, and why it is not that.** A shader now
+//! compiles in the first frame that renders it instead of one frame later
+//! (ADR 2026-08-03-memory-pressure-at-compile-safe-points, amended
+//! 2026-10-16). Only what that moves was re-captured, and it was checked to
+//! be only that: every example's tick-0 entry (the old black deferral frame,
+//! now the lit frame), and the two stateful ones shifted by exactly one frame
+//! — meteor's new ticks 0–2 are its old ticks 1–3, and fluid's solver starts
+//! one frame sooner. No other tick moved.
+//!
 //! Digest, not raw bytes, because zook-dome alone publishes thousands of
 //! lamps; the byte length and the first samples ride along so a failure still
 //! says something human ("length changed", "the head is dark now") before
@@ -60,7 +69,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/basic.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xe16a13e23f48515e, [0, 0, 15, 150, 86, 156]),
                 (1446, 0x293433eb0cfc54ee, [0, 0, 223, 150, 32, 156]),
                 (1446, 0x46b80f26fcc310db, [0, 0, 173, 151, 234, 155]),
                 (1446, 0x97b0f1cb0c786fae, [0, 0, 117, 152, 183, 155]),
@@ -72,7 +81,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/basic2.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xa53d2885db766c67, [255, 255, 0, 0, 18, 51]),
                 (1446, 0x62f72a58ec56a560, [255, 255, 0, 0, 140, 55]),
                 (1446, 0xf56176d26347a5dd, [255, 255, 0, 0, 60, 60]),
                 (1446, 0x48c3934c255ae9ee, [255, 255, 0, 0, 22, 65]),
@@ -84,7 +93,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/button.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xfedb7a2ab9364d91, [18, 3, 215, 3, 30, 5]),
                 (1446, 0xfedb7a2ab9364d91, [18, 3, 215, 3, 30, 5]),
                 (1446, 0xfedb7a2ab9364d91, [18, 3, 215, 3, 30, 5]),
                 (1446, 0xfedb7a2ab9364d91, [18, 3, 215, 3, 30, 5]),
@@ -108,7 +117,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/comet.show/output.output",
             &[
-                (720, 0xa987b600a8b7fb65, [0, 0, 0, 0, 0, 0]),
+                (720, 0xb0a52ab1abad70ff, [0, 0, 0, 0, 0, 0]),
                 (720, 0x244740d174eb827c, [0, 0, 0, 0, 0, 0]),
                 (720, 0x95f86fb6738d6c9a, [198, 0, 220, 0, 200, 7]),
                 (720, 0xdf66f16455d365f3, [192, 0, 213, 0, 135, 7]),
@@ -120,7 +129,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/events.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0x4bcd0fd1d65e6c5c, [215, 3, 155, 4, 102, 6]),
                 (1446, 0x4bcd0fd1d65e6c5c, [215, 3, 155, 4, 102, 6]),
                 (1446, 0x4bcd0fd1d65e6c5c, [215, 3, 155, 4, 102, 6]),
                 (1446, 0x4bcd0fd1d65e6c5c, [215, 3, 155, 4, 102, 6]),
@@ -144,7 +153,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/fiber_headband.show/output.output",
             &[
-                (12, 0x5467b0da1d106495, [0, 0, 0, 0, 0, 0]),
+                (12, 0x9c2fa13b0b21b6b4, [255, 255, 95, 66, 90, 66]),
                 (12, 0xbe4fd8207739fa10, [252, 255, 176, 67, 11, 65]),
                 (12, 0xe5309614e0f72af2, [243, 255, 3, 69, 191, 63]),
                 (12, 0x93c382dffe63cc08, [229, 255, 84, 70, 118, 62]),
@@ -156,7 +165,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/fire2012.show/output.output",
             &[
-                (720, 0xa987b600a8b7fb65, [0, 0, 0, 0, 0, 0]),
+                (720, 0x852aa3882e5cc57e, [17, 221, 232, 56, 62, 2]),
                 (720, 0x168f131e35222c7e, [17, 221, 232, 56, 62, 2]),
                 (720, 0xe014534788eb6176, [17, 221, 232, 56, 62, 2]),
                 (720, 0x9a0a8cbc88c73767, [13, 222, 18, 58, 76, 2]),
@@ -168,10 +177,10 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/fluid.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
-                (1446, 0x723bf9822969d790, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xce0eb1457d246511, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xce0eb1457d246511, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xce0eb1457d246511, [0, 0, 0, 0, 0, 0]),
+                (1446, 0x3fd4eb25414e2228, [0, 0, 0, 0, 0, 0]),
             ],
         )],
     },
@@ -180,10 +189,10 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/meteor.show/output.output",
             &[
-                (360, 0x9cccbb9b79c47545, [0, 0, 0, 0, 0, 0]),
                 (360, 0x5b336d7f0bd8288b, [48, 1, 242, 2, 7, 1]),
                 (360, 0x6d217051e716f19d, [26, 1, 187, 2, 244, 0]),
                 (360, 0x3accd4b816ddb8b1, [5, 1, 137, 2, 226, 0]),
+                (360, 0xe1baf959d5bbac7c, [242, 0, 90, 2, 210, 0]),
             ],
         )],
     },
@@ -205,7 +214,7 @@ const GOLDEN: &[Expectation] = &[
             (
                 "/small_dome.show/out_a.output",
                 &[
-                    (20010, 0x5faba9f88665ce0d, [0, 0, 0, 0, 0, 0]),
+                    (20010, 0xfe73923ab4d02a41, [178, 6, 113, 23, 138, 43]),
                     (20010, 0x2a98e876479251b2, [185, 6, 139, 23, 185, 43]),
                     (20010, 0x13f23661db633609, [192, 6, 164, 23, 232, 43]),
                     (20010, 0x7fac526c49ce1f2a, [201, 6, 192, 23, 28, 44]),
@@ -227,7 +236,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/palette_waves.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0x75a06357c4a0a8ea, [199, 142, 230, 97, 221, 35]),
                 (1446, 0xe054737b58c4a061, [249, 140, 18, 96, 50, 35]),
                 (1446, 0xe8e6c2b5534ae66a, [53, 139, 70, 94, 138, 34]),
                 (1446, 0xf31c7a419567abd8, [123, 137, 136, 92, 232, 33]),
@@ -243,7 +252,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/peach_1d.show/output.output",
             &[
-                (336, 0x51795983e22e1d65, [0, 0, 0, 0, 0, 0]),
+                (336, 0xfefd50d6c4feace1, [255, 255, 99, 107, 137, 34]),
                 (336, 0xaf0b86d5b1ad0d8b, [255, 255, 46, 106, 41, 34]),
                 (336, 0x1e6a3fa2e15e4b25, [255, 255, 238, 104, 198, 33]),
                 (336, 0x02ef6aa2395df3a2, [255, 255, 174, 103, 98, 33]),
@@ -255,7 +264,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/peach_2d.show/output.output",
             &[
-                (336, 0x51795983e22e1d65, [0, 0, 0, 0, 0, 0]),
+                (336, 0x0e03d1d51feca4e5, [170, 142, 69, 93, 60, 71]),
                 (336, 0x9220b815e84449a0, [170, 142, 69, 93, 60, 71]),
                 (336, 0x612a05bf5303f400, [171, 142, 70, 93, 60, 71]),
                 (336, 0xe34576a55778a25d, [171, 142, 70, 93, 61, 71]),
@@ -267,7 +276,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/perf_baseline.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xd645850dea78b2ac, [0, 0, 109, 195, 154, 203]),
                 (1446, 0xbfca2fe59e38ed4f, [0, 0, 99, 196, 58, 203]),
                 (1446, 0x8f4bf29c18181b63, [0, 0, 83, 197, 218, 202]),
                 (1446, 0x0ca30df76e1c7394, [0, 0, 64, 198, 128, 202]),
@@ -279,7 +288,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/perf_fastmath.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0xd645850dea78b2ac, [0, 0, 109, 195, 154, 203]),
                 (1446, 0xbfca2fe59e38ed4f, [0, 0, 99, 196, 58, 203]),
                 (1446, 0x8f4bf29c18181b63, [0, 0, 83, 197, 218, 202]),
                 (1446, 0x0ca30df76e1c7394, [0, 0, 64, 198, 128, 202]),
@@ -291,7 +300,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/plasma.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0x14ff5dafc24dd96c, [168, 255, 104, 66, 120, 66]),
                 (1446, 0x9207f21355b6ba3e, [177, 255, 75, 67, 149, 65]),
                 (1446, 0x3c1bf1d3dc5cb69d, [146, 255, 82, 68, 176, 64]),
                 (1446, 0xe7c16df42bdd3a00, [94, 255, 72, 69, 234, 63]),
@@ -304,7 +313,7 @@ const GOLDEN: &[Expectation] = &[
             (
                 "/plasma_duo.show/disc_out.output",
                 &[
-                    (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                    (1446, 0x14ff5dafc24dd96c, [168, 255, 104, 66, 120, 66]),
                     (1446, 0x9207f21355b6ba3e, [177, 255, 75, 67, 149, 65]),
                     (1446, 0x3c1bf1d3dc5cb69d, [146, 255, 82, 68, 176, 64]),
                     (1446, 0xe7c16df42bdd3a00, [94, 255, 72, 69, 234, 63]),
@@ -326,7 +335,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/rocaille.show/output.output",
             &[
-                (1446, 0x5ff65547467f0dbd, [0, 0, 0, 0, 0, 0]),
+                (1446, 0x5a44b9500ff8483d, [0, 128, 0, 128, 0, 128]),
                 (1446, 0x47365bf5f6574c17, [0, 128, 0, 128, 0, 128]),
                 (1446, 0x92ae57178851ac70, [0, 128, 0, 128, 0, 128]),
                 (1446, 0xf17267e6aed9c733, [0, 128, 0, 128, 0, 128]),
@@ -338,7 +347,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/shader_oracle.show/output.output",
             &[
-                (384, 0xc86ec345c0ee8125, [0, 0, 0, 0, 0, 0]),
+                (384, 0x142d97adaf4a30b8, [169, 49, 143, 73, 240, 1]),
                 (384, 0x142d97adaf4a30b8, [169, 49, 143, 73, 240, 1]),
                 (384, 0x142d97adaf4a30b8, [169, 49, 143, 73, 240, 1]),
                 (384, 0x142d97adaf4a30b8, [169, 49, 143, 73, 240, 1]),
@@ -350,7 +359,7 @@ const GOLDEN: &[Expectation] = &[
         outputs: &[(
             "/zook_dome.show/output.output",
             &[
-                (9000, 0x2198935831931845, [0, 0, 0, 0, 0, 0]),
+                (9000, 0x8861e3c10842d044, [150, 32, 128, 4, 55, 1]),
                 (9000, 0x836afb177d66a20b, [58, 33, 149, 4, 57, 1]),
                 (9000, 0x762067a8d5150dc5, [215, 33, 169, 4, 59, 1]),
                 (9000, 0xbca3930e3c5a68bc, [109, 34, 188, 4, 61, 1]),

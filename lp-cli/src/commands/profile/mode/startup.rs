@@ -3,12 +3,11 @@ use lp_perf::{EVENT_FRAME, EVENT_SHADER_COMPILE};
 
 /// Capture project-load through the first *compiled* frame.
 ///
-/// Shader compiles are deferred one frame for the memory-pressure compile
-/// window (ADR 2026-08-03-memory-pressure-at-compile-safe-points): frame 1
-/// requests the window and renders fallback, frame 2 compiles and renders
-/// for real. Startup cost therefore spans load + both frames, so this gate
-/// stops at the end of the frame that contained the first shader-compile —
-/// or after two frames when the project compiles nothing.
+/// A shader asks for its compile window as it is created, so the first
+/// frame after a load compiles (ADR 2026-08-03-memory-pressure-at-compile-
+/// safe-points, amended 2026-10-16). This gate stops at the end of the frame
+/// that contained the first shader-compile — or after two frames when the
+/// project compiles nothing.
 #[derive(Default)]
 pub struct StartupGate {
     frames_ended: u32,

@@ -3232,37 +3232,31 @@ mod tests {
         );
     }
 
-    /// The boot path: the first frame defers the compile and requests a
-    /// window; the engine broadcasts exactly one `High` pressure at the top of
-    /// the next tick, and the compile runs inside that same frame.
+    /// The boot path: a shader that has never compiled asks for its window
+    /// as it is created, so the first tick broadcasts exactly one `High`
+    /// pressure and the compile runs inside that frame — the first frame
+    /// renders lit, with no black deferral frame (ADR
+    /// 2026-08-03-memory-pressure-at-compile-safe-points, amended 2026-10-16).
     #[test]
     fn compile_window_broadcasts_pressure_before_the_boot_compile() {
         let mut rt = loaded_basic_runtime();
         let levels = attach_pressure_probe(&mut rt);
-
-        rt.tick(40).expect("boot tick");
         assert!(
             levels.borrow().is_empty(),
-            "no pressure before any node requested a compile window"
-        );
-        assert!(
-            output_buffer_bytes(&rt, "/output.json")
-                .iter()
-                .all(|byte| *byte == 0),
-            "the deferral frame renders the black fallback"
+            "no pressure before the first tick"
         );
 
-        rt.tick(40).expect("window tick");
+        rt.tick(40).expect("boot tick");
         assert_eq!(
             &*levels.borrow(),
             &[crate::node::PressureLevel::High],
-            "exactly one High broadcast opens the compile window"
+            "exactly one High broadcast opens the boot compile window"
         );
         assert!(
             output_buffer_bytes(&rt, "/output.json")
                 .iter()
                 .any(|byte| *byte != 0),
-            "the compile ran inside the window frame, after the broadcast"
+            "the compile ran inside the first frame, after the broadcast"
         );
 
         rt.tick(40).expect("steady tick");
@@ -3306,16 +3300,19 @@ mod tests {
         ))));
         let levels = attach_pressure_probe(&mut rt);
 
-        // Boot: deferral frame, then the window frame compiles the idle shader.
-        tick_with_test_time(&mut rt, &time, 16, "boot deferral");
+        // Boot: every shader asks for its window as it is created, so the
+        // first frame opens one window and compiles the idle shader; the
+        // resident entries' shaders, not demanded, let theirs expire.
         tick_with_test_time(&mut rt, &time, 16, "boot window");
+        tick_with_test_time(&mut rt, &time, 16, "boot steady");
         let boot_broadcasts = levels.borrow().len();
         assert_eq!(boot_broadcasts, 1, "boot opens one compile window");
 
-        // Switch: the active-entry shader has never compiled. The switch
-        // frame captures the held frame (the idle entry, still shown); the
-        // next frame samples the incoming entry, which defers its compile;
-        // the tick after must broadcast again.
+        // Switch: the active-entry shader has never compiled, and its
+        // creation-time window expired at boot. The switch frame captures
+        // the held frame (the idle entry, still shown); the next frame
+        // samples the incoming entry, which defers its compile; the tick
+        // after must broadcast again.
         control.set_pressed(HwAddress::gpio(20), true);
         tick_with_test_time(&mut rt, &time, 16, "press candidate");
         tick_with_test_time(&mut rt, &time, 30, "press stable — switch, capture");

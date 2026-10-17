@@ -56,10 +56,14 @@ fn a_switch_holds_the_old_frame_until_the_new_entry_renders_then_fades() {
         .iter()
         .take_while(|frame| frame.bytes == idle)
         .count();
+    // Two: the switch frame (the capture), then the incoming entry's load,
+    // whose shader asks for its window as it is created and compiles in its
+    // first frame (ADR 2026-08-03-memory-pressure-at-compile-safe-points,
+    // amended 2026-10-16; it was three while that frame deferred).
     assert!(
-        held >= 3,
+        held >= 2,
         "the playlist must hold across the load and the compile window \
-         (capture, load + deferral, window), held {held} frames"
+         (capture, load + window), held {held} frames"
     );
     assert!(
         frames[..held]
@@ -108,7 +112,7 @@ fn a_texture_area_fixture_holds_and_fades_too() {
         .iter()
         .take_while(|frame| frame.bytes == idle)
         .count();
-    assert!(held >= 3, "held {held} frames on the texture path");
+    assert!(held >= 2, "held {held} frames on the texture path");
     assert!(
         frames[..held]
             .iter()
