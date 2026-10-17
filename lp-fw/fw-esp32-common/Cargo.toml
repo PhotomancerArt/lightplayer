@@ -147,7 +147,7 @@ host-lan-harness = [
 # The tree store as the board's filesystem (`tree_fs`, `aligned_nor_flash`;
 # plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`). Off by
 # default; the C6's `fs-tree` turns it on. Never in a shipped image.
-fs-tree = ["server", "dep:lp-tree-store", "dep:lp-crc32", "dep:embedded-storage"]
+fs-tree = ["server", "dep:lp-tree-store", "dep:lp-crc32", "dep:embedded-storage", "dep:lpc-access"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
 [dev-dependencies]
