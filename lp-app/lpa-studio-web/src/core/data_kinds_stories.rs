@@ -5,8 +5,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    CalendarDate, PRE_HELLO_FIRMWARE, age_spoken, age_words, byte_size, date_words,
-    duration_words, firmware_label_version, firmware_version, percent, pre_ota_version,
+    CalendarDate, PRE_HELLO_FIRMWARE, age_spoken, age_words, byte_size, date_words, duration_words,
+    firmware_label_version, firmware_version, percent, pre_ota_version,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -27,10 +27,11 @@ fn every_kind() -> Element {
         .into_iter()
         .map(|secs| (seconds(secs), duration_words(secs)))
         .collect();
-    let spoken: Vec<(String, String)> = [0.0, 1.0, 12.0, 90.0, 2.0 * 3_600.0, 3.0 * DAY, 14.0 * DAY]
-        .into_iter()
-        .map(|secs| (seconds(secs), age_spoken(secs)))
-        .collect();
+    let spoken: Vec<(String, String)> =
+        [0.0, 1.0, 12.0, 90.0, 2.0 * 3_600.0, 3.0 * DAY, 14.0 * DAY]
+            .into_iter()
+            .map(|secs| (seconds(secs), age_spoken(secs)))
+            .collect();
     let sizes: Vec<(String, String)> = [
         0_u64,
         512,
