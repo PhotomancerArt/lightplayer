@@ -3,7 +3,7 @@
 //! nothing. (`lab-mapping-fit-tests` holds the proofs against the product.)
 
 use lab_mapping_files::embedded::{CHOKER, Embedded, RADIANCE_DOME, ZOOK_DOME};
-use lab_mapping_files::{MemFiles, Opened};
+use lab_mapping_files::{DirFiles, MemFiles, Opened};
 use lab_mapping_model::{
     Channel, ColorOrder, ComponentKind, NodeId, NodeKind, PatchRule, Project, Target,
 };
@@ -247,6 +247,26 @@ fn the_desk_saves_as_a_new_project() {
         w
     };
     assert_eq!(wire(&again), wire(&desk));
+}
+
+/// A catalog pattern's grid fixture opens as its box alone: the rest of
+/// the project opens around it, the fixture says it holds a grid, and an
+/// unedited save writes nothing (its files are never touched).
+#[test]
+fn a_grid_opens_as_its_box_alone() {
+    let root = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../catalog/patterns/plasma"
+    );
+    let o = Opened::open(&DirFiles::new(root)).unwrap();
+    let fixture = o.project.fixture(&NodeId::new("fixture")).unwrap();
+    assert_eq!(fixture.unsupported.as_deref(), Some("grid"));
+    assert!(fixture.components.is_empty());
+    assert!(fixture.rules.is_empty());
+    assert!(o.project.output(&NodeId::new("output")).is_some());
+    let saved = o.files.save(&o.project).unwrap();
+    assert!(saved.writes.is_empty(), "{:?}", saved.writes);
+    assert!(saved.removed.is_empty());
 }
 
 fn open(e: &Embedded) -> Opened {

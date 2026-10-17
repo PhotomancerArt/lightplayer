@@ -146,6 +146,7 @@ impl Project {
     pub fn fixture_at(&self, p: Vec2) -> Option<NodeId> {
         self.fixtures()
             .into_iter()
+            .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_none()))
             .find(|n| self.node_rect(&n.id).is_some_and(|r| r.contains(p)))
             .map(|n| n.id.clone())
     }

@@ -37,6 +37,9 @@ pub struct UiFixtureFace {
     /// The picture its lamps sample, as a coarse grid of cells, drawn
     /// faintly behind them; empty in the live view.
     pub picture: Vec<(Rect, Rgb)>,
+    /// Why nothing is drawn in it: what it holds that the lab can't show
+    /// yet, in a sentence.
+    pub not_shown: Option<String>,
 }
 
 /// How a fixture's face is drawn.

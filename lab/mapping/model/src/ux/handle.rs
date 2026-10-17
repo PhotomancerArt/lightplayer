@@ -165,7 +165,7 @@ impl Project {
             }
             // A lamp shows the handles of the path or ring it is on.
             Target::Lamp { object, .. } => return self.handles_of(&self.object_target(object)),
-            Target::Node(id) if self.fixture(id).is_some() => {
+            Target::Node(id) if self.fixture(id).is_some_and(|f| f.unsupported.is_none()) => {
                 let Some(r) = self.node_rect(id) else {
                     return out;
                 };

@@ -37,7 +37,7 @@ use serde_json::Value;
 
 use crate::channels::{exports, fixture_reads, fixture_writes, output_reads, visual_writes};
 use crate::error::FilesError;
-use crate::map2d_doc::Map2dDoc;
+use crate::map2d_doc::{Map2dDoc, unsupported_shape};
 use crate::patch_doc::{PatchDoc, PatchSource, valid_object_id};
 use crate::source::{Source, join};
 
@@ -147,6 +147,7 @@ impl Opened {
             .fixtures()
             .iter()
             .filter(|n| files.nodes.get(&n.id).is_some_and(|f| f.patch.is_none()))
+            .filter(|n| n.fixture().is_some_and(|f| f.unsupported.is_none()))
             .map(|n| n.id.clone())
             .collect();
         for fixture in unpatched {
@@ -282,6 +283,15 @@ impl Reader<'_> {
             .ok_or_else(|| FilesError::new(path, "mapping has no source"))?;
         let map_path = join(path, source);
         let text = read_text(self.src, &map_path)?;
+        // A drawing the lab can't hold yet: the fixture is its box alone,
+        // and its files are kept as they are (no map, no patch read).
+        if let Some(what) = unsupported_shape(&text) {
+            let mut fixture = Fixture::new(canvas_size(&text));
+            fixture.unsupported = Some(what);
+            fixture.color_order = color_order_of(value);
+            fixture.reads = Channel::new(fixture_reads(value));
+            return Ok(fixture);
+        }
         let doc = Map2dDoc::parse(&text).map_err(|e| FilesError::new(&map_path, e))?;
 
         // Ids: the file's, else the product's slug of the name, unique in
@@ -332,11 +342,7 @@ impl Reader<'_> {
         };
         let mut fixture = Fixture::new(size);
         fixture.components = components;
-        fixture.color_order = value
-            .get("color_order")
-            .and_then(Value::as_str)
-            .and_then(ColorOrder::from_key)
-            .unwrap_or_default();
+        fixture.color_order = color_order_of(value);
         fixture.reads = Channel::new(fixture_reads(value));
         file.map = Some(MapFile {
             path: map_path,
@@ -374,6 +380,31 @@ impl Reader<'_> {
         }
         self.taken_components.insert(id.clone());
         id
+    }
+}
+
+/// A fixture's colour order, or the product's default.
+fn color_order_of(value: &Value) -> ColorOrder {
+    value
+        .get("color_order")
+        .and_then(Value::as_str)
+        .and_then(ColorOrder::from_key)
+        .unwrap_or_default()
+}
+
+/// A mapping document's box, from `(0, 0)` to its canvas's far corner;
+/// the default square when it says none.
+fn canvas_size(text: &str) -> Vec2 {
+    let canvas = serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|v| v.get("canvas").cloned());
+    let n = |c: &Value, i: usize| c.get(i).and_then(Value::as_f64);
+    match canvas {
+        Some(c) => match (n(&c, 0), n(&c, 1), n(&c, 2), n(&c, 3)) {
+            (Some(x), Some(y), Some(w), Some(h)) => Vec2::new(x + w, y + h),
+            _ => Fixture::square().size,
+        },
+        None => Fixture::square().size,
     }
 }
 

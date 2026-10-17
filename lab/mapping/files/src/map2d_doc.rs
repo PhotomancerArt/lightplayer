@@ -7,6 +7,8 @@
 //! with one ring of lamps from 12 o'clock (one ring of a lab circle) — and
 //! refuses the rest (grids, filled polygons, multi-ring rings) with a
 //! reason, rather than opening a fixture with lamps missing.
+//! [`unsupported_shape`] names what a document holds that the lab can't,
+//! so its fixture can open as its box alone.
 //!
 //! Every object keeps its JSON. Writing one back starts from it and changes
 //! only what the lab changed, so a field the lab knows nothing about
@@ -91,6 +93,32 @@ impl Map2dDoc {
             canvas,
             objects,
         })
+    }
+}
+
+/// What in a document the lab can't hold yet, in a word or two (`grid`,
+/// `filled polygon`, `ring of several rings`): the first such shape, or
+/// `None` when it can hold every one. A document that isn't a mapping at
+/// all is not this question's: [`Map2dDoc::parse`] says what's wrong.
+pub fn unsupported_shape(text: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    value
+        .get("objects")
+        .and_then(Value::as_array)?
+        .iter()
+        .find_map(|o| o.get("shape").and_then(unsupported_in))
+}
+
+fn unsupported_in(shape: &Value) -> Option<String> {
+    let (tag, s) = tagged(shape).ok()?;
+    match tag {
+        "path" | "polygon" => None,
+        "repeat" => s.get("shape").and_then(unsupported_in),
+        "ring" => ring_of(s)
+            .is_err()
+            .then(|| "ring of several rings".to_string()),
+        "filled_polygon" => Some("filled polygon".into()),
+        other => Some(other.replace('_', " ")),
     }
 }
 

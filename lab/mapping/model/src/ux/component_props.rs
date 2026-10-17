@@ -84,12 +84,13 @@ impl Project {
     pub fn props_of(&self, t: &Target) -> Vec<(PropDesc, PropRaw)> {
         match t {
             // A module and an output have none yet (a name, later).
+            // A fixture the lab can't hold yet keeps its size.
             Target::Node(id) => match self.fixture(id) {
-                Some(f) => vec![
+                Some(f) if f.unsupported.is_none() => vec![
                     (WIDTH, PropRaw::Number(f.size.x)),
                     (HEIGHT, PropRaw::Number(f.size.y)),
                 ],
-                None => Vec::new(),
+                _ => Vec::new(),
             },
             Target::Port { output, key } => match self.output(output).and_then(|o| o.port(key)) {
                 Some(_) => vec![(PIXELS, PropRaw::Count(self.port_pixels(output, key) as i64))],

@@ -89,6 +89,10 @@ impl Editor {
                 ui_object(o, emphasis, frame)
             })
             .collect();
+        let not_shown = p
+            .fixture(id)
+            .and_then(|f| f.unsupported.as_ref())
+            .map(|what| format!("This fixture's {what} isn't on the Graph yet — use Map"));
         let working = cx.open.contains(id)
             || self.selection.contains(&Target::Node(id.clone()))
             || self.tool != Tool::Select;
@@ -99,6 +103,7 @@ impl Editor {
                 objects,
                 wires: Vec::new(),
                 picture: Vec::new(),
+                not_shown,
             };
         }
         let dp = p.data_path(id);
@@ -124,6 +129,7 @@ impl Editor {
                 .into_iter()
                 .map(|(r, c)| (Rect::new(local(r.min), local(r.max)), c))
                 .collect(),
+            not_shown,
         }
     }
 

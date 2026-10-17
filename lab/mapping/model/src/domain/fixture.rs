@@ -33,6 +33,11 @@ pub struct Fixture {
     /// The visual channel whose render product it samples (the product's
     /// `bindings.input.source`).
     pub reads: Channel,
+    /// What in its drawing the lab can't hold yet (`grid`, `filled
+    /// polygon`, `ring of several rings`), when it holds one. Such a
+    /// fixture opens as its box alone: nothing is drawn in it, nothing can
+    /// be drawn into it or resized, and its files are never written.
+    pub unsupported: Option<String>,
 }
 
 impl Fixture {
@@ -54,6 +59,7 @@ impl Fixture {
             rules: Vec::new(),
             color_order: ColorOrder::default(),
             reads: Channel::visual_out(),
+            unsupported: None,
         }
     }
 

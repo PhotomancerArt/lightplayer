@@ -333,6 +333,11 @@ impl<'a> Writer<'a> {
         let Some(fx) = n.fixture() else {
             return Ok(());
         };
+        // A fixture the lab can't hold yet is never written: its files
+        // stay exactly as they were.
+        if fx.unsupported.is_some() {
+            return Ok(());
+        }
         let carried = self.files.nodes.get(&n.id);
         let name = self.places[&n.id].0.clone();
         let mut value = carried.map(|f| f.value.clone()).unwrap_or_else(|| {
