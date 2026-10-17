@@ -1,5 +1,8 @@
 # Lightplayer Language
 
+The principles behind these words and looks, with examples, are in
+`docs/ux/README.md`.
+
 ## Product Names
 
 Use **Lightplayer** as the umbrella product and brand name. Treat **Light
