@@ -504,11 +504,20 @@ async function pressMaybeArmed(driver, { board, verb, bar }) {
 /// step it is on (`board_card/bar_work.rs`), so the walk reads which ones it
 /// showed, in order. Read off every card's firmware bar — a board that came
 /// back from a pulled cable can be a new card until it says who it is.
-const STEP_LABELS = ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"];
+/// Since the board card's words round 2 (#1159, 2026-10-16) the Firmware row
+/// says a USB update as ONE verb with its percent ("installing · 40%",
+/// `bar_work.rs`), not each step: `ROW_WORD` is that verb, seen as a label.
+/// The step labels stay for a card that still names them; the cable cuts key
+/// off esptool-js's own `Writing at` lines on the board's terminal, never
+/// these.
+const ROW_WORD = "installing";
+const STEP_LABELS = ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…", ROW_WORD];
 /// Page-side: every card's firmware bar, as its line reads (its work's
 /// words while it carries work).
 const FIRMWARE_LINES = `[...document.querySelectorAll('[data-board-card] [data-bar="firmware"] button[aria-label="Firmware details"]')].map((el) => (el.textContent || '').replace(/\\s+/g, ' ').trim())`;
 const STEPS_NOW = `(() => { const lines = ${FIRMWARE_LINES}; return ${JSON.stringify(STEP_LABELS)}.filter((l) => lines.some((t) => t.includes(l))); })()`;
+/// Page-side: a Firmware row carries running work (`data-bar-work`).
+const ROW_WORKING = `Boolean(document.querySelector('[data-board-card] [data-bar="firmware"][data-bar-work="running"]'))`;
 /// Page-side: the firmware bars' lines, joined — a diagnostic.
 const FIRMWARE_LINE = `${FIRMWARE_LINES}.filter(Boolean).join(' | ')`;
 
@@ -606,8 +615,8 @@ async function awaitInstalled(driver) {
   // The activity ends when the firmware bar stops naming a step; whether it
   // succeeded is read after (a terminal line can say "failed" mid-run —
   // esptool-js's own connect retries do).
-  await driver.waitFor(`${STEPS_NOW}.length > 0`, { timeoutMs: STEP_MS, what: "the update to start" });
-  for (const label of await watchSteps(driver, `${STEPS_NOW}.length === 0`, { timeoutMs: MIGRATION_MS, what: "the update to end" })) cardSteps.push(label);
+  await driver.waitFor(`${STEPS_NOW}.length > 0 || ${ROW_WORKING}`, { timeoutMs: STEP_MS, what: "the update to start" });
+  for (const label of await watchSteps(driver, `${STEPS_NOW}.length === 0 && !${ROW_WORKING}`, { timeoutMs: MIGRATION_MS, what: "the update to end" })) cardSteps.push(label);
   // The activity's OUTCOME line is the last thing it writes (after the
   // board-manifest stamp), on the board's terminal in the status corner's
   // details; give it its moment.
@@ -1243,7 +1252,8 @@ async function main() {
         // them, so "Moving files…" is not required (recorded either way).
         step(
           "the card named each step",
-          ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Checking the files…"].every((s) => cardSteps.includes(s)),
+          ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Checking the files…"].every((s) => cardSteps.includes(s))
+            || (questionSeen && cardSteps.includes(ROW_WORD)),
           cardSteps.join(" → "),
         );
         step(
@@ -1293,7 +1303,8 @@ async function main() {
         // second pass still shows every step, in this order.
         step(
           "the card named each step",
-          inOrder(cardSteps, ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"]),
+          inOrder(cardSteps, ["Reading the board…", "Waiting for your answer…", "Flashing firmware…", "Moving files…", "Checking the files…"])
+            || (questionSeen && cardSteps.includes(ROW_WORD)),
           cardSteps.join(" → "),
         );
         step(
@@ -1319,7 +1330,7 @@ async function main() {
       }
       case "W3":
       case "W4": {
-        step("the card read the board before it answered", cardSteps.includes("Reading the board…"), cardSteps.join(" → "));
+        step("the card read the board before it answered", cardSteps.includes("Reading the board…") || cardSteps.includes(ROW_WORD), cardSteps.join(" → "));
         // Against the chip as the update found it (after the connect's own
         // access-file write): a refusal or a cancel writes NOTHING.
         const fixture = readFileSync(path.join(out, `as-found-${scenario}.bin`));
