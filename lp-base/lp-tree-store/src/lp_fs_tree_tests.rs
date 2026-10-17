@@ -202,11 +202,12 @@ fn the_tree_store_says_its_batches_are_atomic_through_a_view() {
     assert!(!LpFsMemory::new().batches_are_atomic());
 }
 
-/// The idle step through the adapter and through a view reaches the store:
-/// it cleans up the garbage rewrites left, then settles, and no file
-/// changes; inside a batch it does nothing; memory has nothing to do.
+/// Quiet ticks with nothing playing, through the adapter and through a
+/// view, reach the store (a step each): it cleans up the garbage rewrites
+/// left, then settles, and no file changes; inside a batch it does nothing;
+/// memory has nothing to do.
 #[test]
-fn the_idle_step_reaches_the_store_through_a_view() {
+fn the_idle_tick_reaches_the_store_through_a_view() {
     let fs = tree_fs();
     for i in 0..30u64 {
         fs.write_file("/p/churn.json".as_path(), &text(i, 3000))
@@ -214,20 +215,20 @@ fn the_idle_step_reaches_the_store_through_a_view() {
     }
     let before = fs.read_file("/p/churn.json".as_path()).unwrap();
     let view = fs.chroot("/p".as_path()).unwrap();
-    assert!(view.borrow().idle_step().unwrap(), "nothing to clean");
+    assert!(idle(&*view.borrow()).unwrap(), "nothing to clean");
     let mut steps = 1;
-    while fs.idle_step().unwrap() {
+    while idle(&fs).unwrap() {
         steps += 1;
         assert!(steps < 64, "the steps do not end");
     }
-    assert!(!view.borrow().idle_step().unwrap(), "not settled");
+    assert!(!idle(&*view.borrow()).unwrap(), "not settled");
     assert_eq!(fs.read_file("/p/churn.json".as_path()).unwrap(), before);
     fs.begin_batch().unwrap();
     fs.write_file("/p/churn.json".as_path(), &text(99, 3000))
         .unwrap();
-    assert!(!fs.idle_step().unwrap(), "an idle step inside a batch");
+    assert!(!idle(&fs).unwrap(), "an idle step inside a batch");
     fs.commit_batch().unwrap();
-    assert!(!LpFsMemory::new().idle_step().unwrap());
+    assert!(!idle(&LpFsMemory::new()).unwrap());
 }
 
 /// A deflated push in one batch — several files, one of them many chunks —
@@ -493,5 +494,15 @@ fn image(fs: &LpFsTree<NorFlashSim, SoftSha256>) -> Vec<u8> {
         let mut out = vec![0u8; (f.sector_count() * f.sector_size()) as usize];
         f.peek(0, &mut out);
         out
+    })
+}
+
+/// A quiet tick with nothing playing, two seconds after the last: the pacer
+/// lets every such tick run a step.
+fn idle(fs: &dyn LpFs) -> Result<bool, lpfs::FsError> {
+    fs.idle_tick(lpfs::IdleTick {
+        delta_ms: 2_000,
+        busy: false,
+        playing: false,
     })
 }
