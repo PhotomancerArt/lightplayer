@@ -17,16 +17,27 @@
 //! - `c40`: the same project replaced by a c40-sized one (132 files, ~216 KB);
 //! - `used` (`LP_FIRST_LIGHT_CHURN` pushes of c40 first, 20 by default): a
 //!   written-out store, as a board that has been edited for a while has;
-//! - `full` (4 KiB files until the store says no space): nearly full.
+//! - `full` (4 KiB files until the store says no space): nearly full;
+//! - `keep`: the store as the board has it (its own startup project);
+//! - `wifi`: Wi-Fi on and a network saved (`LP_FIRST_LIGHT_WIFI_SSID`,
+//!   `LP_FIRST_LIGHT_WIFI_PASSWORD`: the desk's bench access point, from the
+//!   environment only, never a file here); each boot then also waits for
+//!   the board's address and its first frame-time line, so the join's time
+//!   and its cost to the frames are recorded too;
+//! - `forget`: that network forgotten (no network saved);
+//! - `wifioff`: Wi-Fi switched off (the network stays saved).
 //!
-//! **It erases the board's filesystem** (the merged image's blank `lpfs`).
-//! Run it only on the sacrificial board, leased. Env: `LP_FIRST_LIGHT_DIR`
+//! **With `LP_FIRST_LIGHT_MERGED` it erases the board's filesystem** (the
+//! merged image's blank `lpfs`): only the sacrificial board, leased (CX1;
+//! anything else is refused). Without it, `LP_FIRST_LIGHT_BOARD=cx2` measures
+//! CX2 (`c6-button`) as it is, leased. Env: `LP_FIRST_LIGHT_DIR`
 //! (records), `LP_FIRST_LIGHT_LABEL` (the image: `littlefs`, `fs-tree`),
 //! `LP_FIRST_LIGHT_MERGED` (the image to flash; unset, the board is not
 //! flashed), `LP_FIRST_LIGHT_CASES` (default `none,basic,c40`),
 //! `LP_FIRST_LIGHT_BOOTS` (per case, default 10),
 //! `LP_FIRST_LIGHT_HOST_DELAY_MS` (open the link this long after the port
-//! is back, so the boot runs with no host draining it), `BOARD_HOLDER`.
+//! is back, so the boot runs with no host draining it), `LP_FIRST_LIGHT_BOARD`
+//! (`cx1`, the default, or `cx2`), `BOARD_HOLDER`.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -72,8 +83,18 @@ async fn measure() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
     let holder = std::env::var("BOARD_HOLDER").expect("BOARD_HOLDER");
-    let desk = Desk::cx1(&holder);
-    desk.check().unwrap_or_else(|e| panic!("{e}"));
+    let desk = match std::env::var("LP_FIRST_LIGHT_BOARD").as_deref() {
+        Ok("cx2") => Desk::cx2(&holder),
+        Ok("cx1") | Err(_) => Desk::cx1(&holder),
+        Ok(other) => panic!("LP_FIRST_LIGHT_BOARD is cx1 or cx2, not {other:?}"),
+    };
+    let erases = std::env::var("LP_FIRST_LIGHT_MERGED").is_ok();
+    if erases {
+        desk.check()
+    } else {
+        desk.check_leased()
+    }
+    .unwrap_or_else(|e| panic!("{e}"));
     desk.renew(120).expect("the lease");
     let epoch = Instant::now();
     let console = Console::new(epoch);
@@ -109,7 +130,7 @@ async fn measure() {
     let mut conn: Option<CliConnection> = None;
     let mut rows = Vec::new();
     // The first boot of a freshly flashed chip formats: measured, not a case.
-    let (c, first) = power_up(&desk, &port, conn.take(), &console, "first boot").await;
+    let (c, first) = power_up(&desk, &port, conn.take(), &console, "first boot", false).await;
     rows.push(serde_json::json!({"case": "first boot", "boots": [first]}));
     conn = Some(c);
 
@@ -119,8 +140,15 @@ async fn measure() {
         let mut got = Vec::new();
         let mut next = Some(c);
         for i in 0..boots {
-            let (c, b) =
-                power_up(&desk, &port, next.take(), &console, &format!("{case} #{i}")).await;
+            let (c, b) = power_up(
+                &desk,
+                &port,
+                next.take(),
+                &console,
+                &format!("{case} #{i}"),
+                case == "wifi",
+            )
+            .await;
             got.push(b);
             next = Some(c);
         }
@@ -140,7 +168,7 @@ async fn measure() {
     }
     let out = serde_json::json!({
         "label": label,
-        "board": "CX1 c6-expendable, MAC 14:C1:9F:E6:54:90",
+        "board": format!("{} {}", desk.slug, desk.mac),
         "configuration": "silicon:esp32c6",
         "rows": rows,
     });
@@ -203,6 +231,27 @@ async fn prepare(case: &str, conn: CliConnection, churn: usize) -> CliConnection
                 }
             }
         }
+        "keep" => {}
+        "wifi" => {
+            let ssid = std::env::var("LP_FIRST_LIGHT_WIFI_SSID").expect("LP_FIRST_LIGHT_WIFI_SSID");
+            let password = std::env::var("LP_FIRST_LIGHT_WIFI_PASSWORD")
+                .expect("LP_FIRST_LIGHT_WIFI_PASSWORD");
+            client
+                .network_add(ssid, lpc_wire::WifiPassword::new(&password), None)
+                .await
+                .expect("wifi add");
+            client.network_set(Some(true), None).await.expect("wifi on");
+        }
+        "forget" => {
+            let ssid = std::env::var("LP_FIRST_LIGHT_WIFI_SSID").expect("LP_FIRST_LIGHT_WIFI_SSID");
+            client.network_forget(ssid).await.expect("wifi forget");
+        }
+        "wifioff" => {
+            client
+                .network_set(Some(false), None)
+                .await
+                .expect("wifi off");
+        }
         other => panic!("unknown case {other:?}"),
     }
     // Let the board settle (its `/lightplayer.json` rewrite after a load).
@@ -223,6 +272,7 @@ async fn power_up(
     conn: Option<CliConnection>,
     console: &Console,
     what: &str,
+    join: bool,
 ) -> (CliConnection, serde_json::Value) {
     if let Some(c) = conn {
         close(c).await;
@@ -269,12 +319,39 @@ async fn power_up(
         let _ = client.project_list_loaded().await;
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+    // A joining boot: on to the board's address, and then to its first
+    // frame-time line after it (`[perf] frames … max=…`, every 5 s), which
+    // holds the join's longest frame.
+    if join {
+        let until = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < until && frames_after(&boot, "[wifi] address").is_none() {
+            let _ = client.project_list_loaded().await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
     drop(client);
     let line = boot.find(LINE);
     assert!(
         line.is_some(),
         "STOP: {what}: no `{LINE}…` line in 15 s — not a power-on boot, or it never lit"
     );
+    let at = |needle: &str| {
+        boot.lines
+            .borrow()
+            .iter()
+            .find(|(_, l)| l.contains(needle))
+            .map(|(t, _)| *t)
+    };
+    // The address, in host seconds after the first-light line arrived.
+    let address_after_line_s = at("[wifi] address").zip(at(LINE)).map(|(a, l)| a - l);
+    let wifi = serde_json::json!({
+        "starts": boot.find("[wifi] station starts"),
+        "trying": boot.find("[wifi] trying"),
+        "associated": boot.find("[wifi] associated"),
+        "address": boot.find("[wifi] address"),
+        "address_after_line_s": address_after_line_s,
+        "frames": frames_after(&boot, "[wifi] address"),
+    });
     let compile = boot.find("[shader-node] compilation succeeded");
     let fs_line = boot.find("[FS] ");
     let fs = conn
@@ -294,7 +371,18 @@ async fn power_up(
             "fs_line": fs_line,
             "fs": fs,
             "port_back_s": times.back,
+            "wifi": wifi,
             "power_cycle_exited_s": pc.exited,
         }),
     )
+}
+
+/// The first `[perf] frames …` line after the first line holding `needle`.
+fn frames_after(console: &Console, needle: &str) -> Option<String> {
+    let lines = console.lines.borrow();
+    let from = lines.iter().position(|(_, l)| l.contains(needle))?;
+    lines[from..]
+        .iter()
+        .find(|(_, l)| l.contains("[perf] frames "))
+        .map(|(_, l)| l.clone())
 }
