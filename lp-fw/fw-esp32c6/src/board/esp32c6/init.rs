@@ -66,8 +66,9 @@ pub fn init_board() -> (
     // second-stage bootloader loads its code and data into, and runs its
     // stack in — esp-hal's `#[ram(reclaimed)]` exists for exactly this. A
     // second `esp_alloc` region: `HEAP.free()`/`used()` sum all three,
-    // allocations fill the main region first. Heap total 301,536 B
-    // (325,536 B before the 2026-09-24 cut).
+    // allocations fill the main region first. Heap total 372,544 B since
+    // the 2026-10-16 stack-to-heap move (`HEAP_MAIN_SIZE`); 301,536 B before
+    // it, 325,536 B before the 2026-09-24 cut.
     //
     // That segment is the bootloader's again the moment the HP system
     // resets, while the radio does not reset with it: a warm reset (the
@@ -136,8 +137,19 @@ pub fn init_board() -> (
 }
 
 /// The main heap region's size (see the RAM-split note in [`init_board`]):
-/// the 236,000 B main RAM gives the heap, less the radio's region.
-const HEAP_MAIN_SIZE: usize = 236_000 - HEAP_RADIO_SIZE;
+/// the heap's share of main RAM, less the radio's region.
+///
+/// 236,000 → 307,008 B of main RAM (2026-10-16, RAM research M1): the radio
+/// code that moved to flash (#1092) and the constants (#1110) left the main
+/// stack at 120,160 B in the shipped split image (main `f3a77691e`), where
+/// the deepest catalog project needs 35,752 B: meteor's load, and the same
+/// after ten shader edits (`lp-emu:esp32c6:t1`, `lp-cli/tests/emu_stack_peak.rs`;
+/// silicon in the RAM split ADR's 2026-10-16 amendment). The
+/// stack keeps that peak + 12 KiB, rounded up to 4 KiB: 49,152 B, and the
+/// other 71,008 B are heap. `emu_stack_peak` fails CI the day the statics or
+/// this constant eat into the 12 KiB, so the next static that grows has to
+/// take its bytes back from here. See docs/adr/2026-09-02-esp32c6-ram-split.md.
+const HEAP_MAIN_SIZE: usize = 307_008 - HEAP_RADIO_SIZE;
 /// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
 /// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth
 /// up (2026-09-24), less the 10,320 B the lean ESP-NOW buffers gave back
