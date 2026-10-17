@@ -25,7 +25,8 @@
 //! board; CX1 by default), `LP_QIO_LABEL` (e.g. `cx1-qio`), `LP_QIO_DIR`
 //! (records), `LP_QIO_SPLIT_JSON` (the image's `split.json`, for the core's
 //! hash), `LP_QIO_EXPECT` (`QIO` or `DIO`: what every `[flash]` line must
-//! say).
+//! say). A board the registry does not tag `sacrificial` also needs
+//! `LP_QIO_ERASE_OK=<its slug>`: the sitting saved its flash first.
 
 #[path = "support/desk_board.rs"]
 mod desk_board;
@@ -95,7 +96,28 @@ async fn sitting() {
         mac: std::env::var("LP_QIO_MAC").unwrap_or_else(|_| CX1_MAC.into()),
         holder,
     };
-    desk.check().unwrap_or_else(|e| panic!("{e}"));
+    // A board the registry does not tag `sacrificial` is driven only when the
+    // sitting names it in `LP_QIO_ERASE_OK` (its slug), and then still only
+    // with its MAC and our lease.
+    if std::env::var("LP_QIO_ERASE_OK").as_deref() == Ok(desk.slug.as_str()) {
+        let info = desk.show().unwrap_or_else(|e| panic!("{e}"));
+        assert!(
+            info["mac"]
+                .as_str()
+                .is_some_and(|m| m.eq_ignore_ascii_case(&desk.mac)),
+            "REFUSED: {} is not {}",
+            desk.slug,
+            desk.mac
+        );
+        assert_eq!(
+            info["lease"]["holder"].as_str(),
+            Some(desk.holder.as_str()),
+            "REFUSED: {} is not leased by us",
+            desk.slug
+        );
+    } else {
+        desk.check().unwrap_or_else(|e| panic!("{e}"));
+    }
     desk.renew(120).expect("the lease");
     let port = desk
         .port_wait(Duration::from_secs(30))
