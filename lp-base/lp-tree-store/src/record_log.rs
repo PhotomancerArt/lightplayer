@@ -420,7 +420,7 @@ impl<F: Flash> RecordLog<F> {
     }
 
     /// Whether flash at `addr` reads `first ++ parts…`.
-    fn verify(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
+    pub fn verify(&mut self, addr: u32, first: &[u8], parts: &[&[u8]]) -> R<bool, F> {
         let mut buf = [0u8; 64];
         let mut a = addr;
         for p in core::iter::once(first).chain(parts.iter().copied()) {

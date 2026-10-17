@@ -1,8 +1,10 @@
 //! Writing content: a file's bytes as stored chunks under a multi tree, an
 //! append that re-chunks only the stored tail, a host-deflated chunk
 //! (verified by inflating and hashing it), and a directory node. Every
-//! record is skipped when its id is already indexed (dedup: the index's
-//! records all have complete closures, `ram_index.rs`).
+//! record is skipped when its id is already indexed and the record there
+//! holds the same bytes (dedup: the index's records all have complete
+//! closures, `ram_index.rs`; a hit with other bytes is a collision, and the
+//! write is refused).
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -22,6 +24,11 @@ use crate::tree_delta::FileEntry;
 use crate::tree_store::{Res, TreeStore, Txn, head_for};
 
 const HDR: u32 = RECORD_HEADER_LEN;
+
+/// A write whose record's id is indexed with other bytes behind it: a
+/// 64-bit id collision (crafted, or a damaged record). The write is refused
+/// and nothing is written; the record already there keeps its bytes.
+pub(crate) const ID_COLLISION: &str = "a record with this id holds other bytes";
 
 /// A host-deflated chunk a write keeps as it came.
 pub(crate) struct Coded<'a> {
@@ -83,6 +90,9 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         let id = ObjectId::of(&mut self.hasher, IdTag::Blob, &[&buf]);
         if expected.is_some_and(|e| e != id) {
             return Err(StoreError::Corrupt("chunk id"));
+        }
+        if !self.same_logical(id, &buf)? {
+            return Err(StoreError::Corrupt(ID_COLLISION));
         }
         let coded = DEFLATE_PREFIX + deflated.len();
         if coded <= self.max_payload() && coded < logical {
@@ -267,7 +277,10 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         id: ObjectId,
         parts: &[&[u8]],
     ) -> Res<(), F> {
-        if self.log.index.contains(id) {
+        if let Some(loc) = self.log.index.get(id) {
+            if !self.same_record(loc, id, kind, codec, parts)? {
+                return Err(StoreError::Corrupt(ID_COLLISION));
+            }
             stat!(self.stats.dedup_hits += 1);
             return Ok(());
         }
@@ -277,6 +290,55 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         }
         self.log.append(head, kind, codec, id, parts)?;
         Ok(())
+    }
+
+    /// Whether the record at `loc` (indexed as `id`) holds what `kind`,
+    /// `codec` and `parts` would write: a dedup hit compares bytes before it
+    /// reuses a record (FORMAT.md "Ids": ids are 64 bits and not
+    /// cryptographic, so a crafted collision must not alias two files). A
+    /// deflated chunk on either side compares logical bytes — a stored and
+    /// a deflated copy of one chunk share an id — and a new deflated chunk
+    /// was compared by its caller (`deflated_inner`, which holds its
+    /// logical bytes). One read of the record per hit.
+    fn same_record(
+        &mut self,
+        loc: crate::ram_index::RecordLoc,
+        id: ObjectId,
+        kind: RecordKind,
+        codec: ChunkCodec,
+        parts: &[&[u8]],
+    ) -> Res<bool, F> {
+        let h = self.log.header_at(loc)?;
+        if h.kind != kind {
+            return Ok(false);
+        }
+        if codec == ChunkCodec::Deflate {
+            return Ok(true);
+        }
+        let len: usize = parts.iter().map(|p| p.len()).sum();
+        if h.codec == ChunkCodec::Deflate {
+            let mut have = Vec::new();
+            read_node_into(&mut self.log, id, &mut have)?;
+            self.log.note(have.capacity());
+            return Ok(have.len() == len && parts.concat() == have);
+        }
+        if usize::from(h.len) != len {
+            return Ok(false);
+        }
+        let at = self.log.addr(loc.sector, loc.offset + HDR);
+        self.log.verify(at, &[], parts)
+    }
+
+    /// A host-deflated chunk whose id is indexed: whether the record there
+    /// decodes to the same `logical` bytes (see [`Self::same_record`]).
+    fn same_logical(&mut self, id: ObjectId, logical: &[u8]) -> Res<bool, F> {
+        if !self.log.index.contains(id) {
+            return Ok(true);
+        }
+        let mut have = Vec::new();
+        read_node_into(&mut self.log, id, &mut have)?;
+        self.log.note(have.capacity());
+        Ok(have == logical)
     }
 
     // ---- what a write will append (before it appends anything) ----------

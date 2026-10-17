@@ -457,8 +457,17 @@ as a u64; the value 0 is replaced by 1. Tags:
 
 A file's node id is its one Blob's id (a file of at most `R − 16` stored
 bytes, or one chunk) or its top Multi's id. Ids are 64 bits and **not**
-cryptographic (spike U9): a writer reuses a record whose id it already
-holds without comparing bytes.
+cryptographic (spike U9): an accidental collision is negligible (about
+`L²/2⁶⁵` for `L` live records), but anyone who can write can spend about
+2³² SHA-256 evaluations to make bytes whose id equals a file they can
+predict. So **a writer compares bytes on a dedup hit**: before it reuses a
+record whose id it already holds, it reads that record and compares it with
+what it would write (logical bytes when either copy is deflated, since a
+stored and a deflated copy of one chunk share an id). A hit with other
+bytes behind it is refused — nothing is written, the record already there
+keeps its bytes, and no file ever reads another's (`lp-tree-store`:
+`Corrupt("a record with this id holds other bytes")`). A writer rule; a
+reader needs nothing.
 
 ## Files and paths
 
