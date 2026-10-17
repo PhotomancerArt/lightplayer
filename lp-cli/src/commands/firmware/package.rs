@@ -37,6 +37,9 @@ pub fn handle_package(args: PackageArgs) -> Result<()> {
         // `PackageArgs::single_image`).
         def.split = false;
     }
+    if args.fs_tree {
+        with_tree_store(&mut def)?;
+    }
 
     if !args.no_build {
         build_firmware(&repo_root, &def)?;
@@ -48,6 +51,25 @@ pub fn handle_package(args: PackageArgs) -> Result<()> {
     };
     let manifest_path = package_build(&repo_root, &def, &out_dir)?;
     println!("firmware manifest: {}", manifest_path.display());
+    Ok(())
+}
+
+/// `--fs-tree`: the C6 def with the tree store (see
+/// `PackageArgs::fs_tree`). The partition table moves to the tree table
+/// beside the def's own.
+pub fn with_tree_store(def: &mut BuildDef) -> Result<()> {
+    const C6_TABLE: &str = "lp-fw/fw-esp32c6/partitions.csv";
+    const TREE_TABLE: &str = "lp-fw/fw-esp32c6/partitions-tree.csv";
+    if def.package != "fw-esp32c6" || def.partitions_csv != C6_TABLE {
+        bail!(
+            "--fs-tree is the C6's (package fw-esp32c6 on {C6_TABLE}); `{}` is not",
+            def.id
+        );
+    }
+    if !def.cargo_features.iter().any(|f| f == "fs-tree") {
+        def.cargo_features.push("fs-tree".to_string());
+    }
+    def.partitions_csv = TREE_TABLE.to_string();
     Ok(())
 }
 

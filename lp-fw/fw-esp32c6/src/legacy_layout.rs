@@ -18,9 +18,21 @@
 //! says `fs: legacy_held` in its hello. Studio's Update firmware (or
 //! `lp-cli hardware lpfs migrate`) then carries the files across.
 
-/// Where the pre-repartition `lpfs` starts.
+/// Where the pre-repartition `lpfs` starts. Read by the littlefs build's
+/// held line and by the probe, which the size measurement's build leaves
+/// out.
+#[cfg(not(feature = "measure_no_legacy_probe"))]
 pub const LEGACY_LPFS_V1_OFFSET: u32 = 0x0031_0000;
 /// How many 4 KB littlefs blocks it holds (`0xF0000` bytes). Read by the
 /// probe only, which the size measurement's build leaves out.
 #[cfg(not(feature = "measure_no_legacy_probe"))]
 pub const LEGACY_LPFS_V1_BLOCKS: u32 = 240;
+
+/// Where the 2026-10 repartition's `lpfs` starts (`partitions.csv` until the
+/// tree-store cutover): an `fs-tree` board on the tree table holds a
+/// littlefs it finds here (`flash_storage::legacy_lpfs_present_at`).
+#[cfg(all(feature = "fs-tree", not(feature = "measure_no_legacy_probe")))]
+pub const LEGACY_LPFS_V2_OFFSET: u32 = 0x0035_0000;
+/// Its 4 KB littlefs blocks (`0xB0000` bytes).
+#[cfg(all(feature = "fs-tree", not(feature = "measure_no_legacy_probe")))]
+pub const LEGACY_LPFS_V2_BLOCKS: u32 = 176;

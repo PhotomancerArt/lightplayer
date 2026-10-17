@@ -142,7 +142,7 @@ pub(crate) fn write_tree_image(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::layout_migration::legacy_layout::LEGACY_C6_V1_LPFS;
 

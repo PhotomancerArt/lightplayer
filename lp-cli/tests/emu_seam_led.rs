@@ -30,6 +30,7 @@
 use std::path::{Path, PathBuf};
 
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
+use lp_cli::commands::hardware::args::LpfsTargetFs;
 use lp_cli::commands::hardware::lpfs::fixture::build_chip;
 use lp_cli::commands::hardware::lpfs::lpfs_target::target_table;
 use lp_emu_esp_common::Strap;
@@ -215,7 +216,7 @@ fn chip_with_project(split: &SplitImage) -> Vec<u8> {
     let mut files = Vec::new();
     walk(&project, &project, &mut files);
     let tree = LpfsTree::from_files(files);
-    build_chip(&merged, &table, &tree).expect("the chip")
+    build_chip(&merged, &table, &tree, LpfsTargetFs::Littlefs).expect("the chip")
 }
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {

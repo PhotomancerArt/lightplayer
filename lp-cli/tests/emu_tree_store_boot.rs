@@ -204,7 +204,10 @@ fn a_legacy_layout_is_held_and_never_written() {
     }
     let before = chip(&shipped)[region.clone()].to_vec();
     assert_eq!(hello_fs(&hello), "legacy_held", "{hello}");
-    boot_word(&host, "[FS] legacy-layout filesystem found at 0x310000");
+    boot_word(
+        &host,
+        "[FS] legacy-layout filesystem found — not formatting",
+    );
     assert!(
         line_with(&host, "[FS] tree store formatted").is_none(),
         "{}",

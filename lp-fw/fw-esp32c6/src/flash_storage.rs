@@ -84,6 +84,30 @@ pub fn legacy_lpfs_present_at(
     lpfs_offset: u32,
 ) -> bool {
     use crate::legacy_layout::{LEGACY_LPFS_V1_BLOCKS, LEGACY_LPFS_V1_OFFSET};
+    // An `fs-tree` board on the tree table (`lpfs` at `0x380000`) also holds
+    // the 176-sector littlefs of the 2026-10 repartition's table
+    // (`0x350000`), whose blocks 48–175 ARE its partition: a board flashed
+    // there by a path that skipped the cutover's migration keeps its files
+    // and holds (`fs: legacy_held`) for the USB migration, never formats
+    // over them (plan `lp2025/2026-10-16-0848-tree-store-adoption`, AD3). A
+    // superblock there survives only while nothing written up from
+    // `0x10000` reached it, so a mount there reads blocks no image wrote.
+    #[cfg(feature = "fs-tree")]
+    {
+        use crate::legacy_layout::{LEGACY_LPFS_V2_BLOCKS, LEGACY_LPFS_V2_OFFSET};
+        if lpfs_offset != LEGACY_LPFS_V2_OFFSET {
+            let region = RegionReader {
+                flash: &mut *flash,
+                offset: LEGACY_LPFS_V2_OFFSET,
+            };
+            if fw_esp32_common::lp_fs::lpfs_mounts_read_only(
+                region,
+                config_for(LEGACY_LPFS_V2_BLOCKS),
+            ) {
+                return true;
+            }
+        }
+    }
     if lpfs_offset == LEGACY_LPFS_V1_OFFSET {
         return false;
     }

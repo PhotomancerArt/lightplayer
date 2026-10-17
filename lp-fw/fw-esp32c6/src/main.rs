@@ -737,10 +737,11 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
                             (Box::new(fs), FsBootState::Formatted)
                         }
                         TreeFsInit::Held(_) => {
+                            // At 0x310000 (pre-repartition) or 0x350000 (the
+                            // 176-sector littlefs the cutover moves from).
                             esp_println::println!(
-                                "[FS] legacy-layout filesystem found at {:#x} — not formatting; \
-                                 files are held for migration; using memory FS",
-                                crate::legacy_layout::LEGACY_LPFS_V1_OFFSET
+                                "[FS] legacy-layout filesystem found — not formatting; files \
+                                 are held for migration; using memory FS"
                             );
                             (Box::new(LpFsMemory::new()), FsBootState::LegacyHeld)
                         }

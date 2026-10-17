@@ -184,6 +184,8 @@ struct Package {
     chip: espflash::targets::Chip,
     target_table: Vec<u8>,
     image_len: u32,
+    /// What the merged image mounts (its manifest core's `fs.tree`).
+    target_fs: crate::FsKind,
 }
 
 impl Package {
@@ -223,6 +225,7 @@ impl Package {
         PartitionTable::parse(&target_table).map_err(|error| {
             LinkError::other(format!("the firmware package's partition table: {error}"))
         })?;
+        let target_fs = crate::layout_migration::image_fs_kind(merged);
         let image_len = images
             .iter()
             .map(|(image, data)| image.address + data.len() as u32)
@@ -234,6 +237,7 @@ impl Package {
             chip,
             target_table,
             image_len,
+            target_fs,
         })
     }
 }
@@ -248,7 +252,11 @@ fn inspect_in_session(
     let probed_mac = flasher.device_info().ok().map(|info| info.mac_address);
     let target = PartitionTable::parse(&package.target_table)
         .map_err(|error| LinkError::other(error.to_string()))?;
-    let mut probe = LayoutProbe::new(target, flasher.chip() == espflash::targets::Chip::Esp32c6);
+    let mut probe = LayoutProbe::new_for(
+        target,
+        package.target_fs,
+        flasher.chip() == espflash::targets::Chip::Esp32c6,
+    );
     let mut reads = Vec::new();
     while let Some(read) = probe.next_read() {
         let label = if read.length > 0x10000 {
@@ -265,6 +273,7 @@ fn inspect_in_session(
         probed_mac,
         target_table: package.target_table.clone(),
         target_image_len: package.image_len,
+        target_fs: package.target_fs,
         target_manifest: embedded_manifest(package.images.iter().map(|(_, data)| data.as_slice())),
         reads,
         logs: recorder.logs.clone(),
