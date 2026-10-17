@@ -24,6 +24,17 @@ fn main() {
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
     );
 
+    // Put this crate's directory on the linker search path so esp-hal's
+    // `INCLUDE "rwdata_hook.x"` resolves to `rwdata_hook.x` next to this file.
+    // esp-hal's `ld/sections/rwdata.x` ends the `.data` output section with
+    // that INCLUDE, gated on `ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK` (set in
+    // `.cargo/config.toml`); the linker resolves it through `-L`, and esp-hal
+    // only adds its own OUT_DIR. See `rwdata_hook.x` for what stays in RAM.
+    println!(
+        "cargo:rustc-link-search={}",
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).display()
+    );
+
     emit_build_provenance();
     emit_partition_facts();
 

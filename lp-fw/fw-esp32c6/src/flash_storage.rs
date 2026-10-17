@@ -62,6 +62,17 @@ impl LpFlashStorage {
     pub fn legacy_lpfs_present(&mut self) -> bool {
         legacy_lpfs_present_at(&mut self.flash, self.partition.offset)
     }
+
+    /// Does the located `lpfs` hold a tree store (the newer filesystem an
+    /// `fs-tree` core writes)? Read-only, four bytes a sector; asked only
+    /// after littlefs would not mount. A littlefs core never formats one: a
+    /// loader rollback from a tree core, or an older image flashed over USB,
+    /// would otherwise wipe the board's files
+    /// (`fw_esp32_common::lp_fs::holds_tree_store`).
+    pub fn holds_tree_store(&mut self) -> bool {
+        let blocks = self.partition.len / BLOCK_SIZE;
+        fw_esp32_common::lp_fs::holds_tree_store(self, blocks)
+    }
 }
 
 /// Is a pre-repartition LightPlayer filesystem at the legacy offset, for a

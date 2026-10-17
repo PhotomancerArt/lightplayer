@@ -173,11 +173,11 @@ impl UpdateTarget for SplitUpdateTarget {
         len: u32,
         build_hash: u32,
     ) -> Result<(), FlashFault> {
-        // `fs-tree` (D8): a core that would not mount this board's tree
-        // store would format it on its first boot — refuse it here, before
-        // the record that boots it, and say why.
-        #[cfg(feature = "fs-tree")]
-        {
+        // A board with a tree store (D8: an `fs-tree` board; or, since
+        // 2026-10-16, a littlefs board holding one): a core that would not
+        // mount the store could format it on its first boot — refuse it
+        // here, before the record that boots it, and say why.
+        if super::cores_must_read_tree_store() {
             let flash = &mut self.flash;
             let verdict =
                 fw_esp32_common::fs_tree_core_guard::core_store_verdict(len, |at, buf| {
