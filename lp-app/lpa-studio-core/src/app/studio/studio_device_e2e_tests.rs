@@ -179,6 +179,8 @@ mod ble_drop_tests;
 mod board_card_tests;
 /// One tab holds a board: two tabs on one in-memory hold bus.
 mod board_hold_tests;
+/// Connect a board's chooser failing after the pick: the section says so.
+mod chooser_failure_tests;
 /// Connected: Connect, Edit and Done by path, the home page and an open
 /// session side by side, and the surface following the place.
 mod connected_tests;

@@ -342,6 +342,12 @@ pub struct StudioController {
     /// Why the last Connect did not open, for the board's card; cleared by
     /// the next Connect, Edit or Done on any board.
     connect_failure: Option<crate::ConnectFailure>,
+    /// The chooser Connect a board's USB or Bluetooth square opened last,
+    /// while it has not answered: the link its answer names, and which.
+    section_chooser: Option<(lpa_devices::LinkId, crate::ChooserTransport)>,
+    /// That chooser's connect failed after the pick: the section's words
+    /// under its squares, until the next press of either.
+    chooser_failure: Option<crate::UiChooserFailure>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -567,6 +573,8 @@ impl StudioController {
             lens_hold: None,
             connected: None,
             connect_failure: None,
+            section_chooser: None,
+            chooser_failure: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -1979,9 +1987,11 @@ impl StudioController {
             );
         }
         self.keep_fresh_starts();
-        // A Connect waiting on the chooser it opened hears its answer.
+        // A Connect waiting on the chooser it opened hears its answer, and
+        // so does Connect a board.
         if let Some((link, answer)) = &grant_answer {
             self.note_connect_chooser(*link, answer);
+            self.note_section_chooser_answer(*link, answer);
         }
         // A failed Connect's words go once the board is reached by any
         // road.
@@ -2321,6 +2331,7 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        view.chooser_failure = self.chooser_failure.clone();
         view.take_overs = self
             .take_overs
             .devices()
@@ -6518,7 +6529,9 @@ impl StudioController {
             crate::DeviceAction::Forget { device } => self.board_key(*device),
             _ => None,
         };
+        let chooser_before = self.devices.effects().last_grant_request();
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        self.note_section_chooser(op.action(), chooser_before);
         if let Some(key) = forgotten_board {
             self.wifi_connects.forget_board(key);
             if self.wifi_addresses.forget(&key) {

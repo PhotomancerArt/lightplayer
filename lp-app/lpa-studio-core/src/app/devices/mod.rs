@@ -71,6 +71,7 @@ pub mod browser_sim_source;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_transport;
 pub mod bundled_own_build;
+pub mod chooser_failure;
 pub mod composite_transport;
 pub mod connect_offer;
 pub mod device_affordance;
@@ -181,6 +182,7 @@ pub use browser_sim_source::BrowserSimLinkSource;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub use browser_transport::BrowserSerialTransport;
 pub use bundled_own_build::{BundledOwnBuild, BundledOwnBuildSource, OWN_BUILD_MISMATCH};
+pub use chooser_failure::{ChooserTransport, UiChooserFailure};
 pub use composite_transport::CompositeDeviceTransport;
 pub use connect_offer::{
     CONNECT_VERB, ConnectFacts, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,

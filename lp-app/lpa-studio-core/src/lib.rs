@@ -128,6 +128,8 @@ pub use app::devices::{
     CONNECT_VERB, ConnectFacts, DONE_VERB, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
     device_done_offer,
 };
+/// Connect a board's chooser failing after the pick.
+pub use app::devices::{ChooserTransport, UiChooserFailure};
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
     FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
