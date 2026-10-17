@@ -24,6 +24,11 @@
 //!    project's `HashPackage` is the same; the board's own `[FS] tree store
 //!    mounted (…)` and `[LOADER] core @0x18000` lines; the loaded project
 //!    runs (its console, kept with the run).
+//! 6. **First light, both sides:** a power cycle (`board power-cycle`) before
+//!    the migration and another after it, each read to the firmware's
+//!    `[perf] first light …` line (said on power-on boots only), so the
+//!    record carries the littlefs and the tree-store boot of the same board
+//!    and files.
 //!
 //! Env: `LP_MIGRATE_DIR` (required), `LP_MIGRATE_MANIFEST` (the `fs-tree`
 //! package's manifest.json; required), `LP_MIGRATE_LP_CLI` (an `lp-cli`
@@ -43,7 +48,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use desk_board::{Console, Desk, close, connect, lpfs_save, tree_check};
+use desk_board::{Console, Desk, close, connect, lpfs_save, power_up_to_first_light, tree_check};
 use lpa_client::LpClient;
 use lpa_link::layout_migration::{LpfsGeometry, LpfsTree, read_tree};
 use tree_store_board::{c40_files, project_files};
@@ -107,10 +112,15 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
             hashes.insert(id.to_string(), hash);
         }
         drop(client);
+        // First light on littlefs: a power-on boot of the board as it is.
+        let (conn, light) =
+            power_up_to_first_light(&desk, &port, Some(conn), &console, "littlefs").await;
         close(conn).await;
-        hashes
+        (hashes, light)
     });
+    let (before_hashes, light_before) = before_hashes;
     record(&dir, "hashes-before.json", &format!("{before_hashes:#?}"));
+    record(&dir, "first-light-before.json", &light_before.to_string());
     let raw_before = lpfs_save(&lp_cli, &port, &dir.join("before")).expect("lpfs save before");
     let before = host_files(
         &raw_before,
@@ -162,8 +172,10 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
         },
     );
     assert_eq!(after, before, "every file, byte for byte");
-    let (after_hashes, lines) = local.block_on(&runtime, async {
-        let conn = connect(&port, &console).await.expect("the board after");
+    let (after_hashes, lines, light_after) = local.block_on(&runtime, async {
+        // First light on the tree store: a power-on boot after the move.
+        let (conn, light) =
+            power_up_to_first_light(&desk, &port, None, &console, "tree store").await;
         let hello = conn.hello().expect("a hello");
         record(&dir, "hello-after.json", &format!("{hello:#?}"));
         assert!(hello.build.features.contains(&lpc_model::LpFeature::FsTree));
@@ -185,9 +197,10 @@ fn cx1_moves_from_littlefs_into_the_tree_store_with_every_file() {
             .map(|(_, l)| l.clone())
             .collect();
         close(conn).await;
-        (hashes, lines)
+        (hashes, lines, light)
     });
     record(&dir, "console.txt", &lines.join("\n"));
+    record(&dir, "first-light-after.json", &light_after.to_string());
     assert_eq!(after_hashes, before_hashes, "every project's HashPackage");
     eprintln!("after: {} files, hashes {after_hashes:?}", after.len());
 }
