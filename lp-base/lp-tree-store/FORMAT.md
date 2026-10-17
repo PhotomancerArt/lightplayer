@@ -96,7 +96,8 @@ The flag rules, for whoever adds the first flag:
   record that needs the feature only into a sector that carries it: then
   wherever such a record is, its own sector's header makes an old reader
   refuse the whole store (and once GC has erased the last of them, the
-  store no longer needs the feature).
+  store no longer needs the feature). A core sets one only after its
+  over-the-air trial is confirmed (the trial rule, "Versioning").
 - Bits are allocated from bit 0 upwards in each set and documented here
   with the version of this document that added them. A bit, once fielded,
   is never reused for a different meaning. Adding a flag does **not** bump
@@ -404,11 +405,45 @@ There are two kinds of change, handled differently:
 - **A layout change bumps the version**: what the rules above cannot
   express (the header's own fields after byte 6 moving, a record header
   change, a CRC change). An older reader refuses a store holding any
-  sector of the new version (rule 0: `Unsupported("newer format")`) — never
-  misread, and never "no store" — so a version bump ships with a migration
-  that rewrites **every** sector before the new firmware writes, and a
-  board must be re-packed to take it. A board rolled back to the older
+  sector of the new version (rule 0: `Unsupported("newer format")`) —
+  never misread, and never "no store". A board rolled back to the older
   core afterwards refuses its store rather than formatting over it.
+
+**A version bump does not need a USB re-pack.** The version is in every
+sector's header and bytes 0..6 are the same in every version, so a store
+may hold sectors of two versions at once, and a core that reads both can
+run on it. A version bump therefore ships in one of two ways:
+
+- **in place, over the air**: the new core carries a reader of the old
+  version beside its own, writes only new-version sectors, and converts the
+  store on the device — sector by sector as GC copies live records into new
+  sectors, or in one background pass that is GC run over every old-version
+  sector. Every step is a GC step (copy, read back, then kill and erase:
+  I1, I2), so a power cut anywhere leaves a mixed store the same core
+  mounts. Its only limit is free space when new records are bigger than
+  old ones (the conversion then needs room reserved before it starts);
+- **by a re-pack over USB** (the layout migration, below), when a second
+  reader is not worth carrying.
+
+Both obey the trial rule. The cost of a later layout change is the code of
+a second reader plus one rewrite of the live set, not a re-pack of every
+board.
+
+**The trial rule.** A core that arrived over the air runs **on trial**
+until a link confirms it; a trial that fails boots the core before it
+(`docs/adr/2026-10-06-ota-update-protocol.md`). A core sets a new
+incompat flag, writes a sector of a newer version, or starts a conversion
+**only after its trial is confirmed** — never on an unconfirmed trial,
+whatever the feature. Everything else a newer core may do on trial (a
+compat flag, a new record kind nothing known names, a new root tag) is
+safe for the core before it by the rules above. So a failed trial meets the
+format's rollback bar: **the previous core boots and reads the ordinary
+files** (data that only a newer feature wrote — a snapshot, an index — may
+be lost when the older core writes; that is accepted). The firmware's gate
+is `fw_esp32_common::tree_fs::may_change_store_format(standing)`, true only
+for a confirmed boot (as `lpa_server::access_store::may_migrate_device_store`
+is for the device access file); version 3 defines no flag, so nothing calls
+it yet, and the first change that needs it must.
 
 **Can anything but a newer writer show the magic and a greater version?**
 Rule 0 trusts 6 bytes with no CRC, so it matters what else could put them
@@ -453,13 +488,16 @@ rewrites the partition on the host, in one bootloader session, **over
 USB**. A board updated over Wi-Fi or Bluetooth (the update channel) cannot
 be re-packed: its next core must read the flash the previous core wrote, as
 it is, and a rolled-back core must read what the newer one left. So a
-change a later core makes must be expressible without a version bump — as
-a flag, a tag or a skippable kind that the core it replaces handles safely
-— and version bumps are kept for changes worth a USB re-pack.
+change a later core makes is best expressed without a version bump — as a
+flag, a tag or a skippable kind that the core it replaces handles safely.
+A version bump is still open to an over-the-air core when it carries a
+reader of the old version and converts the store on the device (above);
+what it costs is that reader's code, not a cable.
 
 Once a store is fielded (the adoption round), this format is
 **never-break**: a change that an existing reader would misread is either
-behind an incompat flag or bumps the version and ships with a migration;
+behind an incompat flag or bumps the version and ships with a conversion
+(on the device by a core that reads both versions, or over USB);
 the golden in `tests/format_golden.rs` is never re-recorded to make a change
 pass. Until then a change is allowed but still bumps the version (or, inside
 one unmerged PR, re-records the golden in a commit that says which

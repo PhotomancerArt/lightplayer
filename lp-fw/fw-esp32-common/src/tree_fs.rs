@@ -91,6 +91,21 @@ where
     }
 }
 
+/// Whether this boot may change the store's **format** on flash: set an
+/// incompat flag, write a sector of a newer format version, or start an
+/// in-place conversion (FORMAT.md "Versioning", the trial rule). Only on a
+/// confirmed boot: a core on an unconfirmed over-the-air trial may yet roll
+/// back to the core before it, which must still boot and read the ordinary
+/// files — and a store flagged or converted by the trial core would be
+/// refused. The same gate as the device access file's
+/// ([`lpa_server::access_store::may_migrate_device_store`]).
+///
+/// Format version 3 defines no flag and no conversion, so nothing calls this
+/// yet: it is the gate the first change that needs one must call.
+pub fn may_change_store_format(standing: lpa_server::access_store::BootStanding) -> bool {
+    lpa_server::access_store::may_migrate_device_store(standing)
+}
+
 /// The store's word for a mount it would not adopt (never `NoStore`).
 fn refusal<E>(e: &StoreError<E>) -> &'static str {
     match e {
@@ -190,6 +205,13 @@ mod tests {
         };
         assert_eq!(why, "newer format");
         assert_eq!(image(&flash), newer);
+    }
+
+    #[test]
+    fn only_a_confirmed_boot_may_change_the_store_format() {
+        use lpa_server::access_store::BootStanding;
+        assert!(may_change_store_format(BootStanding::Confirmed));
+        assert!(!may_change_store_format(BootStanding::UnconfirmedTrial));
     }
 
     // ---- helpers -----------------------------------------------------------
