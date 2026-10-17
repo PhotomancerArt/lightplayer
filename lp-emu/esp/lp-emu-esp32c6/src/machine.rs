@@ -1186,6 +1186,9 @@ pub struct Esp32C6Builder {
     /// The modelled chip's size. `--flash` a larger file and the build
     /// fails rather than truncating it.
     flash_len: u32,
+    /// The part on the board ([`crate::flash::FlashPart`]): its JEDEC id and
+    /// status register 2 at power-on.
+    flash_part: crate::flash::FlashPart,
     /// Register the boot set before `peripherals`.
     boot_set: bool,
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
@@ -1276,6 +1279,7 @@ impl Esp32C6Builder {
             lp_peri_clk_en: crate::periph::lp_peri::CLK_EN_RESET,
             flash: crate::flash::FlashBacking::Blank,
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
+            flash_part: crate::flash::FlashPart::ROM_DEFAULT,
             boot_set: true,
             peripherals: Vec::new(),
             dump_frames: FrameSink::default(),
@@ -1880,6 +1884,16 @@ impl Esp32C6Builder {
         self
     }
 
+    /// The part on the board: what `RDID` answers (with the image's own
+    /// capacity byte) and status register 2 as it powers on. Defaults to the
+    /// ROM's own default chip, status clear
+    /// ([`crate::flash::FlashPart::ROM_DEFAULT`]); a desk part
+    /// (`FlashPart::CX1`, `FlashPart::XIAO_C6`) powers on with QE set.
+    pub fn flash_part(mut self, part: crate::flash::FlashPart) -> Self {
+        self.flash_part = part;
+        self
+    }
+
     /// Register a peripheral. Order matters — see
     /// [`PERIPHERAL_REGISTRATION_ORDER`].
     pub fn peripheral(mut self, base: u32, len: u32, periph: BoxedPeripheral) -> Self {
@@ -1976,6 +1990,7 @@ impl Esp32C6Builder {
             lp_peri_clk_en,
             flash,
             flash_len,
+            flash_part,
             boot_set,
             peripherals,
             dump_frames,
@@ -2155,10 +2170,13 @@ impl Esp32C6Builder {
         // The flash chip and the cache MMU are shared state, not
         // peripherals: SPI1 executes commands against the chip, SPI0
         // programs the table, and the machine's fill reads both.
-        let flash_handle: crate::flash::FlashHandle = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::flash::FlashImage::open(flash, flash_len)
-                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
-        ));
+        let flash_handle: crate::flash::FlashHandle = std::sync::Arc::new(std::sync::Mutex::new({
+            let mut image = crate::flash::FlashImage::open(flash, flash_len)
+                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?;
+            // Before the controllers: their status latch powers on from it.
+            image.set_part(flash_part);
+            image
+        }));
         let cache_handle: crate::cache::CacheHandle =
             std::sync::Arc::new(std::sync::Mutex::new(crate::cache::CacheMmu::new()));
 

@@ -366,6 +366,13 @@ pub struct RunArgs {
     #[arg(long = "efuse-rev")]
     pub efuse_rev: Option<String>,
 
+    /// The flash part on the board: `rom-default` (the mask ROM's own
+    /// default chip, status clear — what every transcript was captured
+    /// against), `cx1` or `xiao-c6` (the desk's C6 parts, read on silicon,
+    /// which power on with QE set, so the core reads its flash in QIO).
+    #[arg(long = "flash-part")]
+    pub flash_part: Option<String>,
+
     /// What `LP_CLKRST.reset_cause` says at power-on, and so what a ROM-up
     /// boot's banner prints: `poweron` (default), `usb-uart` or `tg0-wdt`.
     #[arg(long = "reset-cause")]

@@ -39,6 +39,7 @@ pub(super) fn run_v3(args: &RunArgs, micros: u64) -> Result<()> {
         (!args.wire.is_empty(), "--wire"),
         (args.efuse_mac.is_some(), "--efuse-mac"),
         (args.efuse_rev.is_some(), "--efuse-rev"),
+        (args.flash_part.is_some(), "--flash-part"),
         (args.reset_cause.is_some(), "--reset-cause"),
         (args.strap.is_some(), "--strap"),
         (args.usb_host.is_some(), "--usb-host"),
