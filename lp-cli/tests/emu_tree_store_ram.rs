@@ -38,7 +38,7 @@ mod tree_store_measure;
 
 use editor_reads::{block_on, heartbeats};
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp32c6::test_support::FwImage;
+use lp_emu_esp32c6::test_support::{FwImage, ReferenceImage};
 use lpa_client::LpClient;
 use lpc_model::LpValue;
 use lpfs::LpPath;
@@ -68,13 +68,19 @@ fn ram_resident_transient_and_compile_overlap() {
         .ok()
         .filter(|s| !s.is_empty());
     for (label, image) in [
-        ("fs-tree", FwImage::FS_TREE_HEAP_PEAK),
-        ("littlefs", FwImage::SHIPPED_HEAP_PEAK),
+        ("fs-tree", None),
+        ("littlefs", Some(ReferenceImage::FIELDED_LITTLEFS_HEAP_PEAK)),
     ] {
         if only.as_deref().is_some_and(|o| o != label) {
             continue;
         }
-        let Some(elf) = elf("emu_tree_store_ram", &image) else {
+        // The tree store is the shipped image since the cutover; littlefs is
+        // the pinned fielded image, booted on its own table (`fielded_chip`).
+        let found = match &image {
+            None => elf("emu_tree_store_ram", &FwImage::SHIPPED_HEAP_PEAK),
+            Some(fielded) => fielded_elf("emu_tree_store_ram", fielded),
+        };
+        let Some(elf) = found else {
             return;
         };
         rows.push((label, measure(label, &elf)));
@@ -125,7 +131,7 @@ fn measure(label: &str, elf: &std::path::Path) -> Ram {
             wall.elapsed().as_secs_f64()
         );
     };
-    let mut host = board(elf, Vec::new(), 0x4A40_0001);
+    let mut host = board(elf, blank_for(label), 0x4A40_0001);
     boot(&mut host);
     let c40 = c40_files();
     {

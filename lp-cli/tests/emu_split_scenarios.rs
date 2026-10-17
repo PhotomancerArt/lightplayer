@@ -16,9 +16,6 @@
 //!   `started`).
 //! - `y-hangs` — `y` with `fixture-trial-hangs` (spins on trial, unfed,
 //!   before `started`).
-//! - `y-tree-dies` — `y-dies` built with `fs-tree`: a tree-store core whose
-//!   trial dies (S11, the rollback a tree core's failed trial makes onto a
-//!   littlefs core).
 //!
 //! A "Y trial over X" chip is X's merged image with Y's `core.bin` copied to
 //! the high offset `SplitLayout::next_core_offset` gives, a trial record for
@@ -46,8 +43,9 @@ use std::path::PathBuf;
 const SECTOR: usize = 0x1000;
 /// The MMU page espflash 3.3.0's bootloader picks on a 4 MB C6.
 const PAGE: u32 = 0x8000;
-/// `factory` in `lp-fw/fw-esp32c6/partitions.csv`.
-const FACTORY: (u32, u32) = (0x1_0000, 0x34_0000);
+/// `factory` in `lp-fw/fw-esp32c6/partitions.csv` (the tree table since the
+/// tree-store cutover).
+const FACTORY: (u32, u32) = (0x1_0000, 0x37_0000);
 const NONCE: u32 = 0x5911_7C08;
 
 #[test]
@@ -372,16 +370,20 @@ fn s9_the_loader_skips_a_core_that_will_not_load_and_boots_the_other() {
     );
 }
 
-/// The rollback the adoption round has to survive (plan
-/// `lp2025/2026-10-16-0848-tree-store-adoption`, A5): a board whose files
-/// are in a tree store takes a tree-store core on trial; the trial dies; the
-/// loader rolls back to the littlefs core X. Before A5 X formatted the
-/// store. Now it holds: its boot word says so, and `lpfs` is byte-identical
-/// to the store the trial core found.
+/// The failed-trial bar of the tree-store cutover (plan
+/// `lp2025/2026-10-16-0848-tree-store-adoption`; rolling back to an older
+/// core is otherwise a non-goal): a board whose files are in the tree store
+/// takes a core on trial; the trial dies; the loader rolls back to X — a
+/// tree core too, since the cutover leaves no littlefs core in a boot
+/// record (AD4). X mounts the store, never formats it, and every file the
+/// trial core found is still there (read back on the host). Before the
+/// default switch this was A5's rollback onto a littlefs core that HELD the
+/// store; that core is the released one now
+/// (`emu_littlefs_on_tree_store.rs`).
 #[test]
 #[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
-fn s11_a_tree_core_that_dies_rolls_back_to_a_littlefs_core_that_holds_the_store() {
-    let (Some(x), Some(y)) = (image("x"), image("y-tree-dies")) else {
+fn s11_a_core_that_dies_on_trial_rolls_back_to_one_that_mounts_the_store() {
+    let (Some(x), Some(y)) = (image("x"), image("y-dies")) else {
         return;
     };
     let (mut chip, high) = trial_over(&x, &y);
@@ -395,24 +397,27 @@ fn s11_a_tree_core_that_dies_rolls_back_to_a_littlefs_core_that_holds_the_store(
     expect(&console, "[FS] tree store mounted (");
     expect(&console, "fixture-trial-dies");
     expect(&console, "[LOADER] core @0x18000 (rolled back)");
-    let console = until(
-        &mut host,
-        "[FS] this board's files are in the tree store",
-        3_000_000,
-    );
+    // X's boot after the rollback (its mount line follows the loader's).
+    host.run_until(host.board.machine.micros() + 3_000_000, None)
+        .expect("the run");
+    let console = host.console().join("\n");
+    let after = console
+        .rsplit("[LOADER] core @0x18000 (rolled back)")
+        .next()
+        .unwrap_or_default();
     assert!(
-        !console.contains("Formatted and mounted fresh filesystem"),
-        "the littlefs core formatted:\n{console}"
+        after.contains("[FS] tree store mounted (") && !after.contains("tree store formatted"),
+        "X did not mount the store it rolled back onto:\n{console}"
     );
     let flash = flash_of(&host.board.machine);
-    assert!(
-        flash[lpfs][..store.len()] == store[..],
-        "the store changed across the trial and the rollback"
+    assert_eq!(
+        store_files(&flash[lpfs][..store.len()]),
+        store_files(&store),
+        "a file changed across the trial and the rollback"
     );
     report(
         "S11",
-        "a tree core's trial dies warm → the littlefs core X rolled back, holds the tree store \
-         (refused), lpfs byte-identical",
+        "a core's trial dies warm → X rolled back, mounts the tree store, every file kept",
     );
 }
 
@@ -514,6 +519,29 @@ fn tree_store_region() -> Vec<u8> {
     let mut out = vec![0u8; sectors as usize * SECTOR];
     st.flash().peek(0, &mut out);
     out
+}
+
+/// Every file of a store region, mounted on the host.
+fn store_files(region: &[u8]) -> Vec<(String, Vec<u8>)> {
+    use lp_nor_sim::{NorFlashSim, NorGeometry};
+    use lp_tree_store::{SoftSha256, StoreConfig, TreeStore};
+    let sectors = (region.len() / SECTOR) as u32;
+    let mut f = NorFlashSim::new(NorGeometry::c6(sectors));
+    f.set_panic_on_violation(false);
+    for (s, chunk) in region.chunks(SECTOR).enumerate() {
+        if chunk.iter().any(|b| *b != 0xFF) {
+            f.program(s as u32 * SECTOR as u32, chunk)
+                .expect("program the copy");
+        }
+    }
+    let mut st = TreeStore::mount(f, SoftSha256, StoreConfig::default())
+        .unwrap_or_else(|(e, ..)| panic!("the store mounts on the host: {e:?}"));
+    let mut files = Vec::new();
+    for path in st.list("/").expect("list") {
+        let bytes = st.get(&path).expect("get").expect("a listed file");
+        files.push((path, bytes));
+    }
+    files
 }
 
 /// A record written into an erased sector, its marks erased.

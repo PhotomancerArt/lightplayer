@@ -18,8 +18,10 @@
 //!   reads the table and the whole old filesystem region; both must be the
 //!   chip file's bytes.
 //! - **W10**: `lpfs migrate` moves every file to the new layout — table at
-//!   `0x8000` is the new one, the filesystem at `0x350000` mounts with every
-//!   file byte for byte, the old superblock pair at `0x310000` is retired
+//!   `0x8000` is the new one, the filesystem at `lpfs` (the tree store at
+//!   `0x380000` since the tree-store cutover: a pre-repartition board moves
+//!   straight into it) mounts with every file byte for byte, the old
+//!   superblock pair at `0x310000` is retired
 //!   (erased, or under this tree's image where the image reaches past it —
 //!   Decision 7's retire-first order) — and the board then boots its files
 //!   without formatting.
@@ -55,8 +57,8 @@ use lp_emu_esp32c6::machine::{
     UsbSjDrain, UsbSjSink,
 };
 use lp_emu_esp32c6::test_support::{
-    FwImage, ReferenceImage, SplitTable, fw_esp32c6_image, merged_image, reference_lpfs_offset,
-    split_image_on, workspace_root,
+    FwImage, ReferenceImage, fw_esp32c6_image, merged_image, reference_lpfs_offset, split_image,
+    workspace_root,
 };
 use lpa_link::FsKind;
 use lpa_link::PartitionTable;
@@ -151,9 +153,8 @@ fn migrate_moves_every_file_and_the_board_boots_them() {
         "the chip carries the new partition table"
     );
     let geometry = LpfsGeometry::from_table(&target).unwrap();
-    let start = geometry.offset as usize;
-    let (tree, _) = LpfsTree::from_image(&chip[start..start + geometry.len() as usize], geometry)
-        .expect("the new filesystem mounts");
+    let region = &chip[geometry.offset as usize..geometry.end() as usize];
+    let tree = read_tree(region, geometry).expect("the new filesystem (a tree store) mounts");
     assert_eq!(files_of(&tree), work.files, "every file, byte for byte");
     // Retired: erased, except where this tree's image now covers it (the
     // image reaches past 0x310000, so the retire went first — Decision 7).
@@ -242,8 +243,9 @@ fn a_board_whose_files_do_not_fit_is_refused_and_left_byte_identical() {
 // A fielded board — the pinned littlefs image ([`FIELDED_LITTLEFS`]) on the
 // 176-sector table, its files (the walk's own plus a c40-sized project) in
 // littlefs at `0x350000` — moved by `lp-cli hardware lpfs migrate --to tree`
-// to the `fs-tree` split image on the tree table (128 sectors at
-// `0x380000`), through espflash's stub as before.
+// to the shipped split image (the tree store on the tree table since the
+// default switch: 128 sectors at `0x380000`), through espflash's stub as
+// before.
 
 /// What a fielded board runs on the eve of the cutover: littlefs on the
 /// 176-sector table, pinned by commit.
@@ -506,11 +508,11 @@ enum CutBoard {
 }
 
 impl Work {
-    /// A cutover scenario: the target is the `fs-tree` split image on the
-    /// tree table; the board is [`FIELDED_LITTLEFS`] on the 176-sector
-    /// table (or, already migrated, the target itself).
+    /// A cutover scenario: the target is the shipped split image (the tree
+    /// store on the tree table); the board is [`FIELDED_LITTLEFS`] on the
+    /// 176-sector table (or, already migrated, the target itself).
     fn cutover(name: &str, start: Cutover) -> Option<Self> {
-        let split = match split_image_on(&FwImage::FS_TREE, SplitTable::TREE) {
+        let split = match split_image(&FwImage::SHIPPED) {
             Ok(split) => split,
             Err(reason) => {
                 eprintln!("emu_layout_migration: skipped — {reason}");
@@ -534,7 +536,7 @@ impl Work {
         let (fielded, table, fs) = match start {
             Cutover::AlreadyTree => (
                 merged.clone(),
-                root.join("lp-fw/fw-esp32c6/partitions-tree.csv"),
+                root.join("lp-fw/fw-esp32c6/partitions.csv"),
                 "tree",
             ),
             _ => {
@@ -699,7 +701,7 @@ fn stale_newer_record() -> Vec<u8> {
 
 fn tree_table() -> PartitionTable {
     let root = workspace_root().unwrap();
-    let csv = std::fs::read_to_string(root.join("lp-fw/fw-esp32c6/partitions-tree.csv")).unwrap();
+    let csv = std::fs::read_to_string(root.join("lp-fw/fw-esp32c6/partitions.csv")).unwrap();
     PartitionTable::from_csv(&csv).unwrap()
 }
 
@@ -714,7 +716,7 @@ fn dir_has_files(dir: &Path) -> bool {
 enum Layout {
     /// The frozen pre-2026-10 table; the files at `0x310000`.
     Legacy,
-    /// This tree's table; the files at its `lpfs`.
+    /// This tree's table; the files in the tree store at its `lpfs`.
     Current,
 }
 
@@ -797,6 +799,8 @@ impl Work {
                     OsString::from("--table"),
                     root.join("lp-fw/fw-esp32c6/partitions.csv")
                         .into_os_string(),
+                    OsString::from("--fs"),
+                    OsString::from("tree"),
                 ],
             })
             .output()

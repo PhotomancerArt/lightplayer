@@ -1,7 +1,9 @@
-//! The `fs-tree` firmware (the tree store as `lpfs`) booting on the
-//! emulated C6 under every mount verdict (plan
-//! `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, P6). No cuts
-//! here; `emu_tree_store_cuts.rs` cuts.
+//! The shipped firmware (the tree store as `lpfs` since the tree-store
+//! cutover) booting on the emulated C6 under every mount verdict (plan
+//! `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, P6; the
+//! littlefs cases rewritten by the default switch,
+//! `lp2025/2026-10-16-0848-tree-store-adoption` A7). No cuts here;
+//! `emu_tree_store_cuts.rs` cuts.
 //!
 //! Each case waits for the board's own words — the `[FS] tree store …` boot
 //! word and the hello's `fs` — and reads the flash back on the host:
@@ -11,11 +13,16 @@
 //! 2. **Upload `projects/test/basic`, power-cycle** → `mounted` with its
 //!    summary; every file reads back byte for byte over the wire and from the
 //!    host's own mount of the flash; the package hash is the same.
-//! 3. **A littlefs partition** (today's shipped image after an upload) → the
-//!    store finds no store of its own: `formatted`, the old files gone (the
-//!    D8 hazard in miniature; the update guard is for the other direction).
-//! 4. **A legacy-layout chip** (a pre-repartition littlefs at `0x310000`) →
-//!    `legacy_held`, the old region byte-identical.
+//! 3. **A littlefs partition** (a littlefs at `lpfs` itself, files in it) →
+//!    the store finds no store of its own, the superblock's name says
+//!    littlefs: `legacy_held`, the partition byte-identical (AD3: a tree core
+//!    never formats a littlefs that holds files; AD5: found by its magic,
+//!    littlefs not linked).
+//! 4. **A skipped migration** (the fielded 176-block littlefs at `0x350000`,
+//!    the tree table flashed over it by a plain flash) → `legacy_held`,
+//!    `0x350000..0x400000` byte-identical. A pre-repartition littlefs at
+//!    `0x310000` is not probed any more (every image writes over it): such a
+//!    chip formats.
 //! 5. **A newer store header** (`Unsupported`) → `refused`, the boot word
 //!    says "a newer or damaged store header — files kept", the device store
 //!    is locked (Bluetooth off for that reason; network writes refused), and
@@ -50,7 +57,9 @@ use lp_emu_esp32c6::loader::ResetCause;
 use lp_emu_esp32c6::machine::{AppSource, BootMode, Esp32C6Builder, UsbHost};
 use lp_emu_esp32c6::test_support::{FwImage, split_image};
 use lpa_client::LpClient;
-use lpa_link::layout_migration::{LpfsGeometry, LpfsTree, build_image, legacy_c6_v1_table};
+use lpa_link::layout_migration::{
+    LpfsGeometry, LpfsTree, build_image, legacy_c6_v1_table, legacy_c6_v2_table,
+};
 use lpc_model::LpValue;
 use lpfs::LpPath;
 use tree_store_board::*;
@@ -70,7 +79,7 @@ fn blank_flash_formats_and_serves() {
     let hello = boot(&mut host);
     assert_eq!(hello_fs(&hello), "formatted", "{hello}");
     let word = boot_word(&host, "[FS] tree store formatted (");
-    assert!(word.contains("(176 sectors, "), "{word}");
+    assert!(word.contains("(128 sectors, "), "{word}");
     let loaded = {
         let mut client = LpClient::new(&mut host).with_request_ids_from(100);
         block_on(client.project_list_loaded())
@@ -81,7 +90,7 @@ fn blank_flash_formats_and_serves() {
         "1 blank: {word}; host mount {summary:?}, {} file(s)",
         files.len()
     );
-    assert_eq!(summary.sectors, 176);
+    assert_eq!(summary.sectors, 128);
 }
 
 #[test]
@@ -125,84 +134,66 @@ fn an_upload_survives_a_power_cycle_byte_for_byte() {
 }
 
 #[test]
-#[ignore = "needs built fw-esp32c6 ELFs; `just test-emu-c6-cli-boards` runs it"]
-fn a_littlefs_partition_is_no_store_and_is_formatted() {
-    let test = "a_littlefs_partition_is_no_store_and_is_formatted";
-    let (Some(littlefs), Some(elf)) = (elf(test, &FwImage::SHIPPED), fs_tree_elf(test)) else {
+#[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli-boards` runs it"]
+fn a_littlefs_partition_is_held_and_never_written() {
+    let test = "a_littlefs_partition_is_held_and_never_written";
+    let Some(elf) = fs_tree_elf(test) else {
         return;
     };
-    let mut lfs = board(&littlefs, Vec::new(), 0x7EE0_0003);
-    boot(&mut lfs);
-    upload(&mut lfs, PROJECT, &project_files("projects/test/basic"));
-    let littlefs_chip = chip(&lfs);
+    // A littlefs at `lpfs` itself, with files: what a littlefs core leaves
+    // when it ran on the tree table.
+    let geometry = LpfsGeometry {
+        offset: LPFS_OFFSET,
+        block_count: LPFS_LEN / 4096,
+    };
+    let image = build_image(&held_files(), geometry).expect("a littlefs image");
+    let mut region = vec![0xFFu8; LPFS_LEN as usize];
+    region[..image.len()].copy_from_slice(&image);
+    let chip0 = chip_with_lpfs(&region);
     assert!(
-        host_mount(lpfs(&littlefs_chip)).is_err(),
+        host_mount(lpfs(&chip0)).is_err(),
         "the premise: a littlefs partition is no tree store"
     );
 
-    let mut host = board(&elf, littlefs_chip, 0x7EE0_0013);
+    let mut host = board(&elf, chip0, 0x7EE0_0003);
     let hello = boot(&mut host);
-    assert_eq!(hello_fs(&hello), "formatted", "{hello}");
-    let word = boot_word(&host, "[FS] tree store formatted (");
-    let listed = {
-        let mut client = LpClient::new(&mut host).with_request_ids_from(100);
-        block_on(client.fs_list_dir(LpPath::new("/projects"), true))
-    };
-    let (stored, _) = host_mount(lpfs(&chip(&host))).expect("the host mounts the store");
-    assert!(
-        !stored.keys().any(|p| p.starts_with("/projects/")),
-        "the littlefs files are gone: {stored:?}"
+    assert_eq!(hello_fs(&hello), "legacy_held", "{hello}");
+    let word = boot_word(
+        &host,
+        "[FS] legacy-layout filesystem found — not formatting",
     );
-    println!("3 littlefs: {word}; /projects lists {listed:?}");
+    assert!(
+        line_with(&host, "[FS] tree store formatted").is_none(),
+        "{}",
+        host.console().join("\n")
+    );
+    assert!(
+        lpfs(&chip(&host)) == &region[..],
+        "the held littlefs partition was written"
+    );
+    println!("3 littlefs: legacy_held ({word}), lpfs byte-identical");
 }
 
 #[test]
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli-boards` runs it"]
-fn a_legacy_layout_is_held_and_never_written() {
-    let test = "a_legacy_layout_is_held_and_never_written";
-    let (Some(littlefs), Some(elf)) = (elf(test, &FwImage::SHIPPED), fs_tree_elf(test)) else {
+fn a_skipped_migration_is_held_and_never_written() {
+    let test = "a_skipped_migration_is_held_and_never_written";
+    let Some(elf) = fs_tree_elf(test) else {
         return;
     };
-    let geometry = LpfsGeometry::from_table(&legacy_c6_v1_table()).expect("the legacy lpfs");
-    let tree = LpfsTree::from_files([
-        (
-            "/hardware.json".to_string(),
-            b"{\"board\":\"held\"}".to_vec(),
-        ),
-        (
-            format!("/projects/{PROJECT}/project.json"),
-            b"{\"name\":\"held\"}".to_vec(),
-        ),
-    ]);
-    let legacy = build_image(&tree, geometry).expect("a legacy littlefs image");
+    // The fielded 176-block littlefs at 0x350000; the chip carries no table,
+    // so the direct load stages today's (the tree table) over it — a plain
+    // flash of the tree image that skipped the migration. `lpfs`
+    // (0x380000..) is that littlefs's blocks 48–175.
+    let geometry = LpfsGeometry::from_table(&legacy_c6_v2_table()).expect("the v2 lpfs");
+    let legacy = build_image(&held_files(), geometry).expect("a v2 littlefs image");
     let mut chip0 = vec![0xFFu8; lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN as usize];
     let at = geometry.offset as usize;
     chip0[at..at + legacy.len()].copy_from_slice(&legacy);
     let region = at..(LPFS_OFFSET + LPFS_LEN) as usize;
 
-    // The premise, on today's littlefs image: does this chip read as held?
-    // A direct load stages the app in `factory` (0x10000..0x350000), and
-    // today's `.text` runs past 0x310000 — over the old filesystem's
-    // superblock pair — so the probe may find nothing to hold.
-    let mut shipped = board(&littlefs, chip0.clone(), 0x7EE0_0014);
-    let shipped_fs = hello_fs(&boot(&mut shipped));
     let mut host = board(&elf, chip0.clone(), 0x7EE0_0004);
     let hello = boot(&mut host);
-    if shipped_fs != "legacy_held" {
-        // Not reachable on this image: say so, and hold the tree store to
-        // what today's image does with the same chip.
-        let staged = &chip(&shipped)[at..at + 8192] != &legacy[..8192];
-        println!(
-            "4 legacy: NOT REACHABLE on this image — today's littlefs image reports \
-             `{shipped_fs}` on a legacy-layout chip (the staged app overwrote the old \
-             superblock pair at 0x310000: {staged}); fs-tree reports `{}`. The probe-and-hold \
-             path is covered on the host (`tree_fs::tests::hold_writes_nothing`).",
-            hello_fs(&hello)
-        );
-        assert_eq!(hello_fs(&hello), shipped_fs, "{hello}");
-        return;
-    }
-    let before = chip(&shipped)[region.clone()].to_vec();
     assert_eq!(hello_fs(&hello), "legacy_held", "{hello}");
     boot_word(
         &host,
@@ -214,10 +205,39 @@ fn a_legacy_layout_is_held_and_never_written() {
         host.console().join("\n")
     );
     assert!(
-        chip(&host)[region] == before[..],
-        "the held chip was written between 0x310000 and the end of lpfs"
+        chip(&host)[region.clone()] == chip0[region],
+        "the held chip was written between 0x350000 and the end of lpfs"
     );
-    println!("4 legacy: legacy_held, 0x310000..0x400000 byte-identical");
+
+    // The pre-repartition littlefs (0x310000) is not probed any more: every
+    // image since the 2026-10 repartition writes over its superblock pair,
+    // so a chip that still has one cannot come from a flash of this image.
+    let v1 = LpfsGeometry::from_table(&legacy_c6_v1_table()).expect("the v1 lpfs");
+    let old = build_image(&held_files(), v1).expect("a v1 littlefs image");
+    let mut chip1 = vec![0xFFu8; lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN as usize];
+    let at = v1.offset as usize;
+    chip1[at..at + old.len()].copy_from_slice(&old);
+    let mut v1_host = board(&elf, chip1, 0x7EE0_0024);
+    let v1_fs = hello_fs(&boot(&mut v1_host));
+    println!(
+        "4 skipped migration: legacy_held, 0x350000..0x400000 byte-identical; a v1 chip \
+         (0x310000) reports `{v1_fs}` (not probed)"
+    );
+    assert_eq!(v1_fs, "formatted");
+}
+
+/// A held board's files: a board manifest and a project.
+fn held_files() -> LpfsTree {
+    LpfsTree::from_files([
+        (
+            "/hardware.json".to_string(),
+            b"{\"board\":\"held\"}".to_vec(),
+        ),
+        (
+            format!("/projects/{PROJECT}/project.json"),
+            b"{\"name\":\"held\"}".to_vec(),
+        ),
+    ])
 }
 
 #[test]
@@ -316,7 +336,7 @@ fn a_project_switch_and_a_panel_write_persist() {
 #[test]
 #[ignore = "needs a split fw-esp32c6 build; `just test-emu-c6-cli-boards` runs it"]
 fn the_split_image_formats_and_mounts_its_store() {
-    let split = match split_image(&FwImage::FS_TREE) {
+    let split = match split_image(&FwImage::SHIPPED) {
         Ok(split) => split,
         Err(reason) => {
             eprintln!("emu_tree_store_boot split: skipped — {reason}");

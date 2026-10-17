@@ -98,7 +98,10 @@ pub const FW_TARGET: &str = "riscv32imac-unknown-none-elf";
 pub const FW_PROFILE: &str = "release-esp32";
 
 /// The shipped feature set: `default = ["esp32c6", "server", "radio",
-/// "json-pack"]` ([`FwImage::SHIPPED`] builds with the defaults on).
+/// "json-pack", …]` ([`FwImage::SHIPPED`] builds with the defaults on). Its
+/// filesystem is the tree store on the tree table since the tree-store
+/// cutover (`server` implies `fs-tree`); a littlefs board is a pinned
+/// reference image ([`ReferenceImage::FIELDED_LITTLEFS`]).
 pub const SHIPPED_FEATURES: &[&str] = &["esp32c6", "server", "radio"];
 
 /// One firmware image: a feature set, with or without the defaults.
@@ -195,24 +198,9 @@ impl FwImage {
         default_features: true,
     };
 
-    /// The shipped image with `lpfs` as the tree store (`fw-esp32c6`'s
-    /// `fs-tree`; plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`).
-    /// Never shipped: the tree-store walks (`lp-cli/tests/emu_tree_store_*`)
-    /// build it, unsplit, and its split twin through [`split_image`].
-    pub const FS_TREE: FwImage = FwImage {
-        features: &["esp32c6", "server", "radio", "fs-tree"],
-        default_features: true,
-    };
-
-    /// [`FwImage::FS_TREE`] with the `[heap] peak=…` line
-    /// (`heap_peak_diag`): the tree store's RAM figures.
-    pub const FS_TREE_HEAP_PEAK: FwImage = FwImage {
-        features: &["esp32c6", "server", "radio", "fs-tree", "heap_peak_diag"],
-        default_features: true,
-    };
-
-    /// [`FwImage::SHIPPED`] (littlefs) with the same `[heap] peak=…` line:
-    /// the RAM figures' comparison.
+    /// [`FwImage::SHIPPED`] with the `[heap] peak=…` line
+    /// (`heap_peak_diag`): the tree store's RAM and mount figures. Its
+    /// littlefs comparison is [`ReferenceImage::FIELDED_LITTLEFS_HEAP_PEAK`].
     pub const SHIPPED_HEAP_PEAK: FwImage = FwImage {
         features: &["esp32c6", "server", "radio", "heap_peak_diag"],
         default_features: true,
@@ -580,49 +568,13 @@ pub fn split_slug(image: &FwImage) -> String {
 /// says what the packaged image's does, and as a figure build (version
 /// `0000000`, stamped clean), so it is the heap ratchet's bytes.
 pub fn split_image(image: &FwImage) -> Result<SplitImage, String> {
-    split_image_with(image, None)
-}
-
-/// A partition table a split image can be built with instead of
-/// `partitions.csv`: its repo-relative CSV and the word its slug carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SplitTable {
-    pub csv: &'static str,
-    pub slug: &'static str,
-}
-
-impl SplitTable {
-    /// The tree-store table (`partitions-tree.csv`: a 128-sector `lpfs` at
-    /// `0x380000`, `factory` to `0x380000`) — what an `fs-tree` image is
-    /// built with until the cutover's default switch.
-    pub const TREE: SplitTable = SplitTable {
-        csv: "lp-fw/fw-esp32c6/partitions-tree.csv",
-        slug: "TREETABLE",
-    };
-}
-
-/// [`split_image`] built with `table` (its slug says so:
-/// `<SLUG>_<TABLE>_SPLIT`).
-pub fn split_image_on(image: &FwImage, table: SplitTable) -> Result<SplitImage, String> {
-    split_image_with(image, Some(table))
-}
-
-fn split_image_with(image: &FwImage, table: Option<SplitTable>) -> Result<SplitImage, String> {
     assert!(
         image.default_features,
         "lp-fw-split builds with fw-esp32c6's defaults on; {} turns them off",
         image.slug()
     );
-    let (slug, var) = match table {
-        None => (
-            split_slug(image),
-            format!("LP_EMU_C6_SPLIT_{}", image.slug()),
-        ),
-        Some(t) => (
-            format!("{}_{}_SPLIT", image.slug(), t.slug),
-            format!("LP_EMU_C6_SPLIT_{}_{}", image.slug(), t.slug),
-        ),
-    };
+    let slug = split_slug(image);
+    let var = format!("LP_EMU_C6_SPLIT_{}", image.slug());
     let what = format!("the split image for `{}`", image.slug());
     if let Ok(dir) = std::env::var(&var) {
         return complete_split_dir(PathBuf::from(dir), &var);
@@ -649,7 +601,7 @@ fn split_image_with(image: &FwImage, table: Option<SplitTable>) -> Result<SplitI
         &[],
         &dir.join("merged.bin"),
         "`just test-emu-c6`",
-        || build_split(&root, image, table, &dir),
+        || build_split(&root, image, &dir),
     )?;
     Ok(SplitImage {
         dir: merged
@@ -676,12 +628,7 @@ fn complete_split_dir(dir: PathBuf, var: &str) -> Result<SplitImage, String> {
 /// `lp-fw-split build` for one feature set into a scratch directory, then
 /// the four files published into `dir` by one rename. Panics on a failed
 /// build: `LP_EMU_BUILD_FW=1` asked for this image.
-fn build_split(
-    root: &Path,
-    image: &FwImage,
-    table: Option<SplitTable>,
-    dir: &Path,
-) -> Result<(), String> {
+fn build_split(root: &Path, image: &FwImage, dir: &Path) -> Result<(), String> {
     let scratch = dir.with_extension("partial");
     let _ = std::fs::remove_dir_all(&scratch);
     let mut cmd = Command::new("cargo");
@@ -699,9 +646,6 @@ fn build_split(
         .arg(&scratch)
         .arg("--features")
         .arg(image.features.join(","));
-    if let Some(table) = table {
-        cmd.arg("--partitions").arg(root.join(table.csv));
-    }
     if *image == FwImage::SHIPPED {
         // A figure build (`LP_FIGURE_BUILD=1`, `tools/lp-app-version`): a
         // fixed version and a clean stamp, as `scripts/heap-budget-check.sh`
@@ -811,9 +755,14 @@ pub const SCENARIO_COMMIT: &str = "372392b9c";
 
 /// The commit the fielded littlefs image is built at
 /// ([`ReferenceImage::FIELDED_LITTLEFS`]): `origin/main` when the tree-store
-/// adoption's migration (A6) began, 2026-10-16 — littlefs on the 2026-10
-/// repartition's table, the firmware every fielded C6 runs.
-pub const FIELDED_LITTLEFS_COMMIT: &str = "3fc9aa987";
+/// cutover's default switch (A7) branched, 2026-10-16 — the last littlefs
+/// `main`, the firmware every fielded C6 runs on the eve of the cutover:
+/// littlefs on the 2026-10 repartition's table, holding (never formatting) a
+/// tree store it meets (#1150, released first by AD4), with the
+/// `[perf] first light` line (#1152). (The migration's first walks, A6, ran
+/// `3fc9aa987`, before #1150.) Re-pin it to the cutover merge's first parent
+/// if main ships another littlefs release before the cutover lands.
+pub const FIELDED_LITTLEFS_COMMIT: &str = "1d5840a76";
 
 /// One of the reference images the script builds: a commit, with these
 /// features, optionally plus the `spike_uart0_link` feature applied as a
@@ -892,13 +841,26 @@ impl ReferenceImage {
 
     /// What a board in a house runs on the eve of the tree-store cutover:
     /// the shipped feature set (littlefs, the 176-sector table at
-    /// `0x350000`) at [`FIELDED_LITTLEFS_COMMIT`], the tree-store adoption's
-    /// base. The cutover migration's walks start from it
-    /// (`lp-cli/tests/emu_layout_migration.rs`), pinned by commit so it does
-    /// not become a tree-store image when the default switches.
+    /// `0x350000`) at [`FIELDED_LITTLEFS_COMMIT`]. The cutover migration's
+    /// walks start from it (`lp-cli/tests/emu_layout_migration.rs`), and
+    /// every littlefs control (first light, RAM, mount, the littlefs core
+    /// that meets a tree store) runs it — pinned by commit, the "fielded
+    /// board" since the default switched. Boot it on its own table
+    /// ([`crate::flash::legacy_v2_partition_table_bytes`]), as a board in a
+    /// house has it.
     pub const FIELDED_LITTLEFS: ReferenceImage = ReferenceImage {
         slug: "esp32c6+server+radio",
         features: "esp32c6,server,radio",
+        commit: FIELDED_LITTLEFS_COMMIT,
+        spike: false,
+    };
+
+    /// [`ReferenceImage::FIELDED_LITTLEFS`] with the `[heap] peak=…` line
+    /// (`heap_peak_diag`, which that commit carries): the littlefs side of
+    /// the tree store's RAM and mount comparisons.
+    pub const FIELDED_LITTLEFS_HEAP_PEAK: ReferenceImage = ReferenceImage {
+        slug: "esp32c6+server+radio+heap_peak_diag",
+        features: "esp32c6,server,radio,heap_peak_diag",
         commit: FIELDED_LITTLEFS_COMMIT,
         spike: false,
     };
