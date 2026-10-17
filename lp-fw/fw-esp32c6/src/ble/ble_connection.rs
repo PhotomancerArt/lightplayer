@@ -8,9 +8,12 @@
 //! board reads the connection's negotiated ATT MTU and sizes the session's
 //! frames to one ATT value (`fw_esp32_common::radio_link::radio_link_config`);
 //! a connection whose MTU cannot carry even a handshake frame is refused and
-//! disconnected. The session's handshake then runs as ordinary traffic, and
-//! the mux owes the link its hello when that session comes up — not at
-//! subscribe.
+//! disconnected. A central that subscribes while the MTU is still the
+//! Bluetooth minimum (Android Chrome reconnecting, which can exchange the MTU
+//! after its CCCD write) gets up to a second for the exchange before its link
+//! opens (`fw_esp32_common::radio_link::mtu_grace`). The session's handshake
+//! then runs as ordinary traffic, and the mux owes the link its hello when
+//! that session comes up — not at subscribe.
 //!
 //! One task, one `select` loop, four things it waits on:
 //!
@@ -23,7 +26,8 @@
 //!   not take in time): disconnect, logged with the reason.
 //! - **Timers:** the link's own (resend, delayed ACK, keepalive, handshake),
 //!   the connection-parameter request shortly after connect and its
-//!   read-back, and the subscribe deadline — a central that never enables
+//!   read-back, the MTU poll while a subscribed link waits for the
+//!   exchange, and the subscribe deadline — a central that never enables
 //!   notifications is disconnected after the same 10 s a link gets to log in.
 //!
 //! Each turn of the loop starts by notifying whatever frames the link has
@@ -32,7 +36,8 @@
 use embassy_futures::select::{Either4, select4};
 use embassy_time::{Duration, Instant, Timer};
 use fw_esp32_common::radio_link::{
-    LOGIN_DEADLINE_MS, OpenRefused, RadioLinkEvent, RadioLinkMode, RadioLinkPort, now_us,
+    LOGIN_DEADLINE_MS, MTU_GRACE_US, MtuGraceDecision, OpenRefused, RadioLinkEvent, RadioLinkMode,
+    RadioLinkPort, mtu_grace_decision, now_us,
 };
 use lpc_shared::transport::LinkId;
 use trouble_host::att::{AttClient, AttReq};
@@ -70,6 +75,10 @@ pub async fn serve(
 
     let mut opened = false;
     let mut closing = false;
+    // Notifications are on but the link waits for the MTU exchange: when the
+    // central subscribed, and when to look at the MTU again.
+    let mut subscribed_at: Option<Instant> = None;
+    let mut mtu_poll_at: Option<Instant> = None;
     // The link had more frames ready than one pass sends.
     let mut more = false;
     let mut params_request_at = Some(connected_at + PARAMS_REQUEST_AFTER);
@@ -105,6 +114,7 @@ pub async fn serve(
         let next_timer = [
             params_request_at,
             params_readback_at,
+            mtu_poll_at.filter(|_| !opened && !closing),
             (!opened && !closing).then_some(subscribe_deadline),
             link_timer,
         ]
@@ -120,6 +130,9 @@ pub async fn serve(
             }
         };
 
+        // Notifications are on and the link has not opened: open it, or keep
+        // waiting for the MTU exchange.
+        let mut try_open = false;
         match select4(
             conn.next(),
             slot_port.doorbell(),
@@ -168,12 +181,16 @@ pub async fn serve(
                 // subscription; the table is the truth.
                 let subscribed = tx_subscribed(server, conn.raw());
                 if subscribed && !opened && !closing {
-                    if open_link(port, slot, link, &conn).await {
-                        opened = true;
-                    } else {
-                        closing = true;
-                        conn.raw().disconnect();
+                    // The first CCCD write starts the grace; a later write
+                    // while it runs just looks at the MTU again.
+                    if subscribed_at.is_none() {
+                        subscribed_at = Some(Instant::now());
                     }
+                    try_open = true;
+                } else if !subscribed && !opened {
+                    // Turned off again while the link waited: nothing opened.
+                    subscribed_at = None;
+                    mtu_poll_at = None;
                 } else if !subscribed && opened && !closing {
                     log::warn!("[ble] {link}: notifications turned off — disconnecting");
                     closing = true;
@@ -205,7 +222,9 @@ pub async fn serve(
             }
             Either4::Fourth(()) => {
                 let now = Instant::now();
-                if params_request_at.is_some_and(|at| now >= at) {
+                if mtu_poll_at.is_some_and(|at| now >= at) {
+                    try_open = true;
+                } else if params_request_at.is_some_and(|at| now >= at) {
                     params_request_at = None;
                     conn_params::request_preferred(link, &conn, stack).await;
                     params_readback_at = Some(Instant::now() + PARAMS_READBACK_AFTER);
@@ -239,6 +258,21 @@ pub async fn serve(
                 // Otherwise the link's own timer: the next turn transmits.
             }
         }
+        if let (true, Some(at), false, false) = (try_open, subscribed_at, opened, closing) {
+            // No poll was pending: this is the first look since subscribe.
+            let first = mtu_poll_at.take().is_none();
+            match mtu_grace(link, &conn, at, first) {
+                MtuGraceDecision::Open => {
+                    if open_link(port, slot, link, &conn).await {
+                        opened = true;
+                    } else {
+                        closing = true;
+                        conn.raw().disconnect();
+                    }
+                }
+                MtuGraceDecision::PollAt(next) => mtu_poll_at = Some(Instant::from_micros(next)),
+            }
+        }
     };
 
     // The link's RAM goes back to the heap here, whatever closed it.
@@ -254,6 +288,33 @@ pub async fn serve(
         reason.into_inner(),
         esp_alloc::HEAP.used()
     );
+}
+
+/// Whether a subscribed connection opens its link now or keeps waiting for
+/// the MTU exchange, saying so at the first wait and when the grace runs out.
+fn mtu_grace(
+    link: LinkId,
+    conn: &GattConnection<'_, '_, DefaultPacketPool>,
+    subscribed_at: Instant,
+    first: bool,
+) -> MtuGraceDecision {
+    let att_mtu = conn.raw().att_mtu();
+    let at = subscribed_at.as_micros();
+    let now = Instant::now().as_micros();
+    let decision = mtu_grace_decision(att_mtu, at, now);
+    match decision {
+        MtuGraceDecision::PollAt(_) if first => log::info!(
+            "[ble] {link}: notifications on at ATT MTU {att_mtu} — waiting up to {} ms for \
+             the MTU exchange",
+            MTU_GRACE_US / 1000
+        ),
+        MtuGraceDecision::Open if !first => log::info!(
+            "[ble] {link}: ATT MTU {att_mtu} after {} ms",
+            (now - at) / 1000
+        ),
+        _ => {}
+    }
+    decision
 }
 
 /// The central enabled notifications: start the connection's lp-link session
