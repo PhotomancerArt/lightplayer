@@ -22,6 +22,7 @@ mod debug_assist;
 mod flash_setup;
 mod lp_interrupts;
 mod mmio;
+mod rom_flash_chip;
 mod watchdogs;
 
 /// Everything the IDF did that the core inherits, in the IDF's order.
@@ -34,6 +35,7 @@ pub fn run() {
         debug_assist::protection_and_pc_record();
         lp_interrupts::mask_and_clear();
         flash_setup::spi_leftovers();
+        rom_flash_chip::four_megabytes();
         watchdogs::rtc_watchdog_9s();
         watchdogs::flash_boot_protection_off();
         cache_mmu::page_mode_32k_and_unmap_all();

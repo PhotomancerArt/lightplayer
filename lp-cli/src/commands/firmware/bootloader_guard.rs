@@ -74,6 +74,12 @@ const C6_APP_RAM_END: u32 = 0x4086_e610;
 /// table — except the first (lowest) segment, which is the bootloader's DRAM
 /// data and never executes. Chips without a table are not checked.
 pub(super) fn check_bootloader_segments(chip: &str, image: &[u8]) -> Result<()> {
+    // LightPlayer's own second stage (`LPLB` at 0x0): nothing of the IDF's
+    // to recognise, and no wedge to detect. It must be a whole, well-formed
+    // image the ROM will load, entirely inside the loader's RAM.
+    if chip == "esp32c6" && lp_bootctl::find_bootloader_version(image) > 0 {
+        return check_lightplayer_bootloader(image);
+    }
     let expected = lpa_devices::bootloader::bootloader_code_ranges(chip);
     if expected.is_empty() {
         return Ok(());
@@ -111,6 +117,27 @@ pub(super) fn check_bootloader_segments(chip: &str, image: &[u8]) -> Result<()> 
         fmt(&missing),
         fmt(&unexpected),
     );
+}
+
+/// Our second stage: the ROM's checks (checksum, appended hash) pass, it
+/// ends before the partition table, and every segment is RAM inside the
+/// loader's `0x4085_0000..0x4086_0000`.
+fn check_lightplayer_bootloader(image: &[u8]) -> Result<()> {
+    const STAGE_RAM: Range<u32> = 0x4085_0000..0x4086_0000;
+    let head = &image[..image.len().min(lp_fw_split::bootloader_image::BOOTLOADER_MAX_LEN)];
+    let segments = lp_fw_split::bootloader_image::check(head)
+        .map_err(|e| anyhow::anyhow!("LightPlayer's bootloader at 0x0 is not a whole image: {e}"))?;
+    for (addr, len) in segments {
+        if addr < STAGE_RAM.start || addr + len > STAGE_RAM.end {
+            bail!(
+                "LightPlayer's bootloader loads 0x{addr:08x}+0x{len:x}, outside its RAM \
+                 0x{:08x}..0x{:08x}",
+                STAGE_RAM.start,
+                STAGE_RAM.end
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
