@@ -5056,6 +5056,19 @@ walk-migration-emu *args:
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
 
+# The desk's Android test phone over adb (scripts/phone/README.md):
+# `just phone status|pair <code>|connect|awake|cdp|serve <port>|open <url>|shot <png>|snoop <dir>`.
+phone *args:
+    node scripts/phone/phone.mjs {{ args }}
+
+# The Bluetooth walk on real radios: Studio in the phone's own Chrome, the
+# real chooser, a leased desk C6 (default fixture-c6) — card, editor, Play,
+# and a power cut under Play. Defaults to lightplayer.app (the board on the
+# latest release); `--studio http://127.0.0.1:<port>` or `--serve-release`
+# for this checkout's. Not CI: it needs the phone and the desk.
+walk-ble-phone *args:
+    node scripts/phone/walk-ble-phone.mjs {{ args }}
+
 # One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
 # profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
 # emulated C6 over `?emu=`. Tab A holds the board; tab B (`?emu-second-tab=1`:
