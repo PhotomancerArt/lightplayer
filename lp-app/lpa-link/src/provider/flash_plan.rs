@@ -29,6 +29,9 @@ impl FlashStep {
     pub fn label(&self) -> &'static str {
         match self {
             Self::WriteFirmware => "Writing firmware",
+            // The tree migration's disarm: the app's first sector, erased
+            // right before the firmware is written over it.
+            Self::Erase { offset, .. } if *offset == 0x1_0000 => "Writing firmware",
             Self::Erase { .. } | Self::Write { .. } => "Moving files",
             Self::VerifyEquals { .. } => "Verifying files",
         }

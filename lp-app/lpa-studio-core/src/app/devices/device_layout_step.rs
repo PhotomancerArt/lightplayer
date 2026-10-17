@@ -91,7 +91,12 @@ pub fn stage_layout(
         .as_deref()
         .and_then(lpa_link::chip_id_from_reported)
         == Some("esp32c6");
-    let classified = LayoutProbe::replay(target.clone(), chip_is_c6, &inspection.reads);
+    let classified = LayoutProbe::replay_for(
+        target.clone(),
+        inspection.target_fs,
+        chip_is_c6,
+        &inspection.reads,
+    );
     let base_mac = inspection
         .probed_mac
         .as_deref()
@@ -291,6 +296,7 @@ pub(crate) mod tests {
             probed_mac: Some("10:BD:A3:B0:8E:30".to_string()),
             target_table: target.to_bytes(),
             target_image_len: 0x2D_0000,
+            target_fs: lpa_link::FsKind::Littlefs,
             target_manifest: None,
             reads,
             logs: Vec::new(),

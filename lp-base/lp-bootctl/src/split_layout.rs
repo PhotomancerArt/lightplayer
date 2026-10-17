@@ -158,7 +158,8 @@ mod tests {
 
     const PAGE: u32 = 0x8000;
 
-    /// Today's table (2026-10 repartition): `factory` 0x10000 + 0x340000.
+    /// The 2026-10 repartition's table (every fielded littlefs board's):
+    /// `factory` 0x10000 + 0x340000.
     fn today() -> SplitLayout {
         SplitLayout::from_factory(0x1_0000, 0x34_0000, PAGE).unwrap()
     }
@@ -179,6 +180,14 @@ mod tests {
     #[test]
     fn todays_table_ends_the_region_at_0x350000() {
         assert_eq!(today().region_end, 0x35_0000);
+    }
+
+    /// The tree-store cutover's table (`partitions.csv` since A7): `factory`
+    /// 0x10000 + 0x370000, the region to `lpfs` at 0x380000.
+    #[test]
+    fn the_tree_table_ends_the_region_at_0x380000() {
+        let tree = SplitLayout::from_factory(0x1_0000, 0x37_0000, PAGE).unwrap();
+        assert_eq!(tree.region_end, 0x38_0000);
     }
 
     #[test]

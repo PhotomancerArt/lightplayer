@@ -157,6 +157,14 @@ already asked the question (landed in `828dcb97c`).
   Studio "Update firmware" to take the split image. See the split-image ADR
   and the flash budget's amendment.
 
+- 2026-10-16: the tree-store cutover reuses this migration to move every
+  board from this layout's littlefs into the tree store at 128 sectors
+  (`lpfs` `0x380000`, `factory` to `0x370000`), and adds a second write
+  order — staged, the old filesystem whole until the firmware switch — beside
+  this one's: `2026-10-16-c6-tree-store-cutover-migration.md` (proposed).
+  This ADR's table is frozen at
+  `lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv`.
+
 - Studio ZIP-file import of a device backup — before the image crosses
   `0x300000` (Decision 11).
 - `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`

@@ -21,6 +21,26 @@ fn decodes_miniz_at_every_level_with_no_dictionary() {
     }
 }
 
+/// `inflate_with`, one `Tables` reused across every chunk (stored, fixed and
+/// dynamic blocks alike): the same bytes as `inflate`, chunk by chunk.
+#[test]
+fn caller_owned_tables_reused_across_chunks_decode_the_same() {
+    const CHUNK: usize = 4096;
+    let mut tables = Box::new(lp_deflate::Tables::default());
+    for (i, chunk) in FIRMWARE.chunks(CHUNK).enumerate() {
+        let level = [0u8, 1, 6, 9][i % 4];
+        let compressed = miniz_oxide::deflate::compress_to_vec(chunk, level);
+        let mut buf = vec![0u8; chunk.len()];
+        let n = lp_deflate::inflate_with(&compressed, &mut buf, 0, &mut tables)
+            .unwrap_or_else(|e| panic!("chunk {i}: inflate_with failed: {e:?}"));
+        assert_eq!(
+            &buf[..n],
+            chunk,
+            "chunk {i} (level {level}): output mismatch"
+        );
+    }
+}
+
 /// The OTA shape itself: the image split into 4 KiB chunks, each compressed
 /// (independently, no dictionary) and decoded into its own fresh slice —
 /// the baseline the dictionary test in `preset_dictionary.rs` builds on.

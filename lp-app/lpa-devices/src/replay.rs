@@ -546,6 +546,7 @@ impl Step {
                 LinkEvent::Frame(ServerFrame::hello(
                     1,
                     HelloFacts {
+                        tree_store: false,
                         proto: proto.unwrap_or(config.expected_proto),
                         identity: peer_identity(uid, mac, name).unwrap_or_default(),
                         firmware: Some("fw-esp32c6 test".to_string()),

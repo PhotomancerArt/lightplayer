@@ -486,3 +486,79 @@ pub async fn power_up(
         serde_json::json!({"what": what, "mount_us": mount_us, "fs_line": fs_line, "fs": fs}),
     )
 }
+
+/// The firmware's time-to-first-light line (`fw-esp32c6`'s `first_light`).
+pub const FIRST_LIGHT: &str = "[perf] first light ";
+
+/// Cut the power at idle (closing `conn` first), open the link at power-up,
+/// and keep it read until the board says its [`FIRST_LIGHT`] line (at the
+/// first lit frame, or after 64 unlit ones). Stops unless the line came —
+/// it is said on power-on boots only. The boot's lines are added to
+/// `console`, each tagged with `what`.
+pub async fn power_up_to_first_light(
+    desk: &Desk,
+    port: &str,
+    conn: Option<CliConnection>,
+    console: &Console,
+    what: &str,
+) -> (CliConnection, serde_json::Value) {
+    if let Some(c) = conn {
+        close(c).await;
+    }
+    let epoch = Instant::now();
+    let boot = Console::new(epoch);
+    let watch = PortWatch::start(port, epoch);
+    let power = desk.power_cycle_async(epoch);
+    let until = Instant::now() + Duration::from_secs(30);
+    while watch.times().back.is_none() && Instant::now() < until {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(
+        watch.times().back.is_some(),
+        "{what}: the port never came back"
+    );
+    let conn = connect(port, &boot)
+        .await
+        .unwrap_or_else(|e| panic!("{what}: {e}"));
+    while power.lock().unwrap().is_none() {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let pc = power.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        pc.code,
+        Some(0),
+        "STOP: `board power-cycle` failed: {}",
+        pc.output
+    );
+    let mut client = LpClient::new(conn.client_io());
+    let until = Instant::now() + Duration::from_secs(15);
+    while boot.find(FIRST_LIGHT).is_none() && Instant::now() < until {
+        let _ = client.project_list_loaded().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    drop(client);
+    let line = boot.find(FIRST_LIGHT);
+    assert!(
+        line.is_some(),
+        "STOP: {what}: no `{FIRST_LIGHT}…` line in 15 s — not a power-on boot, or it never lit"
+    );
+    let fs_line = boot.find("[FS] ");
+    let compile = boot.find("[shader-node] compilation succeeded");
+    let fs = conn
+        .hello()
+        .map(|h| serde_json::to_value(h).unwrap()["hardware"]["fs"].clone());
+    eprintln!("{what}: {}", line.as_deref().unwrap_or(""));
+    for (t, l) in boot.take() {
+        console.push(format!("[{what} +{t:.3}] {l}"));
+    }
+    (
+        conn,
+        serde_json::json!({
+            "what": what,
+            "first_light": line,
+            "fs_line": fs_line,
+            "compile": compile,
+            "fs": fs,
+        }),
+    )
+}

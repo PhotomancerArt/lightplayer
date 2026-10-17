@@ -3,17 +3,18 @@
 //! — from the reset vector, and the fast path that stands in for the
 //! bootloader agrees with it.
 //!
-//! - **The ROM-up boot.** The whole merged image in the chip, the hart at
-//!   the mask ROM's reset vector, nothing placed: the ROM loads the
-//!   second-stage bootloader the image carries (whichever the build def
-//!   names: `lp-fw/bootloaders/README.md`), which loads the loader as its
-//!   app; the loader
-//!   reads the boot records, maps the core and copies its RAM segments; the
-//!   core starts the radios and links and opens the engine. Asserted on the
-//!   board's own words — the loader's ROM print, the core's first line, the
-//!   engine's server-loop line — and on the cache MMU page the bootloader
-//!   chose, which is the one the layout is aligned to (a bootloader that
-//!   picked another would fail here).
+//! - **The ROM-up boot, through both front doors.** The whole merged image
+//!   in the chip, the hart at the mask ROM's reset vector, nothing placed.
+//!   Through **our door** (`merged.bin`) the ROM loads LightPlayer's own
+//!   second stage from `0x0`, which does the loader's job itself; through
+//!   **the IDF door** (`merged-idf.bin`, the same `app.bin`) the ROM loads
+//!   the IDF bootloader the build def names, which loads the factory loader
+//!   as its app. Either way the loader's logic reads the boot records, maps the core
+//!   and copies its RAM segments; the core starts the radios and links and
+//!   opens the engine. Asserted on the board's own words — each door's line,
+//!   the loader's ROM print, the core's first line, the engine's server-loop
+//!   line — and on the cache MMU page, which is the one the layout is aligned
+//!   to (a second stage that picked another would fail here).
 //! - **Direct load over the flashed image.** The same chip, the hart at the
 //!   loader's entry in the state the bootloader leaves
 //!   (`Esp32C6Builder::flash_holds_image`, 32 KiB pages): the loader does the
@@ -72,33 +73,52 @@ fn the_split_image_boots_from_the_reset_vector_to_the_engine() {
             return;
         }
     };
-    let mut m = rom_up(&split, true);
+    for door in [Door::Ours, Door::Idf] {
+        boots_to_the_engine(&split, door);
+    }
+}
+
+/// The two second stages a C6 may carry at flash `0x0`.
+#[derive(Clone, Copy, Debug)]
+enum Door {
+    /// LightPlayer's own (`merged.bin`).
+    Ours,
+    /// ESP-IDF's, starting the factory loader (`merged-idf.bin`).
+    Idf,
+}
+
+fn boots_to_the_engine(split: &SplitImage, door: Door) {
+    let mut m = rom_up_door(split, door, true);
     let outcome = m.run_until(&StopCondition::after_micros(GATE_US).exit_on(ENGINE_LINE));
     assert!(
         matches!(outcome, Outcome::ExitMatched { .. }),
-        "the split image never reached the engine's server loop: {outcome:?}\n{}",
+        "{door:?}: the split image never reached the engine's server loop: {outcome:?}\n{}",
         consoles(&m)
     );
     assert!(
         m.bus.first_strict_violation().is_none(),
-        "{:?}",
+        "{door:?}: {:?}",
         m.bus.first_strict_violation()
     );
 
     let rom_console = m.uart0().text();
-    // The ROM handed the CPU to the bootloader (`entry`), and the bootloader
-    // started the loader after it. Not its log lines: which bootloader the
-    // image carries is the build def's choice, and a quiet one says nothing.
     let entry = rom_console
         .find("entry 0x")
-        .unwrap_or_else(|| panic!("the ROM started the bootloader:\n{rom_console}"));
+        .unwrap_or_else(|| panic!("{door:?}: the ROM started the second stage:\n{rom_console}"));
     let loader = rom_console
         .find("[LOADER]")
-        .unwrap_or_else(|| panic!("the bootloader started the loader:\n{rom_console}"));
+        .unwrap_or_else(|| panic!("{door:?}: the loader's logic ran:\n{rom_console}"));
     assert!(
         entry < loader,
-        "the loader ran before the ROM entered the bootloader:\n{rom_console}"
+        "{door:?}: the loader ran before the ROM's entry:\n{rom_console}"
     );
+    // Which second stage ran: ours says so in one line; the IDF's (whichever
+    // the build def names — a quiet build says nothing) never does.
+    let ours = rom_console.contains("[LPBOOT] LightPlayer bootloader v1");
+    match door {
+        Door::Ours => assert!(ours, "our bootloader, not the IDF's, ran:\n{rom_console}"),
+        Door::Idf => assert!(!ours, "the IDF door ran our bootloader:\n{rom_console}"),
+    }
     assert!(
         rom_console.contains("[LOADER] core @0x18000 (proven)"),
         "the loader chose the flashed core:\n{rom_console}"
@@ -116,7 +136,7 @@ fn the_split_image_boots_from_the_reset_vector_to_the_engine() {
         "the bootloader chose the page the split layout is aligned to"
     );
     println!(
-        "split ROM-up: loader → core → engine in {} cycles; {} cache page(s) mapped",
+        "split ROM-up ({door:?} door): loader → core → engine in {} cycles; {} cache page(s) mapped",
         m.cycles(),
         m.cache().lock().unwrap().mapped_pages().len()
     );
@@ -308,10 +328,18 @@ const CORE_OFFSET: usize = 0x1_8000;
 /// The ROM-up machine: the merged image in the chip, nothing placed, the
 /// second link as the symbol table.
 fn rom_up(split: &SplitImage, strict: bool) -> Esp32C6Machine {
+    rom_up_door(split, Door::Ours, strict)
+}
+
+fn rom_up_door(split: &SplitImage, door: Door, strict: bool) -> Esp32C6Machine {
+    let chip = match door {
+        Door::Ours => split.merged(),
+        Door::Idf => split.merged_idf(),
+    };
     Esp32C6Builder::new()
         .boot_mode(BootMode::RomUp)
         .app(AppSource::Path(split.p2_elf()))
-        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(split.merged()))
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Copy(chip))
         .flash_len(chip_len(split))
         .reset_cause(ResetCause::UsbUartHpSys)
         .strap(Strap::App)

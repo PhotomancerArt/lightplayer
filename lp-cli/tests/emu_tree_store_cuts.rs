@@ -29,8 +29,10 @@
 //! (`calibrated_zeroing_mid_word`, `calibrated_first_lift`) on every erase.
 //!
 //! **littlefs control** (`LP_TREE_CUTS_CONTROL=1`; the long form sets it):
-//! the same scenarios but `format` on today's shipped image, report-only —
-//! never asserted.
+//! the same scenarios but `format` on the pinned fielded littlefs image
+//! (`ReferenceImage::FIELDED_LITTLEFS`, since the tree store became the
+//! shipped one), formatting its littlefs on the tree table's `lpfs` so one
+//! reading of the chip serves both — report-only, never asserted.
 //!
 //! **Replay:** a failure prints its key `(scenario, seed, index, model)` and
 //! keeps the cut chip under `target/tree-store-cuts/`; `REPLAY=<scenario>:
@@ -55,7 +57,7 @@ use std::time::Instant;
 
 use editor_reads::block_on;
 use lp_emu_esp_common::engine::flash_cut::TearModel;
-use lp_emu_esp32c6::test_support::FwImage;
+use lp_emu_esp32c6::test_support::ReferenceImage;
 use lpa_client::LpClient;
 use tree_store_board::*;
 use tree_store_oracle::*;
@@ -114,7 +116,10 @@ fn a_cut_at_any_flash_operation_loses_nothing_committed() {
     }
     let mut control_rows = Vec::new();
     if control && (replay.is_none() || skip_tree) {
-        if let Some(shipped) = elf("emu_tree_store_cuts control", &FwImage::SHIPPED) {
+        if let Some(shipped) = fielded_elf(
+            "emu_tree_store_cuts control",
+            &ReferenceImage::FIELDED_LITTLEFS,
+        ) {
             for scenario in scenarios(&shipped, Fs::Littlefs, long) {
                 if scenario.name == "format"
                     || only
@@ -363,14 +368,15 @@ fn print_table(title: &str, rows: &[Row]) {
 
 /// The scenarios, on `elf`'s filesystem.
 fn scenarios(elf: &Path, fs: Fs, long: bool) -> Vec<Scenario> {
-    // The partition's size (Q23): the real table's 176 sectors, or a
-    // fixture table's `lpfs` of `LP_TREE_CUTS_SECTORS` (the long form's 128)
-    // on the chip, which the firmware and the cut both read at runtime.
+    // The partition's size (Q23): the real table's 128 sectors (since the
+    // tree-store cutover), or a fixture table's `lpfs` of
+    // `LP_TREE_CUTS_SECTORS` on the chip, which the firmware and the cut
+    // both read at runtime.
     let sectors: u32 = std::env::var("LP_TREE_CUTS_SECTORS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(176);
-    let blank = if sectors == 176 {
+        .unwrap_or(128);
+    let blank = if sectors == 128 {
         Vec::new()
     } else {
         chip_with_lpfs_sectors(sectors)

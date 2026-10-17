@@ -252,6 +252,7 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             }
             lpc_wire::FsBootState::Refused => BoardFs::TreeStoreHeld,
         },
+        tree_store: hello.build.features.contains(&lpc_model::LpFeature::FsTree),
         // The board manifest a split image's hello carries (update protocol
         // Part B, wire proto 38): proof the board speaks channel 3, and its
         // update facts, mirrored as `M`'s are (DS2).

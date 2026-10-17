@@ -89,7 +89,7 @@ pub fn handle_report(args: LpfsReportArgs) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
         let table = PartitionTable::parse(&read.partition_table).ok();
         let geometry = geometry_of(read.region);
-        let (tree, used) = LpfsTree::from_image(&read.image, geometry)
+        let (tree, used) = region_files(&read.image, geometry)
             .map_err(|e| anyhow::anyhow!("the board's filesystem: {e}"))?;
         let layout = table
             .as_ref()
@@ -266,23 +266,33 @@ fn from_image(path: &Path, offset: Option<u32>) -> Result<(String, LpfsTree, u32
             LinkFlashRegion::lpfs_in(&table).context("the chip's table has no lpfs row")?;
         let geometry = geometry_of(region);
         let start = region.offset as usize;
-        let (tree, used) =
-            LpfsTree::from_image(&bytes[start..start + region.length as usize], geometry)
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let (tree, used) = region_files(&bytes[start..start + region.length as usize], geometry)?;
         return Ok((describe_layout(&table), tree, used, geometry.block_count));
     }
     let geometry = LpfsGeometry {
         offset: offset.unwrap_or(LEGACY_C6_V1_LPFS.offset),
         block_count: (bytes.len() / 4096) as u32,
     };
-    let (tree, used) =
-        LpfsTree::from_image(&bytes, geometry).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (tree, used) = region_files(&bytes, geometry)?;
     let layout = format!(
         "a filesystem region at {:#x} ({} KB)",
         geometry.offset,
         geometry.len() / 1024
     );
     Ok((layout, tree, used, geometry.block_count))
+}
+
+/// The files a region holds, by its magic: a tree store (the cutover's
+/// filesystem; its used sectors) or littlefs (its used blocks).
+pub fn region_files(region: &[u8], geometry: LpfsGeometry) -> Result<(LpfsTree, u32)> {
+    use lpa_link::layout_migration::fs_kind::fs_in_region;
+    use lpa_link::layout_migration::tree_image::used_sectors;
+    if fs_in_region(region) == Some(lpa_link::FsKind::Tree) {
+        let tree = lpa_link::layout_migration::read_tree(region, geometry)
+            .map_err(|e| anyhow::anyhow!("the tree store: {e}"))?;
+        return Ok((tree, used_sectors(region).len() as u32));
+    }
+    LpfsTree::from_image(region, geometry).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 fn geometry_of(region: LinkFlashRegion) -> LpfsGeometry {
