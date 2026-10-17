@@ -39,7 +39,10 @@ impl DeltaEntry {
     }
 }
 
-/// Sorted by (path bytes, is-tree): a file and a directory may share a path.
+/// Sorted by (path bytes, is-tree): a file and the tree under the same path
+/// are two changes (deleting a file and the directory of its name, as
+/// `LpFs::delete_dir` does). `LpFsTree` never creates both at one name
+/// (`name_clash.rs`).
 #[derive(Default)]
 pub struct TreeDelta {
     entries: Vec<DeltaEntry>,

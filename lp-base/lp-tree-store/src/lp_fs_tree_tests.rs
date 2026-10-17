@@ -304,6 +304,146 @@ fn the_default_deflated_write_inflates_into_plain_bytes() {
     assert!(!fs.file_exists("/p/t.glsl".as_path()).unwrap());
 }
 
+/// The snapshot namespace is reserved (FORMAT.md "The snapshot namespace"):
+/// no write, append or deflated write lands under it, and nothing is
+/// written trying; a neighbour of it is an ordinary path.
+#[test]
+fn nothing_but_a_snapshot_writes_under_the_snapshot_namespace() {
+    let fs = tree_fs();
+    let before = image(&fs);
+    for p in [
+        "/.lp/snapshots",
+        "/.lp/snapshots/p/n/project.json",
+        "/.lp/snapshots/p/n/.lp/panel.json",
+    ] {
+        let refused = |r: Result<(), lpfs::FsError>| {
+            assert!(
+                matches!(r, Err(lpfs::FsError::InvalidPath(_))),
+                "{p}: {r:?}"
+            );
+        };
+        refused(fs.write_file(p.as_path(), b"{}"));
+        refused(fs.append_file(p.as_path(), b"{}"));
+        let z = crate::test_support::deflate(b"{}");
+        refused(fs.write_deflated_chunk(p.as_path(), 0, 2, &z));
+    }
+    assert!(image(&fs) == before);
+    fs.write_file("/.lp/snapshotsx.json".as_path(), b"{}")
+        .unwrap();
+    fs.write_file("/projects/p/.lp/snapshots/a".as_path(), b"{}")
+        .unwrap();
+}
+
+/// A file and a directory never share a name (FORMAT.md "Files and
+/// paths"): a new file under a file, or where files are, is refused with
+/// nothing written — through every write, inside a batch too, and for hot
+/// paths — while rewriting a file, and writing where a deleted one was,
+/// stay ordinary.
+#[test]
+fn a_file_and_a_directory_never_share_a_name() {
+    let fs = tree_fs();
+    fs.write_file("/a".as_path(), b"file a").unwrap();
+    fs.write_file("/d/x.json".as_path(), b"under d").unwrap();
+    fs.write_file("/p/.lp/panel.json".as_path(), b"{}").unwrap();
+    fs.write_file("/q".as_path(), b"file q").unwrap();
+    let before = image(&fs);
+    let refused = |what: &str, r: Result<(), lpfs::FsError>| {
+        assert!(
+            matches!(r, Err(lpfs::FsError::InvalidPath(_))),
+            "{what}: {r:?}"
+        );
+    };
+    let z = crate::test_support::deflate(b"{}");
+    for p in ["/a/b", "/a/b/c", "/d", "/p/.lp", "/p", "/q/.lp/panel.json"] {
+        refused(p, fs.write_file(p.as_path(), b"{}"));
+        refused(p, fs.append_file(p.as_path(), b"{}"));
+        refused(p, fs.write_deflated_chunk(p.as_path(), 0, 2, &z));
+    }
+    assert!(image(&fs) == before, "a refused write wrote");
+    assert!(!fs.is_dir("/a".as_path()).unwrap());
+    // A rewrite and an append of an existing file are not new files.
+    fs.write_file("/a".as_path(), b"file a, again").unwrap();
+    fs.append_file("/d/x.json".as_path(), b"+").unwrap();
+    // Inside a batch, the batch's own writes count.
+    fs.begin_batch().unwrap();
+    fs.write_file("/t/u".as_path(), b"u").unwrap();
+    refused("/t in a batch", fs.write_file("/t".as_path(), b"t"));
+    fs.write_file("/v".as_path(), b"v").unwrap();
+    refused("/v/w in a batch", fs.write_file("/v/w".as_path(), b"w"));
+    fs.commit_batch().unwrap();
+    // Gone, the name is free again: a deleted file becomes a directory.
+    fs.delete_file("/a".as_path()).unwrap();
+    fs.write_file("/a/b".as_path(), b"b").unwrap();
+    fs.delete_dir("/d".as_path()).unwrap();
+    fs.write_file("/d".as_path(), b"d").unwrap();
+    assert_eq!(fs.read_file("/d".as_path()).unwrap(), b"d");
+    assert_eq!(fs.read_file("/a/b".as_path()).unwrap(), b"b");
+}
+
+/// A secret path's old version leaves the flash when it is replaced or
+/// deleted (FORMAT.md "Secret files"): no byte of it is anywhere in the
+/// image after the write, the delete, or a batch's commit — while a
+/// non-secret file's old version stays as garbage, as it always has. The
+/// store reads the same after a remount.
+#[test]
+fn a_replaced_secret_leaves_no_old_bytes_on_flash() {
+    let fs = tree_fs().with_secret_paths(|p| p.ends_with("/.lp/network.json"));
+    let net = "/.lp/network.json";
+    let plain = "/notes/plain.json";
+    let secret = |n: u32| format!("{{\"ssid\":\"home\",\"pass\":\"secret-{n:04}-xyzzy\"}}");
+    let note = |n: u32| format!("{{\"note\":\"plain-{n:04}-xyzzy\"}}");
+    // Some other files around them, so their sectors hold live records too.
+    for i in 0..12 {
+        fs.write_file(format!("/p/f{i}.json").as_path(), &text(i, 700))
+            .unwrap();
+    }
+    fs.write_file(net.as_path(), secret(1).as_bytes()).unwrap();
+    fs.write_file(plain.as_path(), note(1).as_bytes()).unwrap();
+    for i in 12..20 {
+        fs.write_file(format!("/p/f{i}.json").as_path(), &text(i, 700))
+            .unwrap();
+    }
+    fs.write_file(net.as_path(), secret(2).as_bytes()).unwrap();
+    fs.write_file(plain.as_path(), note(2).as_bytes()).unwrap();
+    let on_flash = |s: &str| image(&fs).windows(s.len()).any(|w| w == s.as_bytes());
+    assert!(
+        !on_flash(&secret(1)),
+        "the replaced secret is still on flash"
+    );
+    assert!(on_flash(&secret(2)));
+    assert!(
+        on_flash(&note(1)),
+        "control: a plain file's old version stays"
+    );
+    // In a batch: scrubbed once it commits.
+    fs.begin_batch().unwrap();
+    fs.write_file(net.as_path(), secret(3).as_bytes()).unwrap();
+    fs.write_file("/p/in-batch.json".as_path(), b"{}").unwrap();
+    fs.commit_batch().unwrap();
+    assert!(!on_flash(&secret(2)));
+    // Deleted (and a delete_dir over it): gone too.
+    fs.delete_file(net.as_path()).unwrap();
+    assert!(!on_flash(&secret(3)));
+    fs.write_file(net.as_path(), secret(4).as_bytes()).unwrap();
+    fs.delete_dir("/.lp".as_path()).unwrap();
+    assert!(!on_flash(&secret(4)));
+    // The rest of the store is as written, across a remount.
+    fs.write_file(net.as_path(), secret(5).as_bytes()).unwrap();
+    let f = fs.with_store(|st| st.flash().clone());
+    let Ok(st) = TreeStore::mount(f, SoftSha256, StoreConfig::default()) else {
+        panic!("remount")
+    };
+    let fs = LpFsTree::new(st);
+    assert_eq!(fs.read_file(net.as_path()).unwrap(), secret(5).as_bytes());
+    assert_eq!(fs.read_file(plain.as_path()).unwrap(), note(2).as_bytes());
+    for i in 0..20 {
+        assert_eq!(
+            fs.read_file(format!("/p/f{i}.json").as_path()).unwrap(),
+            text(i, 700)
+        );
+    }
+}
+
 /// `bytes` to `path` as the wire sends them: the plan's chunks, in order.
 fn write_deflated(fs: &dyn LpFs, path: &str, bytes: &[u8], record_max: u32) {
     for chunk in crate::plan_deflated_chunks(bytes, record_max, crate::DEFAULT_DEFLATE_LEVEL) {
@@ -315,4 +455,15 @@ fn write_deflated(fs: &dyn LpFs, path: &str, bytes: &[u8], record_max: u32) {
         )
         .unwrap();
     }
+}
+
+/// Every byte of the store's flash.
+fn image(fs: &LpFsTree<NorFlashSim, SoftSha256>) -> Vec<u8> {
+    use crate::Flash;
+    fs.with_store(|st| {
+        let f = st.flash();
+        let mut out = vec![0u8; (f.sector_count() * f.sector_size()) as usize];
+        f.peek(0, &mut out);
+        out
+    })
 }
