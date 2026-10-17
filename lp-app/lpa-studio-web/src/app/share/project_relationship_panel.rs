@@ -236,7 +236,7 @@ pub fn ProjectRelationshipPanel(
                 // The fork's receipt, unmissable (G1): the state flip alone
                 // was too quiet for the moment the document became yours.
                 div { class: FORKED_BANNER_CLASS,
-                    span { "\u{2713} Saved \u{2014} this copy is yours. It's in your Projects now." }
+                    span { "\u{2713} Saved. This copy is in your projects now." }
                 }
             }
             // The identity block (G1 rework): name, standing, and origin
@@ -277,7 +277,7 @@ pub fn ProjectRelationshipPanel(
                     }
                 } else {
                     p { class: "tw:m-0 tw:px-0.5 tw:text-[10px] tw:leading-snug tw:text-dim-foreground",
-                        "No address yet \u{2014} this project has no link the browser can point at."
+                        "This project doesn\u{2019}t have a link yet."
                     }
                 }
 
@@ -296,7 +296,7 @@ pub fn ProjectRelationshipPanel(
                     // standing, then who else is here — read-only.
                     (ProjectRelationship::MemberOfSomeoneElses, Some(facts)) => rsx! {
                         p { class: "tw:m-0 tw:px-0.5 tw:text-[10.5px] tw:leading-snug tw:text-status-good-foreground",
-                            "You can edit \u{2014} your saves go to the shared project."
+                            "You can edit. Your saves will go to the shared project."
                         }
                         span { class: GROUP_HEADER_CLASS, "People" }
                         PeopleList { people: facts.people, on_remove: None }
@@ -460,7 +460,7 @@ fn OverflowRows(
             if let Some(json_target) = json_target {
                 ShareRow {
                     label: "Copy as JSON",
-                    hint: "Copy this project as a shareable JSON envelope.",
+                    hint: "Copy this project as JSON, to paste into another Studio.",
                     icon: StudioIconName::Copy,
                     disabled: dirty,
                     on_press: move |_| {
@@ -479,7 +479,7 @@ fn OverflowRows(
             }
             if dirty && export.is_some() {
                 p { class: "tw:m-0 tw:pt-1 tw:text-[10px] tw:leading-snug tw:text-subtle-foreground",
-                    "Save first \u{2014} sharing sends the last saved version, not your unsaved edits."
+                    "Save first to include your unsaved changes."
                 }
             }
         }
@@ -505,32 +505,32 @@ fn where_words(relationship: ProjectRelationship) -> WhereWords {
         ProjectRelationship::Example => WhereWords {
             glyph: StudioIconName::Test,
             lead: "Built-in example",
-            rest: " \u{2014} curated, and the same for everyone.",
-            sub: "Play freely \u{2014} nothing saves until you keep a copy.",
+            rest: ", the same for everyone.",
+            sub: "Your changes aren\u{2019}t saved. Save a copy to keep them.",
         },
         ProjectRelationship::MineLocal => WhereWords {
             glyph: StudioIconName::RelationshipPrivate,
             lead: "Yours",
-            rest: " \u{2014} in this browser\u{2019}s library.",
+            rest: ", in this browser\u{2019}s library.",
             sub: "Nobody else can open it.",
         },
         ProjectRelationship::MinePublished => WhereWords {
             glyph: StudioIconName::RelationshipShared,
             lead: "Yours",
-            rest: " \u{2014} published; the link is live.",
-            sub: "Saved versions publish to the cloud copy behind this link.",
+            rest: ", published.",
+            sub: "People with the link see your last saved version.",
         },
         ProjectRelationship::MemberOfSomeoneElses => WhereWords {
             glyph: StudioIconName::RelationshipMember,
             lead: "Someone else\u{2019}s",
-            rest: " \u{2014} shared with you.",
-            sub: "You are on the roster below; the owner\u{2019}s name is not shown.",
+            rest: ", shared with you.",
+            sub: "You\u{2019}re one of the people below. The owner\u{2019}s name isn\u{2019}t shown.",
         },
         ProjectRelationship::ViewingSomeoneElses => WhereWords {
             glyph: StudioIconName::RelationshipViewing,
             lead: "Someone else\u{2019}s",
-            rest: " \u{2014} you\u{2019}re viewing it as a guest.",
-            sub: "The owner is unnamed \u{2014} the service only tells members.",
+            rest: " project. You\u{2019}re viewing it as a guest.",
+            sub: "Only people added to the project can see who owns it.",
         },
     }
 }
@@ -541,10 +541,10 @@ fn where_words(relationship: ProjectRelationship) -> WhereWords {
 fn address_note(relationship: ProjectRelationship) -> Option<&'static str> {
     match relationship {
         ProjectRelationship::Example => {
-            Some("The canonical example link \u{2014} opens for anyone, always.")
+            Some("Anyone can open this link.")
         }
         ProjectRelationship::MinePublished => {
-            Some("Same link as the address bar \u{2014} copying either works.")
+            Some("The same link as the address bar.")
         }
         ProjectRelationship::MineLocal
         | ProjectRelationship::MemberOfSomeoneElses
@@ -565,16 +565,16 @@ struct AccessLine {
 fn access_line(relationship: ProjectRelationship, publish: Option<&PublishStatus>) -> AccessLine {
     let sentence = match relationship {
         ProjectRelationship::Example => {
-            "Everyone can open this example \u{2014} it\u{2019}s built in. Your copy gets its own access control once you save it."
+            "Anyone can open this example. Save a copy to choose who can open yours."
         }
         ProjectRelationship::ViewingSomeoneElses => {
-            "You hold view access \u{2014} the link is the key, no account needed. Nothing you touch changes their copy."
+            "You can view this project with the link, no account needed. Your changes won\u{2019}t change their copy."
         }
         ProjectRelationship::MineLocal => return local_access_line(publish),
         // Both of these carry a roster when the service has answered; this
         // is the answer-not-yet-in case, and saying so beats dead controls.
         ProjectRelationship::MinePublished | ProjectRelationship::MemberOfSomeoneElses => {
-            "Waiting on the service for this project\u{2019}s access and roster."
+            "Loading who has access\u{2026}"
         }
     };
     AccessLine {
@@ -600,7 +600,7 @@ fn access_line(relationship: ProjectRelationship, publish: Option<&PublishStatus
 fn local_access_line(publish: Option<&PublishStatus>) -> AccessLine {
     let Some(publish) = publish else {
         return AccessLine {
-            sentence: "Not shared \u{2014} it lives in this browser\u{2019}s library. Access controls appear once it reaches the cloud.".to_string(),
+            sentence: "Not shared. It\u{2019}s only in this browser\u{2019}s library. Sharing options will appear once it\u{2019}s uploaded to your account.".to_string(),
             trouble: false,
         };
     };
@@ -610,15 +610,15 @@ fn local_access_line(publish: Option<&PublishStatus>) -> AccessLine {
         // Up, and the roster has not answered — the service-silent half
         // that belongs to the READ side, not the driver.
         SyncOutcomeKind::Published | SyncOutcomeKind::Pushed => {
-            "Published from this tab \u{2014} waiting on the service for its access and roster.".to_string()
+            "Published. Loading who has access\u{2026}".to_string()
         }
         SyncOutcomeKind::NothingSaved => {
-            "Not published yet \u{2014} there is no saved version to send. The first save publishes it.".to_string()
+            "Not published yet. Save the project to publish it.".to_string()
         }
-        SyncOutcomeKind::Skipped => format!("Not published from this tab \u{2014} {detail}."),
-        SyncOutcomeKind::Retrying => format!("Publishing is retrying \u{2014} {detail}."),
+        SyncOutcomeKind::Skipped => format!("Not published from this tab: {detail}."),
+        SyncOutcomeKind::Retrying => format!("Publishing failed and will retry: {detail}."),
         SyncOutcomeKind::Refused => format!("Publishing was refused: {detail}."),
-        SyncOutcomeKind::Denied => format!("Publishing was denied \u{2014} {detail}."),
+        SyncOutcomeKind::Denied => format!("Publishing was denied: {detail}."),
     };
     AccessLine {
         sentence,
@@ -643,22 +643,22 @@ pub fn fork_verb(relationship: ProjectRelationship) -> ForkVerb {
     match relationship {
         ProjectRelationship::Example => ForkVerb {
             label: "Save a copy",
-            title: "Keep this example as your own project \u{2014} no edit required",
+            title: "Keep this example as your own project.",
             hero: true,
         },
         ProjectRelationship::ViewingSomeoneElses => ForkVerb {
-            label: "Fork \u{2014} make it yours",
-            title: "Take a copy into your library so your changes are kept",
+            label: "Fork a copy",
+            title: "Copy this project into your library to keep your changes.",
             hero: true,
         },
         ProjectRelationship::MineLocal | ProjectRelationship::MinePublished => ForkVerb {
             label: "Duplicate",
-            title: "Duplicate this project \u{2014} an independent copy at its current saved version",
+            title: "Make a separate copy of this project\u{2019}s last saved version.",
             hero: false,
         },
         ProjectRelationship::MemberOfSomeoneElses => ForkVerb {
-            label: "Fork my copy",
-            title: "Take an independent copy \u{2014} it leaves the shared project behind",
+            label: "Fork a copy",
+            title: "Make your own copy. Your edits to it won\u{2019}t change the shared project.",
             hero: false,
         },
     }
@@ -717,8 +717,8 @@ mod tests {
                 "Save a copy",
                 "Duplicate",
                 "Duplicate",
-                "Fork my copy",
-                "Fork \u{2014} make it yours",
+                "Fork a copy",
+                "Fork a copy",
             ]
         );
         assert_eq!(
@@ -783,7 +783,7 @@ mod tests {
         let retrying = line(SyncOutcomeKind::Retrying, "the service was unreachable");
         assert_eq!(
             retrying.sentence,
-            "Publishing is retrying \u{2014} the service was unreachable."
+            "Publishing failed and will retry: the service was unreachable."
         );
         assert!(retrying.trouble);
 
@@ -805,7 +805,7 @@ mod tests {
         );
         assert_eq!(
             denied.sentence,
-            "Publishing was denied \u{2014} the service says this project is not yours to write."
+            "Publishing was denied: the service says this project is not yours to write."
         );
         assert!(denied.trouble);
 
@@ -829,7 +829,7 @@ mod tests {
                 "open in another tab; that tab syncs it"
             )
             .sentence,
-            "Not published from this tab \u{2014} open in another tab; that tab syncs it."
+            "Not published from this tab: open in another tab; that tab syncs it."
         );
 
         // Trouble is exactly the ledger's own definition of trouble.
