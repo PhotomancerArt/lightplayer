@@ -1,7 +1,7 @@
 ---
 status: fixed          # not reproduced on today's emulator; `t4` times the flash and lands within ~3 % (2026-10-17 note)
 found: 2026-10-14      # hardware-walk (the tree store's CX1 sitting, M7)
-fixed: this change     # the `t4` time grade (feat(lp-emu): the C6's flash commands take the time silicon takes)
+fixed: e4684bd42       # the `t4` time grade
 area: lp-emu/esp/lp-emu-esp32c6 (t1 timing) against fw-esp32c6 `fs-tree`'s mount
 class: emulator-fidelity
 related:
