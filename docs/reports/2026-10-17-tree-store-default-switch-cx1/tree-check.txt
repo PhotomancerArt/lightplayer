@@ -1,0 +1,5 @@
+checked: /private/tmp/claude-502/-Users-yona-dev-photomancer-lp2025--claude-worktrees-suspicious-bartik-a8767f/3fd259ee-6a38-45ce-9d2c-4283cdc33ba9/scratchpad/a7/cx1-run/after/raw-lpfs-0x380000-1792222079.bin — 128 sectors of 4096 B
+mount:   mounts; root seq 2 (sector 93, offset 66)
+note    [orphans] 1 record(s), 42 bytes, are not reachable from the committed root (garbage until GC collects them)
+verified: 142 files, 148 records hashed; 1 orphan record(s) (42 B)
+result:  CONSISTENT (0 warning(s))
