@@ -16,6 +16,9 @@
 //!   `started`).
 //! - `y-hangs` — `y` with `fixture-trial-hangs` (spins on trial, unfed,
 //!   before `started`).
+//! - `y-tree-dies` — `y-dies` built with `fs-tree`: a tree-store core whose
+//!   trial dies (S11, the rollback a tree core's failed trial makes onto a
+//!   littlefs core).
 //!
 //! A "Y trial over X" chip is X's merged image with Y's `core.bin` copied to
 //! the high offset `SplitLayout::next_core_offset` gives, a trial record for
@@ -369,6 +372,50 @@ fn s9_the_loader_skips_a_core_that_will_not_load_and_boots_the_other() {
     );
 }
 
+/// The rollback the adoption round has to survive (plan
+/// `lp2025/2026-10-16-0848-tree-store-adoption`, A5): a board whose files
+/// are in a tree store takes a tree-store core on trial; the trial dies; the
+/// loader rolls back to the littlefs core X. Before A5 X formatted the
+/// store. Now it holds: its boot word says so, and `lpfs` is byte-identical
+/// to the store the trial core found.
+#[test]
+#[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
+fn s11_a_tree_core_that_dies_rolls_back_to_a_littlefs_core_that_holds_the_store() {
+    let (Some(x), Some(y)) = (image("x"), image("y-tree-dies")) else {
+        return;
+    };
+    let (mut chip, high) = trial_over(&x, &y);
+    chip.resize(lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN as usize, 0xFF);
+    let store = tree_store_region();
+    let lpfs = lp_emu_esp32c6::flash::LPFS_OFFSET as usize..;
+    chip[lpfs.clone()][..store.len()].copy_from_slice(&store);
+    let mut host = hosted(chip, true);
+    let console = until(&mut host, "[CORE] rolled back", 60_000_000);
+    expect(&console, &format!("[LOADER] core @{high:#x} (trial)"));
+    expect(&console, "[FS] tree store mounted (");
+    expect(&console, "fixture-trial-dies");
+    expect(&console, "[LOADER] core @0x18000 (rolled back)");
+    let console = until(
+        &mut host,
+        "[FS] this board's files are in the tree store",
+        3_000_000,
+    );
+    assert!(
+        !console.contains("Formatted and mounted fresh filesystem"),
+        "the littlefs core formatted:\n{console}"
+    );
+    let flash = flash_of(&host.board.machine);
+    assert!(
+        flash[lpfs][..store.len()] == store[..],
+        "the store changed across the trial and the rollback"
+    );
+    report(
+        "S11",
+        "a tree core's trial dies warm → the littlefs core X rolled back, holds the tree store \
+         (refused), lpfs byte-identical",
+    );
+}
+
 #[test]
 #[ignore = "needs the scenario images; `just test-emu-c6-split-boot`"]
 fn s10_an_engine_that_keeps_crashing() {
@@ -445,6 +492,28 @@ fn trial_over(x: &Image, y: &Image) -> (Vec<u8>, u32) {
         },
     );
     (chip, high)
+}
+
+/// A whole `lpfs` holding a tree store with a few files, as an `fs-tree`
+/// core leaves it (built on the host by `lp-tree-store`).
+fn tree_store_region() -> Vec<u8> {
+    use lp_nor_sim::{NorFlashSim, NorGeometry};
+    use lp_tree_store::{SoftSha256, StoreConfig, TreeStore};
+    let sectors = lp_emu_esp32c6::flash::LPFS_LEN / SECTOR as u32;
+    let mut st = match TreeStore::format(
+        NorFlashSim::new(NorGeometry::c6(sectors)),
+        SoftSha256,
+        StoreConfig::default(),
+    ) {
+        Ok(st) => st,
+        Err((e, ..)) => panic!("format: {e:?}"),
+    };
+    st.put("/hardware.json", b"{\"board\":\"kept\"}").unwrap();
+    st.put("/projects/kept/project.json", b"{\"name\":\"kept\"}")
+        .unwrap();
+    let mut out = vec![0u8; sectors as usize * SECTOR];
+    st.flash().peek(0, &mut out);
+    out
 }
 
 /// A record written into an erased sector, its marks erased.

@@ -5,9 +5,9 @@
 //! Layout (24 bytes, little-endian): magic `"LTS1"` u32 | format version u16 |
 //! head kind u8 | log2 of the sector size u8 | compat flags u16 | incompat
 //! flags u16 | sector seq u32 | erase count u32 | CRC-32 of the first 20
-//! bytes. Before a sector is erased its header is *killed* (programmed to
-//! all zeros), so a torn erase can never leave an old, valid header in front
-//! of weak bits.
+//! bytes. Before a sector is erased its header is *killed* (its magic and
+//! its CRC programmed to zeros), so a torn erase can never leave an old,
+//! valid header in front of weak bits.
 
 use lp_crc32::crc32;
 
@@ -17,8 +17,17 @@ pub const SECTOR_MAGIC: u32 = 0x3153_544C; // "LTS1" read little-endian
 /// neither).
 pub const FORMAT_VERSION: u16 = 3;
 pub const SECTOR_HEADER_LEN: u32 = 24;
-/// What a header is programmed to before its sector is erased.
-pub const KILLED_SECTOR_HEADER: [u8; SECTOR_HEADER_LEN as usize] = [0; SECTOR_HEADER_LEN as usize];
+/// What a kill programs to zero, in this order (FORMAT.md "Writing and
+/// killing"): the magic (bytes 0..4), then the header CRC (20..24). Bytes
+/// 4..20 — version, head kind, sector size, flags, seq and erase count —
+/// are left as they read, so the erase count survives the kill.
+pub const KILL_SPANS: [(u32, u32); 2] = [(0, 4), (20, 24)];
+
+/// Whether header bytes read killed: magic and CRC zero. A header of 24
+/// zero bytes (what a kill programmed before 2026-10-16) reads killed too.
+pub fn reads_killed(h: &[u8; SECTOR_HEADER_LEN as usize]) -> bool {
+    h[..4] == [0; 4] && h[20..] == [0; 4]
+}
 /// Compat flags this version knows (none): a sector with any other compat
 /// bit is read, never appended to.
 pub const COMPAT_KNOWN: u16 = 0;
@@ -29,9 +38,10 @@ pub const INCOMPAT_KNOWN: u16 = 0;
 /// Which write head a sector was opened for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadKind {
-    /// File content, directories, GC copies.
+    /// File content, directories (and GC copies of them).
     Cold,
-    /// `.lp/panel.json` files, the hot directory, roots.
+    /// `.lp/panel.json` files, the hot directory, roots (and GC copies of
+    /// them).
     Hot,
 }
 
@@ -91,7 +101,7 @@ impl SectorHeader {
     pub fn decode(b: &[u8; SECTOR_HEADER_LEN as usize], sector_size: u32) -> SectorRead {
         let word = |i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
         let half = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
-        if word(0) == SECTOR_MAGIC && half(4) > FORMAT_VERSION {
+        if !mutant!(NewerVersionUntrusted) && word(0) == SECTOR_MAGIC && half(4) > FORMAT_VERSION {
             // A newer writer's sector: refuse, never read it as blank (the
             // CRC is not checked: a newer layout may have moved it).
             return SectorRead::Unsupported("newer format");
@@ -148,10 +158,15 @@ mod tests {
             appendable: true,
         };
         assert_eq!(SectorHeader::decode(&b, S), trusted);
-        assert_eq!(
-            SectorHeader::decode(&KILLED_SECTOR_HEADER, S),
-            SectorRead::Untrusted
-        );
+        let mut killed = b;
+        for (from, to) in KILL_SPANS {
+            killed[from as usize..to as usize].fill(0);
+        }
+        assert!(reads_killed(&killed) && reads_killed(&[0; 24]));
+        assert!(!reads_killed(&b));
+        assert_eq!(killed[16..20], 3u32.to_le_bytes(), "the erase count stays");
+        assert_eq!(SectorHeader::decode(&killed, S), SectorRead::Untrusted);
+        assert_eq!(SectorHeader::decode(&[0; 24], S), SectorRead::Untrusted);
         assert_eq!(SectorHeader::decode(&[0xFF; 24], S), SectorRead::Untrusted);
         for i in 0..24 {
             let mut t = b;

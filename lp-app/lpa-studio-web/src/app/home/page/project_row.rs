@@ -12,7 +12,7 @@
 //! Open link. The row builds no action.
 
 use dioxus::prelude::*;
-use lpa_studio_core::core::time_ago::time_ago;
+use lpa_studio_core::age_words;
 use lpa_studio_core::{UiAction, UiPackageCard};
 use lpc_cloud_api::share_link::slugify;
 
@@ -114,7 +114,7 @@ fn row_facts(card: &UiPackageCard, now: f64) -> ProjectRowFacts {
         .blocked()
         .map(|(headline, _remedy)| headline.to_string());
     ProjectRowFacts {
-        edited: card.last_saved_at.map(|at| time_ago(now, at)),
+        edited: card.last_saved_at.map(|at| age_words(now - at)),
         boards: boards_line(&card.on_boards),
         open_href: blocked
             .is_none()
@@ -157,17 +157,14 @@ mod tests {
         let facts = row_facts(
             &UiPackageCard {
                 health: PackageHealth::Blocked {
-                    headline: "Format 3 — too old for this Studio".to_string(),
+                    headline: "Format too old (3)".to_string(),
                     remedy: "Export a copy or delete it.".to_string(),
                 },
                 ..card()
             },
             0.0,
         );
-        assert_eq!(
-            facts.blocked.as_deref(),
-            Some("Format 3 — too old for this Studio")
-        );
+        assert_eq!(facts.blocked.as_deref(), Some("Format too old (3)"));
         assert_eq!(facts.open_href, None);
     }
 

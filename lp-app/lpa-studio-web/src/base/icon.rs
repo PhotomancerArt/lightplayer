@@ -2,13 +2,13 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Activity, ArrowUpRight, Asterisk, Binary, Bluetooth, Bot, Boxes, ChartLine, Check, ChevronDown,
     ChevronLeft, ChevronRight, CircleAlert, CircleArrowUp, CircleCheck, CircleDot, CircleMinus,
-    CircleQuestionMark, Clock, Cloud, Copy, Cpu, Download, Droplet, Ellipsis, Eraser, Eye, Flag,
-    FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, LayoutGrid,
-    Lightbulb, Link, Link2, Link2Off, List, ListMusic, Locate, LocateFixed, Lock, LockOpen,
-    Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus, Power,
-    Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, Smartphone, Sparkles,
-    SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug, Upload, Usb, Users,
-    Waypoints, Wifi, X, Zap,
+    CircleQuestionMark, Clock, Cloud, CloudOff, Copy, Cpu, Download, Droplet, Ellipsis, Eraser,
+    Eye, Flag, FlaskConical, Folder, Funnel, Hash, History, Image, Info, KeyRound, Laptop, Layers,
+    LayoutGrid, Lightbulb, Link, Link2, Link2Off, List, ListMusic, Locate, LocateFixed, Lock,
+    LockOpen, Maximize2, Minimize2, MonitorPlay, MousePointerClick, Pencil, Pin, Play, Plug, Plus,
+    Power, Radio, RadioTower, RefreshCw, RotateCcw, Route, Save, Settings, SlidersHorizontal,
+    Smartphone, Sparkles, SquareArrowRight, SquareTerminal, Trash2, TriangleAlert, Undo2, Unplug,
+    Upload, Usb, Users, Waypoints, Wifi, X, Zap,
 };
 
 #[component]
@@ -106,16 +106,19 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::AccessLocked => rsx! { Lock { size } },
         StudioIconName::AccessDone => rsx! { CircleCheck { size } },
         StudioIconName::AccessRegenerate => rsx! { RefreshCw { size } },
-        StudioIconName::Project => rsx! { Asterisk { size } },
+        StudioIconName::Project => rsx! { Layers { size } },
         StudioIconName::Chip => rsx! { Cpu { size } },
         StudioIconName::Firmware => rsx! { Binary { size } },
         StudioIconName::Cloud => rsx! { Cloud { size } },
+        StudioIconName::CloudFilled => rsx! { Cloud { size, fill: "currentColor" } },
+        StudioIconName::CloudOff => rsx! { CloudOff { size } },
         StudioIconName::Newer => rsx! { CircleArrowUp { size } },
         StudioIconName::Connect => rsx! { Plug { size } },
         StudioIconName::Disconnect => rsx! { Unplug { size } },
         StudioIconName::Restart => rsx! { RotateCcw { size } },
         StudioIconName::ViewCards => rsx! { LayoutGrid { size } },
         StudioIconName::ViewList => rsx! { List { size } },
+        StudioIconName::Sliders => rsx! { SlidersHorizontal { size } },
     }
 }
 
@@ -295,15 +298,24 @@ pub enum StudioIconName {
     AccessDone,
     /// Circling arrows: another random password.
     AccessRegenerate,
-    /// ✳: the board card's project bar — what a board plays (the spike's
-    /// spark; a play triangle means play and nothing else).
+    /// Layers (three stacked chevrons): a project, wherever Studio marks one —
+    /// the board card's Project row, what a board plays (Yona's O2,
+    /// 2026-10-16; the spark it replaced meant nothing, and a play triangle
+    /// means play and nothing else).
     Project,
     /// A chip with its pins: the board card's hardware bar.
     Chip,
     /// Ones and zeros: the board card's firmware bar, and Install.
     Firmware,
-    /// A cloud: a board reached through lightplayer.app, and "also cloud".
+    /// A cloud: a board reached through lightplayer.app.
     Cloud,
+    /// A filled cloud: the mark of a board lightplayer.app reaches right
+    /// now, lit in the live tone. Filled, not only lit (P14: never colour
+    /// alone).
+    CloudFilled,
+    /// A cloud struck through: Cloud relay is on, and lightplayer.app
+    /// can't reach the board right now.
+    CloudOff,
     /// A circled up-arrow: a blue (Live) bar's mark — a newer firmware is
     /// offered.
     Newer,
@@ -317,6 +329,9 @@ pub enum StudioIconName {
     ViewCards,
     /// Rows: the home page's list view.
     ViewList,
+    /// Two sliders: the connected board card's All controls row (the
+    /// board's play page).
+    Sliders,
 }
 
 /// The per-node-type glyph family. Mapped from the node's human-readable

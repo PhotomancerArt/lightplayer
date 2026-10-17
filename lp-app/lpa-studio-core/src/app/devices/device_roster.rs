@@ -93,10 +93,25 @@ pub struct DeviceRosterView {
     /// Connect a board's Network row, under way, or why it
     /// failed (`devices/connect-wifi-address`).
     pub wifi_address_connect: Option<super::UiWifiConnect>,
+    /// Connect a board's USB or Bluetooth press that failed after the pick
+    /// (`devices/connect-usb`, `devices/connect-ble`): what the section says
+    /// under its squares until the next press. Joined by the controller.
+    pub chooser_failure: Option<super::UiChooserFailure>,
     /// Each board another tab held whose Connect is under way here, or why
     /// it failed (`devices/<board>/take-over`). Joined by the controller,
     /// which holds the asks; absent = nothing to say.
     pub take_overs: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiTakeOver>,
+    /// The project each board's push is sending, by name (the library
+    /// project's slug, the example's, the starter's), for the card's
+    /// surface while the push runs. Joined by the controller, which staged
+    /// the push; absent = no name to say.
+    pub sending: std::collections::BTreeMap<lpa_devices::DeviceId, String>,
+    /// Where this tab's session stands on each board it is about —
+    /// connecting, connected, reconnecting, or why the last Connect failed
+    /// ([`super::board_card::BoardConnection`]). Joined by the controller,
+    /// which holds the session; absent = watched.
+    pub connections:
+        std::collections::BTreeMap<lpa_devices::DeviceId, super::board_card::BoardConnection>,
     /// Each device's firmware-update words (the update-states spike,
     /// direction C): the firmware zone's line and bar, the picture slot's
     /// sentence and light, the header chip and version. Joined by the
@@ -151,7 +166,10 @@ impl Default for DeviceRosterView {
             lan_links: std::collections::BTreeMap::new(),
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            chooser_failure: None,
             take_overs: std::collections::BTreeMap::new(),
+            sending: std::collections::BTreeMap::new(),
+            connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
             backup_download: None,
@@ -260,6 +278,9 @@ pub struct DeviceRoster {
     /// How each board's last activity ended, read off the journal as it is
     /// drained (the board card's Done and Failed).
     ends: super::ActivityEnds,
+    /// What this browser remembers of boards' files: whether "its files are
+    /// gone" is news ([`super::BoardFilesMemory`]).
+    files: super::BoardFilesMemory,
 }
 
 impl DeviceRoster {
@@ -277,7 +298,34 @@ impl DeviceRoster {
             keys: std::collections::BTreeMap::new(),
             mirrored_through: 0,
             ends: super::ActivityEnds::default(),
+            files: super::BoardFilesMemory::default(),
         }
+    }
+
+    /// What this browser remembers of boards' files.
+    pub fn files_memory(&self) -> &super::BoardFilesMemory {
+        &self.files
+    }
+
+    /// The same, for the controller: the fresh starts' stored form, the
+    /// registry's given projects, Start fresh.
+    pub fn files_memory_mut(&mut self) -> &mut super::BoardFilesMemory {
+        &mut self.files
+    }
+
+    /// Start fresh on `device`: its lost files are let go, and the card stops
+    /// saying they are gone. `false` when the board has said no MAC to
+    /// remember the choice by, or chose it already.
+    pub fn start_fresh(&mut self, device: lpa_devices::DeviceId) -> bool {
+        let Some(mac) = self
+            .roster
+            .device(device)
+            .and_then(|board| board.identity.mac.as_ref())
+            .map(|mac| mac.0.clone())
+        else {
+            return false;
+        };
+        self.files.start_fresh(&mac)
     }
 
     /// How each board's last activity ended ([`super::ActivityEnds`]).
@@ -461,8 +509,10 @@ impl DeviceRoster {
         // goes.
         self.effects.reconcile_updates(&self.roster);
         let lines = self.drain_journal();
+        self.note_boards_with_files();
         let roster = &self.roster;
         self.ends.retain(|device| roster.device(device).is_some());
+        self.files.retain(|device| roster.device(device).is_some());
         lines
     }
 
@@ -506,8 +556,12 @@ impl DeviceRoster {
             // Joined by the controller, which holds the connects.
             wifi_connects: std::collections::BTreeMap::new(),
             wifi_address_connect: None,
+            chooser_failure: None,
             // Joined by the controller, which holds the asks.
             take_overs: std::collections::BTreeMap::new(),
+            // Joined by the controller, which staged the pushes.
+            sending: std::collections::BTreeMap::new(),
+            connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
@@ -574,6 +628,20 @@ impl DeviceRoster {
                 let hello = device.evidence.classification.hello();
                 let fs = hello.map(|hello| hello.fs).unwrap_or_default();
                 let has_uid = hello.is_some_and(|hello| hello.identity.uid.is_some());
+                let mac = device.identity.mac.as_ref().map(|mac| mac.0.as_str());
+                let key = self
+                    .keys
+                    .get(&device.id.0)
+                    .cloned()
+                    .or_else(|| super::device_records::registry_key(&device.identity));
+                let evidence = super::FilesEvidence {
+                    remembered: self.files.remembers(
+                        device.id,
+                        key.as_deref(),
+                        device.identity.uid.is_some() && !has_uid,
+                    ),
+                    started_fresh: self.files.started_fresh(mac),
+                };
                 let staged = layout.staged(device.id);
                 let pending = device
                     .identity
@@ -605,6 +673,7 @@ impl DeviceRoster {
                     offers_at.clone(),
                     fs,
                     has_uid,
+                    evidence,
                     staged.as_ref(),
                     pending.as_ref(),
                     device.identity.mac.as_ref().map(|mac| mac.0.as_str()),
@@ -623,6 +692,21 @@ impl DeviceRoster {
                 ui.map(|ui| (device.id, ui))
             })
             .collect()
+    }
+
+    /// Every board that reports a project loaded holds files: remember it,
+    /// and end any fresh start chosen for it ([`super::BoardFilesMemory`]).
+    fn note_boards_with_files(&mut self) {
+        for device in self.roster.devices() {
+            if device
+                .evidence
+                .loaded_projects()
+                .is_some_and(|loaded| !loaded.is_empty())
+            {
+                let mac = device.identity.mac.as_ref().map(|mac| mac.0.as_str());
+                self.files.note_running(device.id, mac);
+            }
+        }
     }
 
     /// A `Close` for a link the model is releasing is the last thing that link
@@ -649,6 +733,20 @@ impl DeviceRoster {
                 (entry.scope, &entry.record)
             {
                 self.ends.note(device, note, entry.at);
+                // A factory reset here is the owner's own fresh start: the
+                // files it erased are not news when the board comes back.
+                if let lpa_devices::journal::JournalNote::ActivityEnded {
+                    kind: lpa_devices::ActivityKind::Erase,
+                    outcome,
+                } = note
+                    && outcome.is_success()
+                    && let Some(mac) = self
+                        .roster
+                        .device(device)
+                        .and_then(|board| board.identity.mac.as_ref())
+                {
+                    self.files.start_fresh(&mac.0);
+                }
             }
             lines.push(JournalLine {
                 scope: scope_label(entry.scope),
@@ -925,6 +1023,7 @@ mod tests {
             state_label: "Offline".to_string(),
             detail: None,
             freshness_label: Some("last heard 3 m ago".to_string()),
+            heard_age_ms: Some(180000),
             identity_label: Some(format!("dev{id}")),
             detected_chip: None,
             board_id: board_id.map(str::to_string),
@@ -956,6 +1055,7 @@ mod tests {
             state_label: "Ready".to_string(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,
@@ -991,7 +1091,10 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            chooser_failure: None,
             take_overs: Default::default(),
+            sending: Default::default(),
+            connections: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![
@@ -1012,6 +1115,7 @@ mod tests {
                     frame_age_secs: Some(3_600.0),
                     engine_fps: None,
                     liveness: super::super::FeedLiveness::Offline,
+                    from_lens: false,
                 },
             )]),
             runtime_bands: std::collections::BTreeMap::new(),
@@ -1060,7 +1164,10 @@ mod tests {
             lan_links: Default::default(),
             wifi_connects: Default::default(),
             wifi_address_connect: None,
+            chooser_failure: None,
             take_overs: Default::default(),
+            sending: Default::default(),
+            connections: Default::default(),
             updates: Default::default(),
             roster: RosterView {
                 devices: vec![ready_view(1, "A"), ready_view(2, "B"), ready_view(3, "C")],

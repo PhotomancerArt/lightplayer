@@ -11,15 +11,17 @@
 //!
 //! | piece | draws |
 //! |---|---|
-//! | [`BoardCard`] | the card: the picture's row, the name bar, the five bars, at one height in every state |
+//! | [`BoardCard`] | the card: the picture's row, the name bar, the five bars (connected, the board's panel in their place: [`CompactPanel`](crate::app::module::CompactPanel)), at one height in every state |
 //! | [`BoardPicture`](board_picture::BoardPicture) | the board's lights, dimmed when last known, or the update's light strip |
-//! | [`StatusCorner`](status_corner::StatusCorner) | the notch cut out of the picture: the mark and the reading; it opens the corner's details |
+//! | [`BoardSurface`](board_surface::BoardSurface) | over the picture, what matters now: the state's icon in its tone, one or two plain sentences, the work's progress; the picture dims under it |
+//! | [`StatusCorner`](status_corner::StatusCorner) | the notch cut out of the picture: a quiet ⋯ that opens the corner's details |
 //! | [`NameBar`](name_bar::NameBar) | the name, its place, the one primary as a flush section |
-//! | [`StackBar`](stack_bar::StackBar) | one 28 px bar: icon, summary, aside (one trigger for its details), its action outside the trigger |
-//! | [`BarWork`](bar_work::BarWork) | a bar's work: spinner and words with the iridescent foot, green when done, striped when failed |
+//! | [`StackBar`](stack_bar::StackBar) | one 28 px row in the card's grammar — icon · kind · name · state (one trigger for its details), its action outside the trigger; while it works, the spinner in the icon's place and the work's words as its state |
+//! | [`WorkFoot`](bar_work::WorkFoot) | a row's running work: the iridescent fill along its foot |
 //! | [`BarDetails`](bar_details::BarDetails) | a bar's (or the corner's) details: the merged detail card, its sections, panels and danger zone |
 //! | [`BarDetailPanel`](bar_detail_panel::BarDetailPanel) | one of today's card surfaces inside a details card: the terminal, access, the Bluetooth switch, Wi‑Fi, link counters, rename, the layout question, other version, restore from file |
 //! | [`CardAction`] | one action from the offer it presses, in the card's word and icon |
+//! | [`card_play_address`] | the lens session's play page, where a connected card's All controls goes (the router builds it, the web app provides it) |
 //!
 //! The panels moved here from today's card (`bluetooth_switch_panel`,
 //! `link_counters_section`, `other_version_form`,
@@ -32,8 +34,13 @@
 //! walks read them here):
 //!
 //! - `data-board-card="devices/<board ref>"` on the card's root;
-//! - `data-board-corner="fine|attention|warning|error|quiet|blank"` on the
-//!   status corner, whose details hold the board's terminal;
+//! - `data-surface="<state>"` on the surface over the picture
+//!   (`old-firmware`, `offline`, `all-well`, … — core's
+//!   `SurfaceState::as_str`), with `data-surface-first` and
+//!   `data-surface-second` on its sentences and `data-surface-progress` on
+//!   its bar;
+//! - `data-board-corner="fine|quiet|blank"` on the status corner, a quiet
+//!   ⋯ whose details hold the board's terminal;
 //! - `data-bar="project|connection|access|firmware|hardware"` on each bar;
 //! - `data-bar-work="running|done|failed"` on a bar while it carries work;
 //! - `data-picture="link|lens|saved|none"` on the picture, with
@@ -42,7 +49,13 @@
 //! - `data-offer-path="devices/<board ref>/<verb>"` on every action
 //!   (`AgentMark`), so a walk presses an offer by its path;
 //! - `data-board-terminal` on the board's terminal in the corner's details
-//!   (`DeviceTerminal`): what the board said, in its own words.
+//!   (`DeviceTerminal`): what the board said, in its own words;
+//! - connected, in the bars' place: `data-board-panel` on the panel and
+//!   `data-all-controls` on its last row (All controls, and Edit at its
+//!   end); each of its controls carries the panel control's own
+//!   `data-panel-scope`, `data-panel-channel` and
+//!   `data-panel-state="read-default|read-following|engaged"`, as it does in
+//!   the editor and on the play page (`ModulePanelControl`).
 //!
 //! A bar's details trigger is the button named "<Bar> details" ("Project
 //! details", …), the corner's "Status details". Details render inside the
@@ -62,7 +75,9 @@ pub(crate) mod board_card;
 #[cfg(feature = "stories")]
 pub(crate) mod board_card_stories;
 pub(crate) mod board_picture;
+pub(crate) mod board_surface;
 pub(crate) mod card_action;
+pub(crate) mod card_play_address;
 #[cfg(test)]
 pub(crate) mod card_test_fixtures;
 pub(crate) mod link_counters_section;
@@ -75,6 +90,6 @@ pub(crate) mod status_corner;
 pub(crate) use board_card::BoardCard;
 #[cfg(any(test, feature = "stories"))]
 pub(crate) use board_card::CardPart;
-#[cfg(any(test, feature = "stories"))]
+#[cfg(feature = "stories")]
 pub(crate) use card_action::CardPreviews;
 pub(crate) use card_action::{CardAction, CardActionLook, OfferAction};

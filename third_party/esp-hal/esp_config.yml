@@ -183,5 +183,27 @@ options:
     default:
       - value: false
 
+  # LP fork (fifth diff, README-LP.md): ESP-IDF's optional radio IRAM classes,
+  # each a switch with today's layout (RAM) as the default. ESP-IDF 5.5.3's
+  # linker fragments make the same choice per sdkconfig; the blobs carry the
+  # section names, not the placement.
+  - name: place_wifi_iram_in_flash
+    description: "Link the Wi-Fi blobs' `.wifi0iram`, `.wifiextrairam` and `.coexiram` input sections into flash `.text` instead of `.rwtext.wifi` (ESP-IDF's `ESP_WIFI_IRAM_OPT=n` + `ESP_WIFI_EXTRA_IRAM_OPT=n`)."
+    default:
+      - value: false
+    active: 'chip == "esp32c6"'
+
+  - name: place_wifi_rx_slp_iram_in_flash
+    description: "Link the Wi-Fi blobs' `.wifirxiram`, `.wifislprxiram` and `.wifislpiram` input sections into flash `.text` instead of `.rwtext.wifi` (ESP-IDF's `ESP_WIFI_RX_IRAM_OPT=n` + `ESP_WIFI_SLP_IRAM_OPT=n`)."
+    default:
+      - value: false
+    active: 'chip == "esp32c6"'
+
+  - name: place_ble_controller_iram_in_flash
+    description: "Link the BLE controller's (`libble_app.a`) `.iram1` input sections into flash `.text` instead of `.rwtext.wifi` (ESP-IDF's `BT_CTRL_RUN_IN_FLASH_ONLY`, link half only). `.high_perf_code_iram1` and every other archive's `.iram1` stay in RAM."
+    default:
+      - value: false
+    active: 'chip == "esp32c6"'
+
 checks:
   - "ESP_HAL_CONFIG_STACK_GUARD_OFFSET % 4 == 0"

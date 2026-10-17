@@ -16,6 +16,8 @@ pub(crate) mod boards_line;
 pub(crate) mod browser_identity;
 pub(crate) mod card_footer;
 pub(crate) mod card_thumb;
+#[cfg(feature = "stories")]
+pub(crate) mod chooser_failure_stories;
 pub(crate) mod connect_board;
 pub(crate) mod device_access_panel;
 pub(crate) mod device_layout_sheet;

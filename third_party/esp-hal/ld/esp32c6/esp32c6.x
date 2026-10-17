@@ -17,8 +17,11 @@ SECTIONS {
    * Thus, we need to force a gap here.
    */
   .text_gap (NOLOAD): {
-    . = . + 8;
-    . = ALIGN(0x10000) + 0x20;
+    /* LP fork (sixth diff, README-LP.md): a link that defines
+       `_lp_text_follows_rodata` (the C6 split core's, which the split loader
+       maps page by page, never the IDF bootloader) gets no gap. */
+    . = DEFINED(_lp_text_follows_rodata) ? . : . + 8;
+    . = DEFINED(_lp_text_follows_rodata) ? . : ALIGN(0x10000) + 0x20;
   } > ROM
 }
 INSERT BEFORE .text;

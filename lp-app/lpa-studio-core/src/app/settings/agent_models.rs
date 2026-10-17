@@ -60,22 +60,19 @@ pub fn discovery_fingerprint(config: &AgentProviderConfig) -> String {
 pub fn models_error_copy(provider: AgentProvider, error: &ListModelsError) -> String {
     match error {
         ListModelsError::Auth { .. } => {
-            "model list unavailable — the API key was rejected".to_string()
+            "Couldn't load models: the API key was rejected".to_string()
         }
         ListModelsError::Network { .. } => match provider {
-            AgentProvider::Custom => "model list unavailable — server unreachable \
-                                      (check the base URL and the CORS note above)"
+            AgentProvider::Custom => "Couldn't load models: the server didn't answer. \
+                                      Check the base URL and the CORS note above."
                 .to_string(),
-            _ => format!(
-                "model list unavailable — couldn't reach {}",
-                provider.label()
-            ),
+            _ => format!("Couldn't load models: {} didn't answer", provider.label()),
         },
         ListModelsError::Http { status, .. } => {
-            format!("model list unavailable (HTTP {status})")
+            format!("Couldn't load models (HTTP {status})")
         }
         ListModelsError::Parse { .. } => {
-            "model list unavailable — unexpected response from the server".to_string()
+            "Couldn't load models: the server sent an unexpected answer".to_string()
         }
     }
 }
@@ -369,7 +366,7 @@ mod tests {
                 message: "bad".into(),
             },
         );
-        assert!(parse.contains("unexpected response"), "{parse}");
+        assert!(parse.contains("unexpected answer"), "{parse}");
 
         let http = models_error_copy(
             AgentProvider::OpenAi,

@@ -8,7 +8,7 @@ use lpa_studio_core::{
     ActionConfirmation, ControllerId, HOME_NODE_ID, HomeOp, PreviewSource, UiAction, UiPackageCard,
 };
 
-use lpa_studio_core::core::time_ago::time_ago;
+use lpa_studio_core::age_words;
 use lpc_cloud_api::share_link::slugify;
 
 use crate::router::canonical_share_path;
@@ -49,7 +49,7 @@ pub(crate) fn PackageCard(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let now = now_secs.unwrap_or_else(platform_now_secs);
-    let edited_line = card.last_saved_at.map(|at| time_ago(now, at));
+    let edited_line = card.last_saved_at.map(|at| age_words(now - at));
     // A project this Studio cannot open is still ON SCREEN — that is the
     // point (P3). It just says what is wrong instead of pretending to be
     // openable: no open link, no push, no drag, and a menu cut down to the
@@ -201,7 +201,7 @@ fn face_status_glyphs(_card: &UiPackageCard, blocked: bool) -> Vec<CardStatusGly
         return vec![CardStatusGlyph {
             icon: StudioIconName::StepAttention,
             tone: GlyphTone::Attention,
-            words: "This project can't be opened by this Studio.".to_string(),
+            words: "This project can't be opened.".to_string(),
         }];
     }
     Vec::new()
@@ -313,8 +313,8 @@ pub(crate) fn PackageCardMenu(
                         // a fact, not a warning: it opens, and opening it
                         // is what upgrades it
                         p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground",
-                            title: "Opening this project upgrades it to the current format and saves a version you can go back to.",
-                            "Format {found} — upgrades when you open it"
+                            title: "Opening this project will upgrade it to the current format and save a version you can go back to.",
+                            "Older format ({found}) · upgraded on open"
                         }
                     }
                     if let Some(edited) = edited_line {
@@ -412,7 +412,7 @@ pub(crate) fn PackageCardMenu(
                     button {
                         class: menu_item_action_class(),
                         r#type: "button",
-                        title: "Copy this project's link — the same address the editor shows.",
+                        title: "Copy a link to this project.",
                         onclick: move |_| {
                             crate::clipboard::write_text(
                                 &crate::app::share::share_url::project_link_absolute(
@@ -717,13 +717,13 @@ mod tests {
         // here, still named, still exportable and deletable.
         let mut blocked = card(false);
         blocked.health = PackageHealth::Blocked {
-            headline: "Format 3 — too old for this Studio".to_string(),
+            headline: "Format too old (3)".to_string(),
             remedy: "Export a copy or delete it.".to_string(),
         };
         assert!(!blocked.health.is_openable());
         assert_eq!(
             blocked.health.blocked().map(|(headline, _)| headline),
-            Some("Format 3 — too old for this Studio")
+            Some("Format too old (3)")
         );
         assert!(package_card_class(false, false, true, false).contains("status-attention-border"));
     }
@@ -779,7 +779,7 @@ mod tests {
 
         let blocked = UiPackageCard {
             health: PackageHealth::Blocked {
-                headline: "Format 3 — too old for this Studio".to_string(),
+                headline: "Format too old (3)".to_string(),
                 remedy: "Export a copy or delete it.".to_string(),
             },
             ..pattern

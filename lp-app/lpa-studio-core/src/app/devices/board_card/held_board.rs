@@ -4,27 +4,29 @@
 //!
 //! The state, the facts and the verb exist already (`DeviceView.held_elsewhere`,
 //! `DeviceRosterView.take_overs`, the offer `devices/<board>/take-over`); this
-//! file only arranges them. The primary action, the connection bar, the
-//! picture's line and the corner's state line each ask it for their words, so
-//! a held card says one thing everywhere.
+//! file only arranges them. The connection bar, the picture's line and the
+//! corner's state line each ask it for their words, so a held card says one
+//! thing everywhere; the surface and the primary
+//! ([`super::board_surface`], [`super::primary_action`]) say the state in
+//! sentences and press `take-over` as **Connect here**.
 //!
-//! | The tab has | Connection bar | Primary |
-//! |---|---|---|
-//! | the board held by another tab | "Open in another tab", the editor-open or busy aside, orange | **Connect** (`take-over`) |
-//! | it held, the holder busy | the same, the busy label aside | Connect, disabled: "Busy in the other tab: <label>" |
-//! | let go on request | "Taken by another tab", orange | **Connect** (`take-over`, takes it back) |
-//! | an ask out, or the board opening | work, running: "Asking the other tab…" / "Opening…" | Connect, disabled: the same words |
-//! | a take-over that failed | work, striped: the reason, with Retry | **Connect** (`take-over`) |
+//! | The tab has | Connection bar | Surface | Primary |
+//! |---|---|---|---|
+//! | the board held by another tab | "Open in another tab", the editor-open or busy aside | "This board is open in another tab." | **Connect here** (`take-over`) |
+//! | it held, the holder busy | the same, the busy label aside | "This board is busy in another tab." | — |
+//! | let go on request | "Taken by another tab" | "Another tab took this board." | **Connect here** (`take-over`, takes it back) |
+//! | an ask out, or the board opening | work, running: "Asking the other tab…" / "Opening…" | "Moving this board to this tab." | the spinner |
+//! | a take-over that failed | work, striped: the reason, with Retry | "Studio couldn't move this board to this tab." | **Connect here** (`take-over`) |
 //!
-//! Orange is the colour of "someone has it"; nothing here changes a hue. The
-//! words name facts only: no tab id, no key, no browser.
+//! The Link row says "someone has it" quietly now: the surface is the one
+//! loud place (the rows go quiet). The words name facts only: no tab id, no
+//! key, no browser.
 
 use lpa_devices::{HeldElsewhere, HoldLevel};
 
-use super::board_card_input::{BoardCardInput, link_icon};
+use super::board_card_input::BoardCardInput;
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_card_action::UiCardAction;
-use super::ui_name_bar::UiPrimary;
 use crate::app::devices::take_over_offer::busy_in_the_other_tab;
 
 /// The connection bar's summary for a board another tab holds.
@@ -84,39 +86,6 @@ pub fn held_sentence(held: &HeldElsewhere, undoable: bool) -> String {
     sentence
 }
 
-/// The primary for a board another tab holds, or whose take-over is under
-/// way: Connect, which is the take-over. `None` when this tab has an open
-/// link to the board (it is not held from here).
-pub(crate) fn held_primary(input: &BoardCardInput<'_>) -> Option<UiPrimary> {
-    if !input.no_open_link() {
-        return None;
-    }
-    let working = input.take_over.filter(|over| !over.failed);
-    let held = input.held();
-    if held.is_none() && working.is_none() {
-        return None;
-    }
-    let icon = link_icon(input.held_link());
-    let unavailable = |reason: String| UiPrimary::Unavailable {
-        word: "Connect".to_string(),
-        icon: icon.to_string(),
-        reason,
-    };
-    if let Some(over) = working {
-        return Some(unavailable(over.words.clone()));
-    }
-    let held = held?;
-    if let HoldLevel::Busy(label) = &held.level {
-        return Some(unavailable(busy_in_the_other_tab(label)));
-    }
-    Some(match input.offer("take-over") {
-        Some(offer) => UiPrimary::Offer(UiCardAction::press(offer, "Connect").with_icon(icon)),
-        // Nothing to press (this browser cannot ask its other tabs): the
-        // word still says why.
-        None => unavailable(held_summary(held).to_string()),
-    })
-}
-
 /// The connection bar's work for a take-over: running while the other tab
 /// is asked and while the board opens here; striped, with Retry on the same
 /// `take-over`, when it ended without the board.
@@ -132,6 +101,7 @@ pub(crate) fn take_over_work(input: &BoardCardInput<'_>) -> Option<UiBarWork> {
     };
     Some(UiBarWork {
         words: over.words.clone(),
+        detail: None,
         percent: None,
         state,
         cancel: None,
@@ -189,7 +159,7 @@ mod tests {
         let mut fixture = CardFixture::ready();
         fixture.view.held_elsewhere = Some(held(HoldLevel::Watching, false));
         fixture.view.held_elsewhere.as_mut().unwrap().via = HoldVia::Network;
-        assert_eq!(held_primary(&fixture.input()), None);
+        assert!(fixture.input().held().is_none());
         assert!(take_over_work(&fixture.input()).is_none());
     }
 

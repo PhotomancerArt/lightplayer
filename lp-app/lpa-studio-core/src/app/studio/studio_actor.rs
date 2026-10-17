@@ -322,7 +322,7 @@ where
         if let Some(reach) = plan.bluetooth_reach {
             self.controller.set_bluetooth_reach(reach);
         }
-        if let Some(place) = plan.place {
+        for place in plan.places {
             self.controller.set_place(place);
         }
         for command in plan.console {
@@ -758,8 +758,13 @@ struct CommandPlan {
     page_visibility: Option<bool>,
     /// The browser's latest Bluetooth answer in the batch (latest wins).
     bluetooth_reach: Option<crate::BluetoothReach>,
-    /// The page's latest place report in the batch (latest wins).
-    place: Option<crate::UiPlace>,
+    /// The page's place reports in the batch, in queue order. Never
+    /// coalesced: a waiting Edit ends at the first report that moves the
+    /// user to another page (`ConnectedBoard::note_page_moved`), so a move
+    /// and a move back queued behind one long action must both be seen.
+    /// Kept as latest-wins, the pair read as "no move" and the editor stayed
+    /// up over the home page.
+    places: Vec<crate::UiPlace>,
 }
 
 /// One planned device step: fold an input, or make the effects layer look.
@@ -786,7 +791,7 @@ impl CommandPlan {
         let mut library_changed = false;
         let mut page_visibility = None;
         let mut bluetooth_reach = None;
-        let mut place = None;
+        let mut places = Vec::new();
         for command in batch {
             match command {
                 StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
@@ -797,7 +802,7 @@ impl CommandPlan {
                 StudioCommand::HoldEdge(event) => hold_edge.push(event),
                 StudioCommand::PageVisibility { visible } => page_visibility = Some(visible),
                 StudioCommand::BluetoothReach(reach) => bluetooth_reach = Some(reach),
-                StudioCommand::Place(reported) => place = Some(reported),
+                StudioCommand::Place(reported) => places.push(reported),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a runtime-level change is
                 // a server round-trip, so convert it into the equivalent
@@ -847,7 +852,7 @@ impl CommandPlan {
             library_changed,
             page_visibility,
             bluetooth_reach,
-            place,
+            places,
         }
     }
 }

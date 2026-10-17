@@ -237,7 +237,7 @@ pub fn FixturesPanel(
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
-                "No fixtures on a wire yet — bind an output to a control bus and this panel fills in."
+                "No fixtures on a wire yet. Bind an output to a control bus to fill this panel."
             }
         };
     };
@@ -772,7 +772,7 @@ pub fn OutputsPanel(
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
-                "Nothing to patch yet — no output has published a wire."
+                "Nothing to patch yet. No output has a wire."
             }
         };
     };

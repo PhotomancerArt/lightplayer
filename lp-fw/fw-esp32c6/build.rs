@@ -40,10 +40,14 @@ fn emit_build_provenance() {
     emit_git_head_watches();
     let commit =
         git_output(&["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    let dirty = match git_output(&["status", "--porcelain"]) {
-        Some(status) => !status.is_empty(),
-        None => false,
-    };
+    // A figure build is stamped clean, as it is stamped with a fixed version
+    // (`lp_app_version::figure_build`): the tree's state must not reach the
+    // image whose memory figures are recorded.
+    let dirty = !lp_app_version::figure_build()
+        && match git_output(&["status", "--porcelain"]) {
+            Some(status) => !status.is_empty(),
+            None => false,
+        };
     let profile = profile_dir_name()
         .or_else(|| std::env::var("PROFILE").ok())
         .unwrap_or_else(|| "unknown".into());
@@ -384,6 +388,14 @@ SECTIONS {
     // `DEP_ESP_HAL_LINKER_SCRIPTS`, or a missing script inside it — both abort
     // the build instead of carrying on.
     println!("cargo:rerun-if-changed={}", manifest_dir.display());
+
+    // Put this crate's directory on the linker search path so esp-hal's
+    // `INCLUDE "rwdata_hook.x"` resolves to `rwdata_hook.x` next to this file.
+    // esp-hal's `ld/sections/rwdata.x` ends the `.data` output section with
+    // that INCLUDE, gated on `ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK` (set in
+    // `.cargo/config.toml`); the linker resolves it through `-L`, and esp-hal
+    // only adds its own OUT_DIR. See `rwdata_hook.x` for what stays in RAM.
+    println!("cargo:rustc-link-search={}", manifest_dir.display());
 }
 
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded

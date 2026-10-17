@@ -46,6 +46,7 @@
 
 pub mod accept;
 pub mod efuse;
+pub mod extmem;
 pub mod gpio;
 pub mod i2c_ana_mst;
 pub mod intpri;
@@ -190,7 +191,11 @@ pub fn boot_set(
             0x400,
             Box::new(lp_peri::LpPeri::new(seed, lp_peri_clk_en, lp_peri)),
         ),
-        (base::EXTMEM, 0x400, Box::new(accept::extmem())),
+        (
+            base::EXTMEM,
+            0x400,
+            Box::new(extmem::Extmem::new(mmu.clone())),
+        ),
         (
             base::UART0,
             0x100,

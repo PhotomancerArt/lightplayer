@@ -120,8 +120,8 @@ unnamed.
 | step | what it does |
 |---|---|
 | `connect` / `cancel-connect` | press the home page's **USB** square, then pick `board` in the in-page chooser (or Cancel it) |
-| `settle` | wait until core says what the board is: every verb in `offers` drawn on the card's face and enabled (`"a\|b"` = either, as an `expect` matcher spells it: `"push\|edit"` is a ready board, offered a project or the editor on the one it runs), and each bar's line in `bars` (`{ "firmware": "No firmware" }`) including its words. `words` (the card's face text) is refused |
-| `flash` | a blank board's Install: the firmware bar says "No firmware", `flash` opens the board pick, picking `model` (default `XIAO ESP32-C6`) is the press, and the firmware bar's work must start and finish |
+| `settle` | wait until core says what the board is: every verb in `offers` drawn on the card's face and enabled (`"a\|b"` = either, as an `expect` matcher spells it: `"push\|edit"` is a ready board, offered a project or the editor on the one it runs), and each bar's line in `bars` (`{ "firmware": "Firmware none" }`: the row's kind word, then its name) including its words. `words` (the card's face text) is refused |
+| `flash` | a blank board's Install firmware: the Firmware row says "none", `flash` opens the board pick, picking `model` (default `XIAO ESP32-C6`) is the press, and the firmware bar's work must start and finish |
 | `project` | press `push` (an empty board's "Add a project") and choose `name` in the project pick |
 | `push` | press "Put it on the board" in the project pick |
 | `said` | the board's own `words` in its terminal (the status corner's details) |

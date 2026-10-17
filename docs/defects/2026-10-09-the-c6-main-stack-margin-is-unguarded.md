@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed          # candidate 1: a load-and-compile peak gate on the emulated C6 (RAM research M1)
 found: 2026-10-09      # report: the whole-RAM ledger (scripts/ram-ledger.py, RAM research E1) read the C6's stack off CI's image at 3c7e838c2
 area: fw-esp32c6 main stack (esp-hal stack.x residual) × scripts/heap-budget-check.sh (the chip gate's stack arm)
+fixed: this change
 class: budget-exhaustion   # a hard budget (the stack) is gated against the wrong quantity, so growth of the statics crosses the real limit silently
 related:
   - ../adr/2026-09-02-esp32c6-ram-split.md   # the stack is a measured number; its 2026-09-24 amendment (BLE ate 24 KB of heap to keep it)
@@ -53,7 +54,21 @@ A stack overflow on this layout writes into the statics below the stack (the
 sample the pointer"), which is the failure the stack probe was added to keep
 from being a surprise.
 
-**Fix** — open. Candidates, none chosen:
+**Fix** (2026-10-16, RAM research M1) — candidate 1.
+`lp-cli/tests/emu_stack_peak.rs` boots the shipped split image on
+`lp-emu:esp32c6:t1`, deploys the two deepest catalog projects (a census of
+every catalog project picked them: meteor, 35,752 B, the same after ten
+shader edits; the PLAYFUL choker tryout, 33,852 B on its load; every other
+project that loads on the emulator peaks at 30,652–32,252 B), and fails in
+words unless the image's main stack exceeds each peak by 12 KiB: "meteor's
+load and 10 edits peak at N of M B; margin K B < 12288 B (12 KiB)". It runs
+in CI's `Emulator C6 lp-cli (x64)` job (`just test-emu-c6-cli-boards`), so
+statics growth or a bigger `HEAP_MAIN` that eats into the margin goes red
+the day it lands. That gate is what let the freed stack room become heap
+(the RAM split ADR's 2026-10-16 amendment). The idle band arm in
+`heap-budget-check.sh` stays; it still checks the probe and the layout.
+
+The candidates as they were filed:
 
 1. Gate the chip check on `stackTotal ≥ (a recorded steady-state high-water
    of the flagship) + a stated margin`, measured with a project loaded on the
@@ -65,7 +80,11 @@ from being a surprise.
 3. A ratchet on `stackTotal` itself (the stack may shrink only by a stated
    amount per PR), the way `lint-web-actions` ratchets web-built actions.
 
-**Regression coverage** — none: nothing is broken yet.
+**Regression coverage** — `emu_stack_peak`'s
+`the_main_stack_holds_the_deepest_projects_with_a_12_kib_margin` (CI).
+Negative control on main's image with the margin set to 86 KiB: both
+projects fail by name with their peak, the stack and the margin. The census
+(`LP_STACK_PEAK_CENSUS=1`) re-measures every catalog project.
 
 **Lesson** — a residual is a budget nobody owns. The stack was made "derived,
 not recorded" so that adding a static would not force a re-baseline; the cost

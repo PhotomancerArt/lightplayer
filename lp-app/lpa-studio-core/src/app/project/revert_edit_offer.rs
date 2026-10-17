@@ -24,7 +24,7 @@ pub fn revert_edit_offer(rows: &[(UiPendingEdit, UiAction)]) -> Option<UiOffer> 
         .2
         .clone()
         .with_label("Revert one edit")
-        .with_summary("Discard one pending edit of the changes list.")
+        .with_summary("Discard this change.")
         .undoable();
     let options = rows
         .iter()

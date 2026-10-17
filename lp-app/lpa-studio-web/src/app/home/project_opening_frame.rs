@@ -47,7 +47,7 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::{
     ActionPriority, DeviceOpenProgress, DeviceOpenStep, DeviceWait, DeviceWaitReason, OfferPath,
-    OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer,
+    OpenDevice, OpenStage, RuntimeOp, UiAction, UiOffer, byte_size, percent_of,
 };
 
 use crate::core::{
@@ -140,11 +140,11 @@ impl EnginePhase {
     /// — never the wire word.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Compiling => "Preparing the engine…",
-            Self::Booting => "Starting the engine…",
-            Self::Instantiating => "Loading the engine…",
+            Self::Compiling => "Preparing the sim…",
+            Self::Booting => "Starting the sim…",
+            Self::Instantiating => "Loading the sim…",
             Self::GpuInit => "Setting up graphics…",
-            Self::RuntimeCreate => "Starting the sim…",
+            Self::RuntimeCreate => "Creating the sim…",
         }
     }
 }
@@ -159,12 +159,12 @@ impl OpeningState {
                 total_bytes,
             } => Some(match total_bytes {
                 Some(total) if *total > 0.0 => format!(
-                    "Downloading the engine… {}%",
-                    ((received_bytes / total) * 100.0).clamp(0.0, 100.0).round()
+                    "Downloading the sim… {}",
+                    percent_of(*received_bytes, *total).unwrap_or_default()
                 ),
                 _ => format!(
-                    "Downloading the engine… {:.1} MB",
-                    received_bytes / 1_048_576.0
+                    "Downloading the sim… {}",
+                    byte_size(received_bytes.max(0.0) as u64)
                 ),
             }),
             Self::StartingEngine { phase } => Some(phase.label().to_string()),
@@ -265,10 +265,10 @@ fn step_label(progress: &DeviceOpenProgress) -> String {
             total_bytes,
         } => format!(
             "Sending the project to {name}… {} of {}",
-            human_bytes(sent_bytes),
-            human_bytes(total_bytes)
+            byte_size(sent_bytes),
+            byte_size(total_bytes)
         ),
-        DeviceOpenStep::Loading => format!("Loading on {name} — compiling its shaders…"),
+        DeviceOpenStep::Loading => format!("Compiling shaders on {name}…"),
         DeviceOpenStep::Reading => format!("Reading the project back from {name}…"),
     }
 }
@@ -278,31 +278,23 @@ fn device_detail(state: &OpeningState) -> Option<&'static str> {
     match state {
         OpeningState::WaitingForDevice(wait) => match wait.reason {
             DeviceWaitReason::NotConnected => Some(
-                "A page may only use a USB board after you pick it, and some browsers (Brave) \
-                 forget that answer on every reload. Connect it and this project opens on it.",
+                "A page can only use a USB board after you pick it, and some browsers (Brave) \
+                 forget your pick on every reload. Connect the board to open this project on it.",
             ),
             DeviceWaitReason::PortClosed => {
                 Some("The board is plugged in but this page closed its port.")
             }
             DeviceWaitReason::Identifying => Some(
-                "It is connected but has not said hello yet. A board that just reset says it \
-                 within a few seconds; one that stays quiet may need a reset.",
+                "It is connected but hasn't answered yet. A board that just reset will answer \
+                 within a few seconds. If it stays quiet, it may need a reset.",
             ),
             DeviceWaitReason::Busy | DeviceWaitReason::Unknown => None,
         },
         OpeningState::OnDevice(DeviceOpenProgress {
             step: DeviceOpenStep::Loading,
             ..
-        }) => Some("The board compiles every shader itself; a large project takes a while."),
+        }) => Some("The board compiles every shader itself, so a large project can take a while."),
         _ => None,
-    }
-}
-
-fn human_bytes(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{bytes} B")
-    } else {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
     }
 }
 
@@ -551,7 +543,9 @@ pub fn ProjectOpeningFrame(
     };
 
     rsx! {
-        section { class: "tw:grid tw:gap-3.5",
+        // `data-opening-frame`: the walk hook — Edit on a connected board
+        // must draw no opening frame (it reopens nothing).
+        section { class: "tw:grid tw:gap-3.5", "data-opening-frame": "",
             div { class: "tw:grid tw:gap-2",
                 div { class: "tw:flex tw:items-center tw:gap-3",
                     span { class: "tw:h-2.5 tw:w-2.5 tw:animate-pulse tw:rounded-full tw:bg-status-working-foreground" }
@@ -840,7 +834,7 @@ pub(crate) fn OpenFailureNotice(
                         r#type: "button",
                         class: solid_action_class(ActionPriority::Secondary),
                         disabled: !unlock.is_enabled(),
-                        title: "Unlock with an edit password; Retry once it is unlocked.",
+                        title: "Unlock it with an edit password, then press Retry.",
                         "data-offer-path": "{unlock.path}",
                         onclick: {
                             let press = unlock.action.clone();
@@ -858,7 +852,7 @@ pub(crate) fn OpenFailureNotice(
                         r#type: "button",
                         class: solid_action_class(ActionPriority::Secondary),
                         disabled: !reset.meta().enablement.is_enabled(),
-                        title: "{reset_title(&reset, \"Reset the board's hardware; Retry once it says hello again.\")}",
+                        title: "{reset_title(&reset, \"Reset the board, then press Retry once it answers.\")}",
                         onclick: move |_| {
                             if let Some(on_action) = on_action {
                                 on_action.call(reset.clone());
@@ -937,7 +931,7 @@ mod tests {
             ..opening()
         });
         assert_eq!(state.fraction(), Some(0.5));
-        assert_eq!(state.label().unwrap(), "Downloading the engine… 50%");
+        assert_eq!(state.label().unwrap(), "Downloading the sim… 50%");
 
         // A content-encoded response declares no length: motion, no bar.
         let indeterminate = opening_state(&OpenProbe {
@@ -945,21 +939,18 @@ mod tests {
             ..opening()
         });
         assert_eq!(indeterminate.fraction(), None);
-        assert_eq!(
-            indeterminate.label().unwrap(),
-            "Downloading the engine… 5.0 MB"
-        );
+        assert_eq!(indeterminate.label().unwrap(), "Downloading the sim… 5 MB");
     }
 
     #[test]
     fn boot_phases_read_as_work_not_as_wire_words() {
         for (status, expected) in [
-            ("booting", "Starting the engine…"),
-            ("instantiating", "Loading the engine…"),
+            ("booting", "Starting the sim…"),
+            ("instantiating", "Loading the sim…"),
             ("gpu-init", "Setting up graphics…"),
-            ("runtime-create", "Starting the sim…"),
+            ("runtime-create", "Creating the sim…"),
             // an unknown future phase must never leak the raw token
-            ("warming-caches", "Starting the engine…"),
+            ("warming-caches", "Starting the sim…"),
         ] {
             let state = opening_state(&OpenProbe {
                 boot_status: Some(status.to_string()),

@@ -1,3 +1,9 @@
+---
+status: fixed          # recorded fixed in the index on 2026-08-01 (8708d0111); the text below predates the fix
+found: 2026-08-01      # hardware-walk (classic bring-up, M4-P2)
+area: lpc-shared DisplayPipeline + fw-esp32-common provider
+class: misattributed-symptom
+---
 # Classic ESP32: opening a WS281x channel faults and reset-loops the board
 
 - **Date:** 2026-08-01

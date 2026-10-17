@@ -120,27 +120,27 @@ pub fn relationship_face(relationship: ProjectRelationship) -> RelationshipFace 
         ProjectRelationship::Example => RelationshipFace {
             word: "Example",
             glyph: StudioIconName::Test,
-            title: "Built-in example \u{2014} save a copy to make it yours",
+            title: "A built-in example. Save a copy to keep it.",
         },
         ProjectRelationship::MineLocal => RelationshipFace {
             word: "Private",
             glyph: StudioIconName::RelationshipPrivate,
-            title: "Yours \u{2014} not shared",
+            title: "Your project, not shared",
         },
         ProjectRelationship::MinePublished => RelationshipFace {
             word: "Shared",
             glyph: StudioIconName::RelationshipShared,
-            title: "Yours \u{2014} anyone with the link can view",
+            title: "Your project. Anyone with the link can view it.",
         },
         ProjectRelationship::MemberOfSomeoneElses => RelationshipFace {
             word: "Member",
             glyph: StudioIconName::RelationshipMember,
-            title: "Someone else\u{2019}s project \u{2014} you can edit",
+            title: "Someone else\u{2019}s project. You can edit it.",
         },
         ProjectRelationship::ViewingSomeoneElses => RelationshipFace {
             word: "Viewing",
             glyph: StudioIconName::RelationshipViewing,
-            title: "Someone else\u{2019}s project \u{2014} save a copy to keep changes",
+            title: "Someone else\u{2019}s project. Fork a copy to keep your changes.",
         },
     }
 }

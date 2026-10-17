@@ -247,7 +247,7 @@ pub fn SignInPanel(
                     // there is otherwise nothing here to act on.
                     if picker.choices.is_empty() {
                         p { class: "tw:m-0 tw:text-[11px] tw:leading-snug tw:text-dim-foreground",
-                            "No profiles yet — the first sign-in creates one:"
+                            "No profiles yet. Signing in will create one:"
                         }
                         code { class: "tw:min-w-0 tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground tw:select-all tw:[overflow-wrap:anywhere]",
                             "{picker.start_path}?email=you@example.com"

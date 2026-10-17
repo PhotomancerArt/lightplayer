@@ -18,6 +18,11 @@ pub mod app;
 pub mod controller;
 pub mod core;
 
+pub use self::core::data_kinds::{
+    CalendarDate, FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, age_spoken, age_words,
+    byte_size, date_words, duration_words, firmware_label_version, firmware_version, percent,
+    percent_of, pre_ota_version,
+};
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
 
@@ -51,12 +56,18 @@ pub use app::devices::BrowserSerialTransport;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
-    ANYONE_CAN_EDIT_SENTENCE, BarLayer, BarWorkState, BoardCardInput, CornerMark,
-    LOCKED_PREVIEW_SENTENCE, NOTHING_TO_EDIT, PictureSource, RosterCardsInput,
-    SOMEONE_ELSE_SENTENCE, UiActionDraw, UiBarDetails, UiBarWork, UiBluetoothSwitch, UiBoardCard,
-    UiBoardPicture, UiBoardPresence, UiCardAction, UiCornerDetails, UiDetailPanel, UiNameBar,
-    UiPrimary, UiStackBar, UiStatusCorner, activity_bar, activity_words, bluetooth_switch,
-    board_card, chip_words, link_icon, pending_board_card, roster_board_card, roster_board_cards,
+    ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS,
+    BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONFIRMATION_REQUIRED,
+    CONNECT_HERE, CONNECTING, CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE,
+    LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN,
+    PROJECT_NONE, PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput,
+    SOMEONE_ELSE_SENTENCE, SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED,
+    UPDATE_REQUIRED, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch,
+    UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
+    UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
+    UiStatusCorner, UiSurfaceNotice, activity_bar, activity_words, bluetooth_switch, board_card,
+    board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
@@ -73,8 +84,8 @@ pub use app::devices::{
     EmuBacking, EmuDeviceTransport, EmuLinkSource, EmuRuntimeControl, EmuSession,
     FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FeedLiveness, FirmwareVerb,
     FlashBoardChoice, FlashOffer, GrantedLink, JournalLine, LAN_LINK_PATH, LanDeviceTransport,
-    LanFlag, LanLinkSource, LensLineTap, LensTapEvent, NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM,
-    NewSimRecord, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
+    LanFlag, LanLinkSource, LensFrameSource, LensLineTap, LensTapEvent, NEW_SIM_BACKING_PARAM,
+    NEW_SIM_BOARD_PARAM, NewSimRecord, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
     ProvisionalBoardNumbers, PushOffer, PushOver, PushPayload, PushSource, PushSourceChoice,
     PushSourceGroup, RENAME_NAME_PARAM, RESET_NEEDS_AUTHOR, RESET_WAITS_FOR_ANSWER, RememberedView,
     ResetReach, RosterSplit, RuntimeKind, SIM_TRANSPORT, SimBacking, SimCreateOp,
@@ -87,17 +98,14 @@ pub use app::devices::{
     device_status_kind, emu_endpoint, emu_link_info, emu_offered_for, escape_verb, feed_liveness,
     firmware_face_preview_sentence, firmware_verb, first_bundled_example_id, flash_consequence,
     flash_device_offer, flash_offer, flash_offer_for, flash_pending_offer, lan_link_for_endpoint,
-    lan_link_view, mint_sim_identity, new_sim_offer, new_sim_record, normalize_lan_address,
-    parse_lan_flag, pending_escape_action, pending_firmware_line, pending_identity_rows,
-    pending_link_offers, push_device_offer, push_offer, read_sim_record, reflash_choice,
-    sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
+    lan_link_view, lens_feed_view, mint_sim_identity, new_sim_offer, new_sim_record,
+    normalize_lan_address, parse_lan_flag, pending_escape_action, pending_firmware_line,
+    pending_identity_rows, pending_link_offers, push_device_offer, push_offer, read_sim_record,
+    reflash_choice, sim_device_name, sim_endpoint, sim_link_info, split_roster, target_offer,
     transport_label_for_endpoint, uid_from_emu_endpoint, uid_from_sim_endpoint,
     update_firmware_offer, write_sim_record,
 };
-pub use app::devices::{
-    ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, age_words, device_edit_offer,
-    duration_words,
-};
+pub use app::devices::{ActivityEnd, ActivityEnds, DONE_SHOWS_SECS, EDIT_VERB, device_edit_offer};
 /// One tab holds a board: the hold vocabulary and the edge the web installs.
 pub use app::devices::{
     AskOutcome, AskRefusal, BoardHoldBook, BoardHoldEdge, BookChange, ClaimAnswer,
@@ -106,15 +114,22 @@ pub use app::devices::{
 };
 pub use app::devices::{
     BackupDownload, BackupEntry, BackupFileBytes, BackupIndex, BackupStatus, BackupStoreError,
-    DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp, DeviceRestoreFromFileOp,
-    MemoryBackupStore, UiDeviceLayout, UiLayoutPanel, check_backup_file, check_store_contract,
-    device_layout_view, device_restore_from_file_action,
+    BoardFilesMemory, DeviceBackupOp, DeviceBackupStore, DeviceRestoreFromFileDataOp,
+    DeviceRestoreFromFileOp, DeviceStartFreshOp, FRESH_STARTS_STORAGE_KEY, FilesEvidence,
+    MemoryBackupStore, START_FRESH, UiDeviceLayout, UiLayoutPanel, check_backup_file,
+    check_store_contract, device_layout_view, device_restore_from_file_action,
 };
 pub use app::devices::{BoardPlays, BoardProjectInputs, BoardProjects, board_projects};
 pub use app::devices::{
     BundledOwnBuild, BundledOwnBuildSource, MemoryOwnBuildSource, OWN_BUILD_MISMATCH,
     OwnBuildSource, UpdateHost,
 };
+pub use app::devices::{
+    CONNECT_VERB, ConnectFacts, DONE_VERB, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
+    device_done_offer,
+};
+/// Connect a board's chooser failing after the pick.
+pub use app::devices::{ChooserTransport, UiChooserFailure};
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
     FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
@@ -145,6 +160,8 @@ pub use app::devices::{
 };
 pub use app::docs_host::DocsSimHost;
 pub use app::studio::PlayViewOp;
+pub use app::studio::{CONNECT_GAVE_UP, CONNECT_INTENT_GRACE, ConnectHold, PendingLens};
+pub use app::studio::{ConnectFailure, ConnectPhase, ConnectedBoard};
 pub use app::studio::{UiPage, UiPanel, UiPlace, UiProjectView, UiSessionSection};
 /// A board's MAC, as the roster records it.
 pub use lpa_devices::identity::MacAddress;
@@ -261,8 +278,8 @@ pub use app::rich_object::{
 };
 pub use app::roster::board_display_name;
 pub use app::runtime_pool::{
-    DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload, RuntimePool,
-    RuntimeSession, SESSION_CAPACITY,
+    ConnectReach, DeviceLensAttachment, LinkTransport, RuntimeId, RuntimeOp, RuntimePayload,
+    RuntimePool, RuntimeSession, SESSION_CAPACITY,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerSnapshot, ServerState,
@@ -324,7 +341,8 @@ pub use lpa_devices::{
     FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
-    TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
+    TerminalLine as DeviceTerminalLine, UpdateBoardState as DeviceUpdateBoardState,
+    WireVersion as DeviceWireVersion,
 };
 /// What a board reports about its saved networks, its station and what it
 /// hears.

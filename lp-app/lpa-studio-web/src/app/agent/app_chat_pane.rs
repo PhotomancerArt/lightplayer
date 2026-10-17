@@ -70,7 +70,7 @@ pub(crate) fn AppChatPane(
                             "What do you want your lights to do?"
                         }
                         p { class: "tw:m-0 tw:max-w-80 tw:text-xs tw:leading-relaxed tw:text-dim-foreground",
-                            "Say it in your own words — “a strip of 250 LEDs on my XIAO that cycles a few patterns”. The assistant makes the same edits you could, and when a step needs your click (connecting or flashing a board) it puts the button here for you."
+                            "Say it in your own words, like “a strip of 250 LEDs on my XIAO that cycles a few patterns”. The assistant makes the same edits you could. When a step needs your click, like connecting or flashing a board, it will put the button here."
                         }
                     }
                 },

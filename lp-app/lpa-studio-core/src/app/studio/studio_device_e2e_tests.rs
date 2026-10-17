@@ -179,6 +179,11 @@ mod ble_drop_tests;
 mod board_card_tests;
 /// One tab holds a board: two tabs on one in-memory hold bus.
 mod board_hold_tests;
+/// Connect a board's chooser failing after the pick: the section says so.
+mod chooser_failure_tests;
+/// Connected: Connect, Edit and Done by path, the home page and an open
+/// session side by side, and the surface following the place.
+mod connected_tests;
 /// The home page's sections over this bench: a board plugged in is
 /// online, a detached one is offline, and the Connect a board section's
 /// offers are all published.
@@ -2548,6 +2553,21 @@ fn running_board_wanting_a_picture(uid: &str, endpoint: &str) -> (DeviceBench, T
     (bench, tasks)
 }
 
+/// One edit to one slot, as the editor's field sends it
+/// (`SlotEditOp::SetValue`). No offer carries a slot edit — the field
+/// builds it (`slot_edit_actions.rs`, the web's) — so this is the device
+/// tests' one place to build it.
+fn set_slot_value(
+    bench: &mut DeviceBench,
+    address: crate::ProjectSlotAddress,
+    value: lpc_model::LpValue,
+) -> crate::UiResult {
+    drive(bench.controller.dispatch(UiAction::from_op(
+        ProjectController::NODE_ID,
+        crate::SlotEditOp::SetValue { address, value },
+    )))
+}
+
 fn feed_frame_revision(bench: &DeviceBench, device: crate::DeviceId) -> Option<i64> {
     bench
         .controller
@@ -3414,11 +3434,10 @@ fn a_flash_from_the_blank_pending_card_runs_to_ready_named_and_registered() {
             .is_some_and(|outcome| outcome.ok && outcome.summary.contains("firmware installed")),
         "{card:?}"
     );
-    // Auto-name: "<board display_name> · <Mon D>" (bench clock = epoch
-    // second 1000 = Jan 1), no naming step anywhere.
+    // Auto-name: the board's display name (O5: no date), no naming step
+    // anywhere.
     assert_eq!(
-        card.title,
-        format!("{} · Jan 1", choice.title),
+        card.title, choice.title,
         "the derived name is the card's title"
     );
 
@@ -4365,7 +4384,7 @@ const NEIGHBOUR_MAC: &str = "02:00:00:00:00:01";
 /// back to the saved record and reach Ready, the board's later frames must
 /// land on it (on main they landed on the neighbour as `IdentityConflict`s,
 /// and the card never reached Ready), and the auto-name must be written ONCE
-/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" every settle for as
+/// — on main it ping-ponged "… · Oct 2" / "… · Oct 2 2" (a dated name, before O5) every settle for as
 /// long as the page was open, because each `SetName` aimed at the C6's id
 /// renamed the neighbour instead.
 #[test]
@@ -4419,7 +4438,7 @@ fn a_remembered_board_comes_back_to_its_record_and_is_named_once() {
     let desk = card_for_mac(&bench, DESK_C6_MAC).expect("the desk board's card");
     assert_eq!(desk.state_label, "Ready", "{desk:?}");
     assert!(
-        desk.title.ends_with(&month_day_of(&bench)),
+        !desk.title.is_empty() && !desk.title.ends_with(" 2"),
         "named once, without a collision suffix: {:?}",
         desk.title
     );
@@ -4532,12 +4551,6 @@ fn journal_lines(bench: &DeviceBench) -> Vec<String> {
         .entries()
         .map(|entry| format!("{entry:?}"))
         .collect()
-}
-
-/// The "<Mon D>" the auto-name ends with on the bench's clock.
-fn month_day_of(bench: &DeviceBench) -> String {
-    let derived = crate::app::devices::derive_flash_name("x", bench.clock.get(), &[]);
-    derived.trim_start_matches("x · ").to_string()
 }
 
 // ---------------------------------------------------------------------
@@ -5843,19 +5856,16 @@ fn a_ready_board_publishes_its_verbs_at_its_mac_with_their_levels() {
     ] {
         assert!(names.contains(&verb), "{verb} missing from {names:?}");
     }
-    for absent in [
-        "flash",
-        "connect",
-        "reconnect",
-        "cancel",
-        "retry",
-        "remove-project",
-    ] {
+    for absent in ["flash", "reconnect", "cancel", "retry", "remove-project"] {
         assert!(
             !names.contains(&absent),
             "{absent} on a Ready, empty board: {names:?}"
         );
     }
+    // Connect is the board's panel, here (Q9 of "connected"): a board
+    // running no project has none to show, and says so.
+    let connect = crate::OfferPath::parse("devices/mac-6055f90a0b0c/connect").unwrap();
+    assert_eq!(bench.offer_reason(connect), crate::NO_PROJECT);
     for (verb, lasting) in &verbs {
         let expected = matches!(verb.as_str(), "erase" | "forget" | "update-firmware");
         assert_eq!(*lasting, expected, "{verb}");
@@ -6260,7 +6270,7 @@ fn the_agents_flash_over_firmware_is_a_card_the_user_may_re_pick() {
     );
     assert_eq!(
         bench.view().devices[0].title,
-        format!("{} · Jan 1", users.title),
+        users.title,
         "named after the user's board"
     );
     let card = app_cards(&mut bench).remove(0);
@@ -7802,13 +7812,11 @@ fn a_sim_that_never_says_hello_fails_the_open_instead_of_holding_it() {
     bench.controller.request_library_refresh();
     drive(bench.controller.settle_library());
 
-    let outcome = drive(bench.controller.dispatch(UiAction::from_op(
-        crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::OpenPackage {
-            key: key.clone(),
-            prefer: None,
-        },
-    )));
+    // The gallery's open, pressed by path as the card and the agent press it.
+    let outcome = bench.press(
+        "project/open",
+        OfferArgs::new().with(crate::OPEN_PROJECT_PARAM, &key),
+    );
     assert!(
         outcome.is_ok(),
         "the open is held, never refused: {outcome:?}"
@@ -8685,7 +8693,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
     )));
     let error = result.expect_err("a newer-format head is refused");
     assert!(
-        error.to_string().contains("made by a newer LightPlayer"),
+        error.to_string().contains("Made by a newer LightPlayer"),
         "the classified reason reaches the caller: {error}"
     );
 
@@ -8710,7 +8718,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
         failure.message
     );
     assert!(
-        failure.message.contains("made by a newer LightPlayer"),
+        failure.message.contains("Made by a newer LightPlayer"),
         "the notice carries the classified reason: {:?}",
         failure.message
     );
@@ -9387,24 +9395,66 @@ fn an_unnamed_board_with_its_files_gets_the_ordinary_card_and_its_update() {
     }
 }
 
-/// A board whose filesystem was just formatted DOES need its files back —
-/// and still gets its Update beside the restore: an update (over the air,
-/// or a flash that keeps `lpfs`) never touches the board's files, so the
-/// files state never withholds it (defect 2026-10-06).
+/// A board this tab saw run a project that comes back from a power cut with
+/// its storage formatted DOES need its files back — and still gets its
+/// Update beside the restore: an update (over the air, or a flash that
+/// keeps `lpfs`) never touches the board's files, so the files state never
+/// withholds it (defect 2026-10-06). The same board's first, fresh boot
+/// said nothing about files: a formatted boot is a loss only on evidence
+/// the board held some (defect 2026-10-14).
 #[test]
 fn a_board_that_formatted_offers_its_restore_and_its_update() {
-    let device = unnamed_light_player(lpc_wire::FsBootState::Formatted);
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_base_mac("10:bd:a3:b0:8e:30")
+            .with_fs_boot_state(lpc_wire::FsBootState::Formatted)
+            .with_heartbeat_interval(Duration::from_millis(20)),
+    )));
     let (mut bench, tasks) = identified(&device, "usb-layout-formatted");
     let target = bench.view().devices[0].id;
-
     bench.wait_for_verb(&tasks, target, "update-firmware");
+    assert!(
+        !bench
+            .controller
+            .device_roster_view()
+            .layout
+            .contains_key(&target),
+        "a fresh boot lost nothing"
+    );
+
+    // It runs a project here, then loses power and boots formatted again,
+    // empty.
+    bench.push_gesture(target, bundled_example());
+    bench.run_until(&tasks, "the board to run what was pushed", |bench| {
+        bench.view().devices.first().is_some_and(|card| {
+            card.activity.is_none()
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
+    });
+    device.fake_power_cycle();
+    bench.run_until(&tasks, "the card to say its files are gone", |bench| {
+        bench
+            .controller
+            .device_roster_view()
+            .layout
+            .get(&target)
+            .is_some_and(|layout| layout.line.is_some())
+    });
     let layout = bench.controller.device_roster_view().layout[&target].clone();
     assert_eq!(
         layout.line.as_deref(),
-        Some("This board needs its files back — restore them from a backup file.")
+        Some(
+            "This board's files are gone. Restore them from a backup file if you have one. Or \
+             Start fresh, and the board waits for a new project."
+        )
     );
     assert!(layout.restore_from_file.is_some(), "the way back");
+    assert!(layout.start_fresh.is_some(), "the way on");
     assert!(card_offers(&bench, target, RESTORE_FROM_FILE));
+    assert!(card_offers(&bench, target, crate::START_FRESH));
     assert!(
         card_offers(&bench, target, "update-firmware"),
         "and its Update"
@@ -9460,7 +9510,7 @@ fn a_reboot_after_a_pull_mid_filesystem_write_still_offers_the_backup_and_update
         layout
             .line
             .as_deref()
-            .is_some_and(|line| line.contains("in a backup in this browser")),
+            .is_some_and(|line| line.contains("This browser kept a backup")),
         "{:?}",
         layout.line
     );

@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use lpa_link::layout_migration::device_backup_archive::BackupPurpose;
 use lpa_link::layout_migration::{
-    LayoutDecision, LayoutProbe, LpfsGeometry, decide, describe_layout,
+    LayoutDecision, LayoutProbe, LpfsGeometry, decide, describe_layout, firmware_reads_tree_store,
 };
 use lpa_link::providers::host_serial_esp32::{LayoutSessionOutcome, layout_session};
 use lpa_link::{LinkError, LinkLayoutInspection, PartitionTable, normalize_base_mac};
@@ -156,6 +156,12 @@ pub fn read_target(port: &str) -> Result<String> {
 /// command's whole point is "is the board now running what was asked for".
 pub fn wait_for_hello(port: &str, expected_version: &str, expected_target: &str) -> Result<()> {
     with_hello(port, |hello| {
+        if hello.hardware.fs == lpc_wire::FsBootState::Refused {
+            bail!(
+                "{}",
+                crate::commands::hardware::lpfs::refused_store_words(&hello)
+            );
+        }
         if hello.hardware.fs != lpc_wire::FsBootState::Mounted {
             bail!(
                 "the board came back with its filesystem {:?}, not mounted — its files are in \
@@ -209,6 +215,7 @@ fn decide_for(inspection: &LinkLayoutInspection) -> Result<LayoutDecision, LinkE
         inspection.target_image_len,
         None,
         false,
+        firmware_reads_tree_store(inspection.target_manifest.as_deref()),
     )
     .map_err(|refusal| LinkError::other(refusal_text(&refusal)))
 }

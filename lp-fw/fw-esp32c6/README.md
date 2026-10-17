@@ -240,6 +240,74 @@ just flash-fw-esp32c6 migrate=1                                  # the flash rec
 `just flash-fw-esp32c6` refuses to write a table that does not match the
 board's (exit 3) unless told `migrate=1` or `discard=1`.
 
+## The tree store as `lpfs` (`fs-tree`, never shipped)
+
+`--features esp32c6,server,fs-tree` makes `lpfs` the tree store
+(`lp-base/lp-tree-store`, plan
+`lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`). It is **never**
+in `lp-fw/builds/served.json`, a release or `bless-chips`: tests, the
+emulator walks and the CX1 sitting build it. Every board file goes through
+it, because they all go through `base_fs`.
+
+- **Flash:** `src/tree_flash.rs`, over esp-storage through the
+  word-alignment shim (`fw_esp32_common::aligned_nor_flash`): esp-storage
+  here refuses an unaligned offset or length and panics on an unaligned
+  buffer, and the store writes records at any byte offset, so every read
+  goes through an aligned bounce buffer and every program is padded to
+  whole words with `0xFF`. **Every program reaches the ROM word-aligned.**
+- **Reads go through the flash cache** (the mount study's C7): `lpfs` is
+  mapped by the MMU into the top of the loader's old scratch window
+  (`0x4275_0000..0x4280_0000` for 704 KiB at 32 KiB pages; the core and the
+  engine together never reach it) and the store reads it as memory, a
+  32-byte line fill instead of a ROM read call. After every program and
+  erase, `lp_tree_store::WindowedFlash` invalidates the range with the ROM's
+  `Cache_Invalidate_Addr` before the next read; a refused invalidate, or a
+  partition that does not fit the window, sends every read back to the ROM
+  calls (`[FS] lpfs is read by ROM calls: …` at boot for the latter).
+- **Hasher:** `src/hw_sha.rs` (`StoreSha256`): the SHA accelerator, or
+  software `sha2` while a boot hash holds it. Moved out of `ota/` because an
+  unsplit build has no `ota/`.
+- **Boot words** (`fw_esp32_common::tree_fs`; D2):
+  - `[FS] tree store mounted (<n> sectors, <free> free, root <seq>)` — `fs: mounted`;
+  - `[FS] tree store formatted (…)` — a partition with no store (blank,
+    littlefs, an interrupted first format), when the legacy probe holds
+    nothing — `fs: formatted`; the format is lazy: it erases sectors 0
+    and 1 and kills every other header (it erased all 176, ≈ 3.7–3.9 s on
+    silicon, until 2026-10-16);
+  - `[FS] tree store refused: a newer or damaged store header — files kept
+    (<why>); using memory FS, access locked` — `fs: refused`: nothing
+    written, the device store locked, Bluetooth off; read the files with
+    `lp-cli hardware tree extract`;
+  - a pre-repartition filesystem at the old offset is held, as today
+    (`legacy_held`). The legacy probe keeps littlefs linked.
+- **Update guard** (D8): the split build's update session refuses a core
+  install whose embedded manifest lacks the feature `fs.tree` — a littlefs
+  core would format the store
+  (`fw_esp32_common::fs_tree_core_guard`).
+- **The littlefs build's half** (adoption A5): today's littlefs image,
+  finding a partition littlefs will not mount, looks for the tree store's
+  sector magic `"LTS1"` at every sector before it formats
+  (`fw_esp32_common::lp_fs::holds_tree_store`). A tree store is held, not
+  formatted: `[FS] this board's files are in the tree store, a newer
+  filesystem than this firmware reads — not formatting; files kept; using
+  memory FS, access locked. Update the firmware.` — `fs: refused` with no
+  `fs.tree` in the hello, the same locked state as above. While it holds
+  one, its update session applies the same guard: only a core that reads
+  the store installs over the air.
+
+Two measurement features ride with it, neither shipped: `heap_peak_diag`
+(`[heap] peak=… live=… max_usage=… largest=…` after each heartbeat — the
+peak of requested bytes since the line before — and `[perf] fs mount <us>
+us` at boot; not with `heap_map_diag`) and `measure_no_legacy_probe`
+(`fs-tree` without the legacy probe: the size table's "littlefs removed"
+row; such a board formats a legacy layout instead of holding it). Size any
+of them with `just fw-esp32c6-size-check 65536 "" <features>`. The
+emulator walks are `lp-cli/tests/emu_tree_store_{boot,cuts,ram,perf}.rs`;
+the report is `docs/reports/2026-10-10-tree-store-emulator-walk.md`.
+
+`fs-tree` + `memory_fs` is a `compile_error!`. See
+`docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md`.
+
 ## Feature Notes
 
 The default feature set targets ESP32-C6 with server and radio support. Many

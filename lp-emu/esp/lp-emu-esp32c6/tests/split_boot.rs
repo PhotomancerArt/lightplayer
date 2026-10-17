@@ -4,8 +4,10 @@
 //! bootloader agrees with it.
 //!
 //! - **The ROM-up boot.** The whole merged image in the chip, the hart at
-//!   the mask ROM's reset vector, nothing placed: the ROM loads espflash
-//!   3.3.0's IDF bootloader, which loads the loader as its app; the loader
+//!   the mask ROM's reset vector, nothing placed: the ROM loads the
+//!   second-stage bootloader the image carries (whichever the build def
+//!   names: `lp-fw/bootloaders/README.md`), which loads the loader as its
+//!   app; the loader
 //!   reads the boot records, maps the core and copies its RAM segments; the
 //!   core starts the radios and links and opens the engine. Asserted on the
 //!   board's own words — the loader's ROM print, the core's first line, the
@@ -53,7 +55,8 @@ const ENGINE_LINE: &str = "[INIT] fw-esp32 initialized, starting server loop... 
 const CORE_FIRST: &str = "[INIT] Initializing board";
 
 /// The cache MMU page the layout is aligned to, and the one espflash
-/// 3.3.0's bundled bootloader picks on a 4 MB C6.
+/// 3.3.0's bundled bootloader (and its quiet rebuild) picks on a 4 MB C6.
+/// A bootloader that picked another would fail here.
 const PAGE: u32 = 0x8000;
 
 #[test]
@@ -83,9 +86,18 @@ fn the_split_image_boots_from_the_reset_vector_to_the_engine() {
     );
 
     let rom_console = m.uart0().text();
+    // The ROM handed the CPU to the bootloader (`entry`), and the bootloader
+    // started the loader after it. Not its log lines: which bootloader the
+    // image carries is the build def's choice, and a quiet one says nothing.
+    let entry = rom_console
+        .find("entry 0x")
+        .unwrap_or_else(|| panic!("the ROM started the bootloader:\n{rom_console}"));
+    let loader = rom_console
+        .find("[LOADER]")
+        .unwrap_or_else(|| panic!("the bootloader started the loader:\n{rom_console}"));
     assert!(
-        rom_console.contains("Loaded app from partition at offset 0x10000"),
-        "the bootloader loaded the loader as its app:\n{rom_console}"
+        entry < loader,
+        "the loader ran before the ROM entered the bootloader:\n{rom_console}"
     );
     assert!(
         rom_console.contains("[LOADER] core @0x18000 (proven)"),
@@ -217,6 +229,81 @@ fn a_direct_load_over_the_flashed_image_agrees_with_rom_up() {
         ours.len()
     );
 }
+
+#[test]
+#[ignore = "needs a split fw-esp32c6 build; `just test-emu-c6`"]
+fn a_core_segment_at_address_0_faults_the_loader_as_on_silicon() {
+    let split = match split_image(&FwImage::SHIPPED) {
+        Ok(s) => s,
+        Err(reason) => {
+            skip_notice(
+                "a_core_segment_at_address_0_faults_the_loader_as_on_silicon",
+                &reason,
+            );
+            return;
+        }
+    };
+    // The shipped chip, with the core's first segment (a RAM one) re-aimed
+    // at address 0: what espflash's padding segment is, and what the loader
+    // copied to address 0 on a board, where the store faulted
+    // (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md).
+    // Not strict: the fault is the chip's, not the checker's.
+    let mut chip = std::fs::read(split.merged()).unwrap();
+    let first_segment = CORE_OFFSET + 24;
+    let addr = u32::from_le_bytes(chip[first_segment..first_segment + 4].try_into().unwrap());
+    assert!(
+        (0x4080_0000..0x4088_0000).contains(&addr),
+        "the core's first segment is a RAM one: {addr:#x}"
+    );
+    chip[first_segment..first_segment + 4].copy_from_slice(&0u32.to_le_bytes());
+    let len = chip.len() as u32;
+    let mut m = Esp32C6Builder::new()
+        .boot_mode(BootMode::RomUp)
+        .app(AppSource::Path(split.p2_elf()))
+        .flash(lp_emu_esp32c6::flash::FlashBacking::Bytes(chip))
+        .flash_len(len)
+        .reset_cause(ResetCause::UsbUartHpSys)
+        .strap(Strap::App)
+        .uart0(Uart0Sink::Memory)
+        .usb_host(UsbHost::Attached { draining: true })
+        .build()
+        .expect("the ROM-up machine builds");
+    let outcome = m.run_until(&StopCondition::after_micros(GATE_US).exit_on(CORE_FIRST));
+    assert!(
+        !matches!(outcome, Outcome::ExitMatched { .. }),
+        "the core started over an address-0 segment: {outcome:?}\n{}",
+        consoles(&m)
+    );
+    assert!(!m.usb_sj().text().contains(CORE_FIRST), "{}", consoles(&m));
+    assert!(
+        !m.uart0().text().contains("[LOADER] core @0x18000 (proven)"),
+        "the loader said it booted the core:\n{}",
+        consoles(&m)
+    );
+    assert!(
+        m.bus.unmapped_writes() >= 1,
+        "the loader's store to 0 was seen"
+    );
+    // Silicon's words for it (CX1, 2026-10-14): `Guru Meditation Error:
+    // Core 0 panic'ed (Store/AMO access fault)`, then the registers.
+    let rom = m.uart0().text();
+    let said: Vec<&str> = rom
+        .lines()
+        .filter(|l| l.contains("Guru Meditation") || l.starts_with("PC ") || l.contains("MCAUSE"))
+        .collect();
+    assert!(
+        rom.contains("Store/AMO access fault"),
+        "the ROM named no store fault:\n{rom}"
+    );
+    println!(
+        "address-0 segment: the loader faulted ({outcome:?}); {} unmapped store(s):\n{}",
+        m.bus.unmapped_writes(),
+        said.join("\n")
+    );
+}
+
+/// Where the flashed image puts the core (`lp_bootctl::REGION_START`).
+const CORE_OFFSET: usize = 0x1_8000;
 
 /// The ROM-up machine: the merged image in the chip, nothing placed, the
 /// second link as the symbol table.

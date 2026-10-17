@@ -1,16 +1,18 @@
-//! The card's picture, and the words that used to be drawn over it.
+//! The card's picture, and its facts for the corner's details.
 //!
-//! The picture draws the board's lights or stays dark; nothing covers it
-//! (Q10). Where it comes from is its source: the board's link (live, stale,
+//! The picture draws the board's lights or stays dark. While the board is
+//! well nothing covers it; otherwise the card's surface does, and dims it
+//! ([`super::board_surface`]). Where it comes from is its source: the board's link (live, stale,
 //! or waiting for its first frame), the editor's lens (the last frame it
 //! left, dimmed), the last saved picture (dimmed), or nothing. While an
-//! update holds the board's lights, the picture is their one colour.
+//! update holds the board's lights, the picture is their one colour. A
+//! board that runs nothing has no picture: a fresh install never shows the
+//! last project's lights (`docs/ux/anatomy/board-card.md`, "Corner").
 //!
-//! Today's card said why there was no picture with a sentence in the slot
-//! (`preview_sentence`, `preview_slot_sentence`, `LOCKED_PREVIEW_SENTENCE`,
-//! the firmware faces' sentences) and named the picture's source with a
-//! pill ("live · 43 fps", "last frame · 12 s ago"). Those words are the
-//! status corner's "Picture" line now, word for word ([`picture_line`]).
+//! Why there is no picture, or where it comes from, is the status corner's
+//! "Picture" fact ([`picture_line`]); how fast it moves and how old it is
+//! are its "Frame rate" and "Last frame" facts — a label and a value, in
+//! the details only (P5, P17), never a reading on the picture.
 
 use lpa_devices::device::DeviceStatus;
 use lpa_devices::view::{ActivityView, DeviceView, LoadedProject};
@@ -18,10 +20,10 @@ use lpa_devices::view::{ActivityView, DeviceView, LoadedProject};
 use super::board_card_input::BoardCardInput;
 use super::held_board::{HELD_NO_PICTURE_LINE, HELD_PICTURE_LINE};
 use super::ui_board_picture::{PictureSource, UiBoardPicture};
-use crate::app::devices::age_words::age_words;
 use crate::app::devices::device_card_feed_view::{DeviceCardFeedView, FeedLiveness};
 use crate::app::devices::device_firmware_face::firmware_face_preview_sentence;
 use crate::app::devices::ui_link_kind::UiLinkKind;
+use crate::core::data_kinds::age_words;
 
 /// The picture's words on a board nothing has unlocked: it is locked, and
 /// Unlock (the card's primary) is the way in.
@@ -29,11 +31,14 @@ pub const LOCKED_PREVIEW_SENTENCE: &str = "Locked — Unlock it to see what it r
 
 /// The card's picture.
 pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
-    let feed = picture_feed(input);
+    let feed = picture_feed(input).filter(|_| !runs_nothing(input));
+    let lens_live = feed.is_some_and(lens_is_live);
     let source = match feed.map(|feed| feed.liveness) {
         // A board another tab holds has no link here: whatever the feed
         // says, the picture is the one that tab saved.
         Some(_) if input.held().is_some() => PictureSource::Saved,
+        // The open session's own frames (CD8): the lens's, current.
+        Some(_) if lens_live => PictureSource::Lens,
         Some(FeedLiveness::Live | FeedLiveness::Stale | FeedLiveness::Waiting) => {
             PictureSource::Link
         }
@@ -46,9 +51,22 @@ pub(crate) fn board_picture(input: &BoardCardInput<'_>) -> UiBoardPicture {
         frame: feed
             .and_then(|feed| feed.frame.clone())
             .filter(|frame| frame.display_layout.is_some()),
-        dim: matches!(source, PictureSource::Saved | PictureSource::Lens),
+        // Last known rather than current: a saved picture, or the frame the
+        // feed left when the lens took the wire. The lens's own frames are
+        // current, and drawn so.
+        dim: match source {
+            PictureSource::Saved => true,
+            PictureSource::Lens => !lens_live,
+            PictureSource::Link | PictureSource::None => false,
+        },
         light: input.update.and_then(|update| update.light),
     }
+}
+
+/// The picture is the lens session's own and current: live, or stale on a
+/// board that stopped publishing, read by the open session (CD8).
+pub(crate) fn lens_is_live(feed: &DeviceCardFeedView) -> bool {
+    feed.from_lens && matches!(feed.liveness, FeedLiveness::Live | FeedLiveness::Stale)
 }
 
 /// The status corner's "Picture" line: the sentence that says why there is
@@ -78,8 +96,51 @@ pub(crate) fn picture_line(input: &BoardCardInput<'_>) -> Option<String> {
             None => HELD_NO_PICTURE_LINE.to_string(),
         });
     }
+    let feed = feed.filter(|_| !runs_nothing(input));
     preview_slot_sentence(input.view, activity, feed)
         .or_else(|| feed.and_then(|feed| source_words(feed, activity, input.link_kind())))
+}
+
+/// The status corner's "Frame rate" fact: the rate of the frames the
+/// picture shows while it is live — the open session's own when the
+/// editor's lens reads them, else the board's last word — and nothing
+/// while it is not.
+pub(crate) fn frame_rate(input: &BoardCardInput<'_>) -> Option<String> {
+    let feed = picture_feed(input).filter(|_| !runs_nothing(input));
+    let fps = match feed {
+        Some(feed) if lens_is_live(feed) && feed.liveness == FeedLiveness::Live => feed.engine_fps,
+        Some(feed) if feed.liveness == FeedLiveness::Live => input
+            .view
+            .engine_fps
+            .filter(|_| input.linked())
+            .or(feed.engine_fps),
+        Some(_) => None,
+        None => input.view.engine_fps.filter(|_| input.linked()),
+    }?;
+    Some(format!("{fps} fps"))
+}
+
+/// The status corner's "Last frame" fact: how old the picture is when it
+/// is not live (stale, saved, the lens's last), in Studio's one age.
+pub(crate) fn last_frame(input: &BoardCardInput<'_>) -> Option<String> {
+    let feed = picture_feed(input).filter(|_| !runs_nothing(input))?;
+    feed.frame.as_ref()?;
+    let live = match feed.liveness {
+        FeedLiveness::Live => true,
+        FeedLiveness::Waiting => true,
+        _ => false,
+    };
+    (!live).then(|| age_words(feed.frame_age_secs.unwrap_or_default()))
+}
+
+/// The board runs nothing — it said so, or there is no LightPlayer on it
+/// — so whatever picture was saved is of a project it no longer has
+/// (finding 18: a fresh install showed its previous life's lights).
+fn runs_nothing(input: &BoardCardInput<'_>) -> bool {
+    input.held().is_none()
+        && (input.view.needs_firmware()
+            || input.view.loaded_project == LoadedProject::Empty
+            || *input.plays == crate::app::devices::board_plays::BoardPlays::Nothing)
 }
 
 /// The feed the picture is drawn from: none on a locked board (it answers
@@ -88,13 +149,16 @@ fn picture_feed<'a>(input: &BoardCardInput<'a>) -> Option<&'a DeviceCardFeedView
     input.feed.filter(|_| !input.locked())
 }
 
-/// Where the picture came from and how old it is — today's pill: nothing
-/// while an activity runs or before a frame exists.
+/// Where the picture comes from, when that is worth a sentence: the
+/// editor's session, the editor holding the board, a Bluetooth link's
+/// gentler pace, or a picture saved before the board went away. Nothing
+/// while an activity runs or before a frame exists. How fast it moves and
+/// how old it is are the "Frame rate" and "Last frame" facts.
 ///
-/// Over Bluetooth the live words also say how often the picture moves: the
-/// card pulls there at a gentler pace (`DEVICE_CARD_FEED_BLE_INTERVAL`, one
-/// to two pictures a second), so the board's "43 fps" beside a picture
-/// that steps once a second would read as a stall.
+/// Over Bluetooth the card pulls at a gentler pace
+/// (`DEVICE_CARD_FEED_BLE_INTERVAL`, one to two pictures a second), so the
+/// details say so: the board's "43 fps" beside a picture that steps once a
+/// second would read as a stall.
 pub(crate) fn source_words(
     feed: &DeviceCardFeedView,
     activity: Option<&ActivityView>,
@@ -104,25 +168,34 @@ pub(crate) fn source_words(
         return None;
     }
     feed.frame.as_ref()?;
-    let age = || age_words(feed.frame_age_secs.unwrap_or_default());
+    // The open session's frames, named as its (the ADR's §4: the details
+    // say where the picture comes from). Its pace is the session's reads,
+    // not the card feed's, so a Bluetooth link adds no pace words here.
+    if lens_is_live(feed) {
+        return Some(LENS_SOURCE_WORDS.to_string());
+    }
     Some(match feed.liveness {
-        FeedLiveness::Waiting => return None,
-        // The board's engine rate off its heartbeat; a board that has not
-        // reported one says "live" and nothing more.
-        FeedLiveness::Live => match (feed.engine_fps, over == UiLinkKind::Bluetooth) {
-            (Some(fps), false) => format!("live · {fps} fps"),
-            (None, false) => "live".to_string(),
-            (Some(fps), true) => format!("live · {fps} fps · {BLUETOOTH_PICTURE_PACE}"),
-            (None, true) => format!("live · {BLUETOOTH_PICTURE_PACE}"),
-        },
-        FeedLiveness::Stale | FeedLiveness::Offline => format!("last frame · {}", age()),
-        FeedLiveness::Lens => "editor has the wire".to_string(),
+        FeedLiveness::Waiting | FeedLiveness::Stale => return None,
+        FeedLiveness::Live if over == UiLinkKind::Bluetooth => BLUETOOTH_PICTURE_PACE.to_string(),
+        FeedLiveness::Live => return None,
+        FeedLiveness::Offline => SAVED_PICTURE_WORDS.to_string(),
+        FeedLiveness::Lens => EDITOR_HOLDS_IT_WORDS.to_string(),
     })
 }
 
-/// How often a Bluetooth card's picture moves, in the live words (see
-/// [`source_words`]).
-const BLUETOOTH_PICTURE_PACE: &str = "shown 1–2/s";
+/// How often a Bluetooth card's picture moves (see [`source_words`]).
+const BLUETOOTH_PICTURE_PACE: &str = "Shown once or twice a second over Bluetooth.";
+
+/// A picture saved before the board went away.
+const SAVED_PICTURE_WORDS: &str = "Saved before the board went away.";
+
+/// The editor holds the board's wire: the picture is its last frame.
+const EDITOR_HOLDS_IT_WORDS: &str = "The editor has the board; this is the last frame it left.";
+
+/// Where the connected card's picture comes from, in the picture line: the
+/// editor's session, which reads the board's frames while it holds the
+/// wire (CD8).
+pub const LENS_SOURCE_WORDS: &str = "From the editor's session.";
 
 /// The sentence when the picture is not the whole story.
 fn preview_slot_sentence(
@@ -167,16 +240,13 @@ fn preview_sentence(view: &DeviceView, activity: Option<&ActivityView>) -> Strin
         let label = activity.label.trim_end_matches(['…', '.', ' ']);
         return format!("{label}… the picture returns when the board does.");
     }
-    // A board Studio cannot reach has no feed coming: say when it was last
-    // heard (today's remembered tile's words), never "coming".
+    // A board Studio cannot reach has no feed coming, never "coming"; the
+    // Link row says how long it has been away (P2).
     if view.status == DeviceStatus::Offline {
-        return match &view.freshness_label {
-            Some(heard) => format!("Not connected — {heard}."),
-            None => "Not connected — Studio has not heard this board.".to_string(),
-        };
+        return "No picture — the board is offline.".to_string();
     }
     if view.loaded_project == LoadedProject::Empty {
-        return "Nothing on it yet — no picture until something runs.".to_string();
+        return "No project — no picture until one runs.".to_string();
     }
     "No picture yet — the live feed is coming.".to_string()
 }
@@ -186,7 +256,7 @@ mod tests {
     use lpa_devices::ActivityKind;
     use lpa_devices::view::FirmwareFace;
 
-    use super::super::card_fixtures::{CardFixture, activity, feed};
+    use super::super::card_fixtures::{CardFixture, activity, feed, lens_feed};
     use super::*;
     use crate::{UpdateLight, UpdateRowKind, UpdateVersion};
 
@@ -213,6 +283,54 @@ mod tests {
         let picture = board_picture(&CardFixture::ready().input());
         assert_eq!(picture.source, PictureSource::None);
         assert_eq!(picture.frame, None);
+    }
+
+    /// CD8: the open session's own frames are the lens's picture, current —
+    /// not dimmed — and the details read the session's rate and name where
+    /// the picture comes from; the corner says nothing. A board that stops
+    /// publishing goes stale under the lens as it does under the feed, still
+    /// the lens's, its age a fact.
+    #[test]
+    fn the_lens_sessions_frames_are_the_lens_picture_not_dimmed() {
+        let mut fixture = CardFixture::ready();
+        fixture.feed = Some(lens_feed());
+        let picture = board_picture(&fixture.input());
+        assert_eq!(picture.source, PictureSource::Lens);
+        assert!(!picture.dim, "current, not last known");
+        assert!(picture.frame.is_some());
+        assert_eq!(
+            picture_line(&fixture.input()).as_deref(),
+            Some(LENS_SOURCE_WORDS)
+        );
+        assert_eq!(
+            frame_rate(&fixture.input()).as_deref(),
+            Some("57 fps"),
+            "the session's rate, not the board's last word (58)"
+        );
+        assert_eq!(
+            super::super::board_surface::surface_state(&fixture.input()),
+            crate::SurfaceState::AllWell,
+            "live and well: the surface is the picture"
+        );
+
+        let mut stale = lens_feed();
+        stale.liveness = FeedLiveness::Stale;
+        stale.frame_age_secs = Some(12.0);
+        fixture.feed = Some(stale);
+        let picture = board_picture(&fixture.input());
+        assert_eq!(picture.source, PictureSource::Lens);
+        assert!(!picture.dim);
+        assert_eq!(last_frame(&fixture.input()).as_deref(), Some("12 s ago"));
+        assert_eq!(frame_rate(&fixture.input()), None);
+
+        // Over Bluetooth the session's reads set the pace: no card-feed
+        // pace words.
+        let mut over_ble = CardFixture::ready().over(UiLinkKind::Bluetooth);
+        over_ble.feed = Some(lens_feed());
+        assert_eq!(
+            picture_line(&over_ble.input()).as_deref(),
+            Some(LENS_SOURCE_WORDS)
+        );
     }
 
     #[test]
@@ -253,27 +371,54 @@ mod tests {
         );
     }
 
-    /// The source words are today's pill, in the corner now.
+    /// Where the picture comes from is a sentence only when it is worth one;
+    /// how fast and how old are facts (P5, P17).
     #[test]
-    fn the_picture_line_names_the_pictures_provenance_and_age() {
-        let line = |liveness| {
+    fn the_picture_facts_name_its_rate_its_age_and_its_source() {
+        let read = |liveness| {
             let mut fixture = CardFixture::ready();
             fixture.feed = Some(feed(liveness, true));
-            picture_line(&fixture.input())
+            let input = fixture.input();
+            (picture_line(&input), frame_rate(&input), last_frame(&input))
         };
-        assert_eq!(line(FeedLiveness::Live).as_deref(), Some("live · 43 fps"));
         assert_eq!(
-            line(FeedLiveness::Stale).as_deref(),
-            Some("last frame · 12 s ago")
+            read(FeedLiveness::Live),
+            (None, Some("58 fps".to_string()), None)
         );
         assert_eq!(
-            line(FeedLiveness::Offline).as_deref(),
-            Some("last frame · 12 s ago")
+            read(FeedLiveness::Stale),
+            (None, None, Some("12 s ago".to_string()))
         );
         assert_eq!(
-            line(FeedLiveness::Lens).as_deref(),
-            Some("editor has the wire")
+            read(FeedLiveness::Offline),
+            (
+                Some(SAVED_PICTURE_WORDS.to_string()),
+                None,
+                Some("12 s ago".to_string())
+            )
         );
+        assert_eq!(
+            read(FeedLiveness::Lens).0.as_deref(),
+            Some(EDITOR_HOLDS_IT_WORDS)
+        );
+    }
+
+    /// Finding 18: a board that runs nothing has no picture — a fresh
+    /// install never shows the last project's lights.
+    #[test]
+    fn a_board_that_runs_nothing_has_no_picture() {
+        let mut fixture = CardFixture::ready();
+        fixture.view.loaded_project = LoadedProject::Empty;
+        fixture.plays = crate::app::devices::board_plays::BoardPlays::Nothing;
+        fixture.feed = Some(feed(FeedLiveness::Offline, true));
+        let picture = board_picture(&fixture.input());
+        assert_eq!(picture.source, PictureSource::None);
+        assert_eq!(picture.frame, None);
+        assert_eq!(
+            picture_line(&fixture.input()).as_deref(),
+            Some("No project — no picture until one runs.")
+        );
+        assert_eq!(last_frame(&fixture.input()), None);
     }
 
     /// Ported from the old card: the sentence yields to a picture with
@@ -299,6 +444,7 @@ mod tests {
             liveness: FeedLiveness::Lens,
             frame_age_secs: None,
             engine_fps: None,
+            from_lens: false,
         };
         assert_eq!(
             preview_slot_sentence(&card, None, Some(&lens_no_frame)),
@@ -330,7 +476,7 @@ mod tests {
         card.loaded_project = LoadedProject::Empty;
         assert_eq!(
             preview_sentence(&card, None),
-            "Nothing on it yet — no picture until something runs."
+            "No project — no picture until one runs."
         );
         card.firmware_face = FirmwareFace::Blank;
         assert_eq!(
@@ -346,35 +492,28 @@ mod tests {
         );
     }
 
-    /// An offline board's picture line says it is not connected and when it
-    /// was last heard — never that a feed is coming (today's remembered
-    /// tile's words, ported from the page's offline tile).
+    /// An offline board's picture line says it is offline — never that a
+    /// feed is coming; how long it has been away is the Link row's (P2).
     #[test]
-    fn an_offline_boards_picture_line_says_when_it_was_heard() {
+    fn an_offline_boards_picture_line_says_it_is_offline() {
         let mut offline = CardFixture::offline();
         offline.view.freshness_label = Some("last heard 4 min ago".to_string());
         assert_eq!(
             picture_line(&offline.input()).as_deref(),
-            Some("Not connected — last heard 4 min ago.")
-        );
-        offline.view.freshness_label = None;
-        assert_eq!(
-            picture_line(&offline.input()).as_deref(),
-            Some("Not connected — Studio has not heard this board.")
+            Some("No picture — the board is offline.")
         );
         // Over its last link too: an offline Bluetooth board promises no
         // Bluetooth picture either.
         let mut ble = CardFixture::offline().over(UiLinkKind::Bluetooth);
-        ble.view.freshness_label = None;
         assert_eq!(
             picture_line(&ble.input()).as_deref(),
-            Some("Not connected — Studio has not heard this board.")
+            Some("No picture — the board is offline.")
         );
     }
 
     /// The picture runs on every link (#1062: over Bluetooth at a gentler
     /// pace), so no link says it has none, and a live Bluetooth picture's
-    /// words say how often it moves.
+    /// details say how often it moves.
     #[test]
     fn every_link_waits_for_its_picture_and_bluetooth_says_its_pace() {
         for link in [
@@ -394,27 +533,16 @@ mod tests {
         live.feed = Some(feed(FeedLiveness::Live, true));
         assert_eq!(
             picture_line(&live.input()).as_deref(),
-            Some("live · 43 fps · shown 1–2/s")
+            Some(BLUETOOTH_PICTURE_PACE)
         );
-        let mut no_fps = live.clone();
-        no_fps.feed.as_mut().expect("a feed").engine_fps = None;
-        assert_eq!(
-            picture_line(&no_fps.input()).as_deref(),
-            Some("live · shown 1–2/s")
-        );
-        // Stale reads the same on every link; Wi‑Fi's live words have no pace.
+        // Stale says nothing more on any link; Wi‑Fi's live picture needs
+        // no pace words.
         let mut stale = CardFixture::ready().over(UiLinkKind::Bluetooth);
         stale.feed = Some(feed(FeedLiveness::Stale, true));
-        assert_eq!(
-            picture_line(&stale.input()).as_deref(),
-            Some("last frame · 12 s ago")
-        );
+        assert_eq!(picture_line(&stale.input()), None);
         let mut wifi = CardFixture::ready().over(UiLinkKind::Wifi);
         wifi.feed = Some(feed(FeedLiveness::Live, true));
-        assert_eq!(
-            picture_line(&wifi.input()).as_deref(),
-            Some("live · 43 fps")
-        );
+        assert_eq!(picture_line(&wifi.input()), None);
     }
 
     fn update_words(light: Option<UpdateLight>) -> crate::UiDeviceUpdate {

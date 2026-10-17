@@ -229,12 +229,11 @@ const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_S
 const RELEASE_STEPS = ["install-older", "install-lookup", "install-file"].some((step) => STEPS.includes(step));
 /// The link this lane updates over, in the steps' words.
 const LINK_WORD = BLE ? "Bluetooth" : ON_LAN ? "Wi\u2011Fi" : "USB";
-/// The link the card must name: its connection bar's summary leads with the
-/// link's label (`UiLinkKind::label`, `ui_link_kind.rs`), then " · " and how
-/// it is going ("USB · live", "Bluetooth · connected", a new board's "USB ·
-/// new" — `connection_bar.rs`). Through the relay it is "Wi‑Fi via
-/// lightplayer.app".
-const LINK_LABEL = BLE ? "Bluetooth" : RELAY_LANE ? "Wi\u2011Fi via lightplayer.app" : LAN_LANE ? "Wi\u2011Fi" : "USB";
+/// The link the card must name: its Link row leads with the link's name
+/// (`UiLinkKind::label`, `ui_link_kind.rs`), then " · " and how it is going
+/// ("USB · connected", "Bluetooth · connecting" — `connection_bar.rs`).
+/// Through the relay it is "lightplayer.app".
+const LINK_LABEL = BLE ? "Bluetooth" : RELAY_LANE ? "lightplayer.app" : LAN_LANE ? "Wi\u2011Fi" : "USB";
 if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
   console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
   process.exit(2);
@@ -334,22 +333,27 @@ const MAIN_TEXT = `(document.querySelector('#main')?.innerText || '')`;
 ///   `UpdateStageFacts::label`): "Backing up current firmware… 40%",
 ///   "Updating firmware… 40%", "Restoring firmware… 35%", "Finishing the
 ///   update… 70%", "Another device is updating it… 40%".
-/// - What needs a person is the bar's summary (the update's line, NeedsYou):
-///   "Needs <v>, which Studio can't get", "Needs one update over USB".
+/// - A roster card's Firmware row says the update as its state, one number
+///   for the whole of it (`bar_work.rs`): "backing up · 12%", then
+///   "updating · N%" — the new firmware is 0–49 %, its last part 50–100 % —
+///   "resuming · N%", "restoring · N%".
+/// - What needs a person is the row's state: "incomplete" (a version Studio
+///   can't get), and a core from before over-the-air updates names itself
+///   "v… (pre-OTA)".
 ///
 /// Two kinds are not lines: "available" is the firmware bar's action, the
 /// over-the-air `update-firmware`, offered (`cardLines`); "up to date" is
 /// the firmware details' sentence (`upToDate`), since the bar shows the
 /// version alone.
 const CARD_LINES = [
-  ["backing up", /^Backing up\b[^\n]*/],
-  ["updating", /^(?:Updating · 1 of 2|Updating firmware…)[^\n]*/],
-  ["finishing", /^(?:(?:Updating|Resuming) · 2 of 2|Finishing the update…)[^\n]*/],
-  ["resuming", /^Resuming · [^\n]*/],
-  ["restoring", /^Restoring\b[^\n]*/],
+  ["backing up", /(?:\bbacking up · \d+%|^Backing up\b)[^\n]*/],
+  ["updating", /(?:\bupdating · [1-4]?\d%|^Updating firmware…)[^\n]*/],
+  ["finishing", /(?:\b(?:updating|resuming) · (?:[5-9]\d|100)%|^Finishing the update…)[^\n]*/],
+  ["resuming", /\bresuming · [^\n]*/],
+  ["restoring", /(?:\brestoring · |^Restoring\b)[^\n]*/],
   ["another device", /^Another device is updating it[^\n]*/],
-  ["cant get", /^Needs [^\n]*, which Studio can't get/],
-  ["needs usb", /^Needs one update over USB/],
+  ["cant get", /\bincomplete\b/],
+  ["needs usb", /\(pre-OTA\)/],
 ];
 
 /// A MAC's 12 lowercase hex, the way a card's path carries it
@@ -1043,13 +1047,13 @@ async function main() {
   /// every tick the firmware bar said "Updating · 1 of 2", leads with the
   /// link's label (`LINK_LABEL`).
   const checkLinkWord = (ran) => {
-    if (!ran.order.some((entry) => entry.kind === "updating")) throw new Error("the card never said Updating · 1 of 2");
+    if (!ran.order.some((entry) => entry.kind === "updating")) throw new Error("the card never said updating (the new firmware)");
     if (!ran.links.some((line) => line.startsWith(`${LINK_LABEL} · `))) {
       throw new Error(`while it updated, the card's connection bar said ${JSON.stringify(ran.links)}, never ${LINK_LABEL}`);
     }
   };
   /// Put the walk's project on the board, by its card's offers: a board
-  /// running a project already (its primary Edit can be pressed) is left as
+  /// running a project already (its project bar's Edit can be pressed) is left as
   /// it is; an empty one is given `push` — the project bar's "Add a
   /// project", drawn as the project pick — then the project in the picker,
   /// "Put it on the board", and the board's own "Project loaded" in its
@@ -1516,7 +1520,7 @@ async function main() {
   /// The board runs `release` and the card has finished: the board's core
   /// booted that build and committed its engine, and the board's card names
   /// the version — its firmware bar's summary, with no update work left on
-  /// it — and runs its project: its primary Edit can be pressed, and the
+  /// it — and runs its project: its project bar's Edit can be pressed, and the
   /// project details offer `remove-project`.
   const awaitRelease = async (board, release, from) => {
     const id = `${release.version}+${release.commit.slice(0, 12)}`;
@@ -1704,8 +1708,10 @@ async function main() {
             const air0 = await bleStats(board);
             const ran = await runUpdate(board, {
               cut: engine
-                ? { stage: "finishing", boardSays: /\[OTA\] offer \S+ → engine/, atPercent: 40 }
-                : { stage: "updating", boardSays: /\[OTA\] offer \S+ → core/, atPercent: 40, phantom },
+                // One number for the whole update: the engine's 40 % is 70 %,
+                // the core's is 20 %.
+                ? { stage: "finishing", boardSays: /\[OTA\] offer \S+ → engine/, atPercent: 70 }
+                : { stage: "updating", boardSays: /\[OTA\] offer \S+ → core/, atPercent: 20, phantom },
             });
             const air1 = await bleStats(board);
             if (!ran.cutAt) throw new Error("the walk never found the moment to cut");
@@ -1719,7 +1725,7 @@ async function main() {
             // The engine, the update's second piece: "Updating · 2 of 2"
             // (or "Resuming · 2 of 2"; a new board's card: "Finishing the
             // update…").
-            if (!BLE && !ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said Updating · 2 of 2");
+            if (!BLE && !ran.order.some((entry) => entry.kind === "finishing")) throw new Error("the card never said updating past 50 % (the last part)");
             const reconnects = ON_LAN
               ? checkWifiReconnects(await terminalLines(), 2)
               : checkReconnects(await terminalLines(), air0, air1, 1);
@@ -1758,7 +1764,7 @@ async function main() {
               // says no hello, so it is not kept): its connection details'
               // State says "Restoring firmware… N%" (`watchCard` keeps them
               // open). X running again: the board said who it is — its card
-              // kept and live — and runs its project (its primary Edit can be
+              // kept and live — and runs its project (its project bar's Edit can be
               // pressed) or is offered the update to Y over the air.
               const order = await watchCard(async (snap) => {
                 const card = snap.board;
@@ -1788,14 +1794,13 @@ async function main() {
               // card until it is kept: its no-click restore runs (and misses)
               // there, and the row that needs a person is on the kept card.
               // The new board's card (`data-board-corner="blank"`,
-              // `pending_board_card`) settled on core-only: its firmware bar
-              // says "<version> · waiting for its firmware"
-              // (`device_firmware_face.rs` `core_only_line`, the pending
-              // firmware bar's summary).
+              // `pending_board_card`) settled on core-only: its Firmware row
+              // reads "<version> incomplete", as the kept card's will
+              // (`firmware_bar.rs` `core_only_words`).
               const pending = await driver.waitFor(
                 `(() => { const card = JSON.parse(${snapshotExpr()}).board;
-                          return card && card.corner === 'blank' && /waiting for its firmware/.test(card.firmware?.line ?? '') ? card.path : false; })()`,
-                { timeoutMs: STEP_MS, what: "the new board's card to settle on core-only (… · waiting for its firmware)" },
+                          return card && card.corner === 'blank' && /\\bincomplete\\b/.test(card.firmware?.line ?? '') ? card.path : false; })()`,
+                { timeoutMs: STEP_MS, what: "the new board's card to settle on core-only (Firmware … incomplete)" },
               );
               await shot("cant-get-pending");
               // Set up this device: `adopt`, in the new board's hardware
@@ -2020,7 +2025,7 @@ async function main() {
               cut: {
                 stage: "updating",
                 boardSays: /\[OTA\] offer \S+ → core/,
-                atPercent: 40,
+                atPercent: 20,
                 act: async () => {
                   cutFrom = boardWords(board).length;
                   legs = cloud.cutDeviceLeg();
@@ -2093,7 +2098,7 @@ async function main() {
               cut: {
                 stage: "updating",
                 boardSays: /\[OTA\] offer \S+ → core/,
-                atPercent: 20,
+                atPercent: 10,
                 act: async () => {
                   const busyFrom = boardWords(board).length;
                   const refused = await lpCli(["wifi", "status", `lan:${door.forward}`, "--json"], { timeoutMs: 120_000 });

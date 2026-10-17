@@ -770,8 +770,6 @@ checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 [[package]]
 name = "bt-hci"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "211713d2e9fb4793ce4360a712c0764264aff6be48932ccf02ca2a331c0436a9"
 dependencies = [
  "btuuid",
  "embassy-sync 0.8.0",
@@ -779,6 +777,7 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "futures-intrusive",
  "heapless 0.9.2",
+ "log",
 ]
 
 [[package]]
@@ -4102,6 +4101,7 @@ dependencies = [
  "lp-app-version",
  "lp-gfx-lpvm",
  "lp-gfx-wgpu",
+ "lpa-client",
  "lpa-server",
  "lpc-hardware",
  "lpc-history",
@@ -4183,23 +4183,29 @@ name = "fw-esp32-common"
 version = "40.0.0"
 dependencies = [
  "async-trait",
+ "bt-hci",
  "critical-section",
  "embassy-futures",
  "embassy-net-driver",
  "embassy-sync 0.8.0",
  "embassy-time",
  "embedded-hal-async",
+ "embedded-io 0.7.1",
  "embedded-io-async 0.6.1",
+ "embedded-storage",
  "fw-core",
  "hashbrown 0.15.5",
  "littlefs-rust",
  "log",
  "lp-collection 1.0.0",
+ "lp-crc32",
  "lp-gfx",
  "lp-json-pack",
  "lp-link",
+ "lp-nor-sim",
  "lp-recovery",
  "lp-seam",
+ "lp-tree-store",
  "lpa-client",
  "lpa-server",
  "lpc-access",
@@ -4257,6 +4263,7 @@ dependencies = [
  "lp-perf",
  "lp-recovery",
  "lp-shader",
+ "lp-tree-store",
  "lp-ws281x",
  "lpa-server",
  "lpc-access",
@@ -6074,6 +6081,7 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-emu-core",
+ "lp-nor-sim",
  "lp-seam",
  "lp-ws281x",
  "object 0.37.3",
@@ -6522,6 +6530,7 @@ dependencies = [
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
+ "lp-tree-store",
  "lpc-access",
  "lpc-hardware",
  "lpc-model",
@@ -6595,6 +6604,8 @@ dependencies = [
  "js-sys",
  "littlefs-rust",
  "lp-bootctl",
+ "lp-nor-sim",
+ "lp-tree-store",
  "lpa-client",
  "lpa-devices",
  "lpc-access",
@@ -6645,11 +6656,14 @@ dependencies = [
 name = "lpa-server"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "hashbrown 0.15.5",
  "log",
  "lp-gfx-lpvm",
+ "lp-nor-sim",
  "lp-perf",
  "lp-recovery",
+ "lp-tree-store",
  "lpa-client",
  "lpc-access",
  "lpc-engine",
@@ -6663,7 +6677,9 @@ dependencies = [
  "lpc-wire",
  "lpfs",
  "lpvm-native",
+ "miniz_oxide",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7030,6 +7046,8 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
+ "lp-deflate",
+ "miniz_oxide",
  "serde",
  "tempfile",
 ]
@@ -10960,8 +10978,6 @@ dependencies = [
 [[package]]
 name = "trouble-host"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1df7817cead4b83dfbeeaa59736ecbc97c30b21dc3bfc0cc2ce8a6687f70b37a"
 dependencies = [
  "bt-hci",
  "embassy-futures",

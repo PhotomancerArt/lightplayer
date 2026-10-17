@@ -59,6 +59,7 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         wifi_connect: None,
         take_over: None,
         update: None,
+        sending: None,
         layout: None,
         plays: &lpa_studio_core::BoardPlays::Running {
             label: "demo-project".to_string(),
@@ -70,6 +71,8 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
         ended: None,
         editor_holds_it: true,
         now: 0.0,
+        connection: &lpa_studio_core::BoardConnection::Watched,
+        panel: None,
     });
     UiLensCard::Board(Box::new(card))
 }
@@ -104,6 +107,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         state_label: "Ready".to_string(),
         detail: None,
         freshness_label: None,
+        heard_age_ms: None,
         identity_label: Some("02:1a:2b:3c:4d:5e".to_string()),
         detected_chip: None,
         board_id: Some("lightplayer/desktop".to_string()),

@@ -101,7 +101,7 @@ fn classify(head: &[u8; SECTOR_HEADER_LEN as usize], sector: &[u8], size: u32) -
         SectorRead::Untrusted => {
             if sector.iter().all(|&b| b == 0xFF) {
                 SectorState::Blank
-            } else if head.iter().all(|&b| b == 0) {
+            } else if crate::sector_header::reads_killed(head) {
                 SectorState::Killed
             } else if head.iter().all(|&b| b == 0xFF) {
                 SectorState::NeedsErase {

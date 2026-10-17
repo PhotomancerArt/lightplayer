@@ -199,6 +199,16 @@ name = "flash-tears"
 description = "Tree-store M4: power cuts on a SACRIFICIAL C6 (CX1, `c6-expendable`, tag `sacrificial`), to measure what real NOR tears look like and calibrate `lp-nor-sim`'s tear models against them. The image owns the first 18 sectors of `lpfs` and destroys the filesystem there. A silicon recording is fifty cuts: `scripts/emu/flash-tears-cuts.py` answers each boot's ready line, reads its scan to `[flash-tears] === SCAN DONE ===`, waits a random 50-2000 ms and cuts the power with `board power-cycle` (it refuses any board the desk registry does not tag `sacrificial`). `scripts/emu/flash-tears-soak.sh` runs the whole sitting as recordings of this set. The emulated twin cuts five times between flash operations, so its scans must show no tears at all: that is the dry run."
 payloads = ["flash-tears"]
 
+[[set]]
+name = "flash-tears-unaligned"
+description = "Tree-store M4's owed sitting (from M2 P10): the `flash-tears` power cuts on the same SACRIFICIAL C6, with every program started off a 32-byte boundary (a 20-byte write at offset 0, then 16-1040-byte writes, word-aligned and never on a 32-byte boundary, at `20 + k*4`, drawn from sector and cycle), to measure whether a torn prefix stops relative to the write's address or on absolute 32-byte boundaries. Same image gates, cut driver and emulated dry run as `flash-tears`; `scripts/emu/flash-tears-soak.sh --unaligned` runs it."
+payloads = ["flash-tears-unaligned"]
+
+[[set]]
+name = "flash-reprogram"
+description = "Tree-store M7: does programming a torn word AGAIN with its intended value make its weak bits read solid? PR #1136's settle step assumes it (from `lp-nor-sim`'s model), and nothing on silicon had tried it. Power cuts on the same SACRIFICIAL C6 (CX1, `c6-expendable`, tag `sacrificial`); the image owns the WHOLE `lpfs` partition. Its work loop does one thing (every other erase or program runs before the scan-done line): on odd generations it programs the region, so the cut lands in a program; on even ones it erases the 64 sectors its boot programmed, so the cut lands in an erase (a program cut tears inside a word about 1 time in 80, a torn erase leaves sectors of part-lifted cells). Each boot re-reads the previous boot's re-programmed words (the further power cycle), finds this cut's torn words by reading the bytes around the frontier 64 times, reads each 4,096 times left alone (the control), re-programs its write with the intended bytes, and reads it 64 and 4,096 times again; after an erase loop it does the same for a torn sector, at the sector's scale (64 reads, 512 left alone, programmed to 0x00, 512 again). `scripts/emu/flash-tears-soak.sh --reprogram` runs it; `scripts/emu/flash-reprogram-analyze.py` reads it. The emulated twin cuts three times between flash operations: no torn words, the flow only."
+payloads = ["flash-reprogram"]
+
 # ---------------------------------------------------------------------------
 # Configurations
 # ---------------------------------------------------------------------------
@@ -552,6 +562,45 @@ because = "the same pin observation as t1 and t2, from the same fabric and the s
 class = "wire"
 grade = "modeled"
 because = "the same UART0 model as t1 and t2: the bytes are the guest's, a live socket's arrival times are the host's"
+
+[[configuration]]
+name = "lp-emu:esp32c6:t4"
+description = "t3, plus the flash interface's time (lp-emu-esp32c6/src/flash_timing.rs): every SPI1 transfer keeps `cmd` busy for its wire time at the SCK (PCR's MSPI clock divided by the controller's own `clock`) and the line widths and phase lengths its registers give; a page program or an erase holds the part's write-in-progress bit for CX1's busy times (NorTiming::CX1) while the guest's own ROM loop polls it with interrupts masked as on silicon; a cache line fill costs what SPI0's registers say a 32-byte read costs (338 cycles at the shipped DIO/80 MHz, which is t3's constant); and EXTMEM's range invalidates drop the lines they name. A direct load leaves the flash interface as the IDF bootloader does for the header's mode. Memory is identical to t1–t3 by construction; the interleaving is not."
+chip = "esp32c6"
+mac = "a0:f2:62:87:b4:8c"
+silicon_rev = "v0.2"
+board = "seeed/xiao-esp32-c6"
+records_pins = true
+
+[[configuration.trust]]
+class = "memory"
+grade = "modeled"
+because = "the same allocator and the same RAM model as t1–t3: a flash command's time answers in cycles, never in bytes"
+
+[[configuration.trust]]
+class = "timing"
+grade = "modeled"
+because = "no transcript grades it: t4 is t3's calibrated cycle model plus a flash interface whose constants are silicon figures from CX1 (JEDEC 0x464016) — the 338-cycle DIO line fill and its 80 MHz SCK (t3 calibration; the 2026-10-17 DIO/QIO sitting measured 2,167 ns DIO and 1,315 ns QIO), the sector erase from the tree store's first-boot format, the 32-byte program fitted to flash-tears' ft-timing page time — and its predictions are compared with the tree store's silicon mount, save, load and first-light records in docs/reports/2026-10-17-c6-flash-timing-emulator.md, inside about 15 % where the report says so and outside it where it says why. Block erase and status-write busy times are estimates or unmodelled. FRAME RATE UNDER LINK LOAD IS NOT GRADED HERE EITHER: t4 changes nothing about t3's cold-code-path caveat. Never gate on its microseconds"
+
+[[configuration.trust]]
+class = "boot-log"
+grade = "modeled"
+because = "direct load prints no ROM or bootloader banner; the time grade changes nothing about that"
+
+[[configuration.trust]]
+class = "usb-serial-jtag"
+grade = "modeled"
+because = "the same host model as t1–t3"
+
+[[configuration.trust]]
+class = "pin"
+grade = "modeled"
+because = "the same pin observation as t1–t3, from the same fabric and the same decoder; what a time grade moves is the frame count in a fixed wall of emulated time, which is reported as timing"
+
+[[configuration.trust]]
+class = "wire"
+grade = "modeled"
+because = "the same UART0 model as t1–t3"
 
 # ---------------------------------------------------------------------------
 # The classic ESP32 on our own machine (M5).

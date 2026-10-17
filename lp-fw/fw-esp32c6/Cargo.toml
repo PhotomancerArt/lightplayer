@@ -208,6 +208,12 @@ desk_ble_fault = ["ble"]
 # moves the chip's heap figures: `just bless-chips esp32c6`.
 lp_sram_heap = []
 heap_map_diag = ["lpc-shared"]
+# The heap's peak between two heartbeats, one `[heap] peak=… live=…
+# max_usage=… largest=…` line per heartbeat (`src/heap_peak_diag.rs`) — OFF
+# by default, never shipped: the tree store's RAM figures (plan
+# `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, D5). It owns
+# esp-alloc's hooks, so not with `heap_map_diag`. The wire is unchanged.
+heap_peak_diag = ["esp-alloc/alloc-hooks"]
 heap_track_diag = ["heap_map_diag", "esp-alloc/alloc-hooks"]
 heap_diag_ble_standin = ["heap_map_diag"]
 # The `rmt-chase` payload's harness: a 256-LED white chase on GPIO18 through
@@ -247,6 +253,30 @@ test_button = ["server"]  # Test root-owned GPIO button input with internal pull
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
 memory_fs = []  # Use in-memory filesystem instead of persistent flash
+# A MEASUREMENT build, never shipped: `fs-tree` without the legacy-layout
+# probe (`flash_storage::legacy_lpfs_present_at`, the one thing that keeps
+# littlefs linked in an `fs-tree` image), so the size check measures "the
+# tree store with littlefs removed" (plan Q5/Q21). A board on it formats a
+# pre-repartition layout instead of holding it: never flash one that has one.
+measure_no_legacy_probe = ["fs-tree"]
+# The tree store as `lpfs` (plan
+# `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`) — OFF by default,
+# NEVER shipped: never in `lp-fw/builds/served.json`, a release or
+# `bless-chips`. The board's filesystem is `lp-tree-store` over esp-storage
+# (`src/tree_flash.rs`: the word-alignment shim) with the SHA accelerator as
+# its hasher (`src/hw_sha.rs`); every board file goes through it, because
+# they all go through `base_fs`. Mount verdicts (`fw_esp32_common::tree_fs`):
+# a partition with no store (blank, littlefs, an interrupted first format)
+# is formatted, unless the legacy-layout probe finds a pre-repartition
+# filesystem (then held, as today); a newer or damaged store is REFUSED —
+# nothing written, files kept, access locked (`fs: refused`). Its update
+# session refuses a core install built without `fs-tree` (a littlefs core
+# would format the store). littlefs stays linked for the legacy probe. See
+# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md. Not
+# `test_*` (that prefix is a harness entrypoint), and not with `memory_fs`.
+#
+#   cargo build --profile release-esp32 --features esp32c6,server,fs-tree
+fs-tree = ["server", "fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 # JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
@@ -282,6 +312,17 @@ test_rmt_rx = ["dep:fw-checks", "fw-checks/check-rmt-rx", "fw-checks/check-rmt"]
 # classifier and boot flow live in fw-checks as `checks::flash_tears`; what
 # stays here is esp-storage, the clock, the USB link and the reset reason.
 test_flash_tears = ["dep:fw-checks", "fw-checks/check-flash-tears"]
+# The same harness as the `flash-tears-unaligned` payload: every program
+# starts off a 32-byte boundary, so a torn prefix says whether program
+# commands count from the write's address or from absolute boundaries. Same
+# board, same gates; never built together with `test_flash_tears`.
+test_flash_tears_unaligned = ["dep:fw-checks", "fw-checks/check-flash-tears"]
+# The `flash-reprogram` payload's harness (tree-store M7): power cuts on the
+# same SACRIFICIAL board, every one while the part programs, and each torn
+# word programmed again with its intended value and read back — does that
+# make its weak bits solid? It owns the WHOLE `lpfs` partition. The flow
+# lives in fw-checks as `checks::flash_reprogram`.
+test_flash_reprogram = ["dep:fw-checks", "fw-checks/check-flash-reprogram"]
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
 # f32 soft-float semantics harness (roadmap M9). The ONLY configuration in this
 # crate that turns `float-f32` on: the C6 has no FPU, ships Fixed-mode shaders,
@@ -425,7 +466,9 @@ esp-alloc = { version = "0.10.0", default-features = false, features = ["global-
 # The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-251"] }
-bt-hci = { version = "0.8.0", optional = true, default-features = false }
+# `log`: the fork's one warning (a Command Complete with more return bytes
+# than its command declares, third_party/bt-hci/README-LP.md).
+bt-hci = { version = "0.8.0", optional = true, default-features = false, features = ["log"] }
 heapless = { version = "0.9", optional = true }
 # trouble-host 0.6's `#[gatt_server]` expands to `static_cell::…` and
 # `embassy_sync::…` paths, and its embassy-sync is 0.7 (ours is 0.8); the
@@ -531,6 +574,9 @@ log = { workspace = true, default-features = false }
 embedded-storage = "0.3"
 esp-storage = { version = "0.9", features = ["esp32c6", "panic-unaligned-buffer"] }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
+# `fs-tree` only: the tree store as `lpfs`. No `soft-sha` (the SHA
+# accelerator is the hasher), no `stats`.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs"], optional = true }
 
 [lints]
 workspace = true

@@ -30,10 +30,16 @@ pub mod seams;
 pub mod serial;
 pub mod time;
 
+#[cfg(feature = "fs-tree")]
+pub mod aligned_nor_flash;
 #[cfg(feature = "server")]
 pub mod boot;
 #[cfg(feature = "server")]
 pub mod chip_identity;
+// Every server build: an `fs-tree` board always guards, a littlefs board
+// that holds a tree store guards too (ADR 2026-10-10, amended 2026-10-16).
+#[cfg(feature = "server")]
+pub mod fs_tree_core_guard;
 #[cfg(feature = "server")]
 pub mod hardware;
 #[cfg(feature = "server")]
@@ -43,6 +49,8 @@ pub mod lp_fs;
 pub mod radio_link;
 #[cfg(feature = "server")]
 pub mod server_loop;
+#[cfg(feature = "fs-tree")]
+pub mod tree_fs;
 #[cfg(feature = "uart-link")]
 pub mod uart_link;
 pub mod update_send;

@@ -130,7 +130,8 @@ mod tests {
 
     /// The home page reverses D7: an offline board is not folded away
     /// under a line, it is a card under Offline boards — and that card
-    /// draws the board's last picture, dimmed, with its age in the corner.
+    /// draws the board's last picture, dimmed under the surface's "This
+    /// board is offline.", its age a fact in the corner's details too.
     #[test]
     fn an_offline_board_is_a_card_with_its_last_picture_and_its_age() {
         let mut devices = roster(vec![
@@ -145,7 +146,20 @@ mod tests {
         let card = slot_card(&sections.offline[0], &devices).expect("its card");
         assert!(card.picture.frame.is_some(), "{:?}", card.picture);
         assert!(card.picture.dim, "a last picture is dimmed");
-        assert_eq!(card.status.reading.as_deref(), Some("3 h ago"));
+        assert_eq!(card.surface.state, lpa_studio_core::SurfaceState::Offline);
+        assert_eq!(
+            card.surface.picture,
+            lpa_studio_core::SurfacePicture::Dimmed,
+            "the picture dims under the surface's notice"
+        );
+        assert!(
+            card.status.details.sections.iter().any(|section| section
+                .lines
+                .iter()
+                .any(|line| line.label == "Last frame" && line.value == "3 h ago")),
+            "{:?}",
+            card.status.details
+        );
     }
 
     fn entry(id: u64, kind: UiHomeBoardKind) -> UiHomeBoard {
@@ -190,6 +204,7 @@ mod tests {
             projects: &[],
             lens: None,
             now: 0.0,
+            panel: None,
         })
     }
 
@@ -217,6 +232,7 @@ mod tests {
             frame_age_secs: Some(3.0 * 3_600.0),
             engine_fps: None,
             liveness: lpa_studio_core::FeedLiveness::Offline,
+            from_lens: false,
         }
     }
 
@@ -228,6 +244,7 @@ mod tests {
             state_label: String::new(),
             detail: None,
             freshness_label: None,
+            heard_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,

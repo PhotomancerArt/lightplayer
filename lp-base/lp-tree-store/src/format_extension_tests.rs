@@ -50,7 +50,9 @@ fn an_unknown_incompat_flag_refuses_the_mount_and_format_recovers() {
     reseal_header(&mut f, victim, |h| h[11] |= 0x01);
     let mut f = refused(f, &c, "unknown incompat flag");
 
-    TreeStore::format(&mut f, &mut SoftSha256, &c).unwrap();
+    TreeStore::format(&mut f, SoftSha256, c.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
     let mut st = mount(f, &c);
     assert!(snapshot(&mut st).is_empty());
     st.put("/x.json", b"{}").unwrap();
@@ -141,15 +143,18 @@ fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
     let (c, f, _) = small_store();
     let mut probe = f.clone();
     probe.set_plan(FaultPlan::none());
-    TreeStore::format(&mut probe, &mut SoftSha256, &c).unwrap();
+    TreeStore::format(&mut probe, SoftSha256, c.clone())
+        .map_err(|(e, ..)| e)
+        .unwrap();
     let ops = probe.ops_since_plan();
-    let mut runs = 0u32;
+    let tears = crate::test_support::sweep_tears();
+    let mut runs = 0usize;
     for k in 0..ops {
-        for tear in crate::test_support::sweep_tears() {
+        for &tear in &tears {
             for seed in 0..24u64 {
                 let mut g = f.clone();
                 g.set_plan(FaultPlan::cut(k, tear, seed << 8 | k));
-                assert!(TreeStore::format(&mut g, &mut SoftSha256, &c).is_err());
+                assert!(TreeStore::format(&mut g, SoftSha256, c.clone()).is_err());
                 g.power_cycle(FaultPlan::none());
                 for s in 0..SECTORS {
                     for _ in 0..4 {
@@ -168,7 +173,13 @@ fn a_torn_kill_erase_or_header_program_never_reads_as_newer() {
             }
         }
     }
-    assert!(runs > 1000, "{runs} runs");
+    // The bar was set at three models (> 1000 runs); it scales with how many
+    // `LP_TREE_STORE_SWEEP_TEARS` names.
+    assert!(
+        runs * 3 > 1000 * tears.len(),
+        "{runs} runs over {} models",
+        tears.len()
+    );
 }
 
 /// A root whose tail carries a tag this version does not know is the
@@ -247,6 +258,101 @@ fn an_unknown_record_kind_is_skipped() {
     assert!(!cells.windows(19).any(|w| w == b"a record from later"));
     let mut st = mount(f, &c);
     assert_eq!(st.list("/").unwrap(), ["/churn.json"]);
+}
+
+/// An index checkpoint in the reserved layout (FORMAT.md "Reserved: the
+/// index checkpoint") — a kind-6 chunk of the live records, a kind-7 top
+/// with watermarks and one run, and a root naming the top by tag 1 — is
+/// invisible to version 3: the root is adopted as if its tail were empty,
+/// neither record is indexed, the files read as they did, and the next
+/// commit drops the tag.
+#[test]
+fn a_reserved_index_checkpoint_mounts_as_if_absent() {
+    use crate::format_reservations::*;
+    let (c, f, want) = small_store();
+    let mut st = mount(f, &c);
+    let committed = st.committed.clone().unwrap().root;
+    let id = |h: &mut SoftSha256, tag: u8, payload: &[u8]| {
+        use crate::object_hasher::ObjectHasher;
+        let d = h.sha256(&[&[tag], payload]);
+        ObjectId(u64::from_be_bytes(d[..8].try_into().unwrap()))
+    };
+    // The chunk: every indexed record, sorted by id (the index already is).
+    let n = st.log.index.len();
+    let mut chunk = Vec::new();
+    chunk.extend_from_slice(&(n as u16).to_le_bytes());
+    for i in 0..n {
+        let loc = st.log.index.loc_at(i);
+        let len = st.log.header_at(loc).unwrap().total_len();
+        chunk.extend_from_slice(&st.log.index.id_at(i).0.to_le_bytes());
+        chunk.extend_from_slice(&(loc.sector as u16).to_le_bytes());
+        chunk.extend_from_slice(&(loc.offset as u16).to_le_bytes());
+        chunk.extend_from_slice(&(len as u16).to_le_bytes());
+    }
+    assert_eq!(chunk.len(), 2 + INDEX_ENTRY_LEN * n);
+    let chunk_id = id(&mut st.hasher, INDEX_CHUNK_ID_TAG, &chunk);
+    let cold = st.log.heads[HeadKind::Cold.index()].expect("a cold head");
+    let hot = st.log.heads[HeadKind::Hot.index()].expect("a hot head");
+    let chunk_at = u32::from(st.log.sectors.end[cold as usize]);
+    // The top: covered seq, the two watermarks, one run of one level-0 ref.
+    let mut top = alloc::vec![0x80];
+    top.extend_from_slice(&committed.seq.to_le_bytes());
+    top.push(2);
+    for s in [cold, hot] {
+        top.extend_from_slice(&st.log.sectors.seq[s as usize].to_le_bytes());
+        top.extend_from_slice(&st.log.sectors.end[s as usize].to_le_bytes());
+    }
+    top.push(1);
+    top.extend_from_slice(&(n as u32).to_le_bytes());
+    top.push(0);
+    top.extend_from_slice(&1u16.to_le_bytes());
+    top.extend_from_slice(&st.log.index.id_at(0).0.to_le_bytes());
+    top.extend_from_slice(&chunk_id.0.to_le_bytes());
+    top.extend_from_slice(&(cold as u16).to_le_bytes());
+    top.extend_from_slice(&(chunk_at as u16).to_le_bytes());
+    top.extend_from_slice(&0u16.to_le_bytes());
+    let top_id = id(&mut st.hasher, INDEX_FENCE_ID_TAG, &top);
+    let top_at = u32::from(st.log.sectors.end[hot as usize]);
+    // The root, tag 1 naming the top.
+    let mut root = RootRecord {
+        seq: committed.seq + 1,
+        ..committed.clone()
+    }
+    .encode();
+    root.extend_from_slice(&[INDEX_TOP_ROOT_TAG, 12, 0]);
+    root.extend_from_slice(&top_id.0.to_le_bytes());
+    root.extend_from_slice(&(hot as u16).to_le_bytes());
+    root.extend_from_slice(&(top_at as u16).to_le_bytes());
+    let root_id = ObjectId::of(&mut st.hasher, IdTag::Root, &[&root]);
+    let root_at = top_at + RECORD_HEADER_LEN + top.len() as u32;
+    let mut f = st.into_flash();
+    program_record(&mut f, cold, chunk_at, INDEX_CHUNK_KIND, chunk_id, &chunk);
+    program_record(&mut f, hot, top_at, INDEX_FENCE_KIND, top_id, &top);
+    program_record(
+        &mut f,
+        hot,
+        root_at,
+        RecordKind::Root.to_u8(),
+        root_id,
+        &root,
+    );
+
+    let mut st = mount(f, &c);
+    let got = st.committed.clone().unwrap();
+    assert_eq!((got.id, got.root.seq), (root_id, committed.seq + 1));
+    assert!(!st.log.index.contains(chunk_id));
+    assert!(!st.log.index.contains(top_id));
+    assert_eq!(snapshot(&mut st), want);
+    st.put("/b.json", b"[]").unwrap();
+    let next = st.committed.clone().unwrap();
+    let (_, p) = st.log.read_record(next.id).unwrap();
+    assert_eq!(
+        p.len(),
+        ROOT_FIXED_LEN + 2 * next.root.retired.len(),
+        "tag 1 kept"
+    );
+    let mut st = mount(st.into_flash(), &c);
+    assert_eq!(st.get("/b.json").unwrap().unwrap(), b"[]");
 }
 
 /// A formatted store with a few files (cold, multi-part, hot).

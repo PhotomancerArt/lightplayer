@@ -264,7 +264,7 @@ pub(crate) fn control_history_popover_open() -> Element {
 
 #[story(
     label = "Changes panel — the receipt names vNEXT",
-    description = "The changes panel, mounted directly, on a project whose projection knows its next version: the receipt says \"Save banks v13\" — the same number the History segment's newest row will wear after the save. The two segments read one ledger from opposite ends, which is why they sit next door to each other."
+    description = "The changes panel, mounted directly, on a project whose projection knows its next version: the receipt says \"Save to keep them as v13\" — the same number the History segment's newest row will wear after the save. The two segments read one ledger from opposite ends, which is why they sit next door to each other."
 )]
 pub(crate) fn control_changes_panel_dirty() -> Element {
     let changes = dirty_content_with_history().changes();
@@ -546,6 +546,7 @@ fn sim_control(board: Option<&str>) -> UiChromeSessionControl {
         stat_line: board.map(|_| "60 fps · 217 lamps".to_string()),
         update: None,
         link: lpa_studio_core::UiLinkKind::Usb,
+        connected: false,
     }
 }
 
@@ -563,6 +564,7 @@ fn hardware_control() -> UiChromeSessionControl {
         stat_line: Some("43 fps".to_string()),
         update: None,
         link: lpa_studio_core::UiLinkKind::Usb,
+        connected: false,
     }
 }
 
@@ -590,7 +592,7 @@ fn control_content(persisted: usize, failed: usize, status: UiStatus) -> Project
 }
 
 /// The dirty-list-open story's content: two persisted edits, both listed
-/// (not just counted) so the popover's "Unsaved (persisted)" section shows
+/// (not just counted) so the popover's "Unsaved changes" section shows
 /// real rows with per-entry revert, matching the closed changes segment's
 /// count.
 fn dirty_content() -> ProjectDetailContent {

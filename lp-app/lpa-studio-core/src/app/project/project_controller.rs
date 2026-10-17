@@ -1164,6 +1164,16 @@ impl ProjectController {
     /// Whether the server is saving panel state for this project
     /// (panel.md P11), as of the last runtime read.
     ///
+    /// The lens session's newest composed picture across every output the
+    /// board has published, with the lens's own frame clock
+    /// ([`ProjectSync::frames_seen`]): what the device card draws while the
+    /// editor's session holds the wire (CD8). `None` until a read has
+    /// carried a frame.
+    pub fn lens_published_frame(&self) -> Option<(crate::UiControlProductPreview, u64)> {
+        let sync = self.sync.as_ref()?;
+        Some((sync.composed_published_frame()?, sync.frames_seen()))
+    }
+
     /// The P11 switch's READ path. It rides `ServerRuntimeStatus` on the
     /// ordinary project read Studio makes every refresh rather than a
     /// message of its own, so the toggle converges exactly the way engaged
@@ -1883,7 +1893,7 @@ impl ProjectController {
             .map(|node| node.label().to_string())
             .unwrap_or_else(|| entry.artifact.file_path().as_str().to_string());
         let detail = match entry.body_len() {
-            Some(len) => asset_body_size_display(len),
+            Some(len) => crate::byte_size(len as u64),
             None => "deleted".to_string(),
         };
         let phase = if entry.summary.failed > 0 {
@@ -3155,7 +3165,7 @@ impl ProjectController {
         }
         self.transient_fork_generation += 1;
         Ok(Some(UiNotice::info(
-            "Saved — this project is now in your library",
+            "Saved. This project is in your library now.",
         )))
     }
 
@@ -3682,7 +3692,7 @@ impl ProjectController {
         if local != remote {
             log::error!("library/runtime hash mismatch after save: {local} vs {remote}");
             return Ok(Some(UiNotice::warning(
-                "Saved, but the library copy differs from the running project — please report this",
+                "Saved, but the copy in your library differs from the running project. Please report this.",
             )));
         }
         Ok(None)
@@ -5193,11 +5203,11 @@ impl ProjectController {
 
         let notice = match (export, upgraded, downgraded) {
             (true, true, _) => UiNotice::info(format!(
-                "{folder} is exported — {project} is now a pattern project"
+                "{folder} is exported. {project} is a pattern project now."
             )),
             (true, false, _) => UiNotice::info(format!("{folder} is exported from {project}")),
             (false, _, true) => UiNotice::info(format!(
-                "{folder} is no longer exported — {project} is a general project again"
+                "{folder} is no longer exported. {project} is a general project again."
             )),
             (false, _, false) => UiNotice::info(format!("{folder} is no longer exported")),
         };
@@ -6961,9 +6971,9 @@ impl ProjectController {
         let changes = &commit.result.artifact_changes;
         let written = changes.added.len() + changes.changed.len() + changes.removed.len();
         let notice = if written == 0 {
-            UiNotice::info("Save found no persisted edits to write")
+            UiNotice::info("Nothing to save")
         } else {
-            UiNotice::info(format!("Saved {written} project file(s)"))
+            UiNotice::info("Saved")
         };
         let mut notices = UiNotices::new().with_notice(notice);
         let mut pulled = true;
@@ -6976,7 +6986,7 @@ impl ProjectController {
                     pulled = false;
                     log::warn!("save-as-pull failed (will retry on next save): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
-                        "Saved to the running project, but not yet to your library — will retry on the next save",
+                        "Saved to the running project, but not to your library yet. Studio will try again on the next save.",
                     ));
                 }
             }
@@ -7008,7 +7018,7 @@ impl ProjectController {
                 Err(e) => {
                     log::warn!("fork-at-save failed (session stays transient): {e:?}");
                     notices = notices.with_notice(UiNotice::warning(
-                        "Saved in this session, but couldn't add the project to your library — will retry on the next save",
+                        "Saved in this session, but couldn't add the project to your library. Studio will try again on the next save.",
                     ));
                 }
             }
@@ -7040,7 +7050,7 @@ impl ProjectController {
             .await?;
         let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
         let notices = if rejections.is_empty() {
-            UiNotices::new().with_notice(UiNotice::info("All pending edits reverted"))
+            UiNotices::new().with_notice(UiNotice::info("All unsaved changes reverted"))
         } else {
             rejection_notices(&rejections)
         };
@@ -7072,7 +7082,7 @@ impl ProjectController {
             .collect();
         if addresses.is_empty() {
             return Ok(ProjectEditRun::notice(UiNotice::info(format!(
-                "No pending edits under {node}"
+                "No unsaved changes in {node}"
             ))));
         }
 
@@ -7099,7 +7109,7 @@ impl ProjectController {
                 }
                 Err(reason) => {
                     notices = notices.with_notice(UiNotice::warning(format!(
-                        "Revert on {} could not reach the server overlay: {reason}",
+                        "Couldn't revert {}: {reason}",
                         address.path
                     )));
                 }
@@ -7133,7 +7143,7 @@ impl ProjectController {
         let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
         notices = if rejections.is_empty() {
             notices.with_notice(UiNotice::info(format!(
-                "Reverted {reverted} pending edit(s) under {node}"
+                "Reverted {reverted} change(s) in {node}"
             )))
         } else {
             rejections.iter().fold(notices, |notices, rejection| {
@@ -7224,7 +7234,7 @@ impl ProjectController {
                 }
                 Err(reason) => {
                     notices = notices.with_notice(UiNotice::warning(format!(
-                        "Clear on {} could not reach the server overlay: {reason}",
+                        "Couldn't clear {}: {reason}",
                         address.path
                     )));
                 }
@@ -7445,9 +7455,7 @@ impl ProjectController {
         let outcome = server.project_create_node(handle_id, request).await?;
         let mut logs = outcome.logs;
         match outcome.response {
-            WireCreateNodeResponse::Created {
-                artifact_changes, ..
-            } => {
+            WireCreateNodeResponse::Created { .. } => {
                 // Focus resolves once the created node's tree entry lands in
                 // an applied view (usually the refresh right below).
                 self.pending_focus = Some(PendingNodeFocus {
@@ -7472,10 +7480,8 @@ impl ProjectController {
                         log::warn!("post-create inventory read failed: {error:?}");
                     }
                 }
-                let mut notices = UiNotices::new().with_notice(UiNotice::info(format!(
-                    "Added {name} ({} file(s) written)",
-                    artifact_changes.added.len()
-                )));
+                let mut notices =
+                    UiNotices::new().with_notice(UiNotice::info(format!("Added {name}")));
                 // Creation committed files — pull them into the library so it
                 // lands as a Saved event (reload-safe). Same failure posture
                 // as save: the runtime already committed fine.
@@ -7485,7 +7491,7 @@ impl ProjectController {
                     Err(error) => {
                         log::warn!("create save-pull failed (will retry on next save): {error:?}");
                         notices = notices.with_notice(UiNotice::warning(
-                            "Added to the running project, but not yet to your library — will sync on the next save",
+                            "Added to the running project, but not to your library yet. Studio will try again on the next save.",
                         ));
                     }
                 }
@@ -8186,7 +8192,7 @@ impl ProjectController {
             Ok(artifact) => artifact,
             Err(reason) => {
                 return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                    "Revert on {} could not reach the server overlay: {reason}",
+                    "Couldn't revert {}: {reason}",
                     address.path
                 ))));
             }
@@ -8327,7 +8333,8 @@ impl ProjectController {
             Ok(artifact) => artifact,
             Err(reason) => {
                 return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                    "{verb} on {} could not reach the server overlay: {reason}",
+                    "Couldn't {} {}: {reason}",
+                    verb.to_lowercase(),
                     address.path
                 ))));
             }
@@ -9069,8 +9076,8 @@ impl ProjectController {
             // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
             // with its bytes preserved and nothing is sent.
             let reason = format!(
-                "asset too large to send (limit {} KB)",
-                MAX_ASSET_BODY_BYTES / 1024
+                "asset too large to send (limit {})",
+                crate::byte_size(MAX_ASSET_BODY_BYTES as u64)
             );
             let notice = format!(
                 "Edit on {} was not sent: {reason}",
@@ -9412,7 +9419,7 @@ fn asset_extension(source_path: &str) -> String {
 fn attach_unavailable_notice(attach: &UiAttachTarget) -> UiNotice {
     match attach {
         UiAttachTarget::ProjectRoot => {
-            UiNotice::warning("Cannot add a node before the project tree has synced")
+            UiNotice::warning("Can't add a node until the project has loaded")
         }
         UiAttachTarget::Playlist { node } => UiNotice::warning(format!(
             "Cannot add to {node}: the playlist is not in the synced project, or its \
@@ -10043,15 +10050,6 @@ fn asset_edit_keys(
     }
 }
 
-/// Human-readable byte size for an asset body row ("824 B", "3.2 KB").
-fn asset_body_size_display(len: usize) -> String {
-    if len < 1024 {
-        format!("{len} B")
-    } else {
-        format!("{:.1} KB", len as f64 / 1024.0)
-    }
-}
-
 /// Human-readable slot path for a change-list entry: the path display, or
 /// the root's name for root-path edits (an empty path renders nothing).
 fn slot_path_display(address: &ProjectSlotAddress) -> String {
@@ -10556,7 +10554,7 @@ fn project_editor_stats(
         }
         stats.push(UiMetric::new("Buffers", runtime.runtime_buffer_count));
         if let Some(free_bytes) = runtime.free_bytes {
-            stats.push(UiMetric::new("Memory free", format_bytes(free_bytes)));
+            stats.push(UiMetric::new("Memory free", crate::byte_size(free_bytes)));
         }
     }
     stats
@@ -10568,14 +10566,6 @@ fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
         ProjectSyncPhase::SyncingProject => "Syncing",
         ProjectSyncPhase::Ready => "Synced",
         ProjectSyncPhase::Failed => "Needs attention",
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1024 {
-        format!("{} KB", bytes / 1024)
-    } else {
-        format!("{bytes} B")
     }
 }
 
@@ -11201,7 +11191,7 @@ mod tests {
         let error = project
             .migrate_package_on_open(&mut handle, 2.0)
             .expect_err("below the floor");
-        assert!(error.message().contains("Format 3"), "{error}");
+        assert!(error.message().contains("Format too old (3)"), "{error}");
         assert_eq!(
             handle.history.head(),
             before,
@@ -11214,7 +11204,7 @@ mod tests {
             panic!("expected the failed state, got {:?}", project.state);
         };
         assert!(
-            issue.message.contains("Format 3 — too old for this Studio"),
+            issue.message.contains("Format too old (3)"),
             "{}",
             issue.message
         );
@@ -16695,7 +16685,7 @@ mod tests {
                 .action
                 .meta()
                 .summary
-                .contains("revert from the save panel"),
+                .contains("restore it from Changes"),
             "delete carries the composed pre-flight as its summary"
         );
         assert!(
@@ -17504,7 +17494,7 @@ mod tests {
         assert!(
             run.notices.notices[0]
                 .message
-                .contains("Reverted 2 pending edit(s)")
+                .contains("Reverted 2 change(s)")
         );
     }
 
@@ -17530,7 +17520,7 @@ mod tests {
         assert!(
             run.notices.notices[0]
                 .message
-                .contains("No pending edits under")
+                .contains("No unsaved changes in")
         );
     }
 
@@ -18635,7 +18625,10 @@ mod tests {
         let run = block_on_ready(project.save_overlay(&mut client)).unwrap();
 
         assert_eq!(run.notices.notices.len(), 1);
-        assert!(run.notices.notices[0].message.contains("Saved 1"));
+        assert_eq!(
+            run.notices.notices[0].message, "Saved",
+            "one file was written"
+        );
         assert_eq!(
             sent.borrow().len(),
             2,

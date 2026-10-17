@@ -434,10 +434,14 @@ async function main() {
       if (section !== "online") throw new Error(`tab B's card is under ${section ?? "no section"}, not Online boards`);
       await driverB.waitOffer("take-over", { board: state.mac, timeoutMs: STEP_DEADLINE_MS });
       const words = await driverB.offerWords("take-over", { board: state.mac });
-      if (words !== "Connect") throw new Error(`the held card's primary is ${JSON.stringify(words)}, not Connect`);
+      if (words !== "Connect here") throw new Error(`the held card's primary is ${JSON.stringify(words)}, not Connect here`);
       const picture = await driverB.pictureOf({ board: state.mac });
       if (picture?.source !== "saved" || !picture.frame || !picture.dim) {
         throw new Error(`the held card's picture is not A's saved one, dimmed: ${JSON.stringify(picture)}`);
+      }
+      // The card's top says it, over that picture (`board_surface.rs`).
+      if (picture.surface !== "another-tab") {
+        throw new Error(`the held card's surface says ${JSON.stringify(picture.surface)}, not another-tab`);
       }
       // What B's pick cost: the chooser registers the port it picks without
       // the sweep's gate (`request_grant` in `device_effects.rs`), so B may
@@ -446,7 +450,7 @@ async function main() {
       // held the board.
       const attempts = await openAttempts(driverB);
       report.bAttemptsAfterPick = attempts;
-      return `B: Online boards, "Open in another tab", Connect = take-over, picture ${picture.source}${picture.dim ? " (dimmed)" : ""}; B's open() ran ${untouched} time(s) before the pick and ${attempts} after it; B reads A's lock`;
+      return `B: Online boards, "Open in another tab", Connect here = take-over, surface ${picture.surface}, picture ${picture.source}${picture.dim ? " (dimmed)" : ""}; B's open() ran ${untouched} time(s) before the pick and ${attempts} after it; B reads A's lock`;
     });
 
     // ---------------------------------------------------------------- 3

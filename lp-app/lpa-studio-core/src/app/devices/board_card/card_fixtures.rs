@@ -9,10 +9,13 @@ use lpa_devices::{
     ActivityKind, DeviceId, FirmwareAge, HeldElsewhere, HoldLevel, HoldVia, WireVersion,
 };
 
-use super::board_card_input::BoardCardInput;
+use super::board_card_input::{BoardCardInput, link_icon};
+use super::board_connection::BoardConnection;
+use super::ui_board_panel::UiBoardPanel;
 use crate::app::access::{UiDeviceAccess, UiUnlockOffer, device_unlock_offer};
 use crate::app::devices::activity_ends::ActivityEnd;
 use crate::app::devices::board_plays::BoardPlays;
+use crate::app::devices::connect_offer::{ConnectFacts, device_connect_offer};
 use crate::app::devices::device_card_feed_view::{DeviceCardFeedView, FeedLiveness};
 use crate::app::devices::device_layout_view::UiDeviceLayout;
 use crate::app::devices::device_offers::{DeviceOfferFacts, device_offers};
@@ -20,6 +23,7 @@ use crate::app::devices::device_reset_reach::ResetReach;
 use crate::app::devices::device_update_offers::UpdateOfferFacts;
 use crate::app::devices::device_update_words::UiDeviceUpdate;
 use crate::app::devices::devices_op::DeviceFace;
+use crate::app::devices::done_offer::device_done_offer;
 use crate::app::devices::edit_offer::device_edit_offer;
 use crate::app::devices::lan_link_view::UiLanLink;
 use crate::app::devices::relay_connect_offer::connect_relay_offer;
@@ -31,7 +35,7 @@ use crate::app::devices::wifi_connect_offer::connect_wifi_offer;
 use crate::app::devices::wifi_connects::UiWifiConnect;
 use crate::app::home::{UiExampleCard, UiPackageCard};
 use crate::app::network::UiDeviceWifi;
-use crate::{OfferPath, UiOffer};
+use crate::{ConnectReach, OfferPath, UiOffer};
 
 /// One board's facts, owned; [`Self::input`] publishes its verbs and lends
 /// the builder its input.
@@ -49,6 +53,8 @@ pub(crate) struct CardFixture {
     /// A take-over of the board from another tab, under way or failed.
     pub take_over: Option<UiTakeOver>,
     pub update: Option<UiDeviceUpdate>,
+    /// The project a push is sending, by name.
+    pub sending: Option<String>,
     /// The update standing the offers are published from.
     pub update_facts: UpdateOfferFacts,
     pub layout: Option<UiDeviceLayout>,
@@ -58,7 +64,15 @@ pub(crate) struct CardFixture {
     pub shared_with: Vec<String>,
     pub last_seen_at: Option<f64>,
     pub ended: Option<ActivityEnd>,
+    /// This tab's session is on the board (its card, or the docked card).
     pub editor_holds_it: bool,
+    /// …and the editor shows it (the docked card): no `edit`, as the
+    /// controller publishes none there.
+    pub docked: bool,
+    /// Where the session stands on the board.
+    pub connection: BoardConnection,
+    /// The panel picks the controller hands a connected card.
+    pub panel: Option<UiBoardPanel>,
     pub now: f64,
     /// The board's registry uid (its `edit` needs one).
     pub uid: Option<String>,
@@ -94,6 +108,7 @@ impl CardFixture {
             wifi_connect: None,
             take_over: None,
             update: None,
+            sending: None,
             update_facts: UpdateOfferFacts::default(),
             layout: None,
             plays: BoardPlays::Running {
@@ -105,6 +120,9 @@ impl CardFixture {
             last_seen_at: None,
             ended: None,
             editor_holds_it: false,
+            docked: false,
+            connection: BoardConnection::Watched,
+            panel: None,
             now: 1_000_000.0,
             uid: Some("devporch0000000000".to_string()),
             reset: ResetReach::Lines,
@@ -149,6 +167,15 @@ impl CardFixture {
             taken_from_here: false,
         });
         fixture.plays = BoardPlays::Unknown;
+        fixture
+    }
+
+    /// The same board, its link open and silent: the model projects Retry.
+    pub fn not_answering() -> Self {
+        let mut fixture = Self::ready();
+        fixture.view.status = DeviceStatus::NotResponding;
+        fixture.view.state_label = "Not responding".to_string();
+        fixture.view.escapes = vec![Escape::Retry, Escape::Disconnect, Escape::Forget];
         fixture
     }
 
@@ -200,6 +227,7 @@ impl CardFixture {
             wifi_connect: self.wifi_connect.as_ref(),
             take_over: self.take_over.as_ref(),
             update: self.update.as_ref(),
+            sending: self.sending.as_deref(),
             layout: self.layout.as_ref(),
             plays: &self.plays,
             sharing: self.sharing,
@@ -208,6 +236,8 @@ impl CardFixture {
             last_seen_at: self.last_seen_at,
             ended: self.ended.as_ref(),
             editor_holds_it: self.editor_holds_it,
+            connection: &self.connection,
+            panel: self.panel.as_ref(),
             now: self.now,
         }
     }
@@ -280,11 +310,40 @@ impl CardFixture {
             ));
         }
         offers.extend(device_unlock_offer(&self.board, &self.view, unlock));
-        offers.extend(device_edit_offer(
-            &self.board,
-            &self.view,
-            self.uid.as_deref(),
-        ));
+        // The session's verbs, as the controller's `session_offers` publish
+        // them: `connect`, `edit` (not where the editor shows the board) and
+        // `done` (on the board the session is on).
+        let reach = match offline_wire {
+            true if self.wifi_address => Some(ConnectReach::Wifi),
+            true if self.relay => Some(ConnectReach::Relay),
+            true => (self.view.escapes.contains(&Escape::Reconnect)
+                && !self
+                    .view
+                    .held_elsewhere
+                    .as_ref()
+                    .is_some_and(|held| held.via == HoldVia::Usb))
+            .then_some(ConnectReach::Usb),
+            false => None,
+        };
+        let connect = ConnectFacts {
+            registered: self.uid.is_some(),
+            session_on_it: self.editor_holds_it,
+            granted: unlock != Some(UiUnlockOffer::Locked),
+            icon: link_icon(self.link.unwrap_or_default()),
+            reach,
+            waiting: self.connection == BoardConnection::Connecting,
+        };
+        offers.extend(device_connect_offer(&self.board, &self.view, &connect));
+        if !self.docked {
+            offers.extend(device_edit_offer(
+                &self.board,
+                &self.view,
+                self.uid.as_deref(),
+            ));
+        }
+        if self.editor_holds_it {
+            offers.push(device_done_offer(&self.board));
+        }
         offers.extend(self.extra_offers.iter().cloned());
         offers.retain(|offer| {
             !self
@@ -335,6 +394,7 @@ fn ready_view() -> DeviceView {
         state_label: "Ready".to_string(),
         detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
         freshness_label: None,
+        heard_age_ms: None,
         identity_label: Some("a0:f2:62:87:b4:8c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
@@ -384,6 +444,18 @@ pub(crate) fn feed(liveness: FeedLiveness, with_layout: bool) -> DeviceCardFeedV
         frame_age_secs: Some(12.0),
         engine_fps: Some(43),
         liveness,
+        from_lens: false,
+    }
+}
+
+/// The lens session's own live picture, as the card draws it while the
+/// lens holds the wire (CD8): a moment old, at the lens's engine rate.
+pub(crate) fn lens_feed() -> DeviceCardFeedView {
+    DeviceCardFeedView {
+        frame_age_secs: Some(0.2),
+        engine_fps: Some(57),
+        from_lens: true,
+        ..feed(FeedLiveness::Live, true)
     }
 }
 

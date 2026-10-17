@@ -53,6 +53,52 @@ avoided. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
   specs) over any implementation.
 - If unsure whether a source is safe to copy from: **ask; do not copy.**
 
+## What you may do without asking
+
+Yona answers yes to nearly every question agents ask here. On 2026-10-14 he
+said that what should reach him is the Lasting calls, product and UX
+direction, and hardware sittings. Everything else ships, and he reads it
+afterwards. Sort every action by what a wrong call costs:
+
+- **Routine — do it.** Edit, commit, push, open and ready a PR, watch and
+  fix CI, file defects, debt entries and ADRs.
+- **Undoable — do it, and say what you did.** A revert or the next release
+  puts it back. **Merging your own PR to `main` is Undoable, and you are
+  authorized to do it** once every check on its head is green. When the diff
+  touches a firmware-linked crate (`lp-base/`, `lp-core/`, `lp-shader/`,
+  `lp-fw/`, `lp-riscv/`), the emulator jobs and the "Heap budget" job must
+  have *run* and passed. Skipped by the path filter does not count: run
+  them yourself (`just test-emu-c6`, `just heap-budget-check-chips`) or hand
+  the merge over. The deploy that rides the merge is Undoable too: Main push,
+  Release firmware, Deploy Cloud Service, `/healthz`. Watch it. So are wire
+  changes with their `WIRE_PROTO_VERSION` bump (no compatibility during
+  development), public API changes, CI and justfile edits, new dependencies
+  whose license fits, and UI changes with no open design question.
+- **Lasting — ask.** A revert cannot put it back:
+  - persisted bytes: project/package files and `PROJECT_FORMAT_VERSION`,
+    the cloud store, stamped device identity, the access and network files
+    (see "Persisted-format compatibility");
+  - the never-break pins: lp-link's plain, secure and update-channel
+    goldens, `lpc-update`'s v1 golden, the LAN endpoint contract,
+    `RELAY_PROTO_VERSION` and the relay goldens;
+  - released-firmware formats (the ota-manifest, the release index), the
+    boot records and the loader;
+  - deleting user data, anywhere;
+  - anything outward: other repos, upstream issues, posts, messages;
+  - spending money.
+
+Whatever the cost, also ask about:
+
+- product or UX direction the plan did not settle;
+- loosening a budget, ratchet or acceptance number;
+- license provenance you are unsure of (above);
+- anything that needs hands or a desk board;
+- any call where you have no confident lean.
+
+**A question you would end with "Lean: yes" about something Undoable is a
+decision you have already made.** Make it, and list it under "Decided
+without you" in your report. The `yona-*` skills carry the same sort.
+
 ## How to Handle `no_std` Issues
 
 When a dependency in the GLSL → LPIR → machine code path does not support
@@ -210,8 +256,11 @@ the app through the same view model and presses the same actions. See
   core reads it: the agent's readout leads with it and lists only the
   focused node's verbs in full, ⌘K ranks by it. Core never navigates,
   routes or opens anything because of it; navigation stays in
-  `router.rs`. Don't report what core already owns (node focus, card
-  sections, `UiSelection`): read it.
+  `router.rs`. It may pick which surface of an already-open session it
+  builds (a connected board's card, or the editor) from the place, and it
+  still opens, closes and navigates nothing because of it
+  (`ConnectedBoard::shows_editor`). Don't report what core already owns
+  (node focus, card sections, `UiSelection`): read it.
 - **View state is not an offer.** The home page's tabs, its cards/list
   switch and a fold are page-local state, not user verbs: no `UiAction`, not
   in the offer tree. The agent reads every section of the page through
@@ -333,6 +382,14 @@ the app through the same view model and presses the same actions. See
   may not dial. See `docs/adr/2026-10-07-c6-wifi-link.md` and
   `docs/adr/2026-10-06-cloud-relay.md` ("Device side"); the emulated LAN
   (`net=lan`) is `docs/adr/2026-10-05-emulator-seams.md` §11.
+- **A push is one transaction** (wire 42). Every project write runs one
+  primitive, `lpa_client::push_files::deploy_files`: `BeginBatch`, whose
+  `atomic` answer (`LpFs::batches_are_atomic`) says whether the board commits
+  it as one, deflated chunks (`writeChunkDeflated`), and `CommitBatch` after
+  the load and hash. The batch is the server's one piece of fs state, owned by
+  a link and ended by its close or reset (`ServerTransport::take_reset_links`)
+  or 60 s idle; an `LpFs` wrapper forwards every method. See
+  `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`.
 - **Project loads are tried, not gated.** There is no headroom gate before a
   `LoadProject`. A load is recorded in the RTC recovery region until its
   project has run 3 frames. A switch that resets the board boots the
@@ -766,8 +823,10 @@ A plan that ends at a review gate keeps its PR in draft. Title it
 `<type>: <plan title>` from the plan's H1 and open the body with
 `Plan: lp2025/<planning-dir>` so PRs correlate to the planning workspace.
 
-The pipeline does not end at the PR. `yona-ship` takes the green PR through
-merge and deploy: merging to `main` runs "Main push" (tag + release, not
+The pipeline does not end at the PR. `yona-implement` runs `yona-ship` in the
+same session when no gate is pending, and ship takes the green PR through
+merge and deploy without asking unless the plan declared a ship gate or the
+work did something Lasting (see "What you may do without asking"): merging to `main` runs "Main push" (tag + release, not
 marked Latest), and a green run triggers both **"Release firmware"**
 (`release-firmware.yml`: builds every served firmware package once, checks
 it, attaches it to the release, marks Latest) and "Deploy Cloud Service" to
@@ -788,7 +847,8 @@ This applies to every session, not just delegated ones. See
 ### Defect and debt registers during implementation
 
 When implementation fixes a user-reported or walk-found defect, write or close
-its `docs/defects/` entry in the same change (see `docs/defects/README.md`).
+its `docs/defects/` entry in the same change (see `docs/defects/README.md`;
+the entry is the whole change, since the index is built from frontmatter).
 When it hits a recurring operational burden, check `docs/debt/` for the entry,
 follow its Workarounds, and append the incident; file a new entry only for a
 structural, recurring burden. Do the same during push and CI repair — a CI
@@ -1188,9 +1248,11 @@ approval, or final pre-merge review — follow
   server to see it".
 - Always state the exact gate questions.
 - Every session runs the full pipeline by default: implement → validate →
-  PR → CI green → review handoff when the change is user-visible. That
-  includes sessions started from a task chip or a delegation prompt, and
-  prompts that file task chips must say so too.
+  PR → CI green → merge and deploy (`yona-ship`), stopping only at a gate a
+  plan declared or before something Lasting. A user-visible change with no
+  open design question is not a gate: it merges, and its screenshots go in
+  the ship report. That includes sessions started from a task chip or a
+  delegation prompt, and prompts that file task chips must say so too.
 
 Claude sessions: the repo skill `lp-review-handoff` executes this checklist.
 
@@ -1214,9 +1276,25 @@ produced) a regression test, or the lesson outlives the fix. Fix-forward
 trivialities stay commit messages.
 
 When you fix a qualifying bug, write the entry in the same change; when a walk
-or debugging session finds one you don't fix, file it `status: open`. Update
-the index in `docs/defects/README.md` either way. Recurring classes in that
-index are architecture signals — surface them when you see one repeat.
+or debugging session finds one you don't fix, file it `status: open`. The
+entry file is the whole change: there is no index to update. The index is
+built from each entry's frontmatter when it is read (`just defects-index`,
+`--by-class`, `--open`), so two PRs that each file a defect never touch a
+shared line. `just lint-defects` (in `check-lint`, and CI's "Defect registry"
+job, which runs on docs-only PRs too) fails an entry missing `status`
+(exactly `open`/`fixed`/`wontfix`), `found`, `area`, `class` or its title. It
+also fails a hand-written row added back to `docs/defects/README.md`; delete
+that row. Recurring classes in `just defects-index --by-class` are
+architecture signals — surface them when you see one repeat.
+
+## Studio UX
+
+UI work starts at `docs/ux/README.md`. Name the principles your change
+touches and read only those, then read the component's anatomy under
+`docs/ux/anatomy/`. A new component gets its anatomy drawn (in ASCII, whole
+then part by part) and reviewed before it is built. A feel-gate note becomes
+a bad → do pair under its principle, in the PR that fixes it. `docs/style/`
+holds the product's words (`language.md`) and its visual style (`ui.md`).
 
 ## Studio UI visual baselines
 
@@ -1421,6 +1499,8 @@ just heap-budget-check-chips                    # the firmware's own heap ledger
 just bless-chips [esp32c6|esp32v3|esp32s3|engine]   # a firmware change moved a pinned figure: re-record them all (docs/chip-figures.md)
 just apply-ci-figures [pr]                      # …or take the patch CI already blessed on the PR (its sticky "figures moved" comment) — no firmware build
 just emu-c6 <elf> --strict-bus --timeout 6s     # the workshop binary, thirty flags
+lp-cli emu run --elf <elf> --flash-cut 400:calibrated:3,then=power-cycle   # a power cut at the 400th lpfs program/erase, torn per lp-nor-sim; label +flash-cut, validate refuses it
+just walk-tree-store-cuts-emu [scenarios] [sectors]   # the fs-tree firmware cut at flash ops and power-cycled, long form (never CI; the CI subset rides test-emu-c6-cli-boards)
 LP_EMU_WIRE_TAP=<dir> just studio-dev-emu; just wire-tap-stat <dir>/c6-a.tap --ledger   # exact wire bytes of a real Studio session, by JSON path — the tool for any wire-size claim
 lp-cli wire unpack --sizes < capture.bin > capture.txt   # decode a board's lp-link capture back to `M!{json}` + console lines (`--lines` for an M! transport), with a per-message/total size report on stderr
 LP_WIRE_ENCODING=json lp-cli upload projects/test/basic serial:auto   # lp-cli's own serial transports never ask for packed — a JSON-vs-packed comparison, or a link you want to watch as text

@@ -287,6 +287,12 @@ impl<T: ServerTransport> ServerTransport for RelayHostTransport<T> {
         closed
     }
 
+    /// The local links' resets; a relay route's new session is a closed
+    /// link and a new id, never a reset.
+    fn take_reset_links(&mut self) -> Vec<LinkId> {
+        self.inner.take_reset_links()
+    }
+
     fn take_secure_events(&mut self) -> Vec<(LinkId, SecureLinkEvent)> {
         let mut events = self.inner.take_secure_events();
         events.append(&mut self.secure_events);

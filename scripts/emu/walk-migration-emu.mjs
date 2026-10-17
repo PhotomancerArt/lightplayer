@@ -310,14 +310,16 @@ function offerButton(board, verb, inDetails) {
 /// The card the board is on now: its own (`CARD`) while that card is
 /// linked, else the one linked card on the page — a board that comes back
 /// from a pulled cable not running LightPlayer can be a new card until it
-/// says who it is. Linked: its connection bar does not read "Offline · …"
-/// (`connection_bar.rs`, `offline_words`).
+/// says who it is. Linked: its connection bar reads neither "Offline · …"
+/// nor, for an unplugged board Wi‑Fi or lightplayer.app still reaches,
+/// "<that way> · not connected" (`connection_bar.rs`).
 async function liveBoard(driver) {
   const paths = await driver.cardPaths();
   const linked = [];
   for (const board of paths) {
     const line = await driver.barText("connection", { board });
-    if (line && !line.startsWith("Offline")) linked.push(board);
+    const unplugged = line?.startsWith("Offline") || /^(Wi‑Fi|lightplayer\.app) · not connected/.test(line ?? "");
+    if (line && !unplugged) linked.push(board);
   }
   if (CARD && linked.includes(CARD)) return CARD;
   if (linked.length === 1) return linked[0];
@@ -696,7 +698,7 @@ function framedValues(said, key) {
 /// whose letters it holds in order (the longest, should two fit).
 function fsState(value) {
   const letters = value.replace(/[^a-z_]/g, "");
-  return ["legacy_held", "formatted", "mounted", "memory"].find((state) => subsequence(state, letters));
+  return ["legacy_held", "formatted", "refused", "mounted", "memory"].find((state) => subsequence(state, letters));
 }
 
 /// Whether `needle`'s characters appear in `hay` in order.

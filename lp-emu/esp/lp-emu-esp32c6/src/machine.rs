@@ -423,6 +423,14 @@ pub enum TimeGrade {
     /// `lp-emu:esp32c6:t3` — the kernel-measured class table, and the cache
     /// and bus costs of the address ([`crate::cache::CacheCost`]).
     T3,
+    /// `lp-emu:esp32c6:t4` — `t3`, plus the flash interface's time
+    /// ([`crate::flash_timing`]): every SPI1 transfer keeps `cmd` busy for
+    /// its wire time at the SCK and line widths its registers give, a
+    /// program or an erase holds the part's WIP for CX1's busy times
+    /// ([`NorTiming::CX1`](lp_emu_esp_common::engine::nor_timing::NorTiming::CX1)),
+    /// a cache fill costs what SPI0's registers say,
+    /// and a range invalidate drops the lines it names.
+    T4,
 }
 
 impl TimeGrade {
@@ -430,7 +438,7 @@ impl TimeGrade {
         match self {
             TimeGrade::T1 => CycleModel::InstructionCount,
             TimeGrade::T2 => CycleModel::Esp32C6,
-            TimeGrade::T3 => CycleModel::Esp32C6Kernels,
+            TimeGrade::T3 | TimeGrade::T4 => CycleModel::Esp32C6Kernels,
         }
     }
 
@@ -438,12 +446,20 @@ impl TimeGrade {
     ///
     /// `t1` and `t2` are `None` **by construction**, which is the reason
     /// their counts cannot move: the bus's hook is not installed, so its
-    /// drain is a constant zero.
+    /// drain is a constant zero. `t4`'s model is bound to the machine's
+    /// flash interface, so its machine builds it
+    /// ([`CacheCost::with_flash`](crate::cache::CacheCost::with_flash));
+    /// this answers `t3`'s stand-alone model for it.
     pub fn memory_cost(self) -> Option<Box<dyn lp_emu_core::MemoryCost + Send>> {
         match self {
             TimeGrade::T1 | TimeGrade::T2 => None,
-            TimeGrade::T3 => Some(Box::new(crate::cache::CacheCost::new())),
+            TimeGrade::T3 | TimeGrade::T4 => Some(Box::new(crate::cache::CacheCost::new())),
         }
+    }
+
+    /// Does this grade time the flash interface (`t4`)?
+    pub const fn times_flash(self) -> bool {
+        matches!(self, TimeGrade::T4)
     }
 
     /// The validation system's configuration name (plan PD4).
@@ -452,6 +468,7 @@ impl TimeGrade {
             TimeGrade::T1 => "lp-emu:esp32c6:t1",
             TimeGrade::T2 => "lp-emu:esp32c6:t2",
             TimeGrade::T3 => "lp-emu:esp32c6:t3",
+            TimeGrade::T4 => "lp-emu:esp32c6:t4",
         }
     }
 
@@ -460,11 +477,52 @@ impl TimeGrade {
             "t1" => Ok(TimeGrade::T1),
             "t2" => Ok(TimeGrade::T2),
             "t3" => Ok(TimeGrade::T3),
+            "t4" => Ok(TimeGrade::T4),
             other => Err(format!(
-                "unknown time grade `{other}` (expected t1, t2 or t3)"
+                "unknown time grade `{other}` (expected t1, t2, t3 or t4)"
             )),
         }
     }
+}
+
+/// `t4`'s wiring: PCR and SPI0 publish into `clocks`, EXTMEM posts its
+/// invalidates there, and SPI1 is timed by it with CX1's part. Every block
+/// is required: a `t4` machine missing one would time some of the interface
+/// and not the rest, and say nothing.
+fn wire_flash_timing(
+    bus: &mut lp_emu_esp_common::SocBus,
+    clocks: &std::sync::Arc<crate::flash_timing::FlashClocks>,
+) -> Result<(), BuildError> {
+    use crate::periph::{extmem::Extmem, pcr::Pcr, spi0::Spi0, spi1::Spi1};
+    let missing = |name: &str| {
+        BuildError::Io(format!(
+            "time grade t4 times the flash interface and this machine has no {name} block"
+        ))
+    };
+    let i = bus.peripheral_index("PCR").ok_or_else(|| missing("PCR"))?;
+    bus.with_peripheral::<Pcr, _>(i, |p, _| p.set_flash_clocks(clocks.clone()))
+        .ok_or_else(|| missing("PCR"))?;
+    let i = bus
+        .peripheral_index("SPI0")
+        .ok_or_else(|| missing("SPI0"))?;
+    bus.with_peripheral::<Spi0, _>(i, |p, _| p.set_flash_clocks(clocks.clone()))
+        .ok_or_else(|| missing("SPI0"))?;
+    let i = bus
+        .peripheral_index("EXTMEM")
+        .ok_or_else(|| missing("EXTMEM"))?;
+    bus.with_peripheral::<Extmem, _>(i, |p, _| p.set_flash_clocks(clocks.clone()))
+        .ok_or_else(|| missing("EXTMEM"))?;
+    let i = bus
+        .peripheral_index("SPI1")
+        .ok_or_else(|| missing("SPI1"))?;
+    bus.with_peripheral::<Spi1, _>(i, |p, _| {
+        p.set_timing(
+            clocks.clone(),
+            lp_emu_esp_common::engine::nor_timing::NorTiming::CX1,
+        )
+    })
+    .ok_or_else(|| missing("SPI1"))?;
+    Ok(())
 }
 
 /// Where the mask ROM comes from. There is no "no ROM" variant: plan PD7
@@ -949,6 +1007,14 @@ pub enum Outcome {
     /// this chip start runs: no live table, or an entry missing. Judged once
     /// the app runs, so after the build. Exit code 64.
     Seam { cycle: Cycles, why: String },
+    /// A `--flash-cut` plan fired: the supply went in the middle of the
+    /// program or erase `report` names, the chip tore it, and the run stops
+    /// here with the flash as the cut left it (`then=power-cycle` runs on
+    /// instead, and never returns this). Exit code 6.
+    PowerCut {
+        cycle: Cycles,
+        report: lp_emu_esp_common::engine::flash_cut::FlashCutReport,
+    },
 }
 
 impl Outcome {
@@ -960,6 +1026,7 @@ impl Outcome {
             Outcome::StrictBus { .. } => 3,
             Outcome::WallTimeout { .. } => 4,
             Outcome::Breakpoint { .. } => 5,
+            Outcome::PowerCut { .. } => 6,
             Outcome::Seam { .. } => 64,
         }
     }
@@ -1191,6 +1258,9 @@ pub struct Esp32C6Builder {
     usb_in_free_lag_ns: u64,
     /// The USB host link's fault injector (`--usb-faults`), off by default.
     usb_faults: Option<lp_emu_esp_common::link_faults::LinkFaults>,
+    /// A power cut at the Nth flash command in `lpfs` (`--flash-cut`), off
+    /// by default.
+    flash_cut: Option<crate::flash_cut_spec::FlashCutSpec>,
     /// Emulator seams to engage (`--seams`, `--seams-prefer`). The capability
     /// defaults (`net=lan`, softly) unless asked otherwise.
     seams: lp_emu_esp_common::seam::SeamRequest,
@@ -1274,6 +1344,7 @@ impl Esp32C6Builder {
             rmt_logs: false,
             usb_in_free_lag_ns: 0,
             usb_faults: None,
+            flash_cut: None,
             seams: lp_emu_esp_common::seam::SeamRequest::default(),
             seam_pacing: lp_emu_esp_common::seam::PacerConfig::default(),
             lan: None,
@@ -1760,6 +1831,21 @@ impl Esp32C6Builder {
         self
     }
 
+    /// Cut the power at the Nth program or erase command inside `lpfs`
+    /// (`--flash-cut <spec>`) — a test switch, off by default. The range is
+    /// the spec's, or the chip's own `lpfs` row as the build finds it, and
+    /// the count runs from power-on. When the cut fires the run ends with
+    /// [`Outcome::PowerCut`], or, with `then=power-cycle`, the board is
+    /// power-cycled and runs on (the plan spent). The run's label gains
+    /// `+flash-cut`. A machine with a plan keeps a power-on snapshot, so
+    /// [`Esp32C6Machine::power_cycle`] works on it whatever
+    /// [`reboot_on_reset`](Self::reboot_on_reset) says. See
+    /// [`crate::flash_cut_spec`] and `lp_emu_esp_common::engine::flash_cut`.
+    pub fn flash_cut(mut self, spec: crate::flash_cut_spec::FlashCutSpec) -> Self {
+        self.flash_cut = Some(spec);
+        self
+    }
+
     /// Engage these emulator seams (`--seams led=fast`, `--seams-prefer …`;
     /// `lp_emu_esp_common::seam::SeamRequest`). A strict seam that no table
     /// in flash could satisfy fails the build; one that cannot engage once
@@ -1893,6 +1979,11 @@ impl Esp32C6Builder {
         for span in memmap::MMIO_WINDOWS {
             bus.add_mmio_window(span.base, span.len);
         }
+        // A store where the C6 has nothing (no region above, no window)
+        // faults, as on silicon: the split loader's copy to address 0 took a
+        // `Store/AMO access fault` on a board while this bus ignored 26,452
+        // of them and booted the core.
+        bus.set_fault_stores_to_nothing(true);
         bus
     }
 
@@ -1953,6 +2044,7 @@ impl Esp32C6Builder {
             rmt_logs,
             usb_in_free_lag_ns,
             usb_faults,
+            flash_cut,
             seams,
             seam_pacing,
             lan,
@@ -2226,6 +2318,12 @@ impl Esp32C6Builder {
                 )
             };
             loader::seed_rom_flash_chip(&mut bus, staging.chip_size);
+            // At `t4` the flash interface's registers are time, so they are
+            // left as the bootloader leaves them for the chip's header mode.
+            if time_grade.times_flash() {
+                let mode = loader::header_flash_mode(&flash_handle).unwrap_or(2);
+                loader::seed_flash_interface(&mut bus, mode);
+            }
             // Everything the loader staged was already placed into the
             // window by `rom::load` / `load_app`; filling now proves the
             // table and the placement agree, and is what serves the window
@@ -2250,6 +2348,16 @@ impl Esp32C6Builder {
                 ));
             }
         }
+
+        // The power cut, armed now so its count runs from power-on, over the
+        // range the chip's own table names (the direct load has staged one
+        // by here; a blank ROM-up chip falls back to the shipped row).
+        let flash_cut_then = flash_cut.as_ref().map(|spec| {
+            let mut flash = flash_handle.lock().unwrap();
+            let plan = spec.plan(flash.bytes());
+            flash.arm_flash_cut(plan);
+            spec.then
+        });
 
         if usb_in_free_lag_ns > 0 {
             let set = bus
@@ -2366,7 +2474,15 @@ impl Esp32C6Builder {
         // loader has placed the app and filled the window: the cache starts
         // cold, as it is at reset, and the host's placement of segments
         // costs the guest nothing.
-        bus.set_memory_cost(time_grade.memory_cost());
+        if time_grade.times_flash() {
+            // `t4`: one clock cell between the blocks that set the flash
+            // interface's time and the two that are timed by it.
+            let clocks = std::sync::Arc::new(crate::flash_timing::FlashClocks::new());
+            wire_flash_timing(&mut bus, &clocks)?;
+            bus.set_memory_cost(Some(Box::new(crate::cache::CacheCost::with_flash(clocks))));
+        } else {
+            bus.set_memory_cost(time_grade.memory_cost());
+        }
 
         // `--wire a:b`, before the guest runs: a jumper is on the header
         // when the board powers up, not put there later.
@@ -2438,6 +2554,8 @@ impl Esp32C6Builder {
             strap,
             pin_strap: strap,
             reboot_on_reset,
+            flash_cut_then: flash_cut_then.unwrap_or_default(),
+            flash_cut_armed: flash_cut_then.is_some(),
             translate,
             jit_report,
             jit_seed_override: None,
@@ -2536,7 +2654,10 @@ impl Esp32C6Builder {
                 .bus
                 .with_peripheral::<crate::periph::uart::Uart, _>(i, |u, _| u.set_host_baud(baud));
         }
-        if reboot_on_reset {
+        // A flash-cut plan is a power cut waiting to happen: keep the
+        // snapshot a power cycle restores, whether or not resets are
+        // performed.
+        if reboot_on_reset || machine.flash_cut_armed {
             machine.power_on = Some(machine.snapshot());
         }
         // Emulator seams: the build is the first chip start. After the
@@ -2787,6 +2908,12 @@ pub struct Esp32C6Machine {
     /// request, and GPIO9 is a pin, not a latch.
     pin_strap: Strap,
     reboot_on_reset: bool,
+    /// What the run loop does when a flash power cut fires
+    /// ([`Esp32C6Builder::flash_cut`]).
+    flash_cut_then: crate::flash_cut_spec::AfterCut,
+    /// Was a flash-cut plan ever armed on this machine? What puts
+    /// `+flash-cut` in the label, for the whole run.
+    flash_cut_armed: bool,
     /// May a translated core be installed on this machine's hart
     /// ([`Esp32C6Builder::translate`])? `false` is `--interpreter`.
     translate: bool,
@@ -3975,6 +4102,12 @@ impl Esp32C6Machine {
             self.usb_sj_tried_log.bytes(),
         );
         self.restore_in(&power_on, restore);
+        // The supply is back: a flash a power cut latched off takes commands
+        // again, its cells (weak bits included) as the cut left them. A
+        // reset is not a supply, so only a power cycle does this.
+        if restore.is_none() {
+            self.flash.lock().unwrap().restore_power();
+        }
         self.uart0_log.replace(&uart0);
         self.usb_sj_log.replace(&usb_sj);
         self.usb_sj_tried_log.replace(&tried);
@@ -4287,6 +4420,80 @@ impl Esp32C6Machine {
                 u.faults().map(|f| (f.in_counters, f.out_counters))
             })
             .flatten()
+    }
+
+    /// Arm a flash power cut now, on a running machine
+    /// ([`Esp32C6Builder::flash_cut`]'s twin): `spec.at` counts in-range
+    /// commands from this moment, over the spec's range or the `lpfs` row of
+    /// the table on the chip now. What lets a test boot, then cut inside the
+    /// work it starts next.
+    ///
+    /// A power cycle needs the power-on snapshot, which only a machine built
+    /// with a plan or with [`Esp32C6Builder::reboot_on_reset`] keeps: `Err`
+    /// on any other, rather than a cut nothing could ever power back up.
+    pub fn arm_flash_cut(
+        &mut self,
+        spec: &crate::flash_cut_spec::FlashCutSpec,
+    ) -> Result<(), String> {
+        if self.power_on.is_none() {
+            return Err(
+                "this machine keeps no power-on snapshot, so a cut could never be power-cycled: \
+                 build it with reboot_on_reset(true) or a flash_cut plan"
+                    .to_string(),
+            );
+        }
+        let mut flash = self.flash.lock().unwrap();
+        let plan = spec.plan(flash.bytes());
+        flash.arm_flash_cut(plan);
+        drop(flash);
+        self.flash_cut_then = spec.then;
+        self.flash_cut_armed = true;
+        Ok(())
+    }
+
+    /// Was a flash-cut plan ever armed on this machine (what puts
+    /// `+flash-cut` in its label)?
+    pub fn flash_cut_armed(&self) -> bool {
+        self.flash_cut_armed
+    }
+
+    /// The last flash power cut that fired on this machine.
+    pub fn last_flash_cut(&self) -> Option<lp_emu_esp_common::engine::flash_cut::FlashCutReport> {
+        self.flash.lock().unwrap().last_flash_cut().copied()
+    }
+
+    /// The flash-cut run's summary lines, for a host to print at exit: the
+    /// cut (or that the plan never fired, and how far it counted) and the
+    /// in-range op census. Empty when no plan was ever armed.
+    pub fn flash_cut_summary(&self) -> Vec<String> {
+        if !self.flash_cut_armed {
+            return Vec::new();
+        }
+        let flash = self.flash.lock().unwrap();
+        let mut lines = Vec::new();
+        let cutter = flash.flash_cutter();
+        match (cutter.armed(), flash.last_flash_cut()) {
+            (Some(plan), _) => lines.push(format!(
+                "flash-cut: armed at op {} ({}), not reached — {} in-range op(s) counted",
+                plan.at,
+                plan.tear.name(),
+                cutter.seen()
+            )),
+            (None, Some(report)) => lines.push(report.to_string()),
+            (None, None) => {}
+        }
+        if let Some(census) = flash.flash_op_census() {
+            lines.push(census.to_string());
+        }
+        let weak = flash.weak_bits();
+        if !weak.is_empty() {
+            lines.push(format!(
+                "flash-cut: {} weak bit(s) in {} sector(s), in this process only",
+                weak.count(),
+                weak.sectors().len()
+            ));
+        }
+        lines
     }
 
     /// The UART0 TCP listener, when `Uart0Sink::Tcp` was chosen.
@@ -5476,12 +5683,37 @@ impl Esp32C6Machine {
                     wake,
                 };
             }
+            let request = self.bus.take_request();
+            // A flash power cut: the chip tore a command and has no supply.
+            // `then=stop` (the default) ends the run here; `power-cycle`
+            // restores the supply — both domains back to power-on, the flash
+            // as the cut left it, the plan spent — and runs on, with the
+            // budget rebased onto the new clock as a reset's is.
+            if let Some(lp_emu_esp_common::MachineRequest::PowerCut { report }) = request {
+                if self.flash_cut_then == crate::flash_cut_spec::AfterCut::PowerCycle {
+                    let remaining = stop
+                        .stop_cycle
+                        .map(|_| stop_cycle.saturating_sub(self.cycles()));
+                    if self.power_cycle(self.pin_strap) {
+                        log::info!("machine: {report} — power-cycled, running on");
+                        if let Some(remaining) = remaining {
+                            stop_cycle = self.cycles().saturating_add(remaining);
+                        }
+                        matched = [0usize; 2];
+                        continue;
+                    }
+                }
+                return Outcome::PowerCut {
+                    cycle: report.cycle,
+                    report,
+                };
+            }
             if let Some(lp_emu_esp_common::MachineRequest::Reset {
                 source,
                 at,
                 strap,
                 cause,
-            }) = self.bus.take_request()
+            }) = request
             {
                 // `stop_cycle` is an absolute guest cycle and a reboot moves
                 // what zero means: `restore(power_on)` puts the clock back.
@@ -6336,7 +6568,7 @@ mod tests {
     }
 
     #[test]
-    fn the_time_grades_are_the_three_cycle_models_and_their_configuration_names() {
+    fn the_time_grades_are_their_cycle_models_and_their_configuration_names() {
         assert_eq!(TimeGrade::T1.cycle_model(), CycleModel::InstructionCount);
         assert_eq!(TimeGrade::T2.cycle_model(), CycleModel::Esp32C6);
         assert_eq!(TimeGrade::T3.cycle_model(), CycleModel::Esp32C6Kernels);
@@ -6344,7 +6576,11 @@ mod tests {
         assert_eq!(TimeGrade::T2.configuration(), "lp-emu:esp32c6:t2");
         assert_eq!(TimeGrade::T3.configuration(), "lp-emu:esp32c6:t3");
         assert_eq!(TimeGrade::parse("t3"), Ok(TimeGrade::T3));
-        assert!(TimeGrade::parse("t4").is_err());
+        assert_eq!(TimeGrade::T4.cycle_model(), CycleModel::Esp32C6Kernels);
+        assert_eq!(TimeGrade::T4.configuration(), "lp-emu:esp32c6:t4");
+        assert_eq!(TimeGrade::parse("t4"), Ok(TimeGrade::T4));
+        assert!(TimeGrade::T4.times_flash() && !TimeGrade::T3.times_flash());
+        assert!(TimeGrade::parse("t5").is_err());
 
         let m = Esp32C6Builder::new()
             .time_grade(TimeGrade::T2)
@@ -6357,11 +6593,12 @@ mod tests {
     /// `t1` and `t2` are `None` **by construction**, which is the whole of
     /// why their cycle counts cannot move (M1 P3 G3-3).
     #[test]
-    fn only_t3_installs_a_memory_cost_model() {
+    fn only_t3_and_t4_install_a_memory_cost_model() {
         for (grade, expected) in [
             (TimeGrade::T1, false),
             (TimeGrade::T2, false),
             (TimeGrade::T3, true),
+            (TimeGrade::T4, true),
         ] {
             assert!(grade.memory_cost().is_some() == expected, "{grade:?}");
             let m = Esp32C6Builder::new().time_grade(grade).build().unwrap();
@@ -6858,6 +7095,117 @@ mod tests {
         m.harts[0].set_pc(memmap::HP_SRAM_BASE);
         m
     }
+
+    /// An idle machine with a flash-cut plan, its `j .` loop in SRAM.
+    fn idle_with_cut(spec: &str) -> Esp32C6Machine {
+        let mut m = Esp32C6Builder::new()
+            .flash_cut(crate::flash_cut_spec::FlashCutSpec::parse(spec).unwrap())
+            .build()
+            .unwrap();
+        m.bus
+            .load_image(memmap::HP_SRAM_BASE, &0x0000_006fu32.to_le_bytes())
+            .unwrap();
+        m.harts[0].set_pc(memmap::HP_SRAM_BASE);
+        m
+    }
+
+    /// A sector erase through SPI1's registers, as the ROM's
+    /// `esp_rom_spiflash_erase_sector` issues it: WREN, the address, SE.
+    fn erase_sector_via_spi1(m: &mut Esp32C6Machine, addr: u32) {
+        use crate::periph::spi1::{ADDR, CMD, CMD_FLASH_SE, CMD_FLASH_WREN};
+        let spi1 = memmap::periph::SPI1;
+        m.bus.write_word(spi1 + CMD, CMD_FLASH_WREN as i32).unwrap();
+        m.bus.write_word(spi1 + ADDR, addr as i32).unwrap();
+        m.bus.write_word(spi1 + CMD, CMD_FLASH_SE as i32).unwrap();
+    }
+
+    #[test]
+    fn a_flash_cut_stops_the_run_and_labels_it() {
+        let lpfs = crate::flash::LPFS_OFFSET;
+        let mut m = idle_with_cut("1:calibrated_all_zero:9");
+        assert!(m.configuration_label().ends_with("+flash-cut"));
+        assert_eq!(m.configuration_label(), "lp-emu:esp32c6:t1+flash-cut");
+        // Out of lpfs: not counted. Index 0 runs; index 1 is the cut.
+        erase_sector_via_spi1(&mut m, 0x1000);
+        erase_sector_via_spi1(&mut m, lpfs);
+        assert!(m.bus.take_request().is_none(), "not yet");
+        erase_sector_via_spi1(&mut m, lpfs + 0x2000);
+        let out = m.run_until(&StopCondition::after_micros(10));
+        let Outcome::PowerCut { report, .. } = out else {
+            panic!("expected a power cut, got {out:?}");
+        };
+        assert_eq!(out.exit_code(), 6);
+        assert_eq!((report.index, report.addr), (1, lpfs + 0x2000));
+        assert_eq!(m.last_flash_cut(), Some(report));
+        let flash = m.flash().lock().unwrap();
+        assert!(flash.is_powered_off());
+        assert!(
+            flash
+                .peek(lpfs + 0x2000, SECTOR_LEN_FOR_TESTS)
+                .unwrap()
+                .iter()
+                .all(|&b| b == 0),
+            "the forced shape tore the sector all-zero"
+        );
+        drop(flash);
+        let summary = m.flash_cut_summary();
+        assert!(
+            summary[0].starts_with("FLASH-CUT op=1 kind=sector-erase"),
+            "{summary:?}"
+        );
+        assert!(
+            summary[1].starts_with("FLASH-OPS range=0x350000+0xb0000 ops=2"),
+            "{summary:?}"
+        );
+
+        // A test may power-cycle the board itself: the latch clears, the
+        // cells stay torn, and the spent plan cuts nothing more.
+        assert!(m.power_cycle(Strap::App));
+        assert!(!m.flash().lock().unwrap().is_powered_off());
+        assert_eq!(m.power_cycles(), 1);
+    }
+
+    #[test]
+    fn then_power_cycle_runs_on_with_the_flash_as_the_cut_left_it() {
+        let lpfs = crate::flash::LPFS_OFFSET;
+        let mut m = idle_with_cut("0:calibrated_all_zero:9,then=power-cycle");
+        erase_sector_via_spi1(&mut m, lpfs + 0x3000);
+        let out = m.run_until(&StopCondition::after_micros(10));
+        assert!(matches!(out, Outcome::Deadline { .. }), "{out:?}");
+        assert_eq!(m.power_cycles(), 1, "the cut was a power cycle");
+        let flash = m.flash().lock().unwrap();
+        assert!(!flash.is_powered_off());
+        assert!(flash.flash_cutter().armed().is_none(), "the plan is spent");
+        assert!(
+            flash
+                .peek(lpfs + 0x3000, SECTOR_LEN_FOR_TESTS)
+                .unwrap()
+                .iter()
+                .all(|&b| b == 0)
+        );
+    }
+
+    #[test]
+    fn a_runtime_cut_needs_a_power_on_snapshot_and_no_plan_changes_nothing() {
+        let mut m = idle_machine();
+        assert_eq!(m.configuration_label(), "lp-emu:esp32c6:t1");
+        assert!(m.flash_cut_summary().is_empty());
+        let spec = crate::flash_cut_spec::FlashCutSpec::parse("0:clean:1").unwrap();
+        let err = m.arm_flash_cut(&spec).unwrap_err();
+        assert!(err.contains("reboot_on_reset"), "{err}");
+        assert_eq!(m.configuration_label(), "lp-emu:esp32c6:t1");
+
+        let mut m = Esp32C6Builder::new().reboot_on_reset(true).build().unwrap();
+        m.arm_flash_cut(&spec).unwrap();
+        assert_eq!(m.configuration_label(), "lp-emu:esp32c6:t1+flash-cut");
+        erase_sector_via_spi1(&mut m, crate::flash::LPFS_OFFSET);
+        assert!(matches!(
+            m.bus.take_request(),
+            Some(lp_emu_esp_common::MachineRequest::PowerCut { .. })
+        ));
+    }
+
+    const SECTOR_LEN_FOR_TESTS: u32 = crate::flash::SECTOR_LEN;
 
     #[test]
     fn a_control_command_is_applied_at_the_cycle_its_reply_names() {

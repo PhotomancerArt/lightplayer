@@ -27,7 +27,7 @@ impl ControllerOp for NodeRevertOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
             "Revert node edits",
-            "Discard every pending edit under this node.",
+            "Discard every unsaved change in this node.",
             ActionPriority::Secondary,
         )
         .undoable()

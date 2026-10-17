@@ -1,6 +1,10 @@
-//! [`UiNameBar`]: the board's name and its one primary action — Connect,
-//! Unlock, Install, Edit (until "connected" lands) or Power on — a flush
-//! section of the bar with an icon leading the word.
+//! [`UiNameBar`]: the board's name and its one primary action — the most
+//! likely thing to do: Connect, Done, Update firmware, Install firmware,
+//! Retry, Connect here, Unlock, Add a project, Power on… — a flush section
+//! of the bar with an icon leading its verb and object; the spinner alone
+//! while the board is being reached or identified; or nothing at all when
+//! nothing can be pressed (`docs/ux/anatomy/board-card.md`, "Name bar and
+//! primary"). The card's surface says why, and says the button aloud.
 
 use super::ui_card_action::UiCardAction;
 
@@ -12,8 +16,9 @@ pub struct UiNameBar {
     /// Its group or owner, under the name; `None` until the account keeps
     /// boards (Q16).
     pub place: Option<String>,
-    /// The one primary action; `None` while the editor holds the board
-    /// (until Done lands).
+    /// The one primary; `None` when nothing can be pressed (the board is
+    /// busy, away with no way in, busy in another tab, has nothing to send,
+    /// or has not said yet): no button, never a greyed verb (P7).
     pub primary: Option<UiPrimary>,
 }
 
@@ -22,21 +27,25 @@ pub struct UiNameBar {
 pub enum UiPrimary {
     /// An offer to press.
     Offer(UiCardAction),
-    /// The word the primary would be, drawn disabled, saying why
-    /// ("Offline · 2 weeks", "Busy: Updating · 42%").
-    Unavailable {
-        word: String,
-        icon: String,
-        reason: String,
-    },
+    /// The board is being reached or identified: the spinner alone, no
+    /// words — the Link row (or the Hardware row) says how. `label` is the
+    /// spinner's accessible name ("Connecting", "Identifying").
+    Working { label: String },
 }
 
 impl UiPrimary {
-    /// The word on the primary, either way.
-    pub fn word(&self) -> &str {
+    /// The spinner, named `label` for a screen reader.
+    pub fn working(label: impl Into<String>) -> Self {
+        Self::Working {
+            label: label.into(),
+        }
+    }
+
+    /// The word on the primary: the offer's, or none for the spinner.
+    pub fn word(&self) -> Option<&str> {
         match self {
-            UiPrimary::Offer(action) => &action.word,
-            UiPrimary::Unavailable { word, .. } => word,
+            UiPrimary::Offer(action) => Some(&action.word),
+            UiPrimary::Working { .. } => None,
         }
     }
 }

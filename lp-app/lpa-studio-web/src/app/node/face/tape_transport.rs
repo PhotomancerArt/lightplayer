@@ -508,7 +508,7 @@ pub fn TapeTransport(
                 }
                 {override_clear_slot(
                     transport.play_state_override.clone(),
-                    "Clear the run/pause debug override \u{2014} session only",
+                    "Clear the run/pause debug override",
                     on_action,
                 )}
                 // The time cluster: driver-written digits with the amber
@@ -550,7 +550,7 @@ pub fn TapeTransport(
                 }
                 {override_clear_slot(
                     transport.scrub_override.clone(),
-                    "Clear the scrub debug override \u{2014} session only",
+                    "Clear the scrub debug override",
                     on_action,
                 )}
                 span { class: "tw:ml-auto tw:inline-flex tw:flex-none tw:items-center tw:gap-2",
@@ -582,7 +582,7 @@ pub fn TapeTransport(
                     }
                     {override_clear_slot(
                         transport.rate_override.clone(),
-                        "Clear the speed debug override \u{2014} session only",
+                        "Clear the speed debug override",
                         on_action,
                     )}
                 }

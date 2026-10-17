@@ -215,8 +215,13 @@ const PRESSABLE = `((mark) => { if (!mark) return null; const all = mark.querySe
 
 /// Page-side: a bar's line as it reads — its pieces (summary, aside, or the
 /// work's words) each trimmed and joined by one space, so "USB · connected"
-/// and its aside "also cloud" read "USB · connected also cloud".
+/// and its aside "editor open" read "Open in another tab editor open". A
+/// mark (the cloud) is an icon with no text, and reads as nothing.
 const LINE_TEXT = `((el) => [...el.children].map((c) => (c.textContent || '').replace(/\\s+/g, ' ').trim()).filter(Boolean).join(' '))`;
+
+/// The Firmware row of a board with no LightPlayer on it: "Firmware none"
+/// (`firmware_bar.rs`; the row's kind word, then its name).
+export const NO_FIRMWARE = /^Firmware none\b/;
 
 /// Page-side test for a text: includes a string, or matches a RegExp.
 function textTest(words) {
@@ -293,6 +298,21 @@ export class StudioDriver {
     return new StudioDriver({ cdp, sessionId, targetId, child, exited, userDataDir, keepProfile: profileDir !== null });
   }
 
+  /// A new tab in a browser this driver did NOT launch — the desk's Android
+  /// phone's Chrome, reached over `adb forward` (`scripts/phone/`).
+  /// `browserWsUrl` is that browser's `/json/version` `webSocketDebuggerUrl`.
+  /// Rule 1 does not apply: the phone's screen is its own, not the desk's.
+  /// `close()` closes this tab and the DevTools connection, never the
+  /// browser.
+  static async attach({ browserWsUrl }) {
+    const cdp = await Cdp.open(browserWsUrl);
+    const { targetId, sessionId } = await attachNewTarget(cdp, {});
+    // A phone draws one tab at a time: bring this one to the front, or its
+    // page is hidden and Studio's frame feed never runs.
+    await cdp.send("Target.activateTarget", { targetId }).catch(() => {});
+    return new StudioDriver({ cdp, sessionId, targetId, child: null, exited: null, userDataDir: null, keepProfile: true, ownsBrowser: false, ownsCdp: true });
+  }
+
   /// A SECOND TAB of the same browser: a new target in a new WINDOW of the
   /// browser this driver launched, sharing its profile — so the two pages
   /// share OPFS, Web Locks and `BroadcastChannel`, which is what "one tab
@@ -320,9 +340,10 @@ export class StudioDriver {
     });
   }
 
-  constructor({ cdp, sessionId, targetId = null, child, exited, userDataDir, keepProfile = false, ownsBrowser = true }) {
+  constructor({ cdp, sessionId, targetId = null, child, exited, userDataDir, keepProfile = false, ownsBrowser = true, ownsCdp = false }) {
     this.keepProfile = keepProfile;
     this.ownsBrowser = ownsBrowser;
+    this.ownsCdp = ownsCdp;
     this.cdp = cdp;
     this.sessionId = sessionId;
     this.targetId = targetId;
@@ -506,6 +527,56 @@ export class StudioDriver {
     }
   }
 
+  /// Press the Bluetooth square and answer the browser's own Web Bluetooth
+  /// chooser — the REAL one, for a page whose `navigator.bluetooth` is the
+  /// browser's (the phone walk), never `?ble=emu`'s in-page picker. The
+  /// press carries a user gesture (`requestDevice` refuses without one), and
+  /// the chooser is answered over CDP's `DeviceAccess` domain
+  /// (`spikes/ble-lab/scripts/cdp-central.mjs` is the same move by hand).
+  /// Picks the first advertiser matching `id`, else `name` exactly, else
+  /// `prefix`; returns `{ name, id, seen }`. The deadline names everything
+  /// the chooser offered, so "wrong name" and "no radio" read differently.
+  async connectBluetooth({ id = null, name = null, prefix = "LP-", timeoutMs = 60_000 } = {}) {
+    await this.waitFor(`${matchingControls("Bluetooth", { scope: CONNECT_SCOPE, exact: true })}.length > 0`, {
+      what: "the Bluetooth square",
+    });
+    const wanted = (device) => (id ? device.id === id : name ? device.name === name : device.name.startsWith(prefix));
+    const what = id ? `id ${JSON.stringify(id)}` : name ? `name ${JSON.stringify(name)}` : `prefix ${JSON.stringify(prefix)}`;
+    await this.cdp.send("DeviceAccess.enable", {}, this.sessionId);
+    const seen = new Map();
+    let prompts = 0;
+    let settled = false;
+    const picked = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        settled = true;
+        const offered = [...seen].map(([deviceId, deviceName]) => `${deviceName} (${deviceId})`).join(", ");
+        reject(new Error(
+          `no Bluetooth advertiser matching ${what} in ${timeoutMs} ms; ${prompts} chooser event(s) offered [${offered}]` +
+            (prompts === 0 ? " — no chooser opened (did requestDevice throw? is Bluetooth on?)" : ""),
+        ));
+      }, timeoutMs);
+      this.cdp.on("DeviceAccess.deviceRequestPrompted", async (params, sid) => {
+        if (sid !== this.sessionId || settled) return;
+        prompts += 1;
+        for (const device of params.devices) seen.set(device.id, device.name);
+        const hit = params.devices.find(wanted);
+        if (!hit) return;
+        settled = true;
+        clearTimeout(timer);
+        try {
+          await this.cdp.send("DeviceAccess.selectPrompt", { id: params.id, deviceId: hit.id }, this.sessionId);
+          resolve({ name: hit.name, id: hit.id, seen: [...seen].map(([deviceId, deviceName]) => ({ name: deviceName, id: deviceId })) });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    const press = `(() => { const el = ${matchingControls("Bluetooth", { scope: CONNECT_SCOPE, exact: true })}[0]; el.scrollIntoView({ block: 'center' }); el.click(); return true; })()`;
+    // Not awaited: `requestDevice` resolves only once the chooser is answered.
+    this.cdp.send("Runtime.evaluate", { expression: press, userGesture: true }, this.sessionId, timeoutMs + 5_000).catch(() => {});
+    return picked;
+  }
+
   // --- the board card, by its hooks ----------------------------------------
   //
   // Every helper here takes `{ board }`: a MAC (any case, colons or not), a
@@ -596,8 +667,10 @@ export class StudioDriver {
 
   /// The card's picture as its hooks name it: `{ source, frame }` —
   /// `data-picture` (`link`, `lens`, `saved`, `none`) and whether a frame is
-  /// drawn — and whether it is dimmed (last known, not current). `null`
-  /// when the card or its picture is not there.
+  /// drawn — whether it is dimmed (last known, not current; or under the
+  /// surface's notice, which takes the one dim), and `surface`, the state
+  /// the card's top says (`data-surface`: `another-tab`, `offline`,
+  /// `all-well`, …). `null` when the card or its picture is not there.
   async pictureOf({ board = null } = {}) {
     const scope = await this.card({ board });
     return this.evaluate(
@@ -605,7 +678,9 @@ export class StudioDriver {
                 const picture = card.querySelector('[data-picture]'); if (!picture) return null;
                 return { source: picture.getAttribute('data-picture'),
                          frame: picture.getAttribute('data-picture-frame') === 'true',
-                         dim: picture.classList.contains('ux-play-frame-dim') }; })()`,
+                         dim: picture.classList.contains('ux-play-frame-dim')
+                           || picture.classList.contains('ux-board-picture-covered'),
+                         surface: card.querySelector('[data-surface]')?.getAttribute('data-surface') ?? null }; })()`,
     );
   }
 
@@ -715,6 +790,24 @@ export class StudioDriver {
     }
   }
 
+  /// One fact in the status corner's details ("Frame rate", "Last frame",
+  /// "Picture"): opens them, reads the value, closes them. `null` when the
+  /// details carry no such fact.
+  async cornerFact(label, { board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
+    await this.openCorner({ board, timeoutMs });
+    const scope = await this.card({ board });
+    try {
+      return await this.evaluate(`(() => { const card = ${scope}; if (!card) return null;
+        const wanted = ${JSON.stringify(label.toLowerCase())};
+        const dt = [...card.querySelectorAll('[data-board-corner] [id^="ux-popover-panel"] dt')]
+          .find((el) => (el.textContent || '').trim().toLowerCase() === wanted);
+        const dd = dt?.nextElementSibling;
+        return dd ? (dd.textContent || '').replace(/\\s+/g, ' ').trim() : null; })()`);
+    } finally {
+      await this.closeDetails({ board });
+    }
+  }
+
   /// A bar's work: `"running"`, `"done"`, `"failed"`, or `"none"` (no work),
   /// off its `data-bar-work`; `null` when the card is not there.
   async workState(layer, { board = null } = {}) {
@@ -771,15 +864,15 @@ export class StudioDriver {
   }
 
   /// Studio's own flash flow on a blank board's card, the way a person does
-  /// it: the firmware bar says "No firmware", the primary Install (`flash`)
-  /// opens the board pick, picking `model` presses it, and the flash is the
-  /// firmware bar's work — it must START and then FINISH (a wait on "No
-  /// firmware went away" alone is satisfied the instant the work starts).
-  /// Finished means the work is gone and the bar no longer says "No
-  /// firmware"; the board's own state (its backing's registry) is the
-  /// caller's to check.
+  /// it: the Firmware row says "none", the primary Install firmware
+  /// (`flash`) opens the board pick, picking `model` presses it, and the
+  /// flash is the Firmware row's work — it must START and then FINISH (a
+  /// wait on "none went away" alone is satisfied the instant the work
+  /// starts). Finished means the work is gone and the row no longer says
+  /// "none"; the board's own state (its backing's registry) is the caller's
+  /// to check.
   async flashBlank(model, { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000 } = {}) {
-    await this.waitBar("firmware", "No firmware", { board, timeoutMs });
+    await this.waitBar("firmware", NO_FIRMWARE, { board, timeoutMs });
     await this.pressOffer("flash", { board, timeoutMs });
     await this.waitFor(`Boolean(${PANEL})`, { timeoutMs, what: "the board-model picker" });
     // Picking the model is the press: the board pick in verb mode.
@@ -789,21 +882,22 @@ export class StudioDriver {
     await this.waitFor(
       `(() => { const bar = ${scope}?.querySelector('[data-bar="firmware"]');
                 if (!bar || bar.getAttribute('data-bar-work') === 'running') return false;
-                return !(bar.textContent || '').includes('No firmware'); })()`,
+                const line = ${LINE_TEXT}(bar.querySelector('button[aria-label="Firmware details"]') || bar);
+                return !${textTest(NO_FIRMWARE)}(line); })()`,
       { timeoutMs: flashTimeoutMs, what: "the flash to finish" },
     );
   }
 
   /// What the board says it runs, as core reads it: `"empty"` once its
-  /// project bar offers `push` ("Add a project"), `"running"` once its
-  /// primary Edit can be pressed. Waits for one of the two — the card is
+  /// primary offers `push` ("Add a project"), `"running"` once its
+  /// project bar's Edit can be pressed. Waits for one of the two — the card is
   /// ready either way.
   async boardRuns({ board = null, timeoutMs = DEFAULT_WAIT_MS } = {}) {
     const scope = await this.card({ board });
     return this.waitFor(
       `(() => { const card = ${scope}; if (!card) return false;
                 const push = ${FIND_MARK}(card, 'push', false);
-                if (push?.closest('[data-bar="project"]') && ${PRESSABLE}(push)) return 'empty';
+                if (push?.closest('[data-name-bar]') && ${PRESSABLE}(push)) return 'empty';
                 const edit = ${PRESSABLE}(${FIND_MARK}(card, 'edit', false));
                 return edit && !edit.disabled ? 'running' : false; })()`,
       { timeoutMs, what: `the board to say what it runs (\`push\` or \`edit\` offered)` },
@@ -897,8 +991,10 @@ export class StudioDriver {
 
   async close() {
     if (!this.ownsBrowser) {
-      // A second tab: its target only. The browser is the first driver's.
+      // A second tab, or a tab in an attached browser: its target only. The
+      // browser is the first driver's, or the phone's.
       await this.closeTab().catch(() => {});
+      if (this.ownsCdp) this.cdp.close();
       return;
     }
     try {

@@ -405,7 +405,7 @@ pub(super) fn locked_store_file() -> (String, Vec<u8>) {
 }
 
 /// The bundled example's files, as a board holds them.
-fn bundled_example_files() -> Vec<(String, Vec<u8>)> {
+pub(super) fn bundled_example_files() -> Vec<(String, Vec<u8>)> {
     crate::app::home::embedded_example::embedded_example(
         crate::first_bundled_example_id().expect("this build bundles examples"),
     )

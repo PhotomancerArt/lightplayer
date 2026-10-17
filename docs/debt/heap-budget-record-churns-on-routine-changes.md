@@ -7,6 +7,7 @@ related:
   - docs/heap-budget-gate.md
   - docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md
   - PR #798
+  - PR #1126
   - docs/debt/reference-images-are-not-reproducible-across-hosts.md
   - lp2025/2026-09-23-1701-lp-json-pack
 ---
@@ -349,6 +350,45 @@ long-lived branch conflict on this file whenever main re-baselined too.
   the same run read 104,660 / 196,876 / 116,688 / 12,164 — the 2026-10-07
   entry's two-builds-in-one-run gap. Workaround as before: the record takes
   the heap job's clean first-step figures, transcribed from its log.
+
+- 2026-10-10 — **the dirty re-check, paid down** by PR #1126. The C6
+  heap ratchet's image is now a **figure build** (`LP_FIGURE_BUILD=1`,
+  `tools/lp-app-version`): stamped with the fixed version `0000000` and
+  `LP_BUILD_DIRTY=false` whatever the tree's state, and built into
+  `target/fw-split/figures` (`target/fw-split/shipped` keeps the tree's real
+  version). The emulator suite's shipped split image
+  (`lp_emu_esp32c6::test_support`) is a figure build too, so the image CI
+  uploads for `just fetch-ci-images` is the ratchet's bytes again. Product
+  builds (release, deploy, the packager, `just fw-esp32c6-split`, flashing)
+  never set the variable. Seven characters is CI's own short-sha length, so
+  the record taken from #1066's clean first step held without a re-baseline
+  (#1126's own run read 104,652 / 196,884 / 116,656 / 12,168, the record to
+  the byte). Proof:
+  - **CI** — PR #1127 (#1126 plus 64 B held at boot, never merged): the
+    heap job failed on `usedBytes` 104,652 → 104,716 and `freeBytes`
+    196,884 → 196,820; its `Figure moves` step re-baselined, the re-check
+    rebuilt on the tree the re-baseline had just written (`version
+    0000000`), read the same figures and passed, and the job uploaded
+    `figures-patch-heap-budget-chips` (`verdict: figure-move`, run
+    38095029199). `just apply-ci-figures 1127` applied it with a plain
+    `git apply`, and the next run's heap job was green.
+  - **Desk** — on one commit, the figure build of a clean tree and of a tree
+    with the record rewritten are the same bytes (`p2.elf`, `loader.elf`,
+    `merged.bin`) and read the same 104,652 / 196,884; the emulator suite's
+    feature spelling (`esp32c6,server,radio`) builds the same bytes as the
+    ratchet's (`esp32c6,server`); the old unpinned build of the dirty tree
+    (`841831e2b-dirty-170734PT`) read 104,688 / 196,848 and failed. This desk
+    now reads CI's `usedBytes` and `freeBytes` exactly (its 9-character sha
+    used to cost 8 B).
+  What it does not cover: `largestFreeBlock` still differs between hosts on
+  one image (116,720 on this desk against CI's 116,656 — the 2026-10-07
+  entry's placement effect, not the version); and the classic's and the S3's
+  images are not figure builds, because their ratchet boots their boot
+  suite's own image, whose build script stamps the version once per HEAD, so
+  CI's re-check there was never dirty — a desk bless of those two can still
+  differ from CI by its sha's length. Workaround now: **take CI's C6 patch**
+  (`just apply-ci-figures <pr>`); the transcribe-from-the-log workaround of
+  the 2026-10-06 – 10-10 entries above is retired.
 
 **Exit criteria** — a PR whose only memory effect is a few bytes of statics
 passes the gate without touching the record, and two PRs that each

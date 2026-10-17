@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::app_image::{self, PAGE};
+use crate::core_padding;
+use crate::core_segments;
 use crate::elf_symbol;
 use crate::engine_script::{ENGINE_BASE, EngineRules, pass1_script};
 use crate::merged_image;
@@ -25,7 +27,9 @@ pub struct BuildOptions {
     pub out: PathBuf,
     /// Cargo features for fw-esp32c6 (its defaults are always on).
     pub features: String,
-    /// A build def's bootloader override.
+    /// The second-stage bootloader to merge. [`BuildOptions::new`] sets the
+    /// shipped one ([`crate::merged_image::C6_BOOTLOADER`]); `None` merges
+    /// the one espflash bundles.
     pub bootloader: Option<PathBuf>,
     /// The partition table the image is flashed with.
     pub partitions: PathBuf,
@@ -37,11 +41,12 @@ pub struct BuildOptions {
 impl BuildOptions {
     pub fn new(repo: PathBuf, out: PathBuf) -> Self {
         let partitions = repo.join("lp-fw/fw-esp32c6/partitions.csv");
+        let bootloader = Some(repo.join(crate::merged_image::C6_BOOTLOADER));
         Self {
             repo,
             out,
             features: "esp32c6,server".into(),
-            bootloader: None,
+            bootloader,
             partitions,
             target: None,
         }
@@ -64,6 +69,10 @@ pub const BUILD_ID_SYMBOL: &str = "LP_BUILD_ID";
 pub const ENGINE_DIGEST_SYMBOL: &str = "LP_ENGINE_DIGEST";
 /// The emulator seam descriptor table (`fw_esp32_common::seam_table!`).
 pub const SEAM_TABLE_SYMBOL: &str = "LP_SEAM_TABLE";
+/// The core's `.bss` bounds (esp-hal `ld/sections/rwdata.x`; riscv-rt zeroes
+/// `__sbss..__ebss`, their aliases, before Rust runs).
+pub const BSS_START_SYMBOL: &str = "_bss_start";
+pub const BSS_END_SYMBOL: &str = "_bss_end";
 /// The layout `lp_bootctl::SplitLayout` describes.
 pub const LAYOUT: u32 = 1;
 
@@ -181,7 +190,30 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     if lp_bootctl::engine_digest::decode(slot.get(&p2_elf)) != Some(engine_sha256) {
         bail!("the core's digest slot does not hold engine.bin's SHA-256 after patching");
     }
-    let core = split_artifacts::app_image(&split_artifacts::core_elf(&p2_elf)?)?;
+    let mut core = split_artifacts::app_image(&split_artifacts::core_elf(&p2_elf)?)?;
+    // espflash's address-0 padding, if a core ever has any, goes to the
+    // core's .bss, which the core zeroes before it reads it; the loader would
+    // copy it to address 0. (A rodata page crossing used to leave a gap the
+    // RAM segments could not fill; with `.text` following rodata there is no
+    // gap — `engine_script::TEXT_FOLLOWS_RODATA`.)
+    let bss =
+        elf_symbol::value(&p2_elf, BSS_START_SYMBOL)?..elf_symbol::value(&p2_elf, BSS_END_SYMBOL)?;
+    for p in core_padding::aim_padding_at_bss(&mut core, bss.clone())? {
+        eprintln!(
+            "    core.bin: padding segment {} ({} B) aimed at .bss {:#010x} (.bss {:#010x}..{:#010x})",
+            p.index, p.len, p.addr, bss.start, bss.end
+        );
+    }
+    // Every segment must be one the loader can place: a core it cannot is
+    // never written, so nothing downstream can package or ship it.
+    let segments = core_segments::check(&core)?;
+    eprintln!(
+        "    core.bin: {} segments, every one placeable",
+        segments.len()
+    );
+    for s in &segments {
+        eprintln!("{}", s.line());
+    }
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
 

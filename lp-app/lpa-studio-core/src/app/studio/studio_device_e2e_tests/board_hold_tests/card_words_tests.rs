@@ -9,7 +9,10 @@
 //! (C5), and the board under Online boards on the page (C6).
 
 use super::*;
-use crate::{BarLayer, BarWorkState, CornerMark, PictureSource, UiPrimary, UiStatusKind};
+use crate::{
+    BarLayer, BarWorkState, CornerMark, PictureSource, SurfacePicture, SurfaceState, UiPrimary,
+    UiStatusKind,
+};
 
 /// C1: B loads beside a holder that has a picture saved. B's card for the
 /// board is the board's own card, Online, with the picture A saved (dimmed),
@@ -31,26 +34,36 @@ fn c1_a_watchers_card_is_online_saying_another_tab_has_it_and_connects_by_taking
     assert_eq!(card.picture.source, PictureSource::Saved);
     assert!(card.picture.dim, "A's picture, dimmed");
     assert!(card.picture.frame.is_some());
-    assert!(
-        card.status
-            .reading
-            .as_deref()
-            .is_some_and(|age| age.ends_with(" ago")),
-        "the corner reads the picture's age: {:?}",
-        card.status.reading
+    assert_eq!(card.surface.state, SurfaceState::AnotherTab);
+    assert_eq!(
+        card.surface.picture,
+        SurfacePicture::Dimmed,
+        "A's picture dims under the notice"
     );
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board is open in another tab.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Connect here to move it to this tab.")
+    );
+    assert_eq!(notice.tone, UiStatusKind::Attention);
     let connection = card.bar(BarLayer::Connection);
     assert_eq!(connection.summary, "Open in another tab");
     assert_eq!(connection.aside, None, "A only watches");
-    assert_eq!(connection.tone, UiStatusKind::Attention);
+    assert_eq!(
+        connection.tone,
+        UiStatusKind::Neutral,
+        "the surface says it, once: the row goes quiet"
+    );
     assert_eq!(connection.action, None);
     assert_eq!(
         card.status.mark,
-        CornerMark::Notice(UiStatusKind::Attention)
+        CornerMark::Fine,
+        "the corner is a quiet ⋯"
     );
 
     let primary = primary_of(&card);
-    assert_eq!(primary.word, "Connect");
+    assert_eq!(primary.word, "Connect here");
     assert_eq!(primary.offer, b.verb(MAC_A, "take-over"));
     assert_eq!(primary.icon.as_deref(), Some("usb"));
     assert!(
@@ -66,8 +79,9 @@ fn c1_a_watchers_card_is_online_saying_another_tab_has_it_and_connects_by_taking
 
 /// C2: the holder's level is in the aside and in the cost. With its editor
 /// open, B's bar says "editor open" and its Connect is Undoable (the error
-/// tint, one click); busy with a push, B's Connect is disabled with the
-/// holder's reason, which the offer reads out too.
+/// tint, one click); busy with a push, B's primary says "Busy in the other
+/// tab" with the holder's reason on its hover, which the offer reads out
+/// too.
 #[test]
 fn c2_the_holders_level_is_the_aside_and_the_cost() {
     let desk = Desk::new(&[("dev000000holdc2aa", MAC_A)]);
@@ -120,12 +134,8 @@ fn c2_the_holders_level_is_the_aside_and_the_cost() {
         Some(label.as_str())
     );
     assert_eq!(
-        card.name_bar.primary,
-        Some(UiPrimary::Unavailable {
-            word: "Connect".to_string(),
-            icon: "usb".to_string(),
-            reason: reason.clone(),
-        })
+        card.name_bar.primary, None,
+        "never a greyed Connect: no button, and the Link row says why"
     );
     assert_eq!(
         b.bench.offer_reason(b.verb(MAC_A, "take-over")),
@@ -136,8 +146,8 @@ fn c2_the_holders_level_is_the_aside_and_the_cost() {
 }
 
 /// C3: pressing the primary by path IS pressing `take-over`. While A is
-/// asked the bar is the work "Asking the other tab…" and Connect is
-/// disabled with those words; then "Opening…"; then the card is the
+/// asked the bar is the work "Asking the other tab…" and the primary says
+/// those words; then "Opening…"; then the card is the
 /// board's ordinary live card, whose primary is Edit.
 #[test]
 fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
@@ -165,11 +175,8 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
     );
     assert_eq!(
         card.name_bar.primary,
-        Some(UiPrimary::Unavailable {
-            word: "Connect".to_string(),
-            icon: "usb".to_string(),
-            reason: "Asking the other tab\u{2026}".to_string(),
-        })
+        Some(UiPrimary::working("Asking the other tab\u{2026}")),
+        "the spinner alone: the Link row says how"
     );
     assert_eq!(
         b.bench.offer_reason(primary.offer.clone()),
@@ -177,9 +184,13 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
     );
 
     run_until(&mut [&mut a, &mut b], "B to have the board", |tabs| {
-        tabs[1]
-            .card(MAC_A)
-            .is_some_and(|card| card.status == DeviceStatus::Ready)
+        tabs[1].card(MAC_A).is_some_and(|card| {
+            card.status == DeviceStatus::Ready
+                && matches!(
+                    card.loaded_project,
+                    lpa_devices::view::LoadedProject::Running { .. }
+                )
+        })
     });
     let card = b.ui_card(MAC_A);
     assert!(
@@ -194,17 +205,15 @@ fn c3_the_primary_is_the_take_over_and_the_bar_works_while_it_runs() {
         card.bar(BarLayer::Connection).summary,
         "USB \u{b7} connected"
     );
-    assert!(
-        matches!(
-            card.name_bar.primary.as_ref().map(UiPrimary::word),
-            Some("Edit") | Some("Connect")
-        ),
-        "an ordinary live card: {:?}",
-        card.name_bar.primary
-    );
-    assert_ne!(
-        card.name_bar.primary.as_ref().map(UiPrimary::word),
-        Some("Connect"),
+    // An ordinary live card: its Connect opens its panel here (`connect`),
+    // with nothing left to take over.
+    let Some(UiPrimary::Offer(connect)) = card.name_bar.primary.as_ref() else {
+        panic!("an ordinary live card: {:?}", card.name_bar.primary);
+    };
+    assert_eq!(connect.word, "Connect");
+    assert_eq!(
+        connect.offer,
+        b.verb(MAC_A, "connect"),
         "nothing left to take over"
     );
 }
@@ -232,12 +241,24 @@ fn c4_the_tab_that_let_go_says_taken_by_another_tab_and_connects_to_take_it_back
     assert_eq!(card.presence, crate::UiBoardPresence::Online);
     let connection = card.bar(BarLayer::Connection);
     assert_eq!(connection.summary, "Taken by another tab");
-    assert_eq!(connection.tone, UiStatusKind::Attention);
+    assert_eq!(
+        connection.tone,
+        UiStatusKind::Neutral,
+        "the surface says it"
+    );
     assert_eq!(connection.aside, None);
     assert_eq!(card.picture.source, PictureSource::Saved);
     assert!(card.picture.dim && card.picture.frame.is_some());
+    assert_eq!(card.surface.state, SurfaceState::TakenByAnotherTab);
+    assert_eq!(
+        card.surface
+            .notice
+            .as_ref()
+            .map(|notice| notice.first.as_str()),
+        Some("Another tab took this board.")
+    );
     let primary = primary_of(&card);
-    assert_eq!(primary.word, "Connect");
+    assert_eq!(primary.word, "Connect here");
     assert_eq!(primary.offer, a.verb(MAC_A, "take-over"));
     every_card_action_is_offered(&a);
 

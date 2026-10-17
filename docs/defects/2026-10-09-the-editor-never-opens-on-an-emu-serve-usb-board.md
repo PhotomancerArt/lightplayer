@@ -1,8 +1,8 @@
 ---
 status: open
 found: 2026-10-09      # how: e2e (walk-drop-emu, emulated, lp-emu:esp32c6:t1)
-area: lpa-studio-core project sync over a `?emu=ws://…` USB board (`lp-cli emu serve`), or the door's link
-class: unclassified
+area: fw-esp32-common `usb_link_transport` (SEND_ROOM_WAIT) × a `?emu=ws://…` host paced by the Mac serial model × the emulated clock
+class: fixed-budget-over-variable-work
 related:
   - scripts/emu/walk-drop-emu.mjs (step `editor`)
   - lp2025/2026-10-08-2050-the-board-card (P09, where it was found)
@@ -63,3 +63,60 @@ Graph on the same build, so the walk ran there.
 **Lesson** — the walks that open the editor over the door (`walk-drop-emu`)
 had not been run since the lanes moved to `--serve-release`; a lane nobody
 runs hides a failure until a change that has to run it finds one.
+
+**Re-checked 2026-10-10** (the connected plan's P7, branch
+`claude/connected-in-the-card` at `0c1ede359`, `main` at `0e505dd26` merged
+in, so the emulated `sc.w` fix is in; `lp-emu:esp32c6:t1`). `just
+walk-drop-emu --serve-release` over the door **passed**: the editor step
+opened `/p/playful-choker-prj…` with the board's panel (brightness, palette,
+scale, clock.rate), and both cable pulls were ridden out. The tab backing
+passed too. The same error text did appear once, and recovered: in `just
+walk-two-tabs-emu --serve-release`, tab B's Connect (step 5, which on that
+branch opens the board's session on its card) logged `project sync failed:
+protocol error: expected project read frame seq 1, got 0` twice, right
+after the board's `dropped stale response … for a request abandoned by
+client` lines, then the sync started over and the walk passed. Not
+re-run on `main` here. Status left open: one passing run is not a cause.
+
+**The mechanism, 2026-10-10** (the connected plan's debugging pass, branch
+`claude/connected-in-the-card` at `2a8c955fa`, `lp-emu:esp32c6:t1`, a
+loaded desk). `just walk-no-board --serve-release` failed at `card-connect`
+(Connect opens the same lens the editor does): "waiting for the board's
+panel on its card, the page still at `/`". Every one of the lens's project
+reads failed, and for each read id the board's console says why:
+
+```
+[usb_link] dropping message id=4328521736: Transport error: host link busy: the reply before it is not out (2048 B held)
+```
+
+A full project read is several 16 KiB frames. The board waits
+`SEND_ROOM_WAIT` (3 s, on its own clock) for one frame to be cut before it
+queues the next, then drops the next and sends a drop notice
+(`usb_link_transport.rs`, D8). The page was reading the whole time, at the
+Mac serial model's ceiling (`?emu=` on a Mac: one 255 B read every ≥16 ms):
+27,827 B in 2.09 s, no gap over 62 ms. One frame took about 1.4 s of wall
+time to drain, and the drop landed about 20 ms after the frame before it
+had fully arrived, with the same 2048 B held each time. So the board's
+3 s ran out in about 1.4 s of the page's wall time: the emulated clock ran
+ahead of a host that the tty model paces in wall time. Every retry lost the
+same race. 1 run of 4 hit it that day; of the other three, one recovered
+after a single dropped read, one dropped none, and the third's console was
+not kept.
+
+The drop notice is a plain `WireServerMessage::new` (seq 0), so a client
+mid-stream reports "expected project read frame seq N, got 0" instead of
+the drop's own words. That is cosmetic: the read fails either way.
+
+Not fixed here (it is `main`'s, and the fix belongs to the firmware's room
+wait against a slow host, the emulator's pace, or the read's frame size).
+Status stays open.
+
+**Re-checked 2026-10-17** (the board card's round 3, branch
+`claude/card-surface-3` on `main` at `dd8534867`, `lp-emu:esp32c6:t1`,
+lp-emu `7bf210663`, a loaded desk running other walks' builds). `just
+walk-drop-emu --serve-release` over the door failed 3 runs of 3 at the
+`editor` step (`connect` and `push` pass), each console repeating `expected
+project read frame seq 1, got 0` between link resets, two runs in Chrome for
+Testing 142 and one in Brave. The same walk on the tab backing
+(`WALK_BACKING=tab`) passed every step, both cable pulls included. The
+card's change touches no read path: this is the defect above, not the round.

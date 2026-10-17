@@ -2,7 +2,7 @@
  *
  * esp-hal's default puts three families of anonymous constants in `.data`:
  * interrupt-handler tables, every match jump table in the image, and the
- * `.rodata.cst*` literal pools. On the classic that is 17,896 B out of a
+ * `.rodata.cst*` literal pools. On the classic that was 17,896 B out of a
  * `dram_seg` where `.data`, `.bss` and `.stack` are strictly zero-sum, and
  * almost all of it belongs to code that never runs from an ISR.
  *
@@ -18,9 +18,14 @@
  * hence the `*<crate>*` shapes below.
  *
  * ⚠️ `.rodata.cst*` are MERGED pools: one section holds constants from every
- * crate at a given alignment, so they can only move as a whole. They stay in
- * RAM (5,080 B) because some of the code that reads them is on the ISR path
- * and there is no way to split them.
+ * crate at a given alignment, so they can only move as a whole. They stayed in
+ * RAM (5,080 B) on the 2026-09-06 build because some of the code that reads
+ * them was believed to be on the ISR path. 2026-10-10 (E5 of the RAM research
+ * program): `just iram-flash-literals-esp32v3` — the check — says no
+ * RAM-resident function loads an address inside them (99 functions, 82 flash
+ * literals, both before and after), so the pools went to flash too and the
+ * stack got 5,520 B. If a RAM function ever does read one, the check goes red
+ * naming it; put `*(.rodata.cst*)` back below and say why.
  *
  * Included from esp-hal's `ld/sections/rwdata.x` inside the `.data` output
  * section, which the linker script reaches before `.rodata` — so anything
@@ -31,19 +36,21 @@
  * check, not this comment.
  */
 
-/* Interrupt dispatch tables and the merged constant pools. */
+/* Interrupt dispatch tables. (The merged constant pools used to be here too.) */
 *(.rodata.*_esp_hal_internal_handler*)
 *(.rodata.*INTERRUPT_EDGE*)
-*(.rodata.cst*)
 
-/* Jump tables belonging to crates with code in IRAM: the WS281x refill ISR,
- * the firmware's own ISR plumbing and wire pusher, esp-hal's and esp-rtos's
- * handlers, and xtensa-lx-rt's vector code. */
+/* Lookup tables that RAM-resident functions read: the WS281x refill ISR's
+ * `fill_half` tables and esp-hal's `mapped_to_raw` (interrupt source mapping),
+ * with esp-rtos's as a precaution (0 B). This used to be five broad crate
+ * globs (`*fw_esp32v3*`, `*esp_hal*`, `*xtensa_lx_rt*`, …) that also kept
+ * `boot_firmware`'s 1 KB table and the `Debug` tables of every GPIO signal and
+ * exception cause in RAM (2,448 B); `just iram-flash-literals-esp32v3` says no
+ * RAM-resident function loads those either (99 functions / 82 literals, both
+ * ways), so only the ones named here stay. */
 *(.rodata..Lswitch.table.*lp_ws281x*)
-*(.rodata..Lswitch.table.*fw_esp32v3*)
-*(.rodata..Lswitch.table.*esp_hal*)
+*(.rodata..Lswitch.table.*mapped_to_raw*)
 *(.rodata..Lswitch.table.*esp_rtos*)
-*(.rodata..Lswitch.table.*xtensa_lx_rt*)
 
 /* Jump tables of `#[ram]` FUNCTIONS, which LLVM emits as `.rodata.<function>`
  * (not `.rodata..Lswitch.table.*`, which is only the switch LOOKUP tables):

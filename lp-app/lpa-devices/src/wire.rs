@@ -424,6 +424,15 @@ pub enum BoardFs {
     /// A pre-repartition filesystem is waiting for a migration: the
     /// firmware refused to format over it.
     LegacyHeld,
+    /// The board refused its file store (a newer or damaged store header,
+    /// `fs-tree` builds): files kept on the flash, a RAM filesystem served,
+    /// access locked. Not a migration.
+    Refused,
+    /// The same refusal from a build that does not read the tree store (`fs:
+    /// refused` in a hello without `fs.tree`): a littlefs core found its
+    /// board's files in the tree store, the newer filesystem, and kept them.
+    /// A firmware that reads it brings them back.
+    TreeStoreHeld,
 }
 
 impl HelloFacts {

@@ -454,7 +454,7 @@ impl SettingsStore {
         // for providers without a default.
         let model_placeholder = match self.agent_model() {
             Some(model) => model.to_string(),
-            None => "model id from your provider — see its docs".to_string(),
+            None => "Model id from your provider's docs".to_string(),
         };
         // The discovered-model slice (P8): options only from a Loaded
         // fetch; Loading and Failed render as flags on the free-text path.

@@ -390,7 +390,7 @@ fn home_open_package_pushes_the_library_head_end_to_end() {
 /// open is already over. Unless `open_on_simulator` emits a view of its
 /// own after setting `pending_open`, a slow open runs to completion
 /// behind a gallery that never acknowledged the click (the live G1 Q1
-/// residual: a throttled first click showed no "Downloading the engine…"
+/// residual: a throttled first click showed no "Downloading the sim…"
 /// line, because the line's mount gate never arrived).
 #[test]
 fn an_open_narrates_on_the_card_while_it_runs() {
