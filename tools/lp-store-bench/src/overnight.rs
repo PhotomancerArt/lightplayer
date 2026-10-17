@@ -409,6 +409,7 @@ fn round_units<'a>(
                 let n = if p.quick { 2 } else { 4 };
                 (0..n).into_par_iter().for_each(|i| {
                     let lp = LongParams {
+                        idle_steps: 0,
                         candidate: cand.name().into(),
                         config: cfg.clone(),
                         corpora: vec!["c40".into(), "c20".into(), "c13".into(), "c40reuse".into()],

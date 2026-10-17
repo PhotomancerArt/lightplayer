@@ -65,10 +65,13 @@ pub enum Mutant {
     /// `format` erases its two sectors but leaves every other header as it
     /// reads (no kill): an earlier store's sectors stay trusted.
     FormatKeepsHeaders,
+    /// An idle step forgets a garbage-only sector even when it is a write
+    /// head (its next append lands in a sector a mount no longer reads).
+    IdleForgetsHeads,
 }
 
 impl Mutant {
-    pub const ALL: [Mutant; 15] = [
+    pub const ALL: [Mutant; 16] = [
         Mutant::SkipKill,
         Mutant::TrustRecordHeaders,
         Mutant::DedupAgainstAllRecords,
@@ -84,6 +87,7 @@ impl Mutant {
         Mutant::NewestByHeaders,
         Mutant::NoFullScan,
         Mutant::FormatKeepsHeaders,
+        Mutant::IdleForgetsHeads,
     ];
 
     pub fn name(self) -> &'static str {
@@ -103,6 +107,7 @@ impl Mutant {
             Mutant::NewestByHeaders => "newest_by_headers",
             Mutant::NoFullScan => "no_full_scan",
             Mutant::FormatKeepsHeaders => "format_keeps_headers",
+            Mutant::IdleForgetsHeads => "idle_forgets_heads",
         }
     }
 

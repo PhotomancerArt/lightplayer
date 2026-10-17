@@ -83,6 +83,11 @@ pub trait CandidateStore {
     /// End of a workload step. A transactional store makes everything since the
     /// last commit atomic; others may no-op.
     fn commit(&mut self) -> Result<(), StoreError>;
+    /// One bounded piece of the store's own cleanup, as a board does on a
+    /// quiet tick; `true` if it did any. Changes no file. Default: none.
+    fn idle(&mut self) -> Result<bool, StoreError> {
+        Ok(false)
+    }
     /// Unmount (without writing anything new) and hand the flash back.
     fn into_flash(self: Box<Self>) -> NorFlashSim;
     /// A clone of the flash as it stands (cheap: sectors are shared), for

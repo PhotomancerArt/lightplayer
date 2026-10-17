@@ -362,6 +362,17 @@ impl<F: Flash> RecordLog<F> {
         Ok(reads_killed(&h))
     }
 
+    /// Stop trusting a sector that holds no live record (nothing indexed in
+    /// it): kill its header, so a mount reads 24 bytes of it instead of its
+    /// records. It stays free and is erased when it is opened, as it would
+    /// have been.
+    pub fn forget_sector(&mut self, s: u32) -> R<(), F> {
+        self.index.remove_sector(s);
+        self.sectors.end[s as usize] = NEEDS_ERASE;
+        self.sectors.live[s as usize] = 0;
+        self.kill_header(s)
+    }
+
     /// Whether `s`'s header reads `want`.
     pub fn header_reads(&mut self, s: u32, want: u8) -> R<bool, F> {
         let mut h = [0u8; SECTOR_HEADER_LEN as usize];

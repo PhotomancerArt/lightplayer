@@ -207,6 +207,18 @@ pub trait LpFs {
         }
     }
 
+    /// One bounded piece of the filesystem's own cleanup, for a caller with
+    /// nothing else to do: a server calls it on a quiet tick (no request,
+    /// no open batch). It changes no file. `true` if it did any work; once
+    /// there is none left it answers `false` cheaply until the next write.
+    ///
+    /// The default does nothing: only the tree store has cleanup it can do
+    /// early (`TreeStore::collect_step`); littlefs, memory and the host
+    /// filesystem have none.
+    fn idle_step(&self) -> Result<bool, FsError> {
+        Ok(false)
+    }
+
     /// Get the current filesystem version
     ///
     /// Returns the version number that will be assigned to the next change.

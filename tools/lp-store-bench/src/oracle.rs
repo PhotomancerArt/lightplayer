@@ -23,6 +23,7 @@ pub fn apply_step(model: &mut Model, step: &Step) {
                 model.insert(path.clone(), bytes.clone());
             }
             Op::DeletePrefix(prefix) => model.retain(|p, _| !p.starts_with(prefix.as_str())),
+            Op::Idle(_) => {}
         }
     }
 }
@@ -33,6 +34,13 @@ pub fn run_step(store: &mut dyn CandidateStore, step: &Step) -> Result<(), Store
         match op {
             Op::Put { path, bytes } => store.put(path, bytes)?,
             Op::DeletePrefix(prefix) => store.delete_prefix(prefix)?,
+            Op::Idle(n) => {
+                for _ in 0..*n {
+                    if !store.idle()? {
+                        break;
+                    }
+                }
+            }
         }
     }
     store.commit()
