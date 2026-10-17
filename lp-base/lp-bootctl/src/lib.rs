@@ -92,10 +92,10 @@
 extern crate std;
 
 mod boot_choice;
-pub mod bootloader_identity;
 mod boot_control;
 mod boot_flags;
 mod boot_record;
+pub mod bootloader_identity;
 pub mod engine_digest;
 pub mod engine_header;
 pub mod loader_identity;
@@ -109,8 +109,8 @@ pub use boot_record::{
     BootRecord, BootSlot, COLD_RETRY_CAP, COLD_TALLY_OFFSET, CONFIRMED_MARK_OFFSET, RECORD_MAGIC,
     STARTED_MARK_OFFSET, build_hash,
 };
-pub use engine_header::{EngineHeader, EngineHeaderError};
 pub use bootloader_identity::{BOOTLOADER_VERSION, find_bootloader_version};
+pub use engine_header::{EngineHeader, EngineHeaderError};
 pub use loader_identity::{LOADER_VERSION, find_loader_version};
 pub use reset_kind::ResetKind;
 pub use split_layout::{

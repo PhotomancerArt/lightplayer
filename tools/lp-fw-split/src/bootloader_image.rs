@@ -87,7 +87,12 @@ pub fn image(entry: u32, segments: &[RamSegment]) -> Result<Vec<u8>> {
         );
     }
     let mut out = Vec::with_capacity(BOOTLOADER_MAX_LEN);
-    out.extend_from_slice(&[MAGIC, segments.len() as u8, SPI_MODE_DIO, SIZE_SPEED_4MB_40MHZ]);
+    out.extend_from_slice(&[
+        MAGIC,
+        segments.len() as u8,
+        SPI_MODE_DIO,
+        SIZE_SPEED_4MB_40MHZ,
+    ]);
     out.extend_from_slice(&entry.to_le_bytes());
     out.extend_from_slice(&[0xEE, 0, 0, 0]);
     out.extend_from_slice(&CHIP_ID_C6.to_le_bytes());
@@ -188,7 +193,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(&img[..4], &[0xE9, 1, 2, 0x20]);
-        assert_eq!(u32::from_le_bytes(img[4..8].try_into().unwrap()), 0x4085_0008);
+        assert_eq!(
+            u32::from_le_bytes(img[4..8].try_into().unwrap()),
+            0x4085_0008
+        );
         assert_eq!(&img[12..14], &[0x0D, 0]);
         assert_eq!(img[23], 1);
         // The data starts at 0x20, padded to a word.

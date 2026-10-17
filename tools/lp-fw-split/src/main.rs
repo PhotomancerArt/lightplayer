@@ -34,8 +34,9 @@ enum Command {
         /// fw-esp32c6 features (its defaults are always on).
         #[arg(long, default_value = "esp32c6,server")]
         features: String,
-        /// The IDF bootloader the IDF door's image carries, instead of
-        /// espflash 3.3.0's bundled one.
+        /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries
+        /// (default: the esp32c6-4mb build def's IDF bootloader,
+        /// lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin).
         #[arg(long)]
         bootloader: Option<PathBuf>,
         /// The second stage `merged.bin` boots through: `lightplayer` (our
@@ -115,7 +116,9 @@ fn run(command: Command) -> Result<bool> {
         } => {
             let mut opts = BuildOptions::new(repo, out);
             opts.features = features;
-            opts.bootloader = bootloader;
+            if let Some(b) = bootloader {
+                opts.bootloader = Some(b);
+            }
             opts.door = door;
             opts.target = target;
             if let Some(p) = partitions {

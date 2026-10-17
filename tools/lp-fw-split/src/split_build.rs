@@ -27,8 +27,10 @@ pub struct BuildOptions {
     pub out: PathBuf,
     /// Cargo features for fw-esp32c6 (its defaults are always on).
     pub features: String,
-    /// The IDF bootloader the IDF door's image carries (`None`: the one
-    /// espflash bundles).
+    /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries.
+    /// [`BuildOptions::new`] sets the build def's
+    /// ([`crate::merged_image::C6_BOOTLOADER`]); `None` merges the one
+    /// espflash bundles.
     pub bootloader: Option<PathBuf>,
     /// Which second stage `merged.bin` boots through. Both doors' images are
     /// always written (`merged-lp.bin`, `merged-idf.bin`); this picks the one
@@ -44,11 +46,12 @@ pub struct BuildOptions {
 impl BuildOptions {
     pub fn new(repo: PathBuf, out: PathBuf) -> Self {
         let partitions = repo.join("lp-fw/fw-esp32c6/partitions.csv");
+        let bootloader = Some(repo.join(crate::merged_image::C6_BOOTLOADER));
         Self {
             repo,
             out,
             features: "esp32c6,server".into(),
-            bootloader: None,
+            bootloader,
             door: Door::Lightplayer,
             partitions,
             target: None,
@@ -362,7 +365,10 @@ pub fn rebuild_bootloader(repo: &Path, out: &Path) -> Result<()> {
         size_bytes: image.len() as u32,
         sha256: hex(&Sha256::digest(&image)),
     });
-    fs::write(out.join("split.json"), serde_json::to_string_pretty(&report)?)?;
+    fs::write(
+        out.join("split.json"),
+        serde_json::to_string_pretty(&report)?,
+    )?;
     Ok(())
 }
 

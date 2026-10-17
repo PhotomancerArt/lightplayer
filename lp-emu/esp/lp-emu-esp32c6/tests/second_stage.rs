@@ -118,7 +118,11 @@ fn a_board_with_the_lp_analog_clock_gated_boots_through_our_door() {
         "the gated board did not reach the core through our door: {outcome:?}\n{}",
         m.uart0().text()
     );
-    assert!(!m.uart0().text().contains("TG0_WDT"), "{}", m.uart0().text());
+    assert!(
+        !m.uart0().text().contains("TG0_WDT"),
+        "{}",
+        m.uart0().text()
+    );
 }
 
 #[test]
@@ -227,7 +231,10 @@ fn allowed(reg: &str) -> bool {
     ];
     PREFIXES.iter().any(|p| reg.starts_with(p))
         || EXACT.contains(&reg)
-        || matches!(reg, "IO_MUX+0x06c" | "IO_MUX+0x074" | "IO_MUX+0x078" | "IO_MUX+0x07c")
+        || matches!(
+            reg,
+            "IO_MUX+0x06c" | "IO_MUX+0x074" | "IO_MUX+0x078" | "IO_MUX+0x07c"
+        )
 }
 
 /// `cyc=N pc=0x… <rest>`: the pc and the rest.
@@ -283,5 +290,9 @@ fn rom_up(split: &SplitImage, clk_en: u32) -> Esp32C6Builder {
         .uart0(Uart0Sink::Memory)
         .usb_host(UsbHost::Attached { draining: true })
         .strict(true);
-    if clk_en == 0 { b } else { b.lp_peri_clk_en(clk_en) }
+    if clk_en == 0 {
+        b
+    } else {
+        b.lp_peri_clk_en(clk_en)
+    }
 }

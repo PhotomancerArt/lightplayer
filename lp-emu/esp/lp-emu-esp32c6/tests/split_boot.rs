@@ -8,8 +8,8 @@
 //!   Through **our door** (`merged.bin`) the ROM loads LightPlayer's own
 //!   second stage from `0x0`, which does the loader's job itself; through
 //!   **the IDF door** (`merged-idf.bin`, the same `app.bin`) the ROM loads
-//!   espflash 3.3.0's IDF bootloader, which loads the factory loader as its
-//!   app. Either way the loader's logic reads the boot records, maps the core
+//!   the IDF bootloader the build def names, which loads the factory loader
+//!   as its app. Either way the loader's logic reads the boot records, maps the core
 //!   and copies its RAM segments; the core starts the radios and links and
 //!   opens the engine. Asserted on the board's own words — each door's line,
 //!   the loader's ROM print, the core's first line, the engine's server-loop
@@ -56,7 +56,8 @@ const ENGINE_LINE: &str = "[INIT] fw-esp32 initialized, starting server loop... 
 const CORE_FIRST: &str = "[INIT] Initializing board";
 
 /// The cache MMU page the layout is aligned to, and the one espflash
-/// 3.3.0's bundled bootloader picks on a 4 MB C6.
+/// 3.3.0's bundled bootloader (and its quiet rebuild) picks on a 4 MB C6.
+/// A bootloader that picked another would fail here.
 const PAGE: u32 = 0x8000;
 
 #[test]
@@ -101,16 +102,22 @@ fn boots_to_the_engine(split: &SplitImage, door: Door) {
     );
 
     let rom_console = m.uart0().text();
+    let entry = rom_console
+        .find("entry 0x")
+        .unwrap_or_else(|| panic!("{door:?}: the ROM started the second stage:\n{rom_console}"));
+    let loader = rom_console
+        .find("[LOADER]")
+        .unwrap_or_else(|| panic!("{door:?}: the loader's logic ran:\n{rom_console}"));
+    assert!(
+        entry < loader,
+        "{door:?}: the loader ran before the ROM's entry:\n{rom_console}"
+    );
+    // Which second stage ran: ours says so in one line; the IDF's (whichever
+    // the build def names — a quiet build says nothing) never does.
+    let ours = rom_console.contains("[LPBOOT] LightPlayer bootloader v1");
     match door {
-        Door::Ours => assert!(
-            rom_console.contains("[LPBOOT] LightPlayer bootloader v1")
-                && !rom_console.contains("Loaded app from partition"),
-            "our bootloader, not the IDF's, ran:\n{rom_console}"
-        ),
-        Door::Idf => assert!(
-            rom_console.contains("Loaded app from partition at offset 0x10000"),
-            "the IDF bootloader loaded the loader as its app:\n{rom_console}"
-        ),
+        Door::Ours => assert!(ours, "our bootloader, not the IDF's, ran:\n{rom_console}"),
+        Door::Idf => assert!(!ours, "the IDF door ran our bootloader:\n{rom_console}"),
     }
     assert!(
         rom_console.contains("[LOADER] core @0x18000 (proven)"),
