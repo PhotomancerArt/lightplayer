@@ -14,7 +14,8 @@
 //!
 //! - `x` — the packaged split image, app version `a0a0a0a0`;
 //! - `y` — the same tree at `b1b1b1b1`;
-//! - `y-dies` — `y` with `fixture-trial-dies`;
+//! - `y-dies` — `y` with `fixture-trial-dies`, at `c1c1c1c1`: a build id of its
+//!   own, so refusing it never refuses `y` (U19 heals `y` after it);
 //! - `x-untrusted` — `x` with `fixture-usb-untrusted`.
 //!
 //! A **power cut** after request N is the flash as it stood when the host had
