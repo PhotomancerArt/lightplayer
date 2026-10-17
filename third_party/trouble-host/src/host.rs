@@ -980,8 +980,9 @@ impl<'d, C: Controller, P: PacketPool> RxRunner<'d, C, P> {
                                             min_connection_interval: Duration::from_micros(
                                                 event.interval_min.as_micros(),
                                             ),
+                                            // LP fork: upstream read interval_min here too.
                                             max_connection_interval: Duration::from_micros(
-                                                event.interval_min.as_micros(),
+                                                event.interval_max.as_micros(),
                                             ),
                                             max_latency: event.max_latency,
                                             supervision_timeout: Duration::from_micros(event.timeout.as_micros()),

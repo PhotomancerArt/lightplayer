@@ -322,29 +322,41 @@ impl ConnectionParamsRequest {
             return self.reject(stack).await;
         }
 
+        // LP fork (third_party/trouble-host/README-LP.md): a request the
+        // central made over the link layer (HCI LE Remote Connection Parameter
+        // Request — Android's) is answered by the Reply alone. Upstream issued
+        // an LE Connection Update first, which the controller refuses while
+        // that procedure waits on the host, so every such request was turned
+        // down — by a Negative Reply that bt-hci then mis-parsed into a panic.
+        if !self.l2cap {
+            let interval_min: bt_hci::param::Duration<1_250> = bt_hci_duration(params.min_connection_interval);
+            let interval_max: bt_hci::param::Duration<1_250> = bt_hci_duration(params.max_connection_interval);
+            let timeout: bt_hci::param::Duration<10_000> = bt_hci_duration(params.supervision_timeout);
+            return match stack
+                .host
+                .async_command(LeRemoteConnectionParameterRequestReply::new(
+                    self.handle,
+                    interval_min,
+                    interval_max,
+                    params.max_latency,
+                    timeout,
+                    bt_hci_duration(params.min_event_length),
+                    bt_hci_duration(params.max_event_length),
+                ))
+                .await
+            {
+                Err(BleHostError::BleHost(crate::Error::Hci(bt_hci::param::Error::UNKNOWN_CONN_IDENTIFIER))) => {
+                    Err(crate::Error::Disconnected.into())
+                }
+                other => other,
+            };
+        }
+
         match stack.host.async_command(into_le_conn_update(self.handle, params)).await {
             Ok(()) => {
-                if self.l2cap {
-                    // Use L2CAP signaling to update connection parameters
-                    let param = ConnParamUpdateRes { result: 0 };
-                    stack.host.send_conn_param_update_res(self.handle, &param).await
-                } else {
-                    let interval_min: bt_hci::param::Duration<1_250> = bt_hci_duration(params.min_connection_interval);
-                    let interval_max: bt_hci::param::Duration<1_250> = bt_hci_duration(params.max_connection_interval);
-                    let timeout: bt_hci::param::Duration<10_000> = bt_hci_duration(params.supervision_timeout);
-                    stack
-                        .host
-                        .async_command(LeRemoteConnectionParameterRequestReply::new(
-                            self.handle,
-                            interval_min,
-                            interval_max,
-                            params.max_latency,
-                            timeout,
-                            bt_hci_duration(params.min_event_length),
-                            bt_hci_duration(params.max_event_length),
-                        ))
-                        .await
-                }
+                // Use L2CAP signaling to update connection parameters
+                let param = ConnParamUpdateRes { result: 0 };
+                stack.host.send_conn_param_update_res(self.handle, &param).await
             }
             Err(BleHostError::BleHost(crate::Error::Hci(bt_hci::param::Error::UNKNOWN_CONN_IDENTIFIER))) => {
                 Err(crate::Error::Disconnected.into())
