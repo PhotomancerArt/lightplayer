@@ -366,7 +366,7 @@ mod tests {
                 message: "bad".into(),
             },
         );
-        assert!(parse.contains("unexpected response"), "{parse}");
+        assert!(parse.contains("unexpected answer"), "{parse}");
 
         let http = models_error_copy(
             AgentProvider::OpenAi,

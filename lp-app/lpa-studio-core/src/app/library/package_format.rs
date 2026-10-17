@@ -34,7 +34,7 @@ pub enum PackageHealth {
     UpgradesOnOpen { found: u32 },
     /// This Studio cannot open it as it stands.
     Blocked {
-        /// Card-sized statement of what was found ("Format 3 — too old").
+        /// Card-sized statement of what was found ("Format too old (3)").
         headline: String,
         /// What to do about it — a full sentence, from the classifier where
         /// the classifier has one.

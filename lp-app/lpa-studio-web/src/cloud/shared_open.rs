@@ -66,19 +66,19 @@ impl SharedOpenState {
             SharedOpenState::Idle => None,
             SharedOpenState::Opening => Some("Opening shared project…"),
             SharedOpenState::NotFound => {
-                Some("This link doesn't open anything — it may be restricted or archived.")
+                Some("This link doesn't open a project. It may be restricted or archived.")
             }
             SharedOpenState::Unreachable => Some(
-                "Couldn't reach the service to open this link — check your connection and try again.",
+                "Couldn't reach LightPlayer to open this link. Check your connection and try again.",
             ),
             SharedOpenState::NewerFormat => Some(
-                "This project was made by a newer LightPlayer — update LightPlayer to open it.",
+                "This project was made by a newer version of LightPlayer. Update LightPlayer to open it.",
             ),
             SharedOpenState::UnsupportedFormat => {
                 Some("This project's format can't be opened by this version of LightPlayer.")
             }
             SharedOpenState::ContentRefused => Some(
-                "This project uses something this LightPlayer doesn't know — update LightPlayer to open it.",
+                "This project uses something this version of LightPlayer doesn't know. Update LightPlayer to open it.",
             ),
         }
     }

@@ -338,7 +338,7 @@ mod tests {
         removal.kind = UiPendingEditKind::NodeRemoved;
         let (label, title) = revert_label(&removal);
         assert_eq!(label, "Restore");
-        assert!(title.contains("staged file deletions"));
+        assert!(title.contains("keep its files"));
     }
 
     #[test]

@@ -106,7 +106,7 @@ mod tests {
         assert!(message.contains("Remove Clock"));
         assert!(!message.contains("pending edit"));
         assert!(!message.contains("reference"));
-        assert!(message.contains("revert from the save panel"));
+        assert!(message.contains("restore it from Changes"));
         assert_eq!(preflight.consequence(), crate::ActionConsequence::Undoable);
     }
 
@@ -121,6 +121,6 @@ mod tests {
 
         assert!(preflight.consequence().arms());
         let copy = preflight.consequence();
-        assert!(copy.copy().unwrap().message.contains("2 unsaved edit(s)"));
+        assert!(copy.copy().unwrap().message.contains("2 unsaved change(s)"));
     }
 }

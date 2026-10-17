@@ -11149,7 +11149,7 @@ mod tests {
         let error = project
             .migrate_package_on_open(&mut handle, 2.0)
             .expect_err("below the floor");
-        assert!(error.message().contains("Format 3"), "{error}");
+        assert!(error.message().contains("Format too old (3)"), "{error}");
         assert_eq!(
             handle.history.head(),
             before,
@@ -16643,7 +16643,7 @@ mod tests {
                 .action
                 .meta()
                 .summary
-                .contains("revert from the save panel"),
+                .contains("restore it from Changes"),
             "delete carries the composed pre-flight as its summary"
         );
         assert!(
