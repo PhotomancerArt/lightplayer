@@ -1,15 +1,14 @@
-//! Package-time guard: the merged image's second-stage bootloader loads where
-//! the device model says it does.
+//! Package-time guard: the merged image's second-stage bootloader is one the
+//! device model knows.
 //!
 //! Studio recognizes a board hung in its bootloader by the ROM's `Saved PC`
 //! falling inside the bootloader's code segments
-//! (`lpa_devices::bootloader::bootloader_code_ranges`). That table is
-//! hardcoded from the bootloader espflash bundles; the day the bundled
-//! bootloader changes (an espflash upgrade, or a `--bootloader` override in
-//! the build def), the table would silently stop matching and the detection
-//! would go blind. The merged image starts with the bootloader's own ESP
-//! image header, so the truth is one parse away — this refuses to package an
-//! image whose bootloader segments disagree with the table.
+//! (`lpa_devices::bootloader`). That table is hardcoded from the bootloaders'
+//! headers; the day the merged bootloader changes (an espflash upgrade, or a
+//! build def's `bootloader`), the table would silently stop matching and the
+//! detection would go blind. The merged image starts with the bootloader's
+//! own ESP image header, so the truth is one parse away — this refuses to
+//! package an image whose bootloader is not one the table names.
 //!
 //! See `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
 
@@ -66,50 +65,53 @@ pub(super) fn parse_image_segments(bytes: &[u8]) -> Result<Vec<ImageSegment>> {
 /// data, and every code one must be in the model's table.
 const C6_APP_RAM_END: u32 = 0x4086_e610;
 
-/// Refuse when the bootloader at the head of `image` does not load its code
-/// where `lpa_devices::bootloader::bootloader_code_ranges(chip)` says.
+/// Refuse when the bootloader at the head of `image` is not one
+/// `lpa_devices::bootloader::known_bootloaders(chip)` names.
 ///
-/// Two-way check: every table range must be a segment of the image, and
-/// every image segment in the bootloader's part of HP SRAM must be in the
-/// table — except the first (lowest) segment, which is the bootloader's DRAM
-/// data and never executes. Chips without a table are not checked.
-pub(super) fn check_bootloader_segments(chip: &str, image: &[u8]) -> Result<()> {
-    let expected = lpa_devices::bootloader::bootloader_code_ranges(chip);
-    if expected.is_empty() {
-        return Ok(());
+/// The image's code segments — every segment in the bootloader's part of HP
+/// SRAM except the first (lowest), which is the bootloader's DRAM data and
+/// never executes — must be exactly one known bootloader's. Chips without a
+/// table are not checked. Returns the matching bootloader's name.
+pub(super) fn check_bootloader_segments(chip: &str, image: &[u8]) -> Result<Option<&'static str>> {
+    let known = lpa_devices::bootloader::known_bootloaders(chip);
+    if known.is_empty() {
+        return Ok(None);
     }
     let segments = parse_image_segments(image)?;
-    let ranges: Vec<Range<u32>> = segments.iter().map(ImageSegment::range).collect();
-
-    let missing: Vec<&Range<u32>> = expected
-        .iter()
-        .filter(|range| !ranges.contains(range))
-        .collect();
     let data_segment = segments.iter().map(|segment| segment.addr).min();
-    let unexpected: Vec<&Range<u32>> = ranges
+    let mut code: Vec<Range<u32>> = segments
         .iter()
-        .filter(|range| range.start >= C6_APP_RAM_END)
-        .filter(|range| Some(range.start) != data_segment)
-        .filter(|range| !expected.contains(range))
+        .filter(|segment| segment.addr >= C6_APP_RAM_END)
+        .filter(|segment| Some(segment.addr) != data_segment)
+        .map(ImageSegment::range)
         .collect();
+    code.sort_by_key(|range| range.start);
 
-    if missing.is_empty() && unexpected.is_empty() {
-        return Ok(());
+    for bootloader in known {
+        let mut expected = bootloader.code.to_vec();
+        expected.sort_by_key(|range| range.start);
+        if expected == code {
+            return Ok(Some(bootloader.name));
+        }
     }
-    let fmt = |ranges: &[&Range<u32>]| {
+    let fmt = |ranges: &[Range<u32>]| {
         ranges
             .iter()
             .map(|range| format!("0x{:08x}..0x{:08x}", range.start, range.end))
             .collect::<Vec<_>>()
             .join(", ")
     };
+    let known_list = known
+        .iter()
+        .map(|bootloader| format!("{} [{}]", bootloader.name, fmt(bootloader.code)))
+        .collect::<Vec<_>>()
+        .join("; ");
     bail!(
-        "the merged image's bootloader does not load where `lpa_devices::bootloader::bootloader_code_ranges(\"{chip}\")` \
-         says it does — Studio's hung-bootloader detection would go blind. Table ranges missing from the image: [{}]; \
-         image segments above 0x{C6_APP_RAM_END:08x} missing from the table: [{}]. Update the table (and the bench \
-         script's copy in scripts/c6-lp-ana-i2c.py) from the new bootloader's header.",
-        fmt(&missing),
-        fmt(&unexpected),
+        "the merged image's bootloader is not one `lpa_devices::bootloader::known_bootloaders(\"{chip}\")` \
+         names — Studio's hung-bootloader detection would go blind. Its code segments: [{}]; the known ones: {known_list}. \
+         Add it to the table (and, if the union of the ranges moves, the bench script's copy in \
+         scripts/c6-lp-ana-i2c.py) from the new bootloader's header.",
+        fmt(&code),
     );
 }
 
@@ -172,9 +174,50 @@ mod tests {
         assert!(parse_image_segments(&bytes).is_err());
     }
 
+    /// `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin`, from its
+    /// header.
+    const QUIET_C6: &[(u32, u32)] = &[
+        (0x4086_c410, 0xa98),
+        (0x4086_e610, 0x2404),
+        (0x4087_5720, 0x4e8),
+    ];
+
     #[test]
     fn the_shipped_c6_bootloader_matches_the_table() {
-        check_bootloader_segments("esp32c6", &image_with(SHIPPED_C6)).unwrap();
+        let name = check_bootloader_segments("esp32c6", &image_with(SHIPPED_C6)).unwrap();
+        assert!(name.unwrap().contains("espflash 3.3.0"), "{name:?}");
+    }
+
+    #[test]
+    fn the_quiet_c6_bootloader_matches_the_table() {
+        let name = check_bootloader_segments("esp32c6", &image_with(QUIET_C6)).unwrap();
+        assert!(name.unwrap().contains("quiet"), "{name:?}");
+    }
+
+    /// The committed files themselves, not copies of their headers: a build
+    /// def may merge either, so each must be one the table knows.
+    #[test]
+    fn the_committed_c6_bootloaders_match_the_table() {
+        for (file, expect) in [
+            ("esp32c6-bootloader-idf-v5.1.bin", "espflash 3.3.0"),
+            ("esp32c6-bootloader-idf-v5.1-quiet.bin", "quiet"),
+        ] {
+            let path = format!("{}/../lp-fw/bootloaders/{file}", env!("CARGO_MANIFEST_DIR"));
+            let bytes = std::fs::read(&path).expect("a committed bootloader");
+            let name = check_bootloader_segments("esp32c6", &bytes).unwrap();
+            assert!(name.unwrap().contains(expect), "{file}: {name:?}");
+        }
+    }
+
+    /// A mix of the two is neither.
+    #[test]
+    fn a_mix_of_two_known_bootloaders_is_refused() {
+        let mixed = &[
+            (0x4086_c410, 0xa98),
+            (0x4086_e610, 0x2404),
+            (0x4087_5720, 0x1800),
+        ];
+        assert!(check_bootloader_segments("esp32c6", &image_with(mixed)).is_err());
     }
 
     #[test]
@@ -188,6 +231,7 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("0x4086e610..0x40871378"), "{message}");
         assert!(message.contains("0x4086e620..0x40871388"), "{message}");
+        assert!(message.contains("quiet"), "{message}");
     }
 
     #[test]
@@ -198,6 +242,9 @@ mod tests {
 
     #[test]
     fn chips_without_a_table_are_not_checked() {
-        check_bootloader_segments("esp32", &[0xFF; 8]).unwrap();
+        assert_eq!(
+            check_bootloader_segments("esp32", &[0xFF; 8]).unwrap(),
+            None
+        );
     }
 }

@@ -103,8 +103,11 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
 
     // The bootloader at the head of the image must load where Studio's
     // hung-bootloader detection expects it (`lpa_devices::bootloader`).
-    check_bootloader_segments(&def.chip.name, &image_bytes)
-        .with_context(|| format!("checking the bootloader in {}", image_path.display()))?;
+    if let Some(bootloader) = check_bootloader_segments(&def.chip.name, &image_bytes)
+        .with_context(|| format!("checking the bootloader in {}", image_path.display()))?
+    {
+        println!("bootloader: {bootloader}");
+    }
     // Package-time drift assertion: what espflash wrote must describe the
     // same build as the ELF we extracted from. A mismatch means the merge
     // picked up a stale or foreign artifact.

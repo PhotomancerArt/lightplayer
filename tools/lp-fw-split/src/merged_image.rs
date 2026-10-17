@@ -5,9 +5,9 @@
 //! espflash's own merge does the first two: it is given the loader's ELF as
 //! the app, with the partition table and the flash settings
 //! `scripts/emu/build-merged-image.sh` uses (DIO, 40 MHz, 4 MB — the silicon
-//! transcript's own words), so the bootloader is espflash 3.3.0's bundled
-//! one, patched with the same flash header. `app.bin` is then written over
-//! the app partition.
+//! transcript's own words), and the bootloader [`C6_BOOTLOADER`] (the
+//! `esp32c6-4mb` build def's; espflash patches its header with the same flash
+//! settings). `app.bin` is then written over the app partition.
 
 use std::path::Path;
 
@@ -17,12 +17,18 @@ use espflash::flasher::{FlashData, FlashFrequency, FlashMode, FlashSettings, Fla
 use espflash::targets::{Chip, XtalFrequency};
 use lp_bootctl::LOADER_OFFSET;
 
+/// The bootloader a split image carries unless told otherwise: espflash
+/// 3.3.0's bundled one, rebuilt from source and committed byte-identical
+/// (`lp-fw/bootloaders/README.md`). Repo-relative; the `esp32c6-4mb` build
+/// def names the same file (a test in lp-cli holds the two together).
+pub const C6_BOOTLOADER: &str = "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin";
+
 /// The C6's flash: 4 MiB.
 pub const FLASH_LEN: usize = 4 * 1024 * 1024;
 
 /// The merged image of `app` over the bootloader and `partitions`.
-/// `loader_elf` stands in as espflash's app; `bootloader` overrides the
-/// bundled one (a build def's override).
+/// `loader_elf` stands in as espflash's app; `bootloader` is the second-stage
+/// bootloader to merge (`None`: the one espflash bundles).
 pub fn merge(
     loader_elf: &[u8],
     app: &[u8],
