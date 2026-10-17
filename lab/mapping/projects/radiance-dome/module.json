@@ -1,0 +1,49 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "dome": {
+      "ref": "./dome.json"
+    },
+    "out_1": {
+      "ref": "./out_1.json"
+    },
+    "out_10": {
+      "ref": "./out_10.json"
+    },
+    "out_2": {
+      "ref": "./out_2.json"
+    },
+    "out_3": {
+      "ref": "./out_3.json"
+    },
+    "out_4": {
+      "ref": "./out_4.json"
+    },
+    "out_5": {
+      "ref": "./out_5.json"
+    },
+    "out_6": {
+      "ref": "./out_6.json"
+    },
+    "out_7": {
+      "ref": "./out_7.json"
+    },
+    "out_8": {
+      "ref": "./out_8.json"
+    },
+    "out_9": {
+      "ref": "./out_9.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

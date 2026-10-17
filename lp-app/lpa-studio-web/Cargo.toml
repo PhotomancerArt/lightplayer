@@ -39,6 +39,12 @@ lpa-palettes = { path = "../lpa-palettes" }
 lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false }
 # Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
 lpa-mapping-editor = { path = "../lpa-mapping-editor" }
+# The Graph tab: the mapping lab's canvas, panels and model, mounted as
+# they are (plan 2026-10-17-0202-mapping-lab-into-studio, D5).
+lab-layout = { path = "../../lab/mapping/layout" }
+lab-mapping-files = { path = "../../lab/mapping/files" }
+lab-mapping-model = { path = "../../lab/mapping/model" }
+lab-mapping-web = { path = "../../lab/mapping/web" }
 # Board catalog data + the BoardDiagram row-engine renderer.
 lpa-board-editor = { path = "../lpa-board-editor" }
 lpa-boards = { path = "../lpa-boards", features = ["diagram"] }

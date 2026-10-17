@@ -52,6 +52,14 @@ WebSocket byte channel, not the tab's Worker or the Bluetooth polyfill.
 **Regression coverage** — none: the walk is not a CI job. `walk-drop-emu`'s
 `editor` step is the reproduction.
 
+**Seen again, 2026-10-17** — the Graph tab's G1 walk
+(`lp2025/2026-10-17-0202-mapping-lab-into-studio`, branch
+`claude/graph-in-studio-13f805`): an `lp-cli emu serve` C6 reached over
+`?emu=ws://…`, the PLAYFUL choker pushed from the board card, Edit pressed —
+"Syncing project…" for good, the same `expected project read frame seq 1, got
+0` in the console. The tab backing (`?emu=tab`) opened the editor and the
+Graph on the same build, so the walk ran there.
+
 **Lesson** — the walks that open the editor over the door (`walk-drop-emu`)
 had not been run since the lanes moved to `--serve-release`; a lane nobody
 runs hides a failure until a change that has to run it finds one.

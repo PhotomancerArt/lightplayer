@@ -1,0 +1,188 @@
+//! How long the model's per-frame work takes on the radiance dome (and the
+//! two small projects), natively. The page asks the model these questions
+//! every time it draws; this times them one by one, plus a "page frame"
+//! that asks what the canvas and the panels ask.
+//!
+//! ```bash
+//! cargo run --release -p lab-mapping-files --example scale_bench
+//! cargo run --release -p lab-mapping-files --example scale_bench -- radiance-dome 50   # or `all 50`
+//! ```
+//!
+//! Each figure is the median of N runs (default 20), in milliseconds. The
+//! model caches what it derives from a project until the project changes,
+//! so "cold" is the first ask after an edit and "warm" every ask after it.
+
+use std::time::Instant;
+
+use lab_mapping_files::{Opened, embedded};
+use lab_mapping_model::{Editor, Mods, Project, Target, Vec2};
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let only = args.first().filter(|k| *k != "all").cloned();
+    let runs: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(20);
+    for p in embedded::ALL {
+        if only.as_ref().is_some_and(|k| k != p.key) {
+            continue;
+        }
+        bench(p.key, &p.files(), runs);
+    }
+}
+
+fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
+    let open = median(runs.min(5), || {
+        let _ = Opened::open(files).unwrap();
+    });
+    let project = Opened::open(files).unwrap().project;
+    println!(
+        "\n== {key}: {} lamps, {} objects, {} nodes ({runs} runs, median ms)",
+        project.lamp_count(),
+        project.objects().len(),
+        project.all_nodes().len()
+    );
+    row("open (parse + build)", open);
+
+    // Cold: a fresh clone each run has nothing derived yet.
+    let cold = |f: &dyn Fn(&Project)| {
+        median(runs, || {
+            let p = fresh(&project);
+            f(&p);
+        })
+    };
+    let warm = |f: &dyn Fn(&Project)| {
+        let p = fresh(&project);
+        f(&p);
+        median(runs, || f(&p))
+    };
+    let both = |name: &str, f: &dyn Fn(&Project)| {
+        println!("  {name:<34} cold {:>9.3}  warm {:>9.3}", cold(f), warm(f));
+    };
+    both("layout (input, then lab-layout)", &|p| {
+        let input = Editor::new(p.clone()).layout_input();
+        let _ = lab_layout::canvas_layout(&input);
+    });
+    both("placed objects", &|p| {
+        let _ = p.placed_objects();
+    });
+    both("effective patch", &|p| {
+        let _ = p.effective_patch();
+    });
+    both("device frame (nothing selected)", &|p| {
+        let _ = p.board_frame(&[], 1.0);
+    });
+    let first_component = project
+        .objects()
+        .first()
+        .map(|o| Target::Component(o.id.component.clone()));
+    if let Some(t) = &first_component {
+        let sel = vec![t.clone()];
+        both("device frame (a repeat selected)", &|p| {
+            let _ = p.board_frame(&sel, 1.0);
+        });
+    }
+    both("tree rows", &|p| {
+        let _ = p.tree_rows();
+    });
+    let fixtures: Vec<_> = project.fixtures().iter().map(|n| n.id.clone()).collect();
+    both("data path (every fixture)", &|p| {
+        for f in &fixtures {
+            let _ = p.data_path(f);
+        }
+    });
+
+    // The editor's questions, at the whole view and zoomed in on a lamp.
+    let mut e = Editor::new(fresh(&project));
+    e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
+    e.resize(Vec2::new(1200.0, 800.0));
+    e.fit();
+    let lamp = project
+        .objects()
+        .get(project.objects().len() / 2)
+        .and_then(|o| o.lamps.first().map(|l| l.pos))
+        .unwrap_or_default();
+    for (view, zoom) in [("whole", 1.0), ("zoomed ×8", 8.0)] {
+        let mut ed = e.clone();
+        let at = ed.camera.to_screen(lamp);
+        ed.camera.zoom_at(at, zoom);
+        let at = ed.camera.to_screen(lamp);
+        ed.pointer_move(at, Mods::default());
+        let hover = ed.hover_target();
+        println!(
+            "  -- {view}: hovering {:?}",
+            hover.map(|t| ed.project.label(&t))
+        );
+        let warm_ed = |name: &str, f: &dyn Fn(&Editor)| {
+            f(&ed);
+            println!(
+                "  {name:<34}                 warm {:>9.3}",
+                median(runs, || f(&ed))
+            );
+        };
+        warm_ed("hover target", &|ed| {
+            let _ = ed.hover_target();
+        });
+        warm_ed("things at the pointer", &|ed| {
+            let _ = ed.project.things_at(&ed.camera, at);
+        });
+        warm_ed("edges", &|ed| {
+            let _ = ed.edges();
+        });
+        warm_ed("hint bar", &|ed| {
+            let _ = ed.hint_bar();
+        });
+        warm_ed("view nodes (faces)", &|ed| {
+            let _ = ed.view_nodes();
+        });
+        warm_ed("view overlay", &|ed| {
+            let _ = ed.view_overlay();
+        });
+        warm_ed("view inspector", &|ed| {
+            let _ = ed.view_inspector();
+        });
+        warm_ed("view tree pane", &|ed| {
+            let _ = ed.view_tree_pane();
+        });
+        warm_ed("board frame", &|ed| {
+            let _ = ed.board_frame(1.0);
+        });
+        warm_ed("page frame (the view tree)", &|ed| page_frame(ed));
+        // A pointer move: the editor takes the event, then the page asks.
+        let mut moving = ed.clone();
+        let mut k = 0.0;
+        let t = median(runs, || {
+            k += 1.0;
+            moving.pointer_move(at + Vec2::new(k % 7.0, 0.0), Mods::default());
+            page_frame(&moving);
+        });
+        row("pointer move + page frame", t);
+    }
+}
+
+/// What the page asks the model each time it draws: the view tree.
+fn page_frame(e: &Editor) {
+    let _ = e.view_tree();
+}
+
+/// The project as if just opened: nothing derived yet (a `&mut` way in
+/// forgets what was worked out).
+fn fresh(p: &Project) -> Project {
+    let mut q = p.clone();
+    q.nodes_mut();
+    q
+}
+
+fn median(runs: usize, mut f: impl FnMut()) -> f64 {
+    let mut times: Vec<f64> = (0..runs.max(1))
+        .map(|_| {
+            let t = Instant::now();
+            f();
+            t.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    times[times.len() / 2]
+}
+
+fn row(name: &str, ms: f64) {
+    println!("  {name:<34}                 warm {ms:>9.3}");
+}

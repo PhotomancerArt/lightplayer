@@ -53,6 +53,23 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   unit-tested), and `share` (the `lp.package` / `lp.node` clipboard
   envelope formats — see `docs/adr/2026-07-28-share-envelopes.md`; pure
   byte functions, with the clipboard itself living in the web edge).
+- `app/graph/` is the **Graph** tab's state: the mapping design lab's
+  editor (`lab/mapping/`'s `lab-mapping-model`) on the open project. While
+  the Graph is the place, the actor opens the project's own files with
+  `lab-mapping-files` (fetching what it asks for), lays it out with
+  `lab-layout`, and rebuilds it only when a file it read changes. The page
+  applies its pointer and key input to the editor synchronously through
+  a `GraphHandle` (an `Rc<RefCell>` built before the controller moves into
+  the actor, like `StudioHandle`'s delay cell), because a pointer move
+  can't wait behind a device read and a whole-view rebuild; what an input
+  changes for the rest of Studio reaches the actor as a
+  `StudioCommand::Graph` note. Every verb is an offer at
+  `project/graph/<verb>`; edits save through the ordinary asset edit
+  (`apply_asset_body`) in today's formats with an id on every written
+  object, pins go in `editor.json`'s per-node `canvas` surface, and the
+  selection breathes or chases on the board through the Patch view's
+  `PatchPulseOp`. Colours are the board's own published frames. Plan:
+  `lp2025/2026-10-17-0202-mapping-lab-into-studio`.
 - A future `base/` layer can hold truly primitive app-core concepts if one
   emerges. It is intentionally not present until there is a clean need for it.
 
