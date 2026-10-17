@@ -9,7 +9,7 @@
 # flash-size field to 4MB regardless of the physical chip, and the bootloader
 # validates the partition table against that header rather than the chip.
 #
-# 4mb matches partitions.csv (0x350000 + 0xB0000 = 0x400000) and
+# 4mb matches partitions.csv (0x380000 + 0x80000 = 0x400000) and
 # lp-fw/builds/esp32c6-4mb.json; `flash_size_mirrors_agree_with_the_defs` in
 # lp-cli fails if this drifts from the def.
 runner    = "espflash flash --chip esp32c6 --partition-table partitions.csv --flash-size 4mb --monitor --after hard-reset"
@@ -89,7 +89,7 @@ ESP_RADIO_CONFIG_BLE_CONTROLLER_FLASH_ONLY_PARAMS = "true"
 # "the hook did nothing".
 ESP_HAL_CONFIG_PLACE_SWITCH_TABLES_IN_RAM = "false"
 ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"
-# littlefs2-sys bindgen needs stdint.h when targeting bare-metal; use host's stdint
+
 [unstable]
 build-std = ["core", "alloc"]
 # optimize_for_size on core/alloc: -50 KB, no measured render-loop cost.

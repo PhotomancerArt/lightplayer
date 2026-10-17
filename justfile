@@ -46,7 +46,7 @@ fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 v3_flash_size := "4mb"
 
 # The C6's 4 MB flash, matching lp-fw/fw-esp32c6/partitions.csv
-# (0x350000 + 0xB0000 = 0x400000) and the runner in
+# (0x380000 + 0x80000 = 0x400000) and the runner in
 # lp-fw/fw-esp32c6/.cargo/config.toml, which cannot read this var — same
 # reasoning as s3_flash_size above. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).

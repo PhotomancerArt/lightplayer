@@ -2,9 +2,11 @@
 // THE MIGRATION WALK (C6 repartition, P08; `just walk-migration-emu <scenario>`).
 //
 // Real Studio, in headless Chrome, updating an emulated ESP32-C6 that is a
-// "fielded board": the current firmware on the frozen pre-2026-10 partition
-// table, its files in a 240-block littlefs at 0x310000 — the board every
-// shipped C6 is today. Studio's own Update (the board card's
+// "fielded board". The W scenarios are the 2026-10 repartition's: a board on
+// the frozen pre-2026-10 partition table, its files in a 240-block littlefs
+// at 0x310000; since the tree-store cutover's default switch (A7) they move
+// straight into the tree store at 0x380000. The T scenarios (below) are the
+// cutover's own, from the 176-sector littlefs every C6 ran until it. Studio's own Update (the board card's
 // `update-firmware` offer) runs the layout migration through esptool-js,
 // over the `?emu=` virtual serial port, into the emulated mask ROM's
 // download console.
@@ -31,10 +33,11 @@
 //       script's own server)
 //
 // THE TREE-STORE CUTOVER (plan lp2025/2026-10-16-0848-tree-store-adoption,
-// A6). The fielded board runs littlefs on the 176-sector table (the pinned
-// `FIELDED_LITTLEFS` image, `3fc9aa987`, its files at 0x350000 with a
-// c40-sized project), and the Studio bundle carries the `fs-tree` split on
-// the tree table (`LP_FW_IMAGE=split-tree just studio-firmware-package-esp32c6`):
+// A6, on the default build since A7). The fielded board runs littlefs on the
+// 176-sector table (the pinned `FIELDED_LITTLEFS` image, `1d5840a76` — the
+// last littlefs main — its files at 0x350000 with a c40-sized project), and
+// the Studio bundle carries the shipped split image, the tree store on the
+// tree table (`LP_FW_IMAGE=split just studio-firmware-package-esp32c6`):
 //
 //   T1  Update → the question → Continue → every file in the tree store at
 //       0x380000; the board boots it, as itself (a c40-sized littlefs takes
@@ -119,12 +122,12 @@ const SCENARIOS = {
 /// The pinned fielded littlefs image (`ReferenceImage::FIELDED_LITTLEFS`,
 /// `lp-emu-esp32c6`'s test support): its merged chip image, built beside
 /// the reference ELF the first time it is asked for.
-const FIELDED_REF = path.join(ROOT, "target/emu-ref/3fc9aa987-esp32c6+server+radio");
+const FIELDED_REF = path.join(ROOT, "target/emu-ref/1d5840a76-esp32c6+server+radio");
 function fieldedMerged() {
   const merged = path.join(FIELDED_REF, "merged.bin");
   if (!existsSync(merged)) {
     const elf = path.join(FIELDED_REF, "fw-esp32c6");
-    if (!existsSync(elf)) run("scripts/emu/build-reference-image.sh", ["esp32c6,server,radio", "3fc9aa987", "none"]);
+    if (!existsSync(elf)) run("scripts/emu/build-reference-image.sh", ["esp32c6,server,radio", "1d5840a76", "none"]);
     run("scripts/emu/build-merged-image.sh", [elf, merged]);
   }
   return merged;
@@ -271,7 +274,7 @@ function buildFixture(kind, out) {
   const merged = cutover ? fieldedMerged() : served;
   const chip = path.join(out, "fixture.bin");
   const cliArgs = ["hardware", "lpfs", "fixture", "--merged", merged, "--tree", tree, "--out", chip];
-  if (kind === "current") cliArgs.push("--table", path.join(ROOT, "lp-fw/fw-esp32c6/partitions.csv"));
+  if (kind === "current") cliArgs.push("--table", path.join(ROOT, "lp-fw/fw-esp32c6/partitions.csv"), "--fs", "tree");
   if (cutover) cliArgs.push("--table", path.join(ROOT, "lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv"));
   console.log("  " + run(LP_CLI, cliArgs).trim());
   if (kind === "tree-bypassed") {
@@ -301,13 +304,13 @@ function buildFixture(kind, out) {
   return chip;
 }
 
-/// The tree scenarios need the bundle's C6 package to be the `fs-tree`
-/// split on the tree table; a littlefs package would plain-flash a board
-/// these walks expect to migrate.
+/// The tree scenarios need the bundle's C6 package to mount the tree store
+/// (every C6 package since the default switch); an older littlefs bundle
+/// would plain-flash a board these walks expect to migrate.
 function assertTreeBundle() {
   const manifest = JSON.parse(readFileSync(path.join(FIRMWARE, "esp32c6-4mb/manifest.json"), "utf8"));
   if (!(manifest.core?.features ?? []).includes("fs.tree")) {
-    throw new Error("the served C6 package does not mount the tree store: `LP_FW_IMAGE=split-tree just studio-firmware-package-esp32c6`, then `just studio-web-story-build`");
+    throw new Error("the served C6 package does not mount the tree store: `LP_FW_IMAGE=split just studio-firmware-package-esp32c6`, then `just studio-web-story-build`");
   }
 }
 
@@ -1282,7 +1285,7 @@ async function main() {
           files.same || studiosAfterHeld,
           JSON.stringify(files),
         );
-        step("the chip is on the new layout", /0x350000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
+        step("the chip is on the new layout", /0x380000/.test(after.layout) || !/pre-2026-10/.test(after.layout), after.layout);
         step("old superblock retired", !legacySuperblock, "");
         // The card named the update's steps as they happened (G1 walk,
         // 2026-10-03: it said "Flashing firmware…" from the first read to
@@ -1311,7 +1314,7 @@ async function main() {
           files.missing.length === 0 && files.extra.length === 0 && files.changed.every((p) => studios.has(p)),
           JSON.stringify(files),
         );
-        step("the chip is still on the new layout", /0x350000/.test(after.layout), after.layout);
+        step("the chip is still on the new layout", /0x380000/.test(after.layout), after.layout);
         break;
       }
       case "W3":

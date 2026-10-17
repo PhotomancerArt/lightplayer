@@ -649,12 +649,9 @@ jobs:
               - '.github/workflows/pre-merge.yml'
             c6_layout:
               - 'lp-fw/fw-esp32c6/partitions.csv'
-              - 'lp-fw/fw-esp32c6/partitions-tree.csv'
               - 'lp-fw/fw-esp32c6/src/tree_flash.rs'
               - 'lp-fw/fw-esp32c6/.cargo/config.toml'
               - 'lp-fw/builds/esp32c6-4mb.json'
-              - 'lp-fw/fw-esp32c6/src/flash_storage.rs'
-              - 'lp-fw/fw-esp32c6/src/legacy_layout.rs'
               - 'lp-fw/fw-esp32-common/src/lp_fs.rs'
               - 'lp-fw/fw-esp32-common/src/hardware/manifest_loader.rs'
               - 'lp-core/lpc-wire/src/server/fs_boot_state.rs'
