@@ -144,6 +144,86 @@ impl Project {
         self.evaluate(fixture, output, time)
     }
 
+    /// What a real board shows, from its pixels: `pixels(output, port)`
+    /// gives a port's pixels in order, as they look (red, green, blue —
+    /// whatever byte order its strip wants). Every lamp takes the colour
+    /// of the pixel it lands on; a lamp on no pixel has none, and a port
+    /// the board said nothing for is dark. Nothing is simulated: the
+    /// board's own highlight is already in its pixels.
+    pub fn board_frame_from_ports(
+        &self,
+        pixels: impl Fn(&NodeId, &str) -> Option<Vec<Rgb>>,
+    ) -> BoardFrame {
+        let wiring = self.wiring();
+        let ports: Vec<PortFrame> = wiring
+            .ports
+            .iter()
+            .map(|(output, key, n)| {
+                let mut px = pixels(output, key).unwrap_or_default();
+                px.resize(*n, Rgb::BLACK);
+                PortFrame {
+                    output: output.clone(),
+                    key: key.clone(),
+                    pixels: px,
+                }
+            })
+            .collect();
+        let lamps = wiring
+            .lit
+            .iter()
+            .map(|at| {
+                let (port, pixel) = (*at)?;
+                ports
+                    .get(port as usize)?
+                    .pixels
+                    .get(pixel as usize)
+                    .copied()
+            })
+            .collect();
+        let placed = self.placed();
+        let fixtures = self
+            .fixtures()
+            .iter()
+            .filter_map(|n| Some((n.id.clone(), placed.fixture_lamps(&n.id)?)))
+            .collect();
+        let bindings = self.bindings();
+        let patch = self.effective_patch();
+        let inputs = self
+            .outputs()
+            .iter()
+            .map(|n| {
+                let mut feeders: Vec<NodeId> = bindings
+                    .iter()
+                    .filter(|b| b.to == n.id)
+                    .map(|b| b.from.clone())
+                    .collect();
+                // In the order they start on its wire.
+                let start = |f: &NodeId| {
+                    patch
+                        .spans
+                        .iter()
+                        .zip(&wiring.spans)
+                        .filter(|(s, _)| s.output == n.id && &s.fixture == f)
+                        .filter_map(|(_, w)| {
+                            let w = w.as_ref()?;
+                            w.lamps.iter().map(|&(_, px)| (w.port, px)).min()
+                        })
+                        .min()
+                        .unwrap_or((usize::MAX, u32::MAX))
+                };
+                feeders.sort_by_key(start);
+                (n.id.clone(), feeders)
+            })
+            .collect();
+        BoardFrame {
+            ports,
+            inputs,
+            lamps,
+            fixtures,
+            wiring,
+        }
+    }
+
     /// Run the dataflow once: pull from every output, then from the canvas
     /// (every fixture's lamps).
     pub(crate) fn evaluate(

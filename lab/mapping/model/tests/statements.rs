@@ -1564,6 +1564,38 @@ fn every_offered_key_does_something() {
     }
 }
 
+// ---- a real board ------------------------------------------------------------
+
+/// A real board's pixels are what the board shows: each port as the board
+/// sent it, and each lamp in the colour of the pixel it lands on. A port
+/// the board said nothing for is dark.
+#[test]
+fn a_real_boards_pixels_colour_the_lamps_on_them() {
+    let e = editor();
+    let tail_out = node_id(&e, "tail out");
+    let red = Rgb::new(255, 0, 0);
+    let frame = e.project.board_frame_from_ports(|output, key| {
+        (output == &tail_out && key == "0").then(|| vec![red; 60])
+    });
+    assert_eq!(frame.port(&tail_out, "0").unwrap(), &[red; 60][..]);
+    let tail = e
+        .project
+        .placed_objects()
+        .iter()
+        .find(|(f, _)| f == &node_id(&e, "tail"))
+        .map(|(_, o)| o.id.clone())
+        .unwrap();
+    assert_eq!(frame.lamp(&tail, 0), Some(red));
+    let main = node_id(&e, "main");
+    assert!(
+        frame
+            .port(&main, "0")
+            .unwrap()
+            .iter()
+            .all(|px| px.is_black())
+    );
+}
+
 // ---- the simulated board ----------------------------------------------------
 
 /// With nothing selected, the board shows the pattern on every patched pixel

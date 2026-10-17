@@ -44,7 +44,8 @@
 //! **[`ux`]: the editor's state and every user verb.**
 //!
 //! - [`Editor`] — the state, driven by input events, with no IO; "Move &
-//!   draw" off holds the drawing still.
+//!   draw" off holds the drawing still. [`GraphInput`] is every input as
+//!   one value, so a page in the lab and one in Studio say the same thing.
 //! - [`layout_input`] — what the view lays out: each node's role, size and
 //!   module, the dataflow, and pins while pinning is on (D64). The page
 //!   runs `lab-layout` and hands the placement back.
@@ -115,6 +116,7 @@ pub use ux::edges::Edge;
 pub use ux::editor::{
     Button, ContextMenu, Editor, Gesture, Key, MenuAction, MenuCommand, MenuItem, Mods, Tool,
 };
+pub use ux::graph_input::GraphInput;
 pub use ux::handle::{Handle, HandleKind, SizeEdge};
 pub use ux::hints::{Hint, HintBar, HintKind};
 pub use ux::pick::{PickMode, pick};
