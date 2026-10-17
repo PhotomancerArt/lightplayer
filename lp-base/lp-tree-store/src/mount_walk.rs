@@ -450,12 +450,12 @@ mod tests {
             let want = snapshot(&mut st);
             // A cap the records on flash pass part-way through pass 1.
             let small = StoreConfig {
-                mount_index_max: 12 * 40,
+                mount_index_max: 12 * 64,
                 ..c.clone()
             };
             let mut st = mount(st.into_flash(), &small);
             if name != "empty" {
-                assert!(!st.stats().mount_indexed, "{name}: fits 40 entries");
+                assert!(!st.stats().mount_indexed, "{name}: a 64-slot table held it");
             }
             assert_eq!(snapshot(&mut st), want, "{name}");
         }
