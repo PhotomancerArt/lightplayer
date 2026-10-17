@@ -1,0 +1,55 @@
+# The C6's committed second-stage bootloader
+# (lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1-quiet.bin) is a build
+# product: this rebuilds it from ESP-IDF source in the pinned Docker image and
+# fails if a single byte differs. It also rebuilds the stock variant and
+# checks it against espflash 3.3.0's bundled bootloader — the proof that the
+# recipe is the stock bootloader with one setting changed.
+#
+# On an x64 runner, so it is also the amd64 half of the reproducibility proof
+# (the desk builds on arm64; the pinned digest is the multi-arch index).
+#
+# Deliberately its own workflow, not a pre-merge job, and not a required
+# check: it pulls a ~2 GB image and runs only when the recipe or the binary
+# changes (or by hand). `check-red-main-needs.py` only looks at
+# pre-merge.yml, so this file needs no `needs:` entry there.
+name: Bootloader reproducible
+
+on:
+  pull_request:
+    paths:
+      - "scripts/bootloader/**"
+      - "lp-fw/bootloaders/**"
+      - ".github/workflows/bootloader-reproducible.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-c6-bootloader:
+    name: Rebuild the C6 bootloader (x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Quiet bootloader == the committed binary
+        run: scripts/bootloader/build-c6-bootloader.sh --variant quiet --check
+
+      - name: Stock bootloader == espflash 3.3.0's bundled one
+        run: scripts/bootloader/build-c6-bootloader.sh --variant stock --check
+
+      - name: Keep the build records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c6-bootloader-x64
+          path: |
+            target/bootloader/*/bootloader.bin
+            target/bootloader/*/bootloader.bin.sha256
+            target/bootloader/*/sdkconfig
+            target/bootloader/*/sdkconfig.non-default
+            target/bootloader/*/image-info.txt
+            target/bootloader/*/docker.log
+          if-no-files-found: ignore
