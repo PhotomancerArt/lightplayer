@@ -298,7 +298,7 @@ pub fn ConfigSlotRow(
 /// access points can never diverge.
 fn chrome_revert_labels(chrome: SlotEditChrome) -> (&'static str, &'static str) {
     match chrome {
-        SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
+        SlotEditChrome::Unsaved => ("Revert", "Discard this change"),
         SlotEditChrome::Debug => ("Clear", "Clear this debug override"),
     }
 }

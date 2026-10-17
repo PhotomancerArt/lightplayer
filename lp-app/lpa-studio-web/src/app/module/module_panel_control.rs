@@ -204,7 +204,7 @@ pub fn ModulePanelControl(
             button {
                 class: "tw:absolute tw:left-full tw:top-1/2 tw:ml-0.5 tw:inline-flex tw:flex-none tw:-translate-y-1/2 tw:cursor-pointer tw:appearance-none tw:items-center tw:border-0 tw:bg-transparent tw:p-0 tw:text-status-engaged-foreground tw:opacity-70 tw:hover:opacity-100",
                 r#type: "button",
-                title: "Reset {reset_label} — drop the held value and follow the project again",
+                title: "Reset {reset_label} and let the project control it again",
                 aria_label: "Reset {reset_label}",
                 onclick: move |event| {
                     event.stop_propagation();

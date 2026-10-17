@@ -27,8 +27,15 @@ pub struct BuildOptions {
     pub out: PathBuf,
     /// Cargo features for fw-esp32c6 (its defaults are always on).
     pub features: String,
-    /// A build def's bootloader override.
+    /// The IDF bootloader the IDF door's image (`merged-idf.bin`) carries.
+    /// [`BuildOptions::new`] sets the build def's
+    /// ([`crate::merged_image::C6_BOOTLOADER`]); `None` merges the one
+    /// espflash bundles.
     pub bootloader: Option<PathBuf>,
+    /// Which second stage `merged.bin` boots through. Both doors' images are
+    /// always written (`merged-lp.bin`, `merged-idf.bin`); this picks the one
+    /// copied to `merged.bin`, which packaging and the emulator gates read.
+    pub door: Door,
     /// The partition table the image is flashed with.
     pub partitions: PathBuf,
     /// The target (`lp-fw/builds/` id) the image is built as, embedded in
@@ -39,13 +46,38 @@ pub struct BuildOptions {
 impl BuildOptions {
     pub fn new(repo: PathBuf, out: PathBuf) -> Self {
         let partitions = repo.join("lp-fw/fw-esp32c6/partitions.csv");
+        let bootloader = Some(repo.join(crate::merged_image::C6_BOOTLOADER));
         Self {
             repo,
             out,
             features: "esp32c6,server".into(),
-            bootloader: None,
+            bootloader,
+            door: Door::Lightplayer,
             partitions,
             target: None,
+        }
+    }
+}
+
+/// The second stage at flash `0x0`: the C6's front door.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Door {
+    /// LightPlayer's own bootloader (`fw-esp32c6-loader --features
+    /// bootloader`, `bootloader.bin`), loaded by the mask ROM.
+    #[default]
+    Lightplayer,
+    /// The ESP-IDF second stage, which starts the factory loader as its app.
+    Idf,
+}
+
+impl std::str::FromStr for Door {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "lightplayer" | "lp" => Ok(Self::Lightplayer),
+            "idf" => Ok(Self::Idf),
+            _ => Err(format!("unknown door `{s}` (lightplayer or idf)")),
         }
     }
 }
@@ -66,6 +98,10 @@ pub const BUILD_ID_SYMBOL: &str = "LP_BUILD_ID";
 pub const ENGINE_DIGEST_SYMBOL: &str = "LP_ENGINE_DIGEST";
 /// The emulator seam descriptor table (`fw_esp32_common::seam_table!`).
 pub const SEAM_TABLE_SYMBOL: &str = "LP_SEAM_TABLE";
+/// The tree-store mark (`fw_esp32_common::tree_fs::LP_CORE_FS_TREE_MARK`):
+/// what a tree-store board's update guard reads in a core it is sent, so it
+/// must be in the core ([`check_core_tree_mark`]).
+pub const CORE_FS_TREE_MARK_SYMBOL: &str = "LP_CORE_FS_TREE_MARK";
 /// The core's `.bss` bounds (esp-hal `ld/sections/rwdata.x`; riscv-rt zeroes
 /// `__sbss..__ebss`, their aliases, before Rust runs).
 pub const BSS_START_SYMBOL: &str = "_bss_start";
@@ -85,6 +121,12 @@ pub struct SplitReport {
     pub build_id: String,
     pub loader_version: u16,
     pub loader: Piece,
+    /// The door `merged.bin` boots through.
+    #[serde(default)]
+    pub door: Door,
+    /// Our second stage (`bootloader.bin`, flash 0x0 of `merged-lp.bin`).
+    #[serde(default)]
+    pub bootloader: Option<Piece>,
     pub core: Piece,
     pub engine: Piece,
     pub app_bin: Piece,
@@ -167,6 +209,9 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         );
     }
 
+    eprintln!("==> bootloader");
+    let bootloader = build_bootloader_image(&repo, &out)?;
+
     eprintln!("==> split");
     let mut p2_elf = fs::read(&p2.elf)?;
     let (engine_base, mut engine) = split_artifacts::engine_bin(&p2_elf)?;
@@ -211,6 +256,8 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     for s in &segments {
         eprintln!("{}", s.line());
     }
+    let mark = check_core_tree_mark(&p2_elf, &core)?;
+    eprintln!("    core.bin: {mark}");
     fs::write(out.join("engine.bin"), &engine)?;
     fs::write(out.join("core.bin"), &core)?;
 
@@ -223,12 +270,19 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     let build = lp_bootctl::build_hash(build_id_text.as_bytes());
     let app = app_image::assemble(&loader, &core, &engine, region_end, build)?;
     fs::write(out.join("app.bin"), &app.bytes)?;
-    let merged = merged_image::merge(
+    let merged_idf = merged_image::merge(
         &loader_elf,
         &app.bytes,
         &opts.partitions,
         opts.bootloader.as_deref(),
     )?;
+    let merged_lp = merged_image::with_bootloader(&merged_idf, &bootloader)?;
+    fs::write(out.join("merged-idf.bin"), &merged_idf)?;
+    fs::write(out.join("merged-lp.bin"), &merged_lp)?;
+    let merged = match opts.door {
+        Door::Lightplayer => merged_lp,
+        Door::Idf => merged_idf,
+    };
     fs::write(out.join("merged.bin"), &merged)?;
 
     let piece = |offset: u32, bytes: &[u8]| Piece {
@@ -244,6 +298,8 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
         build_id: build_id_text,
         loader_version,
         loader: piece(lp_bootctl::LOADER_OFFSET, &loader),
+        door: opts.door,
+        bootloader: Some(piece(0, &bootloader)),
         core: piece(app.core_off, &core),
         engine: piece(app.engine_off, &engine),
         app_bin: piece(lp_bootctl::LOADER_OFFSET, &app.bytes),
@@ -277,6 +333,51 @@ pub fn build(opts: &BuildOptions) -> Result<SplitReport> {
     Ok(report)
 }
 
+/// Build our second stage and write `bootloader.elf` and `bootloader.bin`
+/// into `out`; the image.
+fn build_bootloader_image(repo: &Path, out: &Path) -> Result<Vec<u8>> {
+    let elf = fs::read(pass_link::build_bootloader(repo)?)?;
+    fs::write(out.join("bootloader.elf"), &elf)?;
+    let image = crate::bootloader_image::image_from_elf(&elf)?;
+    crate::bootloader_image::check(&image)?;
+    if lp_bootctl::find_bootloader_version(&image) != lp_bootctl::BOOTLOADER_VERSION {
+        bail!(
+            "bootloader.bin does not carry bootloader version {}",
+            lp_bootctl::BOOTLOADER_VERSION
+        );
+    }
+    fs::write(out.join("bootloader.bin"), &image)?;
+    eprintln!("    bootloader.bin: {} B", image.len());
+    Ok(image)
+}
+
+/// Rebuild only our second stage into the build at `out`: `bootloader.bin`,
+/// `merged-lp.bin` (from `merged-idf.bin`), `merged.bin` when the build's
+/// door is ours, and `split.json`'s bootloader piece.
+pub fn rebuild_bootloader(repo: &Path, out: &Path) -> Result<()> {
+    let repo = repo.canonicalize()?;
+    let image = build_bootloader_image(&repo, out)?;
+    let idf = fs::read(out.join("merged-idf.bin"))
+        .with_context(|| format!("{} has no merged-idf.bin", out.display()))?;
+    let lp = merged_image::with_bootloader(&idf, &image)?;
+    fs::write(out.join("merged-lp.bin"), &lp)?;
+    let mut report: SplitReport = serde_json::from_slice(&fs::read(out.join("split.json"))?)?;
+    if report.door == Door::Lightplayer {
+        fs::write(out.join("merged.bin"), &lp)?;
+        report.merged_sha256 = hex(&Sha256::digest(&lp));
+    }
+    report.bootloader = Some(Piece {
+        offset: 0,
+        size_bytes: image.len() as u32,
+        sha256: hex(&Sha256::digest(&image)),
+    });
+    fs::write(
+        out.join("split.json"),
+        serde_json::to_string_pretty(&report)?,
+    )?;
+    Ok(())
+}
+
 /// Verify one link: its graph, its split, the verdict.
 pub fn verify(elf: &Path, map: &Path) -> Result<Verification> {
     let graph = SectionGraph::load(elf, map)?;
@@ -306,7 +407,49 @@ pub fn core_roots(graph: &SectionGraph, elf: &[u8]) -> Result<Vec<usize>> {
     if let Some(table) = elf_symbol::find_opt(elf, SEAM_TABLE_SYMBOL)? {
         named.push((SEAM_TABLE_SYMBOL, table.vaddr));
     }
+    if let Some(mark) = elf_symbol::find_opt(elf, CORE_FS_TREE_MARK_SYMBOL)? {
+        named.push((CORE_FS_TREE_MARK_SYMBOL, mark.vaddr));
+    }
     roots_at(graph, &named)
+}
+
+/// The core must say what it mounts in its own bytes: an image whose
+/// manifest lists `fs.tree` carries the tree-store mark in `core.bin`, and
+/// one whose manifest does not, does not. A tree-store board's update guard
+/// reads only the core (its engine, which holds the manifest, is written
+/// after the core boots on trial), so a tree core without the mark is
+/// refused by every board it is sent to, its own kind included
+/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+pub fn check_core_tree_mark(elf: &[u8], core: &[u8]) -> Result<&'static str> {
+    let lists_tree = manifest_lists_fs_tree(elf);
+    let mark = lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes();
+    let carries = core.windows(mark.len()).any(|w| w == mark);
+    match (lists_tree, carries) {
+        (true, true) => Ok("carries the tree-store mark (its manifest lists fs.tree)"),
+        (false, false) => Ok("no tree-store mark (its manifest lists no fs.tree)"),
+        (true, false) => bail!(
+            "the manifest lists fs.tree but core.bin carries no tree-store mark \
+             (`{CORE_FS_TREE_MARK_SYMBOL}`): every tree-store board would refuse this core"
+        ),
+        (false, true) => bail!(
+            "core.bin carries the tree-store mark but the manifest lists no fs.tree: \
+             the hosts and the boards would disagree on what it mounts"
+        ),
+    }
+}
+
+/// Does the image's manifest core list `fs.tree`?
+fn manifest_lists_fs_tree(elf: &[u8]) -> bool {
+    let Some(json) = lpc_model::manifest::find_manifest_core(elf) else {
+        return false;
+    };
+    let Ok(core) = serde_json::from_slice::<serde_json::Value>(json) else {
+        return false;
+    };
+    let tree = lpc_model::LpFeature::FsTree.wire_name();
+    core.get("features")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(tree)))
 }
 
 /// The input sections holding each named address.
@@ -384,6 +527,28 @@ pub fn factory_extent(partitions: &Path) -> Result<(u32, u32)> {
 mod tests {
     use super::*;
     use crate::section_graph::Node;
+
+    #[test]
+    fn a_tree_manifest_needs_the_mark_in_the_core_and_only_then() {
+        let manifest = |features: &str| {
+            let mut elf = vec![0x11u8; 256];
+            elf.extend_from_slice(lpc_model::manifest::MANIFEST_BLOB_BEGIN.as_bytes());
+            elf.extend_from_slice(format!(r#"{{"features":[{features}]}}"#).as_bytes());
+            elf.extend_from_slice(lpc_model::manifest::MANIFEST_BLOB_END.as_bytes());
+            elf
+        };
+        let tree = manifest(r#""gfx.lpvm","fs.tree""#);
+        let plain = manifest(r#""gfx.lpvm""#);
+        let mut marked = vec![0x13u8; 300];
+        marked.extend_from_slice(lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes());
+        let unmarked = vec![0x13u8; 300];
+
+        assert!(check_core_tree_mark(&tree, &marked).is_ok());
+        assert!(check_core_tree_mark(&plain, &unmarked).is_ok());
+        let err = check_core_tree_mark(&tree, &unmarked).unwrap_err();
+        assert!(err.to_string().contains("would refuse this core"), "{err}");
+        assert!(check_core_tree_mark(&plain, &marked).is_err());
+    }
 
     #[test]
     fn the_seam_table_is_a_root_beside_the_digest_and_the_build_id() {

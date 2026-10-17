@@ -64,6 +64,10 @@ pub enum Grade {
     /// The kernel-measured class costs, plus the flash cache's fills and the
     /// APB's wait states.
     T3,
+    /// `t3`, plus the flash interface's time: SPI transfers at the SCK and
+    /// line widths the registers give, the part's write-in-progress busy
+    /// time for programs and erases, and register-derived cache fills.
+    T4,
 }
 
 /// A run's pace (`lp_emu_esp_common::seam::net::lan_pace`): whether the
@@ -365,6 +369,13 @@ pub struct RunArgs {
     /// board's `0.2`.
     #[arg(long = "efuse-rev")]
     pub efuse_rev: Option<String>,
+
+    /// The flash part on the board: `rom-default` (the mask ROM's own
+    /// default chip, status clear — what every transcript was captured
+    /// against), `cx1` or `xiao-c6` (the desk's C6 parts, read on silicon,
+    /// which power on with QE set, so the core reads its flash in QIO).
+    #[arg(long = "flash-part")]
+    pub flash_part: Option<String>,
 
     /// What `LP_CLKRST.reset_cause` says at power-on, and so what a ROM-up
     /// boot's banner prints: `poweron` (default), `usb-uart` or `tg0-wdt`.

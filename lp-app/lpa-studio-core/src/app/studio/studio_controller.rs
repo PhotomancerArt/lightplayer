@@ -204,6 +204,10 @@ pub struct StudioController {
     /// each ended (`devices/<board>/take-over`;
     /// `studio_controller/take_over_flow.rs`).
     take_overs: crate::TakeOvers,
+    /// The project each board's last push sent, by name, as the push
+    /// staged it: the card's surface names it while that push runs
+    /// (`DeviceRosterView.sending`).
+    sending: std::collections::BTreeMap<crate::DeviceId, String>,
     /// What the browser answered about Bluetooth, reported by the web layer
     /// (`StudioCommand::BluetoothReach`); `Checking` until it does.
     bluetooth_reach: crate::BluetoothReach,
@@ -338,6 +342,12 @@ pub struct StudioController {
     /// Why the last Connect did not open, for the board's card; cleared by
     /// the next Connect, Edit or Done on any board.
     connect_failure: Option<crate::ConnectFailure>,
+    /// The chooser Connect a board's USB or Bluetooth square opened last,
+    /// while it has not answered: the link its answer names, and which.
+    section_chooser: Option<(lpa_devices::LinkId, crate::ChooserTransport)>,
+    /// That chooser's connect failed after the pick: the section's words
+    /// under its squares, until the next press of either.
+    chooser_failure: Option<crate::UiChooserFailure>,
     /// Injected randomness for uid minting. The web shell installs crypto
     /// randomness at startup; the default is a clock-derived fallback good
     /// enough for tests.
@@ -528,6 +538,7 @@ impl StudioController {
             board_hold_book: None,
             board_hold_flow: Default::default(),
             take_overs: crate::TakeOvers::default(),
+            sending: std::collections::BTreeMap::new(),
             bluetooth_reach: crate::BluetoothReach::Checking,
             update_build_facts: crate::UpdateBuildFacts::default(),
             driving_updates: false,
@@ -562,6 +573,8 @@ impl StudioController {
             lens_hold: None,
             connected: None,
             connect_failure: None,
+            section_chooser: None,
+            chooser_failure: None,
             random: Rc::new(clock_fallback_random),
             local_stamp: {
                 let clock = Rc::clone(&now_secs_for_stamp);
@@ -1820,6 +1833,9 @@ impl StudioController {
                 store_releases: None,
                 store_lookups: None,
                 file_build: None,
+                // An automatic start waits for the hello: an unknown board
+                // is never started on its own.
+                board_tree_store: board_on_tree_store(evidence).unwrap_or(false),
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -1916,6 +1932,7 @@ impl StudioController {
             store_releases: self.update_build_facts.store_releases(),
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
+            board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -1970,9 +1987,11 @@ impl StudioController {
             );
         }
         self.keep_fresh_starts();
-        // A Connect waiting on the chooser it opened hears its answer.
+        // A Connect waiting on the chooser it opened hears its answer, and
+        // so does Connect a board.
         if let Some((link, answer)) = &grant_answer {
             self.note_connect_chooser(*link, answer);
+            self.note_section_chooser_answer(*link, answer);
         }
         // A failed Connect's words go once the board is reached by any
         // road.
@@ -2312,10 +2331,25 @@ impl StudioController {
             })
             .collect();
         view.wifi_address_connect = self.wifi_connects.view(crate::WifiConnectTarget::Address);
+        view.chooser_failure = self.chooser_failure.clone();
         view.take_overs = self
             .take_overs
             .devices()
             .filter_map(|device| Some((device, self.take_overs.view(device)?)))
+            .collect();
+        // A name only while that board's push runs: a finished push's name
+        // is no news.
+        view.sending = view
+            .roster
+            .devices
+            .iter()
+            .filter(|device| {
+                device
+                    .activity
+                    .as_ref()
+                    .is_some_and(|activity| activity.kind == crate::DeviceActivityKind::Push)
+            })
+            .filter_map(|device| Some((device.id, self.sending.get(&device.id)?.clone())))
             .collect();
         // A port another tab's claims account for is that tab's board, not
         // a new device found here.
@@ -5016,7 +5050,7 @@ impl StudioController {
             });
             if let Some(slug) = slug {
                 return UiError::UnsupportedAction(format!(
-                    "{slug} is open in another tab — close it there first"
+                    "{slug} is open in another tab. Close it there first."
                 ));
             }
         }
@@ -6495,7 +6529,9 @@ impl StudioController {
             crate::DeviceAction::Forget { device } => self.board_key(*device),
             _ => None,
         };
+        let chooser_before = self.devices.effects().last_grant_request();
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        self.note_section_chooser(op.action(), chooser_before);
         if let Some(key) = forgotten_board {
             self.wifi_connects.forget_board(key);
             if self.wifi_addresses.forget(&key) {
@@ -6538,7 +6574,7 @@ impl StudioController {
             // programming error or a hand-made action — refused with the
             // reason rather than silently started as Desktop.
             return Err(UiError::UnsupportedAction(format!(
-                "no hardware profile is checked in for {target_id}, so it cannot be started here"
+                "{target_id} has no hardware profile yet, so it can't be started here"
             )));
         }
         let kind = match op.backing {
@@ -6650,8 +6686,14 @@ impl StudioController {
             }));
         }
         let (staged, migration_notice) = self.prepare_push(&op.source).await;
-        if let Err(reason) = &staged {
-            log::warn!("nothing to push to {:?}: {reason}", op.device);
+        match &staged {
+            Ok(payload) => {
+                self.sending.insert(op.device, payload.label.clone());
+            }
+            Err(reason) => {
+                self.sending.remove(&op.device);
+                log::warn!("nothing to push to {:?}: {reason}", op.device);
+            }
         }
         self.devices.effects_mut().stage_push(op.device, staged);
         self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::Push {
@@ -8115,7 +8157,7 @@ impl StudioController {
     ) -> Result<(lpa_agent::ProjectEditsOutcome, UiNotices), UiError> {
         if self.project.active_library_uid().is_none() {
             return Err(UiError::UnsupportedAction(
-                "no project is open — open or create one first".to_string(),
+                "no project is open: open or create one first".to_string(),
             ));
         }
         let (landings, runs) = {
@@ -8798,7 +8840,7 @@ impl StudioController {
     fn app_agent_start(&mut self, text: String, shown: bool) -> UiResult {
         let Some(config) = self.settings.app_agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
-                "the assistant isn't set up yet — configure a provider in Settings (the gear icon)"
+                "the assistant isn't set up yet: choose a provider in Settings (the gear icon)"
                     .to_string(),
             ));
         };
@@ -9028,7 +9070,7 @@ impl StudioController {
         };
         let Some(config) = self.settings.agent_provider_config() else {
             return Err(UiError::UnsupportedFeature(
-                "the agent isn't set up yet — configure a provider in Settings (the gear icon)"
+                "the agent isn't set up yet: choose a provider in Settings (the gear icon)"
                     .to_string(),
             ));
         };
@@ -10290,6 +10332,26 @@ struct AgentStartProbe {
     journal: u64,
     /// What a push press sends, by name.
     push_project: Option<String>,
+}
+
+/// Whether the board's last hello listed `fs.tree` (its filesystem is the
+/// tree store) and did not hold its files for a migration: what lets a
+/// tree-store build go to it over the air. A held board's files are in an
+/// older littlefs that a core placed high in its app partition could write
+/// over; they move over USB first. A littlefs core holding a tree store
+/// (`TreeStoreHeld`, A5) is on the store: a core that reads it is what it
+/// needs.
+fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
+    use lpa_devices::wire::BoardFs;
+    // `None`: the board sent no hello — a core-only board waiting for its
+    // engine answers only on the update channel. The person's own offers do
+    // not hold it back (since the tree-store cutover such a board is almost
+    // always a tree board, and a tree core on a littlefs one holds its files
+    // for the USB migration, AD3); an automatic start waits for the hello.
+    let hello = evidence.classification.hello()?;
+    Some(
+        (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld,
+    )
 }
 
 /// The board a device press is aimed at, when it is one that changes what

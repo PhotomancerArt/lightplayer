@@ -10,8 +10,9 @@
 //! (the IDF bootloader, in `dram2_seg`), and the loader's own range has the
 //! same exposure (`docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md`).
 //!
-//! [`BOOT_STAGE_RAM`] is the split image's loader (`loader.x`'s `LRAM`:
-//! code at the bottom, stack at the top). The app's `.bss` covers it once the
+//! [`BOOT_STAGE_RAM`] is where both of our boot stages run: the split
+//! image's loader and our second-stage bootloader (`loader.x`'s and
+//! `bootloader.x`'s `LRAM`: code at the bottom, stack at the top). The app's `.bss` covers it once the
 //! core runs, so the firmware borrows it for its heap, but only for requests
 //! no radio makes: [`split_at_boot_stage_ram`] says where a heap array has to
 //! be cut so the part from this range up is registered without the
@@ -19,9 +20,10 @@
 
 use core::ops::Range;
 
-/// The split image's loader RAM: `fw-esp32c6-loader/loader.x`'s `LRAM`
-/// (its test holds the two equal). The loader is never updated over the air,
-/// so this range binds for every board that ever ran a split image.
+/// The boot stages' RAM: `fw-esp32c6-loader`'s `loader.x` and
+/// `bootloader.x` `LRAM` (its test holds all three equal). Neither stage is
+/// updated over the air, so this range binds for every board that ever ran
+/// one.
 pub const BOOT_STAGE_RAM: Range<u32> = 0x4085_0000..0x4086_0000;
 
 /// Cut the array `start..start + len` where it reaches [`BOOT_STAGE_RAM`]:
@@ -79,22 +81,32 @@ mod tests {
     }
 
     #[test]
-    fn the_range_is_the_loaders_linker_region() {
-        let script = include_str!("../../../lp-fw/fw-esp32c6-loader/loader.x");
-        let lram = script
-            .lines()
-            .find(|l| l.trim_start().starts_with("LRAM"))
-            .expect("loader.x names LRAM");
-        let expect = std::format!(
-            "ORIGIN = 0x{:08X}, LENGTH = 0x{:X}",
-            BOOT_STAGE_RAM.start,
-            BOOT_STAGE_RAM.end - BOOT_STAGE_RAM.start
-        );
-        assert!(
-            lram.to_ascii_uppercase()
-                .contains(&expect.to_ascii_uppercase()),
-            "loader.x's `{}` is not BOOT_STAGE_RAM ({expect})",
-            lram.trim()
-        );
+    fn the_range_is_both_boot_stages_linker_region() {
+        for (name, script) in [
+            (
+                "loader.x",
+                include_str!("../../../lp-fw/fw-esp32c6-loader/loader.x"),
+            ),
+            (
+                "bootloader.x",
+                include_str!("../../../lp-fw/fw-esp32c6-loader/bootloader.x"),
+            ),
+        ] {
+            let lram = script
+                .lines()
+                .find(|l| l.trim_start().starts_with("LRAM"))
+                .unwrap_or_else(|| panic!("{name} names LRAM"));
+            let expect = std::format!(
+                "ORIGIN = 0x{:08X}, LENGTH = 0x{:X}",
+                BOOT_STAGE_RAM.start,
+                BOOT_STAGE_RAM.end - BOOT_STAGE_RAM.start
+            );
+            assert!(
+                lram.to_ascii_uppercase()
+                    .contains(&expect.to_ascii_uppercase()),
+                "{name}'s `{}` is not BOOT_STAGE_RAM ({expect})",
+                lram.trim()
+            );
+        }
     }
 }

@@ -6,6 +6,7 @@
 #   scripts/emu/m4-walk.sh --keep              # leave the artefacts behind
 #   scripts/emu/m4-walk.sh --monolith          # the C6's unsplit dev image
 #   scripts/emu/m4-walk.sh --after-update      # the C6 split, walked after an OTA update
+#   LP_WALK_FLASH_PART=cx1 scripts/emu/m4-walk.sh   # on a desk flash part: the core reads in QIO
 #
 # TWO chips, one script (M6 P10). Both have a native USB-Serial-JTAG link, the
 # same generation of RMT, and a board whose `D10` pad is the one
@@ -181,6 +182,16 @@ TIMEOUT="${LP_WALK_TIMEOUT:-8s}"
 WALL="${LP_WALK_WALL_TIMEOUT:-900}"
 BOOT="${LP_WALK_BOOT:-rom-up}"
 OUT="${LP_WALK_OUT:-$OUT_DEFAULT}"
+# The C6's flash part (`lp-cli emu run --flash-part`): unset is the mask
+# ROM's own default chip, which the core reads in DIO (it is not on the
+# core's QIO list); `cx1` or `xiao-c6` is a desk part with QE set at the
+# factory, which the core reads in QIO (`fw-esp32c6`'s `flash_qio`). The
+# emulator moves the same bytes either way, so this walks the switch, not
+# the bus.
+flash_part_args=()
+if [[ -n "${LP_WALK_FLASH_PART:-}" ]]; then
+    flash_part_args=(--flash-part "$LP_WALK_FLASH_PART")
+fi
 
 command -v jq >/dev/null 2>&1 || {
     echo "jq not found. Install it (brew install jq) — the decoded frames are JSON." >&2
@@ -389,6 +400,7 @@ esp32c6)
     echo "==> lp-cli emu run ($BOOT boot, ${TIMEOUT} emulated), hosting the link and uploading $PROJECT"
     "$cli" emu run \
         "${boot_args[@]}" \
+        ${flash_part_args[@]+"${flash_part_args[@]}"} \
         --host-link \
         --upload "$PROJECT" \
         --time-grade t1 \
@@ -758,6 +770,7 @@ else
     set +e
     "$cli" emu run \
         "${boot_args[@]}" \
+        ${flash_part_args[@]+"${flash_part_args[@]}"} \
         --host-link \
         --upload "$PROJECT" \
         --time-grade t3 \

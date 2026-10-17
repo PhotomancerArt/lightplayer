@@ -423,6 +423,14 @@ pub enum TimeGrade {
     /// `lp-emu:esp32c6:t3` — the kernel-measured class table, and the cache
     /// and bus costs of the address ([`crate::cache::CacheCost`]).
     T3,
+    /// `lp-emu:esp32c6:t4` — `t3`, plus the flash interface's time
+    /// ([`crate::flash_timing`]): every SPI1 transfer keeps `cmd` busy for
+    /// its wire time at the SCK and line widths its registers give, a
+    /// program or an erase holds the part's WIP for CX1's busy times
+    /// ([`NorTiming::CX1`](lp_emu_esp_common::engine::nor_timing::NorTiming::CX1)),
+    /// a cache fill costs what SPI0's registers say,
+    /// and a range invalidate drops the lines it names.
+    T4,
 }
 
 impl TimeGrade {
@@ -430,7 +438,7 @@ impl TimeGrade {
         match self {
             TimeGrade::T1 => CycleModel::InstructionCount,
             TimeGrade::T2 => CycleModel::Esp32C6,
-            TimeGrade::T3 => CycleModel::Esp32C6Kernels,
+            TimeGrade::T3 | TimeGrade::T4 => CycleModel::Esp32C6Kernels,
         }
     }
 
@@ -438,12 +446,20 @@ impl TimeGrade {
     ///
     /// `t1` and `t2` are `None` **by construction**, which is the reason
     /// their counts cannot move: the bus's hook is not installed, so its
-    /// drain is a constant zero.
+    /// drain is a constant zero. `t4`'s model is bound to the machine's
+    /// flash interface, so its machine builds it
+    /// ([`CacheCost::with_flash`](crate::cache::CacheCost::with_flash));
+    /// this answers `t3`'s stand-alone model for it.
     pub fn memory_cost(self) -> Option<Box<dyn lp_emu_core::MemoryCost + Send>> {
         match self {
             TimeGrade::T1 | TimeGrade::T2 => None,
-            TimeGrade::T3 => Some(Box::new(crate::cache::CacheCost::new())),
+            TimeGrade::T3 | TimeGrade::T4 => Some(Box::new(crate::cache::CacheCost::new())),
         }
+    }
+
+    /// Does this grade time the flash interface (`t4`)?
+    pub const fn times_flash(self) -> bool {
+        matches!(self, TimeGrade::T4)
     }
 
     /// The validation system's configuration name (plan PD4).
@@ -452,6 +468,7 @@ impl TimeGrade {
             TimeGrade::T1 => "lp-emu:esp32c6:t1",
             TimeGrade::T2 => "lp-emu:esp32c6:t2",
             TimeGrade::T3 => "lp-emu:esp32c6:t3",
+            TimeGrade::T4 => "lp-emu:esp32c6:t4",
         }
     }
 
@@ -460,11 +477,52 @@ impl TimeGrade {
             "t1" => Ok(TimeGrade::T1),
             "t2" => Ok(TimeGrade::T2),
             "t3" => Ok(TimeGrade::T3),
+            "t4" => Ok(TimeGrade::T4),
             other => Err(format!(
-                "unknown time grade `{other}` (expected t1, t2 or t3)"
+                "unknown time grade `{other}` (expected t1, t2, t3 or t4)"
             )),
         }
     }
+}
+
+/// `t4`'s wiring: PCR and SPI0 publish into `clocks`, EXTMEM posts its
+/// invalidates there, and SPI1 is timed by it with CX1's part. Every block
+/// is required: a `t4` machine missing one would time some of the interface
+/// and not the rest, and say nothing.
+fn wire_flash_timing(
+    bus: &mut lp_emu_esp_common::SocBus,
+    clocks: &std::sync::Arc<crate::flash_timing::FlashClocks>,
+) -> Result<(), BuildError> {
+    use crate::periph::{extmem::Extmem, pcr::Pcr, spi0::Spi0, spi1::Spi1};
+    let missing = |name: &str| {
+        BuildError::Io(format!(
+            "time grade t4 times the flash interface and this machine has no {name} block"
+        ))
+    };
+    let i = bus.peripheral_index("PCR").ok_or_else(|| missing("PCR"))?;
+    bus.with_peripheral::<Pcr, _>(i, |p, _| p.set_flash_clocks(clocks.clone()))
+        .ok_or_else(|| missing("PCR"))?;
+    let i = bus
+        .peripheral_index("SPI0")
+        .ok_or_else(|| missing("SPI0"))?;
+    bus.with_peripheral::<Spi0, _>(i, |p, _| p.set_flash_clocks(clocks.clone()))
+        .ok_or_else(|| missing("SPI0"))?;
+    let i = bus
+        .peripheral_index("EXTMEM")
+        .ok_or_else(|| missing("EXTMEM"))?;
+    bus.with_peripheral::<Extmem, _>(i, |p, _| p.set_flash_clocks(clocks.clone()))
+        .ok_or_else(|| missing("EXTMEM"))?;
+    let i = bus
+        .peripheral_index("SPI1")
+        .ok_or_else(|| missing("SPI1"))?;
+    bus.with_peripheral::<Spi1, _>(i, |p, _| {
+        p.set_timing(
+            clocks.clone(),
+            lp_emu_esp_common::engine::nor_timing::NorTiming::CX1,
+        )
+    })
+    .ok_or_else(|| missing("SPI1"))?;
+    Ok(())
 }
 
 /// Where the mask ROM comes from. There is no "no ROM" variant: plan PD7
@@ -1186,6 +1244,9 @@ pub struct Esp32C6Builder {
     /// The modelled chip's size. `--flash` a larger file and the build
     /// fails rather than truncating it.
     flash_len: u32,
+    /// The part on the board ([`crate::flash::FlashPart`]): its JEDEC id and
+    /// status register 2 at power-on.
+    flash_part: crate::flash::FlashPart,
     /// Register the boot set before `peripherals`.
     boot_set: bool,
     peripherals: Vec<(u32, u32, BoxedPeripheral)>,
@@ -1276,6 +1337,7 @@ impl Esp32C6Builder {
             lp_peri_clk_en: crate::periph::lp_peri::CLK_EN_RESET,
             flash: crate::flash::FlashBacking::Blank,
             flash_len: crate::flash::DEFAULT_FLASH_LEN,
+            flash_part: crate::flash::FlashPart::ROM_DEFAULT,
             boot_set: true,
             peripherals: Vec::new(),
             dump_frames: FrameSink::default(),
@@ -1880,6 +1942,16 @@ impl Esp32C6Builder {
         self
     }
 
+    /// The part on the board: what `RDID` answers (with the image's own
+    /// capacity byte) and status register 2 as it powers on. Defaults to the
+    /// ROM's own default chip, status clear
+    /// ([`crate::flash::FlashPart::ROM_DEFAULT`]); a desk part
+    /// (`FlashPart::CX1`, `FlashPart::XIAO_C6`) powers on with QE set.
+    pub fn flash_part(mut self, part: crate::flash::FlashPart) -> Self {
+        self.flash_part = part;
+        self
+    }
+
     /// Register a peripheral. Order matters — see
     /// [`PERIPHERAL_REGISTRATION_ORDER`].
     pub fn peripheral(mut self, base: u32, len: u32, periph: BoxedPeripheral) -> Self {
@@ -1976,6 +2048,7 @@ impl Esp32C6Builder {
             lp_peri_clk_en,
             flash,
             flash_len,
+            flash_part,
             boot_set,
             peripherals,
             dump_frames,
@@ -2155,10 +2228,13 @@ impl Esp32C6Builder {
         // The flash chip and the cache MMU are shared state, not
         // peripherals: SPI1 executes commands against the chip, SPI0
         // programs the table, and the machine's fill reads both.
-        let flash_handle: crate::flash::FlashHandle = std::sync::Arc::new(std::sync::Mutex::new(
-            crate::flash::FlashImage::open(flash, flash_len)
-                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?,
-        ));
+        let flash_handle: crate::flash::FlashHandle = std::sync::Arc::new(std::sync::Mutex::new({
+            let mut image = crate::flash::FlashImage::open(flash, flash_len)
+                .map_err(|e| BuildError::Io(format!("opening the flash image: {e}")))?;
+            // Before the controllers: their status latch powers on from it.
+            image.set_part(flash_part);
+            image
+        }));
         let cache_handle: crate::cache::CacheHandle =
             std::sync::Arc::new(std::sync::Mutex::new(crate::cache::CacheMmu::new()));
 
@@ -2260,6 +2336,12 @@ impl Esp32C6Builder {
                 )
             };
             loader::seed_rom_flash_chip(&mut bus, staging.chip_size);
+            // At `t4` the flash interface's registers are time, so they are
+            // left as the bootloader leaves them for the chip's header mode.
+            if time_grade.times_flash() {
+                let mode = loader::header_flash_mode(&flash_handle).unwrap_or(2);
+                loader::seed_flash_interface(&mut bus, mode);
+            }
             // Everything the loader staged was already placed into the
             // window by `rom::load` / `load_app`; filling now proves the
             // table and the placement agree, and is what serves the window
@@ -2410,7 +2492,15 @@ impl Esp32C6Builder {
         // loader has placed the app and filled the window: the cache starts
         // cold, as it is at reset, and the host's placement of segments
         // costs the guest nothing.
-        bus.set_memory_cost(time_grade.memory_cost());
+        if time_grade.times_flash() {
+            // `t4`: one clock cell between the blocks that set the flash
+            // interface's time and the two that are timed by it.
+            let clocks = std::sync::Arc::new(crate::flash_timing::FlashClocks::new());
+            wire_flash_timing(&mut bus, &clocks)?;
+            bus.set_memory_cost(Some(Box::new(crate::cache::CacheCost::with_flash(clocks))));
+        } else {
+            bus.set_memory_cost(time_grade.memory_cost());
+        }
 
         // `--wire a:b`, before the guest runs: a jumper is on the header
         // when the board powers up, not put there later.
@@ -6496,7 +6586,7 @@ mod tests {
     }
 
     #[test]
-    fn the_time_grades_are_the_three_cycle_models_and_their_configuration_names() {
+    fn the_time_grades_are_their_cycle_models_and_their_configuration_names() {
         assert_eq!(TimeGrade::T1.cycle_model(), CycleModel::InstructionCount);
         assert_eq!(TimeGrade::T2.cycle_model(), CycleModel::Esp32C6);
         assert_eq!(TimeGrade::T3.cycle_model(), CycleModel::Esp32C6Kernels);
@@ -6504,7 +6594,11 @@ mod tests {
         assert_eq!(TimeGrade::T2.configuration(), "lp-emu:esp32c6:t2");
         assert_eq!(TimeGrade::T3.configuration(), "lp-emu:esp32c6:t3");
         assert_eq!(TimeGrade::parse("t3"), Ok(TimeGrade::T3));
-        assert!(TimeGrade::parse("t4").is_err());
+        assert_eq!(TimeGrade::T4.cycle_model(), CycleModel::Esp32C6Kernels);
+        assert_eq!(TimeGrade::T4.configuration(), "lp-emu:esp32c6:t4");
+        assert_eq!(TimeGrade::parse("t4"), Ok(TimeGrade::T4));
+        assert!(TimeGrade::T4.times_flash() && !TimeGrade::T3.times_flash());
+        assert!(TimeGrade::parse("t5").is_err());
 
         let m = Esp32C6Builder::new()
             .time_grade(TimeGrade::T2)
@@ -6517,11 +6611,12 @@ mod tests {
     /// `t1` and `t2` are `None` **by construction**, which is the whole of
     /// why their cycle counts cannot move (M1 P3 G3-3).
     #[test]
-    fn only_t3_installs_a_memory_cost_model() {
+    fn only_t3_and_t4_install_a_memory_cost_model() {
         for (grade, expected) in [
             (TimeGrade::T1, false),
             (TimeGrade::T2, false),
             (TimeGrade::T3, true),
+            (TimeGrade::T4, true),
         ] {
             assert!(grade.memory_cost().is_some() == expected, "{grade:?}");
             let m = Esp32C6Builder::new().time_grade(grade).build().unwrap();
@@ -7077,7 +7172,7 @@ mod tests {
             "{summary:?}"
         );
         assert!(
-            summary[1].starts_with("FLASH-OPS range=0x350000+0xb0000 ops=2"),
+            summary[1].starts_with("FLASH-OPS range=0x380000+0x80000 ops=2"),
             "{summary:?}"
         );
 

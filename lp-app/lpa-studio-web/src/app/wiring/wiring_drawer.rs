@@ -93,10 +93,9 @@ pub fn WiringDrawerBody(view: UiBusView, on_action: EventHandler<UiAction>) -> E
             div { class: "tw:grid tw:gap-1 tw:text-sm tw:text-muted-foreground",
                 p { class: "tw:m-0", "No bus channels yet." }
                 p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-subtle-foreground",
-                    "The bus is the project's patch bay: nodes publish and consume "
-                    "values on named channels. Bind a slot to "
+                    "The bus is how nodes share values, on named channels. Bind a slot to "
                     code { class: "tw:font-mono", "bus:…" }
-                    " and the channel appears here."
+                    " to add its channel here."
                 }
             }
         };
@@ -191,7 +190,7 @@ pub(crate) fn FlowChannelRow(
                             if channel.value_error.is_some() {
                                 "no writer"
                             } else {
-                                "no writer — authored default (R6)"
+                                "no writer, uses its default"
                             }
                         }
                     } else {
@@ -325,7 +324,7 @@ fn ContentionBadge(contended: bool) -> Element {
         if contended {
             span {
                 class: "tw:rounded-xs tw:border tw:border-status-attention-border tw:bg-status-attention-bg tw:px-1 tw:text-[9px] tw:font-bold tw:uppercase tw:leading-snug tw:text-status-attention-foreground",
-                title: "Two writers tie at fallback priority — ambiguous until the author picks (E3). The pick gesture is future work.",
+                title: "Two writers have the same fallback priority, so it isn't settled which one wins. Choosing one isn't possible yet.",
                 "2\u{d7} fallback"
             }
         }
@@ -398,11 +397,11 @@ fn BusSiteChip(
     }
     let marks = (!marks.is_empty()).then(|| format!("({})", marks.join(", ")));
     let title = if panel_writer {
-        "Engaged panel writer — unauthored runtime state (R10)"
+        "Held from the panel. Not saved in the project."
     } else if child_scope.is_some() {
-        "Lives in a child module's scope; its input has no writer there, so it resolves to this channel (R5)"
+        "In a child module. Nothing writes its input there, so it reads this channel."
     } else if publish {
-        "Module publish (R7)"
+        "Published by the module"
     } else if origin == UiBusSiteOrigin::Default {
         "Default binding"
     } else if clickable {

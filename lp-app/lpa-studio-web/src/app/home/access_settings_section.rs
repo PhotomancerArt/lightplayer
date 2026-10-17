@@ -208,7 +208,7 @@ fn AccountGroup(
                 ArmedConfirmButton {
                     label: Some("Reset account key…".to_string()),
                     armed_label: "Confirm reset".to_string(),
-                    title: "Make a new account key. Devices drop the old one the next time you plug them in.".to_string(),
+                    title: "Make a new account key. Your devices will drop the old one the next time you plug them in.".to_string(),
                     on_confirm: move |_| on_reset_key.call(()),
                 }
             }
@@ -228,7 +228,7 @@ fn AccountGroup(
                 }
             }
             p { class: HELP_CLASS,
-                "Added to every device you set up or plug in, next to your account key. For friends who don't use LightPlayer — tell them the play one."
+                "Added to every device you set up or plug in, along with your account key. Give friends who don't use LightPlayer the play password."
             }
         }
     }
@@ -336,7 +336,7 @@ const OPT_CLASS: &str = "tw:flex tw:min-w-0 tw:items-center tw:gap-2.5 tw:rounde
 
 fn remembered_line(count: usize) -> String {
     match count {
-        0 => "None yet. Passwords friends share with you land here.".to_string(),
+        0 => "None yet. Passwords friends share with you will appear here.".to_string(),
         1 => "1 password friends shared with you.".to_string(),
         n => format!("{n} passwords friends shared with you."),
     }

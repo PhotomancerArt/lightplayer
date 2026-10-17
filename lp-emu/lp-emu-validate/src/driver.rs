@@ -177,7 +177,7 @@ pub const ESP32C6: ChipSpec = ChipSpec {
     rom_elf: "esp32c6_rev0_rom.elf",
     monitor_baud: None,
     port_prefix: "cu.usbmodem",
-    time_grades: &["t1", "t2", "t3"],
+    time_grades: &["t1", "t2", "t3", "t4"],
     takes_reset_cause: true,
     core_quantum: None,
     takes_seams: true,

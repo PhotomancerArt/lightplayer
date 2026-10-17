@@ -7,8 +7,23 @@ It runs entirely from RAM (about 2.8 KB) and is the one piece of the image that
 is **never updated over the air**: changing it takes a USB flash.
 
 ```text
-IDF bootloader → loader (0x10000) → core (0x18000, or the high end) → engine
+the IDF door:  ROM → IDF bootloader (0x0) → loader (0x10000) → core → engine
+our door:      ROM → this crate's bootloader flavour (0x0)   → core → engine
 ```
+
+**One crate, two flavours.** The default build is the **factory loader**
+above (`loader.x`), unchanged for boards that boot through the ESP-IDF
+bootloader. `--features bootloader` builds **LightPlayer's own second
+stage** (`bootloader.x`): the mask ROM loads it from flash `0x0` (RAM only,
+`0x4085_0000..0x4086_0000`, no placeholder segments), it runs a short
+prologue (`src/prologue/`: the state the IDF left that a core relies on —
+watchdogs, brownout, the flash clocks and the ROM's flash descriptor,
+32 KiB MMU pages; each value measured on the emulator), prints
+`[LPBOOT] LightPlayer bootloader v1`, and then does exactly the factory
+loader's job with the same code. `app.bin` is the same bytes under both.
+`tools/lp-fw-split` builds both and writes the second stage's image itself.
+The decision and the core entry contract (C1–C8) are
+[`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`](../../docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
 
 The decisions, the byte layouts and the rules found on silicon are in
 [`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`](../../docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md).

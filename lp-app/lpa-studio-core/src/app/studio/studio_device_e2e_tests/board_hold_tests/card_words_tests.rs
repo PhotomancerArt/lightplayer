@@ -9,7 +9,10 @@
 //! (C5), and the board under Online boards on the page (C6).
 
 use super::*;
-use crate::{BarLayer, BarWorkState, CornerMark, PictureSource, UiPrimary, UiStatusKind};
+use crate::{
+    BarLayer, BarWorkState, CornerMark, PictureSource, SurfacePicture, SurfaceState, UiPrimary,
+    UiStatusKind,
+};
 
 /// C1: B loads beside a holder that has a picture saved. B's card for the
 /// board is the board's own card, Online, with the picture A saved (dimmed),
@@ -31,23 +34,36 @@ fn c1_a_watchers_card_is_online_saying_another_tab_has_it_and_connects_by_taking
     assert_eq!(card.picture.source, PictureSource::Saved);
     assert!(card.picture.dim, "A's picture, dimmed");
     assert!(card.picture.frame.is_some());
+    assert_eq!(card.surface.state, SurfaceState::AnotherTab);
     assert_eq!(
-        card.status.reading, None,
-        "the picture dims; the corner says nothing (P4)"
+        card.surface.picture,
+        SurfacePicture::Dimmed,
+        "A's picture dims under the notice"
     );
+    let notice = card.surface.notice.clone().expect("the surface says it");
+    assert_eq!(notice.first, "This board is open in another tab.");
+    assert_eq!(
+        notice.second.as_deref(),
+        Some("Connect here to move it to this tab.")
+    );
+    assert_eq!(notice.tone, UiStatusKind::Attention);
     let connection = card.bar(BarLayer::Connection);
     assert_eq!(connection.summary, "Open in another tab");
     assert_eq!(connection.aside, None, "A only watches");
-    assert_eq!(connection.tone, UiStatusKind::Attention);
+    assert_eq!(
+        connection.tone,
+        UiStatusKind::Neutral,
+        "the surface says it, once: the row goes quiet"
+    );
     assert_eq!(connection.action, None);
-    assert_ne!(
+    assert_eq!(
         card.status.mark,
-        CornerMark::Notice(UiStatusKind::Attention),
-        "the Link row says it, once"
+        CornerMark::Fine,
+        "the corner is a quiet ⋯"
     );
 
     let primary = primary_of(&card);
-    assert_eq!(primary.word, "Connect");
+    assert_eq!(primary.word, "Connect here");
     assert_eq!(primary.offer, b.verb(MAC_A, "take-over"));
     assert_eq!(primary.icon.as_deref(), Some("usb"));
     assert!(
@@ -225,12 +241,24 @@ fn c4_the_tab_that_let_go_says_taken_by_another_tab_and_connects_to_take_it_back
     assert_eq!(card.presence, crate::UiBoardPresence::Online);
     let connection = card.bar(BarLayer::Connection);
     assert_eq!(connection.summary, "Taken by another tab");
-    assert_eq!(connection.tone, UiStatusKind::Attention);
+    assert_eq!(
+        connection.tone,
+        UiStatusKind::Neutral,
+        "the surface says it"
+    );
     assert_eq!(connection.aside, None);
     assert_eq!(card.picture.source, PictureSource::Saved);
     assert!(card.picture.dim && card.picture.frame.is_some());
+    assert_eq!(card.surface.state, SurfaceState::TakenByAnotherTab);
+    assert_eq!(
+        card.surface
+            .notice
+            .as_ref()
+            .map(|notice| notice.first.as_str()),
+        Some("Another tab took this board.")
+    );
     let primary = primary_of(&card);
-    assert_eq!(primary.word, "Connect");
+    assert_eq!(primary.word, "Connect here");
     assert_eq!(primary.offer, a.verb(MAC_A, "take-over"));
     every_card_action_is_offered(&a);
 

@@ -1,4 +1,5 @@
-//! An emulated C6 running the `fs-tree` firmware, for the tree-store walks
+//! An emulated C6 running the shipped firmware (the tree store as `lpfs`
+//! since the tree-store cutover), for the tree-store walks
 //! (plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`, P6–P8):
 //! build a board on a given flash, boot it to its hello, read its boot
 //! words, power-cycle it, read its flash out, and mount that flash on the
@@ -16,9 +17,12 @@ use std::path::{Path, PathBuf};
 
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
 use lp_emu_esp_common::Strap;
-use lp_emu_esp32c6::flash::{DEFAULT_FLASH_LEN, FlashBacking, LPFS_LEN, LPFS_OFFSET};
+use lp_emu_esp32c6::flash::{
+    DEFAULT_FLASH_LEN, FlashBacking, LPFS_LEN, LPFS_OFFSET, PARTITION_TABLE_OFFSET,
+    legacy_v2_partition_table_bytes,
+};
 use lp_emu_esp32c6::machine::{AppSource, Esp32C6Builder, TimeGrade, UsbHost};
-use lp_emu_esp32c6::test_support::{FwImage, fw_esp32c6_image};
+use lp_emu_esp32c6::test_support::{FwImage, ReferenceImage, fw_esp32c6_image, reference_image};
 use lp_nor_sim::{NorFlashSim, NorGeometry};
 use lp_tree_store::{MountSummary, SoftSha256, StoreConfig, StoreError, TreeStore};
 
@@ -31,9 +35,45 @@ pub const BOOT_BANNER: &str = "[INIT] Initializing board...";
 /// A file set: absolute path → bytes.
 pub type Files = BTreeMap<String, Vec<u8>>;
 
-/// The `fs-tree` image (or `None` with a skip notice).
+/// The tree-store image — the shipped one since the cutover (or `None`
+/// with a skip notice).
 pub fn fs_tree_elf(test: &str) -> Option<PathBuf> {
-    elf(test, &FwImage::FS_TREE)
+    elf(test, &FwImage::SHIPPED)
+}
+
+/// A pinned littlefs image (`FIELDED_LITTLEFS`, or its heap-peak twin): the
+/// fielded board every littlefs control runs since the default switched (or
+/// `None` with a skip notice). Boot it on [`fielded_chip`].
+pub fn fielded_elf(test: &str, image: &ReferenceImage) -> Option<PathBuf> {
+    match reference_image(image) {
+        Ok(path) => Some(path),
+        Err(reason) => {
+            eprintln!("{test}: skipped — {reason}");
+            None
+        }
+    }
+}
+
+/// The blank chip a comparison's leg starts from: the fielded table for
+/// `littlefs` ([`fielded_chip`]), an empty (blank, today's table staged)
+/// chip for the tree store.
+pub fn blank_for(label: &str) -> Vec<u8> {
+    if label == "littlefs" {
+        fielded_chip()
+    } else {
+        Vec::new()
+    }
+}
+
+/// A blank chip carrying the fielded boards' own table (the 2026-10
+/// repartition's: a 176-block littlefs at `0x350000`) — what a littlefs
+/// board in a house is flashed with. A direct load keeps it.
+pub fn fielded_chip() -> Vec<u8> {
+    let mut chip = vec![0xFFu8; DEFAULT_FLASH_LEN as usize];
+    let table = legacy_v2_partition_table_bytes();
+    let at = PARTITION_TABLE_OFFSET as usize;
+    chip[at..at + table.len()].copy_from_slice(&table);
+    chip
 }
 
 /// Any image (or `None` with a skip notice).
@@ -59,7 +99,7 @@ pub fn board(elf: &Path, flash: Vec<u8>, nonce: u32) -> EmuLinkHost<C6Board> {
         .app(AppSource::Path(elf.to_path_buf()))
         .flash(backing)
         .strict(false)
-        .time_grade(TimeGrade::T1)
+        .time_grade(grade())
         .usb_host(UsbHost::Attached { draining: true })
         .usb_sj_queue_source()
         // The power-on snapshot a power cycle (and a cut) restores.
@@ -67,6 +107,18 @@ pub fn board(elf: &Path, flash: Vec<u8>, nonce: u32) -> EmuLinkHost<C6Board> {
         .build()
         .expect("the image builds a machine");
     EmuLinkHost::new(C6Board::new(machine).expect("a hosted board"), nonce, true)
+}
+
+/// The time grade the tree-store boards run at: `LP_EMU_GRADE` (`t1`, the
+/// default, through `t4`). `t4` is the one whose flash commands take time;
+/// every walk CI runs stays at `t1`.
+pub fn grade() -> TimeGrade {
+    std::env::var("LP_EMU_GRADE")
+        .ok()
+        .filter(|g| !g.is_empty())
+        .map_or(TimeGrade::T1, |g| {
+            TimeGrade::parse(&g).expect("LP_EMU_GRADE is t1, t2, t3 or t4")
+        })
 }
 
 /// Step `host` to its hello; the hello's line. Panics with the console if it
@@ -162,7 +214,7 @@ pub fn host_mount(
 }
 
 /// A store region built on the host, with `files` committed (one commit
-/// each), at the C6's 176 sectors.
+/// each), at the C6's 128 sectors.
 pub fn host_store(files: &[(&str, &[u8])]) -> Vec<u8> {
     let sectors = LPFS_LEN / 4096;
     let mut st = match TreeStore::format(

@@ -34,7 +34,7 @@ pub enum PackageHealth {
     UpgradesOnOpen { found: u32 },
     /// This Studio cannot open it as it stands.
     Blocked {
-        /// Card-sized statement of what was found ("Format 3 — too old").
+        /// Card-sized statement of what was found ("Format too old (3)").
         headline: String,
         /// What to do about it — a full sentence, from the classifier where
         /// the classifier has one.
@@ -109,15 +109,13 @@ pub fn health_for(class: &FormatClass, manifest_defect: Option<&str>) -> Package
 fn headline_for(class: &FormatClass) -> String {
     match class {
         FormatClass::BelowFloor { found: Some(found) } => {
-            format!("Format {found} — too old for this Studio")
+            format!("Format too old ({found})")
         }
-        FormatClass::BelowFloor { found: None } => {
-            String::from("Format not stated — too old for this Studio")
-        }
+        FormatClass::BelowFloor { found: None } => String::from("Format too old"),
         FormatClass::FutureFormat { found } => {
-            format!("Format {found} — made by a newer LightPlayer")
+            format!("Made by a newer LightPlayer (format {found})")
         }
-        FormatClass::NotAProject => String::from("No project.json — not a project"),
+        FormatClass::NotAProject => String::from("Not a project (no project.json)"),
         FormatClass::Unreadable { .. } => String::from("project.json could not be read"),
         // Not blocked; kept total rather than unreachable! so a future
         // FormatClass arm cannot panic the gallery.

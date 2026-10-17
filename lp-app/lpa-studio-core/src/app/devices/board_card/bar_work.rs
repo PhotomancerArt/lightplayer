@@ -90,28 +90,28 @@ fn failed_words(kind: ActivityKind) -> &'static str {
     }
 }
 
-/// An update under way, in its row's words and one number for the whole
-/// update: the new firmware is the first half and its last part the
-/// second, so "updating · 42%" never restarts at "2 of 2". `None` for a
-/// standing that is not an update running.
-pub(crate) fn update_work_words(standing: &UpdateStanding) -> Option<(String, Option<u8>)> {
-    let half = |percent: Option<u8>, second: bool| {
-        percent.map(|percent| (u32::from(percent.min(100)) / 2 + u32::from(second) * 50) as u8)
-    };
-    let (verb, percent) = match standing {
-        UpdateStanding::BackingUp { percent, .. } => ("backing up", *percent),
-        UpdateStanding::Updating { percent, .. } => ("updating", half(*percent, false)),
-        UpdateStanding::Finishing {
-            percent, resumed, ..
-        } => match resumed {
-            true => ("resuming", half(*percent, true)),
-            false => ("updating", half(*percent, true)),
-        },
-        UpdateStanding::Restoring { percent, .. } => ("restoring", *percent),
-        UpdateStanding::AnotherDevice { percent, .. } => ("updating", *percent),
+/// An update under way: its row's verb, and one number for the whole
+/// update ([`UpdateStanding::whole_percent`]), so "updating · 42%" never
+/// restarts at "2 of 2". `None` for a standing that is not an update
+/// running.
+pub(crate) fn update_work(standing: &UpdateStanding) -> Option<(&'static str, Option<u8>)> {
+    let verb = match standing {
+        UpdateStanding::BackingUp { .. } => "backing up",
+        UpdateStanding::Finishing { resumed: true, .. } => "resuming",
+        UpdateStanding::Restoring { .. } => "restoring",
+        UpdateStanding::Updating { .. }
+        | UpdateStanding::Finishing { .. }
+        | UpdateStanding::AnotherDevice { .. } => "updating",
         _ => return None,
     };
-    Some((state_words(verb, percent), percent))
+    Some((verb, standing.whole_percent()))
+}
+
+/// Work under way on a row: `verb` and `percent`, the one number its words
+/// say, its foot draws and the card's surface reads — so they can never
+/// disagree.
+pub(crate) fn running_work(verb: &str, percent: Option<u8>) -> UiBarWork {
+    UiBarWork::running(state_words(verb, percent), percent)
 }
 
 /// The work `layer` shows on this board: the running activity when it is
@@ -127,19 +127,19 @@ pub(crate) fn bar_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<Ui
             .filter(|update| {
                 activity.kind == ActivityKind::Update && update.kind == UpdateRowKind::Progress
             })
-            .and_then(|update| update_work_words(&update.standing));
-        let (words, percent) = match story {
-            Some((words, percent)) if !activity.cancel_requested => {
-                (words, percent.or(activity.percent))
-            }
-            _ => (activity_words(activity), activity.percent),
+            .and_then(|update| update_work(&update.standing));
+        let verb = story.map_or(activity_verb(activity.kind), |(verb, _)| verb);
+        let percent = story.and_then(|(_, percent)| percent).or(activity.percent);
+        let work = match activity.cancel_requested {
+            true => UiBarWork::running(activity_words(activity), percent),
+            false => running_work(verb, percent),
         };
         return Some(UiBarWork {
             cancel: input
                 .offer("cancel")
                 .filter(|_| activity.cancellable)
                 .map(|offer| offer.path.clone()),
-            ..UiBarWork::running(words, percent)
+            ..work
         });
     }
     if layer == BarLayer::Connection
@@ -176,22 +176,37 @@ fn ended_work(input: &BoardCardInput<'_>, layer: BarLayer) -> Option<UiBarWork> 
             ..UiBarWork::running(done_word(end.kind), None)
         });
     }
-    let failed = outcome
-        .filter(|outcome| !outcome.ok && !end.ok)
-        .filter(|_| end.kind != ActivityKind::Identify)?;
-    input.idle().then(|| {
-        UiBarWork::failed(
-            failed_words(end.kind),
-            Some(failed.summary.clone()),
-            retry(input, end.kind),
-        )
-    })
+    let kind = failed_kind(input).filter(|kind| *kind == end.kind)?;
+    Some(UiBarWork::failed(
+        failed_words(kind),
+        outcome.map(|outcome| outcome.summary.clone()),
+        retry(input, kind),
+    ))
+}
+
+/// The kind of work that failed and still shows so: the model keeps its
+/// failed outcome until the next activity clears it, past the few green
+/// seconds a success gets. Never an identify (how it ended is the board's
+/// own state now), and only on an idle board.
+pub(crate) fn failed_kind(input: &BoardCardInput<'_>) -> Option<ActivityKind> {
+    let end = input.ended?;
+    if end.shows_done(input.now) || end.ok || end.kind == ActivityKind::Identify {
+        return None;
+    }
+    let failed = input
+        .view
+        .last_outcome
+        .as_ref()
+        .is_some_and(|outcome| !outcome.ok);
+    (failed && input.idle()).then_some(end.kind)
 }
 
 /// Retry for a failed `kind`: the row's own verb, when it is offered again —
 /// the project picker for a push, the update for an update, the board pick
-/// for a flash. Nothing else retries from the row.
-fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<UiCardAction> {
+/// for a flash, Factory reset for an erase (it still arms: it is Lasting),
+/// and the removal for a removal. An identify does not retry from the row:
+/// the board's own state says what comes next.
+pub(crate) fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<UiCardAction> {
     let retry = |offer, draw| {
         Some(
             UiCardAction::press(offer, "Retry")
@@ -215,7 +230,9 @@ fn retry(input: &BoardCardInput<'_>, kind: ActivityKind) -> Option<UiCardAction>
             };
             retry(update, draw)
         }
-        ActivityKind::Erase | ActivityKind::RemoveProject | ActivityKind::Identify => None,
+        ActivityKind::Erase => retry(input.offer("erase")?, UiActionDraw::Press),
+        ActivityKind::RemoveProject => retry(input.offer("remove-project")?, UiActionDraw::Press),
+        ActivityKind::Identify => None,
     }
 }
 
@@ -313,10 +330,8 @@ mod tests {
             link: crate::app::devices::device_update_route::UpdateLink::Usb,
             percent: Some(84),
         };
-        assert_eq!(
-            update_work_words(&updating),
-            Some(("updating · 42%".to_string(), Some(42)))
-        );
+        assert_eq!(update_work(&updating), Some(("updating", Some(42))));
+        assert_eq!(running_work("updating", Some(42)).words, "updating · 42%");
         let finishing = UpdateStanding::Finishing {
             board: x.clone(),
             to: y.clone(),
@@ -324,23 +339,14 @@ mod tests {
             running: true,
             resumed: false,
         };
-        assert_eq!(
-            update_work_words(&finishing),
-            Some(("updating · 70%".to_string(), Some(70)))
-        );
+        assert_eq!(update_work(&finishing), Some(("updating", Some(70))));
         let backing_up = UpdateStanding::BackingUp {
             board: x.clone(),
             to: y,
             percent: Some(12),
         };
-        assert_eq!(
-            update_work_words(&backing_up),
-            Some(("backing up · 12%".to_string(), Some(12)))
-        );
-        assert_eq!(
-            update_work_words(&UpdateStanding::UpToDate { version: x }),
-            None
-        );
+        assert_eq!(update_work(&backing_up), Some(("backing up", Some(12))));
+        assert_eq!(update_work(&UpdateStanding::UpToDate { version: x }), None);
     }
 
     #[test]

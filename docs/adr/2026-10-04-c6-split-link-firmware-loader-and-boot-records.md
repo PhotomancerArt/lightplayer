@@ -340,6 +340,17 @@ apply from now regardless.
 (decisions D1–D21), spike `lp2025/2026-10-01-1854-ota-split-link-spike`,
 draft PR #903.
 
+## Amendment (2026-10-17): the second stage at `0x0` is ours
+
+The `0x0` row of §2 and §3's "the IDF bootloader starts the loader": from the
+cutover on, every board flashed over USB boots **ROM → LightPlayer's own
+second stage → core → engine**. The second stage is this loader's
+`bootloader` flavour — the same records, `choose` and fallback, after a
+prologue that leaves the core what the IDF did — and `app.bin` (the factory
+loader included) is unchanged, so boards updated only over the air keep
+booting through the IDF bootloader. See
+[2026-10-17-the-c6-boots-through-our-own-bootloader](2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+
 ## Amendment (2026-10-07): a trial core that hears from no host gives the board back
 
 §4 keeps a trial that started and never confirmed alive across every cold

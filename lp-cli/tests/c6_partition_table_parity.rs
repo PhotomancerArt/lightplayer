@@ -45,3 +45,24 @@ fn the_emulators_lpfs_facts_are_the_csvs_lpfs_row() {
     assert_eq!(factory.offset(), lp_emu_esp32c6::flash::FACTORY_OFFSET);
     assert_eq!(factory.size(), lp_emu_esp32c6::flash::FACTORY_LEN);
 }
+
+/// The table a pinned fielded (littlefs) image is booted on — the 2026-10
+/// repartition's, which every board fielded before the tree-store cutover
+/// carries — is the frozen copy compiled the same way.
+#[test]
+fn the_emulators_fielded_table_is_the_frozen_v2_csv_compiled_by_espflash() {
+    let csv_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv");
+    let csv = std::fs::read_to_string(&csv_path).expect("read the frozen v2 table");
+    let table = esp_idf_part::PartitionTable::try_from_str(&csv).expect("parse the v2 table");
+    let compiled = table.to_bin().expect("encode the v2 table");
+    let emulated = lp_emu_esp32c6::flash::legacy_v2_partition_table_bytes();
+    assert!(
+        compiled[..] == emulated[..],
+        "lp-emu-esp32c6's fielded (v2) table no longer matches \
+         lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv"
+    );
+    let lpfs = table.find("lpfs").expect("an lpfs row");
+    assert_eq!(lpfs.offset(), lp_emu_esp32c6::flash::LEGACY_V2_LPFS_OFFSET);
+    assert_eq!(lpfs.size(), lp_emu_esp32c6::flash::LEGACY_V2_LPFS_LEN);
+}

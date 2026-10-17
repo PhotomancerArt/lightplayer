@@ -19,9 +19,9 @@ pub mod controller;
 pub mod core;
 
 pub use self::core::data_kinds::{
-    CalendarDate, FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, age_words, byte_size,
-    date_words, duration_words, firmware_label_version, firmware_version, percent, percent_of,
-    pre_ota_version,
+    CalendarDate, FIRMWARE_NONE, FIRMWARE_UNKNOWN, PRE_HELLO_FIRMWARE, age_spoken, age_words,
+    byte_size, date_words, duration_words, firmware_label_version, firmware_version, percent,
+    percent_of, pre_ota_version,
 };
 pub use self::core::status::UiStatusKind;
 pub use lpc_history::{ContentHash, SyncRelation};
@@ -58,14 +58,16 @@ pub use app::devices::BrowserSimLinkSource;
 pub use app::devices::board_card::{
     ADD_A_PROJECT, ALSO_THROUGH_THE_CLOUD, ANYONE_CAN_EDIT_SENTENCE, BOARD_PANEL_CONTROLS,
     BarLayer, BarWorkState, BoardCardInput, BoardConnection, CLOUD_NOT_YET, CONFIRMATION_REQUIRED,
-    CONNECTING, CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE, EDITING,
+    CONNECT_HERE, CONNECTING, CONNECTION_FAILED, CornerMark, DATA_LOST, DATA_UNREADABLE,
     LENS_SOURCE_WORDS, LOCKED_PREVIEW_SENTENCE, MASTER_CHANNEL, MODEL_NOT_SET, PROJECT_HIDDEN,
-    PROJECT_NONE, PictureSource, RECONNECTING, RosterCardsInput, SOMEONE_ELSE_SENTENCE,
-    UPDATE_INTERRUPTED, UPDATE_REQUIRED, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork,
-    UiBluetoothSwitch, UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiCardAction,
+    PROJECT_NONE, PROJECT_UNKNOWN, PictureSource, RECONNECTING, RosterCardsInput,
+    SOMEONE_ELSE_SENTENCE, SurfacePicture, SurfaceProgress, SurfaceState, UPDATE_INTERRUPTED,
+    UPDATE_REQUIRED, UiActionDraw, UiBarDetails, UiBarMark, UiBarWork, UiBluetoothSwitch,
+    UiBoardCard, UiBoardPanel, UiBoardPicture, UiBoardPresence, UiBoardSurface, UiCardAction,
     UiCardControl, UiCornerDetails, UiDetailPanel, UiNameBar, UiPrimary, UiStackBar,
-    UiStatusCorner, activity_bar, activity_words, bluetooth_switch, board_card, board_panel_picks,
-    chip_words, link_icon, pending_board_card, roster_board_card, roster_board_cards,
+    UiStatusCorner, UiSurfaceNotice, activity_bar, activity_words, bluetooth_switch, board_card,
+    board_panel_picks, chip_words, link_icon, pending_board_card, roster_board_card,
+    roster_board_cards,
 };
 #[cfg(any(test, feature = "story-fixtures"))]
 pub use app::devices::device_update_fixtures::{
@@ -126,6 +128,8 @@ pub use app::devices::{
     CONNECT_VERB, ConnectFacts, DONE_VERB, NO_PROJECT, PROJECT_NOT_KNOWN, device_connect_offer,
     device_done_offer,
 };
+/// Connect a board's chooser failing after the pick.
+pub use app::devices::{ChooserTransport, UiChooserFailure};
 pub use app::devices::{DeviceFirmwareSources, StudioFirmwareStore};
 pub use app::devices::{
     FIRST_BLUETOOTH_UPDATE_RELEASE, FirmwareFileDataOp, FirmwareFileOp, FirmwareLookupOp,
@@ -337,7 +341,8 @@ pub use lpa_devices::{
     FlashStep as DeviceFlashStep, Input as DeviceInput, LayoutVerdict as DeviceLayoutVerdict,
     LinkCounterFacts as DeviceLinkCounters, LinkId as DeviceLinkId, LinkInfo as DeviceLinkInfo,
     Millis as DeviceMillis, RosterConfig as DeviceRosterConfig, TerminalKind as DeviceTerminalKind,
-    TerminalLine as DeviceTerminalLine, WireVersion as DeviceWireVersion,
+    TerminalLine as DeviceTerminalLine, UpdateBoardState as DeviceUpdateBoardState,
+    WireVersion as DeviceWireVersion,
 };
 /// What a board reports about its saved networks, its station and what it
 /// hears.

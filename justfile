@@ -46,11 +46,22 @@ fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 v3_flash_size := "4mb"
 
 # The C6's 4 MB flash, matching lp-fw/fw-esp32c6/partitions.csv
-# (0x350000 + 0xB0000 = 0x400000) and the runner in
+# (0x380000 + 0x80000 = 0x400000) and the runner in
 # lp-fw/fw-esp32c6/.cargo/config.toml, which cannot read this var — same
 # reasoning as s3_flash_size above. CANONICAL SOURCE:
 # lp-fw/builds/esp32c6-4mb.json (`flashSizeMb`).
 c6_flash_size := "4mb"
+
+# The C6's second-stage bootloader, the bytes every C6 flash writes at 0x0:
+# today espflash 3.3.0's bundled one, rebuilt from source and committed
+# byte-identical (lp-fw/bootloaders/README.md; `just build-c6-bootloader
+# stock` rebuilds it in Docker). Changing which bootloader the C6 ships is
+# changing this file name in the build def and its mirrors. Every `espflash flash`/`save-image --merge` for this
+# chip passes it as `--bootloader`. CANONICAL SOURCE:
+# lp-fw/builds/esp32c6-4mb.json (`bootloader`); this var, lp-fw-split's
+# default and the crate's runner are mirrors, and `cargo test -p lp-cli`
+# fails if one drifts.
+c6_bootloader := "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin"
 lps_dir := "lp-shader"
 studio_assets_dir := "target/studio-web-assets"
 
@@ -68,7 +79,10 @@ served_builds_json := "lp-fw/builds/served.json"
 # updates over USB only — and `split` builds the product's split image with
 # its update files, which Studio needs to update a board over the air. Ask
 # for it when testing updates: `LP_FW_IMAGE=split just studio-dev`. The
-# release bundle (`studio-web-build`, every deploy) is ALWAYS split.
+# release bundle (`studio-web-build`, every deploy) is ALWAYS split. Both
+# mount the tree store on the tree table since the tree-store cutover (A7):
+# the provisioning (USB) image and the over-the-air "own" build are one
+# package, so they switch together.
 # Measured warm on an M2 Max, 2026-10-06: single 23 s, split 50 s (two link
 # passes, 23 s + 25 s). See lp-fw/builds/README.md.
 studio_fw_image := env("LP_FW_IMAGE", "single")
@@ -1643,7 +1657,7 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
 flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (build-fw-esp32c6 features)
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    args=(--chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
     case "{{ monitor }}" in
       monitor) args+=(--monitor) ;;
       no-monitor) ;;
@@ -1668,7 +1682,7 @@ flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (b
     set -e
     if [[ $verdict -eq 4 ]]; then
       merged="target/riscv32imac-unknown-none-elf/{{ fw_esp32c6_profile }}/fw-esp32c6-merged-for-migrate.bin"
-      espflash save-image --chip esp32c6 --merge --partition-table lp-fw/fw-esp32c6/partitions.csv \
+      espflash save-image --chip esp32c6 --merge --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv \
         --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }} "$merged"
       cargo run -q -p lp-cli -- hardware lpfs migrate --port "$port" --merged "$merged" --yes
       exit 0
@@ -2195,6 +2209,20 @@ fwtest-button-esp32s3 port="":
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
 
+# Rebuild a C6 second-stage bootloader from ESP-IDF source in Docker (a
+# pinned `espressif/idf` image; nothing installed on the host, nothing
+# downloaded inside) and check it byte for byte against the committed file.
+# `stock` is espflash 3.3.0's bundled bootloader (the shipped
+# lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin); `quiet` is the same
+# with its log level NONE (esp32c6-bootloader-idf-v5.1-quiet.bin, built but
+# not shipped — a fallback). The first run pulls the image (~2 GB download,
+# ~4 GB on disk).
+#
+#   just build-c6-bootloader stock
+#   just build-c6-bootloader quiet
+build-c6-bootloader variant="stock":
+    scripts/bootloader/build-c6-bootloader.sh --variant {{ variant }} --check
+
 # Build the ESP32-C6 SPLIT image — the product image: the loader, the boot
 # records, the core and the engine, laid out inside `factory` — with
 # `tools/lp-fw-split` into target/fw-split/<slug>/ (`shipped` for the shipped
@@ -2230,14 +2258,14 @@ fw-esp32c6-split features="": install-rv32-target
 #   - steady headroom, core low (as flashed) and core high (after an update):
 #     the region − the page-rounded core − the engine;
 #   - update headroom: whether a second core of the same size fits beside it;
-#   - legacy overlap: app.bin's end to the pre-repartition lpfs at 0x310000.
+#   - legacy overlap: app.bin's end to the fielded littlefs superblock at 0x350000.
 # The GATE is the smallest of the steady and update headrooms, against
 # `margin`. `unsplit=1` also builds the monolithic image and prints the code
 # and image deltas against it (informational; CI does not pay that build).
 # `features` (the third, positional: `just fw-esp32c6-size-check 65536 ""
-# esp32c6,server,fs-tree`) measures another feature set the same way — the
-# tree store, never shipped. The default, empty, is the shipped image and is
-# what CI gates.
+# esp32c6,server,heap_peak_diag`) measures another feature set the same way.
+# The default, empty, is the shipped image (the tree store on the tree table
+# since the tree-store cutover) and is what CI gates.
 fw-esp32c6-size-check margin="65536" unsplit="" features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -2421,16 +2449,18 @@ _fw-size-check name chip flash_size elf csv margin doc:
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         echo "{{ name }} image \`${size}\` B of \`${partition}\` B — headroom \`${headroom}\` B" >> "$GITHUB_STEP_SUMMARY"
     fi
-    # The C6's pre-repartition lpfs began at 0x310000 (frozen at
-    # lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv). Once the app
-    # image crosses it, a migration must retire the old filesystem BEFORE the
-    # firmware is written (plan MQ6/MQ9) — informational, never a failure.
+    # Every C6 fielded before the tree-store cutover keeps its littlefs at
+    # 0x350000 (frozen at lp-app/lpa-link/testdata/
+    # partitions-esp32c6-legacy-v2.csv). A tree core holds a board whose
+    # migration a plain flash skipped only while that flash left the
+    # superblock pair there whole — informational, never a failure (the
+    # migration reads the board first and does not depend on it).
     if [ "{{ name }}" = "esp32c6" ]; then
-        overlap=$(( 0x300000 - size ))
+        overlap=$(( 0x340000 - size ))
         if [ "${overlap}" -ge 0 ]; then
-            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x310000"
+            echo "legacy overlap: ${overlap} B before the image reaches the old lpfs at 0x350000"
         else
-            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x310000"
+            echo "legacy overlap: crossed — the image runs $(( -overlap )) B into the old lpfs at 0x350000"
         fi
     fi
     if [ "${headroom}" -lt "{{ margin }}" ]; then
@@ -2836,17 +2866,14 @@ clippy-fw-esp32c6: install-rv32-target
     echo "clippy: split (LP_SPLIT_LINK=1)"
     LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
         --features esp32c6,server -- --no-deps -D warnings
-    # `fs-tree` (the tree store as `lpfs`; never shipped), plain and split:
-    # nothing else lints its mount, its shim's glue or its update guard.
-    # With it, its two measurement features: the heap-peak line and the
-    # probe-less build the size table's "littlefs removed" row comes from.
-    echo "clippy: --features fs-tree (plain with heap_peak_diag, probe-less, split)"
+    # The tree store's measurement feature (the heap-peak line), and the
+    # in-memory filesystem that replaces the store (`memory_fs`: the bench
+    # and no-flash emulator images) — nothing else lints either.
+    echo "clippy: --features heap_peak_diag, memory_fs"
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,fs-tree,heap_peak_diag -- --no-deps -D warnings
+        --features esp32c6,heap_peak_diag -- --no-deps -D warnings
     cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,measure_no_legacy_probe -- --no-deps -D warnings
-    LP_SPLIT_LINK=1 cargo clippy --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} \
-        --features esp32c6,server,fs-tree -- --no-deps -D warnings
+        --features esp32c6,memory_fs -- --no-deps -D warnings
     # The loader: a standalone crate (its own workspace, target and script).
     echo "clippy: fw-esp32c6-loader"
     cd ../fw-esp32c6-loader
@@ -3052,8 +3079,8 @@ test-rust-features:
     # ...and the C6's Bluetooth links (feature `radio-link`, the mux and the
     # radio slots), with `json-pack` so the packed-session test runs too.
     cargo test -p fw-esp32-common --features radio-link,json-pack
-    # The tree store as the board's filesystem (`fs-tree`, never shipped):
-    # the mount verdict, the alignment shim and the update guard.
+    # The tree store as the board's filesystem (`fs-tree`, the C6's since the
+    # cutover): the mount verdict, the alignment shim and the update guard.
     cargo test -p fw-esp32-common --features fs-tree
     # lpa-update's packer (feature `pack`: std + flate2/zlib-rs) and the host x
     # board simulation's encoding-1 cases. Its own invocation, so flate2's
@@ -3567,14 +3594,14 @@ test-emu-layout-migration:
 #   cold (D10) · S5 a started trial with no host survives power cycles (D9) ·
 #   S7 reflashing the packaged image clears a stale newer record (D12) · S8 an
 #   uncommitted engine is not entered (core-only, no hello) · S9 the loader
-#   skips a core that will not load and boots the other (D4) · S11 a tree-store
-#   core's trial dies and the littlefs core it rolls back to holds the store
-#   (tree-store adoption A5). S6 and S10 are named skips (each needs another
-#   fixture).
+#   skips a core that will not load and boots the other (D4) · S11 a core's
+#   trial dies and the core it rolls back to mounts the board's tree store,
+#   every file kept (the failed-trial bar of the tree-store cutover). S6 and
+#   S10 are named skips (each needs another fixture).
 #
-# NOT in CI (D19): five split builds (X, Y, Y with `fixture-trial-dies`, Y
-# with `fixture-trial-hangs`, Y with `fs-tree` and `fixture-trial-dies`; two
-# link passes each, a few minutes on an M2 Max) and a few minutes of
+# NOT in CI (D19): four split builds (X, Y, Y with `fixture-trial-dies`, Y
+# with `fixture-trial-hangs`; two link passes each, a few minutes on an M2
+# Max) and a few minutes of
 # scenarios. Run it when you touch `lp-bootctl`'s records or `choose`, the
 # loader (`lp-fw/fw-esp32c6-loader`), `fw-esp32c6/src/ota/` or the boot
 # mount. `scenarios=<dir>` reuses images already built there.
@@ -3589,9 +3616,14 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
         split y-test y esp32c6,server
         split y-test y-dies esp32c6,server,fixture-trial-dies
         split y-test y-hangs esp32c6,server,fixture-trial-hangs
-        split y-test y-tree-dies esp32c6,server,fs-tree,fixture-trial-dies
     fi
-    LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
+    # Through both front doors: our own second stage (`merged.bin`) and the
+    # ESP-IDF one (`merged-idf.bin`, LP_BOOT_DOOR=idf) — every core must boot
+    # through both (docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+    for door in lp idf; do
+        echo "== split scenarios through the $door door"
+        LP_BOOT_DOOR=$door LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
+    done
 
 # Over-the-air updates on an emulated C6, scenario by scenario (OTA plan
 # lp2025/2026-10-04-0757-ota-update-protocol, Part B, P08;
@@ -3631,7 +3663,11 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         scripts/ota/build-image.sh "$out/y-dies" b1b1b1b1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
     fi
-    LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+    # Through both front doors, as test-emu-c6-split-boot.
+    for door in lp idf; do
+        echo "== OTA scenarios through the $door door"
+        LP_BOOT_DOOR=$door LP_OTA_IMAGES="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_ota -- --include-ignored --nocapture --test-threads=1 {{ filter }}
+    done
 
 # Over-the-air updates over the EMULATED LAN (OTA Wi-Fi plan P4): the board on
 # a virtual LAN under `emu serve`, no USB cable, `lp-cli link capture lan:` as
@@ -3677,7 +3713,8 @@ test-emu-c6-cli-link: install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast {{ C6_CLI_LINK_TESTS }} -- --include-ignored --nocapture
 
 # The boards half: whole boards over the link — the fragmented-heap reads,
-# the split image's boot, the LED seam on the split image, a flash power
+# the split image's boot, its flash read mode on each flash part (QIO on a
+# desk part with QE set, DIO otherwise, never a status write), the LED seam on the split image, a flash power
 # cut mid-upload power-cycled back to a serving board, today's littlefs
 # image holding a tree store instead of formatting it, and the main stack
 # gate (`emu_stack_peak`: the deepest catalog projects' load and shader
@@ -3685,14 +3722,15 @@ test-emu-c6-cli-link: install-rv32-target
 # lp-cli (x64)` job runs it. No pinned figures here, so that job has no
 # figure-patch step.
 test-emu-c6-cli-boards: install-rv32-target
-    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts --test emu_littlefs_on_tree_store --test emu_stack_peak -- --include-ignored --nocapture
+    LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-cli --release --no-fail-fast --test emu_frag_reads --test emu_split_boot --test emu_flash_qio --test emu_seam_led --test emu_flash_cut_smoke --test emu_tree_store_boot --test emu_tree_store_cuts --test emu_littlefs_on_tree_store --test emu_stack_peak -- --include-ignored --nocapture
 
 # Time to first light on the emulated C6 (plan
 # lp2025/2026-10-16-0848-tree-store-adoption, A1;
 # `lp-cli/tests/emu_first_light.rs`): power-on to the first lit LED frame,
-# and its parts, from a ROM-up boot of the split image, for the shipped
-# (littlefs) and `fs-tree` images, with no project, `projects/test/basic` and
-# a c40-sized project. A REPORT, never a gate: emulated time, never compared
+# and its parts, from a ROM-up boot, for the shipped image (the tree store)
+# and the fielded littlefs image (pinned, `FIELDED_LITTLEFS`, on its own
+# 176-sector table), with no project, `projects/test/basic` and a c40-sized
+# project. A REPORT, never a gate: emulated time, never compared
 # with silicon in ms (docs/reports/2026-10-16-c6-time-to-first-light.md has
 # the silicon figures). Never CI. `grade` is t1, t2 or t3; `dir` keeps the
 # JSON record.
@@ -3707,12 +3745,13 @@ report-first-light-emu grade="t2" dir="": install-rv32-target
 # random_bits, a c40-class push, and the littlefs control (report-only).
 # Never CI (`test-emu-c6-cli-boards` runs the CI subset). `scenarios` is a
 # comma list (`format,push,push-c40,save,panel,switch`; empty: all);
-# `sectors=128` runs on a fixture table's 128-sector `lpfs` (the control
-# stays at 176 and is skipped there). Emulated, never hardware-validated.
+# `sectors=<n>` runs on a fixture table's `lpfs` of n sectors (the control,
+# the pinned fielded littlefs image, runs only at the table's own 128).
+# Emulated, never hardware-validated.
 #   just walk-tree-store-cuts-emu
-#   just walk-tree-store-cuts-emu format 128
-walk-tree-store-cuts-emu scenarios="" sectors="176": install-rv32-target
-    LP_TREE_CUTS=long LP_TREE_CUTS_SCENARIOS={{ scenarios }} LP_TREE_CUTS_SECTORS={{ sectors }} LP_TREE_CUTS_CONTROL={{ if sectors == "176" { "1" } else { "0" } }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_tree_store_cuts -- --include-ignored --nocapture
+#   just walk-tree-store-cuts-emu format 176
+walk-tree-store-cuts-emu scenarios="" sectors="128": install-rv32-target
+    LP_TREE_CUTS=long LP_TREE_CUTS_SCENARIOS={{ scenarios }} LP_TREE_CUTS_SECTORS={{ sectors }} LP_TREE_CUTS_CONTROL={{ if sectors == "128" { "1" } else { "0" } }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_tree_store_cuts -- --include-ignored --nocapture
 
 # The app-agent evals' deterministic legs: stage A's `the_` tests, then stage
 # B (`app_agent_emu_decode`, the Sean goldens and stage A's replays decoded
@@ -4990,7 +5029,7 @@ fixture-fw variant port="":
     just install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,"$feature"
     cd - >/dev/null
-    args=(--chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
+    args=(--chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
     # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32c6)"
     args+=(--port "$resolved_port")
@@ -5055,6 +5094,19 @@ walk-migration-emu *args:
 # Proves the transport, the UI and Play — not access enforcement.
 walk-ble-emu *args:
     node scripts/emu/walk-ble-emu.mjs {{ args }}
+
+# The desk's Android test phone over adb (scripts/phone/README.md):
+# `just phone status|pair <code>|connect|awake|cdp|serve <port>|open <url>|shot <png>|snoop <dir>`.
+phone *args:
+    node scripts/phone/phone.mjs {{ args }}
+
+# The Bluetooth walk on real radios: Studio in the phone's own Chrome, the
+# real chooser, a leased desk C6 (default fixture-c6) — card, editor, Play,
+# and a power cut under Play. Defaults to lightplayer.app (the board on the
+# latest release); `--studio http://127.0.0.1:<port>` or `--serve-release`
+# for this checkout's. Not CI: it needs the phone and the desk.
+walk-ble-phone *args:
+    node scripts/phone/walk-ble-phone.mjs {{ args }}
 
 # One tab holds a board (roadmap M5): two tabs of ONE headless Chrome (one
 # profile, so one OPFS, Web Locks manager and BroadcastChannel) against one
@@ -5288,7 +5340,7 @@ demo-esp32c6-host project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Run an ESP32-C6 demo as an automated hardware check: capture boot serial,
@@ -5306,7 +5358,7 @@ demo-esp32c6-host-naga project="projects/test/basic": install-rv32-target
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
     cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
 
 # Same as demo-esp32c6-check, but builds the explicit Naga frontend.
@@ -5317,7 +5369,7 @@ demo-esp32c6-check-naga example="basic": install-rv32-target
 demo-esp32c6-standalone: build-fw-esp32c6
     PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
     echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}
+    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}
 
 # Run firmware on ESP32-C6 device using the test_rmt feature
 fwtest-rmt-esp32c6: install-rv32-target
@@ -5375,7 +5427,7 @@ calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32c6 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }}
     cd ../..
-    espflash flash --chip esp32c6 --port "$port" --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6
+    espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --port "$port" --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset target/{{ rv32_target }}/{{ fw_esp32c6_profile }}/fw-esp32c6
     sleep 1
     args=(hardware calibrate esp32c6 --board "{{ board }}" --port "serial:$port")
     if [[ -n "{{ label }}" ]]; then

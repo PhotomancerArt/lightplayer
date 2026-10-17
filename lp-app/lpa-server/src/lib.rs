@@ -18,7 +18,6 @@ pub mod batch_state;
 pub mod device_identity;
 pub mod error;
 pub mod file_sync;
-pub mod fs_idle;
 pub mod handlers;
 pub mod heartbeat_status;
 pub mod link_session;

@@ -16,6 +16,7 @@ esp32c6 = [
     "esp-hal/esp32c6",
 ]
 server = [
+    "fs-tree",
     "fw-esp32-common/server",
     "lpc-hardware",
     "lpc-model",
@@ -24,7 +25,7 @@ server = [
     "lpa-server",
     "lpc-shared",
     "lpfs",
-]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
+]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs, the tree store)
 radio = [
     "lpc-hardware",
     "lpc-shared",
@@ -252,31 +253,31 @@ uart_bridge_fast = []
 test_button = ["server"]  # Test root-owned GPIO button input with internal pull-up
 test_usb = []  # Test USB serial communication
 test_json = ["server"]  # Validates ser-write-json on device (sends Heartbeat via OUTGOING_SERVER_MSG)
-memory_fs = []  # Use in-memory filesystem instead of persistent flash
-# A MEASUREMENT build, never shipped: `fs-tree` without the legacy-layout
-# probe (`flash_storage::legacy_lpfs_present_at`, the one thing that keeps
-# littlefs linked in an `fs-tree` image), so the size check measures "the
-# tree store with littlefs removed" (plan Q5/Q21). A board on it formats a
-# pre-repartition layout instead of holding it: never flash one that has one.
-measure_no_legacy_probe = ["fs-tree"]
-# The tree store as `lpfs` (plan
-# `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`) — OFF by default,
-# NEVER shipped: never in `lp-fw/builds/served.json`, a release or
-# `bless-chips`. The board's filesystem is `lp-tree-store` over esp-storage
-# (`src/tree_flash.rs`: the word-alignment shim) with the SHA accelerator as
-# its hasher (`src/hw_sha.rs`); every board file goes through it, because
-# they all go through `base_fs`. Mount verdicts (`fw_esp32_common::tree_fs`):
-# a partition with no store (blank, littlefs, an interrupted first format)
-# is formatted, unless the legacy-layout probe finds a pre-repartition
-# filesystem (then held, as today); a newer or damaged store is REFUSED —
-# nothing written, files kept, access locked (`fs: refused`). Its update
-# session refuses a core install built without `fs-tree` (a littlefs core
-# would format the store). littlefs stays linked for the legacy probe. See
-# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md. Not
-# `test_*` (that prefix is a harness entrypoint), and not with `memory_fs`.
-#
-#   cargo build --profile release-esp32 --features esp32c6,server,fs-tree
-fs-tree = ["server", "fw-esp32-common/fs-tree", "dep:lp-tree-store"]
+# The in-memory filesystem instead of the tree store on flash: no `lpfs` is
+# mounted, nothing on flash is read or written for files. For benchmark and
+# no-flash emulator images, never shipped. It REPLACES the tree store (a
+# `server` build links `fs-tree` either way, and LTO drops it unused); the
+# hello then lists no `fs.tree`.
+memory_fs = []
+# The tree store as `lpfs` — the C6's filesystem since the tree-store cutover
+# (plan `lp2025/2026-10-16-0848-tree-store-adoption`, A7). Every `server`
+# build mounts it (there is no littlefs build of this crate any more:
+# littlefs left the C6 with the cutover, AD5). `lp-tree-store` over
+# esp-storage (`src/tree_flash.rs`: the word-alignment shim) with the SHA
+# accelerator as its hasher (`src/hw_sha.rs`); every board file goes through
+# it, because they all go through `base_fs`. Mount verdicts
+# (`fw_esp32_common::tree_fs`): a partition with no store is formatted
+# (lazily) unless a littlefs superblock is found — in `lpfs` itself, or at
+# `0x350000` where the 176-sector littlefs of a board that skipped the
+# migration starts — then the board HOLDS (`fs: legacy_held`, files untouched,
+# for the USB migration); a newer or damaged store is REFUSED — nothing
+# written, files kept, access locked (`fs: refused`). Its update session
+# refuses a core install that does not carry the tree-store mark in its own
+# bytes (`fw_esp32_common::fs_tree_core_guard`). See
+# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md and
+# docs/adr/2026-10-16-c6-tree-store-cutover-migration.md. The name stays for
+# the build defs and recipes that spell it; `server` implies it.
+fs-tree = ["fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 # JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
@@ -466,7 +467,9 @@ esp-alloc = { version = "0.10.0", default-features = false, features = ["global-
 # The BLE link (`ble`) and its spike (`test_ble`). trouble-host 0.6 is the release on bt-hci 0.8,
 # which is what esp-radio 0.18's `BleConnector` implements.
 trouble-host = { version = "0.6.0", optional = true, default-features = false, features = ["derive", "gatt", "peripheral", "log", "connection-params-update", "default-packet-pool", "default-packet-pool-mtu-251"] }
-bt-hci = { version = "0.8.0", optional = true, default-features = false }
+# `log`: the fork's one warning (a Command Complete with more return bytes
+# than its command declares, third_party/bt-hci/README-LP.md).
+bt-hci = { version = "0.8.0", optional = true, default-features = false, features = ["log"] }
 heapless = { version = "0.9", optional = true }
 # trouble-host 0.6's `#[gatt_server]` expands to `static_cell::…` and
 # `embassy_sync::…` paths, and its embassy-sync is 0.7 (ours is 0.8); the
@@ -571,9 +574,8 @@ log = { workspace = true, default-features = false }
 
 embedded-storage = "0.3"
 esp-storage = { version = "0.9", features = ["esp32c6", "panic-unaligned-buffer"] }
-littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
-# `fs-tree` only: the tree store as `lpfs`. No `soft-sha` (the SHA
-# accelerator is the hasher), no `stats`.
+# The tree store as `lpfs` (`fs-tree`, which `server` implies). No
+# `soft-sha` (the SHA accelerator is the hasher), no `stats`.
 lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["lpfs"], optional = true }
 
 [lints]

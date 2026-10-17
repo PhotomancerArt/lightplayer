@@ -411,6 +411,51 @@ impl StudioController {
         self.mark_dirty();
     }
 
+    /// Connect a board's USB or Bluetooth square was pressed: the last
+    /// failure's words go, and the chooser it opened (if it opened one; the
+    /// latest request is newer than `chooser_before`) is the one whose
+    /// answer the section waits on.
+    pub(super) fn note_section_chooser(
+        &mut self,
+        action: &lpa_devices::Action,
+        chooser_before: Option<lpa_devices::LinkId>,
+    ) {
+        let transport = match action {
+            lpa_devices::Action::AddFromUsb => crate::ChooserTransport::Usb,
+            lpa_devices::Action::AddFromBle => crate::ChooserTransport::Bluetooth,
+            _ => return,
+        };
+        if self.chooser_failure.take().is_some() {
+            self.mark_dirty();
+        }
+        self.section_chooser = self
+            .devices
+            .effects()
+            .last_grant_request()
+            .filter(|link| Some(*link) != chooser_before)
+            .map(|link| (link, transport));
+    }
+
+    /// The chooser Connect a board opened answered for `link`. A board
+    /// picked or nothing picked says nothing (the board's card, or the
+    /// section as it was, says the rest); a connect that failed after the
+    /// pick says so under the squares (defect 2026-10-17: it was a console
+    /// warning). Any other chooser's answer is not the section's.
+    pub(super) fn note_section_chooser_answer(
+        &mut self,
+        link: lpa_devices::LinkId,
+        answer: &lpa_devices::GrantAnswer,
+    ) {
+        let Some((_, transport)) = self.section_chooser.filter(|(waits, _)| *waits == link) else {
+            return;
+        };
+        self.section_chooser = None;
+        if let lpa_devices::GrantAnswer::Failed { error } = answer {
+            self.chooser_failure = Some(crate::UiChooserFailure::new(transport, error));
+            self.mark_dirty();
+        }
+    }
+
     /// Why a Connect's hold on the board at `uid` lets go at once, while
     /// the board is here: it is locked (Unlock is its way in) or needs
     /// firmware (Install is). `None` while neither, or while it is not here

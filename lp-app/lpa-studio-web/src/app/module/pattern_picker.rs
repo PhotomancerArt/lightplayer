@@ -124,7 +124,7 @@ pub fn PatternPicker(
                     if skip_held && let Some(target) = picker.skip_target.clone() {
                         ResetGlyph {
                             target,
-                            title: "Reset the on/off switches — the playlist's own list plays again",
+                            title: "Reset the on/off switches to the playlist's own list",
                             on_panel,
                         }
                     }
@@ -209,7 +209,7 @@ fn CycleRow(
                 role: "switch",
                 aria_checked: "{cycling}",
                 disabled: toggle.is_none(),
-                title: if cycling { "Cycling — tap to stay on the playing pattern" } else { "Holding — tap to cycle the patterns" },
+                title: if cycling { "Cycling. Tap to stay on this pattern." } else { "Holding. Tap to cycle through the patterns." },
                 onclick: move |event| {
                     event.stop_propagation();
                     if let Some(offer) = &toggle {
@@ -243,7 +243,7 @@ fn CycleRow(
             if held && let Some(target) = picker.cycle_target.clone() {
                 ResetGlyph {
                     target,
-                    title: "Reset the cycle — the playlist's own setting plays again",
+                    title: "Reset the cycle to the playlist's own setting",
                     on_panel,
                 }
             }
@@ -306,7 +306,7 @@ fn PatternRow(
             "{} failed to load on the device — tap to try it again",
             entry.name
         ),
-        UiPatternEntryState::Skipped => format!("Play {} (it is off in the cycle)", entry.name),
+        UiPatternEntryState::Skipped => format!("Play {} (off in the cycle)", entry.name),
         UiPatternEntryState::Available => format!("Play {}", entry.name),
     };
     let key = entry.key.to_string();

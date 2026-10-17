@@ -33,6 +33,7 @@ impl Grade {
             Grade::T1 => TimeGrade::T1,
             Grade::T2 => TimeGrade::T2,
             Grade::T3 => TimeGrade::T3,
+            Grade::T4 => TimeGrade::T4,
         }
     }
 }
@@ -264,6 +265,12 @@ fn run(args: RunArgs) -> Result<()> {
             .flash(FlashBacking::Copy(over.to_path_buf()))
             .flash_len(whole_part_len(over)?)
             .flash_holds_image(true);
+    }
+
+    // The flash part: its JEDEC id and status register 2 at power-on.
+    if let Some(text) = &args.flash_part {
+        let part = lp_emu_esp32c6::flash::FlashPart::parse(text).map_err(|e| anyhow::anyhow!(e))?;
+        builder = builder.flash_part(part);
     }
 
     // The eFuse identity. `run` serves one board, so the default — the desk

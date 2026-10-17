@@ -2,8 +2,14 @@
 //! `lp2025/2026-10-16-0848-tree-store-adoption`, A1): power-on to the first
 //! lit LED frame, and its parts, from a ROM-up boot of the SPLIT image — the
 //! mask ROM, the IDF bootloader, the loader, the core and the engine — for
-//! the shipped image (littlefs) and the `fs-tree` image, each with no
-//! project, `projects/test/basic` and a c40-sized project.
+//! the shipped image (the tree store since the cutover), with no project,
+//! `projects/test/basic` and a c40-sized project.
+//!
+//! The littlefs leg (A1 ran both) is gone with littlefs from this tree: no
+//! split littlefs image is built from it any more, and a pinned plain one
+//! would not be the same boot (no loader, no core hash). The littlefs
+//! figures are A1's, and the before/after on silicon is the cutover's CX1
+//! run (the release littlefs split image against this one).
 //!
 //! **A report, never a gate** (AGENTS.md: never gate on emulated time). Each
 //! case prints two readings of the same boot:
@@ -19,11 +25,15 @@
 //! lights is a broken boot, not a slow one.
 //!
 //! Emulated: `lp-emu:esp32c6:<grade>` (`LP_FIRST_LIGHT_GRADE`: `t1`, `t2`,
-//! the default, or `t3`), ROM-up. Never hardware-validated: the silicon
+//! the default, `t3` or `t4`), ROM-up. Never hardware-validated: the silicon
 //! figures are `docs/reports/2026-10-16-c6-time-to-first-light.md`'s.
 //! `LP_FIRST_LIGHT_DIR` writes `emu-first-light-<grade>.json` there;
-//! `LP_FIRST_LIGHT_IMAGES=littlefs` (or `fs-tree`) runs one image only.
-//! `#[ignore]`d: it needs both split builds (`LP_EMU_BUILD_FW=1`, or
+//! For a like-for-like reading of a silicon sitting: `LP_FIRST_LIGHT_MERGED`
+//! (`label=merged.bin,…`) boots that sitting's own chips instead of this
+//! tree's, `LP_FIRST_LIGHT_CASES` (`none`, `basic`, `c40`, `project:<dir>`)
+//! picks the projects, and `LP_FIRST_LIGHT_LPFS` (`label=lpfs.bin,…`) also
+//! runs each case on a chip whose `lpfs` starts as that store.
+//! `#[ignore]`d: it needs the split build (`LP_EMU_BUILD_FW=1`, or
 //! `LP_EMU_C6_SPLIT_<SLUG>`).
 
 #[path = "support/editor_reads.rs"]
@@ -50,23 +60,35 @@ const LINE_BUDGET_US: u64 = 30_000_000;
 const BOOTS: usize = 2;
 
 #[test]
-#[ignore = "needs both split fw-esp32c6 builds; a report, not a gate (module docs)"]
+#[ignore = "needs the split fw-esp32c6 build; a report, not a gate (module docs)"]
 fn time_to_first_light_on_the_emulated_c6() {
-    let grade = match std::env::var("LP_FIRST_LIGHT_GRADE").as_deref() {
-        Ok("t1") => TimeGrade::T1,
-        Ok("t3") => TimeGrade::T3,
-        _ => TimeGrade::T2,
-    };
+    let grade = std::env::var("LP_FIRST_LIGHT_GRADE")
+        .ok()
+        .filter(|g| !g.is_empty())
+        .map_or(TimeGrade::T2, |g| {
+            TimeGrade::parse(&g).expect("LP_FIRST_LIGHT_GRADE is t1, t2, t3 or t4")
+        });
     let grade_name = format!("{grade:?}").to_lowercase();
     let mut rows = Vec::new();
-    // `LP_FIRST_LIGHT_IMAGES` (`littlefs`, `fs-tree`, comma-joined; unset:
-    // both) runs only those, for a quicker loop on one image.
-    let images = std::env::var("LP_FIRST_LIGHT_IMAGES").unwrap_or_default();
-    for (label, image) in [
-        ("littlefs", FwImage::SHIPPED),
-        ("fs-tree", FwImage::FS_TREE),
-    ] {
-        if !images.is_empty() && !images.split(',').any(|want| want == label) {
+    // `LP_FIRST_LIGHT_MERGED` (`label=merged.bin`, comma-joined) boots those
+    // chips instead of this tree's split builds — a silicon sitting's own
+    // images, for a like-for-like reading. ROM-up needs no ELF.
+    let mut chips: Vec<(String, Vec<u8>, Option<std::path::PathBuf>)> = Vec::new();
+    if let Ok(list) = std::env::var("LP_FIRST_LIGHT_MERGED")
+        && !list.is_empty()
+    {
+        for pair in list.split(',') {
+            let (label, path) = pair.split_once('=').expect("label=path");
+            chips.push((
+                label.to_string(),
+                std::fs::read(path).expect("the merged image"),
+                None,
+            ));
+        }
+    }
+    // The label stays `fs-tree`, so the JSON rows read as A1's tree rows did.
+    for (label, image) in [("fs-tree", FwImage::SHIPPED)] {
+        if !chips.is_empty() {
             continue;
         }
         let split = match split_image(&image) {
@@ -77,76 +99,135 @@ fn time_to_first_light_on_the_emulated_c6() {
             }
         };
         let merged = std::fs::read(split.merged()).expect("the merged image");
-        for (project, files) in [
-            ("none", None),
-            ("basic", Some(project_files("projects/test/basic"))),
-            ("c40", Some(c40_files())),
-        ] {
-            // A fresh chip: the first boot formats, the project goes on over
-            // the link, and then every measured boot is a power-on.
-            let machine = Esp32C6Builder::new()
-                .boot_mode(BootMode::RomUp)
-                .app(AppSource::Path(split.p2_elf()))
-                .flash(FlashBacking::Bytes(merged.clone()))
-                .reset_cause(ResetCause::UsbUartHpSys)
-                .strap(Strap::App)
-                .time_grade(grade)
-                .usb_host(UsbHost::Attached { draining: true })
-                .usb_sj_queue_source()
-                .reboot_on_reset(true)
-                .build()
-                .expect("the split image builds a machine");
-            let mut host = EmuLinkHost::new(
-                C6Board::new(machine).expect("a hosted board"),
-                0x7EE1_0001,
-                true,
-            );
-            line(&mut host, "\"hello\":{");
-            if let Some(files) = &files {
-                let mut client = LpClient::new(&mut host).with_request_ids_from(1_000);
-                block_on(client.replace_and_load_project("first-light", files))
-                    .unwrap_or_else(|e| panic!("{label}/{project}: upload: {e}"));
-            }
-            for boot in 0..BOOTS {
-                host = power_cycle(host, 0x7EE1_0100 + boot as u32);
-                let t0 = host.board.machine.micros();
-                let said = line(&mut host, "[perf] first light ");
-                // The decoder closes a frame on its reset low, after the
-                // firmware has said the line: step on until the lit one is
-                // there (a project), at most a second.
-                let mut lit_us = first_lit_us(&host);
-                let until = host.board.machine.micros() + 1_000_000;
-                while files.is_some() && lit_us.is_none() && host.board.machine.micros() < until {
-                    host.step().expect("the run");
-                    lit_us = first_lit_us(&host);
-                }
-                let lit_us = lit_us.map(|us| us - t0 as f64);
-                if files.is_some() {
-                    assert!(
-                        said.contains("first light at "),
-                        "{label}/{project}: {said}"
-                    );
-                    assert!(lit_us.is_some(), "{label}/{project}: no lit frame decoded");
+        chips.push((label.to_string(), merged, Some(split.p2_elf())));
+    }
+    // `LP_FIRST_LIGHT_CASES` (`none`, `basic`, `c40`, `project:<dir>`,
+    // comma-joined; unset: the first three).
+    let cases = std::env::var("LP_FIRST_LIGHT_CASES")
+        .ok()
+        .filter(|c| !c.is_empty())
+        .unwrap_or_else(|| "none,basic,c40".to_string());
+    // `LP_FIRST_LIGHT_LPFS` (`label=lpfs.bin`, comma-joined): also run each
+    // case on a chip whose `lpfs` starts as that store (written out, used,
+    // full) rather than blank.
+    let mut stores: Vec<(String, Option<Vec<u8>>)> = vec![("fresh".to_string(), None)];
+    if let Ok(list) = std::env::var("LP_FIRST_LIGHT_LPFS")
+        && !list.is_empty()
+    {
+        for pair in list.split(',') {
+            let (label, path) = pair.split_once('=').expect("label=path");
+            stores.push((
+                label.to_string(),
+                Some(std::fs::read(path).expect("the lpfs image")),
+            ));
+        }
+    }
+    for (label, merged, p2_elf) in &chips {
+        let label = label.as_str();
+        for (store, region) in &stores {
+            for case in cases.split(',') {
+                let (project, files) = match case {
+                    "none" => ("none".to_string(), None),
+                    "basic" => (
+                        "basic".to_string(),
+                        Some(project_files("projects/test/basic")),
+                    ),
+                    "c40" => ("c40".to_string(), Some(c40_files())),
+                    other => {
+                        let dir = other.strip_prefix("project:").expect("a known case");
+                        (
+                            dir.rsplit('/').next().unwrap().to_string(),
+                            Some(project_files(dir)),
+                        )
+                    }
+                };
+                let project = if store == "fresh" {
+                    project
                 } else {
-                    assert!(
-                        said.contains("first light none by "),
-                        "{label}/{project}: {said}"
-                    );
+                    format!("{project}@{store}")
+                };
+                let mut chip = merged.clone();
+                if let Some(region) = region {
+                    let at = lp_emu_esp32c6::flash::LPFS_OFFSET as usize;
+                    chip[at..at + region.len()].copy_from_slice(region);
                 }
-                let parts = parts_of(&said);
-                println!(
-                    "{label:8} {project:5} boot {boot}: frame on the pad {} | {}",
-                    lit_us.map_or("none".to_string(), |us| format!("{:.1} ms", us / 1e3)),
-                    said.split("[perf] ").nth(1).unwrap_or(&said)
+                // A fresh chip: the first boot formats, the project goes on over
+                // the link, and then every measured boot is a power-on.
+                let mut builder = Esp32C6Builder::new().boot_mode(BootMode::RomUp);
+                if let Some(elf) = p2_elf {
+                    builder = builder.app(AppSource::Path(elf.clone()));
+                }
+                let machine = builder
+                    .flash(FlashBacking::Bytes(chip))
+                    .reset_cause(ResetCause::UsbUartHpSys)
+                    .strap(Strap::App)
+                    .time_grade(grade)
+                    .usb_host(UsbHost::Attached { draining: true })
+                    .usb_sj_queue_source()
+                    .reboot_on_reset(true)
+                    .build()
+                    .expect("the split image builds a machine");
+                let mut host = EmuLinkHost::new(
+                    C6Board::new(machine).expect("a hosted board"),
+                    0x7EE1_0001,
+                    true,
                 );
-                rows.push(serde_json::json!({
-                    "image": label,
-                    "project": project,
-                    "boot": boot,
-                    "line": said,
-                    "parts_ms": parts,
-                    "pad_first_lit_start_ms": lit_us.map(|us| us / 1e3),
-                }));
+                line(&mut host, "\"hello\":{");
+                if let Some(files) = &files {
+                    let mut client = LpClient::new(&mut host).with_request_ids_from(1_000);
+                    block_on(client.replace_and_load_project("first-light", files))
+                        .unwrap_or_else(|e| panic!("{label}/{project}: upload: {e}"));
+                    // The board makes a load its startup project only once
+                    // the project has survived its first frames
+                    // (`persist_startup_project`); cut the power before that
+                    // and the boot falls back to the lexically first project
+                    // — on a store holding another one (`panel-176`'s
+                    // `/projects/a`), not this one. Silicon's
+                    // `board_first_light` settles for the same reason.
+                    line(&mut host, "startup_project set to first-light");
+                }
+                for boot in 0..BOOTS {
+                    host = power_cycle(host, 0x7EE1_0100 + boot as u32);
+                    let t0 = host.board.machine.micros();
+                    let said = line(&mut host, "[perf] first light ");
+                    // The decoder closes a frame on its reset low, after the
+                    // firmware has said the line: step on until the lit one is
+                    // there (a project), at most a second.
+                    let mut lit_us = first_lit_us(&host);
+                    let until = host.board.machine.micros() + 1_000_000;
+                    while files.is_some() && lit_us.is_none() && host.board.machine.micros() < until
+                    {
+                        host.step().expect("the run");
+                        lit_us = first_lit_us(&host);
+                    }
+                    let lit_us = lit_us.map(|us| us - t0 as f64);
+                    if files.is_some() {
+                        assert!(
+                            said.contains("first light at "),
+                            "{label}/{project}: {said}"
+                        );
+                        assert!(lit_us.is_some(), "{label}/{project}: no lit frame decoded");
+                    } else {
+                        assert!(
+                            said.contains("first light none by "),
+                            "{label}/{project}: {said}"
+                        );
+                    }
+                    let parts = parts_of(&said);
+                    println!(
+                        "{label:8} {project:5} boot {boot}: frame on the pad {} | {}",
+                        lit_us.map_or("none".to_string(), |us| format!("{:.1} ms", us / 1e3)),
+                        said.split("[perf] ").nth(1).unwrap_or(&said)
+                    );
+                    rows.push(serde_json::json!({
+                        "image": label,
+                        "project": project,
+                        "boot": boot,
+                        "line": said,
+                        "parts_ms": parts,
+                        "pad_first_lit_start_ms": lit_us.map(|us| us / 1e3),
+                    }));
+                }
             }
         }
     }

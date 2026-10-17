@@ -1,13 +1,17 @@
-//! Today's littlefs firmware meeting a tree store on the emulated C6 (plan
-//! `lp2025/2026-10-16-0848-tree-store-adoption`, A5; ADR
+//! The fielded littlefs firmware meeting a tree store on the emulated C6
+//! (plan `lp2025/2026-10-16-0848-tree-store-adoption`, A5; ADR
 //! `2026-10-10-fs-tree-refused-state-and-update-guard`, amended 2026-10-16).
 //!
-//! A littlefs core reaches a tree store by a loader rollback from a tree
-//! core whose trial failed, by a USB flash of an older image, or by Studio's
-//! "Other version…" install. Before this it took the store for an
-//! unformatted partition and formatted it. Each case boots the SHIPPED
-//! image over a store built on the host by `lp-tree-store`, waits for the
-//! board's own words, and reads the flash back:
+//! A littlefs core reaches a tree store by a USB flash of an older image
+//! (with its own table: `lpfs` at `0x350000`, 176 blocks, of which the
+//! tree store's 128 sectors are blocks 48–175), or by another host's
+//! "Other version…" install. Before A5 it took the store for an unformatted
+//! partition and formatted it; the release that holds instead shipped first
+//! (AD4). Since the default switch (A7) the littlefs core is the pinned
+//! fielded image (`ReferenceImage::FIELDED_LITTLEFS`, the last littlefs
+//! `main`), booted on its own table over a store built on the host by
+//! `lp-tree-store` where a migration leaves it; each case waits for the
+//! board's own words and reads the flash back:
 //!
 //! 1. **A store whose first sectors are in use** → the hello says
 //!    `fs: refused` with no `fs.tree`; the boot word says the files are in
@@ -17,14 +21,15 @@
 //!    file. A power cycle changes nothing.
 //! 2. **A store whose first sectors are free** (its wear levelling moved its
 //!    headers on) → the same.
-//! 3. **The split image** (the core that ships), ROM-up over a store → the
-//!    same words, `lpfs` byte-identical.
-//! 4. **The host half**: the USB flash path's probe reads the same chip as a
-//!    tree store, refuses the shipped image (its manifest has no `fs.tree`)
-//!    and takes the `fs-tree` image — the real images' own manifests.
+//! 3. **The host half**: the USB flash path's probe reads a migrated chip
+//!    as a tree store, refuses the fielded littlefs image (its manifest has
+//!    no `fs.tree`) and takes the shipped one — the real images' own
+//!    manifests.
 //!
-//! The rollback itself (a tree core's trial dies, the loader boots the
-//! littlefs core) is `emu_split_scenarios.rs`'s S11.
+//! A split littlefs core is not built from this tree any more (the split
+//! case ran at A5 on the image that shipped); a failed trial rolls back to
+//! a tree core since the cutover leaves no littlefs core in a boot record
+//! (AD4, `emu_split_scenarios.rs`'s S11).
 //!
 //! Emulated: `lp-emu:esp32c6:t1+net=lan` (direct load; the split case
 //! ROM-up). Never hardware-validated. `#[ignore]`d: they need built
@@ -38,13 +43,10 @@ mod tree_store_board;
 
 use editor_reads::block_on;
 use lp_cli::commands::emu::link_host::{C6Board, EmuLinkHost};
-use lp_emu_esp_common::Strap;
 use lp_emu_esp32c6::flash::{
-    FlashBacking, LPFS_OFFSET, PARTITION_TABLE_OFFSET, c6_partition_table_bytes,
+    LEGACY_V2_LPFS_OFFSET, LPFS_OFFSET, PARTITION_TABLE_OFFSET, c6_partition_table_bytes,
 };
-use lp_emu_esp32c6::loader::ResetCause;
-use lp_emu_esp32c6::machine::{AppSource, BootMode, Esp32C6Builder, UsbHost};
-use lp_emu_esp32c6::test_support::{FwImage, split_image};
+use lp_emu_esp32c6::test_support::{FwImage, ReferenceImage};
 use lpa_client::LpClient;
 use lpa_link::PartitionTable;
 use lpa_link::layout_migration::{
@@ -61,7 +63,7 @@ const HOLD_WORD: &str = "[FS] this board's files are in the tree store, a newer 
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli-boards` runs it"]
 fn a_littlefs_core_holds_a_tree_store_and_writes_nothing() {
     let test = "a_littlefs_core_holds_a_tree_store_and_writes_nothing";
-    let Some(shipped) = elf(test, &FwImage::SHIPPED) else {
+    let Some(shipped) = fielded_elf(test, &ReferenceImage::FIELDED_LITTLEFS) else {
         return;
     };
     let region = files_region();
@@ -76,7 +78,7 @@ fn a_littlefs_core_holds_a_tree_store_and_writes_nothing() {
 #[ignore = "needs a built fw-esp32c6 ELF; `just test-emu-c6-cli-boards` runs it"]
 fn a_store_with_its_first_sectors_free_is_held_too() {
     let test = "a_store_with_its_first_sectors_free_is_held_too";
-    let Some(shipped) = elf(test, &FwImage::SHIPPED) else {
+    let Some(shipped) = fielded_elf(test, &ReferenceImage::FIELDED_LITTLEFS) else {
         return;
     };
     let mut region = files_region();
@@ -93,54 +95,13 @@ fn a_store_with_its_first_sectors_free_is_held_too() {
 }
 
 #[test]
-#[ignore = "needs a split fw-esp32c6 build; `just test-emu-c6-cli-boards` runs it"]
-fn the_shipped_split_core_holds_a_tree_store() {
-    let split = match split_image(&FwImage::SHIPPED) {
-        Ok(split) => split,
-        Err(reason) => {
-            eprintln!("emu_littlefs_on_tree_store split: skipped — {reason}");
-            return;
-        }
-    };
-    let region = files_region();
-    let mut merged = std::fs::read(split.merged()).expect("the merged image");
-    let at = LPFS_OFFSET as usize;
-    if merged.len() < at + region.len() {
-        merged.resize(lp_emu_esp32c6::flash::DEFAULT_FLASH_LEN as usize, 0xFF);
-    }
-    merged[at..at + region.len()].copy_from_slice(&region);
-    let machine = Esp32C6Builder::new()
-        .boot_mode(BootMode::RomUp)
-        .app(AppSource::Path(split.p2_elf()))
-        .flash(FlashBacking::Bytes(merged))
-        .reset_cause(ResetCause::UsbUartHpSys)
-        .strap(Strap::App)
-        .usb_host(UsbHost::Attached { draining: true })
-        .usb_sj_queue_source()
-        .reboot_on_reset(true)
-        .build()
-        .expect("the split image builds a machine");
-    let mut host = EmuLinkHost::new(
-        C6Board::new(machine).expect("a hosted board"),
-        0x7EE1_0003,
-        true,
-    );
-    let hello = boot(&mut host);
-    assert_eq!(hello_fs(&hello), "refused", "{hello}");
-    assert!(!hello.contains("fs.tree"), "a littlefs build: {hello}");
-    let word = boot_word(&host, HOLD_WORD);
-    assert!(
-        lpfs(&chip(&host)) == &region[..],
-        "the split core wrote to the tree store"
-    );
-    println!("3 split: {word}; lpfs byte-identical");
-}
-
-#[test]
 #[ignore = "needs built fw-esp32c6 ELFs; `just test-emu-c6-cli-boards` runs it"]
-fn the_usb_flash_path_refuses_the_shipped_image_and_takes_a_tree_one() {
-    let test = "the_usb_flash_path_refuses_the_shipped_image_and_takes_a_tree_one";
-    let (Some(shipped), Some(tree)) = (elf(test, &FwImage::SHIPPED), fs_tree_elf(test)) else {
+fn the_usb_flash_path_refuses_the_fielded_image_and_takes_the_shipped_one() {
+    let test = "the_usb_flash_path_refuses_the_fielded_image_and_takes_the_shipped_one";
+    let (Some(shipped), Some(tree)) = (
+        fielded_elf(test, &ReferenceImage::FIELDED_LITTLEFS),
+        elf(test, &FwImage::SHIPPED),
+    ) else {
         return;
     };
     let mut flash = chip_with_lpfs(&{
@@ -180,19 +141,25 @@ fn the_usb_flash_path_refuses_the_shipped_image_and_takes_a_tree_one() {
     let taken = decide(&inspection, &target, 0x2D_0000, None, false, tree_reads);
     assert!(matches!(taken, Ok(LayoutDecision::Plain(_))), "{taken:?}");
     println!(
-        "4 host: TreeStore; shipped image → {}; fs-tree image → plain flash",
+        "3 host: TreeStore; fielded littlefs image → {}; shipped (tree) image → plain flash",
         Refusal::TreeStoreNotRead
     );
 }
 
 // ---- helpers ---------------------------------------------------------------
 
-/// Boot the littlefs image over `region`; it must hold, say so, lock the
-/// device store, refuse a network write in its words, keep answering, and
-/// leave `lpfs` untouched — across a power cycle too.
+/// Boot the fielded littlefs image, on its own table, over `region` where a
+/// migration leaves the store (`0x380000`, the littlefs's blocks 48–175);
+/// it must hold, say so, lock the device store, refuse a network write in
+/// its words, keep answering, and leave its whole `lpfs` (`0x350000..`)
+/// untouched — across a power cycle too.
 fn held_case(label: &str, elf: &std::path::Path, region: Vec<u8>) {
     let (before, _) = host_mount(&region).expect("the premise: the host mounts the store");
-    let mut host = board(elf, chip_with_lpfs(&region), 0x7EE1_0001);
+    let mut chip0 = fielded_chip();
+    let at = LPFS_OFFSET as usize;
+    chip0[at..at + region.len()].copy_from_slice(&region);
+    let whole = LEGACY_V2_LPFS_OFFSET as usize..chip0.len();
+    let mut host = board(elf, chip0.clone(), 0x7EE1_0001);
     let hello = boot(&mut host);
     assert_eq!(hello_fs(&hello), "refused", "{hello}");
     assert!(!hello.contains("fs.tree"), "a littlefs build: {hello}");
@@ -231,7 +198,7 @@ fn held_case(label: &str, elf: &std::path::Path, region: Vec<u8>) {
     );
     assert!(loaded.is_ok(), "the link still answers: {loaded:?}");
     assert!(
-        lpfs(&chip(&host)) == &region[..],
+        chip(&host)[whole.clone()] == chip0[whole.clone()],
         "{label}: the held partition was written"
     );
 
@@ -239,7 +206,7 @@ fn held_case(label: &str, elf: &std::path::Path, region: Vec<u8>) {
     let hello = boot(&mut host);
     assert_eq!(hello_fs(&hello), "refused", "after a power cycle: {hello}");
     assert!(
-        lpfs(&chip(&host)) == &region[..],
+        chip(&host)[whole.clone()] == chip0[whole],
         "{label}: written after a power cycle"
     );
     let (after, _) = host_mount(lpfs(&chip(&host))).expect("the host still mounts the store");
@@ -252,7 +219,7 @@ fn held_case(label: &str, elf: &std::path::Path, region: Vec<u8>) {
 }
 
 /// A store region holding a few files (and a hot panel file), built on the
-/// host as an `fs-tree` core would have left it.
+/// host as a tree core (or the migration) would have left it.
 fn files_region() -> Vec<u8> {
     host_store(&[
         ("/hardware.json", b"{\"board\":\"kept\"}"),

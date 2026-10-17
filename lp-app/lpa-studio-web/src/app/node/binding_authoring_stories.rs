@@ -19,7 +19,7 @@ fn bound_aspect(label: &str, endpoint: &str, default_origin: bool) -> UiSlotAspe
     if default_origin {
         aspect = aspect.with_row(
             UiSlotAspectRow::new("Origin", "default binding")
-                .with_detail("Declared by the slot itself; authoring a binding overrides it."),
+                .with_detail("Set by the slot itself. A binding you add will replace it."),
         );
     }
     aspect

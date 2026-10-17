@@ -238,6 +238,26 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
             None,
             "Ready",
         ),
+        UpdateStanding::NeedsFilesMoved { link, to, .. } => words(
+            NeedsYou,
+            "Files move to a new filesystem".to_string(),
+            match link {
+                UpdateLink::Usb => format!(
+                    "{} keeps this board's files in a new filesystem. Update moves them there \
+                     over this cable — backed up first, every file kept.",
+                    to.short()
+                ),
+                _ => format!(
+                    "{} keeps this board's files in a new filesystem, and only a USB cable can \
+                     move them. Connect it by USB to update; after that it updates over {} \
+                     again.",
+                    to.short(),
+                    link.word()
+                ),
+            },
+            None,
+            "Ready",
+        ),
         UpdateStanding::KeepsCrashing { board, .. } => words(
             NeedsYou,
             format!("{} keeps crashing", board.short()),
@@ -334,7 +354,8 @@ pub fn update_session_words(
     let board = standing.board()?;
     let run_word = match words.kind {
         UpdateRowKind::Progress => Some(UpdateRunWord {
-            text: match words.progress.and_then(|p| p.percent) {
+            // The card's one number for the whole update.
+            text: match standing.whole_percent() {
                 Some(percent) => format!("{} · {percent}%", words.chip),
                 None => words.chip.clone(),
             },
@@ -859,7 +880,7 @@ mod tests {
         assert_eq!(
             updating.run_word,
             Some(UpdateRunWord {
-                text: "Updating · 40%".to_string(),
+                text: "Updating · 20%".to_string(),
                 tone: UpdateRunTone::Working
             })
         );

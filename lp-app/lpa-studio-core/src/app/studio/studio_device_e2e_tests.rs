@@ -179,6 +179,8 @@ mod ble_drop_tests;
 mod board_card_tests;
 /// One tab holds a board: two tabs on one in-memory hold bus.
 mod board_hold_tests;
+/// Connect a board's chooser failing after the pick: the section says so.
+mod chooser_failure_tests;
 /// Connected: Connect, Edit and Done by path, the home page and an open
 /// session side by side, and the surface following the place.
 mod connected_tests;
@@ -8691,7 +8693,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
     )));
     let error = result.expect_err("a newer-format head is refused");
     assert!(
-        error.to_string().contains("made by a newer LightPlayer"),
+        error.to_string().contains("Made by a newer LightPlayer"),
         "the classified reason reaches the caller: {error}"
     );
 
@@ -8716,7 +8718,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
         failure.message
     );
     assert!(
-        failure.message.contains("made by a newer LightPlayer"),
+        failure.message.contains("Made by a newer LightPlayer"),
         "the notice carries the classified reason: {:?}",
         failure.message
     );
@@ -9421,7 +9423,9 @@ fn a_board_that_formatted_offers_its_restore_and_its_update() {
     );
 
     // It runs a project here, then loses power and boots formatted again,
-    // empty.
+    // empty. (Push is offered once the card settles; on a slow runner that
+    // can come a tick after its Update.)
+    bench.wait_for_verb(&tasks, target, "push");
     bench.push_gesture(target, bundled_example());
     bench.run_until(&tasks, "the board to run what was pushed", |bench| {
         bench.view().devices.first().is_some_and(|card| {

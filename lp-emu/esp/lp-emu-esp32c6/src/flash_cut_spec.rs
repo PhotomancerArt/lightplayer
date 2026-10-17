@@ -250,15 +250,15 @@ mod tests {
         let at = crate::flash::PARTITION_TABLE_OFFSET as usize;
         chip[at..at + table.len()].copy_from_slice(&table);
         assert_eq!(lpfs_range(&chip), LPFS_OFFSET..LPFS_OFFSET + LPFS_LEN);
-        // A table whose lpfs is elsewhere (a 128-sector one): that row.
+        // A table whose lpfs is elsewhere (the fielded 176-sector one): that row.
         let row = (at..at + table.len())
             .step_by(32)
             .find(|&r| &chip[r + 12..r + 16] == b"lpfs")
             .expect("the lpfs row");
-        chip[row + 4..row + 8].copy_from_slice(&0x0038_0000u32.to_le_bytes());
-        chip[row + 8..row + 12].copy_from_slice(&0x0008_0000u32.to_le_bytes());
-        assert_eq!(lpfs_range(&chip), 0x38_0000..0x40_0000);
+        chip[row + 4..row + 8].copy_from_slice(&0x0035_0000u32.to_le_bytes());
+        chip[row + 8..row + 12].copy_from_slice(&0x000B_0000u32.to_le_bytes());
+        assert_eq!(lpfs_range(&chip), 0x35_0000..0x40_0000);
         let spec = FlashCutSpec::new(3, TearModel::Clean, 1);
-        assert_eq!(spec.plan(&chip).range, 0x38_0000..0x40_0000);
+        assert_eq!(spec.plan(&chip).range, 0x35_0000..0x40_0000);
     }
 }

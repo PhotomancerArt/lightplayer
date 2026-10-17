@@ -1,6 +1,7 @@
 //! [`BoardCard`]: one board, drawn from core's [`UiBoardCard`] — the
-//! picture with the status corner cut out of it, the name bar and its one
-//! primary, then the five bars, always project · connection · access ·
+//! picture with the surface over it ([`BoardSurface`]: what matters now,
+//! when anything does) and the status corner cut out of it, the name bar
+//! and its one primary, then the five bars, always project · connection · access ·
 //! firmware · hardware. Connected, the board's panel stands in the bars'
 //! place, at their height ([`CompactPanel`]: `card.panel`), its All controls
 //! row linking the session's play page.
@@ -20,11 +21,12 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    BarLayer, DeviceFeedOp, DeviceId, OfferPath, UiAction, UiBoardCard, UiBoardPresence,
-    UiExampleCard, UiPackageCard,
+    BarLayer, DeviceFeedOp, DeviceId, OfferPath, SurfacePicture, UiAction, UiBoardCard,
+    UiBoardPresence, UiExampleCard, UiPackageCard,
 };
 
 use super::board_picture::BoardPicture;
+use super::board_surface::BoardSurface;
 use super::card_action::{CardPreviews, CardScope, use_provide_card_scope};
 use super::card_play_address::use_card_play_address;
 use super::name_bar::NameBar;
@@ -101,7 +103,11 @@ pub fn BoardCard(
     rsx! {
         article { class: CARD_CLASS, "data-board-card": "{card.board}",
             div { class: PICTURE_SLOT_CLASS,
-                BoardPicture { picture: card.picture.clone() }
+                BoardPicture {
+                    picture: card.picture.clone(),
+                    covered: card.surface.picture == SurfacePicture::Dimmed,
+                }
+                BoardSurface { surface: card.surface.clone() }
                 StatusCorner {
                     corner: card.status.clone(),
                     board: board.clone(),

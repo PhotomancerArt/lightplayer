@@ -5,9 +5,10 @@
   "package": "fw-esp32c6",
   "cargoTarget": "riscv32imac-unknown-none-elf",
   "profile": "release-esp32",
-  "cargoFeatures": ["esp32c6", "server"],
+  "cargoFeatures": ["esp32c6", "server", "fs-tree"],
   "flashSizeMb": 4,
   "partitionsCsv": "lp-fw/fw-esp32c6/partitions.csv",
+  "bootloader": "lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin",
   "split": true,
   "chip": {
     "family": "esp32",

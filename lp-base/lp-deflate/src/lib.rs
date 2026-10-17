@@ -57,4 +57,4 @@ mod inflate;
 mod tables;
 
 pub use error::Error;
-pub use inflate::inflate;
+pub use inflate::{Tables, inflate, inflate_with};

@@ -1,7 +1,8 @@
-//! The card's picture, and the words that used to be drawn over it.
+//! The card's picture, and its facts for the corner's details.
 //!
-//! The picture draws the board's lights or stays dark; nothing covers it
-//! (Q10). Where it comes from is its source: the board's link (live, stale,
+//! The picture draws the board's lights or stays dark. While the board is
+//! well nothing covers it; otherwise the card's surface does, and dims it
+//! ([`super::board_surface`]). Where it comes from is its source: the board's link (live, stale,
 //! or waiting for its first frame), the editor's lens (the last frame it
 //! left, dimmed), the last saved picture (dimmed), or nothing. While an
 //! update holds the board's lights, the picture is their one colour. A
@@ -306,8 +307,11 @@ mod tests {
             Some("57 fps"),
             "the session's rate, not the board's last word (58)"
         );
-        let corner = super::super::status_corner::status_corner(&fixture.input(), &[], false);
-        assert_eq!(corner.reading, None, "live and well: the corner is quiet");
+        assert_eq!(
+            super::super::board_surface::surface_state(&fixture.input()),
+            crate::SurfaceState::AllWell,
+            "live and well: the surface is the picture"
+        );
 
         let mut stale = lens_feed();
         stale.liveness = FeedLiveness::Stale;

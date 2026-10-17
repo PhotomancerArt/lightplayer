@@ -72,15 +72,15 @@ pub fn provider_guidance(provider: AgentProvider) -> AgentProviderGuidance {
         AgentProvider::OpenRouter => AgentProviderGuidance {
             provider,
             label: provider.label(),
-            setup: "Connect your OpenRouter account — one click, no key to \
-                    paste. Usage is pay-as-you-go from your own OpenRouter \
+            setup: "Connect your OpenRouter account with one click, no key to \
+                    paste. You pay as you go from your own OpenRouter \
                     credits, and every major model is available.",
             links: &[
                 ("openrouter.ai/credits", "https://openrouter.ai/credits"),
                 ("manage keys", "https://openrouter.ai/settings/keys"),
             ],
             note: Some(
-                "Connect creates a key inside your OpenRouter account; you \
+                "Connecting creates a key in your OpenRouter account. You \
                  can revoke it there at any time.",
             ),
         },
@@ -97,8 +97,8 @@ pub fn provider_guidance(provider: AgentProvider) -> AgentProviderGuidance {
             provider,
             label: provider.label(),
             setup: "Create an API key at platform.openai.com (API keys) and set \
-                    up billing. Enter the model id to use — OpenAI model ids are \
-                    listed in its docs.",
+                    up billing. Enter the model id to use. OpenAI lists the ids \
+                    in its docs.",
             links: &[(
                 "platform.openai.com",
                 "https://platform.openai.com/api-keys",
@@ -108,15 +108,15 @@ pub fn provider_guidance(provider: AgentProvider) -> AgentProviderGuidance {
         AgentProvider::Custom => AgentProviderGuidance {
             provider,
             label: provider.label(),
-            setup: "Any OpenAI-compatible server works — e.g. Ollama: run \
-                    `ollama serve`, set the base URL to http://localhost:11434/v1, \
-                    no key needed. LM Studio, llama.cpp, vLLM: use the base URL \
-                    the server shows, and the model id it serves. Not sure? \
+            setup: "Any OpenAI-compatible server works. For Ollama, run \
+                    `ollama serve` and set the base URL to http://localhost:11434/v1 \
+                    (no key needed). For LM Studio, llama.cpp or vLLM, use the base \
+                    URL the server shows and the model id it serves. Not sure? \
                     Press Find my server and Studio will look.",
             links: &[("ollama.com", "https://ollama.com/")],
             note: Some(
-                "Browser note: the server must allow cross-origin requests — \
-                 for Ollama set OLLAMA_ORIGINS to this app's origin (or *).",
+                "Browser note: the server must allow cross-origin requests. \
+                 For Ollama, set OLLAMA_ORIGINS to this app's origin (or *).",
             ),
         },
     }

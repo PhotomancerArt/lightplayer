@@ -115,6 +115,7 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
         wifi_connect: roster.wifi_connects.get(&view.id),
         take_over: roster.take_overs.get(&view.id),
         update: roster.updates.get(&view.id),
+        sending: roster.sending.get(&view.id).map(String::as_str),
         layout: roster.layout.get(&view.id),
         plays,
         sharing: roster.board_projects.sharing(view.id),

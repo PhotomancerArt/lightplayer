@@ -146,7 +146,9 @@ host-lan-harness = [
 ]
 # The tree store as the board's filesystem (`tree_fs`, `aligned_nor_flash`;
 # plan `lp2025/2026-10-08-2339-tree-store-firmware-and-emulator`). Off by
-# default; the C6's `fs-tree` turns it on. Never in a shipped image.
+# default; the C6's `fs-tree` turns it on — every C6 server image since the
+# tree-store cutover (plan `lp2025/2026-10-16-0848-tree-store-adoption`, A7).
+# The S3 and the classic stay on littlefs (`lp_fs`).
 fs-tree = ["server", "dep:lp-tree-store", "dep:lp-crc32", "dep:embedded-storage", "dep:lpc-access"]
 server = ["dep:littlefs-rust", "dep:lp-json-pack", "dep:lp-recovery", "dep:lpa-server", "dep:lpc-model", "dep:lpc-wire", "dep:lpfs", "dep:ser-write-json"]
 
@@ -178,3 +180,9 @@ async-trait = "0.1"
 tungstenite = "0.28"
 sha1 = "0.10"
 simple-dns = "0.9"
+# `tests/ble_controller_answers.rs`: the host side of the C6's HCI (bt-hci's
+# ExternalController, as forked in third_party/bt-hci) against the exact
+# answers its controller gives. Host-only; the firmware's own bt-hci is
+# fw-esp32c6's.
+bt-hci = { version = "0.8.0", default-features = false }
+embedded-io-07 = { package = "embedded-io", version = "0.7" }

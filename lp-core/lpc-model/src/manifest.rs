@@ -29,6 +29,20 @@ pub const MANIFEST_BLOB_BEGIN: &str = "\u{1}LP-FW-MANIFEST-BEGIN-v1\u{2}";
 /// Blob suffix; guards against truncated artifacts.
 pub const MANIFEST_BLOB_END: &str = "\u{3}LP-FW-MANIFEST-END-v1\u{4}";
 
+/// The mark a split image's **core** carries in its own bytes when it mounts
+/// the tree store (`fw_esp32_common::tree_fs::LP_CORE_FS_TREE_MARK`, a core
+/// root of the split link).
+///
+/// The manifest blob says the same (`fs.tree`), but it is linked into the
+/// engine, and an over-the-air update writes and trials the core before its
+/// engine exists — so the board's update guard
+/// (`fw_esp32_common::fs_tree_core_guard`) reads this instead
+/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+/// Only the mark's own layout is versioned here (`v1`); which store format
+/// the core reads is the store's business (it refuses a newer one). A scanner
+/// holds it masked, so the only contiguous copy in an image is the real mark.
+pub const CORE_FS_TREE_MARK: &str = "\u{1}LP-CORE-FS-TREE-v1\u{2}";
+
 /// JSON shape version of the manifest core payload.
 ///
 /// - 3: `target`, the opaque name of the line of builds this build belongs
@@ -498,12 +512,26 @@ pub struct ManifestPlatform {
 /// Find the manifest-core JSON payload in raw artifact bytes (ELF, espflash
 /// merged image, or wasm module). Returns the JSON slice, or `None` when no
 /// well-formed blob is present.
+///
+/// The markers can appear more than once: code that SCANS for a blob and
+/// holds them as string constants (the tree-store update guard did, until it
+/// read the core's own mark instead) leaves a begin marker followed by the
+/// end marker with no JSON between. The blob is the first begin marker whose
+/// payload is a JSON object.
 pub fn find_manifest_core(artifact: &[u8]) -> Option<&[u8]> {
     let begin = MANIFEST_BLOB_BEGIN.as_bytes();
     let end = MANIFEST_BLOB_END.as_bytes();
-    let start = find(artifact, begin)? + begin.len();
-    let len = find(&artifact[start..], end)?;
-    Some(&artifact[start..start + len])
+    let mut from = 0;
+    while let Some(at) = find(&artifact[from..], begin) {
+        let start = from + at + begin.len();
+        let len = find(&artifact[start..], end)?;
+        let payload = &artifact[start..start + len];
+        if payload.first() == Some(&b'{') {
+            return Some(payload);
+        }
+        from = start;
+    }
+    None
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -622,6 +650,11 @@ mod tests {
         assert_eq!(found, json.as_bytes());
 
         assert_eq!(find_manifest_core(&[0u8; 64]), None);
+        // A scanner's own marker constants before the blob are skipped.
+        let mut scanned = MANIFEST_BLOB_BEGIN.as_bytes().to_vec();
+        scanned.extend_from_slice(MANIFEST_BLOB_END.as_bytes());
+        scanned.extend_from_slice(&artifact);
+        assert_eq!(find_manifest_core(&scanned), Some(json.as_bytes()));
         // Truncated artifact: BEGIN present, END missing.
         let cut = &artifact[..artifact.len() - 300];
         assert_eq!(find_manifest_core(cut), None);

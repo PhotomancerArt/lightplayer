@@ -138,20 +138,20 @@ fn first_run() -> Element {
 }
 
 #[story(
-    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgrades when you open it\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Download zip on the card, delete in the menu."
+    description = "Project format states (P3): a package NEVER vanishes for being unreadable. A format-4 project carries a quiet \"upgraded on open\" line and is otherwise a normal card; below-floor, future-format and unreadable packages wear the amber edge, say what was found and what to do, and drop their open affordance for the two remedies that work on raw files — Download zip on the card, delete in the menu."
 )]
 fn project_format_states() -> Element {
     let mut projects = packages();
     projects[0].health = PackageHealth::UpgradesOnOpen { found: 4 };
     projects[1].health = PackageHealth::Blocked {
-        headline: "Format 3 — too old for this Studio".to_string(),
+        headline: "Format too old (3)".to_string(),
         remedy: "Project format 3, expected 5; formats below 4 are too old to upgrade \
                  automatically. Open it in a LightPlayer that still reads format 3 and \
                  re-save it, or rebuild the project."
             .to_string(),
     };
     projects[2].health = PackageHealth::Blocked {
-        headline: "Format 7 — made by a newer LightPlayer".to_string(),
+        headline: "Made by a newer LightPlayer (format 7)".to_string(),
         remedy: "Project format 7, expected 5; it was written by a newer LightPlayer. \
                  Update LightPlayer to open it."
             .to_string(),
@@ -556,7 +556,9 @@ fn powered_off_sim_fixture() -> DeviceRosterView {
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
+        chooser_failure: None,
         take_overs: Default::default(),
+        sending: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1402,7 +1404,9 @@ pub(crate) fn roster_fixture() -> DeviceRosterView {
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
+        chooser_failure: None,
         take_overs: Default::default(),
+        sending: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,
@@ -1775,7 +1779,9 @@ pub(crate) fn roster_page_fixture() -> DeviceRosterView {
         lan_links: Default::default(),
         wifi_connects: Default::default(),
         wifi_address_connect: None,
+        chooser_failure: None,
         take_overs: Default::default(),
+        sending: Default::default(),
         updates: Default::default(),
         transport_available: true,
         usb_available: true,

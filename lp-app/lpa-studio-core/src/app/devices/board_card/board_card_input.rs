@@ -57,6 +57,10 @@ pub struct BoardCardInput<'a> {
     pub take_over: Option<&'a UiTakeOver>,
     /// The board's update story.
     pub update: Option<&'a UiDeviceUpdate>,
+    /// The project a push is sending to the board, by its name, while one
+    /// runs: the surface says it ("Sending the project “studio” to this
+    /// board.").
+    pub sending: Option<&'a str>,
     /// The board's files across a layout change, and the project note.
     pub layout: Option<&'a UiDeviceLayout>,
     /// Which project the board plays ([`crate::BoardProjects`]).

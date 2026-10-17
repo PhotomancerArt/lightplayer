@@ -46,12 +46,29 @@ impl<const N: usize> Huff<N> {
     /// table (RFC 1951 is explicit that one is possible only in a corrupt
     /// stream); an incomplete table is accepted, since RFC 1951 §3.2.7
     /// permits a single valid distance code with no matches to decode.
+    #[cfg(test)]
     pub(crate) fn new(lengths: &[u8]) -> Result<Self, Error> {
-        let mut h = Huff {
+        let mut h = Self::empty();
+        h.build(lengths)?;
+        Ok(h)
+    }
+
+    /// A table with no codes (every array zero): what [`Huff::build`] fills.
+    pub(crate) const fn empty() -> Self {
+        Huff {
             count: [0; 16],
             symbol: [0; N],
             fast: [0; FAST_LEN],
-        };
+        }
+    }
+
+    /// [`Huff::new`], in place: `self` becomes the code for `lengths`, so a
+    /// caller that owns the storage (`crate::Tables`) never moves a table.
+    pub(crate) fn build(&mut self, lengths: &[u8]) -> Result<(), Error> {
+        self.count = [0; 16];
+        self.symbol.fill(0);
+        self.fast.fill(0);
+        let h = self;
         for &l in lengths {
             h.count[usize::from(l)] += 1;
         }
@@ -75,7 +92,7 @@ impl<const N: usize> Huff<N> {
             }
         }
         h.fill_fast();
-        Ok(h)
+        Ok(())
     }
 
     /// The lookup table: §3.2.2's codes, in `symbol`'s order (by length,

@@ -33,9 +33,24 @@
 //!
 //! **The level depends on what is on the chip (Q3).** Flashing a blank
 //! board loses nothing, so it is Routine: one click, and the agent may
-//! press it. Over anything else — somebody's firmware, an older
-//! LightPlayer, a chip that will not say — it is the Flash op's own
-//! Lasting, with its copy. Update keeps the Flash op's Lasting (M1).
+//! press it. Over anything else — somebody's firmware, a chip that will
+//! not say — it is the Flash op's own Lasting, with its copy. Update keeps
+//! the Flash op's Lasting (M1), with one exception:
+//!
+//! **An older LightPlayer's update loses nothing, so it is Routine**
+//! (2026-10-17, the desk C6's dead end). Its flash writes the firmware and
+//! keeps the board's files: the layout step decides before anything is
+//! written (`device_layout_step`), and a plain flash writes the firmware
+//! image only, below `lpfs`; a layout that moves the files stores a backup
+//! first and asks its own Lasting question (Continue); a store the new
+//! firmware cannot read is refused with nothing written. The project and
+//! the board's identity live in `lpfs`, so they stay. Priced like the
+//! over-the-air update ("Update", Routine, `devices_op`): one click, no
+//! red, and the agent may press it. The face's own words always said so —
+//! "flash to update; the project stays" (`device_firmware_face`). Whether
+//! the same price belongs on a pre-update LightPlayer's USB update (ADR
+//! 2026-10-06-studio-updates-over-the-update-channel, §4: Lasting) is left
+//! to that ADR.
 
 use std::rc::Rc;
 
@@ -122,13 +137,18 @@ pub fn update_firmware_offer(view: &DeviceView, prefix: OfferPath) -> Option<UiO
             verb.blocked_action(view.id, reason),
         ));
     }
+    let keeps_everything = keeps_everything(&view.firmware_face);
     if let Some(action) = verb.update_action(view.id) {
+        let action = match keeps_everything {
+            true => action.with_consequence(ActionConsequence::Routine),
+            false => action,
+        };
         return Some(UiOffer::new(path, "download", action));
     }
     let dress = Dress {
         label: Some(verb.label().to_string()),
         summary: Some(verb.summary()),
-        consequence: None,
+        consequence: keeps_everything.then_some(ActionConsequence::Routine),
     };
     Some(board_pick_offer(
         path,
@@ -140,16 +160,24 @@ pub fn update_firmware_offer(view: &DeviceView, prefix: OfferPath) -> Option<UiO
     ))
 }
 
-/// What flashing over `face` costs: nothing on a blank chip, the Flash op's
-/// own Lasting everywhere else.
+/// What flashing over `face` costs: nothing on a blank chip, nor on an
+/// older LightPlayer (its update keeps its files: see the module docs); the
+/// Flash op's own Lasting everywhere else.
 pub fn flash_consequence(face: &FirmwareFace) -> ActionConsequence {
     match face {
         FirmwareFace::Blank => ActionConsequence::Routine,
+        face if keeps_everything(face) => ActionConsequence::Routine,
         _ => flash_action(DeviceId(0), None, None, &Dress::default())
             .meta()
             .consequence
             .clone(),
     }
+}
+
+/// An older LightPlayer: writing this Studio's firmware over it keeps the
+/// project, the files and the identity, so its update loses nothing.
+fn keeps_everything(face: &FirmwareFace) -> bool {
+    matches!(face, FirmwareFace::OlderLightPlayer { .. })
 }
 
 /// The Flash verb at `path` for `device`: disabled with `blocked` when the
@@ -400,11 +428,44 @@ mod tests {
         );
     }
 
+    /// An older LightPlayer's update keeps its project and files: one
+    /// click, the over-the-air update's price — whether its board is known
+    /// (`update-firmware`) or must be picked (`flash`, bound too).
+    #[test]
+    fn an_older_lightplayers_update_is_routine() {
+        let older = FirmwareFace::OlderLightPlayer { proto: Some(33) };
+        let mut known = needs_firmware(older.clone(), Some("esp32c6"));
+        known.board_id = Some("seeed/xiao-esp32-c6".to_string());
+        known.escapes = vec![Escape::Disconnect, Escape::Forget];
+        let update = update_firmware_offer(&known, prefix()).expect("it updates");
+        assert_eq!(
+            update.path.to_string(),
+            "devices/mac-a0f26287b48c/update-firmware"
+        );
+        assert!(
+            update.consequence().is_routine(),
+            "{:?}",
+            update.consequence()
+        );
+        assert!(update.params().is_empty(), "one click");
+
+        let unknown = needs_firmware(older, Some("esp32c6"));
+        let flash = flash_device_offer(&unknown, prefix()).expect("it flashes");
+        assert!(
+            flash.consequence().is_routine(),
+            "{:?}",
+            flash.consequence()
+        );
+        let bound = flash
+            .press(&OfferArgs::new().with("board", offer_first_board(&flash)))
+            .unwrap();
+        assert!(bound.meta().consequence.is_routine(), "bound Routine too");
+    }
+
     #[test]
     fn flashing_over_firmware_is_lasting() {
         for face in [
             FirmwareFace::Foreign { label: None },
-            FirmwareFace::OlderLightPlayer { proto: Some(3) },
             FirmwareFace::Bootloader,
             FirmwareFace::Silent,
             FirmwareFace::NoHello,
