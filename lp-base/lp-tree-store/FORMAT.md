@@ -13,24 +13,37 @@ value and final XOR `0xFFFF_FFFF`; `crc32(b"123456789") = 0xCBF4_3926`.
 ## The medium
 
 The partition is `N` sectors of `S` bytes (`4 ≤ N ≤ 65535`; `S` a power of
-two, `512 ≤ S ≤ 32768`; the C6 uses `S = 4096`, design target `N = 128`,
+two, `512 ≤ S ≤ 65,536`; the C6 uses `S = 4096`, design target `N = 128`,
 today's partition `N = 176`). NOR semantics: erase sets a sector to all
 `0xFF`; program can only clear bits. Address of byte `o` of sector `s` is
 `s·S + o`.
 
+**The sector size is configuration, not a format version.** A board picks
+`S` from the format's range (a bigger part might take 32 or 64 KiB erase
+blocks); a reader given another `S` than a store's headers record refuses
+the store (rule 3), so a store of one size is never misread by a reader
+configured for another. An implementation may support a narrower range:
+this one (`lp-tree-store`) takes `512 ≤ S ≤ 32,768`, because its RAM sector
+table keeps each sector's end and live bytes as u16 (a 64 KiB store needs
+those widened in RAM; no byte of the format changes).
+
 Every sector header records `S` (as its log2), so a raw image describes its
 own sector size: a tool handed an image and no geometry reads byte 7 of the
-first header that checks (trying each power of two from 512 to 32768 as the
-stride if sector 0 is erased or killed) and then reads every header at
-multiples of `S`. **`N` is recorded nowhere** and needs no field: it is the
+first header that checks (trying each power of two from 512 to 65,536 that
+it supports as the stride if sector 0 is erased or killed) and then reads
+every header at multiples of `S`. **`N` is recorded nowhere** and needs no field: it is the
 partition's length divided by `S`, which the partition table (or the image
 file's length) already gives, and nothing in the format depends on it
 beyond the retired list's sector numbers.
 
 `record_max` (`R`, 128 ≤ `R` ≤ `S − 24`) is a store dial, **not recorded on
 flash**: it bounds what a writer produces. A reader must accept any record
-that fits its sector (`16 + len ≤ S − 24`). The firmware's value is fixed
-per build (see the README's record-size choice).
+that fits its sector (`16 + len ≤ S − 24`) and **never assumes `R`**: every
+chunk carries its own length, so a board may raise `R` (a bigger board, a
+store of bigger files) or lower it, and a store written under one `R`
+reads, appends and collects under another (only dedup between the two is
+lost). The firmware's value is fixed per build (see the README's
+record-size choice).
 
 ## Sector
 
@@ -188,7 +201,9 @@ A whole small file, or one chunk of a bigger node.
   bytes with no preset dictionary. Written only as the host sent it
   (`put_chunk_deflated`), after the board inflated and hashed it.
 
-A chunk's logical length is at most 4096.
+A deflated chunk's logical length is at most 4096 (a reader refuses a
+longer one); a stored chunk is bounded only by its record (`≤ S − 40`; a
+writer cuts stored chunks at `R − 16`).
 
 ### Multi (kind 2)
 
@@ -378,6 +393,41 @@ reader already classifies the same way, and no byte of the format changes.
 - **I3 — derived liveness.** Nothing on flash records liveness or free
   space: live = reachable from the committed root (and, while writing, from
   the writer's uncommitted tree).
+
+## Limits at scale
+
+What each field allows, and where it stands on the largest board planned
+(an 8 MB filesystem: `N = 2,048` sectors of 4 KiB). **No field fails at
+8 MB, or at 64 MB**; what grows with the partition is the number of records
+on flash, which a reader that reads one header per record pays at mount,
+and the RAM of an index of every live record (12 B each in this
+implementation) — what the index checkpoint (kinds 6 and 7, below) is
+reserved for.
+
+| field | width | limit | at 2,048 × 4 KiB |
+|---|---|---|---|
+| sector count `N` | not on flash; retired list and locations u16 | 65,535 sectors (256 MiB at 4 KiB) | ok |
+| sector size `S` | header byte 7, log2 | 512 ..= 65,536, by configuration (above) | ok |
+| sector seq | u32, wrapping | a span ≥ 2³¹ makes a reader read the whole flash ("A faster reading") | ~7,700 opens a month: ~23,000 years to wrap |
+| erase count | u32 | 4·10⁹ | ok |
+| compat / incompat flags | u16 each | 16 bits each; none assigned | ok |
+| record `len` | u16 | 65,535; a record never spans a sector, so `≤ S − 40` | ok |
+| record id | u64, not cryptographic | accidental collision ≈ `L²/2⁶⁵` (`L` live records); a crafted one is refused by the writer's byte compare ("Ids") | `L` ≈ 11,300 at full: ≈ 3·10⁻¹² |
+| root seq | u64 | does not wrap (2⁶⁴ commits) | ok |
+| retired list | count u16, sectors u16 | the root is one record: a reader accepts `⌊(S − 66) / 2⌋` sectors (2,015 at 4 KiB); a root held to `record_max` `R`, like every other record, names at most `⌊(R − 42) / 2⌋` — **491 at `R` = 1,024** | 491 = 24 % of the partition |
+| root tail entry | length u16 | 65,535, inside the root record | ok |
+| Multi | total u32, count u16, fanout `⌊(R − 23) / 8⌋` | 4 GiB a node; levels 0..127 | ok |
+| Dir | count u16, name length u16, size u32 | 65,535 entries a directory | ok |
+| deflated chunk | logical length u16 prefix | ≤ 4,096 logical bytes (a reader refuses more) | ok |
+| stored chunk | its record's `len` | `≤ S − 40`; a writer cuts at `R − 16` | ok |
+| `record_max` | not on flash | 128 ..= `S − 24`, a per-board dial readers never assume | ok |
+| path | — | ≤ 32 components, ≤ 65,535 B | ok |
+
+**One location convention.** A record that stores where another record is
+(the index checkpoint is the first) writes it as `sector u16 ‖ offset u16`,
+the offset of the record's header from the start of its sector. That holds
+for every `N ≤ 65,535` and `S ≤ 65,536` (an offset is below `S`), so every
+later record follows it rather than choosing its own widths.
 
 ## Versioning and extension
 
