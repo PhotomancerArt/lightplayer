@@ -69,7 +69,7 @@ Bluetooth, the LAN or the relay ends with it while the radio is busy.
   Rust's global allocator (no radio DMA) lands there. Rust tries the regions
   in the same address order as before. The cost is contiguity: no block can
   straddle `0x40850000`. On `lp-emu:esp32c6:t1` (the shipped split image's
-  first heartbeat) the largest free block falls 187,504 → 169,104 B; free,
+  first heartbeat, on main `55f27361b`) the largest free block falls 186,384 → 167,584 B; free,
   used and total bytes are unchanged.
 - **Quiesce.** `ota::reset_now` goes through `restart::restart`, which holds
   the modem in reset before the software reset.
