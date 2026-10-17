@@ -28,8 +28,11 @@
 use lp_emu_esp_common::regfile::merge_lane;
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
+use std::sync::Arc;
+
 use super::accept;
 use crate::cache::CacheHandle;
+use crate::flash_timing::FlashClocks;
 use crate::regs;
 
 const SYNC_CTRL: u32 = 0x098;
@@ -42,6 +45,10 @@ const INVALIDATE_ENA: u32 = 1;
 pub struct Extmem {
     regs: RegFile,
     mmu: CacheHandle,
+    /// `t4`: where a range invalidate is posted for the cache's cost model,
+    /// so the lines it names are filled again ([`crate::flash_timing`]).
+    /// `None` at every other grade, whose cost model never forgets a line.
+    clocks: Option<Arc<FlashClocks>>,
 }
 
 impl core::fmt::Debug for Extmem {
@@ -55,7 +62,13 @@ impl Extmem {
         Self {
             regs: accept::extmem(),
             mmu,
+            clocks: None,
         }
+    }
+
+    /// Post every range invalidate to `clocks` from now on (`t4`).
+    pub fn set_flash_clocks(&mut self, clocks: Arc<FlashClocks>) {
+        self.clocks = Some(clocks);
     }
 }
 
@@ -75,6 +88,9 @@ impl Peripheral for Extmem {
             let addr = self.regs.stored(SYNC_ADDR);
             let size = self.regs.stored(SYNC_SIZE) & 0x00ff_ffff;
             self.mmu.lock().unwrap().invalidate_vaddr_range(addr, size);
+            if let Some(clocks) = &self.clocks {
+                clocks.post_invalidate(addr, size);
+            }
             // Only the machine can refill the window: end the slice so the
             // read after the invalidate sees the flash (as `Spi0` does for
             // an MMU entry write).

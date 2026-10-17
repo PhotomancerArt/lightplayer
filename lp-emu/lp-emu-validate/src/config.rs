@@ -475,6 +475,7 @@ mod tests {
             "lp-emu:esp32c6:t1",
             "lp-emu:esp32c6:t2",
             "lp-emu:esp32c6:t3",
+            "lp-emu:esp32c6:t4",
             "lp-emu:esp32v3:t1",
             "lp-emu:esp32s3:t1",
         ] {

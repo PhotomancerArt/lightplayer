@@ -49,7 +49,7 @@ price is granularity: the net can fire up to a stride late, at most
 Nothing the guest can observe depends on when it fires, so no transcript
 surface moves. `--wall-timeout` is a net, never a stopwatch.
 
-Time comes in three grades. The first two are just the hart's cycle model:
+Time comes in four grades. The first two are just the hart's cycle model:
 `t1` (`lp-emu:esp32c6:t1`) counts instructions, `t2` uses a per-class model.
 `t3` adds what an access's **address** costs — a 32 KiB 4-way cache of
 32-byte lines over the flash window at 338 cycles a fill, and 9 cycles of APB
@@ -58,7 +58,12 @@ wait state on a peripheral load or store (`cache.rs`, and
 every number) — and corrects the four class costs the `cycle-probe` payload
 measured on silicon. It is the first grade in which two instructions with the
 same opcode cost different amounts because they are at different addresses.
-The CPU is 160 MHz, so `micros = cycles / 160`. No grade is a claim about
+`t4` is `t3` plus the **flash interface's time**: an SPI1 transfer, a page
+program's and an erase's busy time, a cache fill derived from SPI0's
+registers, and the cache forgetting what a range invalidate names
+([What a flash command costs (`t4`)](#what-a-flash-command-costs-t4)). It is
+the only grade in which a commit, a format or a GC takes the time its erases
+take. The CPU is 160 MHz, so `micros = cycles / 160`. No grade is a claim about
 milliseconds on silicon — see the vision's "time is a graded ladder, never a
 promise".
 
@@ -790,9 +795,9 @@ is `lp_emu_esp_common::engine::flash_cut`):
   spec's own options joined by `;` (`flash_cut=40:calibrated:7;then=power-cycle`).
   Rust tests use `Esp32C6Builder::flash_cut` or `arm_flash_cut`, and may call
   `power_cycle` themselves (`lp-cli/tests/emu_flash_cut_smoke.rs`).
-- **What it does not model:** flash busy time (every command still takes
-  zero emulated time, so a cut lands between instructions, never inside an
-  erase's 20-odd milliseconds), a brown-out's slow supply, cuts outside a
+- **What it does not model:** a cut inside a command's busy time (below `t4` every command takes
+  zero emulated time; at `t4` the busy time is there but the cut still lands
+  at the command, never inside an erase's 21 ms), a brown-out's slow supply, cuts outside a
   program or erase, and weak bits across processes. The S3 and the classic
   share the engine but do not wire it.
 
@@ -836,6 +841,66 @@ flash: 300 commands (287 reads, 4 page programs, 2 sector erases, 0 block
 erases, 7 write-enables; 60 status polls); 37 page(s) filled into the cache
 window
 ```
+
+### What a flash command costs (`t4`)
+
+Below `t4` every flash command completes inside the write that triggers it:
+an erase's 21 ms is zero emulated time, and an emulated commit, format or GC
+is CPU time only. `t4` (`lp-emu:esp32c6:t4`) is `t3` plus four things, all in
+`flash_timing.rs`, `periph/spi1.rs`, `cache.rs` and the common engine's
+`nor_timing.rs`:
+
+- **An SPI1 transfer takes its wire time.** At the trigger the view reads its
+  own registers — command, address, dummy and data phases from `user`,
+  `user1`, `user2` and the data lengths; their line widths from `ctrl`
+  (reads) and `user` (writes) — and the SCK: PCR's MSPI module clock
+  (`mspi_clk_conf` over `sysclk_conf`'s root) divided by the controller's
+  `clock`. `cmd` then reads the trigger bits and a busy `mst_st` back until
+  the transfer is done, so the ROM's `while (cmd)` and `Wait_SPI_Idle` spin
+  for it as they do on silicon.
+- **The part is busy after a program or an erase.** The engine holds the
+  status register's WIP for the part's busy time (`NorTiming::CX1`), starting
+  when the command's last bit is on the wire; `Wait_SPI_Idle`'s RDSR loop
+  polls it. Nothing is skipped or fast-forwarded: the time is the guest's own
+  poll loop, inside esp-storage's critical section, with interrupts masked
+  because the guest masked them. A part that is busy ignores a program, an
+  erase or a status write (said once in the trace).
+- **A cache fill costs what SPI0 says.** `CacheCost` takes the fill from
+  SPI0's registers the same way (a 32-byte read), recomputed when SPI0 or PCR
+  changes; at what the shipped bootloader leaves it is `t3`'s 338 cycles.
+- **A range invalidate drops lines.** EXTMEM posts each `cache_sync`
+  invalidate and `CacheCost` forgets the lines it names, so the read after an
+  invalidate (the `fs-tree` firmware's cache-mapped `lpfs`) pays its fills.
+
+| term | value | grade | source |
+|---|---|---|---|
+| SCK after the bootloader | 80 MHz | `measured` | the ROM + espflash's IDF bootloader, run here, leave `mspi_clk_conf = 0x500` (SPLL 480 ÷ 6) and `clock = 0x8000_0000` for a 20, 40 or 80 MHz header alike; CX1's own registers read the same (2026-10-17 DIO/QIO sitting) |
+| per-transfer overhead | 34 cycles | `measured` (fitted) | the 338-cycle DIO fill less its 304 cycles of 80 MHz wire |
+| DIO / QIO line fill | 338 / 202 cycles (2.11 / 1.26 µs) | `measured` / predicted | silicon 2.17 µs DIO, 1.32 µs QIO (2026-10-17) |
+| SPI1 register access | +29 cycles over the APB's 9 | **fitted** | the cache-off mount of six CX1 images (`cache.rs`, `MSPI_REG_EXTRA_CYCLES`) |
+| 32-byte program | 24 µs | `measured` (fitted) | `flash-tears`' `ft-timing`: a 256-byte write in 340 µs here, 318–353 µs on CX1 |
+| 4 KiB sector erase | 21 ms | `measured` | the first-boot format of 176 sectors, 3.3–3.9 s on CX1; a heavily cycled sector erases in 21–33 ms (median 26.7) |
+| 64 KiB block erase | 105 ms | **estimate** | 5 × a sector, datasheet ratio; never measured |
+| status write | 0 | **not modelled** | once per `FlashStorage`; no silicon figure |
+
+**What the header decides.** Only the mode: the bootloader leaves the line
+widths for QIO, QOUT, DIO or DOUT (`loader::seed_flash_interface` holds the
+four sets it was seen to leave), and the speed nibble moves nothing after it.
+An app that switches the interface itself (a QIO switch, a clock change) is
+followed, because the time is read from the registers it writes. A direct
+load at `t4` leaves the interface as the bootloader does for the header's
+mode; `t1`–`t3` keep the reset registers, so their instruction counts, pinned
+since M3, do not move.
+
+**How close it is.** Against every CX1 storage record with the firmware it
+was taken on — mount on four firmwares and eleven stores, `ft-timing`, saves
+and loads, first light — in `docs/reports/2026-10-17-c6-flash-timing-emulator.md`.
+A grade, not a promise: never gate on its microseconds (PD9/D13).
+
+**What it does not model:** flash encryption, suspend/resume, erase time that
+varies with wear or content, a WRSR's busy time, the cache refusing a fill
+while the part is busy (the guest never does it), and a power cut landing
+*inside* an erase — `--flash-cut` still cuts at a command.
 
 ## Peripherals
 

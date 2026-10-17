@@ -86,7 +86,7 @@ pub fn NewProjectMenu(
                         class: NAME_INPUT_CLASS,
                         r#type: "text",
                         aria_label: "Project name (optional)",
-                        placeholder: "Name (optional) \u{2014} else named after the template",
+                        placeholder: "Name (optional)",
                         value: "{name}",
                         oninput: move |event| name.set(event.value()),
                     }

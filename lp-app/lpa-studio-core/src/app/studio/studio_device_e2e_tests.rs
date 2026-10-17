@@ -8691,7 +8691,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
     )));
     let error = result.expect_err("a newer-format head is refused");
     assert!(
-        error.to_string().contains("made by a newer LightPlayer"),
+        error.to_string().contains("Made by a newer LightPlayer"),
         "the classified reason reaches the caller: {error}"
     );
 
@@ -8716,7 +8716,7 @@ fn a_reload_to_a_newer_format_is_refused_before_it_reaches_the_runtime() {
         failure.message
     );
     assert!(
-        failure.message.contains("made by a newer LightPlayer"),
+        failure.message.contains("Made by a newer LightPlayer"),
         "the notice carries the classified reason: {:?}",
         failure.message
     );

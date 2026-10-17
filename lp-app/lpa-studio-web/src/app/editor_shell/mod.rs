@@ -96,7 +96,7 @@ pub fn EditorShellCenter(
         return rsx! {
             div { class: "tw:flex tw:min-h-0 tw:flex-1 tw:items-center tw:justify-center",
                 p { class: "tw:m-0 tw:max-w-[360px] tw:text-center tw:text-xs tw:text-dim-foreground",
-                    "No fixtures on a wire yet — bind an output to a control bus and the mapping editor fills in."
+                    "No fixtures on a wire yet. Bind an output to a control bus to fill the mapping editor."
                 }
             }
         };

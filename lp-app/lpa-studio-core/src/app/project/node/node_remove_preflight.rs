@@ -41,7 +41,7 @@ impl UiNodeRemovePreflight {
         }
         if self.pending_edit_count > 0 {
             message.push_str(&format!(
-                " {} pending edit(s) on it will be discarded.",
+                " {} unsaved change(s) on it will be lost.",
                 self.pending_edit_count
             ));
         }
@@ -51,7 +51,7 @@ impl UiNodeRemovePreflight {
                 self.dependent_count
             ));
         }
-        message.push_str(" You can revert from the save panel until you save.");
+        message.push_str(" You can restore it from Changes until you save.");
         message
     }
 
@@ -65,7 +65,7 @@ impl UiNodeRemovePreflight {
         crate::ActionConsequence::Lasting(crate::ActionConfirmation::new(
             format!("Remove {}?", self.node_label),
             format!(
-                "Its {} unsaved edit(s) are discarded, and reverting the removal does not bring them back.",
+                "Its {} unsaved change(s) will be lost, and restoring the node won't bring them back.",
                 self.pending_edit_count
             ),
             "remove",
@@ -89,7 +89,7 @@ mod tests {
         let summary = preflight.summary();
         assert!(summary.contains("Remove Orbit shader"));
         assert!(summary.contains("2 file(s) will be deleted on save: /orbit.json, /orbit.glsl"));
-        assert!(summary.contains("1 pending edit(s)"));
+        assert!(summary.contains("1 unsaved change(s)"));
         assert!(summary.contains("2 other node(s)"));
     }
 
@@ -106,7 +106,7 @@ mod tests {
         assert!(message.contains("Remove Clock"));
         assert!(!message.contains("pending edit"));
         assert!(!message.contains("reference"));
-        assert!(message.contains("revert from the save panel"));
+        assert!(message.contains("restore it from Changes"));
         assert_eq!(preflight.consequence(), crate::ActionConsequence::Undoable);
     }
 
@@ -121,6 +121,6 @@ mod tests {
 
         assert!(preflight.consequence().arms());
         let copy = preflight.consequence();
-        assert!(copy.copy().unwrap().message.contains("2 unsaved edit(s)"));
+        assert!(copy.copy().unwrap().message.contains("2 unsaved change(s)"));
     }
 }

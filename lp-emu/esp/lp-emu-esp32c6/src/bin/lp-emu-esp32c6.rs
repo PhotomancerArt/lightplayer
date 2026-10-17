@@ -64,8 +64,11 @@ OPTIONS:
                             and --flash is what keeps them. With rom-up an
                             --elf is optional and is never loaded [direct]
     --rom <path>            a mask ROM ELF (default: the vendored C6 rev0 image)
-    --time-grade t1|t2|t3   t1 = instruction count, t2 = the per-class model,
-                            t3 = the measured class costs plus cache and bus [t1]
+    --time-grade t1|t2|t3|t4
+                            t1 = instruction count, t2 = the per-class model,
+                            t3 = the measured class costs plus cache and bus,
+                            t4 = t3 plus the flash interface's time (SPI
+                            transfers, WIP busy, register-derived fills) [t1]
     --timeout <5s|1500ms|900us>
                             EMULATED time to run for [100ms]
     --wall-timeout <s>      host-clock safety net; exits 4. Sampled every 64th

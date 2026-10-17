@@ -54,7 +54,7 @@ impl ControllerOp for ProjectEditorOp {
             ),
             Self::AskAgent { .. } => ActionMeta::new(
                 "Ask the shader agent",
-                "Open this shader's agent chat with the request typed in; you press Send.",
+                "Open this shader's agent chat with the request typed in, ready to send.",
                 ActionPriority::Secondary,
             ),
             Self::PatchSelect { .. } => ActionMeta::new(

@@ -45,9 +45,12 @@ P14  never colour alone            tones, marks
 P15  numbers read naturally        numbers, times, sizes
 P16  one treatment per meaning     icons, colours, words that mean something
 P17  one way per kind of data      times, sizes, versions, names, status
+P18  the main surface says what matters  cards, pictures, the top of a page
+P19  the primary is the likely next step  the button beside a name
+P20  voice by role                 any words: labels, sentences, buttons
 ```
 
-P1–P10, P16, P17: Yona. P11–P15: the director's, accepted 10-16.
+P1–P10, P16–P20: Yona (P18–P20 set 10-17). P11–P15: the director's, accepted 10-16.
 
 ---
 
@@ -82,6 +85,8 @@ bad:  │ XIAO ESP32-C6       │ Updating · 42%  │   # shipped: the button s
 bad:  XIAO ESP32-S3 Plus (sim) · Simulated · off · Simulated XIAO …   # shipped: 3× on one card
 bad:  You can edit · anyone can edit                                  # shipped: twice in one row
 ```
+
+One exception: the primary button may repeat a row's own button (P19).
 
 app: `lpa-studio-core/…/board_card/status_corner.rs`, `primary_action.rs`
 
@@ -146,7 +151,11 @@ bad:  Update needs your OK            # spike r1: "so ai-slop"
 bad:  Its files are gone              # card 10-14
 bad:  Needs your answer               # shipped: answer to what?
 bad:  The board isn't online.         # shipped: say "Offline"
+bad:  Format 3 — too old for this Studio    # sweep 10-17: "Format too old (3)"
+bad:  Changes — 3 unsaved                   # sweep 10-17: "Changes: 3 unsaved"
 ```
+
+P6 governs labels. P20 says where a sentence is allowed, and how it reads.
 
 ## P7. no dead ends
 
@@ -238,6 +247,11 @@ bad:  fw-esp32c6 c688c990b           # shipped: a build label
 bad:  Pre-hello firmware             # shipped: our protocol history
 bad:  Updating · 1 of 2 · 42%        # shipped: core, then engine; one number will do
 bad:  Files waiting                  # shipped: the mechanism, not the state
+bad:  Live preview on the GPU tier                       # sweep 10-17: "on the GPU"
+bad:  Install a project from a pasted JSON envelope.     # sweep 10-17: "Add a project you copied as JSON."
+bad:  Already live in this session — Save banks v13 to your library.   # sweep 10-17
+bad:  Revert on /orbit could not reach the server overlay: …           # sweep 10-17: "Couldn't revert /orbit: …"
+bad:  no writer — authored default (R6)                  # sweep 10-17: a plan id on screen
 ```
 
 ## P12. the button explains
@@ -326,6 +340,90 @@ bad:  12 s ago · last frame · 12 s ago · last heard 12 s ago · quiet — las
 app: `lpa-studio-core/src/core/data_kinds/` (ages, byte sizes, percents,
 dates, firmware versions) · story: `core/data-kinds/every-kind` (every kind,
 every case)
+
+## P18. the main surface says what matters
+
+"The primary surface should always give the most important information."
+The top of a card, where the picture is, always shows the most important
+thing about the board. It is never black. A problem that stops the board
+being used is said there, not in a quiet aside further down.
+
+```text
+do:   ┌──────────────────────────────────────────────┐
+      │ This board is running old firmware.          │   ← the picture's place
+      │ Update the firmware to connect and edit.     │
+      ├────────────────────────────┬─────────────────┤
+      │ XIAO ESP32-C6              │ Update firmware │
+      └────────────────────────────┴─────────────────┘
+
+bad:  ┌──────────────────────────────────────────────┐   # card 10-17: a black picture,
+      │ (black)                                      │   #   no button up top, and the
+      ├──────────────────────────────────────────────┤   #   reason a quiet aside in a row
+      │ XIAO ESP32-C6                                │
+      │ ▲ Firmware  v2026.07.02   too old            │
+      └──────────────────────────────────────────────┘
+```
+
+## P19. the primary is the likely next step
+
+"The primary action slot should hold the most likely action a user wants to
+take." The button beside the name holds it. It may repeat a row's own
+button: the one exception to P2.
+
+```text
+do:   │ XIAO ESP32-C6                  │ Update firmware │   # the likely next step, up top,
+      │ ▲ Firmware  v2026.07.02                 │ Update │   #   and still in its own row
+
+bad:  │ XIAO ESP32-C6                                    │   # card 10-17: no button up top;
+      │ ▲ Firmware  v2026.07.02                 │ Update │   #   the fix a red Update in a row
+```
+
+app: `lpa-studio-core/…/board_card/primary_action.rs`
+
+## P20. voice by role
+
+Every line has a role, and the role sets its voice.
+
+- **Labels** (row states, chips, headings, statuses): P6. The words other
+  software uses: "Connection failed", "Not connected", "Update available".
+  No pronouns, no chat, no dashes or semicolons.
+- **Sentences**, only where a surface explains (an empty state, a lede under
+  a heading, a dialog's body, the card's top): one or two short, complete
+  sentences. Say what is going on, then what it means for you. Keep the
+  articles and verbs.
+- **Buttons**: a verb and its object (P12).
+
+When a button sits under the sentences, the second sentence is the button
+said aloud: its verb and object, then what it gets you.
+
+Tense: plain speech uses "is …ing" for a state and "will" for a
+consequence. The simple present narrating one ("keeps playing", "takes it
+over", "the project stays") is an AI tell. "Keep" + -ing is only for
+repetition ("keeps crashing").
+
+The AI tells, each one a bad below: headline-ese, our mechanism instead of
+their situation, unasked reassurance, lines that sound meaningful and say
+nothing, marketing clichés.
+
+```text
+do:   This board is running old firmware. Update the firmware to connect and edit.
+do:   Open one to try it, then save it to keep your own copy.
+do:   Something else is driving this channel. Turning the control will take it over.
+
+bad:  Firmware too old for this Studio / its project keeps playing   # director, 10-17
+bad:  This board is running old firmware. An update is required to connect and edit.
+                                          # spike r1: says the button indirectly
+bad:  Connecting here takes it over       # director, 10-17: present for a consequence
+bad:  Real pieces, wired the way they were built. Open one here, then make it yours.
+                                          # home, 10-17
+bad:  Play freely — nothing saves until you keep a copy.          # sweep 10-17: chat, then a dash
+bad:  Saved to the running project, but not yet to your library — will retry on the next save
+                                          # sweep 10-17: "will retry" with no subject
+bad:  Could not add that address — nobody was invited.            # sweep 10-17: unasked reassurance
+bad:  Fork — make it yours                # sweep 10-17: a dash in a button, and says nothing
+bad:  Something else drives this channel; turning the control takes it over.
+                                          # sweep 10-17: present for a consequence
+```
 
 ---
 

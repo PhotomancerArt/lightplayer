@@ -99,6 +99,7 @@ use std::sync::{Arc, Mutex};
 use lp_emu_esp_common::SocBus;
 
 use crate::flash::{BLOCK_LEN, FlashHandle};
+use crate::flash_timing::FlashClocks;
 use crate::memmap;
 
 /// Entries in the table. `Cache_MMU_Init` clears exactly this many.
@@ -552,6 +553,26 @@ pub const LINE_FILL_CYCLES: u32 = 338;
 /// report as the capture that would settle it.
 pub const APB_ACCESS_CYCLES: u32 = 9;
 
+/// `t4`: what a load or store to SPI1's registers costs **beyond** the
+/// APB's [`APB_ACCESS_CYCLES`] — the flash controller's register block is
+/// reached across its own (MSPI) clock domain.
+///
+/// FITTED, not measured by a kernel: the mount of the tree store's `pr1`
+/// firmware (cache off, every read a ROM call) on six CX1 images ran
+/// 13–22 % slower on silicon than on `t4` without this term, and the gap
+/// over the empty store's mount divided by the extra SPI1 register accesses
+/// each mount made was 23–30 cycles an access (0.14–0.19 µs) — steadier than
+/// the same gap per transfer (1.9–2.8 µs). The least-squares fit through the
+/// five is 29. It is validated on firmware it was not fitted to (`pr1n`,
+/// and the save/load and first-light records:
+/// `docs/reports/2026-10-17-c6-flash-timing-emulator.md`). A kernel that
+/// polls an SPI1 register in a loop (`cycle-probe`'s `mmio_poll` at SPI1)
+/// would turn this into a measurement.
+pub const MSPI_REG_EXTRA_CYCLES: u32 = 29;
+
+/// SPI1's register block, the window [`MSPI_REG_EXTRA_CYCLES`] is charged on.
+const SPI1_REGS: core::ops::Range<u32> = 0x6000_3000..0x6000_3400;
+
 /// Invalid tag. Line indices are `addr >> 5` over a 32-bit space, so
 /// `u32::MAX` is only reachable at `0xffff_ffe0`, which is not memory on
 /// this part.
@@ -590,6 +611,20 @@ pub struct CacheCost {
     fills: u64,
     hits: u64,
     apb: u64,
+    /// `t4` only ([`with_flash`](Self::with_flash)): the flash interface
+    /// the fill cost is derived from, and the invalidates that drop lines.
+    /// `None` is `t3`: a fill is the constant [`LINE_FILL_CYCLES`] and a
+    /// line, once filled, is only ever evicted.
+    flash: Option<FlashLink>,
+}
+
+/// `t4`'s link from the cost model to the flash interface.
+struct FlashLink {
+    clocks: Arc<FlashClocks>,
+    /// The [`FlashClocks::generation`] [`fill`](Self::fill) was computed at.
+    generation: u32,
+    /// What a fill costs at that generation.
+    fill: u32,
 }
 
 impl Default for CacheCost {
@@ -606,6 +641,87 @@ impl CacheCost {
             fills: 0,
             hits: 0,
             apb: 0,
+            flash: None,
+        }
+    }
+
+    /// The `t4` model: `t3`'s cache, with a fill costing what SPI0's
+    /// registers say a 32-byte read costs ([`FlashClocks::line_fill_cycles`];
+    /// 338 cycles at the shipped DIO/80 MHz, so equal to `t3` there), and
+    /// with EXTMEM's range invalidates dropping the lines they name, so the
+    /// read after one pays its fills as on silicon.
+    pub fn with_flash(clocks: Arc<FlashClocks>) -> Self {
+        Self {
+            flash: Some(FlashLink {
+                clocks,
+                generation: u32::MAX,
+                fill: LINE_FILL_CYCLES,
+            }),
+            ..Self::new()
+        }
+    }
+
+    /// What a load or store on the high peripheral bus costs: the APB's
+    /// wait states, and at `t4` SPI1's own on top.
+    #[inline]
+    fn apb_cycles(&self, addr: u32) -> u32 {
+        if self.flash.is_some() && SPI1_REGS.contains(&addr) {
+            APB_ACCESS_CYCLES + MSPI_REG_EXTRA_CYCLES
+        } else {
+            APB_ACCESS_CYCLES
+        }
+    }
+
+    /// What a fill costs now.
+    #[inline]
+    fn fill_cycles(&mut self) -> u32 {
+        match self.flash.as_mut() {
+            None => LINE_FILL_CYCLES,
+            Some(link) => {
+                let generation = link.clocks.generation();
+                if generation != link.generation {
+                    link.fill = link.clocks.line_fill_cycles();
+                    link.generation = generation;
+                }
+                link.fill
+            }
+        }
+    }
+
+    /// Apply the invalidates EXTMEM posted since the last access, if any.
+    #[inline]
+    fn take_invalidates(&mut self) {
+        let Some(link) = self.flash.as_ref() else {
+            return;
+        };
+        if !link.clocks.invalidate_pending() {
+            return;
+        }
+        for (vaddr, size) in link.clocks.take_invalidates() {
+            self.invalidate(vaddr, size);
+        }
+    }
+
+    /// Drop every resident line holding a byte of `[vaddr, vaddr + size)`.
+    pub fn invalidate(&mut self, vaddr: u32, size: u32) {
+        let shift = LINE_BYTES.trailing_zeros();
+        let first = vaddr >> shift;
+        let last = vaddr.saturating_add(size.max(1) - 1) >> shift;
+        if (last - first) as usize >= SETS * WAYS {
+            for tag in self.tags.iter_mut() {
+                if *tag != NO_LINE && (first..=last).contains(tag) {
+                    *tag = NO_LINE;
+                }
+            }
+            return;
+        }
+        for line in first..=last {
+            let base = (line as usize & (SETS - 1)) * WAYS;
+            for tag in &mut self.tags[base..base + WAYS] {
+                if *tag == line {
+                    *tag = NO_LINE;
+                }
+            }
         }
     }
 
@@ -669,7 +785,7 @@ impl CacheCost {
         order = promote(order, victim as u8);
         self.order[set] = order;
         self.fills += 1;
-        LINE_FILL_CYCLES
+        self.fill_cycles()
     }
 
     /// The lines an access of `width` bytes at `addr` touches. A misaligned
@@ -677,6 +793,7 @@ impl CacheCost {
     /// does — the C6 core performs misaligned data accesses in hardware.
     #[inline]
     fn span(&mut self, addr: u32, width: u8) -> u32 {
+        self.take_invalidates();
         let first = addr >> LINE_BYTES.trailing_zeros();
         let last = addr.wrapping_add(u32::from(width) - 1) >> LINE_BYTES.trailing_zeros();
         let mut cycles = self.touch_line(first);
@@ -717,6 +834,7 @@ impl lp_emu_core::MemoryCost for CacheCost {
         if !Self::cached(addr) {
             return 0;
         }
+        self.take_invalidates();
         self.touch_line(addr >> LINE_BYTES.trailing_zeros())
     }
 
@@ -727,7 +845,7 @@ impl lp_emu_core::MemoryCost for CacheCost {
         }
         if Self::peripheral(addr) {
             self.apb += 1;
-            return APB_ACCESS_CYCLES;
+            return self.apb_cycles(addr);
         }
         0
     }
@@ -742,7 +860,7 @@ impl lp_emu_core::MemoryCost for CacheCost {
         }
         if Self::peripheral(addr) {
             self.apb += 1;
-            return APB_ACCESS_CYCLES;
+            return self.apb_cycles(addr);
         }
         0
     }
@@ -853,6 +971,50 @@ mod tests {
         assert_eq!(c.fills(), 2);
         // And an aligned one in the same pair is free afterwards.
         assert_eq!(c.load(memmap::FLASH_CACHE_BASE, 4), 0);
+    }
+
+    #[test]
+    fn t4_fills_cost_what_spi0_says_and_equal_t3_at_the_shipped_config() {
+        use crate::flash_timing::Spi0Word;
+        let clocks = Arc::new(FlashClocks::new());
+        let mut c = CacheCost::with_flash(clocks.clone());
+        let base = memmap::FLASH_CACHE_BASE + 0x1000;
+        // Reset registers: the crystal, `clock` ÷ 4, one line: slow.
+        let cold = c.fetch(base);
+        assert!(cold > LINE_FILL_CYCLES, "{cold}");
+        // What the IDF bootloader leaves: DIO, 80 MHz SCK.
+        clocks.set_pcr(0x500, 0x2801_0200);
+        for (word, value) in [
+            (Spi0Word::Ctrl, 0x00ac_200c),
+            (Spi0Word::User, 0x7000_00c0),
+            (Spi0Word::User1, 0x6c00_0041),
+            (Spi0Word::User2, 0x7000_00bb),
+            (Spi0Word::Clock, 0x8000_0000),
+        ] {
+            clocks.set_spi0(word, value);
+        }
+        assert_eq!(c.fetch(base + LINE_BYTES), LINE_FILL_CYCLES);
+        assert_eq!(c.fetch(base), 0, "still resident");
+    }
+
+    #[test]
+    fn t4_drops_the_lines_a_range_invalidate_names() {
+        let clocks = Arc::new(FlashClocks::new());
+        let mut c = CacheCost::with_flash(clocks.clone());
+        let a = memmap::FLASH_CACHE_BASE + 0x75_0000;
+        c.load(a, 4);
+        c.load(a + LINE_BYTES, 4);
+        c.load(a + 4 * LINE_BYTES, 4);
+        clocks.post_invalidate(a + 8, LINE_BYTES);
+        assert!(c.load(a, 4) > 0, "the first line was dropped");
+        assert!(
+            c.load(a + LINE_BYTES, 4) > 0,
+            "so was the second it reaches"
+        );
+        assert_eq!(c.load(a + 4 * LINE_BYTES, 4), 0, "the third was not named");
+        // A range bigger than the cache scans the tags instead.
+        clocks.post_invalidate(memmap::FLASH_CACHE_BASE, 0x80_0000);
+        assert!(c.load(a + 4 * LINE_BYTES, 4) > 0);
     }
 
     #[test]

@@ -94,9 +94,7 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
         // The staged removal row: the entry's label is the removed node's
         // name and its path is the attachment site; the staged file
         // deletions list separately as their own file rows.
-        (UiPendingEditKind::NodeRemoved, _) => {
-            "node removed \u{2014} staged until save".to_string()
-        }
+        (UiPendingEditKind::NodeRemoved, _) => "node removed on save".to_string(),
     }
 }
 
@@ -107,14 +105,11 @@ fn kind_display(kind: &UiPendingEditKind, old_value: Option<&str>) -> String {
 /// overrides never reach this list (D7); their verb is Clear, on the row.
 fn revert_label(edit: &UiPendingEdit) -> (&'static str, &'static str) {
     if matches!(edit.kind, UiPendingEditKind::NodeRemoved) {
-        return (
-            "Restore",
-            "Restore this node and cancel its staged file deletions",
-        );
+        return ("Restore", "Restore this node and keep its files");
     }
     match edit.phase {
-        UiPendingEditPhase::Persisted => ("Revert", "Discard this pending edit"),
-        UiPendingEditPhase::Failed { .. } => ("Revert", "Discard this failed edit"),
+        UiPendingEditPhase::Persisted => ("Revert", "Discard this change"),
+        UiPendingEditPhase::Failed { .. } => ("Revert", "Discard this failed change"),
     }
 }
 
@@ -307,13 +302,13 @@ mod tests {
         // The staged removal row (label = removed node, path = the site).
         assert_eq!(
             kind_display(&UiPendingEditKind::NodeRemoved, None),
-            "node removed \u{2014} staged until save"
+            "node removed on save"
         );
         // Old values never leak onto the removal row (the site's base JSON
         // would be noise; the label already names the node).
         assert_eq!(
             kind_display(&UiPendingEditKind::NodeRemoved, Some("{\"node\":1}")),
-            "node removed \u{2014} staged until save"
+            "node removed on save"
         );
         // Staged file deletions are file fates…
         assert_eq!(
@@ -343,7 +338,7 @@ mod tests {
         removal.kind = UiPendingEditKind::NodeRemoved;
         let (label, title) = revert_label(&removal);
         assert_eq!(label, "Restore");
-        assert!(title.contains("staged file deletions"));
+        assert!(title.contains("keep its files"));
     }
 
     #[test]

@@ -356,7 +356,7 @@ fn CycleTabBody(
                 max: "{MAX_STEP_SECONDS}",
                 step: "0.5",
                 value: "{step_seconds}",
-                title: "Seconds each palette holds — drag to 0 to hold the current one",
+                title: "Seconds on each palette. Drag to 0 to stay on the current one.",
                 onpointerdown: move |_| step_hold.press(),
                 onpointerup: move |_| step_hold.release(reported_step),
                 onpointercancel: move |_| step_hold.release(reported_step),
@@ -396,7 +396,7 @@ fn CycleTabBody(
         div { class: "tw:border-t tw:border-border-muted",
             if full {
                 p { class: "tw:m-0 tw:px-3 tw:py-1.5 tw:text-[11px] tw:text-status-attention-foreground",
-                    "Full set — {MAX_CYCLE_SET} palettes is the most a cycle holds. Remove one to add another."
+                    "A cycle holds up to {MAX_CYCLE_SET} palettes. Remove one to add another."
                 }
             }
             div { class: PALETTE_LIST_CLASS,

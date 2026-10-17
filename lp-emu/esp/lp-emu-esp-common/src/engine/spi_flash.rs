@@ -85,6 +85,7 @@ use std::sync::{Arc, Mutex};
 use super::flash_cut::{self, CutGate, FlashCut, FlashCutReport, FlashCutter, FlashOpKind};
 use super::flash_op_census::FlashOpCensus;
 use super::flash_weak_bits::FlashWeakBits;
+use super::nor_timing::{NorTiming, ns_to_cycles};
 use crate::periph::{BusCx, MachineRequest};
 
 /// A 4 KiB flash sector — the erase granule, and littlefs's block size.
@@ -718,6 +719,11 @@ pub mod op {
     pub const PAGE_PROGRAM: u8 = 0x02;
     pub const READ_STATUS: u8 = 0x05;
     pub const READ_STATUS_HIGH: u8 = 0x35;
+    /// Write the status register through the generic engine: one byte is
+    /// the low half, two are both — what an app sets QE with.
+    pub const WRITE_STATUS: u8 = 0x01;
+    /// Write the status register's high half (SR2) alone.
+    pub const WRITE_STATUS_HIGH: u8 = 0x31;
     pub const WRITE_ENABLE: u8 = 0x06;
     pub const WRITE_DISABLE: u8 = 0x04;
     pub const RDID: u8 = 0x9f;
@@ -734,7 +740,9 @@ pub mod op {
 /// register, not the SoC's**: WIP and WEL are the SPI NOR command set's own,
 /// which is why they are here and not in a view.
 ///
-/// Write-in-progress. Always 0 here: operations complete inside the write.
+/// Write-in-progress. 0 unless the engine has a [`NorTiming`]: without one
+/// every operation completes inside the write; with one, a program or an
+/// erase holds it set for the part's busy time ([`FlashEngine::set_timing`]).
 pub const SR_WIP: u16 = 1 << 0;
 /// Write-enable latch. A ROM's `_SPI_write_enable` loops until this is set.
 pub const SR_WEL: u16 = 1 << 1;
@@ -803,8 +811,25 @@ pub struct FlashEngine {
     /// The chip's status register. Bits above WEL are whatever a status
     /// write last put there — the part remembers block-protect bits and a
     /// ROM's `_esp_rom_spiflash_unlock` writes them, so a model that dropped
-    /// them would make the unlock unobservable.
+    /// them would make the unlock unobservable. WIP is never stored here: it
+    /// is [`busy_until`](Self::busy_until) compared with the clock.
     status: u16,
+    /// The part's busy times, in the guest's clock; `None` (the default)
+    /// completes every command inside the write.
+    timing: Option<EngineTiming>,
+    /// The guest cycle the part's current program or erase finishes at; WIP
+    /// reads set before it. 0 when nothing is in progress.
+    busy_until: u64,
+    /// Whether a command that arrived while the part was busy has been
+    /// reported yet (once a run: a guest that does it does it in a loop).
+    busy_command_noted: bool,
+}
+
+/// [`NorTiming`] in the guest's clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EngineTiming {
+    part: NorTiming,
+    cpu_hz: u64,
 }
 
 impl FlashEngine {
@@ -813,11 +838,50 @@ impl FlashEngine {
     /// 2 the part's own ([`FlashPart::status2`]).
     pub fn new(flash: FlashHandle) -> Self {
         let status = u16::from(flash.lock().unwrap().part.status2) << 8;
-        Self { flash, status }
+        Self {
+            flash,
+            status,
+            timing: None,
+            busy_until: 0,
+            busy_command_noted: false,
+        }
     }
 
+    /// Give the part its busy times ([`nor_timing`](super::nor_timing)), in
+    /// a guest clock of `cpu_hz`; `None` takes them away again, and every
+    /// command completes inside the write.
+    pub fn set_timing(&mut self, part: Option<NorTiming>, cpu_hz: u64) {
+        self.timing = part.map(|part| EngineTiming { part, cpu_hz });
+        if self.timing.is_none() {
+            self.busy_until = 0;
+        }
+    }
+
+    pub fn timing(&self) -> Option<NorTiming> {
+        self.timing.map(|t| t.part)
+    }
+
+    /// The status register's low half as a status write last left it, plus
+    /// WEL. WIP is not in it: see [`busy_at`](Self::busy_at).
     pub fn status(&self) -> u16 {
         self.status
+    }
+
+    /// The guest cycle the current program or erase finishes at (0: none).
+    pub fn busy_until(&self) -> u64 {
+        self.busy_until
+    }
+
+    /// Is a program or an erase still in progress at `now`?
+    pub fn busy_at(&self, now: u64) -> bool {
+        now < self.busy_until
+    }
+
+    /// The part starts `ns` of busy time at guest cycle `at`.
+    fn start_busy(&mut self, at: u64, ns: u64, cpu_hz: u64) {
+        if ns > 0 {
+            self.busy_until = at + ns_to_cycles(ns, cpu_hz);
+        }
     }
 
     pub fn flash(&self) -> &FlashHandle {
@@ -859,6 +923,56 @@ impl FlashEngine {
         name: &str,
         cx: &mut BusCx<'_>,
     ) -> FlashOutcome {
+        self.execute_timed(op, buffer, name, cx, 0)
+    }
+
+    /// [`execute`](Self::execute), for a view that also bills the command's
+    /// own transfer: `wire` is how many guest cycles the command, address
+    /// and data take on the bus, so a program or an erase starts its busy
+    /// time when the part has the whole command (`cx.now + wire`), not when
+    /// the controller was triggered. Without a [`NorTiming`] `wire` changes
+    /// nothing.
+    ///
+    /// With one, a command that writes the array (a program, an erase, a
+    /// status write) while the part is still busy is **ignored**, as a NOR
+    /// part ignores everything but a status read until WIP drops, and said
+    /// once in the trace; any other command is served, and said, because a
+    /// guest that reads mid-erase is a bug the trace should show rather than
+    /// hide.
+    pub fn execute_timed(
+        &mut self,
+        op: FlashOp,
+        buffer: &mut [u8; BUFFER_LEN],
+        name: &str,
+        cx: &mut BusCx<'_>,
+        wire: u64,
+    ) -> FlashOutcome {
+        if self.timing.is_some() && self.busy_at(cx.now) && !matches!(op, FlashOp::ReadStatus) {
+            let writes = matches!(
+                op,
+                FlashOp::Program { .. }
+                    | FlashOp::Erase { .. }
+                    | FlashOp::EraseChip
+                    | FlashOp::WriteStatus(_)
+            );
+            if !self.busy_command_noted {
+                self.busy_command_noted = true;
+                cx.trace.note(&format!(
+                    "cyc={} pc={:#010x} {name} {op:?} while the part is busy until cyc={}; {}",
+                    cx.now,
+                    cx.pc,
+                    self.busy_until,
+                    if writes {
+                        "the part ignores it"
+                    } else {
+                        "served, but silicon would not answer it"
+                    }
+                ));
+            }
+            if writes {
+                return FlashOutcome::Nothing;
+            }
+        }
         match op {
             FlashOp::ReadId => {
                 let id = self.flash.lock().unwrap().jedec_id();
@@ -866,12 +980,22 @@ impl FlashEngine {
             }
             FlashOp::ReadStatus => {
                 self.flash.lock().unwrap().status_reads += 1;
-                FlashOutcome::Status(self.status)
+                // The part shifts the status out at the end of the command.
+                let wip = if self.busy_at(cx.now + wire) {
+                    SR_WIP
+                } else {
+                    0
+                };
+                FlashOutcome::Status(self.status | wip)
             }
             FlashOp::WriteStatus(value) => {
                 self.flash.lock().unwrap().status_written.push(value);
+                let enabled = self.status & SR_WEL != 0;
                 self.status = value & !SR_WIP;
                 self.status &= !SR_WEL;
+                if enabled && let Some(t) = self.timing {
+                    self.start_busy(cx.now + wire, t.part.write_status_ns, t.cpu_hz);
+                }
                 FlashOutcome::Nothing
             }
             FlashOp::WriteEnable => {
@@ -884,28 +1008,39 @@ impl FlashEngine {
                 FlashOutcome::Nothing
             }
             FlashOp::Erase { addr, len } => {
-                self.erase(addr, len, name, cx);
+                if self.erase(addr, len, name, cx)
+                    && let Some(t) = self.timing
+                {
+                    self.start_busy(cx.now + wire, t.part.erase_ns(len), t.cpu_hz);
+                }
                 FlashOutcome::Nothing
             }
             FlashOp::EraseChip => {
                 // Never counted and never cut; refused, like everything else,
                 // once a cut has taken the power.
-                let refused = {
+                let (refused, chip) = {
                     let mut flash = self.flash.lock().unwrap();
                     let refused = flash.cutter.refuse_when_off();
                     if !refused {
                         flash.erase_chip();
                     }
-                    refused
+                    (refused, flash.len())
                 };
                 if refused {
                     note_refused(cx, name, "chip erase", 0);
+                } else if let Some(t) = self.timing {
+                    self.start_busy(cx.now + wire, t.part.erase_ns(chip), t.cpu_hz);
                 }
                 self.status &= !SR_WEL;
                 FlashOutcome::Nothing
             }
             FlashOp::Program { addr, len } => {
-                self.program(addr, len, buffer, name, cx);
+                if self.program(addr, len, buffer, name, cx)
+                    && let Some(t) = self.timing
+                {
+                    let len = len.min(BUFFER_LEN as u32);
+                    self.start_busy(cx.now + wire, t.part.program_ns(len), t.cpu_hz);
+                }
                 FlashOutcome::Nothing
             }
             FlashOp::Read { addr, len } => {
@@ -947,6 +1082,8 @@ impl FlashEngine {
         }
     }
 
+    /// Returns whether the part ran the program (and so is busy with it): a
+    /// command it ignored, refused or was cut in the middle of is not.
     fn program(
         &mut self,
         addr: u32,
@@ -954,14 +1091,14 @@ impl FlashEngine {
         buffer: &[u8; BUFFER_LEN],
         name: &str,
         cx: &mut BusCx<'_>,
-    ) {
+    ) -> bool {
         if self.status & SR_WEL == 0 {
             cx.trace.note(&format!(
                 "cyc={} pc={:#010x} {name} page program at {addr:#010x} with WEL clear; \
                  the part would ignore it, and so does this",
                 cx.now, cx.pc
             ));
-            return;
+            return false;
         }
         let len = (len as usize).min(BUFFER_LEN);
         // A page program may not cross a 256-byte page: the part wraps
@@ -984,9 +1121,10 @@ impl FlashEngine {
         } else {
             CutGate::Run
         };
-        match gate {
+        let ran = match gate {
             CutGate::Run => {
-                if !flash.program(addr, data) {
+                let ran = flash.program(addr, data);
+                if !ran {
                     drop(flash);
                     cx.trace.note(&format!(
                         "cyc={} pc={:#010x} {name} page program of {len} bytes at {addr:#010x} \
@@ -994,27 +1132,32 @@ impl FlashEngine {
                         cx.now, cx.pc
                     ));
                 }
+                ran
             }
             CutGate::Refused => {
                 drop(flash);
                 note_refused(cx, name, "page program", addr);
+                false
             }
             CutGate::Cut(plan) => {
                 let report = flash.tear_program(&plan, addr, data, cx.now);
                 drop(flash);
                 power_cut(cx, report);
+                false
             }
-        }
+        };
         self.status &= !SR_WEL;
+        ran
     }
 
-    fn erase(&mut self, addr: u32, len: u32, name: &str, cx: &mut BusCx<'_>) {
+    /// Returns whether the part ran the erase, as [`program`](Self::program).
+    fn erase(&mut self, addr: u32, len: u32, name: &str, cx: &mut BusCx<'_>) -> bool {
         if self.status & SR_WEL == 0 {
             cx.trace.note(&format!(
                 "cyc={} pc={:#010x} {name} erase at {addr:#010x} with WEL clear; ignored",
                 cx.now, cx.pc
             ));
-            return;
+            return false;
         }
         // The part erases the granule the address falls in.
         let aligned = addr & !(len - 1);
@@ -1032,9 +1175,10 @@ impl FlashEngine {
         } else {
             CutGate::Run
         };
-        match gate {
+        let ran = match gate {
             CutGate::Run => {
-                if !flash.erase(aligned, len) {
+                let ran = flash.erase(aligned, len);
+                if !ran {
                     drop(flash);
                     cx.trace.note(&format!(
                         "cyc={} pc={:#010x} {name} erase of {len} bytes at {aligned:#010x} \
@@ -1042,18 +1186,22 @@ impl FlashEngine {
                         cx.now, cx.pc
                     ));
                 }
+                ran
             }
             CutGate::Refused => {
                 drop(flash);
                 note_refused(cx, name, "erase", aligned);
+                false
             }
             CutGate::Cut(plan) => {
                 let report = flash.tear_erase(&plan, aligned, len, cx.now);
                 drop(flash);
                 power_cut(cx, report);
+                false
             }
-        }
+        };
         self.status &= !SR_WEL;
+        ran
     }
 
     /// The status latch, little-endian. The view writes its own register
@@ -1061,6 +1209,24 @@ impl FlashEngine {
     /// already pinned.
     pub fn save_status(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.status.to_le_bytes());
+    }
+
+    /// The busy deadline, little-endian — a view with timing on appends it
+    /// to its snapshot; one without never writes it, so a snapshot taken
+    /// without timing is byte-for-byte what it always was.
+    pub fn save_busy(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.busy_until.to_le_bytes());
+    }
+
+    /// Parse a [`save_busy`](Self::save_busy) chunk.
+    pub fn load_busy(bytes: &[u8]) -> Option<(u64, usize)> {
+        let raw: [u8; 8] = bytes.get(..8)?.try_into().ok()?;
+        Some((u64::from_le_bytes(raw), 8))
+    }
+
+    /// Apply a parsed busy deadline.
+    pub fn restore_busy(&mut self, busy_until: u64) {
+        self.busy_until = busy_until;
     }
 
     /// Parse a [`save_status`](Self::save_status) chunk and say how many
@@ -1830,5 +1996,111 @@ mod tests {
                 (1, FlashOpKind::Program, RANGE.start + 64, 32),
             ]
         );
+    }
+
+    // ---- busy time (`NorTiming`) ------------------------------------------
+
+    #[test]
+    fn a_timed_erase_holds_wip_for_the_parts_busy_time_after_its_wire() {
+        let (mut sb, mut engine, flash) = timed_rig(SECTOR_LEN * 2);
+        let mut buffer = [0u8; BUFFER_LEN];
+        sb.now = 1_000;
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute_timed(
+            FlashOp::Erase {
+                addr: 0,
+                len: SECTOR_LEN,
+            },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+            64,
+        );
+        // The cells are erased at once (no poll can see them earlier); what
+        // takes the time is WIP.
+        assert_eq!(flash.lock().unwrap().sector_erases, 1);
+        let done = 1_000 + 64 + 21 * 160_000;
+        assert_eq!(engine.busy_until(), done);
+        sb.now = done - 1;
+        assert_eq!(timed_status(&mut sb, &mut engine) & SR_WIP, SR_WIP);
+        sb.now = done;
+        assert_eq!(timed_status(&mut sb, &mut engine) & SR_WIP, 0);
+        assert_eq!(engine.status() & SR_WIP, 0, "WIP is never stored");
+    }
+
+    #[test]
+    fn a_timed_program_is_billed_per_rom_unit() {
+        let (mut sb, mut engine, _flash) = timed_rig(SECTOR_LEN);
+        program(&mut sb, &mut engine, 0, &[0u8; 32]);
+        assert_eq!(
+            engine.busy_until(),
+            ns_to_cycles(NorTiming::CX1.program_ns(32), 160_000_000)
+        );
+    }
+
+    #[test]
+    fn the_part_ignores_an_array_write_while_it_is_busy_and_serves_a_status_read() {
+        let (mut sb, mut engine, flash) = timed_rig(SECTOR_LEN * 2);
+        let mut buffer = [0u8; BUFFER_LEN];
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(
+            FlashOp::Erase {
+                addr: 0,
+                len: SECTOR_LEN,
+            },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
+        sb.now = 10;
+        engine.execute(FlashOp::WriteEnable, &mut buffer, "FLASH", &mut sb.cx());
+        engine.execute(
+            FlashOp::Erase {
+                addr: SECTOR_LEN,
+                len: SECTOR_LEN,
+            },
+            &mut buffer,
+            "FLASH",
+            &mut sb.cx(),
+        );
+        assert_eq!(flash.lock().unwrap().sector_erases, 1, "ignored while busy");
+        assert_eq!(timed_status(&mut sb, &mut engine) & SR_WIP, SR_WIP);
+    }
+
+    #[test]
+    fn without_timing_nothing_is_ever_busy() {
+        let (mut sb, mut engine, _flash) = rig(SECTOR_LEN);
+        program(&mut sb, &mut engine, 0, &[0u8; 32]);
+        assert_eq!(engine.busy_until(), 0);
+        assert_eq!(timed_status(&mut sb, &mut engine) & SR_WIP, 0);
+    }
+
+    #[test]
+    fn the_busy_deadline_round_trips() {
+        let (mut sb, mut engine, _flash) = timed_rig(SECTOR_LEN);
+        program(&mut sb, &mut engine, 0, &[0u8; 32]);
+        let mut out = Vec::new();
+        engine.save_busy(&mut out);
+        let (busy, n) = FlashEngine::load_busy(&out).unwrap();
+        assert_eq!((busy, n), (engine.busy_until(), 8));
+        let (_, mut other, _) = timed_rig(SECTOR_LEN);
+        other.restore_busy(busy);
+        assert_eq!(other.busy_until(), engine.busy_until());
+        assert!(FlashEngine::load_busy(&out[..7]).is_none());
+    }
+
+    /// A part with CX1's busy times on a 160 MHz guest clock.
+    fn timed_rig(len: u32) -> (Sandbox, FlashEngine, FlashHandle) {
+        let (sb, mut engine, flash) = rig(len);
+        engine.set_timing(Some(NorTiming::CX1), 160_000_000);
+        (sb, engine, flash)
+    }
+
+    fn timed_status(sb: &mut Sandbox, engine: &mut FlashEngine) -> u16 {
+        let mut buffer = [0u8; BUFFER_LEN];
+        match engine.execute(FlashOp::ReadStatus, &mut buffer, "FLASH", &mut sb.cx()) {
+            FlashOutcome::Status(s) => s,
+            other => panic!("{other:?}"),
+        }
     }
 }

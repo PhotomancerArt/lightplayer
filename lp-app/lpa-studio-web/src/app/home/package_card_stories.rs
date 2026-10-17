@@ -59,7 +59,7 @@ pub(crate) fn blocked_card_menu() -> Element {
     let mut blocked = pattern_card(Vec::new());
     blocked.project_kind = "General".to_string();
     blocked.health = PackageHealth::Blocked {
-        headline: "Format 3 — too old for this Studio".to_string(),
+        headline: "Format too old (3)".to_string(),
         remedy: "Export a copy or delete it.".to_string(),
     };
     card(blocked)

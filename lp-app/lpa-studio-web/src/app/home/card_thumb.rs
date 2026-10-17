@@ -197,11 +197,11 @@ fn thumb_badge_text(badge: &ThumbPreviewBadge) -> &'static str {
 /// Badge tooltip: the fallback / failure reason when there is one.
 fn thumb_badge_title(badge: &ThumbPreviewBadge) -> String {
     match badge {
-        ThumbPreviewBadge::Gpu => "Live preview on the GPU tier".to_string(),
-        ThumbPreviewBadge::Cpu { reason: None } => "Live preview on the CPU tier".to_string(),
+        ThumbPreviewBadge::Gpu => "Live preview on the GPU".to_string(),
+        ThumbPreviewBadge::Cpu { reason: None } => "Live preview on the CPU".to_string(),
         ThumbPreviewBadge::Cpu {
             reason: Some(reason),
-        } => format!("CPU tier (GPU unavailable: {reason})"),
+        } => format!("Live preview on the CPU. GPU unavailable: {reason}"),
         ThumbPreviewBadge::Error { reason } => format!("Preview failed: {reason}"),
     }
 }

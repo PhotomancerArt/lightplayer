@@ -24,6 +24,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
+use crate::flash_timing::FlashClocks;
+
 /// `PCR.uart(0).clk_conf` / `uart(1).clk_conf` (`regs::PCR`: `+0x004`,
 /// `+0x010`).
 pub const UART0_CLK_CONF: u32 = 0x004;
@@ -107,12 +109,39 @@ pub struct Pcr {
     regs: RegFile,
     lines: UartClockLines,
     rmt: RmtClockLine,
+    /// `t4`: the flash interface's clock cell ([`crate::flash_timing`]),
+    /// fed `mspi_clk_conf` and `sysclk_conf`. `None` at every other grade.
+    flash: Option<Arc<FlashClocks>>,
 }
+
+/// `PCR.mspi_clk_conf` (`+0x01c`): the MSPI module clock's dividers.
+pub const MSPI_CLK_CONF: u32 = 0x01c;
+/// `PCR.sysclk_conf` (`+0x110`): `soc_clk_sel` (bits 17:16) is the root the
+/// MSPI clock divides.
+pub const SYSCLK_CONF: u32 = 0x110;
 
 impl Pcr {
     pub fn new(lines: UartClockLines, rmt: RmtClockLine) -> Self {
         let regs = super::accept::pcr();
-        Self { regs, lines, rmt }
+        Self {
+            regs,
+            lines,
+            rmt,
+            flash: None,
+        }
+    }
+
+    /// Set a word without a guest write, and drive the lines from it — what
+    /// a direct load does in the bootloader's place.
+    pub fn poke(&mut self, off: u32, value: u32) {
+        self.regs.poke(off, value);
+        self.drive_lines();
+    }
+
+    /// Feed the flash interface's clock cell from now on (`t4`).
+    pub fn set_flash_clocks(&mut self, clocks: Arc<FlashClocks>) {
+        self.flash = Some(clocks);
+        self.drive_lines();
     }
 
     fn drive_lines(&self) {
@@ -120,6 +149,12 @@ impl Pcr {
         self.lines.uart1.set(self.regs.stored(UART1_CLK_CONF));
         self.rmt.conf.set(self.regs.stored(RMT_CONF));
         self.rmt.sclk.set(self.regs.stored(RMT_SCLK_CONF));
+        if let Some(flash) = &self.flash {
+            flash.set_pcr(
+                self.regs.stored(MSPI_CLK_CONF),
+                self.regs.stored(SYSCLK_CONF),
+            );
+        }
     }
 }
 
@@ -136,10 +171,19 @@ impl Peripheral for Pcr {
         self.regs.write(off, width, value, cx);
         if matches!(
             off & !3,
-            UART0_CLK_CONF | UART1_CLK_CONF | RMT_CONF | RMT_SCLK_CONF
+            UART0_CLK_CONF
+                | UART1_CLK_CONF
+                | RMT_CONF
+                | RMT_SCLK_CONF
+                | MSPI_CLK_CONF
+                | SYSCLK_CONF
         ) {
             self.drive_lines();
         }
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 
     /// PCR is the P5 accept block with the clock lines on top, so its

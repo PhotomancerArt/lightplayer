@@ -395,7 +395,7 @@ pub fn AssetEditor(
                             class: persist_button_class(dirty),
                             r#type: "button",
                             disabled: !dirty,
-                            title: "Discard the applied edit and return to the saved file",
+                            title: "Discard your changes and go back to the saved file",
                             onclick: move |event| {
                                 event.stop_propagation();
                                 on_revert(());
@@ -406,7 +406,7 @@ pub fn AssetEditor(
                             class: persist_button_class(dirty),
                             r#type: "button",
                             disabled: !dirty,
-                            title: "Write the applied edits to the project files ({keyboard::SAVE.display(platform)})",
+                            title: "Save your changes ({keyboard::SAVE.display(platform)})",
                             onclick: move |event| {
                                 event.stop_propagation();
                                 on_save(());
@@ -419,7 +419,7 @@ pub fn AssetEditor(
             }
             match (&editor.content.as_ref().map(|content| &content.body), &doc) {
                 (Some(UiAssetContentBody::Binary { len }), _) => rsx! {
-                    AssetEditorNote { note: format!("Binary asset ({len} bytes) — not editable.") }
+                    AssetEditorNote { note: format!("Binary file ({len} bytes). It can't be edited here.") }
                 },
                 (Some(UiAssetContentBody::Deleted), _) => rsx! {
                     AssetEditorNote { note: "A pending edit deletes this asset body.".to_string() }

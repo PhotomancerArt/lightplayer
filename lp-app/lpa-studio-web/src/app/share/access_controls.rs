@@ -144,17 +144,17 @@ pub(crate) fn AccessDescription(access: Access) -> Element {
             match access {
                 Access::None => rsx! {
                     span { class: "{strong}", "Only people added below" }
-                    " can open the link. Everyone else sees nothing — not even that it exists."
+                    " can open the link."
                 },
                 Access::View => rsx! {
-                    "Opens "
-                    span { class: "{strong}", "running" }
-                    " for anyone with the link — no account needed. Only the people below can save changes."
+                    "Anyone with the link can "
+                    span { class: "{strong}", "view" }
+                    " it, no account needed. Only the people below can save changes."
                 },
                 Access::Edit => rsx! {
-                    "Anyone holding the link can "
+                    "Anyone with the link can "
                     span { class: "{strong}", "edit and save" }
-                    ". The link is the only key — share it accordingly."
+                    ". Share it only with people you trust."
                 },
             }
         }

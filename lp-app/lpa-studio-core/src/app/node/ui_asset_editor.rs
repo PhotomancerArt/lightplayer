@@ -101,7 +101,7 @@ impl UiAssetEditor {
             },
         )
         .with_summary(format!(
-            "Discard the applied edit of {} and return to the saved file.",
+            "Discard your changes to {} and go back to the saved file.",
             self.source
         ))
     }

@@ -30,7 +30,7 @@ impl ControllerOp for NodeRemoveOp {
     fn default_action_meta(&self) -> ActionMeta {
         ActionMeta::new(
             "Remove node",
-            "Remove this node from the project; its files are deleted on save.",
+            "Remove this node from the project. Its files will be deleted when you save.",
             ActionPriority::Tertiary,
         )
         .with_icon("remove")

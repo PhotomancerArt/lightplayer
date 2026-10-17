@@ -380,7 +380,7 @@ fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
         button {
             class: menu_item_action_class(),
             r#type: "button",
-            title: "Archive this project — reversible, and nothing is deleted",
+            title: "Hide this project from your projects. You can restore it from Archived projects.",
             onclick: move |_| {
                 if let Some(mut close) = close {
                     close.close();
@@ -415,7 +415,7 @@ pub fn PlayToggle(href: String, playing: bool) -> Element {
         a {
             class: "{class} tw:inline-flex tw:items-center",
             href: "{href}",
-            title: if playing { "Back to the editor" } else { "Play mode: the panel, full screen" },
+            title: if playing { "Back to the editor" } else { "Show the panel full screen" },
             // Word above the utility cut, glyph below it (the crowded
             // ladder's <900 rung): the mode keeps its one-tap home on the
             // phone bar, at glyph cost. The active underline carries the

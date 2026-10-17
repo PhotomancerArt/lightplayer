@@ -62,7 +62,7 @@ pub fn PowerSlotField(
         span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1",
             select {
                 class: dropdown_field_class(&state),
-                title: "Lamp part family — selects the power model",
+                title: "Lamp type, for the power estimate",
                 value: "{parts.lamp_type.as_str()}",
                 oninput: move |event| {
                     if let Some(next) = power_set_lamp(&lamp_kind, &event.value()) {
@@ -85,7 +85,7 @@ pub fn PowerSlotField(
                     step: "50",
                     value: "{parts.budget_ma}",
                     aria_label: "Supply budget (mA)",
-                    title: "Supply budget in mA \u{2014} 0 means unlimited",
+                    title: "Supply budget in mA (0 for unlimited)",
                     onchange: move |event| {
                         if let Some(next) = power_set_budget(&kind, &event.value()) {
                             handler.call(slot_set_value_action(address.clone(), next));
