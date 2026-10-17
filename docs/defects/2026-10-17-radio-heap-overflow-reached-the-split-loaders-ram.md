@@ -68,7 +68,9 @@ Bluetooth, the LAN or the relay ends with it while the radio is busy.
   The part from the range up carries no tag, like `dram2_seg`, so only
   Rust's global allocator (no radio DMA) lands there. Rust tries the regions
   in the same address order as before. The cost is contiguity: no block can
-  straddle `0x40850000`.
+  straddle `0x40850000`. On `lp-emu:esp32c6:t1` (the shipped split image's
+  first heartbeat) the largest free block falls 187,504 → 169,104 B; free,
+  used and total bytes are unchanged.
 - **Quiesce.** `ota::reset_now` goes through `restart::restart`, which holds
   the modem in reset before the software reset.
 - `radio_dma_diag` flags a live radio block in the loader's RAM as well as
