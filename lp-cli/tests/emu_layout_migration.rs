@@ -526,7 +526,10 @@ impl Work {
         std::fs::create_dir_all(&dir).unwrap();
         let bytes = std::fs::read(split.merged()).unwrap();
         let merged = dir.join("merged.bin");
-        std::fs::write(&merged, &bytes[..written_len(&bytes)]).unwrap();
+        // Up to `app.bin`'s end, a 4 KiB sector (the split ADR §9: an image ending
+        // mid-word lost its tail to espflash 3.3.0's stub), as the package writes it.
+        let end = written_len(&bytes).next_multiple_of(0x1000);
+        std::fs::write(&merged, &bytes[..end]).unwrap();
 
         let (fielded, table, fs) = match start {
             Cutover::AlreadyTree => (
