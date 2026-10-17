@@ -55,6 +55,7 @@ pub mod control;
 pub mod flash;
 /// `--flash-cut <spec>`: a power cut at the Nth flash command in `lpfs`.
 pub mod flash_cut_spec;
+pub mod flash_timing;
 pub mod image;
 pub mod intmatrix;
 /// The translated core, behind the optional `jit` feature. See its own docs

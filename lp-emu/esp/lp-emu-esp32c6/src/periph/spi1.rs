@@ -42,12 +42,15 @@
 //!    inside the write.** `Wait_SPI_Idle` spins on `mst_st`, so `cmd`'s low
 //!    nibble must read 0; every spin above is `while cmd != 0`. A model that
 //!    took a cycle to finish would need an event and would give the same
-//!    answer, because nothing observes the interval — [`Spi1`] therefore
-//!    completes synchronously and says so, rather than inventing a duration
-//!    it never measured. (`t2`'s flash wait states are a cycle-model rung,
-//!    not a peripheral one — director note 6.)
-//! 2. **The status register is real state.** WIP (bit 0) is always 0 because
-//!    operations complete; WEL (bit 1) is set by `flash_wren`, cleared by
+//!    answer, because nothing observes the interval — so below `t4` [`Spi1`]
+//!    completes synchronously. At `t4` ([`Spi1::set_timing`],
+//!    [`crate::flash_timing`]) the interval is the point: the bytes still
+//!    move at the trigger, but `cmd` reads the trigger bits and a busy
+//!    `mst_st` back until the transfer's wire time has passed, and the guest
+//!    spins for it as on silicon.
+//! 2. **The status register is real state.** WIP (bit 0) is 0 below `t4`,
+//!    because operations complete; at `t4` it reads set for the part's busy
+//!    time after a program or an erase. WEL (bit 1) is set by `flash_wren`, cleared by
 //!    `flash_wrdi` and by any completed program or erase, exactly as the
 //!    part does — and `_SPI_write_enable` **loops until it sees WEL set**, so
 //!    a model that left it 0 would hang the first write.
@@ -64,20 +67,26 @@
 //! Bus width (`ctrl`'s `fread_*` bits), clock dividers, timing calibration,
 //! CRC, encrypted writes, suspend/resume and the interrupt registers are
 //! accept-and-remember: the bytes that move do not depend on them, and a
-//! model that pretended to honour them would be inventing behaviour. A
+//! model that pretended to honour them would be inventing behaviour. (At
+//! `t4` the bus width and the clock divider are read — not for the bytes,
+//! for how long the transfer takes.) A
 //! `cmd` trigger this table does not know is **refused loudly** — it clears
 //! the bit (so the guest does not hang) and writes a `SPI1 unmodelled
 //! command` line into the trace naming the bit and the PC, which is the
 //! honest answer for a bring-up: the run continues and the log says what it
 //! did not do.
 
+use std::sync::Arc;
+
+use lp_emu_esp_common::engine::nor_timing::NorTiming;
 use lp_emu_esp_common::engine::spi_flash::{self, FlashEngine, FlashOp, FlashOutcome, op};
 use lp_emu_esp_common::periph::RegGrade;
 use lp_emu_esp_common::regfile::{lane_of, merge_lane};
 use lp_emu_esp_common::{BusCx, Peripheral, RegFile, Width};
 
 use crate::flash::{BLOCK_LEN, FlashHandle, SECTOR_LEN};
-use crate::regs;
+use crate::flash_timing::{self, FlashClocks, Phases};
+use crate::{memmap, regs};
 
 /// This block's name, in its own trace lines and in the ones the engine
 /// writes on its behalf — the engine models a NOR flash and does not know
@@ -93,6 +102,8 @@ pub const CTRL: u32 = 0x008;
 /// [`Spi1::reg_grade`] and
 /// `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`.
 pub const CTRL2: u32 = 0x010;
+/// The SPI clock divider (`clkcnt_n`, `clk_equ_sysclk`); read at `t4`.
+pub const CLOCK: u32 = 0x014;
 pub const USER: u32 = 0x018;
 pub const USER1: u32 = 0x01c;
 pub const USER2: u32 = 0x020;
@@ -140,8 +151,12 @@ const CMD_TRIGGERS: u32 = CMD_FLASH_PE
 // `user` phase-enable bits.
 const USER_MOSI: u32 = 1 << 27;
 const USER_MISO: u32 = 1 << 28;
+const USER_DUMMY: u32 = 1 << 29;
 const USER_ADDR: u32 = 1 << 30;
 const USER_COMMAND: u32 = 1 << 31;
+
+/// `ctrl.wrsr_2b`: a status write carries two bytes.
+const CTRL_WRSR_2B: u32 = 1 << 22;
 
 // The flash part's status-register bits, as the ROM reads them: WIP (0) and
 // WEL (1) are the SPI NOR command set's own, so they live with the chip in
@@ -158,7 +173,30 @@ pub struct Spi1 {
     /// Every `cmd` trigger this model does not know, once each, so a boot
     /// that reaches one says so without flooding the log.
     refused: Vec<u32>,
+    /// `t4`'s transfer time ([`set_timing`](Self::set_timing)); `None` at
+    /// every other grade, where every trigger completes inside the write.
+    timing: Option<Spi1Timing>,
+    /// The cycles the transfer being executed takes on the wire — what the
+    /// engine adds before a program's or an erase's busy time starts.
+    wire: u64,
 }
+
+/// A transfer in flight, and the clock it is timed by.
+struct Spi1Timing {
+    clocks: Arc<FlashClocks>,
+    /// The guest cycle the in-flight transfer ends at.
+    busy_until: u64,
+    /// The trigger bits it was started with: `cmd` reads them back, with a
+    /// non-idle `mst_st`, until it ends.
+    busy_bits: u32,
+}
+
+/// `mst_st` while a transfer runs: any non-idle state is what the ROM's
+/// `Wait_SPI_Idle` (`cmd & 0xf`) and every `while cmd != 0` wait out.
+const MST_ST_BUSY: u32 = 1;
+
+/// The register file's snapshot length: `0x400` bytes of window.
+const REGS_STATE_LEN: usize = 0x400;
 
 impl core::fmt::Debug for Spi1 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -196,11 +234,101 @@ impl Spi1 {
             regs,
             engine: FlashEngine::new(flash),
             refused: Vec::new(),
+            timing: None,
+            wire: 0,
         }
+    }
+
+    /// Time this block (`t4`): every trigger keeps `cmd` busy for its
+    /// transfer at the SCK `clocks` and this block's own `clock` register
+    /// give, and the part holds WIP for `part`'s busy times.
+    pub fn set_timing(&mut self, clocks: Arc<FlashClocks>, part: NorTiming) {
+        self.engine.set_timing(Some(part), memmap::CPU_HZ);
+        self.timing = Some(Spi1Timing {
+            clocks,
+            busy_until: 0,
+            busy_bits: 0,
+        });
     }
 
     pub fn status(&self) -> u16 {
         self.engine.status()
+    }
+
+    /// Set a register without a guest write — what a direct load does in the
+    /// bootloader's place ([`crate::loader::seed_flash_interface`]).
+    pub fn poke(&mut self, off: u32, value: u32) {
+        self.regs.poke(off, value);
+    }
+
+    /// The SCK this block's transfers run at.
+    fn sck_hz(&self, clocks: &FlashClocks) -> u64 {
+        flash_timing::sck_hz(clocks.mspi_hz(), self.regs.stored(CLOCK))
+    }
+
+    /// What a trigger moves on the wire: the `usr` engine's phases from
+    /// `user`/`user1`/`user2` and the data lengths, on the lines `ctrl`
+    /// (reads) and `user` (writes) select; a dedicated trigger's are the
+    /// single-line command it stands for.
+    fn phases(&self, triggered: u32) -> Phases {
+        let ctrl = self.regs.stored(CTRL);
+        let user = self.regs.stored(USER);
+        if triggered & CMD_USR != 0 {
+            let user1 = self.regs.stored(USER1);
+            let user2 = self.regs.stored(USER2);
+            let (read_addr, read_data) = flash_timing::read_lines(ctrl);
+            let (write_addr, write_data) = flash_timing::write_lines(user);
+            let bits = |off: u32| (self.regs.stored(off) & 0x3ff) + 1;
+            let (addr_lines, data_bits, data_lines) = if user & USER_MISO != 0 {
+                (read_addr, bits(MISO_DLEN), read_data)
+            } else if user & USER_MOSI != 0 {
+                (write_addr, bits(MOSI_DLEN), write_data)
+            } else {
+                (read_addr, 0, 1)
+            };
+            return Phases {
+                cmd_bits: if user & USER_COMMAND != 0 {
+                    ((user2 >> 28) & 0xf) + 1
+                } else {
+                    0
+                },
+                cmd_lines: flash_timing::cmd_lines(ctrl),
+                addr_bits: if user & USER_ADDR != 0 {
+                    ((user1 >> 26) & 0x3f) + 1
+                } else {
+                    0
+                },
+                addr_lines,
+                dummy_clocks: if user & USER_DUMMY != 0 {
+                    (user1 & 0x3f) + 1
+                } else {
+                    0
+                },
+                data_bits,
+                data_lines,
+            };
+        }
+        match triggered & !CMD_FLASH_PE {
+            CMD_FLASH_RDSR => Phases::single(8, 0, 8),
+            CMD_FLASH_WRSR => Phases::single(8, 0, if ctrl & CTRL_WRSR_2B != 0 { 16 } else { 8 }),
+            CMD_FLASH_RDID => Phases::single(8, 0, 24),
+            CMD_FLASH_SE | CMD_FLASH_BE => Phases::single(8, 24, 0),
+            CMD_FLASH_PP => Phases::single(8, 24, self.dlen_bytes(MOSI_DLEN) * 8),
+            CMD_FLASH_READ => {
+                let (addr_lines, data_lines) = flash_timing::read_lines(ctrl);
+                Phases {
+                    cmd_bits: 8,
+                    cmd_lines: 1,
+                    addr_bits: 24,
+                    addr_lines,
+                    dummy_clocks: 0,
+                    data_bits: self.dlen_bytes(MISO_DLEN) * 8,
+                    data_lines,
+                }
+            }
+            // WREN, WRDI, CE, HPM, RES, DP: the command byte alone.
+            _ => Phases::single(8, 0, 0),
+        }
     }
 
     /// The `w0..w15` buffer as bytes, little-endian per word — the layout
@@ -255,7 +383,9 @@ impl Spi1 {
             FlashOp::Program { .. } => self.buffer_bytes(),
             _ => [0u8; spi_flash::BUFFER_LEN],
         };
-        let outcome = self.engine.execute(op, &mut buffer, NAME, cx);
+        let outcome = self
+            .engine
+            .execute_timed(op, &mut buffer, NAME, cx, self.wire);
         if outcome == FlashOutcome::Buffer {
             self.set_buffer_bytes(&buffer);
         }
@@ -417,6 +547,26 @@ impl Spi1 {
                     self.regs.poke(W0, u32::from(status >> 8));
                 }
             }
+            // A status write through the generic engine — how an app sets
+            // the part's QE bit to switch to QIO itself (the 2026-10-17
+            // DIO/QIO sitting's firmware does: `0x01` with one byte, then
+            // `0x31`). The data is `w0`'s low bytes; a half the command does
+            // not carry keeps what the part held. WEL and WIP are the
+            // engine's, never written from here.
+            op::WRITE_STATUS | op::WRITE_STATUS_HIGH => {
+                if !self.phase(user, USER_MOSI, "write-data", command, cx) {
+                    return;
+                }
+                let held = self.engine.status() & !(SR_WEL | SR_WIP);
+                let data = self.regs.stored(W0);
+                let bytes = self.dlen_bytes(MOSI_DLEN);
+                let value = match (command, bytes) {
+                    (op::WRITE_STATUS_HIGH, _) => (held & 0x00ff) | ((data as u16 & 0xff) << 8),
+                    (_, 1) => (held & 0xff00) | (data as u16 & 0xff),
+                    _ => data as u16,
+                };
+                self.run(FlashOp::WriteStatus(value), cx);
+            }
             op::RDID => {
                 if let FlashOutcome::Word(id) = self.run(FlashOp::ReadId, cx) {
                     self.regs.poke(W0, id);
@@ -472,10 +622,16 @@ impl Peripheral for Spi1 {
 
     fn read(&mut self, off: u32, width: Width, cx: &mut BusCx<'_>) -> u32 {
         if off & !3 == CMD {
-            // Every trigger has already completed and cleared; `mst_st` and
-            // `slv_st` read 0 (idle), which is what `Wait_SPI_Idle` waits
-            // for. So `cmd` always reads exactly zero.
-            return lane_of(0, off, width);
+            // Untimed, every trigger has already completed and cleared;
+            // `mst_st` and `slv_st` read 0 (idle), which is what
+            // `Wait_SPI_Idle` waits for. So `cmd` reads exactly zero. Timed
+            // (`t4`), the trigger bits and a busy `mst_st` read back until
+            // the transfer's wire time has passed.
+            let word = match &self.timing {
+                Some(t) if cx.now < t.busy_until => t.busy_bits | MST_ST_BUSY,
+                _ => 0,
+            };
+            return lane_of(word, off, width);
         }
         self.regs.read(off, width, cx)
     }
@@ -488,9 +644,24 @@ impl Peripheral for Spi1 {
         let word = merge_lane(0, off, width, value);
         let triggered = word & CMD_TRIGGERS;
         if triggered != 0 {
+            // Timed, the transfer's own duration: what `cmd` stays busy
+            // for, and what a program's or an erase's busy time starts
+            // after.
+            self.wire = match &self.timing {
+                Some(t) => flash_timing::transfer_cycles(
+                    self.phases(triggered).clocks(),
+                    self.sck_hz(&t.clocks),
+                ),
+                None => 0,
+            };
             self.execute(triggered, cx);
+            if let Some(t) = self.timing.as_mut() {
+                t.busy_until = cx.now + self.wire;
+                t.busy_bits = triggered;
+            }
         }
-        // Whatever was triggered is done; the register is back to idle.
+        // The register file keeps no trigger: an untimed one is done, and a
+        // timed one's busy bits are `timing`'s.
         self.regs.poke(CMD, 0);
     }
 
@@ -531,10 +702,19 @@ impl Peripheral for Spi1 {
     /// The engine's status latch, then this block's register file — the
     /// order the snapshot format has always had, which is why the engine
     /// writes its half into the same buffer rather than owning the stream.
+    ///
+    /// Timed (`t4`), three more fields follow: the part's busy deadline,
+    /// the transfer's, and the transfer's trigger bits. An untimed block
+    /// never writes them, so its snapshot is byte-for-byte what it was.
     fn save_state(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(0x400 + 2);
+        let mut out = Vec::with_capacity(REGS_STATE_LEN + 2 + 20);
         self.engine.save_status(&mut out);
         out.extend_from_slice(&self.regs.save_state());
+        if let Some(t) = &self.timing {
+            self.engine.save_busy(&mut out);
+            out.extend_from_slice(&t.busy_until.to_le_bytes());
+            out.extend_from_slice(&t.busy_bits.to_le_bytes());
+        }
         out
     }
 
@@ -544,7 +724,30 @@ impl Peripheral for Spi1 {
             return;
         };
         self.engine.restore(status);
-        self.regs.load_state(&bytes[n..]);
+        let rest = &bytes[n..];
+        let regs_len = REGS_STATE_LEN.min(rest.len());
+        self.regs.load_state(&rest[..regs_len]);
+        let tail = &rest[regs_len..];
+        if let Some(t) = self.timing.as_mut() {
+            let (busy, deadline, bits) = match (
+                FlashEngine::load_busy(tail),
+                tail.get(8..16).and_then(|b| <[u8; 8]>::try_from(b).ok()),
+                tail.get(16..20).and_then(|b| <[u8; 4]>::try_from(b).ok()),
+            ) {
+                (Some((busy, _)), Some(deadline), Some(bits)) => {
+                    (busy, u64::from_le_bytes(deadline), u32::from_le_bytes(bits))
+                }
+                // A snapshot an untimed block took: nothing was in flight.
+                _ => (0, 0, 0),
+            };
+            self.engine.restore_busy(busy);
+            t.busy_until = deadline;
+            t.busy_bits = bits;
+        }
+    }
+
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
     }
 }
 
@@ -792,5 +995,55 @@ mod tests {
         assert_eq!(spi.reg_name(RD_STATUS), Some("rd_status"));
         assert_eq!(spi.reg_name(W0), Some("w0"));
         assert_eq!(spi.reg_name(0x03c), Some("cache_fctrl"));
+    }
+
+    #[test]
+    fn timed_cmd_stays_busy_for_the_transfer_and_wip_for_the_erase() {
+        let (mut sb, mut spi, _flash) = rig();
+        let clocks = Arc::new(FlashClocks::new());
+        clocks.set_pcr(0x500, 0x2801_0200); // 80 MHz MSPI, as the bootloader leaves it
+        spi.set_timing(clocks, NorTiming::CX1);
+        sb.write(&mut spi, CLOCK, 0x8000_0000);
+        // A 64-byte DIO read: 8 + 14 + 2 + 256 SCK at 80 MHz, + overhead.
+        sb.write(&mut spi, CTRL, 0x00ec_200c);
+        sb.write(
+            &mut spi,
+            USER,
+            USER_COMMAND | USER_ADDR | USER_DUMMY | USER_MISO,
+        );
+        sb.write(&mut spi, USER1, 0x6c00_0001);
+        sb.write(&mut spi, USER2, 0x7000_0000 | u32::from(op::DUAL_IO));
+        sb.write(&mut spi, MISO_DLEN, 64 * 8 - 1);
+        sb.now = 100;
+        sb.write(&mut spi, CMD, CMD_USR);
+        let done = 100 + 2 * (8 + 14 + 2 + 256) + flash_timing::TRANSFER_OVERHEAD_CYCLES;
+        sb.now = done - 1;
+        assert_eq!(sb.read(&mut spi, CMD), CMD_USR | MST_ST_BUSY);
+        sb.now = done;
+        assert_eq!(sb.read(&mut spi, CMD), 0);
+
+        // An erase: `cmd` clears after its 32 SCK, WIP after 21 ms more.
+        sb.write(&mut spi, CMD, CMD_FLASH_WREN);
+        sb.now += 1_000;
+        sb.write(&mut spi, CMD, CMD_FLASH_SE | CMD_FLASH_PE);
+        let erase_at = sb.now;
+        sb.now += 1_000;
+        assert_eq!(sb.read(&mut spi, CMD), 0);
+        sb.write(&mut spi, CMD, CMD_FLASH_RDSR);
+        sb.now += 1_000;
+        assert_eq!(sb.read(&mut spi, RD_STATUS) & u32::from(SR_WIP), 1);
+        sb.now = erase_at + 21 * 160_000 + 1_000;
+        sb.write(&mut spi, CMD, CMD_FLASH_RDSR);
+        sb.now += 1_000;
+        assert_eq!(sb.read(&mut spi, RD_STATUS) & u32::from(SR_WIP), 0);
+    }
+
+    #[test]
+    fn untimed_cmd_reads_idle_at_once() {
+        let (mut sb, mut spi, _flash) = rig();
+        sb.write(&mut spi, CMD, CMD_FLASH_RDSR);
+        assert_eq!(sb.read(&mut spi, CMD), 0);
+        let state = spi.save_state();
+        assert_eq!(state.len(), 2 + REGS_STATE_LEN, "no timing tail untimed");
     }
 }

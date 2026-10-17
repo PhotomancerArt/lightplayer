@@ -46,6 +46,12 @@ fn tree_store_mount_cpu_on_the_emulated_c6() {
             let hello = boot(&mut host);
             let mount = line_with(&host, "[perf] fs mount ").cloned();
             let fs = line_with(&host, "[FS] ").cloned();
+            // `LP_MOUNT_ECHO=<needle>`: the console lines carrying it, too.
+            if let Ok(needle) = std::env::var("LP_MOUNT_ECHO") {
+                for l in host.console().iter().filter(|l| l.contains(&needle)) {
+                    println!("  {l}");
+                }
+            }
             println!(
                 "{label} {}: {} | {} | fs {}",
                 image.file_stem().unwrap().to_string_lossy(),
