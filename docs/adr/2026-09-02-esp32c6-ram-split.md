@@ -302,7 +302,11 @@ loads and renders, and the tryout survives Studio's editor sync and ten edits.
 
 **What it costs.** First fit tries the main region first, and it is now 70 KB
 bigger, so placements move. `dram2_seg` stays whole longer, and the largest
-block is 64 KiB or more in every silicon run above. One placement got worse.
+block is 64 KiB or more in every silicon run above. In `emu_edit_frag` (the
+choker, 24 growing edits over USB, emulated), the largest block after each
+edit was 14,456 / 29,500 / 38,976 B (min / median / max) on main. With this
+change it is 65,528 / 65,528 / 65,536 B, and free after the edits is 145,396 /
+147,972 B (min / median), up from about 74.6 / 77.6 KB. One placement got worse.
 On the emulator, a dome-scale read that main's heap refused cleanly is now
 admitted and resets the board halfway through
 (`docs/defects/2026-10-16-a-read-the-read-cost-admits-resets-a-dome-scale-c6-mid-read.md`,
