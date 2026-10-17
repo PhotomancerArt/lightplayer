@@ -85,7 +85,8 @@ impl ComputeShaderNode {
             compilation_error: None,
             input_resolve_failures: Vec::new(),
             needs_compile: true,
-            compile_window_requested: false,
+            // Asks for its first window as it is created (see `ShaderNode::new`).
+            compile_window_requested: true,
             compile_window: None,
             map_templates: MapInputTemplates::new(),
             authored_keys: AuthoredFieldKeys::new(),

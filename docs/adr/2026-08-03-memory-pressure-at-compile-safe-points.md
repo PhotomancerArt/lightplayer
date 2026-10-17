@@ -2,7 +2,10 @@
 
 - **Status:** Accepted, amended 2026-08-04 (the `High` droppable set of §4
   is removed — the ordering premise in §2 was measured false; the window
-  mechanism itself stands. See the Amendment section.)
+  mechanism itself stands. See the Amendment section.) Amended 2026-10-16
+  (a shader asks for its first window as it is created, so the first frame
+  after a load compiles instead of rendering black — see the second
+  Amendment).
 - **Date:** 2026-08-03
 - **Deciders:** Photomancer
 - **Supersedes:** None
@@ -122,6 +125,8 @@ drop at the same safe point is recorded as follow-up, not attempted here.
 
 - The first frame after load, and the first frame after a playlist switch
   to a never-compiled shader, render fallback (black or keep-last-good).
+  *(Since 2026-10-16 the first frame after a load compiles instead; see the
+  second Amendment.)*
   Tests that render once and assert compiled output either render twice or
   open a window explicitly (`open_compile_window`).
 - Pinned by tests in `project_loader.rs`:
@@ -218,3 +223,52 @@ Full evidence chain, and why no host test could have caught this (the
 wasm backend's `free` is a bump no-op, so reclaim is unobservable on the
 host):
 `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+
+## Amendment (2026-10-16): a shader asks for its first window as it is created
+
+Plan `lp2025/2026-10-16-0848-tree-store-adoption`, milestone A8 (boot under
+one second). **§2's protocol stands; one request moves earlier.** A shader
+or compute shader that has never compiled now sets its window request in its
+constructor, so the first tick after its load broadcasts `High`, opens the
+window, and the first frame that renders it compiles. The black deferral
+frame after a load is gone. A node created but not demanded (an inactive
+playlist entry) lets that window expire and re-requests on its first demanded
+frame, as before; every later compile (an edit, a switch to an entry that
+never compiled) still defers one frame.
+
+### Why this does not undo what the window is for
+
+§2's remaining justification (the 2026-08-04 amendment) is that the window
+"moves the transient off the frame that also allocates". Measured, the
+frame-1 allocations were never apart from the compile: the per-LED buffers
+frame 1 allocates are still held in frame 2, so the frame-2 compile already
+landed on top of them. Compiling in frame 1 lands it on the same buffers,
+allocated in the same tick just before it. The peak heap in use across the
+whole startup (`lp-cli profile <project> --collect alloc --mode startup`,
+fw-emu, 2026-10-16) is **lower** on every project the ratchet records:
+
+| project | before (main `3de89072a`) | after | |
+|---|---:|---:|---:|
+| `projects/test/basic` | 184,524 B | 182,288 B | −2,236 |
+| `catalog/patterns/meteor` | 184,833 B | 177,380 B | −7,453 |
+| `catalog/projects/playful-choker-tryout` | 278,193 B | 276,625 B | −1,568 |
+| `catalog/projects/zook-dome` | 155,285 B | 154,968 B | −317 |
+
+The largest free block after the compile grows for basic (137,376 →
+143,008 B), meteor and playful-choker, and shrinks for zook-dome (181,664 →
+173,232 B), a dome-scale project far past the C6's 128–512 LED target.
+
+### What moved, and what was re-baselined
+
+- The heap ratchet's startup `frame` window now holds the compile (one frame
+  instead of two), so its `transient`/`retained` figures rose while the
+  absolute peak above fell; the engine records were re-baselined in the same
+  change (`just heap-budget-baseline`).
+- `output_control_samples_golden.rs` re-captured only each example's tick-0
+  entry (the old black frame, now lit) and the two stateful examples shifted
+  by exactly one frame; its module docs say so.
+- The pinned boot test now asserts one `High` broadcast before the first
+  frame's compile and a lit first frame; the playlist-switch tests hold two
+  frames where they held three.
+- On silicon the C6's first light loses the black frame (see the A8 PR for
+  the CX1 numbers).

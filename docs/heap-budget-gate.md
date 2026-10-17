@@ -18,10 +18,12 @@ Two profile modes per project:
 
 - **`startup`** — project load through the first *compiled* frame. Every
   perf-event window in the trace is recorded: `server-boot`, `project-load`, `shader-compile`,
-  `shader-link`, `frame`. Its `frame` window brackets frames 1–2, and frame 2
-  contains the shader compile (compiles are deferred one frame; see
-  `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`), so this
-  `frame` is a **cold-start** figure.
+  `shader-link`, `frame`. Its `frame` window is frame 1, which contains the
+  shader compile (a shader asks for its compile window as it is created, so
+  the first frame after a load compiles; see
+  `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`, amended
+  2026-10-16), so this `frame` is a **cold-start** figure: the per-LED
+  buffers the first frame allocates plus the compile's transient on top.
 - **`steady-render`** — two warm-up frames, then four captured steady frames.
   Only the `frame` window is recorded (the other windows lie outside the
   capture and would record zeros). This is the **steady-state** figure and the
