@@ -31,7 +31,8 @@ use crate::app::agent::AgentMark;
 use crate::app::home::device_pick_popover::{
     BoardPickMode, BoardPickPopover, ChipSource, ProjectPickMode, ProjectPickPopover, VerbTrigger,
 };
-use crate::base::action_icon_name;
+use crate::base::{StudioIcon, action_icon_name};
+use crate::core::action::action_button::label_text;
 use crate::core::action::action_variant_class;
 use crate::core::{
     ActionButton, ActionButtonVariant, OfferParamsForm, OfferPressButton, pressed_or_refused,
@@ -155,6 +156,7 @@ pub fn CardAction(
                 running: false,
                 variant: look.variant(),
                 armed_preview: armed,
+                narrow_tail: narrow_tail(&action, look).map(str::to_string),
                 on_action,
             }
         },
@@ -396,14 +398,41 @@ pub(crate) fn card_press(offer: &UiOffer, action: &UiCardAction) -> UiAction {
     }
 }
 
-/// A picker's trigger in the card's word and icon, on `look`.
+/// A picker's trigger in the card's word and icon, on `look`: the primary's
+/// word with the end a narrow card drops ([`narrow_tail`]).
 fn verb_trigger(action: &UiCardAction, look: CardActionLook) -> Option<VerbTrigger> {
+    let icon = action_icon_name(action.icon.as_deref());
+    let content = narrow_tail(action, look).map(|tail| {
+        rsx! {
+            if let Some(icon) = icon {
+                span { class: "tw:inline-flex tw:flex-none tw:items-center tw:justify-center", aria_hidden: "true",
+                    StudioIcon { name: icon, size: 12 }
+                }
+            }
+            span { class: "tw:inline-flex", {label_text(&action.word, Some(tail))} }
+        }
+    });
     Some(VerbTrigger {
         word: action.word.clone(),
-        icon: action_icon_name(action.icon.as_deref()),
+        icon,
         class: action_variant_class(look.variant(), false).to_string(),
-        content: None,
+        content,
     })
+}
+
+/// The end of the primary's word a name bar too narrow for the board's
+/// name drops (" firmware" of "Update firmware"): what follows the verb
+/// core gives it alone ([`UiCardAction::verb_alone`]). Only the primary
+/// sheds it; a row's own button already says its verb alone (P12).
+pub(crate) fn narrow_tail(action: &UiCardAction, look: CardActionLook) -> Option<&str> {
+    if look != CardActionLook::Primary {
+        return None;
+    }
+    let verb = action.verb_alone.as_deref()?;
+    action
+        .word
+        .strip_prefix(verb)
+        .filter(|tail| !tail.trim().is_empty())
 }
 
 /// The board pick's chip source: the boot banner, or the board's firmware.

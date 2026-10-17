@@ -28,13 +28,17 @@
 //! | A stand-in, off | "Simulated · off" / "Emulated · off" | Neutral | — (Power on is the primary) |
 //! | Not responding | "<link> · not responding" | Attention | Retry |
 //! | Port there, closed | "<link> · not connected" | Neutral | — (Connect is the primary) |
-//! | Offline | "Offline · <how long>" | Neutral | — (the primary reconnects) |
+//! | Unplugged, and Wi‑Fi or lightplayer.app reaches it | "Wi‑Fi · not connected" / "lightplayer.app · not connected" | Neutral | — (Connect, over that way, is the primary) |
+//! | Offline | "Offline · 2 hours ago" | Neutral | — (the primary reconnects, when anything can) |
 //! | Linked | "<link> · connected" | Neutral | — |
 //!
 //! Work and refusals first (they are news), then what the board is, then
 //! how well it answers. A device that needs you is orange (Attention); a
 //! connection that failed is red (Error); nothing here is yellow, the
-//! unsaved edit's colour (P16). "Someone else connected" is for a holder
+//! unsaved edit's colour (P16) — and while the card's surface says the
+//! row's problem, the row goes quiet ([`super::board_surface::carried_layer`]).
+//! An offline board's age reads as the surface's sentence says it
+//! ("2 hours ago", [`crate::age_spoken`]): one age, one phrasing (P17). "Someone else connected" is for a holder
 //! Studio cannot name (a stranger on the network slot); "Open in another
 //! tab" is a tab of this browser (`docs/style/language.md`). The held words
 //! are [`super::held_board`]'s. A stand-in says what it is ("Simulated",
@@ -54,6 +58,7 @@ use lpa_devices::view::PendingLinkView;
 use super::bar_work::bar_work;
 use super::board_card_input::{BoardCardInput, link_icon};
 use super::board_connection::BoardConnection;
+use super::board_surface::{offline_road, road_link};
 use super::detail_sections::{facts, notice, verbs, without_empty};
 use super::held_board::{held_aside, held_sentence, held_summary, take_over_work};
 use super::primary_action::{CONNECTING, offline_words, primary_action};
@@ -67,7 +72,7 @@ use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::app::devices::wifi_connects::UiWifiConnect;
 use crate::app::network::WifiTone;
 use crate::core::data_kinds::age_words;
-use crate::{ActionConsequence, RichLine, UiStatusKind};
+use crate::{ActionConsequence, ConnectReach, RichLine, UiStatusKind};
 
 /// The busy notice's words: another device holds the board's one network
 /// connection.
@@ -136,11 +141,24 @@ pub(crate) fn connection_bar(input: &BoardCardInput<'_>) -> UiStackBar {
                 UiStatusKind::Neutral,
                 None,
             ),
-            DeviceStatus::Offline => (
-                offline_words(input.last_seen_at, input.now),
-                UiStatusKind::Neutral,
-                None,
-            ),
+            // Unplugged, and Wi‑Fi or lightplayer.app reaches it: the row
+            // names the way that works, not "offline".
+            DeviceStatus::Offline => match offline_road(input) {
+                Some((road @ (ConnectReach::Wifi | ConnectReach::Relay), _)) => {
+                    let way = road_link(input, road);
+                    icon = link_icon(way).to_string();
+                    (
+                        format!("{} · not connected", way.label()),
+                        UiStatusKind::Neutral,
+                        None,
+                    )
+                }
+                _ => (
+                    offline_words(input.last_seen_at, input.now),
+                    UiStatusKind::Neutral,
+                    None,
+                ),
+            },
             _ if input.linked() => (format!("{label} · connected"), UiStatusKind::Neutral, None),
             _ => (
                 format!("{label} · not connected"),
@@ -818,6 +836,30 @@ mod tests {
         );
     }
 
+    /// Unplugged, and another way reaches it: the row names the way that
+    /// works, not "offline" (Wi‑Fi first, then lightplayer.app).
+    #[test]
+    fn an_offline_board_another_way_reaches_names_that_way() {
+        let mut fixture = CardFixture::offline();
+        fixture.last_seen_at = Some(fixture.now - 7_200.0);
+        fixture.wifi_address = true;
+        fixture.relay = true;
+        let bar = connection_bar(&fixture.input());
+        assert_eq!(bar.summary, "Wi\u{2011}Fi · not connected");
+        assert_eq!(bar.icon, "wifi");
+        assert_eq!(bar.tone, UiStatusKind::Neutral);
+        fixture.wifi_address = false;
+        let bar = connection_bar(&fixture.input());
+        assert_eq!(bar.summary, "lightplayer.app · not connected");
+        assert_eq!(bar.icon, "cloud");
+        fixture.relay = false;
+        assert_eq!(
+            connection_bar(&fixture.input()).summary,
+            "Offline · 2 hours ago",
+            "only its cable reaches it"
+        );
+    }
+
     #[test]
     fn a_closed_port_is_not_connected_and_an_offline_board_says_how_long() {
         let mut attached = CardFixture::ready();
@@ -831,7 +873,10 @@ mod tests {
         let mut offline = CardFixture::offline();
         offline.last_seen_at = Some(offline.now - 15.0 * 86_400.0);
         let bar = connection_bar(&offline.input());
-        assert_eq!(bar.summary, "Offline · 2 weeks");
+        assert_eq!(
+            bar.summary, "Offline · 2 weeks ago",
+            "the surface's sentence says the same age the same way"
+        );
         assert_eq!(line(&bar, "Last heard").as_deref(), Some("2 weeks ago"));
         offline.last_seen_at = None;
         let bar = connection_bar(&offline.input());

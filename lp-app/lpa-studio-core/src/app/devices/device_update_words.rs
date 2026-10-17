@@ -354,7 +354,8 @@ pub fn update_session_words(
     let board = standing.board()?;
     let run_word = match words.kind {
         UpdateRowKind::Progress => Some(UpdateRunWord {
-            text: match words.progress.and_then(|p| p.percent) {
+            // The card's one number for the whole update.
+            text: match standing.whole_percent() {
                 Some(percent) => format!("{} · {percent}%", words.chip),
                 None => words.chip.clone(),
             },
@@ -879,7 +880,7 @@ mod tests {
         assert_eq!(
             updating.run_word,
             Some(UpdateRunWord {
-                text: "Updating · 40%".to_string(),
+                text: "Updating · 20%".to_string(),
                 tone: UpdateRunTone::Working
             })
         );

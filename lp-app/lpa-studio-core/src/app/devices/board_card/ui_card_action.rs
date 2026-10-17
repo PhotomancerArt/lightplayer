@@ -32,6 +32,11 @@ pub struct UiCardAction {
     /// reason (the offer's own, never the card's), so "why can't I?" is
     /// answered where it is asked.
     pub refused: Option<String>,
+    /// The word's verb alone, when the word names its object too ("Update"
+    /// for "Update firmware"): what a name bar too narrow for the board's
+    /// name beside the whole word says instead. The surface's sentence
+    /// already names the object.
+    pub verb_alone: Option<String>,
 }
 
 /// How the web draws an action and what one press does.
@@ -66,6 +71,7 @@ impl UiCardAction {
             draw: UiActionDraw::Press,
             args: OfferArgs::new(),
             refused: refusal(offer),
+            verb_alone: None,
         }
     }
 
@@ -83,6 +89,12 @@ impl UiCardAction {
     /// This action drawn as `draw`.
     pub fn drawn(mut self, draw: UiActionDraw) -> Self {
         self.draw = draw;
+        self
+    }
+
+    /// This action, saying `verb` alone where the name bar is narrow.
+    pub fn with_verb_alone(mut self, verb: impl Into<String>) -> Self {
+        self.verb_alone = Some(verb.into());
         self
     }
 

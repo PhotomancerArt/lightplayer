@@ -1,6 +1,7 @@
-//! [`UiBoardCard`]: one board, as the card draws it — the picture, the
-//! status corner, the name bar and its primary, then the five bars (or,
-//! connected, the board's panel in their place). Built in
+//! [`UiBoardCard`]: one board, as the card draws it — the surface (its
+//! picture, and over it what matters now), the status corner, the name bar
+//! and its primary, then the five bars (or, connected, the board's panel in
+//! their place). Built in
 //! core ([`super::board_card`], [`super::pending_board_card`]) from the
 //! roster's facts and the board's own offers, so the web decides how a bar
 //! looks and never what it says or which offer it carries
@@ -13,6 +14,7 @@ use crate::OfferPath;
 use super::ui_bar_work::{BarWorkState, UiBarWork};
 use super::ui_board_panel::UiBoardPanel;
 use super::ui_board_picture::UiBoardPicture;
+use super::ui_board_surface::UiBoardSurface;
 use super::ui_card_action::UiCardAction;
 use super::ui_name_bar::{UiNameBar, UiPrimary};
 use super::ui_stack_bar::{BarLayer, UiStackBar};
@@ -28,6 +30,9 @@ pub struct UiBoardCard {
     /// New, online or offline: the home page's sections (M3).
     pub presence: UiBoardPresence,
     pub picture: UiBoardPicture,
+    /// What the card's top says over its picture: nothing while the board
+    /// is well, else the state and what the primary does about it.
+    pub surface: UiBoardSurface,
     pub status: UiStatusCorner,
     pub name_bar: UiNameBar,
     /// Always five, in [`BarLayer::ALL`]'s order. Built while the board is

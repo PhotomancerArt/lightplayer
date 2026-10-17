@@ -153,8 +153,10 @@ export const WORDS = {
   // U+2011. The Link row on a LAN link: `<link> · connected`
   // (`board_card/connection_bar.rs`), the link's word being
   // `UiLinkKind::Wifi.label()` (`ui_link_kind.rs`). A board through the relay
-  // reads "lightplayer.app · …", which this does not match.
-  wifiLine: "Wi‑Fi · ",
+  // reads "lightplayer.app · …", which this does not match, and an unplugged
+  // board Wi‑Fi still reaches reads "Wi‑Fi · not connected", which this does
+  // not match either.
+  wifiLine: "Wi‑Fi · connected",
   connectToANetwork: "Connect to a network",
   otherNetwork: "Other network",
   connect: "Connect",

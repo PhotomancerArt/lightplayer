@@ -1,6 +1,7 @@
-//! [`UiBoardPicture`]: the board's lights. Nothing draws over it — no
-//! sentence, no pill, no progress, no button; what used to be said over the
-//! picture is the status corner's "Picture" line now (Q10).
+//! [`UiBoardPicture`]: the board's lights. While the board is well nothing
+//! draws over it; otherwise the card's surface ([`super::UiBoardSurface`])
+//! covers it with its notice and dims it, with one dim — the cover's, never
+//! the picture's own stale dim too.
 
 use crate::{UiControlProductPreview, UpdateLight};
 
@@ -13,7 +14,8 @@ pub struct UiBoardPicture {
     /// dark.
     pub frame: Option<UiControlProductPreview>,
     /// Last known rather than current (a saved picture, or one the editor's
-    /// lens holds still): drawn dimmed.
+    /// lens holds still): drawn dimmed, unless the surface's notice covers
+    /// it (its dim is the one dim then).
     pub dim: bool,
     /// The board's own lights while an update holds them (one solid
     /// colour), drawn as the light strip instead of the frame.

@@ -667,8 +667,10 @@ export class StudioDriver {
 
   /// The card's picture as its hooks name it: `{ source, frame }` —
   /// `data-picture` (`link`, `lens`, `saved`, `none`) and whether a frame is
-  /// drawn — and whether it is dimmed (last known, not current). `null`
-  /// when the card or its picture is not there.
+  /// drawn — whether it is dimmed (last known, not current; or under the
+  /// surface's notice, which takes the one dim), and `surface`, the state
+  /// the card's top says (`data-surface`: `another-tab`, `offline`,
+  /// `all-well`, …). `null` when the card or its picture is not there.
   async pictureOf({ board = null } = {}) {
     const scope = await this.card({ board });
     return this.evaluate(
@@ -676,7 +678,9 @@ export class StudioDriver {
                 const picture = card.querySelector('[data-picture]'); if (!picture) return null;
                 return { source: picture.getAttribute('data-picture'),
                          frame: picture.getAttribute('data-picture-frame') === 'true',
-                         dim: picture.classList.contains('ux-play-frame-dim') }; })()`,
+                         dim: picture.classList.contains('ux-play-frame-dim')
+                           || picture.classList.contains('ux-board-picture-covered'),
+                         surface: card.querySelector('[data-surface]')?.getAttribute('data-surface') ?? null }; })()`,
     );
   }
 

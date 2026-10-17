@@ -1,9 +1,10 @@
-//! [`UiNameBar`]: the board's name and its one primary action — Connect,
-//! Done, Add a project, Unlock, Install firmware or Power on — a flush
-//! section of the bar with an icon leading the word; the spinner alone
+//! [`UiNameBar`]: the board's name and its one primary action — the most
+//! likely thing to do: Connect, Done, Update firmware, Install firmware,
+//! Retry, Connect here, Unlock, Add a project, Power on… — a flush section
+//! of the bar with an icon leading its verb and object; the spinner alone
 //! while the board is being reached or identified; or nothing at all when
 //! nothing can be pressed (`docs/ux/anatomy/board-card.md`, "Name bar and
-//! primary"). The row that is busy, away or waiting says why, once (P2).
+//! primary"). The card's surface says why, and says the button aloud.
 
 use super::ui_card_action::UiCardAction;
 
